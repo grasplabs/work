@@ -18,7 +18,6 @@ import {
   ArchiveIcon,
   EllipsisIcon,
   Icon,
-  LayoutGridIcon,
   Maximize2Icon,
   SettingsIcon,
 } from "@grasp-os/ui/lib/icons";
@@ -30,6 +29,7 @@ import type { ReactNode } from "react";
 
 import { StatusBadge } from "../drafts/status-badge.tsx";
 import { ItemBar, ItemShell } from "../frame/item-shell.tsx";
+import { AppWindowIcon } from "../frame/sidebar-icons.ts";
 import type { Crumb } from "../frame/site-header.tsx";
 import { pageHref, useAppAddress } from "../pages/app-address.ts";
 import { PageFrame } from "../pages/page-frame.tsx";
@@ -121,7 +121,7 @@ const NoPage = ({ archived }: { archived: boolean }) => {
       ) : (
         <Empty>
           <EmptyHeader>
-            <EmptyMedia icon={LayoutGridIcon} />
+            <EmptyMedia icon={AppWindowIcon} />
             <EmptyTitle>{t`No page yet`}</EmptyTitle>
             <EmptyDescription>{t`This App has nothing to open yet.`}</EmptyDescription>
           </EmptyHeader>

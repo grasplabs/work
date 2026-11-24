@@ -1,4 +1,4 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
+import { Badge } from "@grasp-os/ui/components/badge";
 import { Trans } from "@lingui/react/macro";
 
 import { formatList } from "../format.ts";
@@ -41,20 +41,20 @@ export const StatusBadge = ({
 }) => {
   if (archived) {
     return (
-      <Badge variant="outline">
+      <Badge>
         <Trans context="an App put away">Archived</Trans>
       </Badge>
     );
   }
   if (live === null || who?.length === 0) {
     return (
-      <Badge variant="attention">
+      <Badge variant="warning">
         <Trans>Only you see this</Trans>
       </Badge>
     );
   }
   return (
-    <Badge variant="passed">
+    <Badge variant="success">
       <UsedBy who={who} />
     </Badge>
   );

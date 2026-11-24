@@ -11,8 +11,8 @@ import { goTo } from "./tabs-nav.ts";
 
 // A builder writes an independent workflow's definition in the editor:
 // core checks each save against grasp-workflow/2 and says what to fix at
-// its JSON Pointer, only a draft that passes is shared with the team (Share
-// with your team, in its bar, as an App's), and of two people saving the
+// its JSON Pointer, only a draft that passes is published to the team
+// (Publish, in its bar, as an App's), and of two people saving the
 // same draft, the second is told and keeps their text. The workflow opens
 // on its page, whose Workshop opens its Steps: the Flow, drawn from the
 // draft every builder shares; a step is changed there too, and the JSON is
@@ -123,20 +123,24 @@ const save = async (page: Page, text: string): Promise<void> => {
   await page.getByRole("button", { name: "Check and save" }).click();
 };
 
-/** Shares the draft on `page` with the team, as its bar's lime action does. */
-const share = async (page: Page, label: string): Promise<void> => {
-  await page.getByRole("button", { name: label }).click();
-  await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "Share", exact: true })
-    .click();
-  await expect(toastSaying(page, "Your changes are shared")).toBeVisible(
-    pageRead
-  );
+/** The bar's Publish on `page`: the wide bar's, or the narrow one's icon. */
+const publishIn = (page: Page) =>
+  page
+    .getByRole("button", { name: "Publish", exact: true })
+    .filter({ visible: true });
+
+/** Publishes the draft on `page` to the team, from its bar's Publish. */
+const publish = async (page: Page): Promise<void> => {
+  await publishIn(page).click();
+  const dialog = page.getByRole("dialog", { name: /^Publish /u });
+  await dialog.getByRole("button", { name: "Publish", exact: true }).click();
+  await expect(toastSaying(page, / is live/u)).toBeVisible(pageRead);
+  // Closed once published, before the bar's next action.
+  await expect(dialog).toHaveCount(0);
 };
 
-/** A version's label, `YY.MM.N`, as History names it. */
-const versionLabel = /\d{2}\.\d{2}\.\d+/u;
+/** A workflow's version as History names it, `vN`. */
+const versionLabel = /^v\d+/u;
 
 /** What the editor says of a draft that passes. */
 const passes = "It passes its checks.";
@@ -153,27 +157,27 @@ test("a builder writes a workflow's definition, fixes what core finds, shares it
   await expect(page.getByText("Only you see this")).toBeAttached();
 
   // A key the format doesn't know: refused at its pointer, and it can't
-  // be shared until it passes.
+  // be published until it passes.
   await save(page, definition("done", { unknown: true }));
   const problems = page.getByRole("region", { name: "What to fix" });
   await expect(problems.getByText("/steps/0/unknown")).toBeVisible();
   await expect(
     page.getByText("It doesn't pass yet: what to fix is below.")
   ).toBeVisible();
-  await page.getByRole("button", { name: "Share with your team" }).click();
-  const sheet = page.getByRole("dialog");
+  await publishIn(page).click();
+  const dialog = page.getByRole("dialog", { name: /^Publish /u });
   await expect(
-    sheet.getByText("It can't be shared yet: 1 problem")
+    dialog.getByText("It can't be published yet: 1 problem")
   ).toBeVisible(pageRead);
   await expect(
-    sheet.getByRole("button", { name: "Share", exact: true })
+    dialog.getByRole("button", { name: "Publish", exact: true })
   ).toBeDisabled();
   await page.keyboard.press("Escape");
 
   await save(page, definition("done"));
   await expect(page.getByText(passes)).toBeVisible();
   await expect(problems).toHaveCount(0);
-  await share(page, "Share with your team");
+  await publish(page);
   // Its History names the version its team has.
   await section(page, "History");
   await expect(page.getByText("Your team has this one")).toBeVisible(pageRead);
@@ -231,7 +235,7 @@ test("a builder sees every declared branch of the checked definition, a test run
     await expect(diagram.getByRole("listitem", { name: task })).toBeVisible();
   }
 
-  await share(page, "Share with your team");
+  await publish(page);
 
   // A run of the live version, started with Run in the bar.
   await page.getByRole("button", { name: "Run", exact: true }).click();
@@ -244,10 +248,10 @@ test("a builder sees every declared branch of the checked definition, a test run
   await start.getByRole("button", { name: "Close" }).first().click();
   await expect(start).toHaveCount(0);
 
-  // A second version, shared as the first was.
+  // A second version, published as the first was.
   await save(page, definition("done"));
   await expect(page.getByText(passes)).toBeVisible();
-  await share(page, "Share with your team");
+  await publish(page);
 
   // Runs: the run of version 1, on its own page, with what it returned to
   // whoever started it, and in its Workshop each step its journal recorded

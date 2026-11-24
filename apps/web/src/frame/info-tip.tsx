@@ -1,6 +1,6 @@
 import { Button } from "@grasp-os/ui/components/button";
 import { Icon, InfoIcon } from "@grasp-os/ui/lib/icons";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { font, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
@@ -16,11 +16,27 @@ import type { ReactNode } from "react";
 // Integrations pages share this one.
 
 const styles = stylex.create({
-  // The title and its mark on one line, centred on each other.
-  row: { display: "flex", alignItems: "center", gap: space[1], minWidth: 0 },
-  // No height of its own: the button may be taller than the title's line,
-  // the row never is.
-  mark: { display: "inline-flex", alignItems: "center", height: 0 },
+  // The title and its mark on one line, centred on each other; where the
+  // title takes the line's width (a card beside the docked chat), the mark
+  // goes under it, as #2503's, and the title keeps its words whole.
+  row: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    columnGap: space[1],
+    rowGap: space[2],
+    minWidth: 0,
+  },
+  // Beside a card's title, a space-2 from it, as #2503's section header
+  // sets its title row; beside a label, a space-1, as its setting row.
+  ofTitle: { columnGap: space[2] },
+  // A box no taller than the title's line: the button may be taller, the
+  // row never is.
+  mark: {
+    display: "inline-flex",
+    alignItems: "center",
+    height: font.textSmLine,
+  },
 });
 
 /** The info mark: `children` said on hover and focus; `label` names it for a screen reader. */
@@ -53,12 +69,15 @@ export const WithInfo = ({
   children,
   info,
   label,
+  of = "label",
 }: {
   children: ReactNode;
   info: ReactNode;
   label?: string;
+  /** What it stands beside: a label's (a field's, a setting's), or a card's title. */
+  of?: "label" | "title";
 }) => (
-  <div {...stylex.props(styles.row)}>
+  <div {...stylex.props(styles.row, of === "title" && styles.ofTitle)}>
     {children}
     <span {...stylex.props(styles.mark)}>
       <InfoTip {...(label === undefined ? {} : { label })}>{info}</InfoTip>

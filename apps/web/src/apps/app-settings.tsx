@@ -20,14 +20,12 @@ import { Button } from "@grasp-os/ui/components/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@grasp-os/ui/components/card";
 import {
   Field,
   FieldContent,
-  FieldDescription,
   FieldGroup,
   FieldLabel,
   FieldTitle,
@@ -186,7 +184,13 @@ const styles = stylex.create({
     flexGrow: 1,
     minHeight: 0,
     gap: space[2],
-    paddingTop: space[2],
+    boxSizing: "border-box",
+    // In from the pane's edges as the reference's app shell sets every
+    // page in (28px under the bar, 24px at the sides, 32px at the foot),
+    // then the sections' own room under it.
+    paddingTop: `calc(${space[7]} + ${space[2]})`,
+    paddingInline: space[6],
+    paddingBottom: space[8],
   },
   scroll: { flexGrow: 1, minHeight: 0, minWidth: 0, overflowY: "auto" },
   column: {
@@ -219,6 +223,10 @@ const styles = stylex.create({
     alignItems: "flex-start",
     gap: space[1],
   },
+  // A fact's value, or the link and its button, from the start of the
+  // row's control column, as the reference's fact rows stand: a Field's
+  // row puts a narrower control at the column's end.
+  value: { justifySelf: "stretch" },
   sections: { display: "flex", flexDirection: "column", gap: space[8] },
   section: { display: "flex", flexDirection: "column", gap: space[3] },
   // Two columns once there is room for both: Damsko has no token for a
@@ -348,7 +356,7 @@ const OwnLink = ({ app }: { app: App }) => {
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
   return (
-    <div {...stylex.props(styles.line)}>
+    <div {...stylex.props(styles.line, styles.value)}>
       <Text as="span" size="sm" color="muted">
         {app.link === null ? t`None yet` : linkAddress(app.link)}
       </Text>
@@ -380,6 +388,7 @@ const AppInstructions = ({ app }: { app: ViewedApp }) => {
       <section aria-label={t`Instructions`}>
         <CardHeader>
           <WithInfo
+            of="title"
             info={t`What a builder’s chat about this App starts with. Only its builders read and change it.`}
             label={t`More about its instructions`}
           >
@@ -421,6 +430,7 @@ const ForBuilders = ({
         <section aria-label={t`Copies`}>
           <CardHeader>
             <WithInfo
+              of="title"
               info={t`Its definition to keep or move, and a blueprint others can start from.`}
               label={t`More about copies`}
             >
@@ -451,6 +461,7 @@ const ForBuilders = ({
           <section aria-label={t`Its data`}>
             <CardHeader>
               <WithInfo
+                of="title"
                 info={t`Only an admin resets an App’s data: every record goes for good, and its current version runs again with no records.`}
                 label={t`More about its data`}
               >
@@ -467,6 +478,7 @@ const ForBuilders = ({
         <section aria-label={t`Putting it away`}>
           <CardHeader>
             <WithInfo
+              of="title"
               info={t`An archived App is kept as it was and goes offline: nobody opens it, its triggers stop and its unfinished runs are cancelled. A builder can restore it, as a draft.`}
               label={t`More about putting it away`}
             >
@@ -608,7 +620,7 @@ const GeneralForm = ({
                 <FieldContent>
                   <FieldTitle>{t`Status`}</FieldTitle>
                 </FieldContent>
-                <div {...stylex.props(styles.fact)}>
+                <div {...stylex.props(styles.fact, styles.value)}>
                   <StatusBadge
                     archived={app.archived}
                     live={app.currentVersion}
@@ -618,10 +630,12 @@ const GeneralForm = ({
               </Field>
               <Field orientation="responsive">
                 <FieldContent>
-                  <FieldLabel>{t`Made for`}</FieldLabel>
-                  <FieldDescription>
-                    {t`Shown with the App. It opens the App to nobody: who may use it is who it is shared with.`}
-                  </FieldDescription>
+                  <WithInfo
+                    info={t`Shown with the App. It opens the App to nobody: who may use it is who it is shared with.`}
+                    label={t`More about who it’s for`}
+                  >
+                    <FieldLabel>{t`Made for`}</FieldLabel>
+                  </WithInfo>
                 </FieldContent>
                 <Select
                   disabled={disabled}
@@ -673,12 +687,15 @@ const GeneralForm = ({
           })}
         >
           <CardHeader>
-            <CardTitle>
-              {t({ message: "Owner", context: "who answers for an app" })}
-            </CardTitle>
-            <CardDescription>
-              {t`Who answers for the App: who is asked about it and decides what changes.`}
-            </CardDescription>
+            <WithInfo
+              of="title"
+              info={t`Who answers for the App: who is asked about it and decides what changes.`}
+              label={t`More about the owner`}
+            >
+              <CardTitle>
+                {t({ message: "Owner", context: "who answers for an app" })}
+              </CardTitle>
+            </WithInfo>
           </CardHeader>
           <CardContent>
             {/* The platform's one owner control, as a workflow's line has it. */}
@@ -1093,19 +1110,22 @@ export const AppSettings = ({
   const section = asked ?? "general";
   return (
     <div {...stylex.props(styles.settings)}>
-      <TabsNav aria-label={t`Settings sections`} variant="line">
-        {sections.map((each) => (
-          <SectionLink
-            app={app.id}
-            current={each === section}
-            key={each}
-            section={each}
-            within={within}
-          >
-            {i18n._(sectionLabels[each])}
-          </SectionLink>
-        ))}
-      </TabsNav>
+      {/* In the workspace the sections are the sidebar's rows (app-section.tsx). */}
+      {within === "page" ? (
+        <TabsNav aria-label={t`Settings sections`} variant="line">
+          {sections.map((each) => (
+            <SectionLink
+              app={app.id}
+              current={each === section}
+              key={each}
+              section={each}
+              within={within}
+            >
+              {i18n._(sectionLabels[each])}
+            </SectionLink>
+          ))}
+        </TabsNav>
+      ) : null}
       <div {...stylex.props(styles.scroll)}>
         <div {...stylex.props(styles.column)}>
           <SectionBody
