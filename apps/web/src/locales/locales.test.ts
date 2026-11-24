@@ -142,14 +142,15 @@ describe("translations", () => {
         const looksLikeData =
           /^\s*\{\s*["']/u.test(entry.str) || languageKey.test(entry.str);
         // One word can sit inside another language's ("Diagram" in
-        // "Diagramme", "Un admin" in "Un administrador"); another language's
-        // sentence, as whole words, cannot.
+        // "Diagramme", "Un admin" in "Un administrador"), and Spanish may only
+        // add its "¿"; another language's sentence, as whole words, beside
+        // more words, cannot.
         const holdsAnother = others.some((other) => {
           const theirs = other.get(entry.key)?.trim() ?? "";
           return (
             /\s/u.test(theirs) &&
-            theirs !== entry.str.trim() &&
-            wholeWords(theirs).test(entry.str)
+            wholeWords(theirs).test(entry.str) &&
+            /\p{L}/u.test(entry.str.replace(theirs, ""))
           );
         });
         return looksLikeData || holdsAnother ? [entry.key] : [];
