@@ -248,17 +248,20 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
   // day first, as the field shows ("For example 31/12/…"). Month first is
   // no day here, and the plan waits until it is put right. Whether the
   // field refuses it is what it tells a screen reader on it: marked wrong,
-  // described by its error. Not the page's text: the page's one announcer
-  // says the error too, a moment after it shows, and keeps its words once
-  // the field takes a day, so on a slow runner a search of the page found
-  // it twice, or once after it was put right (merge queue, November 2026).
+  // described by its error, and the error shown under it, in its own Field.
+  // Not the page's text: the page's one announcer says the error too, a
+  // moment after it shows, and keeps its words once the field takes a day,
+  // so on a slow runner a search of the page found it twice, or once after
+  // it was put right (merge queue, November 2026).
   const day = page.getByLabel("Another day");
+  const dayField = page.locator('[data-slot="field"]', { has: day });
   const refused = /I can’t plan that day\. Type one like 31\/12\//u;
   await expect(page.getByText(/^For example 31\/12\/\d{4}$/u)).toBeVisible();
   await day.fill("12/31/2026");
   await day.press("Enter");
   await expect(day).toHaveAttribute("aria-invalid", "true");
   await expect(day).toHaveAccessibleDescription(refused);
+  await expect(dayField.getByText(refused)).toBeVisible();
   await expect(page.getByRole("button", { name: "I sent it" })).toBeDisabled();
   const today = await pageToday(page);
   await day.fill(typed(today));
