@@ -3,7 +3,6 @@
 // corner over a shade, a title that names it, a body that scrolls between the title and actions
 // that stay put, and a close button in its corner. Under 640px it is a sheet along the bottom of
 // the window.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Dialog>
 //     <DialogTrigger asChild><Button>Rename project</Button></DialogTrigger>
@@ -183,8 +182,8 @@ const look = stylex.create({
   panel: {
     overflow: "hidden",
     borderRadius: {
-      default: radius.base,
-      [PHONE]: `${radius.base} ${radius.base} 0 0`,
+      default: radius.xl,
+      [PHONE]: `${radius.xl} ${radius.xl} 0 0`,
     },
   },
 

@@ -46,6 +46,7 @@ const firstAgent: Agent = {
   state: "on",
   ownerId: null,
   offeredAt: null,
+  madeBy: null,
   changedBy: null,
   changedAt: null,
 };
@@ -66,6 +67,9 @@ export const agentOfRow = (
         state: row.state,
         ownerId: row.ownerId,
         offeredAt: row.offeredAt?.toISOString() ?? null,
+        // The first agent's row is made at its first change, by whoever
+        // changed it: nobody made the agent itself.
+        madeBy: row.id === firstAgentId ? null : row.madeBy,
         changedBy: row.changedBy,
         changedAt: row.changedAt.toISOString(),
       };

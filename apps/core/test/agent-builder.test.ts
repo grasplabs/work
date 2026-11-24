@@ -118,6 +118,46 @@ describe("the agent builder", setUpTime, () => {
     expect(new Set([chatAgentId, claire.id, pat.id]).size).toBe(3);
   });
 
+  it("names who made an agent, whoever changes it since, and nobody for the first agent", async () => {
+    const maker = await signedInApi(idp, "admin");
+    const other = await signedInApi(idp, "admin");
+    const made = await maker.api.connections.makeAgent(said());
+    expect(made).toMatchObject({
+      madeBy: maker.userId,
+      changedBy: maker.userId,
+    });
+
+    await other.api.connections.changeAgent(made.id, said({ job: "More." }));
+    await other.api.connections.setAgentPaused(made.id, true);
+    // The first agent's row is made by its first change: still nobody's.
+    await other.api.connections.changeAgent(chatAgentId, said({ name: "Ada" }));
+    const listed = await maker.api.connections.agents();
+    expect(
+      listed.map(({ id, madeBy, changedBy }) => ({ id, madeBy, changedBy }))
+    ).toStrictEqual([
+      { id: chatAgentId, madeBy: null, changedBy: other.userId },
+      { id: made.id, madeBy: maker.userId, changedBy: other.userId },
+    ]);
+  });
+
+  it("keeps a company agent, naming its maker by their ID alone, once its maker is erased", async () => {
+    const maker = await signedInApi(idp, "admin");
+    const admin = await signedInApi(idp, "admin");
+    const made = await maker.api.connections.makeAgent(said());
+    await admin.api.members.remove(maker.userId);
+    await admin.api.members.erase(maker.userId, String(maker.person.name));
+
+    // The company's record of who made and changed it, as every company
+    // record names someone erased: their ID, which `users` keeps with
+    // their name and nothing else.
+    const listed = await admin.api.connections.agents();
+    expect(listed.find(({ id }) => id === made.id)).toMatchObject({
+      name: "Claire",
+      madeBy: maker.userId,
+      changedBy: maker.userId,
+    });
+  });
+
   it("is the company's own admins' alone: never a member's, never Grasp staff's", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");

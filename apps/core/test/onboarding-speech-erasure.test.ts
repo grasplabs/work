@@ -8,9 +8,9 @@ import { z } from "zod";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { platformAi } from "../src/platform-ai.ts";
 import { keepLine, storedKeyOf } from "../src/speech-cache.ts";
-import { speechModelOf } from "../src/speech.ts";
+import { speechModel } from "../src/speech.ts";
 import { adminCommands } from "./admin-command.ts";
-import { platformElevenLabsKey } from "./connect-providers.ts";
+import { platformKugelAudioKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import { onLink, openedFor } from "./interview-link.ts";
 import type { Device } from "./interview-link.ts";
@@ -28,7 +28,7 @@ import { sayForAdmin, sayOnLink, stillKept } from "./spoken.ts";
 // Stephen speaks lands while the voice works on the next. The store
 // noted the line's key as it was asked; the erasure takes the note, and
 // the line, kept once the voice answers, is taken out again then. The
-// voice (ElevenLabs, behind connect) is the outside system: its answer is
+// voice (KugelAudio, behind connect) is the outside system: its answer is
 // held until each erasure has landed.
 
 const idp = mockIdp();
@@ -47,7 +47,7 @@ const sayingWhile = async (
   erase: () => Promise<unknown>
 ): Promise<{ status: number; reached: number }> => {
   const held = `voice-${unique()}`;
-  await plan(platformElevenLabsKey, [{ release: held }]);
+  await plan(platformKugelAudioKey, [{ release: held }]);
   const saying = ask();
   await expect
     .poll(async () => await carrying(text), { timeout: 10_000 })
@@ -353,12 +353,11 @@ describe("a line whose take-out fails", { timeout: 60_000 }, () => {
           env,
           {
             text,
-            spoken: text,
             voice: platformAi.speech.voices.stephen,
-            model: speechModelOf(),
+            model: speechModel,
             language: "en",
           },
-          JSON.stringify({ audio: "AAAA", mime: "audio/mpeg", words: [] })
+          JSON.stringify({ audio: "AAAA", mime: "audio/wav", words: [] })
         );
         await instance.forgetSpoken([key]);
         answered.resolve(true);
@@ -388,12 +387,11 @@ describe("a line whose take-out fails", { timeout: 60_000 }, () => {
         env,
         {
           text,
-          spoken: text,
           voice: platformAi.speech.voices.stephen,
-          model: speechModelOf(),
+          model: speechModel,
           language: "en",
         },
-        JSON.stringify({ audio: "AAAA", mime: "audio/mpeg", words: [] })
+        JSON.stringify({ audio: "AAAA", mime: "audio/wav", words: [] })
       );
     };
 
@@ -451,16 +449,15 @@ describe("a line whose take-out fails", { timeout: 60_000 }, () => {
       { length: count },
       (_, at) => `Line ${at} of ${run}, waiting to go.`
     );
-    const answer = JSON.stringify({ audio: "AAAA", mime: "audio/mpeg" });
+    const answer = JSON.stringify({ audio: "AAAA", mime: "audio/wav" });
     const keys = await Promise.all(
       texts.map(async (text) => {
         await keepLine(
           env,
           {
             text,
-            spoken: text,
             voice: platformAi.speech.voices.stephen,
-            model: speechModelOf(),
+            model: speechModel,
             language: "en",
           },
           answer

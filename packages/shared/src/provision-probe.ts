@@ -73,6 +73,13 @@ export const provisionProbeSchema = z.strictObject({
    * Connect's own are `connect.<name>`, as connect answered core.
    */
   bindings: z.record(z.string(), z.boolean()),
+  /**
+   * Whether this core starts closed for its company's onboarding, as its
+   * deploy asked (`ONBOARDING_CLOSED_FROM`; core's onboarding/gate.ts):
+   * false where its deploy asked for none; absent from a core of a
+   * release from before it, which starts open whatever its deploy asked.
+   */
+  startsClosed: z.boolean().optional(),
   /** Core's clock and connect's, each armed if it wasn't; null for one that didn't answer. */
   clocks: z.strictObject({
     core: clockRegistrationSchema.nullable(),

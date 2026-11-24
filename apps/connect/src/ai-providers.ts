@@ -92,8 +92,9 @@ import { resealBatchSize, vaultFor } from "./vault.ts";
 //   limit's wait.
 // - A request that streams forever: the grant names the call's deadline,
 //   which cuts the provider's request off here too.
-// - A realtime socket (`modelSocket`, Grasp's live listening): the same
-//   grant, placeholder, host and credential checks as a request, only to
+// - A realtime socket (`modelSocket`, Grasp's live listening and the
+//   lines it says): the same grant, placeholder, host and credential
+//   checks as a request, only to
 //   the provider's realtime paths with their one query, and only on
 //   Grasp's own key (an organization's key never opens one). Connect holds
 //   both ends and passes each message on as it comes, keeping and logging
@@ -498,22 +499,6 @@ const carriesPlaceholder = (
     : request.headers.get(keyHeader) === aiCredentialPlaceholder;
 };
 
-/** One ID a `*` path segment stands for: letters and digits, nothing else. */
-const idSegment = /^[A-Za-z0-9]{1,64}$/u;
-
-/** Whether `pathname` is `path`, each `*` segment of it one ID. */
-const matchesPath = (pathname: string, path: string): boolean => {
-  const asked = pathname.split("/");
-  const allowed = path.split("/");
-  return (
-    asked.length === allowed.length &&
-    allowed.every((segment, index) => {
-      const given = asked[index] ?? "";
-      return segment === "*" ? idSegment.test(given) : segment === given;
-    })
-  );
-};
-
 /** Whether `url` is one of the provider's model endpoints, at `base`. */
 const isModelEndpoint = (
   url: URL,
@@ -524,8 +509,8 @@ const isModelEndpoint = (
   // A fixed provider's paths are whole; a custom endpoint's sit below its
   // base URL's own path.
   const custom = provider === "openai-compatible";
-  return aiProviders[provider].paths.some((path) =>
-    matchesPath(url.pathname, custom ? `${prefix}${path}` : path)
+  return aiProviders[provider].paths.some(
+    (path) => url.pathname === (custom ? `${prefix}${path}` : path)
   );
 };
 
@@ -588,8 +573,7 @@ const sendsToBase = (
 ): boolean => {
   const checked = checkEndpoint(url.href, policy);
   // The query a model request may carry: exactly one its provider names
-  // (`queries`), none only where it names `""`. ElevenLabs's must be its
-  // own, so a line is never sent with logging left on.
+  // (`queries`), none only where it names `""`.
   const query = aiProviders[provider].queries.includes(url.search);
   return (
     !("refused" in checked) &&
@@ -863,7 +847,8 @@ const closeEnd = (socket: WebSocket, code: number): void => {
 
 /**
  * Opens a realtime WebSocket of a model call core's gateway decided (a
- * listening, core's models.ts) to the provider, with Grasp's key, and
+ * listening or a line said, core's models.ts) to the provider, with
+ * Grasp's key, and
  * relays it: the upgrade carries its grant (`aiGrantHeader`) and the
  * placeholder where the key goes, to the provider's own realtime URL.
  * Its client end, or connect's refusal (`aiRefusedHeader`).

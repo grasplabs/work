@@ -82,11 +82,11 @@ export interface HoldButtonProps extends Omit<
    */
   onConfirm?: () => unknown;
   /** Said while its work runs, and shown in place of its words ("Deleting"). */
-  loadingLabel?: string;
+  loadingText?: string;
   /** Said once its work is done, and shown in place of its words for a moment ("Deleted"). */
-  successLabel?: string;
+  successText?: string;
   /** Said when its work failed, and shown in place of its words for a moment ("Not deleted"). */
-  errorLabel?: string;
+  errorText?: string;
   /**
    * How long the press must last, in milliseconds.
    * @default duration-press-and-hold
@@ -601,9 +601,9 @@ export const HoldButton = ({
   size = "default",
   children,
   onConfirm,
-  loadingLabel,
-  successLabel,
-  errorLabel,
+  loadingText,
+  successText,
+  errorText,
   duration: time = durations.pressAndHold,
   labels: given,
   type = "button",
@@ -617,7 +617,7 @@ export const HoldButton = ({
   const labels = { ...useI18n().holdButton, ...given };
   const words = wordsOrLabel(children, rest["aria-label"]);
   // The work a confirmed press starts, followed as a Button follows its own press.
-  const action = useAction(waitOn, { loadingLabel, successLabel, errorLabel });
+  const action = useAction(waitOn, { loadingText, successText, errorText });
   const busy = action.status === "loading" || isInvalid(rest["aria-busy"]);
   // While it works or shows how it went, its words (or the state's) name it, not "Hold to …".
   const resting = action.status === "idle" && !busy;
@@ -673,9 +673,9 @@ export const HoldButton = ({
               disabled={disabled}
               focusableWhenDisabled={focusableWhenDisabled}
               status={action.status}
-              loadingLabel={loadingLabel}
-              successLabel={successLabel}
-              errorLabel={errorLabel}
+              loadingText={loadingText}
+              successText={successText}
+              errorText={errorText}
               style={style}
               asChild
             >

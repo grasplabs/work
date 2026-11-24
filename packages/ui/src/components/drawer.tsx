@@ -2,7 +2,6 @@
 // SDK's Drawer: a raised panel with the one corner on its top, a handle to drag it by, a body that
 // scrolls between the title and actions that stay put. A drag down, Escape or a press on the shade
 // closes it; with `snapPoints` it rests at more than one height, and the handle steps through them.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Drawer>
 //     <DrawerTrigger asChild><Button>Set a reminder</Button></DrawerTrigger>
@@ -194,7 +193,7 @@ const styles = stylex.create({
   panel: {
     position: "relative",
     marginInline: "auto",
-    borderRadius: `${radius.base} ${radius.base} 0 0`,
+    borderRadius: `${radius.xl} ${radius.xl} 0 0`,
     width: { default: `min(${sizes.drawerWidth}, 100%)`, [PHONE]: "100%" },
     height: "fit-content",
     maxHeight: `min(${sizes.drawerHeight}, var(--visual-viewport-height, 100dvh) - ${sizes.dialogGutter})`,
@@ -225,7 +224,7 @@ const styles = stylex.create({
     marginBlockStart: space["1"],
     padding: 0,
     borderWidth: 0,
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
     backgroundColor: "transparent",
     cursor: { default: "grab", ":active": "grabbing" },

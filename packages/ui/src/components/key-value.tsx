@@ -251,7 +251,7 @@ const styles = stylex.create({
     margin: 0,
     padding: 0,
     borderWidth: 0,
-    borderRadius: `min(${radius.row}, calc(${size.controlDefault} / 2))`,
+    borderRadius: `min(${radius.lg}, calc(${size.controlDefault} / 2))`,
     cornerShape: radius.shape,
     cursor: "pointer",
     transitionProperty: "background-color",
@@ -284,7 +284,7 @@ const styles = stylex.create({
   // An icon alone that names its row: focusable, so its Tooltip opens for the keyboard too.
   markAlone: {
     position: "relative",
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
   },
   // At the end: the value takes the room left after its name, the chevron's room after it.
@@ -324,7 +324,7 @@ const styles = stylex.create({
     borderWidth: size.hairline,
     borderStyle: "solid",
     borderColor: colors.border,
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     fontSize: font.textSm,
     lineHeight: font.textSmLine,

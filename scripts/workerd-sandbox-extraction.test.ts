@@ -37,6 +37,8 @@ const types = {
   pdf: "application/pdf",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  csv: "text/csv",
+  html: "text/html",
 } as const;
 
 /** Just under an upload's limit of 10 MiB. */
@@ -124,6 +126,23 @@ describe("extracting an upload on the on-prem sandbox", () => {
       docxHeading: true,
       xlsx: "ok",
       xlsxSheet: true,
+    });
+  }, 60_000);
+
+  it("reads a table and a web page on the sandbox host, whose parsers run without Node", async () => {
+    const csv = await extract("offices.csv", `type=${types.csv}`);
+    const html = await extract("notice.html", `type=${types.html}`);
+
+    expect({
+      csv: csv.status,
+      csvRow: csv.text?.includes("| Utrecht | 12 |"),
+      html: html.status,
+      htmlHeading: html.text?.includes("Office notice"),
+    }).toStrictEqual({
+      csv: "ok",
+      csvRow: true,
+      html: "ok",
+      htmlHeading: true,
     });
   }, 60_000);
 

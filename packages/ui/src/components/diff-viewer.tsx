@@ -212,7 +212,7 @@ export interface DiffViewerFilesProps {
 const FORCED = media.forcedColors;
 const COARSE = media.pointerCoarse;
 const HOVER = media.hover;
-const BOX_CORNER = `min(${radius.base}, ${space["4"]})`;
+const BOX_CORNER = `min(${radius.xl}, ${space["4"]})`;
 
 const styles = stylex.create({
   diff: {
@@ -406,7 +406,7 @@ const styles = stylex.create({
   // Underlined as well as tinted, so a changed word is never told by colour alone.
   wordAdded: {
     backgroundColor: colors.diffViewerAddedWord,
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
     textDecoration: "underline",
     textDecorationColor: colors.success,
@@ -414,7 +414,7 @@ const styles = stylex.create({
   },
   wordRemoved: {
     backgroundColor: colors.diffViewerRemovedWord,
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
     textDecoration: "line-through",
     textDecorationColor: colors.destructive,
@@ -587,14 +587,14 @@ const styles = stylex.create({
     textDecoration: "underline",
     textDecorationColor: colors.success,
     textUnderlineOffset: space["1"],
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
   },
   del: {
     backgroundColor: colors.diffViewerRemovedWord,
     textDecoration: "line-through",
     textDecorationColor: colors.destructive,
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
   },
   empty: {

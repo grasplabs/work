@@ -2,7 +2,6 @@
 // StyleX: a small card with its picture or a mark for its kind, its name and a line
 // about it, and its actions. A prompt input shows them above its text and a message under its
 // words; neither is known here.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <AttachmentGroup aria-label="Files to send">
 //     {files.map((file) => (
@@ -276,13 +275,13 @@ const styles = stylex.create({
   },
   // The corner is the system's, or half the card's height when that is less.
   cardDefault: {
-    borderRadius: `min(${radius.base}, calc((${sizes.attachmentThumb} + 2 * ${space["1"]}) / 2))`,
+    borderRadius: `min(${radius.xl}, calc((${sizes.attachmentThumb} + 2 * ${space["1"]}) / 2))`,
   },
   cardSm: {
-    borderRadius: `min(${radius.base}, calc((${sizes.controlSm} + 2 * ${space["1"]}) / 2))`,
+    borderRadius: `min(${radius.xl}, calc((${sizes.controlSm} + 2 * ${space["1"]}) / 2))`,
   },
   cardXs: {
-    borderRadius: `min(${radius.base}, calc((${sizes.controlXs} + 2 * ${space["1"]}) / 2))`,
+    borderRadius: `min(${radius.xl}, calc((${sizes.controlXs} + 2 * ${space["1"]}) / 2))`,
   },
   vertical: {
     flexDirection: "column",
@@ -290,7 +289,7 @@ const styles = stylex.create({
     width: `calc(${sizes.attachmentThumb} * 3)`,
     paddingInlineEnd: space["1"],
     paddingBottom: space["2"],
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
   },
   idle: {
     boxShadow: "none",
@@ -307,7 +306,7 @@ const styles = stylex.create({
     width: sizes.attachmentThumb,
     height: sizes.attachmentThumb,
     overflow: "hidden",
-    borderRadius: `calc(${radius.base} / 2)`,
+    borderRadius: `calc(${radius.xl} / 2)`,
     cornerShape: radius.shape,
     backgroundColor: colors.card,
     boxShadow: sizes.borderStrong,

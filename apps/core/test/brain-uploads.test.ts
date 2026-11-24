@@ -649,7 +649,7 @@ describe("uploading a file straight into the Brain", () => {
           name: "notes.vtt",
           bytes: new TextEncoder().encode("Just text"),
         }),
-        noType: await upload({ name: "notes.txt", bytes: captions("Hello") }),
+        noType: await upload({ name: "notes.jpg", bytes: captions("Hello") }),
         noText: await upload({
           name: "empty.vtt",
           bytes: new TextEncoder().encode("WEBVTT\n"),

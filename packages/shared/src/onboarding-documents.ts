@@ -108,7 +108,7 @@ export const documentErrors = defineErrorFamily({
   "document.slides":
     "Slides can't be read yet. Save them as a PDF, and share that.",
   "document.unsupported":
-    "That kind of file can't be read. Share a PDF, Word or Excel file.",
+    "That kind of file can't be read. Share a PDF, a Word, Excel or PowerPoint file, a web page or a text file.",
   "document.too_large": "That file is larger than 10 MB.",
   "document.empty": "There is no text in that file to read.",
   "document.too_complex":

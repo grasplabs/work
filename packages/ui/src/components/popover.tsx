@@ -2,7 +2,6 @@
 // in StyleX, built on UI SDK's Popover: a raised panel with
 // the one corner, placed beside its trigger and kept inside the window, named by its title. It
 // never takes the page: the page still scrolls and can be pressed, and focus is not trapped.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Popover>
 //     <PopoverTrigger asChild><Button variant="outline">Share</Button></PopoverTrigger>
@@ -269,7 +268,7 @@ const styles = stylex.create({
     color: colors.bodyForeground,
     backgroundColor: colors.popover,
     boxShadow: shadow.popupShadow,
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     fontFamily: font.sans,
     // Opened inside its trigger's parent (it is not portalled), it would take that parent's text:

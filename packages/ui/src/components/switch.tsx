@@ -3,7 +3,6 @@
 // the switch role beside a hidden native input, so a form sends it and an agent can turn it on by
 // name. It draws itself only; its words are Field's parts, on a row at least 44px tall that a press
 // on the switch, its label or the space around them turns:
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Field orientation="horizontal">
 //     <FieldContent>
@@ -14,7 +13,7 @@
 //   </Field>
 //
 // With `onSave` it is a setting that saves as it turns: it holds still with a spinner while it
-// saves (`loading`), turns once the save worked, and says its `errorLabel` in the row, under the
+// saves (`loading`), turns once the save worked, and says its `errorText` in the row, under the
 // words, when it failed (`error`). Where something beside it already names it,
 // `<Switch aria-label="Weekly summary" />` alone.
 //
@@ -99,7 +98,7 @@ interface SwitchBase {
 /** A switch whose setting your code saves elsewhere, or a form sends. */
 interface WithoutSave {
   onSave?: undefined;
-  errorLabel?: never;
+  errorText?: never;
   status?: never;
 }
 
@@ -115,7 +114,7 @@ interface WithSave {
    * What did not happen, said under the label and to a screen reader.
    * @default "Could not save"
    */
-  errorLabel?: string;
+  errorText?: string;
   /**
    * Where the save is: `idle`, `loading`, `success` (at rest, turned) or `error`. Leave it out:
    * `onSave` keeps it. Set it to show one state standing still.
@@ -825,7 +824,7 @@ export const Switch = (allProps: SwitchProps) => {
   const {
     style,
     onSave,
-    errorLabel,
+    errorText,
     status,
     onCheckedChange,
     controller: given,
@@ -836,12 +835,12 @@ export const Switch = (allProps: SwitchProps) => {
       keyof SwitchBase | "className" | "children" | "render"
     > & {
       onSave?: (checked: boolean) => Promise<unknown>;
-      errorLabel?: string;
+      errorText?: string;
       status?: ActionStatus;
     };
   const field = useFieldControl();
   const words = useI18n().switch;
-  const failure = errorLabel ?? words.error;
+  const failure = errorText ?? words.error;
   const [made] = useReducer(keepController, undefined, createSwitchController);
   const controller = given ?? made;
   const [saving, setSaving] = useState<ActionStatus>("idle");

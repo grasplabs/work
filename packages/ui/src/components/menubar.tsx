@@ -3,7 +3,6 @@
 // Menubar and Menu: a quiet bar with the system's edge, triggers drawn as a list's items, and its
 // menus in the raised panel the dropdown menu has, with items, checkbox and radio items, and
 // submenus of their own.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Menubar aria-label="Editor">
 //     <MenubarMenu>
@@ -152,7 +151,7 @@ export interface MenubarItemProps {
   /**
    * Runs when it is pressed, by pointer, Enter or Space. Call `event.preventDefault()` to keep the
    * menu open. Return a Promise and the menu stays open while it runs, with a spinner at the end of
-   * the item, and closes once it is done; when it rejects, the item says `errorLabel` and the menu
+   * the item, and closes once it is done; when it rejects, the item says `errorText` and the menu
    * stays open to try again.
    */
   onSelect?: (event: Event) => unknown;
@@ -165,13 +164,13 @@ export interface MenubarItemProps {
    * What a screen reader hears as the work of an `onSelect` that returns a Promise starts.
    * @default "Working"
    */
-  loadingLabel?: string;
+  loadingText?: string;
   /**
    * The words when its work failed, at the end of the item, said aloud and given to an agent
    * ("Could not publish").
    * @default "Failed"
    */
-  errorLabel?: string;
+  errorText?: string;
   /**
    * What the item does, for the person an agent must ask first ("Deletes the report"). A
    * `destructive` item asks with its own words when this is left out.
@@ -327,7 +326,7 @@ const styles = stylex.create({
     borderWidth: { default: 0, [FORCED]: size.hairline },
     borderStyle: "solid",
     borderColor: "CanvasText",
-    borderRadius: `min(${radius.base}, calc((${size.controlSm} + 2 * ${space[1]}) / 2))`,
+    borderRadius: `min(${radius.xl}, calc((${size.controlSm} + 2 * ${space[1]}) / 2))`,
     cornerShape: radius.shape,
     boxShadow: size.borderStrong,
     fontFamily: font.sans,
@@ -345,7 +344,7 @@ const styles = stylex.create({
     paddingInline: space[3],
     paddingBlock: 0,
     borderWidth: 0,
-    borderRadius: `min(calc(${radius.base} - ${space[1]}), calc(${size.controlSm} / 2))`,
+    borderRadius: `min(calc(${radius.xl} - ${space[1]}), calc(${size.controlSm} / 2))`,
     cornerShape: radius.shape,
     backgroundColor: {
       default: "transparent",

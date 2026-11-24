@@ -1,11 +1,9 @@
-// ChainOfThought: the steps an assistant took to an answer, behind one line that opens, from
-// shadcn's Chain of Thought pattern (content/docs/ai-elements/base/chain-of-thought.mdx), built as
-// it builds it: a Trace with a TraceCollapsible for the summary, and a Trace of steps inside, each a
-// TraceLine. The line is the run's summary, which the caller writes ("Searched 3 times and read 2
-// files, 14s"); while a step is active the line runs (`status="running"`: Trace shimmers its title)
-// and says that step instead. A run that finishes while the person has not opened or closed it
-// settles back into its one line.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
+// ChainOfThought: the steps an assistant took to an answer, behind one line that opens. It is made
+// of Damsko's Trace: a Trace with a TraceCollapsible for the summary, and a Trace of steps inside,
+// each a TraceLine. The line is the run's summary, which the caller writes ("Searched 3 times and
+// read 2 files, 14s"); while a step is active the line runs (`status="running"`: Trace shimmers its
+// title) and says that step instead. A run that finishes while the person has not opened or closed
+// it settles back into its one line.
 //
 //   <ChainOfThought>
 //     <ChainOfThoughtHeader>Searched 3 times and read 2 files</ChainOfThoughtHeader>
@@ -177,7 +175,7 @@ const styles = stylex.create({
     borderWidth: { default: 0, [media.forcedColors]: 1 },
     borderStyle: "solid",
     borderColor: "CanvasText",
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     backgroundColor: colors.muted,
   },
@@ -359,7 +357,7 @@ export const ChainOfThoughtSearchResults = ({
   </span>
 );
 
-/** One search result: its site, a label in a small `secondary` Badge, as shadcn's. */
+/** One search result: its site, a label in a small `secondary` Badge. */
 export const ChainOfThoughtSearchResult = ({
   children,
 }: ChainOfThoughtSearchResultProps) => (

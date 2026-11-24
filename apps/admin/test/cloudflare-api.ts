@@ -268,6 +268,13 @@ const answerProbe = async (
         .filter(({ type }) => probedKinds.has(type))
         .map(({ answers }) => [answers, !down.has(answers)])
     ),
+    ...(probe.beforeStartingClosed === true
+      ? {}
+      : {
+          startsClosed: bindings.some(
+            ({ name }) => name === "ONBOARDING_CLOSED_FROM"
+          ),
+        }),
     clocks: { core: clock("core"), connect: clock("connect") },
   } satisfies ProvisionProbe);
 };

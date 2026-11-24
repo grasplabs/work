@@ -18,12 +18,12 @@ import {
 // The brain's teams and gaps (core's brain-records.ts and brain-gaps.ts):
 // a team's sizes and stakeholders added as dated values, joining the
 // onboarding's team of the same id for whoever reads it; a gap asked
-// about, answered or closed once each. What can go wrong, tried here (the
+// about while it is open, answered or closed once. What can go wrong, tried here (the
 // threat note is on GRA-527): a value for a team or record that doesn't
 // exist; the onboarding's teams reaching someone who isn't an admin; a gap
 // asked about or closed unanswered by someone who isn't an admin; an
-// answer written over, or a closed gap reopened; an answer in the audit
-// log.
+// answer written over, or a closed gap reopened, by asking it again too;
+// an owner buried in notices of one gap; an answer in the audit log.
 
 const idp = mockIdp();
 
@@ -458,7 +458,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
     });
   });
 
-  it("are asked by an admin once of who holds the role, answered once by any member in their own name, and audited without the answer", async () => {
+  it("are asked by an admin of who holds the role, answered once by any member in their own name, and audited without the answer", async () => {
     const admin = await signedInApi(idp, "admin");
     const member = await signedInApi(idp, "user");
     const owner = await signedInApi(idp, "user");
@@ -476,7 +476,6 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
     let toldMember: unknown;
     const events = await auditedDuring(async () => {
       asked = await admin.api.brain.askAboutGap(ids.gap);
-      await admin.api.brain.askAboutGap(ids.gap);
       toldOwner = await askedOf(owner);
       toldMember = await askedOf(member);
       answered = await member.api.brain.answerGap(ids.gap, "About 400.");
@@ -519,7 +518,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
         about: [ids.candidate],
         askedAt: today,
       },
-      // The owner is asked, once however often the admin asks; nobody else.
+      // The owner is asked; nobody else.
       toldOwner: [
         {
           gap: ids.gap,
@@ -539,8 +538,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
         answer: "About 400.",
         answeredBy: name,
       },
-      // Asked once, however often, naming whom by id; the answer itself
-      // isn't in the log.
+      // The ask names whom by id; the answer itself isn't in the log.
       events: [
         {
           action: "brain.gap.asked",
@@ -575,6 +573,153 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
     });
   });
 
+  it("are asked again by an admin while open, of who holds the role by then: the newest ask kept, the owner's one notice unread again, each ask audited, and never once closed", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const member = await signedInApi(idp, "user");
+    const owner = await signedInApi(idp, "user");
+    const newcomer = await signedInApi(idp, "user");
+    const grasp = await staff();
+    const { ids, records } = gapRecords(unique());
+    await admin.api.brain.addRecords(records);
+    await rosterWith(admin, "Head of finance", owner);
+
+    /** The owner's notices of the gap, and how many they haven't read. */
+    const noticesOf = async (person: Signed) => {
+      const { notifications, unread } = await person.api.notifications.list();
+      return {
+        notices: notifications.filter(
+          (notice) => notice.type === "gap_asked" && notice.gap === ids.gap
+        ),
+        unread,
+      };
+    };
+    const laterMs = Date.now() + 2 * 24 * 60 * 60 * 1000;
+    const later = new Date(laterMs).toISOString().slice(0, 10);
+    let first: unknown;
+    let other: Signed | undefined;
+    let again: unknown;
+    let readFirst: Awaited<ReturnType<typeof noticesOf>> | undefined;
+    let refused: unknown;
+    const events = await auditedDuring(async () => {
+      first = await admin.api.brain.askAboutGap(ids.gap);
+      const unreadFirst = await noticesOf(owner);
+      const [notice] = unreadFirst.notices;
+      await owner.api.notifications.markRead(
+        notice === undefined ? [] : [notice.id],
+        notice?.at ?? ""
+      );
+      readFirst = await noticesOf(owner);
+      // Asked once already, it is still the company's admins' alone to ask.
+      refused = {
+        member: await outcome(member.api.brain.askAboutGap(ids.gap)),
+        staff: await outcome(grasp.brain.askAboutGap(ids.gap)),
+      };
+      // Someone else holds the role too by the second ask, two days on,
+      // by another admin who signs in then: core runs in this isolate, so
+      // its clock is the one set here.
+      await rosterWith(admin, "Head of finance", owner, newcomer);
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(laterMs);
+      try {
+        other = await signedInApi(idp, "admin");
+        again = await other.api.brain.askAboutGap(ids.gap);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+    const afterRefused = await noticesOf(owner);
+    const toldNewcomer = await askedOf(newcomer);
+    await admin.api.brain.closeGap(ids.gap);
+    const closed = await outcome(admin.api.brain.askAboutGap(ids.gap));
+    const read = await admin.api.brain.read();
+    const today = new Date().toISOString().slice(0, 10);
+    const [before] = readFirst?.notices ?? [];
+    const [after] = afterRefused.notices;
+
+    expect({
+      first,
+      again,
+      refused,
+      readFirst: { read: before?.read, unread: readFirst?.unread },
+      // The one notice the owner had, theirs to read again, as of the
+      // second ask.
+      owner: {
+        notices: afterRefused.notices.length,
+        same: after?.id === before?.id,
+        read: after?.read,
+        unread: afterRefused.unread,
+        at: after?.at,
+      },
+      toldNewcomer: toldNewcomer.map(({ gap }) => gap),
+      events: events
+        .filter(({ action }) => action === "brain.gap.asked")
+        .map(({ actor, target, detail, provenance }) => ({
+          actor: actor.type === "person" ? actor.userId : actor.type,
+          target,
+          detail,
+          provenance: provenance.toSorted(),
+        })),
+      closed,
+      // The ask refused of a closed gap left its last ask as it was.
+      gap: read.gaps.find(({ id }) => id === ids.gap),
+      ownerAfter: await askedOf(owner),
+    }).toStrictEqual({
+      first: {
+        id: ids.gap,
+        question: "How many invoices come in a month?",
+        owner: "Head of finance",
+        sourceId: ids.source,
+        about: [ids.candidate],
+        askedAt: today,
+      },
+      again: {
+        id: ids.gap,
+        question: "How many invoices come in a month?",
+        owner: "Head of finance",
+        sourceId: ids.source,
+        about: [ids.candidate],
+        askedAt: later,
+      },
+      refused: { member: "role.forbidden", staff: "role.forbidden" },
+      readFirst: { read: true, unread: 0 },
+      owner: {
+        notices: 1,
+        same: true,
+        read: false,
+        unread: 1,
+        at: new Date(laterMs).toISOString(),
+      },
+      toldNewcomer: [ids.gap],
+      // One event an ask, by who asked, of whom it was asked then; none
+      // for an ask refused.
+      events: [
+        {
+          actor: admin.userId,
+          target: { type: "brain_gap", id: ids.gap },
+          detail: { asked: 1 },
+          provenance: [owner.userId],
+        },
+        {
+          actor: other?.userId,
+          target: { type: "brain_gap", id: ids.gap },
+          detail: { asked: 2 },
+          provenance: [owner.userId, newcomer.userId].toSorted(),
+        },
+      ],
+      closed: "brain.gap_closed",
+      gap: {
+        id: ids.gap,
+        question: "How many invoices come in a month?",
+        owner: "Head of finance",
+        sourceId: ids.source,
+        about: [ids.candidate],
+        askedAt: later,
+        closedAt: today,
+      },
+      ownerAfter: [],
+    });
+  });
+
   it("aren't asked, nor shown as asked, when nobody who can sign in holds the role", async () => {
     const admin = await signedInApi(idp, "admin");
     const owner = await signedInApi(idp, "user");
@@ -604,7 +749,7 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
     });
   });
 
-  it("are refused as closed when an answer lands while the ask is made, and asked of the owner once when two admins ask at once", async () => {
+  it("are refused as closed when an answer lands while the ask is made, and told to the owner as one question when two admins ask at once", async () => {
     const admin = await signedInApi(idp, "admin");
     const other = await signedInApi(idp, "admin");
     const owner = await signedInApi(idp, "user");
