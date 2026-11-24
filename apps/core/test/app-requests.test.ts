@@ -136,6 +136,46 @@ describe("app requests", { timeout: 60_000 }, () => {
     ]);
   });
 
+  it("keep one request with everyone who asked when people ask for a new app at the same moment, each ask recorded once", async () => {
+    const [first, second, third] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "builder"),
+      signedInApi(idp, "user"),
+    ]);
+    const name = `Afas ${unique()}`;
+    const asked: AppRequest[] = [];
+    const audited = await auditedDuring(async () => {
+      asked.push(
+        ...(await Promise.all([
+          first.api.connections.requestApp({ name }),
+          second.api.connections.requestApp({ name: name.toUpperCase() }),
+          // The same person twice at once: one asker, one event.
+          third.api.connections.requestApp({ name }),
+          third.api.connections.requestApp({ name: name.toLowerCase() }),
+        ]))
+      );
+    });
+
+    const listed = await first.api.connections.appRequests();
+    const kept = listed.filter(
+      ({ name: each }) => each.toLowerCase() === name.toLowerCase()
+    );
+    expect(kept).toHaveLength(1);
+    const [request] = kept;
+    expect(new Set(asked.map(({ id }) => id))).toStrictEqual(
+      new Set([request?.id])
+    );
+    expect(
+      request?.askers.map(({ userId }) => userId).toSorted()
+    ).toStrictEqual([first.userId, second.userId, third.userId].toSorted());
+    expect(
+      audited
+        .filter(({ action }) => action === "connection.app_requested")
+        .flatMap(({ actor }) => (actor.type === "person" ? [actor.userId] : []))
+        .toSorted()
+    ).toStrictEqual([first.userId, second.userId, third.userId].toSorted());
+  });
+
   it("refuse a request it can't keep, Grasp staff, and anyone signed out, keeping and recording nothing", async () => {
     const person = await signedInApi(idp, "user");
     const staff = await openRpc(
