@@ -53,6 +53,10 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
               plural(rest, { one: "# other", other: "# others" }),
             ]),
     },
+    breadcrumb: {
+      ellipsis: t`Show hidden levels`,
+      name: t`Breadcrumb`,
+    },
     calendar: {
       next: t`Next month`,
       previous: t`Previous month`,
@@ -93,6 +97,11 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       },
       loading: t`Loading the value`,
     },
+    input: {
+      hidePassword: t`Hide password`,
+      replace: t`Replace`,
+      showPassword: t`Show password`,
+    },
     sheet: {
       close: t`Close`,
     },
@@ -100,6 +109,19 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       close: t`Close`,
       showAll: t`Show all`,
       views: t`Views`,
+    },
+    stepper: {
+      count: (step, total) => t`Step ${step} of ${total}`,
+      current: (step, total, label) => t`Step ${step} of ${total}: ${label}`,
+      finished: t`All steps done`,
+      navBack: t`Back`,
+      navNext: t`Next`,
+      states: {
+        complete: t`done`,
+        active: t`current step`,
+        pending: t`not started`,
+        error: t`failed`,
+      },
     },
     switch: {
       error: t`Could not save`,

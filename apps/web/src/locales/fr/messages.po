@@ -2205,6 +2205,7 @@ msgstr "Des agents que les personnes créent pour elles-mêmes. Seul leur propri
 #: src/apps/resource-bindings.tsx
 #: src/brain/brain.ts
 #: src/interview/words.ts
+#: src/onboarding/setup-frame.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "AI"
 msgstr "IA"
@@ -2259,6 +2260,10 @@ msgstr "Toutes les factures"
 #: src/routes/_shell.settings.spend.tsx
 msgid "All model calls together"
 msgstr "Tous les appels de modèle réunis"
+
+#: src/frame/ui-words.tsx
+msgid "All steps done"
+msgstr "Toutes les étapes sont terminées"
 
 #: src/connections/http-connections.tsx
 msgid "Allow at least one method."
@@ -3145,6 +3150,7 @@ msgstr "Disponible, via Composio"
 #: src/brain/back-button.tsx
 #: src/chat/asked-questions.tsx
 #: src/chat/composer-menu.tsx
+#: src/frame/ui-words.tsx
 #: src/guest-sign-in.tsx
 #: src/onboarding/setup-frame.tsx
 msgid "Back"
@@ -3280,6 +3286,7 @@ msgid "Brain"
 msgstr "Cerveau"
 
 #: src/frame/site-header.tsx
+#: src/frame/ui-words.tsx
 msgid "Breadcrumb"
 msgstr "Fil d’Ariane"
 
@@ -3443,9 +3450,6 @@ msgstr "Impossible de proposer Exécuter : {unread}"
 #: src/interview/destination.tsx
 #: src/interview/transcript.tsx
 #: src/link-confirmation.tsx
-#: src/onboarding/document-drop.tsx
-#: src/onboarding/forget-kickoff.tsx
-#: src/onboarding/forget-teams.tsx
 #: src/onboarding/place-picker.tsx
 #: src/projects/file-item-dialog.tsx
 #: src/projects/project-dialog.tsx
@@ -3995,7 +3999,6 @@ msgstr "Effacer la recherche"
 #: src/drafts/share-with-team.tsx
 #: src/frame/ui-words.tsx
 #: src/interview/destination.tsx
-#: src/onboarding/place-picker.tsx
 #: src/projects/project-chats.tsx
 #: src/projects/project-people-stack.tsx
 #: src/report/report-dialog.tsx
@@ -4087,6 +4090,7 @@ msgid "Commerce"
 msgstr "Commerce"
 
 #: src/brain/brain.ts
+#: src/onboarding/setup-frame.tsx
 #: src/routes/_shell.settings.billing.tsx
 msgid "Company"
 msgstr "Entreprise"
@@ -4437,7 +4441,6 @@ msgstr "Copenhague"
 #: src/chat/chat-more.tsx
 #: src/chat/thread.tsx
 #: src/frame/ui-words.tsx
-#: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/shown-once.tsx
 msgid "Copied"
@@ -4648,6 +4651,10 @@ msgstr "Devise"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Current plan"
 msgstr "Abonnement actuel"
+
+#: src/frame/ui-words.tsx
+msgid "current step"
+msgstr "étape en cours"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -5131,6 +5138,7 @@ msgstr "Avez-vous quelque chose qui explique votre façon de travailler ?"
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
 #: src/onboarding/document-drop.tsx
+#: src/onboarding/setup-frame.tsx
 msgid "Documents"
 msgstr "Documents"
 
@@ -5162,6 +5170,10 @@ msgstr "Domaine"
 #: src/apps/field-editor.tsx
 msgid "Don’t allow it while this record links to it"
 msgstr "Ne pas l’autoriser tant que cet enregistrement y est lié"
+
+#: src/frame/ui-words.tsx
+msgid "done"
+msgstr "terminé"
 
 #: src/apps/blueprints.tsx
 #: src/chat/thread.tsx
@@ -5902,6 +5914,10 @@ msgctxt "thinking effort"
 msgid "Extra high"
 msgstr "Très élevé"
 
+#: src/frame/ui-words.tsx
+msgid "failed"
+msgstr "échec"
+
 #: src/workflows/today-lanes.tsx
 msgctxt "a run that ended in failure"
 msgid "failed"
@@ -6199,6 +6215,10 @@ msgstr "Pour tout le monde"
 #: src/brain/skills-page.tsx
 msgid "For everyone in the company"
 msgstr "Pour tout le monde dans l'entreprise"
+
+#: src/onboarding/send-plan-form.tsx
+msgid "For example {example}"
+msgstr "Par exemple {example}"
 
 #: src/connections/request-app-dialog.tsx
 msgid "For example Personio or Twinfield"
@@ -6916,6 +6936,10 @@ msgctxt "hides an opportunity for every admin until its evidence changes"
 msgid "Hide for every admin"
 msgstr "Masquer pour tous les admins"
 
+#: src/frame/ui-words.tsx
+msgid "Hide password"
+msgstr "Masquer le mot de passe"
+
 #: src/settings/event-source-activity.tsx
 msgid "Hide what {name} received"
 msgstr "Masquer ce que {name} a reçu"
@@ -6981,6 +7005,10 @@ msgstr "Niveau de réflexion"
 #: src/workflows/item-test.tsx
 msgid "How it went then"
 msgstr "Comment cela s’est passé alors"
+
+#: src/onboarding/setup-frame.tsx
+msgid "How it works"
+msgstr "Comment ça marche"
 
 #: src/onboarding/about-story.tsx
 msgid "How long does one of those take you, {name}?"
@@ -7081,6 +7109,10 @@ msgstr "Connexions HTTP"
 #: src/connections/http-connections.tsx
 msgid "https:// and a public host name, with nothing after it."
 msgstr "https:// et un nom d'hôte public, sans rien après."
+
+#: src/onboarding/send-plan-form.tsx
+msgid "I can’t plan that day. Type one like {example}, from {earliest} to {latest}."
+msgstr "Je ne peux pas planifier ce jour. Saisissez-en un comme {example}, du {earliest} au {latest}."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I can’t read {name}: it’s in an old format. As a PDF or a newer file, I can."
@@ -7408,6 +7440,7 @@ msgstr "Entretien : {role}"
 
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
+#: src/onboarding/setup-frame.tsx
 msgid "Interviews"
 msgstr "Entretiens"
 
@@ -8119,6 +8152,10 @@ msgstr "Responsable de {name}"
 #: src/onboarding/interviews-progress.tsx
 msgid "Lead talked"
 msgstr "Responsable a parlé"
+
+#: src/onboarding/setup-frame.tsx
+msgid "Leads"
+msgstr "Responsables"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Leads get their link {when}. Everyone else right after their lead has talked to me."
@@ -8969,6 +9006,7 @@ msgid "Newest item first. Nothing was sent or changed: every call was answered f
 msgstr "L’élément le plus récent d’abord. Rien n’a été envoyé ni modifié : chaque appel a reçu la réponse que vous avez donnée."
 
 #: src/chat/asked-questions.tsx
+#: src/frame/ui-words.tsx
 msgid "Next"
 msgstr "Suivante"
 
@@ -9631,6 +9669,10 @@ msgstr "Pas encore partagé"
 msgid "Not shown"
 msgstr "Non affiché"
 
+#: src/frame/ui-words.tsx
+msgid "not started"
+msgstr "pas commencé"
+
 #: src/projects/project-people.tsx
 #: src/projects/project-view.tsx
 msgid "Not taken out"
@@ -10240,6 +10282,7 @@ msgstr "Vous seul voyez ceci"
 
 #: src/connections/request-app-dialog.tsx
 #: src/inbox/item-detail.tsx
+#: src/onboarding/setup-frame.tsx
 #: src/settings/where-stephen.tsx
 msgid "Open"
 msgstr "Ouvrir"
@@ -11693,6 +11736,10 @@ msgctxt "what the Brain remembers about something"
 msgid "Renewal date"
 msgstr "Date de renouvellement"
 
+#: src/frame/ui-words.tsx
+msgid "Replace"
+msgstr "Remplacer"
+
 #: src/settings/ai-providers.tsx
 msgid "Replace key"
 msgstr "Remplacer la clé"
@@ -11882,6 +11929,7 @@ msgid "return a month, measured"
 msgstr "gain par mois, mesuré"
 
 #: src/inbox/item-detail.tsx
+#: src/onboarding/setup-frame.tsx
 msgid "Review"
 msgstr "Examiner"
 
@@ -12955,6 +13003,10 @@ msgstr "Afficher exactement ce qui sera envoyé"
 msgid "Show fewer"
 msgstr "Afficher moins"
 
+#: src/frame/ui-words.tsx
+msgid "Show hidden levels"
+msgstr "Afficher les niveaux masqués"
+
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Show in the brain"
 msgstr "Afficher dans le cerveau"
@@ -12997,6 +13049,10 @@ msgstr "Afficher les versions plus anciennes"
 #: src/frame/site-header.tsx
 msgid "Show or hide the sidebar"
 msgstr "Afficher ou masquer la barre latérale"
+
+#: src/frame/ui-words.tsx
+msgid "Show password"
+msgstr "Afficher le mot de passe"
 
 #: src/settings/event-source-activity.tsx
 msgid "Show payload"
@@ -13349,6 +13405,7 @@ msgstr "Source"
 
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts
+#: src/onboarding/setup-frame.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Sources"
 msgstr "Sources"
@@ -13524,9 +13581,13 @@ msgctxt "what the Brain remembers about something"
 msgid "Step"
 msgstr "Étape"
 
-#: src/onboarding/setup-frame.tsx
-msgid "Step {n}"
-msgstr "Étape {n}"
+#: src/frame/ui-words.tsx
+msgid "Step {step} of {total}"
+msgstr "Étape {step} sur {total}"
+
+#: src/frame/ui-words.tsx
+msgid "Step {step} of {total}: {label}"
+msgstr "Étape {step} sur {total} : {label}"
 
 #: src/interview/words.ts
 msgid "Step by step"
@@ -13844,6 +13905,7 @@ msgstr "taches"
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
 #: src/onboarding/interviews-progress.tsx
+#: src/onboarding/setup-frame.tsx
 msgid "Team"
 msgstr "Équipe"
 
@@ -15440,6 +15502,7 @@ msgid "Tool"
 msgstr "Outil"
 
 #: src/brain/brain.ts
+#: src/onboarding/setup-frame.tsx
 msgid "Tools"
 msgstr "Outils"
 
@@ -16226,6 +16289,10 @@ msgstr "Semaine {week} sur {weeks}"
 #: src/report/report.ts
 msgid "Week {week} of {weeks} · {stage}"
 msgstr "Semaine {week} sur {weeks} · {stage}"
+
+#: src/onboarding/setup-frame.tsx
+msgid "Welcome"
+msgstr "Bienvenue"
 
 #: src/activity/audit-words.ts
 msgid "Went back to an earlier version"
