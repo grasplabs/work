@@ -103,7 +103,8 @@ export interface MessageProps {
   align?: Align;
   /**
    * For the assistant's message: `thinking` before it writes, `streaming` while it writes, `done`
-   * once written, `stopped` when stopped part way (its words kept, Stopped under them), `error`
+   * once written, `stopped` when stopped part way (its words kept, Stopped first on its actions'
+   * row, or under them with no actions), `error`
    * when it could not be written (put a MessageError in it). Said once to a screen reader as it
    * changes.
    * @default "done"
@@ -255,6 +256,11 @@ const styles = stylex.create({
       default: "0px",
       ":has([data-slot='message-footer'])": `calc(${font.textXsLine} + ${space["2"]})`,
     },
+    // Stopped is said once: on the actions' row when the Message holds actions, else under the words.
+    [messageVars.stoppedUnder]: {
+      default: "inline-flex",
+      ":has([data-slot='message-actions'])": "none",
+    },
     position: "relative",
     display: "flex",
     gap: space["2"],
@@ -314,10 +320,13 @@ const styles = stylex.create({
     fontFamily: font.sans,
     fontSize: size.messageText,
     lineHeight: size.messageTextLine,
-    color: colors.foreground,
+    color: colors.bodyForeground,
     whiteSpace: "pre-wrap",
     overflowWrap: "anywhere",
   },
+  // A stopped answer's one quiet line. With actions it stands on their row, before them
+  // (MessageActions draws it there): the one under the words is for a Message that holds none
+  // (messageVars.stoppedUnder, set by the Message from what it holds).
   note: {
     display: "inline-flex",
     alignItems: "center",
@@ -361,8 +370,22 @@ const styles = stylex.create({
     // The first icon stands under the first letter of the words; at the end, the last under the
     // bubble's edge.
     marginInlineStart: `calc(-1 * (${size.controlSm} - ${size.iconSm}) / 2)`,
+    // As wide as its buttons, not the column: its name belongs to them alone.
+    alignSelf: "flex-start",
+    maxWidth: "100%",
+  },
+  // After Stopped on the row, the actions start after its words, not under the first letter.
+  actionsStopped: { marginInlineStart: 0 },
+  // Stopped under the words: only when the Message holds no actions.
+  noteUnder: { display: messageVars.stoppedUnder },
+  // Stopped on the actions' row: a space-3 before the first button.
+  noteInRow: {
+    display: "inline-flex",
+    alignSelf: "center",
+    marginInlineEnd: `calc(${space["3"]} - ${space["1"]})`,
   },
   actionsEnd: {
+    alignSelf: "flex-end",
     marginInlineStart: 0,
     marginInlineEnd: `calc(-1 * (${size.controlSm} - ${size.iconSm}) / 2)`,
   },
@@ -627,7 +650,8 @@ const Markdown = lazyPart(
 
 /**
  * The assistant's answer, drawn from Markdown, its words coming in smoothly while it is written;
- * Stopped under it when it was stopped part way.
+ * Stopped under it when it was stopped part way and its Message holds no actions (MessageActions
+ * says it on its row otherwise), wherever in the Message either stands.
  */
 export const MessageResponse = ({
   children,
@@ -655,7 +679,10 @@ export const MessageResponse = ({
         </Suspense>
       </div>
       {status === "stopped" && (
-        <p data-slot="message-stopped" {...stylex.props(styles.note)}>
+        <p
+          data-slot="message-stopped"
+          {...stylex.props(styles.note, styles.noteUnder)}
+        >
           <Icon icon={SquareIcon} />
           {words.stopped}
         </p>
@@ -664,7 +691,10 @@ export const MessageResponse = ({
   );
 };
 
-/** A named row of quiet buttons: hidden and out of reach (its room kept) while the answer is written. */
+/**
+ * A named row of quiet buttons: hidden and out of reach (its room kept) while the answer is
+ * written. A stopped answer's Stopped stands at its start.
+ */
 export const MessageActions = ({
   children,
   "aria-label": label,
@@ -681,11 +711,22 @@ export const MessageActions = ({
       inert={waiting}
       {...stylex.props(
         styles.actions,
+        status === "stopped" && styles.actionsStopped,
         align === "end" && styles.actionsEnd,
         waiting && styles.waiting,
         style
       )}
     >
+      {/* A stopped answer says so on this row, before its buttons, as the original did. */}
+      {status === "stopped" && (
+        <p
+          data-slot="message-stopped"
+          {...stylex.props(styles.note, styles.noteInRow)}
+        >
+          <Icon icon={SquareIcon} />
+          {words.stopped}
+        </p>
+      )}
       {children}
     </fieldset>
   );

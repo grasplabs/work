@@ -30,27 +30,48 @@ export interface KbdGroupProps {
   style?: LayoutStyle;
 }
 
+// In a tooltip the keys are quiet words at the end of its line, no key cap: the tooltip is a dark
+// chip already, and a white cap in it would be the loudest thing in it.
+const IN_TOOLTIP = ":is([data-slot=tooltip-content] *)";
+
 const styles = stylex.create({
   kbd: {
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
     boxSizing: "border-box",
-    height: size.kbdHeight,
-    minWidth: size.kbdHeight,
-    paddingInline: space.kbdPadding,
+    height: { default: size.kbdHeight, [IN_TOOLTIP]: "auto" },
+    minWidth: { default: size.kbdHeight, [IN_TOOLTIP]: 0 },
+    // At the end of a tooltip's last line.
+    marginInlineStart: { default: null, [IN_TOOLTIP]: "auto" },
+    paddingInline: { default: space.kbdPadding, [IN_TOOLTIP]: 0 },
     borderRadius: radius.sm,
     cornerShape: radius.shape,
     fontFamily: font.sans,
     fontSize: font.textXs,
-    lineHeight: 1,
-    fontWeight: font.weightMedium,
+    lineHeight: { default: 1, [IN_TOOLTIP]: "inherit" },
+    fontWeight: {
+      default: font.weightMedium,
+      [IN_TOOLTIP]: font.weightNormal,
+    },
     whiteSpace: "nowrap",
-    color: colors.mutedForeground,
-    backgroundColor: colors.muted,
-    boxShadow: size.borderStrong,
+    color: {
+      default: colors.mutedForeground,
+      [IN_TOOLTIP]: {
+        default: colors.tooltipMutedForeground,
+        [media.forcedColors]: "CanvasText",
+      },
+    },
+    backgroundColor: { default: colors.muted, [IN_TOOLTIP]: "transparent" },
+    boxShadow: { default: size.borderStrong, [IN_TOOLTIP]: "none" },
     // Forced colours drop the fill and the edge: a line keeps the key.
-    outline: { default: "none", [media.forcedColors]: "1px solid CanvasText" },
+    outline: {
+      default: "none",
+      [media.forcedColors]: {
+        default: "1px solid CanvasText",
+        [IN_TOOLTIP]: "none",
+      },
+    },
     outlineOffset: "-1px",
     userSelect: "none",
   },

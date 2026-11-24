@@ -5,6 +5,7 @@ import {
   CableIcon as HugeCableIcon,
   ContrastIcon as HugeContrastIcon,
   HelpCircleIcon,
+  Invoice01Icon,
   LaptopIcon as HugeLaptopIcon,
   SmartPhone01Icon,
   Tablet01Icon,
@@ -21,6 +22,7 @@ export const ArrowLeftRightIcon: IconData = HugeArrowLeftRightIcon;
 export const CableIcon: IconData = HugeCableIcon;
 export const ContrastIcon: IconData = HugeContrastIcon;
 export const CircleHelpIcon: IconData = HelpCircleIcon;
+export const InvoiceIcon: IconData = Invoice01Icon;
 export const LaptopIcon: IconData = HugeLaptopIcon;
 export const SmartphoneIcon: IconData = SmartPhone01Icon;
 export const TabletIcon: IconData = Tablet01Icon;

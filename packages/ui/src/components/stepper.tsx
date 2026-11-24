@@ -141,7 +141,8 @@ const LINE_OFF = `(${size.stepperDotActive} / 2 + ${size.stepperRingGap} + ${siz
  * (the dot, and its gap and stroke on both sides); its room is a pixel more, an even number as the
  * dot (8 or 10px) and the line (2px) are, so each stands on whole pixels about one middle: an odd
  * room would put that middle half a pixel off the dot's and the line's. */
-const ROOM = `(${size.stepperDotActive} + 2 * (${size.stepperRingGap} + ${size.stepperRing}) + 1px)`;
+const RING = `(${size.stepperDotActive} + 2 * (${size.stepperRingGap} + ${size.stepperRing}))`;
+const ROOM = `(${RING} + 1px)`;
 /** Across, where the dots stand in their column: the start edge, the name under it from the same
  * edge; the middle of the dot, from the column's start and top. */
 const DOT_X = `(${size.stepperDotActive} / 2)`;
@@ -256,10 +257,12 @@ const styles = stylex.create({
     textAlign: "start",
   },
   // The mark across: as wide as the current dot and as tall as its ring's room, at the start of the
-  // column.
+  // column. The row gives it only the ring's own height, as the original did: the extra pixel that
+  // keeps the middle whole lies under the name's line, where only the ring's outer half pixel is.
   markAcross: {
     width: size.stepperDotActive,
     height: `calc${ROOM}`,
+    marginBlockEnd: `calc(${RING} - ${ROOM})`,
   },
   // The marks alone: as wide as the ring's room too, so the dot stands in the middle of its pitch
   // and the line as far from the step before as from the step after. On a phone, as with names.
