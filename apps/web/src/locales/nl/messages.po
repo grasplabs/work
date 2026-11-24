@@ -14716,10 +14716,6 @@ msgstr "Klantenservice"
 msgid "Suspended"
 msgstr "Geschorst"
 
-#: src/onboarding/leads-step.tsx
-msgid "Switch a team off and nobody in it gets a link."
-msgstr "Zet een team uit en niemand erin krijgt een link."
-
 #: src/pages/page-frame.tsx
 msgid "Switch now"
 msgstr "Nu wisselen"
