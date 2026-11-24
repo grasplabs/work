@@ -170,6 +170,7 @@ import {
   largeEnoughAudiences,
   teamsOfAtLeast,
 } from "./brain-share-audiences.ts";
+import { organizationTimeZone } from "./company-day.ts";
 import {
   activeAudiences,
   audiencesRead,
@@ -188,7 +189,6 @@ import { parseModelRef } from "./model-catalog.ts";
 import { brainSpendByPurpose, spendMonth } from "./model-spend.ts";
 import { modelForRole, modelSettings, models } from "./models.ts";
 import { teamsWithMembers } from "./organization-teams.ts";
-import { organizationTimeZone } from "./organization.ts";
 import { personalWorkspaceId } from "./personal-workspace.ts";
 import { shippedSkills } from "./shipped-skills.ts";
 import { skillCards, skillCardsKept } from "./skill-cards.ts";
