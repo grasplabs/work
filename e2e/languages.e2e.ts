@@ -63,7 +63,7 @@ const chosen = async (option: Locator): Promise<void> => {
   await option.click();
 };
 
-test("on a phone the person menu holds the themes and the organization, each within the window", async ({
+test("on a phone the person menu holds the themes and the organizations, each within the window", async ({
   pageOf,
 }) => {
   const { member } = peopleIn("languages");
@@ -90,17 +90,19 @@ test("on a phone the person menu holds the themes and the organization, each wit
     await sheet.getByRole("button", { name: "Person", exact: true }).click();
   };
 
-  // Under their names in the menu itself, no submenu off the window's edge.
+  // The themes on Appearance's own row, the organizations in a submenu,
+  // none of them off the window's edge.
   await opened();
-  await chosen(menu.getByRole("menuitemradio", { name: "Dark" }));
+  await chosen(menu.getByRole("button", { name: "Dark", exact: true }));
   await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
-
-  await opened();
   await expect(
-    menu.getByRole("menuitemradio", { name: "Dark" })
-  ).toHaveAttribute("aria-checked", "true");
+    menu.getByRole("button", { name: "Dark", exact: true })
+  ).toHaveAttribute("aria-pressed", "true");
+  await page
+    .getByRole("menuitem", { name: "Switch organization", exact: true })
+    .click();
   // The organization the person is in, chosen.
-  const organization = menu.getByRole("menuitemradio").last();
+  const organization = page.getByRole("menuitemradio").last();
   await expect(organization).toHaveAttribute("aria-checked", "true");
   await chosen(organization);
 });

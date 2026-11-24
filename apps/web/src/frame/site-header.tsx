@@ -15,6 +15,7 @@ import { Fragment, useLayoutEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
 import type { RegionId } from "../brain/brain-atlas.ts";
+import { ChatToggle } from "../chat/chat-bar.tsx";
 
 /** A step on the way to the page; the last one is the page itself. */
 export type Crumb =
@@ -136,7 +137,16 @@ const styles = stylex.create({
     gap: space["2"],
     minWidth: 0,
     overflow: "hidden",
+    // The crumbs in the sidebar's greys, as the reference's bar: the steps
+    // back in its rows' words, the slashes quieter, the page in its ink.
+    // Damsko's Breadcrumb takes the page's tinted greys (registry gap of
+    // 24 Nov 2026).
+    "--damsko-muted-foreground": colors.sidebarSecondaryForeground,
+    "--damsko-subtle-foreground": colors.sidebarTertiaryForeground,
+    "--damsko-foreground": colors.sidebarForeground,
   },
+  // The slashes stand a step apart from the steps, as the reference's.
+  separator: { marginInline: space["1"] },
   trailing: { display: "flex", flexShrink: 0, alignItems: "center" },
   actions: {
     display: "flex",
@@ -145,6 +155,15 @@ const styles = stylex.create({
     gap: space["2"],
     marginInlineStart: "auto",
   },
+  // The chat's own button, last, its empty rim hanging out past the bar's
+  // room so its glyph ends where the page's words do.
+  chat: {
+    display: "flex",
+    flexShrink: 0,
+    marginInlineStart: "auto",
+    marginInlineEnd: `calc((${size.sidebarIcon} - ${size.sidebarIconButton}) / 2)`,
+  },
+  chatAfter: { marginInlineStart: 0 },
 });
 
 /**
@@ -243,7 +262,9 @@ export const SiteHeader = ({
               // A path's steps don't move: each stands at its own place.
               <Fragment key={index}>
                 {index === 0 ? null : (
-                  <BreadcrumbSeparator>/</BreadcrumbSeparator>
+                  <BreadcrumbSeparator style={styles.separator}>
+                    /
+                  </BreadcrumbSeparator>
                 )}
                 <BreadcrumbItem>
                   {index !== last && "to" in crumb ? (
@@ -265,6 +286,9 @@ export const SiteHeader = ({
       {actions === undefined ? null : (
         <div {...stylex.props(styles.actions)}>{actions}</div>
       )}
+      <ChatToggle
+        style={[styles.chat, actions !== undefined && styles.chatAfter]}
+      />
     </header>
   );
 };

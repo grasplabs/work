@@ -4,7 +4,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
@@ -17,35 +16,36 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  useSidebar,
 } from "@grasp-os/ui/components/sidebar";
-import { isThemeMode, themeModes } from "@grasp-os/ui/components/theme-toggle";
-import type { ThemeMode } from "@grasp-os/ui/components/theme-toggle";
+import { isThemeMode } from "@grasp-os/ui/components/theme-toggle";
 import { toast } from "@grasp-os/ui/components/toast";
 import {
-  ArrowUpDownIcon,
+  ToggleGroup,
+  ToggleGroupItem,
+} from "@grasp-os/ui/components/toggle-group";
+import {
   ChevronsUpDownIcon,
   Icon,
-  InfoIcon,
   LogOutIcon,
   MonitorIcon,
   MoonIcon,
   SettingsIcon,
   SunIcon,
 } from "@grasp-os/ui/lib/icons";
-import type { IconData } from "@grasp-os/ui/lib/icons";
 import { colors, font, size, space } from "@grasp-os/ui/lib/tokens.stylex";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useSyncExternalStore } from "react";
-import type { ReactNode } from "react";
 
 import { signOut } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { OrganizationName } from "./organization-name.tsx";
+import {
+  ArrowLeftRightIcon,
+  CircleHelpIcon,
+  ContrastIcon,
+} from "./sidebar-icons.ts";
 import { applyTheme, chooseTheme, onThemeChange, readTheme } from "./theme.ts";
 
 // The person signed in, at the foot of the sidebar: their initials, their
@@ -112,146 +112,110 @@ const styles = stylex.create({
     fontSize: font.textXs,
     lineHeight: font.sidebarNoteLine,
   },
-  // A submenu's words, then its choice now at the row's end, before the
-  // chevron, quiet, cut short when there is no room, as the reference's.
-  choice: { display: "flex", gap: space["4"] },
-  current: {
-    flexShrink: 100,
+  // The chevrons quieter than the words, as the rows' end marks are.
+  chevrons: {
+    display: "flex",
+    flexShrink: 0,
+    color: colors.sidebarTertiaryForeground,
+  },
+  // Appearance: its words at the start, the theme's segments at the end, on one row.
+  themeRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["2"],
+    minHeight: size.sidebarMenuButtonHeight,
+    paddingInlineStart: size.sidebarRowInline,
+    color: colors.foreground,
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+  },
+  themeWords: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["2"],
+    flexGrow: 1,
     minWidth: 0,
-    marginInlineStart: "auto",
     overflow: "hidden",
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
-    color: colors.mutedForeground,
+  },
+  // As wide as the person's button, over it.
+  menu: {
+    width: "var(--anchor-width)",
+    minWidth: 0,
+    maxWidth: "var(--anchor-width)",
   },
 });
 
-const themeNames: Record<ThemeMode, MessageDescriptor> = {
-  light: msg`Light`,
-  dark: msg`Dark`,
-  system: msg`System`,
-};
-
-const themeIcons: Record<ThemeMode, IconData> = {
-  light: SunIcon,
-  dark: MoonIcon,
-  system: MonitorIcon,
-};
-
 /**
- * One choice of the person menu, its options a radio group: beside the
- * menu as a submenu, its trigger showing the choice now; `inline`, the
- * options in the menu itself under the choice's name. On a phone a
- * submenu has no room beside the menu, and Damsko's does not move into
- * the window (registry gap "submenus do not shift into the window"), so
- * the menu holds them there.
+ * Appearance, a row of the person menu: light, dark or the system's, the
+ * person's own in this browser (theme.ts), as Damsko's theme toggle's
+ * segments at the row's end.
  */
-const Choice = ({
-  inline,
-  name,
-  icon,
-  now,
-  value,
-  onValueChange,
-  children,
-}: {
-  inline: boolean;
-  name: string;
-  icon: IconData;
-  /** The choice now, after `name` on the submenu's trigger. */
-  now: ReactNode;
-  value: string;
-  onValueChange: (value: unknown) => void;
-  /** The options, each a DropdownMenuRadioItem. */
-  children: ReactNode;
-}) => {
-  if (inline) {
-    return (
-      <DropdownMenuRadioGroup onValueChange={onValueChange} value={value}>
-        <DropdownMenuLabel>{name}</DropdownMenuLabel>
-        {children}
-      </DropdownMenuRadioGroup>
-    );
-  }
-  return (
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger icon={icon}>
-        <span {...stylex.props(styles.choice)}>
-          {name}
-          {now}
-        </span>
-      </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent>
-        <DropdownMenuRadioGroup onValueChange={onValueChange} value={value}>
-          {children}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuSubContent>
-    </DropdownMenuSub>
-  );
-};
-
-/**
- * Light, dark or the system's, a choice of the person menu: the person's
- * own in this browser (theme.ts), on Damsko's modes. The person menu
- * applies it; this mounts only while the menu is open.
- */
-const ThemeMenu = ({ userId, inline }: { userId: string; inline: boolean }) => {
-  const { t, i18n } = useLingui();
+const ThemeRow = ({ userId }: { userId: string }) => {
+  const { t } = useLingui();
   // Read where it is kept, so a choice made in another tab shows here too.
   const theme = useSyncExternalStore(onThemeChange, () => readTheme(userId));
   return (
-    <Choice
-      icon={themeIcons[theme]}
-      inline={inline}
-      name={t`Appearance`}
-      now={
-        <span {...stylex.props(styles.current)}>
-          {i18n._(themeNames[theme])}
-        </span>
-      }
-      onValueChange={(value) => {
-        if (isThemeMode(value)) {
-          chooseTheme(userId, value);
-        }
-      }}
-      value={theme}
-    >
-      {themeModes.map((each) => (
-        <DropdownMenuRadioItem key={each} value={each}>
-          {i18n._(themeNames[each])}
-        </DropdownMenuRadioItem>
-      ))}
-    </Choice>
+    <div data-slot="sidebar-theme-row" {...stylex.props(styles.themeRow)}>
+      <span {...stylex.props(styles.themeWords)}>
+        <Icon icon={ContrastIcon} />
+        {t`Appearance`}
+      </span>
+      <ToggleGroup
+        aria-label={t`Appearance`}
+        onValueChange={(next) => {
+          const [mode] = next;
+          if (isThemeMode(mode)) {
+            chooseTheme(userId, mode);
+          }
+        }}
+        size="xs"
+        value={[theme]}
+      >
+        <ToggleGroupItem aria-label={t`Light`} tooltip={t`Light`} value="light">
+          <Icon icon={SunIcon} />
+        </ToggleGroupItem>
+        <ToggleGroupItem aria-label={t`Dark`} tooltip={t`Dark`} value="dark">
+          <Icon icon={MoonIcon} />
+        </ToggleGroupItem>
+        <ToggleGroupItem
+          aria-label={t`System`}
+          tooltip={t`System`}
+          value="system"
+        >
+          <Icon icon={MonitorIcon} />
+        </ToggleGroupItem>
+      </ToggleGroup>
+    </div>
   );
 };
 
 /**
  * The organizations the person is in, the one they are in now chosen: one,
- * until Grasp lets a person be in more. A choice of the person menu.
+ * until Grasp lets a person be in more, by its initials until the
+ * workspace has a logo. A submenu of the person menu.
  */
-const OrganizationMenu = ({
-  core,
-  inline,
-}: {
-  core: CoreConnection;
-  inline: boolean;
-}) => {
+const OrganizationMenu = ({ core }: { core: CoreConnection }) => {
   const { t } = useLingui();
   return (
-    <Choice
-      icon={ArrowUpDownIcon}
-      inline={inline}
-      name={t`Switch organization`}
-      now={null}
-      onValueChange={() => {
-        // The one there is: nothing to switch to yet.
-      }}
-      value="current"
-    >
-      <DropdownMenuRadioItem value="current">
-        <OrganizationName core={core} />
-      </DropdownMenuRadioItem>
-    </Choice>
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger icon={ArrowLeftRightIcon}>
+        {t`Switch organization`}
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent>
+        <DropdownMenuRadioGroup
+          onValueChange={() => {
+            // The one there is: nothing to switch to yet.
+          }}
+          value="current"
+        >
+          <DropdownMenuRadioItem value="current">
+            <OrganizationName core={core} />
+          </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
   );
 };
 
@@ -269,7 +233,6 @@ export const PersonMenu = ({
   useEffect(() => {
     applyTheme(readTheme(identity.userId));
   }, [identity.userId]);
-  const { isMobile } = useSidebar();
   // The menu is gone once pressed: a sign-out core didn't carry out is
   // said in a toast, and the page stays.
   const signOutOrSay = async (): Promise<void> => {
@@ -298,32 +261,30 @@ export const PersonMenu = ({
                   <OrganizationName core={core} />
                 </span>
               </span>
-              <Icon icon={ChevronsUpDownIcon} />
+              <span aria-hidden="true" {...stylex.props(styles.chevrons)}>
+                <Icon icon={ChevronsUpDownIcon} />
+              </span>
             </SidebarMenuButton>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" side={isMobile ? "top" : "right"}>
+          <DropdownMenuContent align="start" side="top" style={styles.menu}>
             <div {...stylex.props(styles.items)}>
               <DropdownMenuItem asChild icon={SettingsIcon}>
                 <Link to="/settings/profile">{t`Settings`}</Link>
               </DropdownMenuItem>
-              {/* On a phone the theme's options stand in the menu itself,
-                  under its name, as the organizations do. */}
-              {isMobile ? <DropdownMenuSeparator /> : null}
-              <ThemeMenu inline={isMobile} userId={identity.userId} />
-              {isMobile ? <DropdownMenuSeparator /> : null}
-              <DropdownMenuItem asChild icon={InfoIcon}>
+              <ThemeRow userId={identity.userId} />
+              <DropdownMenuItem asChild icon={CircleHelpIcon}>
                 <a href="/docs" rel="noopener" target="_blank">
                   {t`Support`}
                 </a>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <OrganizationMenu core={core} inline={isMobile} />
-              {isMobile ? <DropdownMenuSeparator /> : null}
+              <OrganizationMenu core={core} />
               <DropdownMenuItem
                 icon={LogOutIcon}
                 onSelect={() => {
                   void signOutOrSay();
                 }}
+                variant="destructive"
               >
                 {t`Sign out`}
               </DropdownMenuItem>

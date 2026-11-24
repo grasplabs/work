@@ -215,7 +215,7 @@ test("closing the chat while it dictates stops it: no sound goes once it is out 
     });
   await page.goto("/apps");
   const chat = page.getByRole("region", { name: "Chat" });
-  await page.getByRole("button", { name: "Open the chat" }).click();
+  await page.getByRole("button", { name: "Show or hide the chat" }).click();
   await expect(chat).toBeVisible();
 
   await chat.getByRole("button", { name: "Dictate" }).click();
@@ -276,7 +276,7 @@ test("what is heard stays in the chat's box as the chat leaves its dock, which s
   const page = await pageOf(user);
   await page.routeWebSocket("**/api/transcription", liveLine([]));
   await page.goto("/apps");
-  await page.getByRole("button", { name: "Open the chat" }).click();
+  await page.getByRole("button", { name: "Show or hide the chat" }).click();
   const chat = page.getByRole("region", { name: "Chat" });
   await expect(chat).toBeVisible();
 
@@ -331,7 +331,7 @@ test("Escape in the dictation bar over the open chat ends the dictation alone, t
   const page = await pageOf(user);
   await page.routeWebSocket("**/api/transcription", liveLine([]));
   await page.goto("/apps");
-  await page.getByRole("button", { name: "Open the chat" }).click();
+  await page.getByRole("button", { name: "Show or hide the chat" }).click();
   const chat = page.getByRole("region", { name: "Chat" });
   await expect(chat).toBeVisible();
   // A press of the microphone leaves the focus in the text, where it was.

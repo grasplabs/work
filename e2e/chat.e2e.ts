@@ -430,7 +430,7 @@ test("Escape closes only what is open over the chat, and the chat once nothing i
   const { opener } = modelScripts.answersTable;
   const question = `${opener} (${crypto.randomUUID().slice(0, 8)})`;
   await page.goto("/apps");
-  await page.getByRole("button", { name: "Open the chat" }).click();
+  await page.getByRole("button", { name: "Show or hide the chat" }).click();
   const chat = chatOf(page);
   await expect(chat).toBeVisible();
   await chat.getByRole("textbox", { name: "Ask Grasp" }).fill(question);
@@ -727,7 +727,7 @@ test("the chat on every other page carries on the open chat, which is the same c
   // The bar's box while the chat is closed, the chat's own while it is open:
   // one text, shown in one at a time.
   const box = page.getByRole("textbox", { name: "Ask Grasp" });
-  await page.getByRole("button", { name: "Open the chat" }).click();
+  await page.getByRole("button", { name: "Show or hide the chat" }).click();
   await expect(chat).toBeVisible();
   await expect(box).toBeFocused();
   // The box takes a question once the chat has read the models core
@@ -788,9 +788,9 @@ test("the chat on every other page carries on the open chat, which is the same c
   await expect(
     messages.getByRole("article", { name: "You" }).first()
   ).toContainText(second);
-  await expect(page.getByRole("button", { name: "Open the chat" })).toHaveCount(
-    0
-  );
+  await expect(
+    page.getByRole("button", { name: "Show or hide the chat" })
+  ).toHaveCount(0);
   const chats = await chatsWindow(page);
   await expect(rowOf(chats, second)).toBeVisible();
   await expect(rowOf(chats, question)).toBeVisible();

@@ -2,9 +2,9 @@ import { Link, useLocation } from "@tanstack/react-router";
 import type { AnchorHTMLAttributes } from "react";
 import { useState } from "react";
 
-import { levelAt } from "./levels.ts";
+import { inLevel } from "./levels.ts";
 
-// Back, in a level of the sidebar (Settings), leads out of every level, to
+// Back, in a level of the sidebar (Settings, the Brain, an App), leads out of every level, to
 // the last page the main level stood beside; to Chat when the person
 // landed in a level. The frame keeps that page (`useWayOut`, in the
 // sidebar's own component, which stays as long as the frame does): the
@@ -26,7 +26,7 @@ export interface Outside {
 export const useWayOut = (): Outside | undefined => {
   const { href, pathname, search } = useLocation();
   const [outside, setOutside] = useState<Outside>();
-  if (levelAt(pathname) === "main" && outside?.href !== href) {
+  if (!inLevel(pathname) && outside?.href !== href) {
     setOutside({ href, pathname, search });
   }
   return outside;
