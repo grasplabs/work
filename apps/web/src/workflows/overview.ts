@@ -1,5 +1,4 @@
 import type { BusinessProcess } from "@grasp-os/shared/business-processes";
-import type { CatalogEntry, ListedConnection } from "@grasp-os/shared/connect";
 import type { MemberRole } from "@grasp-os/shared/subject-members";
 import { workflowLabel } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
@@ -7,27 +6,16 @@ import type {
   TriggerKind,
   WorkflowTrigger,
 } from "@grasp-os/shared/workflow-triggers";
-import type {
-  ConnectionWorkflows,
-  WorkflowSummary,
-} from "@grasp-os/shared/workflows";
+import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 
-import {
-  httpConnectionsOf,
-  integrationsOf,
-  workflowsOf,
-} from "../connections/integrations.ts";
-import { brandOf } from "../connections/provider-mark.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import { timeoutMs, withTimeout } from "../core.ts";
-import type { Brand } from "../grasp/brand-icon/index.ts";
 import { loadFromCore, orNull } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { listWorkflows } from "./reads.ts";
 
 // What the Workflows page shows (workflow-rows.tsx): every workflow the
-// person has a role in, each in the phase it stands in, with the tools it
-// reaches. What is published is what runs, so a workflow runs once a
+// person has a role in, each in the phase it stands in. What is published is what runs, so a workflow runs once a
 // version of it is live (`version`); whether it is paused is on its own
 // record.
 
@@ -35,7 +23,7 @@ import { listWorkflows } from "./reads.ts";
  * The phases a workflow stands in, in the order the page reads them: what
  * needs the reader first.
  */
-export const phases = ["needsYou", "running", "building"] as const;
+const phases = ["needsYou", "running", "building"] as const;
 export type Phase = (typeof phases)[number];
 
 /**
@@ -189,49 +177,6 @@ const overviewRows = ({
     );
 };
 
-/** A tool a workflow reaches: an app by its name, with the library's mark where it has one. */
-export interface Tool {
-  name: string;
-  brand: Brand | undefined;
-}
-
-/** The tools each workflow reaches, by the workflow's ID. */
-export type ToolsByWorkflow = ReadonlyMap<string, readonly Tool[]>;
-
-/**
- * The tools each workflow reaches: the apps whose connections its current
- * version uses (`workflows.byConnection`), each once, and its HTTP
- * connections by their names.
- */
-const toolsByWorkflow = (
-  uses: readonly ConnectionWorkflows[],
-  connections: readonly ListedConnection[],
-  entries: readonly (CatalogEntry & { offered: boolean })[]
-): ToolsByWorkflow => {
-  const tools = new Map<string, Tool[]>();
-  const add = (workflow: string, tool: Tool): void => {
-    tools.set(workflow, [...(tools.get(workflow) ?? []), tool]);
-  };
-  for (const integration of integrationsOf(entries, connections)) {
-    const tool = {
-      name: integration.name,
-      brand: brandOf(integration.id, integration.name),
-    };
-    for (const workflow of workflowsOf(integration, uses)) {
-      add(workflow.id, tool);
-    }
-  }
-  for (const { connection, http } of httpConnectionsOf(connections)) {
-    const used = uses.find(
-      ({ connectionId }) => connectionId === connection.id
-    );
-    for (const workflow of used?.workflows ?? []) {
-      add(workflow.id, { name: http.name, brand: undefined });
-    }
-  }
-  return tools;
-};
-
 /**
  * Reads the page's rows: the workflows core lists for the person, and
  * their records beside them, for the process each serves and whether it
@@ -247,26 +192,6 @@ export const readOverview = async (
     ]);
     return overviewRows({ listed, resources: resources ?? [] });
   });
-
-/**
- * Reads the tools each workflow reaches. They stand beside a workflow, so
- * a read of them that fails leaves the page without them, never without
- * its workflows.
- */
-export const readTools = async (
-  core: Pick<CoreConnection, "withSession">
-): Promise<ToolsByWorkflow> => {
-  const read = await loadFromCore(core, async (session) => {
-    const [uses, connections, catalog] = await Promise.all([
-      session.workflows.byConnection(),
-      session.connections.list(),
-      // The catalog names an app; without it, its provider's ID stands in.
-      orNull(async () => await session.connections.catalog()),
-    ]);
-    return toolsByWorkflow(uses, connections, catalog?.entries ?? []);
-  });
-  return read.state === "ready" ? read.data : new Map();
-};
 
 /** What starts a workflow's runs, as its row's route begins. */
 export interface RowTrigger {
@@ -371,9 +296,8 @@ export const withTriggers = (
 
 /**
  * Reads what starts each of `workflows`. Core lists a workflow's triggers
- * one workflow at a time, so this is a read each, side by side; like the
- * tools they stand beside a workflow, and one that can't be read leaves
- * its row without them.
+ * one workflow at a time, so this is a read each, side by side; one that
+ * can't be read leaves its row without them.
  */
 export const readTriggers = async (
   core: Pick<CoreConnection, "withSession">,

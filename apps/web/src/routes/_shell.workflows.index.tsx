@@ -1,7 +1,6 @@
 import { canBuild, isMemberAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
 
 import { PageNotLoaded } from "../frame/page-states.tsx";
 import { Page, PageHeading } from "../frame/page.tsx";
@@ -11,7 +10,6 @@ import { Button } from "../grasp/button/index.ts";
 import { MakeSomethingLink } from "../make/make-link.tsx";
 import {
   readOverview,
-  readTools,
   readTriggers,
   withTriggers,
 } from "../workflows/overview.ts";
@@ -19,35 +17,12 @@ import type { TriggersByWorkflow } from "../workflows/overview.ts";
 import { WorkflowRows } from "../workflows/workflow-rows.tsx";
 
 // Everything that runs on its own, in one place: every workflow the
-// person has a role in, as rows gathered by the phase each stands in
-// (workflows/workflow-rows.tsx), those that need the reader first. Their
-// runs are a page of their own (Workflows › Runs), a button away in the
-// heading, beside the page's action: a new workflow. What starts each
-// workflow is read before the rows show, as it decides how each stands:
-// live only where something can start it.
-
-/**
- * What stands beside the rows (the tools each workflow reaches), once its
- * read answers. The loader starts this read on every run of it and never
- * waits for it: a slow one keeps nobody from their workflows.
- */
-const useLater = <T,>(later: Promise<T>): T | undefined => {
-  const [read, setRead] = useState<T>();
-  useEffect(() => {
-    let current = true;
-    const settle = async (): Promise<void> => {
-      const answered = await later;
-      if (current) {
-        setRead(answered);
-      }
-    };
-    void settle();
-    return () => {
-      current = false;
-    };
-  }, [later]);
-  return read;
-};
+// person has a role in, as one table, those that need the reader first
+// (workflows/workflow-rows.tsx). Their runs are a page of their own
+// (Workflows › Runs), a button away in the heading, beside the page's
+// action: a new workflow. What starts each workflow is read before the
+// rows show, as it decides how each stands: live only where something can
+// start it.
 
 /**
  * The heading's actions: the runs, and a new workflow for who builds.
@@ -72,7 +47,6 @@ const Workflows = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
-  const tools = useLater(page.tools);
   // The rows are the page: without them the failure stands for all of it,
   // under the bar, not as a box under a heading with nothing to head.
   if (page.overview.state !== "ready") {
@@ -86,9 +60,9 @@ const Workflows = () => {
       <Page>
         <PageHeading action={<WorkflowsActions />} title={t`Workflows`} />
         <WorkflowRows
+          admin={isMemberAdmin(identity)}
           builds={canBuild(identity.role)}
           rows={page.overview.data}
-          tools={tools}
           triggers={page.triggers}
         />
       </Page>
@@ -123,11 +97,9 @@ const noTriggers: TriggersByWorkflow = new Map();
 export const Route = createFileRoute("/_shell/workflows/")({
   pendingComponent: WorkflowsPending,
   loader: async ({ context: { core, identity } }) => {
-    // Not awaited: the tools stand beside a workflow, and arrive after.
-    const tools = readTools(core);
     const read = await readOverview(core);
     if (read.state !== "ready") {
-      return { overview: read, tools, triggers: noTriggers };
+      return { overview: read, triggers: noTriggers };
     }
     // What starts each workflow, read once the rows name them: it decides
     // how each stands, so the rows wait for it. Only where the reader
@@ -144,7 +116,7 @@ export const Route = createFileRoute("/_shell/workflows/")({
       ...read,
       data: withTriggers(read.data, triggers, admin),
     };
-    return { overview, tools, triggers };
+    return { overview, triggers };
   },
   component: Workflows,
 });
