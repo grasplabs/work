@@ -41,6 +41,7 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { AgentPage } from "./agent-page.tsx";
 import type { FirstAgentAccess } from "./agent-page.tsx";
+import { faceOf, lookOf } from "./figure/look.ts";
 import { ManualAgent } from "./manual-agent.tsx";
 import { NewAgent } from "./new-agent.tsx";
 import { agentTabOf } from "./tabs.tsx";
@@ -384,7 +385,13 @@ const fakeConnections = () => {
       }
     },
   };
-  return { connections, instructions, outOfReach, asked };
+  /** A wake-up firing as core's runner fires it, and how that went. */
+  const fired = (wakeId: string, at: string, outcome: string): void => {
+    wakes = wakes.map((wake) =>
+      wake.id === wakeId ? { ...wake, lastAt: at, lastOutcome: outcome } : wake
+    );
+  };
+  return { connections, instructions, outOfReach, asked, fired };
 };
 
 type Fake = ReturnType<typeof fakeConnections>;
@@ -492,7 +499,7 @@ const Page = ({
       tab={tab}
       teams={teams}
       usable
-      usage={undefined}
+      userId="user-admin"
       wakes={data.wakes[agent.id] ?? []}
     />
   );
@@ -784,9 +791,12 @@ const answerBox = (): HTMLInputElement | HTMLTextAreaElement => {
 
 /** The choice labelled `label` (a library Select's trigger), or none. */
 const choice = (label: string): HTMLElement | null =>
-  document.querySelector<HTMLElement>(
-    `[role="combobox"][aria-label="${label}"]`
-  );
+  [...document.querySelectorAll<HTMLElement>('[role="combobox"]')].find(
+    (each) =>
+      each.getAttribute("aria-label") === label ||
+      document.querySelector(`label[for="${each.id}"]`)?.textContent.trim() ===
+        label
+  ) ?? null;
 
 /** What a choice shows as chosen, without what is hidden from a screen reader. */
 const chosenIn = (label: string): string | undefined => {
@@ -1121,6 +1131,35 @@ describe("an agent's page", () => {
     );
   });
 
+  it("saves a picture picked in Edit only with Save, and drops it on Cancel", async () => {
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire" });
+    await press(await fromMenu("Edit"));
+    await choose("Shape", "Crystal");
+    await press(dialogButton("Cancel"));
+    const cancelled = [...asked];
+    await press(await fromMenu("Edit"));
+    await choose("Shape", "Crystal");
+    await press(dialogButton("Save"));
+    expect({ cancelled, asked }).toStrictEqual({
+      cancelled: [],
+      asked: [
+        [
+          "change",
+          "agent-1",
+          {
+            ...claire,
+            face: faceOf({
+              ...lookOf({ ...claire, id: "agent-1" }),
+              shape: "crystal",
+            }),
+          },
+        ],
+      ],
+    });
+  });
+
   it("saves a new name with the rest of the agent as it was", async () => {
     const fake = await withClaire();
     const { asked } = fake;
@@ -1137,18 +1176,68 @@ describe("an agent's page", () => {
     const fake = await withClaire();
     const { asked } = fake;
     await shown(fake, { agent: "Claire" });
-    await press(await fromMenu("Turn off"));
+    await press(button("Pause"));
     expect(asked).toStrictEqual([["paused", "agent-1", true]]);
-    expect(document.querySelector("header")?.textContent).toContain("Off");
+    expect(document.querySelector("header")?.textContent).toContain("Paused");
+  });
+
+  it("says an agent is failing while one of its schedules couldn't run, though another ran since", async () => {
+    const fake = await withClaire();
+    const ask = {
+      cron: "0 9 * * 1-5",
+      personId: "user-anna",
+      opening: "Chase invoices.",
+    };
+    const morning = await fake.connections.makeAgentWake("agent-1", ask);
+    const evening = await fake.connections.makeAgentWake("agent-1", {
+      ...ask,
+      cron: "0 17 * * 1-5",
+    });
+    fake.fired(morning.id, "2026-11-12T08:00:00.000Z", "model.no_provider");
+    fake.fired(evening.id, "2026-11-12T16:00:00.000Z", "started");
+    await shown(fake, { agent: "Claire" });
+    expect(document.querySelector("header")?.textContent).toContain("Failing");
+    expect(document.body.textContent).toContain("No AI provider is connected.");
+  });
+
+  it("shows a person its instructions name as their name, not as plain words", async () => {
+    const fake = await withClaire();
+    await fake.instructions.save({
+      file: { scope: "agent", agentId: "agent-1" },
+      change: "told-again",
+      text: "Ask Anna de Vries before chasing.",
+      after: 1,
+    });
+    await shown(fake, { agent: "Claire" });
+    const chips = [...document.querySelectorAll("[data-slot=tag]")].map(
+      (each) => each.textContent
+    );
+    expect(chips).toContain("Anna de Vries");
+  });
+
+  it("says when a schedule first runs before it ever has, and that it hasn't yet", async () => {
+    const fake = await withClaire();
+    await fake.connections.makeAgentWake("agent-1", {
+      cron: "0 9 * * 1-5",
+      personId: "user-anna",
+      opening: "Chase invoices.",
+    });
+    await shown(fake, { agent: "Claire" });
+    expect(document.querySelector("header")?.textContent).toContain(
+      "First run"
+    );
+    expect(document.body.textContent).toContain("No runs yet; the first is");
+    await press(button("Pause"));
+    expect(document.body.textContent).not.toContain("the first is");
   });
 
   it("offers someone who isn't the company's admin nothing to change", async () => {
     const fake = await withClaire();
     const { asked } = fake;
     await shown(fake, { agent: "Claire" }, false);
+    expect(document.body.textContent).not.toContain("Edit instructions");
+    const off = isDisabled(button("Pause"));
     const edit = isDisabled(await fromMenu("Edit"));
-    const turnOff = menuItem("Turn off");
-    const off = turnOff !== undefined && isDisabled(turnOff);
     // Closed again before the tabs are pressed.
     await press(moreButton());
     expect({ edit, off }).toStrictEqual({ edit: true, off: true });
@@ -1182,7 +1271,7 @@ describe("an agent's page", () => {
     await shown(fake, { agent: "Claire", tab: "instructions" });
     await set(field("Instructions"), "A draft, not saved.", "input");
     // Paused: core is asked and the page read again.
-    await press(await fromMenu("Turn off"));
+    await press(await fromMenu("Pause"));
     const afterPause = field("Instructions").value;
     await openTab("access");
     await openTab("instructions");
@@ -1244,7 +1333,7 @@ describe("an agent's page", () => {
     await press(button("Add a time"));
     await set(field("What to ask it each time"), "refuse this", "input");
     // Another change on the page saves and the page is read again.
-    await press(await fromMenu("Turn off"));
+    await press(await fromMenu("Pause"));
     expect(field("What to ask it each time").value).toBe("refuse this");
     // Core refuses it: still there to be corrected, and said why.
     await press(exactButton("Add"));
@@ -1641,7 +1730,6 @@ describe("an agent's page", () => {
     await openTab("schedule");
     expect({
       alone: text.includes("Just for you"),
-      who: text.includes("Only you"),
       access,
       schedule: [...document.querySelectorAll("button")].some(
         (each) => inView(each) && each.textContent?.trim() === "Add a time"
@@ -1649,7 +1737,6 @@ describe("an agent's page", () => {
       asked,
     }).toStrictEqual({
       alone: true,
-      who: true,
       access: null,
       schedule: false,
       asked: [["change", "agent-1", { ...claire, name: "Clara" }]],
