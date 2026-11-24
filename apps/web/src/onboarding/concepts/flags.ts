@@ -13,6 +13,15 @@ export interface Flag {
   /** The same colours as the brand's stops, night to paper, so the five are one family. */
   brand: readonly BrandStop[];
   at: (u: number, v: number) => number;
+  /** How wide it stands at the card's far edge, as times its height. */
+  aspect: number;
+  /**
+   * Its bands stand side by side: the fade ends where the flag begins, so
+   * every band shows whole.
+   */
+  vertical?: boolean;
+  /** What runs on under the fade, toward the name: its own edge, or its first colour alone. */
+  under: "edge" | "field";
 }
 
 export type BrandStop =
@@ -61,21 +70,29 @@ export const flags: Record<Locale, Flag> = {
     real: ["#012169", "#ffffff", "#c8102e"],
     brand: ["ink", "paper", "mint"],
     at: unionJack,
+    aspect: 2,
+    under: "field",
   },
   de: {
     real: ["#000000", "#dd0000", "#ffce00"],
     brand: ["night", "pine", "lime"],
     at: across([1 / 3, 2 / 3]),
+    aspect: 1.8,
+    under: "edge",
   },
   nl: {
     real: ["#ae1c28", "#ffffff", "#21468b"],
     brand: ["mint", "paper", "ink"],
     at: across([1 / 3, 2 / 3]),
+    aspect: 1.8,
+    under: "edge",
   },
   es: {
     real: ["#aa151b", "#f1bf00", "#aa151b"],
     brand: ["pine", "lime", "pine"],
     at: across([1 / 4, 3 / 4]),
+    aspect: 1.8,
+    under: "edge",
   },
   fr: {
     real: ["#002654", "#ffffff", "#ce1126"],
@@ -86,5 +103,8 @@ export const flags: Record<Locale, Flag> = {
       }
       return u < 2 / 3 ? 1 : 2;
     },
+    aspect: 3.2,
+    vertical: true,
+    under: "field",
   },
 };

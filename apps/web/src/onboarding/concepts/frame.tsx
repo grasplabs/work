@@ -7,11 +7,9 @@ import {
   SelectValue,
 } from "@grasp-os/ui/components/select";
 import { StepperNav } from "@grasp-os/ui/components/stepper";
-import { Text } from "@grasp-os/ui/components/text";
 import { Icon, LogOutIcon } from "@grasp-os/ui/lib/icons";
 import { media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
-import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
@@ -23,9 +21,8 @@ import type { Locale } from "../../i18n.ts";
 import { useCore } from "../../use-core.ts";
 import { useNarrow } from "../use-narrow.ts";
 
-// The frame of the setup's concepts: one bar on top with the mark, where
-// the admin is in words (one of three chapters, and about how many
-// minutes are left), the sound, the language and the way out;
+// The frame of the setup's concepts: one bar on top with the mark alone at
+// its start, the sound, the language and the way out at its end;
 // the step below in one column that scrolls with the page. Leaving signs
 // out: the admin can't use Grasp before the setup is done, so a way "home"
 // only led back here. Everything done so far is kept, and signing in again
@@ -55,11 +52,6 @@ const styles = stylex.create({
     maxWidth: "48rem",
     marginInline: "auto",
     paddingInline: space[4],
-  },
-  where: {
-    display: "flex",
-    justifyContent: { default: "center", [media.maxSm]: "flex-start" },
-    textAlign: { default: "center", [media.maxSm]: "start" },
   },
   end: {
     display: "flex",
@@ -91,6 +83,8 @@ const styles = stylex.create({
   fillColumn: { flexGrow: 1, minHeight: 0, marginBlock: 0 },
   narrowColumn: { maxWidth: "34rem" },
   wideColumn: { maxWidth: "48rem" },
+  // The welcome's five language cards stand in one row.
+  widestColumn: { maxWidth: "80rem" },
 });
 
 /** A step of the whole setup, by the screen's name. */
@@ -118,61 +112,6 @@ export const wholeSetup: readonly WholeStep[] = [
   "review",
 ];
 
-/** About how many minutes each step takes, to say how long is left. */
-const minutes: Record<WholeStep, number> = {
-  welcome: 0.5,
-  ai: 1,
-  about: 1,
-  company: 1.5,
-  sources: 1,
-  documents: 1.5,
-  leads: 1,
-  team: 1,
-  review: 0.5,
-};
-
-/** The three chapters the setup reads as: the start, the company, the team. */
-const chapterOf = (step: WholeStep): 0 | 1 | 2 => {
-  if (step === "welcome" || step === "ai" || step === "about") {
-    return 0;
-  }
-  return step === "team" || step === "review" ? 2 : 1;
-};
-
-/**
- * Where the admin is, in words: the chapter, and about how many minutes
- * are left of the whole setup. No row of steps: nine names read as a
- * long road, and the step's own foot already goes back and on.
- */
-const Whereabouts = ({ step }: { step: WholeStep }) => {
-  const { t } = useLingui();
-  const narrow = useNarrow();
-  const chapters = [t`Getting started`, t`Your company`, t`Your team`];
-  const left = Math.max(
-    1,
-    Math.ceil(
-      wholeSetup
-        .slice(wholeSetup.indexOf(step))
-        .reduce((sum, each) => sum + minutes[each], 0)
-    )
-  );
-  const chapter = chapters[chapterOf(step)] ?? "";
-  // On a phone, short enough to keep the bar on one line.
-  const long = plural(left, {
-    one: "About # minute left",
-    other: "About # minutes left",
-  });
-  const short = plural(left, { one: "# min left", other: "# min left" });
-  const time = narrow ? short : long;
-  return (
-    <div {...stylex.props(styles.where)}>
-      <Text color="muted" size="sm">
-        {chapter} · {time}
-      </Text>
-    </div>
-  );
-};
-
 const languages = Object.entries(localeNames).flatMap(([code, name]) =>
   isLocale(code) ? [{ code, name }] : []
 );
@@ -196,12 +135,20 @@ const Language = () => {
       }}
       value={locale}
     >
-      <SelectTrigger aria-label={t`Language`} size="sm" variant="ghost">
+      <SelectTrigger
+        aria-label={t`Language: ${localeNames[locale]}`}
+        size="sm"
+        variant="ghost"
+      >
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
         {languages.map(({ code, name }) => (
-          <SelectItem key={code} label={name} value={code}>
+          <SelectItem
+            key={code}
+            label={narrow ? code.toUpperCase() : name}
+            value={code}
+          >
             <span lang={code}>{name}</span>
           </SelectItem>
         ))}
@@ -218,7 +165,6 @@ const Language = () => {
 const Leave = () => {
   const { t } = useLingui();
   const core = useCore();
-  const narrow = useNarrow();
   const leave = async () => {
     try {
       await signOut(core);
@@ -226,29 +172,19 @@ const Leave = () => {
       // Still signed in: the page stays as it was.
     }
   };
-  if (narrow) {
-    return (
-      <Button
-        aria-label={t`Leave for now`}
-        onClick={() => {
-          void leave();
-        }}
-        size="icon-sm"
-        variant="ghost"
-      >
-        <Icon icon={LogOutIcon} />
-      </Button>
-    );
-  }
+  // Its icon alone, at every width: a ghost Button's words are ink, heavier
+  // than the quiet words of the sound and the language beside it. Its name
+  // is its tooltip and its accessible name.
   return (
     <Button
+      aria-label={t`Leave for now`}
       onClick={() => {
         void leave();
       }}
-      size="sm"
+      size="icon-sm"
       variant="ghost"
     >
-      {t`Leave for now`}
+      <Icon icon={LogOutIcon} />
     </Button>
   );
 };
@@ -287,19 +223,18 @@ const AlongBar = ({ along }: { along: Along }) => {
 
 export const ConceptFrame = ({
   along,
-  step,
   language = true,
   tools,
   wide = false,
   fill = false,
   children,
 }: {
-  step: WholeStep;
   /** The language in the bar: not on the step that asks for it. */
   language?: boolean;
   /** More in the bar before the language, such as the sound. */
   tools?: ReactNode;
-  wide?: boolean;
+  /** How wide the step's column is: the narrow default, `true` wider, `"widest"` for a row of five cards. */
+  wide?: boolean | "widest";
   /** As high as the window, the step scrolling inside itself. */
   fill?: boolean;
   /** StepperNav's bar under the top bar, for a later step that ends in its own button. */
@@ -311,7 +246,7 @@ export const ConceptFrame = ({
       <span {...stylex.props(styles.mark)}>
         <Icon icon={GraspLogo} label="Grasp" />
       </span>
-      <Whereabouts step={step} />
+      <span />
       <div {...stylex.props(styles.end)}>
         {tools}
         {language ? <Language /> : null}
@@ -323,7 +258,9 @@ export const ConceptFrame = ({
       <div
         {...stylex.props(
           styles.column,
-          wide ? styles.wideColumn : styles.narrowColumn,
+          wide === "widest" && styles.widestColumn,
+          wide === true && styles.wideColumn,
+          wide === false && styles.narrowColumn,
           fill && styles.fillColumn
         )}
       >
