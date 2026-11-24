@@ -4244,9 +4244,17 @@ msgstr "Kontext"
 msgid "Continue"
 msgstr "Weiter"
 
+#: src/frame/sign-in/sign-in.tsx
+msgid "Continue with {provider}"
+msgstr "Weiter mit {provider}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Continue with {signIn}"
 msgstr "Weiter mit {signIn}"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Continue with Grasp staff"
+msgstr "Weiter als Grasp-Mitarbeiter"
 
 #: src/apps/resource-bindings.tsx
 msgid "Contract"
@@ -4818,6 +4826,10 @@ msgstr "Diagramm"
 msgctxt "inbox item kind: a change whose answer was lost"
 msgid "Did it happen?"
 msgstr "Ist es geschehen?"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Did not open"
+msgstr "Nicht geöffnet"
 
 #: src/inbox/items.ts
 msgid "Did this happen? {who}"
@@ -7210,8 +7222,8 @@ msgid "Invited as {role} by {inviter} on {date} · hasn’t signed in yet"
 msgstr "Als {role} eingeladen von {inviter} am {date} · noch nicht angemeldet"
 
 #: src/routes/sign-in.tsx
-msgid "Invited as a guest? Sign in with a code"
-msgstr "Als Gast eingeladen? Mit einem Code anmelden"
+msgid "Invited as a guest?"
+msgstr "Als Gast eingeladen?"
 
 #: src/brain/brain.ts
 msgid "Invited for step 2"
@@ -7794,6 +7806,7 @@ msgctxt "what the Brain remembers about something"
 msgid "Language"
 msgstr "Sprache"
 
+#: src/frame/language-button.tsx
 #: src/language-picker.tsx
 msgid "Language: {name}"
 msgstr "Sprache: {name}"
@@ -7835,6 +7848,10 @@ msgstr "Zuletzt gelesen {lastRead}"
 #: src/workflows/workflows-table.tsx
 msgid "Last run"
 msgstr "Letzter Lauf"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Last used"
+msgstr "Zuletzt verwendet"
 
 #: src/brain/activity-page.tsx
 msgid "Last week"
@@ -8098,6 +8115,10 @@ msgstr "Wird geladen…"
 msgctxt "what the Brain remembers about something"
 msgid "Location"
 msgstr "Standort"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Log in"
+msgstr "Anmelden"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -10087,6 +10108,14 @@ msgstr "Ihr Onboarding öffnen"
 #: src/report/report.ts
 msgid "Open: {open}"
 msgstr "Offen: {open}"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Opened"
+msgstr "Geöffnet"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Opening {provider}"
+msgstr "{provider} wird geöffnet"
 
 #: src/onboarding/platform-reveal.tsx
 msgid "Opening Grasp"
@@ -12675,6 +12704,10 @@ msgstr "Melden Sie sich an, um Ihr Interview zu öffnen"
 #: src/sign-in-options.tsx
 msgid "Sign in with {label}"
 msgstr "Mit {label} anmelden"
+
+#: src/routes/sign-in.tsx
+msgid "Sign in with a code"
+msgstr "Mit einem Code anmelden"
 
 #: src/sign-in-errors.ts
 msgid "Sign in with your organization's account."
@@ -15341,10 +15374,6 @@ msgstr "Den Chat, das Gehirn und die mit ihnen geteilten Apps nutzen"
 #: src/workflows/resource-params.tsx
 msgid "Use the default"
 msgstr "Standard verwenden"
-
-#: src/routes/sign-in.tsx
-msgid "Use your organization’s account to go on."
-msgstr "Melden Sie sich mit dem Konto Ihrer Organisation an, um fortzufahren."
 
 #: src/onboarding/ai-step.tsx
 msgid "Use your own key"
