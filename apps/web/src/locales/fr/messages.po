@@ -4706,6 +4706,10 @@ msgstr "La réponse n’a pas pu être envoyée"
 msgid "Could not send. Your message is kept."
 msgstr "Envoi impossible. Votre message est conservé."
 
+#: src/interview/parts/consent.tsx
+msgid "Could not start"
+msgstr "Impossible de commencer"
+
 #: src/activity/audit-words.ts
 msgid "Couldn't erase an upload from the Brain"
 msgstr "N'a pas pu effacer un fichier importé du Brain"
@@ -7327,6 +7331,10 @@ msgstr "Connexions HTTP"
 msgid "https:// and a public host name, with nothing after it."
 msgstr "https:// et un nom d'hôte public, sans rien après."
 
+#: src/interview/parts/consent.tsx
+msgid "I agree, let's start"
+msgstr "D'accord, commençons"
+
 #: src/onboarding/send-plan-form.tsx
 msgid "I can’t plan that day. Type one like {example}, from {earliest} to {latest}."
 msgstr "Je ne peux pas planifier ce jour. Saisissez-en un comme {example}, du {earliest} au {latest}."
@@ -7442,6 +7450,10 @@ msgstr "Je parle d’abord à chaque responsable d’équipe, pour qu’il enten
 #: src/interview/before.tsx
 msgid "I write down what you tell me. At the end I read it back, and you say what is wrong. Your voice is not kept."
 msgstr "Je note ce que vous me dites. À la fin, je vous le relis, et vous dites ce qui est faux. Votre voix n’est pas conservée."
+
+#: src/interview/parts/consent.tsx
+msgid "I'd rather skip this"
+msgstr "Je préfère passer mon tour"
 
 #: src/interview/before.tsx
 msgid "I’m {firstName}."
@@ -10000,6 +10012,10 @@ msgstr "Non réinitialisé"
 msgid "Not revoked"
 msgstr "Non révoqué"
 
+#: src/interview/parts/consent.tsx
+msgid "Not right now"
+msgstr "Pas tout de suite"
+
 #: src/interview/composer.tsx
 msgid "Not saved yet. Trying again."
 msgstr "Pas encore enregistré. Nouvel essai en cours."
@@ -11702,6 +11718,10 @@ msgstr "Lit les personnes de votre organisation : noms, e-mails et équipes."
 #: src/onboarding/setup-frame.tsx
 msgid "Ready"
 msgstr "Prêt"
+
+#: src/interview/parts/consent.tsx
+msgid "Ready to start?"
+msgstr "Prêt à commencer ?"
 
 #: src/workflows/item-test.tsx
 msgid "Real run"
@@ -18016,6 +18036,10 @@ msgstr "Les fichiers de votre export"
 #: src/routes/_shell.settings.instructions.tsx
 msgid "Your instructions"
 msgstr "Vos instructions"
+
+#: src/interview/parts/consent.tsx
+msgid "Your microphone stays off until you agree."
+msgstr "Votre micro reste coupé tant que vous n'avez pas accepté."
 
 #: src/frame/person-menu.tsx
 msgid "Your onboarding"
