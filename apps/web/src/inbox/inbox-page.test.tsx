@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { setTimeout as sleep } from "node:timers/promises";
 
+import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
 import { brainGapErrors } from "@grasp-os/shared/brain-records";
 import {
   appIdSchema,
@@ -282,7 +283,10 @@ const shown = async ({
     root = createRoot(host);
     root.render(
       <I18nProvider i18n={i18n}>
-        <RouterProvider router={router} />
+        {/* The page draws the frame's bar, whose sidebar button needs its sidebar. */}
+        <SidebarProvider>
+          <RouterProvider router={router} />
+        </SidebarProvider>
       </I18nProvider>
     );
     await router.load();
@@ -404,14 +408,14 @@ const panelText = (): string =>
 
 /** What the side panel's item asks. */
 const panelTitle = (): string | undefined =>
-  document.querySelector("aside [data-slot='confirmation-request']")
+  document.querySelector("aside [data-slot='approval-request'] h2")
     ?.textContent ?? undefined;
 
 /** Whether both of the panel's answers can be pressed. */
 const answersOn = (): boolean => {
   const answers = [
     ...document.querySelectorAll<HTMLButtonElement>(
-      "aside [data-slot='confirmation-action']"
+      "aside [data-slot='approval-request'] [data-slot='button']"
     ),
   ];
   return (
