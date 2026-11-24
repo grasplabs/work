@@ -1,40 +1,3 @@
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@grasp-os/app-kit/components/alert-dialog";
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Card, CardContent } from "@grasp-os/app-kit/components/card";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@grasp-os/app-kit/components/dropdown-menu";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-} from "@grasp-os/app-kit/components/field";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemGroup,
-} from "@grasp-os/app-kit/components/item";
-import {
-  PageHeader,
-  PageHeaderDescription,
-  PageHeaderTitle,
-} from "@grasp-os/app-kit/components/page-header";
-import { Textarea } from "@grasp-os/app-kit/components/textarea";
 import { failureText } from "@grasp-os/shared/errors";
 import type { Opportunity } from "@grasp-os/shared/opportunities";
 import type {
@@ -52,14 +15,56 @@ import type {
   SkillsOverview,
   SkillTeam,
 } from "@grasp-os/shared/skills";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@grasp-os/ui/components/alert-dialog";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import { Card } from "@grasp-os/ui/components/card";
+import { Container } from "@grasp-os/ui/components/container";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@grasp-os/ui/components/dropdown-menu";
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+} from "@grasp-os/ui/components/field";
+import { Heading } from "@grasp-os/ui/components/heading";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { PageHeader } from "@grasp-os/ui/components/page-header";
+import { Text } from "@grasp-os/ui/components/text";
+import { Textarea } from "@grasp-os/ui/components/textarea";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { i18n as lingui } from "@lingui/core";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useId, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
-import { formatDateTime } from "../format.ts";
+import { formatDate } from "../format.ts";
+import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { skillOf, useStartFrom } from "./opportunity-drafts.ts";
@@ -101,6 +106,24 @@ const callCore = async <T,>(
   }
 };
 
+/**
+ * What `read` answers on the person's session, or why not, as every read
+ * from core is (`loadFromCore`): within its deadline, and out of reach or
+ * not found said in the person's language, with the reference to quote.
+ */
+const readSkills = async <T,>(
+  core: CoreConnection,
+  read: (skills: Skills) => Promise<T>
+): Promise<Read<T>> => {
+  const loaded = await loadFromCore(
+    core,
+    async (session) => await read(session.skills)
+  );
+  return loaded.state === "ready"
+    ? loaded
+    : { state: "refused", message: notLoadedText(loaded, lingui) ?? "" };
+};
+
 /** A new skill's text, for the person to fill in. */
 const newSkillText = `---
 name: my-skill
@@ -109,6 +132,33 @@ description: When to use it, in one sentence.
 
 The steps.
 `;
+
+const styles = stylex.create({
+  // A page of the brain: its own pane that scrolls, round the library's page column.
+  pane: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
+  section: { display: "flex", flexDirection: "column", gap: space["3"] },
+  stack: { display: "flex", flexDirection: "column", gap: space["2"] },
+  unread: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: space["2"],
+  },
+  row: { display: "flex", flexWrap: "wrap", gap: space["2"] },
+  start: { alignSelf: "flex-start" },
+  cards: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["3"],
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  // Focus lands on the heading itself once a skill is deleted.
+  landing: { outline: "none" },
+  // Texts are shown as text, with their own line breaks.
+  plain: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" },
+});
 
 /**
  * Where the person's share stands: added (a later decision may replace it
@@ -129,7 +179,7 @@ const ShareStatus = ({
   if (share.version !== null) {
     if (live) {
       return (
-        <Badge variant="passed">
+        <Badge size="sm" variant="success">
           {forTeam ? (
             <Trans>Added to the team&apos;s skills.</Trans>
           ) : (
@@ -139,7 +189,7 @@ const ShareStatus = ({
       );
     }
     return (
-      <Badge variant="outline">
+      <Badge size="sm">
         {forTeam ? (
           <Trans>
             Added to the team&apos;s skills, and since taken out of use.
@@ -154,21 +204,21 @@ const ShareStatus = ({
   }
   if (share.status === "pending") {
     return (
-      <Badge variant="attention">
+      <Badge size="sm" variant="warning">
         <Trans>Waiting for an admin</Trans>
       </Badge>
     );
   }
   if (share.status === "declined") {
     return (
-      <Badge variant="outline">
+      <Badge size="sm">
         <Trans>Declined</Trans>
       </Badge>
     );
   }
   if (share.superseded) {
     return (
-      <Badge variant="outline">
+      <Badge size="sm">
         <Trans>
           Approved, but a later decision on this skill came before it was added.
         </Trans>
@@ -176,7 +226,7 @@ const ShareStatus = ({
     );
   }
   return (
-    <Badge variant="attention">
+    <Badge size="sm" variant="warning">
       {forTeam ? (
         <Trans>Approved, but not added to the team&apos;s skills yet.</Trans>
       ) : (
@@ -212,9 +262,10 @@ const Unread = ({
   reason: string | undefined;
   busy: boolean;
   onRetry: () => void;
-}) =>
-  reason === undefined ? null : (
-    <div className="flex flex-col items-start gap-2">
+}) => {
+  const { t } = useLingui();
+  return reason === undefined ? null : (
+    <div {...stylex.props(styles.unread)}>
       <ErrorText>{reason}</ErrorText>
       <Button
         disabled={busy}
@@ -223,10 +274,11 @@ const Unread = ({
         type="button"
         variant="outline"
       >
-        <Trans>Try again</Trans>
+        {t`Try again`}
       </Button>
     </div>
   );
+};
 
 /** Asks before something that can't be undone. */
 const Confirmed = ({
@@ -245,12 +297,10 @@ const Confirmed = ({
   onConfirm: () => void;
 }) => (
   <AlertDialog>
-    <AlertDialogTrigger
-      render={
-        <Button disabled={disabled} size="sm" type="button" variant="outline" />
-      }
-    >
-      {label}
+    <AlertDialogTrigger asChild>
+      <Button disabled={disabled} size="sm" variant="outline">
+        {label}
+      </Button>
     </AlertDialogTrigger>
     <AlertDialogContent>
       <AlertDialogHeader>
@@ -258,10 +308,13 @@ const Confirmed = ({
         <AlertDialogDescription>{description}</AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter>
-        <AlertDialogCancel>
-          <Trans>Cancel</Trans>
-        </AlertDialogCancel>
-        <AlertDialogAction onClick={onConfirm} variant="destructive">
+        <AlertDialogCancel />
+        <AlertDialogAction
+          onClick={() => {
+            onConfirm();
+          }}
+          variant="destructive"
+        >
           {confirm}
         </AlertDialogAction>
       </AlertDialogFooter>
@@ -333,30 +386,31 @@ const ShareWithTeam = ({
   waiting: Map<string, Waiting | undefined>;
   disabled: boolean;
   onShare: (team: string) => void;
-}) => (
-  <DropdownMenu>
-    <DropdownMenuTrigger
-      render={
-        <Button disabled={disabled} size="sm" type="button" variant="outline" />
-      }
-    >
-      <Trans>Share with a team</Trans>
-    </DropdownMenuTrigger>
-    <DropdownMenuContent align="end">
-      {teams.map((team) => (
-        <DropdownMenuItem
-          disabled={waiting.get(team.id) === "current"}
-          key={team.id}
-          onClick={() => {
-            onShare(team.id);
-          }}
-        >
-          {team.name}
-        </DropdownMenuItem>
-      ))}
-    </DropdownMenuContent>
-  </DropdownMenu>
-);
+}) => {
+  const { t } = useLingui();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button disabled={disabled} size="sm" variant="outline">
+          {t`Share with a team`}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {teams.map((team) => (
+          <DropdownMenuItem
+            disabled={waiting.get(team.id) === "current"}
+            key={team.id}
+            onSelect={() => {
+              onShare(team.id);
+            }}
+          >
+            {team.name}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
 
 /** Whether `page` still lists the person's own skill `name`. */
 const listsOwn = (page: Read<SkillsOverview>, name: string): boolean =>
@@ -393,13 +447,11 @@ const OwnSkill = ({
   return (
     <Item size="sm" variant="outline">
       <ItemContent>
-        <span className="text-sm font-medium">{name}</span>
-        <span className="text-muted-foreground text-sm">
-          {skill.description}
-        </span>
-        <span className="text-muted-foreground text-xs">
+        <ItemTitle>{name}</ItemTitle>
+        <ItemDescription>{skill.description}</ItemDescription>
+        <Text as="span" size="xs" color="muted">
           <Trans>Version {version}</Trans>
-        </span>
+        </Text>
       </ItemContent>
       <ItemActions>
         <Button
@@ -409,7 +461,7 @@ const OwnSkill = ({
           type="button"
           variant="outline"
         >
-          <Trans>Edit</Trans>
+          {t`Edit`}
         </Button>
         <Button
           disabled={busy || waiting === "current"}
@@ -453,7 +505,7 @@ const Replaces = ({ request }: { request: SkillShareRequest }) => {
   }
   if (audience.kind === "company") {
     return (
-      <p className="text-sm">
+      <Text size="sm">
         {replaces === "grasp" ? (
           <Trans>
             Approving it replaces Grasp&apos;s own skill {name} for everyone.
@@ -464,22 +516,22 @@ const Replaces = ({ request }: { request: SkillShareRequest }) => {
             everyone.
           </Trans>
         )}
-      </p>
+      </Text>
     );
   }
   const team = teamName(audience.team);
   if (replaces === "team") {
     return (
-      <p className="text-sm">
+      <Text size="sm">
         <Trans>
           Approving it replaces the team {team}&apos;s own skill {name} for its
           members.
         </Trans>
-      </p>
+      </Text>
     );
   }
   return (
-    <p className="text-sm">
+    <Text size="sm">
       {replaces === "grasp" ? (
         <Trans>
           Approving it replaces Grasp&apos;s own skill {name} for the members of{" "}
@@ -491,7 +543,7 @@ const Replaces = ({ request }: { request: SkillShareRequest }) => {
           members of {team}.
         </Trans>
       )}
-    </p>
+    </Text>
   );
 };
 
@@ -507,38 +559,51 @@ const ShareRequest = ({
   onApprove: () => void;
   onDecline: () => void;
 }) => {
+  const { t } = useLingui();
   const asker = request.requestedBy.name ?? request.requestedBy.userId;
-  const asked = formatDateTime(request.requestedAt);
+  const asked = formatDate(request.requestedAt);
   const { name } = request;
   return (
-    <Card render={<li />} size="sm">
-      <CardContent>
-        <span className="text-sm font-medium">{name}</span>
-        <p className="text-sm">
-          <ShareAudience audience={request.audience} />
-        </p>
-        <Replaces request={request} />
-        <p className="text-muted-foreground text-xs">
-          <Trans>
-            Asked by {asker} on {asked}
-          </Trans>
-        </p>
-        <p className="text-sm whitespace-pre-wrap">{request.text}</p>
-        <div className="flex gap-2">
-          <Button disabled={busy} onClick={onApprove} size="sm" type="button">
-            <Trans>Approve</Trans>
-          </Button>
-          <Button
-            disabled={busy}
-            onClick={onDecline}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            <Trans>Decline</Trans>
-          </Button>
+    <Card asChild>
+      <li>
+        <div {...stylex.props(styles.stack)}>
+          <Text size="sm" weight="medium">
+            {name}
+          </Text>
+          <Text size="sm">
+            <ShareAudience audience={request.audience} />
+          </Text>
+          <Replaces request={request} />
+          <Text size="xs" color="muted">
+            <Trans>
+              Asked by {asker} on {asked}
+            </Trans>
+          </Text>
+          <Text size="sm">
+            <span {...stylex.props(styles.plain)}>{request.text}</span>
+          </Text>
+          <div {...stylex.props(styles.row)}>
+            <Button
+              disabled={busy}
+              onClick={onApprove}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {t`Approve`}
+            </Button>
+            <Button
+              disabled={busy}
+              onClick={onDecline}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {t`Decline`}
+            </Button>
+          </div>
         </div>
-      </CardContent>
+      </li>
     </Card>
   );
 };
@@ -550,15 +615,13 @@ const TeamSkill = ({ skill }: { skill: ListedTeamSkill }) => {
   return (
     <Item size="sm" variant="outline">
       <ItemContent>
-        <span className="text-sm font-medium">{name}</span>
-        <span className="text-muted-foreground text-sm">
-          {skill.description}
-        </span>
-        <span className="text-muted-foreground text-xs">
+        <ItemTitle>{name}</ItemTitle>
+        <ItemDescription>{skill.description}</ItemDescription>
+        <Text as="span" size="xs" color="muted">
           <Trans>
             {team}, version {version}
           </Trans>
-        </span>
+        </Text>
       </ItemContent>
     </Item>
   );
@@ -628,15 +691,13 @@ const CompanySkillItem = ({
   return (
     <Item size="sm" variant="outline">
       <ItemContent>
-        <span className="text-sm font-medium">{name}</span>
+        <ItemTitle>{name}</ItemTitle>
         {skill.description === null ? null : (
-          <span className="text-muted-foreground text-sm">
-            {skill.description}
-          </span>
+          <ItemDescription>{skill.description}</ItemDescription>
         )}
-        <span className="text-muted-foreground text-xs">
+        <Text as="span" size="xs" color="muted">
           <InUseLine inUse={skill} team={null} />
-        </span>
+        </Text>
       </ItemContent>
       {admin && skill.onItsWay !== "retirement" ? (
         <ItemActions>
@@ -670,10 +731,10 @@ const DecidedSkill = ({
   return (
     <Item size="sm" variant="outline">
       <ItemContent>
-        <span className="text-sm font-medium">{name}</span>
-        <span className="text-muted-foreground text-xs">
+        <ItemTitle>{name}</ItemTitle>
+        <Text as="span" size="xs" color="muted">
           <InUseLine inUse={skill} team={team} />
-        </span>
+        </Text>
       </ItemContent>
       {skill.onItsWay === "retirement" ? null : (
         <ItemActions>
@@ -709,26 +770,25 @@ const EveryTeamsSkills = ({
     return null;
   }
   return (
-    <section aria-labelledby={heading} className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium" id={heading}>
+    <section aria-labelledby={heading} {...stylex.props(styles.section)}>
+      <Heading id={heading} level={2} size="2xs">
         <Trans>Every team&apos;s skills</Trans>
-      </h2>
+      </Heading>
       {data.teamSkills.length === 0 ? (
-        <p className="text-muted-foreground text-sm">
+        <Text size="sm" color="muted">
           <Trans>No team has a skill of its own yet.</Trans>
-        </p>
+        </Text>
       ) : null}
-      <ItemGroup render={<ul />} spacing="tight">
+      <ItemGroup>
         {data.teamSkills.map((skill) => (
-          <li key={`${skill.team.id} ${skill.name}`}>
-            <DecidedSkill
-              busy={busy}
-              onRetire={() => {
-                onRetire(skill);
-              }}
-              skill={skill}
-            />
-          </li>
+          <DecidedSkill
+            busy={busy}
+            key={`${skill.team.id} ${skill.name}`}
+            onRetire={() => {
+              onRetire(skill);
+            }}
+            skill={skill}
+          />
         ))}
       </ItemGroup>
     </section>
@@ -742,28 +802,26 @@ const AskedShares = ({ data }: { data: SkillsOverview | undefined }) => {
     return null;
   }
   return (
-    <section aria-labelledby={heading} className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium" id={heading}>
+    <section aria-labelledby={heading} {...stylex.props(styles.section)}>
+      <Heading id={heading} level={2} size="2xs">
         <Trans>What you asked to share</Trans>
-      </h2>
-      <ItemGroup render={<ul />} spacing="tight">
+      </Heading>
+      <ItemGroup>
         {data.shares.map((share) => (
-          <li key={share.id}>
-            <Item size="sm">
-              <ItemContent>
-                <span className="text-sm">{share.name}</span>
-                <span className="text-muted-foreground text-xs">
-                  <ShareAudience audience={share.audience} />
-                </span>
-                <span className="text-muted-foreground text-xs">
-                  {formatDateTime(share.requestedAt)}
-                </span>
-              </ItemContent>
-              <ItemActions>
-                <ShareStatus live={share.inUse} share={share} />
-              </ItemActions>
-            </Item>
-          </li>
+          <Item key={share.id} size="sm">
+            <ItemContent>
+              <ItemTitle>{share.name}</ItemTitle>
+              <Text as="span" size="xs" color="muted">
+                <ShareAudience audience={share.audience} />
+              </Text>
+              <Text as="span" size="xs" color="muted">
+                {formatDate(share.requestedAt)}
+              </Text>
+            </ItemContent>
+            <ItemActions>
+              <ShareStatus live={share.inUse} share={share} />
+            </ItemActions>
+          </Item>
         ))}
       </ItemGroup>
     </section>
@@ -777,27 +835,24 @@ const TeamSkills = ({ data }: { data: SkillsOverview | undefined }) => {
     return null;
   }
   return (
-    <section aria-labelledby={heading} className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium" id={heading}>
+    <section aria-labelledby={heading} {...stylex.props(styles.section)}>
+      <Heading id={heading} level={2} size="2xs">
         <Trans>Your teams&apos; skills</Trans>
-      </h2>
+      </Heading>
       {data.team.length === 0 ? (
-        <p className="text-muted-foreground text-sm">
+        <Text size="sm" color="muted">
           <Trans>Your teams have no skills of their own yet.</Trans>
-        </p>
+        </Text>
       ) : null}
-      <ItemGroup render={<ul />} spacing="tight">
+      <ItemGroup>
         {data.team.map((skill) => (
-          <li key={`${skill.team.id} ${skill.name}`}>
-            <TeamSkill skill={skill} />
-          </li>
+          <TeamSkill key={`${skill.team.id} ${skill.name}`} skill={skill} />
         ))}
       </ItemGroup>
     </section>
   );
 };
 
-/** The skills page: the person's own, their shares, the company's and their teams', and for admins what waits. */
 /** A skill proposed to the person, with what it rests on and the exact text adding it saves. */
 const ProposedSkill = ({
   proposal,
@@ -816,34 +871,48 @@ const ProposedSkill = ({
   const { version } = basis;
   const count = basis.runs.length;
   const [latest] = basis.runs;
-  const ended = latest === undefined ? "" : formatDateTime(latest.endedAt);
+  const ended = latest === undefined ? "" : formatDate(latest.endedAt);
   return (
-    <Card render={<li />} size="sm">
-      <CardContent>
-        <span className="text-sm font-medium">{name}</span>
-        <span className="text-muted-foreground text-sm">{description}</span>
-        <p className="text-muted-foreground text-xs">
-          {t`${plural(count, {
-            one: `From your last run of ${workflow}, version ${version}, which succeeded on ${ended}.`,
-            other: `From your last # runs of ${workflow}, version ${version}, which all succeeded, the latest on ${ended}.`,
-          })}`}
-        </p>
-        <p className="text-sm whitespace-pre-wrap">{text}</p>
-        <div className="flex gap-2">
-          <Button disabled={busy} onClick={onAdd} size="sm" type="button">
-            <Trans>Add to your skills</Trans>
-          </Button>
-          <Button
-            disabled={busy}
-            onClick={onDismiss}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            <Trans context="a skill proposed to you">Dismiss</Trans>
-          </Button>
+    <Card asChild>
+      <li>
+        <div {...stylex.props(styles.stack)}>
+          <Text size="sm" weight="medium">
+            {name}
+          </Text>
+          <Text size="sm" color="muted">
+            {description}
+          </Text>
+          <Text size="xs" color="muted">
+            {t`${plural(count, {
+              one: `From your last run of ${workflow}, version ${version}, which succeeded on ${ended}.`,
+              other: `From your last # runs of ${workflow}, version ${version}, which all succeeded, the latest on ${ended}.`,
+            })}`}
+          </Text>
+          <Text size="sm">
+            <span {...stylex.props(styles.plain)}>{text}</span>
+          </Text>
+          <div {...stylex.props(styles.row)}>
+            <Button
+              disabled={busy}
+              onClick={onAdd}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {t`Add to your skills`}
+            </Button>
+            <Button
+              disabled={busy}
+              onClick={onDismiss}
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              {t({ message: "Dismiss", context: "a skill proposed to you" })}
+            </Button>
+          </div>
         </div>
-      </CardContent>
+      </li>
     </Card>
   );
 };
@@ -866,7 +935,7 @@ const ProposedSkills = ({ onAdded }: { onAdded: () => void }) => {
   useEffect(() => {
     let left = false;
     const read = async (): Promise<void> => {
-      const answer = await callCore(
+      const answer = await readSkills(
         core,
         async (skills) => await skills.proposals()
       );
@@ -897,7 +966,7 @@ const ProposedSkills = ({ onAdded }: { onAdded: () => void }) => {
         onAdded();
       }
       setProposals(
-        await callCore(core, async (skills) => await skills.proposals())
+        await readSkills(core, async (skills) => await skills.proposals())
       );
       setBusy(false);
     })();
@@ -907,18 +976,18 @@ const ProposedSkills = ({ onAdded }: { onAdded: () => void }) => {
     return failed === undefined ? null : <ErrorText>{failed}</ErrorText>;
   }
   return (
-    <section aria-labelledby={heading} className="flex flex-col gap-3">
-      <h2 className="text-sm font-medium" id={heading}>
+    <section aria-labelledby={heading} {...stylex.props(styles.section)}>
+      <Heading id={heading} level={2} size="2xs">
         <Trans>Proposed for you</Trans>
-      </h2>
-      <p className="text-muted-foreground text-sm">
+      </Heading>
+      <Text size="sm" color="muted">
         <Trans>
           Drafted from your own runs of a workflow that keep succeeding. Only
           you see them, and none is used until you add it to your skills.
         </Trans>
-      </p>
+      </Text>
       {failed === undefined ? null : <ErrorText>{failed}</ErrorText>}
-      <ul className="flex flex-col gap-3">
+      <ul {...stylex.props(styles.cards)}>
         {proposals.data.map((proposal) => (
           <ProposedSkill
             busy={busy}
@@ -942,6 +1011,7 @@ const ProposedSkills = ({ onAdded }: { onAdded: () => void }) => {
   );
 };
 
+/** The skills page: the person's own, their shares, the company's and their teams', and for admins what waits. */
 export const SkillsPage = ({
   opportunity,
 }: {
@@ -949,8 +1019,7 @@ export const SkillsPage = ({
   opportunity?: Promise<Loaded<Opportunity | undefined>> | undefined;
 }) => {
   const core = useCore();
-  const { i18n } = useLingui();
-  const editorId = useId();
+  const { i18n, t } = useLingui();
   const ownHeading = useId();
   const companyHeading = useId();
   const requestsHeading = useId();
@@ -969,7 +1038,7 @@ export const SkillsPage = ({
   /** Where focus goes once the page is read again after an action. */
   const focusNext = useRef<HTMLElement | null>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
-  const ownHeadingRef = useRef<HTMLHeadingElement>(null);
+  const ownHeadingRef = useRef<HTMLDivElement>(null);
 
   // Focus returns where the action left the person, once the page holds
   // still again (a disabled control takes no focus).
@@ -988,7 +1057,7 @@ export const SkillsPage = ({
   useEffect(() => {
     let left = false;
     const read = async (): Promise<void> => {
-      const answer = await callCore(
+      const answer = await readSkills(
         core,
         async (skills) => await skills.overview()
       );
@@ -1035,7 +1104,7 @@ export const SkillsPage = ({
       } else {
         after?.();
       }
-      const page = await callCore(
+      const page = await readSkills(
         core,
         async (skills) => await skills.overview()
       );
@@ -1053,7 +1122,7 @@ export const SkillsPage = ({
   const readAgain = () => {
     setBusy(true);
     void (async () => {
-      show(await callCore(core, async (skills) => await skills.overview()));
+      show(await readSkills(core, async (skills) => await skills.overview()));
       setBusy(false);
     })();
   };
@@ -1064,7 +1133,7 @@ export const SkillsPage = ({
     setReading(name);
     setFailed(undefined);
     void (async () => {
-      const answer = await callCore(
+      const answer = await readSkills(
         core,
         async (skills) => await skills.read("own", name)
       );
@@ -1091,26 +1160,21 @@ export const SkillsPage = ({
   const editorBusy = busy || reading !== null;
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="pb-chat mx-auto flex w-full max-w-5xl flex-col gap-8 px-6 pt-8 md:px-12">
-        <PageHeader>
-          <PageHeaderTitle>
-            <Trans context="the Brain's skills page">Skills</Trans>
-          </PageHeaderTitle>
-          <PageHeaderDescription>
+    // A page of the brain: the title in the serif, in the library's page column.
+    <div {...stylex.props(styles.pane)}>
+      <Container size="lg">
+        <PageHeader
+          description={
             <Trans>
-              How things are done here. Your own skills are used in your own
-              chats alone. Sharing one with the company or one of your teams
-              waits for an admin, and from then on the agents of everyone in it
-              use it. A skill is guidance: it never grants access.
+              How things are done here: guidance that never grants access.
             </Trans>
-          </PageHeaderDescription>
-        </PageHeader>
+          }
+          title={<Trans context="the Brain's skills page">Skills</Trans>}
+        />
         {failed === undefined ? null : <ErrorText>{failed}</ErrorText>}
         <Unread busy={busy} onRetry={readAgain} reason={unread} />
 
         <form
-          className="flex flex-col gap-3"
           onSubmit={(event) => {
             event.preventDefault();
             act(
@@ -1121,18 +1185,16 @@ export const SkillsPage = ({
               }
             );
           }}
+          {...stylex.props(styles.section)}
         >
-          <Field>
-            <FieldLabel htmlFor={editorId}>
+          <Field disabled={editorBusy}>
+            <FieldLabel>
               <Trans>Write a skill</Trans>
             </FieldLabel>
             <Textarea
-              disabled={editorBusy}
-              id={editorId}
+              mono
+              onValueChange={setText}
               ref={editorRef}
-              onChange={(event) => {
-                setText(event.target.value);
-              }}
               rows={12}
               value={text}
             />
@@ -1145,62 +1207,63 @@ export const SkillsPage = ({
             </FieldDescription>
           </Field>
           <Button
-            className="self-start"
             disabled={editorBusy || text.trim() === ""}
+            style={styles.start}
+            size="sm"
             type="submit"
-            variant="highlight"
+            variant="default"
           >
-            <Trans>Save</Trans>
+            {t`Save`}
           </Button>
         </form>
 
-        <section aria-labelledby={ownHeading} className="flex flex-col gap-3">
-          <h2
-            className="text-sm font-medium"
-            id={ownHeading}
+        <section aria-labelledby={ownHeading} {...stylex.props(styles.section)}>
+          <div
             ref={ownHeadingRef}
             tabIndex={-1}
+            {...stylex.props(styles.landing)}
           >
-            <Trans>Your skills</Trans>
-          </h2>
+            <Heading id={ownHeading} level={2} size="2xs">
+              <Trans>Your skills</Trans>
+            </Heading>
+          </div>
           {data !== undefined && data.own.length === 0 ? (
-            <p className="text-muted-foreground text-sm">
+            <Text size="sm" color="muted">
               <Trans>You have no skills of your own yet.</Trans>
-            </p>
+            </Text>
           ) : null}
-          <ItemGroup render={<ul />} spacing="tight">
+          <ItemGroup>
             {data?.own.map((skill) => (
-              <li key={skill.name}>
-                <OwnSkill
-                  busy={busy}
-                  reading={reading !== null}
-                  onEdit={() => {
-                    edit(skill.name);
-                  }}
-                  onRemove={() => {
-                    act(
-                      async (skills) => {
-                        await skills.remove(skill.name);
-                      },
-                      () => {
-                        focusNext.current = ownHeadingRef.current;
-                      }
-                    );
-                  }}
-                  onShare={(audience) => {
-                    act(
-                      async (skills) =>
-                        await skills.share(skill.name, skill.version, audience)
-                    );
-                  }}
-                  skill={skill}
-                  teams={teams}
-                  teamsWaiting={waitingForTeams(waiting, skill.name, teams)}
-                  waiting={waiting.get(
-                    waitingKey(skill.name, { kind: "company" })
-                  )}
-                />
-              </li>
+              <OwnSkill
+                busy={busy}
+                key={skill.name}
+                reading={reading !== null}
+                onEdit={() => {
+                  edit(skill.name);
+                }}
+                onRemove={() => {
+                  act(
+                    async (skills) => {
+                      await skills.remove(skill.name);
+                    },
+                    () => {
+                      focusNext.current = ownHeadingRef.current;
+                    }
+                  );
+                }}
+                onShare={(audience) => {
+                  act(
+                    async (skills) =>
+                      await skills.share(skill.name, skill.version, audience)
+                  );
+                }}
+                skill={skill}
+                teams={teams}
+                teamsWaiting={waitingForTeams(waiting, skill.name, teams)}
+                waiting={waiting.get(
+                  waitingKey(skill.name, { kind: "company" })
+                )}
+              />
             ))}
           </ItemGroup>
         </section>
@@ -1209,7 +1272,10 @@ export const SkillsPage = ({
           onAdded={() => {
             void (async () => {
               show(
-                await callCore(core, async (skills) => await skills.overview())
+                await readSkills(
+                  core,
+                  async (skills) => await skills.overview()
+                )
               );
             })();
           }}
@@ -1220,17 +1286,17 @@ export const SkillsPage = ({
         {data?.requests === null || data?.requests === undefined ? null : (
           <section
             aria-labelledby={requestsHeading}
-            className="flex flex-col gap-3"
+            {...stylex.props(styles.section)}
           >
-            <h2 className="text-sm font-medium" id={requestsHeading}>
+            <Heading id={requestsHeading} level={2} size="2xs">
               <Trans>Shares waiting for you</Trans>
-            </h2>
+            </Heading>
             {data.requests.length === 0 ? (
-              <p className="text-muted-foreground text-sm">
+              <Text size="sm" color="muted">
                 <Trans>Nobody is waiting for you to decide a share.</Trans>
-              </p>
+              </Text>
             ) : (
-              <ul className="flex flex-col gap-3">
+              <ul {...stylex.props(styles.cards)}>
                 {data.requests.map((request) => (
                   <ShareRequest
                     busy={busy}
@@ -1251,30 +1317,29 @@ export const SkillsPage = ({
 
         <section
           aria-labelledby={companyHeading}
-          className="flex flex-col gap-3"
+          {...stylex.props(styles.section)}
         >
-          <h2 className="text-sm font-medium" id={companyHeading}>
+          <Heading id={companyHeading} level={2} size="2xs">
             <Trans>The company&apos;s skills</Trans>
-          </h2>
+          </Heading>
           {data !== undefined && data.company.length === 0 ? (
-            <p className="text-muted-foreground text-sm">
+            <Text size="sm" color="muted">
               <Trans>The company has no skills of its own yet.</Trans>
-            </p>
+            </Text>
           ) : null}
-          <ItemGroup render={<ul />} spacing="tight">
+          <ItemGroup>
             {data?.company.map((skill) => (
-              <li key={skill.name}>
-                <CompanySkillItem
-                  admin={data.requests !== null}
-                  busy={busy}
-                  onRetire={() => {
-                    act(async (skills) => {
-                      await skills.retire(skill.name, "company");
-                    });
-                  }}
-                  skill={skill}
-                />
-              </li>
+              <CompanySkillItem
+                admin={data.requests !== null}
+                busy={busy}
+                key={skill.name}
+                onRetire={() => {
+                  act(async (skills) => {
+                    await skills.retire(skill.name, "company");
+                  });
+                }}
+                skill={skill}
+              />
             ))}
           </ItemGroup>
         </section>
@@ -1289,7 +1354,7 @@ export const SkillsPage = ({
             });
           }}
         />
-      </div>
+      </Container>
     </div>
   );
 };

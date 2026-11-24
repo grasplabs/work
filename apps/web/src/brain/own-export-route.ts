@@ -9,7 +9,7 @@ import { CoreTimeoutError, deadline, timeoutMs } from "../core.ts";
 // session. Core answers only the signed-in person, about their own.
 
 /** Where core serves a person's own export. */
-export const ownExportPath = "/api/brain/own-export";
+const ownExportPath = "/api/brain/own-export";
 
 const ownExportSchema = z.object({
   id: z.uuid(),

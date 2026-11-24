@@ -1,6 +1,19 @@
-import { cn } from "@grasp-os/app-kit/lib/utils";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { ArrowUpRightIcon, Icon } from "@grasp-os/ui/lib/icons";
+import { focusRing } from "@grasp-os/ui/lib/styles";
+import {
+  colors,
+  duration,
+  font,
+  media,
+  radius,
+  shadow,
+  size as sizes,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
+import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
 import { useLingui } from "@lingui/react/macro";
-import { ArrowUpRightIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
 import {
   useEffect,
   useImperativeHandle,
@@ -47,7 +60,7 @@ import { RegionMarks } from "./region-marks.tsx";
 export type { AtlasControls, AtlasView } from "./atlas-engine.ts";
 
 /** Space kept clear over the canvas, in pixels. */
-export interface AtlasClear {
+interface AtlasClear {
   /** Along its top, and as much along its sides. */
   top: number;
   /** Along its bottom, for the chat's bar. */
@@ -186,30 +199,220 @@ const spottedOf = (spot: "known" | "waiting" | "open" | undefined): number => {
   return spot === "open" ? OPEN_MARK : -1;
 };
 
+/** Hidden until the drawing says it shows (`data-shown`, set each frame by the engine). */
+const hidden = ":is([data-shown=false])";
+
+/** A label over the canvas: raised, with a hairline edge and a low lift. */
+const labelEdge = {
+  borderWidth: sizes.hairline,
+  borderStyle: "solid",
+  borderColor: colors.border,
+  backgroundColor: colors.card,
+  boxShadow: shadow.sm,
+} as const;
+
+const styles = stylex.create({
+  // The canvas's holder: a faint ground under the dots.
+  atlas: {
+    position: "relative",
+    flex: 1,
+    minHeight: 0,
+    overflow: "hidden",
+    backgroundColor: `color-mix(in oklch, ${colors.muted} 30%, transparent)`,
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+  },
+  canvas: {
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    touchAction: "none",
+  },
+  // Where the drawing places a name, by its transform. Hidden, a name can't be pointed at or
+  // reached with Tab: it goes invisible once it has faded.
+  placed: {
+    position: "absolute",
+    insetBlockStart: 0,
+    insetInlineStart: 0,
+    pointerEvents: "none",
+    opacity: { default: 1, [hidden]: 0 },
+    visibility: { default: null, [hidden]: "hidden" },
+    transitionProperty: {
+      default: "opacity, visibility",
+      [media.reducedMotion]: "none",
+    },
+    transitionDuration: duration.ui,
+    transitionTimingFunction: duration.ease,
+  },
+  up: { zIndex: 10 },
+  // Words cut at their line, the cut marked with an ellipsis.
+  clamp: {
+    display: "-webkit-box",
+    WebkitBoxOrient: "vertical",
+    overflow: "hidden",
+  },
+  clampOne: { WebkitLineClamp: 1 },
+  clampTwo: { WebkitLineClamp: 2 },
+  clampThree: { WebkitLineClamp: 3 },
+  balance: { textWrap: "balance" },
+  // A region's name on the brain, its open questions counted beside it.
+  region: {
+    ...labelEdge,
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    paddingBlock: space["1"],
+    paddingInline: `calc(2.5 * ${space["1"]})`,
+    borderRadius: radius.base,
+    color: "inherit",
+    fontFamily: "inherit",
+    fontSize: "inherit",
+    fontWeight: font.weightMedium,
+    whiteSpace: "nowrap",
+    pointerEvents: "auto",
+    cursor: "pointer",
+    translate: "-50% -50%",
+    transitionProperty: "box-shadow",
+    transitionDuration: duration.hover,
+    transitionTimingFunction: duration.ease,
+  },
+  lifted: { boxShadow: shadow.md },
+  // What the lifted region holds, on a card under its name.
+  marks: {
+    ...labelEdge,
+    position: "absolute",
+    insetBlockStart: space["5"],
+    insetInlineStart: 0,
+    paddingBlock: space["2"],
+    paddingInline: `calc(2.5 * ${space["1"]})`,
+    borderRadius: radius.sm,
+    boxShadow: shadow.md,
+    whiteSpace: "nowrap",
+    translate: "-50% 0",
+  },
+  // A folder's name over its neurons, growing upwards.
+  group: {
+    margin: 0,
+    maxWidth: "var(--wide)",
+    color: colors.mutedForeground,
+    fontSize: font.textXs,
+    lineHeight: 1.25,
+    fontWeight: font.weightMedium,
+    pointerEvents: "auto",
+    translate: "0 -100%",
+  },
+  groupLink: {
+    padding: 0,
+    borderWidth: 0,
+    borderRadius: radius.sm,
+    backgroundColor: "transparent",
+    color: {
+      default: "inherit",
+      [media.hover]: { default: null, ":hover": colors.foreground },
+    },
+    fontFamily: "inherit",
+    fontSize: "inherit",
+    fontWeight: "inherit",
+    lineHeight: "inherit",
+    textAlign: "start",
+    textDecorationLine: {
+      default: "none",
+      [media.hover]: { default: null, ":hover": "underline" },
+    },
+    cursor: "pointer",
+  },
+  // A neuron's name under it.
+  neuron: {
+    ...labelEdge,
+    maxWidth: "var(--cell)",
+    paddingBlock: 2,
+    paddingInline: space["1"],
+    borderRadius: radius.sm,
+    color: colors.foreground,
+    fontFamily: "inherit",
+    fontSize: "inherit",
+    fontWeight: font.weightMedium,
+    lineHeight: 1.25,
+    textAlign: "center",
+    pointerEvents: "auto",
+    cursor: "pointer",
+    translate: "-50% 0",
+  },
+  small: { fontSize: font.textXs },
+  // An open question says what it asks in full, quieter than the notes.
+  question: { maxWidth: 224, fontSize: font.textXs },
+  // A neuron's name as it stands: in hand, an open question, a note still waiting, or a known one.
+  chosen: {
+    borderColor: colors.foreground,
+    backgroundColor: colors.foreground,
+    color: colors.background,
+  },
+  open: { color: colors.warning },
+  waiting: { color: colors.mutedForeground, fontWeight: font.weightNormal },
+  pointed: {
+    borderColor: `color-mix(in oklch, ${colors.foreground} 40%, transparent)`,
+    boxShadow: shadow.md,
+  },
+  // A way out, pinned along the top.
+  exit: {
+    ...labelEdge,
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    maxWidth: "var(--pill)",
+    paddingBlock: space["1"],
+    paddingInlineStart: space["2"],
+    paddingInlineEnd: space["3"],
+    borderRadius: radius.full,
+    backgroundColor: {
+      default: colors.card,
+      [media.hover]: { default: null, ":hover": colors.muted },
+    },
+    color: "inherit",
+    fontFamily: "inherit",
+    fontSize: "inherit",
+    fontWeight: font.weightMedium,
+    whiteSpace: "nowrap",
+    pointerEvents: "auto",
+    cursor: "pointer",
+    translate: "-50% -50%",
+    transitionProperty: "background-color",
+    transitionDuration: duration.hover,
+    transitionTimingFunction: duration.ease,
+    [iconVars.size]: `calc(3.5 * ${space["1"]})`,
+  },
+  // What is lit also lives there: an answer drew on that part.
+  litExit: { borderColor: colors.foreground },
+  quiet: { color: colors.mutedForeground, display: "flex" },
+  exitName: { overflow: "hidden", textOverflow: "ellipsis" },
+  exitCount: {
+    color: colors.mutedForeground,
+    fontWeight: font.weightNormal,
+    fontVariantNumeric: "tabular-nums",
+  },
+});
+
 /** Balanced where a name has the lines to end on; where it may be cut short it fills its lines instead, so as much of it as fits is read. */
-const linesClass = (lines: number | undefined): string => {
+const linesOf = (lines: number | undefined) => {
   if (lines === 1) {
-    return "line-clamp-1";
+    return [styles.clamp, styles.clampOne];
   }
-  return lines === 2 ? "line-clamp-2" : "line-clamp-3 text-balance";
+  return lines === 2
+    ? [styles.clamp, styles.clampTwo]
+    : [styles.clamp, styles.clampThree, styles.balance];
 };
 
 /** A neuron's name as it stands: in hand, an open question, a note still waiting, or a known one. */
-const neuronClass = (chosen: boolean, state: Neuron["state"]): string => {
+const neuronLook = (chosen: boolean, state: Neuron["state"]) => {
   if (chosen) {
-    return "border-foreground bg-foreground font-medium text-background";
+    return styles.chosen;
   }
   if (state === "open") {
-    return "bg-card font-medium text-status-attention";
+    return styles.open;
   }
-  return state === "waiting"
-    ? "bg-card text-muted-foreground"
-    : "bg-card font-medium";
+  return state === "waiting" ? styles.waiting : null;
 };
-
-// Hidden, a name can't be pointed at or reached with Tab: it goes invisible once it has faded.
-const PLACE =
-  "pointer-events-none absolute top-0 left-0 fade-shown data-[shown=false]:invisible data-[shown=false]:opacity-0";
 
 /** The brain's dots, made once and kept: every atlas on screen draws from them. */
 let cloudOnce: AtlasDots | null = null;
@@ -504,16 +707,13 @@ const RegionNames = ({
       const up = lifted === region.id;
       return (
         <div
-          className={cn(PLACE, up && "z-10")}
+          {...stylex.props(styles.placed, up && styles.up)}
           data-shown="false"
           key={region.id}
           ref={keep(`region:${region.id}`)}
         >
           <button
-            className={cn(
-              "bg-card focus-visible:ring-ring/50 pointer-events-auto flex -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 rounded-lg border px-2.5 py-1 font-medium whitespace-nowrap shadow-xs transition-shadow outline-none focus-visible:ring-3",
-              up && "shadow-md"
-            )}
+            {...stylex.props(styles.region, up && styles.lifted, focusRing)}
             onBlur={() => {
               onName({});
             }}
@@ -533,16 +733,15 @@ const RegionNames = ({
           >
             {region.name}
             {region.open.length > 0 ? (
-              <span className="bg-status-attention text-primary-foreground rounded-full px-1.5 text-xs tabular-nums">
+              <Badge size="sm" variant="warning">
                 {region.open.length}
-              </span>
+              </Badge>
             ) : null}
           </button>
           {up ? (
-            <RegionMarks
-              className="bg-popover absolute top-5 left-0 -translate-x-1/2 rounded-md border px-2.5 py-2 whitespace-nowrap shadow-md"
-              region={region}
-            />
+            <div {...stylex.props(styles.marks)}>
+              <RegionMarks region={region} />
+            </div>
           ) : null}
         </div>
       );
@@ -565,18 +764,25 @@ const GroupNames = ({
     const own = group.noteId;
     return (
       <div
-        className={PLACE}
+        {...stylex.props(styles.placed)}
         data-shown="false"
         key={`${map.region}:group:${group.label}`}
         ref={keep(`group:${index}`)}
       >
         {/* Over its neurons, growing upwards when its name takes two lines in a narrow group. */}
-        <p className="text-muted-foreground pointer-events-auto line-clamp-2 max-w-(--wide) -translate-y-full text-xs leading-tight font-medium text-balance">
+        <p
+          {...stylex.props(
+            styles.group,
+            styles.clamp,
+            styles.clampTwo,
+            styles.balance
+          )}
+        >
           {own === undefined ? (
             group.label
           ) : (
             <button
-              className="hover:text-foreground focus-visible:ring-ring/50 rounded-sm text-left outline-none hover:underline focus-visible:ring-3"
+              {...stylex.props(styles.groupLink, focusRing)}
               onClick={() => {
                 onOpen(own);
               }}
@@ -607,7 +813,7 @@ const NeuronNames = ({
   onChoose: (index: number) => void;
 }) => {
   // No name takes more lines than its cell is high for; a full region names its notes a size smaller.
-  const lines = linesClass(map.cell.lines);
+  const lines = linesOf(map.cell.lines);
   return map.neurons.map((neuron, index) => {
     const question = neuron.kind === "gap";
     // A question sits beside what it is about, quieter than the notes.
@@ -615,21 +821,24 @@ const NeuronNames = ({
     const up = chosen === index || hovered === index;
     return (
       <div
-        className={cn(PLACE, up && "z-10")}
+        {...stylex.props(styles.placed, up && styles.up)}
         data-quiet={quiet ? "true" : "false"}
         data-shown="false"
         key={`${map.region}:${neuron.id}`}
         ref={keep(`neuron:${index}`)}
       >
         <button
-          className={cn(
-            "focus-visible:ring-ring/50 pointer-events-auto max-w-(--cell) -translate-x-1/2 rounded-md border px-1 py-0.5 text-center leading-tight shadow-xs outline-none focus-visible:ring-3",
+          {...stylex.props(
+            styles.neuron,
             // An open question says what it asks in full; a note's name keeps to the lines its cell has.
-            question ? "line-clamp-3 text-balance" : lines,
-            map.cell.small && "text-xs",
-            question && "max-w-56 text-xs",
-            neuronClass(chosen === index, neuron.state),
-            up && chosen !== index && "border-foreground/40 shadow-md"
+            question
+              ? [styles.clamp, styles.clampThree, styles.balance]
+              : lines,
+            map.cell.small && styles.small,
+            question && styles.question,
+            neuronLook(chosen === index, neuron.state),
+            up && chosen !== index && styles.pointed,
+            focusRing
           )}
           onClick={() => {
             onChoose(index);
@@ -672,17 +881,16 @@ const WayOuts = ({
     const to = atlas.regions.find((each) => each.id === exit.region);
     return (
       <div
-        className={PLACE}
+        {...stylex.props(styles.placed)}
         data-shown="false"
         key={`${region}:exit:${exit.region}`}
         ref={keep(`exit:${index}`)}
       >
         <button
-          className={cn(
-            "bg-card hover:bg-muted focus-visible:ring-ring/50 pointer-events-auto flex max-w-(--pill) -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 rounded-full border py-1 pr-3 pl-2 font-medium whitespace-nowrap shadow-xs transition-colors outline-none focus-visible:ring-3",
-            // What is lit also lives there: an answer drew on that part.
-            litRegions.has(REGION_IDS.indexOf(exit.region)) &&
-              "border-foreground"
+          {...stylex.props(
+            styles.exit,
+            litRegions.has(REGION_IDS.indexOf(exit.region)) && styles.litExit,
+            focusRing
           )}
           onBlur={() => {
             onName({});
@@ -701,11 +909,13 @@ const WayOuts = ({
           }}
           type="button"
         >
-          <ArrowUpRightIcon className="text-muted-foreground size-3.5 flex-none" />
-          <span className="truncate">{to?.name ?? exit.region}</span>
-          <span className="text-muted-foreground font-normal tabular-nums">
-            {exit.count}
+          <span {...stylex.props(styles.quiet)}>
+            <Icon icon={ArrowUpRightIcon} />
           </span>
+          <span {...stylex.props(styles.exitName)}>
+            {to?.name ?? exit.region}
+          </span>
+          <span {...stylex.props(styles.exitCount)}>{exit.count}</span>
         </button>
       </div>
     );
@@ -941,14 +1151,11 @@ export const BrainAtlas = ({
   };
 
   return (
-    <div
-      className="bg-muted/30 relative min-h-0 flex-1 overflow-hidden text-sm"
-      ref={box}
-    >
+    <div {...stylex.props(styles.atlas)} ref={box}>
       <canvas
         aria-hidden="true"
-        className="absolute inset-0 size-full touch-none"
         ref={canvas}
+        {...stylex.props(styles.canvas)}
       />
       {map ? (
         <>
