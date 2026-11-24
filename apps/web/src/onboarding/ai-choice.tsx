@@ -205,6 +205,8 @@ export const AiChoice = ({
       ) : null}
       <ConnectApiKey
         // Two and two: the four providers stand as a square, not three and one.
+        // On the page, no card: the step's own title and line already say what the card's would.
+        bare
         columns={2}
         connected={connected}
         labels={{
