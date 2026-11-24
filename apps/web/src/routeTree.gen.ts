@@ -17,6 +17,7 @@ import { Route as KitRouteImport } from './routes/kit'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as SignInRouteImport } from './routes/sign-in'
 import { Route as StaffRouteImport } from './routes/staff'
+import { Route as WaitingRouteImport } from './routes/waiting'
 import { Route as ShellIndexRouteImport } from './routes/_shell.index'
 import { Route as ShellSplatRouteImport } from './routes/_shell.$'
 import { Route as ShellBrainRouteImport } from './routes/_shell.brain'
@@ -24,7 +25,6 @@ import { Route as ShellConnectMicrosoftRouteImport } from './routes/_shell.conne
 import { Route as ShellInboxRouteImport } from './routes/_shell.inbox'
 import { Route as ShellSettingsRouteImport } from './routes/_shell.settings'
 import { Route as DecisionsDecisionRouteImport } from './routes/decisions.$decision'
-import { Route as KitDamskoRouteImport } from './routes/kit_.damsko'
 import { Route as ShellAgentsIndexRouteImport } from './routes/_shell.agents.index'
 import { Route as ShellAgentsAgentRouteImport } from './routes/_shell.agents.$agent'
 import { Route as ShellAgentsNewRouteImport } from './routes/_shell.agents.new'
@@ -108,6 +108,11 @@ const StaffRoute = StaffRouteImport.update({
   path: '/staff',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WaitingRoute = WaitingRouteImport.update({
+  id: '/waiting',
+  path: '/waiting',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ShellIndexRoute = ShellIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -141,11 +146,6 @@ const ShellSettingsRoute = ShellSettingsRouteImport.update({
 const DecisionsDecisionRoute = DecisionsDecisionRouteImport.update({
   id: '/decisions/$decision',
   path: '/decisions/$decision',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const KitDamskoRoute = KitDamskoRouteImport.update({
-  id: '/kit_/damsko',
-  path: '/kit/damsko',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ShellAgentsIndexRoute = ShellAgentsIndexRouteImport.update({
@@ -377,13 +377,13 @@ export interface FileRoutesByFullPath {
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
   '/staff': typeof StaffRoute
+  '/waiting': typeof WaitingRoute
   '/$': typeof ShellSplatRoute
   '/brain': typeof ShellBrainRouteWithChildren
   '/connect-microsoft': typeof ShellConnectMicrosoftRoute
   '/inbox': typeof ShellInboxRoute
   '/settings': typeof ShellSettingsRouteWithChildren
   '/decisions/$decision': typeof DecisionsDecisionRoute
-  '/kit/damsko': typeof KitDamskoRoute
   '/agents/$agent': typeof ShellAgentsAgentRoute
   '/agents/new': typeof ShellAgentsNewRoute
   '/apps/$app': typeof ShellAppsAppRouteWithChildren
@@ -436,11 +436,11 @@ export interface FileRoutesByTo {
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
   '/staff': typeof StaffRoute
+  '/waiting': typeof WaitingRoute
   '/$': typeof ShellSplatRoute
   '/connect-microsoft': typeof ShellConnectMicrosoftRoute
   '/inbox': typeof ShellInboxRoute
   '/decisions/$decision': typeof DecisionsDecisionRoute
-  '/kit/damsko': typeof KitDamskoRoute
   '/': typeof ShellIndexRoute
   '/agents/$agent': typeof ShellAgentsAgentRoute
   '/agents/new': typeof ShellAgentsNewRoute
@@ -496,13 +496,13 @@ export interface FileRoutesById {
   '/setup': typeof SetupRoute
   '/sign-in': typeof SignInRoute
   '/staff': typeof StaffRoute
+  '/waiting': typeof WaitingRoute
   '/_shell/$': typeof ShellSplatRoute
   '/_shell/brain': typeof ShellBrainRouteWithChildren
   '/_shell/connect-microsoft': typeof ShellConnectMicrosoftRoute
   '/_shell/inbox': typeof ShellInboxRoute
   '/_shell/settings': typeof ShellSettingsRouteWithChildren
   '/decisions/$decision': typeof DecisionsDecisionRoute
-  '/kit_/damsko': typeof KitDamskoRoute
   '/_shell/': typeof ShellIndexRoute
   '/_shell/agents/$agent': typeof ShellAgentsAgentRoute
   '/_shell/agents/new': typeof ShellAgentsNewRoute
@@ -559,13 +559,13 @@ export interface FileRouteTypes {
     | '/setup'
     | '/sign-in'
     | '/staff'
+    | '/waiting'
     | '/$'
     | '/brain'
     | '/connect-microsoft'
     | '/inbox'
     | '/settings'
     | '/decisions/$decision'
-    | '/kit/damsko'
     | '/agents/$agent'
     | '/agents/new'
     | '/apps/$app'
@@ -618,11 +618,11 @@ export interface FileRouteTypes {
     | '/setup'
     | '/sign-in'
     | '/staff'
+    | '/waiting'
     | '/$'
     | '/connect-microsoft'
     | '/inbox'
     | '/decisions/$decision'
-    | '/kit/damsko'
     | '/'
     | '/agents/$agent'
     | '/agents/new'
@@ -677,13 +677,13 @@ export interface FileRouteTypes {
     | '/setup'
     | '/sign-in'
     | '/staff'
+    | '/waiting'
     | '/_shell/$'
     | '/_shell/brain'
     | '/_shell/connect-microsoft'
     | '/_shell/inbox'
     | '/_shell/settings'
     | '/decisions/$decision'
-    | '/kit_/damsko'
     | '/_shell/'
     | '/_shell/agents/$agent'
     | '/_shell/agents/new'
@@ -739,8 +739,8 @@ export interface RootRouteChildren {
   SetupRoute: typeof SetupRoute
   SignInRoute: typeof SignInRoute
   StaffRoute: typeof StaffRoute
+  WaitingRoute: typeof WaitingRoute
   DecisionsDecisionRoute: typeof DecisionsDecisionRoute
-  KitDamskoRoute: typeof KitDamskoRoute
   AppsAppDraftRoute: typeof AppsAppDraftRouteWithChildren
   AppsAppFullRoute: typeof AppsAppFullRouteWithChildren
   KitComponentsNameRoute: typeof KitComponentsNameRoute
@@ -805,6 +805,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StaffRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/waiting': {
+      id: '/waiting'
+      path: '/waiting'
+      fullPath: '/waiting'
+      preLoaderRoute: typeof WaitingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_shell/': {
       id: '/_shell/'
       path: '/'
@@ -852,13 +859,6 @@ declare module '@tanstack/react-router' {
       path: '/decisions/$decision'
       fullPath: '/decisions/$decision'
       preLoaderRoute: typeof DecisionsDecisionRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/kit_/damsko': {
-      id: '/kit_/damsko'
-      path: '/kit/damsko'
-      fullPath: '/kit/damsko'
-      preLoaderRoute: typeof KitDamskoRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_shell/agents/': {
@@ -1322,8 +1322,8 @@ const rootRouteChildren: RootRouteChildren = {
   SetupRoute: SetupRoute,
   SignInRoute: SignInRoute,
   StaffRoute: StaffRoute,
+  WaitingRoute: WaitingRoute,
   DecisionsDecisionRoute: DecisionsDecisionRoute,
-  KitDamskoRoute: KitDamskoRoute,
   AppsAppDraftRoute: AppsAppDraftRouteWithChildren,
   AppsAppFullRoute: AppsAppFullRouteWithChildren,
   KitComponentsNameRoute: KitComponentsNameRoute,

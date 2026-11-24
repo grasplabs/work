@@ -3,7 +3,6 @@
 // own turn its scroll anchor, so a new question settles near the top and the reply streams in under
 // it; an Empty before the first turn; and the PromptInput under the thread. It composes and
 // owns no scrolling: that is MessageScroller's.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Chat>
 //     <ChatMessages aria-label="Conversation with the assistant" aria-busy={streaming}>

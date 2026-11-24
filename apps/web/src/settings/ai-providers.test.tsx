@@ -680,16 +680,16 @@ describe("Settings › AI providers", () => {
       label: aiProviders.openai.label,
       whereItRuns: "OpenAI, European Union",
     } as const;
-    const elevenLabs = {
-      id: "elevenlabs",
-      label: aiProviders.elevenlabs.label,
-      whereItRuns: "ElevenLabs, European Union",
+    const kugelAudio = {
+      id: "kugelaudio",
+      label: aiProviders.kugelaudio.label,
+      whereItRuns: "KugelAudio, European Union",
     } as const;
     const { api } = fakeAiProviders({
       connected: [{ provider: "mistral" }],
       platform: [
         { feature: "transcription", provider: openai },
-        { feature: "speech", provider: elevenLabs },
+        { feature: "speech", provider: kugelAudio },
       ],
     });
     await shown(api);
@@ -702,7 +702,7 @@ describe("Settings › AI providers", () => {
       "Grasp transcribes interviews with OpenAI, European Union, using Grasp's own key."
     );
     expect(text()).toContain(
-      "Grasp reads the interview's questions aloud with ElevenLabs, European Union, using Grasp's own key."
+      "Grasp reads the interview's questions aloud with KugelAudio, European Union, using Grasp's own key."
     );
     expect(section?.querySelectorAll("input, select, button")).toHaveLength(0);
     expect(section?.textContent).toContain("Grasp's own provider keys");

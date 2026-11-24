@@ -284,6 +284,7 @@ export const makeAgent = async (
     state: "on",
     ownerId: null,
     offeredAt: null,
+    madeBy: identity.userId,
     changedBy: identity.userId,
     changedAt: now.toISOString(),
   };

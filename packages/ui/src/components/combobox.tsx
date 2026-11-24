@@ -1,10 +1,8 @@
-// Combobox: type to find one value in a list, from shadcn's (registry/bases/base/ui/combobox.tsx),
-// converted from Tailwind to StyleX and rebuilt on UI SDK's Combobox: closed, it is an Input (the
-// same fill, hairline, heights and corner) with a chevron at the end; open, it is the list popup
-// Select shares, and the letters that matched are drawn in the text colour. An item can carry
-// `media` (an avatar, a logo) and a `description` line under its words, as a person does; the
+// Combobox: type to find one value in a list, in StyleX on UI SDK's Combobox: closed, it is an
+// Input (the same fill, hairline, heights and corner) with a chevron at the end; open, it is the
+// list popup Select shares, and the letters that matched are drawn in the text colour. An item can
+// carry `media` (an avatar, a logo) and a `description` line under its words, as a person does; the
 // chosen item's media stands at the field's start, and the field's own `media` while there is none.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Field>
 //     <FieldLabel>Country</FieldLabel>

@@ -70,7 +70,7 @@ export interface LinkProps extends Omit<
 
 const styles = stylex.create({
   link: {
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
     textDecorationLine: "underline",
     textDecorationThickness: size.linkUnderlineWidth,

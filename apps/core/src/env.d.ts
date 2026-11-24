@@ -43,6 +43,14 @@ interface __BaseEnv_Env {
    * onboarding is first kept; unset, it starts with all of it.
    */
   ONBOARDING_START?: unknown;
+  /**
+   * When the deployment was made, where it starts closed
+   * (src/onboarding/gate.ts): an ISO date and time, set by Grasp's admin
+   * for a company staff added with an onboarding, so its gate is closed
+   * before anyone signs in, without staff closing it. Read only while the
+   * gate was never moved; unset, a deployment starts open.
+   */
+  ONBOARDING_CLOSED_FROM?: unknown;
   /** Who core's mail is from (src/mail.ts): JSON, `{name, address}`. */
   MAIL_FROM?: unknown;
   /**

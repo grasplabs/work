@@ -2,7 +2,6 @@
 // on UI SDK's InputGroup. The group draws an input's look (lib/styles' field box) round all its
 // parts, so "https://", the words typed and a Copy button read as one field. A press on an addon's
 // words or icon puts the caret in the input.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <InputGroup>
 //     <InputGroupAddon><InputGroupText>https://</InputGroupText></InputGroupAddon>
@@ -139,15 +138,15 @@ const groupStyles = stylex.create({
   },
   sm: {
     minHeight: sizes.controlSm,
-    borderRadius: `min(${radius.base}, calc(${sizes.controlSm} / 2))`,
+    borderRadius: `min(${radius.xl}, calc(${sizes.controlSm} / 2))`,
   },
   default: {
     minHeight: sizes.controlDefault,
-    borderRadius: `min(${radius.base}, calc(${sizes.controlDefault} / 2))`,
+    borderRadius: `min(${radius.xl}, calc(${sizes.controlDefault} / 2))`,
   },
   lg: {
     minHeight: sizes.controlLg,
-    borderRadius: `min(${radius.base}, calc(${sizes.controlLg} / 2))`,
+    borderRadius: `min(${radius.xl}, calc(${sizes.controlLg} / 2))`,
   },
   // A finger needs 44px: on a touch screen an unseen area makes up the difference, as Input's. A
   // press on it reaches the input through UI SDK's group.
@@ -685,7 +684,7 @@ const clearStyles = stylex.create({
     padding: 0,
     borderWidth: 0,
     // Its corner nests inside the group's, space-1 in.
-    borderRadius: `max(0px, calc(${radius.base} - ${space[1]}))`,
+    borderRadius: `max(0px, calc(${radius.xl} - ${space[1]}))`,
     cornerShape: radius.shape,
     backgroundColor: "transparent",
     color: {

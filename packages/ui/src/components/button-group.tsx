@@ -2,7 +2,6 @@
 // one quiet surface with the system's bevel, and ghost Buttons of one size inside it. A plain
 // `role="group"`, named by `aria-label`: UI SDK has no primitive for it, and it is not a toolbar, so
 // Tab reaches every button.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <ButtonGroup aria-label="Text alignment">
 //     <Button variant="ghost" size="icon" aria-label="Align left"><Icon icon={TextAlignStartIcon} /></Button>
@@ -100,10 +99,10 @@ const styles = stylex.create({
     backgroundColor: colors.control,
     boxShadow: shadow.inputShadow,
     borderRadius: {
-      default: `min(${radius.base}, calc(${size.controlDefault} / 2))`,
-      [sized("xs icon-xs")]: `min(${radius.base}, calc(${size.controlXs} / 2))`,
-      [sized("sm icon-sm")]: `min(${radius.base}, calc(${size.controlSm} / 2))`,
-      [sized("lg icon-lg")]: `min(${radius.base}, calc(${size.controlLg} / 2))`,
+      default: `min(${radius.xl}, calc(${size.controlDefault} / 2))`,
+      [sized("xs icon-xs")]: `min(${radius.xl}, calc(${size.controlXs} / 2))`,
+      [sized("sm icon-sm")]: `min(${radius.xl}, calc(${size.controlSm} / 2))`,
+      [sized("lg icon-lg")]: `min(${radius.xl}, calc(${size.controlLg} / 2))`,
     },
     cornerShape: radius.shape,
     "::after": {

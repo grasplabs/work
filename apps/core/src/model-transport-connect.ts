@@ -90,11 +90,7 @@ const baseUrlOf = (
  */
 const placeholderHeaders = (provider: AiProviderId): ProviderHeaders => {
   const { keyHeader } = aiProviders[provider];
-  const none: ProviderHeaders = {
-    Authorization: null,
-    "x-api-key": null,
-    "xi-api-key": null,
-  };
+  const none: ProviderHeaders = { Authorization: null, "x-api-key": null };
   return keyHeader === "authorization"
     ? { ...none, Authorization: `Bearer ${aiCredentialPlaceholder}` }
     : { ...none, [keyHeader]: aiCredentialPlaceholder };
@@ -436,7 +432,7 @@ const connectFetch =
  * The route to `ref` through connect, when it is `target`'s provider's: at
  * its fixed base URL, or the organization's for an OpenAI-compatible
  * endpoint, for a model whose API core speaks. None for anything else,
- * ElevenLabs's included, which speaks no text API (`connectRequest`).
+ * KugelAudio's included, which speaks no text API (`connectSocket`).
  */
 export const connectRoute = (
   env: ConnectEnv,

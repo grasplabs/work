@@ -4,7 +4,6 @@
 // Calendar's months in a popup. `mode="range"` takes a start and an end, a field for each (two
 // months suit it), and `presets` puts the ranges people choose often in a column beside the months,
 // after the date range pickers of analytics products.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <DatePicker aria-label="Due date" name="due" defaultValue="2026-11-20" />
 //   <DatePicker aria-label="Trip" mode="range" numberOfMonths={2} name="trip" />
@@ -205,7 +204,7 @@ const styles = stylex.create({
   // button, a size below the field's, stands as far from the field's end as from its top and bottom.
   sm: {
     minHeight: { default: size.controlSm, [COARSE]: size.tapTarget },
-    borderRadius: `min(${radius.base}, calc(${size.controlSm} / 2))`,
+    borderRadius: `min(${radius.xl}, calc(${size.controlSm} / 2))`,
     paddingInlineEnd: {
       default: `calc((${size.controlSm} - ${size.controlXs}) / 2)`,
       [COARSE]: `calc((${size.tapTarget} - ${size.controlXs}) / 2)`,
@@ -213,7 +212,7 @@ const styles = stylex.create({
   },
   default: {
     minHeight: { default: size.controlDefault, [COARSE]: size.tapTarget },
-    borderRadius: `min(${radius.base}, calc(${size.controlDefault} / 2))`,
+    borderRadius: `min(${radius.xl}, calc(${size.controlDefault} / 2))`,
     paddingInlineEnd: {
       default: `calc((${size.controlDefault} - ${size.controlSm}) / 2)`,
       [COARSE]: `calc((${size.tapTarget} - ${size.controlSm}) / 2)`,
@@ -221,7 +220,7 @@ const styles = stylex.create({
   },
   lg: {
     minHeight: size.controlLg,
-    borderRadius: `min(${radius.base}, calc(${size.controlLg} / 2))`,
+    borderRadius: `min(${radius.xl}, calc(${size.controlLg} / 2))`,
     paddingInlineEnd: `calc((${size.controlLg} - ${size.controlDefault}) / 2)`,
   },
   // A typed date that is no date, or one that cannot be chosen: Input's destructive edge.
@@ -366,7 +365,7 @@ const styles = stylex.create({
     borderWidth: { default: 0, [FORCED]: 1 },
     borderStyle: "solid",
     borderColor: "transparent",
-    borderRadius: `min(${radius.base}, calc(${size.controlSm} / 2))`,
+    borderRadius: `min(${radius.xl}, calc(${size.controlSm} / 2))`,
     cornerShape: radius.shape,
     backgroundColor: {
       default: "transparent",

@@ -1,6 +1,5 @@
 // Kbd: a key to press, in StyleX. A small soft key with an edge, its sign in muted
 // small type; a shortcut is a KbdGroup of one Kbd per key.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Kbd>Esc</Kbd>
 //   <KbdGroup><Kbd aria-label="Command">⌘</Kbd><Kbd>K</Kbd></KbdGroup>
@@ -40,7 +39,7 @@ const styles = stylex.create({
     height: size.kbdHeight,
     minWidth: size.kbdHeight,
     paddingInline: space.kbdPadding,
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
     fontFamily: font.sans,
     fontSize: font.textXs,

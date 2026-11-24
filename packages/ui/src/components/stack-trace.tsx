@@ -3,7 +3,6 @@
 // monospace block, the product's own frames in ink and the dependencies' muted. The parts:
 // StackTraceHeader the row's trigger, its TraceLine failed,
 // StackTraceError its TraceTitle, and StackTraceActions beside the trigger, not in it.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <StackTrace trace={error.stack} onFilePathClick={(path, line) => openFile(path, line)} />
 //

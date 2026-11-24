@@ -2,7 +2,7 @@
   "name": "@grasp-os/ui",
   "private": true,
   "description": "Damsko, Grasp's design system, installed as source from its registry: StyleX on UI SDK",
-  "license": "SEE LICENSE IN https://github.com/grasplabs/damsko/blob/main/LICENSE",
+  "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "exports": {
     "./components/data-grid": "./src/components/data-grid/index.ts",

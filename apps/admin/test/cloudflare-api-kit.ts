@@ -155,6 +155,8 @@ export interface CoreState {
         clocksDown?: readonly ("core" | "connect")[];
         /** As a core from before connect's version: neither in its probe nor asked for. */
         noConnectVersion?: boolean;
+        /** As a core from before a company could start closed: it says nothing of it. */
+        beforeStartingClosed?: boolean;
       };
   /**
    * What its core answers the admin's signed onboarding summary request

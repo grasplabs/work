@@ -5,7 +5,7 @@ import {
 import type { CatalogLogo, CatalogLogoType } from "@grasp-os/shared/connect";
 import { errorFields, log } from "@grasp-os/shared/log";
 
-import { listedToolkits } from "./catalog.ts";
+import { lastListedToolkits } from "./catalog.ts";
 import { ComposioError, composioKey, readCappedBytes } from "./composio.ts";
 
 // Catalog entries' logos. The Integrations page shows each toolkit's logo
@@ -47,15 +47,14 @@ interface CachedLogo {
   logo: CatalogLogo | null;
 }
 
-// Per isolate, by the logo's address (no key goes with it). Loads under way
-// are shared, as the catalog's are (src/catalog.ts).
+// Per isolate, by the logo's address (no key goes with it). A load under
+// way is never kept for another request, as the catalog's isn't
+// (src/catalog.ts).
 const logos = new Map<string, CachedLogo>();
-const loading = new Map<string, Promise<CatalogLogo | null>>();
 
 /** Forgets every logo kept, so the next is fetched afresh. */
 export const forgetCatalogLogos = (): void => {
   logos.clear();
-  loading.clear();
 };
 
 const sizeOf = (cached: CachedLogo | undefined): number =>
@@ -229,21 +228,9 @@ const cachedLogo = async (source: URL): Promise<CatalogLogo | null> => {
   if (hit !== undefined && hit.expiresAt > Date.now()) {
     return hit.logo;
   }
-  const underWay = loading.get(id);
-  if (underWay !== undefined) {
-    return await underWay;
-  }
-  const loaded = (async () => {
-    try {
-      const logo = await fetchLogo(source);
-      keep(id, logo);
-      return logo;
-    } finally {
-      loading.delete(id);
-    }
-  })();
-  loading.set(id, loaded);
-  return await loaded;
+  const logo = await fetchLogo(source);
+  keep(id, logo);
+  return logo;
 };
 
 /** One entry's logo, as `ConnectApi.catalogLogo` describes it. */
@@ -263,7 +250,7 @@ export const catalogLogo = async (
     return null;
   }
   try {
-    const listed = await listedToolkits(key);
+    const listed = await lastListedToolkits(key);
     const logoSource = listed.find(({ entry }) => entry.id === id)?.logoSource;
     return logoSource === undefined ? null : await cachedLogo(logoSource);
   } catch (error) {

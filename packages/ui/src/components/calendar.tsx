@@ -2,7 +2,6 @@
 // type, the month's name between Previous and Next (ghost Buttons), weekdays in muted words, and
 // days the size of a small control. A chosen day takes the first action's colour; a range joins its
 // days in a quiet band.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Calendar defaultValue="2026-11-16" />
 //   <Calendar mode="range" defaultValue={["2026-11-10", "2026-11-14"]} numberOfMonths={2} />
@@ -139,7 +138,7 @@ const styles = stylex.create({
     padding: 0,
     textAlign: "center",
     verticalAlign: "middle",
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
     cursor: { default: "pointer", [off]: "default" },
     color: {
@@ -199,28 +198,28 @@ const styles = stylex.create({
     // A range joins its days into one band: no corner where two days meet. A day with the keyboard's
     // ring keeps its own corner, so the ring, which follows it, is never square inside the band.
     borderStartEndRadius: {
-      default: radius.mark,
+      default: radius.sm,
       ":is([data-range-start]):not([data-range-end])": 0,
       [middle]: 0,
-      [ringed]: radius.mark,
+      [ringed]: radius.sm,
     },
     borderEndEndRadius: {
-      default: radius.mark,
+      default: radius.sm,
       ":is([data-range-start]):not([data-range-end])": 0,
       [middle]: 0,
-      [ringed]: radius.mark,
+      [ringed]: radius.sm,
     },
     borderStartStartRadius: {
-      default: radius.mark,
+      default: radius.sm,
       ":is([data-range-end]):not([data-range-start])": 0,
       [middle]: 0,
-      [ringed]: radius.mark,
+      [ringed]: radius.sm,
     },
     borderEndStartRadius: {
-      default: radius.mark,
+      default: radius.sm,
       ":is([data-range-end]):not([data-range-start])": 0,
       [middle]: 0,
-      [ringed]: radius.mark,
+      [ringed]: radius.sm,
     },
     opacity: { default: 1, ":is([data-disabled])": size.opacityDisabled },
     // In forced colours fills are dropped: chosen days take the system's own highlight, and

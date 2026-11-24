@@ -3,7 +3,6 @@
 // `xs` size, its words muted until pressed; pressed lays a veil of ink deeper than hover's. Its
 // icon is a child, as on Button; an icon alone makes it square and needs an `aria-label`, which it
 // shows in a Tooltip of its own under a resting pointer and on keyboard focus.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Toggle aria-label="Bold"><Icon icon={TextBoldIcon} /></Toggle>
 //   <Toggle defaultPressed>Show archived</Toggle>
@@ -113,7 +112,7 @@ const styles = stylex.create({
     paddingBlock: 0,
     paddingInline: sizes.togglePadding,
     borderWidth: 0,
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     fontFamily: font.sans,
     fontSize: font.textSm,
