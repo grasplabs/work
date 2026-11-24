@@ -77,7 +77,6 @@ import {
   ItemContent,
   ItemDescription,
   ItemGroup,
-  ItemMedia,
   ItemSeparator,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -112,7 +111,6 @@ import * as stylex from "@stylexjs/stylex";
 import { Fragment, useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
-import { ProviderMark } from "../connections/provider-mark.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
@@ -120,6 +118,7 @@ import { formatBytes, formatDate, formatDay, formatList } from "../format.ts";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { given } from "./brain.ts";
+import { ConnectionMark } from "./connection-mark.tsx";
 import { LearnedSection } from "./learned-section.tsx";
 import { OwnExportSection } from "./own-export.tsx";
 import { paneStyles } from "./page-pane.ts";
@@ -1121,9 +1120,7 @@ const Search = ({
  * GRA-1730); everything else agents search live, and the Brain keeps
  * nothing of it. A full copy comes with native sync. These connections
  * don't say which are the person's own, so the rule is said once. Each
- * row's mark is the connections' ProviderMark, by the name as its id: a
- * connection here carries no connector id, and its name is one only where
- * the catalog doesn't list it (core's `connectionsOf`); else its letter.
+ * row's mark is found by the connection's name (ConnectionMark).
  */
 const ConnectionFeeds = ({ connections }: { connections: Connection[] }) => {
   const heading = useId();
@@ -1147,17 +1144,11 @@ const ConnectionFeeds = ({ connections }: { connections: Connection[] }) => {
         </Trans>
       </Text>
       <ItemGroup>
-        {connections.map(({ name, logo, keepsReads, activityGap }, index) => (
+        {connections.map(({ name, keepsReads, activityGap }, index) => (
           <Fragment key={name}>
             {index === 0 ? null : <ItemSeparator />}
             <Item size="xs">
-              <ItemMedia>
-                <ProviderMark
-                  id={name}
-                  logo={given(logo) ? `/logos/${logo}` : null}
-                  name={name}
-                />
-              </ItemMedia>
+              <ConnectionMark name={name} />
               <ItemContent>
                 <ItemTitle>{name}</ItemTitle>
                 <ItemDescription>
@@ -1192,7 +1183,7 @@ const ConnectionFeeds = ({ connections }: { connections: Connection[] }) => {
  * The shared connections whose kept reads the person may read
  * (GRA-1831): what agents read through a connection an admin shared,
  * kept for the people the admin chose. One row a connection, not one a
- * record, marked as in ConnectionFeeds.
+ * record, marked by its name as in ConnectionFeeds.
  */
 const SharedConnectionReads = ({
   connected,
@@ -1223,9 +1214,7 @@ const SharedConnectionReads = ({
               <Fragment key={connectionId}>
                 {index === 0 ? null : <ItemSeparator />}
                 <Item size="xs">
-                  <ItemMedia>
-                    <ProviderMark id={name} logo={null} name={name} />
-                  </ItemMedia>
+                  <ConnectionMark name={name} />
                   <ItemContent>
                     <ItemTitle>
                       {account === null ? name : `${name} (${account})`}

@@ -1154,10 +1154,10 @@ describe(SourcesPage, () => {
       feeds:
         "How your connections feed the Brain" +
         "When an agent reads for you through an account you connected yourself, the Brain keeps what it read for you alone, while that account stays connected: one Gmail message or attachment, one OneNote page, or the answer of a read in another app, the company’s records included. Everything else agents search live when you ask, and the Brain keeps nothing of it." +
-        // Each row's mark is ProviderMark's: with no logo, its first letter, decorative.
-        "GGmailThe Brain may keep, for you alone, some of what an agent reads for you through this connection, while it stays connected." +
-        "MMicrosoft 365Searched live, nothing kept." +
-        "HHubSpotSearched live, nothing kept." +
+        // Each row's mark is drawn, decorative, never a letter (connection-mark.test.tsx).
+        "GmailThe Brain may keep, for you alone, some of what an agent reads for you through this connection, while it stays connected." +
+        "Microsoft 365Searched live, nothing kept." +
+        "HubSpotSearched live, nothing kept." +
         "A gap: this connection can’t tell Grasp what changed in it, so Grasp sees only what is done there through Grasp.",
       none: "",
     });
