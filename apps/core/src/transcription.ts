@@ -9,7 +9,9 @@ import type {
 } from "@grasp-os/shared/voice";
 import { z } from "zod";
 
+import { models } from "./models.ts";
 import type { Listening } from "./models.ts";
+import { platformAi } from "./platform-ai.ts";
 import { Resampler } from "./resampler.ts";
 
 // Live transcription as core implements it: Grasp's own transcription
@@ -420,3 +422,17 @@ export const platformTranscription = (
     };
   },
 });
+
+/** The transcription model sockets and recordings are written down with, as the gateway names it. */
+export const transcriptionModel = `${platformAi.transcription.provider}/${platformAi.transcription.model}`;
+
+/**
+ * Whether a member's dictation is set up here, as the page asks before it
+ * offers a microphone (`SessionApi.dictationSetUp`): the gateway's own
+ * word on what the relay answers as `transcription.unavailable`
+ * (onboarding/transcription.ts), with no call made. Never the day's
+ * budget, a busy gateway or a failure: those pass, and a microphone
+ * hidden for them would stay hidden.
+ */
+export const dictationSetUp = async (env: Env): Promise<boolean> =>
+  await models(env).canListen(transcriptionModel);
