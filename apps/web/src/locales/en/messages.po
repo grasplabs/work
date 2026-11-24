@@ -4128,7 +4128,6 @@ msgstr "Chat name"
 msgid "Chat with {name}"
 msgstr "Chat with {name}"
 
-#: src/chat/chat-switcher.tsx
 #: src/chat/chat-window.tsx
 #: src/chat/sidebar-chats.tsx
 msgid "Chats"
@@ -7957,6 +7956,7 @@ msgctxt "a model's tokens"
 msgid "Input"
 msgstr "Input"
 
+#: src/chat/answer-steps.tsx
 #: src/frame/ui-words.tsx
 msgctxt "what a tool was given"
 msgid "Input"
@@ -12738,6 +12738,11 @@ msgstr "Result"
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
+msgid "Result"
+msgstr "Result"
+
+#: src/chat/answer-steps.tsx
+msgctxt "what a tool gave back"
 msgid "Result"
 msgstr "Result"
 

@@ -27,6 +27,7 @@ import {
   size,
   space,
 } from "@grasp-os/ui/lib/tokens.stylex";
+import { nothing } from "@grasp-os/ui/lib/utils";
 import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -78,6 +79,8 @@ export const stepWorking = (status: StepStatus): boolean =>
   status === "writing" || status === "running";
 
 const styles = stylex.create({
+  // As wide as its longest line, never wider than the column: long lines wrap there.
+  root: { width: "max-content", maxWidth: "100%" },
   // A step's input and result, under its line: the panel's own room
   // above them, none under (the step's own room ends the row).
   detail: {
@@ -197,12 +200,21 @@ const StepOutput = ({
   const [open, setOpen] = useState(false);
   const [long, setLong] = useState(false);
   const box = useRef<HTMLSpanElement | null>(null);
-  // Measured again whenever the text changes.
+  // Measured as the text changes, and whenever its box changes size: as
+  // the step opens (closed, it has none), and as the column narrows.
   useLayoutEffect(() => {
     const element = box.current;
-    if (element !== null && text !== "") {
-      setLong(element.scrollHeight > element.clientHeight + 1);
+    if (element === null || text === "") {
+      return nothing;
     }
+    const measure = (): void => {
+      setLong(element.scrollHeight > element.clientHeight + 1);
+    };
+    const resized = new ResizeObserver(measure);
+    resized.observe(element);
+    return () => {
+      resized.disconnect();
+    };
   }, [text]);
   return (
     <div {...stylex.props(styles.block)}>
@@ -314,12 +326,25 @@ const Step = ({ step }: { step: AnswerStep }) => {
           <TraceCollapsibleContent>
             <div {...stylex.props(styles.detail)}>
               {step.input === "" ? null : (
-                <StepOutput label={t`Input`} text={step.input} />
+                <StepOutput
+                  label={t({
+                    message: "Input",
+                    context: "what a tool was given",
+                  })}
+                  text={step.input}
+                />
               )}
               {result === "" ? null : (
                 <StepOutput
                   failed={failed}
-                  label={failed ? t`Why it failed` : t`Result`}
+                  label={
+                    failed
+                      ? t`Why it failed`
+                      : t({
+                          message: "Result",
+                          context: "what a tool gave back",
+                        })
+                  }
                   text={result}
                 />
               )}
@@ -365,6 +390,7 @@ export const AnswerSteps = ({
   return (
     <ChainOfThought
       aria-label={t`What Grasp did`}
+      style={styles.root}
       onOpenChange={(next) => {
         setChosen(true);
         setOpen(next);
