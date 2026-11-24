@@ -30,7 +30,6 @@ import { micLevel, reachMic, watchLevel } from "../mic.ts";
 import { shownAs, useSaid, wordsOf } from "../spoken.tsx";
 import { usedWords, wrapUpSeconds } from "./clock.ts";
 import { Countdown } from "./countdown.tsx";
-import type { CountdownLook } from "./countdown.tsx";
 import {
   copy,
   fixture,
@@ -605,21 +604,19 @@ const LitLine = ({
 /**
  * A and B: the conversation as a stage, as the interview is today: one
  * thing in the middle of the window, Stephen's line, large, centred, in the
- * serif of what Grasp says, its words lighting up as he says them; over it
- * who asks and, for A, the minutes left. What was said before is in the
+ * serif of what Grasp says, its words lighting up as he says them; over it,
+ * for A, the minutes left, alone. What was said before is in the
  * transcript, beside the stage on a wide window.
  */
 const Stage = ({
   talk,
   left,
   clock,
-  countLook,
   onReadBack,
 }: {
   talk: Talk;
   left: number;
   clock: ClockPlace;
-  countLook: CountdownLook;
   onReadBack: () => void;
 }) => {
   const now = talk.turns.findLast((turn) => turn.from === "stephen");
@@ -632,14 +629,7 @@ const Stage = ({
   return (
     <div {...stylex.props(styles.stage)}>
       <div {...stylex.props(styles.question)}>
-        <div {...stylex.props(styles.over)}>
-          <Text as="span" color="muted" size="sm">
-            {fixture.interviewer}
-          </Text>
-          {clock === "title" ? (
-            <Countdown left={left} look={countLook} />
-          ) : null}
-        </div>
+        {clock === "title" ? <Countdown left={left} /> : null}
         {now?.lead === undefined ||
         (talk.doing === "listening" && talk.interim !== "") ? null : (
           <Text color="muted" size="lg">
@@ -696,7 +686,6 @@ export const Conversation = ({
   left,
   clock,
   look,
-  countLook,
   transcript = false,
   onReadBack,
 }: {
@@ -705,8 +694,6 @@ export const Conversation = ({
   left: number;
   clock: ClockPlace;
   look: "stage" | "thread";
-  /** The countdown's look over the question (A): small, large or minutes only. */
-  countLook: CountdownLook;
   /** The transcript is open: beside the stage, or in its place on a phone. */
   transcript?: boolean;
   onReadBack: () => void;
@@ -748,7 +735,6 @@ export const Conversation = ({
         >
           <Stage
             clock={clock}
-            countLook={countLook}
             left={left}
             onReadBack={onReadBack}
             talk={talk}

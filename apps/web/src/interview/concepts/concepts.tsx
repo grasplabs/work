@@ -1,7 +1,11 @@
 import { Button } from "@grasp-os/ui/components/button";
 import { Chat } from "@grasp-os/ui/components/chat";
 import { Text } from "@grasp-os/ui/components/text";
-import { Icon, MessageSquareIcon, PauseIcon } from "@grasp-os/ui/lib/icons";
+import {
+  Icon,
+  MessageSquareFilledIcon,
+  PauseFilledIcon,
+} from "@grasp-os/ui/lib/icons";
 import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
@@ -15,7 +19,6 @@ import {
 } from "./clock.ts";
 import { Conversation, helloTalk, talkAt, Thread } from "./conversation.tsx";
 import type { Talk, Turn } from "./conversation.tsx";
-import type { CountdownLook } from "./countdown.tsx";
 import {
   checkAsk,
   copy,
@@ -32,7 +35,6 @@ import { Frame } from "./frame.tsx";
 import type { ClockPlace } from "./frame.tsx";
 import { ReadBackPlaceholder } from "./read-back.tsx";
 import { ConsentClean } from "./start-clean.tsx";
-import type { StartBody } from "./start-clean.tsx";
 import {
   Consent,
   consentTurn,
@@ -70,25 +72,13 @@ export interface ConceptSearch {
   band: "header" | "low";
   /** Ruben's alternative title on A's start (`&title=alt`). */
   altTitle: boolean;
-  /** The start's body (`&body=a|b`): A the short paragraph, B with the fold-out. */
-  body: StartBody;
   /** The person's name, to try a long one (`&name=`). */
   name: string;
   /** "Not right now"'s times (`&later=a|b`): A the time first, B the day first. */
   laterLook: "a" | "b";
-  /** The countdown's look (`&count=a|b|c`): A small, B large, C minutes only. */
-  countLook: CountdownLook;
   /** On a laptop: the pages before the conversation beside the dither, or centred in the whole window (`&layout=centre`). */
   centred: boolean;
 }
-
-/** The countdown's look by its letter. */
-const countLookOf = (value: unknown): CountdownLook => {
-  if (value === "b") {
-    return "large";
-  }
-  return value === "c" ? "minutes" : "small";
-};
 
 /** Reads the concept’s own part of the address; nothing when it names no concept. */
 export const conceptSearch = (
@@ -112,13 +102,11 @@ export const conceptSearch = (
     altTitle: search.title === "alt",
     // Centred in the whole window by default (Ruben chose it); the split beside the dither with `&layout=split`.
     centred: search.layout !== "split",
-    body: search.body === "a" ? "a" : "b",
     laterLook: search.later === "b" ? "b" : "a",
     name:
       typeof search.name === "string" && search.name !== ""
         ? search.name
         : fixture.person,
-    countLook: countLookOf(search.count),
   };
 };
 
@@ -374,7 +362,6 @@ const BeforeAB = ({
   screen,
   live,
   altTitle,
-  body,
   name,
   laterLook,
   go,
@@ -383,7 +370,6 @@ const BeforeAB = ({
   screen: string;
   live: boolean;
   altTitle: boolean;
-  body: StartBody;
   name: string;
   laterLook: "a" | "b";
   go: (screen: string) => void;
@@ -440,7 +426,6 @@ const BeforeAB = ({
         return (
           <ConsentClean
             altTitle={altTitle}
-            body={body}
             name={name}
             onAgree={() => {
               go("hello");
@@ -545,7 +530,6 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
         key={screen}
         left={left}
         live={live}
-        countLook={search.countLook}
         look={concept === "c" ? "thread" : "stage"}
         transcript={transcript}
         onReadBack={() => {
@@ -569,7 +553,6 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
     page = (
       <BeforeAB
         altTitle={search.altTitle}
-        body={search.body}
         concept={concept}
         go={go}
         laterLook={search.laterLook}
@@ -595,7 +578,7 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
                 size="icon-sm"
                 variant={transcript ? "secondary" : "ghost"}
               >
-                <Icon icon={MessageSquareIcon} />
+                <Icon icon={MessageSquareFilledIcon} />
               </Button>
             )}
             <Button
@@ -606,7 +589,7 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
               size="icon-sm"
               variant="ghost"
             >
-              <Icon icon={PauseIcon} />
+              <Icon icon={PauseFilledIcon} />
             </Button>
           </>
         ) : null
