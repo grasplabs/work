@@ -1,5 +1,6 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
+import { Button } from "@grasp-os/ui/components/button";
+import { Heading } from "@grasp-os/ui/components/heading";
+import { Text } from "@grasp-os/ui/components/text";
 import { Trans } from "@lingui/react/macro";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useState } from "react";
@@ -26,15 +27,15 @@ const StaffPage = () => {
   };
   return (
     <OnboardingFrame>
-      <PageHeaderTitle>
+      <Heading level={1}>
         <Trans>Grasp staff work from the admin dashboard</Trans>
-      </PageHeaderTitle>
-      <p className="text-muted-foreground">
+      </Heading>
+      <Text color="muted">
         <Trans>
           To act in this workspace, ask its admin to add you as a user, and sign
           in as one.
         </Trans>
-      </p>
+      </Text>
       <Button
         disabled={busy}
         onClick={() => {
