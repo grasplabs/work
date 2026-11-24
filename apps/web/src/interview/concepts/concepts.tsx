@@ -7,8 +7,6 @@ import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import { sceneKinds } from "../../apps/app-card/scenes.ts";
-import type { Scene } from "../../apps/app-card/scenes.ts";
 import {
   budgetSeconds,
   useCountdown,
@@ -66,12 +64,10 @@ export interface ConceptSearch {
   lang: "unknown" | undefined;
   transcript: boolean;
   fold: boolean;
-  /** On a phone: the scene only behind the header, or a low band under it. */
+  /** On a phone: the texture only behind the header, or a low band under it. */
   band: "header" | "low";
   /** Ruben's alternative title on A's start (`&title=alt`). */
   altTitle: boolean;
-  /** The scene behind the mark on a phone and in the conversation's header (`&phoneScene=`). */
-  phoneScene: Scene | undefined;
 }
 
 /** Reads the concept’s own part of the address; nothing when it names no concept. */
@@ -94,7 +90,6 @@ export const conceptSearch = (
     fold: search.fold !== undefined,
     band: search.band === "header" ? "header" : "low",
     altTitle: search.title === "alt",
-    phoneScene: sceneKinds.find((kind) => kind === search.phoneScene),
   };
 };
 
@@ -245,16 +240,9 @@ const talkFor = (concept: Concept, at: string): Talk => {
   }
 };
 
-/** The scene beside a page before the conversation: A’s wave, B’s mountain, C’s aurora. */
-const scenes: Record<Concept, Scene> = { a: "wave", b: "fuji", c: "aurora" };
-
-/** Whether a screen stands beside its concept's scene: every page but the conversation, the read-back and C's thread. */
-const withScene = (concept: Concept, screen: string): Scene | undefined => {
-  if (talking.has(screen) || screen === "readback") {
-    return undefined;
-  }
-  return scenes[concept];
-};
+/** Whether a screen stands beside the calm dither: every page but the conversation, the read-back and C's thread. */
+const withScene = (screen: string): boolean =>
+  !(talking.has(screen) || screen === "readback");
 
 /** A's fold-in variant: B's "I can hear you clearly." moment, with `&fold`. */
 const talkFold = (search: ConceptSearch, screen: string): boolean =>
@@ -558,7 +546,7 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
                   setTranscript(!transcript);
                 }}
                 size="icon-sm"
-                variant={transcript ? "secondary" : "outline"}
+                variant={transcript ? "secondary" : "ghost"}
               >
                 <Icon icon={MessageSquareIcon} />
               </Button>
@@ -569,7 +557,7 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
                 go("paused");
               }}
               size="icon-sm"
-              variant="outline"
+              variant="ghost"
             >
               <Icon icon={PauseIcon} />
             </Button>
@@ -578,11 +566,10 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
       }
       clock={clockOf[concept]}
       left={inTalk ? left : null}
-      scene={withScene(concept, screen)}
+      beside={withScene(screen)}
       band={search.band}
-      phoneScene={search.phoneScene}
       strip={inTalk}
-      sceneOnPhone={concept !== "c" || screen === "language"}
+      besideOnPhone={concept !== "c" || screen === "language"}
     >
       {page}
     </Frame>

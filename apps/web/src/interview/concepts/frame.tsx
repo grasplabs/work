@@ -4,13 +4,17 @@ import {
   ProgressValue,
 } from "@grasp-os/ui/components/progress";
 import { Icon } from "@grasp-os/ui/lib/icons";
-import { colors, font, media, space } from "@grasp-os/ui/lib/tokens.stylex";
-import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
+import {
+  colors,
+  font,
+  media,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
+import { iconVars, pixel } from "@grasp-os/ui/lib/vars.stylex";
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
-import { AppCardGround } from "../../apps/app-card/ground.tsx";
-import type { Scene } from "../../apps/app-card/scenes.ts";
 import { GraspLogo } from "../../connections/brand-logos.ts";
 import { LanguageButton } from "../../frame/language-button.tsx";
 import { budgetSeconds, nearEnd, usedSeconds, usedWords } from "./clock.ts";
@@ -67,8 +71,8 @@ const styles = stylex.create({
     fontSize: font.headingSm,
     lineHeight: font.headingSmLine,
   },
-  // A scene's room: its ground fills it, behind what stands on it.
-  scene: {
+  // The texture's room: the page's own ground, the texture over it.
+  field: {
     position: "relative",
     isolation: "isolate",
     overflow: "hidden",
@@ -79,8 +83,7 @@ const styles = stylex.create({
     gridColumn: "2",
     gridRow: "1 / 3",
   },
-  // On a phone (Ruben: no white bar over the artwork, and quiet): the scene runs up behind the
-  // header and a little under it ("low"), or only behind it ("header").
+  // On a phone: the texture behind the header and a little under it, so the top is one surface.
   band: {
     display: { default: "block", [media.lg]: "none" },
     gridColumn: "1 / -1",
@@ -88,19 +91,36 @@ const styles = stylex.create({
     height: { default: "7rem", [media.sm]: "8rem" },
   },
   bandHeader: { height: { default: "4rem", [media.sm]: "5rem" } },
-  // In the conversation: the scene only behind the header, across the window, at every width.
+  // In the conversation: the texture behind the header, across the window, at every width.
   strip: {
     gridColumn: "1 / -1",
     gridRow: "1",
-    height: { default: "4rem", [media.sm]: "5rem" },
+    height: { default: "6rem", [media.sm]: "8rem" },
   },
   // The header stands at the top of the band's room.
-  headerOnScene: { alignSelf: "start" },
-  // On the scene the mark is light on dark: on a phone's band, or on the strip at every width.
-  brandOnBand: {
-    color: { default: colors.brandPaper, [media.lg]: colors.foreground },
+  headerOnField: { alignSelf: "start" },
+  // Damsko's calm dither, as the page header's banner draws it: mint light from a corner, seen
+  // through the system's one pixel (a 2px square in every 3px), at the banner's faint strength, on
+  // the page's own ground. Decoration: hidden from assistive tech, never moves, not drawn in forced
+  // colours.
+  texture: {
+    position: "absolute",
+    inset: 0,
+    zIndex: -1,
+    pointerEvents: "none",
+    opacity: size.pageHeaderDitherStrength,
+    maskImage: pixel.mask,
+    maskSize: "3px 3px",
+    display: { default: "block", [media.forcedColors]: "none" },
   },
-  brandOnStrip: { color: colors.brandPaper },
+  // Beside the page: the light from the top end corner, falling across the half.
+  lightBeside: {
+    backgroundImage: `radial-gradient(140% 100% at 100% 0%, ${colors.mint}, transparent 75%)`,
+  },
+  // Over a header: the light from the top, fading down before the page begins.
+  lightTop: {
+    backgroundImage: `linear-gradient(to bottom, ${colors.mint}, transparent 95%)`,
+  },
   bar: {
     gridColumn: "1 / -1",
     gridRow: "2",
@@ -121,14 +141,8 @@ const styles = stylex.create({
 });
 
 /** Grasp's mark and name, top start. */
-const Brand = ({ on }: { on: "page" | "band" | "strip" }) => (
-  <span
-    {...stylex.props(
-      styles.brand,
-      on === "band" && styles.brandOnBand,
-      on === "strip" && styles.brandOnStrip
-    )}
-  >
+const Brand = () => (
+  <span {...stylex.props(styles.brand)}>
     <Icon icon={GraspLogo} />
     Grasp
   </span>
@@ -158,77 +172,71 @@ const TimeBar = ({ left }: { left: number }) => (
  * concept puts it there, a scene beside the page before the conversation,
  * and the page.
  */
+/** Damsko's calm dither in a room of its own: beside the page, or falling from the top. */
+const Field = ({
+  room,
+  light,
+}: {
+  room: readonly stylex.StyleXStyles[];
+  light: "beside" | "top";
+}) => (
+  <div aria-hidden="true" {...stylex.props(styles.field, ...room)}>
+    <span
+      {...stylex.props(
+        styles.texture,
+        light === "beside" ? styles.lightBeside : styles.lightTop
+      )}
+    />
+  </div>
+);
+
 export const Frame = ({
   left,
   clock,
-  scene,
-  sceneOnPhone = true,
+  beside = false,
+  besideOnPhone = true,
   band = "low",
   strip = false,
-  phoneScene = "aurora",
   actions,
   children,
 }: {
   /** Seconds left, once the conversation runs; null before it. */
   left: number | null;
   clock: ClockPlace;
-  /** The scene beside the page, before the conversation. */
-  scene?: Scene;
+  /** The texture beside the page, before the conversation. */
+  beside?: boolean;
   /** On a phone too, as a band behind the header; else beside the page only. */
-  sceneOnPhone?: boolean;
+  besideOnPhone?: boolean;
   /** The phone's band: low under the header, or only behind it. */
   band?: "header" | "low";
-  /** The conversation: the scene only behind the header, at every width. */
+  /** The conversation: the texture behind the header, at every width. */
   strip?: boolean;
-  /** The scene behind the mark on a phone and on the strip: the darkest, so "Grasp" always reads. */
-  phoneScene?: Scene;
   /** More at the header’s end, before the language: the way out for now. */
   actions?: ReactNode;
   children: ReactNode;
 }) => {
-  const onBand = scene !== undefined && sceneOnPhone;
-  let brandOn: "page" | "band" | "strip" = "page";
-  if (strip) {
-    brandOn = "strip";
-  } else if (onBand) {
-    brandOn = "band";
-  }
+  const onBand = beside && besideOnPhone;
   return (
-    <div {...stylex.props(styles.frame, scene === undefined && styles.plain)}>
-      <header {...stylex.props(styles.header, onBand && styles.headerOnScene)}>
-        <Brand on={brandOn} />
+    <div {...stylex.props(styles.frame, !beside && styles.plain)}>
+      <header {...stylex.props(styles.header, onBand && styles.headerOnField)}>
+        <Brand />
         <div {...stylex.props(styles.end)}>
           {actions}
           <LanguageButton side="bottom" />
         </div>
       </header>
-      {scene === undefined ? null : (
-        <div {...stylex.props(styles.scene, styles.beside)}>
-          <AppCardGround hue={undefined} scene={scene} />
-        </div>
-      )}
+      {beside ? <Field light="beside" room={[styles.beside]} /> : null}
       {onBand ? (
-        <div
-          {...stylex.props(
-            styles.scene,
-            styles.band,
-            band === "header" && styles.bandHeader
-          )}
-        >
-          <AppCardGround hue={undefined} scene={phoneScene} />
-        </div>
+        <Field
+          light="top"
+          room={[styles.band, band === "header" && styles.bandHeader]}
+        />
       ) : null}
-      {strip ? (
-        <div {...stylex.props(styles.scene, styles.strip)}>
-          <AppCardGround hue={undefined} scene={phoneScene} />
-        </div>
-      ) : null}
-      {left !== null && clock === "bar" && scene === undefined ? (
+      {strip ? <Field light="top" room={[styles.strip]} /> : null}
+      {left !== null && clock === "bar" && !beside ? (
         <TimeBar left={left} />
       ) : null}
-      <main
-        {...stylex.props(styles.main, scene === undefined && styles.mainPlain)}
-      >
+      <main {...stylex.props(styles.main, !beside && styles.mainPlain)}>
         {children}
       </main>
     </div>
