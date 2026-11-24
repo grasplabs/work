@@ -37,7 +37,7 @@ import { act } from "react";
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { AgentPage } from "./agent-page.tsx";
 import type { FirstAgentAccess } from "./agent-page.tsx";
@@ -1114,21 +1114,24 @@ const reviewed = (label: string): string | undefined =>
     .find((each) => each.textContent.trim() === label)
     ?.nextElementSibling?.textContent.trim();
 
-/** Waits out the moment a made agent stands ready before its page opens. */
-const readyShown = async () => {
-  await act(async () => {
-    const { promise, resolve } = Promise.withResolvers<boolean>();
-    setTimeout(() => {
-      resolve(true);
-    }, 1800);
-    await promise;
-  });
+/**
+ * Presses Make, then moves the clock past the 1.6 s a made agent stands
+ * ready before its page opens, rather than waiting it out.
+ */
+const madeAndOpened = async (make: HTMLElement) => {
+  vi.useFakeTimers({ toFake: ["setTimeout"], shouldAdvanceTime: true });
+  try {
+    await press(make);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1800);
+    });
+  } finally {
+    vi.useRealTimers();
+  }
   await settled();
 };
 
-// A made agent stands ready 1.6 s before its page opens, and a setup is a
-// dozen presses: more than the default's 5 s beside other test files.
-describe("an agent's page", { timeout: 20_000 }, () => {
+describe("an agent's page", () => {
   afterEach(() => {
     act(() => {
       root?.unmount();
@@ -1779,8 +1782,7 @@ describe("an agent's page", { timeout: 20_000 }, () => {
         await press(radio("On a schedule"));
       }
     });
-    await press(button("Make Claire"));
-    await readyShown();
+    await madeAndOpened(button("Make Claire"));
     return { asked: fake.asked, router };
   };
   const unfinished = "Claire was made, but not all of it was saved";
@@ -1851,8 +1853,7 @@ describe("an agent's page", { timeout: 20_000 }, () => {
     fake.refused.add("reach");
     const router = await shown(fake, "new-guided");
     await setUpByHand("Claire");
-    await press(button("Make Claire"));
-    await readyShown();
+    await madeAndOpened(button("Make Claire"));
     await press(exactButton("Open Access"));
     expect(router.state.location.href).toBe("/agents/agent-1?tab=access");
   });
@@ -1862,8 +1863,7 @@ describe("an agent's page", { timeout: 20_000 }, () => {
     const router = await shown(fake, "new-guided");
     const entries = router.history.length;
     await setUpByHand("Claire");
-    await press(button("Make Claire"));
-    await readyShown();
+    await madeAndOpened(button("Make Claire"));
     expect({
       page: router.state.location.pathname,
       entries: router.history.length,
