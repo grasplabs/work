@@ -8652,7 +8652,7 @@ msgid "More about this section"
 msgstr "En savoir plus sur cette section"
 
 #: src/apps/app-settings.tsx
-msgid "More about who it’s made for"
+msgid "More about who it’s for"
 msgstr "En savoir plus sur son public"
 
 #: src/frame/ui-words.tsx
