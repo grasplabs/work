@@ -104,7 +104,7 @@ const styles = stylex.create({
     gap: space["2"],
     margin: 0,
     padding: space["4"],
-    borderRadius: `max(${radius.mark}, calc(${radius.base} - ${space["3"]}))`,
+    borderRadius: `max(${radius.sm}, calc(${radius.base} - ${space["3"]}))`,
     cornerShape: radius.shape,
     backgroundColor: colors.card,
     boxShadow: shadow.sm,

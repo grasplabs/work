@@ -630,7 +630,7 @@ const DeleteAgent = ({
           <AlertDialogCancel />
           {/* Works before it closes: the button says so, and that it failed. */}
           <Button
-            errorLabel={t`Couldn't delete`}
+            errorText={t`Couldn't delete`}
             onClick={remove}
             size="sm"
             variant="destructive"

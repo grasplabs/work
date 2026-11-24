@@ -825,8 +825,8 @@ export const NewAgent = ({
           <DrawerFooter>
             <DrawerClose>{t`Keep editing`}</DrawerClose>
             <Button
-              errorLabel={t`Couldn't make it`}
-              loadingLabel={t`Making`}
+              errorText={t`Couldn't make it`}
+              loadingText={t`Making`}
               onClick={making}
               size="sm"
             >

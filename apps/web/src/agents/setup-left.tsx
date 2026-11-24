@@ -123,11 +123,11 @@ export const SetupLeft = ({
       {retryable ? (
         <AlertAction>
           <Button
-            errorLabel={t`Not saved`}
-            loadingLabel={t`Saving…`}
+            errorText={t`Not saved`}
+            loadingText={t`Saving…`}
             onClick={retry}
             size="sm"
-            successLabel={t`Saved`}
+            successText={t`Saved`}
             variant="outline"
           >
             {t`Try again`}

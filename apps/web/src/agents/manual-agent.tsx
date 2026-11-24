@@ -437,9 +437,9 @@ export const ManualAgent = ({
   };
   // Making it takes a few calls to core: the button says it is working.
   const making = useAction(make, {
-    loadingLabel: t`Making ${name}…`,
-    successLabel: t`Made`,
-    errorLabel: t`Not made`,
+    loadingText: t`Making ${name}…`,
+    successText: t`Made`,
+    errorText: t`Not made`,
   });
 
   const submit = (event: SubmitEvent<HTMLFormElement>) => {
@@ -472,7 +472,7 @@ export const ManualAgent = ({
           <span {...stylex.props(styles.bar)}>
             <StepperNav
               disabled={!ready[step]}
-              finishLabel={t`Make agent`}
+              finishText={t`Make agent`}
               loading={making.status === "loading"}
               onBack={() => {
                 setAt(at - 1);
