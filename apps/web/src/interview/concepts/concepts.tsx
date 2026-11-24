@@ -15,6 +15,7 @@ import {
 } from "./clock.ts";
 import { Conversation, helloTalk, talkAt, Thread } from "./conversation.tsx";
 import type { Talk, Turn } from "./conversation.tsx";
+import type { CountdownLook } from "./countdown.tsx";
 import {
   checkAsk,
   copy,
@@ -68,9 +69,19 @@ export interface ConceptSearch {
   band: "header" | "low";
   /** Ruben's alternative title on A's start (`&title=alt`). */
   altTitle: boolean;
+  /** The countdown's look (`&count=a|b|c`): A small, B large, C minutes only. */
+  countLook: CountdownLook;
   /** On a laptop: the pages before the conversation beside the dither, or centred in the whole window (`&layout=centre`). */
   centred: boolean;
 }
+
+/** The countdown's look by its letter. */
+const countLookOf = (value: unknown): CountdownLook => {
+  if (value === "b") {
+    return "large";
+  }
+  return value === "c" ? "minutes" : "small";
+};
 
 /** Reads the concept’s own part of the address; nothing when it names no concept. */
 export const conceptSearch = (
@@ -93,6 +104,7 @@ export const conceptSearch = (
     band: search.band === "header" ? "header" : "low",
     altTitle: search.title === "alt",
     centred: search.layout === "centre",
+    countLook: countLookOf(search.count),
   };
 };
 
@@ -136,6 +148,7 @@ const talking = new Set([
   "b-talk",
   "listening",
   "typed",
+  "streaming",
   "b-typed",
   "mic-refused",
   "five-left",
@@ -150,6 +163,7 @@ const leftAt: Record<string, number> = {
   "b-talk": 19 * 60 + 40,
   listening: 17 * 60 + 5,
   typed: 16 * 60 + 30,
+  streaming: 17 * 60 + 40,
   "b-typed": budgetSeconds,
   "mic-refused": 19 * 60 + 20,
   "five-left": wrapUpSeconds - 10,
@@ -205,6 +219,9 @@ const talkFor = (concept: Concept, at: string): Talk => {
     }
     case "listening": {
       return talkAt(2, { interim: partly(script[1].answer, 11) }, before);
+    }
+    case "streaming": {
+      return talkAt(2, { mode: "type", doing: "speaking" }, before);
     }
     case "typed": {
       return talkAt(2, { mode: "type" }, before);
@@ -505,6 +522,7 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
         key={screen}
         left={left}
         live={live}
+        countLook={search.countLook}
         look={concept === "c" ? "thread" : "stage"}
         transcript={transcript}
         onReadBack={() => {
