@@ -23,7 +23,7 @@ export type Loaded<T> =
 
 /**
  * What a page can name that core may not have (any more): an App, a
- * workflow, a decision, a page. Not
+ * workflow, a decision, a page, a chat. Not
  * `request.not_found`, an endpoint this core doesn't know (an older one),
  * nor what a page reads along the way, such as a member: those stay
  * refusals, with their reference.
@@ -37,6 +37,7 @@ const notFoundCodes = new Set([
   "decision.not_found",
   "page.not_found",
   "project.not_found",
+  "agent.chat_not_found",
 ]);
 
 // Read off the error itself: a family's codes are only known to
