@@ -287,85 +287,97 @@ describe("an organization's integrations, workflows and members", () => {
 });
 
 describe("an organization's sections without its core", () => {
-  it("opens an organization whose core didn't answer on every section, each saying why nothing of it is read and what to do, and its Setup", async () => {
-    const down = gridRow({ id: "down", name: "Down" });
-    const waiting = gridRow({
-      id: "waiting",
-      name: "Waiting",
-      status: "provisioning",
-      hostname: null,
-    });
-    /** What each section of `client` says, but its Setup. */
-    const sectionsOf = async (client: GridRow, admin: ClientAdmin) => {
-      const said = [];
-      for (const section of orgSections.filter((each) => each !== "setup")) {
-        const path = sectionTo[section].replace(`/organizations/$clientId`, "");
-        // oxlint-disable-next-line no-await-in-loop -- one page at a time, as one tab opens them
-        const { container, main } = await openAt(client, admin, path);
-        const page = main();
-        const column = container.querySelector(
-          `nav[aria-label="${client.name}"]`
-        )?.textContent;
-        said.push({
-          section,
-          title:
-            container.querySelector("main h1")?.textContent ===
-            (section === "overview"
-              ? client.name
-              : sectionWords[section].title),
-          column:
-            (column?.includes("Details") ?? false) &&
-            (column?.includes("Not read now") ?? false),
-          failed: page.includes("This couldn’t be shown"),
-          fromCore: ["Needs Grasp", "% known", "From the company"].some(
-            (words) => page.includes(words)
-          ),
-          toSetup:
-            container.querySelector(
-              `main a[href="/organizations/${client.id}/setup"]`
-            ) !== null,
-          state: [
-            "isn’t set up yet",
-            "See its Setup progress",
-            "’s Grasp didn’t answer",
-            "Try again",
-          ].filter((words) => page.includes(words)),
-        });
-      }
-      return said;
-    };
-    const downAdmin = unread(down, "timeout");
-    const waitingAdmin = unread(waiting, "not_deployed");
-    const downSections = await sectionsOf(down, downAdmin);
-    const waitingSections = await sectionsOf(waiting, waitingAdmin);
-    const downPage = await openAt(down, downAdmin);
-    const downWhy = downPage.main();
-    const membersPage = await openAt(down, downAdmin, "/details?tab=members");
-    const membersWhy = membersPage.main();
-    const setupPage = await openAt(down, downAdmin, "/setup");
-    const setup = setupPage.main();
-    const waitingPage = await openAt(waiting, waitingAdmin);
-    const waitingWhy = waitingPage.main();
+  it(
+    "opens an organization whose core didn't answer on every section, each saying why nothing of it is read and what to do, and its Setup",
+    // Room for every section of two organizations, opened one after
+    // another, to fail on what a page shows, not on time.
+    { timeout: 15_000 },
+    async () => {
+      const down = gridRow({ id: "down", name: "Down" });
+      const waiting = gridRow({
+        id: "waiting",
+        name: "Waiting",
+        status: "provisioning",
+        hostname: null,
+      });
+      /** What each section of `client` says, but its Setup. */
+      const sectionsOf = async (client: GridRow, admin: ClientAdmin) => {
+        const said = [];
+        for (const section of orgSections.filter((each) => each !== "setup")) {
+          const path = sectionTo[section].replace(
+            `/organizations/$clientId`,
+            ""
+          );
+          // oxlint-disable-next-line no-await-in-loop -- one page at a time, as one tab opens them
+          const { container, main } = await openAt(client, admin, path);
+          const page = main();
+          const column = container.querySelector(
+            `nav[aria-label="${client.name}"]`
+          )?.textContent;
+          said.push({
+            section,
+            title:
+              container.querySelector("main h1")?.textContent ===
+              (section === "overview"
+                ? client.name
+                : sectionWords[section].title),
+            column:
+              (column?.includes("Details") ?? false) &&
+              (column?.includes("Not read now") ?? false),
+            failed: page.includes("This couldn’t be shown"),
+            fromCore: ["Needs Grasp", "% known", "From the company"].some(
+              (words) => page.includes(words)
+            ),
+            toSetup:
+              container.querySelector(
+                `main a[href="/organizations/${client.id}/setup"]`
+              ) !== null,
+            state: [
+              "isn’t set up yet",
+              "See its Setup progress",
+              "’s Grasp didn’t answer",
+              "Try again",
+            ].filter((words) => page.includes(words)),
+          });
+        }
+        return said;
+      };
+      const downAdmin = unread(down, "timeout");
+      const waitingAdmin = unread(waiting, "not_deployed");
+      const downSections = await sectionsOf(down, downAdmin);
+      const waitingSections = await sectionsOf(waiting, waitingAdmin);
+      const downPage = await openAt(down, downAdmin);
+      const downWhy = downPage.main();
+      const membersPage = await openAt(down, downAdmin, "/details?tab=members");
+      const membersWhy = membersPage.main();
+      const setupPage = await openAt(down, downAdmin, "/setup");
+      const setup = setupPage.main();
+      const waitingPage = await openAt(waiting, waitingAdmin);
+      const waitingWhy = waitingPage.main();
 
-    expect({
-      downSections,
-      waitingSections,
-      downWhy: downWhy.includes("Its Grasp can’t be read now:"),
-      membersWhy: membersWhy.includes("Its Grasp can’t be read now:"),
-      // Its Setup is the admin's own record, read whatever its core does.
-      setup: setup.includes("Setup"),
-      waitingWhy: waitingWhy.includes(
-        "Its Grasp isn’t deployed yet, so there is nothing of it to read."
-      ),
-    }).toStrictEqual({
-      downSections: expected(["’s Grasp didn’t answer", "Try again"]),
-      waitingSections: expected(["isn’t set up yet", "See its Setup progress"]),
-      downWhy: true,
-      membersWhy: true,
-      setup: true,
-      waitingWhy: true,
-    });
-  });
+      expect({
+        downSections,
+        waitingSections,
+        downWhy: downWhy.includes("Its Grasp can’t be read now:"),
+        membersWhy: membersWhy.includes("Its Grasp can’t be read now:"),
+        // Its Setup is the admin's own record, read whatever its core does.
+        setup: setup.includes("Setup"),
+        waitingWhy: waitingWhy.includes(
+          "Its Grasp isn’t deployed yet, so there is nothing of it to read."
+        ),
+      }).toStrictEqual({
+        downSections: expected(["’s Grasp didn’t answer", "Try again"]),
+        waitingSections: expected([
+          "isn’t set up yet",
+          "See its Setup progress",
+        ]),
+        downWhy: true,
+        membersWhy: true,
+        setup: true,
+        waitingWhy: true,
+      });
+    }
+  );
 
   it("says an offboarded organization was offboarded on each of its sections, and leaves it out of the sidebar", async () => {
     const gone = gridRow({ id: "gone", name: "Gone", status: "offboarded" });
