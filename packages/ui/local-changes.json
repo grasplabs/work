@@ -1,5 +1,10 @@
 [
   {
+    "path": "src/blocks/connect-api-key-01/connect-api-key-01.tsx",
+    "reason": "A columns prop, the most tiles in a row, so four providers stand two and two and not three and one.",
+    "since": "2026-11-24"
+  },
+  {
     "path": "src/components/collapsible.tsx",
     "reason": "A plain variant with no fill, and a trigger that takes Text's size and weight, so a page keeps one body style; with fitContent it no longer wraps in a box that shrinks to fit.",
     "since": "2026-11-24",
