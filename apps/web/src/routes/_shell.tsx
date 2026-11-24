@@ -22,7 +22,7 @@ import { ShellPending } from "../frame/shell-pending.tsx";
 import { forgetSignedIn, markSignedIn } from "../frame/signed-in-here.ts";
 import { heldWhileOnboarding, onboardingIsBehind } from "../landing.ts";
 import { RouteError } from "../route-error.tsx";
-import { signInErrorSearch } from "../sign-in-errors.ts";
+import { toSignIn } from "../sign-in-redirect.ts";
 
 // The signed-in product: the app's sidebar beside the page, each page
 // headed by its own site header (frame/site-header.tsx). Everyone else goes
@@ -125,19 +125,6 @@ const Shell = () => {
   );
 };
 
-/**
- * The page to come back to after signing in: its path and search, less
- * `error` and `error_description`, which a refused sign-in adds (OAuth's
- * pair) and the sign-in page shows itself.
- */
-const returnPathOf = (pathname: string, searchStr: string): string => {
-  const search = new URLSearchParams(searchStr);
-  search.delete("error");
-  search.delete("error_description");
-  const rest = search.toString();
-  return rest === "" ? pathname : `${pathname}?${rest}`;
-};
-
 /** Core failed or stayed out of reach while the shell asked who is in. */
 class CoreUnreachableError extends Error {
   constructor() {
@@ -181,16 +168,7 @@ export const Route = createFileRoute("/_shell")({
     if (identity === undefined) {
       forgetSignedIn();
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
-      throw redirect({
-        to: "/sign-in",
-        search: {
-          // Its search too, a deep link's input among it, but not a
-          // refused sign-in's error, which is the sign-in page's own.
-          returnTo: returnPathOf(location.pathname, location.searchStr),
-          // A refused sign-in comes back here, as `error=<code>`.
-          ...signInErrorSearch(location.search),
-        },
-      });
+      throw toSignIn(location);
     }
     // Grasp's staff work from the admin dashboard: nothing here is theirs.
     if (identity.staff) {

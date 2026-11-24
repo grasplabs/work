@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 
 import { useAppAddress } from "../pages/app-address.ts";
 import { PageFrame } from "../pages/page-frame.tsx";
+import { signInFirst } from "../sign-in-redirect.ts";
 
 // An App, full page, outside the shell: "Open full page" on the App's page
 // links here, at the route it had open. Its routes sit in the address as
@@ -34,5 +35,10 @@ const FullPage = () => {
 };
 
 export const Route = createFileRoute("/apps/$app/full")({
+  // Outside the shell, so it asks who is in itself: whoever isn't signs in
+  // first and comes back here, as a link into the shell does.
+  beforeLoad: async ({ context: { core }, location }) => {
+    await signInFirst(core, location);
+  },
   component: FullPage,
 });
