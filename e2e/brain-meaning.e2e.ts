@@ -45,7 +45,7 @@ test("a person's upload is found by a search that shares no word with it, by mea
   await page.goto("/brain/sources");
   const box = page.getByRole("searchbox", { name: "Search the Brain" });
   const found = page
-    .getByRole("button")
+    .getByRole("listitem")
     .filter({ hasText: tag })
     .filter({ hasText: "By meaning" });
   // Asked again until its passage is embedded.

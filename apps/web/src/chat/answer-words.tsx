@@ -34,7 +34,7 @@ const leavingSchemes: ReadonlySet<string> = new Set([
  * A link out of Grasp: a button until the person says yes, then opened in
  * a tab of its own without this page as its opener.
  */
-const LeavingLink = ({
+export const LeavingLink = ({
   href,
   children,
 }: {

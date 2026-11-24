@@ -689,6 +689,37 @@ describe("AI providers", { timeout: 60_000 }, () => {
       }).toStrictEqual({ first: 2, second: 1, kept: 0 });
     });
 
+    it("removes only the save it names: a key another admin saved since stays", async () => {
+      const { admin: by } = await admin();
+      const tried = await by.api.aiProviders.add({
+        provider: "anthropic",
+        key: newKey(),
+      });
+      // Another key lands while the first one's test runs (another
+      // admin's, from another tab); the same millisecond would read as
+      // the same save.
+      await vi.waitFor(() => {
+        expect(Date.now()).toBeGreaterThan(tried.updatedAt);
+      });
+      const replaced = await by.api.aiProviders.add({
+        provider: "anthropic",
+        key: newKey(),
+      });
+
+      await by.api.aiProviders.remove("anthropic", tried.updatedAt);
+      const afterStale = await by.api.aiProviders.list();
+      await by.api.aiProviders.remove("anthropic", replaced.updatedAt);
+      const afterOwn = await by.api.aiProviders.list();
+
+      expect({
+        stale: afterStale.providers.map(({ mask }) => mask),
+        own: afterOwn.providers.length,
+      }).toStrictEqual({
+        stale: [replaced.mask],
+        own: 0,
+      });
+    });
+
     it("audits each change in the admin's name, and the test as a call through the gateway, never with the key", async () => {
       const { admin: by } = await admin();
       const key = newKey();

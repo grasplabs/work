@@ -11,7 +11,7 @@ export const rpcParamNames: ParamNames = {
   "AiProvidersRpc": {
     "add": ["request"],
     "list": [],
-    "remove": ["provider"],
+    "remove": ["provider","savedAt"],
     "setModels": ["choice"],
     "setSource": ["source"],
     "test": ["provider","model"],
