@@ -50,11 +50,8 @@ const styles = stylex.create({
   mark: { display: "flex", [iconVars.size]: size.iconDefault },
   where: {
     display: "flex",
-    flexWrap: "wrap",
-    alignItems: "baseline",
     justifyContent: { default: "center", [media.maxSm]: "flex-start" },
-    columnGap: space[2],
-    margin: 0,
+    textAlign: { default: "center", [media.maxSm]: "start" },
   },
   end: {
     display: "flex",
@@ -70,14 +67,20 @@ const styles = stylex.create({
     paddingInline: space[4],
     paddingBlock: { default: space[12], [media.maxSm]: space[6] },
   },
-  column: { display: "flex", flexDirection: "column", width: "100%" },
+  // The step stands in the middle of the room under the bar, its foot right under it.
+  column: {
+    display: "flex",
+    flexDirection: "column",
+    width: "100%",
+    marginBlock: "auto",
+  },
   // A conversation fills the window: its transcript scrolls, its answer stays in sight.
   filled: { height: "100svh" },
   fillMain: {
     minHeight: 0,
     paddingBlock: { default: space[4], [media.maxSm]: space[2] },
   },
-  fillColumn: { flexGrow: 1, minHeight: 0 },
+  fillColumn: { flexGrow: 1, minHeight: 0, marginBlock: 0 },
   narrowColumn: { maxWidth: "34rem" },
   wideColumn: { maxWidth: "48rem" },
 });
@@ -145,18 +148,16 @@ const Whereabouts = ({ step }: { step: WholeStep }) => {
     )
   );
   const chapter = chapters[chapterOf(step)] ?? "";
+  const time = plural(left, {
+    one: "About # minute left",
+    other: "About # minutes left",
+  });
   return (
-    <p {...stylex.props(styles.where)}>
-      <Text as="span" color="default" size="sm" weight="medium">
-        {chapter}
+    <div {...stylex.props(styles.where)}>
+      <Text color="muted" size="sm">
+        {chapter} · {time}
       </Text>
-      <Text as="span" color="muted" size="sm">
-        {plural(left, {
-          one: "About # minute left",
-          other: "About # minutes left",
-        })}
-      </Text>
-    </p>
+    </div>
   );
 };
 

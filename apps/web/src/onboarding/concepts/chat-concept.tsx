@@ -49,17 +49,18 @@ import { AiChoice } from "./ai-choice.tsx";
 import type { ConceptProps, ConceptStep } from "./concept-props.ts";
 import { ConceptFrame } from "./frame.tsx";
 import { LanguageCards } from "./language-cards.tsx";
-import { CampaignTimeline, ExampleNote } from "./plan.tsx";
+import { CampaignTimeline } from "./plan.tsx";
 import { SoundToggle } from "./sound-toggle.tsx";
 import { interviewer, StephenFigure } from "./stephen.tsx";
 
 // Concept A, "a conversation": Stephen asks, the admin answers, and each
 // answer stays in the transcript as it was said, the next question after
 // it; the library's Messages in its MessageScroller, his at the start,
-// theirs as Bubbles at the end. Where he asks, the answer takes the
-// question's shape at the foot, where a chat's box would be: a
-// Questionnaire for a choice, the Connect API key block for a key, and the
-// PromptInput, with dictation, for words of their own. Stephen speaks his
+// theirs as Bubbles at the end. Where he asks with choices, the choices
+// stand in the thread right under his question: the language cards, a
+// Questionnaire for whose AI, the Connect API key block for a key. Only the
+// plan's open question has the PromptInput, with dictation, at the foot.
+// Stephen's figure stands once, beside his first message. He speaks his
 // newest line when the sound is on.
 
 const styles = stylex.create({
@@ -75,13 +76,6 @@ const styles = stylex.create({
   answer: { display: "grid", gap: space[2], flexShrink: 0 },
   rich: { display: "grid", gap: space[3], width: "100%" },
   end: { marginInlineStart: "auto" },
-  host: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: space[2],
-    paddingBlock: space[4],
-  },
 });
 
 /** What the admin answered, kept in this tab: a language changes the whole page. */
@@ -120,17 +114,18 @@ interface Turn {
   id: string;
   from: "stephen" | "admin";
   text: string;
-  /** What stands under his words: the timeline, the example. */
+  /** What stands under his words: the choices he asks for, the timeline. */
   more?: ReactNode;
 }
 
+/** His turn: his figure and name beside the first one alone. */
 const StephenTurn = ({ turn, first }: { turn: Turn; first: boolean }) => (
   <Message aria-label={interviewer}>
     <MessageAvatar>{first ? <StephenFigure size="xs" /> : null}</MessageAvatar>
     <MessageContent>
       {first ? (
         <MessageHeader>
-          <Text as="span" color="muted" size="sm" weight="medium">
+          <Text as="span" color="muted" size="sm">
             {interviewer}
           </Text>
         </MessageHeader>
@@ -164,10 +159,10 @@ const useReplies = () => {
       answer: t`Yes. You pick the first day when you tell your team, a few steps from now.`,
     },
     first: {
-      question: t`Who talks to you first?`,
+      question: t`Who goes first?`,
       answer: t`The people who know the work best. You name them in a few steps.`,
     },
-    noted: t`I’ve noted that for Grasp’s team. They answer you by email today.`,
+    noted: t`I’ve passed that on to the Grasp team. They’ll answer you by email today.`,
     goOn: t`Sounds good, go on`,
   };
 };
@@ -181,98 +176,6 @@ const DictateButton = () => {
       onListeningChange={setListening}
     />
   );
-};
-
-/** Where things stand in the conversation, from what was said and what core tells. */
-interface Standing {
-  at: number;
-  said: Said;
-  language: string | undefined;
-  ai: ConceptProps["data"]["ai"];
-  ready: boolean;
-  whose: Said["ai"];
-}
-
-/** What the admin answered once a model is ready. */
-const useAiAnswer = (ai: Standing["ai"]): string => {
-  const { t } = useLingui();
-  const own = ai?.listing.providers[0];
-  if (ai === null || ai.listing.source === "grasp" || own === undefined) {
-    return t`Grasp’s AI`;
-  }
-  return t`${own.label}, key ${own.mask}`;
-};
-
-/** The transcript so far, turn by turn. */
-const useTurns = (
-  { at, said, language, ai, ready, whose }: Standing,
-  admin: string,
-  today: Date
-): Turn[] => {
-  const { t } = useLingui();
-  const aiAnswer = useAiAnswer(ai);
-  const turns: Turn[] = [
-    {
-      id: "hello",
-      from: "stephen",
-      text: t`Hi ${admin}, I’m Stephen. I set up Grasp with you, in about 8 minutes.`,
-    },
-    {
-      id: "language",
-      from: "stephen",
-      text: t`First, which language suits you?`,
-    },
-  ];
-  if (language !== undefined) {
-    turns.push(
-      { id: "language-said", from: "admin", text: language },
-      {
-        id: "ai",
-        from: "stephen",
-        text: t`${language} it is. Which AI should I think with? Everything I read and say runs on it.`,
-      }
-    );
-  }
-  if (at >= 1 && whose === "own" && said.ai === "own") {
-    turns.push(
-      { id: "ai-said", from: "admin", text: t`My own key` },
-      {
-        id: "key",
-        from: "stephen",
-        text: t`Pick your provider and paste its key. I test it before we go on.`,
-      }
-    );
-  }
-  if (at >= 1 && ready && ai !== null) {
-    turns.push({ id: "ai-ready", from: "admin", text: aiAnswer });
-  }
-  if (at < 2) {
-    return turns;
-  }
-  turns.push(
-    {
-      id: "plan",
-      from: "stephen",
-      text: t`That works. Here’s the plan: one week of short talks with your team, then you get what I learned.`,
-      more: <CampaignTimeline today={today} />,
-    },
-    {
-      id: "example",
-      from: "stephen",
-      text: t`This is what one answer gives me.`,
-      more: <ExampleNote />,
-    },
-    {
-      id: "ask",
-      from: "stephen",
-      text: t`Anything you’d like to ask before we go on?`,
-    }
-  );
-  const asked = said.asked.flatMap((each, index): Turn[] => [
-    { id: `asked-${index}`, from: "admin", text: each.question },
-    { id: `answer-${index}`, from: "stephen", text: each.answer },
-  ]);
-  return [...turns, ...asked];
 };
 
 /** Whose AI: Grasp's, or a key of their own. */
@@ -296,7 +199,7 @@ const WhoseAnswer = ({
         <QuestionnaireChoices>
           <QuestionnaireChoice recommended value="grasp">
             {t`Grasp’s AI`}
-            <QuestionnaireChoiceDescription>{t`Nothing to set up. You pay for what you use.`}</QuestionnaireChoiceDescription>
+            <QuestionnaireChoiceDescription>{t`Works right away. You pay for what you use.`}</QuestionnaireChoiceDescription>
           </QuestionnaireChoice>
           <QuestionnaireChoice value="own">
             {t`My own key`}
@@ -311,7 +214,7 @@ const WhoseAnswer = ({
   );
 };
 
-/** Anything to ask: a few to press, or their own words, typed or said. */
+/** Anything to ask about the plan: a few to press, or their own words, typed or said. */
 const PlanAnswer = ({
   offered,
   onAsk,
@@ -338,7 +241,7 @@ const PlanAnswer = ({
         <PromptInputBody>
           <PromptInputTextarea
             aria-label={t`Your answer`}
-            placeholder={t`Ask, or say go on`}
+            placeholder={t`Ask me something, or say go on`}
           />
         </PromptInputBody>
         <PromptInputFooter>
@@ -352,66 +255,146 @@ const PlanAnswer = ({
   );
 };
 
-/** The answer at the foot, in the shape of what Stephen asks now. */
-const Answer = ({
-  step,
-  standing,
-  onLanguage,
-  onWhose,
-  onAsk,
-  go,
-}: {
-  step: ConceptStep;
-  standing: Standing;
+/** What the admin answered once a model is ready. */
+const useAiAnswer = (ai: ConceptProps["data"]["ai"]): string => {
+  const { t } = useLingui();
+  const own = ai?.listing.providers[0];
+  if (ai === null || ai.listing.source === "grasp" || own === undefined) {
+    return t`Grasp’s AI`;
+  }
+  return t`${own.label}, key ${own.mask}`;
+};
+
+/** The ways the admin answers, as the thread needs them. */
+interface Answers {
   onLanguage: (code: Locale) => void;
   onWhose: (whose: "grasp" | "own") => void;
-  onAsk: (question: string) => void;
-  go: (step: ConceptStep) => void;
-}) => {
+  onKeyReady: () => void;
+}
+
+/** Where things stand in the conversation, from what was said and what core tells. */
+interface Standing {
+  step: ConceptStep;
+  at: number;
+  said: Said;
+  language: string | undefined;
+  ai: ConceptProps["data"]["ai"];
+  ready: boolean;
+  whose: Said["ai"];
+}
+
+/** The welcome and the AI, turn by turn, each question with its choices under it while it is open. */
+const useOpeningTurns = (
+  { step, at, said, language, ai, ready, whose }: Standing,
+  admin: string,
+  answers: Answers
+): Turn[] => {
   const { t } = useLingui();
-  const replies = useReplies();
-  const { ai, ready, whose } = standing;
-  if (step === "welcome") {
-    return <LanguageCards chosen={null} onPick={onLanguage} />;
+  const aiAnswer = useAiAnswer(ai);
+  const turns: Turn[] = [
+    {
+      id: "hello",
+      from: "stephen",
+      text:
+        admin === ""
+          ? t`Hi, I’m Stephen. I’ll set up Grasp with you, one step at a time.`
+          : t`Hi ${admin}, I’m Stephen. I’ll set up Grasp with you, one step at a time.`,
+    },
+    {
+      id: "language",
+      from: "stephen",
+      text: t`Which language would you like to work in?`,
+      ...(step === "welcome" && {
+        more: (
+          <LanguageCards
+            chosen={null}
+            onPick={(code) => {
+              answers.onLanguage(code);
+            }}
+          />
+        ),
+      }),
+    },
+  ];
+  if (language === undefined) {
+    return turns;
   }
-  if (step === "about") {
-    return (
-      <PlanAnswer
-        offered={[replies.goOn, replies.later.question, replies.first.question]}
-        onAsk={onAsk}
-      />
-    );
-  }
-  if (ready || ai === null) {
-    return (
-      <Suggestions>
-        <Suggestion
-          onClick={() => {
-            go("about");
-          }}
-          suggestion={t`Go on`}
-        />
-      </Suggestions>
-    );
-  }
-  if (whose === undefined || whose === "grasp") {
-    return <WhoseAnswer onPick={onWhose} />;
-  }
-  // Their own key: the block alone, Grasp's AI no longer offered beside it.
-  return (
-    <AiChoice
-      ai={{
-        ...ai,
-        listing: {
-          ...ai.listing,
-          grasp: { ...ai.listing.grasp, available: false },
-        },
-      }}
-      onReady={() => {
-        go("about");
-      }}
-    />
+  const asking = step === "ai" && !ready && ai !== null;
+  turns.push(
+    { id: "language-said", from: "admin", text: language },
+    {
+      id: "ai",
+      from: "stephen",
+      text: t`${language} it is. Which AI should I use? Everything I read and say runs on it.`,
+      ...(asking &&
+        whose === undefined && {
+          more: (
+            <WhoseAnswer
+              onPick={(picked) => {
+                answers.onWhose(picked);
+              }}
+            />
+          ),
+        }),
+    }
   );
+  if (at >= 1 && said.ai === "own") {
+    turns.push(
+      { id: "ai-said", from: "admin", text: t`My own key` },
+      {
+        id: "key",
+        from: "stephen",
+        text: t`Pick your provider and paste its key. I’ll check it works before we go on.`,
+        ...(asking && {
+          more: (
+            <AiChoice
+              ai={{
+                ...ai,
+                listing: {
+                  ...ai.listing,
+                  grasp: { ...ai.listing.grasp, available: false },
+                },
+              }}
+              onReady={() => {
+                answers.onKeyReady();
+              }}
+            />
+          ),
+        }),
+      }
+    );
+  }
+  if (at >= 1 && ready && ai !== null) {
+    turns.push({ id: "ai-ready", from: "admin", text: aiAnswer });
+  }
+  return turns;
+};
+
+/** The plan, and what was asked about it. */
+const usePlanTurns = (said: Said, today: Date): Turn[] => {
+  const { t } = useLingui();
+  return [
+    {
+      id: "plan",
+      from: "stephen",
+      text: t`That works. Here’s the plan. I talk with your team for one week, then you get what I learned.`,
+      more: <CampaignTimeline today={today} />,
+    },
+    {
+      id: "example",
+      from: "stephen",
+      text: t`For example, I might ask what happens when someone new joins. If they say the laptop takes two or three days, I note that as a wait in welcoming new people.`,
+    },
+    {
+      id: "ask",
+      from: "stephen",
+      text: t`Anything you’d like to ask before we go on?`,
+    },
+    ...said.asked.flatMap((each, index): Turn[] => [
+      { id: `asked-${index}`, from: "admin", text: each.question },
+      { id: `answer-${index}`, from: "stephen", text: each.answer },
+    ]),
+  ];
 };
 
 export const ChatConcept = ({
@@ -435,20 +418,6 @@ export const ChatConcept = ({
   const locale = isLocale(i18n.locale) ? i18n.locale : "en";
   const { ai } = data;
   const graspOffered = ai?.listing.grasp.available === true;
-  const standing: Standing = {
-    at,
-    said,
-    // Past the welcome, the language is the page's, whether or not it was said here.
-    language: said.language ?? (at > 0 ? localeNames[locale] : undefined),
-    ai,
-    ready: ai === null || ai.ready,
-    whose: said.ai ?? (graspOffered ? undefined : "own"),
-  };
-  const turns = useTurns(standing, admin, today);
-  const last = turns.at(-1);
-  const { on } = useVoice();
-  useSay(last?.from === "stephen" ? last.text : "", { when: on, delay: 300 });
-
   // Grasp's AI, chosen: the organization's AI runs on it, and on to the plan.
   const chooseGrasp = async () => {
     const set = await run(async (session) => {
@@ -460,6 +429,42 @@ export const ChatConcept = ({
       go("about");
     }
   };
+  const opening = useOpeningTurns(
+    {
+      step,
+      at,
+      said,
+      // Past the welcome, the language is the page's, whether or not it was said here.
+      language: said.language ?? (at > 0 ? localeNames[locale] : undefined),
+      ai,
+      ready: ai === null || ai.ready,
+      whose: said.ai ?? (graspOffered ? undefined : "own"),
+    },
+    admin,
+    {
+      onLanguage: (code) => {
+        update({ ...said, language: localeNames[code] });
+        void (async () => {
+          await chooseLocale(code);
+          go("ai");
+        })();
+      },
+      onWhose: (whose) => {
+        update({ ...said, ai: whose });
+        if (whose === "grasp") {
+          void chooseGrasp();
+        }
+      },
+      onKeyReady: () => {
+        go("about");
+      },
+    }
+  );
+  const plan = usePlanTurns(said, today);
+  const turns = at >= 2 ? [...opening, ...plan] : opening;
+  const last = turns.at(-1);
+  const { on } = useVoice();
+  useSay(last?.from === "stephen" ? last.text : "", { when: on, delay: 300 });
 
   const ask = (question: string) => {
     if (question === replies.goOn) {
@@ -478,6 +483,28 @@ export const ChatConcept = ({
     });
   };
 
+  // At the foot: only the plan's open question, or the way on once the AI is ready.
+  let foot: ReactNode = null;
+  if (step === "about") {
+    foot = (
+      <PlanAnswer
+        offered={[replies.goOn, replies.later.question, replies.first.question]}
+        onAsk={ask}
+      />
+    );
+  } else if (step === "ai" && (ai === null || ai.ready)) {
+    foot = (
+      <Suggestions>
+        <Suggestion
+          onClick={() => {
+            go("about");
+          }}
+          suggestion={t`Go on`}
+        />
+      </Suggestions>
+    );
+  }
+
   return (
     <ConceptFrame
       fill
@@ -493,14 +520,6 @@ export const ChatConcept = ({
               aria-label={t`Your conversation with ${interviewer}`}
             >
               <MessageScrollerContent>
-                <MessageScrollerItem messageId="host">
-                  <div {...stylex.props(styles.host)}>
-                    <StephenFigure size="md" />
-                    <Text as="span" color="muted" size="sm">
-                      {t`${interviewer}, your interviewer at Grasp`}
-                    </Text>
-                  </div>
-                </MessageScrollerItem>
                 {turns.map((turn, index) => (
                   <MessageScrollerItem
                     key={turn.id}
@@ -510,10 +529,7 @@ export const ChatConcept = ({
                     {turn.from === "admin" ? (
                       <AdminTurn turn={turn} />
                     ) : (
-                      <StephenTurn
-                        first={turns[index - 1]?.from !== "stephen"}
-                        turn={turn}
-                      />
+                      <StephenTurn first={index === 0} turn={turn} />
                     )}
                   </MessageScrollerItem>
                 ))}
@@ -522,25 +538,9 @@ export const ChatConcept = ({
             <MessageScrollerButton />
           </MessageScroller>
         </MessageScrollerProvider>
-        <div {...stylex.props(styles.answer)}>
-          <Answer
-            go={go}
-            onAsk={ask}
-            onLanguage={(code) => {
-              update({ ...said, language: localeNames[code] });
-              void chooseLocale(code);
-              go("ai");
-            }}
-            onWhose={(whose) => {
-              update({ ...said, ai: whose });
-              if (whose === "grasp") {
-                void chooseGrasp();
-              }
-            }}
-            standing={standing}
-            step={step}
-          />
-        </div>
+        {foot === null ? null : (
+          <div {...stylex.props(styles.answer)}>{foot}</div>
+        )}
       </div>
     </ConceptFrame>
   );
