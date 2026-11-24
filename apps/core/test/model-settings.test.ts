@@ -5,6 +5,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { describe, expect, it } from "vite-plus/test";
 
 import { modelUsage } from "../src/db/core/schema.ts";
+import { monthSpend } from "../src/model-spend.ts";
 import { modelForRole, models, modelSettings } from "../src/models.ts";
 import type { ModelCall, ModelsNow } from "../src/models.ts";
 import { mockIdp } from "./idp.ts";
@@ -78,6 +79,26 @@ const onOneDay = async <T>(
       return { value, on };
     }
   }
+};
+
+/** The UTC days of `month` up to its `last`, with nothing spent. */
+const unspentTo = (month: string, last: number) =>
+  Array.from({ length: last }, (_, at) => ({
+    date: `${month}-${String(at + 1).padStart(2, "0")}`,
+    amount: 0,
+  }));
+
+/** Stores the organization's time zone: one no admin could save, too. */
+const storeZone = async (timeZone: string | null): Promise<void> => {
+  await env.DB.prepare("UPDATE organizations SET time_zone = ?1")
+    .bind(timeZone)
+    .run();
+};
+
+/** How many days May 2025 has when read at `now`, and the last of them. */
+const lastDayAt = async (now: string) => {
+  const { days } = await monthSpend(env, "2025-05", new Date(now));
+  return [days.length, days.at(-1)];
 };
 
 /** The model each role gets. */
@@ -327,9 +348,9 @@ describe("model settings", { timeout: 60_000 }, () => {
       },
       ...rest,
       days: {
-        length: days.length,
-        sum: micros(days.reduce((sum, each) => sum + each, 0)),
-        spentOn: days.flatMap((each, at) => (each > 0 ? [at + 1] : [])),
+        dates: days.map(({ date }) => date),
+        sum: micros(days.reduce((sum, { amount }) => sum + amount, 0)),
+        spentOn: days.flatMap(({ amount }, at) => (amount > 0 ? [at + 1] : [])),
       },
       chat: micros(chat),
       total: Math.round(spend.total * 1_000_000),
@@ -340,7 +361,7 @@ describe("model settings", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       unspent: {
         month: monthOf(unspent.on),
-        days: Array.from({ length: unspent.on.getUTCDate() }, () => 0),
+        days: unspentTo(monthOf(unspent.on), unspent.on.getUTCDate()),
         total: 0,
       },
       month,
@@ -365,7 +386,7 @@ describe("model settings", { timeout: 60_000 }, () => {
       ],
       more: true,
       days: {
-        length: daysBegun,
+        dates: unspentTo(month, daysBegun).map(({ date }) => date),
         sum: micros(spend.total),
         spentOn: recordedOn,
       },
@@ -379,7 +400,7 @@ describe("model settings", { timeout: 60_000 }, () => {
     ).resolves.toBe("role.forbidden");
   });
 
-  it("count each call on the UTC day it was answered, the days running on to the latest call dated after now, and as chat only people's chat turns", async () => {
+  it("count each call on the day it was answered, UTC days while the organization has no time zone, the days running on to the latest call dated after now, and as chat only people's chat turns", async () => {
     // February of a year that isn't a leap year, 28 days, still to come:
     // no day of it has begun, so the days run to the last one spent on.
     const month = "2300-02";
@@ -438,13 +459,13 @@ describe("model settings", { timeout: 60_000 }, () => {
     const { days, total, chat } = await core.authenticate().models.spend();
 
     expect({
-      days: days.map(micros),
+      days: days.map(({ date, amount }) => [date, micros(amount)]),
       total: micros(total),
       chat: micros(chat),
     }).toStrictEqual({
       days: Array.from({ length: 28 }, (_, at) => {
         const spent: Record<number, number> = { 0: 1000, 13: 8000, 27: 6000 };
-        return spent[at] ?? 0;
+        return [`2300-02-${String(at + 1).padStart(2, "0")}`, spent[at] ?? 0];
       }),
       total: 15_000,
       chat: 11_000,
@@ -481,12 +502,163 @@ describe("model settings", { timeout: 60_000 }, () => {
     const { days, total } = await core.authenticate().models.spend();
 
     expect({
-      days: days.map(micros),
+      days: days.map(({ amount }) => micros(amount)),
+      last: days.at(-1)?.date,
       // Added up from the 1st, as a reader adds them: to the last bit.
-      exact: days.reduce((sum, amount) => sum + amount, 0) === total,
+      exact: days.reduce((sum, { amount }) => sum + amount, 0) === total,
     }).toStrictEqual({
       days: Array.from({ length: 29 }, (_, at) => (at === 2 ? 3001 : 0)),
+      last: "2024-02-29",
       exact: true,
+    });
+  });
+
+  it("count each call on the company's day, in the organization's time zone, the month's first and last days cut at the UTC month's edges and a day the clocks change on 23 or 25 hours long", async () => {
+    /** An organization's call answered `at`, costing `micro` millionths of a dollar. */
+    const call = (at: string, micro: number) => ({
+      id: crypto.randomUUID(),
+      period: at.slice(0, "yyyy-mm".length),
+      personId: "someone",
+      triggerType: "person",
+      model: anthropic,
+      purpose: "chat.turn",
+      credential: "organization",
+      inputTokens: 1000,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      cost: micro / 1_000_000,
+      estimated: false,
+      createdAt: new Date(at),
+    });
+    const calls = [
+      // March 2025 in Amsterdam, an hour ahead of UTC until the clocks go
+      // forward on the 30th, a day of 23 hours, then two ahead.
+      // The month's first instant: 1:00 on the 1st there.
+      call("2025-03-01T00:00:00.000Z", 1),
+      // An evening in UTC, past midnight there: the 11th, not the 10th.
+      call("2025-03-10T22:59:59.999Z", 2),
+      call("2025-03-10T23:30:00.000Z", 4),
+      // The 30th there runs from 23:00 UTC on the 29th to 22:00 on the 30th.
+      call("2025-03-29T22:59:59.999Z", 8),
+      call("2025-03-29T23:00:00.000Z", 16),
+      call("2025-03-30T21:59:59.999Z", 32),
+      call("2025-03-30T22:00:00.000Z", 64),
+      // The month's last two hours are the 1st of April there.
+      call("2025-03-31T21:59:59.999Z", 128),
+      call("2025-03-31T22:00:00.000Z", 256),
+      call("2025-03-31T23:59:59.999Z", 512),
+      // November 2025 in New York, four hours behind UTC until the clocks
+      // go back on the 2nd, a day of 25 hours, then five behind.
+      // The month's first four hours are the 31st of October there.
+      call("2025-11-01T00:00:00.000Z", 1),
+      call("2025-11-01T03:59:59.999Z", 2),
+      call("2025-11-01T04:00:00.000Z", 4),
+      // The 2nd there runs from 4:00 UTC on the 2nd to 5:00 on the 3rd.
+      call("2025-11-02T03:59:59.999Z", 8),
+      call("2025-11-02T04:00:00.000Z", 16),
+      call("2025-11-03T04:59:59.999Z", 32),
+      call("2025-11-03T05:00:00.000Z", 64),
+      // The month's last instant: the evening of the 30th there.
+      call("2025-11-30T23:59:59.999Z", 128),
+    ];
+    // One row a statement: D1 binds at most 100 values.
+    await Promise.all(
+      calls.map(
+        async (row) => await drizzle(env.DB).insert(modelUsage).values(row)
+      )
+    );
+    const { session } = await signedInWithRole(idp, "admin");
+    /** `month`'s days that spent anything, in micros, how many days it has, and whether they add up. */
+    const spentIn = async (month: string) => {
+      const { core } = await openRpc(session, {
+        coreEnv: { ...env, SPEND_MONTH: month },
+      });
+      const { days, total } = await core.authenticate().models.spend();
+      return {
+        days: days.length,
+        first: days.at(0)?.date,
+        last: days.at(-1)?.date,
+        spent: Object.fromEntries(
+          days.flatMap(({ date, amount }) =>
+            amount > 0 ? [[date, micros(amount)]] : []
+          )
+        ),
+        // Added up from the first day, as a reader adds them: to the last bit.
+        exact: days.reduce((sum, { amount }) => sum + amount, 0) === total,
+        total: micros(total),
+      };
+    };
+    const read: Record<string, unknown> = {};
+    try {
+      await storeZone("Europe/Amsterdam");
+      read.amsterdam = await spentIn("2025-03");
+      // A month nothing was spent in, read on an evening in UTC either
+      // side of midnight there, two hours ahead: up to that day there.
+      read.amsterdamToday = [
+        await lastDayAt("2025-05-10T21:59:59.999Z"),
+        await lastDayAt("2025-05-10T22:00:00.000Z"),
+      ];
+      await storeZone("America/New_York");
+      read.newYork = await spentIn("2025-11");
+      // A zone the runtime doesn't know: read in UTC, as the company's day is.
+      await storeZone("Mars/Olympus");
+      read.unknown = await spentIn("2025-03");
+    } finally {
+      // The other tests read the days with no time zone stored.
+      await storeZone(null);
+    }
+
+    expect(read).toStrictEqual({
+      amsterdam: {
+        // The 1st of March to the 1st of April: one more than the month has.
+        days: 32,
+        first: "2025-03-01",
+        last: "2025-04-01",
+        spent: {
+          "2025-03-01": 1,
+          "2025-03-10": 2,
+          "2025-03-11": 4,
+          "2025-03-29": 8,
+          "2025-03-30": 48,
+          "2025-03-31": 192,
+          "2025-04-01": 768,
+        },
+        exact: true,
+        total: 1023,
+      },
+      amsterdamToday: [
+        [10, { date: "2025-05-10", amount: 0 }],
+        [11, { date: "2025-05-11", amount: 0 }],
+      ],
+      newYork: {
+        days: 31,
+        first: "2025-10-31",
+        last: "2025-11-30",
+        spent: {
+          "2025-10-31": 3,
+          "2025-11-01": 12,
+          "2025-11-02": 48,
+          "2025-11-03": 64,
+          "2025-11-30": 128,
+        },
+        exact: true,
+        total: 255,
+      },
+      unknown: {
+        days: 31,
+        first: "2025-03-01",
+        last: "2025-03-31",
+        spent: {
+          "2025-03-01": 1,
+          "2025-03-10": 6,
+          "2025-03-29": 24,
+          "2025-03-30": 96,
+          "2025-03-31": 896,
+        },
+        exact: true,
+        total: 1023,
+      },
     });
   });
 
