@@ -11628,7 +11628,7 @@ msgstr "Suivante"
 #: src/workflows/workflow-rows.tsx
 msgctxt "what starts a workflow next"
 msgid "Next"
-msgstr "Prochaine"
+msgstr "Prochain lancement"
 
 #: src/frame/part-words.tsx
 msgid "Next match"

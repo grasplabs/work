@@ -23,7 +23,7 @@ import { listWorkflows } from "./reads.ts";
  * The phases a workflow stands in, in the order the page reads them: what
  * needs the reader first.
  */
-export const phases = ["needsYou", "running", "building"] as const;
+const phases = ["needsYou", "running", "building"] as const;
 export type Phase = (typeof phases)[number];
 
 /**

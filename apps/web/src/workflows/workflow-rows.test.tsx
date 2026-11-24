@@ -61,6 +61,7 @@ const rows = [
     phase: "building",
     blocked: { kind: "schedule", why: "refused" },
   }),
+  row("Payroll", {}),
 ];
 
 const triggers: TriggersByWorkflow = new Map([
@@ -89,6 +90,23 @@ const triggers: TriggersByWorkflow = new Map([
     [{ kind: "email", address: null, nextAt: null, blocked: "waiting" }],
   ],
   ["wf-ledger", []],
+  [
+    "wf-payroll",
+    [
+      {
+        kind: "schedule",
+        address: null,
+        nextAt: "2031-03-03T08:00:00.000Z",
+        blocked: null,
+      },
+      {
+        kind: "schedule",
+        address: null,
+        nextAt: "2030-02-04T08:00:00.000Z",
+        blocked: null,
+      },
+    ],
+  ],
 ]);
 
 let root: Root | undefined;
@@ -180,6 +198,7 @@ describe("the Workflows page's table", () => {
       "Not live yet",
       "On, not used yet",
       "Its trigger can't start it",
+      "On",
     ]);
   });
 
@@ -210,6 +229,7 @@ describe("the Workflows page's table", () => {
       "",
       "By hand",
       "",
+      expect.stringMatching(/2030.*, and 1 more$/u),
     ]);
   });
 
