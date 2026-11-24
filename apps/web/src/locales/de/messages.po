@@ -7188,10 +7188,6 @@ msgstr "In Ihren eigenen Worten, wie Sie es einer Kollegin oder einem Kollegen s
 msgid "Inbox"
 msgstr "Posteingang"
 
-#: src/workflows/figures.tsx
-msgid "Independent workflows aren't counted here."
-msgstr "Eigenständige Workflows werden hier nicht mitgezählt."
-
 #: src/apps/indexes-view.tsx
 msgid "Indexes"
 msgstr "Indizes"
@@ -13883,7 +13879,7 @@ msgstr "Diesen Wert nimmt dieser Parameter nicht an."
 
 #: src/workflows/run-detail.tsx
 msgid "That run wasn't found, or isn't yours to see."
-msgstr "Dieser Lauf wurde nicht gefunden oder ist nicht für dich sichtbar."
+msgstr "Dieser Lauf wurde nicht gefunden oder ist für Sie nicht sichtbar."
 
 #: src/sign-in-errors.ts
 msgid "That staff account hasn't been given access here."

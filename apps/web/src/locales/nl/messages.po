@@ -7188,10 +7188,6 @@ msgstr "In je eigen woorden, zoals je het een collega zou vertellen."
 msgid "Inbox"
 msgstr "Inbox"
 
-#: src/workflows/figures.tsx
-msgid "Independent workflows aren't counted here."
-msgstr "Losse workflows worden hier niet meegeteld."
-
 #: src/apps/indexes-view.tsx
 msgid "Indexes"
 msgstr "Indexen"

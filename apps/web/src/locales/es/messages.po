@@ -7188,10 +7188,6 @@ msgstr "Con tus propias palabras, como se lo dirías a un compañero."
 msgid "Inbox"
 msgstr "Bandeja de entrada"
 
-#: src/workflows/figures.tsx
-msgid "Independent workflows aren't counted here."
-msgstr "Los flujos de trabajo independientes no se cuentan aquí."
-
 #: src/apps/indexes-view.tsx
 msgid "Indexes"
 msgstr "Índices"

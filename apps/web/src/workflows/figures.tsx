@@ -1,10 +1,7 @@
 import { runActivityDefaultDays } from "@grasp-os/shared/workflows";
 import { StatGroup } from "@grasp-os/ui/components/stat";
-import { Text } from "@grasp-os/ui/components/text";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
 
 import { formatNumber, formatPercent } from "../format.ts";
 import type { RunFigures } from "./run-figures.ts";
@@ -17,10 +14,6 @@ import type { RunFigures } from "./run-figures.ts";
 /** Which runs the figures count: every workflow's, or one's. */
 type Scope = "all" | "workflow";
 
-const styles = stylex.create({
-  figures: { display: "grid", gap: space["2"] },
-});
-
 export const RunFiguresView = ({
   figures,
   scope,
@@ -32,43 +25,35 @@ export const RunFiguresView = ({
   const days = runActivityDefaultDays;
   const { runs, alone, waiting } = figures;
   return (
-    <div {...stylex.props(styles.figures)}>
-      <StatGroup
-        aria-label={t`The runs, in figures`}
-        columns={3}
-        items={[
-          {
-            label: t`${plural(days, {
-              one: "runs started today",
-              other: "runs started in the last # days",
-            })}`,
-            value: formatNumber(runs),
-          },
-          {
-            label:
-              scope === "all"
-                ? t`without a person`
-                : t`completed without a person`,
-            value: alone === null ? "–" : formatPercent(alone),
-          },
-          {
-            label:
-              scope === "all"
-                ? t`of them wait for a decision`
-                : t`wait for a decision now`,
-            value: formatNumber(waiting),
-            ...(waiting > 0
-              ? { change: t`Needs someone`, variant: "warning" as const }
-              : {}),
-          },
-        ]}
-      />
-      {/* What core counts: the Apps' workflows, never independent ones. */}
-      {scope === "all" ? (
-        <Text color="muted" size="sm">
-          {t`Independent workflows aren't counted here.`}
-        </Text>
-      ) : null}
-    </div>
+    <StatGroup
+      aria-label={t`The runs, in figures`}
+      columns={3}
+      items={[
+        {
+          label: t`${plural(days, {
+            one: "runs started today",
+            other: "runs started in the last # days",
+          })}`,
+          value: formatNumber(runs),
+        },
+        {
+          label:
+            scope === "all"
+              ? t`without a person`
+              : t`completed without a person`,
+          value: alone === null ? "–" : formatPercent(alone),
+        },
+        {
+          label:
+            scope === "all"
+              ? t`of them wait for a decision`
+              : t`wait for a decision now`,
+          value: formatNumber(waiting),
+          ...(waiting > 0
+            ? { change: t`Needs someone`, variant: "warning" as const }
+            : {}),
+        },
+      ]}
+    />
   );
 };
