@@ -8,7 +8,7 @@ export const ConceptSetup = ({
   ...props
 }: ConceptProps & { concept: Concept }) => {
   if (concept === "a") {
-    const { footOnlyBack: _foot, ...rest } = props;
+    const { foot: _foot, ...rest } = props;
     return <ChatConcept {...rest} />;
   }
   return <StepsConcept {...props} speaks={concept === "c"} />;

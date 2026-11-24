@@ -49,6 +49,7 @@ import { AiChoice } from "./ai-choice.tsx";
 import type { ConceptProps, ConceptStep } from "./concept-props.ts";
 import { ConceptFrame } from "./frame.tsx";
 import { LanguageCards } from "./language-cards.tsx";
+import type { CardLook } from "./language-cards.tsx";
 import { CampaignTimeline } from "./plan.tsx";
 import { SoundToggle } from "./sound-toggle.tsx";
 import { interviewer, StephenFigure } from "./stephen.tsx";
@@ -287,7 +288,8 @@ interface Standing {
 const useOpeningTurns = (
   { step, at, said, language, ai, ready, whose }: Standing,
   admin: string,
-  answers: Answers
+  answers: Answers,
+  look: CardLook
 ): Turn[] => {
   const { t } = useLingui();
   const aiAnswer = useAiAnswer(ai);
@@ -308,6 +310,7 @@ const useOpeningTurns = (
         more: (
           <LanguageCards
             chosen={null}
+            look={look}
             onPick={(code) => {
               answers.onLanguage(code);
             }}
@@ -404,7 +407,8 @@ export const ChatConcept = ({
   today,
   go,
   onward,
-}: Omit<ConceptProps, "footOnlyBack">) => {
+  cards,
+}: Omit<ConceptProps, "foot">) => {
   const { t, i18n } = useLingui();
   const [said, setSaid] = useState(readSaid);
   const replies = useReplies();
@@ -458,7 +462,8 @@ export const ChatConcept = ({
       onKeyReady: () => {
         go("about");
       },
-    }
+    },
+    cards
   );
   const plan = usePlanTurns(said, today);
   const turns = at >= 2 ? [...opening, ...plan] : opening;
