@@ -24,7 +24,18 @@ const sent = async (): Promise<void> => {
   await Promise.resolve();
 };
 
-/** The ask's words: a short title and one sentence. */
+/** The ask's words: a short title and one sentence; `line` says both at once. */
+export const askLine = (ask: Ask, done: boolean): string => {
+  if (ask.kind === "quiet") {
+    return done
+      ? `Done: ${ask.team} got a nudge from you.`
+      : `${ask.team} is quiet, with ${ask.waiting} still to talk. A nudge from you usually helps.`;
+  }
+  return done
+    ? "The invitation went out again."
+    : `The invitation to ${ask.address} bounced.`;
+};
+
 export const askWords = (
   ask: Ask,
   done: boolean
