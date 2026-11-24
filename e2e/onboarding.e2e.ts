@@ -44,6 +44,12 @@ test.describe.configure({ mode: "serial" });
 /** Today, as core's plan reads it (UTC). */
 const today = (): string => new Date().toISOString().slice(0, 10);
 
+/** A day as the page writes it in English ("11/24/2026"), as core's plan has it ("2026-11-24"). */
+const isoOf = (shown: string): string => {
+  const [month, day, year] = shown.split("/");
+  return `${year}-${month}-${day}`;
+};
+
 const dayMs = 24 * 60 * 60 * 1000;
 
 /** The day `days` from today, as core's plan reads it (UTC). */
@@ -404,8 +410,12 @@ test("the company's admin goes through their onboarding: the staff list, the org
   await installReadingClock(page);
   await page.goto("/setup?step=welcome");
 
+  // Focus is on the step's title, so a screen reader starts there: on the
+  // title's own box until Damsko's Heading takes focus itself (damsko#53).
   await expect(
-    page.getByRole("heading", { level: 1, name: /, I’m Stephen$/u })
+    page
+      .getByRole("heading", { level: 1, name: /, I’m Stephen$/u })
+      .locator("xpath=..")
   ).toBeFocused();
   await page.getByRole("button", { name: "English" }).click();
   await page.getByRole("button", { name: "Let’s start" }).click();
@@ -502,16 +512,18 @@ test("the company's admin goes through their onboarding: the staff list, the org
     })
   ).toBeVisible();
   await page.getByRole("button", { name: "The day after" }).click();
-  const start = await page.getByLabel("Another day").inputValue();
+  const start = isoOf(await page.getByLabel("Another day").inputValue());
   // Only the teams that take part are there to hold back.
   await expect(page.getByRole("checkbox", { name: /^Legal/u })).toHaveCount(0);
   await page.getByRole("checkbox", { name: /^Ops/u }).click();
   await page.getByRole("button", { name: "On a later day" }).click();
-  const later = await page
-    .getByLabel("The day the other teams get their links")
-    .inputValue();
+  const later = isoOf(
+    await page
+      .getByLabel("The day the other teams get their links")
+      .inputValue()
+  );
   const next = page
-    .getByRole("alert")
+    .getByRole("status")
     .filter({ hasText: "What happens next" })
     .getByText(/^The lead of 1 team gets their link /u);
   await expect(next).toBeVisible();
@@ -709,8 +721,9 @@ test("while Stephen talks to the team, the admin sees the numbers, no team under
   });
   await page.goto("/setup?step=listening");
   await expect(page.getByText("Day 7 of 14")).toBeVisible();
+  // Each figure is a Damsko Stat: plain HTML, found by its part's name.
   const figure = (label: string) =>
-    page.locator("div.rounded-xl").filter({ hasText: label });
+    page.locator('[data-slot="stat"]').filter({ hasText: label });
   await expect(figure("team leads talked")).toContainText("2 of 3");
   await expect(figure("colleagues talked")).toContainText("5");
   await expect(
@@ -719,12 +732,13 @@ test("while Stephen talks to the team, the admin sees the numbers, no team under
     )
   ).toBeVisible();
 
-  // Team by team: numbers for Sales, too few for Service, none for Ops.
+  // Team by team: numbers for Sales, too few for Service, none for Ops,
+  // each row its name and count, then whether its lead talked.
   await page.getByRole("button", { name: "By team" }).click();
   const panel = page.getByRole("dialog");
   await expect(panel).toContainText(/Sales\D*5 of 6/u);
-  await expect(panel).toContainText("ServiceLead not yetFewer than 3 of 5");
-  await expect(panel).toContainText("OpsLead talkedUnder 5");
+  await expect(panel).toContainText("ServiceFewer than 3 of 5Lead not yet");
+  await expect(panel).toContainText("OpsUnder 5Lead talked");
   await page.keyboard.press("Escape");
 
   // Everyone's link is out by now: Lea's and the others' after three working days.

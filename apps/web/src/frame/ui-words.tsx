@@ -37,9 +37,55 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       loading: t`Working`,
       success: t`Done`,
     },
+    alertDialog: {
+      cancel: t`Cancel`,
+    },
+    breadcrumb: {
+      ellipsis: t`Show hidden levels`,
+      name: t`Breadcrumb`,
+    },
+    calendar: {
+      next: t`Next month`,
+      previous: t`Previous month`,
+    },
+    datePicker: {
+      last30: t`Last 30 days`,
+      last7: t`Last 7 days`,
+      presets: t`Presets`,
+      rangeEnd: (field) => t`${field}, end`,
+      rangeStart: (field) => t`${field}, start`,
+      rangeTrigger: t`Choose dates`,
+      select: t`Choose date`,
+      triggerWith: (trigger, chosen) => t`${trigger}, ${chosen}`,
+      thisMonth: t`This month`,
+      today: t`Today`,
+    },
+    dialog: {
+      close: t`Close`,
+    },
+    input: {
+      hidePassword: t`Hide password`,
+      replace: t({ message: "Replace", context: "a secret key, typed again" }),
+      showPassword: t`Show password`,
+    },
+    stepper: {
+      count: (step, total) => t`Step ${step} of ${total}`,
+      current: (step, total, label) => t`Step ${step} of ${total}: ${label}`,
+      finished: t`All steps done`,
+      navBack: t`Back`,
+      navNext: t`Next`,
+      states: {
+        complete: t`done`,
+        active: t`current step`,
+        pending: t`not started`,
+        error: t`failed`,
+      },
+    },
+    switch: {
+      error: t`Could not save`,
+    },
     // The parts the Apps pages use (apps/), from here on.
     alert: { close: t`Dismiss` },
-    alertDialog: { cancel: t`Cancel` },
     avatar: {
       groupCount: (count) => t`+${count}`,
       // The names shown and how many more, joined as the language joins a list.
@@ -193,7 +239,6 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
         other: t({ message: "rows", context: "a table's rows, counted" }),
       },
     },
-    dialog: { close: t`Close` },
     dropdownMenu: { expand: t`More actions` },
     empty: { error: t`This did not load` },
     field: {
@@ -201,11 +246,6 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       statusLoading: t`Saving`,
       statusRetry: t`Try again`,
       statusSuccess: t`Saved`,
-    },
-    input: {
-      hidePassword: t`Hide password`,
-      replace: t({ message: "Replace", context: "a secret key, typed again" }),
-      showPassword: t`Show password`,
     },
     keyValue: {
       copy: (label) => {
