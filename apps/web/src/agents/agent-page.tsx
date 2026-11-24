@@ -56,6 +56,7 @@ import { useId, useState } from "react";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
+import { pageText } from "../frame/page-text.ts";
 import { Page } from "../frame/page.tsx";
 import { InstructionFileEditor } from "../settings/instruction-file.tsx";
 import {
@@ -77,7 +78,6 @@ import { AgentLook } from "./agent-look.tsx";
 import { AgentOverview } from "./agent-overview.tsx";
 import { ShareAgent } from "./agent-share.tsx";
 import { AgentWakes } from "./agent-wakes.tsx";
-import { pageText } from "./page-text.ts";
 import { SectionCard } from "./section-card.tsx";
 import { SettingRow } from "./setting-row.tsx";
 import type { AgentTab } from "./tabs.tsx";

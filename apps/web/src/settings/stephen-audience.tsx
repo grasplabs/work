@@ -55,7 +55,9 @@ const styles = stylex.create({
     flexDirection: "column",
     gap: space["2"],
     minWidth: 0,
-    width: "100%",
+    // Its own width in a narrow row, beside the setting's name: the old
+    // setting row held its control in a box of the control's width.
+    maxWidth: "100%",
   },
   fill: { width: "100%" },
   teams: {

@@ -30,13 +30,13 @@ import type { ReactNode } from "react";
 
 import { modelName } from "../chat/composer.tsx";
 import { formatDollars } from "../format.ts";
+import { pageText } from "../frame/page-text.ts";
 import { Page } from "../frame/page.tsx";
 import { AgentCard, agentCardStyles } from "./agent-card.tsx";
 import type { AgentCardFact } from "./agent-card.tsx";
 import { nextWakeAt, useAudienceLine, wakesOn } from "./agent-facts.tsx";
 import { OfferedAgents } from "./agent-share.tsx";
 import { lookOf } from "./figure/look.ts";
-import { pageText } from "./page-text.ts";
 import { AgentTabList, agentsTabOf } from "./tabs.tsx";
 import type { AgentsTab } from "./tabs.tsx";
 

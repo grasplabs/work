@@ -52,6 +52,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { pageText } from "../frame/page-text.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { SeparatedItems } from "../workflows/separated-items.tsx";
 import { briefOf, instructionsOf } from "./agent-brief.ts";
@@ -63,7 +64,6 @@ import type { FigureShape as AgentFigureShape } from "./figure/body.ts";
 import { faceOf, lookFromName } from "./figure/look.ts";
 import { agentFigurePalettes } from "./figure/palettes.ts";
 import type { AgentFigureLook, AgentFigurePalette } from "./figure/palettes.ts";
-import { pageText } from "./page-text.ts";
 import { saveFirstInstructions } from "./unsaved-instructions.ts";
 
 /** The shapes the shape question offers: the library's lit bodies a person can tell apart. */
