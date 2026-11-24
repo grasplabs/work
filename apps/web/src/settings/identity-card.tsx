@@ -71,7 +71,7 @@ const styles = stylex.create({
     inset: 0,
     insetInlineEnd: { default: "-60%", [NARROW]: 0 },
     pointerEvents: "none",
-    opacity: size.pageHeaderDitherStrength,
+    opacity: size.textureStrength,
     backgroundImage: {
       default: `radial-gradient(120% 90% at 0% 0%, ${colors.mint}, transparent 70%)`,
       ":dir(rtl)": `radial-gradient(120% 90% at 100% 0%, ${colors.mint}, transparent 70%)`,
