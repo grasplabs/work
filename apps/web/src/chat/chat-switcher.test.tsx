@@ -11,7 +11,7 @@ import {
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vite-plus/test";
 
 import { ChatSwitcherProvider } from "./chat-switcher.tsx";
 
@@ -44,15 +44,19 @@ const travel = chat("travel", "Trip to Lyon");
 
 /**
  * A page in the frame, with nothing of the chats on it, whose core lists
- * `listed` and finds `found` for any search.
+ * `listed` (or, archived, `archived`) and finds `found` for any search.
  */
 const shown = async (
   found: (query: string) => Promise<ChatSearchHit[]>,
-  listed: ChatSummary[] = [board, lease, travel]
+  listed: ChatSummary[] = [board, lease, travel],
+  archived: () => Promise<ChatSummary[]> = async () => await Promise.resolve([])
 ) => {
   const asked: string[] = [];
   const chats = {
-    list: async () => await Promise.resolve(listed),
+    list: async (which?: { archived?: boolean }) =>
+      which?.archived === true
+        ? await archived()
+        : await Promise.resolve(listed),
     search: async (query: string) => {
       asked.push(query);
       return await found(query);
@@ -93,19 +97,47 @@ const dialog = (): HTMLElement | null =>
 
 /**
  * The chats the window lists, each as its title and any line found under
- * it; when it was used left out.
+ * it, under the day they were used; when it was, left out, and the
+ * window's own rows ("New chat", "Archived") too.
  */
 const rows = (): string[] =>
-  [...(dialog()?.querySelectorAll("[cmdk-item]") ?? [])].map((row) => {
-    const read = row.cloneNode(true);
-    if (!(read instanceof HTMLElement)) {
-      return "";
+  [...(dialog()?.querySelectorAll('[role="group"] [role="option"]') ?? [])].map(
+    (row) => {
+      const read = row.cloneNode(true);
+      if (!(read instanceof HTMLElement)) {
+        return "";
+      }
+      for (const time of read.querySelectorAll("time")) {
+        time.remove();
+      }
+      return (read.textContent ?? "").trim();
     }
-    for (const time of read.querySelectorAll("time")) {
-      time.remove();
-    }
-    return (read.textContent ?? "").trim();
+  );
+
+/** Chooses the window's row `value` ("archived", "back", a chat's ID), as a click would. */
+const choose = async (value: string): Promise<void> => {
+  const row = dialog()?.querySelector<HTMLElement>(
+    `[data-command-value="${value}"]`
+  );
+  if (row === null || row === undefined) {
+    throw new Error(`The window has no row ${value}`);
+  }
+  await act(async () => {
+    row.click();
+    await Promise.resolve();
   });
+};
+
+/** Lets what was started settle: core's answers, and what they set. */
+const settled = async (): Promise<void> => {
+  await act(async () => {
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    setTimeout(() => {
+      resolve(true);
+    }, 0);
+    await promise;
+  });
+};
 
 const press = async (init: KeyboardEventInit): Promise<void> => {
   await act(async () => {
@@ -130,7 +162,7 @@ const openWindow = async (keys: KeyboardEventInit): Promise<void> => {
 
 /** Types `text` into the window's search, as a person would. */
 const type = async (text: string): Promise<void> => {
-  const input = dialog()?.querySelector<HTMLInputElement>("[cmdk-input]");
+  const input = dialog()?.querySelector<HTMLInputElement>('[role="combobox"]');
   if (input === undefined || input === null) {
     throw new Error("The window has no search");
   }
@@ -146,7 +178,16 @@ const type = async (text: string): Promise<void> => {
   });
 };
 
+/** How long the window's code may take to load, built the first time. */
+const loadMs = 30_000;
+
 describe("the chats window", () => {
+  // The window's code loads the first time it opens: loaded once here, so
+  // no test waits on it being built.
+  beforeAll(async () => {
+    await import("./chat-window.tsx");
+  }, loadMs);
+
   afterEach(() => {
     act(() => {
       root?.unmount();
@@ -201,6 +242,110 @@ describe("the chats window", () => {
     await type("office");
     await vi.waitFor(() => {
       expect(rows()).toStrictEqual(["Office lease 2027"]);
+    });
+  });
+
+  it("lists the archived chats alone, never the rest's rows meanwhile, and drops a list that comes late", async () => {
+    const late = Promise.withResolvers<ChatSummary[]>();
+    const old = { ...chat("old", "Old budget"), archived: true };
+    await shown(
+      async () => await Promise.resolve([]),
+      [board, lease, travel],
+      async () => await late.promise
+    );
+    await openWindow({ key: "k", metaKey: true });
+
+    await choose("archived");
+    const whileArchivedRead = rows();
+    await choose("back");
+    await vi.waitFor(() => {
+      expect(rows()).toHaveLength(3);
+    });
+    await act(async () => {
+      late.resolve([old]);
+      await late.promise;
+    });
+    await settled();
+
+    expect({ whileArchivedRead, back: rows() }).toStrictEqual({
+      whileArchivedRead: [],
+      back: ["Board report", "Lease of the office", "Trip to Lyon"],
+    });
+  });
+
+  it("counts the archived chats in the search's name only once their list has come", async () => {
+    const later = Promise.withResolvers<ChatSummary[]>();
+    const old = { ...chat("old", "Old budget"), archived: true };
+    await shown(
+      async () => await Promise.resolve([]),
+      [board, lease, travel],
+      async () => await later.promise
+    );
+    await openWindow({ key: "k", metaKey: true });
+    const search = () =>
+      dialog()?.querySelector('[role="combobox"]')?.getAttribute("aria-label");
+
+    await choose("archived");
+    const whileRead = search();
+    await act(async () => {
+      later.resolve([old]);
+      await later.promise;
+    });
+    await settled();
+
+    expect({ whileRead, read: search() }).toStrictEqual({
+      whileRead: "Archived chats",
+      read: "1 archived chat",
+    });
+  });
+
+  it("comes back from renaming an archived chat on the archived chats", async () => {
+    const old = { ...chat("old", "Old budget"), archived: true };
+    await shown(
+      async () => await Promise.resolve([]),
+      [board, lease, travel],
+      async () => await Promise.resolve([old])
+    );
+    await openWindow({ key: "k", metaKey: true });
+    await choose("archived");
+    await vi.waitFor(() => {
+      expect(rows()).toStrictEqual(["Old budget"]);
+    });
+
+    await act(async () => {
+      dialog()
+        ?.querySelector<HTMLElement>('button[aria-label="More for Old budget"]')
+        ?.click();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(
+        document.querySelector('[role="menuitem"]')?.textContent
+      ).toContain("Rename");
+    });
+    await act(async () => {
+      document.querySelector<HTMLElement>('[role="menuitem"]')?.click();
+      await Promise.resolve();
+    });
+    const renaming = await vi.waitFor(() => {
+      const found = document.querySelector<HTMLElement>(
+        '[role="dialog"][aria-labelledby]'
+      );
+      expect(found?.textContent).toContain("Rename chat");
+      return found;
+    });
+    await act(async () => {
+      [...(renaming?.querySelectorAll("button") ?? [])]
+        .find((button) => button.textContent === "Cancel")
+        ?.click();
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => {
+      expect({
+        renaming: document.body.textContent.includes("Rename chat"),
+        rows: rows(),
+      }).toStrictEqual({ renaming: false, rows: ["Old budget"] });
     });
   });
 

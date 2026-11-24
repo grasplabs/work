@@ -2,7 +2,6 @@
 
 import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
 import { Toaster } from "@grasp-os/app-kit/components/toast";
-import { typeInPrompt } from "@grasp-os/app-kit/testing";
 import type { AppReview } from "@grasp-os/shared/app-review";
 import type { App, ViewedApp } from "@grasp-os/shared/apps";
 import type {
@@ -46,6 +45,7 @@ import { activeChat, setActiveChat } from "../chat/active-chat.ts";
 import { ChatPanel } from "../chat/chat-panel.tsx";
 import { slotOf } from "../chat/chat-subject.ts";
 import { GlobalChatProvider } from "../chat/global-chat.tsx";
+import { typeInPrompt } from "../chat/test-typing.ts";
 import { socketsTo } from "../pages/test-socket.ts";
 import { OpenedApp } from "./app-page.tsx";
 import { AppWorkspace } from "./app-workspace.tsx";
@@ -574,9 +574,10 @@ const off = (element: HTMLElement): boolean =>
   element.hasAttribute("disabled");
 
 /** What the box to ask in says while it is empty. */
-const placeholder = (): string | undefined =>
-  document.querySelector<HTMLElement>('[role="textbox"] p')?.dataset
-    .placeholder;
+const placeholder = (): string | null | undefined =>
+  document
+    .querySelector<HTMLElement>('[role="textbox"]')
+    ?.getAttribute("aria-placeholder");
 
 /** The line under the bar of changes only the builders see, if shown. */
 const changesLine = (): HTMLElement | null =>
@@ -1088,7 +1089,7 @@ describe(AppWorkspace, () => {
     );
     await settled();
     const bar = document.querySelector(
-      '[data-slot="prompt-input-subject-bar"]'
+      '[data-slot="prompt-input-header"]'
     )?.textContent;
     await typeAndSend("Add a due date column");
     await typeAndSend("What's a good name for it?");

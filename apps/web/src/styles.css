@@ -49,80 +49,6 @@
   }
 }
 
-/*
- * From the prototype (packages/grasp/src/index.css), the chat's own motion.
- */
-/*
- * Grasp's line while it reads, before the answer starts: a light that runs
- * through the words (the prototype's Shimmer, without a script).
- */
-@keyframes shimmer-run {
-  from {
-    background-position: 100% center;
-  }
-  to {
-    background-position: 0% center;
-  }
-}
-@utility shimmer-text {
-  background-image:
-    linear-gradient(
-      90deg,
-      transparent calc(50% - 2.5rem),
-      var(--color-background),
-      transparent calc(50% + 2.5rem)
-    ),
-    linear-gradient(
-      var(--color-muted-foreground),
-      var(--color-muted-foreground)
-    );
-  background-size:
-    250% 100%,
-    auto;
-  background-repeat: no-repeat, padding-box;
-  background-clip: text;
-  color: transparent;
-  animation: shimmer-run 2s linear infinite;
-  @media (prefers-reduced-motion: reduce) {
-    animation: none;
-  }
-}
-
-/* A document added to the chat: a thin line fills once under it. */
-@keyframes upload-fill {
-  from {
-    transform: scaleX(0);
-  }
-  to {
-    transform: scaleX(1);
-  }
-}
-@utility animate-upload-fill {
-  transform-origin: left;
-  animation: upload-fill 300ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
-}
-
-/* A document Grasp is reading: a soft light sweeps across it until the answer starts. */
-@keyframes read-sweep {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(100%);
-  }
-}
-@utility animate-read-sweep {
-  animation: read-sweep 1.6s ease-in-out infinite;
-}
-@utility read-light {
-  background-image: linear-gradient(
-    90deg,
-    transparent,
-    color-mix(in oklch, var(--foreground) 8%, transparent),
-    transparent
-  );
-}
-
 /**
  * The page an export prints as a PDF (export/export-file.tsx): A4 with the
  * prototype's margins, its colours printed as they are.
@@ -977,62 +903,6 @@
 }
 
 /*
- * Code in the agent's answers (chat/answer-markdown.tsx), highlighted by
- * class (rehype-highlight): coloured from the theme's tokens, so it follows
- * light and dark, and set without any inline style (the `no-inline-styles`
- * lint rule).
- */
-@layer components {
-  .hljs-comment,
-  .hljs-quote {
-    color: var(--muted-foreground);
-    font-style: italic;
-  }
-
-  .hljs-keyword,
-  .hljs-selector-tag,
-  .hljs-built_in,
-  .hljs-doctag {
-    color: var(--syntax-keyword);
-  }
-
-  .hljs-string,
-  .hljs-regexp,
-  .hljs-symbol {
-    color: var(--syntax-string);
-  }
-
-  .hljs-number,
-  .hljs-literal,
-  .hljs-variable.constant_ {
-    color: var(--syntax-constant);
-  }
-
-  .hljs-title,
-  .hljs-type,
-  .hljs-section,
-  .hljs-attr,
-  .hljs-attribute,
-  .hljs-name,
-  .hljs-property {
-    color: var(--syntax-function);
-  }
-
-  .hljs-addition {
-    color: var(--status-agreed);
-  }
-
-  .hljs-deletion {
-    color: var(--destructive);
-  }
-
-  .hljs-meta,
-  .hljs-punctuation {
-    color: var(--muted-foreground);
-  }
-}
-
-/*
  * An App's Code view (apps/code-view.tsx): @pierre/diffs draws each
  * file and diff in a shadow root, coloured by its custom properties, which
  * reach in from here. Its theme ("grasp", a theme of CSS variables) names
@@ -1072,26 +942,5 @@
 
   .dark diffs-container {
     color-scheme: dark;
-  }
-}
-
-/*
- * A beat's thread in the small picture of Grasp's thinking in an answer
- * (chat/thinking-card.tsx): it grows from the one before to the one the
- * beat names.
- */
-@keyframes draw-thread {
-  from {
-    stroke-dashoffset: 1;
-  }
-  to {
-    stroke-dashoffset: 0;
-  }
-}
-
-@utility draw-thread {
-  animation: draw-thread 300ms ease-out both;
-  @media (prefers-reduced-motion: reduce) {
-    animation: none;
   }
 }
