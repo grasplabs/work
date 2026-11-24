@@ -52,10 +52,10 @@ import type { ReactNode } from "react";
 
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { setActiveChat, useActiveChat } from "./active-chat.ts";
+import { useActiveChat } from "./active-chat.ts";
 import { groupChats, whenShort } from "./chat-history.ts";
 import type { ChatPeriod } from "./chat-history.ts";
-import { useOpenChat } from "./chat-presence.ts";
+import { useGoToChat } from "./chat-link.ts";
 import { DeleteChatDialog } from "./delete-chat-dialog.tsx";
 import { FailureLine } from "./failure-line.tsx";
 
@@ -611,19 +611,6 @@ const useChatItems = ({
   };
 };
 
-/**
- * Opens chat `chatId`, or a new one, in Grasp's chat (global-chat.tsx),
- * where this page allows it (chat-presence.ts), so the person stays where
- * they are.
- */
-export const useSelectChat = () => {
-  const openHere = useOpenChat();
-  return (chatId?: string): void => {
-    setActiveChat(chatId);
-    openHere();
-  };
-};
-
 /** How many frames the window may take to list a chat it comes back to. */
 const rowWaitFrames = 120;
 
@@ -683,18 +670,19 @@ export const ChatWindow = ({
   onOpenChange: (open: boolean) => void;
 }) => {
   const { t } = useLingui();
-  const selectChat = useSelectChat();
+  // A chat opens on its own page, a new one on Chat's start (chat-link.ts).
+  const goToChat = useGoToChat();
   // The chat a Rename dialog was for, while the window comes back to it.
   const [backTo, setBackTo] = useState<string>();
   const { command, empty, failure, dialogs, label } = useChatItems({
     shown: open,
     onNew: () => {
       onOpenChange(false);
-      selectChat();
+      goToChat();
     },
     onOpen: (chatId) => {
       onOpenChange(false);
-      selectChat(chatId);
+      goToChat(chatId);
     },
     onDialog: () => {
       onOpenChange(false);

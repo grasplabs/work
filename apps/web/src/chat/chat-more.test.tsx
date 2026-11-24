@@ -15,13 +15,14 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { PanelTitle } from "../frame/panels/head.tsx";
 import { activeChat, setActiveChat } from "./active-chat.ts";
-import { ChatTitleMenu } from "./chat-more.tsx";
+import { ChatMoreMenu, useRenameChat } from "./chat-more.tsx";
 
-// The open chat's title and its menu at the head of the chat, against
-// core's chats as the page reaches them over RPC, faked: it copies the chat
-// as the thread shows it, renames it where it stands, and deletes it only
-// once the person confirms, leaving it for a new chat.
+// The open chat's name at the head of its panel and its menu, against
+// core's chats as the page reaches them over RPC, faked: the menu copies
+// the chat as the thread shows it and deletes it only once the person
+// confirms, leaving it for a new chat; the name renames it where it stands.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -72,6 +73,12 @@ const settled = async (): Promise<void> => {
     }, 0);
     await promise;
   });
+};
+
+/** The chat's name, renamed where it stands, as the chat panel's head draws it. */
+const Title = ({ of }: { of: ChatSummary }) => {
+  const rename = useRenameChat(of.id);
+  return <PanelTitle onRename={rename}>{of.title}</PanelTitle>;
 };
 
 /**
@@ -125,7 +132,14 @@ const opened = async (
     const shown = all.find(({ id }) => id === open) ?? chat;
     // Its own for each chat, as the chat's head keys it.
     return (
-      <ChatTitleMenu chat={shown} key={shown.id} sourceNames={new Map()} />
+      <>
+        <Title key={`title-${shown.id}`} of={shown} />
+        <ChatMoreMenu
+          chat={shown}
+          key={`menu-${shown.id}`}
+          sourceNames={new Map()}
+        />
+      </>
     );
   };
   const rootRoute = createRootRoute({
@@ -189,19 +203,16 @@ const openMenu = async (): Promise<void> => {
   await press(trigger);
 };
 
-/** Chooses the item `name` from the menu, through the submenu `under`. */
-const choose = async (name: string, under?: string): Promise<void> => {
+/** Chooses the item `name` from the menu. */
+const choose = async (name: string): Promise<void> => {
   await openMenu();
-  if (under !== undefined) {
-    await press(byRole("menuitem", under));
-  }
   await press(byRole("menuitem", name));
 };
 
-/** The chat's title, a click away from renaming it. */
+/** The chat's name, F2 away from renaming it. */
 const titleButton = (): HTMLElement => {
   const found = document.querySelector<HTMLElement>(
-    '[data-slot="inline-edit"] > button'
+    '[data-slot="app-shell-panel-title"]'
   );
   if (found === null) {
     throw new Error("No title");
@@ -209,10 +220,32 @@ const titleButton = (): HTMLElement => {
   return found;
 };
 
+/** Opens the rename where the name stands, as F2 on it does. */
+const startRename = async (): Promise<void> => {
+  await act(async () => {
+    titleButton().dispatchEvent(
+      new KeyboardEvent("keydown", { key: "F2", bubbles: true })
+    );
+    await Promise.resolve();
+  });
+  await settled();
+};
+
+/** The rename's button `name`. */
+const renameButton = (name: string): HTMLButtonElement => {
+  const found = [
+    ...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'),
+  ].find((button) => button.textContent?.trim() === name);
+  if (found === undefined) {
+    throw new Error(`No button ${name} in the rename`);
+  }
+  return found;
+};
+
 /** The field the chat's new name is typed in. */
 const nameField = (): HTMLInputElement => {
   const found = document.querySelector<HTMLInputElement>(
-    'input[aria-label="Chat name"]'
+    'input[aria-label="Name"]'
   );
   if (found === null) {
     throw new Error("No name field");
@@ -273,41 +306,28 @@ describe("the open chat's menu", () => {
     });
     await opened(leave);
     await choose("Copy as Markdown");
+    await settled();
     expect(copied).toHaveLength(1);
     expect(copied[0]).toMatch(/^# Leave/u);
     expect(copied[0]).toContain(question);
     expect(copied[0]).toContain(answer);
-    expect(byRole("menuitem", "Copied")).toBeDefined();
   });
 
-  it("renames the chat where its title stands, to the name typed", async () => {
+  it("renames the chat where its name stands, to the name typed", async () => {
     const { writes } = await opened(leave);
-    await press(titleButton());
+    await startRename();
     const field = nameField();
     expect(field.value).toBe("Leave");
     await typeInto(field, "  Annual leave  ");
-    await act(async () => {
-      field.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Enter", bubbles: true })
-      );
-      await Promise.resolve();
-    });
-    await settled();
+    await press(renameButton("Save"));
     expect(writes).toStrictEqual(["rename chat-1 Annual leave"]);
   });
 
-  it("keeps the name as it was on Escape, and renames nothing", async () => {
+  it("keeps the name as it was on Cancel, and renames nothing", async () => {
     const { writes } = await opened(leave);
-    await press(titleButton());
-    const field = nameField();
-    await typeInto(field, "Pay");
-    await act(async () => {
-      field.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
-      );
-      await Promise.resolve();
-    });
-    await settled();
+    await startRename();
+    await typeInto(nameField(), "Pay");
+    await press(renameButton("Cancel"));
     expect(writes).toStrictEqual([]);
     expect(titleButton().textContent).toBe("Leave");
   });
@@ -331,31 +351,28 @@ describe("the open chat's menu", () => {
     await openMenu();
     const disabled = (name: string): string | null =>
       byRole("menuitem", name).getAttribute("aria-disabled");
-    expect([disabled("Copy as Markdown"), disabled("Download")]).toStrictEqual([
-      "true",
-      "true",
-    ]);
+    const items = [
+      "Copy as Markdown",
+      "Download as Markdown",
+      "Download as PDF",
+    ];
+    expect(items.map(disabled)).toStrictEqual(["true", "true", "true"]);
 
     await answerWatch();
-    expect([disabled("Copy as Markdown"), disabled("Download")]).toStrictEqual([
-      null,
-      null,
-    ]);
+    expect(items.map(disabled)).toStrictEqual([null, null, null]);
   });
 
   it("leaves the name being typed when another chat opens, renaming neither", async () => {
     const other: ChatSummary = { ...leave, id: "chat-2", title: "Pay" };
     const { writes, router } = await opened(leave, { others: [other] });
-    await press(titleButton());
-    expect(
-      document.querySelector('input[aria-label="Chat name"]')
-    ).not.toBeNull();
+    await startRename();
+    expect(document.querySelector('input[aria-label="Name"]')).not.toBeNull();
 
-    await act(async () => {
-      await router.navigate({ to: "/", search: { chat: "chat-2" } });
+    act(() => {
+      router.history.push("/?chat=chat-2");
     });
     await settled();
-    expect(document.querySelector('input[aria-label="Chat name"]')).toBeNull();
+    expect(document.querySelector('input[aria-label="Name"]')).toBeNull();
     expect(titleButton().textContent).toBe("Pay");
     expect(writes).toStrictEqual([]);
   });
