@@ -1,47 +1,58 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
+import { isGeneratedServerFile } from "@grasp-os/runtime/host";
+import type { AppReview } from "@grasp-os/shared/app-review";
+import type { App } from "@grasp-os/shared/apps";
+import type { Draft, DraftProblem } from "@grasp-os/shared/drafts";
+import type { Subject } from "@grasp-os/shared/subject";
+import type { SubjectMember } from "@grasp-os/shared/subject-members";
+import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/ui/components/alert";
+import { AvatarGroup } from "@grasp-os/ui/components/avatar";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@grasp-os/app-kit/components/collapsible";
-import { Field, FieldLabel } from "@grasp-os/app-kit/components/field";
+} from "@grasp-os/ui/components/collapsible";
 import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@grasp-os/app-kit/components/sheet";
-import { Spinner } from "@grasp-os/app-kit/components/spinner";
-import { toast } from "@grasp-os/app-kit/components/toast";
-import { isGeneratedServerFile } from "@grasp-os/runtime/host";
-import type { AppReview } from "@grasp-os/shared/app-review";
-import type { Draft, DraftProblem } from "@grasp-os/shared/drafts";
-import type { Subject } from "@grasp-os/shared/subject";
-import type {
-  ShareCandidates,
-  SubjectMember,
-  SubjectMemberRef,
-} from "@grasp-os/shared/subject-members";
+  Dialog,
+  DialogBody,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@grasp-os/ui/components/dialog";
+import { KeyValueList } from "@grasp-os/ui/components/key-value";
+import type { KeyValueItem } from "@grasp-os/ui/components/key-value";
+import { Spinner } from "@grasp-os/ui/components/spinner";
+import { Text } from "@grasp-os/ui/components/text";
+import { toast } from "@grasp-os/ui/components/toast";
+import {
+  CircleCheckIcon,
+  DatabaseIcon,
+  Icon,
+  KeyIcon,
+  LinkIcon,
+  SparklesIcon,
+  UploadIcon,
+  UsersIcon,
+} from "@grasp-os/ui/lib/icons";
+import { font, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { i18n as pageI18n } from "@lingui/core";
 import type { I18n } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import {
-  ChevronRightIcon,
-  DatabaseIcon,
-  KeyRoundIcon,
-  SparklesIcon,
-  UsersIcon,
-} from "lucide-react";
-import { useEffect, useId, useState } from "react";
-import type { ComponentProps, ReactNode } from "react";
+import { useEffect, useState } from "react";
 
+import { AppLinkDialog, linkAddress } from "../apps/app-own-link.tsx";
 import { planLines } from "../apps/data-model-changes.tsx";
 import {
   AccessChanges,
@@ -54,42 +65,43 @@ import {
 import type { FileGroup } from "../apps/draft-changes.tsx";
 import { fixQuestion } from "../apps/fix-with-grasp.ts";
 import { useGlobalChat } from "../chat/global-chat.tsx";
+import { copyText } from "../copy.ts";
 import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
-import { usePeopleApart } from "../people/people-apart.ts";
 import { useCore } from "../use-core.ts";
 import { ConfirmChange, useDraftChange } from "./draft-history.tsx";
 import type { Asked } from "./draft-history.tsx";
 import { isConflict, publishFailureText, settled } from "./publish-errors.ts";
-import { membersOf, readMembers } from "./sharing.tsx";
+import { memberNames, ShareMembersAccess } from "./sharing.tsx";
 import { hasChanges } from "./use-draft.ts";
 
-// Share with your team, in the bar of an App's workspace and of a
-// workflow's page alike: the page's one lime action (`PublishButton`), in
-// place of a separate Publish and Share. It opens a sheet that asks who
-// gets it (its teams and people, by name, those it is shared with already
-// ticked), says what they'll see, names any access an admin approves
-// first, and what in its changes stops it from being shared, with Fix with
-// Grasp. Share does both in one step, with core's own calls: it publishes
-// the changes only the builders see (`drafts.publish`, over the revision
-// the sheet read, so a draft someone changed meanwhile is refused with
-// `draft.conflict` and read again rather than shared unseen), then shares
-// it with whoever was ticked and has no share of it yet (members.ts), so
-// nobody's role changes. A toast says "Shared with …", with Undo: whoever
-// the share added is taken off again, the version the team had before is
-// theirs again (`versions.rollback` over the one just made, so a
-// colleague's since stays), and the changes shared are the builders'
-// draft again (`drafts.restore`), as before the share; confirmed first
-// when it changed since. The toasts outlive the page, so Undo works after
-// leaving it.
+// The end of the bar of an App's workspace and of a workflow's page alike
+// (`ShareWithTeam`): Share, then Publish, the page's one ink action.
 //
-// Once it is shared, changes stay its builders' until they share them:
-// one slim line under the bar (`UnpublishedChanges`) says so, with Undo,
-// which discards them once the person confirms (draft-history.tsx).
+// Share opens a dialog of whom it is shared with, as its Sharing settings
+// list them (sharing.tsx), with Copy link.
+//
+// Publish opens a dialog that says where it stands (live and at which
+// version, or not yet), an App's address, who can open it, and how the
+// check of its changes stands, with what an admin approves first and
+// what stops it, with Fix with Grasp. Publish makes the changes only the
+// builders see what everyone it is shared with opens, with core's own
+// call (`drafts.publish`, over the revision the dialog read, so a draft
+// someone changed meanwhile is refused with `draft.conflict` and read
+// again rather than published unseen). A toast says it is live, with Undo
+// over a version the team had before: that version is theirs again
+// (`versions.rollback` over the one just made, so a colleague's since
+// stays), and the changes published are the builders' draft again
+// (`drafts.restore`); confirmed first when it changed since. The toasts
+// outlive the page, so Undo works after leaving it.
+//
+// Once it is shared, changes stay its builders' until they publish them:
+// one slim line under the bar (`UnpublishedChanges`) says how many and of
+// what, with Undo, which discards them once the person confirms
+// (draft-history.tsx).
 
 /**
- * What the sheet read of the draft's changes, at the draft's `revision`:
+ * What the dialog read of the draft's changes, at the draft's `revision`:
  * whether they pass their checks, what stops them, and, for an App, all
  * they change (`AppsApi.review`).
  */
@@ -117,7 +129,7 @@ const readReview = async (
   ]);
   return {
     // The older of the two reads: a write between them refuses the
-    // publish (`draft.conflict`), and the sheet reads both again.
+    // publish (`draft.conflict`), and the dialog reads both again.
     revision: Math.min(check.revision, changes?.revision ?? check.revision),
     passed: check.passed,
     problems: check.problems,
@@ -133,14 +145,14 @@ const readReview = async (
   };
 };
 
-/** What the sheet read of the draft's changes, or why it couldn't. */
+/** What the dialog read of the draft's changes, or why it couldn't. */
 type ReviewRead =
   | { state: "ready"; review: Review }
   | { state: "failed"; text: string };
 
 /**
  * The draft's changes, read at each write of the draft (`revision`) and
- * each time the sheet asks (`again`), while `reading` (the draft has
+ * each time the dialog asks (`again`), while `reading` (the draft has
  * changes, and Grasp isn't writing it); otherwise the last read stays.
  * Publish never takes it for a later revision than it was read at.
  */
@@ -188,7 +200,7 @@ const useReview = (
   };
 };
 
-/** Whether publishing changes the App's records, as the sheet says once. */
+/** Whether publishing changes the App's records, as the dialog says once. */
 const changesData = (changes: AppReview, i18n: I18n): boolean =>
   (changes.plan === null ? 0 : planLines(changes.plan, i18n).length) > 0 ||
   (changes.migrations?.length ?? 0) > 0;
@@ -225,7 +237,39 @@ const changeSummaries = (changes: AppReview): string[] =>
     return count === 0 ? [] : [groupCount(group, count)];
   });
 
-/** The problems that stop it from being shared, a few, and Fix with Grasp. */
+// The bar's width (item-shell.tsx names it) below which Share folds into Publish.
+const NARROW_BAR = "@container bar (width < 36rem)";
+
+const styles = stylex.create({
+  // Where the bar (item-shell.tsx) narrows, Share folds into Publish's
+  // dialog and Publish is its icon alone, so the bar keeps one row.
+  wide: { display: { default: "contents", [NARROW_BAR]: "none" } },
+  narrow: { display: { default: "none", [NARROW_BAR]: "contents" } },
+  stack: { display: "grid", gap: space[3], minWidth: 0 },
+  // A fact's value with its own action after it.
+  value: { display: "inline-flex", alignItems: "center", gap: space[2] },
+  tight: {
+    display: "grid",
+    gap: space[1],
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  problem: { display: "grid", minWidth: 0 },
+  where: { fontFamily: font.mono },
+  strip: { flexShrink: 0 },
+  // Who can open it, by name, for a screen reader: the faces say it to the eye.
+  unseen: {
+    position: "absolute",
+    width: "1px",
+    height: "1px",
+    overflow: "hidden",
+    clipPath: "inset(50%)",
+    whiteSpace: "nowrap",
+  },
+});
+
+/** What stops the changes being published, the first few, and Fix with Grasp. */
 const Problems = ({
   problems,
   onFix,
@@ -238,99 +282,98 @@ const Problems = ({
   const count = problems.length;
   const more = count - shown.length;
   return (
-    <div className="flex flex-col gap-2">
-      <p className="text-destructive">
-        <Plural
-          one="It can't be shared yet: # problem"
-          other="It can't be shared yet: # problems"
-          value={count}
-        />
-      </p>
-      <ul aria-label={t`Problems`} className="flex flex-col gap-1 text-xs">
-        {shown.map(({ at, line, message }, index) => (
-          // A problem has no ID, and the same message may come twice.
-          <li className="flex flex-col" key={index}>
-            {at === null ? null : (
-              <span className="text-muted-foreground font-mono">
-                {line === null ? at : `${at}:${line}`}
-              </span>
-            )}
-            <span>{message}</span>
-          </li>
-        ))}
-        {more > 0 ? (
-          <li className="text-muted-foreground">
-            <Plural one="and # more" other="and # more" value={more} />
-          </li>
-        ) : null}
-      </ul>
-      <div>
-        <Button onClick={onFix} size="sm" variant="outline">
-          <SparklesIcon data-icon="inline-start" />
-          <Trans>Fix with Grasp</Trans>
+    <Alert variant="destructive">
+      <AlertTitle>
+        {t`${plural(count, {
+          one: "It can't be published yet: # problem",
+          other: "It can't be published yet: # problems",
+        })}`}
+      </AlertTitle>
+      <AlertDescription>
+        <ul aria-label={t`Problems`} {...stylex.props(styles.tight)}>
+          {shown.map(({ at, line, message }, index) => (
+            // A problem has no ID, and the same message may come twice.
+            <li key={index} {...stylex.props(styles.problem)}>
+              {at === null ? null : (
+                <Text as="span" color="muted" size="xs">
+                  <span {...stylex.props(styles.where)}>
+                    {line === null ? at : `${at}:${line}`}
+                  </span>
+                </Text>
+              )}
+              <Text as="span" size="xs">
+                {message}
+              </Text>
+            </li>
+          ))}
+          {more > 0 ? (
+            <li>
+              <Text as="span" color="muted" size="xs">
+                <Plural one="and # more" other="and # more" value={more} />
+              </Text>
+            </li>
+          ) : null}
+        </ul>
+      </AlertDescription>
+      <AlertAction>
+        <Button onClick={onFix} size="xs" variant="outline">
+          <Icon icon={SparklesIcon} />
+          {t`Fix with Grasp`}
         </Button>
-      </div>
-    </div>
+      </AlertAction>
+    </Alert>
   );
 };
 
-/** One line the sheet says only when it applies, with its icon. */
-const Line = ({ icon, children }: { icon: ReactNode; children: ReactNode }) => (
-  <p className="text-muted-foreground flex items-start gap-2">
-    <span aria-hidden className="mt-0.5 flex-none">
-      {icon}
-    </span>
-    <span>{children}</span>
-  </p>
-);
-
 /** Everything an App's changes hold, folded away. */
-const Summary = ({ changes }: { changes: AppReview }) => (
-  <Collapsible>
-    <CollapsibleTrigger render={<Button size="sm" variant="ghost" />}>
-      <ChevronRightIcon data-icon="inline-start" />
-      <Trans>What changes</Trans>
-    </CollapsibleTrigger>
-    <CollapsibleContent>
-      <div className="flex flex-col gap-4">
-        <FileChanges files={changes.files} />
-        <ChangesSection title={<Trans>Data</Trans>}>
-          <DataChanges changes={changes} />
-        </ChangesSection>
-        <ChangesSection title={<Trans>Access</Trans>}>
-          <AccessChanges changes={changes} />
-        </ChangesSection>
-      </div>
-    </CollapsibleContent>
-  </Collapsible>
-);
+const Summary = ({ changes }: { changes: AppReview }) => {
+  const { t } = useLingui();
+  return (
+    <Collapsible>
+      <CollapsibleTrigger>{t`What changes`}</CollapsibleTrigger>
+      <CollapsibleContent asChild>
+        <div {...stylex.props(styles.stack)}>
+          <FileChanges files={changes.files} />
+          <ChangesSection title={<Trans>Data</Trans>}>
+            <DataChanges changes={changes} />
+          </ChangesSection>
+          <ChangesSection title={<Trans>Access</Trans>}>
+            <AccessChanges changes={changes} />
+          </ChangesSection>
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+};
 
-/** What applies to an App's changes being shared: their data, an admin's approval. */
+/** What applies to an App's changes being published: their data, an admin's approval. */
 const AppNotes = ({ changes }: { changes: AppReview }) => {
-  const { i18n } = useLingui();
+  const { t, i18n } = useLingui();
   const waiting = changes.permissions.length;
   return (
     <>
       {changes.files.length === 0 ? null : <Summary changes={changes} />}
       {changesData(changes, i18n) ? (
-        <Line icon={<DatabaseIcon className="size-4" />}>
-          <Trans>It changes the App&apos;s data: see What changes.</Trans>
-        </Line>
+        <Alert appearance="subtle" icon={DatabaseIcon}>
+          <AlertDescription>{t`It changes the App's data: see What changes.`}</AlertDescription>
+        </Alert>
       ) : null}
       {waiting > 0 ? (
-        <Line icon={<KeyRoundIcon className="size-4" />}>
-          <Plural
-            one="It uses # new kind of access. An admin approves that once."
-            other="It uses # new kinds of access. An admin approves those once."
-            value={waiting}
-          />
-        </Line>
+        <Alert appearance="subtle" icon={KeyIcon}>
+          <AlertDescription>
+            <Plural
+              one="It uses # new kind of access. An admin approves that once."
+              other="It uses # new kinds of access. An admin approves those once."
+              value={waiting}
+            />
+          </AlertDescription>
+        </Alert>
       ) : null}
     </>
   );
 };
 
-/** What applies to the changes being shared: an App's notes, and problems. */
+/** What applies to the changes being published: an App's notes, and problems. */
 const ChangesNotes = ({
   review,
   onFix,
@@ -338,7 +381,7 @@ const ChangesNotes = ({
   review: Review;
   onFix: (problems: readonly DraftProblem[]) => void;
 }) => (
-  <div className="flex flex-col gap-3">
+  <div {...stylex.props(styles.stack)}>
     {review.app === null ? null : <AppNotes changes={review.app} />}
     {review.passed ? null : (
       <Problems
@@ -352,15 +395,14 @@ const ChangesNotes = ({
 );
 
 /**
- * What Undo puts back: whom a share added, and, when it made a new
- * version live over one the team had (`before`) from the draft at
- * `revision`, that version again over the new one (`made`), with the
- * draft as it was shared.
+ * What Undo puts back, when publishing made a new version live over one
+ * the team had (`before`) from the draft at `revision`: that version again
+ * over the new one (`made`), with the draft as it was published.
  */
-interface Undoable {
-  subject: Subject;
-  added: readonly SubjectMemberRef[];
-  back: { before: number; made: number; revision: number } | undefined;
+interface Back {
+  before: number;
+  made: number;
+  revision: number;
 }
 
 /**
@@ -376,15 +418,15 @@ interface UndoTools {
 
 /** Says Undo failed, in the page's words. */
 const undoFailed = (error: unknown): void => {
-  toast.add({ type: "error", title: publishFailureText(error) });
+  toast.error(publishFailureText(error));
 };
 
 /**
- * The draft as it was shared (its checkpoint at `revision`) made the draft
- * again, over the draft as it is now: nothing, should no checkpoint be at
- * that revision.
+ * The draft as it was published (its checkpoint at `revision`) made the
+ * draft again, over the draft as it is now: nothing, should no checkpoint
+ * be at that revision.
  */
-const restoreShared = async (
+const restorePublished = async (
   session: Session,
   subject: Subject,
   revision: number
@@ -393,28 +435,28 @@ const restoreShared = async (
     session.drafts.checkpoints(subject),
     session.drafts.get(subject),
   ]);
-  const shared = checkpoints.find(
+  const published = checkpoints.find(
     (checkpoint) => checkpoint.revision === revision
   );
-  if (shared !== undefined) {
-    await session.drafts.restore(subject, shared.number, now.revision);
+  if (published !== undefined) {
+    await session.drafts.restore(subject, published.number, now.revision);
   }
 };
 
 /**
  * The version the team had before, live again over the draft at
- * `revision`, while the one the share made still is: a colleague's share
- * since stays. Then the draft as it was shared is the draft again, over
- * that version, so nothing of the builders' work is left only in History:
- * read again and tried once more should someone write the draft in
- * between (`draft.conflict`). Should that fail too, the team has the
- * version back all the same, and the person is told the changes are in
- * History, to restore from there.
+ * `revision`, while the one publishing made still is: a colleague's since
+ * stays. Then the draft as it was published is the draft again, over that
+ * version, so nothing of the builders' work is left only in History: read
+ * again and tried once more should someone write the draft in between
+ * (`draft.conflict`). Should that fail too, the team has the version back
+ * all the same, and the person is told the changes are in History, to
+ * restore from there.
  */
 const takeBack = async (
   { core, router, onDone }: UndoTools,
   subject: Subject,
-  back: NonNullable<Undoable["back"]>,
+  back: Back,
   revision: number
 ): Promise<void> => {
   const rolled = await settled(core, async (session) => {
@@ -422,63 +464,41 @@ const takeBack = async (
   });
   const restore = async () =>
     await settled(core, async (session) => {
-      await restoreShared(session, subject, back.revision);
+      await restorePublished(session, subject, back.revision);
     });
   let restored = rolled.ok ? await restore() : rolled;
   if (rolled.ok && !restored.ok && isConflict(restored.error)) {
     restored = await restore();
   }
   onDone();
-  await router.invalidate();
+  await router.invalidate({ sync: true });
   if (!rolled.ok) {
     undoFailed(rolled.error);
     return;
   }
   if (!restored.ok) {
-    toast.add({
-      type: "warning",
-      title: pageI18n._(msg`Your team has the version they had before`),
+    toast.warning(pageI18n._(msg`Your team has the version they had before`), {
       description: pageI18n._(
-        msg`The changes you shared couldn't be put back as the draft. They're in its History, to restore from there.`
+        msg`The changes you published couldn't be put back as the draft. They're in its History, to restore from there.`
       ),
     });
     return;
   }
-  toast.add({ type: "success", title: pageI18n._(msg`Sharing undone`) });
+  toast.success(pageI18n._(msg`Publishing undone`));
 };
 
 /**
- * Undo, from the toast that says it was shared: takes off whoever was
- * added, then puts back the version the team had before, once the person
- * confirms in a toast of its own when it changed since. Works from the
- * toast alone, after the page was left.
+ * Undo, from the toast that says it is live: puts back the version the
+ * team had before, once the person confirms in a toast of its own when it
+ * changed since. Works from the toast alone, after the page was left.
  */
-const undoShare = async (
+const undoPublish = async (
   tools: UndoTools,
-  { subject, added, back }: Undoable
+  subject: Subject,
+  back: Back
 ): Promise<void> => {
-  const { core, router, onDone } = tools;
-  const removed = await settled(core, async (session) => {
-    for (const member of added) {
-      // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
-      await membersOf(session, subject.kind).remove(subject.id, {
-        type: member.type,
-        id: member.id,
-      });
-    }
-  });
-  if (!removed.ok) {
-    undoFailed(removed.error);
-    return;
-  }
-  if (back === undefined) {
-    onDone();
-    await router.invalidate();
-    toast.add({ type: "success", title: pageI18n._(msg`Sharing undone`) });
-    return;
-  }
   const draft = await settled(
-    core,
+    tools.core,
     async (session) => await session.drafts.get(subject)
   );
   if (!draft.ok) {
@@ -490,16 +510,15 @@ const undoShare = async (
     await takeBack(tools, subject, back, revision);
     return;
   }
-  toast.add({
-    type: "warning",
-    title: pageI18n._(msg`Give your team the version they had before?`),
+  toast.warning(pageI18n._(msg`Give your team the version they had before?`), {
     description: pageI18n._(
-      msg`It changed since you shared it. Going back drops those changes, for everyone who builds it.`
+      msg`It changed since you published it. Going back drops those changes, for everyone who builds it.`
     ),
-    timeout: 0,
-    actionProps: {
-      children: pageI18n._(msg`Drop them and go back`),
-      onClick: () => {
+    // It stays until it is answered: it asks something.
+    duration: Number.POSITIVE_INFINITY,
+    action: {
+      label: pageI18n._(msg`Drop them and go back`),
+      onAction: () => {
         void takeBack(tools, subject, back, revision);
       },
     },
@@ -507,11 +526,11 @@ const undoShare = async (
 };
 
 /**
- * The version sharing makes live as it is, with nothing live yet and
+ * The version publishing makes live as it is, with nothing live yet and
  * changes over it that change nothing (the first of an App made from a
- * blueprint); none otherwise, when the changes are what is shared.
+ * blueprint); none otherwise, when the changes are what is published.
  */
-const versionToShare = (
+const versionToPublish = (
   live: number | null,
   draft: Draft | undefined
 ): number | undefined =>
@@ -522,16 +541,8 @@ const versionToShare = (
     ? draft.base
     : undefined;
 
-/** A share's key: its kind and ID. */
-const keyOf = ({ type, id }: SubjectMemberRef): string => `${type}:${id}`;
-
-/** Someone to share with, by name. */
-interface Recipient extends SubjectMemberRef {
-  name: string;
-}
-
 /** What is shared: the subject, its name, owner and live version. */
-export interface Shared {
+interface Shared {
   subject: Subject;
   name: string;
   /** Its owner, who has it always: never offered. */
@@ -541,19 +552,19 @@ export interface Shared {
 }
 
 /**
- * Shares it: publishes its changes (as `review` read them, when there are
- * any to share), then shares it with `recipients`; `onShared` and a toast
- * with Undo once done; why not otherwise, and `again` when it moved, so
- * its changes are read again.
+ * Publishes it: its changes (as `review` read them) or, with none, its
+ * first version as it is; `onPublished` and a toast once done, with Undo
+ * where the team had a version before; why not otherwise, and `again`
+ * when it moved, so its changes are read again.
  */
-const useSharing = (
-  { subject, live }: Shared,
+const usePublishing = (
+  { subject, name, live }: Shared,
   draft: Draft | undefined,
   {
-    onShared,
+    onPublished,
     again,
   }: {
-    onShared: () => void;
+    onPublished: () => void;
     again: () => void;
   }
 ) => {
@@ -562,22 +573,12 @@ const useSharing = (
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
-  const version = versionToShare(live, draft);
-  const share = async (
-    review: Review | undefined,
-    recipients: readonly Recipient[]
-  ): Promise<boolean> => {
+  const version = versionToPublish(live, draft);
+  const publish = async (review: Review | undefined): Promise<boolean> => {
     setBusy(true);
     setFailure(undefined);
     const before = live;
-    const shared = await settled(core, async (session) => {
-      let made = before;
-      // Only who has no share yet: a builder ticked stays one.
-      const sharedWith = await readMembers(session, subject);
-      const had = new Set(sharedWith.map((member) => keyOf(member)));
-      const added = recipients.filter(
-        (recipient) => !had.has(keyOf(recipient))
-      );
+    const published = await settled(core, async (session) => {
       if (version !== undefined) {
         const rolled = await session.versions.rollback(
           subject,
@@ -585,69 +586,54 @@ const useSharing = (
           draft?.revision ?? 0,
           null
         );
-        made = rolled.version;
-      } else if (review !== undefined) {
-        const published = await session.drafts.publish(
-          subject,
-          review.revision
-        );
-        made = published.version;
+        return rolled.version;
       }
-      for (const recipient of added) {
-        // oxlint-disable-next-line no-await-in-loop -- one at a time, in order
-        await membersOf(session, subject.kind).add(subject.id, {
-          type: recipient.type,
-          id: recipient.id,
-          role: "user",
-        });
+      if (review !== undefined) {
+        const made = await session.drafts.publish(subject, review.revision);
+        return made.version;
       }
-      return { made, added };
+      return before;
     });
     setBusy(false);
-    if (!shared.ok) {
-      setFailure(publishFailureText(shared.error));
+    if (!published.ok) {
+      setFailure(publishFailureText(published.error));
       // It moved: what changes is read again, to look at.
-      if (isConflict(shared.error)) {
+      if (isConflict(published.error)) {
         again();
       }
       return false;
     }
-    onShared();
-    await router.invalidate();
-    const { made, added } = shared.value;
-    const tools = { core, router, onDone: onShared };
-    const undoable: Undoable = {
-      subject,
-      added: added.map(({ type, id }) => ({ type, id })),
-      back:
-        before === null ||
-        made === null ||
-        made === before ||
-        review === undefined
-          ? undefined
-          : { before, made, revision: review.revision },
-    };
-    const who = formatList(recipients.map(({ name }) => name));
-    toast.add({
-      type: "success",
-      title:
-        recipients.length === 0
-          ? t`Your changes are shared`
-          : t`Shared with ${who}`,
-      timeout: 10_000,
-      actionProps: {
-        children: t`Undo`,
-        onClick: () => {
-          void undoShare(tools, undoable);
-        },
-      },
-    });
+    onPublished();
+    await router.invalidate({ sync: true });
+    const made = published.value;
+    // Nothing to go back to after a first version: Undo only over one.
+    const back =
+      before === null ||
+      made === null ||
+      made === before ||
+      review === undefined
+        ? undefined
+        : { before, made, revision: review.revision };
+    const tools = { core, router, onDone: onPublished };
+    toast.success(
+      t`${name} is live`,
+      back === undefined
+        ? {}
+        : {
+            action: {
+              label: t`Undo`,
+              onAction: () => {
+                void undoPublish(tools, subject, back);
+              },
+            },
+          }
+    );
     return true;
   };
   return {
     busy,
     failure,
-    share,
+    publish,
     clear: () => {
       setFailure(undefined);
     },
@@ -655,11 +641,11 @@ const useSharing = (
 };
 
 /**
- * The changes to share, read while it has some and Grasp isn't working on
- * it, with whether they may be shared now (`ready`) and Fix with Grasp
- * for what stops them.
+ * The changes to publish, read while it has some and Grasp isn't working
+ * on it, with whether they may be published now (`ready`) and Fix with
+ * Grasp for what stops them.
  */
-const useShareable = (
+const usePublishable = (
   subject: Subject,
   draft: Draft | undefined,
   running: boolean
@@ -677,7 +663,7 @@ const useShareable = (
   const fix = (problems: readonly DraftProblem[]): void => {
     void chat.ask(
       fixQuestion(
-        t`Fix these problems the check found, so it can be shared:`,
+        t`Fix these problems the check found, so it can be published:`,
         problems
       )
     );
@@ -688,289 +674,433 @@ const useShareable = (
     again,
     /** The changes as read at the draft's revision; none while they're read. */
     review: current ? review : undefined,
-    /** Whether the changes may be shared now: read, passing, Grasp done. */
+    /** Whether the changes may be published now: read, passing, Grasp done. */
     ready: !changing || (current && review.passed && !running),
     fix,
   };
 };
 
-/** Who the sheet offers: the teams, then the people, by name. */
-const recipientsOf = (
-  candidates: ShareCandidates | undefined,
-  owner: string
-): Recipient[] =>
-  candidates === undefined
-    ? []
-    : [
-        ...candidates.teams.map(({ id, name }) => ({
-          type: "team" as const,
-          id,
-          name,
-        })),
-        ...candidates.people
-          .filter(({ id }) => id !== owner)
-          .map(({ id, name }) => ({ type: "person" as const, id, name })),
-      ];
-
-/** Ticks who gets it: whom it is shared with already stays ticked. */
-const WhoGetsIt = ({
-  offered,
-  members,
-  chosen,
-  disabled,
-  onChosen,
+/** Where it stands, in one line with a dot: live and at which version, or not yet. */
+const StateLine = ({
+  live,
+  label,
+  changing,
 }: {
-  offered: readonly Recipient[] | undefined;
-  members: readonly SubjectMember[];
-  chosen: readonly string[];
-  disabled: boolean;
-  onChosen: (chosen: string[]) => void;
+  live: number | null;
+  /** The live version's label, where the page has it (an App's). */
+  label: string | undefined;
+  changing: boolean;
 }) => {
   const { t } = useLingui();
-  const ids = useId();
-  // Everyone offered or shared with, so a person is told apart from a
-  // namesake by the end of their ID.
-  const apart = usePeopleApart(
-    [...(offered ?? []), ...members].flatMap(({ type, id, name }) =>
-      type === "person" && name !== null ? [{ id, name }] : []
-    )
-  );
-  if (offered === undefined) {
-    return <Spinner aria-label={t`Loading…`} />;
-  }
-  const shared = new Set(members.map((member) => keyOf(member)));
-  if (offered.length === 0) {
+  if (live === null) {
     return (
-      <p className="text-muted-foreground">
-        <Trans>Nobody else to share with.</Trans>
-      </p>
+      <Badge dot variant="warning">
+        {t`Not live`}
+      </Badge>
     );
   }
+  const version = live;
+  const named = label ?? t`Version ${version}`;
   return (
-    <ul aria-label={t`Who gets it`} className="flex flex-col gap-2">
-      {offered.map((recipient) => {
-        const key = keyOf(recipient);
-        const has = shared.has(key);
-        return (
-          <li key={key}>
-            <Field orientation="horizontal">
-              <Checkbox
-                checked={has || chosen.includes(key)}
-                disabled={has || disabled}
-                id={`${ids}-${key}`}
-                onCheckedChange={(checked) => {
-                  const rest = chosen.filter((one) => one !== key);
-                  onChosen(checked ? [...rest, key] : rest);
-                }}
+    <Badge dot variant="success">
+      {changing ? t`Live, ${named}; changes not live yet` : t`Live, ${named}`}
+    </Badge>
+  );
+};
+
+/** How the changes' check stands, in words, and whether it is still going. */
+const useCheckState = ({
+  publishable,
+  running,
+  first,
+}: {
+  publishable: ReturnType<typeof usePublishable>;
+  running: boolean;
+  /** Whether its first version is published as it is, with no changes to check. */
+  first: boolean;
+}): { words: string; working: boolean } | undefined => {
+  const { t } = useLingui();
+  if (running || (publishable.changing && publishable.review === undefined)) {
+    // Why the read failed stands under the facts.
+    if (publishable.read?.state === "failed" && !running) {
+      return undefined;
+    }
+    return {
+      words: running ? t`Grasp is still working on it…` : t`Checking it…`,
+      working: true,
+    };
+  }
+  if (publishable.review?.passed === false) {
+    // What stops it stands under the facts, with Fix with Grasp.
+    return { words: t`Something to fix first`, working: false };
+  }
+  return {
+    words:
+      publishable.changing || first
+        ? t`Checks pass`
+        : t`Nothing new to publish`,
+    working: false,
+  };
+};
+
+/**
+ * Publish's dialog: where it stands, an App's address, who can open it
+ * and how its check stands, as facts, then what applies to the changes,
+ * and Publish. Address and Who can open it each lead to their own dialog.
+ */
+const PublishDialog = ({
+  open,
+  onOpenChange,
+  shared,
+  app,
+  members,
+  publishable,
+  running,
+  first,
+  failure,
+  canPublish,
+  onLink,
+  onShare,
+  onFix,
+  onPublish,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  shared: Shared;
+  /** The App, for its address and live version's label; none for a workflow. */
+  app: App | undefined;
+  members: readonly SubjectMember[];
+  publishable: ReturnType<typeof usePublishable>;
+  running: boolean;
+  /** Whether its first version is published as it is, with no changes to check. */
+  first: boolean;
+  /** Why publishing didn't go through. */
+  failure: string | undefined;
+  canPublish: boolean;
+  onLink: () => void;
+  onShare: () => void;
+  onFix: (problems: readonly DraftProblem[]) => void;
+  onPublish: () => void;
+}) => {
+  const { t } = useLingui();
+  const { name, live } = shared;
+  const who = memberNames(members);
+  const check = useCheckState({ publishable, running, first });
+  let says = t`Nothing changed since the live version.`;
+  if (first) {
+    says = t`Everyone it is shared with can open it once it is published.`;
+  } else if (publishable.changing) {
+    says = t`Your changes go live for everyone it is shared with.`;
+  }
+  const facts: KeyValueItem[] = [
+    {
+      id: "status",
+      label: t({ message: "Status", context: "where an App stands" }),
+      icon: UploadIcon,
+      value: (
+        <StateLine
+          changing={publishable.changing}
+          label={app?.liveLabel ?? undefined}
+          live={live}
+        />
+      ),
+    },
+    ...(app === undefined
+      ? []
+      : [
+          {
+            id: "address",
+            label: t`Address`,
+            icon: LinkIcon,
+            value: (
+              <span {...stylex.props(styles.value)}>
+                {app.link === null ? t`None yet` : linkAddress(app.link)}
+                <Button onClick={onLink} size="xs" variant="outline">
+                  {app.link === null ? t`Add` : t`Change`}
+                </Button>
+              </span>
+            ),
+          },
+        ]),
+    {
+      id: "who",
+      label: t`Who can open it`,
+      icon: UsersIcon,
+      value: (
+        <span {...stylex.props(styles.value)}>
+          {who.length === 0 ? (
+            t`Only its builders`
+          ) : (
+            <>
+              <AvatarGroup
+                items={who.map((each) => ({ name: each }))}
+                max={3}
               />
-              <FieldLabel htmlFor={`${ids}-${key}`}>
-                {recipient.type === "team" ? (
-                  <UsersIcon aria-hidden className="size-4" />
-                ) : null}
-                {recipient.type === "person"
-                  ? apart.named(recipient)
-                  : recipient.name}
-                {has ? (
-                  <span className="text-muted-foreground">
-                    <Trans>has it</Trans>
-                  </span>
-                ) : null}
-              </FieldLabel>
-            </Field>
-          </li>
-        );
-      })}
-    </ul>
+              <span {...stylex.props(styles.unseen)}>{formatList(who)}</span>
+            </>
+          )}
+          <Button onClick={onShare} size="xs" variant="outline">
+            {t`Manage`}
+          </Button>
+        </span>
+      ),
+    },
+    ...(check === undefined
+      ? []
+      : [
+          {
+            id: "checks",
+            label: t`Checks`,
+            icon: CircleCheckIcon,
+            value: check.working ? (
+              <span {...stylex.props(styles.value)}>
+                <Spinner />
+                {check.words}
+              </span>
+            ) : (
+              check.words
+            ),
+          },
+        ]),
+  ];
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t`Publish ${name}`}</DialogTitle>
+          <DialogDescription>{says}</DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          <div {...stylex.props(styles.stack)}>
+            <KeyValueList divided items={facts} orientation="horizontal" />
+            {publishable.read?.state === "failed" ? (
+              <Alert variant="destructive">
+                <AlertTitle>{publishable.read.text}</AlertTitle>
+              </Alert>
+            ) : null}
+            {publishable.review === undefined ? null : (
+              <ChangesNotes onFix={onFix} review={publishable.review} />
+            )}
+            {failure === undefined ? null : (
+              <Alert variant="destructive">
+                <AlertTitle>{failure}</AlertTitle>
+              </Alert>
+            )}
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <DialogClose>{t`Cancel`}</DialogClose>
+          <Button disabled={!canPublish} onClick={onPublish}>
+            {t`Publish`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+/** What Share's dialog says they'll find, for its kind, live or not yet. */
+const useFoundUnder = ({ subject, live }: Shared): string => {
+  const { t } = useLingui();
+  if (subject.kind === "app") {
+    return live === null
+      ? t`They'll find it under Apps once it is published.`
+      : t`They'll find it under Apps, and see it as it is now.`;
+  }
+  return live === null
+    ? t`They'll find it under Workflows once it is published.`
+    : t`They'll find it under Workflows, and run it as it is now.`;
+};
+
+/** Share's dialog: whom it is shared with, as its Sharing settings list them, with Copy link and Done. */
+const ShareDialog = ({
+  shared,
+  members,
+  open,
+  onOpenChange,
+  onShared,
+}: {
+  shared: Shared;
+  members: readonly SubjectMember[];
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onShared: () => void;
+}) => {
+  const { t } = useLingui();
+  const { subject, name, owner } = shared;
+  const found = useFoundUnder(shared);
+  const path =
+    subject.kind === "app" ? `/apps/${subject.id}` : `/workflows/${subject.id}`;
+  return (
+    <Dialog onOpenChange={onOpenChange} open={open}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t`Share ${name}`}</DialogTitle>
+          <DialogDescription>{found}</DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          <ShareMembersAccess
+            members={members}
+            onChanged={onShared}
+            owner={owner}
+            subject={subject}
+          />
+        </DialogBody>
+        <DialogFooter>
+          <Button
+            onClick={() => {
+              void (async () => {
+                if (await copyText(`${window.location.origin}${path}`)) {
+                  toast.success(t`Link copied`);
+                  return;
+                }
+                toast.error(t`Copying didn't work`);
+              })();
+            }}
+            variant="outline"
+          >
+            <Icon icon={LinkIcon} />
+            {t`Copy link`}
+          </Button>
+          <DialogClose>{t`Done`}</DialogClose>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 };
 
 /**
- * The page's one lime action, always labelled: "Share with your team",
- * or "Share changes" once it is shared and has changes only its builders
- * see (`pending`), with a dot while there are changes to share. Given as
- * the trigger of Share with your team's sheet, whose props it takes.
- */
-const PublishButton = ({
-  pending,
-  changes,
-  ...props
-}: Omit<ComponentProps<typeof Button>, "size" | "variant"> & {
-  pending: boolean;
-  /** Whether the draft has changes to share: the dot. */
-  changes: boolean;
-}) => (
-  <Button {...props} size="sm" variant="highlight">
-    <UsersIcon data-icon="inline-start" />
-    {pending ? (
-      <Trans>Share changes</Trans>
-    ) : (
-      <Trans>Share with your team</Trans>
-    )}
-    {changes ? (
-      <span
-        aria-hidden="true"
-        className="bg-status-attention size-1.5 rounded-full"
-      />
-    ) : null}
-  </Button>
-);
-
-/** What the sheet says they'll find, for its kind. */
-const FoundUnder = ({ kind }: { kind: Subject["kind"] }) =>
-  kind === "app" ? (
-    <Trans>They&apos;ll find it under Apps, and see it as it is now.</Trans>
-  ) : (
-    <Trans>
-      They&apos;ll find it under Workflows, and run it as it is now.
-    </Trans>
-  );
-
-/**
- * Share with your team, and its sheet: who gets it, what they'll see,
- * what an admin approves first and what stops it; Share does it all. The
- * page's one lime action, for an App and a workflow alike.
+ * The end of the bar of an App's workspace and of a workflow's page:
+ * Share, then Publish, the page's one ink action. Share opens its dialog,
+ * whom it is shared with. Publish opens its dialog, which says where it
+ * stands, an App's address, who can open it and whether its changes pass
+ * their check, and publishes them: the changes only its builders see
+ * become what everyone it is shared with opens. Where the bar is narrow
+ * Share folds into Publish's dialog (its Who can open it), and Publish is
+ * its icon alone, so the bar keeps one row.
  */
 export const ShareWithTeam = ({
   shared,
+  app,
   draft,
   members,
   running,
-  pending = false,
   onShared,
 }: {
   shared: Shared;
+  /** The App, on an App's page: its address and live version's label. */
+  app?: App;
   /** Its draft, as read last; none while it is read. */
   draft: Draft | undefined;
   /** Whom it is shared with now. */
   members: readonly SubjectMember[];
   /** Whether Grasp is working on it, or checking it. */
   running: boolean;
-  /** Whether it is shared and has changes only its builders see. */
+  /**
+   * Whether it is shared and has changes only its builders see. Taken for
+   * the pages that pass it; Publish's dialog says so in its Status.
+   */
   pending?: boolean;
+  /** Told once it was shared or published from here. */
   onShared?: () => void;
 }) => {
   const { t } = useLingui();
-  const core = useCore();
-  const { subject, name, owner, live } = shared;
-  const [open, setOpen] = useState(false);
-  const [candidates, setCandidates] = useState<ShareCandidates>();
-  const [chosen, setChosen] = useState<string[]>([]);
-  const shareable = useShareable(subject, draft, running);
-  const { busy, failure, share, clear } = useSharing(shared, draft, {
-    onShared: () => {
-      onShared?.();
-    },
-    again: shareable.again,
-  });
-  const offered =
-    candidates === undefined ? undefined : recipientsOf(candidates, owner);
-  const recipients = (offered ?? []).filter((each) =>
-    chosen.includes(keyOf(each))
-  );
-  // Something to share: someone new, or changes for whom it is shared
-  // with; a workflow's changes for its owner alone too, as its triggers and
-  // Run start its live version, whoever else has it.
-  const forSomeone = members.length > 0 || subject.kind === "workflow";
-  const something =
-    recipients.length > 0 ||
-    (forSomeone &&
-      (shareable.changing || versionToShare(live, draft) !== undefined));
-  const canShare = something && shareable.ready && !busy && !running;
-  const readOffered = async (): Promise<void> => {
-    if (candidates !== undefined) {
-      return;
-    }
-    const listed = await settled(
-      core,
-      async (session) =>
-        await membersOf(session, subject.kind).candidates(subject.id)
-    );
-    setCandidates(
-      listed.ok ? listed.value : { people: [], teams: [], projects: [] }
-    );
+  const [publishing, setPublishing] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [linking, setLinking] = useState(false);
+  const told = (): void => {
+    onShared?.();
   };
+  const publishable = usePublishable(shared.subject, draft, running);
+  const { busy, failure, publish, clear } = usePublishing(shared, draft, {
+    onPublished: told,
+    again: publishable.again,
+  });
+  const first = versionToPublish(shared.live, draft) !== undefined;
+  const canPublish =
+    (publishable.changing || first) && publishable.ready && !busy && !running;
+  const openPublish = (): void => {
+    clear();
+    setPublishing(true);
+  };
+  // Publish rests while there is nothing new to publish; its dialog still
+  // says where it stands.
+  const publishLook = publishable.changing || first ? "default" : "outline";
   return (
-    <Sheet
-      onOpenChange={(opening) => {
-        setOpen(opening);
-        if (opening) {
-          clear();
-          void readOffered();
-        }
-      }}
-      open={open}
-    >
-      <SheetTrigger
-        render={
-          <PublishButton
-            changes={shareable.changing}
-            disabled={draft === undefined}
-            pending={pending}
-          />
-        }
+    <>
+      <span {...stylex.props(styles.wide)}>
+        <Button
+          onClick={() => {
+            setSharing(true);
+          }}
+          size="sm"
+          variant="outline"
+        >
+          <Icon icon={UsersIcon} />
+          {t`Share`}
+        </Button>
+        <Button
+          disabled={draft === undefined}
+          onClick={openPublish}
+          size="sm"
+          variant={publishLook}
+        >
+          {t`Publish`}
+        </Button>
+      </span>
+      <span {...stylex.props(styles.narrow)}>
+        <Button
+          aria-label={t`Publish`}
+          disabled={draft === undefined}
+          onClick={openPublish}
+          size="icon-sm"
+          variant={publishLook}
+        >
+          <Icon icon={UploadIcon} />
+        </Button>
+      </span>
+      <PublishDialog
+        app={app}
+        canPublish={canPublish}
+        failure={failure}
+        first={first}
+        members={members}
+        onFix={(problems) => {
+          setPublishing(false);
+          publishable.fix(problems);
+        }}
+        onLink={() => {
+          setPublishing(false);
+          setLinking(true);
+        }}
+        onOpenChange={setPublishing}
+        onPublish={() => {
+          void (async () => {
+            if (await publish(publishable.review)) {
+              setPublishing(false);
+            }
+          })();
+        }}
+        onShare={() => {
+          setPublishing(false);
+          setSharing(true);
+        }}
+        open={publishing}
+        publishable={publishable}
+        running={running}
+        shared={shared}
       />
-      <SheetContent closeLabel={t`Close`} side="right">
-        <SheetHeader>
-          <SheetTitle>
-            <Trans>Share {name}</Trans>
-          </SheetTitle>
-          <SheetDescription>
-            <FoundUnder kind={subject.kind} />
-          </SheetDescription>
-        </SheetHeader>
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4">
-          <WhoGetsIt
-            chosen={chosen}
-            disabled={busy}
-            members={members}
-            offered={offered}
-            onChosen={setChosen}
-          />
-          {running || (shareable.changing && shareable.review === undefined) ? (
-            <p className="text-muted-foreground flex items-center gap-2">
-              <Spinner aria-hidden />
-              {running ? (
-                <Trans>Grasp is still working on it…</Trans>
-              ) : (
-                <Trans>Checking it…</Trans>
-              )}
-            </p>
-          ) : null}
-          {shareable.read?.state === "failed" ? (
-            <ErrorText>{shareable.read.text}</ErrorText>
-          ) : null}
-          {shareable.review === undefined ? null : (
-            <ChangesNotes
-              onFix={(problems) => {
-                setOpen(false);
-                shareable.fix(problems);
-              }}
-              review={shareable.review}
-            />
-          )}
-          <ErrorText>{failure}</ErrorText>
-        </div>
-        <SheetFooter>
-          <Button
-            disabled={!canShare}
-            onClick={() => {
-              void (async () => {
-                if (await share(shareable.review, recipients)) {
-                  setOpen(false);
-                  setChosen([]);
-                }
-              })();
-            }}
-          >
-            {busy ? <Spinner data-icon="inline-start" /> : null}
-            <Trans>Share</Trans>
-          </Button>
-          <SheetClose render={<Button variant="outline" />}>
-            <Trans>Not yet</Trans>
-          </SheetClose>
-        </SheetFooter>
-      </SheetContent>
-    </Sheet>
+      <ShareDialog
+        members={members}
+        onOpenChange={setSharing}
+        onShared={told}
+        open={sharing}
+        shared={shared}
+      />
+      {app === undefined ? null : (
+        <AppLinkDialog app={app} onOpenChange={setLinking} open={linking} />
+      )}
+    </>
   );
 };
 
@@ -984,36 +1114,11 @@ export const showsUnpublishedChanges = (
   members: readonly SubjectMember[]
 ): boolean => live !== null && members.length > 0 && hasChanges(draft);
 
-/** How many changes only its builders see, as the line counts them. */
-const ChangesCount = ({
-  draft,
-  review,
-}: {
-  draft: Draft;
-  review: Review | undefined;
-}) => {
-  // A workflow's draft is one file: the line says it has changes.
-  if (draft.subject.kind === "workflow") {
-    return <Trans>Changes only you see</Trans>;
-  }
-  const count =
-    review?.app?.files.length ??
-    draft.changed.filter((path) => !isGeneratedServerFile(path)).length;
-  const changed = Math.max(count, 1);
-  return (
-    <Plural
-      one="# change only you see"
-      other="# changes only you see"
-      value={changed}
-    />
-  );
-};
-
 /**
  * Under the bar, once it is shared and has changes only its builders
- * see: how many and of what, that the page shows them, and Undo, which
- * discards them once the person confirms. Share changes is the bar's
- * (`ShareWithTeam`).
+ * see: how many and of what (of a workflow's, one file, that it has
+ * some), that the page shows them, and Undo, which discards them once the
+ * person confirms. Publishing them is the bar's (`ShareWithTeam`).
  */
 export const UnpublishedChanges = ({
   draft,
@@ -1027,57 +1132,68 @@ export const UnpublishedChanges = ({
 }) => {
   const { t } = useLingui();
   const { subject } = draft;
-  const shareable = useShareable(subject, draft, running);
+  const publishable = usePublishable(subject, draft, running);
   const [asked, setAsked] = useState<Asked>();
   const undo = useDraftChange(subject, draft.revision, onChanged);
-  const { review } = shareable;
+  const { review } = publishable;
   const appChanges = review?.app ?? null;
   const summaries = appChanges === null ? [] : changeSummaries(appChanges);
   const problems = review?.passed === false ? review.problems : [];
+  const changed = Math.max(
+    appChanges?.files.length ??
+      draft.changed.filter((path) => !isGeneratedServerFile(path)).length,
+    1
+  );
   return (
-    // One row, whatever comes in later (the summaries, Fix with Grasp): it
-    // stands over the preview, which a taller line would push down under
-    // the person's pointer.
     <section
       aria-label={t`Changes only you see`}
-      className="bg-muted flex flex-none items-center gap-3 border-b px-3 py-1.5"
+      {...stylex.props(styles.strip)}
     >
-      <p className="shrink-0 font-medium">
-        <ChangesCount draft={draft} review={review} />
-      </p>
-      {/* The page shows them while there are some. */}
-      <p className="text-muted-foreground truncate">
-        <Trans>You’re seeing your version.</Trans>
-      </p>
-      {summaries.length === 0 ? null : (
-        <p className="text-muted-foreground truncate">
-          {formatList(summaries)}
-        </p>
-      )}
-      <span className="flex-1" />
-      <ErrorText>{undo.failure}</ErrorText>
-      {problems.length > 0 ? (
-        <Button
-          onClick={() => {
-            shareable.fix(problems);
-          }}
-          size="sm"
-          variant="outline"
-        >
-          <SparklesIcon data-icon="inline-start" />
-          <Trans>Fix with Grasp</Trans>
-        </Button>
-      ) : null}
-      <Button
-        disabled={undo.busy || running}
-        onClick={() => {
-          setAsked({ kind: "discard" });
-        }}
-        size="sm"
-        variant="outline"
+      <Alert
+        appearance="banner"
+        variant={undo.failure === undefined ? "default" : "destructive"}
       >
-        <Trans>Undo</Trans>
-      </Button>
+        <AlertTitle>
+          {subject.kind === "workflow"
+            ? t`Changes only you see`
+            : t`${plural(changed, {
+                one: "# change only you see",
+                other: "# changes only you see",
+              })}`}
+        </AlertTitle>
+        <AlertDescription>
+          {undo.failure ?? (
+            <>
+              {t`You’re seeing your version.`}
+              {summaries.length === 0 ? null : ` ${formatList(summaries)}`}
+            </>
+          )}
+        </AlertDescription>
+        <AlertAction>
+          {problems.length > 0 ? (
+            <Button
+              onClick={() => {
+                publishable.fix(problems);
+              }}
+              size="xs"
+              variant="outline"
+            >
+              <Icon icon={SparklesIcon} />
+              {t`Fix with Grasp`}
+            </Button>
+          ) : null}
+          <Button
+            disabled={undo.busy || running}
+            onClick={() => {
+              setAsked({ kind: "discard" });
+            }}
+            size="xs"
+            variant="outline"
+          >
+            {t`Undo`}
+          </Button>
+        </AlertAction>
+      </Alert>
       <ConfirmChange
         asked={asked}
         onCancel={() => {

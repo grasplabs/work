@@ -316,9 +316,15 @@ const type = async (label: string, text: string): Promise<void> => {
 
 /** Each version listed, by the number in its label, and what it is marked. */
 const listed = (): string[] =>
-  [...document.querySelectorAll('li [data-slot="item-title"]')].map(
+  [...document.querySelectorAll('[data-slot="item"]')].map((line) =>
     // Its label, then its badges.
-    (title) => title.textContent?.trim().replace("26.10.", "") ?? ""
+    [
+      line.querySelector('[data-slot="item-title"]'),
+      ...line.querySelectorAll('[data-slot="badge"]'),
+    ]
+      .map((part) => part?.textContent?.trim() ?? "")
+      .join("")
+      .replace("26.10.", "")
   );
 
 const disabled = (name: string): boolean | undefined => button(name)?.disabled;

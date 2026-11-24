@@ -24,19 +24,13 @@ import {
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
 import { Spinner } from "@grasp-os/ui/components/spinner";
-import { TabsLink, TabsNav } from "@grasp-os/ui/components/tabs";
 import {
   ArchiveIcon,
-  CodeIcon,
-  DatabaseIcon,
   EllipsisIcon,
-  EyeIcon,
   Icon,
-  LayoutGridIcon,
   LinkIcon,
   Maximize2Icon,
   MessageCircleIcon,
-  SettingsIcon,
   SparklesIcon,
   UsersIcon,
 } from "@grasp-os/ui/lib/icons";
@@ -71,6 +65,7 @@ import { ItemBar, ItemShell } from "../frame/item-shell.tsx";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { SettingUp, SettingUpBar, Updating } from "../frame/setting-up.tsx";
 import type { SetUp } from "../frame/setting-up.tsx";
+import { AppWindowIcon } from "../frame/sidebar-icons.ts";
 import type { Crumb } from "../frame/site-header.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { PageFrame } from "../pages/page-frame.tsx";
@@ -91,7 +86,6 @@ import {
   PreviewControls,
   previewWidths,
   usePreviewControls,
-  WidthSwitch,
 } from "./preview-controls.tsx";
 import type {
   PreviewControlsProps,
@@ -204,6 +198,15 @@ const styles = stylex.create({
     minWidth: 0,
   },
   hidden: { display: "none" },
+  // The App, Code and Data stand in from the pane's edges as the
+  // reference's app shell sets every page in (28px under the bar, 24px at
+  // the sides, 32px at the foot), as Settings does itself.
+  inset: {
+    boxSizing: "border-box",
+    paddingTop: space[7],
+    paddingInline: space[6],
+    paddingBottom: space[8],
+  },
   // Over the preview: the first build, or a write that broke it mid-turn.
   over: {
     position: "absolute",
@@ -258,33 +261,25 @@ const styles = stylex.create({
   // A preview drawn narrower than its room, in the middle of it.
   drawn: { width: "100%", marginInline: "auto" },
   padded: { padding: space[4] },
-  // How wide the preview is drawn, over it at its end.
-  // A phone has none: its preview is as wide as the phone.
-  widths: {
-    display: { default: "flex", [media.maxSm]: "none" },
-    justifyContent: "flex-end",
-    flexShrink: 0,
-    paddingBlock: space[2],
-    paddingInline: space[4],
-    borderBlockEndWidth: size.hairline,
-    borderBlockEndStyle: "solid",
-    borderBlockEndColor: colors.border,
-  },
 });
 
 /**
- * The rest, under "…": the App's own link, what its team sees (here, and
- * at full size), and its chat on Chat.
+ * The rest, under "…": the App's own link where Publish doesn't hold it
+ * (`linked`), what its team sees (here, and at full size), and its chat
+ * on Chat.
  */
 const MoreMenu = ({
   app,
   chatId,
   changing,
+  linked,
 }: {
   app: App;
   chatId: string | undefined;
   /** Whether there are changes only its builders see, which the workspace shows. */
   changing: boolean;
+  /** Whether the link is set from here: not while Publish's dialog sets it. */
+  linked: boolean;
 }) => {
   const { t } = useLingui();
   const [linking, setLinking] = useState(false);
@@ -298,7 +293,7 @@ const MoreMenu = ({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          {app.archived ? null : (
+          {app.archived || !linked ? null : (
             <DropdownMenuItem
               icon={LinkIcon}
               onSelect={() => {
@@ -338,49 +333,6 @@ const MoreMenu = ({
       </DropdownMenu>
       <AppLinkDialog app={app} onOpenChange={setLinking} open={linking} />
     </>
-  );
-};
-
-/** The workspace's views, each an address of its own (`?view=`). */
-const views = [
-  { view: "preview", icon: EyeIcon },
-  { view: "code", icon: CodeIcon },
-  { view: "data", icon: DatabaseIcon },
-  { view: "settings", icon: SettingsIcon },
-] as const;
-
-/**
- * The views in the bar: tabs that are links, so each opens in a new tab
- * too. In the reference's frame they are the sidebar's rows of the App's
- * section; until the frame is on Damsko they stay in the bar.
- */
-const ViewSwitch = ({ app, view }: { app: string; view: WorkspaceView }) => {
-  const { t } = useLingui();
-  const labels: Record<WorkspaceView, string> = {
-    preview: t({ message: "App", context: "an app's workspace view" }),
-    code: t({ message: "Code", context: "an app's workspace view" }),
-    data: t({ message: "Data", context: "an app's workspace view" }),
-    settings: t({ message: "Settings", context: "an app's workspace view" }),
-  };
-  return (
-    <TabsNav aria-label={t`Workspace views`} size="sm">
-      {views.map(({ view: each, icon }) => (
-        <TabsLink asChild current={each === view} icon={icon} key={each}>
-          <Link
-            params={{ app }}
-            replace
-            search={(held) => ({
-              env: held.env,
-              project: held.project,
-              ...(each === "preview" ? {} : { view: each }),
-            })}
-            to="/apps/$app"
-          >
-            {labels[each]}
-          </Link>
-        </TabsLink>
-      ))}
-    </TabsNav>
   );
 };
 
@@ -429,15 +381,20 @@ const WorkspaceBar = ({
     <ItemBar
       actions={
         <>
-          <ViewSwitch app={app.id} view={view} />
           {/* The preview's own controls stand with the actions, never on a
               row of their own: they give way first where the bar narrows. */}
           {view === "preview" && preview !== undefined ? (
             <PreviewControls {...preview} />
           ) : null}
-          <MoreMenu app={app} changing={hasChanges(draft)} chatId={chatId} />
+          <MoreMenu
+            app={app}
+            changing={hasChanges(draft)}
+            chatId={chatId}
+            linked={!shares}
+          />
           {shares ? (
             <ShareWithTeam
+              app={app}
               draft={draft}
               members={members ?? []}
               pending={pending}
@@ -898,7 +855,7 @@ const LivePreview = ({
   }
   if (app.currentVersion === null) {
     return (
-      <PreviewState icon={LayoutGridIcon} title={t`Your team has nothing yet`}>
+      <PreviewState icon={AppWindowIcon} title={t`Your team has nothing yet`}>
         <Trans>They see it once you share it with them.</Trans>
       </PreviewState>
     );
@@ -1001,11 +958,15 @@ const MainArea = ({
   modelDraft?: ModelDraft;
 }) => (
   <div {...stylex.props(styles.fill)}>
-    <div {...stylex.props(view === "preview" ? styles.column : styles.hidden)}>
+    <div
+      {...stylex.props(
+        view === "preview" ? [styles.column, styles.inset] : styles.hidden
+      )}
+    >
       {preview}
     </div>
     {view === "code" ? (
-      <div {...stylex.props(styles.column)}>
+      <div {...stylex.props(styles.column, styles.inset)}>
         <Suspense
           fallback={
             <div {...stylex.props(styles.padded)}>
@@ -1018,7 +979,7 @@ const MainArea = ({
       </div>
     ) : null}
     {view === "data" ? (
-      <div {...stylex.props(styles.column)}>
+      <div {...stylex.props(styles.column, styles.inset)}>
         <DataArea app={app.id} env={env} modelDraft={modelDraft} />
       </div>
     ) : null}
@@ -1270,11 +1231,6 @@ const Building = ({
       }
     >
       {env === "live" && changing ? <TeamViewBar app={app.id} /> : null}
-      {view === "preview" ? (
-        <div {...stylex.props(styles.widths)}>
-          <WidthSwitch />
-        </div>
-      ) : null}
       {changesLine && draft !== undefined ? (
         <UnpublishedChanges draft={draft} onChanged={reread} running={busy} />
       ) : null}

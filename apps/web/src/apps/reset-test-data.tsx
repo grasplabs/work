@@ -74,7 +74,6 @@ export const ResetTestData = ({
                 await reset();
                 setAsking(false);
               }}
-              size="sm"
               variant="destructive"
             >
               {t`Reset`}

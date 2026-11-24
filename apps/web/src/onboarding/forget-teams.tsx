@@ -7,6 +7,7 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
+  AlertDialogHeader,
   AlertDialogTitle,
 } from "@grasp-os/ui/components/alert-dialog";
 import { Button } from "@grasp-os/ui/components/button";
@@ -107,10 +108,12 @@ export const ForgetTeams = ({
       <ErrorText>{failure}</ErrorText>
       <AlertDialog onOpenChange={setOpen} open={open}>
         <AlertDialogContent>
-          <AlertDialogTitle>{t`Erase your teams from your Brain?`}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {t`I erase everything your Brain keeps of your teams, every earlier version too, for everyone. Your list of teams and people stays as it is, and the next time you confirm it, your Brain gets it again. This can’t be undone.`}
-          </AlertDialogDescription>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t`Erase your teams from your Brain?`}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t`I erase everything your Brain keeps of your teams, every earlier version too, for everyone. Your list of teams and people stays as it is, and the next time you confirm it, your Brain gets it again. This can’t be undone.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel />
             <AlertDialogAction

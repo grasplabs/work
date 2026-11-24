@@ -32,9 +32,10 @@ export const chatPresence = {
   /**
    * A page the chat builds, about its subject (an App's workspace, a
    * workflow's page: chat-subject.ts): the chat docked beside it, part of
-   * the page rather than a window over it, and no bar.
+   * the page rather than a window over it, or full screen over it for a
+   * while, as #2503's docked panel expands; and no bar.
    */
-  docked: { placements: ["docked"], bar: false },
+  docked: { placements: ["docked", "fullscreen"], bar: false },
   /** A page that is where to ask (Chat's own): the chat full screen over it, and no bar. */
   fullscreenOnly: { placements: ["fullscreen"], bar: false },
   /** A page where Grasp's chat has no place: none of it, nor its bar. */
