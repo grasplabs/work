@@ -29,6 +29,19 @@ export const gathering: Pose = {
   strength: 0.62,
 };
 
+/**
+ * Out of the way: a screen with its own room (the interview's
+ * conversation). Nothing of him shows at rest; he stays mounted, so the
+ * screen that changes to it changes nothing under it.
+ */
+export const aside: Pose = {
+  at: [0.5, 0],
+  reach: [0.5, 0.3],
+  seed: 0,
+  tempo: 1,
+  strength: 0,
+};
+
 /** Low beside the words, a screen of the interview that asks something of them. */
 export const beside: Pose = {
   at: [0.5, 1],

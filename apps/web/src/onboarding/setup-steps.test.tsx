@@ -449,8 +449,9 @@ describe("the welcome", () => {
 describe("the documents and places the admin comes back to", () => {
   it("shows the places chosen for the documents as noted", () => {
     const sharePoint: SetupChoices = { ...noChoices, sources: ["sharepoint"] };
-    expect(said("sources", { choices: sharePoint })).toContain(
-      "SharePoint Noted"
+    // Said after its name; the helper puts a space between the name and the words after it.
+    expect(said("sources", { choices: sharePoint })).toMatch(
+      /SharePoint ?, noted/u
     );
   });
 

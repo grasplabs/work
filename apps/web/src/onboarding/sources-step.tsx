@@ -1,21 +1,20 @@
 import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
 import type { ContextWords } from "@grasp-os/shared/onboarding-context";
-import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Item,
-  ItemActions,
   ItemContent,
-  ItemGroup,
+  ItemGrid,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
+import { FileIcon, Icon, PlusIcon } from "@grasp-os/ui/lib/icons";
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
 
 import { canConnect, ConnectDialog } from "../connections/connect-dialog.tsx";
 import { integrationsOf, stateOf } from "../connections/integrations.ts";
@@ -28,20 +27,18 @@ import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { CalmStep } from "./calm-frame.tsx";
 import { OtherRow } from "./other-row.tsx";
-import { PixelMark } from "./pixel-mark.tsx";
 import { sourcesFor } from "./setup.ts";
 import type { DocumentSource } from "./setup.ts";
-import { otherLogo, sourceLogo, wantedLogo } from "./source-logos.ts";
+import { sourceLogo } from "./source-logos.ts";
 import type { SetupData, StepProps } from "./step-parts.ts";
 import { SupportLink } from "./support-link.tsx";
 
 // Where the documents live: the places, those of the company's sign-in
-// and those the kickoff named first, each a row pressed to note it; where
+// and those the kickoff named first, each a tile pressed to note it; where
 // Grasp connects it through Integrations, its sign-in follows in the
 // connect dialog. Another place is asked for by name. Each choice goes to
-// core, which counts it in how much Grasp knows. Every row carries its
-// mark in pixels (pixel-mark.tsx): half there until the place is chosen,
-// filling in as it is.
+// core, which counts it in how much Grasp knows. The places stand as tiles,
+// three in a row, each with its own logo in its own colours.
 
 const styles = stylex.create({
   stack: { display: "grid", gap: space[3] },
@@ -171,15 +168,12 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
       await save({ ...choices, sourcesWanted: [...wanted, name] });
     }
   };
-  const stateOfRow = (source: DocumentSource): ReactNode => {
+  // What became of a place, said to a screen reader after its name; its tile glows with it.
+  const stateOfRow = (source: DocumentSource): string | null => {
     if (!noted.includes(source.id)) {
       return null;
     }
-    return isConnected(source) ? (
-      <Badge variant="success">{t`Connected`}</Badge>
-    ) : (
-      <Badge variant="secondary">{t`Noted`}</Badge>
-    );
+    return isConnected(source) ? t`connected` : t`noted`;
   };
   return (
     <CalmStep
@@ -204,13 +198,14 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
       title={t`Where does the work get written down?`}
     >
       <div {...stylex.props(styles.stack)}>
-        <ItemGroup aria-label={t`Where your documents live`}>
+        <ItemGrid aria-label={t`Where your documents live`} columns={3}>
           {listed.map((source) => {
             const state = stateOfRow(source);
             const done = noted.includes(source.id) && isConnected(source);
             const logo = sourceLogo(source);
             return (
               <Item
+                done={state !== null}
                 key={source.id}
                 {...(done
                   ? {}
@@ -223,39 +218,45 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
               >
                 {logo === null ? null : (
                   <ItemMedia variant="image">
-                    <PixelMark icon={logo} whole={noted.includes(source.id)} />
+                    <img alt="" src={logo} />
                   </ItemMedia>
                 )}
                 <ItemContent>
-                  <ItemTitle>{source.name}</ItemTitle>
+                  <ItemTitle>
+                    {source.name}
+                    {state === null ? null : (
+                      <span {...stylex.props(visuallyHidden)}>, {state}</span>
+                    )}
+                  </ItemTitle>
                 </ItemContent>
-                {state === null ? null : <ItemActions>{state}</ItemActions>}
               </Item>
             );
           })}
           {wanted.map((name) => (
-            <Item key={name} variant="outline">
-              <ItemMedia variant="image">
-                <PixelMark icon={wantedLogo} whole />
+            <Item done key={name} variant="outline">
+              <ItemMedia variant="icon">
+                <Icon icon={FileIcon} />
               </ItemMedia>
               <ItemContent>
-                <ItemTitle>{name}</ItemTitle>
+                <ItemTitle>
+                  {name}
+                  <span {...stylex.props(visuallyHidden)}>
+                    , {t`asked for`}
+                  </span>
+                </ItemTitle>
               </ItemContent>
-              <ItemActions>
-                <Badge variant="secondary">{t`Asked for`}</Badge>
-              </ItemActions>
             </Item>
           ))}
           <OtherRow
             disabled={busy}
             label={t`Something else`}
-            media={<PixelMark icon={otherLogo} whole={false} />}
+            media={<Icon icon={PlusIcon} />}
             onAdd={(name) => {
               void ask(name);
             }}
             placeholder={t`Where, for example Dropbox`}
           />
-        </ItemGroup>
+        </ItemGrid>
         <ErrorText>{failure}</ErrorText>
       </div>
       {connecting === null ? null : (

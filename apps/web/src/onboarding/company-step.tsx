@@ -32,6 +32,10 @@ import { formatList } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { CalmStep } from "./calm-frame.tsx";
+import { CompanyDots } from "./company-dots.tsx";
+import { namedOf, useCompanyConcept } from "./company-picture.ts";
+import type { CompanyConcept } from "./company-picture.ts";
+import { CompanyRows } from "./company-rows.tsx";
 import {
   csvRows,
   directoryListOf,
@@ -65,15 +69,9 @@ const styles = stylex.create({
   stack: { display: "grid", gap: space[4] },
 });
 
-/** How many of the people the step names, so the admin sees it is their own company. */
-const namedMost = 3;
-
 /** The first few people on the list, by name; someone core erased has none. */
 const namesOf = (roster: Roster): string[] =>
-  roster.people
-    .map(({ name }) => name)
-    .filter((name) => name !== "")
-    .slice(0, namedMost);
+  namedOf(roster).map(({ name }) => name);
 
 const xlsxName = /\.xlsx$/iu;
 
@@ -207,8 +205,11 @@ const useBody = ({
   suites,
   people,
   teams,
+  pictured,
 }: {
   roster: Roster | null;
+  /** A concept draws the roster: the line says what it holds, and leaves the names to the picture. */
+  pictured: boolean;
   /** The upload is out: the line says what to share. */
   listShown: boolean;
   fromDirectory: DirectorySuite | null;
@@ -229,6 +230,9 @@ const useBody = ({
       fromDirectory === null
         ? t`From your staff list I can see ${people} people in ${teams} teams.`
         : t`${signIn} is connected. I can see ${people} people in ${teams} teams.`;
+    if (pictured) {
+      return seen;
+    }
     // A few of them by name, so the admin sees it is their own company.
     const names = formatList(namesOf(roster));
     const among = t`Among them ${names}.`;
@@ -330,6 +334,20 @@ const useCompanyWays = ({
     ),
   };
 };
+
+/** Concepts only: the roster drawn, as dots (a) or as rows (b). */
+const Pictured = ({
+  concept,
+  roster,
+}: {
+  concept: CompanyConcept;
+  roster: Roster;
+}) =>
+  concept === "a" ? (
+    <CompanyDots roster={roster} />
+  ) : (
+    <CompanyRows roster={roster} />
+  );
 
 export const CompanyStep = (props: StepProps) => {
   const { t } = useLingui();
@@ -442,7 +460,11 @@ export const CompanyStep = (props: StepProps) => {
   const fromDirectory = directoryShown(fresh, directory);
   const signInsFirst = roster === null && suites.length > 0 && !another;
   const listShown = roster === null ? !signInsFirst : another;
+  // Concepts only: `?concept=a|b` draws the roster, once there is one and no other list is asked for.
+  const concept = useCompanyConcept();
+  const pictured = concept !== null && roster !== null && !listShown;
   const body = useBody({
+    pictured,
     roster,
     listShown,
     fromDirectory,
@@ -467,6 +489,7 @@ export const CompanyStep = (props: StepProps) => {
       end={end}
       title={t`Who’s who at your company?`}
     >
+      {pictured ? <Pictured concept={concept} roster={roster} /> : null}
       {signInsFirst || listShown || problem !== null || waiting > 0 ? (
         <div {...stylex.props(styles.stack)}>
           {signInsFirst ? (
