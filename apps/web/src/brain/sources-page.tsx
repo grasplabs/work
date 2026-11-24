@@ -104,6 +104,7 @@ import {
   size as sizes,
   space,
 } from "@grasp-os/ui/lib/tokens.stylex";
+import type { LayoutStyle } from "@grasp-os/ui/lib/utils";
 import { i18n } from "@lingui/core";
 import { plural } from "@lingui/core/macro";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
@@ -951,24 +952,22 @@ const UploadActions = ({
             })();
           }}
         >
-          <div {...stylex.props(styles.grow)}>
-            <Field>
-              <FieldLabel>
-                <Trans>New version</Trans>
-              </FieldLabel>
-              <FileUpload
-                accept={uploadAccept}
-                onValueChange={([chosen]) => {
-                  setFile(
-                    chosen === undefined
-                      ? undefined
-                      : { chosen, versionId: crypto.randomUUID() }
-                  );
-                }}
-                variant="button"
-              />
-            </Field>
-          </div>
+          <Field style={styles.grow}>
+            <FieldLabel>
+              <Trans>New version</Trans>
+            </FieldLabel>
+            <FileUpload
+              accept={uploadAccept}
+              onValueChange={([chosen]) => {
+                setFile(
+                  chosen === undefined
+                    ? undefined
+                    : { chosen, versionId: crypto.randomUUID() }
+                );
+              }}
+              variant="button"
+            />
+          </Field>
           <Button
             variant="outline"
             disabled={file === undefined || busy}
@@ -980,19 +979,18 @@ const UploadActions = ({
       ) : null}
       {deletes === null ? null : (
         <AlertDialog>
-          <div {...stylex.props(styles.start)}>
-            <AlertDialogTrigger asChild>
-              <Button
-                aria-label={t`Delete this upload`}
-                disabled={busy}
-                size="sm"
-                variant="ghost"
-              >
-                <Icon icon={TrashIcon} />
-                {t`Delete`}
-              </Button>
-            </AlertDialogTrigger>
-          </div>
+          <AlertDialogTrigger asChild>
+            <Button
+              aria-label={t`Delete this upload`}
+              disabled={busy}
+              size="sm"
+              style={styles.start}
+              variant="ghost"
+            >
+              <Icon icon={TrashIcon} />
+              {t`Delete`}
+            </Button>
+          </AlertDialogTrigger>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>{t`Delete this upload?`}</AlertDialogTitle>
@@ -1321,29 +1319,28 @@ const VersionList = ({
             <ErrorText>{more.message}</ErrorText>
           ) : null}
           {before === null ? null : (
-            <div {...stylex.props(styles.start)}>
-              <Button
-                disabled={more?.state === "loading"}
-                onClick={() => {
-                  setMore({ state: "loading" });
-                  void (async () => {
-                    const answer = await readFrom(
-                      core,
-                      async (sources) => await sources.versions(source, before)
-                    );
-                    setMore(answer.state === "refused" ? answer : undefined);
-                    if (answer.state === "ready") {
-                      onMore(answer.data);
-                    }
-                  })();
-                }}
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                <Trans>Older versions</Trans>
-              </Button>
-            </div>
+            <Button
+              disabled={more?.state === "loading"}
+              onClick={() => {
+                setMore({ state: "loading" });
+                void (async () => {
+                  const answer = await readFrom(
+                    core,
+                    async (sources) => await sources.versions(source, before)
+                  );
+                  setMore(answer.state === "refused" ? answer : undefined);
+                  if (answer.state === "ready") {
+                    onMore(answer.data);
+                  }
+                })();
+              }}
+              size="sm"
+              style={styles.start}
+              type="button"
+              variant="ghost"
+            >
+              <Trans>Older versions</Trans>
+            </Button>
           )}
         </div>
       ) : null}
@@ -1485,6 +1482,7 @@ const SourcePanel = ({
   onChanged,
   onDeleted,
   onClose,
+  style,
 }: {
   source: BrainSourceRef;
   /** The version to show first: the newest they may read when left out. */
@@ -1497,6 +1495,8 @@ const SourcePanel = ({
   /** It was deleted. */
   onDeleted: (source: BrainSourceRef) => void;
   onClose: () => void;
+  /** Its size and where it sits, on its panel. */
+  style?: LayoutStyle;
 }) => {
   const { t } = useLingui();
   const core = useCore();
@@ -1603,7 +1603,7 @@ const SourcePanel = ({
       ? producerLabel(source.producer)
       : firstLineOf(read.text) || t`No first line`;
   return (
-    <SidePanel aria-label={title}>
+    <SidePanel aria-label={title} style={style}>
       <SidePanelHeader
         description={aboutOf(versions)}
         loading={
@@ -1813,35 +1813,34 @@ const SharedUploads = ({ onErased }: { onErased: () => void }) => {
       {acting?.state === "refused" ? <UploadRefusal refused={acting} /> : null}
       {more?.state === "refused" ? <ErrorText>{more.message}</ErrorText> : null}
       {listed.state === "ready" && listed.data.next !== null ? (
-        <div {...stylex.props(styles.start)}>
-          <Button
-            variant="outline"
-            disabled={more?.state === "loading"}
-            onClick={() => {
-              const { next, uploads } = listed.data;
-              setMore({ state: "loading" });
-              void (async () => {
-                const answer = await readFrom(
-                  core,
-                  async (sources) => await sources.sharedUploads(next)
-                );
-                setMore(answer.state === "refused" ? answer : undefined);
-                if (answer.state === "ready") {
-                  setListed({
-                    state: "ready",
-                    data: {
-                      uploads: [...uploads, ...answer.data.uploads],
-                      next: answer.data.next,
-                    },
-                  });
-                }
-              })();
-            }}
-            type="button"
-          >
-            <Trans>Show more</Trans>
-          </Button>
-        </div>
+        <Button
+          style={styles.start}
+          variant="outline"
+          disabled={more?.state === "loading"}
+          onClick={() => {
+            const { next, uploads } = listed.data;
+            setMore({ state: "loading" });
+            void (async () => {
+              const answer = await readFrom(
+                core,
+                async (sources) => await sources.sharedUploads(next)
+              );
+              setMore(answer.state === "refused" ? answer : undefined);
+              if (answer.state === "ready") {
+                setListed({
+                  state: "ready",
+                  data: {
+                    uploads: [...uploads, ...answer.data.uploads],
+                    next: answer.data.next,
+                  },
+                });
+              }
+            })();
+          }}
+          type="button"
+        >
+          <Trans>Show more</Trans>
+        </Button>
       ) : null}
     </section>
   );
@@ -2117,54 +2116,50 @@ export const SourcesPage = ({
                 <ErrorText>{more.message}</ErrorText>
               ) : null}
               {next === null ? null : (
-                <div {...stylex.props(styles.start)}>
-                  <Button
-                    disabled={more?.state === "loading"}
-                    onClick={() => {
-                      setMore({ state: "loading" });
-                      void (async () => {
-                        const answer = await readFrom(
-                          core,
-                          async (read) => await read.list(next)
-                        );
-                        setMore(
-                          answer.state === "refused" ? answer : undefined
-                        );
-                        if (answer.state === "ready") {
-                          setListed({
-                            state: "ready",
-                            data: {
-                              sources: [...kept, ...answer.data.sources],
-                              next: answer.data.next,
-                            },
-                          });
-                        }
-                      })();
-                    }}
-                    size="sm"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <Trans>Show more</Trans>
-                  </Button>
-                </div>
+                <Button
+                  disabled={more?.state === "loading"}
+                  onClick={() => {
+                    setMore({ state: "loading" });
+                    void (async () => {
+                      const answer = await readFrom(
+                        core,
+                        async (read) => await read.list(next)
+                      );
+                      setMore(answer.state === "refused" ? answer : undefined);
+                      if (answer.state === "ready") {
+                        setListed({
+                          state: "ready",
+                          data: {
+                            sources: [...kept, ...answer.data.sources],
+                            next: answer.data.next,
+                          },
+                        });
+                      }
+                    })();
+                  }}
+                  size="sm"
+                  style={styles.start}
+                  type="button"
+                  variant="ghost"
+                >
+                  <Trans>Show more</Trans>
+                </Button>
               )}
             </div>
             {opened === undefined ? null : (
-              <div {...stylex.props(styles.inspector)}>
-                <SourcePanel
-                  connectedNames={connectedNames}
-                  key={`panel-${opened.opening}`}
-                  onChanged={changed}
-                  onClose={() => {
-                    setOpened(undefined);
-                  }}
-                  onDeleted={deleted}
-                  source={opened.source}
-                  teams={teams}
-                  version={opened.version}
-                />
-              </div>
+              <SourcePanel
+                connectedNames={connectedNames}
+                key={`panel-${opened.opening}`}
+                onChanged={changed}
+                onClose={() => {
+                  setOpened(undefined);
+                }}
+                onDeleted={deleted}
+                source={opened.source}
+                style={styles.inspector}
+                teams={teams}
+                version={opened.version}
+              />
             )}
           </div>
         )}

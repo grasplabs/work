@@ -1205,16 +1205,15 @@ export const SkillsPage = ({
               </Trans>
             </FieldDescription>
           </Field>
-          <div {...stylex.props(styles.start)}>
-            <Button
-              disabled={editorBusy || text.trim() === ""}
-              size="sm"
-              type="submit"
-              variant="default"
-            >
-              {t`Save`}
-            </Button>
-          </div>
+          <Button
+            disabled={editorBusy || text.trim() === ""}
+            size="sm"
+            style={styles.start}
+            type="submit"
+            variant="default"
+          >
+            {t`Save`}
+          </Button>
         </form>
 
         <section aria-labelledby={ownHeading} {...stylex.props(styles.section)}>

@@ -159,17 +159,16 @@ export const SourceContentsTable = ({
         rows={hidden > 0 ? contents.rows.slice(0, show) : contents.rows}
       />
       {hidden > 0 ? (
-        <div {...stylex.props(styles.start)}>
-          <Button
-            onClick={() => {
-              setOpen(true);
-            }}
-            size="xs"
-            variant="ghost"
-          >
-            <Plural one="Show # more" other="Show # more" value={hidden} />
-          </Button>
-        </div>
+        <Button
+          onClick={() => {
+            setOpen(true);
+          }}
+          size="xs"
+          style={styles.start}
+          variant="ghost"
+        >
+          <Plural one="Show # more" other="Show # more" value={hidden} />
+        </Button>
       ) : null}
     </section>
   );

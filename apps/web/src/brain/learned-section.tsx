@@ -365,38 +365,37 @@ export const LearnedSection = ({
       ) : null}
       {more?.state === "failed" ? <NotLoaded page={more.page} /> : null}
       {next === null ? null : (
-        <div {...stylex.props(styles.start)}>
-          <Button
-            disabled={more?.state === "loading"}
-            onClick={() => {
-              setMore({ state: "loading" });
-              void (async () => {
-                const answer = await pageOf(core, source, version, next);
-                if (answer.state !== "ready") {
-                  setMore({ state: "failed", page: answer });
-                  return;
+        <Button
+          disabled={more?.state === "loading"}
+          onClick={() => {
+            setMore({ state: "loading" });
+            void (async () => {
+              const answer = await pageOf(core, source, version, next);
+              if (answer.state !== "ready") {
+                setMore({ state: "failed", page: answer });
+                return;
+              }
+              setMore(undefined);
+              const page = answer.data;
+              // None now, after a page before: erased, or no longer theirs
+              // to read, since. What was loaded goes with it, and so does
+              // the cursor that would ask for it again.
+              setLearned((before) => {
+                if (page === null) {
+                  return { state: "gone" };
                 }
-                setMore(undefined);
-                const page = answer.data;
-                // None now, after a page before: erased, or no longer theirs
-                // to read, since. What was loaded goes with it, and so does
-                // the cursor that would ask for it again.
-                setLearned((before) => {
-                  if (page === null) {
-                    return { state: "gone" };
-                  }
-                  return before.state === "ready"
-                    ? { state: "ready", pages: [...before.pages, page] }
-                    : before;
-                });
-              })();
-            }}
-            size="sm"
-            variant="ghost"
-          >
-            {t`Show more`}
-          </Button>
-        </div>
+                return before.state === "ready"
+                  ? { state: "ready", pages: [...before.pages, page] }
+                  : before;
+              });
+            })();
+          }}
+          size="sm"
+          style={styles.start}
+          variant="ghost"
+        >
+          {t`Show more`}
+        </Button>
       )}
     </section>
   );

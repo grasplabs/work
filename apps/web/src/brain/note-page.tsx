@@ -272,11 +272,9 @@ export const NoteBrainPage = ({
         {title}
       </Heading>
       <PageProperties facts={facts} questions={questions} />
-      <div {...stylex.props(styles.body)}>
-        <Markdown headingLevel={2} renderLink={noteLink}>
-          {text ?? noteText(note, byId)}
-        </Markdown>
-      </div>
+      <Markdown headingLevel={2} renderLink={noteLink} style={styles.body}>
+        {text ?? noteText(note, byId)}
+      </Markdown>
     </article>
   );
 };

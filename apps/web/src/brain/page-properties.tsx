@@ -40,7 +40,7 @@ const styles = stylex.create({
     color: colors.mutedForeground,
   },
   count: { color: colors.foreground },
-  body: { paddingBlockStart: space["2"] },
+  body: { marginBlockStart: space["2"] },
 });
 
 export const PageProperties = ({
@@ -81,13 +81,12 @@ export const PageProperties = ({
         </span>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div {...stylex.props(styles.body)}>
-          <KeyValueList
-            items={items}
-            orientation="horizontal"
-            valueAlign="start"
-          />
-        </div>
+        <KeyValueList
+          items={items}
+          orientation="horizontal"
+          style={styles.body}
+          valueAlign="start"
+        />
       </CollapsibleContent>
     </Collapsible>
   );

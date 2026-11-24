@@ -1232,19 +1232,18 @@ const ShowMore = ({
     <>
       <ErrorText>{listing.failure}</ErrorText>
       {listing.next === null ? null : (
-        <div {...stylex.props(styles.start)}>
-          <Button
-            disabled={listing.busy}
-            onClick={() => {
-              listing.showMore();
-            }}
-            size="sm"
-            type="button"
-            variant="ghost"
-          >
-            {t`Show more`}
-          </Button>
-        </div>
+        <Button
+          disabled={listing.busy}
+          onClick={() => {
+            listing.showMore();
+          }}
+          size="sm"
+          style={styles.start}
+          type="button"
+          variant="ghost"
+        >
+          {t`Show more`}
+        </Button>
       )}
     </>
   );
@@ -1770,34 +1769,32 @@ export const MemoriesPage = ({
             <Heading id={entitiesHeading} level={2} size="2xs">
               <Trans>What the Brain remembers</Trans>
             </Heading>
-            <div {...stylex.props(styles.start)}>
-              <Field>
-                <FieldLabel>
-                  <Trans>Kind</Trans>
-                </FieldLabel>
-                <Select
-                  items={brainEntityKinds.map((each) => ({
-                    value: each,
-                    label: kindLabel(each),
-                  }))}
-                  onValueChange={(value) => {
-                    const picked = brainEntityKinds.find(
-                      (each) => each === value
-                    );
-                    if (picked !== undefined) {
-                      setKind(picked);
-                      setOpened(undefined);
-                    }
-                  }}
-                  value={kind}
-                >
-                  <SelectTrigger size="sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent />
-                </Select>
-              </Field>
-            </div>
+            <Field style={styles.start}>
+              <FieldLabel>
+                <Trans>Kind</Trans>
+              </FieldLabel>
+              <Select
+                items={brainEntityKinds.map((each) => ({
+                  value: each,
+                  label: kindLabel(each),
+                }))}
+                onValueChange={(value) => {
+                  const picked = brainEntityKinds.find(
+                    (each) => each === value
+                  );
+                  if (picked !== undefined) {
+                    setKind(picked);
+                    setOpened(undefined);
+                  }
+                }}
+                value={kind}
+              >
+                <SelectTrigger size="sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent />
+              </Select>
+            </Field>
             <div
               {...stylex.props(
                 styles.split,

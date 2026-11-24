@@ -297,18 +297,17 @@ export const OwnExportSection = () => {
     controls = (
       <>
         <ErrorText>{notLoadedText(read, i18n)}</ErrorText>
-        <div {...stylex.props(styles.start)}>
-          <Button
-            disabled={busy}
-            onClick={() => {
-              void requestRead("person");
-            }}
-            size="sm"
-            variant="outline"
-          >
-            <Trans>Try again</Trans>
-          </Button>
-        </div>
+        <Button
+          disabled={busy}
+          onClick={() => {
+            void requestRead("person");
+          }}
+          size="sm"
+          style={styles.start}
+          variant="outline"
+        >
+          <Trans>Try again</Trans>
+        </Button>
       </>
     );
   } else if (read !== undefined && !writing) {
@@ -316,18 +315,17 @@ export const OwnExportSection = () => {
     controls = (
       <>
         {shown?.state === "done" ? <Files shown={shown} /> : null}
-        <div {...stylex.props(styles.start)}>
-          <Button
-            disabled={busy}
-            onClick={() => {
-              void start();
-            }}
-            size="sm"
-            variant="outline"
-          >
-            {again ? <Trans>Export again</Trans> : <Trans>Export</Trans>}
-          </Button>
-        </div>
+        <Button
+          disabled={busy}
+          onClick={() => {
+            void start();
+          }}
+          size="sm"
+          style={styles.start}
+          variant="outline"
+        >
+          {again ? <Trans>Export again</Trans> : <Trans>Export</Trans>}
+        </Button>
       </>
     );
   }

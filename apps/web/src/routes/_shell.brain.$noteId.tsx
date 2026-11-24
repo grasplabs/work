@@ -179,7 +179,7 @@ const styles = stylex.create({
     lineHeight: font.textXsLine,
     color: colors.mutedForeground,
   },
-  earlier: { paddingBottom: space["2"] },
+  earlier: { marginBlockEnd: space["2"] },
   details: {
     display: "flex",
     flexDirection: "column",
@@ -330,34 +330,29 @@ const Timeline = ({ note }: { note: Note }) => {
   return (
     <div {...stylex.props(styles.timeline)}>
       {earlier.length > 0 ? (
-        <div {...stylex.props(styles.earlier)}>
-          <Collapsible fitContent>
-            <CollapsibleTrigger>
-              {t({
-                message: plural(folded, {
-                  one: "# earlier",
-                  other: "# earlier",
-                }),
-                comment: "Earlier events on a timeline, folded away",
-              })}
-            </CollapsibleTrigger>
-            <CollapsibleContent>
-              {earlier.map((month) => (
-                <div key={month.month} {...stylex.props(styles.month)}>
-                  <p {...stylex.props(styles.monthName)}>
-                    {formatMonth(month.month)}
-                  </p>
-                  {month.events.map((entry, index) => (
-                    <TimelineEvent
-                      entry={entry}
-                      key={`${entry.date}-${index}`}
-                    />
-                  ))}
-                </div>
-              ))}
-            </CollapsibleContent>
-          </Collapsible>
-        </div>
+        <Collapsible fitContent style={styles.earlier}>
+          <CollapsibleTrigger>
+            {t({
+              message: plural(folded, {
+                one: "# earlier",
+                other: "# earlier",
+              }),
+              comment: "Earlier events on a timeline, folded away",
+            })}
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            {earlier.map((month) => (
+              <div key={month.month} {...stylex.props(styles.month)}>
+                <p {...stylex.props(styles.monthName)}>
+                  {formatMonth(month.month)}
+                </p>
+                {month.events.map((entry, index) => (
+                  <TimelineEvent entry={entry} key={`${entry.date}-${index}`} />
+                ))}
+              </div>
+            ))}
+          </CollapsibleContent>
+        </Collapsible>
       ) : null}
       {recent.map((entry, index) => (
         <TimelineEvent entry={entry} key={`${entry.date}-${index}`} />
