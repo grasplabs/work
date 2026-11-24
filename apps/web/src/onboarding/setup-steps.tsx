@@ -1614,6 +1614,8 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
   const lines = useHeadlines(props).leads;
   const { run, busy, failure } = useCoreAction();
   const refresh = useRefresh();
+  // Confirmed, it stays busy until every step reads what core now has, so it can't be pressed twice.
+  const [refreshing, setRefreshing] = useState(false);
   const from = JSON.stringify(props.roster);
   // Changed and not confirmed yet, it is as they left it.
   const [draft, setDraft] = useState<Roster>(
@@ -1737,7 +1739,7 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
       </Onward>
       {saved === null ? (
         <Primary
-          busy={busy}
+          busy={busy || refreshing}
           onClick={() => {
             void (async () => {
               const kept = await run(
@@ -1746,7 +1748,9 @@ const ConfirmOrg = (props: StepProps & { roster: Roster }) => {
               if (kept !== undefined) {
                 // Coming back while it stands as confirmed, it still is.
                 orgConfirmed.keep(JSON.stringify(kept.roster), true);
+                setRefreshing(true);
                 await refresh();
+                setRefreshing(false);
                 setSaved("now");
               }
             })();

@@ -28,6 +28,7 @@ import {
   redirect,
   useNavigate,
 } from "@tanstack/react-router";
+import { todayDate } from "@ui-sdk/react/date";
 import {
   useEffect,
   useMemo,
@@ -239,7 +240,10 @@ const notePlace = async (
   }
 };
 
-const today = (): string => new Date().toISOString().slice(0, 10);
+// Today on this device's calendar, as the plan's hours are read on its clock
+// (send-plan.ts, momentOf): in UTC, an evening in the US was already
+// tomorrow. The organization's zone is UTC until an admin sets one.
+const today = (): string => todayDate();
 
 /**
  * How far this browser's admin went, the message they wrote and what they

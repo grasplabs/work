@@ -26,7 +26,8 @@ import { noteHeard, planDraft } from "./visit.ts";
 
 // The team step's plan, as a person in a region of their own types its
 // day: read in their order, or refused in words, and what "What happens
-// next" says is what core is asked to save. Core's answer is faked.
+// next" says is what core is asked to save; and the leads step's
+// confirmation, pressed once. Core's answer is faked.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -527,5 +528,56 @@ describe("the team step's day, typed", () => {
     expect(sendButton().disabled).toBeTruthy();
     await typeDay("25/11/2026");
     expect(sendButton().disabled).toBeFalsy();
+  });
+});
+
+/** The step's main button, by its words (busy, it holds them for each state it can show). */
+const button = (words: string): HTMLButtonElement | undefined =>
+  [...document.querySelectorAll("button")].find((each) =>
+    each.textContent?.trim().startsWith(words)
+  );
+
+const press = async (words: string): Promise<void> => {
+  await act(async () => {
+    button(words)?.click();
+    await Promise.resolve();
+  });
+  await settled();
+};
+
+describe("the leads step's confirmation", () => {
+  afterEach(() => {
+    act(() => {
+      root?.unmount();
+    });
+    root = undefined;
+    document.body.replaceChildren();
+  });
+
+  it("stays busy until every step reads what core now has, so a second press confirms nothing more", async () => {
+    const { promise: reread, resolve: answered } =
+      Promise.withResolvers<boolean>();
+    const { confirmed } = await shown("en", ["en-GB"], {
+      step: "leads",
+      // The HR platform was answered: the step shows the teams and their leads.
+      given: { ...data, choices: { ...noChoices, hr: { kind: "none" } } },
+      reread,
+    });
+    await press("This is right");
+    expect({
+      busy: button("This is right")?.getAttribute("aria-busy"),
+      confirmed: confirmed(),
+    }).toStrictEqual({ busy: "true", confirmed: 1 });
+    await press("This is right");
+    expect(confirmed()).toBe(1);
+    await act(async () => {
+      answered(true);
+      await Promise.resolve();
+    });
+    await settled();
+    expect({
+      next: button("Continue") === undefined,
+      confirmed: confirmed(),
+    }).toStrictEqual({ next: false, confirmed: 1 });
   });
 });
