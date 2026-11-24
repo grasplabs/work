@@ -49,6 +49,8 @@ import {
 import type { Concept } from "../onboarding/campaign/campaign-page.tsx";
 import { isCampaignState } from "../onboarding/campaign/fixtures.ts";
 import type { CampaignState } from "../onboarding/campaign/fixtures.ts";
+import { isConceptStep } from "../onboarding/concepts/concept-props.ts";
+import { ConceptSetup } from "../onboarding/concepts/concepts.tsx";
 import { motion } from "../onboarding/motion.ts";
 import { useReveal } from "../onboarding/reveal-state.ts";
 import { todayInUtc } from "../onboarding/send-plan.ts";
@@ -595,7 +597,45 @@ const SetupOrConcept = () => {
   if (step === "listening" && concept !== undefined) {
     return <CampaignFrame concept={concept} state={state ?? "day3"} />;
   }
-  return <Setup />;
+  return <SetupPage />;
+};
+
+/**
+ * The setup's first three steps as one of the concepts Ruben chooses
+ * between (`?concept=a|b|c`), on the same data and core calls; past the
+ * plan, the setup goes on as it is.
+ */
+const Concepts = ({ concept }: { concept: Concept }) => {
+  const { i18n } = useLingui();
+  const navigate = useNavigate();
+  const { identity } = Route.useRouteContext();
+  const loaded = Route.useLoaderData();
+  const { step: asked } = Route.useSearch();
+  if (loaded.state !== "ready") {
+    return <PageError reason={notLoadedText(loaded, i18n) ?? ""} />;
+  }
+  const step = isConceptStep(asked) ? asked : "welcome";
+  return (
+    <ConceptSetup
+      admin={identity.name.split(" ")[0] ?? identity.name}
+      concept={concept}
+      data={{ ai: loaded.data.ai }}
+      go={(next) => {
+        void navigate({ to: "/setup", search: { concept, step: next } });
+      }}
+      onward={() => {
+        void navigate({ to: "/setup", search: { step: "company" } });
+      }}
+      step={step}
+      today={new Date(`${todayInUtc()}T12:00:00Z`)}
+    />
+  );
+};
+
+/** Today's setup, or one of the concepts of its first steps. */
+const SetupPage = () => {
+  const { concept } = Route.useSearch();
+  return concept === undefined ? <Setup /> : <Concepts concept={concept} />;
 };
 
 /**
