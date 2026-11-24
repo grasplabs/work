@@ -174,10 +174,20 @@ describe("the weekly report in the inbox", () => {
 
     const [file] = saved;
     const html = await resolveObjectURL(file?.href ?? "")?.text();
-    expect(file?.name).toBe("weekly-report-week-06.html");
+    // The file, its title and its heading all name the week that closed.
+    expect({
+      name: file?.name,
+      title: html?.includes("<title>R&amp;D &lt;Labs&gt; week 6</title>"),
+      heading: html?.includes("Week 6 of 8"),
+      today: html?.includes("Week 7"),
+    }).toStrictEqual({
+      name: "weekly-report-week-06.html",
+      title: true,
+      heading: true,
+      today: false,
+    });
     expect(html).toContain("<!doctype html>");
     expect(html).toContain("75% of this week's 4 runs needed nobody.");
-    expect(html).toContain("<title>R&amp;D &lt;Labs&gt; week 7</title>");
     expect(html).toContain('<meta name="color-scheme" content="light dark">');
   });
 
@@ -304,7 +314,7 @@ describe("the weekly report in the inbox", () => {
     expect({
       unread: sheet.includes("This couldn't be read when the report was made."),
       noughts: sheet.includes("0 runs"),
-      week: sheet.includes("Week 7 of 8"),
+      week: sheet.includes("Week 6 of 8"),
       kinds: ["Model cost", "Keeps failing", "failing step"].map((kind) =>
         sheet.includes(kind)
       ),

@@ -309,7 +309,7 @@ const ReportSheetBody = ({
     }
     return await snapshot(
       drawn,
-      `${company} week ${programme.week}`.trim(),
+      `${company} week ${programme.nextReport.week}`.trim(),
       embed
     );
   };

@@ -144,7 +144,8 @@ const weekOf = (
   );
   return {
     company,
-    week: programme.week,
+    // The week the figures are on: the one that closed, on the day it is ready.
+    week: programme.nextReport.week,
     weeks: programme.weeks,
     ran,
     better:
