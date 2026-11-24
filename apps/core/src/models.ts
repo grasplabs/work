@@ -94,13 +94,14 @@ import { recordResponse } from "./model-usage.ts";
 import type { ProviderNote, UsageRecord } from "./model-usage.ts";
 import { usualHostsOf } from "./platform-hosts.ts";
 import {
+  charactersOf,
   hearingCostOf,
   parseHearingRef,
   parseVoiceRef,
   speechCostOf,
   wordsOf,
 } from "./voice-models.ts";
-import type { AlignedWord, HearingRef, VoiceRef } from "./voice-models.ts";
+import type { HearingRef, VoiceRef } from "./voice-models.ts";
 
 // The model gateway: every model call in a deployment goes through here,
 // and from here through a model transport (model-transport.ts), never
@@ -2387,18 +2388,15 @@ const relayOrFail = async (
 // each fixed in code at its provider's EU host. They go through the gateway
 // like any model call, as what is said and heard is interview content:
 // the rules judge it, and once it ended, what it used is recorded at its
-// price per second, with its audit event, never anything said or heard
-// (model-usage.ts). They go to the provider's own
+// price per character or per second, with its audit event, never anything
+// said or heard (model-usage.ts). They go to the provider's own
 // API through connect, with Grasp's own key for it, which connect holds
 // (`platformSecret` in @grasp-os/shared/ai-providers): core holds no key,
 // and a provider Grasp has no key for is refused (`model.not_allowed`,
 // because `platform`), never served by another.
 
-/** A voice's ID: letters and digits alone. */
-const voiceIdPattern = /^[A-Za-z0-9]{1,64}$/u;
-
-/** A voice's ID that is KugelAudio's number for it, which it takes as one. */
-const voiceNumberPattern = /^\d+$/u;
+/** A voice's ID as Mistral names one: letters, digits, `_` and `-`, such as `voice_485`. */
+const voiceIdPattern = /^[A-Za-z0-9_-]{1,64}$/u;
 
 /** An ISO 639-1 language code. */
 const languagePattern = /^[a-z]{2}$/u;
@@ -2428,9 +2426,9 @@ export type SpeechCall = z.input<typeof speechSchema> & {
 const speechTimeoutMs = 60_000;
 
 /**
- * Retries for a line the provider turned away for a moment, before it
- * said any of it (its rate limit, a model it has no room on, a server
- * that is restarting), which is over in a moment.
+ * Retries for a line the provider refused for a moment (429 or 5xx):
+ * Mistral says so many lines at a time and turns the rest away, which is
+ * over in a moment.
  */
 const speechRetries = 1;
 
@@ -2438,46 +2436,16 @@ const speechRetries = 1;
 const speechRetryMs = 500;
 
 /**
- * KugelAudio's speech socket (`/ws/tts`): one request a line, answered
- * with its audio a piece at a time, when each word of each piece is said,
- * and a last frame once it is all said. Its HTTP endpoint tells no word's
- * time, so a line always goes over the socket.
+ * The audio asked for: a WAV file, whose size says how long the line
+ * takes to say, which Mistral's answer doesn't otherwise tell.
  */
-const speechSocketPath = "/ws/tts";
+const speechFormat = { name: "wav", mime: "audio/wav" } as const;
 
-/** The audio a line comes as: 16-bit PCM, mono, which a WAV file holds as it is. */
-const speechAudio = { encoding: "pcm_s16le", bytesPerSample: 2 } as const;
+/** Where a line is said: Mistral's speech endpoint, the whole file at once. */
+const speechPath = "/v1/audio/speech";
 
-/** The media type a line is answered in: its PCM in a WAV file. */
-const speechMime = "audio/wav";
-
-/** A piece of a line's audio, base64, of the part of the line `chunk_id` names. */
-const audioFrameSchema = z.object({
-  audio: z.string(),
-  enc: z.literal(speechAudio.encoding),
-  sr: z.int().positive(),
-  chunk_id: z.int().nonnegative(),
-});
-
-/**
- * When each word of one part of the line is said, in ms from where that
- * part's audio starts, and the characters of the line as sent that the
- * word says, counted in code points.
- */
-const wordsFrameSchema = z.object({
-  word_timestamps: z.array(
-    z.object({
-      start_ms: z.number().nonnegative(),
-      end_ms: z.number().nonnegative(),
-      original_char_start: z.int().nonnegative(),
-      original_char_end: z.int().nonnegative(),
-    })
-  ),
-  chunk_id: z.int().nonnegative(),
-});
-
-/** KugelAudio's own ID for a socket's requests, as its error frames name it. */
-const providerRequestIdSchema = z.string().regex(/^[\w-]{1,64}$/u);
+/** Mistral's answer: the audio. */
+const spokenSchema = z.object({ audio_data: z.string().min(1) });
 
 /** Base64 as bytes; `undefined` for text that isn't base64. */
 const bytesOf = (base64: string): Uint8Array | undefined => {
@@ -2488,49 +2456,10 @@ const bytesOf = (base64: string): Uint8Array | undefined => {
   }
 };
 
-/** The size of a WAV file's header for plain PCM. */
-const wavHeaderBytes = 44;
-
-/** `pieces` of 16-bit mono PCM at `rate` samples a second, `bytes` in all, as one WAV file. */
-const wavOf = (
-  pieces: readonly Uint8Array[],
-  bytes: number,
-  rate: number
-): Uint8Array => {
-  const file = new Uint8Array(wavHeaderBytes + bytes);
-  const header = new DataView(file.buffer);
-  const tag = (at: number, name: string): void => {
-    file.set(new TextEncoder().encode(name), at);
-  };
-  const { bytesPerSample } = speechAudio;
-  tag(0, "RIFF");
-  header.setUint32(4, wavHeaderBytes - 8 + bytes, true);
-  tag(8, "WAVE");
-  tag(12, "fmt ");
-  // A format chunk of 16 bytes: PCM (1), one channel.
-  header.setUint32(16, 16, true);
-  header.setUint16(20, 1, true);
-  header.setUint16(22, 1, true);
-  header.setUint32(24, rate, true);
-  header.setUint32(28, rate * bytesPerSample, true);
-  header.setUint16(32, bytesPerSample, true);
-  header.setUint16(34, bytesPerSample * 8, true);
-  tag(36, "data");
-  header.setUint32(40, bytes, true);
-  let at = wavHeaderBytes;
-  for (const piece of pieces) {
-    file.set(piece, at);
-    at += piece.length;
-  }
-  return file;
-};
-
 /** What the audit log records of one line, however it ended. */
 interface SpeechRecord {
-  /** Characters of the line; 0 when no provider took it. */
+  /** Characters said; 0 when the provider said nothing. */
   characters: number;
-  /** Seconds of audio the provider said of it, which it bills. */
-  seconds: number;
   /** Where its route went (`platformRouteOf`). */
   region: Way["region"];
   cost: number;
@@ -2565,7 +2494,7 @@ const speechEntry = (
     action: "model.call",
     requestId: call.requestId,
     provenance,
-    // A speech model counts seconds said, not tokens (`seconds`).
+    // A speech model counts characters, not tokens (`characters`).
     model: {
       provider: ref.provider,
       model: ref.id,
@@ -2580,7 +2509,6 @@ const speechEntry = (
       status: recorded.status ?? null,
       errorType: recorded.errorType ?? null,
       characters: recorded.characters,
-      seconds: recorded.seconds,
       voice: call.voice,
       language: call.language,
       transport: "connect",
@@ -2600,7 +2528,6 @@ const speechEntry = (
 /** The most a line can add to its audit event (`largestRecord`). */
 const largestSpeech: SpeechRecord = {
   characters: maxSpeechChars,
-  seconds: Number.MAX_SAFE_INTEGER,
   region: "custom",
   cost: Number.MAX_VALUE,
   logId: "x".repeat(auditIdentifierMaxLength),
@@ -2615,10 +2542,10 @@ interface SpeechRoute {
   call: SpeechSession;
   ref: VoiceRef;
   way: Way;
-  /** Opens a speech socket for the line, as provider request `id`. */
-  open: (id: string, limit: Deadline) => Promise<WebSocket>;
-  /** The line as the socket takes it. */
-  request: string;
+  /** Sends the line once, as provider request `id`. */
+  send: (id: string, limit: Deadline) => Promise<Response>;
+  /** What the line's text is charged as (`charactersOf`). */
+  characters: number;
   /** Where its requests go on Grasp's own key (`platformRouteOf`). */
   platform: PlatformRoute;
 }
@@ -2691,253 +2618,171 @@ const admitSpeech = async (
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
   }
+  // No language is named: Voxtral says a line in the language it is
+  // written in.
+  const body = JSON.stringify({
+    model: ref.id,
+    input: call.text,
+    voice_id: call.voice,
+    response_format: speechFormat.name,
+  });
   return {
     env,
     call,
     ref,
     way: platformWay(ref.provider, target.platform, "speech"),
-    open: async (id, limit) =>
-      await connectSocket(env, target, speechSocketPath, {
-        providerRequest: id,
-        endsAt: limit.endsAt,
-        signal: limit.signal,
-      }),
-    request: JSON.stringify({
-      text: call.text,
-      model_id: ref.id,
-      voice_id: voiceNumberPattern.test(call.voice)
-        ? Number(call.voice)
-        : call.voice,
-      // Numbers and dates are read out in the line's language.
-      language: call.language,
-      word_timestamps: true,
-    }),
+    send: async (id, limit) =>
+      await connectRequest(
+        env,
+        target,
+        speechPath,
+        {
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json",
+          },
+          body,
+        },
+        { providerRequest: id, endsAt: limit.endsAt, signal: limit.signal }
+      ),
+    characters: charactersOf(call.text),
     platform: target.platform,
   };
 };
 
-/** How the provider refused a line, by what its error frame names: never its message. */
-interface SpeechRefusal {
-  status: number | undefined;
-  errorType: string | undefined;
-  /** The provider's own ID for the request, as its log names it. */
-  logId: string | undefined;
-}
-
-/** What one request for a line came to. */
+/** What one line's provider requests came to. */
 interface SpeechSent {
-  /** The ID of the request whose socket opened, once one did. */
+  /** The provider's last response, if one came. */
+  answered: Response | undefined;
+  /** The ID of the request the provider answered, once one did. */
   answering: string | undefined;
-  /** The line's audio so far, as it came, and its size. */
-  audio: Uint8Array[];
-  bytes: number;
-  /** Samples a second of the audio, once any came. */
-  rate: number | undefined;
-  /** Where the audio of each part of the line starts, in ms. */
-  starts: Map<number, number>;
-  /** When each word was said, on the whole line's clock. */
-  aligned: AlignedWord[];
-  /** Whether the provider said the line to its end. */
-  whole: boolean;
-  /** Whether something it sent doesn't read as a line's audio or words. */
-  unreadable: boolean;
-  refusal: SpeechRefusal | undefined;
-  /** Whether its server closed the socket to restart, which is no refusal. */
-  restarting: boolean;
 }
 
-/** How much audio a line came to so far, in ms. */
-const audioMsOf = ({ bytes, rate }: SpeechSent): number =>
-  rate === undefined ? 0 : (bytes / speechAudio.bytesPerSample / rate) * 1000;
-
-/** Takes a piece of a line's audio. */
-const takeAudio = (sent: SpeechSent, frame: unknown): void => {
-  const parsed = audioFrameSchema.safeParse(frame);
-  const piece = parsed.success ? bytesOf(parsed.data.audio) : undefined;
-  // One rate for the whole line, as one file holds it.
-  if (
-    !parsed.success ||
-    piece === undefined ||
-    (sent.rate !== undefined && sent.rate !== parsed.data.sr)
-  ) {
-    sent.unreadable = true;
-    return;
-  }
-  if (!sent.starts.has(parsed.data.chunk_id)) {
-    sent.starts.set(parsed.data.chunk_id, audioMsOf(sent));
-  }
-  sent.rate = parsed.data.sr;
-  sent.audio.push(piece);
-  sent.bytes += piece.length;
-};
-
-/** Takes when the words of one part of a line are said: after that part's audio began. */
-const takeWords = (sent: SpeechSent, frame: unknown): void => {
-  const parsed = wordsFrameSchema.safeParse(frame);
-  const from = parsed.success
-    ? sent.starts.get(parsed.data.chunk_id)
-    : undefined;
-  if (!parsed.success || from === undefined) {
-    sent.unreadable = true;
-    return;
-  }
-  for (const word of parsed.data.word_timestamps) {
-    sent.aligned.push({
-      startMs: Math.round(from + word.start_ms),
-      endMs: Math.round(from + word.end_ms),
-      from: word.original_char_start,
-      to: word.original_char_end,
-    });
-  }
-};
-
 /**
- * Takes one frame of a line's socket: `ended` once the provider said the
- * whole line, or refused it. A frame that is neither audio, words, the
- * end nor an error is one of the provider's notes, and passed over.
- */
-const takeFrame = (sent: SpeechSent, data: unknown): "ended" | "open" => {
-  let frame: unknown = undefined;
-  try {
-    frame = typeof data === "string" ? JSON.parse(data) : undefined;
-  } catch {
-    // Not JSON: nothing a line is read from.
-  }
-  if (!isRecord(frame)) {
-    sent.unreadable = true;
-    return "open";
-  }
-  if ("error" in frame) {
-    sent.refusal = {
-      status: z.int().min(100).max(599).safeParse(frame.code).data,
-      errorType: identifierOf(frame.error_code),
-      logId: providerRequestIdSchema.safeParse(frame.request_id).data,
-    };
-    return "ended";
-  }
-  if ("audio" in frame) {
-    takeAudio(sent, frame);
-  } else if ("word_timestamps" in frame) {
-    takeWords(sent, frame);
-  } else if (frame.final === true) {
-    sent.whole = true;
-    return "ended";
-  }
-  return "open";
-};
-
-/** The close codes KugelAudio's server restarts a socket with: no fault of the line's. */
-const restartingCloseCodes: ReadonlySet<number> = new Set([1012, 1013]);
-
-/**
- * Asks for a line once, over a socket of its own: opened, sent the line,
- * and read until the provider said all of it, refused it or closed, or
- * the call was stopped. Never throws.
+ * Sends one provider request for a line: `again` when the provider
+ * refused it for a moment (429 or 5xx), which may be asked once more;
+ * `done` once it ended any other way.
  */
 const sendSpeechOnce = async (
   route: SpeechRoute,
-  limit: Deadline
-): Promise<SpeechSent> => {
-  const sent: SpeechSent = {
-    answering: undefined,
-    audio: [],
-    bytes: 0,
-    rate: undefined,
-    starts: new Map(),
-    aligned: [],
-    whole: false,
-    unreadable: false,
-    refusal: undefined,
-    restarting: false,
-  };
+  limit: Deadline,
+  sent: SpeechSent
+): Promise<"again" | "done"> => {
   if (limit.signal.aborted) {
-    return sent;
+    return "done";
   }
   const id = crypto.randomUUID();
-  let socket: WebSocket;
+  let answered: Response | undefined = undefined;
   try {
-    socket = await route.open(id, limit);
+    answered = await route.send(id, limit);
   } catch {
-    return sent;
+    return "done";
   }
-  sent.answering = id;
-  const ended = Promise.withResolvers<null>();
-  const end = (): void => {
-    ended.resolve(null);
-  };
-  socket.addEventListener("message", (event) => {
-    if (takeFrame(sent, event.data) === "ended") {
-      end();
-    }
-  });
-  socket.addEventListener("close", (event) => {
-    sent.restarting = restartingCloseCodes.has(event.code);
-    end();
-  });
-  socket.addEventListener("error", end);
-  limit.signal.addEventListener("abort", end, { once: true });
-  try {
-    socket.send(route.request);
-    await ended.promise;
-  } catch {
-    // Closed as the line was sent: it said nothing.
-  } finally {
-    limit.signal.removeEventListener("abort", end);
-    try {
-      // Closing it stops a line still being said, and what it would bill.
-      socket.close(1000, "Done");
-    } catch {
-      // Closed already.
-    }
+  sent.answered = answered;
+  if (answered.ok) {
+    sent.answering = id;
+    return "done";
   }
-  return sent;
-};
-
-/** Whether the provider turned a line away for a moment, before it said any of it. */
-const turnedAway = ({ bytes, whole, refusal, restarting }: SpeechSent) => {
-  const status = refusal?.status ?? 0;
-  return (
-    bytes === 0 && !whole && (restarting || status === 429 || status >= 500)
-  );
+  return answered.status === 429 || answered.status >= 500 ? "again" : "done";
 };
 
 /**
- * Asks for a line, and once more when the provider turned it away for a
- * moment, as the model gateway does a text model's request. One whose
- * socket didn't open is not asked for again, nor one cut off once any of
- * it was said: that much is billed.
+ * Sends a line, and once more when the provider refused it for a moment,
+ * as the model gateway does a text model's request. One that didn't
+ * connect is not sent again: it may have been said, and billed.
  */
 const sendSpeech = async (
   route: SpeechRoute,
   limit: Deadline
 ): Promise<SpeechSent> => {
-  let sent = await sendSpeechOnce(route, limit);
-  for (
-    let retry = 0;
-    retry < speechRetries && turnedAway(sent) && !limit.signal.aborted;
-    retry += 1
-  ) {
+  const sent: SpeechSent = { answered: undefined, answering: undefined };
+  for (let request = 0; request <= speechRetries; request += 1) {
+    if (request > 0) {
+      // oxlint-disable-next-line no-await-in-loop -- one request at a time
+      await sent.answered?.body?.cancel();
+      // Only the last request's response says how the line ended.
+      sent.answered = undefined;
+      // oxlint-disable-next-line no-await-in-loop -- one request at a time
+      await pause(speechRetryMs, limit.signal);
+    }
     // oxlint-disable-next-line no-await-in-loop -- one request at a time
-    await pause(speechRetryMs, limit.signal);
-    // oxlint-disable-next-line no-await-in-loop -- one request at a time
-    sent = await sendSpeechOnce(route, limit);
+    const ended = await sendSpeechOnce(route, limit, sent);
+    if (ended === "done") {
+      break;
+    }
   }
   return sent;
 };
 
-/** The line the provider said, read; none when it didn't say all of it, or not as a line reads. */
-const heardSpeech = (
-  { call }: SpeechRoute,
-  sent: SpeechSent
-): Speech | undefined => {
-  const { whole, unreadable, rate, bytes } = sent;
-  if (!whole || unreadable || rate === undefined || bytes === 0) {
+/** The four letters at `at` of a file, such as a WAV chunk's name. */
+const tagAt = (bytes: Uint8Array, at: number): string =>
+  String.fromCodePoint(...bytes.subarray(at, at + 4));
+
+/**
+ * How long a WAV file of plain samples takes to play, in seconds, from
+ * its `fmt ` chunk's bytes a second and its `data` chunk's size;
+ * `undefined` for bytes that aren't such a file. A file written as it was
+ * made may name a size it didn't know yet: its samples then run to its end.
+ */
+const wavSeconds = (bytes: Uint8Array): number | undefined => {
+  if (tagAt(bytes, 0) !== "RIFF" || tagAt(bytes, 8) !== "WAVE") {
     return undefined;
   }
-  const words = wordsOf(call.text, sent.aligned);
-  return words === undefined
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let bytesPerSecond: number | undefined = undefined;
+  for (let at = 12; at + 8 <= bytes.byteLength;) {
+    const size = view.getUint32(at + 4, true);
+    const tag = tagAt(bytes, at);
+    if (tag === "fmt " && at + 20 <= bytes.byteLength) {
+      bytesPerSecond = view.getUint32(at + 16, true);
+    }
+    if (tag === "data") {
+      const samples = Math.min(size, bytes.byteLength - at - 8);
+      return bytesPerSecond === undefined || bytesPerSecond === 0
+        ? undefined
+        : samples / bytesPerSecond;
+    }
+    // A chunk of an odd size is followed by one byte of padding.
+    at += 8 + size + (size % 2);
+  }
+  return undefined;
+};
+
+/**
+ * What a line's answer holds, read; `undefined` when it isn't a line. Its
+ * words are those of the `line` asked for, timed over the audio's length.
+ */
+const readSpeech = async (
+  answered: Response,
+  line: string
+): Promise<Speech | undefined> => {
+  const parsed = spokenSchema.safeParse(
+    await answered.json().catch(() => null)
+  );
+  if (!parsed.success) {
+    return undefined;
+  }
+  const audio = bytesOf(parsed.data.audio_data);
+  const seconds = audio === undefined ? undefined : wavSeconds(audio);
+  return audio === undefined || seconds === undefined
     ? undefined
-    : { audio: wavOf(sent.audio, bytes, rate), mime: speechMime, words };
+    : { audio, mime: speechFormat.mime, words: wordsOf(line, seconds) };
+};
+
+/** The line the provider answered with, read; none when it said nothing. */
+const heardSpeech = async (
+  { answered, answering }: SpeechSent,
+  line: string
+): Promise<Speech | undefined> => {
+  if (answered === undefined || answering === undefined) {
+    return undefined;
+  }
+  try {
+    return await readSpeech(answered, line);
+  } catch {
+    // Cut off while its answer came in: said and billed all the same.
+    return undefined;
+  }
 };
 
 /** How a line ended, as the audit log records it. */
@@ -2956,10 +2801,14 @@ const speechOutcome = (
   return said && stopped === undefined ? "invalid_output" : "failed";
 };
 
+/** The provider's own ID for a request, as its log names it. */
+const providerLogIdOf = (headers: Headers | undefined): string | undefined =>
+  headers?.get("x-request-id") ?? headers?.get("request-id") ?? undefined;
+
 /**
  * Records a line, however it ended, after it (model-usage.ts): its audit
- * event, and once the provider said any of it, the seconds it said, which
- * it bills whether the line could be read, or was said to its end, or not.
+ * event, and once the provider said it, its characters, which it bills
+ * whether its answer could be read or not.
  */
 const recordSpeech = async (
   route: SpeechRoute,
@@ -2967,48 +2816,54 @@ const recordSpeech = async (
   { outcome, stopped }: { outcome: Outcome; stopped: Stopped | undefined }
 ): Promise<void> => {
   const { env, call, ref, way } = route;
-  const { answering, refusal } = sent;
-  const status = refusal?.status;
-  const errorType = stopped ?? refusal?.errorType;
+  const { answering } = sent;
+  const status = sent.answered?.status;
+  const refusal =
+    sent.answered !== undefined && !sent.answered.ok
+      ? refusalOf(await sent.answered.text().catch(() => ""))
+      : undefined;
+  const errorType = stopped ?? refusal?.type;
   if (outcome !== "answered") {
-    log.warn("model.failed", { model: call.model, status, errorType });
+    log.warn("model.failed", {
+      model: call.model,
+      status,
+      errorType,
+      providerErrorCode: refusal?.code,
+    });
   }
-  const seconds = audioMsOf(sent) / 1000;
-  const cost = speechCostOf(ref, seconds);
+  const characters = answering === undefined ? 0 : route.characters;
+  const cost = speechCostOf(ref, characters);
   await recordResponse(env, {
     entry: speechEntry(call, ref, {
-      characters: answering === undefined ? 0 : call.text.length,
-      seconds,
+      characters,
       region: route.platform.region,
       cost,
-      logId: refusal?.logId,
+      logId: providerLogIdOf(sent.answered?.headers),
       outcome,
       status,
       errorType,
     }),
     at: Date.now(),
     spend: call,
-    ...(answering === undefined || seconds === 0
+    ...(answering === undefined
       ? {}
       : {
-          // A speech model's input is the seconds it says, rounded up.
+          // A speech model's input is the characters it says.
           usage: {
             id: answering,
             model: call.model,
             purpose: call.purpose,
             credential: way.credential,
             feature: "speech",
-            inputTokens: Math.ceil(seconds),
+            inputTokens: characters,
             outputTokens: 0,
             cacheReadTokens: 0,
             cacheWriteTokens: 0,
             cost,
             estimated: false,
           },
+          health: { provider: way.provider, credential: way.credential },
         }),
-    ...(sent.whole
-      ? { health: { provider: way.provider, credential: way.credential } }
-      : {}),
   });
 };
 
@@ -3244,7 +3099,7 @@ const canListen = async (env: Env, model: string): Promise<boolean> => {
 /**
  * Says a line through the gateway: refused, audited, before anything is
  * sent when the rules or Grasp's keys don't let it through; otherwise
- * sent, and recorded with the seconds said, however it ended.
+ * sent, and recorded with its characters, however it ended.
  */
 const speakLine = async (
   env: Env,
@@ -3256,18 +3111,21 @@ const speakLine = async (
   const limit = deadline(call.timeoutMs ?? speechTimeoutMs, signal);
   try {
     const sent = await sendSpeech(route, limit);
-    const speech = heardSpeech(route, sent);
+    const speech = await heardSpeech(sent, route.call.text);
     const stopped = limit.stopped();
-    const outcome = speechOutcome(speech, sent.whole, stopped);
+    const outcome = speechOutcome(
+      speech,
+      sent.answering !== undefined,
+      stopped
+    );
     await recordSpeech(route, sent, { outcome, stopped });
     if (speech !== undefined) {
       return speech;
     }
-    if (sent.refusal?.status === 429 && stopped === undefined) {
+    if (sent.answered?.status === 429 && stopped === undefined) {
       throw modelErrors.create("model.rate_limited", {
         model: call.model,
-        // A socket's frame names no wait: the one core takes without one.
-        retryAfterSeconds: rateLimitBounds.defaultSeconds,
+        retryAfterSeconds: rateLimitedSeconds(sent.answered.headers),
       });
     }
     throw modelErrors.create("model.failed");

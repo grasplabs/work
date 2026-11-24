@@ -5,43 +5,37 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { models } from "../src/models.ts";
 import { platformSpeech } from "../src/speech.ts";
-import {
-  secondsPerCharacter,
-  speechBytesPerChar,
-} from "./ai-providers-fake.ts";
+import { speechBytesPerChar } from "./ai-providers-fake.ts";
 import { allEvents } from "./audit-events.ts";
-import { platformKugelAudioKey } from "./connect-providers.ts";
+import { platformMistralKey } from "./connect-providers.ts";
 import { fakeProviderFor } from "./model-provider.ts";
 import { spentMicros } from "./model-usage.ts";
 import { carrying, keyPlaces, plan } from "./platform-providers.ts";
 import { outcome, uniqueLetters } from "./sign-in.ts";
 
 // Speech through the model gateway: Grasp's own speech feature
-// (@grasp-os/shared/platform-ai), KugelAudio's, says a line, judged by
-// the deployment's rules, charged per second said to Grasp's own key
-// (never the organization's spend) and audited
+// (@grasp-os/shared/platform-ai), Mistral's Voxtral, says a line, judged by
+// the deployment's rules, charged per character to Grasp's own key (never
+// the organization's spend) and audited
 // like any model call, through connect with Grasp's own key.
-// KugelAudio is the outside system: a fake behind connect's fetch
-// (test/ai-providers-fake.ts), whose speech socket says each character in
-// 30 ms. Connect, the rules, the usage record and the audit log are real.
+// Mistral is the outside system: a fake behind connect's fetch
+// (test/ai-providers-fake.ts), which says each character in 30 ms.
+// Connect, the rules, the usage record and the audit log are real.
 
-const speechModel = "kugelaudio/kugel-3.5";
+const speechModel = "mistral/voxtral-mini-tts-3-0";
 /** A text model, as an organization chooses one: no speech model. */
 const textModel = "mistral/mistral-large-latest";
 
-/** Stephen's voice by default: a KugelAudio voice ID. */
-const voice = "1656";
+/** Stephen's voice by default: a Mistral voice ID. */
+const voice = "voice_485";
 
-/** What a line of `characters` costs at Kugel 3.5's $0.07 a minute, each character 30 ms: 35 micros each. */
-const lineMicrosOf = (characters: number): number => characters * 35;
-
-/** The size of the WAV header in front of a line's audio. */
-const wavHeaderBytes = 44;
+/** What a line of `characters` costs at Voxtral's $13 a million: 13 micros each. */
+const lineMicrosOf = (characters: number): number => characters * 13;
 
 /** A line no other test says, so what reached the provider with it is this test's. */
 const newLine = (): string => `Hello there, ${uniqueLetters()}.`;
 
-const busy = { status: 429 };
+const busy = { status: 429, headers: { "retry-after": "7" } };
 
 /** What `promise` threw, or `undefined` if it didn't. */
 const thrown = async (promise: Promise<unknown>): Promise<unknown> => {
@@ -130,7 +124,7 @@ const sentWith = async (line: string) => {
 
 // A test waits up to 10 seconds for a line's audit events (`auditedFor`).
 describe("speech through the model gateway", { timeout: 30_000 }, () => {
-  it("says a line as a WAV file, with when each word is said, on one clock across the parts it came in", async () => {
+  it("says a line as a WAV file, with its words timed in order over the audio's length", async () => {
     const { rulesEnv } = withRules();
     const line = newLine();
 
@@ -140,44 +134,35 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       language: "en",
     });
 
-    const header = new DataView(speech.audio.buffer, speech.audio.byteOffset);
+    expect({ bytes: speech.audio.byteLength, mime: speech.mime }).toStrictEqual(
+      { bytes: 44 + line.length * speechBytesPerChar, mime: "audio/wav" }
+    );
+    // Mistral tells no word's time: each is placed over the audio's
+    // length, which the fake makes 30 ms a character.
+    const lengthMs = line.length * 30;
+    const [hello, there, last] = speech.words;
     expect({
-      bytes: speech.audio.byteLength,
-      mime: speech.mime,
-      file: new TextDecoder().decode(speech.audio.subarray(0, 4)),
-      // 16-bit PCM, mono, at the rate the provider said it in.
-      format: [header.getUint16(20, true), header.getUint16(22, true)],
-      rate: header.getUint32(24, true),
-      bitsPerSample: header.getUint16(34, true),
-      audioBytes: header.getUint32(40, true),
+      texts: speech.words.map(({ text }) => text),
+      starts: hello?.startMs,
+      inOrder:
+        (hello?.endMs ?? 0) <= (there?.startMs ?? 0) &&
+        (there?.endMs ?? 0) <= (last?.startMs ?? 0),
+      ends: (last?.endMs ?? 0) > lengthMs / 2 && (last?.endMs ?? 0) <= lengthMs,
     }).toStrictEqual({
-      bytes: wavHeaderBytes + line.length * speechBytesPerChar,
-      mime: "audio/wav",
-      file: "RIFF",
-      format: [1, 1],
-      rate: 24_000,
-      bitsPerSample: 16,
-      audioBytes: line.length * speechBytesPerChar,
+      texts: line.split(" "),
+      starts: 0,
+      inOrder: true,
+      ends: true,
     });
-    // Each character takes the fake 30 ms; punctuation stays with its
-    // word. The fake says "Hello " as one part and the rest as another,
-    // its words timed from where that part starts.
-    const last = line.split(" ").at(-1) ?? "";
-    expect(speech.words).toStrictEqual([
-      { text: "Hello", startMs: 0, endMs: 150 },
-      { text: "there,", startMs: 180, endMs: 360 },
-      { text: last, startMs: 390, endMs: 390 + last.length * 30 },
-    ]);
     await expect(sentWith(line)).resolves.toStrictEqual([
       {
-        host: "api.eu.kugelaudio.com",
-        path: "/ws/tts",
+        host: "api.mistral.ai",
+        path: "/v1/audio/speech",
         body: {
-          text: line,
-          model_id: "kugel-3.5",
-          voice_id: 1656,
-          language: "en",
-          word_timestamps: true,
+          model: "voxtral-mini-tts-3-0",
+          input: line,
+          voice_id: voice,
+          response_format: "wav",
         },
       },
     ]);
@@ -192,7 +177,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       outcome(
         stephen(rulesEnv, person).speak({
           text: line,
-          voice: "NotAVoiceOfGrasps0001",
+          voice: "voice_0",
           language: "en",
         })
       )
@@ -200,7 +185,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     await graspSpent(month, 0);
   });
 
-  it("sends Grasp's key only from connect, once, to KugelAudio alone, and never logs or hands it back", async () => {
+  it("sends Grasp's key only from connect, once, to Mistral alone, and never logs or hands it back", async () => {
     const lines: string[] = [];
     for (const level of ["info", "warn", "error"] as const) {
       vi.spyOn(console, level).mockImplementation((...args: unknown[]) => {
@@ -217,7 +202,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       voice,
       language: "nl",
     });
-    await plan(platformKugelAudioKey, [busy, busy]);
+    await plan(platformMistralKey, [busy, busy]);
     const failed = await thrown(
       stephen(rulesEnv, person).speak({
         text: refused,
@@ -227,23 +212,21 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     );
 
     const events = await auditedFor(person.userId, 2);
-    await expect(keyPlaces(said, platformKugelAudioKey)).resolves.toStrictEqual(
-      {
-        hosts: ["api.eu.kugelaudio.com"],
-        headers: ["authorization"],
-        inBody: false,
-        placeholder: false,
-      }
-    );
+    await expect(keyPlaces(said, platformMistralKey)).resolves.toStrictEqual({
+      hosts: ["api.mistral.ai"],
+      headers: ["authorization"],
+      inBody: false,
+      placeholder: false,
+    });
     const seen = JSON.stringify([speech.words, failed, String(failed), events]);
     expect({
       logged: lines.some((logged) => logged.includes("model.failed")),
-      inLogs: lines.some((logged) => logged.includes(platformKugelAudioKey)),
-      handedBack: seen.includes(platformKugelAudioKey),
+      inLogs: lines.some((logged) => logged.includes(platformMistralKey)),
+      handedBack: seen.includes(platformMistralKey),
     }).toStrictEqual({ logged: true, inLogs: false, handedBack: false });
   });
 
-  it("charges the seconds said to Grasp's own key, never to the organization's spend, and audits it as a platform call", async () => {
+  it("charges the line's characters to Grasp's own key, never to the organization's spend, and audits it as a platform call", async () => {
     const { rulesEnv, month } = withRules();
     const person = newPerson();
     const line = newLine();
@@ -263,8 +246,8 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     const [event] = await auditedFor(person.userId, 1);
     expect(event).toMatchObject({
       action: "model.call",
-      model: { provider: "kugelaudio", model: "kugel-3.5" },
-      cost: { currency: "USD" },
+      model: { provider: "mistral", model: "voxtral-mini-tts-3-0" },
+      cost: { amount: lineMicros / 1_000_000, currency: "USD" },
       detail: {
         purpose: "onboarding.speech",
         outcome: "answered",
@@ -274,11 +257,6 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
         region: "eu",
       },
     });
-    expect(event?.cost?.amount).toBeCloseTo(lineMicros / 1_000_000, 9);
-    expect(event?.detail?.seconds).toBeCloseTo(
-      line.length * secondsPerCharacter,
-      6
-    );
     // Never the line itself.
     expect(JSON.stringify(event)).not.toContain(line);
   });
@@ -297,7 +275,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       });
 
     // One the gateway doesn't offer.
-    await expect(outcome(speak("kugelaudio/kugel-9"))).resolves.toBe(
+    await expect(outcome(speak("mistral/voxtral-mini-tts-9"))).resolves.toBe(
       "model.not_allowed"
     );
     // A text model can't say a line.
@@ -322,7 +300,9 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
     const { rulesEnv, month } = withRules();
     const person = newPerson();
     const line = newLine();
-    await plan(platformKugelAudioKey, [busy]);
+    await plan(platformMistralKey, [
+      { status: 429, body: { error: { type: "too_many_requests" } } },
+    ]);
 
     const speech = await stephen(rulesEnv, person).speak({
       text: line,
@@ -340,7 +320,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
   it("gives up after asking once more, and says when to try again", async () => {
     const { rulesEnv } = withRules();
     const line = newLine();
-    await plan(platformKugelAudioKey, [busy, busy]);
+    await plan(platformMistralKey, [busy, busy]);
 
     await expect(
       stephen(rulesEnv, newPerson()).speak({
@@ -350,29 +330,9 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
       })
     ).rejects.toMatchObject({
       code: "model.rate_limited",
-      details: { retryAfterSeconds: 30 },
+      details: { retryAfterSeconds: 7 },
     });
     await expect(carrying(line)).resolves.toHaveLength(2);
-  });
-
-  it("charges what was said of a line cut off mid-way, gives no line, and doesn't ask for it again", async () => {
-    const { rulesEnv, month } = withRules();
-    const person = newPerson();
-    const line = newLine();
-    // The provider says the line's first part, "Hello ", and drops it.
-    await plan(platformKugelAudioKey, [{ cut: true }]);
-
-    await expect(
-      outcome(
-        stephen(rulesEnv, person).speak({ text: line, voice, language: "en" })
-      )
-    ).resolves.toBe("model.failed");
-    // Said, so billed: its six characters, and no second request, which
-    // would be billed again.
-    await graspSpent(month, lineMicrosOf("Hello ".length));
-    await expect(carrying(line)).resolves.toHaveLength(1);
-    const [event] = await auditedFor(person.userId, 1);
-    expect(event?.detail).toMatchObject({ outcome: "failed" });
   });
 
   it("refuses a line longer than one request may have said", async () => {

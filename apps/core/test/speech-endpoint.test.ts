@@ -24,9 +24,9 @@ import { routed, signedInWithRole, unique, uniqueLetters } from "./sign-in.ts";
 
 // The onboarding's lines said out loud (src/onboarding/speech.ts), over
 // the endpoint, as the page asks for them: on someone's interview link, or
-// for an admin signed in. KugelAudio, Grasp's own speech feature's
+// for an admin signed in. Mistral, Grasp's own speech feature's
 // provider (@grasp-os/shared/platform-ai), is the outside system: a fake
-// behind connect's fetch, which says each character in 25 ms. Connect, the
+// behind connect's fetch, which says each character in 30 ms. Connect, the
 // store, the cache, the gateway's rules and its ledger are real. The ways
 // it can fail, tried here:
 //
@@ -36,9 +36,9 @@ import { routed, signedInWithRole, unique, uniqueLetters } from "./sign-in.ts";
 //   own.
 // - A line said twice paid twice, or the voice running on past its budget.
 
-/** Stephen's voice and Claire's, by their KugelAudio IDs, the defaults. */
-const stephen = 1656;
-const claire = 1071;
+/** Stephen's voice and Claire's, by their Mistral IDs, the defaults. */
+const stephen = "voice_485";
+const claire = "voice_478";
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -53,12 +53,11 @@ const answerSchema = z.object({
   ),
 });
 
-/** What KugelAudio was asked, as far as these tests read it. */
+/** What Mistral was asked, as far as these tests read it. */
 const askedSchema = z.object({
-  text: z.string(),
-  model_id: z.string(),
-  voice_id: z.number(),
-  language: z.string(),
+  input: z.string(),
+  model: z.string(),
+  voice_id: z.string(),
 });
 
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
@@ -137,7 +136,7 @@ const codeOf = async (response: Response) => {
   return [response.status, parsed.success ? parsed.data.code : null];
 };
 
-/** What KugelAudio was asked for the lines carrying `text`. */
+/** What Mistral was asked for the lines carrying `text`. */
 const askedFor = async (text: string) => {
   const carried = await carrying(text);
   return carried.map(({ body }) => askedSchema.parse(JSON.parse(body)));
@@ -165,7 +164,7 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     };
 
     const answer = answerSchema.parse(result.first.body);
-    const said = text.length * secondsPerCharacter * 1000;
+    const said = Math.round(text.length * secondsPerCharacter * 1000);
     expect({
       status: result.first.status,
       mime: answer.mime,
@@ -175,7 +174,7 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
       status: 200,
       mime: "audio/wav",
       words: text.split(" "),
-      ends: Math.round(said),
+      ends: said,
     });
     expect(result.again).toStrictEqual(result.first);
     await expect(carrying(text)).resolves.toHaveLength(1);
@@ -221,26 +220,33 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     }
   );
 
-  it("says a line as written whatever its tone, once for every tone", async () => {
+  it("leads a line with its tone as an emotion the voice doesn't say, in any language, and times only the line's words", async () => {
     const { link } = await opened();
     const text = newLine();
 
-    const warm = await speak({
+    const english = await speak({
       text,
       language: "en",
       tone: "warm, relaxed",
       link,
     });
-    const plain = await speak({ text, language: "en", link });
+    const dutch = await speak({
+      text,
+      language: "nl",
+      tone: "neutral, light",
+      link,
+    });
     const said = [
-      answerSchema.parse(await warm.json()).words,
-      answerSchema.parse(await plain.json()).words,
+      answerSchema.parse(await english.json()).words,
+      answerSchema.parse(await dutch.json()).words,
     ];
 
-    // The voice takes no direction: only the line is sent, and a tone
-    // makes no other line of it, so the second is the first, kept.
     const asked = await askedFor(text);
-    expect(asked.map(({ text: spoken }) => spoken)).toStrictEqual([text]);
+    // A tone that is the voice as it is leads the line with nothing.
+    expect(asked.map(({ input }) => input)).toStrictEqual([
+      `[emotion=warm]${text}`,
+      text,
+    ]);
     expect(
       said.map((words) => words.map(({ text: word }) => word))
     ).toStrictEqual([text.split(" "), text.split(" ")]);
@@ -269,7 +275,7 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     ["Stephen's line in his voice", {}, stephen],
     ["a quick line as any other", { quick: true }, stephen],
     ["Claire's line in her voice", { speaker: "claire" }, claire],
-  ])("says %s, in Kugel 3.5", async (_, change, voice) => {
+  ])("says %s", async (_, change, voice) => {
     const { link } = await opened();
     const text = newLine();
 
@@ -277,7 +283,7 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     await response.body?.cancel();
 
     await expect(askedFor(text)).resolves.toStrictEqual([
-      { text, model_id: "kugel-3.5", voice_id: voice, language: "de" },
+      { input: text, model: "voxtral-mini-tts-3-0", voice_id: voice },
     ]);
   });
 
@@ -338,7 +344,9 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
 
     expect(result.status).toBe(200);
     expect(answerSchema.parse(result.body).words).toHaveLength(3);
-    await expect(askedFor(text)).resolves.toMatchObject([{ voice_id: 1073 }]);
+    await expect(askedFor(text)).resolves.toMatchObject([
+      { voice_id: "voice_1788" },
+    ]);
     await expect(voiceCounted("reading")).resolves.toBeCloseTo(
       before + text.length * secondsPerCharacter
     );
