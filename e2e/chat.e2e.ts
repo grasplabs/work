@@ -560,7 +560,7 @@ test("a person attaches files to a question, sees them, takes two off by pointer
   await expect(page.getByText("setup.exe")).toHaveCount(0);
 
   await page.getByLabel("Your question").fill(question);
-  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
   // The question shows the file it carried; the box is empty again.
   const asked = chatOf(page)
     .getByRole("log", { name: "Messages" })

@@ -1293,10 +1293,6 @@ msgstr "{role} (desconocido)"
 msgid "{role} can answer it"
 msgstr "Puede responderla: {role}"
 
-#: src/frame/person-menu.tsx
-msgid "{role}, Grasp staff"
-msgstr "{role}, personal de Grasp"
-
 #: src/brain/brain.ts
 msgid "{role}, invited {date}, not interviewed yet"
 msgstr "{role}, invitación del {date}, aún sin entrevista"
@@ -1604,7 +1600,8 @@ msgstr "{versions, plural, one {# versión} other {# versiones}}"
 msgid "{waiting, plural, one {# person new on your list gets a link once you confirm your organization.} other {# people new on your list get their links once you confirm your organization.}}"
 msgstr "{waiting, plural, one {# persona nueva en tu lista recibe un enlace en cuanto confirmes tu organización.} other {# personas nuevas en tu lista reciben su enlace en cuanto confirmes tu organización.}}"
 
-#: src/inbox/nav-item.tsx
+#: src/frame/app-sidebar.tsx
+#: src/inbox/sidebar-inbox.tsx
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
 msgstr "{waiting, plural, one {# cosa pendiente} other {# cosas pendientes}}"
 
@@ -2510,6 +2507,15 @@ msgctxt "filter: every integration"
 msgid "All"
 msgstr "Todas"
 
+#: src/inbox/sidebar-inbox.tsx
+msgctxt "inbox filter, short"
+msgid "All"
+msgstr "Todo"
+
+#: src/chat/sidebar-chats.tsx
+msgid "All chats"
+msgstr "Todos los chats"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "All invoices"
 msgstr "Todas las facturas"
@@ -2854,6 +2860,10 @@ msgstr "Respondida: {question}"
 msgid "Answered: {title}"
 msgstr "Respondida: {title}"
 
+#: src/chat/sidebar-chats.tsx
+msgid "Answering"
+msgstr "Respondiendo"
+
 #: src/agents/agent-page.tsx
 msgid "Answers nobody anywhere"
 msgstr "No responde a nadie en ningún sitio"
@@ -2922,6 +2932,10 @@ msgstr "App o flujo de trabajo"
 #: src/routes/_shell.settings.models.tsx
 msgid "App spend"
 msgstr "Gasto por aplicación"
+
+#: src/frame/person-menu.tsx
+msgid "Appearance"
+msgstr "Apariencia"
 
 #: src/brain/brain.ts
 msgid "Application"
@@ -4116,6 +4130,7 @@ msgstr "Chatear con {name}"
 
 #: src/chat/chat-switcher.tsx
 #: src/chat/chat-window.tsx
+#: src/chat/sidebar-chats.tsx
 msgid "Chats"
 msgstr "Chats"
 
@@ -7528,6 +7543,10 @@ msgctxt "an app's settings section"
 msgid "History"
 msgstr "Historial"
 
+#: src/frame/app-sidebar.tsx
+msgid "Home"
+msgstr "Inicio"
+
 #: src/brain/opportunities-page.tsx
 msgid "Hours a week"
 msgstr "Horas por semana"
@@ -7898,9 +7917,10 @@ msgstr "En tus documentos vi {tools}."
 msgid "In your own words, as you would tell a colleague."
 msgstr "Con tus propias palabras, como se lo dirías a un compañero."
 
+#: src/frame/app-sidebar.tsx
 #: src/inbox/inbox-page.tsx
 #: src/inbox/inbox-pending.tsx
-#: src/inbox/nav-item.tsx
+#: src/inbox/sidebar-inbox.tsx
 msgid "Inbox"
 msgstr "Bandeja de entrada"
 
@@ -8634,7 +8654,6 @@ msgstr "Conocido"
 msgid "Known about your organization"
 msgstr "Conocido de tu organización"
 
-#: src/frame/person-menu.tsx
 #: src/routes/_shell.settings.profile.tsx
 msgid "Language"
 msgstr "Idioma"
@@ -10675,6 +10694,10 @@ msgstr "Nada los usa hasta que los apruebes. El malware conocido siempre se rech
 msgid "Nothing waits for you"
 msgstr "Nada te espera"
 
+#: src/inbox/sidebar-inbox.tsx
+msgid "Nothing waits for you."
+msgstr "Nada te espera."
+
 #: src/apps/app-data.tsx
 msgid "Nothing was added. Fix these rows and try again."
 msgstr "No se ha añadido nada. Corrige estas filas e inténtalo de nuevo."
@@ -11871,7 +11894,6 @@ msgstr "Progreso"
 msgid "Project"
 msgstr "Proyecto"
 
-#: src/frame/app-sidebar.tsx
 #: src/people/share-picker.tsx
 #: src/projects/project-view.tsx
 #: src/routes/_shell.projects.$projectId.tsx
@@ -14631,6 +14653,10 @@ msgctxt "what the Brain remembers about something"
 msgid "Supplies"
 msgstr "Suministra"
 
+#: src/frame/person-menu.tsx
+msgid "Support"
+msgstr "Soporte"
+
 #: src/connections/groups.ts
 msgctxt "kind of app"
 msgid "Support"
@@ -14647,6 +14673,10 @@ msgstr "Desactiva un equipo y nadie en él recibe un enlace."
 #: src/pages/page-frame.tsx
 msgid "Switch now"
 msgstr "Cambiar ahora"
+
+#: src/frame/person-menu.tsx
+msgid "Switch organization"
+msgstr "Cambiar de organización"
 
 #: src/settings/ai-providers.tsx
 msgid "Switch to Grasp’s AI"
@@ -15826,7 +15856,6 @@ msgstr "Su propio correo, calendario y archivos. Se ejecuta al momento."
 msgid "Their personal data goes for good. Their name stays on the company’s records, so what they did stays traceable."
 msgstr "Sus datos personales desaparecen para siempre. Su nombre se queda en los registros de la empresa, para que lo que hizo siga siendo rastreable."
 
-#: src/frame/person-menu.tsx
 #: src/frame/ui-words.tsx
 msgid "Theme"
 msgstr "Tema"
@@ -17012,6 +17041,10 @@ msgstr "Vista"
 #: src/drafts/draft-history.tsx
 msgid "View changes"
 msgstr "Ver cambios"
+
+#: src/frame/app-sidebar.tsx
+msgid "Views"
+msgstr "Vistas"
 
 #: src/frame/ui-words.tsx
 msgctxt "a side panel's views"
@@ -18645,10 +18678,6 @@ msgstr "Los archivos de tu exportación"
 #: src/routes/_shell.settings.instructions.tsx
 msgid "Your instructions"
 msgstr "Tus instrucciones"
-
-#: src/frame/person-menu.tsx
-msgid "Your onboarding"
-msgstr "Tu onboarding"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Your organization chooses these with its own AI provider keys."
