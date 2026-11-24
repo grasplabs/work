@@ -33,8 +33,9 @@
 // surfaces start; its fill under the pointer reaches past them by its own padding. In a card that
 // carries traceCardMarker (Tool's) the trigger runs the card's width and takes no fill: its words
 // turn to ink, as a step that opens did in the original. A TraceIcon with nothing in it is the
-// status mark: a dot, the alert when the step failed. A running title shimmers (Shimmer) in ink, a
-// failed one stands in the body's ink beside its red mark. Each status is said in words after the
+// status mark: a dot, the working mark (Agent indicator) on the trace's last running line, the
+// alert when the step failed. A running title shimmers (Shimmer) in ink, a failed one stands in the body's ink beside
+// its red mark. Each status is said in words after the
 // line, not only by its mark and colour.
 //
 // What is said aloud, through the page's live region: a line is said once, when its status changes
@@ -82,6 +83,7 @@ import {
 import { announce, className } from "../lib/utils";
 import type { LayoutStyle } from "../lib/utils";
 import { iconVars, ringInsetMarker, traceCardMarker } from "../lib/vars.stylex";
+import { AgentIndicator } from "./agent-indicator";
 import { Shimmer } from "./shimmer";
 
 /** Where the work a line reports stands: `running` under way, `error` failed, `pending` not begun. Without one it is done. */
@@ -107,7 +109,10 @@ export interface TraceLineProps {
 
 /** Every prop a TraceIcon takes. */
 export interface TraceIconProps {
-  /** The mark: an Icon. Without one, the line's status mark: a dot, or the alert when it failed. */
+  /**
+   * The mark: an Icon. Without one, the line's status mark: a dot; the working mark on the trace's
+   * last running line; the alert when it failed.
+   */
   children?: ReactNode;
   /** Layout only: where it sits and how much room it takes. */
   style?: LayoutStyle;
@@ -192,6 +197,11 @@ const arrive = stylex.keyframes({
   from: { opacity: 0, transform: `translateY(${space["1"]})` },
   to: { opacity: 1, transform: "none" },
 });
+
+// Inside a running line that a later running line follows in the same trace (a later line, or one
+// inside a later part): never two working marks in one view.
+const LATER_RUNNING = "~ [data-status=running], ~ * [data-status=running]";
+const EARLIER_RUNNING = `:is([data-slot=trace] :has(${LATER_RUNNING}) *)`;
 
 const styles = stylex.create({
   trace: {
@@ -280,6 +290,10 @@ const styles = stylex.create({
     backgroundColor: { default: "currentColor", [FORCED]: "CanvasText" },
     forcedColorAdjust: "none",
   },
+  // A running line's mark: the working mark on the trace's last running line, the dot on any line
+  // a later running line follows.
+  working: { display: { default: "inline-flex", [EARLIER_RUNNING]: "none" } },
+  workingDot: { display: { default: "none", [EARLIER_RUNNING]: "block" } },
   dotPending: {
     backgroundColor: {
       default: colors.agentIndicatorRest,
@@ -466,18 +480,25 @@ export const TraceIcon = ({ children, style }: TraceIconProps) => {
   const status = use(StatusContext);
   const step = use(StepContext);
   let mark = children;
-  if (mark === undefined) {
-    mark =
-      status === "error" ? (
-        <Icon icon={CircleAlertIcon} />
-      ) : (
-        <span
-          {...stylex.props(
-            styles.dot,
-            status === "pending" && styles.dotPending
-          )}
-        />
-      );
+  if (mark === undefined && status === "error") {
+    mark = <Icon icon={CircleAlertIcon} />;
+  } else if (mark === undefined && status === "running") {
+    // The step at work: the working mark, nine pixels and their light, in the dot's place. One in
+    // a trace, on its last running line; an earlier running line keeps its dot.
+    mark = (
+      <>
+        <span {...stylex.props(styles.working)}>
+          <AgentIndicator />
+        </span>
+        <span {...stylex.props(styles.dot, styles.workingDot)} />
+      </>
+    );
+  } else if (mark === undefined) {
+    mark = (
+      <span
+        {...stylex.props(styles.dot, status === "pending" && styles.dotPending)}
+      />
+    );
   }
   return (
     <span

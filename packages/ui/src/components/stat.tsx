@@ -192,7 +192,7 @@ const styles = stylex.create({
   warning: { color: colors.warning },
   info: { color: colors.info },
   // Loading: about four figures of the value at its size (a ch is a figure's width), so a figure
-  // waits as wide as a figure, not across the cell.
+  // waits as wide as a figure, not across the cell, on the soft tile a rectangle stands on.
   skeletonValue: {
     display: "flex",
     width: "4ch",
@@ -200,6 +200,12 @@ const styles = stylex.create({
     fontSize: font.textLg,
   },
   skeletonChange: { display: "flex", width: "35%" },
+  // The value waits on a rectangle's soft tile, a body line tall: the rectangle gives way to that
+  // height (it shrinks in a column), its pixels a space-1 inside it.
+  skeletonTile: {
+    flexDirection: "column",
+    height: font.textBaseLine,
+  },
 
   // The group: one box with the lift, its cells parted by hairlines: a hairline's gap between the
   // cells shows the box's ground, the line laid over the card's fill, one colour everywhere, so
@@ -355,8 +361,8 @@ const Body = ({
       </div>
       {loading ? (
         <div {...stylex.props(styles.figures)}>
-          <span {...stylex.props(styles.skeletonValue)}>
-            <Skeleton size="default" />
+          <span {...stylex.props(styles.skeletonValue, styles.skeletonTile)}>
+            <Skeleton variant="rectangular" />
           </span>
           {change !== undefined && (
             <span {...stylex.props(styles.skeletonChange)}>
