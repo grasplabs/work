@@ -158,8 +158,15 @@ export interface ConnectApiKeyProvider {
 
 /** Every prop a ConnectApiKey takes. */
 export interface ConnectApiKeyProps {
-  /** The card's title ("AI provider"). */
+  /** The card's title ("AI provider"); without the card, still the name of the list of tiles. */
   title: string;
+  /**
+   * Without its card: the tiles, the form and the connected row stand on the page itself, for a
+   * page whose own title already says what the card's would (a step of a setup). In a list of
+   * settings it keeps its card, as every setting there has one.
+   * @default false
+   */
+  bare?: boolean;
   /** One line that opens the card, over the tiles, in the serif. */
   description?: ReactNode;
   /** The providers, as tiles, in order. */
@@ -465,6 +472,7 @@ const Connected = ({
 export const ConnectApiKey = ({
   title,
   description,
+  bare = false,
   providers,
   columns,
   connected,
@@ -513,6 +521,126 @@ export const ConnectApiKey = ({
     setReplacing(false);
     setChosen(null);
   };
+  const views = (
+    <>
+      {live !== undefined && connected !== undefined && connected !== null && (
+        <Connected
+          provider={live}
+          last={connected.last}
+          onReplace={() => {
+            setReplacing(true);
+            setChosen(connected.provider);
+          }}
+          onDisconnect={
+            onDisconnect === undefined
+              ? undefined
+              : async () => {
+                  // Once it is gone, the focus goes to its tile.
+                  focusNext.current = placeOf(connected.provider);
+                  try {
+                    await onDisconnect();
+                  } catch (error) {
+                    focusNext.current = null;
+                    throw error;
+                  }
+                }
+          }
+          disconnectDetail={disconnectDetail}
+          words={words}
+        />
+      )}
+      {live === undefined && form !== undefined && (
+        <ConnectForm
+          provider={form}
+          onConnect={async (choice) => {
+            // Once connected, the focus goes to Replace key, in the row that says so.
+            focusNext.current = "replace";
+            try {
+              await onConnect(choice);
+            } catch (error) {
+              focusNext.current = null;
+              throw error;
+            }
+            setReplacing(false);
+            setChosen(null);
+          }}
+          onChange={change}
+          words={words}
+        />
+      )}
+      {live === undefined && form === undefined && (
+        <>
+          {description !== undefined && (
+            <div {...stylex.props(styles.lead)}>
+              <Text variant="display" size="lg">
+                {description}
+              </Text>
+            </div>
+          )}
+          <ul
+            // oxlint-disable-next-line jsx-a11y/no-redundant-roles -- Safari drops a list's role once its markers are hidden
+            role="list"
+            aria-label={title}
+            {...stylex.props(
+              styles.tiles,
+              columns !== undefined && atMost[columns]
+            )}
+          >
+            {tiles.map((provider) => (
+              <li key={provider.id} {...stylex.props(styles.tile)}>
+                <Item
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setChosen(provider.id);
+                  }}
+                >
+                  <Logo provider={provider} />
+                  <ItemContent>
+                    <ItemTitle>{provider.name}</ItemTitle>
+                    {provider.region !== undefined && (
+                      <ItemDescription>
+                        <span {...stylex.props(styles.region)}>
+                          {provider.region.icon}
+                          <span {...stylex.props(styles.regionName)}>
+                            {provider.region.label}
+                          </span>
+                        </span>
+                      </ItemDescription>
+                    )}
+                  </ItemContent>
+                </Item>
+              </li>
+            ))}
+          </ul>
+          {lines.length > 0 && (
+            <div {...stylex.props(styles.own)}>
+              {lines.map((provider) => (
+                <Button
+                  key={provider.id}
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setChosen(provider.id);
+                  }}
+                >
+                  <Icon icon={PlusIcon} />
+                  {provider.addressLabel ?? provider.name}
+                </Button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
+  if (bare) {
+    return (
+      <div ref={body} data-slot="connect-api-key" {...stylex.props(style)}>
+        {views}
+      </div>
+    );
+  }
   return (
     <Card style={style}>
       <CardHeader>
@@ -520,117 +648,7 @@ export const ConnectApiKey = ({
       </CardHeader>
       <CardContent>
         <div ref={body} data-slot="connect-api-key">
-          {live !== undefined &&
-            connected !== undefined &&
-            connected !== null && (
-              <Connected
-                provider={live}
-                last={connected.last}
-                onReplace={() => {
-                  setReplacing(true);
-                  setChosen(connected.provider);
-                }}
-                onDisconnect={
-                  onDisconnect === undefined
-                    ? undefined
-                    : async () => {
-                        // Once it is gone, the focus goes to its tile.
-                        focusNext.current = placeOf(connected.provider);
-                        try {
-                          await onDisconnect();
-                        } catch (error) {
-                          focusNext.current = null;
-                          throw error;
-                        }
-                      }
-                }
-                disconnectDetail={disconnectDetail}
-                words={words}
-              />
-            )}
-          {live === undefined && form !== undefined && (
-            <ConnectForm
-              provider={form}
-              onConnect={async (choice) => {
-                // Once connected, the focus goes to Replace key, in the row that says so.
-                focusNext.current = "replace";
-                try {
-                  await onConnect(choice);
-                } catch (error) {
-                  focusNext.current = null;
-                  throw error;
-                }
-                setReplacing(false);
-                setChosen(null);
-              }}
-              onChange={change}
-              words={words}
-            />
-          )}
-          {live === undefined && form === undefined && (
-            <>
-              {description !== undefined && (
-                <div {...stylex.props(styles.lead)}>
-                  <Text variant="display" size="lg">
-                    {description}
-                  </Text>
-                </div>
-              )}
-              <ul
-                // oxlint-disable-next-line jsx-a11y/no-redundant-roles -- Safari drops a list's role once its markers are hidden
-                role="list"
-                aria-label={title}
-                {...stylex.props(
-                  styles.tiles,
-                  columns !== undefined && atMost[columns]
-                )}
-              >
-                {tiles.map((provider) => (
-                  <li key={provider.id} {...stylex.props(styles.tile)}>
-                    <Item
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setChosen(provider.id);
-                      }}
-                    >
-                      <Logo provider={provider} />
-                      <ItemContent>
-                        <ItemTitle>{provider.name}</ItemTitle>
-                        {provider.region !== undefined && (
-                          <ItemDescription>
-                            <span {...stylex.props(styles.region)}>
-                              {provider.region.icon}
-                              <span {...stylex.props(styles.regionName)}>
-                                {provider.region.label}
-                              </span>
-                            </span>
-                          </ItemDescription>
-                        )}
-                      </ItemContent>
-                    </Item>
-                  </li>
-                ))}
-              </ul>
-              {lines.length > 0 && (
-                <div {...stylex.props(styles.own)}>
-                  {lines.map((provider) => (
-                    <Button
-                      key={provider.id}
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setChosen(provider.id);
-                      }}
-                    >
-                      <Icon icon={PlusIcon} />
-                      {provider.addressLabel ?? provider.name}
-                    </Button>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
+          {views}
         </div>
       </CardContent>
     </Card>
