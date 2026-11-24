@@ -18,6 +18,7 @@ import { Conversation, helloTalk, talkAt, Thread } from "./conversation.tsx";
 import type { Talk, Turn } from "./conversation.tsx";
 import {
   checkAsk,
+  copy,
   checkHeard,
   fixture,
   hello,
@@ -31,7 +32,6 @@ import { Frame } from "./frame.tsx";
 import type { ClockPlace } from "./frame.tsx";
 import { ReadBackPlaceholder } from "./read-back.tsx";
 import { ConsentClean } from "./start-clean.tsx";
-import type { CleanStart } from "./start-clean.tsx";
 import {
   Consent,
   consentTurn,
@@ -65,15 +65,11 @@ export interface ConceptSearch {
   lang: "unknown" | undefined;
   transcript: boolean;
   fold: boolean;
-  /** A's cleaned start: 1, 2 or 3. */
-  start: CleanStart;
+  /** On a phone: the scene only behind the header, or a low band under it. */
+  band: "header" | "low";
+  /** Ruben's alternative title on A's start (`&title=alt`). */
+  altTitle: boolean;
 }
-
-/** The router reads `start=2` as a number: either way, one of the three. */
-const cleanStartOf = (value: unknown): CleanStart => {
-  const given = String(value);
-  return given === "2" || given === "3" ? given : "1";
-};
 
 /** Reads the concept’s own part of the address; nothing when it names no concept. */
 export const conceptSearch = (
@@ -93,7 +89,8 @@ export const conceptSearch = (
     lang: search.lang === "unknown" ? "unknown" : undefined,
     transcript: search.transcript !== undefined,
     fold: search.fold !== undefined,
-    start: cleanStartOf(search.start),
+    band: search.band === "header" ? "header" : "low",
+    altTitle: search.title === "alt",
   };
 };
 
@@ -293,7 +290,7 @@ const ConsentThread = ({
       turns.push({
         id: "reminded",
         from: "stephen",
-        text: `Done: I’ll remind you ${remindWhen}. Nothing was recorded. The interviews close ${fixture.closes}.`,
+        text: copy.c.remindDone(remindWhen),
       });
     }
   }
@@ -301,7 +298,7 @@ const ConsentThread = ({
     turns.push({
       id: "declined",
       from: "stephen",
-      text: `That’s fine, ${fixture.person}. ${fixture.sponsor.name} will see that you’re not taking part, never why. Nothing was recorded, and I won’t remind you. If you change your mind, this link works until ${fixture.closes}.`,
+      text: copy.c.declined,
     });
   }
   return (
@@ -317,16 +314,16 @@ const ConsentThread = ({
                 }}
                 variant="link"
               >
-                I’d rather not
+                {copy.c.decline}
               </Button>
               <Text color="muted" size="xs">
-                Your microphone stays off until you say yes.
+                {copy.c.micOff}
               </Text>
             </>
           ) : null}
           {answer === "rather-not" ? (
             <Button onClick={onUndo} variant="outline">
-              I changed my mind
+              {copy.c.undo}
             </Button>
           ) : null}
         </div>
@@ -350,13 +347,13 @@ const BeforeAB = ({
   concept,
   screen,
   live,
-  start,
+  altTitle,
   go,
 }: {
   concept: Concept;
   screen: string;
   live: boolean;
-  start: CleanStart;
+  altTitle: boolean;
   go: (screen: string) => void;
 }) => {
   const [when, setWhen] = useState<string>(fixture.remindAt[1].when);
@@ -409,6 +406,7 @@ const BeforeAB = ({
       if (concept === "a") {
         return (
           <ConsentClean
+            altTitle={altTitle}
             onAgree={() => {
               go("hello");
             }}
@@ -418,13 +416,12 @@ const BeforeAB = ({
             onRatherNot={() => {
               go("rather-not");
             }}
-            variant={start}
           />
         );
       }
       return (
         <Consent
-          agree="I agree"
+          agree={copy.start.agree}
           onAgree={() => {
             go("check");
           }}
@@ -434,7 +431,7 @@ const BeforeAB = ({
           onRatherNot={() => {
             go("rather-not");
           }}
-          title={`${fixture.minutes} minutes with ${fixture.interviewer}`}
+          title={copy.start.title}
         />
       );
     }
@@ -535,11 +532,11 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
   } else {
     page = (
       <BeforeAB
+        altTitle={search.altTitle}
         concept={concept}
         go={go}
         live={live}
         screen={screen}
-        start={search.start}
       />
     );
   }
@@ -552,7 +549,7 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
             {concept === "c" ? null : (
               <Button
                 aria-expanded={transcript}
-                aria-label="Transcript"
+                aria-label={copy.talk.transcript}
                 onClick={() => {
                   setTranscript(!transcript);
                 }}
@@ -563,7 +560,7 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
               </Button>
             )}
             <Button
-              aria-label="Stop for now"
+              aria-label={copy.talk.stop}
               onClick={() => {
                 go("paused");
               }}
@@ -578,6 +575,7 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
       clock={clockOf[concept]}
       left={inTalk ? left : null}
       scene={withScene(concept, screen)}
+      band={search.band}
       sceneOnPhone={concept !== "c" || screen === "language"}
     >
       {page}
