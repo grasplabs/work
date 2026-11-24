@@ -1,8 +1,8 @@
-import { TabsCount } from "@grasp-os/app-kit/components/tabs";
 import {
   workflowOwnListed,
   workflowRunsListed,
 } from "@grasp-os/shared/workflow-resources";
+import { Badge } from "@grasp-os/ui/components/badge";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 
@@ -39,8 +39,9 @@ export const ListedCount = ({
     ? t`${shown} entries or more`
     : t`${plural(count, { one: "# entry", other: "# entries" })}`;
   return (
-    <TabsCount label={of === "runs" ? runs : entries}>
+    // A quiet count beside the tab's name, said in words to a screen reader.
+    <Badge aria-label={of === "runs" ? runs : entries} size="sm">
       {capped ? `${shown}+` : shown}
-    </TabsCount>
+    </Badge>
   );
 };

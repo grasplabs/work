@@ -1,13 +1,3 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Label } from "@grasp-os/app-kit/components/label";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetTitle,
-} from "@grasp-os/app-kit/components/sheet";
-import { Textarea } from "@grasp-os/app-kit/components/textarea";
-import { cn } from "@grasp-os/app-kit/lib/utils";
 import { draftErrors } from "@grasp-os/shared/drafts";
 import { failureText } from "@grasp-os/shared/errors";
 import type {
@@ -15,18 +5,44 @@ import type {
   WorkflowDiagram,
 } from "@grasp-os/shared/workflow-diagrams";
 import type { WorkflowDraft } from "@grasp-os/shared/workflow-resources";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Button } from "@grasp-os/ui/components/button";
 import {
-  BracesIcon,
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+} from "@grasp-os/ui/components/empty";
+import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+import {
+  Sheet,
+  SheetBody,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@grasp-os/ui/components/sheet";
+import { Text } from "@grasp-os/ui/components/text";
+import { Textarea } from "@grasp-os/ui/components/textarea";
+import {
+  ArrowRightIcon,
   CheckIcon,
-  Columns3Icon,
-  LocateFixedIcon,
-  Rows3Icon,
-  ZapIcon,
-  ZoomInIcon,
-  ZoomOutIcon,
-} from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+  CodeIcon,
+  Icon,
+  Maximize2Icon,
+  MinusIcon,
+  PlayIcon,
+  PlusIcon,
+  TableIcon,
+} from "@grasp-os/ui/lib/icons";
+import {
+  colors,
+  radius,
+  shadow,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useEffect, useRef, useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
@@ -41,17 +57,130 @@ import type { Layout } from "./workflow-diagram.tsx";
 // no problems, `workflow-diagram.tsx`), to where it ends. Its builders open a step to
 // change it (core's `define`, GRA-514), saved as the draft's next
 // revision and checked like any edit; the JSON behind it stays one click
-// away, in its Settings' Definition.
+// away, in its Settings' Definition. Its toolbar, its sheet and its empty
+// state are Damsko's; its dotted ground, its zoom and its nodes'
+// cards are laid out here, on Damsko's tokens.
+
+/** How many lines a step's field shows before its text scrolls. */
+const STEP_ROWS = 16;
+
+const styles = stylex.create({
+  // The toolbar over the canvas, at its top left, and Edit JSON at its top right.
+  controls: {
+    position: "absolute",
+    insetBlockStart: space["3"],
+    insetInlineStart: space["3"],
+    zIndex: 1,
+    display: "flex",
+    alignItems: "center",
+    gap: space["1"],
+    padding: space["1"],
+    borderRadius: radius.base,
+    cornerShape: radius.shape,
+    backgroundColor: colors.card,
+    boxShadow: shadow.sm,
+  },
+  // Edit JSON, at the canvas's top right: a Button takes its layout from
+  // what holds it.
+  json: {
+    position: "absolute",
+    insetBlockStart: space["3"],
+    insetInlineEnd: space["3"],
+    zIndex: 1,
+  },
+  empty: { margin: "auto", maxWidth: size.emptyMeasure },
+  form: { display: "flex", flexDirection: "column", gap: space["4"] },
+  conflict: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: space["2"],
+  },
+  attention: { margin: 0, color: colors.warning },
+  caption: {
+    margin: 0,
+    paddingInline: space["4"],
+    paddingBlockEnd: space["3"],
+    color: colors.warning,
+  },
+  muted: { color: colors.mutedForeground },
+  // It fills the room the page gives it; the canvas's controls stand over it.
+  flow: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minHeight: 0,
+  },
+  over: { position: "relative" },
+  done: { color: colors.success },
+  // The dotted ground the steps lie on: a fine grid of dots in the page's
+  // own hairline ink, on its soft surface.
+  ground: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 0,
+    minHeight: "24rem",
+    overflow: "auto",
+    paddingInline: space["8"],
+    paddingBlockStart: space["20"],
+    paddingBlockEnd: space["12"],
+    backgroundColor: colors.muted,
+    backgroundImage: `radial-gradient(circle at center, ${colors.border} 1px, transparent 1.4px)`,
+    backgroundSize: `${space["4"]} ${space["4"]}`,
+  },
+  // In the middle of the ground while it fits; from its start once larger.
+  drawing: { margin: "auto", width: "max-content" },
+  // A node: a small sheet lifted off the dotted ground.
+  node: {
+    display: "flex",
+    flexShrink: 0,
+    backgroundColor: colors.card,
+    borderRadius: radius.base,
+    cornerShape: radius.shape,
+    boxShadow: shadow.sm,
+  },
+  starts: {
+    width: "14rem",
+    alignItems: "flex-start",
+    gap: space["3"],
+    padding: space["3"],
+  },
+  startsText: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: space["1"],
+  },
+  ends: {
+    alignItems: "center",
+    gap: space["2"],
+    paddingInline: space["3"],
+    paddingBlock: space["2"],
+  },
+  // CSS zoom, not a transform: the drawing takes the room it shows at, so
+  // it centres and scrolls as it is seen.
+  zoom50: { zoom: 0.5 },
+  zoom75: { zoom: 0.75 },
+  zoom90: { zoom: 0.9 },
+  zoom100: { zoom: 1 },
+  zoom110: { zoom: 1.1 },
+  zoom125: { zoom: 1.25 },
+  zoom150: { zoom: 1.5 },
+});
 
 /** The zooms the canvas steps through, each a scale of its own. */
 const zooms = [
-  { scale: 0.5, className: "zoom-50" },
-  { scale: 0.75, className: "zoom-75" },
-  { scale: 0.9, className: "zoom-90" },
-  { scale: 1, className: "zoom-100" },
-  { scale: 1.1, className: "zoom-110" },
-  { scale: 1.25, className: "zoom-125" },
-  { scale: 1.5, className: "zoom-150" },
+  { scale: 0.5, style: styles.zoom50 },
+  { scale: 0.75, style: styles.zoom75 },
+  { scale: 0.9, style: styles.zoom90 },
+  { scale: 1, style: styles.zoom100 },
+  { scale: 1.1, style: styles.zoom110 },
+  { scale: 1.25, style: styles.zoom125 },
+  { scale: 1.5, style: styles.zoom150 },
 ] as const;
 
 /** Where the canvas starts: as drawn, unzoomed. */
@@ -89,29 +218,39 @@ const fitting = (
 };
 
 /** Where it starts, at the head of the drawing: its triggers, or by hand. */
-const Starts = ({ onTriggers }: { onTriggers: () => void }) => (
-  <div className="bg-card node-sheet flex w-56 flex-none items-start gap-3 rounded-xl p-3">
-    <ZapIcon aria-hidden="true" className="text-muted-foreground mt-1 size-4" />
-    <div className="flex flex-col items-start gap-1">
-      <span className="text-muted-foreground text-xs">
-        <Trans context="where a workflow starts">Starts</Trans>
+const Starts = ({ onTriggers }: { onTriggers: () => void }) => {
+  const { t } = useLingui();
+  return (
+    <div {...stylex.props(styles.node, styles.starts)}>
+      <span {...stylex.props(styles.muted)}>
+        <Icon icon={PlayIcon} />
       </span>
-      <Button onClick={onTriggers} size="inline" variant="hint">
-        <Trans>See what starts it</Trans>
-      </Button>
+      <div {...stylex.props(styles.startsText)}>
+        <Text as="span" color="muted" size="xs">
+          {t({ message: "Starts", context: "where a workflow starts" })}
+        </Text>
+        <Button onClick={onTriggers} size="xs" variant="ghost">
+          {t`See what starts it`}
+        </Button>
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 /** Where it ends, at the foot of the drawing. */
-const Done = () => (
-  <div className="bg-card node-sheet flex flex-none items-center gap-2 rounded-xl px-3 py-2">
-    <CheckIcon aria-hidden="true" className="text-status-agreed size-4" />
-    <span className="font-medium">
-      <Trans context="where a workflow ends">Done</Trans>
-    </span>
-  </div>
-);
+const Done = () => {
+  const { t } = useLingui();
+  return (
+    <div {...stylex.props(styles.node, styles.ends)}>
+      <span {...stylex.props(styles.done)}>
+        <Icon icon={CheckIcon} />
+      </span>
+      <Text as="span" size="sm" weight="medium">
+        {t({ message: "Done", context: "where a workflow ends" })}
+      </Text>
+    </div>
+  );
+};
 
 /** What the last change of a step came to, when it didn't simply pass. */
 type Outcome =
@@ -137,7 +276,6 @@ const StepForm = ({
 }) => {
   const core = useCore();
   const { t } = useLingui();
-  const id = useId();
   const [text, setText] = useState(() => JSON.stringify(fields, null, 2));
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<Outcome>();
@@ -204,38 +342,35 @@ const StepForm = ({
 
   return (
     <form
-      className="flex flex-col gap-4 px-6 py-5"
       onSubmit={(event) => {
         event.preventDefault();
         void save();
       }}
+      {...stylex.props(styles.form)}
     >
-      <div className="flex flex-col gap-2">
-        <Label htmlFor={id}>
-          <Trans>The step, as JSON</Trans>
-        </Label>
+      <Field>
+        <FieldLabel>{t`The step, as JSON`}</FieldLabel>
         <Textarea
-          className="min-h-72"
-          id={id}
-          onChange={(event) => {
-            setText(event.target.value);
-          }}
+          autoResize={false}
+          onValueChange={setText}
+          rows={STEP_ROWS}
           spellCheck={false}
           value={text}
-          variant="code"
         />
+      </Field>
+      <div>
+        <Button disabled={busy} type="submit">
+          {busy ? t`Checking…` : t`Check and save`}
+        </Button>
       </div>
-      <Button className="self-start" disabled={busy} type="submit">
-        {busy ? t`Checking…` : t`Check and save`}
-      </Button>
       {/* Saved, and it doesn't pass: the sheet stays open. */}
       {outcome?.kind === "failing" ? (
-        <p className="text-status-attention">
+        <p {...stylex.props(styles.attention)}>
           {t`Saved, but it doesn't pass yet: Definition says what to fix.`}
         </p>
       ) : null}
       {outcome?.kind === "conflict" ? (
-        <div className="flex flex-col items-start gap-2">
+        <div {...stylex.props(styles.conflict)}>
           <ErrorText>
             {t`Someone changed this draft since you read it. Read it again, then change the step.`}
           </ErrorText>
@@ -247,7 +382,7 @@ const StepForm = ({
             size="sm"
             variant="outline"
           >
-            <Trans>Read it again</Trans>
+            {t`Read it again`}
           </Button>
         </div>
       ) : null}
@@ -284,22 +419,24 @@ const StepSheet = ({
       open={task !== null}
     >
       <SheetContent>
-        <div className="flex flex-col gap-1 border-b px-6 py-5 pr-14">
-          <SheetTitle>{task?.id}</SheetTitle>
-          <SheetDescription>{task?.label ?? task?.kind}</SheetDescription>
-        </div>
-        {task === null || fields === undefined ? null : (
-          <StepForm
-            draft={draft}
-            fields={fields}
-            // Each step, and each revision of it, opens afresh.
-            key={`${task.pointer} ${draft.revision}`}
-            onDone={onClose}
-            onDraft={onDraft}
-            task={task}
-            workflow={workflow}
-          />
-        )}
+        <SheetHeader>
+          <SheetTitle>{task?.id ?? ""}</SheetTitle>
+          <SheetDescription>{task?.label ?? task?.kind ?? ""}</SheetDescription>
+        </SheetHeader>
+        <SheetBody>
+          {task === null || fields === undefined ? null : (
+            <StepForm
+              draft={draft}
+              fields={fields}
+              // Each step, and each revision of it, opens afresh.
+              key={`${task.pointer} ${draft.revision}`}
+              onDone={onClose}
+              onDraft={onDraft}
+              task={task}
+              workflow={workflow}
+            />
+          )}
+        </SheetBody>
       </SheetContent>
     </Sheet>
   );
@@ -321,14 +458,16 @@ const Controls = ({
 }) => {
   const { t } = useLingui();
   return (
-    <div className="bg-card node-sheet absolute top-3 left-3 z-10 flex items-center gap-0.5 rounded-lg p-1">
+    <div {...stylex.props(styles.controls)}>
+      {/* Fit, zoom in and out, and left to right, until Damsko's set has
+        their own drawings (logged as a registry gap): its nearest shapes. */}
       <Button
         aria-label={t`Fit to view`}
         onClick={onFit}
         size="icon-sm"
         variant="ghost"
       >
-        <LocateFixedIcon aria-hidden="true" />
+        <Icon icon={Maximize2Icon} />
       </Button>
       <Button
         aria-label={t`Zoom out`}
@@ -339,7 +478,7 @@ const Controls = ({
         size="icon-sm"
         variant="ghost"
       >
-        <ZoomOutIcon aria-hidden="true" />
+        <Icon icon={MinusIcon} />
       </Button>
       <Button
         aria-label={t`Zoom in`}
@@ -350,7 +489,7 @@ const Controls = ({
         size="icon-sm"
         variant="ghost"
       >
-        <ZoomInIcon aria-hidden="true" />
+        <Icon icon={PlusIcon} />
       </Button>
       {layout === "side" ? (
         <Button
@@ -361,7 +500,7 @@ const Controls = ({
           size="icon-sm"
           variant="ghost"
         >
-          <Rows3Icon aria-hidden="true" />
+          <Icon icon={TableIcon} />
         </Button>
       ) : (
         <Button
@@ -372,7 +511,7 @@ const Controls = ({
           size="icon-sm"
           variant="ghost"
         >
-          <Columns3Icon aria-hidden="true" />
+          <Icon icon={ArrowRightIcon} />
         </Button>
       )}
     </div>
@@ -383,14 +522,14 @@ const Controls = ({
  * Why a step can't be changed, while the draft doesn't pass: the Flow
  * then still draws it as it last passed here.
  */
-const Caption = () => (
-  <p className="text-status-attention px-4 pb-3">
-    <Trans>
-      The draft doesn&apos;t pass yet: fix it under Definition to change steps
-      here. The Flow shows it as it last passed.
-    </Trans>
-  </p>
-);
+const Caption = () => {
+  const { t } = useLingui();
+  return (
+    <p {...stylex.props(styles.caption)}>
+      {t`The draft doesn't pass yet: fix it under Definition to change steps here. The Flow shows it as it last passed.`}
+    </p>
+  );
+};
 
 /**
  * The diagram to draw: the draft's, or, while it has problems and none,
@@ -443,12 +582,12 @@ export const WorkflowFlow = ({
     setZoom(fitting(drawing.current, room.current));
   }, []);
 
-  const { className: scale } = zooms[zoom] ?? zooms[unzoomed];
+  const { style: scale } = zooms[zoom] ?? zooms[unzoomed];
   // It fills the room the page gives it, edge to edge, the ground taking
   // what its caption leaves.
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="relative flex min-h-0 flex-1 flex-col">
+    <div {...stylex.props(styles.flow)}>
+      <div {...stylex.props(styles.flow, styles.over)}>
         <Controls
           layout={layout}
           onFit={fit}
@@ -456,33 +595,25 @@ export const WorkflowFlow = ({
           onZoom={setZoom}
           zoom={zoom}
         />
-        <Button
-          className="absolute top-3 right-3 z-10"
-          onClick={onDefinition}
-          size="sm"
-          variant="outline"
-        >
-          <BracesIcon aria-hidden="true" data-icon="inline-start" />
-          <Trans>Edit JSON</Trans>
-        </Button>
-        <div
-          className="dot-ground flex min-h-96 flex-1 flex-col overflow-auto px-8 pt-20 pb-12"
-          data-ground=""
-          ref={room}
-        >
+        <div {...stylex.props(styles.json)}>
+          <Button onClick={onDefinition} size="sm" variant="outline">
+            <Icon icon={CodeIcon} />
+            {t`Edit JSON`}
+          </Button>
+        </div>
+        <div {...stylex.props(styles.ground)} data-ground="" ref={room}>
           {diagram === null ? (
             // Nothing passed yet, as a new workflow starts: its builders
             // tell Grasp how the work runs, in its chat beside the Flow.
-            <p className="bg-card text-muted-foreground m-auto max-w-sm rounded-xl border px-5 py-4 text-center">
-              <Trans>
-                Nothing is drawn yet. Tell Grasp in the chat how this work runs
-                and its steps come here.
-              </Trans>
-            </p>
+            <Empty size="sm" style={styles.empty}>
+              <EmptyHeader>
+                <EmptyDescription>{t`Nothing is drawn yet. Tell Grasp in the chat how this work runs and its steps come here.`}</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : (
             // In the middle of the ground while it fits; from its start
             // once it is larger, so all of it scrolls into view.
-            <div className={cn("m-auto w-max", scale)} ref={drawing}>
+            <div {...stylex.props(styles.drawing, scale)} ref={drawing}>
               <WorkflowDiagramView
                 canvas={{
                   layout,
