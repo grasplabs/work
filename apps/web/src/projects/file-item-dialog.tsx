@@ -146,7 +146,6 @@ const FileForm = ({
           errorText={t`Not added`}
           loadingText={t`Adding`}
           onClick={file}
-          size="sm"
         >
           {t({ message: "Add", context: "put in a project" })}
         </Button>

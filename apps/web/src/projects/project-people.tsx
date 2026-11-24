@@ -314,7 +314,6 @@ const ManagePeople = ({
                 }
                 setRemoving(undefined);
               }}
-              size="sm"
               variant="destructive"
             >
               {t`Take out`}

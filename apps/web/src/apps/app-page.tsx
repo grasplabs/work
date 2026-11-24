@@ -15,6 +15,7 @@ import {
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
 import {
+  AppWindowIcon,
   ArchiveIcon,
   EllipsisIcon,
   Icon,
@@ -29,7 +30,6 @@ import type { ReactNode } from "react";
 
 import { StatusBadge } from "../drafts/status-badge.tsx";
 import { ItemBar, ItemShell } from "../frame/item-shell.tsx";
-import { AppWindowIcon } from "../frame/sidebar-icons.ts";
 import type { Crumb } from "../frame/site-header.tsx";
 import { pageHref, useAppAddress } from "../pages/app-address.ts";
 import { PageFrame } from "../pages/page-frame.tsx";

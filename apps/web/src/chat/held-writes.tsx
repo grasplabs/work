@@ -13,6 +13,14 @@ import {
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
+  CodeBlock,
+  CodeBlockActions,
+  CodeBlockContent,
+  CodeBlockCopyButton,
+  CodeBlockHeader,
+  CodeBlockTitle,
+} from "@grasp-os/ui/components/code-block";
+import {
   Confirmation,
   ConfirmationActions,
   ConfirmationRequest,
@@ -20,8 +28,6 @@ import {
 } from "@grasp-os/ui/components/confirmation";
 import { KeyValueList } from "@grasp-os/ui/components/key-value";
 import { Text } from "@grasp-os/ui/components/text";
-import { useScrollEdges } from "@grasp-os/ui/hooks/use-scroll-edges";
-import { codeStyles, focusRing } from "@grasp-os/ui/lib/styles";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -67,15 +73,6 @@ const styles = stylex.create({
     // A line of its own in the confirmation, under its title.
     flexBasis: "100%",
     minWidth: 0,
-  },
-  // The exact input on a code block's ground, every line drawn: long
-  // ones wrap, and what still overflows scrolls inside it, not the page.
-  exact: {
-    width: "100%",
-    margin: 0,
-    whiteSpace: "pre-wrap",
-    overflowWrap: "anywhere",
-    overflowX: "auto",
   },
   list2: { display: "grid", gap: space["2"] },
   presses: { display: "flex", flexWrap: "wrap", gap: space["2"] },
@@ -298,15 +295,10 @@ export const ExactInput = ({
   sent?: boolean;
 }) => {
   const [open, setOpen] = useState(!shown);
-  const [scrolls, setScrolls] = useState(false);
-  const scroller = useScrollEdges({
-    onChange: ({ overflows }) => {
-      setScrolls(overflows);
-    },
-  });
   const id = useId();
   const { t } = useLingui();
   const name = sent ? t`Exactly what was sent` : t`Exactly what will be sent`;
+  const code = inputOf(input);
   let label = open
     ? t`Hide exactly what will be sent`
     : t`Show exactly what will be sent`;
@@ -333,23 +325,21 @@ export const ExactInput = ({
         </button>
       </Button>
       {open ? (
-        // All of it, in a plain block: what is confirmed is never folded
-        // away, and a code block draws only so many lines.
-        <pre
-          aria-label={scrolls ? name : undefined}
-          id={id}
-          ref={scroller}
-          role={scrolls ? "region" : undefined}
-          tabIndex={scrolls ? 0 : undefined}
-          {...stylex.props(
-            codeStyles.surface,
-            codeStyles.text,
-            styles.exact,
-            focusRing
-          )}
-        >
-          {inputOf(input)}
-        </pre>
+        // All of it, every line drawn and never folded: it is what
+        // confirming names.
+        <div id={id}>
+          <CodeBlock aria-label={name} language="json">
+            <CodeBlockHeader>
+              <CodeBlockTitle />
+              <CodeBlockActions>
+                <CodeBlockCopyButton value={code} />
+              </CodeBlockActions>
+            </CodeBlockHeader>
+            <CodeBlockContent lineNumbers maxLines={false} wrap>
+              {code}
+            </CodeBlockContent>
+          </CodeBlock>
+        </div>
       ) : null}
     </div>
   );

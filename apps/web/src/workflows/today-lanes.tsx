@@ -867,6 +867,7 @@ const WaitsOnYou = ({ run }: { run: LaneRun }) => {
                 void review({ approved: true });
               }}
               size="sm"
+              variant="success"
             >
               <Trans context="let a waiting item go ahead">Approve</Trans>
             </Button>

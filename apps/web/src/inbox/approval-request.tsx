@@ -258,6 +258,7 @@ const AnswerRow = ({
             })}
             focusableWhenDisabled={approveWhy.length > 0}
             onClick={onApprove}
+            variant="success"
           >
             {approveLabel ?? t`Approve`}
           </Button>

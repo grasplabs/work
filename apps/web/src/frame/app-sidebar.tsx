@@ -2,8 +2,10 @@ import type { SidebarApp } from "@grasp-os/shared/pages";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { useSidebar } from "@grasp-os/ui/components/sidebar";
 import {
+  AppWindowIcon,
   BellIcon,
   BrainIcon,
+  CableIcon,
   HouseIcon,
   Icon,
   LayoutDashboardIcon,
@@ -38,7 +40,6 @@ import { shortcutLabel } from "../shortcuts.ts";
 import { useWorkflowsWaiting } from "../workflows/nav-item.tsx";
 import { GraspMark } from "./grasp-mark.ts";
 import { PersonMenu } from "./person-menu.tsx";
-import { AppWindowIcon, CableIcon } from "./sidebar-icons.ts";
 import { FrameSidebar } from "./sidebar.tsx";
 import type { SidebarGroupEntry, SidebarSection } from "./sidebar.tsx";
 import { useSidebarApps } from "./surface-nav.tsx";

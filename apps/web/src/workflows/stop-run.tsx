@@ -74,7 +74,6 @@ export const StopRun = ({
           <Button
             errorText={t`Not stopped`}
             onClick={confirm}
-            size="sm"
             variant="destructive"
           >
             {t`Stop the run`}

@@ -10,6 +10,7 @@ import {
 } from "@grasp-os/ui/components/item";
 import { Switch } from "@grasp-os/ui/components/switch";
 import {
+  AppWindowIcon,
   EyeIcon,
   GlobeIcon,
   PencilIcon,
@@ -21,7 +22,6 @@ import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 
-import { AppWindowIcon } from "../../frame/sidebar-icons.ts";
 import { SeparatedItems } from "../../workflows/separated-items.tsx";
 import { SectionCard } from "../section-card.tsx";
 import { toggled } from "./model.ts";
