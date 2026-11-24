@@ -1,9 +1,4 @@
-import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import { Heading } from "@grasp-os/ui/components/heading";
-import {
-  RadioGroup,
-  RadioGroupItem,
-} from "@grasp-os/ui/components/radio-group";
 import { StepperNav } from "@grasp-os/ui/components/stepper";
 import { Text } from "@grasp-os/ui/components/text";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
@@ -12,12 +7,13 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
-import { chooseLocale, isLocale, localeNames } from "../../i18n.ts";
+import { chooseLocale, isLocale } from "../../i18n.ts";
 import { narrationOf } from "../../voice/timing.ts";
 import { stopSpeaking, useSay, useVoice } from "../../voice/voice.ts";
 import { AiChoice } from "./ai-choice.tsx";
 import type { ConceptProps, ConceptStep } from "./concept-props.ts";
 import { ConceptFrame, wholeSetup } from "./frame.tsx";
+import { LanguageCards } from "./language-cards.tsx";
 import { PlanBody } from "./plan.tsx";
 import { SaidWords } from "./said-words.tsx";
 import { SoundToggle } from "./sound-toggle.tsx";
@@ -97,10 +93,6 @@ const Step = ({
 /** A language other than the page's was picked a moment ago: the page drawn anew in it knows. */
 let languagePicked = false;
 
-const languages = Object.entries(localeNames).flatMap(([code, name]) =>
-  isLocale(code) ? [{ code, name }] : []
-);
-
 const Welcome = ({ admin, speaks, onNext }: StepBodyProps) => {
   const { t, i18n } = useLingui();
   const [picked, setPicked] = useState(languagePicked);
@@ -120,28 +112,14 @@ const Welcome = ({ admin, speaks, onNext }: StepBodyProps) => {
       speaks={speaks}
       title={t`Hi ${admin}, I’m Stephen`}
     >
-      <Field>
-        <FieldLabel>{t`Language`}</FieldLabel>
-        <RadioGroup
-          onValueChange={(value: unknown) => {
-            if (isLocale(value)) {
-              setPicked(true);
-              languagePicked = true;
-              void chooseLocale(value);
-            }
-          }}
-          value={picked ? i18n.locale : null}
-        >
-          {languages.map(({ code, name }) => (
-            <Field key={code} orientation="horizontal">
-              <RadioGroupItem value={code} />
-              <FieldLabel>
-                <span lang={code}>{name}</span>
-              </FieldLabel>
-            </Field>
-          ))}
-        </RadioGroup>
-      </Field>
+      <LanguageCards
+        chosen={picked && isLocale(i18n.locale) ? i18n.locale : null}
+        onPick={(locale) => {
+          setPicked(true);
+          languagePicked = true;
+          void chooseLocale(locale);
+        }}
+      />
     </Step>
   );
 };
@@ -221,6 +199,7 @@ export const StepsConcept = ({
       language={step !== "welcome"}
       step={step}
       tools={speaks ? <SoundToggle /> : null}
+      wide={step === "welcome"}
     >
       <Body
         admin={admin}
