@@ -345,7 +345,14 @@ const Access = ({
               editable={can}
               key={JSON.stringify(settings.audience)}
               label={t`Who may use ${name}`}
-              offers={["everyone", "teams", "maker", "nobody"]}
+              // "Its maker alone" is chosen as "Just me" when an agent
+              // is made; offered here only to keep it, since this page
+              // doesn't say who the maker is.
+              offers={
+                settings.audience.who === "maker"
+                  ? ["everyone", "teams", "maker", "nobody"]
+                  : ["everyone", "teams", "nobody"]
+              }
               teams={teams}
               value={chosenOf(settings.audience)}
               onSave={async (chosen) => {
