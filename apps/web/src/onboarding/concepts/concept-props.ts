@@ -24,12 +24,6 @@ export interface ConceptProps {
   go: (step: ConceptStep) => void;
   /** Past the plan: on to the setup's next step as it is today. */
   onward: () => void;
-  /**
-   * The end of a later step (`?foot=a|b|c`): `a` StepperNav's footer with a
-   * Next that works, `b` the same with its count, `c` StepperNav's bar at
-   * the top and the step's own button. None until Next can work.
-   */
-  foot: "a" | "b" | "c";
   /** How the language cards are drawn (`?cards=a|b|c`). */
   cards: CardLook;
 }

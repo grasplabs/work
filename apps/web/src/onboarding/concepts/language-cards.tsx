@@ -5,8 +5,16 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
+import { Text } from "@grasp-os/ui/components/text";
 import { CheckIcon, Icon } from "@grasp-os/ui/lib/icons";
-import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { focusRing } from "@grasp-os/ui/lib/styles";
+import {
+  colors,
+  media,
+  radius,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 
@@ -36,9 +44,42 @@ export type CardLook = "flag" | "brand" | "scene";
 export const isCardLook = (value: unknown): value is CardLook =>
   value === "flag" || value === "brand" || value === "scene";
 
+/** Under a pointer that can hover, as Damsko's own parts write it. */
+const HOVER = "@media (hover: hover)";
+
 const styles = stylex.create({
-  // Tall enough for the flag to read; the flag lies over the whole card.
-  card: { position: "relative", minHeight: "4rem" },
+  // The flag card: one button, its own corner clipping the flag under its name.
+  flagCard: {
+    position: "relative",
+    display: "flex",
+    alignItems: "center",
+    boxSizing: "border-box",
+    width: "100%",
+    minHeight: "4rem",
+    margin: 0,
+    paddingInline: space[4],
+    borderWidth: 0,
+    borderRadius: radius.lg,
+    cornerShape: radius.shape,
+    overflow: "hidden",
+    cursor: "pointer",
+    textAlign: "start",
+    backgroundColor: {
+      default: colors.card,
+      ":hover": { default: null, [HOVER]: colors.controlHover },
+      ":active": colors.controlActive,
+    },
+    boxShadow: size.borderStrong,
+  },
+  // Coming back: the language in use takes the selected fill, as Item's active does.
+  current: { backgroundColor: colors.accentActive },
+  // The name stands over the flag.
+  name: {
+    position: "relative",
+    display: "flex",
+    alignItems: "center",
+    gap: space[2],
+  },
   // The scene's room: the ground fills the positioned box it stands in.
   scene: {
     position: "relative",
@@ -75,22 +116,89 @@ const languages = Object.entries(localeNames).flatMap(([code, name]) =>
   isLocale(code) ? [{ code, name }] : []
 );
 
-/** The card's picture, by its look. */
-const Picture = ({ code, look }: { code: Locale; look: CardLook }) => {
-  if (look === "scene") {
-    const { scene, hue } = scenes[code];
-    // The scene, with the small crisp flag in its corner.
-    return (
-      <span {...stylex.props(styles.scene)}>
-        <AppCardGround hue={hue} scene={scene} />
-        <span {...stylex.props(styles.corner)}>
-          <FlagPicture fit="small" locale={code} tone="real" />
-        </span>
-      </span>
-    );
-  }
+/** A scene card's picture: the scene, with the small crisp flag in its corner. */
+const Picture = ({ code }: { code: Locale }) => {
+  const { scene, hue } = scenes[code];
   return (
-    <FlagPicture locale={code} tone={look === "flag" ? "real" : "brand"} />
+    <span {...stylex.props(styles.scene)}>
+      <AppCardGround hue={hue} scene={scene} />
+      <span {...stylex.props(styles.corner)}>
+        <FlagPicture fit="small" locale={code} tone="real" />
+      </span>
+    </span>
+  );
+};
+
+interface CardProps {
+  code: Locale;
+  name: string;
+  /** The language in use, when they come back to the step. */
+  chosen: boolean;
+  onPick: (locale: Locale) => void;
+}
+
+/**
+ * A language as one button: its flag over the whole card, dense at the far
+ * edge and thinning out by the dither toward the name, which stands over
+ * it. A component of the setup's own, not an Item: the card's corner clips
+ * its picture, which an Item can't hold without a layer inside it.
+ */
+const FlagCard = ({
+  code,
+  name,
+  chosen,
+  onPick,
+  tone,
+}: CardProps & { tone: "real" | "brand" }) => {
+  const { t } = useLingui();
+  return (
+    <li>
+      <button
+        {...(chosen && { "aria-current": true })}
+        onClick={() => {
+          onPick(code);
+        }}
+        type="button"
+        // No tapTarget: that is the hit area inside a small control; the card is 64px tall already.
+        {...stylex.props(styles.flagCard, chosen && styles.current, focusRing)}
+      >
+        <FlagPicture fit="cover" locale={code} tone={tone} />
+        <span {...stylex.props(styles.name)}>
+          {chosen ? <Icon icon={CheckIcon} label={t`Chosen`} /> : null}
+          <Text as="span" color="default" size="sm" weight="medium">
+            <span lang={code}>{name}</span>
+          </Text>
+        </span>
+      </button>
+    </li>
+  );
+};
+
+/** A language as an Item: a dithered scene as its media, a small flag in its corner. */
+const SceneCard = ({ code, name, chosen, onPick }: CardProps) => {
+  const { t } = useLingui();
+  return (
+    <Item
+      active={chosen}
+      onClick={() => {
+        onPick(code);
+      }}
+      variant="outline"
+    >
+      <ItemMedia>
+        <Picture code={code} />
+      </ItemMedia>
+      {chosen ? (
+        <ItemMedia variant="icon">
+          <Icon icon={CheckIcon} label={t`Chosen`} />
+        </ItemMedia>
+      ) : null}
+      <ItemContent>
+        <ItemTitle>
+          <span lang={code}>{name}</span>
+        </ItemTitle>
+      </ItemContent>
+    </Item>
   );
 };
 
@@ -107,41 +215,26 @@ export const LanguageCards = ({
   const { t } = useLingui();
   return (
     <ItemGrid aria-label={t`Your language`}>
-      {languages.map(({ code, name }) => (
-        <Item
-          active={chosen === code}
-          key={code}
-          onClick={() => {
-            onPick(code);
-          }}
-          style={styles.card}
-          variant="outline"
-        >
-          {look === "scene" ? (
-            <ItemMedia>
-              <Picture code={code} look={look} />
-            </ItemMedia>
-          ) : (
-            // The flag over the whole card, fading out toward the name.
-            <FlagPicture
-              fit="cover"
-              locale={code}
-              tone={look === "flag" ? "real" : "brand"}
-            />
-          )}
-          {/* Coming back: the tick beside the name, clear of the flag at the far edge. */}
-          {chosen === code ? (
-            <ItemMedia variant="icon">
-              <Icon icon={CheckIcon} label={t`Chosen`} />
-            </ItemMedia>
-          ) : null}
-          <ItemContent>
-            <ItemTitle>
-              <span lang={code}>{name}</span>
-            </ItemTitle>
-          </ItemContent>
-        </Item>
-      ))}
+      {languages.map(({ code, name }) =>
+        look === "scene" ? (
+          <SceneCard
+            chosen={chosen === code}
+            code={code}
+            key={code}
+            name={name}
+            onPick={onPick}
+          />
+        ) : (
+          <FlagCard
+            chosen={chosen === code}
+            code={code}
+            key={code}
+            name={name}
+            onPick={onPick}
+            tone={look === "flag" ? "real" : "brand"}
+          />
+        )
+      )}
     </ItemGrid>
   );
 };
