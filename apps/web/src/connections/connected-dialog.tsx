@@ -20,12 +20,14 @@ import {
 import { useLingui } from "@lingui/react/macro";
 import { Fragment } from "react";
 
+import { takesPlaceOf } from "./connection-list.tsx";
+
 // What the connect dialog ends on, as the prototype's `Done` view
 // (`components/connect-dialog.tsx`): the sign-in happens at the provider,
 // which sends the person back to the page with `connection=<id>`, so the
 // page opens this once it lists that connection: that the
-// app is connected (again, where one of its connections that stopped
-// working stands beside it, `returnedOf`), what Grasp may
+// app is connected (again, where it took the place of one of its
+// connections that stopped working, `returnedOf`), what Grasp may
 // do there, and what was chosen: who uses it and, for a Composio toolkit,
 // the tools allowed. A Damsko Dialog: Damsko has no success mark, and its
 // title says it.
@@ -34,9 +36,9 @@ import { Fragment } from "react";
  * What a flow came back with, from what the page lists, never from the
  * address alone: the connection named `id`, only where it is listed and
  * works (anyone can put an ID in a link), and whether it connected the app
- * again: a shared one, beside a shared one of the same kind that stopped
- * working (a Composio toolkit connected again, app-actions.tsx). Another
- * account beside one of someone's own that ran out is not "again".
+ * again: it took the place of one that stopped working (`takesPlaceOf`, a
+ * Composio toolkit connected again, app-actions.tsx). Another account
+ * beside one that stopped is not "again".
  */
 export const returnedOf = (
   connections: readonly ListedConnection[],
@@ -49,14 +51,8 @@ export const returnedOf = (
   return {
     connection,
     again:
-      connection?.scope === "shared" &&
-      connections.some(
-        (each) =>
-          each.id !== connection.id &&
-          each.status === "needs_reauth" &&
-          each.scope === "shared" &&
-          each.source === connection.source
-      ),
+      connection !== undefined &&
+      connections.some((each) => takesPlaceOf(connection, each)),
   };
 };
 

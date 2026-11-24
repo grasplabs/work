@@ -522,13 +522,31 @@ const sameAccount = (
   other.accountName === connection.accountName;
 
 /**
+ * Whether `working`, a shared connection of an app that works, has taken
+ * the place of `stopped`, a shared one of the same app that stopped
+ * working: the same account (`sameAccount`). A working connection of
+ * another account doesn't replace it. The one rule for a stopped row's
+ * notice (`stoppedBesideWorking`) and for the success dialog's "connected
+ * again" (`returnedOf`, connected-dialog.tsx).
+ */
+export const takesPlaceOf = (
+  working: ListedConnection,
+  stopped: ListedConnection
+): boolean =>
+  working.id !== stopped.id &&
+  working.status === "active" &&
+  working.scope === "shared" &&
+  stopped.status === "needs_reauth" &&
+  stopped.scope === "shared" &&
+  sameAccount(working, stopped);
+
+/**
  * Whether `connection` stopped working, can't be signed in to again, and a
- * shared connection of its app that works has taken its place (the same
- * account, `sameAccount`), and `identity` may disconnect it: its row then
- * says it can go now (`StoppedNotice`). One that can be signed in to again
- * offers that instead (its row's Sign in again), and a working connection
- * of another account doesn't replace it. Read from what the page lists, on
- * every load: never from the address, never from anything kept in the
+ * shared connection of its app that works has taken its place
+ * (`takesPlaceOf`), and `identity` may disconnect it: its row then says it
+ * can go now (`StoppedNotice`). One that can be signed in to again offers
+ * that instead (its row's Sign in again). Read from what the page lists,
+ * on every load: never from the address, never from anything kept in the
  * browser.
  */
 export const stoppedBesideWorking = (
@@ -536,17 +554,9 @@ export const stoppedBesideWorking = (
   integration: Integration,
   identity: Pick<Identity, "role" | "staff">
 ): boolean =>
-  connection.status === "needs_reauth" &&
-  connection.scope === "shared" &&
   mayDisconnect(connection, identity) &&
   !canReconnect(connection, integration.offered, identity) &&
-  integration.connections.some(
-    (other) =>
-      other.id !== connection.id &&
-      other.status === "active" &&
-      other.scope === "shared" &&
-      sameAccount(other, connection)
-  );
+  integration.connections.some((other) => takesPlaceOf(other, connection));
 
 /**
  * A stopped connection's row, beside one that works: that it can be
