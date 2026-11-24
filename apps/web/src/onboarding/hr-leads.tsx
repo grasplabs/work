@@ -189,7 +189,7 @@ export const HrLeads = ({
         }}
         {...stylex.props(styles.form)}
       >
-        <Text size="lg">
+        <Text>
           {t`In ${name}, make a service user that may read people’s basic and work details, and paste its ID and token here.`}
         </Text>
         <Field disabled={busy}>

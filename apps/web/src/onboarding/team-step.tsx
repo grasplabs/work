@@ -39,11 +39,9 @@ const styles = stylex.create({
   foot: {
     display: "flex",
     alignItems: "center",
-    justifyContent: "flex-end",
+    justifyContent: "space-between",
     gap: space[3],
   },
-  // Copy keeps its size; the postmark takes the room after it.
-  copy: { flexShrink: 0, marginInlineEnd: "auto" },
   end: {
     display: "flex",
     flexWrap: "wrap",
@@ -189,9 +187,7 @@ export const TeamStep = ({
           }}
           summary={
             <output aria-live="polite">
-              <Text as="span" size="lg">
-                {next}
-              </Text>
+              <Text as="span">{next}</Text>
             </output>
           }
           teams={teams}

@@ -74,7 +74,7 @@ export const ForgetTeams = ({
   if (erased && teamsInBrain === null) {
     return (
       <output aria-live="polite">
-        <Text as="span" size="lg">
+        <Text as="span">
           {t`Erased. Your Brain keeps nothing of your teams until you confirm them again.`}
         </Text>
       </output>
@@ -83,7 +83,7 @@ export const ForgetTeams = ({
   if (teamsInBrain === "erasing") {
     return (
       <output aria-live="polite">
-        <Text as="span" size="lg">
+        <Text as="span">
           {t`I’m erasing your teams from your Brain. It isn’t finished yet, and I finish it by myself.`}
         </Text>
       </output>

@@ -295,9 +295,7 @@ export const SendPlanForm = ({
             />
             <span {...stylex.props(styles.hourWith)}>
               <label htmlFor={timeField} {...stylex.props(styles.at)}>
-                <Text as="span" size="lg">
-                  {at}
-                </Text>
+                <Text as="span">{at}</Text>
               </label>
               <Input
                 id={timeField}
@@ -315,7 +313,7 @@ export const SendPlanForm = ({
         {listed ? (
           <>
             <div id={teamsField}>
-              <Text size="lg">{t`These teams get links. Switch one off to send its links later.`}</Text>
+              <Text>{t`These teams get links. Switch one off to send its links later.`}</Text>
             </div>
             <ul aria-labelledby={teamsField} {...stylex.props(styles.rows)}>
               {teams.map((team) => {
@@ -323,7 +321,7 @@ export const SendPlanForm = ({
                 const { name } = team;
                 return (
                   <li key={team.id} {...stylex.props(styles.row)}>
-                    <Text size="lg">{name}</Text>
+                    <Text>{name}</Text>
                     <Switch
                       aria-label={t`${name} gets links`}
                       checked={inIt}
@@ -343,7 +341,7 @@ export const SendPlanForm = ({
           </>
         ) : (
           <div {...stylex.props(styles.all)}>
-            <Text size="lg">
+            <Text>
               {plural(count, {
                 one: "Your one team gets links.",
                 other: "All # teams get links.",
@@ -365,7 +363,7 @@ export const SendPlanForm = ({
             <Separator />
             <div {...stylex.props(styles.part)}>
               <div id={laterField}>
-                <Text size="lg">
+                <Text>
                   {plural(heldCount, {
                     one: `The team you left out: ${leftOut}.`,
                     other: `The # teams you left out: ${leftOut}.`,
@@ -406,9 +404,7 @@ export const SendPlanForm = ({
                   />
                   <span {...stylex.props(styles.hourWith)}>
                     <span {...stylex.props(styles.at)}>
-                      <Text as="span" size="lg">
-                        {at}
-                      </Text>
+                      <Text as="span">{at}</Text>
                     </span>
                     <Input
                       aria-label={t`The hour the other teams get their links`}

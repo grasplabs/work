@@ -305,7 +305,7 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
         {open === undefined || ask === null ? null : (
           <Card padding="lg">
             <div {...stylex.props(styles.question)}>
-              <Text size="lg">{`${open.reading.about} ${ask.question}`}</Text>
+              <Text>{`${open.reading.about} ${ask.question}`}</Text>
               <div {...stylex.props(styles.options)}>
                 {ask.options.map((option) => (
                   <Button
@@ -358,7 +358,7 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
           </div>
         )}
         {picked.length === 0 ? null : (
-          <Text size="lg">
+          <Text>
             {plural(reading, {
               one: "I’m reading # document from where it lives.",
               other: "I’m reading # documents from where they live.",

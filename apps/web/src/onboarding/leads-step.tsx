@@ -286,9 +286,7 @@ const ConfirmOrg = ({
               }));
               return (
                 <li key={team.id} {...stylex.props(styles.row)}>
-                  <Text size="lg" style={styles.name}>
-                    {name}
-                  </Text>
+                  <Text style={styles.name}>{name}</Text>
                   <Combobox
                     aria-label={t`Lead of ${name}`}
                     disabled={team.off}
@@ -314,15 +312,13 @@ const ConfirmOrg = ({
           </ul>
         </Card>
         {missing > 0 ? (
-          <Text size="lg">
+          <Text>
             {t`A team without a lead gets its links on the first day, and I ask each person what they do.`}
           </Text>
         ) : null}
         {said === null ? null : (
           <output aria-live="polite">
-            <Text as="span" size="lg">
-              {said}
-            </Text>
+            <Text as="span">{said}</Text>
           </output>
         )}
         <WaitingNote waiting={data.view.waiting} />
