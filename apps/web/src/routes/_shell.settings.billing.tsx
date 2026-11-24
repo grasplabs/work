@@ -71,7 +71,7 @@ const BillingPage = () => {
   const readOnly = identity.staff;
   return (
     <>
-      <BillingCard billing={billing} canChange={!readOnly} />
+      <BillingCard billing={billing} canChange={!readOnly} save={save} />
       <Plan />
       <SettingsGroup flush title={t`Billing emails`}>
         <FieldGroup controls="fit">
@@ -86,7 +86,7 @@ const BillingPage = () => {
               checked={billing.emailInvoices}
               aria-label={t`Email invoices`}
               onCheckedChange={(emailInvoices) => {
-                save({ emailInvoices });
+                void save({ emailInvoices });
               }}
               readOnly={readOnly}
             />
@@ -99,7 +99,7 @@ const BillingPage = () => {
               checked={billing.emailReceipts}
               aria-label={t`Email payment receipts`}
               onCheckedChange={(emailReceipts) => {
-                save({ emailReceipts });
+                void save({ emailReceipts });
               }}
               readOnly={readOnly}
             />

@@ -24,10 +24,8 @@ import {
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
-import { useCoreAction } from "../use-core-action.ts";
 import { useHeldDialog } from "../workflows/held-dialog.ts";
 import { IdentityCard } from "./identity-card.tsx";
 import type { IdentityCardFact } from "./identity-card.tsx";
@@ -38,7 +36,7 @@ import type { IdentityCardFact } from "./identity-card.tsx";
 // one; with nothing on file, one quiet line. Its one button opens the
 // details as a form in a Dialog, saved whole through core
 // (`orgSettings.updateBilling`) with Save, as the library's Forms pattern
-// has it. Grasp staff read the card and change nothing, so they have no
+// has it, in the page's one queue of billing saves (queued-save.ts). Grasp staff read the card and change nothing, so they have no
 // button. No cover: on this card it would only decorate.
 
 const styles = stylex.create({
@@ -54,11 +52,22 @@ const keptAs = (text: string): string | null => {
 /** The longest each detail may be, as core takes them (`billingSettingsSchema`). */
 const longest = { email: 254, company: 120, address: 500, vatNumber: 14 };
 
+/** Saves a change to the billing details in the page's queue; whether core took it. */
+export type SaveBilling = (
+  change: Partial<BillingSettings>,
+  report?: (reason: string) => void
+) => Promise<boolean>;
+
 /** The billing details as a form in a Dialog, saved whole with Save. */
-const EditBilling = ({ billing }: { billing: BillingSettings }) => {
+const EditBilling = ({
+  billing,
+  save: queued,
+}: {
+  billing: BillingSettings;
+  save: SaveBilling;
+}) => {
   const { t } = useLingui();
-  const router = useRouter();
-  const { failure, run } = useCoreAction();
+  const [failure, setFailure] = useState<string>();
   const dialog = useHeldDialog();
   const [email, setEmail] = useState(billing.email ?? "");
   const [company, setCompany] = useState(billing.company ?? "");
@@ -72,21 +81,20 @@ const EditBilling = ({ billing }: { billing: BillingSettings }) => {
     setVatNumber(billing.vatNumber ?? "");
   };
   const save = async (): Promise<void> => {
-    const done = await run(async (session) => {
-      await session.orgSettings.updateBilling({
-        ...billing,
+    setFailure(undefined);
+    const done = await queued(
+      {
         email: keptAs(email),
         company: keptAs(company),
         address: keptAs(address),
         vatNumber: keptAs(vatNumber),
-      });
-      return true;
-    });
-    if (done === undefined) {
+      },
+      setFailure
+    );
+    if (!done) {
       // Core's reason shows in the dialog, which stays open with what was typed.
       throw new Error("The billing details were not saved.");
     }
-    await router.invalidate({ sync: true });
   };
   return (
     <Dialog
@@ -172,9 +180,12 @@ const EditBilling = ({ billing }: { billing: BillingSettings }) => {
 export const BillingCard = ({
   billing,
   canChange,
+  save,
 }: {
   billing: BillingSettings;
   canChange: boolean;
+  /** The page's queue of billing saves (`useQueuedSave`). */
+  save: SaveBilling;
 }) => {
   const { t } = useLingui();
   // The address on one line: its lines joined as an envelope's are read aloud.
@@ -191,7 +202,9 @@ export const BillingCard = ({
   }
   return (
     <IdentityCard
-      {...(canChange ? { action: <EditBilling billing={billing} /> } : {})}
+      {...(canChange
+        ? { action: <EditBilling billing={billing} save={save} /> }
+        : {})}
       aria-label={t`Billing information`}
       empty={t`No billing details yet`}
       facts={facts}

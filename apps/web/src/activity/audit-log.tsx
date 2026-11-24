@@ -857,6 +857,9 @@ export const LogRecords = ({
             {busy ? t`Loading…` : t`Older`}
           </Button>
         )}
+        {failure === undefined ? null : (
+          <RowAlert variant="destructive">{failure}</RowAlert>
+        )}
       </div>
     );
   }

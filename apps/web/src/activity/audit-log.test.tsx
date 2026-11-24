@@ -225,6 +225,18 @@ describe(LogRecords, () => {
     });
   });
 
+  it("says why Older stopped when core refuses it before any match was read", async () => {
+    await shown({ records: [], next: 91 }, () => {
+      throw new Error("Core refused the read.");
+    });
+    await press("Older");
+
+    expect({
+      said: document.body.textContent.includes("Core refused the read."),
+      offered: button("Older").disabled,
+    }).toStrictEqual({ said: true, offered: false });
+  });
+
   it("opens an event's details beside the table: what happened, and its place in the chain under Integrity", async () => {
     await shown({ records: records(3, 1), next: null }, () => ({
       records: [],
