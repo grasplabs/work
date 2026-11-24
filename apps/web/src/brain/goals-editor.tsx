@@ -219,8 +219,8 @@ const WordingDialog = ({
           <DialogClose>{t`Cancel`}</DialogClose>
           <Button
             disabled={!canSave}
-            errorLabel={t`Not saved`}
-            loadingLabel={t`Saving`}
+            errorText={t`Not saved`}
+            loadingText={t`Saving`}
             onClick={async () => {
               if (!(await saved())) {
                 // The dialog stays open, with core's reason above the buttons.
@@ -306,8 +306,8 @@ const WorkflowsDialog = ({
           <DialogClose>{t`Cancel`}</DialogClose>
           <Button
             disabled={busy}
-            errorLabel={t`Not saved`}
-            loadingLabel={t`Saving`}
+            errorText={t`Not saved`}
+            loadingText={t`Saving`}
             onClick={async () => {
               await save();
               onOpenChange(false);

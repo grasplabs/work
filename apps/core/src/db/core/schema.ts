@@ -4555,9 +4555,10 @@ export const platformVersions = sqliteTable("platform_versions", {
  * triggers listen to (`events_stopped`), that packages of an App they
  * build were revoked as malware
  * (`package_revoked`), or what an App told them (`app_message`). A
- * `gap_asked` row has its gap alone, once per person and gap. The
- * person's rows read over 30 days ago go when they next read, and all of
- * them when they are removed from the organization.
+ * `gap_asked` row has its gap alone, one per person and gap, unread again
+ * each time the gap is asked. The person's rows read over 30 days ago go
+ * when they next read, and all of them when they are removed from the
+ * organization.
  */
 export const notifications = sqliteTable(
   "notifications",
@@ -4640,7 +4641,7 @@ export const notifications = sqliteTable(
     index("notifications_app_sent_idx")
       .on(table.appId, table.createdAt)
       .where(sql`type = 'app_message'`),
-    // A person is asked about a gap once.
+    // A person's one notice of a gap, however often it is asked.
     uniqueIndex("notifications_gap_idx")
       .on(table.personId, table.gapId)
       .where(sql`gap_id IS NOT NULL`),
@@ -6666,7 +6667,8 @@ export const brainTeamGroupSaves = sqliteTable("brain_team_group_saves", {
 
 /**
  * What became of the brain's gaps (brain-gaps.ts): one row once a
- * gap was asked about, answered or closed, each set once, never cleared.
+ * gap was asked about, answered or closed, never cleared: answered or
+ * closed once, `asked_at` the newest ask while it was open.
  * A gap with no row is open and nobody was asked.
  */
 export const brainGapStates = sqliteTable("brain_gap_states", {

@@ -5699,7 +5699,6 @@ msgid "failed"
 msgstr "fehlgeschlagen"
 
 #: src/chat/thread.tsx
-#: src/frame/ui-words.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/traces.tsx
@@ -5709,6 +5708,11 @@ msgstr "Fehlgeschlagen"
 
 #: src/report/report.ts
 msgctxt "a figure of the report"
+msgid "Failed"
+msgstr "Fehlgeschlagen"
+
+#: src/frame/ui-words.tsx
+msgctxt "a menu item whose work failed"
 msgid "Failed"
 msgstr "Fehlgeschlagen"
 
@@ -6377,6 +6381,10 @@ msgstr "Grasp hat noch keinen Absender für seine E-Mails"
 msgid "Grasp in your language. Numbers, dates and amounts follow it too."
 msgstr "Grasp in Ihrer Sprache. Zahlen, Daten und Beträge folgen ihr auch."
 
+#: src/routes/waiting.tsx
+msgid "Grasp is almost ready for you"
+msgstr "Grasp ist fast bereit für dich"
+
 #: src/apps/app-workspace.tsx
 msgid "Grasp is building"
 msgstr "Grasp baut"
@@ -6400,6 +6408,10 @@ msgstr "Grasp arbeitet noch daran…"
 #: src/brain/own-export.tsx
 msgid "Grasp is writing your export. It takes a minute or two; it shows here as soon as it is ready, and you can leave this page meanwhile."
 msgstr "Grasp schreibt Ihren Export. Das dauert ein, zwei Minuten; er erscheint hier, sobald er fertig ist, und Sie können die Seite inzwischen verlassen."
+
+#: src/sign-in-errors.ts
+msgid "Grasp isn’t open for everyone yet: your company’s admins are still setting it up, and you’ll get in as soon as they have finished. If you have an interview link, it is in your email."
+msgstr "Grasp ist noch nicht für alle geöffnet: Die Admins deines Unternehmens richten es noch ein, und du kommst hinein, sobald sie fertig sind. Wenn du einen Interview-Link hast, findest du ihn in deinen E-Mails."
 
 #: src/guest-sign-in.tsx
 msgid "Grasp isn't open yet. Try again later."
@@ -6436,10 +6448,6 @@ msgstr "Grasp darf {app} nur über die Werkzeuge nutzen, die Sie erlaubt haben."
 #: src/chat/saved-memory.tsx
 msgid "Grasp no longer remembers this."
 msgstr "Grasp merkt sich das nicht mehr."
-
-#: src/sign-in-errors.ts
-msgid "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
-msgstr "Grasp öffnet bald für alle, sobald Stephen mit den Teams gesprochen hat. Wenn Sie einen Interviewlink haben, finden Sie ihn in Ihrer E-Mail."
 
 #: src/settings/ai-providers.tsx
 msgid "Grasp reads the interview's questions aloud with {whereItRuns}, using Grasp's own key."
@@ -7406,6 +7414,10 @@ msgstr "Sie läuft sofort nicht mehr, auch laufende Aufrufe nicht, und kann nie 
 #: src/workflows/stop-run.tsx
 msgid "It stops where it is and never goes on. What it already did stays done. This can't be undone."
 msgstr "Er hält an, wo er gerade ist, und läuft nie weiter. Was er schon getan hat, bleibt getan. Das lässt sich nicht rückgängig machen."
+
+#: src/brain/sources-page.tsx
+msgid "It takes {types} files of up to {size}."
+msgstr "Hochgeladen werden können {types}-Dateien bis {size}."
 
 #: src/settings/event-sources.tsx
 msgid "It takes no event until you make it a new secret."
@@ -10406,10 +10418,6 @@ msgstr "Zahlungsbelege"
 msgid "PDF"
 msgstr "PDF"
 
-#: src/brain/sources-page.tsx
-msgid "PDF, Word, Excel or transcripts, up to {size}."
-msgstr "PDF, Word, Excel oder Transkripte, bis {size}."
-
 #: src/agents/agent-documents.tsx
 msgid "PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each."
 msgstr "PDF, Word, Excel, Markdown, Text, CSV oder JSON, jeweils bis 10 MB."
@@ -12678,6 +12686,7 @@ msgstr "Melden Sie sich mit dem Konto Ihrer Organisation an."
 #: src/routes/guest.tsx
 #: src/routes/interview.tsx
 #: src/routes/staff.tsx
+#: src/routes/waiting.tsx
 msgid "Sign out"
 msgstr "Abmelden"
 
@@ -17062,6 +17071,10 @@ msgstr "Ihr Unternehmen möchte wissen, wie die Arbeit wirklich läuft. Sie leit
 #: src/agents/agents-overview.tsx
 msgid "Your company's"
 msgstr "Die deines Unternehmens"
+
+#: src/routes/waiting.tsx
+msgid "Your company’s admins are still setting Grasp up. There is nothing you need to do: this page opens Grasp for you as soon as they have finished."
+msgstr "Die Admins deines Unternehmens richten Grasp noch ein. Du musst nichts tun: Diese Seite öffnet Grasp für dich, sobald sie fertig sind."
 
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Your company’s name in Grasp."

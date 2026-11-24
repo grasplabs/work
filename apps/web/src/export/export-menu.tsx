@@ -37,7 +37,7 @@ export const ExportMenu = ({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuItem
-          errorLabel={failed}
+          errorText={failed}
           icon={FileIcon}
           onSelect={async () => {
             await exportAs(file, "md", i18n.locale);
@@ -46,7 +46,7 @@ export const ExportMenu = ({
           {t`Markdown (.md)`}
         </DropdownMenuItem>
         <DropdownMenuItem
-          errorLabel={failed}
+          errorText={failed}
           icon={FileIcon}
           onSelect={async () => {
             await exportAs(file, "pdf", i18n.locale);

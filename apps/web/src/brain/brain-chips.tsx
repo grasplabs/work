@@ -107,7 +107,7 @@ const styles = stylex.create({
     gap: space["2"],
     paddingBlock: space["1"],
     paddingInline: space["2"],
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     fontSize: font.textXs,
     lineHeight: font.textXsLine,
     fontWeight: font.weightMedium,
@@ -205,7 +205,7 @@ export const Capped = ({ children }: { children: ReactNode[] }) => {
  */
 const NoteMark = ({ note }: { note: Note }) => {
   if (note.kind === "tool" || note.kind === "app") {
-    return <BrandIcon decorative label={note.title} size="xs" />;
+    return <BrandIcon decorative name={note.title} size="xs" />;
   }
   return <KindDot kind={note.kind} />;
 };

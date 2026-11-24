@@ -112,7 +112,7 @@ const styles = stylex.create({
     maxWidth: "var(--cell)",
     paddingBlock: 2,
     paddingInline: space["1"],
-    borderRadius: radii.mark,
+    borderRadius: radii.sm,
     borderWidth: 0,
     backgroundColor: "transparent",
     color: "inherit",

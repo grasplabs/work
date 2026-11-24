@@ -1,7 +1,6 @@
 // Item: one row of a list, a thing with its name, a line about it, a mark and its actions:
 // the system's edge and corner, words in ink and muted. Plain semantic HTML: UI SDK has
 // no primitive for it.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Item variant="outline">
 //     <ItemMedia variant="icon"><Icon icon={FolderIcon} /></ItemMedia>
@@ -34,6 +33,7 @@
 import * as stylex from "@stylexjs/stylex";
 import { mergeProps } from "@ui-sdk/react/primitive";
 import {
+  Fragment,
   createContext,
   createElement,
   isValidElement,
@@ -220,7 +220,7 @@ const styles = stylex.create({
     width: "100%",
     minWidth: 0,
     margin: 0,
-    borderRadius: radius.row,
+    borderRadius: radius.lg,
     cornerShape: radius.shape,
     color: colors.foreground,
     fontFamily: font.sans,
@@ -353,7 +353,7 @@ const styles = stylex.create({
     justifyContent: "center",
     width: sizes.controlDefault,
     height: sizes.controlDefault,
-    borderRadius: `min(${radius.base}, calc(${sizes.controlDefault} / 2))`,
+    borderRadius: `min(${radius.xl}, calc(${sizes.controlDefault} / 2))`,
     cornerShape: radius.shape,
     backgroundColor: colors.control,
     boxShadow: sizes.borderStrong,
@@ -365,13 +365,13 @@ const styles = stylex.create({
     width: sizes.controlDefault,
     height: sizes.controlDefault,
     overflow: "hidden",
-    borderRadius: `min(${radius.base}, calc(${sizes.controlDefault} / 2))`,
+    borderRadius: `min(${radius.xl}, calc(${sizes.controlDefault} / 2))`,
     cornerShape: radius.shape,
   },
   mediaSm: {
     width: sizes.controlSm,
     height: sizes.controlSm,
-    borderRadius: `min(${radius.base}, calc(${sizes.controlSm} / 2))`,
+    borderRadius: `min(${radius.xl}, calc(${sizes.controlSm} / 2))`,
   },
   title: {
     fontSize: font.textSm,
@@ -409,25 +409,11 @@ const styles = stylex.create({
         sizes.sidePanelTextLine,
     },
   },
-  // On the title's line, after a space and a little more room: quieter, not bolder.
-  detail: {
-    marginInlineStart: space["1"],
-    fontWeight: font.weightNormal,
-    color: colors.mutedForeground,
-  },
-  // In a side panel's card: at the row's end, on one line, cut with an ellipsis past 45% of it.
-  detailXs: {
-    marginInlineStart: {
-      default: space["1"],
-      [stylex.when.ancestor(":is(*)", sidePanelCardMarker)]: "auto",
-    },
-    flexShrink: {
+  // In a side panel's card: the name on one line, cut with an ellipsis so its detail stays whole.
+  nameXs: {
+    minWidth: {
       default: null,
       [stylex.when.ancestor(":is(*)", sidePanelCardMarker)]: 0,
-    },
-    maxWidth: {
-      default: null,
-      [stylex.when.ancestor(":is(*)", sidePanelCardMarker)]: "45%",
     },
     overflow: {
       default: null,
@@ -436,6 +422,27 @@ const styles = stylex.create({
     textOverflow: {
       default: null,
       [stylex.when.ancestor(":is(*)", sidePanelCardMarker)]: "ellipsis",
+    },
+    whiteSpace: {
+      default: null,
+      [stylex.when.ancestor(":is(*)", sidePanelCardMarker)]: "nowrap",
+    },
+  },
+  // On the title's line, after a space and a little more room: quieter, not bolder.
+  detail: {
+    marginInlineStart: space["1"],
+    fontWeight: font.weightNormal,
+    color: colors.mutedForeground,
+  },
+  // In a side panel's card: at the row's end, whole and on one line; the name gives way to it.
+  detailXs: {
+    marginInlineStart: {
+      default: space["1"],
+      [stylex.when.ancestor(":is(*)", sidePanelCardMarker)]: "auto",
+    },
+    flexShrink: {
+      default: null,
+      [stylex.when.ancestor(":is(*)", sidePanelCardMarker)]: 0,
     },
     whiteSpace: {
       default: null,
@@ -512,6 +519,29 @@ const styles = stylex.create({
       cornerShape: "inherit",
     },
   },
+  // In a side panel's card the press is the title's flex row, so its name gives way as the title's.
+  pressXs: {
+    display: {
+      default: null,
+      [stylex.when.ancestor(":is(*)", sidePanelCardMarker)]: "flex",
+    },
+    flexGrow: {
+      default: null,
+      [stylex.when.ancestor(":is(*)", sidePanelCardMarker)]: 1,
+    },
+    alignItems: {
+      default: null,
+      [stylex.when.ancestor(":is(*)", sidePanelCardMarker)]: "center",
+    },
+    gap: {
+      default: null,
+      [stylex.when.ancestor(":is(*)", sidePanelCardMarker)]: space["2"],
+    },
+    minWidth: {
+      default: null,
+      [stylex.when.ancestor(":is(*)", sidePanelCardMarker)]: 0,
+    },
+  },
   // Lists: a real list, the rows one under another, 8px apart, or 4px either side of a hairline.
   group: {
     display: "grid",
@@ -574,13 +604,13 @@ const waits = stylex.create({
     width: sizes.controlDefault,
     height: sizes.controlDefault,
     overflow: "hidden",
-    borderRadius: `min(${radius.base}, calc(${sizes.controlDefault} / 2))`,
+    borderRadius: `min(${radius.xl}, calc(${sizes.controlDefault} / 2))`,
     cornerShape: radius.shape,
   },
   mediaSm: {
     width: sizes.controlSm,
     height: sizes.controlSm,
-    borderRadius: `min(${radius.base}, calc(${sizes.controlSm} / 2))`,
+    borderRadius: `min(${radius.xl}, calc(${sizes.controlSm} / 2))`,
   },
   // The bare icon's box, in line with the title.
   icon: {
@@ -589,7 +619,7 @@ const waits = stylex.create({
     width: sizes.iconSm,
     height: sizes.iconSm,
     overflow: "hidden",
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
   },
   // The title's and the description's lines, as long as a short name and a short line.
@@ -709,6 +739,7 @@ export const ItemContent = ({ children, style }: ItemContentProps) => (
 /** The title's words, as the row's stretched press when the row is a link or a button. */
 const TitleWords = ({ children }: { children: ReactNode }): ReactNode => {
   const press = use(TitlePress);
+  const dense = use(RowSize) === "xs";
   if (press === undefined) {
     return children;
   }
@@ -716,7 +747,7 @@ const TitleWords = ({ children }: { children: ReactNode }): ReactNode => {
   const own = {
     "data-row-press": "",
     "aria-describedby": `${id}-description`,
-    ...stylex.props(styles.press),
+    ...stylex.props(styles.press, dense && styles.pressXs),
   };
   // The caller's element (a router's link) carries the title alone; the row holds its other parts.
   if (element !== undefined) {
@@ -753,25 +784,48 @@ const TitleWords = ({ children }: { children: ReactNode }): ReactNode => {
   );
 };
 
+const isWords = (part: ReactNode): boolean =>
+  typeof part === "string" || typeof part === "number";
+
+/**
+ * An xs row's words: the name (the words before its first element) in a span of its own, in order,
+ * so in a side panel's card, where the title is a flex row, the name alone gives way with an
+ * ellipsis and what follows it (a mark, the detail) stays whole. A name not written as words
+ * first is left as written.
+ */
+const nameFirst = (children: ReactNode): ReactNode => {
+  const parts = [children].flat();
+  const first = parts.findIndex((part) => !isWords(part));
+  const end = first === -1 ? parts.length : first;
+  if (end === 0) {
+    return children;
+  }
+  return createElement(
+    Fragment,
+    null,
+    createElement("span", stylex.props(styles.nameXs), ...parts.slice(0, end)),
+    ...parts.slice(end)
+  );
+};
+
 /** Its name, in a few words ("Spring launch"). */
-export const ItemTitle = ({ children, style }: ItemTitleProps) => (
-  <span
-    data-slot="item-title"
-    {...stylex.props(
-      styles.title,
-      use(RowSize) === "xs" && styles.titleXs,
-      style
-    )}
-  >
-    {use(RowLoading) && isBlank(children) ? (
-      <span {...stylex.props(waits.title)}>
-        <Skeleton />
-      </span>
-    ) : (
-      <TitleWords>{children}</TitleWords>
-    )}
-  </span>
-);
+export const ItemTitle = ({ children, style }: ItemTitleProps) => {
+  const dense = use(RowSize) === "xs";
+  return (
+    <span
+      data-slot="item-title"
+      {...stylex.props(styles.title, dense && styles.titleXs, style)}
+    >
+      {use(RowLoading) && isBlank(children) ? (
+        <span {...stylex.props(waits.title)}>
+          <Skeleton />
+        </span>
+      ) : (
+        <TitleWords>{dense ? nameFirst(children) : children}</TitleWords>
+      )}
+    </span>
+  );
+};
 
 /**
  * A quieter word or two on the title's line, after the name: a role, "you", a count ("Admin"). In

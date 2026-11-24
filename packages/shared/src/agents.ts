@@ -57,6 +57,12 @@ export interface Agent {
    * offered, and for every company agent.
    */
   offeredAt: string | null;
+  /**
+   * The person who made it, by their ID, whoever changed it since; null
+   * for the company's first agent, which Grasp ships and nobody made.
+   * One an admin took on from its owner keeps its owner as its maker.
+   */
+  madeBy: string | null;
   /** Who last changed it, and when; null: as Grasp ships it. */
   changedBy: string | null;
   changedAt: string | null;

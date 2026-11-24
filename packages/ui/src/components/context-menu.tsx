@@ -1,7 +1,6 @@
 // ContextMenu: the actions for a thing, opened where it is right-clicked or long-pressed,
 // in StyleX, built on UI SDK's Menu with its context trigger: the raised panel the dropdown menu has, items with an
 // icon, words and keys, checkbox and radio items, submenus, and an item whose work can fail.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <ContextMenu>
 //     <ContextMenuTrigger aria-label="Q3 forecast">
@@ -149,7 +148,7 @@ export interface ContextMenuItemProps {
   /**
    * Runs when it is pressed, by pointer, Enter or Space. Call `event.preventDefault()` to keep the
    * menu open. Return a Promise and the menu stays open while it runs, with a spinner at the end of
-   * the item, and closes once it is done; when it rejects, the item says `errorLabel` and the menu
+   * the item, and closes once it is done; when it rejects, the item says `errorText` and the menu
    * stays open to try again.
    */
   onSelect?: (event: Event) => unknown;
@@ -162,13 +161,13 @@ export interface ContextMenuItemProps {
    * What a screen reader hears as the work of an `onSelect` that returns a Promise starts.
    * @default "Working"
    */
-  loadingLabel?: string;
+  loadingText?: string;
   /**
    * The words when its work failed, at the end of the item, said aloud and given to an agent
    * ("Could not publish").
    * @default "Failed"
    */
-  errorLabel?: string;
+  errorText?: string;
   /**
    * What the item does, for the person an agent must ask first ("Deletes the report"). A
    * `destructive` item asks with its own words when this is left out.
@@ -307,7 +306,7 @@ const styles = stylex.create({
   // The area: as it is, with the shared focus ring when the keyboard reaches it.
   area: {
     display: "block",
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     WebkitTouchCallout: "none",
   },

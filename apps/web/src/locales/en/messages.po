@@ -5699,7 +5699,6 @@ msgid "failed"
 msgstr "failed"
 
 #: src/chat/thread.tsx
-#: src/frame/ui-words.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/traces.tsx
@@ -5709,6 +5708,11 @@ msgstr "Failed"
 
 #: src/report/report.ts
 msgctxt "a figure of the report"
+msgid "Failed"
+msgstr "Failed"
+
+#: src/frame/ui-words.tsx
+msgctxt "a menu item whose work failed"
 msgid "Failed"
 msgstr "Failed"
 
@@ -6377,6 +6381,10 @@ msgstr "Grasp has no sender for its mail yet"
 msgid "Grasp in your language. Numbers, dates and amounts follow it too."
 msgstr "Grasp in your language. Numbers, dates and amounts follow it too."
 
+#: src/routes/waiting.tsx
+msgid "Grasp is almost ready for you"
+msgstr "Grasp is almost ready for you"
+
 #: src/apps/app-workspace.tsx
 msgid "Grasp is building"
 msgstr "Grasp is building"
@@ -6400,6 +6408,10 @@ msgstr "Grasp is still working on it…"
 #: src/brain/own-export.tsx
 msgid "Grasp is writing your export. It takes a minute or two; it shows here as soon as it is ready, and you can leave this page meanwhile."
 msgstr "Grasp is writing your export. It takes a minute or two; it shows here as soon as it is ready, and you can leave this page meanwhile."
+
+#: src/sign-in-errors.ts
+msgid "Grasp isn’t open for everyone yet: your company’s admins are still setting it up, and you’ll get in as soon as they have finished. If you have an interview link, it is in your email."
+msgstr "Grasp isn’t open for everyone yet: your company’s admins are still setting it up, and you’ll get in as soon as they have finished. If you have an interview link, it is in your email."
 
 #: src/guest-sign-in.tsx
 msgid "Grasp isn't open yet. Try again later."
@@ -6436,10 +6448,6 @@ msgstr "Grasp may use {app} only through the tools you allowed."
 #: src/chat/saved-memory.tsx
 msgid "Grasp no longer remembers this."
 msgstr "Grasp no longer remembers this."
-
-#: src/sign-in-errors.ts
-msgid "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
-msgstr "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
 
 #: src/settings/ai-providers.tsx
 msgid "Grasp reads the interview's questions aloud with {whereItRuns}, using Grasp's own key."
@@ -7406,6 +7414,10 @@ msgstr "It stops running at once, calls already running included, and can never 
 #: src/workflows/stop-run.tsx
 msgid "It stops where it is and never goes on. What it already did stays done. This can't be undone."
 msgstr "It stops where it is and never goes on. What it already did stays done. This can't be undone."
+
+#: src/brain/sources-page.tsx
+msgid "It takes {types} files of up to {size}."
+msgstr "It takes {types} files of up to {size}."
 
 #: src/settings/event-sources.tsx
 msgid "It takes no event until you make it a new secret."
@@ -10406,10 +10418,6 @@ msgstr "Payment receipts"
 msgid "PDF"
 msgstr "PDF"
 
-#: src/brain/sources-page.tsx
-msgid "PDF, Word, Excel or transcripts, up to {size}."
-msgstr "PDF, Word, Excel or transcripts, up to {size}."
-
 #: src/agents/agent-documents.tsx
 msgid "PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each."
 msgstr "PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each."
@@ -12678,6 +12686,7 @@ msgstr "Sign in with your organization's account."
 #: src/routes/guest.tsx
 #: src/routes/interview.tsx
 #: src/routes/staff.tsx
+#: src/routes/waiting.tsx
 msgid "Sign out"
 msgstr "Sign out"
 
@@ -17062,6 +17071,10 @@ msgstr "Your company wants to know how the work really goes. You lead your team,
 #: src/agents/agents-overview.tsx
 msgid "Your company's"
 msgstr "Your company's"
+
+#: src/routes/waiting.tsx
+msgid "Your company’s admins are still setting Grasp up. There is nothing you need to do: this page opens Grasp for you as soon as they have finished."
+msgstr "Your company’s admins are still setting Grasp up. There is nothing you need to do: this page opens Grasp for you as soon as they have finished."
 
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Your company’s name in Grasp."

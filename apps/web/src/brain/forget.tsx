@@ -181,8 +181,7 @@ const UndoCard = ({
       </span>
       {going.failure === undefined ? (
         <Progress
-          label={t`Time left to undo`}
-          showLabel={false}
+          aria-label={t`Time left to undo`}
           size="sm"
           value={(going.left / graceSeconds) * 100}
         />

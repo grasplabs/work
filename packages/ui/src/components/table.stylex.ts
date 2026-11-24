@@ -9,7 +9,7 @@ export const tableVars = stylex.defineVars({
    * flush body) sets it to 0, so the box is square there and its corners clip nothing of the part
    * around it (a soft head's grey was notched at both top corners).
    */
-  corner: radius.mark,
+  corner: radius.sm,
   /** The words' size in its cells. An answer in a chat sets it to the chat's words (Markdown). */
   text: size.tableText,
   /** Their line height, with `text`. */

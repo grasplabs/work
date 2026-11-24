@@ -286,7 +286,7 @@ const styles = stylex.create({
     insetInlineStart: 0,
     paddingBlock: space["2"],
     paddingInline: `calc(2.5 * ${space["1"]})`,
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     boxShadow: shadow.md,
     whiteSpace: "nowrap",
     translate: "-50% 0",
@@ -305,7 +305,7 @@ const styles = stylex.create({
   groupLink: {
     padding: 0,
     borderWidth: 0,
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     backgroundColor: "transparent",
     color: {
       default: "inherit",
@@ -328,7 +328,7 @@ const styles = stylex.create({
     maxWidth: "var(--cell)",
     paddingBlock: 2,
     paddingInline: space["1"],
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     color: colors.foreground,
     fontFamily: "inherit",
     fontSize: "inherit",

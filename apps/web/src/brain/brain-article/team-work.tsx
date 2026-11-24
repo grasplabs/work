@@ -82,7 +82,7 @@ const styles = stylex.create({
   },
   system: {
     display: "inline-flex",
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
   },
 });
 

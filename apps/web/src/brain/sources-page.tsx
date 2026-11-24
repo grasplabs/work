@@ -730,7 +730,8 @@ const UploadForm = ({
   const [choice, setChoice] = useState("me");
   const [sent, setSent] = useState<Read<{ source: BrainSourceRef }>>();
   const busy = sent?.state === "loading";
-  // The limit, from core's own.
+  // What an upload takes, from core's own limits.
+  const types = formatList(Object.keys(uploadTypes).map((type) => `.${type}`));
   const size = formatBytes(uploadMaxBytes);
   const readers = [
     { value: "me", label: t`Only me` },
@@ -765,7 +766,9 @@ const UploadForm = ({
               variant="button"
             />
             <FieldDescription>
-              <Trans>PDF, Word, Excel or transcripts, up to {size}.</Trans>
+              <Trans>
+                It takes {types} files of up to {size}.
+              </Trans>
             </FieldDescription>
           </Field>
           <Field>
@@ -799,8 +802,8 @@ const UploadForm = ({
             what core answers. */}
         <Button
           disabled={file === undefined || busy}
-          errorLabel={t`Couldn't upload`}
-          loadingLabel={t`Uploading…`}
+          errorText={t`Couldn't upload`}
+          loadingText={t`Uploading…`}
           onClick={async () => {
             if (file === undefined) {
               return;

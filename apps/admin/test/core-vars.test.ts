@@ -138,4 +138,19 @@ describe("a hosted client's sign-in, in relay mode", () => {
         derivedCoreConfig({ ...inputs, startingFlow: null }),
     }).toStrictEqual({ chosen: "setup", whole: false, none: false });
   });
+
+  it("says since when its deployment is closed, only for a company added with an onboarding", () => {
+    const inputs = {
+      clientId: "acme",
+      signIn: JSON.stringify(signIn),
+      domain,
+      apps: signInApps(env),
+    };
+    const added = new Date("2026-11-21T09:00:00.000Z");
+    expect({
+      closed: derivedCoreConfig({ ...inputs, closedFrom: added })
+        .ONBOARDING_CLOSED_FROM,
+      open: "ONBOARDING_CLOSED_FROM" in derivedCoreConfig(inputs),
+    }).toStrictEqual({ closed: "2026-11-21T09:00:00.000Z", open: false });
+  });
 });

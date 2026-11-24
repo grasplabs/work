@@ -20,6 +20,7 @@ import {
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
+import { companyMidnightsBetween } from "./company-day.ts";
 import {
   apps,
   modelUsage,
@@ -30,7 +31,8 @@ import { inList } from "./db/d1.ts";
 
 // What the deployment's model calls spent, in US dollars at the providers'
 // list prices, for admins to read: in a UTC month, all together, per
-// workflow, per person and per App's model binding. Nothing limits it:
+// workflow, per person and per App's model binding; the month's days
+// alone are the company's, in its time zone. Nothing limits it:
 // clients pay their providers on their own keys, and the overview is
 // read-only. Each response is recorded after it, as one `model_usage` row
 // (model-usage.ts), and the overview is a query over those rows, as the
@@ -271,26 +273,24 @@ const monthRunsOf = async (
  */
 export const chatTurnPurpose = "chat.turn";
 
-/** Milliseconds in a day. */
-const dayMs = 86_400_000;
-
-/**
- * How many days of UTC month `month` have begun by `now`: up to today in
- * the month it is, all of one that is over, none of one to come.
- */
-const daysSoFar = (month: string, now: Date): number => {
-  const { from, until } = monthBounds(month);
-  const length = Math.round((until.getTime() - from.getTime()) / dayMs);
-  const begun = Math.floor((now.getTime() - from.getTime()) / dayMs) + 1;
-  return Math.min(length, Math.max(0, begun));
-};
+/** The day `at` falls on in `timeZone`, one the runtime knows: `YYYY-MM-DD`. */
+const dayIn = (timeZone: string, at: Date): string =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(at);
 
 /**
  * What the models cost in `month` on the organization's keys: the
- * deployment's total, each UTC day's, chat's, and the workflows that spent
- * most (at most `modelSpendListed`), an App's and an independent one's
- * alike, each with its name and its App's where core still has them, and
- * its runs started in the month: for admins to read (models-rpc.ts).
+ * deployment's total, each of the company's days', chat's, and the
+ * workflows that spent most (at most `modelSpendListed`), an App's and an
+ * independent one's alike, each with its name and its App's where core
+ * still has them, and its runs started in the month: for admins to read
+ * (models-rpc.ts). The month is a UTC month, as everywhere; only its days
+ * are the company's, in its time zone, so an evening's spend counts on
+ * the day people had it.
  */
 export const monthSpend = async (
   env: Pick<Env, "DB">,
@@ -298,12 +298,27 @@ export const monthSpend = async (
   now = new Date()
 ): Promise<ModelMonthSpend> => {
   const db = drizzle(env.DB);
+  const { from, until } = monthBounds(month);
+  const { midnights, timeZone } = await companyMidnightsBetween(
+    env.DB,
+    from,
+    until
+  );
+  // When each of the company's days in the month begins: the first at the
+  // month's start, the others at their midnights.
+  const starts = [from, ...midnights];
   const spent = sql<number>`sum(${modelUsage.cost})`;
-  // The UTC day of the month each call was answered on, `01` to `31`:
-  // `created_at` is in milliseconds.
-  const day = sql<string>`strftime('%d', ${modelUsage.createdAt} / 1000, 'unixepoch')`;
+  // Which of `starts` each call was answered on or after last, from 0:
+  // how many midnights it came at or after. SQLite knows no time zones,
+  // so the midnights are found here; `created_at` is in milliseconds. A
+  // call of the month recorded outside it (a clock set wrong) counts on
+  // the first or the last day, so no spend is lost.
+  const day = sql<number>`(${sql.join(
+    midnights.map((at) => sql`(${modelUsage.createdAt} >= ${at.getTime()})`),
+    sql` + `
+  )})`;
   const [byDay, rows] = await Promise.all([
-    // One pass over the month's rows: at most 31, each day's spend and
+    // One pass over the month's rows: at most 32, each day's spend and
     // its chat's; the total and chat's are their sums.
     db
       .select({
@@ -338,26 +353,23 @@ export const monthSpend = async (
     workflowNamesOf(db, workflows),
     monthRunsOf(db, workflows, month),
   ]);
-  // Every day so far, and on to the latest a call was recorded on, if
-  // later (a clock ahead of `now`'s), so the days always add up to the
-  // total.
-  const days: number[] = Array.from(
-    {
-      length: Math.max(
-        daysSoFar(month, now),
-        ...byDay.map(({ day: of }) => Number(of))
-      ),
-    },
-    () => 0
+  const spentOn = new Map(byDay.map(({ day: of, amount }) => [of, amount]));
+  // Every day begun by `now`, and on to the latest a call was recorded
+  // on, if later (a clock ahead of `now`'s), so the days always add up to
+  // the total.
+  const shown = Math.max(
+    starts.filter((start) => start.getTime() <= now.getTime()).length,
+    ...byDay.map(({ day: of }) => of + 1)
   );
-  for (const { day: of, amount } of byDay) {
-    days[Number(of) - 1] = amount;
-  }
+  const days = starts.slice(0, shown).map((start, at) => ({
+    date: dayIn(timeZone, start),
+    amount: spentOn.get(at) ?? 0,
+  }));
   return {
     month,
-    // Added up from the 1st, as a reader adds the days: the same sum to
-    // the last bit.
-    total: days.reduce((sum, amount) => sum + amount, 0),
+    // Added up from the first day, as a reader adds the days: the same
+    // sum to the last bit.
+    total: days.reduce((sum, { amount }) => sum + amount, 0),
     days,
     chat: byDay.reduce((sum, { chat }) => sum + chat, 0),
     workflows: listed.map(({ workflow, amount }) => ({

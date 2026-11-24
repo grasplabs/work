@@ -71,6 +71,8 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
     "A private binding the release gives core didn't answer the probe.",
   probe_clock_unarmed:
     "Core's clock or connect's isn't armed with tasks after the probe.",
+  probe_starts_open:
+    "The release's core doesn't start a company closed for its onboarding, so its address stays unpublished: put it on a release that does.",
   runner_replaced: "Another attempt took the client over.",
   operation_gone: "The operation's record was gone before it was done.",
   client_not_active:
@@ -167,6 +169,7 @@ const failureCauses = {
   probe_identity_mismatch: "retry",
   probe_binding_unanswered: "retry",
   probe_clock_unarmed: "retry",
+  probe_starts_open: "release",
   runner_replaced: "retry",
   operation_gone: "retry",
   client_not_active: "staff",
