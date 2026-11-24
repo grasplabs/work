@@ -338,10 +338,7 @@ test("a page printed from dark is dark ink on light paper, the kit's colours and
   await expect(heading).toBeVisible();
   // Dark, chosen in the person menu.
   await page.getByRole("button", { name: "Person", exact: true }).click();
-  await page
-    .getByRole("menu")
-    .getByRole("button", { name: "Dark", exact: true })
-    .click();
+  await page.getByRole("menuitemradio", { name: "Dark" }).click();
   await page.keyboard.press("Escape");
   await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
 

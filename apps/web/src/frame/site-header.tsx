@@ -145,6 +145,13 @@ const styles = stylex.create({
     "--damsko-subtle-foreground": colors.sidebarTertiaryForeground,
     "--damsko-foreground": colors.sidebarForeground,
   },
+  // The button's empty rim hangs out past the bar's room, so its glyph
+  // stands where the page's words begin, the crumbs 6px after its box, as
+  // the reference's.
+  trigger: {
+    marginInlineStart: `calc((${size.sidebarIcon} - ${size.sidebarIconButton}) / 2)`,
+    marginInlineEnd: "-2px",
+  },
   // The slashes stand a step apart from the steps, as the reference's.
   separator: { marginInline: space["1"] },
   trailing: { display: "flex", flexShrink: 0, alignItems: "center" },
@@ -246,6 +253,7 @@ export const SiteHeader = ({
       {away ? (
         <SidebarTrigger
           aria-label={t`Show or hide the sidebar`}
+          style={styles.trigger}
           onClick={() => {
             // The sheet takes focus itself, and gives it back on closing.
             handing.current = !isMobile;

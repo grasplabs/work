@@ -93,11 +93,12 @@ test("on a phone the person menu holds the themes and the organizations, each wi
   // The themes on Appearance's own row, the organizations in a submenu,
   // none of them off the window's edge.
   await opened();
-  await chosen(menu.getByRole("button", { name: "Dark", exact: true }));
+  await chosen(menu.getByRole("menuitemradio", { name: "Dark" }));
   await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
+  await opened();
   await expect(
-    menu.getByRole("button", { name: "Dark", exact: true })
-  ).toHaveAttribute("aria-pressed", "true");
+    menu.getByRole("menuitemradio", { name: "Dark" })
+  ).toHaveAttribute("aria-checked", "true");
   await page
     .getByRole("menuitem", { name: "Switch organization", exact: true })
     .click();

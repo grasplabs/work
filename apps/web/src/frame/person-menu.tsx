@@ -2,14 +2,6 @@ import type { Identity } from "@grasp-os/shared/rpc";
 import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
 import {
   DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@grasp-os/ui/components/dropdown-menu";
 import {
@@ -20,10 +12,6 @@ import {
 import { isThemeMode } from "@grasp-os/ui/components/theme-toggle";
 import { toast } from "@grasp-os/ui/components/toast";
 import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
-import {
   ChevronsUpDownIcon,
   Icon,
   LogOutIcon,
@@ -32,7 +20,7 @@ import {
   SettingsIcon,
   SunIcon,
 } from "@grasp-os/ui/lib/icons";
-import { colors, font, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { colors, font } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
@@ -40,12 +28,13 @@ import { useEffect, useSyncExternalStore } from "react";
 
 import { signOut } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
-import { OrganizationName } from "./organization-name.tsx";
+import { OrganizationName, useOrganizationName } from "./organization-name.tsx";
 import {
   ArrowLeftRightIcon,
   CircleHelpIcon,
   ContrastIcon,
 } from "./sidebar-icons.ts";
+import { ProfileMenu } from "./sidebar-profile.tsx";
 import { applyTheme, chooseTheme, onThemeChange, readTheme } from "./theme.ts";
 
 // The person signed in, at the foot of the sidebar: their initials, their
@@ -74,22 +63,6 @@ export const initials = (name: string): string => {
 };
 
 const styles = stylex.create({
-  // The menu's items scroll in a box of their own, over the whole menu,
-  // as tall as the menu may be, so the menu itself never scrolls. In the
-  // sidebar's sheet on a phone, UI SDK's sheet scrolls what takes the
-  // focus there 16px clear of the foot of the area it scrolls in, once the
-  // sheet is still (registry gap "a sheet scrolls a menu that opens in
-  // it", 24 November): the menu, focused as it opens, was that area
-  // itself, so it opened 16px down, its first label cut. The menu's own
-  // room inside it is this box's, so the items stand where they stood.
-  items: {
-    boxSizing: "border-box",
-    maxHeight: `min(${size.popupHeight}, var(--available-height, ${size.popupHeight}))`,
-    margin: `calc(-1 * ${space.popupPadding})`,
-    padding: space.popupPadding,
-    overflowY: "auto",
-    overscrollBehavior: "contain",
-  },
   // The person's name over their organization's, cut where the row ends.
   who: {
     display: "grid",
@@ -122,106 +95,7 @@ const styles = stylex.create({
     flexShrink: 0,
     color: colors.sidebarTertiaryForeground,
   },
-  // Appearance: its words at the start, the theme's segments at the end, on one row.
-  themeRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: space["2"],
-    minHeight: size.sidebarMenuButtonHeight,
-    paddingInlineStart: size.sidebarRowInline,
-    color: colors.foreground,
-    fontSize: font.textSm,
-    lineHeight: font.textSmLine,
-  },
-  themeWords: {
-    display: "flex",
-    alignItems: "center",
-    gap: space["2"],
-    flexGrow: 1,
-    minWidth: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-  },
-  // As wide as the person's button, over it.
-  menu: {
-    width: "var(--anchor-width)",
-    minWidth: 0,
-    maxWidth: "var(--anchor-width)",
-  },
 });
-
-/**
- * Appearance, a row of the person menu: light, dark or the system's, the
- * person's own in this browser (theme.ts), as Damsko's theme toggle's
- * segments at the row's end.
- */
-const ThemeRow = ({ userId }: { userId: string }) => {
-  const { t } = useLingui();
-  // Read where it is kept, so a choice made in another tab shows here too.
-  const theme = useSyncExternalStore(onThemeChange, () => readTheme(userId));
-  return (
-    <div data-slot="sidebar-theme-row" {...stylex.props(styles.themeRow)}>
-      <span {...stylex.props(styles.themeWords)}>
-        <Icon icon={ContrastIcon} />
-        {t`Appearance`}
-      </span>
-      <ToggleGroup
-        aria-label={t`Appearance`}
-        onValueChange={(next) => {
-          const [mode] = next;
-          if (isThemeMode(mode)) {
-            chooseTheme(userId, mode);
-          }
-        }}
-        size="xs"
-        value={[theme]}
-      >
-        <ToggleGroupItem aria-label={t`Light`} tooltip={t`Light`} value="light">
-          <Icon icon={SunIcon} />
-        </ToggleGroupItem>
-        <ToggleGroupItem aria-label={t`Dark`} tooltip={t`Dark`} value="dark">
-          <Icon icon={MoonIcon} />
-        </ToggleGroupItem>
-        <ToggleGroupItem
-          aria-label={t`System`}
-          tooltip={t`System`}
-          value="system"
-        >
-          <Icon icon={MonitorIcon} />
-        </ToggleGroupItem>
-      </ToggleGroup>
-    </div>
-  );
-};
-
-/**
- * The organizations the person is in, the one they are in now chosen: one,
- * until Grasp lets a person be in more, by its initials until the
- * workspace has a logo. A submenu of the person menu.
- */
-const OrganizationMenu = ({ core }: { core: CoreConnection }) => {
-  const { t } = useLingui();
-  return (
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger icon={ArrowLeftRightIcon}>
-        {t`Switch organization`}
-      </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent>
-        <DropdownMenuRadioGroup
-          onValueChange={() => {
-            // The one there is: nothing to switch to yet.
-          }}
-          value="current"
-        >
-          <DropdownMenuRadioItem value="current">
-            <OrganizationName core={core} />
-          </DropdownMenuRadioItem>
-        </DropdownMenuRadioGroup>
-      </DropdownMenuSubContent>
-    </DropdownMenuSub>
-  );
-};
 
 /** The person at the sidebar's foot, and their menu. */
 export const PersonMenu = ({
@@ -232,6 +106,11 @@ export const PersonMenu = ({
   identity: Identity;
 }) => {
   const { t } = useLingui();
+  const organization = useOrganizationName(core);
+  // Read where it is kept, so a choice made in another tab shows here too.
+  const theme = useSyncExternalStore(onThemeChange, () =>
+    readTheme(identity.userId)
+  );
   // What theme.js painted first was whoever was here last; this is theirs.
   // Here, not in the theme menu, which mounts only once the menu opens.
   useEffect(() => {
@@ -272,30 +151,72 @@ export const PersonMenu = ({
               </span>
             </SidebarMenuButton>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" side="top" style={styles.menu}>
-            <div {...stylex.props(styles.items)}>
-              <DropdownMenuItem asChild icon={SettingsIcon}>
-                <Link to="/settings/profile">{t`Settings`}</Link>
-              </DropdownMenuItem>
-              <ThemeRow userId={identity.userId} />
-              <DropdownMenuItem asChild icon={CircleHelpIcon}>
-                <a href="/docs" rel="noopener" target="_blank">
-                  {t`Support`}
-                </a>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <OrganizationMenu core={core} />
-              <DropdownMenuItem
-                icon={LogOutIcon}
-                onSelect={() => {
-                  void signOutOrSay();
-                }}
-                variant="destructive"
-              >
-                {t`Sign out`}
-              </DropdownMenuItem>
-            </div>
-          </DropdownMenuContent>
+          <ProfileMenu
+            entries={[
+              {
+                action: {
+                  label: t`Settings`,
+                  icon: SettingsIcon,
+                  render: <Link to="/settings/profile" />,
+                },
+              },
+              {
+                theme: {
+                  label: t`Appearance`,
+                  icon: ContrastIcon,
+                  value: theme,
+                  choices: [
+                    { label: t`Light`, value: "light", icon: SunIcon },
+                    { label: t`Dark`, value: "dark", icon: MoonIcon },
+                    { label: t`System`, value: "system", icon: MonitorIcon },
+                  ],
+                  onValueChange: (mode) => {
+                    if (isThemeMode(mode)) {
+                      chooseTheme(identity.userId, mode);
+                    }
+                  },
+                },
+              },
+              {
+                action: {
+                  label: t`Support`,
+                  icon: CircleHelpIcon,
+                  // Named here as well: the menu fills in its words, the lint can't see them.
+                  render: (
+                    <a
+                      aria-label={t`Support`}
+                      href="/docs"
+                      rel="noopener"
+                      target="_blank"
+                    />
+                  ),
+                },
+              },
+              "separator",
+              // The organizations the person is in, the one they are in
+              // now chosen: one, until Grasp lets a person be in more.
+              {
+                choices: {
+                  label: t`Switch organization`,
+                  icon: ArrowLeftRightIcon,
+                  choices: [
+                    { label: organization, value: "current", avatar: true },
+                  ],
+                  value: "current",
+                },
+              },
+              {
+                action: {
+                  label: t`Sign out`,
+                  icon: LogOutIcon,
+                  danger: true,
+                  onSelect: () => {
+                    void signOutOrSay();
+                  },
+                },
+              },
+            ]}
+          />
         </DropdownMenu>
       </SidebarMenuItem>
     </SidebarMenu>
