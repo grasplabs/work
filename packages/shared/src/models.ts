@@ -127,6 +127,20 @@ export interface WorkflowMonthSpend extends SpendingWorkflow {
   runs: number;
 }
 
+/**
+ * What the models cost on one of the company's days: a day in the
+ * organization's time zone, as far as it lies in the UTC month counted.
+ * The month's first and last days are cut at the month's edges, so in a
+ * zone ahead of UTC the last one is the 1st of the month after, and in
+ * one behind it the first one is the last day of the month before.
+ */
+export interface ModelDaySpend {
+  /** The day in the organization's time zone, such as `2026-10-31`. */
+  date: string;
+  /** US dollars charged that day; 0 when nothing was spent. */
+  amount: number;
+}
+
 /** What the models cost this month: every call of the deployment, and the workflows that spent most. */
 export interface ModelMonthSpend {
   /** The UTC month it counts, such as `2026-10`. */
@@ -134,13 +148,13 @@ export interface ModelMonthSpend {
   /** US dollars charged this month for every call. */
   total: number;
   /**
-   * US dollars charged each UTC day of the month, the 1st first: every day
-   * up to today, and on to the latest day a call was recorded on if that
-   * is later (a server clock ahead of another). A day with nothing spent
-   * is 0. They add up to `total` exactly, from the 1st on. No amount is
-   * rounded here, so figures rounded to cents for display need not add up.
+   * What each of the company's days in the month cost, the earliest
+   * first: every day up to today, and on to the latest day a call was
+   * recorded on if that is later (a server clock ahead of another). They
+   * add up to `total` exactly, from the first on. No amount is rounded
+   * here, so figures rounded to cents for display need not add up.
    */
-  days: number[];
+  days: ModelDaySpend[];
   /** US dollars of `total` charged for people's chat turns. */
   chat: number;
   /** The workflows that spent most, most first: at most {@link modelSpendListed}. */
