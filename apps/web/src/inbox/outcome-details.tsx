@@ -1,19 +1,25 @@
 import type { UnknownOutcome } from "@grasp-os/shared/connect";
+import { Text } from "@grasp-os/ui/components/text";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 
 import { Described, ExactInput } from "../chat/held-writes.tsx";
 import type { Shown } from "../chat/held-writes.tsx";
 import { formatDateTime } from "../format.ts";
 
-// A call of unknown outcome in the inbox (item-detail.tsx), beside the
-// person's held actions: a change Grasp sent for them whose answer was lost, so
-// nobody can tell whether it took effect (spec 14.3). Only the person it
-// acted for sees it, with what was sent, and only they say what became of
-// it, each answer asked once more (core's unknown-outcomes.ts). The words
-// claim no more than core does: "it happened" sends nothing and undoes
-// nothing; "it didn't happen" lets it be sent once more, exactly as
-// before, and undoes nothing either. Core reads the person from their
-// session and checks the call's permission again before either.
+// A call of unknown outcome, as the Inbox shows it: a change Grasp sent
+// for the person whose answer was lost, so nobody can tell whether it took
+// effect (spec 14.3). Only the person it acted for sees it, with what was
+// sent; the Inbox's item says what became of it (item-detail.tsx).
+
+const styles = stylex.create({
+  details: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["2"],
+  },
+});
 
 /**
  * Whether core can't check the call's permission, so can't resolve it:
@@ -79,21 +85,21 @@ export const OutcomeDetails = ({
     where = t`${connection} (${tool})`;
   }
   return (
-    <div className="flex flex-col gap-2">
-      <p>
+    <div {...stylex.props(styles.details)}>
+      <Text size="sm">
         <Trans>
           Grasp sent this, but its answer was lost: nobody can tell whether it
           took effect. Check on {connection} before you say.
         </Trans>
-      </p>
-      <p className="text-muted-foreground">
+      </Text>
+      <Text size="sm" color="muted">
         <Trans>On {where}</Trans>
-      </p>
-      <p className="text-muted-foreground">
+      </Text>
+      <Text size="sm" color="muted">
         <Trans>
           Sent <time dateTime={outcome.sentAt}>{sent}</time>
         </Trans>
-      </p>
+      </Text>
       {description === undefined || input === null ? null : (
         <Described
           description={description}
@@ -103,17 +109,21 @@ export const OutcomeDetails = ({
         />
       )}
       {input === null ? (
-        <p id={removedId} role="note">
-          <RemovedInput withheld={outcome.withheld} />
-        </p>
+        <div id={removedId} role="note">
+          <Text size="sm">
+            <RemovedInput withheld={outcome.withheld} />
+          </Text>
+        </div>
       ) : (
         <>
           {description?.complete === false ? (
-            <p role="note">
-              <Trans>
-                More was sent than is shown above. Read exactly what was sent.
-              </Trans>
-            </p>
+            <div role="note">
+              <Text size="sm">
+                <Trans>
+                  More was sent than is shown above. Read exactly what was sent.
+                </Trans>
+              </Text>
+            </div>
           ) : null}
           <ExactInput
             input={input}
@@ -126,20 +136,20 @@ export const OutcomeDetails = ({
         </>
       )}
       {isUnresolvable(outcome) ? (
-        <p className="text-muted-foreground" id={unresolvableId}>
+        <Text id={unresolvableId} size="sm" color="muted">
           <Trans>
             Grasp doesn&apos;t know where this came from, so it can&apos;t be
             resolved here.
           </Trans>
-        </p>
+        </Text>
       ) : null}
       {shown.unseen ? (
-        <p className="text-muted-foreground" id={shown.unseenId}>
+        <Text id={shown.unseenId} size="sm" color="muted">
           <Trans>
             Part of what was sent is cut short above. Show it all, or exactly
             what was sent, before you say it didn&apos;t happen.
           </Trans>
-        </p>
+        </Text>
       ) : null}
     </div>
   );

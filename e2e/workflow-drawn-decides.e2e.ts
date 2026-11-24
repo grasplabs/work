@@ -5,6 +5,7 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
+import { inboxList, toItem } from "./inbox.ts";
 import { approvalDrawn, modelScripts } from "./model-scripts.ts";
 import { peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
@@ -65,17 +66,14 @@ const pick = async (page: Page, person: Person): Promise<void> => {
  * on its own time, after its start or delivery was answered.
  */
 const decisionIn = async (page: Page, name: string): Promise<void> => {
-  const listed = page
-    .getByRole("region", { name: "What waits on you" })
-    .getByRole("button", { name: new RegExp(`^${name} Decision`, "u") });
+  const listed = inboxList(page)
+    .getByRole("link")
+    .filter({ hasText: new RegExp(name, "u") })
+    .first();
   await expect(async () => {
     await page.goto("/inbox");
-    // Read in full first, however long a read takes; then it is listed
-    // or not yet.
-    await expect(page.getByRole("tab", { name: /^To do/u })).toBeVisible(
-      pageRead
-    );
-    await expect(listed).toBeVisible({ timeout: 1000 });
+    // However long a read takes: then it is listed, or not yet.
+    await expect(listed).toBeVisible(pageRead);
   }).toPass(untilItHappens);
   await listed.click();
 };
@@ -196,10 +194,11 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
     /1 workflow needs you$/u,
     pageRead
   );
+  // Opened beside the list: what it asks, and the way to its own page.
   const item = asDecider.getByRole("article", {
     name: "Approve invoice INV-42",
   });
-  await item.getByRole("button", { name: "Review and answer" }).first().click();
+  await item.getByRole("link", { name: "Review and answer" }).click();
   await expect(
     asDecider.getByRole("heading", { name: "Approve invoice INV-42" })
   ).toBeVisible(pageRead);
@@ -211,16 +210,59 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   await expect(
     page.getByText("This decision is for someone else to answer.")
   ).toBeVisible(pageRead);
-  await asDecider.getByLabel("Comment (optional)").fill("Matches the order");
-  await asDecider.getByRole("button", { name: "Approve" }).click();
-  await asDecider
-    .getByRole("alertdialog", { name: "Confirm your approval" })
-    .getByRole("button", { name: "Confirm" })
-    .click(pageRead);
-  await expect(asDecider.getByRole("status")).toHaveText(
-    /^Approved by Person on /u,
-    pageRead
+  const comment = asDecider.getByLabel("Comment (optional)");
+  const confirmation = asDecider.getByRole("dialog", {
+    name: "Confirm your approval",
+  });
+  // On a phone, a very long comment scrolls inside Grasp's confirmation,
+  // under its title: Confirm and Cancel stay in the window, nothing runs
+  // over anything else, and the answer is confirmed from there.
+  const wide = asDecider.viewportSize();
+  await asDecider.setViewportSize({ width: 390, height: 700 });
+  await comment.fill(
+    Array.from(
+      { length: 60 },
+      (_, line) => `Line ${line + 1} of a long comment.`
+    ).join("\n")
   );
+  await asDecider.getByRole("button", { name: "Approve" }).click();
+  const confirm = confirmation.getByRole("button", { name: "Confirm" });
+  // Focus starts on Cancel, the safe answer, not on the long body; Confirm
+  // waits its first second.
+  await expect(confirm).toBeDisabled();
+  await expect(
+    confirmation.getByRole("button", { name: "Cancel" })
+  ).toBeFocused(pageRead);
+  await expect(confirm).toBeEnabled(pageRead);
+  await expect(confirm).toBeInViewport({ ratio: 1 });
+  await expect(
+    confirmation.getByRole("button", { name: "Cancel" })
+  ).toBeInViewport({ ratio: 1 });
+  // The body alone scrolls, as a region named by the title.
+  const dialogBody = confirmation.getByRole("region", {
+    name: "Confirm your approval",
+  });
+  await expect(dialogBody).toContainText("Line 60 of a long comment.");
+  const [title, scrolled, answers] = await Promise.all([
+    confirmation.getByText("Confirm your approval").boundingBox(),
+    dialogBody.boundingBox(),
+    confirm.boundingBox(),
+  ]);
+  expect({
+    titleAboveBody:
+      (title?.y ?? 0) + (title?.height ?? 0) <= (scrolled?.y ?? -1),
+    bodyAboveAnswers:
+      (scrolled?.y ?? 0) + (scrolled?.height ?? 0) <= (answers?.y ?? -1),
+  }).toStrictEqual({ titleAboveBody: true, bodyAboveAnswers: true });
+  await confirm.click();
+  if (wide !== null) {
+    await asDecider.setViewportSize(wide);
+  }
+  await expect(
+    asDecider
+      .getByRole("status")
+      .filter({ hasText: /^Approved by Person on /u })
+  ).toBeVisible(pageRead);
   // Answered, it needs them no more.
   await asDecider.reload();
   await expect(workflows).toHaveAccessibleName("Workflows", pageRead);
@@ -236,7 +278,8 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   await run.getByRole("link").click();
   const sheet = page.getByRole("dialog");
   await expect(sheet).toContainText('"status": "approved"', pageRead);
-  await expect(sheet).toContainText('"comment": "Matches the order"');
+  await expect(sheet).toContainText('"comment": "Line 1 of a long comment.');
+  await expect(sheet).toContainText("Line 60 of a long comment.");
   await page.keyboard.press("Escape");
 
   // A webhook: an admin adds a source, its secret shown once.
@@ -281,20 +324,13 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   // request names the trigger by its kind, and the workflow by its name.
   const request = `start on Workflow ${name}`;
   await asAdmin.goto("/inbox");
-  await asAdmin
-    .getByRole("region", { name: "What waits on you" })
-    .getByText(new RegExp(request, "u"))
-    .first()
-    .click(pageRead);
-  await asAdmin
-    .getByRole("region", { name: "What happened" })
-    .getByRole("button", {
-      name: new RegExp(`^Approve Webhook trigger .+: ${request}$`, "u"),
-    })
-    .click();
-  await expect(asAdmin.getByText(/^Approved: Webhook trigger /u)).toBeVisible(
-    pageRead
+  const grant = await toItem(
+    asAdmin,
+    new RegExp(sourceName, "u"),
+    new RegExp(`^Grant Webhook trigger .+: ${request}\\?$`, "u")
   );
+  await grant.getByRole("button", { name: "Grant it" }).click();
+  await expect(grant).toHaveCount(0, pageRead);
   await page.goto(`/workflows/${workflow}?view=settings&section=triggers`);
   await expect(
     page.getByText(`On invoice.received events from ${sourceName}`)

@@ -387,7 +387,6 @@ test("the admin settles what needs them, and once Grasp gives its go, goes in th
     timeout: 30_000,
   });
   await expect(page).toHaveURL(/\/inbox$/u, { timeout: 15_000 });
-  await expect(page.getByRole("tab", { name: /^To do/u })).toBeVisible();
   await expect(page.getByText("Opening Grasp")).toHaveCount(0, {
     timeout: 15_000,
   });

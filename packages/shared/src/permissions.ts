@@ -609,6 +609,13 @@ export interface PermissionsApi {
    */
   revoke: (id: string) => Promise<Permission>;
   /**
+   * Declines a requested permission, which can then never be granted.
+   * Admins only, never Grasp staff; audited as a revoke. Refused with
+   * `permission.not_requested`, changing nothing, once it is no longer
+   * requested: a decline read before someone granted it leaves the grant.
+   */
+  decline: (id: string) => Promise<Permission>;
+  /**
    * Every permission, or one App's or agent's, oldest first; only those in
    * `status` when given. Admins and builders.
    */
@@ -701,7 +708,8 @@ export const permissionErrors = defineErrorFamily({
     "The person this acts for no longer has access to this deployment.",
   "permission.invalid": "That isn't a valid permission request.",
   "permission.not_found": "There's no such permission.",
-  "permission.not_requested": "Only a requested permission can be granted.",
+  "permission.not_requested":
+    "This request was answered already, so it can no longer be granted or declined.",
   "permission.conflict":
     "This App or agent already has a permission with that binding name.",
   "permission.admin_decides":

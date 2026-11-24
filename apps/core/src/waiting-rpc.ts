@@ -528,7 +528,7 @@ export class WaitingRpc extends CoreRpcTarget implements WaitingApi {
       case "permissionRequest": {
         await (verdict.verdict === "grant"
           ? sources.permissions.grant(verdict.id, verdict.reviewed)
-          : sources.permissions.revoke(verdict.id));
+          : sources.permissions.decline(verdict.id));
         return { kind: verdict.kind };
       }
       default: {

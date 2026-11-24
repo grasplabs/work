@@ -185,6 +185,10 @@ msgstr "{chosen} it is. This takes about {minutes} minutes. Ready to start?"
 msgid "{className}, for {name}"
 msgstr "{className}, for {name}"
 
+#: src/inbox/report-view.tsx
+msgid "{company} · Week {number} of {weeks} · {from} to {to}"
+msgstr "{company} · Week {number} of {weeks} · {from} to {to}"
+
 #: src/chat/held-writes.tsx
 #: src/inbox/outcome-details.tsx
 msgid "{connection} ({tool})"
@@ -395,6 +399,10 @@ msgstr "{count, plural, one {# tool allowed} other {# tools allowed}}"
 #: src/settings/event-source-activity.tsx
 msgid "{count, plural, one {# trigger matches this type. A test event starts no workflow.} other {# triggers match this type. A test event starts no workflow.}}"
 msgstr "{count, plural, one {# trigger matches this type. A test event starts no workflow.} other {# triggers match this type. A test event starts no workflow.}}"
+
+#: src/inbox/inbox-page.tsx
+msgid "{count, plural, one {# waiting} other {# waiting}}"
+msgstr "{count, plural, one {# waiting} other {# waiting}}"
 
 #: src/brain/brain.ts
 msgid "{count, plural, one {# wish} other {# wishes}}"
@@ -639,14 +647,6 @@ msgstr "{hours, plural, one {# hour after the step before} other {# hours after 
 msgid "{hours} of the {all} hours a week"
 msgstr "{hours} of the {all} hours a week"
 
-#: src/report/report.ts
-msgid "{idle, plural, one {# more workflow didn't run in this time.} other {# more workflows didn't run in this time.}}"
-msgstr "{idle, plural, one {# more workflow didn't run in this time.} other {# more workflows didn't run in this time.}}"
-
-#: src/report/report-bar.tsx
-msgid "{inDays, plural, one {Your next report is ready tomorrow} other {Your next report is ready in # days}}"
-msgstr "{inDays, plural, one {Your next report is ready tomorrow} other {Your next report is ready in # days}}"
-
 #: src/apps/app-data.tsx
 msgid "{inserted, plural, one {# record added.} other {# records added.}}"
 msgstr "{inserted, plural, one {# record added.} other {# records added.}}"
@@ -704,6 +704,10 @@ msgstr "{label}, read-only"
 #: src/brain/brain-markdown.ts
 msgid "{label}:"
 msgstr "{label}:"
+
+#: src/frame/ui-words.tsx
+msgid "{label}. {summary}"
+msgstr "{label}. {summary}"
 
 #: src/onboarding/setup-steps.tsx
 msgid "{leads, plural, one {Thank you. I’ll start with this lead.} other {Thank you. I’ll start with these # leads.}}"
@@ -811,6 +815,10 @@ msgstr "{more, plural, one {and # more} other {and # more}}"
 msgid "{moved, plural, one {# of them changed after it was set, at a later talk with the board.} other {# of them changed after they were set, at later talks with the board.}}"
 msgstr "{moved, plural, one {# of them changed after it was set, at a later talk with the board.} other {# of them changed after they were set, at later talks with the board.}}"
 
+#: src/frame/ui-words.tsx
+msgid "{name} · {share}"
+msgstr "{name} · {share}"
+
 #: src/brain/brain-article/team-work.tsx
 msgctxt "the same pain: these teams told it too"
 msgid "{name} · also {teams}"
@@ -836,6 +844,10 @@ msgstr "{name} (optional)"
 #: src/projects/project-people.tsx
 msgid "{name} (team)"
 msgstr "{name} (team)"
+
+#: src/frame/ui-words.tsx
+msgid "{name} {value}"
+msgstr "{name} {value}"
 
 #: src/agents/agent-apps-card.tsx
 msgid "{name} also needs “{kind}”, which changes or sends things."
@@ -982,17 +994,17 @@ msgstr "{name}, where does the time go in your week?"
 msgid "{name}, your version"
 msgstr "{name}, your version"
 
-#: src/report/report.ts
-msgid "{name}: {count}"
-msgstr "{name}: {count}"
-
 #: src/brain/thinking/use-thinking.ts
 msgid "{name}: {hours, plural, one {# hour a week} other {# hours a week}}"
 msgstr "{name}: {hours, plural, one {# hour a week} other {# hours a week}}"
 
-#: src/report/report.ts
-msgid "{name}: {started} started, {completed} completed, {failed} failed"
-msgstr "{name}: {started} started, {completed} completed, {failed} failed"
+#: src/frame/ui-words.tsx
+msgid "{name}: {value}"
+msgstr "{name}: {value}"
+
+#: src/frame/ui-words.tsx
+msgid "{name}: {value}, {share}"
+msgstr "{name}: {value}, {share}"
 
 #: src/drafts/status-badge.tsx
 msgid "{names} use it"
@@ -1091,6 +1103,10 @@ msgstr "{person}, {date}"
 msgid "{place, selectordinal, one {sorted #st} two {sorted #nd} few {sorted #rd} other {sorted #th}}"
 msgstr "{place, selectordinal, one {sorted #st} two {sorted #nd} few {sorted #rd} other {sorted #th}}"
 
+#: src/inbox/inbox-page.tsx
+msgid "{place} of {count}"
+msgstr "{place} of {count}"
+
 #: src/apps/indexes-view.tsx
 msgid "{query} (on {routes})"
 msgstr "{query} (on {routes})"
@@ -1184,6 +1200,10 @@ msgstr "{scheduled} on a schedule"
 msgid "{seconds, plural, one {Thought for # second} other {Thought for # seconds}}"
 msgstr "{seconds, plural, one {Thought for # second} other {Thought for # seconds}}"
 
+#: src/frame/ui-words.tsx
+msgid "{share} of {source}"
+msgstr "{share} of {source}"
+
 #: src/settings/stephen-card.tsx
 msgid "{share} of questions answered · 30 days"
 msgstr "{share} of questions answered · 30 days"
@@ -1211,6 +1231,14 @@ msgstr "{signIn} is connected. I can see {people} people in {teams} teams."
 #: src/agents/agent-documents.tsx
 msgid "{size} · Added {when}"
 msgstr "{size} · Added {when}"
+
+#: src/frame/ui-words.tsx
+msgid "{source} → {target}"
+msgstr "{source} → {target}"
+
+#: src/frame/ui-words.tsx
+msgid "{source} to {target}: {value}, {share}"
+msgstr "{source} to {target}: {value}, {share}"
 
 #: src/brain/brain.ts
 msgid "{sources, plural, one {Time-consuming work that could be automated, raised in # source by {teams}.} other {Time-consuming work that could be automated, raised in # sources by {teams}.}}"
@@ -1261,11 +1289,7 @@ msgstr "{status, select, drawn {{workflow} (drawn)} designed {{workflow} (design
 msgid "{status, select, drawn {Drawn as a workflow} designed {Designed as a workflow} testing {Testing as a workflow} other {Running as a workflow}}"
 msgstr "{status, select, drawn {Drawn as a workflow} designed {Designed as a workflow} testing {Testing as a workflow} other {Running as a workflow}}"
 
-#: src/inbox/items.ts
-msgid "{subject} gets this permission once it is granted."
-msgstr "{subject} gets this permission once it is granted."
-
-#: src/inbox/items.ts
+#: src/activity/pending.tsx
 msgid "{subject}: {actions} on {object}"
 msgstr "{subject}: {actions} on {object}"
 
@@ -1371,6 +1395,18 @@ msgstr "{title} on {connection}"
 msgid "{total, plural, one {{count} of its # tool allowed} other {{count} of its # tools allowed}}"
 msgstr "{total, plural, one {{count} of its # tool allowed} other {{count} of its # tools allowed}}"
 
+#: src/inbox/report-view.tsx
+msgid "{total, plural, one {{percent} of this week's # run needed nobody.} other {{percent} of this week's # runs needed nobody.}}"
+msgstr "{total, plural, one {{percent} of this week's # run needed nobody.} other {{percent} of this week's # runs needed nobody.}}"
+
+#: src/inbox/report-view.tsx
+msgid "{total, plural, one {# run from {from} to {to}.} other {# runs from {from} to {to}.}}"
+msgstr "{total, plural, one {# run from {from} to {to}.} other {# runs from {from} to {to}.}}"
+
+#: src/inbox/report-view.tsx
+msgid "{total, plural, one {Where this week's # run went.} other {Where this week's # runs went.}}"
+msgstr "{total, plural, one {Where this week's # run went.} other {Where this week's # runs went.}}"
+
 #: src/frame/ui-words.tsx
 msgid "{trigger}, {chosen}"
 msgstr "{trigger}, {chosen}"
@@ -1434,10 +1470,6 @@ msgstr "{what}, as {binding} in its code: {actions}"
 #: src/agents/agent-wakes.tsx
 msgid "{when}, for {person}, is on"
 msgstr "{when}, for {person}, is on"
-
-#: src/inbox/item-detail.tsx
-msgid "{who} can't be granted later: it has to ask again."
-msgstr "{who} can't be granted later: it has to ask again."
 
 #: src/connections/connection-list.tsx
 msgid "{who} consented to this before connecting it:"
@@ -1709,11 +1741,11 @@ msgstr "A record of another table"
 msgid "A run of {name} waits for your answer. Nothing more happens in it until someone answers, or until it stops waiting."
 msgstr "A run of {name} waits for your answer. Nothing more happens in it until someone answers, or until it stops waiting."
 
-#: src/decision-card.tsx
+#: src/inbox/decision-card.tsx
 msgid "A run of a workflow asked for this answer."
 msgstr "A run of a workflow asked for this answer."
 
-#: src/decision-card.tsx
+#: src/inbox/decision-card.tsx
 msgid "A run of a workflow waits for this answer."
 msgstr "A run of a workflow waits for this answer."
 
@@ -1813,8 +1845,8 @@ msgctxt "note property: what a note is about"
 msgid "About"
 msgstr "About"
 
-#: src/decision-card.tsx
-#: src/decision-confirmation.tsx
+#: src/inbox/decision-card.tsx
+#: src/inbox/decision-confirmation.tsx
 msgctxt "what a decision is about, as its workflow run passed it"
 msgid "About"
 msgstr "About"
@@ -1918,11 +1950,6 @@ msgstr "Active, for the whole company"
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Active, only for you"
 msgstr "Active, only for you"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox tab: what Grasp and people did"
-msgid "Activity"
-msgstr "Activity"
 
 #: src/brain/brain-log.tsx
 #: src/brain/brain-nav.tsx
@@ -2295,13 +2322,13 @@ msgstr "AI tool"
 msgid "All"
 msgstr "All"
 
-#: src/inbox/inbox-page.tsx
-msgctxt "activity filter: everyone"
+#: src/routes/_shell.integrations.index.tsx
+msgctxt "filter: every integration"
 msgid "All"
 msgstr "All"
 
-#: src/routes/_shell.integrations.index.tsx
-msgctxt "filter: every integration"
+#: src/inbox/groups.ts
+msgctxt "inbox filter, short"
 msgid "All"
 msgstr "All"
 
@@ -2595,6 +2622,7 @@ msgstr "Another version of this App was published since this list was read. The 
 
 #: src/brain/brain.ts
 #: src/chat/brain-questions.tsx
+#: src/inbox/item-detail.tsx
 msgid "Answer"
 msgstr "Answer"
 
@@ -2609,10 +2637,6 @@ msgstr "Answer by"
 #: src/make/examples.ts
 msgid "Answer client questions"
 msgstr "Answer client questions"
-
-#: src/inbox/item-detail.tsx
-msgid "Answer in the brain"
-msgstr "Answer in the brain"
 
 #: src/frame/ui-words.tsx
 msgid "Answer ready"
@@ -2644,6 +2668,7 @@ msgid "Answered on {date}."
 msgstr "Answered on {date}."
 
 #: src/brain/brain.ts
+#: src/inbox/item-detail.tsx
 msgid "Answered: {question}"
 msgstr "Answered: {question}"
 
@@ -2732,13 +2757,22 @@ msgstr "Applications"
 msgid "Apply it if the sender’s domain is {domain}."
 msgstr "Apply it if the sender’s domain is {domain}."
 
+#: src/inbox/groups.ts
+msgctxt "inbox filter"
+msgid "Approvals"
+msgstr "Approvals"
+
 #: src/apps/app-webhooks.tsx
 #: src/brain/skills-page.tsx
 #: src/chat/package-requests.tsx
-#: src/decision-card.tsx
-#: src/decision-confirmation.tsx
-#: src/inbox/item-detail.tsx
+#: src/inbox/approval-request.tsx
 #: src/workflows/binding-approvals.tsx
+msgid "Approve"
+msgstr "Approve"
+
+#: src/inbox/decision-card.tsx
+#: src/inbox/decision-confirmation.tsx
+msgctxt "a workflow's decision"
 msgid "Approve"
 msgstr "Approve"
 
@@ -2754,10 +2788,6 @@ msgstr "Approve {alias}"
 #: src/inbox/items.ts
 msgid "Approve {name}?"
 msgstr "Approve {name}?"
-
-#: src/inbox/item-detail.tsx
-msgid "Approve {who}"
-msgstr "Approve {who}"
 
 #: src/make/examples.ts
 msgid "Approve big invoices"
@@ -2780,6 +2810,7 @@ msgid "Approve what {name} reaches"
 msgstr "Approve what {name} reaches"
 
 #: src/apps/app-webhooks.tsx
+#: src/frame/ui-words.tsx
 msgid "Approved"
 msgstr "Approved"
 
@@ -2791,7 +2822,7 @@ msgstr "Approved a page's code"
 msgid "Approved by {approver} on {at}"
 msgstr "Approved by {approver} on {at}"
 
-#: src/decision-card.tsx
+#: src/inbox/decision-card.tsx
 msgid "Approved by {name} on {date}."
 msgstr "Approved by {name} on {date}."
 
@@ -2823,13 +2854,10 @@ msgstr "Approved: {alias} of {name}."
 msgid "Approved: {alias}."
 msgstr "Approved: {alias}."
 
-#: src/report/report.ts
-msgid "Approved: {approved}"
-msgstr "Approved: {approved}"
-
+#: src/inbox/approval-request.tsx
 #: src/inbox/item-detail.tsx
-msgid "Approved: {who}."
-msgstr "Approved: {who}."
+msgid "Approved: {title}"
+msgstr "Approved: {title}"
 
 #: src/brain/brain.ts
 msgid "Approver for new tools named"
@@ -2875,11 +2903,6 @@ msgstr "Apps"
 #: src/connections/connection-list.tsx
 msgid "Apps and agents with a permission"
 msgstr "Apps and agents with a permission"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox filter"
-msgid "Apps and connections"
-msgstr "Apps and connections"
 
 #: src/projects/project-view.tsx
 msgid "Apps and workflows"
@@ -2983,10 +3006,6 @@ msgstr "As for the whole company"
 msgid "As its action, set the spam confidence level (SCL) to “Bypass spam filtering”, then save it."
 msgstr "As its action, set the spam confidence level (SCL) to “Bypass spam filtering”, then save it."
 
-#: src/report/report.ts
-msgid "As of {date}."
-msgstr "As of {date}."
-
 #: src/apps/access-view.tsx
 msgid "As the App's code sets it"
 msgstr "As the App's code sets it"
@@ -3084,7 +3103,7 @@ msgstr "Ask your admin to connect an AI provider."
 msgid "Asked"
 msgstr "Asked"
 
-#: src/decision-confirmation.tsx
+#: src/inbox/decision-confirmation.tsx
 msgctxt "what a decision asks"
 msgid "Asked"
 msgstr "Asked"
@@ -3126,6 +3145,20 @@ msgstr "asked for by the agent, in their chat"
 #: src/agents/agent-page.tsx
 msgid "Asked it, or it works for them on a schedule"
 msgstr "Asked it, or it works for them on a schedule"
+
+#: src/inbox/groups.ts
+msgctxt "inbox filter"
+msgid "Asked of you"
+msgstr "Asked of you"
+
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Asked of you"
+msgstr "Asked of you"
+
+#: src/inbox/item-detail.tsx
+msgid "Asked of you as the {owner}"
+msgstr "Asked of you as the {owner}"
 
 #: src/activity/audit-words.ts
 msgid "Asked the agent to fix a run"
@@ -3250,10 +3283,6 @@ msgstr "Back to {destination}"
 msgid "Back to reference {number}"
 msgstr "Back to reference {number}"
 
-#: src/inbox/item-detail.tsx
-msgid "Back to the list"
-msgstr "Back to the list"
-
 #: src/chat/chat-window.tsx
 msgid "Back to your chats"
 msgstr "Back to your chats"
@@ -3326,10 +3355,6 @@ msgstr "Billing runs through Stripe. You see it here and change it there."
 msgid "Bind {alias}"
 msgstr "Bind {alias}"
 
-#: src/inbox/items.ts
-msgid "Binding"
-msgstr "Binding"
-
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind: what a workflow reaches, for an admin to approve"
 msgid "Bindings"
@@ -3346,6 +3371,12 @@ msgstr "Blocker"
 #: src/brain/brain.ts
 msgid "Blockers"
 msgstr "Blockers"
+
+#: src/inbox/inbox-page.tsx
+#: src/inbox/item-detail.tsx
+msgctxt "inbox: something waits on this item"
+msgid "Blocks work"
+msgstr "Blocks work"
 
 #: src/brain/brain-atlas.ts
 msgid "Board"
@@ -3374,8 +3405,8 @@ msgstr "Bound to"
 msgid "Brain"
 msgstr "Brain"
 
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox filter"
+#: src/inbox/groups.ts
+msgctxt "inbox filter, short"
 msgid "Brain"
 msgstr "Brain"
 
@@ -3542,11 +3573,10 @@ msgstr "Can't offer Run: {unread}"
 #: src/connections/connect-dialog.tsx
 #: src/connections/http-connections.tsx
 #: src/connections/request-app-dialog.tsx
-#: src/decision-confirmation.tsx
 #: src/drafts/draft-history.tsx
 #: src/drafts/sharing.tsx
 #: src/frame/ui-words.tsx
-#: src/inbox/item-detail.tsx
+#: src/inbox/decision-confirmation.tsx
 #: src/interview/destination.tsx
 #: src/interview/transcript.tsx
 #: src/link-confirmation.tsx
@@ -4080,7 +4110,6 @@ msgstr "Clear the filter"
 #: src/drafts/share-with-team.tsx
 #: src/frame/ui-words.tsx
 #: src/interview/destination.tsx
-#: src/report/report-dialog.tsx
 #: src/settings/erasures.tsx
 #: src/settings/stephen-settings.tsx
 #: src/shown-once.tsx
@@ -4154,12 +4183,12 @@ msgctxt "a table's columns"
 msgid "Columns"
 msgstr "Columns"
 
-#: src/decision-confirmation.tsx
+#: src/inbox/decision-confirmation.tsx
 msgctxt "a comment on an answer to a decision"
 msgid "Comment"
 msgstr "Comment"
 
-#: src/decision-card.tsx
+#: src/inbox/decision-card.tsx
 msgid "Comment (optional)"
 msgstr "Comment (optional)"
 
@@ -4191,12 +4220,8 @@ msgctxt "what the Brain remembers about something"
 msgid "Complaint"
 msgstr "Complaint"
 
+#: src/inbox/report-view.tsx
 #: src/workflows/runs.tsx
-msgid "Completed"
-msgstr "Completed"
-
-#: src/report/report.ts
-msgctxt "a figure of the report"
 msgid "Completed"
 msgstr "Completed"
 
@@ -4214,10 +4239,6 @@ msgstr "Completed"
 msgid "completed without a person"
 msgstr "completed without a person"
 
-#: src/report/report.ts
-msgid "Completed: {completed}"
-msgstr "Completed: {completed}"
-
 #: src/routes/_shell.integrations.index.tsx
 msgid "Composio's toolkits can't be listed right now. Try again shortly."
 msgstr "Composio's toolkits can't be listed right now. Try again shortly."
@@ -4228,10 +4249,11 @@ msgstr "Configuration"
 
 #: src/chat/held-writes.tsx
 #: src/frame/ui-words.tsx
+#: src/inbox/item-detail.tsx
 msgid "Confirm"
 msgstr "Confirm"
 
-#: src/decision-confirmation.tsx
+#: src/inbox/decision-confirmation.tsx
 msgctxt "confirm an answer to a decision"
 msgid "Confirm"
 msgstr "Confirm"
@@ -4240,11 +4262,11 @@ msgstr "Confirm"
 msgid "Confirm {what}"
 msgstr "Confirm {what}"
 
-#: src/decision-confirmation.tsx
+#: src/inbox/decision-confirmation.tsx
 msgid "Confirm your approval"
 msgstr "Confirm your approval"
 
-#: src/decision-confirmation.tsx
+#: src/inbox/decision-confirmation.tsx
 msgid "Confirm your rejection"
 msgstr "Confirm your rejection"
 
@@ -4485,11 +4507,6 @@ msgstr "Contact"
 msgctxt "a table filter"
 msgid "contains"
 msgstr "contains"
-
-#: src/inbox/item-detail.tsx
-msgctxt "inbox item section"
-msgid "Context"
-msgstr "Context"
 
 #: src/interview/before.tsx
 #: src/onboarding/about-story.tsx
@@ -4867,21 +4884,14 @@ msgstr "Decision"
 msgid "Decision not found"
 msgstr "Decision not found"
 
-#: src/report/report.ts
-msgid "Decisions"
-msgstr "Decisions"
-
 #: src/agents/agent-share.tsx
 #: src/brain/skills-page.tsx
-#: src/inbox/item-detail.tsx
+#: src/inbox/approval-request.tsx
 msgid "Decline"
 msgstr "Decline"
 
-#: src/inbox/item-detail.tsx
-msgid "Decline starting {name}"
-msgstr "Decline starting {name}"
-
 #: src/brain/skills-page.tsx
+#: src/frame/ui-words.tsx
 msgid "Declined"
 msgstr "Declined"
 
@@ -4889,9 +4899,10 @@ msgstr "Declined"
 msgid "Declined a write to an App"
 msgstr "Declined a write to an App"
 
+#: src/inbox/approval-request.tsx
 #: src/inbox/item-detail.tsx
-msgid "Declined: {name}."
-msgstr "Declined: {name}."
+msgid "Declined: {title}"
+msgstr "Declined: {title}"
 
 #: src/workflows/resource-params.tsx
 msgid "Default"
@@ -5114,12 +5125,13 @@ msgid "Desktop"
 msgstr "Desktop"
 
 #: src/activity/audit-log.tsx
+#: src/inbox/approval-request.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 #: src/workflows/run-detail.tsx
 msgid "Details"
 msgstr "Details"
 
-#: src/decision-confirmation.tsx
+#: src/inbox/decision-confirmation.tsx
 msgctxt "what else an answer to a decision says"
 msgid "Details"
 msgstr "Details"
@@ -5168,11 +5180,6 @@ msgstr "Dictation stopped: the microphone was lost. What was heard is kept."
 #: src/chat/dictation.ts
 msgid "Dictation stopped. What was heard is kept."
 msgstr "Dictation stopped. What was heard is kept."
-
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind: a change whose answer was lost"
-msgid "Did it happen?"
-msgstr "Did it happen?"
 
 #: src/frame/sign-in/sign-in.tsx
 msgid "Did not open"
@@ -5350,11 +5357,6 @@ msgctxt "a task ticked in a list"
 msgid "Done"
 msgstr "Done"
 
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox tab: what someone dealt with"
-msgid "Done"
-msgstr "Done"
-
 #: src/frame/ui-words.tsx
 msgctxt "stop dictating"
 msgid "Done"
@@ -5384,6 +5386,7 @@ msgid "Done right"
 msgstr "Done right"
 
 #: src/chat/chat-more.tsx
+#: src/inbox/report-row.tsx
 msgid "Download"
 msgstr "Download"
 
@@ -5400,10 +5403,6 @@ msgstr "Download {name}"
 #: src/workflows/version-source.tsx
 msgid "Download {path}"
 msgstr "Download {path}"
-
-#: src/report/report-dialog.tsx
-msgid "Download Markdown"
-msgstr "Download Markdown"
 
 #: src/chat/answer-table-actions.tsx
 msgid "Download table"
@@ -5860,10 +5859,6 @@ msgstr "Everyone"
 msgid "Everyone can read this upload."
 msgstr "Everyone can read this upload."
 
-#: src/report/report.ts
-msgid "Everyone else, in the teams whose counts may be shown: {talked} of {asked}"
-msgstr "Everyone else, in the teams whose counts may be shown: {talked} of {asked}"
-
 #: src/settings/staff-access.tsx
 msgid "Everyone from Grasp is signed out at once, and nobody from Grasp can sign in again until a new window is opened."
 msgstr "Everyone from Grasp is signed out at once, and nobody from Grasp can sign in again until a new window is opened."
@@ -5893,6 +5888,10 @@ msgstr "Everyone in it · {shownRole}"
 #: src/connections/brain-audience.tsx
 msgid "Everyone in the company"
 msgstr "Everyone in the company"
+
+#: src/inbox/items.ts
+msgid "Everyone in the company reads your answer, with your name."
+msgstr "Everyone in the company reads your answer, with your name."
 
 #: src/connections/brain-audience.tsx
 msgid "Everyone in the company will be able to find what agents read through {label} and what is copied from it, including what was kept before, whatever their permissions in {label}. Their assistants will also read {label} directly, in their own chats. Choose a team if not everyone should have this."
@@ -5937,11 +5936,6 @@ msgstr "Everyone with Grasp"
 #: src/workflows/start-run.tsx
 msgid "Everyone with the {name} role"
 msgstr "Everyone with the {name} role"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox filter"
-msgid "Everything"
-msgstr "Everything"
 
 #: src/workflows/business-process.tsx
 msgid "Everything around employees, from hiring to leaving."
@@ -6067,10 +6061,6 @@ msgstr "Export definition"
 msgid "Export JSON"
 msgstr "Export JSON"
 
-#: src/report/report-bar.tsx
-msgid "Export report"
-msgstr "Export report"
-
 #: src/activity/audit-log.tsx
 msgid "Export the audit trail"
 msgstr "Export the audit trail"
@@ -6109,14 +6099,10 @@ msgctxt "a run that ended in failure"
 msgid "failed"
 msgstr "failed"
 
+#: src/inbox/report-view.tsx
 #: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/workflow-diagram.tsx
-msgid "Failed"
-msgstr "Failed"
-
-#: src/report/report.ts
-msgctxt "a figure of the report"
 msgid "Failed"
 msgstr "Failed"
 
@@ -6135,14 +6121,15 @@ msgctxt "a step's state"
 msgid "Failed"
 msgstr "Failed"
 
+#: src/frame/ui-words.tsx
+msgctxt "an answer that did not go through"
+msgid "Failed"
+msgstr "Failed"
+
 #: src/workflows/run-status.ts
 msgctxt "status of a workflow run"
 msgid "Failed"
 msgstr "Failed"
-
-#: src/report/report.ts
-msgid "Failed: {failed}"
-msgstr "Failed: {failed}"
 
 #: src/workflows/workflow-rows.tsx
 msgctxt "how a workflow stands"
@@ -6268,11 +6255,6 @@ msgstr "Fill this in."
 msgid "Filter"
 msgstr "Filter"
 
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox: filter button"
-msgid "Filter"
-msgstr "Filter"
-
 #: src/frame/ui-words.tsx
 msgid "Filter {label}"
 msgstr "Filter {label}"
@@ -6392,6 +6374,10 @@ msgstr "Follow the erasure of {who}"
 msgid "Footnote {number}"
 msgstr "Footnote {number}"
 
+#: src/inbox/item-detail.tsx
+msgid "For"
+msgstr "For"
+
 #. placeholder {0}: gap.owner
 #: src/chat/brain-questions.tsx
 msgid "For {0}"
@@ -6401,10 +6387,6 @@ msgstr "For {0}"
 #: src/chat/brain-questions.tsx
 msgid "For {0}, who was asked"
 msgstr "For {0}, who was asked"
-
-#: src/inbox/item-detail.tsx
-msgid "For {person}"
-msgstr "For {person}"
 
 #: src/agents/agent-wakes.tsx
 msgid "For {person}: {opening}"
@@ -6417,10 +6399,6 @@ msgstr "For {person}: {opening} · {last}"
 #: src/settings/erasures.tsx
 msgid "For an address your company gave to someone else. Anyone signing in with it then gets in, {name} too if your sign-in provider still has it for them."
 msgstr "For an address your company gave to someone else. Anyone signing in with it then gets in, {name} too if your sign-in provider still has it for them."
-
-#: src/inbox/item-detail.tsx
-msgid "For an admin"
-msgstr "For an admin"
 
 #: src/agents/agent-page.tsx
 msgid "For each app, under Access"
@@ -6462,10 +6440,6 @@ msgstr "For good. To stop it answering for a while, turn it off instead."
 #: src/routes/_shell.settings.workspace.tsx
 msgid "For schedules and the times Grasp shows."
 msgstr "For schedules and the times Grasp shows."
-
-#: src/inbox/item-detail.tsx
-msgid "For the {role}"
-msgstr "For the {role}"
 
 #: src/agents/agent-apps-card.tsx
 msgid "For the agent {agentName}."
@@ -6538,8 +6512,8 @@ msgstr "Frequency"
 msgid "From"
 msgstr "From"
 
-#: src/decision-card.tsx
-#: src/decision-confirmation.tsx
+#: src/inbox/decision-card.tsx
+#: src/inbox/decision-confirmation.tsx
 msgctxt "where a decision comes from"
 msgid "From"
 msgstr "From"
@@ -6664,11 +6638,6 @@ msgctxt "an app's settings section"
 msgid "General"
 msgstr "General"
 
-#: src/report/report.ts
-msgctxt "programme stage"
-msgid "Getting ready"
-msgstr "Getting ready"
-
 #: src/agents/agent-apps-card.tsx
 msgid "Give {app} back"
 msgstr "Give {app} back"
@@ -6771,6 +6740,10 @@ msgstr "Grant {name}"
 #: src/inbox/items.ts
 msgid "Grant {who}?"
 msgstr "Grant {who}?"
+
+#: src/inbox/item-detail.tsx
+msgid "Grant it"
+msgstr "Grant it"
 
 #: src/activity/audit-words.ts
 msgid "Granted a permission"
@@ -6933,7 +6906,7 @@ msgstr "Grasp reads the interview's questions aloud with {whereItRuns}, using Gr
 msgid "Grasp reads your directory once a day, and keeps members, their teams and their suspensions as it says."
 msgstr "Grasp reads your directory once a day, and keeps members, their teams and their suspensions as it says."
 
-#: src/decision-confirmation.tsx
+#: src/inbox/decision-confirmation.tsx
 msgid "Grasp records this answer only once you confirm it here. Check what is asked and what you answer."
 msgstr "Grasp records this answer only once you confirm it here. Check what is asked and what you answer."
 
@@ -7595,8 +7568,8 @@ msgstr "In your documents I saw {tools}."
 msgid "In your own words, as you would tell a colleague."
 msgstr "In your own words, as you would tell a colleague."
 
-#: src/inbox/inbox-page.tsx
 #: src/inbox/nav-item.tsx
+#: src/routes/_shell.inbox.tsx
 msgid "Inbox"
 msgstr "Inbox"
 
@@ -7683,11 +7656,6 @@ msgstr "Interviewed: the {role}"
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
 #: src/onboarding/setup-frame.tsx
-msgid "Interviews"
-msgstr "Interviews"
-
-#: src/report/report.ts
-msgctxt "programme stage"
 msgid "Interviews"
 msgstr "Interviews"
 
@@ -8021,6 +7989,11 @@ msgstr "Its access ran out. Grasp staff can't reconnect it: an admin of the orga
 msgid "Its access ran out. Sign in again with the same account: Apps and agents keep their permissions for it."
 msgstr "Its access ran out. Sign in again with the same account: Apps and agents keep their permissions for it."
 
+#: src/inbox/approval-request.tsx
+#: src/inbox/item-detail.tsx
+msgid "Its answers can be used in a moment, so a press meant for the one before doesn't answer it."
+msgstr "Its answers can be used in a moment, so a press meant for the one before doesn't answer it."
+
 #: src/projects/project-view.tsx
 msgid "Its apps and workflows aren’t deleted, and nothing in it is shared with the project, so nobody loses access."
 msgstr "Its apps and workflows aren’t deleted, and nothing in it is shared with the project, so nobody loses access."
@@ -8237,7 +8210,7 @@ msgstr "Keep what agents read through {label} in the Brain?"
 msgid "Keep what agents read through it for"
 msgstr "Keep what agents read through it for"
 
-#: src/report/report.ts
+#: src/inbox/report-view.tsx
 msgid "Keeps failing"
 msgstr "Keeps failing"
 
@@ -8381,10 +8354,6 @@ msgstr "Last, the numbers and the result."
 #: src/routes/_shell.settings.instructions.tsx
 msgid "Lasting facts"
 msgstr "Lasting facts"
-
-#: src/inbox/inbox-page.tsx
-msgid "Latest activity"
-msgstr "Latest activity"
 
 #: src/workflows/workflow-flow.tsx
 msgid "Lay it out left to right"
@@ -8612,6 +8581,10 @@ msgstr "Live, being measured"
 msgid "Load older"
 msgstr "Load older"
 
+#: src/inbox/inbox-page.tsx
+msgid "Loaded"
+msgstr "Loaded"
+
 #: src/onboarding/place-picker.tsx
 msgid "Loading"
 msgstr "Loading"
@@ -8627,6 +8600,10 @@ msgstr "Loading more {many}"
 #: src/frame/ui-words.tsx
 msgid "Loading the conversation"
 msgstr "Loading the conversation"
+
+#: src/inbox/report-row.tsx
+msgid "Loading the report"
+msgstr "Loading the report"
 
 #: src/frame/ui-words.tsx
 msgid "Loading the value"
@@ -8707,10 +8684,6 @@ msgstr "Made for"
 #: src/apps/app-settings.tsx
 msgid "Made on {date}."
 msgstr "Made on {date}."
-
-#: src/report/report.ts
-msgid "Made with Grasp on {date}"
-msgstr "Made with Grasp on {date}"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -8929,7 +8902,7 @@ msgstr "Model"
 msgid "Model call"
 msgstr "Model call"
 
-#: src/report/report.ts
+#: src/inbox/report-view.tsx
 msgid "Model cost"
 msgstr "Model cost"
 
@@ -9316,11 +9289,6 @@ msgstr "New team"
 msgid "New version"
 msgstr "New version"
 
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox sort"
-msgid "Newest first"
-msgstr "Newest first"
-
 #: src/frame/ui-words.tsx
 msgid "Next"
 msgstr "Next"
@@ -9346,14 +9314,17 @@ msgstr "Next month"
 msgid "Next person"
 msgstr "Next person"
 
+#: src/inbox/report-row.tsx
+msgid "Next report {inDays, plural, one {tomorrow} other {in # days}}"
+msgstr "Next report {inDays, plural, one {tomorrow} other {in # days}}"
+
+#: src/activity/pending.tsx
+msgid "Next run {when} ({zone})"
+msgstr "Next run {when} ({zone})"
+
 #: src/workflows/workflow-triggers.tsx
 msgid "Next run: {next}"
 msgstr "Next run: {next}"
-
-#: src/inbox/item-detail.tsx
-msgctxt "inbox: the action that settles an item"
-msgid "Next step"
-msgstr "Next step"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -9553,6 +9524,10 @@ msgstr "No longer held since {ended}"
 msgid "No longer offered"
 msgstr "No longer offered"
 
+#: src/inbox/inbox-page.tsx
+msgid "No longer waits for you"
+msgstr "No longer waits for you"
+
 #: src/onboarding/setup-steps.tsx
 msgid "No longer where it was"
 msgstr "No longer where it was"
@@ -9646,10 +9621,6 @@ msgstr "No results"
 msgid "No room left"
 msgstr "No room left"
 
-#: src/report/report.ts
-msgid "No run asked anyone for a decision."
-msgstr "No run asked anyone for a decision."
-
 #: src/routes/_shell.workflows.runs.tsx
 msgid "No runs match these filters."
 msgstr "No runs match these filters."
@@ -9658,7 +9629,6 @@ msgstr "No runs match these filters."
 msgid "No runs yet"
 msgstr "No runs yet"
 
-#: src/report/report.ts
 #: src/workflows/resource-runs.tsx
 msgid "No runs yet."
 msgstr "No runs yet."
@@ -9719,10 +9689,6 @@ msgstr "No workflow has called a model this month."
 msgid "No workflow is open to asking yet."
 msgstr "No workflow is open to asking yet."
 
-#: src/report/report.ts
-msgid "No workflow ran in this time."
-msgstr "No workflow ran in this time."
-
 #: src/connections/workflows-using.tsx
 msgid "No workflow uses {app} yet."
 msgstr "No workflow uses {app} yet."
@@ -9745,7 +9711,7 @@ msgstr "No: its hash or its link to the event before it doesn't match."
 msgid "Nobody"
 msgstr "Nobody"
 
-#: src/decision-card.tsx
+#: src/inbox/decision-card.tsx
 msgid "Nobody answered in time, so this decision has closed."
 msgstr "Nobody answered in time, so this decision has closed."
 
@@ -9981,6 +9947,10 @@ msgctxt "how a workflow stands"
 msgid "Not live yet"
 msgstr "Not live yet"
 
+#: src/inbox/inbox-page.tsx
+msgid "Not loaded"
+msgstr "Not loaded"
+
 #: src/settings/chat-accounts.tsx
 msgid "Not mine"
 msgstr "Not mine"
@@ -10142,10 +10112,6 @@ msgstr "Nothing changes until you say Change it. You can change any of it first.
 msgid "Nothing connected yet."
 msgstr "Nothing connected yet."
 
-#: src/inbox/inbox-page.tsx
-msgid "Nothing dealt with yet. What you decide here shows up in this list, and in the audit trail."
-msgstr "Nothing dealt with yet. What you decide here shows up in this list, and in the audit trail."
-
 #: src/onboarding/place-picker.tsx
 msgid "Nothing found"
 msgstr "Nothing found"
@@ -10259,10 +10225,6 @@ msgstr "Nothing this App asked for is waiting."
 msgid "Nothing to copy into the Brain yet"
 msgstr "Nothing to copy into the Brain yet"
 
-#: src/report/report.ts
-msgid "Nothing to make better right now."
-msgstr "Nothing to make better right now."
-
 #: src/pages/frame-failure.tsx
 msgid "Nothing to run yet"
 msgstr "Nothing to run yet"
@@ -10276,12 +10238,8 @@ msgid "Nothing uses them until you approve. Known malware is always refused."
 msgstr "Nothing uses them until you approve. Known malware is always refused."
 
 #: src/inbox/inbox-page.tsx
-msgid "Nothing waits on you"
-msgstr "Nothing waits on you"
-
-#: src/inbox/inbox-page.tsx
-msgid "Nothing waits on you."
-msgstr "Nothing waits on you."
+msgid "Nothing waits for you"
+msgstr "Nothing waits for you"
 
 #: src/apps/app-data.tsx
 msgid "Nothing was added. Fix these rows and try again."
@@ -10391,7 +10349,7 @@ msgstr "Offered to the company"
 msgid "Offered to your organization"
 msgstr "Offered to your organization"
 
-#: src/report/report.ts
+#: src/inbox/report-view.tsx
 msgid "Often corrected"
 msgstr "Often corrected"
 
@@ -10402,11 +10360,6 @@ msgstr "Older changes"
 #: src/brain/sources-page.tsx
 msgid "Older versions"
 msgstr "Older versions"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox sort"
-msgid "Oldest first"
-msgstr "Oldest first"
 
 #: src/agents/agent-facts.tsx
 #: src/agents/agent-page.tsx
@@ -10742,11 +10695,6 @@ msgstr "Open in a new tab"
 msgid "Open link"
 msgstr "Open link"
 
-#: src/inbox/inbox-kind.tsx
-msgctxt "inbox item kind"
-msgid "Open question"
-msgstr "Open question"
-
 #: src/chat/brain-questions.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Open questions"
@@ -10784,8 +10732,8 @@ msgstr "Open the run"
 msgid "Open this link again whenever you like, and carry on where you stopped."
 msgstr "Open this link again whenever you like, and carry on where you stopped."
 
-#: src/decision-card.tsx
-#: src/decision-confirmation.tsx
+#: src/inbox/decision-card.tsx
+#: src/inbox/decision-confirmation.tsx
 msgctxt "until when a decision can be answered"
 msgid "Open until"
 msgstr "Open until"
@@ -10794,17 +10742,9 @@ msgstr "Open until"
 msgid "Open version {version}"
 msgstr "Open version {version}"
 
-#: src/inbox/item-detail.tsx
-msgid "Open where it lives"
-msgstr "Open where it lives"
-
 #: src/routes/_shell.settings.onboarding.tsx
 msgid "Open your onboarding"
 msgstr "Open your onboarding"
-
-#: src/report/report.ts
-msgid "Open: {open}"
-msgstr "Open: {open}"
 
 #: src/frame/sign-in/sign-in.tsx
 msgid "Opened"
@@ -11065,6 +11005,10 @@ msgstr "Part of what was sent is cut short above. Show it all, or exactly what w
 msgid "Part of what will be sent is cut short above. Show it all, or exactly what will be sent, to confirm."
 msgstr "Part of what will be sent is cut short above. Show it all, or exactly what will be sent, to confirm."
 
+#: src/inbox/item-detail.tsx
+msgid "Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm."
+msgstr "Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm."
+
 #: src/brain/sources-page.tsx
 msgid "Passages"
 msgstr "Passages"
@@ -11190,11 +11134,6 @@ msgctxt "a kind of thing the Brain remembers"
 msgid "People"
 msgstr "People"
 
-#: src/inbox/inbox-page.tsx
-msgctxt "activity filter: what people did"
-msgid "People"
-msgstr "People"
-
 #: src/brain/brain-source-contents.tsx
 msgctxt "column: how many people"
 msgid "People"
@@ -11207,10 +11146,6 @@ msgstr "People can start these by asking him. A workflow's owner opens it to ask
 #: src/onboarding/review-parts.tsx
 msgid "People do “{name}” in two ways"
 msgstr "People do “{name}” in two ways"
-
-#: src/report/report.ts
-msgid "People heard"
-msgstr "People heard"
 
 #: src/chat/agent-draft-card.tsx
 msgid "People in these teams: {named}"
@@ -11534,6 +11469,10 @@ msgstr "Queries of {app}"
 msgid "Queries, mutations and actions of {app}"
 msgstr "Queries, mutations and actions of {app}"
 
+#: src/inbox/item-detail.tsx
+msgid "Question"
+msgstr "Question"
+
 #: src/frame/ui-words.tsx
 msgid "Question {current} of {total}"
 msgstr "Question {current} of {total}"
@@ -11553,15 +11492,6 @@ msgstr "Ran a step of a workflow"
 #: src/activity/audit-words.ts
 msgid "Ran a workflow"
 msgstr "Ran a workflow"
-
-#: src/report/report.ts
-msgctxt "a figure of the report"
-msgid "Ran without a person"
-msgstr "Ran without a person"
-
-#: src/report/report.ts
-msgid "Ran without a person: {share}"
-msgstr "Ran without a person: {share}"
 
 #: src/interview/before.tsx
 msgid "Rather talk with {otherName}?"
@@ -11840,9 +11770,12 @@ msgid "Region"
 msgstr "Region"
 
 #: src/chat/held-writes.tsx
-#: src/decision-card.tsx
-#: src/decision-confirmation.tsx
-#: src/inbox/item-detail.tsx
+msgid "Reject"
+msgstr "Reject"
+
+#: src/inbox/decision-card.tsx
+#: src/inbox/decision-confirmation.tsx
+msgctxt "a workflow's decision"
 msgid "Reject"
 msgstr "Reject"
 
@@ -11855,33 +11788,17 @@ msgstr "Reject"
 msgid "Reject {what}"
 msgstr "Reject {what}"
 
-#: src/inbox/item-detail.tsx
-msgid "Reject {who}"
-msgstr "Reject {who}"
-
 #: src/chat/held-writes.tsx
 msgid "Reject all"
 msgstr "Reject all"
 
-#: src/inbox/item-detail.tsx
-msgid "Reject this request?"
-msgstr "Reject this request?"
-
-#: src/decision-card.tsx
+#: src/inbox/decision-card.tsx
 msgid "Rejected by {name} on {date}."
 msgstr "Rejected by {name} on {date}."
 
 #: src/workflows/today-lanes.tsx
 msgid "Rejected in {left} s"
 msgstr "Rejected in {left} s"
-
-#: src/report/report.ts
-msgid "Rejected: {rejected}"
-msgstr "Rejected: {rejected}"
-
-#: src/inbox/item-detail.tsx
-msgid "Rejected: {who}."
-msgstr "Rejected: {who}."
 
 #: src/settings/erasures.tsx
 msgid "Release address…"
@@ -12127,9 +12044,9 @@ msgstr "Replace the key for {label}"
 msgid "Replaced a request for packages"
 msgstr "Replaced a request for packages"
 
-#: src/report/report-dialog.tsx
-msgid "Report"
-msgstr "Report"
+#: src/inbox/report-row.tsx
+msgid "Report · {day}"
+msgstr "Report · {day}"
 
 #: src/workflows/workflow-triggers.tsx
 msgctxt "ask an admin to let a trigger start"
@@ -12531,8 +12448,8 @@ msgctxt "start a workflow's run by hand"
 msgid "Run"
 msgstr "Run"
 
-#: src/decision-card.tsx
-#: src/decision-confirmation.tsx
+#: src/inbox/decision-card.tsx
+#: src/inbox/decision-confirmation.tsx
 msgctxt "the run of a workflow a decision is for"
 msgid "Run"
 msgstr "Run"
@@ -12589,6 +12506,7 @@ msgstr "Running now"
 msgid "runs"
 msgstr "runs"
 
+#: src/inbox/report-view.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/resource-runs.tsx
@@ -12615,18 +12533,17 @@ msgstr "Runs at: {whereItRuns}"
 msgid "Runs at: {whereItRuns}. A monthly limit applies: once it is reached, AI stops until the next month."
 msgstr "Runs at: {whereItRuns}. A monthly limit applies: once it is reached, AI stops until the next month."
 
+#: src/inbox/report-view.tsx
+msgid "Runs by workflow"
+msgstr "Runs by workflow"
+
 #: src/chat/plan-card.tsx
 msgid "Runs on its own"
 msgstr "Runs on its own"
 
-#: src/report/report.ts
-msgctxt "a figure of the report"
-msgid "Runs started"
-msgstr "Runs started"
-
-#: src/report/report.ts
-msgid "Runs started from {from} to {to}."
-msgstr "Runs started from {from} to {to}."
+#: src/inbox/report-view.tsx
+msgid "Runs per day"
+msgstr "Runs per day"
 
 #: src/workflows/kept-state.tsx
 msgid "Runs that start after this read nothing kept. Runs already going keep what they read. This can't be undone."
@@ -12639,10 +12556,6 @@ msgstr "Runs the draft on the input of your {most} most recent runs. Nothing is 
 #: src/settings/erasures.tsx
 msgid "Runs they started, and their place in the roster"
 msgstr "Runs they started, and their place in the roster"
-
-#: src/report/report.ts
-msgid "Runs: {total}"
-msgstr "Runs: {total}"
 
 #: src/brain/work-knowledge.tsx
 msgctxt "what something known rests on: people said it"
@@ -12746,7 +12659,7 @@ msgstr "Save access"
 msgid "Save as blueprint"
 msgstr "Save as blueprint"
 
-#: src/report/report-dialog.tsx
+#: src/inbox/report-row.tsx
 msgid "Save as PDF"
 msgstr "Save as PDF"
 
@@ -12867,6 +12780,10 @@ msgstr "Say what you want to build, and Grasp builds it."
 #: src/agents/agent-page.tsx
 msgid "Schedule"
 msgstr "Schedule"
+
+#: src/activity/pending.tsx
+msgid "Schedule for {workflow}"
+msgstr "Schedule for {workflow}"
 
 #: src/workflows/trigger-description.ts
 msgid "Schedule trigger"
@@ -13129,7 +13046,7 @@ msgstr "Sent a webhook source a test event"
 msgid "Sent an App's event to a webhook"
 msgstr "Sent an App's event to a webhook"
 
-#: src/decision-confirmation.tsx
+#: src/inbox/decision-confirmation.tsx
 msgctxt "what an App's page sends with an answer to a decision"
 msgid "Sent by the app"
 msgstr "Sent by the app"
@@ -13367,12 +13284,9 @@ msgstr "Sharing undone"
 
 #: src/apps/app-data-model.tsx
 #: src/brain/atlas-overlays.tsx
+#: src/inbox/inbox-page.tsx
 msgid "Show"
 msgstr "Show"
-
-#: src/inbox/inbox-page.tsx
-msgid "Show activity by"
-msgstr "Show activity by"
 
 #: src/brain/opportunities-page.tsx
 msgctxt "shows a hidden opportunity again for every admin"
@@ -13592,6 +13506,10 @@ msgstr "Sign-in shows the applications people log in to."
 msgid "Sign-in timed out or was started elsewhere. Try again."
 msgstr "Sign-in timed out or was started elsewhere. Try again."
 
+#: src/inbox/report-view.tsx
+msgid "Signals"
+msgstr "Signals"
+
 #: src/routes/_shell.settings.security.tsx
 msgid "Signed in {time}"
 msgstr "Signed in {time}"
@@ -13671,6 +13589,11 @@ msgstr "Skill"
 msgctxt "the Brain's skills page"
 msgid "Skills"
 msgstr "Skills"
+
+#: src/inbox/inbox-page.tsx
+msgctxt "put a to-do card at the back of the pile"
+msgid "Skip"
+msgstr "Skip"
 
 #: src/frame/ui-words.tsx
 msgctxt "skip a question"
@@ -13793,11 +13716,6 @@ msgstr "Something you corrected, which you can no longer read"
 msgid "Something your export held was erased since, so the export was deleted with it. Make a new one."
 msgstr "Something your export held was erased since, so the export was deleted with it. Make a new one."
 
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox: sort button"
-msgid "Sort"
-msgstr "Sort"
-
 #: src/frame/ui-words.tsx
 msgid "Sort by this next"
 msgstr "Sort by this next"
@@ -13872,18 +13790,10 @@ msgstr "Stakeholder invited into Grasp"
 msgid "Stakeholder named: the {role}"
 msgstr "Stakeholder named: the {role}"
 
-#: src/inbox/item-detail.tsx
-msgid "Start"
-msgstr "Start"
-
 #: src/interview/sound-check.tsx
 msgctxt "begin the interview"
 msgid "Start"
 msgstr "Start"
-
-#: src/inbox/item-detail.tsx
-msgid "Start {name}"
-msgstr "Start {name}"
 
 #: src/inbox/items.ts
 msgid "Start {name}?"
@@ -13896,6 +13806,10 @@ msgstr "Start a run"
 #: src/interview/sound-check.tsx
 msgid "Start by typing"
 msgstr "Start by typing"
+
+#: src/inbox/item-detail.tsx
+msgid "Start it"
+msgstr "Start it"
 
 #: src/workflows/start-run.tsx
 msgid "Start the run"
@@ -13923,10 +13837,6 @@ msgstr "Started following a connection late: changes before then weren't read"
 #: src/activity/audit-words.ts
 msgid "Started following what changes at a connection"
 msgstr "Started following what changes at a connection"
-
-#: src/inbox/item-detail.tsx
-msgid "Started: {name}."
-msgstr "Started: {name}."
 
 #: src/workflows/run-status.ts
 msgctxt "status of a workflow run"
@@ -14360,10 +14270,6 @@ msgstr "Team for {who}"
 msgid "team leads talked"
 msgstr "team leads talked"
 
-#: src/report/report.ts
-msgid "Team leads: {leadsTalked} of {leads}"
-msgstr "Team leads: {leadsTalked} of {leads}"
-
 #: src/brain/brain.ts
 msgid "Team size unknown"
 msgstr "Team size unknown"
@@ -14566,6 +14472,10 @@ msgstr "That’s plenty to start with. Let’s move on."
 #: src/frame/ui-words.tsx
 msgid "The {many} did not load"
 msgstr "The {many} did not load"
+
+#: src/inbox/item-detail.tsx
+msgid "The {role}"
+msgstr "The {role}"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "The {top} that spent most; more spent less."
@@ -14985,7 +14895,6 @@ msgstr "The example data doesn't fit the change"
 
 #: src/chat/chat-more.tsx
 #: src/export/export-menu.tsx
-#: src/report/report-dialog.tsx
 msgid "The export didn't work. Try again."
 msgstr "The export didn't work. Try again."
 
@@ -14997,10 +14906,6 @@ msgstr "The first {shown} by App; more Apps have models bound."
 msgid "The first links go out"
 msgstr "The first links go out"
 
-#: src/inbox/inbox-page.tsx
-msgid "The full audit trail"
-msgstr "The full audit trail"
-
 #: src/drafts/draft-history.tsx
 msgid "The history of your changes couldn't be read. Try again in a moment."
 msgstr "The history of your changes couldn't be read. Try again in a moment."
@@ -15008,6 +14913,10 @@ msgstr "The history of your changes couldn't be read. Try again in a moment."
 #: src/onboarding/send-plan-form.tsx
 msgid "The hour the other teams get their links"
 msgstr "The hour the other teams get their links"
+
+#: src/inbox/inbox-page.tsx
+msgid "The inbox didn't load"
+msgstr "The inbox didn't load"
 
 #: src/workflows/workflow-triggers.tsx
 msgid "The input each run starts with, as JSON"
@@ -15070,9 +14979,17 @@ msgstr "The model's answer came back in the wrong shape. Try again."
 msgid "The monthly budget for AI is not set yet."
 msgstr "The monthly budget for AI is not set yet."
 
+#: src/inbox/inbox-page.tsx
+msgid "The next one"
+msgstr "The next one"
+
 #: src/interview/words.ts
 msgid "The numbers"
 msgstr "The numbers"
+
+#: src/inbox/inbox-page.tsx
+msgid "The one before"
+msgstr "The one before"
 
 #: src/agents/agent-form.tsx
 msgid "The one the person asking picks"
@@ -15150,10 +15067,6 @@ msgstr "The quickest way is to connect your {signIn} sign-in. I’ll only see na
 #: src/onboarding/setup-steps.tsx
 msgid "The quickest way is to connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed."
 msgstr "The quickest way is to connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed."
-
-#: src/report/report.ts
-msgid "The report as it stands today"
-msgstr "The report as it stands today"
 
 #: src/apps/app-access-requests.tsx
 msgid "The request allows nothing until an admin grants it. They see what the app asks for and decide."
@@ -15284,6 +15197,10 @@ msgstr "The way some told it"
 msgid "The webhook's secret"
 msgstr "The webhook's secret"
 
+#: src/inbox/report-view.tsx
+msgid "The week's figures"
+msgstr "The week's figures"
+
 #: src/settings/audit-chain.tsx
 msgid "The whole chain has not been verified yet."
 msgstr "The whole chain has not been verified yet."
@@ -15300,7 +15217,7 @@ msgstr "the whole connection"
 msgid "The workflow is deleted, but its name wasn't released: {reason}"
 msgstr "The workflow is deleted, but its name wasn't released: {reason}"
 
-#: src/decision-card.tsx
+#: src/inbox/decision-card.tsx
 msgid "The workflow run that asked this has ended, so this decision has closed."
 msgstr "The workflow run that asked this has ended, so this decision has closed."
 
@@ -15528,11 +15445,11 @@ msgstr "This chat read private or restricted data: this may send it out"
 msgid "This connection needs to be connected again."
 msgstr "This connection needs to be connected again."
 
-#: src/report/report.ts
+#: src/inbox/report-view.tsx
 msgid "This couldn't be read when the report was made."
 msgstr "This couldn't be read when the report was made."
 
-#: src/decision-card.tsx
+#: src/inbox/decision-card.tsx
 msgid "This decision has closed."
 msgstr "This decision has closed."
 
@@ -15791,10 +15708,6 @@ msgstr "Time zone"
 msgid "Time-consuming work that could be automated, and what was said about each."
 msgstr "Time-consuming work that could be automated, and what was said about each."
 
-#: src/report/report.ts
-msgid "Timed out: {timedOut}"
-msgstr "Timed out: {timedOut}"
-
 #: src/brain/brain-markdown.ts
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Timeline"
@@ -15817,11 +15730,6 @@ msgstr "To change them, ask your admin."
 msgid "To change them, go to <0>Settings › AI providers</0>."
 msgstr "To change them, go to <0>Settings › AI providers</0>."
 
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox tab: what waits on you"
-msgid "To do"
-msgstr "To do"
-
 #: src/routes/_shell.settings.onboarding.tsx
 msgid "To do: let your team know, and send the interview links"
 msgstr "To do: let your team know, and send the interview links"
@@ -15833,10 +15741,6 @@ msgstr "To everyone"
 #: src/onboarding/setup-steps.tsx
 msgid "To everyone at {company}"
 msgstr "To everyone at {company}"
-
-#: src/report/report.ts
-msgid "To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part."
-msgstr "To keep who spoke private, a team is left out until five of its people were asked, and its count until three were heard. Neither means nobody took part."
 
 #: src/onboarding/send-plan-form.tsx
 msgid "To the team leads. Everyone else follows once their lead has talked."
@@ -15972,10 +15876,11 @@ msgstr "Try"
 #: src/chat/models-unavailable.tsx
 #: src/chat/thread.tsx
 #: src/connections/sync-places.tsx
-#: src/decision-card.tsx
 #: src/frame/page-states.tsx
 #: src/frame/setting-up.tsx
 #: src/frame/ui-words.tsx
+#: src/inbox/decision-card.tsx
+#: src/inbox/inbox-page.tsx
 #: src/interview/destination.tsx
 #: src/interview/sound-check.tsx
 #: src/pages/frame-failure.tsx
@@ -15992,6 +15897,7 @@ msgstr "Try the search again"
 
 #: src/chat/builds.tsx
 #: src/frame/page-states.tsx
+#: src/inbox/inbox-page.tsx
 msgid "Trying again…"
 msgstr "Trying again…"
 
@@ -16075,6 +15981,11 @@ msgstr "Type what is missing, or yes"
 msgid "Type your answer"
 msgstr "Type your answer"
 
+#: src/inbox/inbox-kind.tsx
+msgctxt "inbox item kind"
+msgid "Unconfirmed change"
+msgstr "Unconfirmed change"
+
 #: src/onboarding/interviews-progress.tsx
 msgid "Under 5"
 msgstr "Under 5"
@@ -16082,11 +15993,6 @@ msgstr "Under 5"
 #: src/onboarding/review-parts.tsx
 msgid "Under Spam, bypass spam filters for an approved senders list, and add {domain} to it."
 msgstr "Under Spam, bypass spam filters for an approved senders list, and add {domain} to it."
-
-#: src/report/report.ts
-msgctxt "programme stage"
-msgid "Under way"
-msgstr "Under way"
 
 #: src/chat/saved-memory.tsx
 #: src/drafts/share-with-team.tsx
@@ -16175,7 +16081,6 @@ msgid "Unpin"
 msgstr "Unpin"
 
 #: src/activity/audit-log.tsx
-#: src/inbox/inbox-page.tsx
 msgid "Unreadable event"
 msgstr "Unreadable event"
 
@@ -16549,11 +16454,7 @@ msgstr "Waiting for {signIn}"
 msgid "Waiting for a decision"
 msgstr "Waiting for a decision"
 
-#: src/report/report.ts
-msgid "Waiting for a decision: {waiting}"
-msgstr "Waiting for a decision: {waiting}"
-
-#: src/report/report.ts
+#: src/inbox/report-view.tsx
 msgid "Waiting for a person"
 msgstr "Waiting for a person"
 
@@ -16570,11 +16471,6 @@ msgstr "Waiting for an admin's approval"
 #: src/brain/work-knowledge.tsx
 msgid "Waiting for more voices"
 msgstr "Waiting for more voices"
-
-#: src/report/report.ts
-msgctxt "programme stage"
-msgid "Waiting for the go"
-msgstr "Waiting for the go"
 
 #: src/chat/held-writes.tsx
 msgid "Waiting for you"
@@ -16707,25 +16603,21 @@ msgctxt "an app's settings section"
 msgid "Webhooks"
 msgstr "Webhooks"
 
+#: src/inbox/report-view.tsx
+msgid "Week {number} of {weeks}"
+msgstr "Week {number} of {weeks}"
+
 #: src/brain/brain-article/kern.tsx
 msgid "week {week}"
 msgstr "week {week}"
 
-#: src/report/report.ts
+#: src/inbox/report-row.tsx
 msgid "Week {week}"
 msgstr "Week {week}"
 
-#: src/report/report.ts
-msgid "Week {week} · {stage}"
-msgstr "Week {week} · {stage}"
-
-#: src/report/report.ts
-msgid "Week {week} of {weeks}"
-msgstr "Week {week} of {weeks}"
-
-#: src/report/report.ts
-msgid "Week {week} of {weeks} · {stage}"
-msgstr "Week {week} of {weeks} · {stage}"
+#: src/inbox/report-row.tsx
+msgid "Week {week} so far"
+msgstr "Week {week} so far"
 
 #: src/onboarding/setup-frame.tsx
 msgid "Welcome"
@@ -16759,11 +16651,6 @@ msgstr "What agents read through shared connections"
 msgid "What appears on every invoice."
 msgstr "What appears on every invoice."
 
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox sort"
-msgid "What blocks first, then newest"
-msgstr "What blocks first, then newest"
-
 #: src/brain/brain-atlas.ts
 msgctxt "the brainstem: every conversation, document and connection"
 msgid "What came in"
@@ -16773,7 +16660,7 @@ msgstr "What came in"
 msgid "What changes"
 msgstr "What changes"
 
-#: src/report/report.ts
+#: src/inbox/report-view.tsx
 msgid "What could be better"
 msgstr "What could be better"
 
@@ -16813,10 +16700,6 @@ msgstr "What five or more of the team were seen doing:"
 msgid "What gets in the way"
 msgstr "What gets in the way"
 
-#: src/inbox/inbox-page.tsx
-msgid "What Grasp and its agents do by themselves is under Activity."
-msgstr "What Grasp and its agents do by themselves is under Activity."
-
 #: src/brain/opportunities-page.tsx
 msgid "What Grasp could automate or improve, from how your teams describe their work and how five or more of a team were seen doing it, the largest first. One hidden comes back when its evidence changes."
 msgstr "What Grasp could automate or improve, from how your teams describe their work and how five or more of a team were seen doing it, the largest first. One hidden comes back when its evidence changes."
@@ -16838,10 +16721,9 @@ msgstr "What Grasp may do"
 msgid "What Grasp may do for you"
 msgstr "What Grasp may do for you"
 
-#: src/inbox/item-detail.tsx
-msgctxt "inbox item section"
-msgid "What happened"
-msgstr "What happened"
+#: src/inbox/report-view.tsx
+msgid "What Grasp noticed could be better, by kind."
+msgstr "What Grasp noticed could be better, by kind."
 
 #: src/onboarding/setup-steps.tsx
 msgid "What happens next"
@@ -16990,13 +16872,9 @@ msgstr "What people call it, one line on what it is for, and its picture. All th
 msgid "What people see instead of {name}."
 msgstr "What people see instead of {name}."
 
-#: src/report/report.ts
+#: src/inbox/report-view.tsx
 msgid "What ran"
 msgstr "What ran"
-
-#: src/report/report-dialog.tsx
-msgid "What ran, the decisions it asked for, every workflow and what could be better. Keep it as Markdown, or save it as a PDF from the print window."
-msgstr "What ran, the decisions it asked for, every workflow and what could be better. Keep it as Markdown, or save it as a PDF from the print window."
 
 #: src/connections/request-app-dialog.tsx
 msgid "What should Grasp do there?"
@@ -17099,21 +16977,29 @@ msgstr "What they told us"
 msgid "What they want instead"
 msgstr "What they want instead"
 
-#: src/decision-confirmation.tsx
+#: src/inbox/decision-confirmation.tsx
 msgid "What this decision asks can't be shown right now, so it can't be answered yet. Try again in a moment."
 msgstr "What this decision asks can't be shown right now, so it can't be answered yet. Try again in a moment."
 
-#: src/decision-card.tsx
+#: src/inbox/decision-card.tsx
 msgid "What this decision asks can't be shown right now."
 msgstr "What this decision asks can't be shown right now."
 
-#: src/decision-confirmation.tsx
+#: src/inbox/decision-confirmation.tsx
 msgid "What this decision asks is withheld, so you can only reject it."
 msgstr "What this decision asks is withheld, so you can only reject it."
+
+#: src/inbox/item-detail.tsx
+msgid "What this would send can't be shown right now, so you can only decline it for now. Try again in a moment."
+msgstr "What this would send can't be shown right now, so you can only decline it for now. Try again in a moment."
 
 #: src/chat/held-writes.tsx
 msgid "What this would send can't be shown right now, so you can only reject it for now. Try again in a moment."
 msgstr "What this would send can't be shown right now, so you can only reject it for now. Try again in a moment."
+
+#: src/inbox/item-detail.tsx
+msgid "What this would send is withheld: the run that asked for it may no longer read what it read, so you can only decline it."
+msgstr "What this would send is withheld: the run that asked for it may no longer read what it read, so you can only decline it."
 
 #: src/chat/held-writes.tsx
 msgid "What this would send is withheld: the run that asked for it may no longer read what it read, so you can only reject it."
@@ -17132,6 +17018,7 @@ msgid "What to show of the traces"
 msgstr "What to show of the traces"
 
 #: src/inbox/inbox-page.tsx
+#: src/inbox/inbox-pending.tsx
 msgid "What waits on you"
 msgstr "What waits on you"
 
@@ -17364,10 +17251,6 @@ msgstr "Which tools do people actually use?"
 msgid "While Stephen talks to your team: how far the interviews are, team by team, and everyone’s own link to send."
 msgstr "While Stephen talks to your team: how far the interviews are, team by team, and everyone’s own link to send."
 
-#: src/inbox/item-detail.tsx
-msgid "Who"
-msgstr "Who"
-
 #: src/workflows/binding-approvals.tsx
 msgid "Who answers {alias}"
 msgstr "Who answers {alias}"
@@ -17576,6 +17459,10 @@ msgstr "Without a name"
 msgid "without a person"
 msgstr "without a person"
 
+#: src/inbox/report-view.tsx
+msgid "Without a person"
+msgstr "Without a person"
+
 #: src/activity/audit-words.ts
 msgid "Woke a waiting run whose wake hadn't got through"
 msgstr "Woke a waiting run whose wake hadn't got through"
@@ -17660,8 +17547,8 @@ msgstr "workflow.json"
 #: src/brain/goals-editor.tsx
 #: src/chat/mentions.tsx
 #: src/frame/app-sidebar.tsx
+#: src/inbox/report-view.tsx
 #: src/projects/file-item-dialog.tsx
-#: src/report/report.ts
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
@@ -17678,11 +17565,6 @@ msgstr "Workflows"
 
 #: src/brain/memories-page.tsx
 msgctxt "a kind of thing the Brain remembers"
-msgid "Workflows"
-msgstr "Workflows"
-
-#: src/inbox/inbox-page.tsx
-msgctxt "inbox filter"
 msgid "Workflows"
 msgstr "Workflows"
 
@@ -17969,10 +17851,6 @@ msgstr "You sign in at <0>{host}</0>"
 msgid "You sign in on {app}’s own page."
 msgstr "You sign in on {app}’s own page."
 
-#: src/inbox/items.ts
-msgid "You were asked this as the {owner}. Answer it in the brain: everyone in the company reads the answer, with your name."
-msgstr "You were asked this as the {owner}. Answer it in the brain: everyone in the company reads the answer, with your name."
-
 #: src/interview/page.tsx
 msgid "You withdrew. Nothing you said is used from now on."
 msgstr "You withdrew. Nothing you said is used from now on."
@@ -18038,7 +17916,7 @@ msgstr "Your AI runs on your own keys"
 msgid "Your answer"
 msgstr "Your answer"
 
-#: src/decision-confirmation.tsx
+#: src/inbox/decision-confirmation.tsx
 msgctxt "the answer a person gives a decision"
 msgid "Your answer"
 msgstr "Your answer"
@@ -18197,8 +18075,7 @@ msgstr "Your platform is open."
 msgid "Your question"
 msgstr "Your question"
 
-#: src/report/report-bar.tsx
-#: src/report/report.ts
+#: src/inbox/report-row.tsx
 msgid "Your report on week {week} is ready"
 msgstr "Your report on week {week} is ready"
 
@@ -18271,6 +18148,10 @@ msgstr "Your triggers stopped hearing new mail at {name}"
 #: src/routes/apps.$app.draft.tsx
 msgid "Your version of the App"
 msgstr "Your version of the App"
+
+#: src/inbox/report-row.tsx
+msgid "Your weekly report"
+msgstr "Your weekly report"
 
 #: src/interview/before.tsx
 msgid "Your words"
