@@ -354,9 +354,8 @@ const Revoke = ({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel size="default" />
+          <AlertDialogCancel />
           <AlertDialogAction
-            size="default"
             onClick={() => {
               void decide(
                 async (session) =>

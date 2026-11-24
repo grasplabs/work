@@ -206,9 +206,8 @@ export const ConfirmChange = ({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel size="default" />
+          <AlertDialogCancel />
           <AlertDialogAction
-            size="default"
             onClick={() => {
               if (asked !== undefined) {
                 onConfirm(asked);
@@ -554,9 +553,8 @@ const MoveDialog = ({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel size="default" />
+          <AlertDialogCancel />
           <AlertDialogAction
-            size="default"
             onClick={() => {
               if (move !== null) {
                 onConfirm(move);

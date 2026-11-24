@@ -372,8 +372,9 @@ const ShareWith = ({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel size="default" />
+            <AlertDialogCancel />
             <Button
+              size="sm"
               errorText={t`Couldn't stop sharing`}
               onClick={async () => {
                 if (removing === undefined) {

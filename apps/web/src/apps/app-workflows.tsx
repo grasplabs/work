@@ -188,8 +188,9 @@ const BindDialog = ({
           </Form>
         </DialogBody>
         <DialogFooter>
-          <DialogClose size="default">{t`Cancel`}</DialogClose>
+          <DialogClose>{t`Cancel`}</DialogClose>
           <Button
+            size="sm"
             disabled={busy || workflow === null || revision === undefined}
             errorText={t`Could not change`}
             loadingText={t`Changing`}
