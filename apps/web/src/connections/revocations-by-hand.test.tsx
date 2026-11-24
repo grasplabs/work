@@ -2,6 +2,12 @@
 import type { RevocationToDo } from "@grasp-os/shared/connect";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from "@tanstack/react-router";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
@@ -41,17 +47,27 @@ let root: Root | undefined;
 const shown = async (loaded: Loaded<RevocationToDo[]>): Promise<string> => {
   const host = document.createElement("div");
   document.body.append(host);
-  await act(async () => {
-    root = createRoot(host);
-    root.render(
-      <I18nProvider i18n={i18n}>
+  const router = createRouter({
+    routeTree: createRootRoute({
+      component: () => (
         <RevocationsByHand
           nameOf={() => "Google Workspace"}
           toDos={Promise.resolve(loaded)}
         />
+      ),
+    }),
+    history: createMemoryHistory(),
+    // Out of reach, the section reads again once core is back: never, here.
+    context: { core: { connected: false, onConnected: () => () => {} } },
+  });
+  await act(async () => {
+    root = createRoot(host);
+    root.render(
+      <I18nProvider i18n={i18n}>
+        <RouterProvider router={router} />
       </I18nProvider>
     );
-    await Promise.resolve();
+    await router.load();
   });
   return host.textContent ?? "";
 };
