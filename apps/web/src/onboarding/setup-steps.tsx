@@ -12,11 +12,13 @@ import { stephensLook } from "../agents/figure/look.ts";
 import { ErrorText } from "../error-text.tsx";
 import { chooseLocale, isLocale } from "../i18n.ts";
 import { useCoreAction } from "../use-core-action.ts";
+import { speak } from "../voice/voice.ts";
 import { AiChoice } from "./ai-choice.tsx";
 import { CalmStep } from "./calm-frame.tsx";
 import { CompanyStep } from "./company-step.tsx";
 import { DocumentsStep } from "./documents-step.tsx";
 import { ForgetKickoff } from "./forget-kickoff.tsx";
+import { handOver } from "./hand-over.ts";
 import { LanguageCards } from "./language-cards.tsx";
 import { LeadsStep } from "./leads-step.tsx";
 import { PlanBody } from "./plan.tsx";
@@ -27,6 +29,7 @@ import { smoothly } from "./smoothly.ts";
 import { SourcesStep } from "./sources-step.tsx";
 import { mailToLetThrough, useRefresh } from "./step-parts.ts";
 import type { StepProps } from "./step-parts.ts";
+import { StepWays } from "./step-ways.tsx";
 import { TeamStep } from "./team-step.tsx";
 
 export type { SetupData, StepProps } from "./step-parts.ts";
@@ -134,19 +137,21 @@ const About = ({ onward, today }: StepProps) => {
     <CalmStep
       body={t`I talk with your team for one week. Then you get what I learned, team by team.`}
       centred
-      end={
-        <Button
-          onClick={() => {
-            void onward();
-          }}
-          size="lg"
-        >
-          {t`Continue`}
-        </Button>
-      }
       title={t`Here’s the plan`}
     >
       <PlanBody today={today} />
+      <StepWays
+        buttons={
+          <Button
+            onClick={() => {
+              void onward();
+            }}
+            size="lg"
+          >
+            {t`Continue`}
+          </Button>
+        }
+      />
     </CalmStep>
   );
 };
@@ -300,8 +305,10 @@ const Open = ({ data, onward }: StepProps) => {
       end={
         open ? (
           <Button
-            onClick={() => {
-              void onward();
+            onClick={(event) => {
+              // He says it as he does it, then hands them over to the platform.
+              speak(t`Here’s your Grasp.`);
+              void handOver(event.currentTarget, onward);
             }}
             size="lg"
           >

@@ -45,6 +45,7 @@ const styles = stylex.create({
   },
   day: { flexShrink: 0 },
   numbers: { fontVariantNumeric: "tabular-nums" },
+  example: { margin: 0, textAlign: "center" },
 });
 
 /** The moments of the campaign, by how many days after today: until core plans one. */
@@ -145,7 +146,10 @@ export const PlanBody = ({ today }: { today: string }) => {
           })}
         </ol>
       </div>
-      <Text>{t`A finding reads like this: new people wait two to three days for a laptop from IT.`}</Text>
+      {/* An example, on the step's middle as its title and line are. */}
+      <figure {...stylex.props(styles.example)}>
+        <Text>{t`A finding reads like this: new people wait two to three days for a laptop from IT.`}</Text>
+      </figure>
     </div>
   );
 };
