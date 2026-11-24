@@ -68,6 +68,8 @@ export interface ConceptSearch {
   band: "header" | "low";
   /** Ruben's alternative title on A's start (`&title=alt`). */
   altTitle: boolean;
+  /** On a laptop: the pages before the conversation beside the dither, or centred in the whole window (`&layout=centre`). */
+  centred: boolean;
 }
 
 /** Reads the concept’s own part of the address; nothing when it names no concept. */
@@ -90,6 +92,7 @@ export const conceptSearch = (
     fold: search.fold !== undefined,
     band: search.band === "header" ? "header" : "low",
     altTitle: search.title === "alt",
+    centred: search.layout === "centre",
   };
 };
 
@@ -566,9 +569,9 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
       }
       clock={clockOf[concept]}
       left={inTalk ? left : null}
-      beside={withScene(screen)}
+      beside={withScene(screen) && !search.centred}
       band={search.band}
-      strip={inTalk}
+      strip={inTalk || (search.centred && withScene(screen))}
       besideOnPhone={concept !== "c" || screen === "language"}
     >
       {page}
