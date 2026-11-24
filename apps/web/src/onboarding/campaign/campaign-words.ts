@@ -106,7 +106,7 @@ export const statementOf = (
     case "started": {
       return {
         lead: "We’ve started.",
-        rest: `Your invitations reached all ${invited}. ${talked} have talked already.`,
+        rest: `Your invitations reached all ${invited} people, and ${talked} have talked already.`,
       };
     }
     case "onPace": {
