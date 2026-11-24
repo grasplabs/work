@@ -16,7 +16,6 @@ import { Link, useMatchRoute } from "@tanstack/react-router";
 import { readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { useFrameRead } from "../frame/frame-read.ts";
-import { groupLabel } from "./groups.ts";
 
 // The sidebar's Inbox view, chosen with the Home | Inbox switch under its
 // head (frame/app-sidebar.tsx), as the reference's: All, the inbox, with
@@ -75,7 +74,7 @@ const styles = stylex.create({
  * while core can't be read, rather than claim nothing waits.
  */
 export const InboxView = ({ waiting }: { waiting: number | undefined }) => {
-  const { t, i18n } = useLingui();
+  const { t } = useLingui();
   const matchRoute = useMatchRoute();
   return (
     <SidebarContent aria-label={t`Inbox`}>
@@ -94,7 +93,7 @@ export const InboxView = ({ waiting }: { waiting: number | undefined }) => {
               >
                 <Link to="/inbox">
                   <Icon icon={BellIcon} />
-                  {i18n._(groupLabel.all)}
+                  {t({ message: "All", context: "inbox filter, short" })}
                   {/* Inside the link, so its name says how many wait. */}
                   <span {...stylex.props(visuallyHidden)}>
                     <Plural

@@ -197,22 +197,25 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
     /1 workflow needs you$/u,
     pageRead
   );
-  // Opened beside the list: what it asks, and the way to its own page.
-  const item = asDecider.getByRole("article", {
-    name: "Approve invoice INV-42",
-  });
-  await item.getByRole("link", { name: "Review and answer" }).click();
+  // Opened beside the list, to be answered there: what it asks.
   await expect(
-    asDecider.getByRole("heading", { name: "Approve invoice INV-42" })
+    asDecider.getByRole("region", { name: "Approve invoice INV-42" })
   ).toBeVisible(pageRead);
   // Its page is the decision's link: opened by anyone else, it only says
-  // it isn't theirs.
-  const link = new URL(asDecider.url()).pathname;
-  expect(link).toMatch(/^\/decisions\/[^/]+$/u);
+  // it isn't theirs. The approver answers it there.
+  const decision = (
+    new URL(asDecider.url()).searchParams.get("item") ?? ""
+  ).replace(/^decision:/u, "");
+  const link = `/decisions/${decision}`;
   await page.goto(link);
   await expect(
     page.getByText("This decision is for someone else to answer.")
   ).toBeVisible(pageRead);
+  await asDecider.goto(link);
+  await expect(
+    asDecider.getByRole("heading", { name: "Approve invoice INV-42" })
+  ).toBeVisible(pageRead);
+  await asDecider.getByRole("button", { name: "Add a comment" }).click();
   const comment = asDecider.getByLabel("Comment (optional)");
   const confirmation = asDecider.getByRole("dialog", {
     name: "Confirm your approval",
@@ -361,6 +364,6 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   // Its run asks the approver, as the one started by hand did.
   await decisionIn(asDecider, name);
   await expect(
-    asDecider.getByRole("article", { name: "Approve invoice INV-43" })
+    asDecider.getByRole("region", { name: "Approve invoice INV-43" })
   ).toBeVisible(pageRead);
 });

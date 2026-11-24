@@ -120,46 +120,11 @@ export interface InboxItem {
   source: InboxSource;
 }
 
-/** The kinds, grouped as the inbox's filter offers them. */
-export type Group = "all" | "asked" | "brain" | "approvals";
-
-// Workflows' and Apps' asks are one group, Approvals (Ruben, 17 November).
-export const groupOf: Record<InboxKind, Exclude<Group, "all">> = {
-  checkDrawing: "approvals",
-  checkProposal: "approvals",
-  approveChange: "approvals",
-  confirmResult: "approvals",
-  conflict: "brain",
-  openQuestion: "asked",
-  unknownAiTool: "approvals",
-  signInAgain: "approvals",
-  externalDomain: "approvals",
-  heldWrite: "approvals",
-  heldStart: "approvals",
-  unknownOutcome: "approvals",
-  permissionRequest: "approvals",
-  stoppedSchedule: "approvals",
-  workflowChanged: "approvals",
-  packageNotice: "approvals",
-  stoppedEvents: "approvals",
-  appMessage: "approvals",
-  bindingApproval: "approvals",
-  skillShare: "approvals",
-  decision: "approvals",
-};
-
 /** Urgent first, then the newest, then by title: the inbox's own order. */
 const order = (a: InboxItem, b: InboxItem): number =>
   Number(b.urgent) - Number(a.urgent) ||
   b.date.localeCompare(a.date) ||
   a.title.localeCompare(b.title);
-
-/** What waits in `group`, in the inbox's own order. */
-export const listed = (
-  items: readonly InboxItem[],
-  group: Group
-): InboxItem[] =>
-  items.filter((item) => group === "all" || groupOf[item.kind] === group);
 
 /** A held write's name: what it does, on which connection. */
 const heldName = (action: PendingAction): string => {
