@@ -36,6 +36,7 @@ import {
 } from "../lib/tokens.stylex";
 import type { LayoutStyle } from "../lib/utils";
 import { iconVars, motionVars, ringInsetMarker } from "../lib/vars.stylex";
+import { ControlTooltip } from "./tooltip";
 
 /** How a person chose to see it: light, dark, or whatever the system says. */
 export const themeModes = ["light", "dark", "system"] as const;
@@ -74,6 +75,12 @@ interface ThemeToggleBase {
    * @default "default"
    */
   size?: ThemeToggleSize;
+  /**
+   * The icon button's tooltip, under a resting pointer and on keyboard focus, as Button's. Left
+   * out, it shows its name: where it is and where a press takes it. `false` shows none; words show
+   * those.
+   */
+  tooltip?: ReactNode;
   /** The chosen mode. */
   mode: ThemeMode;
   /** Called with the mode a person or an agent chose; the caller applies and keeps it. */
@@ -691,39 +698,43 @@ const iconSizes = {
 const IconButton = ({
   mode,
   size: buttonSize,
+  tooltip,
   name,
   onChoose,
 }: {
   mode: ThemeMode;
   size: ThemeToggleSize;
+  tooltip: ReactNode;
   name: (current: ThemeMode, next: ThemeMode) => string;
   onChoose: (mode: ThemeMode) => void;
 }) => {
   const index = themeModes.indexOf(mode);
   const next = themeModes[(index + 1) % themeModes.length] ?? "light";
   return (
-    <button
-      type="button"
-      aria-label={name(mode, next)}
-      onClick={() => {
-        onChoose(next);
-      }}
-      {...stylex.props(styles.icon, iconSizes[buttonSize], focusRing)}
-    >
-      <span aria-hidden="true" {...stylex.props(styles.target)} />
-      {themeModes.map((each) => (
-        <span
-          key={each}
-          aria-hidden="true"
-          {...stylex.props(
-            styles.swap,
-            each === mode ? styles.swapIn : styles.swapOut
-          )}
-        >
-          <Icon icon={icons[each]} />
-        </span>
-      ))}
-    </button>
+    <ControlTooltip tooltip={tooltip} iconOnly>
+      <button
+        type="button"
+        aria-label={name(mode, next)}
+        onClick={() => {
+          onChoose(next);
+        }}
+        {...stylex.props(styles.icon, iconSizes[buttonSize], focusRing)}
+      >
+        <span aria-hidden="true" {...stylex.props(styles.target)} />
+        {themeModes.map((each) => (
+          <span
+            key={each}
+            aria-hidden="true"
+            {...stylex.props(
+              styles.swap,
+              each === mode ? styles.swapIn : styles.swapOut
+            )}
+          >
+            <Icon icon={icons[each]} />
+          </span>
+        ))}
+      </button>
+    </ControlTooltip>
   );
 };
 
@@ -966,6 +977,7 @@ const Picker = ({
 export const ThemeToggle = ({
   variant = "segmented",
   size: buttonSize = "default",
+  tooltip,
   mode,
   onModeChange,
   theme,
@@ -1006,6 +1018,7 @@ export const ThemeToggle = ({
         <IconButton
           mode={mode}
           size={buttonSize}
+          tooltip={tooltip}
           name={(current, next) =>
             words.icon(label, wordsOf(current).name, wordsOf(next).name)
           }
