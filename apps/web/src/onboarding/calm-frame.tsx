@@ -10,11 +10,6 @@ import {
 import { Text } from "@grasp-os/ui/components/text";
 import { isThemeMode, ThemeToggle } from "@grasp-os/ui/components/theme-toggle";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/ui/components/tooltip";
-import {
   ArrowLeftIcon,
   ArrowRightIcon,
   Icon,
@@ -148,19 +143,15 @@ const Language = () => {
       }}
       value={locale}
     >
-      {/* Named on a pause, as the bar's other tools are. */}
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <SelectTrigger
-            aria-label={t`Language: ${language}`}
-            size={tool.select}
-            variant="ghost"
-          >
-            <SelectValue />
-          </SelectTrigger>
-        </TooltipTrigger>
-        <TooltipContent>{t`Language`}</TooltipContent>
-      </Tooltip>
+      <SelectTrigger
+        aria-label={t`Language: ${language}`}
+        size={tool.select}
+        // Named on a pause, as the bar's other tools are.
+        tooltip={t`Language`}
+        variant="ghost"
+      >
+        <SelectValue />
+      </SelectTrigger>
       <SelectContent>
         {languages.map(({ code, name }) => (
           <SelectItem
@@ -189,23 +180,19 @@ const Appearance = ({ userId }: { userId: string }) => {
     applyTheme(readTheme(userId));
   }, [userId]);
   return (
-    // Named on a pause, as the bar's other tools are.
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <ThemeToggle
-          aria-label={t`Appearance`}
-          mode={mode}
-          onModeChange={(next) => {
-            if (isThemeMode(next)) {
-              chooseTheme(userId, next);
-            }
-          }}
-          size={tool.toggle}
-          variant="icon"
-        />
-      </TooltipTrigger>
-      <TooltipContent>{t`Light or dark`}</TooltipContent>
-    </Tooltip>
+    <ThemeToggle
+      aria-label={t`Appearance`}
+      mode={mode}
+      onModeChange={(next) => {
+        if (isThemeMode(next)) {
+          chooseTheme(userId, next);
+        }
+      }}
+      size={tool.toggle}
+      // Named on a pause, as the bar's other tools are.
+      tooltip={t`Light or dark`}
+      variant="icon"
+    />
   );
 };
 
