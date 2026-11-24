@@ -1,29 +1,7 @@
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@grasp-os/app-kit/components/alert-dialog";
-import { Button, buttonVariants } from "@grasp-os/app-kit/components/button";
-import { Card } from "@grasp-os/app-kit/components/card";
-import { Switch } from "@grasp-os/app-kit/components/switch";
-import {
-  Tabs,
-  TabsContent,
-  TabsCount,
-  TabsList,
-  TabsTrigger,
-} from "@grasp-os/app-kit/components/tabs";
 import type {
   Agent,
-  AgentSettings,
   AgentDocument,
-  AgentUsage,
+  AgentSettings,
   AgentWake,
 } from "@grasp-os/shared/agents";
 import type { ToolClassSetting } from "@grasp-os/shared/connect";
@@ -31,260 +9,134 @@ import type { InstructionFileText } from "@grasp-os/shared/instruction-files";
 import type { Member } from "@grasp-os/shared/members";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import type { StephenWeek } from "@grasp-os/shared/stephen-requests";
-import { Trans, useLingui } from "@lingui/react/macro";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@grasp-os/ui/components/alert-dialog";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import { Container } from "@grasp-os/ui/components/container";
+import {
+  Dialog,
+  DialogBody,
+  DialogClose,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@grasp-os/ui/components/dialog";
+import { DropdownMenuMore } from "@grasp-os/ui/components/dropdown-menu";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@grasp-os/ui/components/empty";
+import { FieldGroup } from "@grasp-os/ui/components/field";
+import { PageHeader } from "@grasp-os/ui/components/page-header";
+import {
+  Icon,
+  MessageSquareIcon,
+  PauseIcon,
+  PencilIcon,
+  PlayIcon,
+  TrashIcon,
+} from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
-import { MessageCircleIcon, TrashIcon } from "lucide-react";
-import { useId } from "react";
-import type { ReactNode } from "react";
+import { useId, useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
-import { Page, PageHeading, SectionTitle } from "../frame/page.tsx";
+import { Page } from "../frame/page.tsx";
 import { InstructionFileEditor } from "../settings/instruction-file.tsx";
-import { dollars } from "../settings/money.ts";
-import { SettingsBody, SettingsSection } from "../settings/settings-parts.tsx";
 import {
   AudienceControl,
   agentAudienceOf,
   appAudienceOf,
   chosenOf,
 } from "../settings/stephen-audience.tsx";
-import {
-  classNames,
-  Row,
-  StephenSettings,
-} from "../settings/stephen-settings.tsx";
+import { classNames, StephenSettings } from "../settings/stephen-settings.tsx";
 import type { AskableWorkflow } from "../settings/stephen-settings.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { AgentAppsPanel, workOutQuietly } from "./agent-apps-card.tsx";
 import type { AgentAppsShown } from "./agent-apps-card.tsx";
-import { AgentAvatar } from "./agent-avatar.tsx";
 import { AgentDocuments } from "./agent-documents.tsx";
-import {
-  AgentStateBadge,
-  classesOn,
-  nextWakeAt,
-  useAudienceLine,
-  wakesOn,
-} from "./agent-facts.tsx";
+import { AgentFailure } from "./agent-facts.tsx";
 import { AgentForm } from "./agent-form.tsx";
+import type { Part, Typed } from "./agent-form.tsx";
+import { AgentLook } from "./agent-look.tsx";
+import { AgentOverview } from "./agent-overview.tsx";
 import { ShareAgent } from "./agent-share.tsx";
 import { AgentWakes } from "./agent-wakes.tsx";
+import { pageText } from "./page-text.ts";
+import { SectionCard } from "./section-card.tsx";
+import { SettingRow } from "./setting-row.tsx";
+import type { AgentTab } from "./tabs.tsx";
 import type { UnsavedInstructions } from "./unsaved-instructions.ts";
 
-// One agent's page, for the company's admins: what it is, what it is
-// told, whom it answers and what it may do, and when it works on its own,
-// each on a tab. Its heading has the two things done most: a chat with
-// it, and turning it off and on. The first agent is the one every company
-// starts with; whom it reaches and what it may do stays in Settings ›
-// Stephen, and its Access tab leads there. Every other agent starts
-// reaching nobody and with nothing it may do. Each layer only narrows the
-// one above it: an agent has a class of tools for at most the people the
-// company has it for. Core keeps it all and holds every agent to it from
-// the next message (agent-builder.ts, agent-reach.ts, agent-wakes.ts).
-// Every control saves at once and reads the page again.
+// One agent's page, for the company's admins, or a person's own agent's,
+// for them alone, on Grasp UI, in the library's settings column: one
+// column in the page's middle, a card of rows per topic, the controls on
+// one edge. Its Page
+// header holds the agent (picture, name, what it is for, whether it is
+// on) and the things done most: pausing it, Chat, and Edit, which
+// changes its name, job, picture and model in a dialog. Its parts
+// are rows of the sidebar, which the agent takes over as Settings does
+// (agent-section.tsx), the part in the address (`?tab=`) so a link can
+// lead to an agent's access or its schedule:
+//
+// - Overview: its own page (agent-overview.tsx): whether it is on and
+//   when it runs next, what it is told, its schedule, and each
+//   schedule's last run.
+// - Instructions: what it is told (its instruction file, as every
+//   instruction file is edited: settings/instruction-file.tsx), the apps
+//   it may use (agent-apps-card.tsx) and the documents it answers from.
+// - Access: whom it answers and what it may do, each kind of work a row.
+//   The first agent's is the company's own, Settings › Stephen's whole.
+// - Schedule: when it works on its own (agent-wakes.tsx).
+//
+// A person's own agent has no audience, class or schedule to set, so no
+// Access or Schedule; its Overview offers it to the company
+// (agent-share.tsx).
+//
+// Each layer only narrows the one above it: an agent has a class of
+// tools for at most the people the company has it for. Core keeps it all
+// and holds every agent to it from the next message (agent-builder.ts,
+// agent-reach.ts, agent-wakes.ts). Every control saves at once and reads
+// the page again.
 
 /** What a page change asks of core, then the page read again. */
-type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
-
-/** An agent's tabs, by the names its address carries. */
-export const agentTabs = [
-  "overview",
-  "instructions",
-  "access",
-  "schedule",
-] as const;
-export type AgentTab = (typeof agentTabs)[number];
-
-/** The tab an address names; Overview for any other. */
-export const agentTabOf = (value: unknown): AgentTab =>
-  agentTabs.find((tab) => tab === value) ?? "overview";
-
-/** One fact at the head of the overview: what it is, and what holds now. */
-const Glance = ({
-  label,
-  value,
-  line,
-}: {
-  label: string;
-  value: ReactNode;
-  line?: ReactNode;
-}) => (
-  <div className="bg-card flex min-w-0 flex-col gap-1 rounded-xl border p-4">
-    <dt className="text-muted-foreground text-xs">{label}</dt>
-    <dd className="truncate font-medium">{value}</dd>
-    {line === undefined ? null : (
-      <dd className="text-muted-foreground truncate text-xs">{line}</dd>
-    )}
-  </div>
-);
-
-/** A date and time as people read it here. */
-const useMoment = () => {
-  const { i18n } = useLingui();
-  return (iso: string): string =>
-    new Intl.DateTimeFormat(i18n.locale, {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date(iso));
-};
-
-/** What a glance says: what holds, and a line under it. */
-interface Said {
-  value: string;
-  line?: string;
-}
-
 /**
- * Whom an agent answers and how much it may do, at a glance. The first
- * agent's is the company's own, set under Access. Another agent's that
- * core didn't say (as it won't for Grasp's staff) is said to be not
- * shown, never passed off as anyone's.
+ * A change asked of core, then the page read again; whether it was made.
+ * Why it wasn't goes under the page's header, or to `report` (a dialog's
+ * own line, where the person is looking).
  */
-const useAccessGlances = (
-  first: boolean,
-  settings: AgentSettings | undefined,
-  teams: StephenReach["teams"],
-  own: boolean
-): { who: Said; may: Said } => {
-  const { t } = useLingui();
-  const audienceLine = useAudienceLine(teams);
-  if (own) {
-    // A person's own agent has no settings of either: core holds both.
-    return {
-      who: { value: t`Only you`, line: t`In Grasp's chat` },
-      may: {
-        value: t`What Grasp may do for you`,
-        line: t`As your company has set it, never more`,
-      },
-    };
-  }
-  if (first) {
-    return {
-      who: {
-        value: t`Everyone with Grasp`,
-        line: t`In Grasp's chat. Chat apps are under Access.`,
-      },
-      may: { value: t`Set per app`, line: t`For each app, under Access` },
-    };
-  }
-  if (settings === undefined) {
-    const unread = {
-      value: t`Not shown`,
-      line: t`Only the company's own admins see it`,
-    };
-    return { who: unread, may: unread };
-  }
-  const classes = classesOn(settings);
-  return {
-    who: { value: audienceLine(settings.audience) },
-    may: {
-      value: t`${classes.on} of ${classes.of}`,
-      line: t`Kinds of work the company has turned on`,
-    },
-  };
-};
+type Change = (
+  action: (session: Session) => Promise<unknown>,
+  report?: (why: string) => void
+) => Promise<boolean>;
 
-/** The agent at a glance: whether it answers, whom, how much it may do, and when it works on its own. */
-const Glances = ({
-  agent,
-  first,
-  settings,
-  teams,
-  wakes,
-}: {
-  agent: Agent;
-  first: boolean;
-  settings: AgentSettings | undefined;
-  teams: StephenReach["teams"];
-  wakes: readonly AgentWake[];
-}) => {
-  const { t } = useLingui();
-  const moment = useMoment();
-  const { who, may } = useAccessGlances(
-    first,
-    settings,
-    teams,
-    agent.ownerId !== null
-  );
-  const scheduled = wakesOn(wakes).length;
-  const next = nextWakeAt(wakes);
-  return (
-    <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      <Glance
-        label={t`Status`}
-        line={
-          agent.state === "on"
-            ? t`Answers the people it is for`
-            : t`Answers nobody anywhere`
-        }
-        value={agent.state === "on" ? t`On` : t`Paused`}
-      />
-      <Glance label={t`Who may use it`} line={who.line} value={who.value} />
-      <Glance label={t`What it may do`} line={may.line} value={may.value} />
-      <Glance
-        label={t`Works on its own`}
-        line={next === undefined ? undefined : t`Next: ${moment(next)}`}
-        value={
-          scheduled === 0 ? t`Only when asked` : t`${scheduled} on a schedule`
-        }
-      />
-    </dl>
-  );
-};
-
-/** A month such as `2026-11`, as people read it: November 2026. */
-const useMonthName = () => {
-  const { i18n } = useLingui();
-  return (month: string): string => {
-    const [year = 0, of = 1] = month.split("-").map(Number);
-    return new Intl.DateTimeFormat(i18n.locale, {
-      month: "long",
-      year: "numeric",
-      timeZone: "UTC",
-    }).format(new Date(Date.UTC(year, of - 1, 1)));
-  };
-};
-
-/**
- * What the agent used of the organization's models this month: what it
- * cost, how often a model was asked, for how many people, and when last.
- * How much, never what: core says no more (agent-usage.ts).
- */
-const Usage = ({ usage }: { usage: AgentUsage }) => {
-  const { t } = useLingui();
-  const moment = useMoment();
-  const monthName = useMonthName();
-  const before = dollars(usage.spentBefore);
-  const { requests, people } = usage;
-  return (
-    <section className="flex flex-col gap-3">
-      <SectionTitle>{monthName(usage.month)}</SectionTitle>
-      <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Glance
-          label={t`Cost`}
-          line={t`${before} the month before`}
-          value={dollars(usage.spent)}
-        />
-        <Glance
-          label={t`Requests to a model`}
-          line={t`Several for one question`}
-          value={String(requests)}
-        />
-        <Glance
-          label={t`People it worked for`}
-          line={t`Asked it, or it works for them on a schedule`}
-          value={String(people)}
-        />
-        <Glance
-          label={t`Last asked`}
-          value={usage.lastAt === null ? t`Not yet` : moment(usage.lastAt)}
-        />
-      </dl>
-    </section>
-  );
-};
+const styles = stylex.create({
+  actions: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["3"],
+  },
+  // A part's cards, as far apart as the column sets its own.
+  stack: { display: "grid", gap: space["8"] },
+  // The `hidden` attribute alone loses to the stack's own display.
+  hidden: { display: "none" },
+});
 
 /** What the first agent's access is read from, as Settings › Stephen read it. */
 export interface FirstAgentAccess {
@@ -294,17 +146,15 @@ export interface FirstAgentAccess {
   workflows: AskableWorkflow[] | null;
 }
 
-/** Whom an agent answers and what it may do; the first agent's is `StephenSettings`. */
+/** Whom an agent but the first answers and what it may do, a row each. */
 const Access = ({
   agent,
-  first,
   settings,
   teams,
   can,
   change,
 }: {
   agent: Agent;
-  first: boolean;
   settings: AgentSettings | undefined;
   teams: StephenReach["teams"];
   can: boolean;
@@ -312,94 +162,93 @@ const Access = ({
 }) => {
   const { t, i18n } = useLingui();
   const { name } = agent;
-  if (first) {
-    // The first agent's is its own, larger set (`StephenSettings`).
-    return null;
-  }
   if (settings === undefined) {
     // Core didn't say, as it won't for Grasp's staff: said, never left
     // blank or shown as anyone's.
     return (
-      <SettingsSection
-        description={t`Who may use ${name} and what it may do couldn't be read. Only the company's own admins see it. If that is you, load the page again.`}
-        title={t`Access isn't shown`}
-      />
+      <Empty size="default" variant="destructive">
+        <EmptyHeader>
+          <EmptyTitle>{t`Access isn't shown`}</EmptyTitle>
+          <EmptyDescription>
+            {t`Only the company's own admins see it. If that is you, load the page again.`}
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
   return (
     <>
-      <SettingsSection
-        description={t`People outside it can't ask it anything, in Grasp or in a chat app.`}
-        title={t`Who may use it`}
-      >
-        <ul>
-          <Row
-            description={
-              settings.audience.who === "nobody"
-                ? t`Nobody yet, until you choose.`
-                : undefined
-            }
-            name={t`${name} answers`}
+      {/* A card per topic, each titled (Damsko's settings pattern); the
+          row doesn't name the agent again under the page's title. */}
+      <SectionCard flush title={t`Who may use it`}>
+        <FieldGroup controls="fit">
+          <SettingRow
+            info={t`Nobody outside it can ask it anything, in Grasp or a chat app.`}
+            label={t`Answers`}
           >
-            <AudienceControl
-              editable={can}
-              key={JSON.stringify(settings.audience)}
-              label={t`Who may use ${name}`}
-              // "Its maker alone" is chosen as "Just me" when an agent
-              // is made; offered here only to keep it, since this page
-              // doesn't say who the maker is.
-              offers={
-                settings.audience.who === "maker"
-                  ? ["everyone", "teams", "maker", "nobody"]
-                  : ["everyone", "teams", "nobody"]
-              }
-              teams={teams}
-              value={chosenOf(settings.audience)}
-              onSave={async (chosen) => {
-                await change(async (session) => {
-                  await session.connections.setAgentReach(
-                    agent.id,
-                    settings.on,
-                    agentAudienceOf(chosen)
-                  );
-                });
-              }}
-            />
-          </Row>
-        </ul>
-      </SettingsSection>
-      <SettingsSection
-        description={t`Each kind of work as the company has it, or for fewer people. Never for more.`}
+            {() => (
+              <AudienceControl
+                editable={can}
+                key={JSON.stringify(settings.audience)}
+                label={t`Who may use ${name}`}
+                // Its maker alone is chosen as an agent is made; offered
+                // here only to keep it, as this page doesn't say who that is.
+                offers={
+                  settings.audience.who === "maker"
+                    ? ["everyone", "teams", "maker", "nobody"]
+                    : ["everyone", "teams", "nobody"]
+                }
+                onSave={async (chosen) => {
+                  await change(async (session) => {
+                    await session.connections.setAgentReach(
+                      agent.id,
+                      settings.on,
+                      agentAudienceOf(chosen)
+                    );
+                  });
+                }}
+                teams={teams}
+                value={chosenOf(settings.audience)}
+              />
+            )}
+          </SettingRow>
+        </FieldGroup>
+      </SectionCard>
+      <SectionCard
+        flush
+        info={t`Each as the company has it, or for fewer people. Never more.`}
         title={t`What it may do`}
       >
-        <ul>
+        <FieldGroup controls="fit">
           {settings.classes.map(({ toolClass, audience }) => {
             const className = i18n._(classNames[toolClass]);
             return (
-              <Row key={toolClass} name={className}>
-                <AudienceControl
-                  editable={can}
-                  key={JSON.stringify(audience)}
-                  label={t`${className}, for ${name}`}
-                  offers={["same", "teams", "nobody"]}
-                  same={t`As the company has it`}
-                  teams={teams}
-                  value={chosenOf(audience)}
-                  onSave={async (chosen) => {
-                    await change(async (session) => {
-                      await session.connections.setAgentToolClass(
-                        agent.id,
-                        toolClass,
-                        appAudienceOf(chosen)
-                      );
-                    });
-                  }}
-                />
-              </Row>
+              <SettingRow key={toolClass} label={className}>
+                {() => (
+                  <AudienceControl
+                    editable={can}
+                    key={JSON.stringify(audience)}
+                    label={t`${className}, for ${name}`}
+                    offers={["same", "teams", "nobody"]}
+                    onSave={async (chosen) => {
+                      await change(async (session) => {
+                        await session.connections.setAgentToolClass(
+                          agent.id,
+                          toolClass,
+                          appAudienceOf(chosen)
+                        );
+                      });
+                    }}
+                    same={t`As the company has it`}
+                    teams={teams}
+                    value={chosenOf(audience)}
+                  />
+                )}
+              </SettingRow>
             );
           })}
-        </ul>
-      </SettingsSection>
+        </FieldGroup>
+      </SectionCard>
     </>
   );
 };
@@ -424,7 +273,13 @@ const AgentInstructions = ({
 }) => {
   const { t } = useLingui();
   if (saved === undefined) {
-    return <p className="text-muted-foreground text-sm">{t`Not shown`}</p>;
+    return (
+      <Empty size="sm">
+        <EmptyHeader>
+          <EmptyDescription>{t`Not shown`}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
   }
   const workOut = async (session: Session): Promise<void> => {
     await workOutQuietly(session, agentId);
@@ -437,6 +292,260 @@ const AgentInstructions = ({
       onSaved={first ? undefined : workOut}
       saved={saved}
       unsaved={unsaved}
+    />
+  );
+};
+
+/** Edit: the agent's name, job, picture and model, in a dialog the head's menu opens. */
+const EditAgent = ({
+  agent,
+  first,
+  typed,
+  models,
+  can,
+  save,
+  open,
+  setOpen,
+}: {
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  agent: Agent;
+  /** The company's first agent, whose look is fixed. */
+  first: boolean;
+  typed: Typed;
+  models: readonly string[];
+  can: boolean;
+  save: (
+    said: Partial<Typed>,
+    report?: (why: string) => void
+  ) => Promise<boolean>;
+}) => {
+  const { t } = useLingui();
+  const formId = useId();
+  const { name } = agent;
+  const parts: readonly Part[] = ["name", "job", "model"];
+  // The picture picked, saved with the rest on Save; Cancel drops it.
+  const [face, setFace] = useState<string>();
+  // Why the last Save didn't go through, in the dialog the person is in.
+  const [why, setWhy] = useState<string>();
+  const close = (next: boolean): void => {
+    if (!next) {
+      setFace(undefined);
+      setWhy(undefined);
+    }
+    setOpen(next);
+  };
+  return (
+    <Dialog onOpenChange={close} open={open}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t`Edit ${name}`}</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          {/* Mounted only while open, so it starts from what core keeps. */}
+          {open ? (
+            <AgentForm
+              can={can}
+              id={formId}
+              initial={typed}
+              models={models}
+              onSave={async (said) => {
+                setWhy(undefined);
+                if (
+                  await save(
+                    face === undefined ? said : { ...said, face },
+                    setWhy
+                  )
+                ) {
+                  close(false);
+                }
+              }}
+              parts={parts}
+            />
+          ) : null}
+          {open && !first ? (
+            <AgentLook
+              agent={face === undefined ? agent : { ...agent, face }}
+              can={can}
+              pick={(picked) => {
+                setFace(picked);
+              }}
+            />
+          ) : null}
+          <ErrorText>{why}</ErrorText>
+        </DialogBody>
+        <DialogFooter>
+          <DialogClose>{t`Cancel`}</DialogClose>
+          <Button
+            disabled={!can}
+            form={formId}
+            size="sm"
+            type="submit"
+            variant="default"
+          >
+            {t`Save`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+/** Delete, for good, behind a question the head's menu opens; never the first agent. */
+const DeleteAgent = ({
+  name,
+  remove,
+  open,
+  setOpen,
+}: {
+  name: string;
+  remove: (report: (why: string) => void) => Promise<void>;
+  open: boolean;
+  setOpen: (open: boolean) => void;
+}) => {
+  const { t } = useLingui();
+  // Held open while it deletes: Escape and Cancel wait for the answer.
+  const [working, setWorking] = useState(false);
+  const [why, setWhy] = useState<string>();
+  return (
+    <AlertDialog
+      onOpenChange={(next, details) => {
+        if (working) {
+          details.cancel();
+          return;
+        }
+        setWhy(undefined);
+        setOpen(next);
+      }}
+      open={open}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t`Delete ${name}?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t`It answers nobody, and its schedule and settings are removed. The chats people had with it stay theirs. To stop it for a while, pause it instead.`}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <ErrorText>{why}</ErrorText>
+        <AlertDialogFooter>
+          <AlertDialogCancel />
+          <Button
+            errorText={t`Couldn't delete`}
+            onClick={async () => {
+              setWorking(true);
+              setWhy(undefined);
+              await remove(setWhy).finally(() => {
+                setWorking(false);
+              });
+            }}
+            size="sm"
+            variant="destructive"
+          >
+            {t`Delete for good`}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+};
+
+/**
+ * The page's head: the agent's name, what it is for under it, whose it is
+ * and that it is off beside it; Chat, the one button people come for, and
+ * everything else (Edit, turning it off or on, Delete) in "…" (Ruben, 21
+ * November: the switch, Edit and Chat side by side were cluttered).
+ */
+const AgentHead = ({
+  agent,
+  first,
+  can,
+  usable,
+  change,
+  onEdit,
+  onDelete,
+}: {
+  agent: Agent;
+  first: boolean;
+  can: boolean;
+  usable: boolean;
+  change: Change;
+  onEdit: () => void;
+  onDelete: () => void;
+}) => {
+  const { t } = useLingui();
+  const { name } = agent;
+  const on = agent.state === "on";
+  const own = agent.ownerId !== null;
+  return (
+    <PageHeader
+      actions={
+        // One button, the one people come for; the rest in "…"
+        // (Ruben, 21 November: the switch, Edit and Chat were cluttered).
+        <div {...stylex.props(styles.actions)}>
+          <DropdownMenuMore
+            aria-label={t`More for ${name}`}
+            items={[
+              {
+                label: t`Edit`,
+                icon: PencilIcon,
+                disabled: !can,
+                onSelect: () => {
+                  onEdit();
+                },
+              },
+              {
+                label: on ? t`Pause` : t`Resume`,
+                icon: on ? PauseIcon : PlayIcon,
+                disabled: !can,
+                onSelect: () => {
+                  void change(async (session) => {
+                    await session.connections.setAgentPaused(agent.id, on);
+                  });
+                },
+              },
+              ...(first
+                ? []
+                : [
+                    {
+                      label: t`Delete`,
+                      icon: TrashIcon,
+                      variant: "destructive" as const,
+                      disabled: !can,
+                      onSelect: () => {
+                        onDelete();
+                      },
+                    },
+                  ]),
+            ]}
+          />
+          {usable && on ? (
+            <Button asChild size="sm">
+              <Link search={{ agent: agent.id }} to="/">
+                <Icon icon={MessageSquareIcon} />
+                {t`Chat`}
+              </Link>
+            </Button>
+          ) : null}
+        </div>
+      }
+      // Beside its name: whether it works, always (Ruben, 21 November:
+      // with the switch gone it was hard to tell), and whose it is when it
+      // is the person's own.
+      badge={
+        <span {...stylex.props(styles.actions)}>
+          {on ? (
+            <Badge variant="success">{t`On`}</Badge>
+          ) : (
+            <Badge>{t`Paused`}</Badge>
+          )}
+          {own ? <Badge>{t`Just for you`}</Badge> : null}
+        </span>
+      }
+      // What it is for, under its name: the details no longer repeat it.
+      description={agent.job === "" ? undefined : agent.job}
+      size="sm"
+      // The agent's name on every part: the side nav marks which part.
+      title={name}
     />
   );
 };
@@ -455,11 +564,10 @@ export const AgentPage = ({
   people,
   editable,
   usable,
-  usage,
+  userId,
   firstAccess,
   models,
   tab,
-  onTab,
 }: {
   agent: Agent;
   /** The company's first agent, whose reach is Settings › Stephen's. */
@@ -468,17 +576,17 @@ export const AgentPage = ({
   teams: StephenReach["teams"];
   wakes: readonly AgentWake[];
   /**
-   * Its apps and the apps the company offers; undefined where core didn't
-   * say them, and for the first agent, which has none of its own.
-   */
-  apps?: AgentAppsShown | undefined;
-  /**
    * Its instruction file as it is now, null while never written;
    * undefined where core didn't say it.
    */
   instructions: InstructionFileText | null | undefined;
   /** What was typed as it was made and couldn't be saved (unsaved-instructions.ts). */
   unsaved?: UnsavedInstructions | undefined;
+  /**
+   * Its apps and the apps the company offers; undefined where core didn't
+   * say them, and for the first agent, which has none of its own.
+   */
+  apps?: AgentAppsShown | undefined;
   /** The documents it answers from; undefined where core didn't say. */
   documents: readonly AgentDocument[] | undefined;
   /** The company's people, whom a wake-up can work for. */
@@ -487,8 +595,8 @@ export const AgentPage = ({
   editable: boolean;
   /** Whether the person may talk to it themselves. */
   usable: boolean;
-  /** What it used of the models this month; none where core didn't say. */
-  usage: AgentUsage | undefined;
+  /** Who reads the page. */
+  userId: string;
   /**
    * The first agent's access: who reaches it in each chat app, what it
    * may do in each app, and the workflows people start by asking it. None
@@ -498,16 +606,13 @@ export const AgentPage = ({
   /** The models the organization chose, which an agent can be given. */
   models: readonly string[];
   tab: AgentTab;
-  onTab: (tab: AgentTab) => void;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
   const navigate = useNavigate();
-  const switchId = useId();
-  const moment = useMoment();
   const { busy, failure, run } = useCoreAction();
-  const change: Change = async (action) => {
-    await run(async (session) => {
+  const change: Change = async (action, report) => {
+    const done = await run(async (session) => {
       await changeThenRefresh(
         async () => {
           await action(session);
@@ -516,237 +621,154 @@ export const AgentPage = ({
           await router.invalidate({ sync: true });
         }
       );
-    });
+      return true;
+    }, report);
+    return done === true;
   };
   const can = editable && !busy;
+  const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const { name } = agent;
-  const on = agent.state === "on";
-  const typed = {
+  const typed: Typed = {
     name: agent.name,
     job: agent.job,
     face: agent.face,
     model: agent.model,
   };
-  // What a card says, over the agent as core has it now: a card saves its
-  // own parts and never what another card saved since it was shown.
-  const save = async (said: Partial<typeof typed>): Promise<void> => {
-    await change(async (session) => {
-      await session.connections.changeAgent(agent.id, {
-        ...typed,
-        ...said,
-        modelRole: agent.modelRole,
-      });
-    });
+  // What a form says, over the agent as core has it now: a form saves its
+  // own parts and never what another saved since it was shown.
+  const save = async (
+    said: Partial<Typed>,
+    report?: (why: string) => void
+  ): Promise<boolean> => {
+    const done = await run(async (session) => {
+      await changeThenRefresh(
+        async () => {
+          await session.connections.changeAgent(agent.id, {
+            ...typed,
+            ...said,
+            modelRole: agent.modelRole,
+          });
+        },
+        async () => {
+          await router.invalidate({ sync: true });
+        }
+      );
+      return true;
+    }, report);
+    return done === true;
   };
-  const remove = async (): Promise<void> => {
+  const remove = async (report: (why: string) => void): Promise<void> => {
     const done = await run(async (session) => {
       await session.connections.deleteAgent(agent.id);
       return true;
-    });
-    if (done === true) {
-      await navigate({ to: "/agents", replace: true });
+    }, report);
+    if (done !== true) {
+      // The dialog's button then says it failed, and why is in the dialog.
+      throw new Error("The agent wasn't deleted.");
     }
+    await navigate({ to: "/agents", replace: true });
   };
-  const scheduled = wakesOn(wakes).length;
   // A person's own agent: theirs alone, with no audience, class or
-  // schedule to set, so no tab for either.
+  // schedule to set, so no Access or Schedule.
   const own = agent.ownerId !== null;
   const shownTab =
     own && (tab === "access" || tab === "schedule") ? "overview" : tab;
   return (
     <Page>
-      <PageHeading
-        action={
-          <div className="flex flex-wrap items-center gap-4">
-            <label
-              className="flex items-center gap-2 text-sm"
-              htmlFor={switchId}
-            >
-              <Switch
-                checked={on}
-                disabled={!can}
-                id={switchId}
-                onCheckedChange={(next) => {
-                  void change(async (session) => {
-                    await session.connections.setAgentPaused(agent.id, !next);
-                  });
-                }}
-              />
-              {on ? t`${name} is on` : t`${name} is paused`}
-            </label>
-            {usable && on ? (
-              <Link
-                className={buttonVariants()}
-                search={{ agent: agent.id }}
-                to="/"
-              >
-                <MessageCircleIcon data-icon="inline-start" />
-                <Trans>Chat with {name}</Trans>
-              </Link>
-            ) : null}
-          </div>
-        }
-        clamp
-        description={agent.job === "" ? t`No job written yet` : agent.job}
-        meta={
-          <>
-            <AgentStateBadge state={agent.state} />
-            {first ? (
-              <span className="text-muted-foreground text-xs">
-                {t`The company's first agent`}
-              </span>
-            ) : null}
-            {own ? (
-              <span className="text-muted-foreground text-xs">
-                {t`Yours alone: nobody else sees or asks it`}
-              </span>
-            ) : null}
-          </>
-        }
-        title={
-          <span className="flex items-center gap-3">
-            <AgentAvatar face={agent.face} />
-            {name}
-          </span>
-        }
-      />
-      <ErrorText>{failure}</ErrorText>
-      <Tabs
-        onValueChange={(next: unknown) => {
-          onTab(agentTabOf(next));
-        }}
-        value={shownTab}
-      >
-        <TabsList>
-          <TabsTrigger value="overview">
-            <Trans>Overview</Trans>
-          </TabsTrigger>
-          <TabsTrigger value="instructions">
-            <Trans>Instructions</Trans>
-          </TabsTrigger>
-          {own ? null : (
-            <TabsTrigger value="access">
-              <Trans>Access</Trans>
-            </TabsTrigger>
-          )}
-          {own ? null : (
-            <TabsTrigger value="schedule">
-              <Trans>Schedule</Trans>
-              {scheduled === 0 ? null : (
-                <TabsCount label={t`${scheduled} on a schedule`}>
-                  {scheduled}
-                </TabsCount>
-              )}
-            </TabsTrigger>
-          )}
-        </TabsList>
-        <TabsContent keepMounted value="overview">
-          <div className="flex flex-col gap-6">
-            <Glances
+      <div {...stylex.props(pageText.text)}>
+        <Container size="sm">
+          {shownTab === "overview" ? null : (
+            <AgentHead
               agent={agent}
+              can={can}
+              change={change}
               first={first}
-              settings={settings}
-              teams={teams}
-              wakes={wakes}
+              onDelete={() => {
+                setDeleting(true);
+              }}
+              onEdit={() => {
+                setEditing(true);
+              }}
+              usable={usable}
             />
-            {usage === undefined ? null : <Usage usage={usage} />}
-            <ShareAgent agent={agent} can={can} change={change} />
-            <SettingsSection
-              description={t`What people call it, one line on what it is for, and its picture. All three show where people pick an agent.`}
-              title={t`Name, job and picture`}
+          )}
+          <EditAgent
+            agent={agent}
+            first={first}
+            can={can}
+            models={models}
+            open={editing}
+            save={save}
+            setOpen={setEditing}
+            typed={typed}
+          />
+          {first ? null : (
+            <DeleteAgent
+              name={name}
+              open={deleting}
+              remove={remove}
+              setOpen={setDeleting}
+            />
+          )}
+          <AgentFailure>{failure}</AgentFailure>
+          {/* The other tabs stay mounted, hidden: what is typed and not yet
+          saved on one stays while another is looked at. The overview holds
+          nothing typed, so it mounts only when shown. */}
+          {shownTab === "overview" ? (
+            <AgentOverview
+              agent={agent}
+              apps={apps?.apps}
+              can={can}
+              editable={editable}
+              first={first}
+              instructions={instructions}
+              onDelete={() => {
+                setDeleting(true);
+              }}
+              onEdit={() => {
+                setEditing(true);
+              }}
+              pause={(paused: boolean) => {
+                void change(async (session) => {
+                  await session.connections.setAgentPaused(agent.id, paused);
+                });
+              }}
+              people={people}
+              usable={usable}
+              userId={userId}
+              wakes={wakes}
             >
-              <AgentForm
-                can={can}
-                initial={typed}
-                // By what core keeps: what is typed and not yet saved stays
-                // while the agent is paused or its reach changes.
-                key={`${agent.id}:${agent.name}:${agent.job}:${agent.face}`}
-                onSave={save}
-                parts={["name", "job", "face"]}
-                submit={t`Save`}
-              />
-            </SettingsSection>
-            <SettingsSection
-              description={t`Which model answers when ${name} is asked.`}
-              title={t`Model`}
-            >
-              <AgentForm
-                can={can}
-                initial={typed}
-                key={`${agent.id}:${agent.model ?? ""}`}
-                models={models}
-                onSave={save}
-                parts={["model"]}
-                submit={t`Save`}
-              />
-            </SettingsSection>
-            {first ? null : (
-              <SettingsSection
-                action={
-                  <AlertDialog>
-                    <AlertDialogTrigger
-                      disabled={!can}
-                      render={<Button size="sm" variant="destructive" />}
-                    >
-                      <TrashIcon data-icon="inline-start" />
-                      <Trans>Delete</Trans>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>
-                          <Trans>Delete {name}?</Trans>
-                        </AlertDialogTitle>
-                        <AlertDialogDescription>
-                          <Trans>
-                            It is gone for good: it answers nobody, and its
-                            schedule and settings are removed. The chats people
-                            had with it stay theirs to read.
-                          </Trans>
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>
-                          <Trans>Cancel</Trans>
-                        </AlertDialogCancel>
-                        <AlertDialogAction
-                          onClick={() => {
-                            void remove();
-                          }}
-                          variant="destructive"
-                        >
-                          <Trans>Delete for good</Trans>
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                }
-                description={t`For good. To stop it answering for a while, turn it off instead.`}
-                title={t`Delete ${name}`}
-              />
+              <ShareAgent agent={agent} can={can} change={change} />
+            </AgentOverview>
+          ) : null}
+          <div
+            hidden={shownTab !== "instructions"}
+            {...stylex.props(
+              styles.stack,
+              shownTab !== "instructions" && styles.hidden
             )}
-            {agent.changedAt === null ? null : (
-              <p className="text-muted-foreground text-xs">
-                <Trans>Last changed {moment(agent.changedAt)}</Trans>
-              </p>
-            )}
-          </div>
-        </TabsContent>
-        <TabsContent keepMounted value="instructions">
-          <div className="flex flex-col gap-6">
-            <SettingsSection
-              description={t`What ${name} should know and how it should work, on top of Grasp's own rules. Those always hold over what is written here.`}
-              title={t`Instructions`}
-            >
-              <SettingsBody>
-                <AgentInstructions
-                  agentId={agent.id}
-                  first={first}
-                  saved={instructions}
-                  unsaved={unsaved}
-                />
-              </SettingsBody>
-            </SettingsSection>
+          >
+            {/* What it reads first (Ruben, 21 November: documents at the top,
+              for what is worked out of them), then what it is told. */}
+            <AgentDocuments
+              agent={agent}
+              can={can}
+              change={change}
+              documents={documents}
+              editable={editable}
+            />
+            {/* No title: the side nav says "Instructions" already. */}
+            <SectionCard aria-label={t`Instructions`}>
+              <AgentInstructions
+                agentId={agent.id}
+                first={first}
+                saved={instructions}
+                unsaved={unsaved}
+              />
+            </SectionCard>
             <AgentAppsPanel
+              told={instructions?.text ?? ""}
               agent={agent}
               apps={apps}
               can={can}
@@ -756,65 +778,53 @@ export const AgentPage = ({
               people={people}
               wakes={wakes}
             />
-            <Card variant="panel">
-              <ul className="[&>li:first-child]:border-t-0">
-                <AgentDocuments
-                  agent={agent}
-                  can={can}
-                  change={change}
-                  documents={documents}
-                  editable={editable}
-                />
-              </ul>
-            </Card>
           </div>
-        </TabsContent>
-        {own ? null : (
-          <>
-            <TabsContent keepMounted value="access">
-              <div className="flex flex-col gap-6">
-                {firstAccess === undefined ? (
-                  <Access
-                    agent={agent}
-                    can={can}
-                    change={change}
-                    first={first}
-                    settings={settings}
-                    teams={teams}
-                  />
-                ) : (
-                  // The first agent's reach is the company's own, with a place
-                  // for each chat app and a row for each app: its settings
-                  // whole, as Settings › Stephen had them.
-                  <StephenSettings
-                    classes={firstAccess.classes}
-                    editable={editable}
-                    reach={firstAccess.reach}
-                    week={firstAccess.week}
-                    workflows={firstAccess.workflows}
-                  />
-                )}
-              </div>
-            </TabsContent>
-            <TabsContent keepMounted value="schedule">
-              <div className="flex flex-col gap-6">
-                <Card variant="panel">
-                  <ul className="[&>li:first-child]:border-t-0">
-                    <AgentWakes
-                      agent={agent}
-                      can={can}
-                      change={change}
-                      editable={editable}
-                      people={people}
-                      wakes={wakes}
-                    />
-                  </ul>
-                </Card>
-              </div>
-            </TabsContent>
-          </>
-        )}
-      </Tabs>
+          <div
+            hidden={shownTab !== "access"}
+            {...stylex.props(
+              styles.stack,
+              shownTab !== "access" && styles.hidden
+            )}
+          >
+            {firstAccess === undefined ? (
+              <Access
+                agent={agent}
+                can={can}
+                change={change}
+                settings={settings}
+                teams={teams}
+              />
+            ) : (
+              // The first agent's reach is the company's own, with a place
+              // for each chat app and a row for each app: its settings
+              // whole, as Settings › Stephen had them.
+              <StephenSettings
+                classes={firstAccess.classes}
+                editable={editable}
+                reach={firstAccess.reach}
+                week={firstAccess.week}
+                workflows={firstAccess.workflows}
+              />
+            )}
+          </div>
+          <div
+            hidden={shownTab !== "schedule"}
+            {...stylex.props(
+              styles.stack,
+              shownTab !== "schedule" && styles.hidden
+            )}
+          >
+            <AgentWakes
+              agent={agent}
+              can={can}
+              change={change}
+              editable={editable}
+              people={people}
+              wakes={wakes}
+            />
+          </div>
+        </Container>
+      </div>
     </Page>
   );
 };

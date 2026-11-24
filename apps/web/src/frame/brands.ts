@@ -23,6 +23,8 @@ import type { IconData } from "@grasp-os/ui/lib/icons";
 interface Part {
   d: string;
   fill: string;
+  /** How a part with holes in it is filled. */
+  rule?: "evenodd";
 }
 
 /** A brand's parts as drawing data, placed on the 24 grid by `transform` (none: drawn on it). */
@@ -36,6 +38,9 @@ const brandMark = (transform: string, parts: Part[]): IconData =>
             key: `part-${index}`,
             d: part.d,
             fill: part.fill,
+            ...(part.rule === undefined
+              ? {}
+              : { fillRule: part.rule, clipRule: part.rule }),
             ...(transform === "" ? {} : { transform }),
           },
         ] as const
@@ -84,6 +89,50 @@ const BrandClaude: IconData = brandMark("translate(0.48 0.48) scale(0.96)", [
     fill: "#D97757",
   },
 ]);
+
+/** Slack, a place people reach Stephen. */
+const BrandSlack: IconData = brandMark("translate(0.72 0.72) scale(0.94)", [
+  {
+    d: "M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313z",
+    fill: "#E01E5A",
+  },
+  {
+    d: "M8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312z",
+    fill: "#36C5F0",
+  },
+  {
+    d: "M18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312z",
+    fill: "#2EB67D",
+  },
+  {
+    d: "M15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z",
+    fill: "#ECB22E",
+  },
+]);
+
+/** Microsoft Teams, a place people reach Stephen. */
+const BrandTeams: IconData = brandMark("translate(0.48 0.48) scale(0.96)", [
+  {
+    d: "M21.25 3.6a1.9 1.9 0 1 1 0 3.8 1.9 1.9 0 0 1 0-3.8zM19 8.75h5v5.5a3 3 0 0 1-3 3h-2z",
+    fill: "#5059C9",
+  },
+  {
+    d: "M16.5 2.15a2.6 2.6 0 1 1 0 5.2 2.6 2.6 0 0 1 0-5.2zM13.75 8.75h6.75V15a4.5 4.5 0 0 1-6.75 3.9z",
+    fill: "#7B83EB",
+  },
+  {
+    d: "M1.25 5.5h10.5c.69 0 1.25.56 1.25 1.25v10.5c0 .69-.56 1.25-1.25 1.25H1.25C.56 18.5 0 17.94 0 17.25V6.75C0 6.06.56 5.5 1.25 5.5zM3 8.25h7V10H7.4v6.25H5.6V10H3z",
+    fill: "#4B53BC",
+    rule: "evenodd",
+  },
+  { d: "M3 8.25h7V10H7.4v6.25H5.6V10H3z", fill: "#FFFFFF" },
+]);
+
+/** The mark of each chat platform Stephen can be added to that the product has one for, by its id. */
+export const placeMarks: Readonly<Record<string, IconData>> = {
+  slack: BrandSlack,
+  teams: BrandTeams,
+};
 
 /** The mark of each of Grasp's own connectors, by its id, and the name its company goes by. */
 export const brands = {

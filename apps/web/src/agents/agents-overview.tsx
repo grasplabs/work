@@ -1,21 +1,3 @@
-import { buttonVariants } from "@grasp-os/app-kit/components/button";
-import {
-  Empty,
-  EmptyContent,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@grasp-os/app-kit/components/empty";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@grasp-os/app-kit/components/input-group";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/app-kit/components/toggle-group";
 import type {
   Agent,
   AgentSettings,
@@ -25,41 +7,56 @@ import type {
 import type { ChatAgent } from "@grasp-os/shared/chat";
 import type { Member } from "@grasp-os/shared/members";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
 import {
-  BotIcon,
-  CalendarClockIcon,
-  CoinsIcon,
-  MessageCircleIcon,
-  PlusIcon,
-  SearchIcon,
-  UsersRoundIcon,
-  WrenchIcon,
-} from "lucide-react";
-import { useState } from "react";
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@grasp-os/ui/components/empty";
+import { PageHeader } from "@grasp-os/ui/components/page-header";
+import { SectionHeader } from "@grasp-os/ui/components/section-header";
+import { Tabs, TabsContent } from "@grasp-os/ui/components/tabs";
+import { Icon, PlusIcon, UserSparklesIcon } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
-import { Page, PageHeading } from "../frame/page.tsx";
-import { dollars } from "../settings/money.ts";
-import { AgentAvatar } from "./agent-avatar.tsx";
-import {
-  AgentStateBadge,
-  classesOn,
-  useAudienceLine,
-  wakesOn,
-} from "./agent-facts.tsx";
+import { modelName } from "../chat/composer.tsx";
+import { formatDollars } from "../format.ts";
+import { Page } from "../frame/page.tsx";
+import { AgentCard, agentCardStyles } from "./agent-card.tsx";
+import type { AgentCardFact } from "./agent-card.tsx";
+import { nextWakeAt, useAudienceLine, wakesOn } from "./agent-facts.tsx";
 import { OfferedAgents } from "./agent-share.tsx";
-import { OwnAgentsCard } from "./own-agents-admin.tsx";
-import type { OwnAgentsAdmin } from "./own-agents-admin.tsx";
+import { lookOf } from "./figure/look.ts";
+import { pageText } from "./page-text.ts";
+import { AgentTabList, agentsTabOf } from "./tabs.tsx";
+import type { AgentsTab } from "./tabs.tsx";
 
-// The Agents page: the company's agents as a grid of cards, as the Apps
-// page has its Apps (apps/apps-overview.tsx). Everyone sees the agents
-// they may talk to (`chats.agents`), each with the way into a chat with
-// it. The company's admins see every agent (`connections.agents`), with
-// whether it is on, whom it answers, how much it may do and whether it
-// works on its own; a card opens the agent's page (agent-page.tsx), and
-// New agent starts one (new-agent.tsx).
+// The Agents page: the agents as portraits, on the library's AgentCard: the agent's own light on the
+// page's ground, its name in the serif with its job under it, its figure (in the shape and palette
+// it was given, figure/) large and cropped by the card's corner, and whom it answers as a pill at
+// its foot. The whole card is one link. A paused agent sleeps, and says so.
+//
+// Everyone sees the agents they may talk to (`chats.agents`), and their card opens a chat with it,
+// the agent mentioned in its box. A person's own agents (`connections.ownAgents`), which nobody else
+// sees, stand first, each opening its page. The company's admins see every agent of the company
+// (`connections.agents`), and its card opens its page; resting on one, or reaching it with the
+// keys, grows three facts inside the card: whether it works on its own and when next, its model,
+// and this month's use.
+//
+// An admin's agents stand under two tabs: My agents, their own agents and nobody else's, and
+// Organization, every agent of the company, the company's first among them, with the agents people
+// offered the company (agent-share.tsx) and people's own agents (own-agents-admin.tsx) under them.
+// The tab is in the address (`?tab=`). Anyone else has only their own and the agents shared with
+// them, and so no tabs.
 
 /** What an admin's read adds to the agents: every agent, and what core keeps of each. */
 export interface ManagedAgents {
@@ -74,51 +71,21 @@ export interface ManagedAgents {
   teams: StephenReach["teams"];
 }
 
-/** New agent: the page's one action. */
-const NewAgentLink = () => (
-  <Link className={buttonVariants()} to="/agents/new">
-    <PlusIcon data-icon="inline-start" />
-    <Trans>New agent</Trans>
-  </Link>
-);
-
-/** One fact of an agent on its card: an icon and a few words. */
-const Fact = ({ icon, children }: { icon: ReactNode; children: ReactNode }) => (
-  <span className="flex min-w-0 items-center gap-1.5 [&_svg]:size-3.5 [&_svg]:flex-none">
-    {icon}
-    <span className="truncate">{children}</span>
-  </span>
-);
-
-/** Into a new chat with an agent; above the card's own link. */
-const ChatLink = ({ agentId, name }: { agentId: string; name: string }) => {
-  const { t } = useLingui();
-  return (
-    <Link
-      aria-label={t`Chat with ${name}`}
-      className={buttonVariants({
-        size: "sm",
-        variant: "outline",
-        className: "relative z-10",
-      })}
-      search={{ agent: agentId }}
-      to="/"
-    >
-      <MessageCircleIcon data-icon="inline-start" />
-      <Trans>Chat</Trans>
-    </Link>
-  );
-};
+const styles = stylex.create({
+  // The person's own and the company's, a group each.
+  groups: { display: "grid", gap: space["7"] },
+  group: { display: "grid", gap: space["4"] },
+  // The room between the tabs and the cards: with the tab panel's own 16px, the page gap (24px).
+  tabsRoom: { marginBlockEnd: space["2"] },
+});
 
 /** What a card shows of one agent. */
 interface Shown {
   id: string;
   name: string;
   job: string;
-  /** The figure it is drawn with, by name. */
+  /** The look it was given, as core keeps it. */
   face: string;
-  /** Whether the person may talk to it. */
-  usable: boolean;
   /** Whether it answers, for one of the person's own; undefined for any other. */
   own?: Agent["state"];
   /** As an admin reads it; undefined for anyone else. */
@@ -126,164 +93,23 @@ interface Shown {
     | {
         state: Agent["state"];
         first: boolean;
+        /** The model its turns use; null for the one its asker picks. */
+        model: string | null;
         settings: AgentSettings | undefined;
         wakes: readonly AgentWake[];
         usage: AgentUsage | undefined;
       }
     | undefined;
 }
+type Managed = NonNullable<Shown["managed"]>;
 
-/**
- * Whom an agent answers, on its card: the first agent everyone with
- * Grasp; another its own audience (`line`), or that it isn't shown where
- * core didn't say, never passed off as everyone.
- */
-const AudienceFact = ({
-  first,
-  line,
-}: {
-  first: boolean;
-  line: string | undefined;
-}) => {
-  if (first) {
-    return <Trans>Everyone with Grasp</Trans>;
-  }
-  return line ?? <Trans>Access not shown</Trans>;
-};
-
-/** What an admin's card says of an agent under its job. */
-const ManagedFacts = ({
-  managed,
-  teams,
-}: {
-  managed: NonNullable<Shown["managed"]>;
-  teams: StephenReach["teams"];
-}) => {
-  const audienceLine = useAudienceLine(teams);
-  const { settings, first, usage } = managed;
-  const spent = usage === undefined ? undefined : dollars(usage.spent);
-  const scheduled = wakesOn(managed.wakes).length;
-  const classes = settings === undefined ? undefined : classesOn(settings);
-  return (
-    <div className="text-muted-foreground flex flex-col gap-1.5 text-xs">
-      <Fact icon={<UsersRoundIcon />}>
-        <AudienceFact
-          first={first}
-          line={
-            settings === undefined ? undefined : audienceLine(settings.audience)
-          }
-        />
-      </Fact>
-      {classes === undefined ? null : (
-        <Fact icon={<WrenchIcon />}>
-          {classes.on === 0 ? (
-            <Trans>May do nothing yet</Trans>
-          ) : (
-            <Trans>
-              {classes.on} of {classes.of} kinds of work
-            </Trans>
-          )}
-        </Fact>
-      )}
-      <Fact icon={<CalendarClockIcon />}>
-        {scheduled === 0 ? (
-          <Trans>Only when asked</Trans>
-        ) : (
-          <Plural
-            one="Works on its own, # schedule"
-            other="Works on its own, # schedules"
-            value={scheduled}
-          />
-        )}
-      </Fact>
-      {/* Only once it was asked this month: a new agent has cost nothing to say. */}
-      {usage === undefined || usage.requests === 0 ? null : (
-        <Fact icon={<CoinsIcon />}>
-          <Trans>{spent} this month</Trans>
-        </Fact>
-      )}
-    </div>
-  );
-};
-
-/**
- * One agent: its card. One the person manages opens its page; any other
- * is only shown. Its Chat button opens the chat with it mentioned.
- */
-const AgentCard = ({
-  shown,
-  teams,
-}: {
-  shown: Shown;
-  teams: StephenReach["teams"];
-}) => {
-  const { managed, own } = shown;
-  const nameClass =
-    "truncate font-medium outline-none after:absolute after:inset-0 after:rounded-xl focus-visible:underline";
-  const state = managed?.state ?? own;
-  const answers = state === undefined || state === "on";
-  return (
-    <li className="bg-card hover:border-ring/40 relative flex min-w-0 flex-col gap-4 rounded-xl border p-4 transition-colors">
-      <div className="flex items-start gap-3">
-        <AgentAvatar face={shown.face} />
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          {state === undefined ? (
-            // Not theirs to manage: the page asks nothing; its Chat button
-            // opens the chat with it mentioned.
-            <span className="truncate font-medium">{shown.name}</span>
-          ) : (
-            <Link
-              className={nameClass}
-              params={{ agent: shown.id }}
-              to="/agents/$agent"
-            >
-              {shown.name}
-            </Link>
-          )}
-          <p className="text-muted-foreground line-clamp-2 text-sm">
-            {shown.job === "" ? <Trans>No job written yet</Trans> : shown.job}
-          </p>
-        </div>
-      </div>
-      {managed === undefined ? null : (
-        <ManagedFacts managed={managed} teams={teams} />
-      )}
-      {own === undefined ? null : (
-        <div className="text-muted-foreground flex flex-col gap-1.5 text-sm">
-          <Fact icon={<UsersRoundIcon />}>
-            <Trans>Only you</Trans>
-          </Fact>
-        </div>
-      )}
-      <div className="mt-auto flex min-h-8 items-center justify-between gap-2">
-        {state === undefined ? <span /> : <AgentStateBadge state={state} />}
-        {shown.usable && answers ? (
-          <ChatLink agentId={shown.id} name={shown.name} />
-        ) : null}
-      </div>
-    </li>
-  );
-};
-
-/** Which agents an admin's list shows. */
-const filters = ["all", "on", "paused"] as const;
-type Filter = (typeof filters)[number];
-
-/**
- * The cards of the person's own agents, each opening its page, with a way
- * into a chat only for one core lists them as asking (`usable`): none
- * while the company has them off.
- */
-const ownShownOf = (
-  own: readonly Agent[],
-  usable: readonly ChatAgent[]
-): Shown[] =>
+/** The cards of the person's own agents, each opening its page. */
+const ownShownOf = (own: readonly Agent[]): Shown[] =>
   own.map(({ id, name, job, face, state }) => ({
     id,
     name,
     job,
     face,
-    usable: usable.some((each) => each.id === id),
     own: state,
     managed: undefined,
   }));
@@ -304,7 +130,6 @@ const shownOf = (
       name,
       job,
       face,
-      usable: true,
       managed: undefined,
     }));
   }
@@ -314,10 +139,10 @@ const shownOf = (
     name: agent.name,
     job: agent.job,
     face: agent.face,
-    usable: usable.some(({ id }) => id === agent.id),
     managed: {
       state: agent.state,
       first: agent.id === first?.id,
+      model: agent.model,
       settings: managed.settings[agent.id],
       wakes: managed.wakes[agent.id] ?? [],
       usage: managed.usage[agent.id],
@@ -325,29 +150,254 @@ const shownOf = (
   }));
 };
 
+/** The wake-up that ran last, if any did. */
+const lastRunOf = (wakes: readonly AgentWake[]): AgentWake | undefined =>
+  wakes
+    .filter(({ lastAt }) => lastAt !== null)
+    .toSorted((a, b) => (b.lastAt ?? "").localeCompare(a.lastAt ?? ""))
+    .at(0);
+
+/** Whether a wake-up's last run didn't start. */
+const failed = (wake: AgentWake | undefined): boolean =>
+  wake?.lastOutcome !== undefined &&
+  wake.lastOutcome !== null &&
+  wake.lastOutcome !== "started";
+
+/** What a card says of an agent beyond its name and job. */
+interface Facts {
+  /** Whom it answers, as the pill at the card's foot; none where core didn't say. */
+  audience: string | undefined;
+  /** What grows inside the card: on its own, its model, this month. */
+  details: AgentCardFact[];
+  /** Its last run didn't start. */
+  failed: boolean;
+}
+
+/**
+ * What an admin's card says of an agent before it is opened. Whom it answers: everyone, its teams or
+ * nobody yet, and nothing where core didn't say, never passed off as everyone. Then whether it works
+ * on its own and when next, its model, and this month's use.
+ */
+const useFacts = (teams: StephenReach["teams"]) => {
+  const { t, i18n } = useLingui();
+  const audienceLine = useAudienceLine(teams);
+  // Short enough for one line of the card: the day and the time.
+  const moment = (iso: string): string =>
+    new Intl.DateTimeFormat(i18n.locale, {
+      day: "numeric",
+      month: "short",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(new Date(iso));
+  return ({ settings, first, model, usage, wakes }: Managed): Facts => {
+    let audience: string | undefined;
+    if (first) {
+      audience = t`Everyone`;
+    } else if (settings !== undefined) {
+      audience = audienceLine(settings.audience);
+    }
+    const scheduled = wakesOn(wakes).length;
+    const next = nextWakeAt(wakes);
+    let own = t`Only when asked`;
+    if (next !== undefined) {
+      own = moment(next);
+    } else if (scheduled > 0) {
+      own = plural(scheduled, { one: "# schedule", other: "# schedules" });
+    }
+    return {
+      audience,
+      details: [
+        { key: t`On its own`, value: own },
+        {
+          key: t`Model`,
+          value: model === null ? t`The asker's` : modelName(model),
+        },
+        // Left out where core didn't say what it used.
+        ...(usage === undefined
+          ? []
+          : [{ key: t`This month`, value: formatDollars(usage.spent) }]),
+      ],
+      failed: failed(lastRunOf(wakes)),
+    };
+  };
+};
+
+/**
+ * One agent's card. For an admin the whole card opens the agent's page, with whom it answers at its
+ * foot and its details on hover and focus; one of the person's own opens its page too; for anyone
+ * else it opens a chat with the agent mentioned.
+ */
+const AgentPortrait = ({
+  shown,
+  facts,
+}: {
+  shown: Shown;
+  facts: Facts | undefined;
+}) => {
+  const { t } = useLingui();
+  const { name } = shown;
+  const job = shown.job === "" ? t`No job written yet` : shown.job;
+  const look = lookOf(shown);
+  if (facts === undefined) {
+    return (
+      <AgentCard
+        aria-label={t`Chat with ${name}`}
+        headingLevel={2}
+        job={job}
+        look={look}
+        name={name}
+        opens={{ chat: shown.id }}
+      />
+    );
+  }
+  const paused = (shown.managed?.state ?? shown.own) === "paused";
+  return (
+    <AgentCard
+      audience={facts.audience}
+      details={facts.details}
+      headingLevel={2}
+      job={job}
+      look={look}
+      name={name}
+      paused={paused}
+      opens={{ page: shown.id }}
+      status={
+        paused || facts.failed ? (
+          <>
+            {paused ? (
+              <Badge size="sm" variant="default">
+                {t`Paused`}
+              </Badge>
+            ) : null}
+            {facts.failed ? (
+              <Badge size="sm" variant="destructive">
+                {t`Last run failed`}
+              </Badge>
+            ) : null}
+          </>
+        ) : undefined
+      }
+    />
+  );
+};
+
 /** A group of agents' cards. */
-const Cards = ({
+const AgentGrid = ({
   agents,
-  teams,
+  facts,
   label,
 }: {
   agents: readonly Shown[];
-  teams: StephenReach["teams"];
+  facts: (shown: Shown) => Facts | undefined;
   label: string;
 }) => (
-  <ul
-    aria-label={label}
-    className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
-  >
+  <ul aria-label={label} {...stylex.props(agentCardStyles.grid)}>
     {agents.map((agent) => (
-      <AgentCard key={agent.id} shown={agent} teams={teams} />
+      <li key={agent.id}>
+        <AgentPortrait facts={facts(agent)} shown={agent} />
+      </li>
     ))}
   </ul>
 );
 
+/** The person's own agents first, then the company's, told apart only where there are both. */
+const AgentGroups = ({
+  mine,
+  agents,
+  facts,
+}: {
+  mine: readonly Shown[];
+  agents: readonly Shown[];
+  facts: (shown: Shown) => Facts | undefined;
+}) => {
+  const { t } = useLingui();
+  return (
+    <div {...stylex.props(styles.groups)}>
+      {mine.length === 0 ? null : (
+        <section {...stylex.props(styles.group)}>
+          <SectionHeader
+            description={t`Only you see and ask these.`}
+            size="sm"
+            title={t`Yours`}
+          />
+          <AgentGrid agents={mine} facts={facts} label={t`Your agents`} />
+        </section>
+      )}
+      {agents.length === 0 ? null : (
+        <section {...stylex.props(styles.group)}>
+          {mine.length === 0 ? null : (
+            <SectionHeader size="sm" title={t`Your company's`} />
+          )}
+          <AgentGrid agents={agents} facts={facts} label={t`Agents`} />
+        </section>
+      )}
+    </div>
+  );
+};
+
 /**
- * The Agents page's body: the person's `own` agents, the company's they
- * may `usable`, and what an admin `managed`.
+ * An admin's agents under their two tabs, the chosen one's shown: their own (`mine`) under My
+ * agents, and every agent of the company with what an admin keeps of it (`company`) under
+ * Organization.
+ */
+const AgentTabs = ({
+  mine,
+  agents,
+  facts,
+  company,
+  tab,
+  onTab,
+}: {
+  mine: readonly Shown[];
+  agents: readonly Shown[];
+  facts: (shown: Shown) => Facts | undefined;
+  company: ReactNode;
+  tab: AgentsTab | undefined;
+  onTab: (tab: AgentsTab) => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <Tabs
+      onValueChange={(value) => {
+        const chosen = agentsTabOf(value);
+        if (chosen !== undefined) {
+          onTab(chosen);
+        }
+      }}
+      // With no tab in the address, My agents while there are any, else the company's.
+      value={tab ?? (mine.length > 0 ? "mine" : "organization")}
+    >
+      <div {...stylex.props(styles.tabsRoom)}>
+        <AgentTabList />
+      </div>
+      <TabsContent value="mine">
+        {mine.length === 0 ? (
+          <Empty>
+            <EmptyHeader>
+              <EmptyMedia illustration="nothing" />
+              <EmptyDescription>
+                {t`Agents only you can use stand here.`}
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <AgentGrid agents={mine} facts={facts} label={t`Your agents`} />
+        )}
+      </TabsContent>
+      <TabsContent value="organization">
+        {/* Never empty: the company's first agent is always the organization's. */}
+        <div {...stylex.props(styles.groups)}>
+          <AgentGrid agents={agents} facts={facts} label={t`Agents`} />
+          {company}
+        </div>
+      </TabsContent>
+    </Tabs>
+  );
+};
+
+/**
+ * The Agents page's body: the person's `own` agents, the company's they may `usable`, and what an
+ * admin `managed`, under the `tab` the address names.
  */
 export const AgentsOverview = ({
   usable,
@@ -356,7 +406,8 @@ export const AgentsOverview = ({
   makes,
   makesOwn,
   offered,
-  ownAdmin,
+  tab,
+  onTab,
 }: {
   usable: readonly ChatAgent[];
   managed: ManagedAgents | undefined;
@@ -368,174 +419,83 @@ export const AgentsOverview = ({
   makesOwn: boolean;
   /** For admins: the agents people offered the company, and who they are. */
   offered?: { agents: readonly Agent[]; people: readonly Member[] } | undefined;
-  /** What an admin reads of people's own agents; undefined for anyone else. */
-  ownAdmin?: OwnAgentsAdmin | undefined;
+  /** The tab the address names; none shows the first with agents in it. */
+  tab: AgentsTab | undefined;
+  /** Puts the tab chosen in the address. */
+  onTab: (tab: AgentsTab) => void;
 }) => {
   const { t } = useLingui();
-  const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState<Filter>("all");
+  const factsOf = useFacts(managed?.teams ?? []);
   const agents = shownOf(usable, managed);
-  const asked = query.trim();
-  const needle = asked.toLocaleLowerCase();
-  const matches = (agent: Shown): boolean =>
-    needle === "" ||
-    agent.name.toLocaleLowerCase().includes(needle) ||
-    agent.job.toLocaleLowerCase().includes(needle);
-  const shown = agents.filter(
-    (agent) =>
-      matches(agent) && (filter === "all" || agent.managed?.state === filter)
-  );
-  const mine = ownShownOf(own, usable).filter(
-    (agent) => matches(agent) && (filter === "all" || agent.own === filter)
-  );
-  const paused = agents.filter(
-    (agent) => agent.managed?.state === "paused"
-  ).length;
-  const canMake = makes || makesOwn;
+  const mine = ownShownOf(own);
+  // One of the person's own says at its foot that it is theirs alone.
+  const facts = (shown: Shown): Facts | undefined => {
+    if (shown.managed !== undefined) {
+      return factsOf(shown.managed);
+    }
+    return shown.own === undefined
+      ? undefined
+      : { audience: t`Just for me`, details: [], failed: false };
+  };
+  const newAgent =
+    makes || makesOwn ? (
+      <Button asChild size="sm">
+        <Link to="/agents/new">
+          <Icon icon={PlusIcon} />
+          {t`New agent`}
+        </Link>
+      </Button>
+    ) : undefined;
+  let emptyLine: string | undefined;
+  if (managed !== undefined) {
+    emptyLine = t`Make one for a job, such as chasing unpaid invoices.`;
+  } else if (makesOwn) {
+    emptyLine = t`The agents your company sets up for you show here. You can also make one of your own.`;
+  }
+  const none = agents.length === 0 && mine.length === 0;
+  const company =
+    offered === undefined ? null : (
+      <OfferedAgents
+        editable={makes}
+        offered={offered.agents}
+        people={offered.people}
+      />
+    );
   return (
     <Page>
-      <PageHeading
-        action={canMake ? <NewAgentLink /> : undefined}
-        description={
-          managed === undefined ? (
-            <Trans>
-              The agents you can ask. Each has its own job and knows its own
-              part of the company.
-            </Trans>
-          ) : (
-            <Trans>
-              Each agent has its own name and job, answers only the people you
-              choose, and does only what you let it.
-            </Trans>
-          )
-        }
-        title={<Trans>Agents</Trans>}
-      />
-      {agents.length === 0 && own.length === 0 ? (
-        <Empty>
-          <EmptyHeader>
-            <EmptyMedia variant="icon">
-              <BotIcon />
-            </EmptyMedia>
-            <EmptyTitle>
-              <Trans>No agents yet</Trans>
-            </EmptyTitle>
-            <EmptyDescription>
-              {managed === undefined ? (
-                <Trans>
-                  The agents your company sets up for you show here. You can
-                  also make one of your own.
-                </Trans>
-              ) : (
-                <Trans>
-                  Make one for a job, such as chasing unpaid invoices, and say
-                  who may ask it.
-                </Trans>
+      <div {...stylex.props(pageText.text)}>
+        <PageHeader actions={newAgent} title={t`Agents`} />
+        {none ? (
+          <Empty size="lg">
+            <EmptyHeader>
+              <EmptyMedia icon={UserSparklesIcon} />
+              <EmptyTitle>{t`No agents yet`}</EmptyTitle>
+              {/* Only who can make one is told what to do. */}
+              {emptyLine === undefined ? null : (
+                <EmptyDescription>{emptyLine}</EmptyDescription>
               )}
-            </EmptyDescription>
-          </EmptyHeader>
-          {canMake ? (
-            <EmptyContent>
-              <NewAgentLink />
-            </EmptyContent>
-          ) : null}
-        </Empty>
-      ) : (
-        <>
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="w-full sm:w-72">
-              <InputGroup>
-                <InputGroupInput
-                  aria-label={t`Search the agents`}
-                  onChange={(event) => {
-                    setQuery(event.target.value);
-                  }}
-                  placeholder={t`Search`}
-                  value={query}
-                />
-                <InputGroupAddon>
-                  <SearchIcon />
-                </InputGroupAddon>
-              </InputGroup>
-            </div>
-            {/* Only where some are paused: with all on there is nothing to tell apart. */}
-            {managed === undefined || paused === 0 ? null : (
-              <ToggleGroup
-                aria-label={t`Which agents to show`}
-                onValueChange={(next: unknown[]) => {
-                  const picked = filters.find((each) => each === next.at(0));
-                  setFilter(picked ?? "all");
-                }}
-                size="sm"
-                value={[filter]}
-                variant="outline"
-              >
-                <ToggleGroupItem value="all">
-                  <Trans>All</Trans>
-                </ToggleGroupItem>
-                <ToggleGroupItem value="on">
-                  <Trans>On</Trans>
-                </ToggleGroupItem>
-                <ToggleGroupItem value="paused">
-                  <Trans>Paused</Trans>
-                </ToggleGroupItem>
-              </ToggleGroup>
+            </EmptyHeader>
+            {newAgent === undefined ? null : (
+              <EmptyContent>{newAgent}</EmptyContent>
             )}
-          </div>
-          {shown.length === 0 && mine.length === 0 ? (
-            <Empty>
-              <EmptyHeader>
-                <EmptyTitle>
-                  {asked === "" ? (
-                    <Trans>No agent to show here</Trans>
-                  ) : (
-                    <Trans>No agent matches “{asked}”</Trans>
-                  )}
-                </EmptyTitle>
-              </EmptyHeader>
-            </Empty>
-          ) : null}
-          {/* The person's own first, told apart from the company's only
-              where they have some. */}
-          {mine.length === 0 ? null : (
-            <section className="flex flex-col gap-3">
-              <div className="flex flex-col gap-0.5">
-                <h2 className="font-medium">
-                  <Trans>Yours</Trans>
-                </h2>
-                <p className="text-muted-foreground text-sm">
-                  <Trans>Only you see and ask these.</Trans>
-                </p>
-              </div>
-              <Cards agents={mine} label={t`Your agents`} teams={[]} />
-            </section>
-          )}
-          {shown.length === 0 ? null : (
-            <section className="flex flex-col gap-3">
-              {own.length === 0 ? null : (
-                <h2 className="font-medium">
-                  <Trans>Your company&apos;s</Trans>
-                </h2>
-              )}
-              <Cards
-                agents={shown}
-                label={t`Agents`}
-                teams={managed?.teams ?? []}
-              />
-            </section>
-          )}
-        </>
-      )}
-      {offered === undefined ? null : (
-        <OfferedAgents
-          editable={makes}
-          offered={offered.agents}
-          people={offered.people}
-        />
-      )}
-      {ownAdmin === undefined ? null : (
-        <OwnAgentsCard admin={ownAdmin} editable={makes} />
-      )}
+          </Empty>
+        ) : null}
+        {!none && managed !== undefined ? (
+          <AgentTabs
+            agents={agents}
+            company={company}
+            facts={facts}
+            mine={mine}
+            onTab={onTab}
+            tab={tab}
+          />
+        ) : null}
+        {!none && managed === undefined ? (
+          <AgentGroups agents={agents} facts={facts} mine={mine} />
+        ) : null}
+        {/* Without tabs, what an admin keeps of the company stands under the cards. */}
+        {none || managed === undefined ? company : null}
+      </div>
     </Page>
   );
 };

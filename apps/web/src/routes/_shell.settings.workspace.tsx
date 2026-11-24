@@ -16,6 +16,12 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
+import {
+  OwnAgentsCard,
+  readOwnAgentsAdmin,
+} from "../agents/own-agents-admin.tsx";
+import type { OwnAgentsAdmin } from "../agents/own-agents-admin.tsx";
+import { SectionCard } from "../agents/section-card.tsx";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
@@ -301,9 +307,28 @@ const StaffAccess = ({
   );
 };
 
+/** People's own agents, as core answered an admin (agents/own-agents-admin.tsx), as #2503 has it here. */
+const OwnAgents = ({
+  read,
+  editable,
+}: {
+  read: Loaded<OwnAgentsAdmin>;
+  editable: boolean;
+}) => {
+  const { t } = useLingui();
+  if (read.state === "ready") {
+    return <OwnAgentsCard admin={read.data} editable={editable} />;
+  }
+  return (
+    <SectionCard title={t`People's own agents`}>
+      <NotLoadedState heading="h3" page={read} />
+    </SectionCard>
+  );
+};
+
 const Workspace = () => {
   const { t } = useLingui();
-  const { page, staff } = Route.useLoaderData();
+  const { page, staff, ownAgents } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const editable = isMemberAdmin(identity);
   return (
@@ -317,6 +342,9 @@ const Workspace = () => {
           <NotLoadedState heading="h3" page={page} />
         </SettingsSection>
       )}
+      {ownAgents === undefined ? null : (
+        <OwnAgents editable={editable} read={ownAgents} />
+      )}
       {staff === undefined ? null : (
         <StaffAccess editable={editable} read={staff} />
       )}
@@ -329,16 +357,24 @@ export const Route = createFileRoute("/_shell/settings/workspace")({
   errorComponent: SettingsError,
   component: Workspace,
   loader: async ({ context: { core, identity } }) => {
-    // Staff access is for admins only: nobody else is asked.
-    const [page, staff] = await Promise.all([
+    // Staff access and people's own agents are for admins only: nobody
+    // else is asked.
+    const admin = isAdmin(identity.role);
+    const [page, staff, ownAgents] = await Promise.all([
       loadFromCore(core, async (session) => await session.organization.get()),
-      isAdmin(identity.role)
+      admin
         ? loadFromCore(core, async (session) => {
             const gate = await session.onboardingGate.view();
             return gate.staff;
           })
         : undefined,
+      admin
+        ? loadFromCore(
+            core,
+            async (session) => await readOwnAgentsAdmin(session)
+          )
+        : undefined,
     ]);
-    return { page, staff };
+    return { page, staff, ownAgents };
   },
 });
