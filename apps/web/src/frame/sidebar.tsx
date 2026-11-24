@@ -212,13 +212,9 @@ const styles = stylex.create({
     minHeight: size.sidebarIconButton,
   },
   // In the phone's sheet the head stands nearer the sheet's top, as the
-  // reference's: over the main list's switch its buttons in the middle of
-  // a row's height at the top; over a level's head 2px lower, the sheet's
-  // own inset less the sidebar's room above.
-  headInSheet: {
-    marginBlockStart: `calc((${size.sidebarMenuButtonHeight} - ${size.sidebarIconButton}) / 2 - ${space["4"]})`,
-  },
-  headInSheetLevel: { marginBlockStart: `calc(-1 * ${space["3"]})` },
+  // reference's does over the main list and over a level alike: space-1
+  // under the sheet's top, the sidebar's room above taken back.
+  headInSheet: { marginBlockStart: `calc(${space["1"]} - ${space["4"]})` },
   mark: {
     [iconVars.size]: size.appShellMark,
     display: "flex",
@@ -1173,15 +1169,7 @@ export const FrameSidebar = ({
   return (
     <Sidebar aria-label={label} variant="inset">
       <SidebarHeader>
-        <div
-          {...stylex.props(
-            styles.head,
-            isMobile &&
-              (section === undefined
-                ? styles.headInSheet
-                : styles.headInSheetLevel)
-          )}
-        >
+        <div {...stylex.props(styles.head, isMobile && styles.headInSheet)}>
           <span {...stylex.props(styles.mark)}>{mark}</span>
           <div {...stylex.props(styles.tools)}>
             {search === undefined ? null : (
