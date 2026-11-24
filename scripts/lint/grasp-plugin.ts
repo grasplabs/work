@@ -39,10 +39,36 @@
  * icon the table gives no move, one whose move names a part the icon
  * isn't drawn with (Lucide redrew it), and one whose move makes the whole
  * icon larger and smaller, which is no move.
+ *
+ * no-inline-styles: refuses an inline style object (`style={{ … }}`) and
+ * a `style` the lint can't read as a fixed one, with the component
+ * linter's own messages and options, except for a component's `style`
+ * given StyleX styles alone, the way a page places a Damsko component and
+ * a component of its own passes that placement on (Damsko's
+ * `LayoutStyle`, StyleX styles of layout properties). The linter reads no
+ * types, so what counts is what the file shows can be nothing else
+ * (layout-style.ts, whose header has the whole list): a member of a const
+ * StyleX's `create` made, here or in a styles module of an app
+ * (`styles.ts`, `*.styles.ts`, `*-styles.ts` under `apps/`, whose exports
+ * the rule holds to StyleX styles), a parameter declared `LayoutStyle`,
+ * what `satisfies LayoutStyle`, and arrays and conditions of them. An
+ * object literal never is. Such styles go only to Damsko's components,
+ * the feature's own and the file's: never to an element of the page
+ * (`div`, which takes `stylex.props`) or a component of another package
+ * (the kit's, the router's `Link`), whose `style` is an inline style.
  */
 import path from "node:path";
 
+import shadcnLint from "@shadcn/lint";
+
 import { drawIcon, iconMovesAt } from "./icon-moves.ts";
+import {
+  isPlacement,
+  isStylesModule,
+  stylesModuleExports,
+  takesStylex,
+} from "./layout-style.ts";
+import type { StyleContext, StyleNode } from "./layout-style.ts";
 import { findScrollbar } from "./no-scrollbars.ts";
 import { findOldProductName } from "./old-product-name.ts";
 import { durationMs, findSlowClass, LIMIT_MS } from "./slow-motion.ts";
@@ -743,9 +769,87 @@ const iconHasMove = {
   },
 };
 
+const shadcnInlineStyles = shadcnLint.rules["no-inline-styles"];
+
+/** The name a JSX element's name starts with: `Sidebar` of `Sidebar.Item`. */
+const rootName = (name: Node | string | undefined): unknown => {
+  if (typeof name !== "object") {
+    return name;
+  }
+  return name.type === "JSXMemberExpression"
+    ? rootName(name.object)
+    : nameOf(name);
+};
+
+/** Whether a JSX element is a component, not an element of the page (`div`). */
+const isComponent = (name: Node | string | undefined): boolean => {
+  if (typeof name !== "object") {
+    return false;
+  }
+  if (name.type === "JSXMemberExpression") {
+    return true;
+  }
+  const first = rootName(name);
+  return typeof first === "string" && /^[A-Z]/u.test(first);
+};
+
+const noInlineStyles = {
+  meta: {
+    ...shadcnInlineStyles.meta,
+    messages: {
+      ...shadcnInlineStyles.meta.messages,
+      stylexStyle:
+        "StyleX styles reach an element through {...stylex.props(…)}, and a component only through a style prop it types as Damsko's LayoutStyle: not this one, whose style is an inline style.",
+      stylesModule:
+        "A styles module (styles.ts, *.styles.ts, *-styles.ts) exports only consts made by StyleX's create, so a page can place a component with what it imports from here: move this elsewhere.",
+    },
+  },
+  create: (context: StyleContext & Context) => {
+    const inline = shadcnInlineStyles.create(context);
+    // Without its JSX visitors, the component linter's rule refused its
+    // options and reports that itself.
+    if (!("JSXAttribute" in inline)) {
+      return inline;
+    }
+    return {
+      ...inline,
+      ...(isStylesModule(context.filename)
+        ? {
+            Program: (node: StyleNode): void => {
+              for (const refused of stylesModuleExports(node, context)) {
+                context.report({ node: refused, messageId: "stylesModule" });
+              }
+            },
+          }
+        : {}),
+      JSXAttribute: (node: Node): void => {
+        const element = node.parent?.name;
+        const { value } = node;
+        if (
+          rootName(node.name) === "style" &&
+          isNode(value) &&
+          value.type === "JSXExpressionContainer" &&
+          isPlacement(value.expression, context)
+        ) {
+          if (
+            !isComponent(element) ||
+            typeof element !== "object" ||
+            !takesStylex(element, context)
+          ) {
+            context.report({ node, messageId: "stylexStyle" });
+          }
+          return;
+        }
+        inline.JSXAttribute(node);
+      },
+    };
+  },
+};
+
 export default {
   meta: { name: "grasp" },
   rules: {
+    "no-inline-styles": noInlineStyles,
     "no-unbounded-rpc-target": noUnboundedRpcTarget,
     "no-scrollbars": noScrollbars,
     "no-old-product-name": noOldProductName,

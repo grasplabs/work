@@ -4230,9 +4230,17 @@ msgstr "Contexte"
 msgid "Continue"
 msgstr "Continuer"
 
+#: src/frame/sign-in/sign-in.tsx
+msgid "Continue with {provider}"
+msgstr "Continuer avec {provider}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Continue with {signIn}"
 msgstr "Continuer avec {signIn}"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Continue with Grasp staff"
+msgstr "Continuer en tant qu’équipe Grasp"
 
 #: src/apps/resource-bindings.tsx
 msgid "Contract"
@@ -4266,6 +4274,7 @@ msgstr "Copenhague"
 #: src/chat/answer-markdown.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/thread.tsx
+#: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/shown-once.tsx
@@ -4289,6 +4298,7 @@ msgstr "Copié depuis un autre système"
 msgid "Copies"
 msgstr "Copies"
 
+#: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/shown-once.tsx
@@ -4356,6 +4366,10 @@ msgstr "Coût"
 msgctxt "what the Brain remembers about something"
 msgid "Cost"
 msgstr "Coût"
+
+#: src/frame/ui-words.tsx
+msgid "Could not finish"
+msgstr "Impossible de terminer"
 
 #: src/activity/audit-words.ts
 msgid "Couldn't erase an upload from the Brain"
@@ -4786,6 +4800,10 @@ msgctxt "inbox item kind: a change whose answer was lost"
 msgid "Did it happen?"
 msgstr "Est-ce arrivé ?"
 
+#: src/frame/sign-in/sign-in.tsx
+msgid "Did not open"
+msgstr "Ne s’est pas ouvert"
+
 #: src/inbox/items.ts
 msgid "Did this happen? {who}"
 msgstr "Est-ce arrivé ? {who}"
@@ -4899,6 +4917,10 @@ msgstr "Les documents et les exécutions de workflows apparaissent ici dès qu'i
 msgid "Documents they or others shared with a team or the company stay, and their text can still name them."
 msgstr "Les documents que cette personne ou d’autres ont partagés avec une équipe ou l’entreprise restent, et leur texte peut encore la nommer."
 
+#: src/frame/ui-words.tsx
+msgid "Does something that needs your yes"
+msgstr "Fait quelque chose qui demande votre accord"
+
 #: src/settings/stephen-settings.tsx
 msgid "Does things for people here"
 msgstr "Agit pour les personnes ici"
@@ -4918,6 +4940,7 @@ msgstr "Ne pas l’autoriser tant que cet enregistrement y est lié"
 
 #: src/apps/blueprints.tsx
 #: src/chat/thread.tsx
+#: src/frame/ui-words.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/shown-once.tsx
@@ -5662,6 +5685,11 @@ msgstr "En échec"
 msgctxt "a figure of the report"
 msgid "Failed"
 msgstr "Échouées"
+
+#: src/frame/ui-words.tsx
+msgctxt "a menu item whose work failed"
+msgid "Failed"
+msgstr "Échec"
 
 #: src/workflows/run-status.ts
 msgctxt "status of a workflow run"
@@ -7152,8 +7180,8 @@ msgid "Invited as {role} by {inviter} on {date} · hasn’t signed in yet"
 msgstr "Invité comme {role} par {inviter} le {date} · pas encore connecté"
 
 #: src/routes/sign-in.tsx
-msgid "Invited as a guest? Sign in with a code"
-msgstr "Invité ? Connectez-vous avec un code"
+msgid "Invited as a guest?"
+msgstr "Vous êtes invité ?"
 
 #: src/brain/brain.ts
 msgid "Invited for step 2"
@@ -7735,6 +7763,7 @@ msgctxt "what the Brain remembers about something"
 msgid "Language"
 msgstr "Langue"
 
+#: src/frame/language-button.tsx
 #: src/language-picker.tsx
 msgid "Language: {name}"
 msgstr "Langue : {name}"
@@ -7772,6 +7801,10 @@ msgstr "Lu pour la dernière fois {lastRead}"
 #: src/workflows/workflows-table.tsx
 msgid "Last run"
 msgstr "Dernière exécution"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Last used"
+msgstr "Dernier utilisé"
 
 #: src/interview/words.ts
 msgid "Last, the numbers and the result."
@@ -8016,6 +8049,10 @@ msgstr "Chargement…"
 msgctxt "what the Brain remembers about something"
 msgid "Location"
 msgstr "Lieu"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Log in"
+msgstr "Se connecter"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -9134,6 +9171,10 @@ msgstr "Pas encore confirmée par la direction"
 msgid "Not connected"
 msgstr "Non connectée"
 
+#: src/frame/ui-words.tsx
+msgid "Not copied"
+msgstr "Non copié"
+
 #: src/brain/brain.ts
 msgid "Not drawn yet"
 msgstr "Pas encore cartographié"
@@ -9975,6 +10016,14 @@ msgstr "Ouvrir votre onboarding"
 msgid "Open: {open}"
 msgstr "Ouvertes : {open}"
 
+#: src/frame/sign-in/sign-in.tsx
+msgid "Opened"
+msgstr "Ouvert"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Opening {provider}"
+msgstr "Ouverture de {provider}"
+
 #: src/onboarding/platform-reveal.tsx
 msgid "Opening Grasp"
 msgstr "Grasp s’ouvre"
@@ -10503,6 +10552,10 @@ msgstr "Préférence"
 #: src/interview/read-back.tsx
 msgid "Press a line to change it, take out what is wrong, or type what is missing. Choose where each line goes. What you leave in is what counts."
 msgstr "Appuyez sur une ligne pour la modifier, retirez ce qui est faux, ou tapez ce qui manque. Choisissez où va chaque ligne. Ce que vous laissez, c’est ce qui compte."
+
+#: src/frame/ui-words.tsx
+msgid "Presses \"{words}\""
+msgstr "Appuie sur « {words} »"
 
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
@@ -12534,6 +12587,10 @@ msgstr "Connectez-vous pour ouvrir votre entretien"
 #: src/sign-in-options.tsx
 msgid "Sign in with {label}"
 msgstr "Se connecter avec {label}"
+
+#: src/routes/sign-in.tsx
+msgid "Sign in with a code"
+msgstr "Se connecter avec un code"
 
 #: src/sign-in-errors.ts
 msgid "Sign in with your organization's account."
@@ -15208,10 +15265,6 @@ msgstr "Utiliser le chat, le Cerveau et les applications partagées avec eux"
 msgid "Use the default"
 msgstr "Utiliser la valeur par défaut"
 
-#: src/routes/sign-in.tsx
-msgid "Use your organization’s account to go on."
-msgstr "Utilisez le compte de votre organisation pour continuer."
-
 #: src/onboarding/ai-step.tsx
 msgid "Use your own key"
 msgstr "Utiliser votre propre clé"
@@ -16597,6 +16650,10 @@ msgstr "Workflows que l’application lance"
 #: src/routes/_shell.settings.spend.tsx
 msgid "Workflows this month"
 msgstr "Workflows ce mois-ci"
+
+#: src/frame/ui-words.tsx
+msgid "Working"
+msgstr "En cours"
 
 #: src/chat/thread.tsx
 msgid "Working on it"

@@ -4230,9 +4230,17 @@ msgstr "Context"
 msgid "Continue"
 msgstr "Doorgaan"
 
+#: src/frame/sign-in/sign-in.tsx
+msgid "Continue with {provider}"
+msgstr "Doorgaan met {provider}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Continue with {signIn}"
 msgstr "Doorgaan met {signIn}"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Continue with Grasp staff"
+msgstr "Doorgaan als Grasp-medewerker"
 
 #: src/apps/resource-bindings.tsx
 msgid "Contract"
@@ -4266,6 +4274,7 @@ msgstr "Kopenhagen"
 #: src/chat/answer-markdown.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/thread.tsx
+#: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/shown-once.tsx
@@ -4289,6 +4298,7 @@ msgstr "Overgenomen uit een ander systeem"
 msgid "Copies"
 msgstr "Kopieën"
 
+#: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/shown-once.tsx
@@ -4356,6 +4366,10 @@ msgstr "Kosten"
 msgctxt "what the Brain remembers about something"
 msgid "Cost"
 msgstr "Kosten"
+
+#: src/frame/ui-words.tsx
+msgid "Could not finish"
+msgstr "Kon niet afronden"
 
 #: src/activity/audit-words.ts
 msgid "Couldn't erase an upload from the Brain"
@@ -4786,6 +4800,10 @@ msgctxt "inbox item kind: a change whose answer was lost"
 msgid "Did it happen?"
 msgstr "Is het gebeurd?"
 
+#: src/frame/sign-in/sign-in.tsx
+msgid "Did not open"
+msgstr "Niet geopend"
+
 #: src/inbox/items.ts
 msgid "Did this happen? {who}"
 msgstr "Is dit gebeurd? {who}"
@@ -4899,6 +4917,10 @@ msgstr "Documenten en workflowruns verschijnen hier zodra ze in het brein komen.
 msgid "Documents they or others shared with a team or the company stay, and their text can still name them."
 msgstr "Documenten die zij of anderen met een team of het bedrijf deelden blijven, en hun tekst kan hen nog steeds noemen."
 
+#: src/frame/ui-words.tsx
+msgid "Does something that needs your yes"
+msgstr "Doet iets waarvoor jouw ja nodig is"
+
 #: src/settings/stephen-settings.tsx
 msgid "Does things for people here"
 msgstr "Doet hier dingen voor mensen"
@@ -4918,6 +4940,7 @@ msgstr "Niet toestaan zolang dit record ernaar linkt"
 
 #: src/apps/blueprints.tsx
 #: src/chat/thread.tsx
+#: src/frame/ui-words.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/shown-once.tsx
@@ -5660,6 +5683,11 @@ msgstr "Mislukt"
 
 #: src/report/report.ts
 msgctxt "a figure of the report"
+msgid "Failed"
+msgstr "Mislukt"
+
+#: src/frame/ui-words.tsx
+msgctxt "a menu item whose work failed"
 msgid "Failed"
 msgstr "Mislukt"
 
@@ -7152,8 +7180,8 @@ msgid "Invited as {role} by {inviter} on {date} · hasn’t signed in yet"
 msgstr "Uitgenodigd als {role} door {inviter} op {date} · nog niet ingelogd"
 
 #: src/routes/sign-in.tsx
-msgid "Invited as a guest? Sign in with a code"
-msgstr "Uitgenodigd als gast? Log in met een code"
+msgid "Invited as a guest?"
+msgstr "Uitgenodigd als gast?"
 
 #: src/brain/brain.ts
 msgid "Invited for step 2"
@@ -7735,6 +7763,7 @@ msgctxt "what the Brain remembers about something"
 msgid "Language"
 msgstr "Taal"
 
+#: src/frame/language-button.tsx
 #: src/language-picker.tsx
 msgid "Language: {name}"
 msgstr "Taal: {name}"
@@ -7772,6 +7801,10 @@ msgstr "Laatst gelezen {lastRead}"
 #: src/workflows/workflows-table.tsx
 msgid "Last run"
 msgstr "Laatste run"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Last used"
+msgstr "Laatst gebruikt"
 
 #: src/interview/words.ts
 msgid "Last, the numbers and the result."
@@ -8016,6 +8049,10 @@ msgstr "Laden…"
 msgctxt "what the Brain remembers about something"
 msgid "Location"
 msgstr "Locatie"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Log in"
+msgstr "Inloggen"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -9134,6 +9171,10 @@ msgstr "Nog niet bevestigd door het bestuur"
 msgid "Not connected"
 msgstr "Niet verbonden"
 
+#: src/frame/ui-words.tsx
+msgid "Not copied"
+msgstr "Niet gekopieerd"
+
 #: src/brain/brain.ts
 msgid "Not drawn yet"
 msgstr "Nog niet uitgetekend"
@@ -9975,6 +10016,14 @@ msgstr "Open je onboarding"
 msgid "Open: {open}"
 msgstr "Open: {open}"
 
+#: src/frame/sign-in/sign-in.tsx
+msgid "Opened"
+msgstr "Geopend"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Opening {provider}"
+msgstr "{provider} wordt geopend"
+
 #: src/onboarding/platform-reveal.tsx
 msgid "Opening Grasp"
 msgstr "Grasp gaat open"
@@ -10503,6 +10552,10 @@ msgstr "Voorkeur"
 #: src/interview/read-back.tsx
 msgid "Press a line to change it, take out what is wrong, or type what is missing. Choose where each line goes. What you leave in is what counts."
 msgstr "Druk op een regel om hem aan te passen, haal weg wat niet klopt, of typ wat er ontbreekt. Kies waar elke regel naartoe gaat. Wat je laat staan, telt."
+
+#: src/frame/ui-words.tsx
+msgid "Presses \"{words}\""
+msgstr "Drukt op \"{words}\""
 
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
@@ -12534,6 +12587,10 @@ msgstr "Log in om je interview te openen"
 #: src/sign-in-options.tsx
 msgid "Sign in with {label}"
 msgstr "Inloggen met {label}"
+
+#: src/routes/sign-in.tsx
+msgid "Sign in with a code"
+msgstr "Inloggen met een code"
 
 #: src/sign-in-errors.ts
 msgid "Sign in with your organization's account."
@@ -15208,10 +15265,6 @@ msgstr "De chat, het Brein en de met hen gedeelde apps gebruiken"
 msgid "Use the default"
 msgstr "Standaard gebruiken"
 
-#: src/routes/sign-in.tsx
-msgid "Use your organization’s account to go on."
-msgstr "Gebruik het account van je organisatie om verder te gaan."
-
 #: src/onboarding/ai-step.tsx
 msgid "Use your own key"
 msgstr "Je eigen sleutel gebruiken"
@@ -16597,6 +16650,10 @@ msgstr "Workflows die de app start"
 #: src/routes/_shell.settings.spend.tsx
 msgid "Workflows this month"
 msgstr "Workflows deze maand"
+
+#: src/frame/ui-words.tsx
+msgid "Working"
+msgstr "Bezig"
 
 #: src/chat/thread.tsx
 msgid "Working on it"

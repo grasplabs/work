@@ -1,4 +1,14 @@
 @import "@grasp-os/app-kit/styles.css";
+/*
+ * Damsko's styles (packages/ui), for the components that are Damsko's,
+ * beside the kit's theme: its tokens under its own names (--damsko-*), its
+ * modes (the root's `data-mode`, which public/theme.js writes) and its
+ * fonts, served from this origin. Not its base.css: Tailwind's preflight is
+ * the reset here.
+ */
+@import "@grasp-os/ui/styles/tokens.css";
+@import "@grasp-os/ui/styles/themes.css";
+@import "@grasp-os/ui/styles/fonts.css";
 /* The theme's sans, bundled so it is served from this origin (the CSP's default-src). */
 @import "@fontsource-variable/geist";
 /*

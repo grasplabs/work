@@ -45,6 +45,10 @@ catalog:
   typedoc: 0.28.20
   typedoc-plugin-markdown: 4.14.1
   mdast-util-from-markdown: 2.1.0
+  # Damsko's Markdown (packages/ui): tables, task lists and the rest of
+  # GitHub's flavour, on the parser above, at the versions Damsko pins.
+  mdast-util-gfm: 3.1.0
+  micromark-extension-gfm: 3.0.0
   "@types/mdast": 4.0.4
   # Reads the built pages for the hashes of their inline code (apps/docs).
   parse5: 8.1.0
@@ -173,6 +177,10 @@ catalog:
   "@babel/core": 7.29.7
   "@base-ui/react": 1.8.0
   "@fontsource-variable/geist": 5.2.8
+  # Damsko's icons (packages/ui/src/lib/icons.ts): Hugeicons' free set and
+  # its React renderer, at the versions Damsko pins.
+  "@hugeicons/core-free-icons": 4.4.0
+  "@hugeicons/react": 1.1.10
   "@fontsource-variable/newsreader": 5.3.0
   # The code font, wherever code is shown (the theme's font-mono).
   "@fontsource-variable/jetbrains-mono": 5.3.0
@@ -190,6 +198,11 @@ catalog:
   # The kit's chat components (message-scroller): shadcn's own headless
   # primitives.
   "@shadcn/react": 0.3.1
+  # Damsko's styles (packages/ui): StyleX and its bundler plugin, which
+  # each app that renders a Damsko component runs. They move together, at
+  # the version Damsko pins.
+  "@stylexjs/stylex": 0.19.2
+  "@stylexjs/unplugin": 0.19.2
   # The kit's PromptEditor: the box to ask in, with its mentions as chips in
   # the text and the dropdown that picks them (\`@\`, later \`/\`). TipTap's
   # MIT core on ProseMirror, lean: no StarterKit, no formatting, none of its
@@ -227,6 +240,10 @@ catalog:
   # version @tanstack/react-start uses.
   seroval: 1.7.5
   "@types/react": 19.3.0
+  # The headless primitives under Damsko's components (packages/ui), at the
+  # version Damsko pins. They move together.
+  "@ui-sdk/core": 0.1.0-beta.13
+  "@ui-sdk/react": 0.1.0-beta.13
   "@types/react-dom": 19.3.0
   "@vitejs/plugin-react": 6.1.1
   babel-plugin-react-compiler: 1.0.0
@@ -273,6 +290,10 @@ catalog:
   # An App's Code tab: its files and a draft's changes, virtualised and
   # highlighted by the library's own highlighter (Highlights).
   "@pierre/diffs": 1.6.2
+  # Damsko's code block (packages/ui): its highlighter, each language's
+  # grammar loaded when a block first shows it.
+  prismjs: 1.30.0
+  "@types/prismjs": 1.26.6
   remark-gfm: 4.0.1
   shadcn: 4.23.0
   tailwind-merge: 3.7.0

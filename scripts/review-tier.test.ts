@@ -129,6 +129,7 @@ describe("the Security floor", () => {
   it("leaves the theme's tokens, the frontend, tests and ordinary code alone", () => {
     for (const filename of [
       "packages/app-kit/src/styles/tokens.css",
+      "packages/ui/src/lib/tokens.stylex.ts",
       "apps/web/src/brain/brain.ts",
       "apps/core/test/permission-probing.ts",
       "apps/core/test/permissions.test.ts",

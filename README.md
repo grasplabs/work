@@ -26,4 +26,4 @@ We don't accept outside contributions.
 
 ## License
 
-[AGPL-3.0](LICENSE)
+[AGPL-3.0](LICENSE), except `packages/ui/src`: Damsko, Grasp's design system, which stays under its own proprietary licence ([packages/ui/LICENSE](packages/ui/LICENSE)).
