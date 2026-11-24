@@ -2,6 +2,7 @@ import { Button } from "@grasp-os/ui/components/button";
 import {
   Select,
   SelectContent,
+  SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@grasp-os/ui/components/select";
@@ -145,6 +146,7 @@ const chapterOf = (step: WholeStep): 0 | 1 | 2 => {
  */
 const Whereabouts = ({ step }: { step: WholeStep }) => {
   const { t } = useLingui();
+  const narrow = useNarrow();
   const chapters = [t`Getting started`, t`Your company`, t`Your team`];
   const left = Math.max(
     1,
@@ -155,10 +157,13 @@ const Whereabouts = ({ step }: { step: WholeStep }) => {
     )
   );
   const chapter = chapters[chapterOf(step)] ?? "";
-  const time = plural(left, {
+  // On a phone, short enough to keep the bar on one line.
+  const long = plural(left, {
     one: "About # minute left",
     other: "About # minutes left",
   });
+  const short = plural(left, { one: "# min left", other: "# min left" });
+  const time = narrow ? short : long;
   return (
     <div {...stylex.props(styles.where)}>
       <Text color="muted" size="sm">
@@ -175,10 +180,15 @@ const languages = Object.entries(localeNames).flatMap(([code, name]) =>
 /** The language, after the welcome: a Select of the five, each in its own words. */
 const Language = () => {
   const { t, i18n } = useLingui();
+  const narrow = useNarrow();
   const locale: Locale = isLocale(i18n.locale) ? i18n.locale : "en";
+  // Closed, it says the language's own name; on a phone its short code ("NL"). Its list says names.
   return (
     <Select
-      items={languages.map(({ code, name }) => ({ value: code, label: name }))}
+      items={languages.map(({ code, name }) => ({
+        value: code,
+        label: narrow ? code.toUpperCase() : name,
+      }))}
       onValueChange={(value) => {
         if (isLocale(value)) {
           void chooseLocale(value);
@@ -186,10 +196,16 @@ const Language = () => {
       }}
       value={locale}
     >
-      <SelectTrigger aria-label={t`Language`} size="sm">
+      <SelectTrigger aria-label={t`Language`} size="sm" variant="ghost">
         <SelectValue />
       </SelectTrigger>
-      <SelectContent />
+      <SelectContent>
+        {languages.map(({ code, name }) => (
+          <SelectItem key={code} label={name} value={code}>
+            <span lang={code}>{name}</span>
+          </SelectItem>
+        ))}
+      </SelectContent>
     </Select>
   );
 };
@@ -230,7 +246,7 @@ const Leave = () => {
         void leave();
       }}
       size="sm"
-      variant="link"
+      variant="ghost"
     >
       {t`Leave for now`}
     </Button>
