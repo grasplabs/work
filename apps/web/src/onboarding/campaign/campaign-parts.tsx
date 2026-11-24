@@ -210,7 +210,7 @@ export const RunningLine = ({
         </Text>
       </p>
       {declined.length === 0 ? null : (
-        <Text color="muted">{`Declined: ${declined.join(", ")}`}</Text>
+        <Text color="muted">{`${declined.join(", ")} declined the interview.`}</Text>
       )}
     </>
   );
