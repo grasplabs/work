@@ -31,15 +31,9 @@ import { HeldWrites } from "./held-writes.tsx";
 // nothing. A decision that fails is said above the list, as its card
 // may be gone, until the next decision, and in its own chat alone.
 
-/** The exact input the card shows, as its code block draws it, a line each. */
-const exactShown = (): string | undefined => {
-  const lines = document.querySelectorAll(
-    "[data-slot=code-block-content] [data-slot=code-block-line]"
-  );
-  return lines.length === 0
-    ? undefined
-    : Array.from(lines, (line) => line.textContent).join("\n");
-};
+/** The exact input the card shows, as its block draws it. */
+const exactShown = (): string | undefined =>
+  document.querySelector("pre")?.textContent ?? undefined;
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -241,13 +235,11 @@ const shown = async ({
 const alerted = (): string | null =>
   document.querySelector('[role="alert"]')?.textContent ?? null;
 
-/** The cards shown, by their names (not the code blocks in them). */
+/** The cards shown, by their names. */
 const cards = (): string[] =>
-  [
-    ...document.querySelectorAll(
-      "section[aria-label] section[aria-label]:not([data-slot=code-block])"
-    ),
-  ].map((card) => card.getAttribute("aria-label") ?? "");
+  [...document.querySelectorAll("section[aria-label] section[aria-label]")].map(
+    (card) => card.getAttribute("aria-label") ?? ""
+  );
 
 const press = async (label: string): Promise<void> => {
   const button = document.querySelector(`button[aria-label="${label}"]`);
@@ -364,9 +356,7 @@ describe("a write to an App held for the person", () => {
       lastField: true,
       exact: laidOut,
     });
-    // Each of the 32,705 lines highlighted and drawn: about half a minute in
-    // jsdom, a second in a browser.
-  }, 60_000);
+  });
 
   it("keeps Confirm waiting for a described value cut short as it is shown, escapes counted, until it is shown whole", async () => {
     // Under the card's 1,200 characters as held; far past them once its
