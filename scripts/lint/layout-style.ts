@@ -29,10 +29,12 @@
  * Anything else, an object literal above all, is not. Such styles go only
  * to a component that takes them (`takesStylex`): Damsko's, the feature's
  * own (by a relative path, from a module that declares it as a function or
- * a class, or passes it on from Damsko) or one the file declares; never an
- * element of the page, a component of another package (the kit's, the
- * router's `Link`, also when a relative module passes it on, by name, as a
- * namespace's member or destructured) or a name holding an element's.
+ * a class, or passes it on from Damsko) or one the file declares, and a
+ * member of such a component (`Menu.Item`) only where its module assigns
+ * it one of these; never a module that can't be found, an element of the
+ * page, a component of another package (the kit's, the router's `Link`,
+ * also when a relative module passes it on, by name, as a namespace's
+ * member or destructured) or a name holding an element's.
  */
 import { readFileSync, statSync } from "node:fs";
 import nodePath from "node:path";
@@ -688,12 +690,16 @@ const isNode = (value: unknown): value is StyleNode =>
 const parsed = new Map<string, { mtimeMs: number; body: StyleNode[] }>();
 
 /**
- * The file a relative import names, as TypeScript finds it: as written, or
- * with `.tsx` or `.ts`, or its folder's `index`. Undefined if none is.
+ * The file a relative import names, as TypeScript finds it: a `.js` path
+ * as `.ts` or `.tsx`, as written, or with `.tsx` or `.ts`, or its folder's
+ * `index`. Undefined if none is.
  */
 const moduleFile = (from: string, specifier: string): string | undefined => {
   const base = nodePath.resolve(nodePath.dirname(from), specifier);
+  const stem = base.slice(0, -".js".length);
+  const typed = base.endsWith(".js") ? [`${stem}.ts`, `${stem}.tsx`] : [];
   return [
+    ...typed,
     base,
     `${base}.tsx`,
     `${base}.ts`,
@@ -948,21 +954,88 @@ const exportOrigin = (
   return { kind: "absent", everything };
 };
 
+/**
+ * The name a module declares its export `name` by: `A` of `export { A as
+ * B }`, a default's own (`export default function A`), else `name`.
+ */
+const localNameOf = (
+  statements: readonly StyleNode[],
+  name: string
+): string | undefined => {
+  for (const statement of statements) {
+    if (statement.type === "ExportDefaultDeclaration" && name === "default") {
+      const { declaration } = statement;
+      return (
+        identifierName(declaration?.id ?? undefined) ??
+        identifierName(declaration ?? undefined)
+      );
+    }
+    const specifier =
+      statement.type === "ExportNamedDeclaration" && !statement.source
+        ? statement.specifiers?.find(
+            (candidate) =>
+              specifierName(candidate.exported ?? undefined) === name
+          )
+        : undefined;
+    if (specifier !== undefined) {
+      return specifierName(specifier.local);
+    }
+  }
+  return name;
+};
+
+/**
+ * What a member of a component of the module's own (`Menu.Item`) is, as a
+ * component: what the module assigns it once at its top level
+ * (`Menu.Item = MenuItem`), as `declared` reads a value. A member the
+ * module doesn't assign, assigns more than once, or one of the module's
+ * own with members still to follow (`Menu.Item.Icon`) is something else.
+ */
+const memberOrigin = (
+  statements: readonly StyleNode[],
+  object: string | undefined,
+  members: readonly string[]
+): Origin => {
+  const values = statements.flatMap((statement) => {
+    const assignment =
+      statement.type === "ExpressionStatement"
+        ? statement.expression
+        : undefined;
+    const target =
+      assignment?.type === "AssignmentExpression" ? assignment.left : undefined;
+    return target?.type === "MemberExpression" &&
+      target.computed !== true &&
+      identifierName(target.object) === object &&
+      identifierName(target.property) === members[0] &&
+      assignment?.right !== undefined
+      ? [assignment.right]
+      : [];
+  });
+  const [value] = values;
+  if (object === undefined || values.length !== 1 || value === undefined) {
+    return other;
+  }
+  const origin = declared(statements, value);
+  return origin.kind === "own" && members.length > 1 ? other : origin;
+};
+
 /** Whether a module is named by a relative path. */
 const isRelative = (source: string): boolean => source.startsWith(".");
 
 /**
- * Whether what `source`, imported from `file`, exports as `name` may be
- * given StyleX styles: Damsko's may; another package's may not; a
- * relative module's may if it declares it, or passes it on from one that
- * may, followed to where it is declared (`export { Button } from
- * "@grasp-os/app-kit/…"` is the kit's). Undefined where the files don't
- * tell: no such module or export, or a loop.
+ * Whether what `source`, imported from `file`, exports as `name` (or its
+ * `members`, `Menu.Item`: `memberOrigin`) may be given StyleX styles:
+ * Damsko's may; another package's may not; a relative module's may if it
+ * declares it, or passes it on from one that may, followed to where it is
+ * declared (`export { Button } from "@grasp-os/app-kit/…"` is the kit's).
+ * Undefined where the files don't tell: no such module or export, or a
+ * loop; the caller refuses those.
  */
 const moduleTakesStylex = (
   file: string,
   source: string,
   name: string,
+  members: readonly string[],
   seen: Set<string>
 ): boolean | undefined => {
   if (source.startsWith(damskoModule)) {
@@ -976,17 +1049,31 @@ const moduleTakesStylex = (
     return undefined;
   }
   seen.add(`${next}#${name}`);
-  const origin = exportOrigin(statementsOf(next), name);
+  const statements = statementsOf(next);
+  const exported = exportOrigin(statements, name);
+  const origin =
+    exported.kind === "own" && members.length > 0
+      ? memberOrigin(statements, localNameOf(statements, name), members)
+      : exported;
+  if (origin !== exported && origin.kind === "module") {
+    return moduleTakesStylex(
+      next,
+      origin.source,
+      origin.name,
+      members.slice(1),
+      seen
+    );
+  }
   if (origin.kind === "own" || origin.kind === "other") {
     return origin.kind === "own";
   }
   if (origin.kind === "module") {
-    return moduleTakesStylex(next, origin.source, origin.name, seen);
+    return moduleTakesStylex(next, origin.source, origin.name, members, seen);
   }
   // `export *`: a relative module that has it decides; else any package
   // it passes everything on from may, so each must be Damsko.
   for (const from of origin.everything.filter(isRelative)) {
-    const found = moduleTakesStylex(next, from, name, seen);
+    const found = moduleTakesStylex(next, from, name, members, seen);
     if (found !== undefined) {
       return found;
     }
@@ -998,20 +1085,43 @@ const moduleTakesStylex = (
 };
 
 /**
- * The name a component is imported by: its import's, or for a namespace's
- * (`Parts.Save`), the member's.
+ * Whether a component the file declares (`isDeclaredComponent`), or a
+ * member of one (`Local.Item`: `memberOrigin`), may be given StyleX styles.
  */
-const importedComponent = (
-  specifier: StyleNode,
-  member: StyleNode | undefined
-): string => {
-  const imported = importedName(specifier);
-  if (imported !== "*") {
-    return imported;
+const declaredTakesStylex = (
+  definition: Variable["defs"][number],
+  context: StyleContext,
+  name: string,
+  members: readonly string[]
+): boolean => {
+  if (!isDeclaredComponent(definition) || members.length === 0) {
+    return isDeclaredComponent(definition);
   }
-  return member?.type === "JSXIdentifier" && typeof member.name === "string"
-    ? member.name
-    : "";
+  const { body } = context.sourceCode.ast;
+  const origin = memberOrigin(Array.isArray(body) ? body : [], name, members);
+  return origin.kind === "module"
+    ? moduleTakesStylex(
+        context.filename,
+        origin.source,
+        origin.name,
+        members.slice(1),
+        new Set()
+      ) === true
+    : origin.kind === "own";
+};
+
+/** A component's name (`Menu` of `Menu.Item`), and its members in order. */
+const componentPath = (
+  name: StyleNode | undefined
+): { root: StyleNode | undefined; members: string[] } => {
+  let root = name;
+  const members: string[] = [];
+  while (root?.type === "JSXMemberExpression") {
+    const member = root.property?.name;
+    members.unshift(typeof member === "string" ? member : "");
+    root = root.object;
+  }
+  return { root, members };
 };
 
 /**
@@ -1028,12 +1138,7 @@ export const takesStylex = (
   name: StyleNode | undefined,
   context: StyleContext
 ): boolean => {
-  let root = name;
-  let member: StyleNode | undefined;
-  while (root?.type === "JSXMemberExpression") {
-    member = root.property;
-    root = root.object;
-  }
+  const { root, members } = componentPath(name);
   if (root?.type !== "JSXIdentifier" || typeof root.name !== "string") {
     return false;
   }
@@ -1043,7 +1148,7 @@ export const takesStylex = (
     return false;
   }
   if (definition.type !== "ImportBinding") {
-    return isDeclaredComponent(definition);
+    return declaredTakesStylex(definition, context, root.name, members);
   }
   const source = definition.parent?.source?.value;
   if (
@@ -1053,12 +1158,13 @@ export const takesStylex = (
   ) {
     return false;
   }
+  // A namespace's member (`Parts.Save`) is the export; a member of a
+  // component (`Menu.Item`) must be one its module assigns.
+  const imported = importedName(definition.node);
+  const [exported = "", ...rest] =
+    imported === "*" ? members : [imported, ...members];
   return (
-    moduleTakesStylex(
-      context.filename,
-      source,
-      importedComponent(definition.node, member),
-      new Set()
-    ) !== false
+    moduleTakesStylex(context.filename, source, exported, rest, new Set()) ===
+    true
   );
 };

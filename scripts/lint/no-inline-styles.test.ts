@@ -96,15 +96,10 @@ const Renamed = ({ style: placement }: Props) => <Card style={[layout.wide, plac
       filename,
     },
     {
-      name: "a component from another file of the product, or a part of a Damsko component",
+      name: "a part of a Damsko component",
       code: `${styles}
-import { SaveBar } from "./save-bar.tsx";
 import { Sidebar } from "@grasp-os/ui/components/sidebar";
-const Page = () => (
-  <Sidebar.Item style={layout.wide}>
-    <SaveBar style={layout.wide} />
-  </Sidebar.Item>
-);`,
+const Page = () => <Sidebar.Item style={layout.wide} />;`,
       filename,
     },
     {
@@ -646,35 +641,43 @@ describe("through a relative module", () => {
   });
 });
 
-// RuleTester binds no globals, the repository's config does (`undefined`
-// among them): the forms that hold `undefined` once more, in a file linted
-// by the repository's own `vp lint`, as `vp check` lints it. A disable
-// comment there for an inline style object, which an unused one fails,
-// shows the rule ran.
+// RuleTester binds no globals and reads no files of the repository, the
+// repository's own `vp lint` does, as `vp check` lints it: files of
+// `apps/web/src/lint-fixtures`, linted there. A disable comment for each
+// style the rule refuses, which an unused one fails, shows the rule ran.
 describe("grasp/no-inline-styles under the repository's config", () => {
   const root = path.join(import.meta.dirname, "../..");
   const report = z.object({
     diagnostics: z.array(z.object({ code: z.string(), message: z.string() })),
   });
 
-  it("lets undefined through beside StyleX styles: in a condition, an array and after ??", async () => {
+  /** What `vp lint` reports for a file of the fixtures. */
+  const lint = async (fixture: string) => {
     // `vp lint` exits 1 on any report, and prints its JSON all the same.
-    const lint = spawn(
+    const linter = spawn(
       path.join(root, "node_modules/.bin/vp"),
-      [
-        "lint",
-        "--format",
-        "json",
-        "apps/web/src/lint-fixtures/style-or-nothing.tsx",
-      ],
+      ["lint", "--format", "json", `apps/web/src/lint-fixtures/${fixture}`],
       { cwd: root, stdio: ["ignore", "pipe", "ignore"] }
     );
-    lint.stdout.setEncoding("utf-8");
+    linter.stdout.setEncoding("utf-8");
     let stdout = "";
-    lint.stdout.on("data", (chunk: string) => {
+    linter.stdout.on("data", (chunk: string) => {
       stdout += chunk;
     });
-    await once(lint, "close");
-    expect(report.parse(JSON.parse(stdout)).diagnostics).toStrictEqual([]);
+    await once(linter, "close");
+    return report.parse(JSON.parse(stdout)).diagnostics;
+  };
+
+  it("lets undefined through beside StyleX styles: in a condition, an array and after ??", async () => {
+    // The config binds `undefined` as a global, RuleTester doesn't.
+    await expect(lint("style-or-nothing.tsx")).resolves.toStrictEqual([]);
+  }, 60_000);
+
+  it("refuses a member of the feature's own component that is the kit's, here or in another module, and allows one of its own", async () => {
+    await expect(lint("member-of-own.tsx")).resolves.toStrictEqual([]);
+  }, 60_000);
+
+  it("follows a .js path to its .ts module, refusing the kit's component it passes on and allowing the feature's own", async () => {
+    await expect(lint("js-path.tsx")).resolves.toStrictEqual([]);
   }, 60_000);
 });
