@@ -54,7 +54,7 @@ export const SavedField = ({
         }}
         onValueChange={setDraft}
         readOnly={readOnly}
-        rows={3}
+        rows={2}
         value={shown}
       />
     );
@@ -73,6 +73,8 @@ export const SavedField = ({
       }}
       onValueChange={setDraft}
       readOnly={readOnly}
+      // A row's control is the small size, as every settings row's: rows line up.
+      size="sm"
       value={shown}
     />
   );

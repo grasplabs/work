@@ -94,6 +94,7 @@ import {
   pointAt,
   restOf,
   ribbonPath,
+  rowKeys,
   spanOf,
   sparkShape,
   spread,
@@ -495,6 +496,7 @@ export const ChartContainer = ({
   // How the table writes a value: as the y axis or the tooltip writes it, else a plain number.
   const [valueFormatter, setValueFormatter] =
     useState<(value: number) => string>();
+  const rowIds = rowKeys(data, xKey);
   const context: ChartContextValue = {
     config,
     xKey,
@@ -558,8 +560,8 @@ export const ChartContainer = ({
             </tr>
           </thead>
           <tbody>
-            {data.map((row) => (
-              <tr key={String(row[xKey])}>
+            {data.map((row, index) => (
+              <tr key={rowIds[index]}>
                 <th scope="row">{row[xKey]}</th>
                 {keys.map((key) => (
                   <td key={key}>
@@ -1995,6 +1997,7 @@ export const ChartBarList = ({
   const keys = Object.keys(config).slice(0, 2);
   const [first = ""] = keys;
   const rows = orderRows(data, first, sortOrder);
+  const rowIds = rowKeys(rows, nameKey);
   const extent = extentOf(rows, keys);
   const [width, watch] = useWidth();
   const texture = textureOf(pattern);
@@ -2017,7 +2020,7 @@ export const ChartBarList = ({
       <ol {...stylex.props(listStyles.list)}>
         {rows.map((row, index) => (
           <BarRow
-            key={String(row[nameKey])}
+            key={rowIds[index]}
             chart={chart}
             row={row}
             index={index}

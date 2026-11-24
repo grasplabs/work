@@ -217,8 +217,7 @@ const OpenFileCode = ({ path, text }: { path: string; text: string }) => {
         <CodeBlockHeader>
           <CodeBlockTitle>{path}</CodeBlockTitle>
           <CodeBlockActions>
-            <CodeBlockCopyButton value={text} />
-            {/* Save it, beside the copy, in the copy button's own form. */}
+            {/* Save it, before the copy, in the copy button's own form. */}
             <Button
               aria-label={t`Download the file`}
               onClick={() => {
@@ -229,6 +228,7 @@ const OpenFileCode = ({ path, text }: { path: string; text: string }) => {
             >
               <Icon icon={DownloadIcon} />
             </Button>
+            <CodeBlockCopyButton value={text} />
           </CodeBlockActions>
         </CodeBlockHeader>
         <CodeBlockContent lineNumbers maxLines={false}>

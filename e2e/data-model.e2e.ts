@@ -111,17 +111,22 @@ test("a builder creates a table and its fields in the Data view, and sees them i
   // the App's own working version, and its schema generated from the
   // table just made.
   await expect(
-    page.getByRole("button", { name: "Share with your team" })
+    page.getByRole("button", { name: "Publish", exact: true })
   ).toBeEnabled(read);
+  // The App itself, by its name over the workspace's rows.
   await page
-    .getByRole("navigation", { name: "Workspace views" })
-    .getByRole("link", { name: "App" })
+    .getByRole("complementary", { name: "Sidebar" })
+    .getByRole("heading")
+    .getByRole("link")
     .click();
   await expect(
     page.getByRole("region", { name: /, your version$/u })
   ).toBeVisible(read);
-  // The App's own views, not the sidebar's rows for them.
-  await page.getByRole("main").getByRole("link", { name: "Code" }).click();
+  // Its code, the sidebar's row of its workspace.
+  await page
+    .getByRole("navigation", { name: /s workspace$/u })
+    .getByRole("link", { name: "Code" })
+    .click();
   await page
     .getByRole("tree", { name: "Files" })
     .getByRole("treeitem", { name: "schema.ts" })

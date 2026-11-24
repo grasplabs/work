@@ -12,6 +12,7 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
+  AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@grasp-os/ui/components/alert-dialog";
@@ -21,7 +22,6 @@ import {
   Card,
   CardAction,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@grasp-os/ui/components/card";
@@ -32,6 +32,7 @@ import {
   DialogClose,
   DialogContent,
   DialogFooter,
+  DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@grasp-os/ui/components/dialog";
@@ -64,6 +65,7 @@ import type { ReactNode } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { formatList } from "../format.ts";
+import { WithInfo } from "../frame/info-tip.tsx";
 import { decidesRequests } from "../inbox/waiting.ts";
 import { ShownOnceDialog } from "../shown-once.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -144,7 +146,9 @@ const AddWebhook = ({
         </Button>
       </DialogTrigger>
       <DialogContent>
-        <DialogTitle>{t`Add webhook`}</DialogTitle>
+        <DialogHeader>
+          <DialogTitle>{t`Add webhook`}</DialogTitle>
+        </DialogHeader>
         <DialogBody>
           <Form
             id={formId}
@@ -205,7 +209,6 @@ const AddWebhook = ({
               await add();
               setOpen(false);
             }}
-            size="sm"
             variant="default"
           >
             {t`Add webhook`}
@@ -236,10 +239,12 @@ const RemoveWebhook = ({
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
-        <AlertDialogTitle>{t`Remove the webhook to ${url}?`}</AlertDialogTitle>
-        <AlertDialogDescription>
-          {t`Grasp stops sending the App's events there. Its secret can't be used again.`}
-        </AlertDialogDescription>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t`Remove the webhook to ${url}?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t`Grasp stops sending the App's events there. Its secret can't be used again.`}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel />
           <AlertDialogAction onClick={onRemove} variant="destructive">
@@ -314,7 +319,7 @@ const WebhookRow = ({
               act("approve");
             }}
             size="sm"
-            variant="secondary"
+            variant="outline"
           >
             {t`Approve`}
           </Button>
@@ -376,10 +381,12 @@ export const AppWebhooks = ({
     <Card size="sm" asChild>
       <section aria-label={t`Addresses`}>
         <CardHeader>
-          <CardTitle level={3}>{t`Addresses`}</CardTitle>
-          <CardDescription>
-            {t`Grasp sends this App's events to each address, signed with its secret. Until an admin approves an address, it gets IDs and the event only, never what someone sent in a form.`}
-          </CardDescription>
+          <WithInfo
+            of="title"
+            info={t`Grasp sends this App's events to each address, signed with its secret. Until an admin approves an address, it gets IDs and the event only, never what someone sent in a form.`}
+          >
+            <CardTitle level={3}>{t`Addresses`}</CardTitle>
+          </WithInfo>
           <CardAction>
             <AddWebhook app={app} onSecret={setSecret} />
           </CardAction>
