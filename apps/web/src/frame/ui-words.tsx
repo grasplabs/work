@@ -52,6 +52,14 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       remove: t({ message: "Remove", context: "take a badge away" }),
       removeNamed: (words) => t`Remove ${words}`,
     },
+    breadcrumb: {
+      ellipsis: t`Show hidden levels`,
+      name: t`Breadcrumb`,
+    },
+    calendar: {
+      next: t`Next month`,
+      previous: t`Previous month`,
+    },
     codeBlock: {
       collapse: t`Show less`,
       expand: t`Show more`,
@@ -142,6 +150,18 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
         other: t({ message: "rows", context: "a table's rows, many" }),
       },
     },
+    datePicker: {
+      last30: t`Last 30 days`,
+      last7: t`Last 7 days`,
+      presets: t`Presets`,
+      rangeEnd: (field) => t`${field}, end`,
+      rangeStart: (field) => t`${field}, start`,
+      rangeTrigger: t`Choose dates`,
+      select: t`Choose date`,
+      triggerWith: (trigger, chosen) => t`${trigger}, ${chosen}`,
+      thisMonth: t`This month`,
+      today: t`Today`,
+    },
     dialog: {
       close: t({ message: "Close", context: "close a dialog or panel" }),
     },
@@ -163,6 +183,22 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       close: t({ message: "Close", context: "close a dialog or panel" }),
       showAll: t`Show all`,
       views: t({ message: "Views", context: "a side panel's views" }),
+    },
+    stepper: {
+      count: (step, total) => t`Step ${step} of ${total}`,
+      current: (step, total, label) => t`Step ${step} of ${total}: ${label}`,
+      finished: t`All steps done`,
+      navBack: t`Back`,
+      navNext: t`Next`,
+      states: {
+        complete: t`done`,
+        active: t`current step`,
+        pending: t`not started`,
+        error: t`failed`,
+      },
+    },
+    switch: {
+      error: t`Could not save`,
     },
     trace: {
       states: {
