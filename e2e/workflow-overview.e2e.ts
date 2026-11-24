@@ -220,6 +220,8 @@ test("a run's address with no view opens Runs with the run, and closed, the page
   await opened.getByRole("button", { name: "Close" }).click(pressed);
   await expect(page).not.toHaveURL(/[?&]run=/u);
   await expect(views.locator('[aria-current="page"]')).toHaveText(/^Runs/u);
+  // Gone, not leaving: a press while a Sheet leaves is its own (a Damsko gap).
+  await expect(page.locator('[data-slot="sheet-overlay"]')).toHaveCount(0);
   await views.getByRole("link", { name: "Settings" }).click(pressed);
   await expect(page).toHaveURL(/[?&]view=settings/u);
 });
