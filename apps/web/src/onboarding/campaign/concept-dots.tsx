@@ -184,6 +184,10 @@ export const CampaignDots = ({ campaign }: { campaign: Campaign }) => {
         </Heading>
         <Text size="lg">{rest}</Text>
       </header>
+      {/* What needs the admin stands first, inside the first screen. */}
+      <div {...stylex.props(wide.only)}>
+        <AskList campaign={campaign} />
+      </div>
       <div {...stylex.props(styles.table)}>
         <div {...stylex.props(styles.row)}>
           <DayLetters campaign={campaign} />
@@ -224,9 +228,6 @@ export const CampaignDots = ({ campaign }: { campaign: Campaign }) => {
         })}
       </div>
       <OnYourComputer />
-      <div {...stylex.props(wide.only)}>
-        <AskList campaign={campaign} />
-      </div>
       <div {...stylex.props(wide.only)}>
         <div {...stylex.props(styles.foot)}>
           <span>

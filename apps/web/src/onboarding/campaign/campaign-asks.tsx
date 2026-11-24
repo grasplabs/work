@@ -63,8 +63,17 @@ export const askWords = (
 };
 
 /** The one press for a quiet team. */
-const Nudge = ({ ask, onDone }: { ask: Ask; onDone: () => void }) => (
+const Nudge = ({
+  ask,
+  onDone,
+  quiet,
+}: {
+  ask: Ask;
+  onDone: () => void;
+  quiet: boolean;
+}) => (
   <Button
+    variant={quiet ? "link" : "default"}
     onClick={async () => {
       await sent();
       onDone();
@@ -79,16 +88,20 @@ const Nudge = ({ ask, onDone }: { ask: Ask; onDone: () => void }) => (
 const Readdress = ({
   ask,
   onDone,
+  quiet,
 }: {
   ask: Extract<Ask, { kind: "bounce" }>;
   onDone: () => void;
+  quiet: boolean;
 }) => {
   const id = useId();
   const [open, setOpen] = useState(false);
   return (
     <Popover onOpenChange={setOpen} open={open}>
       <PopoverTrigger asChild>
-        <Button variant="outline">Correct the address</Button>
+        <Button variant={quiet ? "link" : "outline"}>
+          Correct the address
+        </Button>
       </PopoverTrigger>
       <PopoverContent align="end">
         <PopoverHeader>
@@ -123,20 +136,29 @@ export const AskAction = ({
   ask,
   done,
   onDone,
+  quiet = false,
 }: {
   ask: Ask;
   done: boolean;
   onDone: () => void;
+  /** A second ask, folded into one line: its press reads as words. */
+  quiet?: boolean;
 }) => {
   if (done) {
     return null;
   }
   return ask.kind === "quiet" ? (
-    <Nudge ask={ask} onDone={onDone} />
+    <Nudge ask={ask} onDone={onDone} quiet={quiet} />
   ) : (
-    <Readdress ask={ask} onDone={onDone} />
+    <Readdress ask={ask} onDone={onDone} quiet={quiet} />
   );
 };
+
+/** The asks, the most important first: a quiet team before a bounced address. */
+export const asksInOrder = (asks: Ask[]): Ask[] =>
+  asks.toSorted(
+    (a, b) => Number(b.kind === "quiet") - Number(a.kind === "quiet")
+  );
 
 /** Which asks are done on this page, kept while it is open. */
 export const useAsksDone = () => {
