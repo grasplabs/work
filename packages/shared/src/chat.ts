@@ -197,6 +197,9 @@ export interface ChatSearchHit {
 // extractor, and the question that names it (`ChatQuestion.files`) carries
 // it. Its agent reads the text as data (`env.chat.readFile`), never as its
 // instructions. Only the text is kept, with the chat, and goes with it.
+// A picture (a pasted screenshot) is kept whole instead, told by its
+// bytes, never its name: the model sees it with the question, where it
+// takes pictures, and the page shows it again from `chatFilePath`.
 
 /**
  * The file types a chat file may be, by extension: what Knowledge reads
@@ -235,12 +238,55 @@ export const chatFileTypeOf = (name: string): ChatFileType | undefined => {
     : undefined;
 };
 
+/**
+ * The picture types a chat file may be, told by its first bytes, never by
+ * its name or a type anyone gives, with the type it is served as. No SVG:
+ * it can carry script.
+ */
+export const chatPictureTypes = {
+  png: "image/png",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+} as const;
+export type ChatPictureType = keyof typeof chatPictureTypes;
+
+/** Whether a chat file of `type` is a picture. */
+export const isChatPictureType = (type: string): type is ChatPictureType =>
+  Object.hasOwn(chatPictureTypes, type);
+
+/**
+ * Largest picture one attachment takes, in bytes: 5 MB, the most the
+ * model providers take of one image.
+ */
+export const chatPictureMaxBytes = 5 * 1024 * 1024;
+
+/** The most pixels a picture may be on either side, as the providers take them. */
+export const chatPictureMaxPixels = 8000;
+
+/** The path a chat's pictures are served under (`chatFilePath`). */
+export const chatFilesPrefix = "/api/chat-files/";
+
+/**
+ * Where the page reads picture `fileId` of chat `chatId` (`ChatFile`),
+ * as that chat's person alone, a signed-in member: an image of its type,
+ * never kept by the browser. Not found for anyone else, for any other file
+ * of the chat, and once the chat is gone.
+ */
+export const chatFilePath = (chatId: string, fileId: string): string =>
+  `${chatFilesPrefix}${encodeURIComponent(chatId)}/${encodeURIComponent(fileId)}`;
+
 /** A file attached to a chat, as its person sees it. */
 export interface ChatFile {
   id: string;
-  /** The file's name, as it was attached. */
+  /**
+   * The file's name, as it was attached. A question's text names a
+   * picture by its ID, as the composer wrote it
+   * (`@[Image 1](attachment:<id>)`), kept as it was asked.
+   */
   name: string;
-  type: ChatFileType;
+  /** Its type: one of {@link chatFileTypes}, or a picture's (`chatFilePath`). */
+  type: ChatFileType | ChatPictureType;
   /** The file's size, in bytes. */
   bytes: number;
   /** When it was attached (ISO 8601). */
@@ -1330,8 +1376,11 @@ export interface ChatsApi {
   /**
    * Attaches a file to the chat, for its next question to carry: a file
    * of one of {@link chatFileTypes} of at most {@link chatFileMaxBytes},
-   * up to {@link chatFilesMax} a chat. Resolves once its text is read,
-   * and is refused with why when it can't be. Audited.
+   * or a picture of one of {@link chatPictureTypes}, by its bytes, of at
+   * most {@link chatPictureMaxBytes} and {@link chatPictureMaxPixels} a
+   * side, up to {@link chatFilesMax} a chat. Resolves once its text is
+   * read, or the picture kept, and is refused with why when it can't be.
+   * Audited.
    */
   attachFile: (chatId: string, file: ChatFileInput) => Promise<ChatFile>;
   /**

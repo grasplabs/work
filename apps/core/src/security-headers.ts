@@ -1,4 +1,5 @@
 import { appFilesPath } from "@grasp-os/shared/app-file-limits";
+import { chatFilesPrefix } from "@grasp-os/shared/chat";
 import { catalogLogoPath } from "@grasp-os/shared/connect";
 import { strictTransportSecurity } from "@grasp-os/shared/http";
 import { organizationLogoPrefix } from "@grasp-os/shared/organization";
@@ -253,14 +254,15 @@ export const catalogLogoPolicy = `${policy({
  * (`isRefusedToProductPage`).
  */
 /**
- * Whether `pathname` is where an App file's, a run file's or the
- * organization's logo's bytes are sent.
+ * Whether `pathname` is where an App file's, a run file's, the
+ * organization's logo's or a chat's picture's bytes are sent.
  */
 const isFileContentPath = (pathname: string): boolean =>
   ((pathname.startsWith(`${appFilesPath}/`) ||
     pathname.startsWith(`${runFilesPath}/`)) &&
     pathname.endsWith("/content")) ||
-  pathname.startsWith(organizationLogoPrefix);
+  pathname.startsWith(organizationLogoPrefix) ||
+  pathname.startsWith(chatFilesPrefix);
 
 export const setSecurityHeaders = (
   headers: Headers,
@@ -272,7 +274,8 @@ export const setSecurityHeaders = (
   } else if (isFileContentPath(url.pathname)) {
     // An App file's or a run file's bytes (app-file-route.ts,
     // workflows/run-file-downloads.ts), always an attachment, or the
-    // organization's logo (organization-logo.ts), an image only: should a
+    // organization's logo (organization-logo.ts) or a chat's picture
+    // (chat-file-route.ts), an image only: should a
     // browser open one as a document anyway, a sandbox that runs nothing,
     // loads nothing and isn't read by another site.
     headers.set("content-security-policy", "default-src 'none'; sandbox");

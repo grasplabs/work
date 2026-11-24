@@ -1,7 +1,10 @@
 import {
   chatFileMaxBytes,
+  chatFilePath,
   chatFilesMax,
   chatFilesPerQuestionMax,
+  chatPictureMaxBytes,
+  chatPictureMaxPixels,
 } from "@grasp-os/shared/chat";
 import type { ChatToolEvent, ChatUpdate } from "@grasp-os/shared/chat";
 import { runInDurableObject } from "cloudflare:test";
@@ -9,6 +12,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { picturesPerRequestMaxBytes } from "../src/chat-agent.ts";
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
 import {
@@ -20,8 +24,14 @@ import {
 } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
-import { fakeProvider } from "./model-provider.ts";
-import { outcome, signedInApi } from "./sign-in.ts";
+import { fakeProvider, fakeProviderFor } from "./model-provider.ts";
+import {
+  outcome,
+  routed,
+  signedIn,
+  signedInApi,
+  staffPerson,
+} from "./sign-in.ts";
 
 // Files attached to a chat's questions: the person attaches a file, core
 // reads its text with Knowledge's extractor, and the question that names
@@ -33,6 +43,15 @@ import { outcome, signedInApi } from "./sign-in.ts";
 // without text, is taken; a limit the page shows isn't held by core;
 // deleting the chat leaves its files; an attachment goes unrecorded, or is
 // recorded with the file's name or words.
+//
+// A picture is the one file kept whole, for the model to see and the page
+// to show again. Its own ways to fail: anyone but its chat's person (another
+// member who guesses or knows its ID, a guest, Grasp staff) reads it; a file
+// a browser would run (HTML or an SVG named .png) is taken as one, or one
+// is served as anything but the image it is, or sniffed; one too large is
+// taken; it outlives its chat or its person (person-erasure.test.ts); a
+// model that can't see pictures is sent one, or the turn breaks. A guest
+// reading it is in guest-role.test.ts, with every other route.
 
 const idp = mockIdp();
 
@@ -100,6 +119,105 @@ const outsideToolResults = (messages: readonly unknown[]): string =>
       ? null
       : value
   );
+
+/** A real PNG, 8 by 8 pixels, from Pillow (organization-logo.test.ts). */
+const realPng = Uint8Array.from(
+  atob(
+    "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAGUlEQVR42mNkYGhQYGDARCwMCgxYweCUAABobwJednxjlwAAAABJRU5ErkJggg=="
+  ),
+  (char) => char.codePointAt(0) ?? 0
+);
+
+const be32 = (value: number): number[] => {
+  const out = new Uint8Array(4);
+  new DataView(out.buffer).setUint32(0, value);
+  return [...out];
+};
+
+/** A PNG's signature and IHDR, `width` by `height`, `size` bytes in all. */
+const png = ({ width = 64, height = 64, size = 88 } = {}): Uint8Array => {
+  const bytes = new Uint8Array(size).fill(1);
+  bytes.set([
+    0x89,
+    0x50,
+    0x4e,
+    0x47,
+    0x0d,
+    0x0a,
+    0x1a,
+    0x0a,
+    ...be32(13),
+    ...utf8("IHDR"),
+    ...be32(width),
+    ...be32(height),
+  ]);
+  return bytes;
+};
+
+/** A GIF's header and logical screen, 2 by 1 pixels. */
+const gif = new Uint8Array([...utf8("GIF89a"), 2, 0, 1, 0, 0, 0, 0, 0x3b]);
+
+/** What `cookie` reads at `path`: its status and headers, and its bytes. */
+const served = async (path: string, cookie?: string) => {
+  const response = await routed(
+    path,
+    cookie === undefined ? {} : { headers: { cookie } }
+  );
+  const { status, headers } = response;
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  return {
+    status,
+    type: status === 200 ? headers.get("content-type") : undefined,
+    cache: status === 200 ? headers.get("cache-control") : undefined,
+    nosniff: headers.get("x-content-type-options"),
+    policy: headers.get("content-security-policy"),
+    bytes: status === 200 ? [...bytes] : undefined,
+  };
+};
+
+/** What every answer on a picture's path carries, with `status`. */
+const guardedAnswer = (status: number) => ({
+  status,
+  type: undefined,
+  cache: undefined,
+  nosniff: "nosniff",
+  policy: "default-src 'none'; sandbox",
+  bytes: undefined,
+});
+
+/** The images an Anthropic request's messages show, as their type and data. */
+const imagesIn = (body: unknown): [string, string][] => {
+  const { messages } = z
+    .object({
+      messages: z.array(z.object({ content: z.unknown() })),
+    })
+    .parse(body);
+  return messages.flatMap(({ content }) =>
+    Array.isArray(content)
+      ? content.flatMap((block: unknown) => {
+          const image = z
+            .object({
+              type: z.literal("image"),
+              source: z.object({ media_type: z.string(), data: z.string() }),
+            })
+            .safeParse(block);
+          const shown: [string, string][] = image.success
+            ? [[image.data.source.media_type, image.data.source.data]]
+            : [];
+          return shown;
+        })
+      : []
+  );
+};
+
+/** How many picture parts `person`'s object keeps, of every chat. */
+const keptParts = async (person: Person): Promise<number> =>
+  await runInDurableObject(objectOf(person), (_instance, state) => {
+    const [row] = state.storage.sql
+      .exec<{ parts: number }>("SELECT count(*) AS parts FROM chat_file_parts")
+      .toArray();
+    return row?.parts ?? 0;
+  });
 
 /** How many files `person`'s object keeps, of every chat. */
 const keptFiles = async (person: Person): Promise<number> =>
@@ -502,6 +620,271 @@ describe("files attached to a question", slow, () => {
       readElsewhere: [true, true, false],
       before: 1,
       after: 0,
+    });
+  });
+});
+
+describe("pictures attached to a question", slow, () => {
+  it("are told by their bytes, kept whole, shown to the model with their question, and served to their chat's person alone", async () => {
+    const ann = await signedInApi(idp, "user");
+    const ben = await signedInApi(idp, "user");
+    const staff = await signedIn(idp, "grasp-staff", staffPerson());
+    const chat = await ann.api.chats.create("Screenshots");
+    const benChat = await ben.api.chats.create("Ben's");
+    // A pasted screenshot has no name worth trusting: its bytes say.
+    const shot = await ann.api.chats.attachFile(chat.id, {
+      name: "Image 1",
+      bytes: realPng,
+    });
+    const moving = await ann.api.chats.attachFile(chat.id, {
+      name: "notes.txt",
+      bytes: gif,
+    });
+    const provider = await fakeProvider(says("A chart."));
+    const followed = await follow(ann, chat.id);
+    const text = `What is in @[Image 1](attachment:${shot.id}) and @[Image 2](attachment:${moving.id})?`;
+    await ann.api.chats.send(chat.id, {
+      text,
+      model,
+      files: [shot.id, moving.id],
+    });
+    await settled(ann, chat.id);
+    const question = followed.messages().find(({ role }) => role === "user");
+    const events = await allEvents();
+    const path = chatFilePath(chat.id, shot.id);
+    const gifServed = await served(
+      chatFilePath(chat.id, moving.id),
+      ann.session
+    );
+
+    expect({
+      attached: [shot, moving].map(({ name, type, bytes }) => [
+        name,
+        type,
+        bytes,
+      ]),
+      // The model sees each with the question, as its own type.
+      shown: imagesIn(provider.requests[0]?.body),
+      // The question's words are kept as asked, and list its pictures.
+      question:
+        question?.role === "user"
+          ? [question.text, question.files?.map(({ id }) => id)]
+          : undefined,
+      ann: await served(path, ann.session),
+      gifType: gifServed.type,
+      // Ben knows its ID, and the chat's: nothing there for him.
+      ben: await served(path, ben.session),
+      benGuesses: await served(chatFilePath(benChat.id, shot.id), ben.session),
+      staff: await served(path, staff),
+      nobody: await served(path),
+      // Another file of the chat, or none, is not found either.
+      notAPicture: await served(
+        chatFilePath(chat.id, "file-none"),
+        ann.session
+      ),
+      // Its ID, type and size: never its name or bytes.
+      audited: events
+        .filter(
+          ({ action, target }) =>
+            action === "chat.file_attached" && target?.id === chat.id
+        )
+        .map(({ detail }) => [detail.file, detail.type, detail.bytes]),
+    }).toStrictEqual({
+      attached: [
+        ["Image 1", "png", realPng.byteLength],
+        ["notes.txt", "gif", gif.byteLength],
+      ],
+      shown: [
+        ["image/png", btoa(String.fromCodePoint(...realPng))],
+        ["image/gif", btoa(String.fromCodePoint(...gif))],
+      ],
+      question: [text, [shot.id, moving.id]],
+      ann: {
+        status: 200,
+        type: "image/png",
+        cache: "private, no-store",
+        nosniff: "nosniff",
+        policy: "default-src 'none'; sandbox",
+        bytes: [...realPng],
+      },
+      gifType: "image/gif",
+      ben: guardedAnswer(404),
+      benGuesses: guardedAnswer(404),
+      staff: guardedAnswer(401),
+      nobody: guardedAnswer(401),
+      notAPicture: guardedAnswer(404),
+      audited: [
+        [shot.id, "png", realPng.byteLength],
+        [moving.id, "gif", gif.byteLength],
+      ],
+    });
+  });
+
+  it("are refused unless their bytes are a PNG, JPEG, WebP or GIF within the limits, whatever their name", async () => {
+    const ann = await signedInApi(idp, "user");
+    const chat = await ann.api.chats.create("Limits");
+    const attach = async (name: string, bytes: Uint8Array) =>
+      await outcome(ann.api.chats.attachFile(chat.id, { name, bytes }));
+    expect({
+      htmlAsPng: await attach(
+        "shot.png",
+        utf8("<html><script>alert(document.cookie)</script></html>")
+      ),
+      svgAsPng: await attach(
+        "shot.png",
+        utf8(
+          '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+        )
+      ),
+      svg: await attach(
+        "shot.svg",
+        utf8('<svg xmlns="http://www.w3.org/2000/svg"></svg>')
+      ),
+      oversized: await attach(
+        "shot.png",
+        png({ size: chatPictureMaxBytes + 1 })
+      ),
+      tooWide: await attach(
+        "shot.png",
+        png({ width: chatPictureMaxPixels + 1, height: 10 })
+      ),
+      noPixels: await attach("shot.png", png({ width: 0 })),
+      // Nothing refused was kept.
+      kept: await keptFiles(ann),
+      parts: await keptParts(ann),
+      atTheLimit: await attach(
+        "shot.png",
+        png({
+          width: chatPictureMaxPixels,
+          height: chatPictureMaxPixels,
+          size: chatPictureMaxBytes,
+        })
+      ),
+    }).toStrictEqual({
+      htmlAsPng: "agent.file_unsupported",
+      svgAsPng: "agent.file_unsupported",
+      svg: "agent.file_unsupported",
+      oversized: "agent.file_too_large",
+      tooWide: "agent.file_too_large",
+      noPixels: "agent.file_unsupported",
+      kept: 0,
+      parts: 0,
+      atTheLimit: "ok",
+    });
+  });
+
+  it("go with their chat, and when their person removes one no question carried", async () => {
+    const ann = await signedInApi(idp, "user");
+    const chat = await ann.api.chats.create("Gone");
+    const carried = await ann.api.chats.attachFile(chat.id, {
+      name: "Image 1",
+      bytes: png({ size: chatPictureMaxBytes }),
+    });
+    const unsent = await ann.api.chats.attachFile(chat.id, {
+      name: "Image 2",
+      bytes: realPng,
+    });
+    await fakeProvider(says("Seen."));
+    await ann.api.chats.send(chat.id, {
+      text: `See @[Image 1](attachment:${carried.id})`,
+      model,
+      files: [carried.id],
+    });
+    await settled(ann, chat.id);
+    const kept = await keptParts(ann);
+    await ann.api.chats.removeFile(chat.id, unsent.id);
+    const afterRemoved = await keptParts(ann);
+    const before = await served(chatFilePath(chat.id, carried.id), ann.session);
+    await ann.api.chats.remove(chat.id);
+
+    expect({
+      kept,
+      afterRemoved,
+      before: before.status,
+      after: await served(chatFilePath(chat.id, carried.id), ann.session),
+      parts: await keptParts(ann),
+      files: await keptFiles(ann),
+    }).toStrictEqual({
+      // Five parts of 1 MB for the large one, one for the small.
+      kept: 6,
+      afterRemoved: 5,
+      before: 200,
+      after: guardedAnswer(404),
+      parts: 0,
+      files: 0,
+    });
+  });
+
+  it("are shown newest first, as many as one request has room for, an older one keeping its line alone", async () => {
+    const ann = await signedInApi(idp, "user");
+    const chat = await ann.api.chats.create("Many");
+    const attach = async (name: string, bytes: Uint8Array) =>
+      await ann.api.chats.attachFile(chat.id, { name, bytes });
+    const oldest = await attach("Image 1", realPng);
+    // Each as large as one may be: two fill a request's room.
+    const large = png({ size: picturesPerRequestMaxBytes / 2 });
+    const second = await attach("Image 2", large);
+    const newest = await attach("Image 3", large);
+    const provider = await fakeProvider(says("Seen."));
+    await ann.api.chats.send(chat.id, {
+      text: "Compare them.",
+      model,
+      files: [oldest.id, second.id, newest.id],
+    });
+    await settled(ann, chat.id);
+    const sent = JSON.stringify(provider.requests[0]?.body);
+
+    expect({
+      shown: imagesIn(provider.requests[0]?.body).map(
+        ([, data]) => data.length
+      ),
+      lines: [oldest, second, newest].map(({ id }) =>
+        sent.includes(`[Picture ${id}]`)
+      ),
+    }).toStrictEqual({
+      // The two newest, as base64.
+      shown: [large, large].map(
+        ({ byteLength }) => 4 * Math.ceil(byteLength / 3)
+      ),
+      lines: [true, true, true],
+    });
+  });
+
+  it("reach no model that can't see pictures, whose question's words stand alone", async () => {
+    const ann = await signedInApi(idp, "user");
+    const chat = await ann.api.chats.create("Words");
+    const shot = await ann.api.chats.attachFile(chat.id, {
+      name: "Image 1",
+      bytes: realPng,
+    });
+    // Mistral NeMo takes text alone (pi's catalog).
+    const textOnly = "mistral/mistral-nemo";
+    const provider = await fakeProviderFor([textOnly], says("No picture."));
+    const followed = await follow(ann, chat.id);
+    await ann.api.chats.send(chat.id, {
+      text: `What is in @[Image 1](attachment:${shot.id})?`,
+      model: textOnly,
+      files: [shot.id],
+    });
+    await settled(ann, chat.id);
+    const sent = JSON.stringify(provider.requests[0]?.body);
+    const answer = followed
+      .messages()
+      .findLast(({ role }) => role === "assistant");
+
+    expect({
+      asked: sent.includes(`@[Image 1](attachment:${shot.id})`),
+      line: sent.includes(`[Picture ${shot.id}]`),
+      picture:
+        sent.includes(btoa(String.fromCodePoint(...realPng))) ||
+        sent.includes("image_url"),
+      // As the answer stands once it is done.
+      answered: answer?.role === "assistant" ? answer.text : undefined,
+    }).toStrictEqual({
+      asked: true,
+      line: true,
+      picture: false,
+      answered: "No picture.",
     });
   });
 });
