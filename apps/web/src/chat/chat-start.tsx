@@ -25,7 +25,7 @@ import type { MakeExample } from "../make/examples.ts";
 import { BlueprintIdeas, WorkflowIdeas } from "../make/make-ideas.tsx";
 import { agentModelOf } from "./agent-choice.tsx";
 import { Backdrop } from "./backdrop/backdrop.tsx";
-import { openChat } from "./chat-layout.ts";
+import { useGoToChat } from "./chat-link.ts";
 import { Composer } from "./composer.tsx";
 import { useGlobalChat } from "./global-chat.tsx";
 import {
@@ -219,14 +219,16 @@ export const ChatStart = ({
   const unavailable = unavailableText(modelsUnavailable);
   const agents = offered?.agents ?? [];
   const named = agents.find(({ id }) => id === agent);
+  const goToChat = useGoToChat();
   const { composer } = useAsk(
     undefined,
     offered?.models,
     offered?.efforts,
     undefined,
     {
-      onAsked: () => {
-        openChat("fullscreen");
+      // The chat's own page (chat-link.ts), the question already in it.
+      onAsked: (chatId) => {
+        goToChat(chatId);
       },
       ...(make === undefined ? {} : { make }),
     }

@@ -1,13 +1,20 @@
 import { Toaster as KitToaster } from "@grasp-os/app-kit/components/toast";
 import { TooltipProvider as KitTooltipProvider } from "@grasp-os/app-kit/components/tooltip";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { SidebarInset, SidebarProvider } from "@grasp-os/ui/components/sidebar";
+import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@grasp-os/ui/components/sidebar";
+import { sidebarMarker } from "@grasp-os/ui/components/sidebar.stylex";
 import { Toaster } from "@grasp-os/ui/components/toast";
-import { duration, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { duration, media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import type { ChatPanels } from "../chat/chat-panel.tsx";
 import { ChatToggle } from "../chat/chat-toggle.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import { AiKeyBanner, providersOf } from "./ai-key-banner.tsx";
@@ -15,6 +22,10 @@ import type { FailingProvider } from "./ai-key-banner.tsx";
 import { AppSidebar } from "./app-sidebar.tsx";
 import { InFrame } from "./in-frame.ts";
 import { PageWithPanel } from "./page-panel.tsx";
+import {
+  ChatPanelsBeside,
+  useChatCover,
+} from "./panels/chat-panels-beside.tsx";
 
 /**
  * Where the person's sidebar choices are kept in this browser: whether it
@@ -57,6 +68,15 @@ const styles = stylex.create({
     transitionDelay: duration.press,
   },
   covered: { opacity: 0, transitionDelay: "0s" },
+  // The AI providers' banner across the card's top fades with the page
+  // under a panel gone full screen, whose head stands where it is.
+  banner: {
+    flexShrink: 0,
+    transitionProperty: "opacity",
+    transitionDuration: duration.ui,
+    transitionTimingFunction: duration.ease,
+    transitionDelay: duration.press,
+  },
   // The page and its panel, under the banner: what the chat's button
   // stands over.
   area: {
@@ -73,6 +93,14 @@ const styles = stylex.create({
     position: "absolute",
     insetBlockStart: `calc((${size.appShellBar} - ${size.sidebarIconButton}) / 2)`,
     insetInlineEnd: `calc(${size.appShellPageInline} - (${size.sidebarIconButton} - ${size.sidebarIcon}) / 2)`,
+    zIndex: 25,
+  },
+  // The menu's button at the row's start on a phone, where the page's bar
+  // has its trigger (site-header.tsx), while the chat covers the page.
+  menu: {
+    position: "absolute",
+    insetBlockStart: `calc((${size.appShellBar} - ${size.sidebarIconButton}) / 2)`,
+    insetInlineStart: `calc(${size.appShellPageInline} + (${size.sidebarIcon} - ${size.sidebarIconButton}) / 2)`,
     zIndex: 25,
   },
   // Over the page, centred at the card's foot, clear of its edges: what
@@ -96,6 +124,26 @@ const styles = stylex.create({
   // What it holds takes presses again: inherited, through a wrapper that
   // draws no box of its own.
   docked: { display: "contents", pointerEvents: "auto" },
+  // Beside the chat's panels the card keeps no room at its end: the gutter
+  // between the two is the panels' handle, as wide as the card's margin
+  // (#2503's shell, frame/panels/panels.tsx), which is the card's end
+  // margin when no panel stands there.
+  card: { marginInlineEnd: 0 },
+  // Room under a page that fills the card while the dock stands over its
+  // foot: as tall as the dock, its inset from the card's foot and the gap
+  // above it, so the page ends above the bar, as #2503's shell keeps it
+  // (its `roomForDock`).
+  roomForDock: (height: number) => ({
+    paddingBlockEnd: `calc(${height}px + ${space["4"]} + ${space["6"]})`,
+  }),
+  // Under the chat lying over it (full screen, or for want of room), the
+  // card spans the room beside the sidebar, its margins in, edge to edge on
+  // a phone: the ground the chat stands on (#2503's `cardCovered`).
+  spans: {
+    position: "absolute",
+    inset: { default: size.sidebarCardGap, [media.maxSm]: 0 },
+    margin: 0,
+  },
 });
 
 /**
@@ -142,6 +190,34 @@ const usePublishedPage = () => {
 };
 
 /**
+ * How tall the dock's bar is while `on`, followed as it changes (a box
+ * that grows with what is typed); null while off or not yet measured.
+ */
+const useDockHeight = (on: boolean): number | null => {
+  const [height, setHeight] = useState<number | null>(null);
+  useEffect(() => {
+    const held = on
+      ? document.querySelector<HTMLElement>(
+          "[data-slot=app-shell-dock] > * > *"
+        )
+      : null;
+    if (held === null) {
+      return () => {
+        // Nothing was watched.
+      };
+    }
+    const observer = new ResizeObserver(() => {
+      setHeight(Math.ceil(held.getBoundingClientRect().height));
+    });
+    observer.observe(held);
+    return () => {
+      observer.disconnect();
+    };
+  }, [on]);
+  return on ? height : null;
+};
+
+/**
  * The signed-in product's frame, on Damsko: its Sidebar beside the page,
  * or a sheet from the start on a narrow window, folded as the person left
  * it (`storageKey`); the page as a card on the sidebar's ground
@@ -164,8 +240,9 @@ export const AppFrame = ({
   identity,
   failing,
   dock,
+  dockRoom = false,
   panels,
-  covered = false,
+
   children,
 }: {
   core: CoreConnection;
@@ -174,13 +251,60 @@ export const AppFrame = ({
   failing?: FailingProvider[];
   /** Over the page, centred at its foot: the chat's idle bar. */
   dock?: ReactNode;
-  /** Beside or over the page: the chat. */
-  panels?: ReactNode;
-  /** A panel is full screen over the page, whose content fades out under it. */
-  covered?: boolean;
+  /** The page fills the card and the dock stands over its foot: the page keeps room for it. */
+  dockRoom?: boolean;
+  /** Beside the page, floating over it, or over it full screen: Grasp's chat. */
+  panels?: ChatPanels;
   children: ReactNode;
 }) => {
+  const { t } = useLingui();
   const page = usePublishedPage();
+  const dockHeight = useDockHeight(dockRoom);
+  const cover = useChatCover(panels);
+  const { covered, phone } = cover.place;
+  const card = (
+    <SidebarInset
+      style={[panels !== undefined && styles.card, covered && styles.spans]}
+    >
+      <div {...stylex.props(styles.frame)}>
+        <div
+          inert={covered}
+          {...stylex.props(styles.banner, covered && styles.covered)}
+        >
+          <AiKeyBanner
+            failing={failing}
+            identity={identity}
+            providers={providersOf(core)}
+          />
+        </div>
+        <div {...stylex.props(styles.area)}>
+          <PageWithPanel>
+            <div
+              data-slot="app-shell-page"
+              inert={covered}
+              ref={page}
+              {...stylex.props(
+                styles.page,
+                covered && styles.covered,
+                dockHeight !== null && styles.roomForDock(dockHeight)
+              )}
+            >
+              <InFrame value>{children}</InFrame>
+            </div>
+          </PageWithPanel>
+          <ChatToggle style={styles.chatToggle} />
+          {/* On a phone the chat lies over the page under the bar's row,
+              which keeps the menu's button, as #2503's shell does. */}
+          {phone ? (
+            <SidebarTrigger
+              aria-label={t`Show or hide the sidebar`}
+              style={styles.menu}
+            />
+          ) : null}
+        </div>
+      </div>
+    </SidebarInset>
+  );
   return (
     // Damsko's Toaster (below) is the app's one place for toasts: a page
     // mounts none of its own and calls Damsko's `toast`. The kit's stays
@@ -192,38 +316,42 @@ export const AppFrame = ({
       <KitTooltipProvider>
         <SidebarProvider storageKey={sidebarKey}>
           <AppSidebar core={core} identity={identity} />
-          <SidebarInset>
-            <div {...stylex.props(styles.frame)}>
-              <AiKeyBanner
-                failing={failing}
-                identity={identity}
-                providers={providersOf(core)}
-              />
-              <div {...stylex.props(styles.area)}>
-                <PageWithPanel>
-                  <div
-                    data-slot="app-shell-page"
-                    inert={covered}
-                    ref={page}
-                    {...stylex.props(styles.page, covered && styles.covered)}
-                  >
-                    <InFrame value>{children}</InFrame>
-                  </div>
-                </PageWithPanel>
-                <ChatToggle style={styles.chatToggle} />
-              </div>
-            </div>
-          </SidebarInset>
+          {panels === undefined ? (
+            card
+          ) : (
+            <ChatPanelsBeside
+              card={
+                <>
+                  {/* Damsko's SidebarInset is a card only beside an inset
+                      Sidebar, its sibling; beside the chat it stands in the
+                      panels' group, so it is given that sibling's mark here
+                      (registry gap of 24 Nov 2026: an inset that is a card
+                      wherever it stands). */}
+                  <span
+                    aria-hidden="true"
+                    data-variant="inset"
+                    hidden
+                    {...stylex.props(sidebarMarker)}
+                  />
+                  {card}
+                </>
+              }
+              cover={cover}
+              panels={panels}
+            />
+          )}
           {dock === undefined ? null : (
             <div
               data-slot="app-shell-dock"
-              inert={covered}
-              {...stylex.props(styles.dock, covered && styles.covered)}
+              inert={panels?.covered === true}
+              {...stylex.props(
+                styles.dock,
+                panels?.covered === true && styles.covered
+              )}
             >
               <div {...stylex.props(styles.docked)}>{dock}</div>
             </div>
           )}
-          {panels}
         </SidebarProvider>
         <Toaster />
       </KitTooltipProvider>

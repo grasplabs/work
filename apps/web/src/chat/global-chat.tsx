@@ -2,8 +2,14 @@ import type { ChatAgent } from "@grasp-os/shared/chat";
 import type { ModelEfforts } from "@grasp-os/shared/models";
 import type { Subject } from "@grasp-os/shared/subject";
 import { useLingui } from "@lingui/react/macro";
-import { useLocation, useRouteContext } from "@tanstack/react-router";
-import { createContext, use, useEffect, useEffectEvent, useRef } from "react";
+import { useRouteContext } from "@tanstack/react-router";
+import {
+  createContext,
+  use,
+  useEffect,
+  useEffectEvent,
+  useSyncExternalStore,
+} from "react";
 import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -24,7 +30,7 @@ import { pendingAsk } from "./asked-questions.tsx";
 import { answeredAfterBuild } from "./build-answered.ts";
 import { useChatBuilds } from "./builds.tsx";
 import { readChatNames, useChatSummary } from "./chat-details.ts";
-import { closeChat, exitFullscreen, useChatLayout } from "./chat-layout.ts";
+import { closeChat, useChatLayout } from "./chat-layout.ts";
 import {
   allows,
   chatPresence,
@@ -33,7 +39,7 @@ import {
   useOpenChat,
 } from "./chat-presence.ts";
 import type { ChatPresence } from "./chat-presence.ts";
-import { stageOf, useChatStage } from "./chat-stage.ts";
+import { stageOf } from "./chat-stage.ts";
 import {
   slotOf,
   subjectOf,
@@ -41,22 +47,45 @@ import {
   useSubjectChat,
 } from "./chat-subject.ts";
 import { useFollowedChat } from "./chat-watch.ts";
-import { useNarrow, usePhone } from "./narrow.ts";
+import { useNoRoomBeside } from "./room-beside.ts";
 import type { SourceName } from "./sources.tsx";
 import { useAsk } from "./use-ask.ts";
+
+/** Narrower than this, a phone or a narrow window: the chat stands docked, never floating. */
+const narrowQuery = "(max-width: 767px)";
+
+/**
+ * App shell's narrow shell (its `width < 40rem`), a phone: docked, the chat
+ * covers the whole page, so a page about a subject shows itself first.
+ */
+const phoneQuery = "(width < 40rem)";
+
+/** Whether the window matches `query` now, followed as it changes; never on the server. */
+const useMatches = (query: string): boolean =>
+  useSyncExternalStore(
+    (onChange) => {
+      const list = matchMedia(query);
+      list.addEventListener("change", onChange);
+      return () => {
+        list.removeEventListener("change", onChange);
+      };
+    },
+    () => matchMedia(query).matches,
+    () => false
+  );
 
 // Grasp's one chat, on every page: the person's open chat
 // (active-chat.ts), so what is asked anywhere goes on there and shows in
 // their list, as on Chat. Closed, it is an idle bar at the foot of the page
 // (chat-bar.tsx); open, a panel docked beside the page or floating over it
-// (chat-panel.tsx, laid out by chat-layout.ts, shown step by step by
-// chat-stage.ts). The chat and what is typed
+// (chat-panel.tsx, laid out by chat-layout.ts, shown as chat-stage.ts
+// says). The chat and what is typed
 // in its box are held here, once, for the whole shell, so they stay as the
 // chat opens, closes or moves, and as the person moves between pages.
 //
-// Where it may show is each page's to say (chat-presence.ts): on Chat's
-// own page only full screen, with no idle bar, as the page is where to
-// ask; none for Grasp staff who reach the onboarding alone: core refuses
+// Where it may show is each page's to say (chat-presence.ts): not at all
+// on Chat's start or a chat's own page (chat-page.tsx), which are where to
+// ask, and the dock doesn't follow the person off them; none for Grasp staff who reach the onboarding alone: core refuses
 // them chats. What it is about is each page's to say too
 // (chat-subject.ts): an App's workspace has the chat that builds the App,
 // a workflow's page the one that draws it, docked beside them.
@@ -65,7 +94,7 @@ import { useAsk } from "./use-ask.ts";
  * The models a question may name, and the efforts each takes, and the
  * company's agents the person may talk to, the first one first.
  */
-export interface Offered {
+interface Offered {
   models: string[];
   efforts: Record<string, ModelEfforts>;
   agents: ChatAgent[];
@@ -132,7 +161,7 @@ const useModelsUnavailable = (
 };
 
 /** What the chat is called and says. */
-export interface ChatWords {
+interface ChatWords {
   title: string;
   placeholder: string;
 }
@@ -167,10 +196,16 @@ const useChatWords = (): ChatWords => {
   const subject = subjectOf(useShownSlot());
   if (subject !== undefined) {
     const { title, placeholder } = subjectWords;
-    return { title: i18n._(title), placeholder: i18n._(placeholder) };
+    return {
+      title: i18n._(title),
+      placeholder: i18n._(placeholder),
+    };
   }
   const title = t`Ask Grasp`;
-  return { title, placeholder: title };
+  return {
+    title,
+    placeholder: title,
+  };
 };
 
 /**
@@ -186,11 +221,15 @@ const useQuestionSubject = (
 };
 
 const useGlobalChatValue = () => {
-  const phone = usePhone();
+  const { identity } = useRouteContext({ from: "/_shell" });
+  const phone = useMatches(phoneQuery);
   const presence = usePresenceHere(phone);
   const available = presence.placements.length > 0;
-  // Read once for every page, not again as the person moves between them.
-  const { value: models, readAgain } = useFrameRead(readModels, available);
+  // Read once for every page, not again as the person moves between them,
+  // and on a chat's own page too, where the dock has no place: anywhere
+  // the person may chat at all (not Grasp staff in the onboarding alone).
+  const chats = identity.onboardingOnly !== true;
+  const { value: models, readAgain } = useFrameRead(readModels, chats);
   const modelsUnavailable = useModelsUnavailable(models);
   const offered = models?.state === "ready" ? models.data : undefined;
   const words = useChatWords();
@@ -199,16 +238,9 @@ const useGlobalChatValue = () => {
   const slot = useShownSlot();
   const chatId = useActiveChat(slot);
   const finding = useSubjectChat(slot, chatId);
-  const { view, failure, gone } = useFollowedChat(chatId);
-  // Core has no such chat (deleted, or not the person's): the next question
-  // starts one, and a subject's is found again.
-  useEffect(() => {
-    if (chatId !== undefined && gone === true) {
-      setActiveChat(undefined, slot);
-    }
-  }, [chatId, gone, slot]);
   // What each question is about: the page's subject, on the box's bar.
   const subject = useQuestionSubject(slot);
+  const { view, failure, gone } = useFollowedChat(chatId);
   const { composer, ask } = useAsk(
     chatId,
     offered?.models,
@@ -217,14 +249,17 @@ const useGlobalChatValue = () => {
     subject.about === undefined ? undefined : { subject: subject.about }
   );
   const builds = useChatBuilds(chatId, view.running, view.worked);
-  // Before anything is asked: a chat not made yet, or one made empty.
-  const empty =
-    chatId === undefined || (view.loaded && view.messages.length === 0);
-  // The questions the chat's agent asked last, answered in the person's
-  // next message.
-  const asking = pendingAsk(view.messages, view.running);
+  const { summary, retitle } = useChatSummary(chatId, view.running);
+  // Core has no such chat (deleted, or not the person's): the next question
+  // starts one, and a subject's is found again.
+  useEffect(() => {
+    if (chatId !== undefined && gone === true) {
+      setActiveChat(undefined, slot);
+    }
+  }, [chatId, gone, slot]);
   const layout = useChatLayout();
-  const roomBeside = !useNarrow();
+  const roomBeside = !useMatches(narrowQuery);
+  const noRoomBeside = useNoRoomBeside();
   // About the page's subject, it stays open (chat-subject.ts), where the
   // page has it: that page is where its subject is made. On a phone, where
   // it would cover that page, the page shows first and the chat opens as
@@ -232,24 +267,38 @@ const useGlobalChatValue = () => {
   // where this page allows it there; elsewhere it stays open, and shows
   // again on a page that does.
   const about = subjectOf(slot) !== undefined;
-  const keptOpen = about && !phone;
+  // Nor where the page has no room beside it docked (room-beside.ts): it
+  // would lie over the page with no way back to it.
+  const keptOpen = about && !phone && !noRoomBeside;
   // A subject's page has it docked, wherever it was put elsewhere.
   const placement = about
     ? (placementOn(presence, layout.placement) ?? layout.placement)
     : layout.placement;
   const open = (keptOpen || layout.open) && allows(presence, placement);
-  const { stage, delays, settled } = useChatStage(
-    stageOf({
-      available,
-      open,
-      placement,
-      roomBeside,
-      barHere: presence.bar,
-    })
-  );
-  const { value: names } = useFrameRead(readChatNames, available);
-  const { summary, retitle } = useChatSummary(chatId, view.running);
+  const stage = stageOf({
+    available,
+    open,
+    placement,
+    roomBeside,
+    barHere: presence.bar,
+  });
+  const { value: names } = useFrameRead(readChatNames, chats);
   return {
+    chatId,
+    view,
+    failure,
+    /** Before anything is asked: a chat not made yet, or one made empty. */
+    empty: chatId === undefined || (view.loaded && view.messages.length === 0),
+    composer,
+    ask,
+    /** The Apps its agent builds, read as it writes them. */
+    builds,
+    /** The questions the chat's agent asked last, answered in the person's next message. */
+    asking: pendingAsk(view.messages, view.running),
+    /** The open chat's summary: its title, once core has said it. */
+    summary,
+    /** Shows a new name the person gave the open chat at once. */
+    retitle,
     /** Where the chat may show on this page, and whether its bar does. */
     presence,
     /** Whether the chat is on this page at all. */
@@ -258,36 +307,22 @@ const useGlobalChatValue = () => {
     open,
     /** Whether it stays open here, about the page's subject: no closing it. */
     keptOpen,
+    /** Whether there is room beside the page to dock into: not on a phone. */
+    roomBeside,
     /** Where it opens, or is. */
     placement,
-    /** What of it shows now, on its way to the layout. */
+    /** What of it shows now. */
     stage,
-    /** Which parts move a beat after the other, in this step. */
-    delays,
-    /** For each part that shows it, once it has finished moving. */
-    settled,
     words,
     /** The tab's slot the chat is in: a subject's (chat-subject.ts), or the person's. */
     slot,
-    chatId,
     /** While a subject's chat is found: why core gave none, and asking again. */
     finding,
     /** What each question is about, by name. */
     subject,
-    view,
-    /** The Apps its agent builds, read as it writes them. */
-    builds,
-    failure,
-    empty,
-    composer,
-    ask,
     modelsUnavailable,
     /** The models a question may name, with their efforts, once read. */
     offered,
-    /** The open chat's summary: its title, once core has said it. */
-    summary,
-    /** Shows a new name the person gave the open chat at once. */
-    retitle,
     /** Where answers came from, by ID, for their sources. */
     sourceNames:
       names?.state === "ready"
@@ -296,8 +331,6 @@ const useGlobalChatValue = () => {
     /** Reads the models again, where core was out of reach or refused. */
     retry:
       models !== undefined && models.state !== "ready" ? readAgain : undefined,
-    /** The questions the chat's agent asked last, in the box's place. */
-    asking,
   };
 };
 
@@ -323,6 +356,16 @@ export const useShownPresence = (): ChatPresence => {
   const chat = use(GlobalChatContext);
   const presence = useChatPresence();
   return chat?.presence ?? presence;
+};
+
+/**
+ * Whether the card's own button may open and close the chat here: where
+ * the chat is, and doesn't stay open about the page's subject (on a phone
+ * it never does); none outside the chat's provider.
+ */
+export const useChatToggles = (): boolean => {
+  const chat = use(GlobalChatContext);
+  return chat !== null && chat.available && !chat.keptOpen;
 };
 
 /**
@@ -368,21 +411,10 @@ export const useChatAbout = (subject: Subject | undefined, name: string) => {
 /** The key that opens the chat, or closes it: ⌘J, or Ctrl J off a Mac. */
 export const chatKey = "j";
 
-/**
- * Holds Grasp's one chat for the shell, opens or closes it on ⌘J, and takes
- * it back beside the page from full screen as the person goes to another.
- */
+/** Holds Grasp's one chat for the shell, and opens or closes it on ⌘J. */
 export const GlobalChatProvider = ({ children }: { children: ReactNode }) => {
   const chat = useGlobalChatValue();
   const openHere = useOpenChat();
-  const { pathname } = useLocation();
-  const shownPath = useRef(pathname);
-  useEffect(() => {
-    if (pathname !== shownPath.current) {
-      shownPath.current = pathname;
-      exitFullscreen();
-    }
-  }, [pathname]);
   const onKey = useEffectEvent((event: KeyboardEvent) => {
     if (!(chat.available && isShortcut(event, chatKey))) {
       return;
