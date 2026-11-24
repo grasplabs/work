@@ -41,7 +41,7 @@ const SettingsLayout = () => {
             : [{ label: t`Settings` }, { label: section }]
         }
       />
-      <Page wide>
+      <Page>
         <PageHeading
           description={t`Your workspace, who may do what in it, and your own account.`}
           title={t`Settings`}

@@ -3,11 +3,12 @@ import { TooltipProvider as KitTooltipProvider } from "@grasp-os/app-kit/compone
 import type { Identity } from "@grasp-os/shared/rpc";
 import { SidebarInset, SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { Toaster } from "@grasp-os/ui/components/toast";
-import { duration, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { duration, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
+import { ChatToggle } from "../chat/chat-toggle.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import { AiKeyBanner, providersOf } from "./ai-key-banner.tsx";
 import type { FailingProvider } from "./ai-key-banner.tsx";
@@ -32,6 +33,9 @@ const styles = stylex.create({
     flexDirection: "column",
     overflow: "clip",
     borderRadius: "inherit",
+    // A layer of its own, so the line inside the card's edge stands over
+    // all of it, the page's bar too, as the reference's.
+    zIndex: 0,
   },
   // The page, under the banner: it scrolls up and down only, what is wider
   // than the card is cut at its edge. Laid out down the card, at least as
@@ -53,6 +57,24 @@ const styles = stylex.create({
     transitionDelay: duration.press,
   },
   covered: { opacity: 0, transitionDelay: "0s" },
+  // The page and its panel, under the banner: what the chat's button
+  // stands over.
+  area: {
+    position: "relative",
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  // The chat's button at the card's end, at the page bar's height, its
+  // empty rim hanging out past the page's room, as the reference's (over
+  // the page's panel too, when it has one).
+  chatToggle: {
+    position: "absolute",
+    insetBlockStart: `calc((${size.appShellBar} - ${size.sidebarIconButton}) / 2)`,
+    insetInlineEnd: `calc(${size.appShellPageInline} - (${size.sidebarIconButton} - ${size.sidebarIcon}) / 2)`,
+    zIndex: 25,
+  },
   // Over the page, centred at the card's foot, clear of its edges: what
   // stays at hand on every page. Not in the card's own box, which is the
   // main landmark (SidebarInset), so it is no part of the page's content:
@@ -178,16 +200,19 @@ export const AppFrame = ({
                 identity={identity}
                 providers={providersOf(core)}
               />
-              <PageWithPanel>
-                <div
-                  data-slot="app-shell-page"
-                  inert={covered}
-                  ref={page}
-                  {...stylex.props(styles.page, covered && styles.covered)}
-                >
-                  <InFrame value>{children}</InFrame>
-                </div>
-              </PageWithPanel>
+              <div {...stylex.props(styles.area)}>
+                <PageWithPanel>
+                  <div
+                    data-slot="app-shell-page"
+                    inert={covered}
+                    ref={page}
+                    {...stylex.props(styles.page, covered && styles.covered)}
+                  >
+                    <InFrame value>{children}</InFrame>
+                  </div>
+                </PageWithPanel>
+                <ChatToggle style={styles.chatToggle} />
+              </div>
             </div>
           </SidebarInset>
           {dock === undefined ? null : (

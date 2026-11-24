@@ -57,7 +57,7 @@ const Workflows = () => {
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Workflows` }]} />
-      <Page wide>
+      <Page>
         <PageHeader actions={<WorkflowsActions />} title={t`Workflows`} />
         <WorkflowRows
           admin={isMemberAdmin(identity)}
@@ -80,7 +80,7 @@ const WorkflowsPending = () => {
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Workflows` }]} />
-      <Page wide>
+      <Page>
         <PageHeader actions={<WorkflowsActions />} title={t`Workflows`} />
         <LoadingLines lines={6} />
       </Page>

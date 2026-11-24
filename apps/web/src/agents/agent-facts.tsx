@@ -1,6 +1,10 @@
 import { Badge } from "@grasp-os/app-kit/components/badge";
-import type { Agent, AgentSettings, AgentWake } from "@grasp-os/shared/agents";
-import type { ToolClassAudience } from "@grasp-os/shared/connect";
+import type {
+  Agent,
+  AgentAudience,
+  AgentSettings,
+  AgentWake,
+} from "@grasp-os/shared/agents";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import { useLingui } from "@lingui/react/macro";
 
@@ -23,12 +27,15 @@ export const AgentStateBadge = ({ state }: { state: Agent["state"] }) => {
 /** Whom an audience names, in a few words. */
 export const useAudienceLine = (teams: StephenReach["teams"]) => {
   const { t, i18n } = useLingui();
-  return (audience: ToolClassAudience): string => {
+  return (audience: AgentAudience): string => {
     if (audience.who === "everyone") {
       return t`Everyone`;
     }
     if (audience.who === "nobody") {
       return t`Nobody yet`;
+    }
+    if (audience.who === "maker") {
+      return t`Only whoever made it`;
     }
     const names = audience.teams.map(
       (teamId) => teams.find((team) => team.teamId === teamId)?.name ?? teamId

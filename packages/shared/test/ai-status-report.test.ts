@@ -18,12 +18,17 @@ describe("a core's AI status report, as the admin reads it", () => {
   it("leaves out a provider this release doesn't know, and keeps the rest of the report", () => {
     const parsed = aiStatusReportSchema.safeParse({
       // A core from before speech moved names the provider it used then.
-      providers: [row("openai"), row("elevenlabs"), row("kugelaudio")],
+      providers: [
+        row("openai"),
+        row("elevenlabs"),
+        row("kugelaudio"),
+        row("mistral"),
+      ],
     });
 
     expect({
       read: parsed.success,
       providers: parsed.data?.providers.map(({ provider }) => provider),
-    }).toStrictEqual({ read: true, providers: ["openai", "kugelaudio"] });
+    }).toStrictEqual({ read: true, providers: ["openai", "mistral"] });
   });
 });

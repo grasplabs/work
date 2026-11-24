@@ -1,32 +1,31 @@
-import { PromptInputButton } from "@grasp-os/ui/components/prompt-input";
-import { Icon, PanelRightIcon } from "@grasp-os/ui/lib/icons";
-import { duration, media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
-import { useLingui } from "@lingui/react/macro";
+import { duration, media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 
-import { shortcutLabel } from "../shortcuts.ts";
 import { useOpenChat } from "./chat-presence.ts";
 import { Composer } from "./composer.tsx";
-import { chatKey, useGlobalChat } from "./global-chat.tsx";
+import { useGlobalChat } from "./global-chat.tsx";
 import { unavailableText } from "./models-unavailable.tsx";
 
 // Grasp's chat while it waits (global-chat.tsx): a bar at the foot of the
 // page, centred over it, as one row to ask in (Damsko's PromptInput,
-// compact: the add menu, the text, the microphone and Send, as on #2503,
-// the model too once something is typed), which
+// compact: the add menu, the text, the model, the microphone and Send, as
+// on #2503), which
 // sinks away as the chat opens and rises back once it has gone. It mentions with `@` as the chat's box does, and takes files
 // pasted or dropped on it; sending opens the chat where it last was, with
-// the answer coming in, and its last button opens it without asking. What
+// the answer coming in; the page's own bar opens it without asking
+// (chat-toggle.tsx). What
 // is typed here, mentions and files too, is the chat's own box's, so it is
 // all still there once the chat opens. Back, it takes the cursor if the
 // chat had it.
 
 const styles = stylex.create({
   bar: {
+    boxSizing: "border-box",
     width: "100%",
-    // Damsko's own width for the box, the card's and its margins alike.
-    maxWidth: size.promptInputWidth,
+    // #2503's dock: 32rem at most, the box as wide as the dock, its
+    // margins from a narrow window's edges round it.
+    maxWidth: `calc(32rem + 2 * ${space["2"]})`,
     marginInline: "auto",
     paddingInline: space["2"],
     opacity: 1,
@@ -49,16 +48,20 @@ const styles = stylex.create({
 
 /** The chat's idle bar: on every page the chat shows on, while it is closed. */
 export const ChatBar = () => {
-  const { t } = useLingui();
   const { stage, delays, settled, composer, words, modelsUnavailable } =
     useGlobalChat();
   const unavailable = unavailableText(modelsUnavailable);
   const openHere = useOpenChat();
   const bar = useRef<HTMLDivElement>(null);
   const open = stage.bar;
+  // Whether the bar was away (the chat open) before it came back: only
+  // then does it take the cursor the chat lost, never as a page opens.
+  const wasAway = useRef(!open);
   // Settled once it has risen or sunk: the chat's own moves wait for it.
   useEffect(() => {
     let current = true;
+    const back = open && wasAway.current;
+    wasAway.current = !open;
     const settle = async (): Promise<void> => {
       const element = bar.current;
       const moving = element === null ? [] : element.getAnimations();
@@ -73,7 +76,7 @@ export const ChatBar = () => {
         return;
       }
       // The chat closed with the cursor in it, which it lost as it went.
-      if (open && document.activeElement === document.body) {
+      if (back && document.activeElement === document.body) {
         element?.querySelector<HTMLElement>('[role="textbox"]')?.focus();
       }
       settled("bar");
@@ -135,17 +138,7 @@ export const ChatBar = () => {
                 openHere();
               },
             })}
-      >
-        <PromptInputButton
-          aria-label={t`Open the chat`}
-          onClick={() => {
-            openHere();
-          }}
-          tooltip={`${t`Open the chat`} (${shortcutLabel(chatKey)})`}
-        >
-          <Icon icon={PanelRightIcon} />
-        </PromptInputButton>
-      </Composer>
+      />
     </div>
   );
 };

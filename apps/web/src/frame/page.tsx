@@ -18,26 +18,14 @@ import type { ReactNode } from "react";
 // (`components/page.tsx`).
 
 /**
- * The page body: centred, generous whitespace. Its foot leaves room for
- * the chat box, so the last row of a page is never under it. Its text is
- * the body's 16px, as the prototype's page: a smaller part says so itself.
+ * The page body: a column as wide as the card, its sides 24px in, as the
+ * reference's (#2503's frame/page.tsx: one width through the product, so
+ * every page's edges stand under the bar's and a banner's). Its foot leaves
+ * room for the chat box, so the last row of a page is never under it. Its
+ * text is the body's 16px: a smaller part says so itself.
  */
-export const Page = ({
-  children,
-  wide = false,
-}: {
-  children: ReactNode;
-  wide?: boolean;
-}) => (
-  <div
-    className={
-      wide
-        ? "pb-chat mx-auto flex w-full max-w-7xl flex-col gap-6 px-6 pt-7"
-        : "pb-chat mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 pt-7"
-    }
-  >
-    {children}
-  </div>
+export const Page = ({ children }: { children: ReactNode }) => (
+  <div className="pb-chat flex w-full flex-col gap-6 px-6 pt-7">{children}</div>
 );
 
 /**

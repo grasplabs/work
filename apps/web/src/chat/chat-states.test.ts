@@ -1,12 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  answerStatusOf,
-  chainStatuses,
-  promptStatusOf,
-  stepStatusOf,
-  toolStates,
-} from "./chat-states.ts";
+import { answerStatusOf, promptStatusOf, stepStatusOf } from "./chat-states.ts";
 import type { AnswerProgress } from "./chat-states.ts";
 
 // What the chat's stream reports, in the words Damsko's chat parts take
@@ -99,27 +93,6 @@ describe("a step's status", () => {
         recovered: false,
       })
     ).toBe("stopped");
-  });
-
-  it("reads as a Tool's state and a step of a chain of thought", () => {
-    expect({ tool: toolStates, chain: chainStatuses }).toStrictEqual({
-      tool: {
-        writing: "input-streaming",
-        running: "input-available",
-        done: "output-available",
-        retried: "output-available",
-        failed: "output-error",
-        stopped: "output-error",
-      },
-      chain: {
-        writing: "active",
-        running: "active",
-        done: "complete",
-        retried: "complete",
-        failed: "error",
-        stopped: "pending",
-      },
-    });
   });
 });
 

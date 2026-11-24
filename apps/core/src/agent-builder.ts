@@ -1,11 +1,14 @@
 import { agentErrors } from "@grasp-os/shared/agent";
-import { agentInputSchema, ownAgentsMax } from "@grasp-os/shared/agents";
+import {
+  agentAudienceSchema,
+  agentInputSchema,
+  ownAgentsMax,
+} from "@grasp-os/shared/agents";
 import type { Agent, AgentSaid, AgentSettings } from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
   companyToolClasses,
   companyToolClassSchema,
-  toolClassAudienceSchema,
 } from "@grasp-os/shared/connect";
 import { requireAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -25,6 +28,7 @@ import {
 import type { SQLWrapper } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import { agentAudienceOf } from "./agent-reach.ts";
 import {
   agentOfRow,
   changeableAgent,
@@ -689,7 +693,7 @@ export const readAgentSettings = async (
   return {
     on: whole?.on ?? true,
     audience:
-      whole === undefined ? { who: "everyone" } : (audienceOf(whole) ?? off),
+      whole === undefined ? { who: "everyone" } : agentAudienceOf(whole),
     classes: companyToolClasses.map((toolClass) => {
       const row = stored.get(toolClass);
       return {
@@ -707,7 +711,8 @@ export const readAgentSettings = async (
  * Turns the agent `agentId` on or off for people, and says who may reach
  * it. Throws `agent.settings_elsewhere` for the first agent, whose reach is
  * Settings › Stephen's, `agent.unknown`, and `agent.record_invalid` for an
- * audience that isn't one or a team the company doesn't have.
+ * audience that isn't one, its maker alone for the first agent, which
+ * nobody made, or a team the company doesn't have.
  */
 export const setAgentReach = async (
   env: Env,
@@ -718,12 +723,22 @@ export const setAgentReach = async (
   { from }: MadeFrom = {}
 ): Promise<void> => {
   requireCompanyAdmin(identity);
-  const parsed = toolClassAudienceSchema.safeParse(audience);
+  const parsed = agentAudienceSchema.safeParse(audience);
   if (!(typeof on === "boolean" && parsed.success)) {
     throw agentErrors.create("agent.record_invalid");
   }
+  if (parsed.data.who === "maker") {
+    // The first agent, which nobody made, has no maker to be for.
+    const { madeBy } = await companyAgent(env, agentId);
+    if (madeBy === null) {
+      throw agentErrors.create("agent.record_invalid");
+    }
+  }
   const id = await requireOwnSettings(env, agentId);
-  const stored = storedOf(parsed.data);
+  const stored =
+    parsed.data.who === "maker"
+      ? { who: parsed.data.who, teams: "[]" }
+      : storedOf(parsed.data);
   await requireKnownTeams(env, stored.teams);
   const by = { changedBy: identity.userId, changedAt: new Date() };
   const db = drizzle(env.DB);

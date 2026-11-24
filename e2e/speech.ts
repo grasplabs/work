@@ -2,7 +2,7 @@ import type { Locator, Page, Request, WebSocket } from "@playwright/test";
 import { z } from "zod";
 
 // Stephen's voice on the onboarding's pages (apps/web/src/voice) is
-// KugelAudio behind the model gateway, which the local stack doesn't
+// Mistral behind the model gateway, which the local stack doesn't
 // reach: the page's speech requests are answered here as core answers
 // them, with silence the length of the line, and kept, to see what he was
 // asked to say.

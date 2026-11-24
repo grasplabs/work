@@ -56,6 +56,34 @@ export const formatDuration = (ms: number): string => {
 };
 
 /**
+ * How long ago `value` was, in its largest whole unit (minutes, hours or
+ * days), as the page's language writes it: `short` for a quiet mark at a
+ * row's end ("5d"), `long` for a screen reader ("5 days").
+ */
+export const formatAge = (
+  value: string | number | Date,
+  now: Date = new Date()
+): { short: string; long: string } => {
+  const ago = Math.max(0, now.getTime() - new Date(value).getTime());
+  let amount = Math.floor(ago / minuteMs);
+  let unit = "minute";
+  if (ago >= dayMs) {
+    amount = Math.floor(ago / dayMs);
+    unit = "day";
+  } else if (ago >= hourMs) {
+    amount = Math.floor(ago / hourMs);
+    unit = "hour";
+  }
+  const say = (unitDisplay: "narrow" | "long") =>
+    new Intl.NumberFormat(i18n.locale, {
+      style: "unit",
+      unit,
+      unitDisplay,
+    }).format(amount);
+  return { short: say("narrow"), long: say("long") };
+};
+
+/**
  * A time zone's name as the page's language says it ("Central European
  * Time"), from its IANA name; the IANA name where the browser has none.
  */

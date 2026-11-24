@@ -56,6 +56,7 @@ import {
   brainReportResponse,
 } from "./brain-report.ts";
 import { installBuiltinsOnce } from "./builtins.ts";
+import { chatFileResponse } from "./chat-file-route.ts";
 import { ensureClockOnce } from "./clock.ts";
 import {
   catalogLogoResponse,
@@ -463,6 +464,10 @@ const route = async (
   const logo = await logoResponse(pathname, request, env, requestId);
   if (logo !== undefined) {
     return logo;
+  }
+  const picture = await chatFileResponse(pathname, request, env, requestId);
+  if (picture !== undefined) {
+    return picture;
   }
   if (isUnder(pathname, "/api")) {
     return errorResponse(

@@ -258,7 +258,7 @@ const WorkflowRuns = () => {
       <SiteHeader
         crumbs={[{ label: t`Workflows`, to: "/workflows" }, { label: title }]}
       />
-      <Page wide>
+      <Page>
         <PageHeader title={title} />
         {page.today.state === "ready" ? (
           <TodayLanes
@@ -288,7 +288,7 @@ const RunsPending = () => {
       <SiteHeader
         crumbs={[{ label: t`Workflows`, to: "/workflows" }, { label: title }]}
       />
-      <Page wide>
+      <Page>
         <PageHeader title={title} />
         <LoadingLines lines={6} />
       </Page>

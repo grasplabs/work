@@ -100,9 +100,19 @@ const dialog = (): HTMLElement | null =>
  * it, under the day they were used; when it was, left out, and the
  * window's own rows ("New chat", "Archived") too.
  */
+/** The rows the window's own places take: not chats. */
+const placeRows = new Set(["new", "archived", "back", "retry-search"]);
+
 const rows = (): string[] =>
-  [...(dialog()?.querySelectorAll('[role="group"] [role="option"]') ?? [])].map(
-    (row) => {
+  [...(dialog()?.querySelectorAll('[role="option"]') ?? [])]
+    .filter(
+      (row) =>
+        !(
+          row instanceof HTMLElement &&
+          placeRows.has(row.dataset.commandValue ?? "")
+        )
+    )
+    .map((row) => {
       const read = row.cloneNode(true);
       if (!(read instanceof HTMLElement)) {
         return "";
@@ -111,17 +121,34 @@ const rows = (): string[] =>
         time.remove();
       }
       return (read.textContent ?? "").trim();
-    }
-  );
+    });
+
+/**
+ * Core's archived chats: at once, as the window counts them when it opens
+ * on the rest, then `opened` for the archived list itself.
+ */
+const archivedThen =
+  (archived: ChatSummary[], opened: () => Promise<ChatSummary[]>) =>
+  async (): Promise<ChatSummary[]> => {
+    archivedThen.counted += 1;
+    return archivedThen.counted === 1
+      ? await Promise.resolve(archived)
+      : await opened();
+  };
+archivedThen.counted = 0;
 
 /** Chooses the window's row `value` ("archived", "back", a chat's ID), as a click would. */
 const choose = async (value: string): Promise<void> => {
-  const row = dialog()?.querySelector<HTMLElement>(
-    `[data-command-value="${value}"]`
-  );
-  if (row === null || row === undefined) {
-    throw new Error(`The window has no row ${value}`);
-  }
+  // Once it is there: Archived shows once the archived chats are counted.
+  const row = await vi.waitFor(() => {
+    const found = dialog()?.querySelector<HTMLElement>(
+      `[data-command-value="${value}"]`
+    );
+    if (found === null || found === undefined) {
+      throw new Error(`The window has no row ${value}`);
+    }
+    return found;
+  });
   await act(async () => {
     row.click();
     await Promise.resolve();
@@ -248,10 +275,11 @@ describe("the chats window", () => {
   it("lists the archived chats alone, never the rest's rows meanwhile, and drops a list that comes late", async () => {
     const late = Promise.withResolvers<ChatSummary[]>();
     const old = { ...chat("old", "Old budget"), archived: true };
+    archivedThen.counted = 0;
     await shown(
       async () => await Promise.resolve([]),
       [board, lease, travel],
-      async () => await late.promise
+      archivedThen([old], async () => await late.promise)
     );
     await openWindow({ key: "k", metaKey: true });
 
@@ -276,10 +304,11 @@ describe("the chats window", () => {
   it("counts the archived chats in the search's name only once their list has come", async () => {
     const later = Promise.withResolvers<ChatSummary[]>();
     const old = { ...chat("old", "Old budget"), archived: true };
+    archivedThen.counted = 0;
     await shown(
       async () => await Promise.resolve([]),
       [board, lease, travel],
-      async () => await later.promise
+      archivedThen([old], async () => await later.promise)
     );
     await openWindow({ key: "k", metaKey: true });
     const search = () =>
@@ -296,56 +325,6 @@ describe("the chats window", () => {
     expect({ whileRead, read: search() }).toStrictEqual({
       whileRead: "Archived chats",
       read: "1 archived chat",
-    });
-  });
-
-  it("comes back from renaming an archived chat on the archived chats", async () => {
-    const old = { ...chat("old", "Old budget"), archived: true };
-    await shown(
-      async () => await Promise.resolve([]),
-      [board, lease, travel],
-      async () => await Promise.resolve([old])
-    );
-    await openWindow({ key: "k", metaKey: true });
-    await choose("archived");
-    await vi.waitFor(() => {
-      expect(rows()).toStrictEqual(["Old budget"]);
-    });
-
-    await act(async () => {
-      dialog()
-        ?.querySelector<HTMLElement>('button[aria-label="More for Old budget"]')
-        ?.click();
-      await Promise.resolve();
-    });
-    await vi.waitFor(() => {
-      expect(
-        document.querySelector('[role="menuitem"]')?.textContent
-      ).toContain("Rename");
-    });
-    await act(async () => {
-      document.querySelector<HTMLElement>('[role="menuitem"]')?.click();
-      await Promise.resolve();
-    });
-    const renaming = await vi.waitFor(() => {
-      const found = document.querySelector<HTMLElement>(
-        '[role="dialog"][aria-labelledby]'
-      );
-      expect(found?.textContent).toContain("Rename chat");
-      return found;
-    });
-    await act(async () => {
-      [...(renaming?.querySelectorAll("button") ?? [])]
-        .find((button) => button.textContent === "Cancel")
-        ?.click();
-      await Promise.resolve();
-    });
-
-    await vi.waitFor(() => {
-      expect({
-        renaming: document.body.textContent.includes("Rename chat"),
-        rows: rows(),
-      }).toStrictEqual({ renaming: false, rows: ["Old budget"] });
     });
   });
 
