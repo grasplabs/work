@@ -4319,9 +4319,17 @@ msgstr "Contexte"
 msgid "Continue"
 msgstr "Continuer"
 
+#: src/frame/sign-in/sign-in.tsx
+msgid "Continue with {provider}"
+msgstr "Continuer avec {provider}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Continue with {signIn}"
 msgstr "Continuer avec {signIn}"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Continue with Grasp staff"
+msgstr "Continuer en tant qu’équipe Grasp"
 
 #: src/apps/resource-bindings.tsx
 msgid "Contract"
@@ -4928,6 +4936,10 @@ msgstr "Diagramme"
 msgctxt "inbox item kind: a change whose answer was lost"
 msgid "Did it happen?"
 msgstr "Est-ce arrivé ?"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Did not open"
+msgstr "Ne s’est pas ouvert"
 
 #: src/inbox/items.ts
 msgid "Did this happen? {who}"
@@ -7386,8 +7398,8 @@ msgid "Invited as {role} by {inviter} on {date} · hasn’t signed in yet"
 msgstr "Invité comme {role} par {inviter} le {date} · pas encore connecté"
 
 #: src/routes/sign-in.tsx
-msgid "Invited as a guest? Sign in with a code"
-msgstr "Invité ? Connectez-vous avec un code"
+msgid "Invited as a guest?"
+msgstr "Vous êtes invité ?"
 
 #: src/brain/brain.ts
 msgid "Invited for step 2"
@@ -7981,6 +7993,7 @@ msgctxt "what the Brain remembers about something"
 msgid "Language"
 msgstr "Langue"
 
+#: src/frame/language-button.tsx
 #: src/language-picker.tsx
 msgid "Language: {name}"
 msgstr "Langue : {name}"
@@ -8018,6 +8031,10 @@ msgstr "Lu pour la dernière fois {lastRead}"
 #: src/workflows/workflows-table.tsx
 msgid "Last run"
 msgstr "Dernière exécution"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Last used"
+msgstr "Dernier utilisé"
 
 #: src/interview/words.ts
 msgid "Last, the numbers and the result."
@@ -8278,6 +8295,10 @@ msgstr "Chargement…"
 msgctxt "what the Brain remembers about something"
 msgid "Location"
 msgstr "Lieu"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Log in"
+msgstr "Se connecter"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -10351,6 +10372,14 @@ msgstr "Ouvrir votre onboarding"
 #: src/report/report.ts
 msgid "Open: {open}"
 msgstr "Ouvertes : {open}"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Opened"
+msgstr "Ouvert"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Opening {provider}"
+msgstr "Ouverture de {provider}"
 
 #: src/onboarding/platform-reveal.tsx
 msgid "Opening Grasp"
@@ -13030,6 +13059,10 @@ msgstr "Connectez-vous pour ouvrir votre entretien"
 #: src/sign-in-options.tsx
 msgid "Sign in with {label}"
 msgstr "Se connecter avec {label}"
+
+#: src/routes/sign-in.tsx
+msgid "Sign in with a code"
+msgstr "Se connecter avec un code"
 
 #: src/sign-in-errors.ts
 msgid "Sign in with your organization's account."
@@ -15737,10 +15770,6 @@ msgstr "Utiliser le chat, le Cerveau et les applications partagées avec eux"
 #: src/workflows/resource-params.tsx
 msgid "Use the default"
 msgstr "Utiliser la valeur par défaut"
-
-#: src/routes/sign-in.tsx
-msgid "Use your organization’s account to go on."
-msgstr "Utilisez le compte de votre organisation pour continuer."
 
 #: src/onboarding/ai-step.tsx
 msgid "Use your own key"
