@@ -420,6 +420,10 @@ msgstr "{count, plural, one {# team, met de rollen} other {# teams, met hun roll
 msgid "{count, plural, one {# test} other {# tests}}"
 msgstr "{count, plural, one {# test} other {# tests}}"
 
+#: src/inbox/sidebar-inbox.tsx
+msgid "{count, plural, one {# thing waiting for you} other {# things waiting for you}}"
+msgstr "{count, plural, one {# ding wacht op je} other {# dingen wachten op je}}"
+
 #: src/brain/brain.ts
 msgid "{count, plural, one {# time waster} other {# time wasters}}"
 msgstr "{count, plural, one {# tijdvreter} other {# tijdvreters}}"
@@ -439,10 +443,6 @@ msgstr "{count, plural, one {# tool toegestaan} other {# tools toegestaan}}"
 #: src/settings/event-source-activity.tsx
 msgid "{count, plural, one {# trigger matches this type. A test event starts no workflow.} other {# triggers match this type. A test event starts no workflow.}}"
 msgstr "{count, plural, one {# trigger past bij dit type. Een testgebeurtenis start geen workflow.} other {# triggers passen bij dit type. Een testgebeurtenis start geen workflow.}}"
-
-#: src/inbox/inbox-page.tsx
-msgid "{count, plural, one {# waiting} other {# waiting}}"
-msgstr "{count, plural, one {# wacht} other {# wachten}}"
 
 #: src/brain/brain.ts
 msgid "{count, plural, one {# wish} other {# wishes}}"
@@ -1115,6 +1115,14 @@ msgstr "{name}: {value}"
 msgid "{name}: {value}, {share}"
 msgstr "{name}: {value}, {share}"
 
+#: src/agents/agent-section.tsx
+msgid "{name}'s pages"
+msgstr "Pagina's van {name}"
+
+#: src/apps/app-section.tsx
+msgid "{name}'s workspace"
+msgstr "Werkruimte van {name}"
+
 #: src/drafts/status-badge.tsx
 msgid "{names} use it"
 msgstr "{names} gebruiken het"
@@ -1162,6 +1170,10 @@ msgstr "{only} gebruikt het"
 #: src/brain/region-marks.tsx
 msgid "{open, plural, one {# open question} other {# open questions}}"
 msgstr "{open, plural, one {# open vraag} other {# open vragen}}"
+
+#: src/brain/brain-section.tsx
+msgid "{open} still open"
+msgstr "{open} nog open"
 
 #: src/onboarding/setup-steps.tsx
 msgid "{openCount, plural, =0 {Nothing needs you} =1 {Just one thing for you} other {# things for you}}"
@@ -1296,10 +1308,6 @@ msgstr "{role} (onbekend)"
 #: src/brain/brain.ts
 msgid "{role} can answer it"
 msgstr "{role} kan het beantwoorden"
-
-#: src/frame/person-menu.tsx
-msgid "{role}, Grasp staff"
-msgstr "{role}, Grasp-medewerker"
 
 #: src/brain/brain.ts
 msgid "{role}, invited {date}, not interviewed yet"
@@ -1608,11 +1616,11 @@ msgstr "{versions, plural, one {# versie} other {# versies}}"
 msgid "{waiting, plural, one {# person new on your list gets a link once you confirm your organization.} other {# people new on your list get their links once you confirm your organization.}}"
 msgstr "{waiting, plural, one {# nieuwe persoon op je lijst krijgt een link zodra je je organisatie bevestigt.} other {# nieuwe mensen op je lijst krijgen hun link zodra je je organisatie bevestigt.}}"
 
-#: src/inbox/nav-item.tsx
+#: src/frame/app-sidebar.tsx
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
 msgstr "{waiting, plural, one {# ding wacht} other {# dingen wachten}}"
 
-#: src/workflows/nav-item.tsx
+#: src/frame/app-sidebar.tsx
 msgid "{waiting, plural, one {# workflow needs you} other {# workflows need you}}"
 msgstr "{waiting, plural, one {# workflow heeft je nodig} other {# workflows hebben je nodig}}"
 
@@ -1906,14 +1914,6 @@ msgstr "Een record van een andere tabel"
 msgid "A run of {name} waits for your answer. Nothing more happens in it until someone answers, or until it stops waiting."
 msgstr "Een run van {name} wacht op je antwoord. Er gebeurt niets meer in totdat iemand antwoordt, of totdat hij niet meer wacht."
 
-#: src/inbox/decision-card.tsx
-msgid "A run of a workflow asked for this answer."
-msgstr "Een run van een workflow vroeg om dit antwoord."
-
-#: src/inbox/decision-card.tsx
-msgid "A run of a workflow waits for this answer."
-msgstr "Een run van een workflow wacht op dit antwoord."
-
 #: src/workflows/activity-bar.tsx
 msgid "A run of version {version} for someone else ended: {status}"
 msgstr "Een run van versie {version} voor iemand anders is afgelopen: {status}"
@@ -2010,7 +2010,6 @@ msgctxt "note property: what a note is about"
 msgid "About"
 msgstr "Over"
 
-#: src/inbox/decision-card.tsx
 #: src/inbox/decision-confirmation.tsx
 msgctxt "what a decision is about, as its workflow run passed it"
 msgid "About"
@@ -2042,6 +2041,7 @@ msgid "Accepted"
 msgstr "Geaccepteerd"
 
 #: src/agents/agent-page.tsx
+#: src/agents/agent-section.tsx
 #: src/drafts/share-with-team.tsx
 msgid "Access"
 msgstr "Toegang"
@@ -2073,6 +2073,11 @@ msgstr "Toegang die op een beheerder wacht"
 
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
+msgid "Account"
+msgstr "Account"
+
+#: src/settings/sections.ts
+msgctxt "settings group"
 msgid "Account"
 msgstr "Account"
 
@@ -2126,6 +2131,7 @@ msgstr "Actief, alleen voor jou"
 
 #: src/brain/brain-log.tsx
 #: src/brain/brain-nav.tsx
+#: src/brain/brain-section.tsx
 #: src/routes/_shell.brain.tsx
 msgctxt "the brain's log"
 msgid "Activity"
@@ -2167,6 +2173,10 @@ msgstr "{model} aan favorieten toevoegen"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Add a card"
 msgstr "Kaart toevoegen"
+
+#: src/inbox/decision-card.tsx
+msgid "Add a comment"
+msgstr "Opmerking toevoegen"
 
 #: src/settings/ai-providers.tsx
 msgid "Add a fallback"
@@ -2519,10 +2529,14 @@ msgctxt "filter: every integration"
 msgid "All"
 msgstr "Alle"
 
-#: src/inbox/groups.ts
+#: src/inbox/sidebar-inbox.tsx
 msgctxt "inbox filter, short"
 msgid "All"
 msgstr "Alles"
+
+#: src/frame/app-sidebar.tsx
+msgid "All chats"
+msgstr "Alle chats"
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "All invoices"
@@ -2868,6 +2882,10 @@ msgstr "Beantwoord: {question}"
 msgid "Answered: {title}"
 msgstr "Beantwoord: {title}"
 
+#: src/chat/sidebar-chats.tsx
+msgid "Answering"
+msgstr "Bezig met antwoorden"
+
 #: src/agents/agent-page.tsx
 msgid "Answers nobody anywhere"
 msgstr "Antwoordt nergens iemand"
@@ -2937,6 +2955,10 @@ msgstr "App of workflow"
 msgid "App spend"
 msgstr "Uitgaven per app"
 
+#: src/frame/person-menu.tsx
+msgid "Appearance"
+msgstr "Weergave"
+
 #: src/brain/brain.ts
 msgid "Application"
 msgstr "Applicatie"
@@ -2948,11 +2970,6 @@ msgstr "Applicaties"
 #: src/onboarding/review-parts.tsx
 msgid "Apply it if the sender’s domain is {domain}."
 msgstr "Laat hem gelden als het domein van de afzender {domain} is."
-
-#: src/inbox/groups.ts
-msgctxt "inbox filter"
-msgid "Approvals"
-msgstr "Goedkeuringen"
 
 #: src/apps/app-webhooks.tsx
 #: src/brain/skills-page.tsx
@@ -3076,6 +3093,7 @@ msgid "Approving it replaces the team {team}'s own skill {name} for its members.
 msgstr "Met goedkeuring vervangt hij de eigen skill {name} van het team {team} voor de leden ervan."
 
 #: src/agents/agent-apps-card.tsx
+#: src/apps/app-section.tsx
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
 #: src/frame/app-sidebar.tsx
@@ -3132,6 +3150,7 @@ msgstr "Hier staan de apps die je bouwt of waarvoor je verantwoordelijk bent."
 #: src/apps/app-status.tsx
 #: src/apps/apps-overview.tsx
 #: src/chat/chat-window.tsx
+#: src/chat/sidebar-chats.tsx
 msgid "Archive"
 msgstr "Archiveren"
 
@@ -3338,11 +3357,6 @@ msgstr "gevraagd door de agent, in hun chat"
 msgid "Asked it, or it works for them on a schedule"
 msgstr "Vroegen hem iets, of hij werkt volgens schema voor hen"
 
-#: src/inbox/groups.ts
-msgctxt "inbox filter"
-msgid "Asked of you"
-msgstr "Aan jou gevraagd"
-
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
 msgid "Asked of you"
@@ -3455,9 +3469,12 @@ msgctxt "a tool's state"
 msgid "Awaiting approval"
 msgstr "Wacht op goedkeuring"
 
+#: src/agents/agent-section.tsx
 #: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
-#: src/frame/settings-level.tsx
+#: src/brain/brain-section.tsx
+#: src/connections/integrations-sidebar.tsx
+#: src/frame/app-sidebar.tsx
 #: src/frame/ui-words.tsx
 #: src/guest-sign-in.tsx
 #: src/onboarding/setup-frame.tsx
@@ -3600,17 +3617,13 @@ msgstr "Gekoppeld aan"
 #: src/agents/agent-form.tsx
 #: src/apps/resource-bindings.tsx
 #: src/brain/brain-nav.tsx
+#: src/brain/brain-section.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.brain.index.tsx
 #: src/routes/_shell.brain.tsx
 #: src/settings/sections.ts
 msgid "Brain"
 msgstr "Brein"
-
-#: src/inbox/groups.ts
-msgctxt "inbox filter, short"
-msgid "Brain"
-msgstr "Brain"
 
 #: src/frame/site-header.tsx
 #: src/frame/ui-words.tsx
@@ -4145,6 +4158,7 @@ msgstr "Chatten met {name}"
 
 #: src/chat/chat-switcher.tsx
 #: src/chat/chat-window.tsx
+#: src/frame/app-sidebar.tsx
 msgid "Chats"
 msgstr "Chats"
 
@@ -4416,6 +4430,7 @@ msgstr "De boeken afsluiten en de cijfers maken waar de directie naar kijkt."
 msgid "Code"
 msgstr "Code"
 
+#: src/apps/app-section.tsx
 #: src/apps/app-workspace.tsx
 msgctxt "an app's workspace view"
 msgid "Code"
@@ -5114,6 +5129,7 @@ msgstr "Donker"
 msgid "Data"
 msgstr "Gegevens"
 
+#: src/apps/app-section.tsx
 #: src/apps/app-workspace.tsx
 msgctxt "an app's workspace view"
 msgid "Data"
@@ -5193,6 +5209,11 @@ msgstr "Beslissing niet gevonden"
 msgid "Decline"
 msgstr "Weigeren"
 
+#: src/inbox/decision-card.tsx
+msgctxt "a workflow's decision"
+msgid "Decline"
+msgstr "Afwijzen"
+
 #: src/brain/skills-page.tsx
 #: src/frame/ui-words.tsx
 msgid "Declined"
@@ -5201,6 +5222,10 @@ msgstr "Afgewezen"
 #: src/activity/audit-words.ts
 msgid "Declined a write to an App"
 msgstr "Een wijziging in een app geweigerd"
+
+#: src/inbox/decision-card.tsx
+msgid "Declined by {name} on {date}."
+msgstr "Afgewezen door {name} op {date}."
 
 #: src/inbox/approval-request.tsx
 #: src/inbox/item-detail.tsx
@@ -5240,6 +5265,7 @@ msgstr "Definitie"
 #: src/chat/chat-more.tsx
 #: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
+#: src/chat/sidebar-chats.tsx
 #: src/projects/project-view.tsx
 #: src/settings/chat-accounts.tsx
 #: src/settings/event-sources.tsx
@@ -5432,6 +5458,7 @@ msgctxt "workflow status"
 msgid "Designed"
 msgstr "Ontworpen"
 
+#: src/apps/app-section.tsx
 #: src/apps/preview-controls.tsx
 msgid "Desktop"
 msgstr "Desktop"
@@ -6421,6 +6448,10 @@ msgctxt "thinking effort"
 msgid "Extra high"
 msgstr "Extra hoog"
 
+#: src/inbox/inbox-page.tsx
+msgid "Facts"
+msgstr "Feiten"
+
 #: src/workflows/today-lanes.tsx
 msgctxt "a run that ended in failure"
 msgid "failed"
@@ -6435,6 +6466,11 @@ msgstr "mislukt"
 #: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/workflow-diagram.tsx
+msgid "Failed"
+msgstr "Mislukt"
+
+#: src/inbox/approval-request.tsx
+msgctxt "a decline that did not go through"
 msgid "Failed"
 msgstr "Mislukt"
 
@@ -6455,6 +6491,11 @@ msgstr "Mislukt"
 
 #: src/frame/ui-words.tsx
 msgctxt "an answer that did not go through"
+msgid "Failed"
+msgstr "Mislukt"
+
+#: src/inbox/approval-request.tsx
+msgctxt "an approval that did not go through"
 msgid "Failed"
 msgstr "Mislukt"
 
@@ -6853,7 +6894,6 @@ msgstr "Frequentie"
 msgid "From"
 msgstr "Uit"
 
-#: src/inbox/decision-card.tsx
 #: src/inbox/decision-confirmation.tsx
 msgctxt "where a decision comes from"
 msgid "From"
@@ -6920,7 +6960,7 @@ msgstr "Uit wat je team zei, versie {version}"
 msgid "From when each event was recorded, archive included. After this, archived events are deleted."
 msgstr "Vanaf het moment dat elke gebeurtenis is vastgelegd, archief inbegrepen. Daarna worden gearchiveerde gebeurtenissen verwijderd."
 
-#: src/frame/surface-nav.tsx
+#: src/frame/app-sidebar.tsx
 msgid "From your Apps"
 msgstr "Uit je apps"
 
@@ -7535,6 +7575,10 @@ msgctxt "an app's settings section"
 msgid "History"
 msgstr "Geschiedenis"
 
+#: src/frame/app-sidebar.tsx
+msgid "Home"
+msgstr "Start"
+
 #: src/brain/opportunities-page.tsx
 msgid "Hours a week"
 msgstr "Uren per week"
@@ -7876,6 +7920,7 @@ msgstr "In plaats van: {replaced}"
 msgid "In progress"
 msgstr "Bezig"
 
+#: src/brain/brain-section.tsx
 #: src/brain/brain.ts
 msgid "In the brain"
 msgstr "In Brain"
@@ -7905,8 +7950,9 @@ msgstr "In je documenten zag ik {tools}."
 msgid "In your own words, as you would tell a colleague."
 msgstr "In je eigen woorden, zoals je het een collega zou vertellen."
 
-#: src/inbox/nav-item.tsx
-#: src/routes/_shell.inbox.tsx
+#: src/frame/app-sidebar.tsx
+#: src/inbox/inbox-page.tsx
+#: src/inbox/inbox-pending.tsx
 msgid "Inbox"
 msgstr "Inbox"
 
@@ -7963,6 +8009,7 @@ msgstr "Instructie"
 
 #: src/agents/agent-form.tsx
 #: src/agents/agent-page.tsx
+#: src/agents/agent-section.tsx
 #: src/apps/app-settings.tsx
 #: src/routes/_shell.settings.instructions.tsx
 #: src/settings/sections.ts
@@ -7979,6 +8026,7 @@ msgid "Integration"
 msgstr "Integratie"
 
 #: src/apps/app-integrations.tsx
+#: src/connections/integrations-sidebar.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.integrations.index.tsx
@@ -8619,6 +8667,10 @@ msgstr "Sleutel: <0>{mask}</0>"
 msgid "Kind"
 msgstr "Soort"
 
+#: src/connections/integrations-sidebar.tsx
+msgid "Kinds of app"
+msgstr "Soorten apps"
+
 #: src/apps/field-editor.tsx
 msgid "Kinds of field"
 msgstr "Soorten velden"
@@ -8640,7 +8692,6 @@ msgstr "Bekend"
 msgid "Known about your organization"
 msgstr "Bekend over je organisatie"
 
-#: src/frame/person-menu.tsx
 #: src/routes/_shell.settings.profile.tsx
 msgid "Language"
 msgstr "Taal"
@@ -9231,6 +9282,7 @@ msgid "members of the team in {field}"
 msgstr "leden van het team in {field}"
 
 #: src/brain/brain-nav.tsx
+#: src/brain/brain-section.tsx
 #: src/brain/memories-page.tsx
 msgctxt "the Brain's memories page"
 msgid "Memories"
@@ -9408,6 +9460,10 @@ msgstr "Meer voor {label}"
 #: src/apps/app-page.tsx
 msgid "More for {name}"
 msgstr "Meer voor {name}"
+
+#: src/chat/sidebar-chats.tsx
+msgid "More for {title}"
+msgstr "Meer voor {title}"
 
 #: src/chat/chat-more.tsx
 msgid "More for this chat"
@@ -9750,6 +9806,7 @@ msgid "Next: {0}"
 msgstr "Volgende keer: {0}"
 
 #: src/apps/field-editor.tsx
+#: src/inbox/json-fields.tsx
 #: src/routes/_shell.settings.members.tsx
 msgid "No"
 msgstr "Nee"
@@ -9805,6 +9862,10 @@ msgstr "Er is nog geen AI-aanbieder gekoppeld, dus de AI-functies van Grasp kunn
 #: src/chat/failure.ts
 msgid "No AI provider is connected yet. Ask your admin to connect one."
 msgstr "Er is nog geen AI-aanbieder gekoppeld. Vraag je beheerder er een te koppelen."
+
+#: src/inbox/decision-card.tsx
+msgid "No answer by {date}: it closes."
+msgstr "Geen antwoord vóór {date}: dan sluit het."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "No App has a model bound to it."
@@ -10684,6 +10745,10 @@ msgstr "Niets gebruikt ze tot je ze goedkeurt. Bekende malware wordt altijd gewe
 msgid "Nothing waits for you"
 msgstr "Er wacht niets op je"
 
+#: src/frame/app-sidebar.tsx
+msgid "Nothing waits for you."
+msgstr "Er wacht niets op je."
+
 #: src/apps/app-data.tsx
 msgid "Nothing was added. Fix these rows and try again."
 msgstr "Er is niets toegevoegd. Corrigeer deze rijen en probeer het opnieuw."
@@ -11085,6 +11150,7 @@ msgid "Only you see this"
 msgstr "Alleen jij ziet dit"
 
 #: src/apps/apps-overview.tsx
+#: src/chat/sidebar-chats.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/inbox/item-detail.tsx
 #: src/onboarding/setup-frame.tsx
@@ -11163,10 +11229,6 @@ msgstr "Stephen openen in {app}, in een nieuw tabblad"
 msgid "Open the App"
 msgstr "De App openen"
 
-#: src/chat/chat-bar.tsx
-msgid "Open the chat"
-msgstr "Chat openen"
-
 #: src/apps/app-workspace.tsx
 msgid "Open the chat in Chat"
 msgstr "De chat openen in Chat"
@@ -11183,7 +11245,6 @@ msgstr "Open de run"
 msgid "Open this link again whenever you like, and carry on where you stopped."
 msgstr "Open deze link weer wanneer je wilt, en ga verder waar je gebleven was."
 
-#: src/inbox/decision-card.tsx
 #: src/inbox/decision-confirmation.tsx
 msgctxt "until when a decision can be answered"
 msgid "Open until"
@@ -11235,6 +11296,7 @@ msgid "Operator"
 msgstr "Operator"
 
 #: src/brain/brain-nav.tsx
+#: src/brain/brain-section.tsx
 #: src/brain/opportunities-page.tsx
 #: src/routes/_shell.brain.tsx
 msgctxt "the Brain's opportunities page"
@@ -11699,6 +11761,7 @@ msgstr "Persoonlijke koppelingen"
 msgid "Personal Knowledge and memories"
 msgstr "Persoonlijke Kennis en herinneringen"
 
+#: src/apps/app-section.tsx
 #: src/apps/preview-controls.tsx
 msgid "Phone"
 msgstr "Telefoon"
@@ -11824,6 +11887,7 @@ msgstr "Druk op Enter om het toe te voegen."
 msgid "Presses \"{words}\""
 msgstr "Drukt op \"{words}\""
 
+#: src/apps/app-section.tsx
 #: src/apps/preview-controls.tsx
 msgid "Preview width"
 msgstr "Breedte van het voorbeeld"
@@ -11881,7 +11945,6 @@ msgstr "Voortgang"
 msgid "Project"
 msgstr "Project"
 
-#: src/frame/app-sidebar.tsx
 #: src/people/share-picker.tsx
 #: src/projects/project-view.tsx
 #: src/routes/_shell.projects.$projectId.tsx
@@ -12289,7 +12352,6 @@ msgstr "Regio"
 msgid "Reject"
 msgstr "Afwijzen"
 
-#: src/inbox/decision-card.tsx
 #: src/inbox/decision-confirmation.tsx
 msgctxt "a workflow's decision"
 msgid "Reject"
@@ -12311,10 +12373,6 @@ msgstr "Alles afwijzen"
 #: src/frame/ui-words.tsx
 msgid "Rejected"
 msgstr "Afgewezen"
-
-#: src/inbox/decision-card.tsx
-msgid "Rejected by {name} on {date}."
-msgstr "Afgewezen door {name} op {date}."
 
 #: src/workflows/today-lanes.tsx
 msgid "Rejected in {left} s"
@@ -12531,6 +12589,7 @@ msgstr "Verwijderd."
 
 #: src/chat/chat-more.tsx
 #: src/chat/chat-window.tsx
+#: src/chat/sidebar-chats.tsx
 #: src/settings/teams.tsx
 msgid "Rename"
 msgstr "Hernoemen"
@@ -12538,6 +12597,10 @@ msgstr "Hernoemen"
 #: src/settings/teams.tsx
 msgid "Rename {name}"
 msgstr "{name} hernoemen"
+
+#: src/chat/sidebar-chats.tsx
+msgid "Rename {title}"
+msgstr "{title} hernoemen"
 
 #: src/chat/chat-window.tsx
 msgid "Rename chat"
@@ -12672,10 +12735,6 @@ msgstr "Formaat wijzigen"
 msgid "Resize the chat"
 msgstr "Breedte van de chat aanpassen"
 
-#: src/frame/page-panel.tsx
-msgid "Resize the panel"
-msgstr "Formaat van het paneel wijzigen"
-
 #: src/apps/resource-bindings.tsx
 msgid "Resource"
 msgstr "Resource"
@@ -12770,10 +12829,6 @@ msgstr "Opnieuw geprobeerd"
 #: src/onboarding/setup-frame.tsx
 msgid "Review"
 msgstr "Beoordelen"
-
-#: src/inbox/item-detail.tsx
-msgid "Review and answer"
-msgstr "Bekijken en antwoorden"
 
 #: src/workflows/item-test.tsx
 msgid "Revision {draftRevision} on it"
@@ -12991,7 +13046,6 @@ msgctxt "start a workflow's run by hand"
 msgid "Run"
 msgstr "Uitvoeren"
 
-#: src/inbox/decision-card.tsx
 #: src/inbox/decision-confirmation.tsx
 msgctxt "the run of a workflow a decision is for"
 msgid "Run"
@@ -13323,6 +13377,7 @@ msgid "Say what you want to build, and Grasp builds it."
 msgstr "Zeg wat je wilt bouwen, en Grasp bouwt het."
 
 #: src/agents/agent-page.tsx
+#: src/agents/agent-section.tsx
 msgid "Schedule"
 msgstr "Schema"
 
@@ -13664,8 +13719,8 @@ msgstr "{name} wordt opgezet…"
 
 #: src/apps/app-page.tsx
 #: src/apps/apps-overview.tsx
+#: src/frame/app-sidebar.tsx
 #: src/frame/person-menu.tsx
-#: src/frame/settings-level.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Settings"
@@ -13676,6 +13731,7 @@ msgctxt "a workflow's view"
 msgid "Settings"
 msgstr "Instellingen"
 
+#: src/apps/app-section.tsx
 #: src/apps/app-workspace.tsx
 msgctxt "an app's workspace view"
 msgid "Settings"
@@ -13830,7 +13886,6 @@ msgstr "Delen ongedaan gemaakt"
 
 #: src/apps/app-data-model.tsx
 #: src/brain/atlas-overlays.tsx
-#: src/inbox/inbox-page.tsx
 msgid "Show"
 msgstr "Tonen"
 
@@ -13906,6 +13961,10 @@ msgstr "Oudere gebeurtenissen tonen"
 #: src/drafts/draft-history.tsx
 msgid "Show older versions"
 msgstr "Oudere versies tonen"
+
+#: src/chat/chat-bar.tsx
+msgid "Show or hide the chat"
+msgstr "Chat tonen of verbergen"
 
 #: src/frame/app-sidebar.tsx
 #: src/frame/site-header.tsx
@@ -14137,6 +14196,7 @@ msgid "Skill"
 msgstr "Skill"
 
 #: src/brain/brain-nav.tsx
+#: src/brain/brain-section.tsx
 #: src/brain/skills-page.tsx
 msgctxt "the Brain's skills page"
 msgid "Skills"
@@ -14307,6 +14367,7 @@ msgid "Sources"
 msgstr "Bronnen"
 
 #: src/brain/brain-nav.tsx
+#: src/brain/brain-section.tsx
 #: src/brain/sources-page.tsx
 #: src/routes/_shell.brain.tsx
 msgctxt "the Brain's sources page"
@@ -14652,6 +14713,10 @@ msgctxt "what the Brain remembers about something"
 msgid "Supplies"
 msgstr "Levert"
 
+#: src/frame/person-menu.tsx
+msgid "Support"
+msgstr "Ondersteuning"
+
 #: src/connections/groups.ts
 msgctxt "kind of app"
 msgid "Support"
@@ -14668,6 +14733,10 @@ msgstr "Zet een team uit en niemand erin krijgt een link."
 #: src/pages/page-frame.tsx
 msgid "Switch now"
 msgstr "Nu wisselen"
+
+#: src/frame/person-menu.tsx
+msgid "Switch organization"
+msgstr "Organisatie wisselen"
 
 #: src/settings/ai-providers.tsx
 msgid "Switch to Grasp’s AI"
@@ -14700,6 +14769,7 @@ msgstr "Tabel {0}"
 msgid "Tables"
 msgstr "Tabellen"
 
+#: src/apps/app-section.tsx
 #: src/apps/preview-controls.tsx
 msgid "Tablet"
 msgstr "Tablet"
@@ -15301,6 +15371,10 @@ msgstr "Het brein bewaart mogelijk, alleen voor jou, een deel van wat een agent 
 msgid "The Brain, as each run's person may read it"
 msgstr "Het Brein, zoals de persoon van elke run het mag lezen"
 
+#: src/brain/brain-section.tsx
+msgid "The Brain's pages"
+msgstr "De pagina's van het Brain"
+
 #: src/routes/_shell.settings.brain.tsx
 msgid "The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here."
 msgstr "De regio’s van het Brain: je teams, gegroepeerd zoals je bedrijf is. Grasp groepeert nieuwe teams zelf; hier geef je een groep een andere naam of verplaats je een team."
@@ -15345,7 +15419,12 @@ msgstr "De gedeelde wijzigingen konden niet terug als concept. Ze staan in de ge
 msgid "The chat adds indexes as it writes the App’s queries."
 msgstr "De chat voegt indexen toe terwijl hij de query’s van de App schrijft."
 
+#: src/chat/sidebar-chats.tsx
+msgid "The chat couldn't be archived. Try again."
+msgstr "De chat kon niet worden gearchiveerd. Probeer het opnieuw."
+
 #: src/chat/chat-more.tsx
+#: src/chat/sidebar-chats.tsx
 msgid "The chat couldn't be renamed. Try again."
 msgstr "De chat kon niet worden hernoemd. Probeer het opnieuw."
 
@@ -15847,7 +15926,6 @@ msgstr "Hun eigen mail, agenda en bestanden. Gebeurt meteen."
 msgid "Their personal data goes for good. Their name stays on the company’s records, so what they did stays traceable."
 msgstr "Hun persoonlijke gegevens verdwijnen voorgoed. Hun naam blijft in de administratie van het bedrijf, zodat herleidbaar blijft wat ze deden."
 
-#: src/frame/person-menu.tsx
 #: src/frame/ui-words.tsx
 msgid "Theme"
 msgstr "Thema"
@@ -17034,6 +17112,10 @@ msgstr "Weergave"
 msgid "View changes"
 msgstr "Wijzigingen bekijken"
 
+#: src/frame/app-sidebar.tsx
+msgid "Views"
+msgstr "Weergaven"
+
 #: src/frame/ui-words.tsx
 msgctxt "a side panel's views"
 msgid "Views"
@@ -17087,6 +17169,10 @@ msgstr "Wacht"
 msgid "Waiting for {app}"
 msgstr "Wachten op {app}"
 
+#: src/inbox/sidebar-inbox.tsx
+msgid "Waiting for {duration}"
+msgstr "Wacht al {duration}"
+
 #: src/workflows/runs.tsx
 msgid "Waiting for {label}, which is limiting requests, since {since}. It goes on by itself once calls work."
 msgstr "Wacht sinds {since} op {label}, dat verzoeken beperkt. Gaat vanzelf verder zodra aanroepen werken."
@@ -17137,6 +17223,11 @@ msgstr "Wacht op jou: {title}"
 #: src/workflows/files-and-apps.tsx
 msgid "Waiting for your approval"
 msgstr "Wacht op je goedkeuring"
+
+#: src/inbox/sidebar-inbox.tsx
+msgctxt "sidebar: the inbox items that have waited longest"
+msgid "Waiting longest"
+msgstr "Wacht het langst"
 
 #: src/workflows/workflow-rows.tsx
 msgctxt "how a workflow stands"
@@ -18200,6 +18291,7 @@ msgstr "workflow.json"
 
 #: src/brain/goals-editor.tsx
 #: src/chat/mentions.tsx
+#: src/frame/app-sidebar.tsx
 #: src/inbox/report-view.tsx
 #: src/projects/file-item-dialog.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -18208,7 +18300,6 @@ msgstr "workflow.json"
 #: src/routes/_shell.workflows.runs.tsx
 #: src/routes/decisions.$decision.tsx
 #: src/settings/stephen-settings.tsx
-#: src/workflows/nav-item.tsx
 msgid "Workflows"
 msgstr "Workflows"
 
@@ -18351,6 +18442,7 @@ msgid "Wrote {file}"
 msgstr "{file} geschreven"
 
 #: src/apps/field-editor.tsx
+#: src/inbox/json-fields.tsx
 #: src/routes/_shell.settings.members.tsx
 msgid "Yes"
 msgstr "Ja"
@@ -18528,10 +18620,6 @@ msgstr "Je bent nog ingelogd. Probeer het zo opnieuw."
 msgid "You've dictated as much as you can today."
 msgstr "Je hebt vandaag zoveel gedicteerd als kan."
 
-#: src/settings/sections.ts
-msgid "Your account"
-msgstr "Je account"
-
 #: src/agents/agents-overview.tsx
 msgid "Your agents"
 msgstr "Jouw agents"
@@ -18665,10 +18753,6 @@ msgstr "De bestanden van je export"
 #: src/routes/_shell.settings.instructions.tsx
 msgid "Your instructions"
 msgstr "Jouw instructies"
-
-#: src/frame/person-menu.tsx
-msgid "Your onboarding"
-msgstr "Jouw onboarding"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Your organization chooses these with its own AI provider keys."

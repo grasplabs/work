@@ -1,61 +1,46 @@
-import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
 import {
   DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@grasp-os/ui/components/dropdown-menu";
 import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  useSidebar,
 } from "@grasp-os/ui/components/sidebar";
-import { isThemeMode, themeModes } from "@grasp-os/ui/components/theme-toggle";
-import type { ThemeMode } from "@grasp-os/ui/components/theme-toggle";
+import { isThemeMode } from "@grasp-os/ui/components/theme-toggle";
 import { toast } from "@grasp-os/ui/components/toast";
 import {
   ChevronsUpDownIcon,
-  GlobeIcon,
   Icon,
   LogOutIcon,
   MonitorIcon,
   MoonIcon,
-  RocketIcon,
   SettingsIcon,
   SunIcon,
 } from "@grasp-os/ui/lib/icons";
-import type { IconData } from "@grasp-os/ui/lib/icons";
-import { colors, font, size, space } from "@grasp-os/ui/lib/tokens.stylex";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
+import { colors, font } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useSyncExternalStore } from "react";
-import type { ReactNode } from "react";
 
 import { signOut } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
-import { chooseLocale, isLocale, localeNames } from "../i18n.ts";
-import type { Locale } from "../i18n.ts";
-import { roleLabel } from "../labels.ts";
-import { OrganizationName } from "./organization-name.tsx";
+import { OrganizationName, useOrganizationName } from "./organization-name.tsx";
+import {
+  ArrowLeftRightIcon,
+  CircleHelpIcon,
+  ContrastIcon,
+} from "./sidebar-icons.ts";
+import { ProfileMenu } from "./sidebar-profile.tsx";
 import { applyTheme, chooseTheme, onThemeChange, readTheme } from "./theme.ts";
 
 // The person signed in, at the foot of the sidebar: their initials, their
-// name and their organization's, and their menu: Settings, their
-// onboarding, the language, the theme, and signing out.
+// name and their organization's, and their menu, as the reference's:
+// Settings, Appearance (the theme), Support, then the organization they
+// are in, and signing out. The language is in Settings › Profile.
 
 const nameParts = /\s+/u;
 
@@ -78,22 +63,6 @@ export const initials = (name: string): string => {
 };
 
 const styles = stylex.create({
-  // The menu's items scroll in a box of their own, over the whole menu,
-  // as tall as the menu may be, so the menu itself never scrolls. In the
-  // sidebar's sheet on a phone, UI SDK's sheet scrolls what takes the
-  // focus there 16px clear of the foot of the area it scrolls in, once the
-  // sheet is still (registry gap "a sheet scrolls a menu that opens in
-  // it", 24 November): the menu, focused as it opens, was that area
-  // itself, so it opened 16px down, its first label cut. The menu's own
-  // room inside it is this box's, so the items stand where they stood.
-  items: {
-    boxSizing: "border-box",
-    maxHeight: `min(${size.popupHeight}, var(--available-height, ${size.popupHeight}))`,
-    margin: `calc(-1 * ${space.popupPadding})`,
-    padding: space.popupPadding,
-    overflowY: "auto",
-    overscrollBehavior: "contain",
-  },
   // The person's name over their organization's, cut where the row ends.
   who: {
     display: "grid",
@@ -115,156 +84,18 @@ const styles = stylex.create({
     color: colors.sidebarSecondaryForeground,
     fontSize: font.textXs,
     lineHeight: font.sidebarNoteLine,
+    fontWeight: font.weightNormal,
+    letterSpacing: "normal",
   },
-  // Atop the menu: who is signed in, and their role.
-  signedIn: { display: "grid", gap: space["1"] },
-  role: { fontWeight: font.weightNormal },
-  // A submenu's words, then its choice now at the row's end, before the
-  // chevron, quiet, cut short when there is no room, as the reference's.
-  choice: { display: "flex", gap: space["4"] },
-  current: {
-    flexShrink: 100,
-    minWidth: 0,
-    marginInlineStart: "auto",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    color: colors.mutedForeground,
+  // The initials in their own spacing, not the row's tighter one.
+  face: { display: "contents", letterSpacing: "normal" },
+  // The chevrons quieter than the words, as the rows' end marks are.
+  chevrons: {
+    display: "flex",
+    flexShrink: 0,
+    color: colors.sidebarTertiaryForeground,
   },
 });
-
-const themeNames: Record<ThemeMode, MessageDescriptor> = {
-  light: msg`Light`,
-  dark: msg`Dark`,
-  system: msg`System`,
-};
-
-const themeIcons: Record<ThemeMode, IconData> = {
-  light: SunIcon,
-  dark: MoonIcon,
-  system: MonitorIcon,
-};
-
-/**
- * One choice of the person menu, its options a radio group: beside the
- * menu as a submenu, its trigger showing the choice now; `inline`, the
- * options in the menu itself under the choice's name. On a phone a
- * submenu has no room beside the menu, and Damsko's does not move into
- * the window (registry gap "submenus do not shift into the window"), so
- * the menu holds them there.
- */
-const Choice = ({
-  inline,
-  name,
-  icon,
-  now,
-  value,
-  onValueChange,
-  children,
-}: {
-  inline: boolean;
-  name: string;
-  icon: IconData;
-  /** The choice now, after `name` on the submenu's trigger. */
-  now: ReactNode;
-  value: string;
-  onValueChange: (value: unknown) => void;
-  /** The options, each a DropdownMenuRadioItem. */
-  children: ReactNode;
-}) => {
-  if (inline) {
-    return (
-      <DropdownMenuRadioGroup onValueChange={onValueChange} value={value}>
-        <DropdownMenuLabel>{name}</DropdownMenuLabel>
-        {children}
-      </DropdownMenuRadioGroup>
-    );
-  }
-  return (
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger icon={icon}>
-        <span {...stylex.props(styles.choice)}>
-          {name}
-          {now}
-        </span>
-      </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent>
-        <DropdownMenuRadioGroup onValueChange={onValueChange} value={value}>
-          {children}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuSubContent>
-    </DropdownMenuSub>
-  );
-};
-
-/**
- * Light, dark or the system's, a choice of the person menu: the person's
- * own in this browser (theme.ts), on Damsko's modes. The person menu
- * applies it; this mounts only while the menu is open.
- */
-const ThemeMenu = ({ userId, inline }: { userId: string; inline: boolean }) => {
-  const { t, i18n } = useLingui();
-  // Read where it is kept, so a choice made in another tab shows here too.
-  const theme = useSyncExternalStore(onThemeChange, () => readTheme(userId));
-  return (
-    <Choice
-      icon={themeIcons[theme]}
-      inline={inline}
-      name={t`Theme`}
-      now={
-        <span {...stylex.props(styles.current)}>
-          {i18n._(themeNames[theme])}
-        </span>
-      }
-      onValueChange={(value) => {
-        if (isThemeMode(value)) {
-          chooseTheme(userId, value);
-        }
-      }}
-      value={theme}
-    >
-      {themeModes.map((each) => (
-        <DropdownMenuRadioItem key={each} value={each}>
-          {i18n._(themeNames[each])}
-        </DropdownMenuRadioItem>
-      ))}
-    </Choice>
-  );
-};
-
-/**
- * The language the product speaks, a choice of the person menu. Each
- * language is named in its own words, so anyone can find theirs.
- */
-const LanguageMenu = ({ inline }: { inline: boolean }) => {
-  const { t, i18n } = useLingui();
-  const locale: Locale = isLocale(i18n.locale) ? i18n.locale : "en";
-  return (
-    <Choice
-      icon={GlobeIcon}
-      inline={inline}
-      name={t`Language`}
-      now={
-        // The language now, in its own words.
-        <span lang={locale} {...stylex.props(styles.current)}>
-          {localeNames[locale]}
-        </span>
-      }
-      onValueChange={(value) => {
-        if (isLocale(value)) {
-          void chooseLocale(value);
-        }
-      }}
-      value={locale}
-    >
-      {Object.entries(localeNames).map(([value, label]) => (
-        <DropdownMenuRadioItem key={value} label={label} value={value}>
-          <span lang={value}>{label}</span>
-        </DropdownMenuRadioItem>
-      ))}
-    </Choice>
-  );
-};
 
 /** The person at the sidebar's foot, and their menu. */
 export const PersonMenu = ({
@@ -275,13 +106,16 @@ export const PersonMenu = ({
   identity: Identity;
 }) => {
   const { t } = useLingui();
+  const organization = useOrganizationName(core);
+  // Read where it is kept, so a choice made in another tab shows here too.
+  const theme = useSyncExternalStore(onThemeChange, () =>
+    readTheme(identity.userId)
+  );
   // What theme.js painted first was whoever was here last; this is theirs.
   // Here, not in the theme menu, which mounts only once the menu opens.
   useEffect(() => {
     applyTheme(readTheme(identity.userId));
   }, [identity.userId]);
-  const { isMobile } = useSidebar();
-  const role = roleLabel(identity.role);
   // The menu is gone once pressed: a sign-out core didn't carry out is
   // said in a toast, and the page stays.
   const signOutOrSay = async (): Promise<void> => {
@@ -299,69 +133,90 @@ export const PersonMenu = ({
       <SidebarMenuItem>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            {/* Named by the person alone: their role is in the menu. */}
+            {/* Named by the person alone. */}
             <SidebarMenuButton aria-label={identity.name} size="lg">
-              <Avatar decorative name={identity.name} size="sm">
-                <AvatarFallback>{initials(identity.name)}</AvatarFallback>
-              </Avatar>
+              <span {...stylex.props(styles.face)}>
+                <Avatar decorative name={identity.name} size="sm">
+                  <AvatarFallback>{initials(identity.name)}</AvatarFallback>
+                </Avatar>
+              </span>
               <span {...stylex.props(styles.who)}>
                 <span {...stylex.props(styles.name)}>{identity.name}</span>
                 <span {...stylex.props(styles.organization)}>
                   <OrganizationName core={core} />
                 </span>
               </span>
-              <Icon icon={ChevronsUpDownIcon} />
+              <span aria-hidden="true" {...stylex.props(styles.chevrons)}>
+                <Icon icon={ChevronsUpDownIcon} />
+              </span>
             </SidebarMenuButton>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" side={isMobile ? "top" : "right"}>
-            <div {...stylex.props(styles.items)}>
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>
-                  <span {...stylex.props(styles.signedIn)}>
-                    <span>{identity.name}</span>
-                    <span {...stylex.props(styles.role)}>
-                      {identity.staff ? t`${role}, Grasp staff` : role}
-                    </span>
-                  </span>
-                </DropdownMenuLabel>
-              </DropdownMenuGroup>
-              <DropdownMenuSeparator />
-              <DropdownMenuGroup>
-                <DropdownMenuItem asChild icon={SettingsIcon}>
-                  <Link to="/settings/profile">{t`Settings`}</Link>
-                </DropdownMenuItem>
-                {/* The company's own onboarding, which only its admins go through. */}
-                {isAdmin(identity.role) && identity.onboardingOnly !== true ? (
-                  <DropdownMenuItem asChild icon={RocketIcon}>
-                    <Link to="/setup">{t`Your onboarding`}</Link>
-                  </DropdownMenuItem>
-                ) : null}
-                {isMobile ? null : (
-                  <>
-                    <LanguageMenu inline={false} />
-                    <ThemeMenu inline={false} userId={identity.userId} />
-                  </>
-                )}
-              </DropdownMenuGroup>
-              {isMobile ? (
-                <>
-                  <DropdownMenuSeparator />
-                  <LanguageMenu inline />
-                  <DropdownMenuSeparator />
-                  <ThemeMenu inline userId={identity.userId} />
-                </>
-              ) : null}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                icon={LogOutIcon}
-                onSelect={() => {
-                  void signOutOrSay();
-                }}
-              >
-                {t`Sign out`}
-              </DropdownMenuItem>
-            </div>
-          </DropdownMenuContent>
+          <ProfileMenu
+            entries={[
+              {
+                action: {
+                  label: t`Settings`,
+                  icon: SettingsIcon,
+                  render: <Link to="/settings/profile" />,
+                },
+              },
+              {
+                theme: {
+                  label: t`Appearance`,
+                  icon: ContrastIcon,
+                  value: theme,
+                  choices: [
+                    { label: t`Light`, value: "light", icon: SunIcon },
+                    { label: t`Dark`, value: "dark", icon: MoonIcon },
+                    { label: t`System`, value: "system", icon: MonitorIcon },
+                  ],
+                  onValueChange: (mode) => {
+                    if (isThemeMode(mode)) {
+                      chooseTheme(identity.userId, mode);
+                    }
+                  },
+                },
+              },
+              {
+                action: {
+                  label: t`Support`,
+                  icon: CircleHelpIcon,
+                  // Named here as well: the menu fills in its words, the lint can't see them.
+                  render: (
+                    <a
+                      aria-label={t`Support`}
+                      href="/docs"
+                      rel="noopener"
+                      target="_blank"
+                    />
+                  ),
+                },
+              },
+              "separator",
+              // The organizations the person is in, the one they are in
+              // now chosen: one, until Grasp lets a person be in more.
+              {
+                choices: {
+                  label: t`Switch organization`,
+                  icon: ArrowLeftRightIcon,
+                  choices: [
+                    { label: organization, value: "current", avatar: true },
+                  ],
+                  value: "current",
+                },
+              },
+              {
+                action: {
+                  label: t`Sign out`,
+                  icon: LogOutIcon,
+                  danger: true,
+                  onSelect: () => {
+                    void signOutOrSay();
+                  },
+                },
+              },
+            ]}
+          />
         </DropdownMenu>
       </SidebarMenuItem>
     </SidebarMenu>

@@ -24,7 +24,7 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it } from "vite-plus/test";
 
-import { inboxItems, listed, unread } from "./items.ts";
+import { inboxItems, unread } from "./items.ts";
 import type { Target } from "./items.ts";
 import { TargetLink } from "./target-link.tsx";
 import type { Waiting } from "./waiting.ts";
@@ -462,27 +462,10 @@ describe(inboxItems, () => {
   });
 });
 
-describe(listed, () => {
+describe("a stopped schedule and a changed workflow", () => {
   const items = inboxItems(waiting(), admin, readAt);
 
-  it("keeps the inbox's own order", () => {
-    expect(listed(items, "all")).toStrictEqual(items);
-  });
-
-  it("shows one group of kinds when asked: what was asked of the person, or every approval", () => {
-    expect(
-      listed(items, "asked").map(({ kind, title, about }) => ({
-        kind,
-        title,
-        about,
-      }))
-    ).toStrictEqual([
-      {
-        kind: "openQuestion",
-        title: "How many invoices come in a month?",
-        about: { kind: "brain" },
-      },
-    ]);
+  it("lead to their workflow's Triggers", () => {
     const stopped = items.find(({ kind }) => kind === "stoppedSchedule");
     expect({ title: stopped?.title, about: stopped?.about }).toStrictEqual({
       title: "The schedule of Nightly report stopped",
@@ -503,9 +486,6 @@ describe(listed, () => {
         section: "triggers",
       },
     });
-    // Workflows' and Apps' asks are one group: everything else.
-    expect(listed(items, "approvals")).toHaveLength(items.length - 1);
-    expect(listed(items, "brain")).toStrictEqual([]);
   });
 });
 

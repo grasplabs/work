@@ -44,25 +44,26 @@ test("Back in Settings' level leads to the last page outside it, and to Chat aft
   await expect(page).toHaveURL(/\/settings\/security$/u);
   await sidebarOf(page).getByRole("link", { name: "Back" }).click();
   await expect(page).toHaveURL(/\/projects$/u);
-  await expect(
-    page.getByRole("navigation", { name: "Main" }).getByRole("link", {
-      name: "Projects",
-    })
-  ).toHaveAttribute("aria-current", "page");
+  // The main level again, which has no Projects row (as the reference):
+  // Back leads to a page the sidebar lists nowhere all the same.
+  const main = page.getByRole("navigation", { name: "Main" });
+  await expect(main.getByRole("link", { name: "Chat" })).toBeVisible();
+  await expect(main.getByRole("link", { name: "Projects" })).toHaveCount(0);
 
-  // The same page with only its query changed, in the page (as a Brain
-  // folder is opened), is the place to go back to.
-  await page.goto("/brain?group=one");
+  // The same page with only its query changed, in the page (as an Inbox
+  // item is opened), is the place to go back to. The Brain has a level
+  // of its own, as Settings has, so Back never leads there.
+  await page.goto("/inbox?item=one");
   await page.evaluate(() => {
-    history.pushState({}, "", "/brain?group=two");
+    history.pushState({}, "", "/inbox?item=two");
     dispatchEvent(new PopStateEvent("popstate"));
   });
-  await expect(page).toHaveURL(/\/brain\?group=two$/u);
+  await expect(page).toHaveURL(/\/inbox\?item=two$/u);
   await page.getByRole("button", { name: "Person", exact: true }).click();
   await page.getByRole("menuitem", { name: "Settings" }).click();
   await expect(page).toHaveURL(/\/settings/u);
   await sidebarOf(page).getByRole("link", { name: "Back" }).click();
-  await expect(page).toHaveURL(/\/brain\?group=two$/u);
+  await expect(page).toHaveURL(/\/inbox\?item=two$/u);
 
   // Straight into Settings, and the page read again: nothing to go back to
   // but Chat.
@@ -338,7 +339,6 @@ test("a page printed from dark is dark ink on light paper, the kit's colours and
   await expect(heading).toBeVisible();
   // Dark, chosen in the person menu.
   await page.getByRole("button", { name: "Person", exact: true }).click();
-  await page.getByRole("menuitem", { name: /^Theme/u }).click();
   await page.getByRole("menuitemradio", { name: "Dark" }).click();
   await page.keyboard.press("Escape");
   await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");

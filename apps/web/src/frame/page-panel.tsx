@@ -1,11 +1,7 @@
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@grasp-os/ui/components/resizable";
 import { Sheet, SheetContent } from "@grasp-os/ui/components/sheet";
 import { SidePanelPlacementProvider } from "@grasp-os/ui/components/side-panel";
-import { useLingui } from "@lingui/react/macro";
+import type { SidePanelPlacement } from "@grasp-os/ui/components/side-panel";
+import { colors, size } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import {
   createContext,
@@ -20,8 +16,10 @@ import type { ReactNode, RefObject } from "react";
 import { createPortal } from "react-dom";
 
 // A page's own side panel (the Inbox's inspector, a note's details in the
-// Brain, an integration's facts), which the frame seats as Damsko's
-// app-shell-01 seats its panel: beside the page, resizable by its handle,
+// Brain, an integration's facts), which the frame seats as the reference's
+// App shell does (#2503's grasp/app-shell `pagePanel`): beside the page in
+// the same card, 420px wide, flush with the card's end and foot from the
+// top of the page's bar, a hairline at its start, on the card's ground,
 // where the page keeps room beside it; a sheet from the end where it would
 // not: where the card less the panel leaves the page's column under its
 // least (`pageMinWidth`; more for a page such as a table that must stay
@@ -46,20 +44,17 @@ interface Claim {
   change: (open: boolean) => void;
 }
 
-/** The frame's seat: where the panel is drawn, and how a page claims it. */
+/** The frame's seat: where the panel is drawn, how it stands there, and how a page claims it. */
 interface Seat {
   host: HTMLElement | null;
+  placement: SidePanelPlacement;
   claim: (claim?: Claim) => void;
 }
 
 const SeatContext = createContext<Seat | undefined>(undefined);
 
-// The panel's first width, its least and its most: Resizable takes lengths, so these restate the
-// side-panel-width token (420px) and a floor a panel's sections still read at, as app-shell-01.
-const PANEL_WIDTH = "420px";
+// The panel's width, the reference's inspector's (#2503's `--grasp-inspector-width`).
 const PANEL_FIRST = 420;
-const PANEL_MIN = "320px";
-const PANEL_MAX = "50%";
 /**
  * The least a page's column keeps beside the panel, in pixels, unless the
  * page asks for more. The reference (#2503) seats its panel beside the
@@ -136,9 +131,25 @@ const useAskedOpen = (
 };
 
 const styles = stylex.create({
-  // The page's room under the banner: the group of the page and its panel.
-  body: { flexGrow: 1, minHeight: 0 },
-  panel: { height: "100%", minHeight: 0 },
+  // The page's room under the banner: the page's column, then its panel.
+  body: { display: "flex", flexGrow: 1, minHeight: 0 },
+  page: { display: "flex", flexDirection: "column", flexGrow: 1, minWidth: 0 },
+  // In the page's card, at its end, flush with its end and foot: a hairline
+  // at its start, on the card's ground.
+  panel: {
+    flexShrink: 0,
+    boxSizing: "border-box",
+    width: `${PANEL_FIRST}px`,
+    maxWidth: "100%",
+    minHeight: 0,
+    borderInlineStartWidth: size.hairline,
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: {
+      default: colors.sidebarBorder,
+      "@media (forced-colors: active)": "CanvasText",
+    },
+    backgroundColor: colors.sidebarCard,
+  },
   // The whole of the place the frame gives, so the panel lays itself out in it.
   host: { display: "grid", height: "100%", minHeight: 0 },
 });
@@ -150,7 +161,6 @@ const styles = stylex.create({
  * and what was typed in it.
  */
 export const PageWithPanel = ({ children }: { children: ReactNode }) => {
-  const { t } = useLingui();
   const body = useRef<HTMLDivElement>(null);
   const width = useWidth(body);
   const [host, setHost] = useState<HTMLElement | null>(null);
@@ -168,39 +178,21 @@ export const PageWithPanel = ({ children }: { children: ReactNode }) => {
   };
   const seat = <div ref={setHost} {...stylex.props(styles.host)} />;
   return (
-    // oxlint-disable-next-line react/jsx-no-constructed-context-values -- compiled
-    <SeatContext value={{ host, claim: setClaim }}>
+    <SeatContext
+      // oxlint-disable-next-line react/jsx-no-constructed-context-values -- compiled
+      value={{ host, placement: narrow ? "sheet" : "beside", claim: setClaim }}
+    >
       <div ref={body} {...stylex.props(styles.body)}>
-        <ResizablePanelGroup>
-          <ResizablePanel>{children}</ResizablePanel>
-          {open && !narrow ? (
-            <>
-              <ResizableHandle aria-label={t`Resize the panel`} />
-              <ResizablePanel
-                defaultSize={PANEL_WIDTH}
-                maxSize={PANEL_MAX}
-                minSize={PANEL_MIN}
-              >
-                <div
-                  data-slot="app-shell-panel"
-                  {...stylex.props(styles.panel)}
-                >
-                  <SidePanelPlacementProvider value="beside">
-                    {seat}
-                  </SidePanelPlacementProvider>
-                </div>
-              </ResizablePanel>
-            </>
-          ) : null}
-        </ResizablePanelGroup>
+        <div {...stylex.props(styles.page)}>{children}</div>
+        {open && !narrow ? (
+          <div data-slot="app-shell-page-panel" {...stylex.props(styles.panel)}>
+            {seat}
+          </div>
+        ) : null}
       </div>
       {narrow ? (
         <Sheet onOpenChange={setOpen} open={sheetOpen}>
-          <SheetContent aria-label={claim.label}>
-            <SidePanelPlacementProvider value="sheet">
-              {seat}
-            </SidePanelPlacementProvider>
-          </SheetContent>
+          <SheetContent aria-label={claim.label}>{seat}</SheetContent>
         </Sheet>
       ) : null}
     </SeatContext>
@@ -261,5 +253,12 @@ export const PagePanel = ({
   if (seat === undefined || seat.host === null) {
     return null;
   }
-  return createPortal(children, seat.host);
+  // Drawn where the frame seats it, and told how it stands there: a
+  // portal's context is the page's, not the seat's.
+  return createPortal(
+    <SidePanelPlacementProvider value={seat.placement}>
+      {children}
+    </SidePanelPlacementProvider>,
+    seat.host
+  );
 };

@@ -24,6 +24,27 @@ const figures = {
 export const faceOf = (name: string): AgentFace =>
   agentFaces.find((face) => face === name) ?? "stephen";
 
+/** An agent's dotted figure, still, filling the box it stands in (the sidebar's agent level marks its name with it). */
+export const AgentFigure = ({ face }: { face: string }) => (
+  <svg
+    aria-hidden="true"
+    height="100%"
+    viewBox="-1.12 -1.12 2.24 2.24"
+    width="100%"
+  >
+    {signFigure(figures[faceOf(face)]).map((dot) => (
+      <circle
+        cx={dot.x}
+        cy={-dot.y}
+        fill="currentColor"
+        key={`${dot.x}:${dot.y}`}
+        opacity={0.3 + 0.7 * dot.ink}
+        r={SIGN_PITCH * (0.2 + 0.24 * dot.ink)}
+      />
+    ))}
+  </svg>
+);
+
 /** An agent's dotted figure, still, in an avatar's round tile. */
 export const AgentAvatar = ({
   face,
@@ -34,18 +55,9 @@ export const AgentAvatar = ({
 }) => (
   <Avatar aria-hidden="true" size={size}>
     <AvatarFallback>
-      <svg className="text-foreground size-4/5" viewBox="-1.12 -1.12 2.24 2.24">
-        {signFigure(figures[faceOf(face)]).map((dot) => (
-          <circle
-            cx={dot.x}
-            cy={-dot.y}
-            fill="currentColor"
-            key={`${dot.x}:${dot.y}`}
-            opacity={0.3 + 0.7 * dot.ink}
-            r={SIGN_PITCH * (0.2 + 0.24 * dot.ink)}
-          />
-        ))}
-      </svg>
+      <span className="text-foreground size-4/5">
+        <AgentFigure face={face} />
+      </span>
     </AvatarFallback>
   </Avatar>
 );

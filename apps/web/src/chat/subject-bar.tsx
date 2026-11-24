@@ -10,35 +10,23 @@ import {
 } from "@grasp-os/ui/components/dropdown-menu";
 import { Link } from "@grasp-os/ui/components/link";
 import { Shimmer } from "@grasp-os/ui/components/shimmer";
-import { Text } from "@grasp-os/ui/components/text";
-import { Icon } from "@grasp-os/ui/lib/icons";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
 import { Link as RouterLink } from "@tanstack/react-router";
 import type { ComponentProps } from "react";
 
 import type { NamedWork } from "./builds.tsx";
+import type { SubjectBar } from "./composer.tsx";
 import { useMentionKinds } from "./mentions.tsx";
 
-// What the chat is about and what it worked on, on the bar above its box
-// (in the box's header): one line, so the box stays as it is. On a
+// What the chat is about and what it worked on, on the band above its box
+// (the box's PromptInputBanner, tucked under its top, as #2503's
+// ComposerSurface): the kind's mark, the name, and "+N" at its end. On a
 // page about one thing (chat-subject.ts), that thing; elsewhere the App or
 // workflow the chat changed last, a way to its page, which carries this
 // chat on beside it (`?chat=`). Anything else it worked on waits behind
 // "+N", the latest first. Each says "Building…" while the running turn
 // writes its draft. Nothing worked on and no subject: no bar.
-
-const styles = stylex.create({
-  bar: {
-    display: "flex",
-    alignItems: "center",
-    gap: space["2"],
-    minWidth: 0,
-  },
-  more: { marginInlineStart: "auto" },
-});
 
 /** One thing on the bar: of a kind, by ID and name. */
 interface Worked {
@@ -61,7 +49,7 @@ const workedOn = ({ work, name }: NamedWork): Worked => ({
  * What the bar shows: the page's `subject`, else the latest of `work`,
  * first; the rest after it. None where there is neither.
  */
-export const subjectBarOf = (
+const subjectBarOf = (
   subject: Worked | undefined,
   work: readonly NamedWork[]
 ): { lead: Worked; others: Worked[] } | undefined => {
@@ -104,11 +92,11 @@ const WorkedLink = ({
   );
 
 /**
- * The bar's line: `subject`, the page's, or else the latest of `work`,
- * and the rest behind "+N"; each building where the running turn, begun
- * at `since`, wrote its draft.
+ * The band's line and its "+N": `subject`, the page's, or else the latest
+ * of `work`, and the rest behind "+N"; each building where the running
+ * turn, begun at `since`, wrote its draft. None where there is neither.
  */
-export const SubjectBarContent = ({
+export const useSubjectBar = ({
   subject,
   work,
   chatId,
@@ -119,12 +107,12 @@ export const SubjectBarContent = ({
   chatId: string | undefined;
   /** When the running turn began (ISO 8601); none while nothing runs. */
   since: string | undefined;
-}) => {
+}): SubjectBar | undefined => {
   const { t } = useLingui();
   const kinds = useMentionKinds();
   const shown = subjectBarOf(subject, work);
   if (shown === undefined) {
-    return null;
+    return undefined;
   }
   const { lead, others } = shown;
   // What the running turn wrote: their checkpoints of this chat moved
@@ -139,63 +127,67 @@ export const SubjectBarContent = ({
   const building = (worked: Worked): boolean =>
     written.has(`${worked.kind}:${worked.id}`);
   const count = others.length;
-  return (
-    <div {...stylex.props(styles.bar)}>
-      <Icon icon={kinds[lead.kind].icon} />
-      {subject === undefined ? (
-        <Link asChild variant="plain">
-          <WorkedLink chatId={chatId} worked={lead}>
-            {lead.name}
-          </WorkedLink>
-        </Link>
-      ) : (
-        <Text as="span" size="sm" truncate>
-          {lead.name}
-        </Text>
-      )}
-      {building(lead) ? <Shimmer>{t`Building…`}</Shimmer> : null}
-      {count === 0 ? null : (
-        <span {...stylex.props(styles.more)}>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                aria-label={t`${plural(count, {
-                  one: "# more thing this chat worked on",
-                  other: "# more things this chat worked on",
-                })}`}
-                size="xs"
-                variant="ghost"
-              >
-                +{count}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>
-                  <Trans>Also worked on</Trans>
-                </DropdownMenuLabel>
-                {others.map((worked) => (
-                  <DropdownMenuItem
-                    asChild
-                    icon={kinds[worked.kind].icon}
-                    key={`${worked.kind}:${worked.id}`}
-                  >
-                    <WorkedLink chatId={chatId} worked={worked}>
-                      {worked.name}
-                      {building(worked) ? (
-                        <>
-                          {" "}
-                          <Shimmer>{t`Building…`}</Shimmer>
-                        </>
-                      ) : null}
-                    </WorkedLink>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </span>
-      )}
-    </div>
-  );
+  return {
+    icon: kinds[lead.kind].icon,
+    line: (
+      <>
+        {subject === undefined ? (
+          <Link asChild variant="plain">
+            <WorkedLink chatId={chatId} worked={lead}>
+              {lead.name}
+            </WorkedLink>
+          </Link>
+        ) : (
+          lead.name
+        )}
+        {building(lead) ? (
+          <>
+            {" · "}
+            <Shimmer>{t`Building…`}</Shimmer>
+          </>
+        ) : null}
+      </>
+    ),
+    more:
+      count === 0 ? undefined : (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              aria-label={t`${plural(count, {
+                one: "# more thing this chat worked on",
+                other: "# more things this chat worked on",
+              })}`}
+              size="xs"
+              variant="ghost"
+            >
+              +{count}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>
+                <Trans>Also worked on</Trans>
+              </DropdownMenuLabel>
+              {others.map((worked) => (
+                <DropdownMenuItem
+                  asChild
+                  icon={kinds[worked.kind].icon}
+                  key={`${worked.kind}:${worked.id}`}
+                >
+                  <WorkedLink chatId={chatId} worked={worked}>
+                    {worked.name}
+                    {building(worked) ? (
+                      <>
+                        {" "}
+                        <Shimmer>{t`Building…`}</Shimmer>
+                      </>
+                    ) : null}
+                  </WorkedLink>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ),
+  };
 };

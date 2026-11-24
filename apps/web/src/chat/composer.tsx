@@ -36,7 +36,9 @@ import {
 } from "@grasp-os/ui/components/prompt-input";
 import type { PromptInputSpeechButtonProps } from "@grasp-os/ui/components/prompt-input";
 import { Text } from "@grasp-os/ui/components/text";
+import type { IconData } from "@grasp-os/ui/lib/icons";
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import type { LayoutStyle } from "@grasp-os/ui/lib/utils";
 import { msg, select } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
@@ -68,8 +70,9 @@ import { isEffort } from "./model-choice.ts";
 // Model selector; by Send, the microphone (dictation.ts); then Send, which
 // is Stop while Grasp answers (its status from the chat: chat-states.ts),
 // and what the page adds. In one row (the chat's idle bar) the text stands
-// between the add menu and the rest, the model only once something is
-// typed, so the placeholder keeps its room, as on #2503. `@` mentions the
+// between the add menu and the rest, the model at its end before the
+// microphone, which gives way to the placeholder at rest in a narrow row,
+// as on #2503. `@` mentions the
 // agents, Apps, workflows and people (mentions.tsx). The text is the
 // page's (use-ask.ts): the box follows it, and tells it each change. Files
 // are the page's too: whatever is picked, pasted or dropped is handed to
@@ -90,14 +93,26 @@ const styles = stylex.create({
     gridArea: "end",
     justifySelf: "end",
   },
-  // The files take the header's whole line, over the subject's: their row
-  // takes no width from its files, and would shrink to nothing beside it.
+  // In one row at rest, what answers gives way to the placeholder where
+  // the row is narrow (a phone's), as #2503's controls fold away.
+  answerer: { display: "contents" },
+  atRest: {
+    display: { default: "contents", "@container (width < 24rem)": "none" },
+  },
+  // The files take the header's whole line, their cards 16px from the
+  // card's top and side and the text 12px under them, as #2503's and as
+  // Damsko's own PromptInputAttachments (its `attachments` style), which
+  // shows only files the box keeps itself: the row keeps 4px of its own
+  // round them for a focus ring.
   files: {
     position: "relative",
-    zIndex: 1,
-    flexBasis: "100%",
+    zIndex: 2,
+    flexBasis: `calc(100% + 2 * ${space["1"]})`,
     flexShrink: 0,
     minWidth: 0,
+    marginInline: `calc(-1 * ${space["1"]})`,
+    marginBlockStart: `calc(-1 * ${space["1"]})`,
+    marginBlockEnd: `calc(${space["3"]} - ${space["1"]} - ${space["4"]})`,
   },
 });
 
@@ -285,8 +300,8 @@ const AddMenu = () => {
 /**
  * The box's tools: at the start the add menu and what answers; at the end
  * the microphone, Send (or Stop) and what the page adds. In one row the
- * text stands between the two, and what answers comes only once something
- * is typed, so at rest the placeholder keeps the room.
+ * text stands between the two, and what answers at the end, before the
+ * microphone; at rest in a narrow row it gives way to the placeholder.
  */
 const BoxTools = ({
   attaches,
@@ -311,7 +326,11 @@ const BoxTools = ({
       {compact ? null : answerer}
     </PromptInputTools>
     <PromptInputTools style={styles.end}>
-      {compact && typed ? answerer : null}
+      {compact ? (
+        <span {...stylex.props(styles.answerer, !typed && styles.atRest)}>
+          {answerer}
+        </span>
+      ) : null}
       {speech === undefined ? null : <PromptInputSpeechButton {...speech} />}
       <PromptInputSubmit {...(stop === undefined ? {} : { onStop: stop })} />
       {children}
@@ -374,6 +393,16 @@ const BoxFiles = ({
     </div>
   );
 
+/**
+ * What the question is about, on the band above the box (subject-bar.tsx):
+ * the kind's mark, the line (its name), and what else at its end ("+N").
+ */
+export interface SubjectBar {
+  icon: IconData;
+  line: ReactNode;
+  more: ReactNode;
+}
+
 /** Where nobody picks a model. */
 export const noModels: readonly string[] = [];
 
@@ -428,6 +457,14 @@ const noProviderBanner = (canConnect: boolean) => (
     )}
   </PromptInputBanner>
 );
+
+/** What the question is about, as the band above the box; a call too, as `noProviderBanner`. */
+const subjectBanner = (subject: SubjectBar | undefined) =>
+  subject === undefined ? null : (
+    <PromptInputBanner action={subject.more} icon={subject.icon}>
+      {subject.line}
+    </PromptInputBanner>
+  );
 
 /**
  * Hands every file picked, pasted or dropped on the box to the page, which
@@ -668,8 +705,8 @@ export const Composer = ({
   placeholder?: string;
   /** After Send: such as the way to open the chat from its bar. */
   children?: ReactNode;
-  /** What the question is about, over the text: a page's subject. */
-  subject?: ReactNode;
+  /** What the question is about: a band above the box, tucked under its top. */
+  subject?: SubjectBar;
   /** The files the question will carry, each shown as a card. */
   files?: readonly CardFile[];
   /** Adds files to the question; without it, the box takes none. */
@@ -748,13 +785,14 @@ export const Composer = ({
       {...(style === undefined ? {} : { style })}
       value={value}
     >
-      {noProvider ? noProviderBanner(canConnect) : null}
+      {/* The band above the box: no AI provider yet, else what the
+          question is about. */}
+      {noProvider ? noProviderBanner(canConnect) : subjectBanner(subject)}
       {/* Under the box: why dictating stopped, else why the last question
           didn't go. Each send clears the first, so the newest shows. */}
       {note === undefined ? null : <PromptInputNote>{note}</PromptInputNote>}
-      {subject === undefined && files.length === 0 ? null : (
+      {files.length === 0 ? null : (
         <PromptInputHeader>
-          {subject}
           <BoxFiles busy={busy} files={files} onRemove={onRemoveFile} />
         </PromptInputHeader>
       )}
@@ -770,9 +808,9 @@ export const Composer = ({
           attaches={onAttach !== undefined}
           compact={compact}
           speech={dictation.speech}
+          typed={text.trim() !== ""}
           // Stop lets a held question go; else it stops the answer, where one can be.
           stop={held ? letGo : onStop}
-          typed={text.trim() !== ""}
         >
           {children}
         </BoxTools>
