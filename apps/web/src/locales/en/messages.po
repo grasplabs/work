@@ -4994,6 +4994,10 @@ msgstr "Could not send the answer"
 msgid "Could not send. Your message is kept."
 msgstr "Could not send. Your message is kept."
 
+#: src/interview/parts/consent.tsx
+msgid "Could not start"
+msgstr "Could not start"
+
 #: src/frame/ui-words.tsx
 msgid "Could not upload"
 msgstr "Could not upload"
@@ -7668,6 +7672,10 @@ msgstr "HTTP connections"
 msgid "https:// and a public host name, with nothing after it."
 msgstr "https:// and a public host name, with nothing after it."
 
+#: src/interview/parts/consent.tsx
+msgid "I agree, let's start"
+msgstr "I agree, let's start"
+
 #: src/onboarding/send-plan-form.tsx
 msgid "I can’t plan that day. Type one like {example}, from {earliest} to {latest}."
 msgstr "I can’t plan that day. Type one like {example}, from {earliest} to {latest}."
@@ -7783,6 +7791,10 @@ msgstr "I talk to each team lead first, so they hear about me before their team 
 #: src/interview/before.tsx
 msgid "I write down what you tell me. At the end I read it back, and you say what is wrong. Your voice is not kept."
 msgstr "I write down what you tell me. At the end I read it back, and you say what is wrong. Your voice is not kept."
+
+#: src/interview/parts/consent.tsx
+msgid "I'd rather skip this"
+msgstr "I'd rather skip this"
 
 #: src/interview/before.tsx
 msgid "I’m {firstName}."
@@ -8641,6 +8653,7 @@ msgid "Known about your organization"
 msgstr "Known about your organization"
 
 #: src/frame/person-menu.tsx
+#: src/interview/concepts/frame.tsx
 #: src/routes/_shell.settings.profile.tsx
 msgid "Language"
 msgstr "Language"
@@ -10417,6 +10430,10 @@ msgstr "Not reset"
 #: src/workflows/files-and-apps.tsx
 msgid "Not revoked"
 msgstr "Not revoked"
+
+#: src/interview/parts/consent.tsx
+msgid "Not right now"
+msgstr "Not right now"
 
 #: src/interview/composer.tsx
 msgid "Not saved yet. Trying again."
@@ -12200,6 +12217,10 @@ msgstr "Reads your organization's people: names, emails and teams."
 #: src/onboarding/setup-frame.tsx
 msgid "Ready"
 msgstr "Ready"
+
+#: src/interview/parts/consent.tsx
+msgid "Ready to start?"
+msgstr "Ready to start?"
 
 #: src/workflows/item-test.tsx
 msgid "Real run"
@@ -18657,6 +18678,10 @@ msgstr "Your export's files"
 #: src/routes/_shell.settings.instructions.tsx
 msgid "Your instructions"
 msgstr "Your instructions"
+
+#: src/interview/parts/consent.tsx
+msgid "Your microphone stays off until you agree."
+msgstr "Your microphone stays off until you agree."
 
 #: src/frame/person-menu.tsx
 msgid "Your onboarding"

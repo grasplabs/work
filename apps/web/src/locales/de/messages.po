@@ -4994,6 +4994,10 @@ msgstr "Die Antwort konnte nicht gesendet werden"
 msgid "Could not send. Your message is kept."
 msgstr "Nicht gesendet. Ihre Nachricht bleibt erhalten."
 
+#: src/interview/parts/consent.tsx
+msgid "Could not start"
+msgstr "Start fehlgeschlagen"
+
 #: src/frame/ui-words.tsx
 msgid "Could not upload"
 msgstr "Konnte nicht hochgeladen werden"
@@ -7668,6 +7672,10 @@ msgstr "HTTP-Verbindungen"
 msgid "https:// and a public host name, with nothing after it."
 msgstr "https:// und ein öffentlicher Hostname, ohne etwas danach."
 
+#: src/interview/parts/consent.tsx
+msgid "I agree, let's start"
+msgstr "Einverstanden, los geht's"
+
 #: src/onboarding/send-plan-form.tsx
 msgid "I can’t plan that day. Type one like {example}, from {earliest} to {latest}."
 msgstr "Diesen Tag kann ich nicht planen. Geben Sie einen wie {example} ein, vom {earliest} bis zum {latest}."
@@ -7783,6 +7791,10 @@ msgstr "Ich spreche zuerst mit jeder Teamleitung, damit sie von mir hört, bevor
 #: src/interview/before.tsx
 msgid "I write down what you tell me. At the end I read it back, and you say what is wrong. Your voice is not kept."
 msgstr "Ich schreibe auf, was Sie erzählen. Am Ende lese ich es vor, und Sie sagen, was nicht stimmt. Ihre Stimme wird nicht gespeichert."
+
+#: src/interview/parts/consent.tsx
+msgid "I'd rather skip this"
+msgstr "Ich möchte das lieber auslassen"
 
 #: src/interview/before.tsx
 msgid "I’m {firstName}."
@@ -8641,6 +8653,7 @@ msgid "Known about your organization"
 msgstr "Bekannt über Ihre Organisation"
 
 #: src/frame/person-menu.tsx
+#: src/interview/concepts/frame.tsx
 #: src/routes/_shell.settings.profile.tsx
 msgid "Language"
 msgstr "Sprache"
@@ -10417,6 +10430,10 @@ msgstr "Nicht zurückgesetzt"
 #: src/workflows/files-and-apps.tsx
 msgid "Not revoked"
 msgstr "Nicht widerrufen"
+
+#: src/interview/parts/consent.tsx
+msgid "Not right now"
+msgstr "Jetzt gerade nicht"
 
 #: src/interview/composer.tsx
 msgid "Not saved yet. Trying again."
@@ -12200,6 +12217,10 @@ msgstr "Liest die Personen deiner Organisation: Namen, E-Mail-Adressen und Teams
 #: src/onboarding/setup-frame.tsx
 msgid "Ready"
 msgstr "Bereit"
+
+#: src/interview/parts/consent.tsx
+msgid "Ready to start?"
+msgstr "Bereit anzufangen?"
 
 #: src/workflows/item-test.tsx
 msgid "Real run"
@@ -18657,6 +18678,10 @@ msgstr "Die Dateien Ihres Exports"
 #: src/routes/_shell.settings.instructions.tsx
 msgid "Your instructions"
 msgstr "Deine Anweisungen"
+
+#: src/interview/parts/consent.tsx
+msgid "Your microphone stays off until you agree."
+msgstr "Dein Mikrofon bleibt aus, bis du zustimmst."
 
 #: src/frame/person-menu.tsx
 msgid "Your onboarding"
