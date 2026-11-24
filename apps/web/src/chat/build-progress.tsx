@@ -66,9 +66,11 @@ const PlanActions = ({
       void navigate({ to: "/apps/$app", params: { app: app.id } });
     } else if (workflow !== undefined) {
       setActiveChat(chatId, slotOf({ kind: "workflow", id: workflow.id }));
+      // Its Steps, where the chat that draws it is docked.
       void navigate({
         to: "/workflows/$workflow",
         params: { workflow: workflow.id },
+        search: { view: "flow" },
       });
     }
   };

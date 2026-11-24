@@ -80,10 +80,8 @@ export const VersionSource = ({
     version: number;
     files: WorkflowVersionSource["files"];
   }>();
-  /** What people call version `version`: its label, once it went live. */
-  const nameOf = (version: number): string =>
-    published.find((each) => each.version === version)?.label ??
-    t`Version ${version}`;
+  /** What people call version `version`: as everywhere else on its page. */
+  const nameOf = (version: number): string => t`v${version}`;
 
   if (!builder || chosen === undefined) {
     return null;

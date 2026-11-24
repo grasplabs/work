@@ -128,7 +128,7 @@ const StateBadge = ({ state }: { state: TraceState | undefined }) => {
     return null;
   }
   const label = {
-    reached: t`Reached`,
+    reached: t({ message: "Done", context: "a step of a run that is done" }),
     running: t({ message: "Running", context: "an attempt of a step" }),
     waiting: t`Waiting`,
     failed: t`Failed`,
@@ -387,7 +387,9 @@ export const WorkflowDiagramView = ({
       {diagram.tasks.length === 0 ? (
         <Empty size="sm">
           <EmptyHeader>
-            <EmptyDescription>{t`It declares no tasks.`}</EmptyDescription>
+            <EmptyDescription>
+              {t`No steps to draw: it works out its result in one go.`}
+            </EmptyDescription>
           </EmptyHeader>
         </Empty>
       ) : null}

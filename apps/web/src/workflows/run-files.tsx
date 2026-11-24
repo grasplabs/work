@@ -7,15 +7,12 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
-  ItemGroup,
   ItemMedia,
-  ItemSeparator,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import { DownloadIcon, FileIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
-import { useEffect, useEffectEvent, Fragment } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useEffectEvent } from "react";
 
 import { formatBytes } from "../format.ts";
 import { useCore } from "../use-core.ts";
@@ -28,7 +25,7 @@ import { useCore } from "../use-core.ts";
 // is shown nothing here, as they see nothing of what the run returned.
 
 /** One file, a row with its size and the way to download it. */
-const FileRow = ({
+export const FileRow = ({
   workflow,
   run,
   file,
@@ -108,38 +105,4 @@ export const RunFilesReader = ({
     };
   }, [core, run, workflow]);
   return null;
-};
-
-/** A section of a run's panel: its title, and what it holds. */
-export interface RunPanelSection {
-  id: string;
-  label: string;
-  content: ReactNode;
-}
-
-/** The panel's section of the files `read` lists; none while there are none. */
-export const useRunFilesSection = (
-  workflow: string,
-  run: string,
-  read: RunFilesRead | undefined
-): RunPanelSection | undefined => {
-  const { t } = useLingui();
-  const files = read === undefined ? null : read.files;
-  if (files === null || files.length === 0) {
-    return undefined;
-  }
-  return {
-    id: "files",
-    label: t`Files it wrote`,
-    content: (
-      <ItemGroup aria-label={t`Files it wrote`}>
-        {files.map((file, at) => (
-          <Fragment key={file.id}>
-            {at === 0 ? null : <ItemSeparator />}
-            <FileRow file={file} run={run} workflow={workflow} />
-          </Fragment>
-        ))}
-      </ItemGroup>
-    ),
-  };
 };

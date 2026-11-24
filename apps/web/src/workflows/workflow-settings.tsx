@@ -33,10 +33,11 @@ import type { ReactNode } from "react";
 import { DraftHistory } from "../drafts/draft-history.tsx";
 import { Sharing } from "../drafts/sharing.tsx";
 import { formatList } from "../format.ts";
+import { WithInfo } from "../frame/info-tip.tsx";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import type { Names } from "./activity-bar.tsx";
+import type { Names } from "./activity-words.ts";
 import { AskStephen } from "./ask-stephen.tsx";
 import {
   ProcessBadge,
@@ -46,7 +47,6 @@ import {
 import { DefinitionEditor } from "./definition-editor.tsx";
 import { DeleteWorkflow } from "./delete-workflow.tsx";
 import { FilesAndApps } from "./files-and-apps.tsx";
-import { InfoTip, LabelWithInfo } from "./info-tip.tsx";
 import { KeptState } from "./kept-state.tsx";
 import { ResourceParams } from "./resource-params.tsx";
 import { SavedAgo } from "./saved-ago.tsx";
@@ -109,9 +109,10 @@ const styles = stylex.create({
     flexGrow: 1,
     minHeight: 0,
     gap: space["2"],
-    paddingTop: space["2"],
-    // The room at its sides the reference's shell gives it: the frame's
-    // item shell gives none of its own.
+    // The room round it the reference's shell gives a page (28px above,
+    // 32px below, 24px at its sides): the frame's item shell gives none.
+    paddingTop: `calc(${space["7"]} + ${space["2"]})`,
+    paddingBottom: space["8"],
     paddingInline: space["6"],
   },
   scroll: { flexGrow: 1, minHeight: 0, minWidth: 0, overflowY: "auto" },
@@ -133,7 +134,6 @@ const styles = stylex.create({
     gap: space["1"],
   },
   // A fact's name and its info mark on one line.
-  fact: { display: "flex", alignItems: "center", gap: space["1"] },
   control: { width: "100%" },
 });
 
@@ -296,20 +296,26 @@ const FactRow = ({
   label: string;
   info?: string | undefined;
   children: ReactNode;
-}) => (
-  <Field orientation="responsive">
-    <FieldContent>
-      <span {...stylex.props(styles.fact)}>
-        <FieldTitle>{label}</FieldTitle>
-        {info === undefined ? null : <InfoTip>{info}</InfoTip>}
-      </span>
-    </FieldContent>
-    {/* Where the rows' controls stand, from the start of their column. */}
-    <Text as="span" size="sm" style={styles.control}>
-      {children}
-    </Text>
-  </Field>
-);
+}) => {
+  const { t } = useLingui();
+  return (
+    <Field orientation="responsive">
+      <FieldContent>
+        {info === undefined ? (
+          <FieldTitle>{label}</FieldTitle>
+        ) : (
+          <WithInfo info={info} label={t`More about this setting`}>
+            <FieldTitle>{label}</FieldTitle>
+          </WithInfo>
+        )}
+      </FieldContent>
+      {/* Where the rows' controls stand, from the start of their column. */}
+      <Text as="span" size="sm" style={styles.control}>
+        {children}
+      </Text>
+    </Field>
+  );
+};
 
 /** What the workflow's page read, and what changes it, as its sections need. */
 interface WorkflowRead {
@@ -355,7 +361,9 @@ const ProcessRow = ({
           {covers === undefined ? (
             <FieldLabel>{t`Business process`}</FieldLabel>
           ) : (
-            <LabelWithInfo info={covers} label={t`Business process`} />
+            <WithInfo info={covers} label={t`More about this setting`}>
+              <FieldLabel>{t`Business process`}</FieldLabel>
+            </WithInfo>
           )}
         </FieldContent>
         <ProcessPicker

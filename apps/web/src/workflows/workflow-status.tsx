@@ -11,10 +11,12 @@ import {
 } from "@grasp-os/ui/components/alert-dialog";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
+import { Link as TextLink } from "@grasp-os/ui/components/link";
 import { Icon, PauseIcon, PlayIcon } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
+import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { StatusBadge } from "../drafts/status-badge.tsx";
@@ -22,10 +24,14 @@ import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { useGrace } from "../use-grace.ts";
+import type { TriggerBlock } from "./overview.ts";
+import { triggerBlockText } from "./trigger-block.ts";
 
-// Where an independent workflow stands, in its bar, in the words an App's
-// bar has (drafts/status-badge.tsx): "Only you see this" until a version is
-// live and shared, then who uses it; "Paused" while it is paused. Beside
+// Where an independent workflow stands, on its page: "Paused" while it is
+// paused; while its triggers can't start it, why (an admin is told where to
+// allow it); else, for its builders, in the words an App's bar has
+// (drafts/status-badge.tsx), "Only you see this" until a version is live
+// and shared, then who uses it; for anyone else, whether it is live. Beside
 // Run, for its builders, Pause while a version is live, or Resume while
 // paused (`workflowResources.pause`, `resume`).
 //
@@ -39,29 +45,78 @@ import { useGrace } from "../use-grace.ts";
 const graceSeconds = 5;
 
 const styles = stylex.create({
-  row: { display: "flex", alignItems: "center", gap: space["2"] },
+  row: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    columnGap: space["2"],
+    rowGap: space["1"],
+  },
+  whole: { whiteSpace: "nowrap" },
   countdown: { display: "flex", alignItems: "center", gap: space["3"] },
 });
 
-/** Where the workflow stands, as its bar says it. */
+/** Where the workflow stands, as its page says it. */
 export const WorkflowStatus = ({
   live,
   paused,
+  blocked,
+  builder,
+  admin,
   who,
 }: {
   /** Its live version; null before the first. */
   live: number | null;
   paused: boolean;
-  /** Whom it is shared with, by name; none while they are read. */
+  /** Why its triggers start nothing, if they can't; null where they can or aren't read. */
+  blocked: TriggerBlock | null;
+  /** Whether the reader builds it: they are told whom it is shared with. */
+  builder: boolean;
+  /** Whether the reader is an admin, who allows a trigger in the Inbox. */
+  admin: boolean;
+  /** Whom it is shared with, by name, for its builders; none while they are read. */
   who: readonly string[] | undefined;
 }) => {
-  const { t } = useLingui();
-  return paused ? (
-    <Badge dot variant="warning">
-      {t({ message: "Paused", context: "a workflow someone paused" })}
+  const { t, i18n } = useLingui();
+  if (paused) {
+    return (
+      <Badge dot variant="warning">
+        {t({ message: "Paused", context: "a workflow someone paused" })}
+      </Badge>
+    );
+  }
+  if (live !== null && blocked !== null) {
+    return (
+      <span {...stylex.props(styles.row)}>
+        <Badge dot variant="warning">
+          {triggerBlockText(blocked, i18n)}
+        </Badge>
+        {admin && blocked.why === "waiting" ? (
+          <span {...stylex.props(styles.whole)}>
+            <TextLink asChild variant="plain">
+              <Link to="/inbox">
+                {t({
+                  message: "Allow it",
+                  context: "go to the Inbox to allow a trigger",
+                })}
+              </Link>
+            </TextLink>
+          </span>
+        ) : null}
+      </span>
+    );
+  }
+  if (builder) {
+    return who === undefined ? null : <StatusBadge live={live} who={who} />;
+  }
+  return live === null ? (
+    <Badge>
+      {t({ message: "Not live yet", context: "how a workflow stands" })}
     </Badge>
   ) : (
-    <StatusBadge live={live} who={who} />
+    <Badge variant="success">
+      {t({ message: "Live", context: "how a workflow stands" })}
+    </Badge>
   );
 };
 

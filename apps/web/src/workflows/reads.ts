@@ -1,4 +1,6 @@
+import type { DecisionView } from "@grasp-os/shared/decisions";
 import { roleErrors } from "@grasp-os/shared/roles";
+import { workflowLabel } from "@grasp-os/shared/workflow-resources";
 import type { WorkflowResourceVersion } from "@grasp-os/shared/workflow-resources";
 import type {
   RunActivity,
@@ -8,6 +10,7 @@ import type {
 } from "@grasp-os/shared/workflows";
 
 import type { Session } from "../core.ts";
+import { listedOrNone, readPeople } from "../directory.ts";
 
 // Lists core refuses to the user role while sharing Apps is switched off:
 // such a person has no App to list, so a refusal reads as none, not as
@@ -41,6 +44,66 @@ export const listWorkflows = async (
     }
     throw error;
   }
+};
+
+/**
+ * Who and what a workflow's runs name, by ID, for names only: people as
+ * the directory lists them for an admin, with each workflow's owner beside
+ * them (core names the owner to anyone who has the workflow, where the
+ * directory is an admin's alone); and each workflow by the name people see
+ * (`workflowLabel`). Either read refused or slow leaves its names out.
+ */
+/**
+ * Each workflow's title, by its ID, where the reader may read it
+ * (`workflows.overview`). Anything else core names by its name, its slug,
+ * for want of the title (core need 76).
+ */
+export const readWorkflowTitles = async (
+  session: Session
+): Promise<ReadonlyMap<string, string>> => {
+  const listed = await listWorkflows(session);
+  return new Map(
+    listed.map((workflow) => [workflow.workflowId, workflowLabel(workflow)])
+  );
+};
+
+/** `decision`, its workflow by the title the reader may read in `titles`. */
+export const titledDecision = (
+  decision: DecisionView,
+  titles: ReadonlyMap<string, string>
+): DecisionView => {
+  const { workflowResource } = decision;
+  const title = titles.get(workflowResource.id);
+  return title === undefined
+    ? decision
+    : { ...decision, workflowResource: { ...workflowResource, name: title } };
+};
+
+export const readWorkflowNames = async (
+  session: Session
+): Promise<{
+  people: ReadonlyMap<string, string>;
+  workflows: ReadonlyMap<string, string>;
+}> => {
+  const [people, workflows] = await Promise.all([
+    readPeople(session),
+    listedOrNone(listWorkflows(session)),
+  ]);
+  const named = new Map(people);
+  for (const { owner } of workflows) {
+    if (owner.name !== null && !named.has(owner.userId)) {
+      named.set(owner.userId, owner.name);
+    }
+  }
+  return {
+    people: named,
+    workflows: new Map(
+      workflows.map((workflow) => [
+        workflow.workflowId,
+        workflowLabel(workflow),
+      ])
+    ),
+  };
 };
 
 /** The runs core lists for the person, as `filter` narrows them. */

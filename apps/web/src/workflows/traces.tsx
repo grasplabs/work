@@ -43,7 +43,7 @@ import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useEffectEvent, useState, Fragment } from "react";
+import { useEffect, useState, Fragment } from "react";
 
 import { isTransient } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
@@ -51,45 +51,25 @@ import { formatDateTime } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
-import { activityKey, activityText } from "./activity-bar.tsx";
-import type { Names } from "./activity-bar.tsx";
+import { activityKey, activityText } from "./activity-words.ts";
+import type { Names } from "./activity-words.ts";
 import { ItemTest } from "./item-test.tsx";
 import { ListedCount } from "./listed-count.tsx";
 import { WorkflowRunsTable } from "./resource-runs.tsx";
-import { RunBeside, useAddressedRun } from "./run-detail.tsx";
 import { SectionCard } from "./section-card.tsx";
 import { WorkflowDiagramView } from "./workflow-diagram.tsx";
 
 // A workflow's Traces, for its builders (prototype `inside-traces.tsx`):
 // one thing at a time behind a switch. Runs: a test of the draft on recent
-// real items, then every run, a row each; a row opens beside the list with
-// when it ran, how it ended and what it returned or why it failed
-// (run-detail.tsx), then what the run did laid over its own version's
-// diagram, and each step its journal recorded with its state, attempts,
-// loop item and error code (`workflowResources.runTrace`), as Damsko's
-// Trace. Activity: everything that happened to the
-// workflow, in full.
+// real items, then every run, a row each, each opening the run's page
+// (run-page.tsx), whose Workshop shows what the run did laid over its own
+// version's diagram, and each step its journal recorded with its state,
+// attempts, loop item and error code (`workflowResources.runTrace`), as
+// Damsko's Trace (`RunTraceDetail`). Activity: everything that happened to
+// the workflow, in full.
 
 /** Which part of Traces shows. */
 export type TracesPart = "runs" | "activity";
-
-/**
- * Which part of Traces shows, given the run the address names: naming
- * another run (Run's "Open the run") shows Runs, where it opens.
- */
-export const useTracesPart = (
-  openRun: string | undefined
-): [TracesPart, (part: TracesPart) => void] => {
-  const [part, setPart] = useState<TracesPart>("runs");
-  const [named, setNamed] = useState(openRun);
-  if (openRun !== named) {
-    setNamed(openRun);
-    if (openRun !== undefined) {
-      setPart("runs");
-    }
-  }
-  return [part, setPart];
-};
 
 /** How often a run still going is read again. */
 const followMs = 1500;
@@ -105,17 +85,6 @@ const styles = stylex.create({
     minWidth: 0,
   },
 });
-
-/**
- * Where a run is, as a read of its trace says it, for what follows it (the
- * run panel's facts, run-detail.tsx): its status, and, while a step waits
- * for its AI provider, that wait. A wait begun or ended moves it, as its
- * status, still running, doesn't.
- */
-export const followedState = (trace: WorkflowRunTrace): string =>
-  trace.aiProvider === undefined
-    ? trace.status
-    : `${trace.status}:${trace.aiProvider.trouble}:${trace.aiProvider.since}`;
 
 /** Ended, or nothing more of it is shown: no need to read it again. */
 const settled = (trace: WorkflowRunTrace): boolean =>
@@ -203,21 +172,17 @@ const StepByStep = ({
 };
 
 /** What run `runId` did, read again until it ends. */
-const RunTraceDetail = ({
+export const RunTraceDetail = ({
   workflow,
   runId,
-  onStatus,
 }: {
   workflow: string;
   runId: string;
-  /** Where the run is, as each read of its trace says it (`followedState`). */
-  onStatus: (status: string) => void;
 }) => {
   const core = useCore();
   const { t } = useLingui();
   const [trace, setTrace] = useState<WorkflowRunTrace>();
   const [failure, setFailure] = useState<string>();
-  const told = useEffectEvent(onStatus);
 
   useEffect(() => {
     let stopped = false;
@@ -233,7 +198,6 @@ const RunTraceDetail = ({
         }
         setTrace(read);
         setFailure(undefined);
-        told(followedState(read));
         if (!settled(read)) {
           timer = setTimeout(() => {
             void follow();
@@ -365,20 +329,11 @@ export const Traces = ({
   runs,
   activity,
   names,
-  admin,
   testable,
   part,
   onPartChange,
-  openRun,
-  onCloseRun,
 }: {
   workflow: string;
-  /** The run the address asks to open, by its ID. */
-  openRun?: string | undefined;
-  /** Clears the run from the address once it is closed. */
-  onCloseRun?: () => void;
-  /** Whether the reader is one of the organization's admins. */
-  admin: boolean;
   runs: Loaded<WorkflowResourceRun[]>;
   activity: Loaded<WorkflowActivity[]>;
   names: Names;
@@ -388,19 +343,6 @@ export const Traces = ({
   onPartChange: (part: TracesPart) => void;
 }) => {
   const { t } = useLingui();
-  const close = (): void => {
-    onCloseRun?.();
-  };
-  // The run the address names: one of the table's, or Run's "Open the run".
-  // Open only while the runs show: Activity hides it, and Runs shows it again.
-  const { opened, notFound, onDismiss } = useAddressedRun(
-    runs.state === "ready" ? runs.data : undefined,
-    part === "runs" ? openRun : undefined,
-    close
-  );
-  // The opened run's status, as its followed trace last said it.
-  const [traced, setTraced] = useState<{ runId: string; status: string }>();
-  const openedId = opened === null ? undefined : opened.id;
   return (
     <div {...stylex.props(styles.traces)}>
       <Tabs
@@ -436,41 +378,15 @@ export const Traces = ({
             {testable === null ? null : (
               <ItemTest revision={testable} workflow={workflow} />
             )}
-            <RunBeside
-              admin={admin}
-              names={names}
-              notFound={notFound}
-              onClose={close}
-              onDismissNotFound={onDismiss}
-              opened={opened}
-              status={
-                traced !== undefined && traced.runId === openedId
-                  ? traced.status
-                  : null
-              }
-              steps={
-                opened === null ? null : (
-                  <RunTraceDetail
-                    onStatus={(status) => {
-                      setTraced({ runId: opened.id, status });
-                    }}
-                    runId={opened.id}
-                    workflow={workflow}
-                  />
-                )
-              }
-              workflow={workflow}
-            >
-              {runs.state === "ready" ? (
-                <WorkflowRunsTable
-                  names={names}
-                  runs={runs.data}
-                  workflow={workflow}
-                />
-              ) : (
-                <NotLoadedState page={runs} />
-              )}
-            </RunBeside>
+            {runs.state === "ready" ? (
+              <WorkflowRunsTable
+                names={names}
+                runs={runs.data}
+                workflow={workflow}
+              />
+            ) : (
+              <NotLoadedState page={runs} />
+            )}
           </div>
         </TabsContent>
         <TabsContent value="activity">

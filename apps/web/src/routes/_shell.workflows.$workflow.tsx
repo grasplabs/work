@@ -1,3 +1,4 @@
+import type { DecisionView } from "@grasp-os/shared/decisions";
 import type { Draft } from "@grasp-os/shared/drafts";
 import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -12,15 +13,11 @@ import type {
   WorkflowResourceVersion,
   WorkflowState,
 } from "@grasp-os/shared/workflow-resources";
-import { TabsLink, TabsNav } from "@grasp-os/ui/components/tabs";
+import type { WorkflowTrigger } from "@grasp-os/shared/workflow-triggers";
+import { Button } from "@grasp-os/ui/components/button";
 import { Icon, WorkflowIcon } from "@grasp-os/ui/lib/icons";
-import {
-  colors,
-  duration,
-  media,
-  size,
-  space,
-} from "@grasp-os/ui/lib/tokens.stylex";
+import { duration, media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import {
@@ -35,7 +32,6 @@ import { setActiveChat } from "../chat/active-chat.ts";
 import { chatPresence } from "../chat/chat-presence.ts";
 import { slotOf } from "../chat/chat-subject.ts";
 import { useChatAbout } from "../chat/global-chat.tsx";
-import { readPeople } from "../directory.ts";
 import {
   ShareWithTeam,
   showsUnpublishedChanges,
@@ -59,29 +55,31 @@ import type { SetUp } from "../frame/setting-up.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { ActivityBar } from "../workflows/activity-bar.tsx";
-import type { Names } from "../workflows/activity-bar.tsx";
-import { ListedCount } from "../workflows/listed-count.tsx";
+import type { Names } from "../workflows/activity-words.ts";
+import { workflowBlock } from "../workflows/overview.ts";
+import type { TriggerBlock } from "../workflows/overview.ts";
 import { workflowSearchOf } from "../workflows/page-search.ts";
 import type { WorkflowView } from "../workflows/page-search.ts";
-import { workflowVersions } from "../workflows/reads.ts";
-import { ResourceRuns } from "../workflows/resource-runs.tsx";
+import { readWorkflowNames, workflowVersions } from "../workflows/reads.ts";
 import type { WorkflowSettingsSection } from "../workflows/settings-sections.ts";
 import { StartIndependentRun } from "../workflows/start-run.tsx";
-import { Traces, useTracesPart } from "../workflows/traces.tsx";
+import { Traces } from "../workflows/traces.tsx";
+import type { TracesPart } from "../workflows/traces.tsx";
 import { useWorkflowDraft } from "../workflows/use-workflow-draft.ts";
 import { WorkflowFlow } from "../workflows/workflow-flow.tsx";
+import { WorkflowHome } from "../workflows/workflow-page.tsx";
+import type { WorkshopRow, WorkshopView } from "../workflows/workflow-page.tsx";
 import { WorkflowSettings } from "../workflows/workflow-settings.tsx";
 import { PauseControl, WorkflowStatus } from "../workflows/workflow-status.tsx";
 
-// One independent workflow (platform specification 13), in the same shell
-// as an App (frame/item-shell.tsx), with the same bar: the way back to
-// the Workflows (or the project it was started from), its name and where
-// it stands in plain words (`workflow-status.tsx`); then its views (Flow,
-// Runs, Settings), Run, Pause, and Share with your team, the page's one
-// lime action, as an App's workspace has it (drafts/share-with-team.tsx).
-// Core decides who sees what: the draft is read only for builders, as it
-// can hold a sensitive default.
+// One independent workflow (platform specification 13), as direction C
+// (Track) has it. Its page (workflows/workflow-page.tsx): its name and where
+// it stands, what waits on the reader, its runs, each opening its own page
+// (routes/_shell.workflows.$workflow_.runs.$run.tsx), and for its builders
+// their workshop: Run, Pause and Share with your team, the one lime action,
+// in the bar, and a row for each tool that changes it, each opening its
+// view under the workflow's crumb. Core decides who sees what: the draft is
+// read only for builders, as it can hold a sensitive default.
 //
 // - Flow, for its builders, who read its draft: the definition drawn
 //   (`workflow-flow.tsx`), filling the page, with Grasp's chat about it
@@ -89,12 +87,11 @@ import { PauseControl, WorkflowStatus } from "../workflows/workflow-status.tsx";
 //   the draft as anyone writes it (`workflows/use-workflow-draft.ts`). Once it
 //   is shared, a line under the bar says it has changes only its builders
 //   see, with Undo, as an App's does.
-// - Runs: its runs as core lists them for the reader (GRA-674), each
-//   opened beside the page with what it did, returned or why it failed;
-//   for its builders with a test of the draft on recent real items and
-//   what happened to it lately.
+// - Runs and tests, for its builders: every run, a test of the draft on
+//   recent real items, and what happened to it lately (`traces.tsx`).
 // - Settings (`workflow-settings.tsx`): everything else, a section at a
-//   time, as an App's are, History among them.
+//   time, as an App's are, History among them; for anyone else too, a
+//   button away in the bar.
 //
 // Run, in the bar, starts its live version by hand, in a dialog.
 
@@ -107,14 +104,17 @@ const fadeIn = stylex.keyframes({
 const styles = stylex.create({
   // A view kept while another shows: its state stays.
   away: { display: "none" },
-  // The canvas set in from the page's edges, as the reference's page of
-  // its own (the frame's "fill" page) has it.
+  // The canvas set in from the page's edges as the reference's shell sets
+  // a page (28px above, 32px below, 24px at its sides): the frame's item
+  // shell gives none of its own.
   flow: {
     display: "flex",
     flexDirection: "column",
     flexGrow: 1,
     minHeight: 0,
-    padding: space["6"],
+    paddingBlockStart: space["7"],
+    paddingBlockEnd: space["8"],
+    paddingInline: space["6"],
     animationName: { default: fadeIn, [media.reducedMotion]: "none" },
     animationDuration: duration.open,
     animationTimingFunction: duration.ease,
@@ -126,26 +126,22 @@ const styles = stylex.create({
     minHeight: 0,
     overflowY: "auto",
   },
-  // As wide as the page, with the room at its sides the reference's shell
-  // gives it: the frame's item shell here gives none of its own.
+  // As wide as the page, with the room round it the reference's shell
+  // gives a page: the frame's item shell here gives none of its own.
   column: {
     boxSizing: "border-box",
     width: "100%",
-    paddingBlockStart: space["6"],
+    paddingBlockStart: `calc(${space["7"]} + ${space["6"]})`,
     paddingBlockEnd: space["8"],
     paddingInline: space["6"],
   },
-  bar: { marginBlockStart: "auto" },
-  views: {
-    display: "flex",
-    flexShrink: 0,
-    justifyContent: "center",
-    minWidth: 0,
-    paddingBlock: space["2"],
-    paddingInline: space["4"],
-    borderBlockEndWidth: size.hairline,
-    borderBlockEndStyle: "solid",
-    borderBlockEndColor: colors.border,
+  // Where it stands gives way where the bar is narrow, as on the
+  // reference, whose shell sets the bar 48px narrower than this one (48rem there).
+  state: {
+    display: {
+      default: "inline-flex",
+      "@container bar (width < 51rem)": "none",
+    },
   },
 });
 
@@ -225,145 +221,16 @@ const useSetUp = (
   return chat.built || worked === resource.id ? "failed" : "ready";
 };
 
-/** Flow | Runs | Settings: links, so each is an address of its own. */
-const ViewSwitch = ({
-  workflow,
-  view,
-  flow,
-  runs,
-}: {
-  workflow: string;
-  view: WorkflowView;
-  /** Whether the reader has its Flow: its draft. */
-  flow: boolean;
-  /** How many runs it has, beside their view once read. */
-  runs: number | undefined;
-}) => {
-  const { t } = useLingui();
-  const views = [
-    ...(flow
-      ? [
-          {
-            view: "flow",
-            label: t({ message: "Flow", context: "a workflow's view" }),
-          } as const,
-        ]
-      : []),
-    {
-      view: "runs",
-      label: t({ message: "Runs", context: "a workflow's view" }),
-    },
-    {
-      view: "settings",
-      label: t({ message: "Settings", context: "a workflow's view" }),
-    },
-  ] as const;
-  const label = t`Workflow views`;
-  const links = views.map(({ view: each, label: words }) => (
-    <TabsLink asChild current={each === view} key={each}>
-      <Link
-        params={{ workflow }}
-        replace
-        search={(held) => ({ project: held.project, view: each })}
-        to="/workflows/$workflow"
-      >
-        {words}
-        {each === "runs" ? <ListedCount count={runs} of="runs" /> : null}
-      </Link>
-    </TabsLink>
-  ));
-  // TabsNav folds to one menu by itself where its links don't fit.
-  return (
-    <TabsNav aria-label={label} size="sm" variant="default">
-      {links}
-    </TabsNav>
-  );
-};
-
 /**
- * Its runs: for its builders, with a test of the draft on recent items
- * and what happened to it lately (`Traces`); for anyone else, the runs
- * core lists them, and what happened lately under them.
- */
-const RunsView = ({
-  workflow,
-  builder,
-  runs,
-  activity,
-  names,
-  admin,
-  testable,
-  openRun,
-  onCloseRun,
-}: {
-  workflow: string;
-  /** The run the address asks to open, by its ID. */
-  openRun: string | undefined;
-  /** Clears the run from the address once it is closed. */
-  onCloseRun: () => void;
-  builder: boolean;
-  runs: Loaded<WorkflowResourceRun[]>;
-  activity: Loaded<WorkflowActivity[]>;
-  names: Names;
-  admin: boolean;
-  /** The draft's revision while it passes: what a test runs. */
-  testable: number | null;
-}) => {
-  const [part, setPart] = useTracesPart(openRun);
-  if (builder) {
-    return (
-      <div {...stylex.props(styles.column)}>
-        <Traces
-          activity={activity}
-          admin={admin}
-          names={names}
-          onCloseRun={onCloseRun}
-          onPartChange={setPart}
-          openRun={openRun}
-          testable={testable}
-          part={part}
-          runs={runs}
-          workflow={workflow}
-        />
-      </div>
-    );
-  }
-  return (
-    <>
-      <div {...stylex.props(styles.column)}>
-        {runs.state === "ready" ? (
-          <ResourceRuns
-            admin={admin}
-            names={names}
-            onCloseRun={onCloseRun}
-            openRun={openRun}
-            runs={runs.data}
-            workflow={workflow}
-          />
-        ) : (
-          <NotLoadedState page={runs} />
-        )}
-      </div>
-      <div {...stylex.props(styles.bar)}>
-        <ActivityBar activity={activity} names={names} onAll={undefined} />
-      </div>
-    </>
-  );
-};
-
-/**
- * The view the page shows: the one asked for, but Flow only for who reads
- * its draft (`flow`), its builders; anyone else opens on Runs.
+ * The view the page shows: the one asked for, but Flow and Runs and tests
+ * only for its builders; anyone else, and anyone who asked for none, has
+ * its page.
  */
 const shownView = (
   asked: WorkflowView | undefined,
-  flow: boolean
-): WorkflowView => {
-  if (asked === undefined || (asked === "flow" && !flow)) {
-    return flow ? "flow" : "runs";
-  }
-  return asked;
-};
+  builder: boolean
+): WorkflowView | undefined =>
+  asked === "settings" || builder ? asked : undefined;
 
 /** What the workflow's page read. */
 interface WorkflowPageRead {
@@ -374,8 +241,14 @@ interface WorkflowPageRead {
   /** What it keeps between runs, for its builders and admins only. */
   state: Loaded<WorkflowState> | undefined;
   runs: Loaded<WorkflowResourceRun[]>;
+  /** The answers its runs wait for that the reader may give. */
+  decisions: DecisionView[];
+  /** What starts it, where the reader manages its triggers. */
+  triggers: Loaded<WorkflowTrigger[]> | undefined;
   askable: Loaded<boolean>;
   activity: Loaded<WorkflowActivity[]>;
+  /** Why its triggers start nothing, if they can't; null where they can or core didn't list them. */
+  blocked: TriggerBlock | null;
   names: Names;
   /** Who reads it: what its History offers them. */
   identity: Pick<Identity, "userId" | "role" | "staff">;
@@ -385,14 +258,34 @@ interface WorkflowPageRead {
   approves: boolean;
 }
 
+/** What each builder view is called, in the trail after the workflow's name. */
+const useViewNames = () => {
+  const { t } = useLingui();
+  return {
+    flow: t({
+      message: "Steps",
+      context: "a workflow's steps, drawn as a flow",
+    }),
+    runs: t({
+      message: "Runs and tests",
+      context: "a workflow's builder view",
+    }),
+    settings: t({ message: "Settings", context: "a workflow's view" }),
+  } satisfies Record<WorkflowView, string>;
+};
+
 /**
- * Its bar, as an App's: its name and where it stands, Run, Pause, and,
- * for its builders, Share with your team, the one lime action. Its views
- * stand in a row of their own under it.
+ * Its bar: the trail to it, and past it to the view open; where it stands
+ * (on a view: its page says it under its name); Run, Settings for anyone
+ * who doesn't build it, Pause, and, for its builders, Share with your team,
+ * the one lime action.
  */
 const WorkflowBar = ({
   resource,
+  blocked,
+  admin,
   back,
+  view,
   paused,
   pauses,
   builder,
@@ -406,7 +299,12 @@ const WorkflowBar = ({
   onShared,
 }: {
   resource: WorkflowResource;
+  blocked: TriggerBlock | null;
+  /** Whether the reader is an admin who allows triggers: an admin of its own, not Grasp staff. */
+  admin: boolean;
   back: Crumb;
+  /** The view open; none on its page. */
+  view: WorkflowView | undefined;
   paused: boolean;
   /** Whether the reader may pause and resume it: a builder, not Grasp staff. */
   pauses: boolean;
@@ -422,16 +320,44 @@ const WorkflowBar = ({
   onChange: (changed: WorkflowResource) => void;
   /** Shows what it may reach, in its Settings' Files and apps. */
   onFiles: () => void;
-  /** Opens a run Run started, beside its runs. */
+  /** Opens the page of a run Run started. */
   onOpenRun: (id: string) => void;
   onShared: () => void;
 }) => {
+  const { t } = useLingui();
+  const viewNames = useViewNames();
   const live = resource.currentVersion;
   const label = workflowLabel(resource);
+  const crumbs: Crumb[] =
+    view === undefined
+      ? [back, { label }]
+      : [
+          back,
+          {
+            label,
+            to: "/workflows/$workflow",
+            params: { workflow: resource.id },
+          },
+          { label: viewNames[view] },
+        ];
   return (
     <ItemBar
       actions={
         <>
+          {builder || view === "settings" ? null : (
+            <Button asChild size="sm" variant="ghost">
+              <Link
+                params={{ workflow: resource.id }}
+                search={(held) => ({
+                  project: held.project,
+                  view: "settings",
+                })}
+                to="/workflows/$workflow"
+              >
+                {t({ message: "Settings", context: "a workflow's view" })}
+              </Link>
+            </Button>
+          )}
           <StartIndependentRun
             live={live}
             onFiles={onFiles}
@@ -465,17 +391,177 @@ const WorkflowBar = ({
         </>
       }
       back={back}
+      crumbs={crumbs}
+      headed={view === undefined}
       name={label}
       state={
-        builder && members === undefined ? undefined : (
-          <WorkflowStatus
-            live={live}
-            paused={paused}
-            who={members === undefined ? undefined : memberNames(members)}
-          />
+        view === undefined ? undefined : (
+          <span {...stylex.props(styles.state)}>
+            <WorkflowStatus
+              admin={admin}
+              blocked={blocked}
+              builder={builder}
+              live={live}
+              paused={paused}
+              who={members === undefined ? undefined : memberNames(members)}
+            />
+          </span>
         )
       }
     />
+  );
+};
+
+/**
+ * Its builders' workshop on its page: a row for each tool that changes it,
+ * in a line from what the page read.
+ */
+const useWorkshop = (
+  read: Pick<WorkflowPageRead, "resource" | "versions" | "triggers">,
+  draft: WorkflowDraft | undefined
+): WorkshopRow[] => {
+  const { t } = useLingui();
+  const steps = draft?.diagram?.tasks.length;
+  const viewNames = useViewNames();
+  const live = read.resource.currentVersion;
+  const triggers =
+    read.triggers?.state === "ready" ? read.triggers.data.length : undefined;
+  const versions =
+    read.versions.state === "ready"
+      ? read.versions.data.filter(({ label }) => label !== null).length
+      : undefined;
+  let stepsLine: string;
+  if (steps === undefined) {
+    stepsLine =
+      live === null ? t`Not published yet.` : t`Version ${live} is live.`;
+  } else if (live === null) {
+    stepsLine = t`${plural(steps, { one: "# step, drawn as a flow. Not published yet.", other: "# steps, drawn as a flow. Not published yet." })}`;
+  } else {
+    stepsLine = t`${plural(steps, { one: `# step, drawn as a flow. Version ${live} is live.`, other: `# steps, drawn as a flow. Version ${live} is live.` })}`;
+  }
+  return [
+    {
+      id: "steps",
+      title: viewNames.flow,
+      description: stepsLine,
+      to: { view: "flow" },
+    },
+    {
+      id: "triggers",
+      title: t({ message: "What starts it", context: "a workflow's triggers" }),
+      description:
+        triggers === undefined || triggers === 0
+          ? t`Run by hand.`
+          : t`${plural(triggers, { one: "# trigger, and Run by hand.", other: "# triggers, and Run by hand." })}`,
+      to: { view: "settings", section: "triggers" },
+    },
+    {
+      id: "files",
+      title: t({
+        message: "Files and apps",
+        context: "what a workflow may reach",
+      }),
+      description: t`What it may read and change, and who allowed it.`,
+      to: { view: "settings", section: "files" },
+    },
+    {
+      id: "runs",
+      title: viewNames.runs,
+      description: t`Every run, a test of your draft on recent items, and what happened lately.`,
+      to: { view: "runs" },
+    },
+    {
+      id: "versions",
+      title: t({
+        message: "Versions",
+        context: "a workflow's published versions",
+      }),
+      description:
+        versions === undefined || versions === 0
+          ? t`None published yet.`
+          : t`${plural(versions, { one: "# published.", other: "# published." })}`,
+      to: { view: "settings", section: "history" },
+    },
+    {
+      id: "settings",
+      title: viewNames.settings,
+      description: t`Its name, who it's shared with, its parameters and its definition.`,
+      to: { view: "settings", section: "general" },
+    },
+  ];
+};
+
+/** Its draft, once read. */
+const readyOf = (
+  draft: Loaded<WorkflowDraft> | undefined
+): WorkflowDraft | undefined =>
+  draft?.state === "ready" ? draft.data : undefined;
+
+/**
+ * Its builders' views: the Flow and Runs and tests, each kept while
+ * another view shows, so the Flow's zoom and layout stay and a test going
+ * on stays followed.
+ */
+const BuilderViews = ({
+  view,
+  draft,
+  latest,
+  onDraft,
+  open,
+  workflow,
+  runs,
+  activity,
+  names,
+}: {
+  view: WorkflowView | undefined;
+  draft: Loaded<WorkflowDraft> | undefined;
+  /** Its draft as written last, on this page. */
+  latest: WorkflowDraft | undefined;
+  onDraft: (draft: WorkflowDraft) => void;
+  open: (to: WorkshopView) => void;
+  workflow: string;
+  runs: Loaded<WorkflowResourceRun[]>;
+  activity: Loaded<WorkflowActivity[]>;
+  names: Names;
+}) => {
+  const [part, setPart] = useState<TracesPart>("runs");
+  return (
+    <>
+      {/* Kept while another view shows: its zoom and layout stay. */}
+      {draft === undefined ? null : (
+        <div {...stylex.props(view === "flow" ? styles.flow : styles.away)}>
+          {draft.state === "ready" ? (
+            <WorkflowFlow
+              draft={latest ?? draft.data}
+              onDefinition={() => {
+                open({ view: "settings", section: "definition" });
+              }}
+              onDraft={onDraft}
+              onTriggers={() => {
+                open({ view: "settings", section: "triggers" });
+              }}
+              workflow={workflow}
+            />
+          ) : (
+            <NotLoadedState page={draft} />
+          )}
+        </div>
+      )}
+      {/* Kept while another view shows: a test going on stays followed. */}
+      <div {...stylex.props(view === "runs" ? styles.runs : styles.away)}>
+        <div {...stylex.props(styles.column)}>
+          <Traces
+            activity={activity}
+            names={names}
+            onPartChange={setPart}
+            part={part}
+            runs={runs}
+            testable={testableOf(latest)}
+            workflow={workflow}
+          />
+        </div>
+      </div>
+    </>
   );
 };
 
@@ -483,7 +569,6 @@ const WorkflowResourceView = ({
   back,
   view: asked,
   section,
-  run,
   handedOver,
   ...read
 }: WorkflowPageRead & {
@@ -491,22 +576,20 @@ const WorkflowResourceView = ({
   /** The view the address asks for, if any. */
   view: WorkflowView | undefined;
   section: WorkflowSettingsSection | undefined;
-  /** On Runs, the run the address asks to open. */
-  run: string | undefined;
   /** The chat the person came from, building it in Chat. */
   handedOver: string | undefined;
 }) => {
-  const { resource, draft, runs, activity, names, admin } = read;
+  const { resource, draft, runs, activity, names } = read;
   const navigate = useNavigate();
   const builder = resource.role === "builder";
   // What its builders build: none for anyone else.
   const built = builder
     ? ({ kind: "workflow", id: resource.id } as const)
     : undefined;
-  const view = shownView(asked, draft !== undefined);
+  const view = shownView(asked, builder);
   const label = workflowLabel(resource);
-  // Grasp's chat about it, docked beside it for its builders, draws it.
-  const chat = useChatAbout(built, label);
+  // Grasp's chat about it, docked beside its Flow for its builders, draws it.
+  const chat = useChatAbout(view === "flow" ? built : undefined, label);
   const { draft: shared, reread } = useDraft(built, chat.worked);
   const { draft: latest, onDraft } = useWorkflowDraft(
     resource.id,
@@ -517,6 +600,7 @@ const WorkflowResourceView = ({
   // Whom it is shared with, for one who builds it; none for anyone else.
   const members = useMembers(built, shares);
   const { paused, pauses, onChange } = usePaused(resource, read.identity);
+  const workshop = useWorkshop(read, latest ?? readyOf(draft));
   useEffect(() => {
     if (handedOver === undefined) {
       return;
@@ -529,33 +613,17 @@ const WorkflowResourceView = ({
       replace: true,
     });
   }, [navigate, resource.id, handedOver]);
-  /**
-   * Runs, with `id` open beside the list; none closes it, in the view the
-   * page is on. Opening and closing a run both replace the address, as
-   * switching views does (and a run's link in the list): Back never
-   * reopens a run once closed.
-   */
-  const runAt = (id?: string): void => {
+  const openRun = (id: string): void => {
     void navigate({
-      to: "/workflows/$workflow",
-      params: { workflow: resource.id },
-      search: (held) => ({
-        project: held.project,
-        view: id === undefined ? asked : "runs",
-        run: id,
-      }),
-      replace: true,
+      to: "/workflows/$workflow/runs/$run",
+      params: { workflow: resource.id, run: id },
     });
   };
-  const settingsAt = (at: WorkflowSettingsSection): void => {
+  const open = (to: WorkshopView): void => {
     void navigate({
       to: "/workflows/$workflow",
       params: { workflow: resource.id },
-      search: (held) => ({
-        project: held.project,
-        view: "settings",
-        section: at,
-      }),
+      search: (held) => ({ project: held.project, ...to }),
     });
   };
   const setUp = useSetUp(resource, latest, chat);
@@ -575,15 +643,17 @@ const WorkflowResourceView = ({
     <ItemShell
       bar={
         <WorkflowBar
+          admin={read.approves}
           back={back}
+          blocked={read.blocked}
           builder={builder}
           draft={shared}
           members={members}
           onChange={onChange}
           onFiles={() => {
-            settingsAt("files");
+            open({ view: "settings", section: "files" });
           }}
-          onOpenRun={runAt}
+          onOpenRun={openRun}
           onShared={() => {
             reread();
             setShares((before) => before + 1);
@@ -593,18 +663,10 @@ const WorkflowResourceView = ({
           running={chat.busy}
           paused={paused}
           pauses={pauses}
+          view={view}
         />
       }
     >
-      {/* Its views, centred under the bar, as the bar's own second row. */}
-      <div {...stylex.props(styles.views)}>
-        <ViewSwitch
-          flow={draft !== undefined}
-          runs={runs.state === "ready" ? runs.data.length : undefined}
-          view={view}
-          workflow={resource.id}
-        />
-      </div>
       {unpublished && shared !== undefined ? (
         <UnpublishedChanges
           draft={shared}
@@ -612,42 +674,41 @@ const WorkflowResourceView = ({
           running={chat.busy}
         />
       ) : null}
-      {/* Kept while another view shows: its zoom and layout stay. */}
-      {draft === undefined ? null : (
-        <div {...stylex.props(view === "flow" ? styles.flow : styles.away)}>
-          {draft.state === "ready" ? (
-            <WorkflowFlow
-              draft={latest ?? draft.data}
-              onDefinition={() => {
-                settingsAt("definition");
-              }}
-              onDraft={onDraft}
-              onTriggers={() => {
-                settingsAt("triggers");
-              }}
-              workflow={resource.id}
-            />
-          ) : (
-            <NotLoadedState page={draft} />
-          )}
-        </div>
-      )}
-      {/* Kept while another view shows: a test going on stays followed. */}
-      <div {...stylex.props(view === "runs" ? styles.runs : styles.away)}>
-        <RunsView
-          activity={activity}
-          admin={admin}
+      {view === undefined ? (
+        <WorkflowHome
           builder={builder}
+          decisions={read.decisions}
+          name={label}
           names={names}
-          onCloseRun={() => {
-            runAt();
-          }}
-          openRun={run}
+          onOpen={open}
           runs={runs}
-          testable={testableOf(latest)}
+          status={
+            <WorkflowStatus
+              admin={read.approves}
+              blocked={read.blocked}
+              builder={builder}
+              live={live}
+              paused={paused}
+              who={members === undefined ? undefined : memberNames(members)}
+            />
+          }
+          workflow={resource.id}
+          workshop={workshop}
+        />
+      ) : null}
+      {builder ? (
+        <BuilderViews
+          activity={activity}
+          draft={draft}
+          latest={latest}
+          names={names}
+          onDraft={onDraft}
+          open={open}
+          runs={runs}
+          view={view}
           workflow={resource.id}
         />
-      </div>
+      ) : null}
       {view === "settings" ? (
         <WorkflowSettings
           read={{
@@ -663,16 +724,20 @@ const WorkflowResourceView = ({
   );
 };
 
+/** People's names by ID. */
+interface People {
+  people: ReadonlyMap<string, string>;
+}
+
+const noPeople: People = { people: new Map() };
+
 /**
- * People's names by ID, for the names on activity lines: read beside the
- * page rather than before it, with IDs standing in until they come.
+ * People's names by ID, for the names on runs and activity lines: read
+ * beside the page rather than before it, "Someone else" standing in until
+ * they come.
  */
-const usePeople = (
-  read: Promise<Loaded<ReadonlyMap<string, string>>>
-): ReadonlyMap<string, string> => {
-  const [people, setPeople] = useState<ReadonlyMap<string, string>>(
-    () => new Map()
-  );
+const usePeople = (read: Promise<Loaded<People>>): People => {
+  const [people, setPeople] = useState<People>(noPeople);
   useEffect(() => {
     let left = false;
     const settle = async (): Promise<void> => {
@@ -698,7 +763,7 @@ const WorkflowResourcePage = () => {
   } = Route.useLoaderData();
   const people = usePeople(peopleRead);
   const { identity } = Route.useRouteContext();
-  const { view, section, run, chat } = Route.useSearch();
+  const { view, section, chat } = Route.useSearch();
   const { t } = useLingui();
   const back = backCrumb({ label: t`Workflows`, to: "/workflows" }, project);
   if (resource.state !== "ready") {
@@ -722,9 +787,8 @@ const WorkflowResourcePage = () => {
       back={back}
       handedOver={chat}
       identity={identity}
-      names={{ people, me: identity.userId }}
+      names={{ people: people.people, me: identity.userId }}
       resource={resource.data}
-      run={run}
       section={section}
       view={view}
     />
@@ -736,7 +800,7 @@ const WorkflowMark = () => <Icon icon={WorkflowIcon} />;
 
 export const Route = createFileRoute("/_shell/workflows/$workflow")({
   // Grasp's chat has no place here but its builders', about the workflow,
-  // docked beside it (chat/chat-subject.ts).
+  // docked beside its Flow (chat/chat-subject.ts).
   staticData: { chat: chatPresence.hidden },
   validateSearch: workflowSearchOf,
   pendingComponent: PageLoading,
@@ -746,8 +810,11 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
     params: { workflow },
     deps: { project },
   }) => {
-    // Names only, and not waited for: IDs stand in until they come.
-    const people = loadFromCore(core, readPeople);
+    // Names only, and not waited for: "Someone else" stands in until they come.
+    const people = loadFromCore(
+      core,
+      async (session): Promise<People> => await readWorkflowNames(session)
+    );
     const resourceRead = loadFromCore(
       core,
       async (session) => await session.workflowResources.get(workflow)
@@ -775,6 +842,22 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
           )
         : undefined;
     };
+    // What starts it, for whether anything can: only where the reader
+    // manages its triggers, its builders and the organization's admins.
+    // Core lists anyone else their own alone, which says nothing of it.
+    const triggersRead = async (): Promise<
+      Loaded<WorkflowTrigger[]> | undefined
+    > => {
+      const read = await resourceRead;
+      return read.state === "ready" &&
+        (read.data.role === "builder" || isAdmin(identity.role))
+        ? await loadFromCore(
+            core,
+            async (session) =>
+              await session.workflowResources.triggers.list(workflow)
+          )
+        : undefined;
+    };
     const [
       resource,
       draft,
@@ -785,6 +868,8 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       askable,
       activity,
       inProject,
+      triggers,
+      waiting,
     ] = await Promise.all([
       resourceRead,
       draftRead(),
@@ -814,6 +899,9 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
         core,
         async (session) => await readItemProject(session, project)
       ),
+      triggersRead(),
+      // The answers its runs wait for that the reader may give.
+      loadFromCore(core, async (session) => await session.decisions.waiting()),
     ]);
     return {
       resource,
@@ -824,6 +912,15 @@ export const Route = createFileRoute("/_shell/workflows/$workflow")({
       runs,
       askable,
       activity,
+      decisions:
+        waiting.state === "ready"
+          ? waiting.data.filter(
+              ({ workflowResource }) => workflowResource.id === workflow
+            )
+          : [],
+      triggers,
+      blocked:
+        triggers?.state === "ready" ? workflowBlock(triggers.data) : null,
       people,
       project: inProject.state === "ready" ? inProject.data : undefined,
     };

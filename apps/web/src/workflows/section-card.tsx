@@ -13,7 +13,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useId } from "react";
 import type { ReactNode } from "react";
 
-import { InfoTip } from "./info-tip.tsx";
+import { WithInfo } from "../frame/info-tip.tsx";
 
 // One part of a workflow's page on a dense card, a landmark of its own:
 // its title (with more about it behind an info mark, where it says more),
@@ -21,9 +21,6 @@ import { InfoTip } from "./info-tip.tsx";
 // old library's section card was a card of these parts.
 
 const styles = stylex.create({
-  // The title and its info mark on one line, the mark outside the heading
-  // so the card's name stays its title alone.
-  titled: { display: "flex", alignItems: "center", gap: space["1"] },
   // A card that is its heading alone: the title and its actions on one row.
   row: {
     display: "flex",
@@ -34,6 +31,16 @@ const styles = stylex.create({
   },
   actions: { display: "flex", alignItems: "center", gap: space["2"] },
 });
+
+/** A title, with its info mark after it where it says more. */
+const Titled = ({
+  info,
+  children,
+}: {
+  info: string | undefined;
+  children: ReactNode;
+}): ReactNode =>
+  info === undefined ? children : <WithInfo info={info}>{children}</WithInfo>;
 
 export const SectionCard = ({
   title,
@@ -73,14 +80,11 @@ export const SectionCard = ({
         <section>
           <CardContent>
             <div {...stylex.props(styles.row)}>
-              <div {...stylex.props(styles.titled)}>
+              <Titled info={info}>
                 <Heading id={titleId} level={level} size="2xs">
                   {title}
                 </Heading>
-                {info === undefined ? null : (
-                  <InfoTip about="section">{info}</InfoTip>
-                )}
-              </div>
+              </Titled>
               {hasActions ? (
                 <div {...stylex.props(styles.actions)}>{actions}</div>
               ) : null}
@@ -100,12 +104,9 @@ export const SectionCard = ({
         {title === undefined && !hasActions ? null : (
           <CardHeader>
             {title === undefined ? null : (
-              <div {...stylex.props(styles.titled)}>
+              <Titled info={info}>
                 <CardTitle level={level}>{title}</CardTitle>
-                {info === undefined ? null : (
-                  <InfoTip about="section">{info}</InfoTip>
-                )}
-              </div>
+              </Titled>
             )}
             {description === undefined ? null : (
               <CardDescription>{description}</CardDescription>

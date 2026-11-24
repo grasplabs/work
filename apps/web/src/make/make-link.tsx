@@ -15,12 +15,15 @@ export const MakeSomethingLink = ({
   kind,
   project,
   size = "default",
+  variant = "default",
 }: {
   kind: ChatPlanKind;
   project?: string;
   size?: "default" | "sm";
+  /** Outline beside the page's other actions, where it isn't the page's one main action. */
+  variant?: "default" | "outline";
 }) => (
-  <Button asChild size={size}>
+  <Button asChild size={size} variant={variant}>
     <Link
       search={project === undefined ? { make: kind } : { make: kind, project }}
       to="/"
