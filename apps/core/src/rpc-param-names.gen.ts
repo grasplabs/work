@@ -120,6 +120,7 @@ export const rpcParamNames: ParamNames = {
     "redactGapAnswer": ["gapId"],
     "saveTeamGroups": ["groups"],
     "thinking": [],
+    "tools": [],
     "work": ["id"],
   },
   "BrainSourcesRpc": {

@@ -3,8 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { isFileGone, isPageFault } from "./error-reports.ts";
 
 // A page's script file that a new release took away, as each browser says
-// it, loads Grasp anew (route-error.tsx); anything else is not that. The
-// e2e test (e2e/page-recovery.e2e.ts) runs it in Chromium.
+// it, loads Grasp anew (route-error.tsx); anything else is not that.
 
 const gone = [
   // Chromium

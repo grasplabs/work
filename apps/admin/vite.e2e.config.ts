@@ -7,7 +7,7 @@ import { adminPlugins, localEnv } from "./vite.config.ts";
 const clientDatabases = 24;
 
 /**
- * The admin the browser journeys run (e2e/admin-rollout.e2e.ts): the
+ * The admin the browser journeys run (e2e/admin/): the
  * dev server's, with test/e2e-worker.ts as its Worker's entry, which puts
  * the admin's tests' fakes around src/server.ts. Its state is kept where
  * the journeys' Playwright config says (`ADMIN_E2E_STATE`), apart from

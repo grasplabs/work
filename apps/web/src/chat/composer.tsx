@@ -70,8 +70,9 @@ import { isEffort } from "./model-choice.ts";
 // Model selector; by Send, the microphone (dictation.ts); then Send, which
 // is Stop while Grasp answers (its status from the chat: chat-states.ts),
 // and what the page adds. In one row (the chat's idle bar) the text stands
-// between the add menu and the rest, the model only once something is
-// typed, so the placeholder keeps its room, as on #2503. `@` mentions the
+// between the add menu and the rest, the model at its end before the
+// microphone, which gives way to the placeholder at rest in a narrow row,
+// as on #2503. `@` mentions the
 // agents, Apps, workflows and people (mentions.tsx). The text is the
 // page's (use-ask.ts): the box follows it, and tells it each change. Files
 // are the page's too: whatever is picked, pasted or dropped is handed to
@@ -91,6 +92,12 @@ const styles = stylex.create({
     marginInlineStart: "auto",
     gridArea: "end",
     justifySelf: "end",
+  },
+  // In one row at rest, what answers gives way to the placeholder where
+  // the row is narrow (a phone's), as #2503's controls fold away.
+  answerer: { display: "contents" },
+  atRest: {
+    display: { default: "contents", "@container (width < 24rem)": "none" },
   },
   // The files take the header's whole line, their cards 16px from the
   // card's top and side and the text 12px under them, as #2503's and as
@@ -293,8 +300,8 @@ const AddMenu = () => {
 /**
  * The box's tools: at the start the add menu and what answers; at the end
  * the microphone, Send (or Stop) and what the page adds. In one row the
- * text stands between the two, and what answers comes only once something
- * is typed, so at rest the placeholder keeps the room.
+ * text stands between the two, and what answers at the end, before the
+ * microphone; at rest in a narrow row it gives way to the placeholder.
  */
 const BoxTools = ({
   attaches,
@@ -319,7 +326,11 @@ const BoxTools = ({
       {compact ? null : answerer}
     </PromptInputTools>
     <PromptInputTools style={styles.end}>
-      {compact && typed ? answerer : null}
+      {compact ? (
+        <span {...stylex.props(styles.answerer, !typed && styles.atRest)}>
+          {answerer}
+        </span>
+      ) : null}
       {speech === undefined ? null : <PromptInputSpeechButton {...speech} />}
       <PromptInputSubmit {...(stop === undefined ? {} : { onStop: stop })} />
       {children}
@@ -797,9 +808,9 @@ export const Composer = ({
           attaches={onAttach !== undefined}
           compact={compact}
           speech={dictation.speech}
+          typed={text.trim() !== ""}
           // Stop lets a held question go; else it stops the answer, where one can be.
           stop={held ? letGo : onStop}
-          typed={text.trim() !== ""}
         >
           {children}
         </BoxTools>

@@ -28,8 +28,7 @@ const notesSpec = {
 } satisfies AppSpec;
 
 const serverCode = `import { AppError, paginationOptionsValidator, paginationResultValidator, v } from "@grasp-os/sdk";
-import { action, doc, internalMutation, mutation, query } from "@server/_generated/server";
-import { internal } from "@server/_generated/internal";
+import { doc, mutation, query } from "@server/_generated/server";
 import { noteFields } from "../values.ts";
 
 export const list = query({
@@ -66,26 +65,6 @@ export const update = mutation({
       throw new AppError("note.not_found", "The note is unavailable.");
     }
     return updated;
-  },
-});
-
-/** Saves a note for an action: the App's own code only. */
-export const insert = internalMutation({
-  args: { title: noteFields.title },
-  returns: v.id("notes"),
-  handler: async (ctx, args) => await ctx.db.insert("notes", args),
-});
-
-/**
- * Imports a note and then fails: the note it saved stays saved, as an
- * action's mutations commit each on its own.
- */
-export const importHalfway = action({
-  args: { title: noteFields.title },
-  returns: v.null(),
-  handler: async (ctx, args) => {
-    await ctx.runMutation(internal.notes.insert, { title: args.title });
-    throw new AppError("import.stopped", "The import stopped halfway.");
   },
 });
 
@@ -314,7 +293,6 @@ import { useState } from "react";
 import { api } from "@server/_generated/api";
 import { Attachments } from "../components/attachments.tsx";
 import { CreateNote } from "../components/create-note.tsx";
-import { ImportNote } from "../components/import-note.tsx";
 import { NoteEditor } from "../components/note-editor.tsx";
 import type { Note } from "../components/note-editor.tsx";
 
@@ -367,7 +345,6 @@ const Notes = () => {
     <main className="flex flex-col gap-6 p-6">
       <h1 className="text-2xl font-semibold">Notes</h1>
       <CreateNote />
-      <ImportNote />
       {items.length === 0 ? (
         <p>No notes yet.</p>
       ) : (
@@ -401,34 +378,6 @@ const Notes = () => {
 export const Route = createFileRoute("/")({ component: Notes });
 `;
 
-const importNote = `import { GraspError, useAction } from "@grasp-os/sdk/react";
-import { Button } from "@grasp-os/app-kit/components/button";
-import { useState } from "react";
-import { api } from "@server/_generated/api";
-
-/** Imports a note through an action that fails after saving it. */
-export const ImportNote = () => {
-  const importHalfway = useAction(api.notes.importHalfway);
-  const [outcome, setOutcome] = useState("");
-  const run = async () => {
-    try {
-      await importHalfway({ title: "Imported" });
-      setOutcome("Imported.");
-    } catch (error) {
-      setOutcome(error instanceof GraspError ? error.message : "It failed.");
-    }
-  };
-  return (
-    <div className="flex items-center gap-3">
-      <Button onClick={() => void run()} variant="outline">
-        Import a note
-      </Button>
-      <output aria-label="Import">{outcome}</output>
-    </div>
-  );
-};
-`;
-
 /** The Notes App's files. */
 export const notesAppFiles = (): TestApp =>
   testApp(notesSpec, {
@@ -441,7 +390,6 @@ export const noteFields = {
 };
 `,
     "server/notes.ts": serverCode,
-    "src/components/import-note.tsx": importNote,
     "src/components/create-note.tsx": createNote,
     "src/components/note-editor.tsx": noteEditor,
     "src/components/attachments.tsx": attachmentsList,
@@ -765,42 +713,12 @@ const Takeoff = () => {
 };
 export const Route = createFileRoute("/takeoff")({ component: Takeoff });
 `,
-    // A page that moves on a press and again on its release, and on a key's
-    // first press and again on each of its repeats: one act each, the
-    // press's, whatever the rest asks.
-    "src/routes/keys.tsx": `import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { Button } from "@grasp-os/app-kit/components/button";
-
-const Keys = () => {
-  const navigate = useNavigate();
-  return (
-    <main className="flex flex-col gap-3 p-6">
-      <h1>Keys</h1>
-      <Button
-        onPointerDown={() => void navigate({ to: "/keys", hash: "down" })}
-        onPointerUp={() => void navigate({ to: "/keys", hash: "up" })}
-      >
-        Press and lift
-      </Button>
-      <input
-        aria-label="Keys"
-        onKeyDown={(event) =>
-          void navigate({ to: "/keys", hash: event.repeat ? "held" : "pressed" })
-        }
-      />
-    </main>
-  );
-};
-export const Route = createFileRoute("/keys")({ component: Keys });
-`,
     "src/routes/launch.tsx": `import { createFileRoute, Link } from "@tanstack/react-router";
 
 const Launch = () => {
   return (
     <main className="flex flex-col gap-3 p-6">
       <h1>Launch</h1>
-      <Link params={{ n: "1" }} to="/hops/$n">Start hopping</Link>
-      <Link params={{ n: "1" }} to="/focus-hops/$n">Start focused hopping</Link>
       <Link params={{ n: "1" }} to="/forges/$n">Start forging</Link>
     </main>
   );
@@ -821,31 +739,6 @@ const Hop = () => {
   return <main className="p-6"><h1>Hop {n}</h1></main>;
 };
 export const Route = createFileRoute("/hops/$n")({ component: Hop });
-`,
-    // A hop that focuses its own field as it mounts, while the click that
-    // opened the first is still active, so the page sees the person acting
-    // in its frame, then navigates.
-    "src/routes/focus-hops.$n.tsx": `import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef } from "react";
-
-const FocusHop = () => {
-  const { n } = Route.useParams();
-  const navigate = useNavigate();
-  const field = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    field.current?.focus();
-    if (Number(n) < ${hopLimit}) {
-      void navigate({ to: "/focus-hops/$n", params: { n: String(Number(n) + 1) } });
-    }
-  }, [navigate, n]);
-  return (
-    <main className="p-6">
-      <h1>Focus hop {n}</h1>
-      <input aria-label="Where" ref={field} />
-    </main>
-  );
-};
-export const Route = createFileRoute("/focus-hops/$n")({ component: FocusHop });
 `,
     // A hop that tries every way its code has to pass for the person
     // acting: it patches the prototypes the frame's document reports acts

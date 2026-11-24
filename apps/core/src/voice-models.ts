@@ -3,26 +3,27 @@ import type { SpokenWord } from "@grasp-os/shared/voice";
 // The voice models the model gateway offers (models.ts) for Grasp's own
 // speech and listening (@grasp-os/shared/platform-ai), beside the text
 // models of pi's catalog: our own small catalog, as pi's has no voice
-// models. Each speech model is KugelAudio's, priced per second of audio it
-// says, which is how KugelAudio bills speech. Each transcription model is
-// OpenAI's, priced per second it hears. Each at a price never below what
-// the provider bills for it. Grasp pays for these on its own keys: what
-// each cost is recorded for Grasp's spend overview (model-usage.ts).
+// models. Each speech model is Mistral's, priced per character it is
+// asked to say, which is how Mistral bills speech. Each transcription
+// model is OpenAI's, priced per second it hears, at a price never below
+// what the provider bills for it. Grasp pays for these on its own keys:
+// what each cost is recorded for Grasp's spend overview (model-usage.ts).
 
 /**
- * What a minute of speech is charged as, in US dollars. KugelAudio bills
- * in euros, per minute of audio: €0.0525 for Kugel 3.5 (kugelaudio.com/
- * en/pricing, read on 2026-11-19). Charged here at $0.07, above it
- * at any exchange rate below $1.33 to the euro, as the spend overview
- * counts in dollars.
+ * Mistral's API prices for text to speech, in US dollars per 1,000
+ * characters.
+ *
+ * Source: Mistral's model page for Voxtral TTS 3
+ * (https://docs.mistral.ai/models/voxtral-mini-tts-3-0), read on
+ * 2026-11-24: $13 per million characters.
  */
-const dollarsPerMinute = {
-  /** Kugel 3.5: KugelAudio's newest, in which every line is said. */
-  "kugel-3.5": 0.07,
+const dollarsPer1000Chars = {
+  /** Voxtral TTS 3, in which every line is said. */
+  "voxtral-mini-tts-3-0": 0.013,
 } as const;
 
-/** The providers that say a line: KugelAudio (platform-ai.ts). */
-const speechProviders = ["kugelaudio"] as const;
+/** The providers that say a line: Mistral (platform-ai.ts). */
+const speechProviders = ["mistral"] as const;
 
 /** The providers that write down speech: OpenAI (platform-ai.ts). */
 const transcriptionProviders = ["openai"] as const;
@@ -30,18 +31,18 @@ const transcriptionProviders = ["openai"] as const;
 /** A speech model the gateway offers. */
 export interface VoiceRef {
   provider: (typeof speechProviders)[number];
-  id: keyof typeof dollarsPerMinute;
+  id: keyof typeof dollarsPer1000Chars;
 }
 
 const isVoiceModel = (id: string): id is VoiceRef["id"] =>
-  Object.hasOwn(dollarsPerMinute, id);
+  Object.hasOwn(dollarsPer1000Chars, id);
 
 const isSpeechProvider = (provider: string): provider is VoiceRef["provider"] =>
   speechProviders.some((one) => one === provider);
 
 /**
  * A speech model as the gateway names it, `<provider>/<model>`, such as
- * `kugelaudio/kugel-3.5`; `undefined` for any other.
+ * `mistral/voxtral-mini-tts-3-0`; `undefined` for any other.
  */
 export const parseVoiceRef = (ref: string): VoiceRef | undefined => {
   const [provider, id, ...rest] = ref.split("/");
@@ -54,9 +55,9 @@ export const parseVoiceRef = (ref: string): VoiceRef | undefined => {
     : undefined;
 };
 
-/** What `seconds` seconds of speech cost on `ref`, in US dollars. */
-export const speechCostOf = ({ id }: VoiceRef, seconds: number): number =>
-  (seconds * dollarsPerMinute[id]) / 60;
+/** What saying `characters` characters costs on `ref`, in US dollars: per million, so whole micros stay whole. */
+export const speechCostOf = ({ id }: VoiceRef, characters: number): number =>
+  (characters * dollarsPer1000Chars[id] * 1000) / 1_000_000;
 
 /**
  * OpenAI's prices for speech to text, in US dollars per hour of audio.
@@ -109,65 +110,59 @@ export const hearingCostOf = ({ id }: HearingRef, seconds: number): number =>
   (seconds * dollarsPerHour[id]) / 3600;
 
 /**
- * A word as KugelAudio aligned it: when it is said, in ms from the start
- * of the audio, and the part of the line as sent that it says, from
- * `from` up to `to`, counted in code points. A number written as digits
- * is said as several words, each with the span of the digits.
+ * Characters a line is charged as: its UTF-16 length, never fewer than
+ * the characters (code points) Mistral counts, so what is recorded is
+ * never below what the line is billed.
  */
-export interface AlignedWord {
-  startMs: number;
-  endMs: number;
-  from: number;
-  to: number;
-}
+export const charactersOf = (text: string): number => text.length;
 
-const space = /^\s$/u;
+/** A direction to the voice inside a line, which isn't said: `[emotion=warm]`. */
+const direction = /\[[^\]]*\]/gu;
+
+const spaces = /\s+/u;
+
+/** After these a voice waits a moment: counted as letters said. */
+const pauses: Readonly<Record<string, number>> = {
+  ",": 2,
+  ";": 3,
+  ":": 3,
+  ".": 5,
+  "!": 5,
+  "?": 5,
+  "\u2026": 5,
+};
+
+/** The wait a word's last mark asks for, in letters. */
+const pauseAfter = (word: string): number => pauses[word.at(-1) ?? ""] ?? 0;
 
 /**
- * The words of `line` as written, each a run of characters between
- * spaces, with when the first word said for it starts and the last ends.
- * A word nothing is said for (a lone symbol) passes at once, where the
- * word before it ended. `undefined` when no word was aligned at all.
+ * The words of a line, each a run of characters between spaces, with when
+ * it is said, in whole ms. Mistral's speech tells no word's time, so each
+ * is worked out: the audio's length shared over the words by how many
+ * letters each has, with a letter for the space after it and the wait its
+ * last mark asks for; the last word ends with the audio. A direction in
+ * brackets isn't said and is no word.
  */
-export const wordsOf = (
-  line: string,
-  aligned: readonly AlignedWord[]
-): SpokenWord[] | undefined => {
-  if (aligned.length === 0) {
-    return undefined;
-  }
+export const wordsOf = (line: string, seconds: number): SpokenWord[] => {
+  const written = line
+    .replaceAll(direction, " ")
+    .split(spaces)
+    .filter((word) => word !== "");
+  const letters = written.map((word) => word.length);
+  const after = written.map((word, at) =>
+    at === written.length - 1 ? 0 : 1 + pauseAfter(word)
+  );
+  const whole = [...letters, ...after].reduce((sum, part) => sum + part, 0);
   const words: SpokenWord[] = [];
-  let at = 0;
-  let word: { text: string; from: number } | undefined = undefined;
-  const close = (): void => {
-    if (word === undefined) {
-      return;
-    }
-    const { text, from } = word;
-    word = undefined;
-    const said = aligned.filter((one) => one.from < at && one.to > from);
-    const before = words.at(-1)?.endMs ?? 0;
-    words.push(
-      said.length === 0
-        ? { text, startMs: before, endMs: before }
-        : {
-            text,
-            startMs: Math.min(...said.map(({ startMs }) => startMs)),
-            endMs: Math.max(...said.map(({ endMs }) => endMs)),
-          }
-    );
-  };
-  // By code point, as KugelAudio counts where a word is in the line.
-  for (const character of line) {
-    if (space.test(character)) {
-      close();
-    } else if (word === undefined) {
-      word = { text: character, from: at };
-    } else {
-      word.text += character;
-    }
-    at += 1;
+  let before = 0;
+  for (const [at, text] of written.entries()) {
+    const said = letters[at] ?? 0;
+    words.push({
+      text,
+      startMs: Math.round((before / whole) * seconds * 1000),
+      endMs: Math.round(((before + said) / whole) * seconds * 1000),
+    });
+    before += said + (after[at] ?? 0);
   }
-  close();
   return words;
 };

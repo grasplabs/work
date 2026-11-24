@@ -78,15 +78,8 @@ const readName = async (
  * The organization's name, read once with `organization`, with any rename
  * since (`organizationRenamed`): "Grasp" until then, or when it has none.
  */
-export const OrganizationNameOf = ({
-  organization,
-}: {
-  organization: () => Promise<Organization>;
-}) => {
-  // A name mounted anew (another session, say) shows no name set before
-  // it mounted, not even for its first paint: only one core says, or a
-  // rename, since.
-  // oxlint-disable-next-line react/hook-use-state -- fixed at mount, never set
+const useNameOf = (organization: () => Promise<Organization>): string => {
+  // oxlint-disable-next-line react/hook-use-state -- the version as it mounted, never set
   const [mountedAt] = useState(() => shownVersion);
   const version = useSyncExternalStore(subscribe, () => shownVersion);
   const name = version > mountedAt ? shownName : undefined;
@@ -97,17 +90,28 @@ export const OrganizationNameOf = ({
       read.current = false;
     };
   }, [organization]);
-  return <span data-slot="organization-name">{name ?? "Grasp"}</span>;
+  return name ?? "Grasp";
 };
+
+/** The organization's name, as `useNameOf` reads it, in words of its own. */
+export const OrganizationNameOf = ({
+  organization,
+}: {
+  organization: () => Promise<Organization>;
+}) => <span data-slot="organization-name">{useNameOf(organization)}</span>;
+
+/** How the organization is read from core. */
+const organizationOf = (core: CoreConnection) => async () =>
+  await readWithin(core, async (session) => await session.organization.get());
 
 /** The organization's name, read from core once. */
 export const OrganizationName = ({ core }: { core: CoreConnection }) => (
-  <OrganizationNameOf
-    organization={async () =>
-      await readWithin(
-        core,
-        async (session) => await session.organization.get()
-      )
-    }
-  />
+  <OrganizationNameOf organization={organizationOf(core)} />
 );
+
+/** The organization's name as words, read from core once: "Grasp" until then. */
+export const useOrganizationName = (core: CoreConnection): string => {
+  // oxlint-disable-next-line react/hook-use-state -- one read for the hook's life, never set
+  const [read] = useState(() => organizationOf(core));
+  return useNameOf(read);
+};

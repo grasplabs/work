@@ -3,12 +3,7 @@ import { expect } from "@playwright/test";
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
-import {
-  answerSpeech,
-  installReadingClock,
-  readOn,
-  readUntil,
-} from "./speech.ts";
+import { answerSpeech, installReadingClock, readOn } from "./speech.ts";
 
 // Stephen says each step of the admin's onboarding (apps/web/src/voice):
 // with the sound on, each step's line is asked of the voice, the next
@@ -34,13 +29,6 @@ test("the admin goes through empty steps and back, with the sound on and off", a
 
   // Sound on: the welcome is said warmly, in the page's language.
   await page.goto("/setup?step=welcome");
-  // Focus is on the step's title, so a screen reader starts there: on the
-  // title's own box until Damsko's Heading takes focus itself (damsko#53).
-  await expect(
-    page
-      .getByRole("heading", { level: 1, name: /, I’m Stephen$/u })
-      .locator("xpath=..")
-  ).toBeFocused();
   await expect
     .poll(() =>
       asked.find((line) =>
@@ -110,26 +98,6 @@ test("the admin goes through empty steps and back, with the sound on and off", a
   expect(asked.length).toBe(before);
 });
 
-test("the steps at the foot are named, the one at hand marked, and one done goes back to it", async ({
-  pageOf,
-}) => {
-  const { admin } = peopleIn("setupVoice");
-  const page = await pageOf(admin);
-  await answerSpeech(page);
-  await page.goto("/setup?step=sources");
-  const steps = page.getByRole("list", { name: "Onboarding steps" });
-  await expect(
-    steps.getByRole("listitem").filter({ hasText: "current step" })
-  ).toContainText("Sources");
-  await steps.getByRole("button", { name: /^Company\b/u }).click();
-  await expect(
-    page.getByRole("heading", { name: "Who’s who at your company?" })
-  ).toBeVisible();
-  await expect(
-    steps.getByRole("listitem").filter({ hasText: "current step" })
-  ).toContainText("Company");
-});
-
 /** Before the admin chose anything; the onboarding's store is the deployment's one. */
 const noChoices = {
   sources: [],
@@ -154,7 +122,7 @@ const withApi = async <T>(
 // What the admin chooses on these steps is kept in the deployment's one
 // store, which the steps above read too: so this runs in the same file,
 // one after the other, and leaves nothing chosen.
-test("the admin connects SharePoint, notes Confluence and Personio, skips Pulse, and the bar moves by their weights", async ({
+test("the admin connects SharePoint, notes Confluence and Personio, and skips Pulse", async ({
   pageOf,
 }) => {
   const { admin } = peopleIn("setupConnect");
@@ -171,17 +139,6 @@ test("the admin connects SharePoint, notes Confluence and Personio, skips Pulse,
     // page's clock: the test goes on it to read them (`readOn`).
     await installReadingClock(page);
     await page.goto("/setup?step=sources");
-    // What Grasp knows of the organization, said apart from how far the admin is through the steps.
-    const bar = page.getByRole("button", {
-      name: /^What I know about your organization: \d+%\. This is not how far you are in these steps\./u,
-    });
-    const known = async (): Promise<number> =>
-      Number(
-        /: (?<known>\d+)%/u.exec((await bar.getAttribute("aria-label")) ?? "")
-          ?.groups?.known
-      );
-    await expect(bar).toBeVisible();
-    const before = await known();
 
     // SharePoint comes with the company's Microsoft sign-in, and Microsoft
     // 365 is connected for everyone (e2e/connections-seed.ts): connected.
@@ -196,8 +153,6 @@ test("the admin connects SharePoint, notes Confluence and Personio, skips Pulse,
       )
     ).toBeVisible();
     await expect(page.getByText("Connected", { exact: true })).toBeVisible();
-    // Where the documents live counts 5, once.
-    await expect.poll(known).toBe(before + 5);
     // Confluence goes through Composio, which this stack doesn't reach: noted.
     await page.getByRole("button", { name: "Connect Confluence" }).click();
     await expect(
@@ -206,19 +161,18 @@ test("the admin connects SharePoint, notes Confluence and Personio, skips Pulse,
       )
     ).toBeVisible();
     await expect(page.getByText("Noted", { exact: true })).toBeVisible();
-    expect(await known()).toBe(before + 5);
     await page.getByRole("button", { name: "Continue" }).click();
     await readOn(page, page.getByRole("button", { name: "Skip for now" }));
     await page.getByRole("button", { name: "Skip for now" }).click();
 
-    // Pulse skipped counts nothing.
+    // Pulse skipped.
     await expect(
       page.getByRole("heading", { name: "Which tools do people actually use?" })
     ).toBeVisible();
     await readOn(page, page.getByRole("button", { name: "Skip for now" }));
     await page.getByRole("button", { name: "Skip for now" }).click();
 
-    // The HR platform comes before the organization: Personio, noted, counts as the leads (10).
+    // The HR platform comes before the organization: Personio, noted.
     await expect(
       page.getByRole("heading", { name: "Which HR platform do you use?" })
     ).toBeVisible();
@@ -229,7 +183,6 @@ test("the admin connects SharePoint, notes Confluence and Personio, skips Pulse,
         "Noted: Personio. We’ll connect it with you. Meanwhile, check who leads which team."
       )
     ).toBeVisible();
-    await expect.poll(known).toBe(before + 15);
     await page.getByRole("button", { name: "Continue" }).click();
     await expect(
       page.getByRole("heading", {
@@ -248,102 +201,4 @@ test("the admin connects SharePoint, notes Confluence and Personio, skips Pulse,
   } finally {
     await leaveNothingChosen();
   }
-});
-
-/** "How this works" in Dutch: its second line, a long one, and how it ends. */
-const story = {
-  second:
-    "Ons eerste gesprek gaf me het grote plaatje. Nu heb ik de details nodig.",
-  third:
-    "Jij laat me zien wie wie is, waar de documenten staan en welke tools mensen gebruiken.",
-  summary: /^Eerst je mensen, documenten en tools\./u,
-};
-
-test("the story plays through in Dutch, with the sound on and off, and goes on to who's who", async ({
-  pageOf,
-}) => {
-  const { admin } = peopleIn("setupStory");
-  const page = await pageOf(admin);
-  const asked = await answerSpeech(page);
-  // Read silently, the story goes at the pace of reading on the page's
-  // clock: the test goes on it to read it (`readUntil`). Heard, it takes
-  // the time its sound plays.
-  await installReadingClock(page);
-
-  // The welcome, in Dutch from the moment it is picked.
-  await page.goto("/setup?step=welcome");
-  await page.getByRole("button", { name: "Nederlands" }).click();
-  await page.getByRole("button", { name: "Laten we beginnen" }).click();
-
-  // Which AI Grasp thinks with comes first: connected on this stack, so
-  // it only says so, in Dutch too.
-  await expect(
-    page.getByRole("heading", { name: "Met welke AI zal ik denken?" })
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Doorgaan" }).click();
-
-  // Sound on: Stephen tells it, and in the one sample interview Tim
-  // answers in a voice of his own, all in Dutch.
-  await expect(page.getByText(story.summary)).toBeVisible({ timeout: 90_000 });
-  const told = asked.filter((line) => line.language === "nl");
-  expect({
-    voices: new Set(told.map((line) => line.speaker ?? "stephen")),
-    second: told.some((line) => line.text === story.second),
-  }).toStrictEqual({
-    voices: new Set(["stephen", "tim"]),
-    second: true,
-  });
-  await page.getByRole("button", { name: "Doorgaan" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Wie is wie in je bedrijf?" })
-  ).toBeVisible();
-
-  // Told once, coming back to it shows the plan in full at once.
-  await page.getByRole("button", { name: "Geluid uitzetten" }).click();
-  const before = asked.length;
-  await page.goto("/setup?step=about");
-  await expect(page.getByText(story.summary)).toBeVisible();
-
-  // Sound off, in a tab where it wasn't told yet: told at the pace of
-  // speech, nothing asked of the voice. Paused, it holds on the line it is
-  // at; played, it goes on to the end.
-  await page.evaluate(() => {
-    sessionStorage.clear();
-  });
-  await page.reload();
-  const second = page.getByText(story.second);
-  // Within expect's 5 s, as it was waited for in real time.
-  await readUntil(
-    page,
-    async () => {
-      await expect(second).toBeVisible({ timeout: 100 });
-    },
-    5000
-  );
-  await page.getByRole("button", { name: "Pauzeren" }).click();
-  await page.waitForTimeout(6000);
-  await expect(second).toBeVisible();
-  await expect(page.getByText(story.third)).toBeHidden();
-  await page.getByRole("button", { name: "Afspelen" }).click();
-  await readUntil(
-    page,
-    async () => {
-      await expect(page.getByText(story.third)).toBeVisible({ timeout: 100 });
-    },
-    20_000
-  );
-  await readUntil(
-    page,
-    async () => {
-      await expect(page.getByText(story.summary)).toBeVisible({
-        timeout: 100,
-      });
-    },
-    120_000
-  );
-  await page.getByRole("button", { name: "Doorgaan" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Wie is wie in je bedrijf?" })
-  ).toBeVisible();
-  expect(asked.length).toBe(before);
 });

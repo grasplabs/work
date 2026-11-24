@@ -10,28 +10,29 @@ import type { Speaker } from "@grasp-os/shared/voice";
 // feature unavailable, never served by another.
 
 /**
- * Each speaker's voice, by its KugelAudio ID, from the voices of its
- * public catalog its documentation plays (docs.kugelaudio.com, "Using
- * Voices", read on 2026-11-19). Stephen's is "James Whitfield" and
- * Claire's "Samantha Ferris", both English voices; the one model says
- * every language in any voice. The sample speakers are catalog voices
- * too, each clearly not Stephen: Lisa "Julia Ziegler", Mark "Noah
- * Tremblay", Tim "Daniel Krüger".
+ * Each speaker's voice, by its Mistral ID: Voxtral 3's own preset voices,
+ * each of which says any language the model does. Stephen's is "Rob",
+ * Claire's "Sheila"; the sample speakers are three more, each clearly not
+ * Stephen.
  */
 const voices = {
-  stephen: "1656",
-  claire: "1071",
-  lisa: "2222",
-  mark: "1073",
-  tim: "2220",
+  stephen: "voice_485",
+  claire: "voice_478",
+  lisa: "voice_590",
+  mark: "voice_1788",
+  tim: "voice_591",
 } as const satisfies Record<Speaker, string>;
 
 /**
  * Each feature's provider and model: OpenAI's GPT-4o Transcribe writes
- * down speech, live and recorded, and KugelAudio's Kugel 3.5 says the
+ * down speech, live and recorded, and Mistral's Voxtral TTS 3 says the
  * lines.
  */
 export const platformAi = {
   transcription: { provider: "openai", model: "gpt-4o-transcribe" },
-  speech: { provider: "kugelaudio", model: "kugel-3.5", voices },
+  speech: {
+    provider: "mistral",
+    model: "voxtral-mini-tts-3-0",
+    voices,
+  },
 } as const;

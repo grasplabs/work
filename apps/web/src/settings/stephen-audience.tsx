@@ -3,6 +3,7 @@ import {
   NativeSelect,
   NativeSelectOption,
 } from "@grasp-os/app-kit/components/native-select";
+import type { AgentAudience } from "@grasp-os/shared/agents";
 import type { ToolClassAudience } from "@grasp-os/shared/connect";
 import type {
   AppClassAudience,
@@ -18,8 +19,11 @@ import { useId, useState } from "react";
 // stephen-card.tsx): as the layer above, everyone, some teams, or nobody.
 // A layer only ever narrows the one above it; core holds it to that.
 
-/** Who a control may choose: as the layer above, everyone, some teams, or nobody. */
-export type Who = "same" | "everyone" | "teams" | "nobody";
+/**
+ * Who a control may choose: as the layer above, everyone, some teams, or
+ * nobody; for one of the company's agents, its maker alone too.
+ */
+export type Who = "same" | "everyone" | "teams" | "nobody" | "maker";
 
 /** An audience of any layer, as a control holds it. */
 export interface Chosen {
@@ -28,7 +32,7 @@ export interface Chosen {
 }
 
 export const chosenOf = (
-  audience: ToolClassAudience | PlaceAudience | AppClassAudience
+  audience: AgentAudience | PlaceAudience | AppClassAudience
 ): Chosen => {
   if (audience.who === "teams") {
     return { who: "teams", teams: audience.teams };
@@ -43,6 +47,7 @@ const whoLabels = {
   everyone: msg`Everyone`,
   teams: msg`Chosen teams`,
   nobody: msg`Nobody yet`,
+  maker: msg`Only whoever made it`,
 } as const satisfies Record<Exclude<Who, "same">, MessageDescriptor>;
 
 /**
@@ -136,6 +141,10 @@ export const audienceOf = ({ who, teams }: Chosen): ToolClassAudience => {
   }
   return { who: who === "everyone" ? "everyone" : "nobody" };
 };
+
+/** An agent's audience as core takes it. */
+export const agentAudienceOf = (chosen: Chosen): AgentAudience =>
+  chosen.who === "maker" ? { who: "maker" } : audienceOf(chosen);
 
 /** A place's audience as core takes it. */
 export const placeAudienceOf = (chosen: Chosen): PlaceAudience =>

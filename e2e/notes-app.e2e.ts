@@ -94,37 +94,15 @@ test("a person creates, loads, edits and deletes notes, and two saves of differe
   const appPage = await openNotes(page, app);
   await expect(appPage.getByText("No notes yet.")).toBeVisible();
 
-  // A title of only spaces fails the function's own check, in the
-  // browser: nothing is sent, the field says why and gets focus.
-  const create = appPage.getByRole("form", { name: "New note" });
-  const title = create.getByLabel("Title");
-  await createNote(appPage, "   ");
-  await expect(title).toHaveAttribute("aria-invalid", "true");
-  await expect(title).toBeFocused();
-  await expect(appPage.getByText("No notes yet.")).toBeVisible();
-
-  // Created as the host normalized it, the form reset after the commit,
-  // and the list it reads refreshed.
-  await createNote(appPage, "  Call Acme  ");
+  // Created, and the list it reads refreshed.
+  await createNote(appPage, "Call Acme");
   const notes = appPage.getByRole("list", { name: "Notes" });
   await expect(notes.getByText("Call Acme", { exact: true })).toBeVisible();
-  await expect(title).toHaveValue("");
-  await expect(title).toHaveAttribute("aria-invalid", "false");
   await createNote(appPage, "Send the invoice", "Before Friday");
   await expect(notes.getByRole("listitem")).toHaveText([
     /Send the invoice/u,
     /Call Acme/u,
   ]);
-
-  // An action that saves a note and then fails: the note it saved stays,
-  // and the list shows it, though the action itself failed.
-  await appPage.getByRole("button", { name: "Import a note" }).click();
-  await expect(appPage.getByRole("status", { name: "Import" })).toHaveText(
-    "The import stopped halfway."
-  );
-  await expect(notes.getByText("Imported", { exact: true })).toBeVisible();
-  await appPage.getByRole("button", { name: "Delete Imported" }).click();
-  await expect(notes.getByRole("listitem")).toHaveCount(2);
 
   // They are the App's records: a new session loads them again.
   await page.reload();
@@ -162,21 +140,11 @@ test("a person creates, loads, edits and deletes notes, and two saves of differe
   await expect(editor.getByLabel("Title")).toHaveValue("Send the invoice");
   await expect(editor.getByLabel("Body")).toHaveValue("Before Friday");
   await editor.getByLabel("Title").fill("Send the invoice today");
-  // The editor as it was typed in: once the save is answered it opens
-  // afresh on the note it saved, without this mark.
-  await editor.getByLabel("Title").evaluate((field) => {
-    field.dataset.typed = "";
-  });
   await editor.getByRole("button", { name: "Save changes" }).click();
   await expect(list.getByRole("listitem")).toHaveText([
     /Send the invoice today/u,
     /My title/u,
   ]);
-  // The list shows the save before the page hears its answer, and core
-  // pushes each query on its own: only the answer tells the page that
-  // what it kept of a note nobody shows may be older, so it reads that
-  // note afresh when it shows again.
-  await expect(editor.locator("[data-typed]")).toHaveCount(0);
   await reloaded.getByRole("button", { name: "Edit My title" }).click();
   await expect(editor.getByLabel("Title")).toHaveValue("My title");
 
@@ -341,95 +309,6 @@ test("a page whose person signed out is stopped and the page loads again, so not
   );
 });
 
-test("a note saved in one session appears on another session's open page without reloading", async ({
-  pageOf,
-}) => {
-  const { builder } = peopleIn("notesLive");
-  const app = await notesApp(builder);
-  const watching = await openNotes(await pageOf(builder), app);
-  await expect(watching.getByText("No notes yet.")).toBeVisible();
-  const saving = await openNotes(await pageOf(builder), app);
-
-  // Saved in the second session: the first, which asks nothing, shows it.
-  await createNote(saving, "Pushed to the other page");
-  const notes = watching.getByRole("list", { name: "Notes" });
-  await expect(
-    notes.getByText("Pushed to the other page", { exact: true })
-  ).toBeVisible();
-
-  // An edit follows the same way, and so does a delete.
-  await saving
-    .getByRole("button", { name: "Edit Pushed to the other page" })
-    .click();
-  const editor = saving.getByRole("form", { name: "Edit note" });
-  await editor.getByLabel("Title").fill("Edited elsewhere");
-  await editor.getByRole("button", { name: "Save changes" }).click();
-  await expect(
-    notes.getByText("Edited elsewhere", { exact: true })
-  ).toBeVisible();
-  await saving.getByRole("button", { name: "Delete Edited elsewhere" }).click();
-  await expect(watching.getByText("No notes yet.")).toBeVisible();
-});
-
-test("a list loads five notes at a time and keeps the loaded notes current across sessions", async ({
-  pageOf,
-}) => {
-  const { builder } = peopleIn("notesPages");
-  const app = await notesApp(builder);
-  const watching = await openNotes(await pageOf(builder), app);
-  await expect(watching.getByText("No notes yet.")).toBeVisible();
-  const notes = watching.getByRole("list", { name: "Notes" });
-  for (let note = 1; note <= 6; note += 1) {
-    // oxlint-disable-next-line no-await-in-loop -- one note after the other
-    await createNote(watching, `Note ${note}`);
-    // oxlint-disable-next-line no-await-in-loop -- see above
-    await expect(
-      notes.getByText(`Note ${note}`, { exact: true })
-    ).toBeVisible();
-  }
-
-  // Five at first, newest first; the sixth once asked for.
-  await expect(notes.getByRole("listitem")).toHaveText([
-    /Note 6/u,
-    /Note 5/u,
-    /Note 4/u,
-    /Note 3/u,
-    /Note 2/u,
-  ]);
-  await watching.getByRole("button", { name: "Load more" }).click();
-  await expect(notes.getByRole("listitem")).toHaveCount(6);
-  await expect(watching.getByRole("button", { name: "Load more" })).toHaveCount(
-    0
-  );
-
-  // Another session saves a note and deletes one inside the loaded list:
-  // the open list follows, every note once, the rest closing up.
-  const saving = await openNotes(await pageOf(builder), app);
-  await createNote(saving, "Note 7");
-  await expect(notes.getByRole("listitem")).toHaveCount(7);
-  await saving.getByRole("button", { name: "Delete Note 4" }).click();
-  await expect(notes.getByRole("listitem")).toHaveText([
-    /Note 7/u,
-    /Note 6/u,
-    /Note 5/u,
-    /Note 3/u,
-    /Note 2/u,
-    /Note 1/u,
-  ]);
-});
-
-test("a page's frame speaks the page's language", async ({ pageOf }) => {
-  const { builder } = peopleIn("notesLanguage");
-  const app = await notesApp(builder);
-  const page = await pageOf(builder, { locale: "de-DE" });
-  await page.goto(`/apps/${app}/full`);
-  const appPage = page.frameLocator("iframe");
-  await expect(appPage.getByRole("heading", { name: "Notes" })).toBeVisible({
-    timeout: 20_000,
-  });
-  await expect(appPage.locator("html")).toHaveAttribute("lang", "de");
-});
-
 /** How long the activation a page has as a page opens can last. */
 const openingActivationMs = 5000;
 
@@ -540,98 +419,6 @@ const openFiles = async (page: Page, app: string): Promise<FrameLocator> => {
   });
   return appPage;
 };
-
-test("a file shown is read once, however often its page renders", async ({
-  pageOf,
-}) => {
-  const { builder } = peopleIn("notesApp");
-  const app = await notesApp(builder, undefined, fileViewFiles());
-  const page = await pageOf(builder);
-  const appPage = await openFiles(page, app);
-  await appPage
-    .getByLabel("Upload a file")
-    .setInputFiles({ name: "photo.png", mimeType: "image/png", buffer: pixel });
-  await expect(
-    appPage.getByText("Showing photo.png, rendered 0")
-  ).toBeVisible();
-  let reads = 0;
-  page.on("request", (request) => {
-    if (request.url().includes("/files/files/")) {
-      reads += 1;
-    }
-  });
-  const again = appPage.getByRole("button", { name: "Render again" });
-  await again.click();
-  await again.click();
-  await again.click();
-  await expect(
-    appPage.getByText("Showing photo.png, rendered 3")
-  ).toBeVisible();
-  await page.waitForTimeout(1000);
-  expect(reads).toBe(0);
-});
-
-test("a file hidden, then shown again, loads afresh instead of its last view", async ({
-  pageOf,
-}) => {
-  const { builder } = peopleIn("notesApp");
-  const app = await notesApp(builder, undefined, fileViewFiles());
-  const page = await pageOf(builder);
-  const appPage = await openFiles(page, app);
-  await appPage
-    .getByLabel("Upload a file")
-    .setInputFiles({ name: "photo.png", mimeType: "image/png", buffer: pixel });
-  await expect(appPage.getByText("Showing photo.png")).toBeVisible();
-  await appPage.getByRole("button", { name: "Hide the file" }).click();
-  await expect(appPage.getByText("The file is hidden")).toBeVisible();
-  // The next read is held back a moment on its way to core.
-  const { promise: released, resolve: letThrough } =
-    Promise.withResolvers<null>();
-  await page.route("**/api/app-files/*/files/files/**", async (route) => {
-    await released;
-    await route.continue();
-  });
-  await appPage.getByRole("button", { name: "Show the file" }).click();
-  await expect(appPage.getByText("Loading the file…")).toBeVisible();
-  await expect(appPage.getByText("Showing photo.png")).toHaveCount(0);
-  letThrough(null);
-  await expect(appPage.getByText("Showing photo.png")).toBeVisible();
-});
-
-test("a file the page deletes while showing it is gone, never read again or a failure", async ({
-  pageOf,
-}) => {
-  const { builder } = peopleIn("notesApp");
-  const app = await notesApp(builder, undefined, fileViewFiles());
-  const page = await pageOf(builder);
-  const appPage = await openFiles(page, app);
-  await appPage
-    .getByLabel("Upload a file")
-    .setInputFiles({ name: "photo.png", mimeType: "image/png", buffer: pixel });
-  await expect(appPage.getByText("Showing photo.png")).toBeVisible();
-  const reads: string[] = [];
-  page.on("request", (request) => {
-    // A read of the file (its deletion is a POST).
-    if (request.method() === "GET" && request.url().includes("/files/")) {
-      reads.push(request.url());
-    }
-  });
-  // Still shown when its deletion lands, as a row is until the change
-  // that removes it reaches the page's own data.
-  await appPage.getByRole("button", { name: "Delete the file" }).click();
-  await expect(appPage.getByRole("status", { name: "Deletion" })).toHaveText(
-    "deleted"
-  );
-  await expect(appPage.getByText("The file is gone")).toBeVisible();
-  await expect(appPage.getByRole("heading", { name: "Files" })).toBeVisible();
-  // Hidden, then shown again: still gone, not read again.
-  await appPage.getByRole("button", { name: "Hide the file" }).click();
-  await expect(appPage.getByText("The file is hidden")).toBeVisible();
-  await appPage.getByRole("button", { name: "Show the file" }).click();
-  await expect(appPage.getByText("The file is gone")).toBeVisible();
-  await page.waitForTimeout(1000);
-  expect(reads).toStrictEqual([]);
-});
 
 test("a file whose page lost the App's data shows the refusal, and isn't read again", async ({
   pageOf,

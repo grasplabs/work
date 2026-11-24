@@ -393,7 +393,7 @@ export const AgentsOverview = ({
   ).length;
   const canMake = makes || makesOwn;
   return (
-    <Page wide>
+    <Page>
       <PageHeading
         action={canMake ? <NewAgentLink /> : undefined}
         description={
