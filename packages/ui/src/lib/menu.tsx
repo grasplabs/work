@@ -57,7 +57,6 @@ import {
   wordsOf,
 } from "./utils";
 import type { LayoutStyle } from "./utils";
-import { menuMarker } from "./vars.stylex";
 
 /** Which menu a part is drawn for: its name, which starts each slot. */
 export type MenuKind = "dropdown-menu" | "context-menu" | "menubar";
@@ -517,7 +516,7 @@ export const MenuSubTriggerPart = ({
     >
       {children}
     </span>
-    <span aria-hidden="true" {...stylex.props(menuStyles.shortcut)}>
+    <span aria-hidden="true" {...stylex.props(menuStyles.chevron)}>
       <Icon icon={ChevronRightIcon} />
     </span>
   </MenuSubTrigger>
@@ -530,7 +529,6 @@ export const MenuSubContentPart = ({ kind, children, style }: PartProps) => (
     collisionPadding={popup.gutter}
     render={slotted("div", `${kind}-sub-content`)}
     {...stylex.props(
-      menuMarker,
       menuStyles.panel,
       menuStyles.motion,
       scrollbarHidden,

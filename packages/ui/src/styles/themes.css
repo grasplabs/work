@@ -71,6 +71,7 @@
   --damsko-success-fill-foreground: var(--damsko-primary-foreground-on-color);
   --damsko-success-light: linear-gradient(180deg, oklch(0.49 0.11 168) 0%, oklch(0.46 0.1 170) 45%, oklch(0.43 0.09 172) 70%, oklch(0.4 0.08 173) 100%);
   --damsko-success-glow: light-dark(oklch(0.8005 0.1625 165.25 / 0.5), oklch(0.85 0.15 150 / 0.36));
+  --damsko-success-glow-hover: light-dark(oklch(0.8005 0.1625 165.25 / 0.7), oklch(0.85 0.15 150 / 0.52));
   --damsko-button-sheen: oklch(1 0 0 / 0.1);
   --damsko-bevel-ink-face: inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.14), oklch(1 0 0 / 1)), inset 0 -0.75px 0 light-dark(oklch(1 0 0 / 0.05), oklch(1 0 0 / 0.5)), inset 0 0 0 1px light-dark(var(--damsko-brand-night), oklch(0 0 0 / 0.5)), inset 0 -2px 4px light-dark(oklch(0.12 0.03 162 / 0.12), oklch(0.29 0.05 162 / 0.03));
   --damsko-bevel-ink: var(--damsko-bevel-ink-face), var(--damsko-input-shadow);
@@ -86,6 +87,8 @@
   --damsko-bevel-destructive-press: var(--damsko-bevel-destructive-face), var(--damsko-button-shadow-active);
   --damsko-bevel-success-face: inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.18), oklch(1 0 0 / 0.22)), inset 0 -0.75px 0 oklch(1 0 0 / 0.06), inset 0 0 0 1px oklch(0.36 0.07 173 / 0.7), inset 0 -6px 12px oklch(0.3 0.06 173 / 0.3);
   --damsko-bevel-success: var(--damsko-bevel-success-face), 0 1px 3px -3px var(--damsko-success-glow), var(--damsko-input-shadow);
+  --damsko-bevel-success-hover: var(--damsko-bevel-success-face), 0 4px 12px -7px var(--damsko-success-glow-hover), var(--damsko-button-shadow-hover);
+  --damsko-bevel-success-press: var(--damsko-bevel-success-face), 0 2px 6px -6px var(--damsko-success-glow), var(--damsko-button-shadow-active);
   --damsko-primary-active: light-dark(oklch(0.27 0.05 168), oklch(0.88 0.02 152));
   --damsko-destructive-fill-active: oklch(0.46 0.165 28);
   --damsko-destructive-hold: light-dark(var(--damsko-destructive-fill-active), oklch(0.38 0.14 28));
@@ -118,6 +121,7 @@
   --damsko-popover-gap: var(--damsko-space-2);
   --damsko-tooltip: light-dark(oklch(0.173 0.028 169.36 / 0.9), oklch(0.37 0.03 168 / 0.9));
   --damsko-tooltip-foreground: oklch(0.965 0.014 150);
+  --damsko-tooltip-muted-foreground: oklch(0.78 0.025 158);
   --damsko-menu-shadow: var(--damsko-shadow-lg);
   --damsko-menu-item-padding: var(--damsko-space-2);
   --damsko-switch-thumb-shadow: drop-shadow(0 0 0.5px light-dark(oklch(0.173 0.028 169.36 / 0.22), oklch(0 0 none / 0.5))) drop-shadow(0 1px 1.5px light-dark(oklch(0.173 0.028 169.36 / 0.14), oklch(0 0 none / 0.4))) drop-shadow(0 2px 3px light-dark(oklch(0.173 0.028 169.36 / 0.08), oklch(0 0 none / 0.3)));
@@ -353,6 +357,7 @@
   --damsko-success-fill-foreground: var(--damsko-primary-foreground-on-color);
   --damsko-success-light: linear-gradient(180deg, oklch(0.49 0.11 168) 0%, oklch(0.46 0.1 170) 45%, oklch(0.43 0.09 172) 70%, oklch(0.4 0.08 173) 100%);
   --damsko-success-glow: light-dark(oklch(0.8005 0.1625 165.25 / 0.5), oklch(0.85 0.15 150 / 0.36));
+  --damsko-success-glow-hover: light-dark(oklch(0.8005 0.1625 165.25 / 0.7), oklch(0.85 0.15 150 / 0.52));
   --damsko-button-sheen: oklch(1 0 0 / 0.1);
   --damsko-bevel-ink-face: inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.14), oklch(1 0 0 / 1)), inset 0 -0.75px 0 light-dark(oklch(1 0 0 / 0.05), oklch(1 0 0 / 0.5)), inset 0 0 0 1px light-dark(var(--damsko-brand-night), oklch(0 0 0 / 0.5)), inset 0 -2px 4px light-dark(oklch(0.12 0.06 178 / 0.12), oklch(0.29 0.1 178 / 0.03));
   --damsko-bevel-ink: var(--damsko-bevel-ink-face), var(--damsko-input-shadow);
@@ -368,6 +373,8 @@
   --damsko-bevel-destructive-press: var(--damsko-bevel-destructive-face), var(--damsko-button-shadow-active);
   --damsko-bevel-success-face: inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.18), oklch(1 0 0 / 0.22)), inset 0 -0.75px 0 oklch(1 0 0 / 0.06), inset 0 0 0 1px oklch(0.36 0.07 173 / 0.7), inset 0 -6px 12px oklch(0.3 0.12 178 / 0.3);
   --damsko-bevel-success: var(--damsko-bevel-success-face), 0 1px 3px -3px var(--damsko-success-glow), var(--damsko-input-shadow);
+  --damsko-bevel-success-hover: var(--damsko-bevel-success-face), 0 4px 12px -7px var(--damsko-success-glow-hover), var(--damsko-button-shadow-hover);
+  --damsko-bevel-success-press: var(--damsko-bevel-success-face), 0 2px 6px -6px var(--damsko-success-glow), var(--damsko-button-shadow-active);
   --damsko-primary-active: light-dark(oklch(0.3 0.068 177), oklch(0.88 0.03 165));
   --damsko-destructive-fill-active: oklch(0.46 0.165 28);
   --damsko-destructive-hold: light-dark(var(--damsko-destructive-fill-active), oklch(0.38 0.14 28));
@@ -400,6 +407,7 @@
   --damsko-popover-gap: var(--damsko-space-2);
   --damsko-tooltip: light-dark(oklch(0.173 0.056 178 / 0.9), oklch(0.37 0.06 178 / 0.9));
   --damsko-tooltip-foreground: oklch(0.965 0.028 178);
+  --damsko-tooltip-muted-foreground: oklch(0.78 0.05 178);
   --damsko-menu-shadow: var(--damsko-shadow-lg);
   --damsko-menu-item-padding: var(--damsko-space-2);
   --damsko-switch-thumb-shadow: drop-shadow(0 0 0.5px light-dark(oklch(0.173 0.056 178 / 0.22), oklch(0 0 none / 0.5))) drop-shadow(0 1px 1.5px light-dark(oklch(0.173 0.056 178 / 0.14), oklch(0 0 none / 0.4))) drop-shadow(0 2px 3px light-dark(oklch(0.173 0.056 178 / 0.08), oklch(0 0 none / 0.3)));
@@ -635,6 +643,7 @@
   --damsko-success-fill-foreground: var(--damsko-primary-foreground-on-color);
   --damsko-success-light: linear-gradient(180deg, oklch(0.49 0.11 168) 0%, oklch(0.46 0.1 170) 45%, oklch(0.43 0.09 172) 70%, oklch(0.4 0.08 173) 100%);
   --damsko-success-glow: light-dark(oklch(0.8005 0.1625 165.25 / 0.5), oklch(0.85 0.15 150 / 0.36));
+  --damsko-success-glow-hover: light-dark(oklch(0.8005 0.1625 165.25 / 0.7), oklch(0.85 0.15 150 / 0.52));
   --damsko-button-sheen: oklch(1 0 0 / 0.1);
   --damsko-bevel-ink-face: inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.14), oklch(1 0 0 / 1)), inset 0 -0.75px 0 light-dark(oklch(1 0 0 / 0.05), oklch(1 0 0 / 0.5)), inset 0 0 0 1px light-dark(var(--damsko-brand-night), oklch(0 0 0 / 0.5)), inset 0 -2px 4px light-dark(oklch(0.12 0.007 75 / 0.12), oklch(0.29 0.011 75 / 0.03));
   --damsko-bevel-ink: var(--damsko-bevel-ink-face), var(--damsko-input-shadow);
@@ -650,6 +659,8 @@
   --damsko-bevel-destructive-press: var(--damsko-bevel-destructive-face), var(--damsko-button-shadow-active);
   --damsko-bevel-success-face: inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.18), oklch(1 0 0 / 0.22)), inset 0 -0.75px 0 oklch(1 0 0 / 0.06), inset 0 0 0 1px oklch(0.36 0.07 173 / 0.7), inset 0 -6px 12px oklch(0.3 0.013 75 / 0.3);
   --damsko-bevel-success: var(--damsko-bevel-success-face), 0 1px 3px -3px var(--damsko-success-glow), var(--damsko-input-shadow);
+  --damsko-bevel-success-hover: var(--damsko-bevel-success-face), 0 4px 12px -7px var(--damsko-success-glow-hover), var(--damsko-button-shadow-hover);
+  --damsko-bevel-success-press: var(--damsko-bevel-success-face), 0 2px 6px -6px var(--damsko-success-glow), var(--damsko-button-shadow-active);
   --damsko-primary-active: light-dark(oklch(0.22 0.01 70), oklch(0.86 0.008 85));
   --damsko-destructive-fill-active: oklch(0.46 0.165 28);
   --damsko-destructive-hold: light-dark(var(--damsko-destructive-fill-active), oklch(0.38 0.14 28));
@@ -682,6 +693,7 @@
   --damsko-popover-gap: var(--damsko-space-2);
   --damsko-tooltip: light-dark(oklch(0.173 0.006 75 / 0.9), oklch(0.37 0.007 75 / 0.9));
   --damsko-tooltip-foreground: oklch(0.965 0.003 75);
+  --damsko-tooltip-muted-foreground: oklch(0.78 0.006 75);
   --damsko-menu-shadow: var(--damsko-shadow-lg);
   --damsko-menu-item-padding: var(--damsko-space-2);
   --damsko-switch-thumb-shadow: drop-shadow(0 0 0.5px light-dark(oklch(0.173 0.006 75 / 0.22), oklch(0 0 none / 0.5))) drop-shadow(0 1px 1.5px light-dark(oklch(0.173 0.006 75 / 0.14), oklch(0 0 none / 0.4))) drop-shadow(0 2px 3px light-dark(oklch(0.173 0.006 75 / 0.08), oklch(0 0 none / 0.3)));

@@ -16,8 +16,10 @@
 // someone a list is empty when its request failed is the one answer that is wrong.
 //
 // An `illustration` is a small drawing that tells the case apart (nothing yet, nothing found, all
-// done, no access, offline, it failed, no page here). What will stand in the place while it loads
-// is the product's own composition of Skeletons, never Empty's.
+// done, no access, offline, it failed, no page here). The faint shapes of what will stand in the
+// place, round the words (rows, cards, bars, bubbles), are the page's own drawing beside Empty, as
+// the `empty/clearing` example draws them; what stands there while it loads is the page's own
+// composition of Skeletons. Neither is Empty's.
 //
 // Every value is a token. A caller may set layout only (the `style` prop).
 import * as stylex from "@stylexjs/stylex";
