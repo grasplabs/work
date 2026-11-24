@@ -69,7 +69,8 @@ export interface HoldButtonProps extends Omit<
    */
   variant?: ButtonVariant;
   /**
-   * Button's size; an `icon` size for a button that is only an icon, named by `aria-label`.
+   * Button's size; an `icon` size for a button that is only an icon, named by `aria-label`. Named
+   * none, Button's own default: `sm` as a direct child of a layer's footer.
    * @default "default"
    */
   size?: ButtonSize;
@@ -521,6 +522,10 @@ const heldStyles = stylex.create({
   destructive: {
     backgroundColor: { default: null, [HELD]: colors.destructiveFill },
   },
+  success: {
+    backgroundColor: { default: null, [HELD]: colors.successFill },
+    backgroundPosition: { default: null, [HELD]: sizes.successLightRest },
+  },
   bare: { backgroundColor: { default: null, [HELD]: "transparent" } },
 });
 
@@ -557,6 +562,15 @@ const fillStyles = stylex.create({
     "::before": {
       backgroundImage: {
         default: flat(colors.destructiveHold),
+        [FORCED]: flat("Highlight"),
+      },
+    },
+  },
+  // The light at its deepest, as a press draws it.
+  success: {
+    "::before": {
+      backgroundImage: {
+        default: flat(`oklch(from ${colors.successFill} calc(l - 0.06) c h)`),
         [FORCED]: flat("Highlight"),
       },
     },
@@ -598,7 +612,7 @@ const splitHandlers = (props: Record<string, unknown>) => {
 
 export const HoldButton = ({
   variant = "default",
-  size = "default",
+  size,
   children,
   onConfirm,
   loadingText,
@@ -709,7 +723,7 @@ export const HoldButton = ({
           {/* It only says yes: the work and its result show on the button, where focus returns. */}
           <PopoverClose asChild onClick={pressing.handleYes}>
             <Button
-              variant={variant === "destructive" ? "destructive" : "default"}
+              variant={variant === "destructive" ? "destructive" : "success"}
               size="sm"
               agentConfirm={agentConfirm ?? said}
             >

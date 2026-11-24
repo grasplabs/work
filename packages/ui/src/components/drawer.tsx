@@ -13,7 +13,7 @@
 //       <DrawerBody>…</DrawerBody>
 //       <DrawerFooter>
 //         <DrawerClose>Cancel</DrawerClose>
-//         <Button size="sm" {...save.props}>Save</Button>
+//         <Button {...save.props}>Save</Button>
 //       </DrawerFooter>
 //     </DrawerContent>
 //   </Drawer>
@@ -469,7 +469,10 @@ export interface DrawerFooterProps extends PartProps {
   children: ReactNode;
 }
 
-/** The actions, at the end of the line. At a lower rest they stay in view. */
+/**
+ * The actions, at the end of the line. A Button directly in it that names no size is small, as
+ * DrawerClose is, so its actions stand one height. At a lower rest they stay in view.
+ */
 export const DrawerFooter = ({ children, style }: DrawerFooterProps) => {
   const snaps = use(SnapsContext);
   return (

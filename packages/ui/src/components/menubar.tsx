@@ -61,7 +61,6 @@ import {
 import { popup } from "../lib/tokens.values";
 import { className, slotProps, slotted } from "../lib/utils";
 import type { LayoutStyle } from "../lib/utils";
-import { menuMarker } from "../lib/vars.stylex";
 
 type OpenChange = ComponentProps<typeof Menu>["onOpenChange"];
 type CheckedChange = ComponentProps<typeof MenuCheckboxItem>["onCheckedChange"];
@@ -461,7 +460,6 @@ export const MenubarContent = ({ children, style }: MenubarContentProps) => (
     collisionPadding={popup.gutter}
     render={slotted("div", "menubar-content")}
     {...stylex.props(
-      menuMarker,
       menuStyles.panel,
       menuStyles.motion,
       scrollbarHidden,

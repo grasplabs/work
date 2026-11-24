@@ -66,6 +66,7 @@ export type ButtonVariant =
   | "default"
   | "secondary"
   | "destructive"
+  | "success"
   | "outline"
   | "ghost"
   | "link";
@@ -93,8 +94,8 @@ interface ButtonBase extends Omit<
    * ordinary button anywhere (the lesser one beside it, a standalone action or trigger),
    * `secondary` for a flat one repeated or dense (the same action on every row; never a filter or
    * an on/off control, which is a Toggle), `ghost` for
-   * toolbars, rows and icon buttons, `destructive` for what cannot be undone, `link` for an action
-   * that reads as words.
+   * toolbars, rows and icon buttons, `destructive` for what cannot be undone, `success` for the yes
+   * that approves or confirms (Approve on a request), `link` for an action that reads as words.
    * @default "default"
    */
   variant?: ButtonVariant;
@@ -106,8 +107,8 @@ interface ButtonBase extends Omit<
   asChild?: boolean;
   /**
    * What the button does, said to the person when an agent asks to press it ("Deletes the
-   * workspace and its files"). The agent's press waits for their yes. A `destructive` button always
-   * asks: in its own words unless this says it better.
+   * workspace and its files"). The agent's press waits for their yes. A `destructive` or `success`
+   * button always asks: in its own words unless this says it better.
    */
   agentConfirm?: string;
   /**
@@ -164,7 +165,8 @@ interface WithWords extends ButtonBase {
   /**
    * The height: `xs` 28px, `sm` 32px, `default` 36px, `lg` 44px; an icon-only button is a square of
    * the same heights, `icon-xs`, `icon-sm`, `icon` and `icon-lg`. On a touch screen every size has
-   * a 44px target.
+   * a 44px target. Named none, it is `sm` as a direct child of a Dialog, AlertDialog, Sheet or
+   * Drawer footer, as the footer's Close is.
    * @default "default"
    */
   size?: Exclude<ButtonSize, IconSize>;
@@ -205,6 +207,13 @@ const ITEM =
   ':not([data-slot$="-content"], [data-slot$="-positioner"], [data-slot$="-backdrop"], [role=menu], [role=dialog], [role=listbox], [role=tooltip])';
 const FIRST = `:nth-child(1 of ${ITEM})`;
 const LAST = `:nth-last-child(1 of ${ITEM})`;
+
+// A layer footer's own actions: its direct children, read from the page's tree, not React's, so a
+// popup opened from the footer, drawn elsewhere or inside it, keeps its own sizes.
+const FOOTERS =
+  "[data-slot=dialog-footer], [data-slot=alert-dialog-footer], [data-slot=sheet-footer], [data-slot=drawer-footer]";
+const FOOTER_ACTION = `:is(:is(${FOOTERS}) > *)`;
+const IN_FOOTER_ACTION = `:is(:is(${FOOTERS}) > * > *)`;
 
 const styles = stylex.create({
   base: {
@@ -333,11 +342,12 @@ const styles = stylex.create({
     flexShrink: 1,
     whiteSpace: "nowrap",
   },
-  // Failed, on every variant: calm. The quiet fill, destructive words, a field's edge tinted
-  // destructive, and one small shake. The alert and the words say it too, so it is never colour alone.
+  // Failed, on every variant: calm. The quiet fill (no light over it), destructive words, a field's
+  // edge tinted destructive, and one small shake. The alert and the words say it too, so it is never colour alone.
   failed: {
     color: { default: colors.destructive, [FORCED]: "ButtonText" },
     backgroundColor: colors.control,
+    backgroundImage: "none",
     boxShadow: sizes.errorBorder,
     animationName: {
       default: stylex.keyframes({
@@ -471,6 +481,40 @@ const sizeStyles = stylex.create({
   },
 });
 
+// A Button that names no size: `default`, and as a layer footer's own action `sm`, as the footer's
+// Close is, so its actions stand one height. An explicit size always wins: it takes sizeStyles.
+const unsizedStyles = stylex.create({
+  look: {
+    minHeight: {
+      default: sizes.controlDefault,
+      [FOOTER_ACTION]: sizes.controlSm,
+    },
+    minWidth: {
+      default: sizes.controlDefault,
+      [FOOTER_ACTION]: sizes.controlSm,
+    },
+    paddingBlock: {
+      default: `calc((${sizes.controlDefault} - ${font.textSmLine}) / 2)`,
+      [FOOTER_ACTION]: `calc((${sizes.controlSm} - ${font.textSmLine}) / 2)`,
+    },
+    paddingInline: space["3"],
+    borderRadius: {
+      default: `min(${radius.xl}, calc(${sizes.controlDefault} / 2))`,
+      [FOOTER_ACTION]: `min(${radius.xl}, calc(${sizes.controlSm} / 2))`,
+    },
+  },
+  // Its touch target, a direct child of the button.
+  target: {
+    insetBlock: {
+      default: 0,
+      [COARSE]: {
+        default: `calc((${sizes.controlDefault} - ${sizes.tapTarget}) / 2)`,
+        [IN_FOOTER_ACTION]: `calc((${sizes.controlSm} - ${sizes.tapTarget}) / 2)`,
+      },
+    },
+  },
+});
+
 // The touch target of each size: as tall as a finger needs, and as wide for a square.
 const targetStyles = stylex.create({
   xs: {
@@ -531,6 +575,20 @@ const variantStyles = stylex.create({
     color: colors.destructiveFillForeground,
     backgroundColor: colors.destructiveFill,
     boxShadow: shadow.bevelDestructive,
+  },
+  // The yes that approves or confirms: a pane of the success light, mint deepened towards pine,
+  // wider than the button so it can move: under a pointer it leans a step deeper, pressed it draws
+  // to its deepest. Its fill is under it, for forced colours.
+  success: {
+    color: colors.successFillForeground,
+    backgroundColor: colors.successFill,
+    backgroundImage: { default: colors.successLight, [FORCED]: "none" },
+    backgroundSize: sizes.successLightSize,
+    backgroundPosition: sizes.successLightRest,
+    boxShadow: shadow.bevelSuccess,
+    transitionProperty:
+      "transform, background-color, box-shadow, color, background-position",
+    transitionDuration: `${motionVars.press}, ${duration.hover}, ${duration.hover}, ${duration.hover}, ${motionVars.mark}`,
   },
   // The ordinary button: the quiet fill, a field's edge and its lift, so it stands as tall as an
   // input beside it.
@@ -616,6 +674,24 @@ const liveStyles = stylex.create({
       },
     },
   },
+  success: {
+    boxShadow: {
+      default: shadow.bevelSuccess,
+      ":hover": { default: null, [HOVER]: shadow.bevelSuccessHover },
+      ":active": {
+        default: shadow.bevelSuccessPress,
+        [HOVER]: shadow.bevelSuccessPress,
+      },
+    },
+    backgroundPosition: {
+      default: sizes.successLightRest,
+      ":hover": { default: null, [HOVER]: sizes.successLightLean },
+      ":active": {
+        default: sizes.successLightPress,
+        [HOVER]: sizes.successLightPress,
+      },
+    },
+  },
   outline: {
     backgroundColor: {
       default: colors.control,
@@ -648,7 +724,7 @@ const liveStyles = stylex.create({
 
 /** The variants drawn on a fill, which carry the sheen. */
 const filled = (variant: ButtonVariant) =>
-  variant === "default" || variant === "destructive";
+  variant === "default" || variant === "destructive" || variant === "success";
 
 /** Whether the element's props say its press failed (`data-status`, from `withStatus`). */
 const hasFailed = (extra: Record<string, unknown>) =>
@@ -656,13 +732,13 @@ const hasFailed = (extra: Record<string, unknown>) =>
 
 const lookOf = (
   variant: ButtonVariant,
-  size: ButtonSize,
+  size: ButtonSize | undefined,
   pressable: boolean
 ) => [
   buttonMarker,
   styles.base,
   hyphenate,
-  sizeStyles[size],
+  size === undefined ? unsizedStyles.look : sizeStyles[size],
   styles.inFooter,
   styles.inGroup,
   variantStyles[variant],
@@ -688,8 +764,8 @@ interface AgentWords {
 
 /**
  * What an agent is told before its press runs: `agentConfirm`, or the part's own. A destructive
- * button always asks, in its own words, unless it only opens something (a dialog's trigger): the
- * action inside asks.
+ * button, and a success one (the yes that approves), always asks, in its own words, unless it only
+ * opens something (a dialog's trigger): the action inside asks.
  */
 const confirmFor = (
   variant: ButtonVariant,
@@ -710,7 +786,9 @@ const confirmFor = (
     typeof words === "string" && words !== ""
       ? said.agentPresses(words)
       : said.agentAsks;
-  return variant === "destructive" && !opens ? own : undefined;
+  return (variant === "destructive" || variant === "success") && !opens
+    ? own
+    : undefined;
 };
 
 /** The button's own props: its look, its slot, its variant and size, and what an agent is told. */
@@ -722,7 +800,7 @@ const ownOf = (
     truncate,
     style,
   }: Required<Pick<ButtonBase, "variant" | "disabled" | "truncate">> &
-    Pick<ButtonBase, "style"> & { size: ButtonSize },
+    Pick<ButtonBase, "style"> & { size: ButtonSize | undefined },
   extra: Record<string, unknown>,
   agentConfirm: string | undefined,
   words: unknown,
@@ -747,7 +825,7 @@ const ownOf = (
     "data-slot": part ?? "button",
     "data-button": part === undefined ? undefined : "",
     "data-variant": variant,
-    "data-size": size,
+    "data-size": size ?? "default",
     "data-agent-confirm": confirmFor(
       variant,
       agentConfirm ?? extra["data-agent-confirm"],
@@ -766,7 +844,7 @@ const Inside = ({
   failed,
 }: {
   variant: ButtonVariant;
-  size: ButtonSize;
+  size: ButtonSize | undefined;
   pressable: boolean;
   failed: boolean;
 }) => (
@@ -779,7 +857,10 @@ const Inside = ({
     )}
     <span
       aria-hidden="true"
-      {...stylex.props(styles.target, targetStyles[size])}
+      {...stylex.props(
+        styles.target,
+        size === undefined ? unsizedStyles.target : targetStyles[size]
+      )}
     />
   </>
 );
@@ -1097,7 +1178,7 @@ const usePress = (
 
 const Pressable = ({
   variant = "default",
-  size = "default",
+  size,
   asChild = false,
   agentConfirm,
   disabled = false,
