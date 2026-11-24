@@ -923,13 +923,22 @@ const installs =
     await Promise.resolve();
   };
 
+const noticePin = "2d49f2dfd0fb6b86d78a224253bd788ec6fc9ba7";
+const earlierPin = "aba6f6e9327fdd78f9aee01c2f9dcf28593c4e74";
+const noticeAt = (at: string) =>
+  `Damsko's licence:\n${damskoLicence(at)}\nIts third-party notices:\n${damskoNotices(at)}\n`;
+
 describe("the update", () => {
   /** Damsko at a pin, from its files: one item, `kit`, with what it holds. */
-  const damskoWith = (files: Record<string, string>): DamskoAt => {
+  const damskoWith = (
+    files: Record<string, string>,
+    commit = "pinned"
+  ): DamskoAt => {
     const root = scratchFolder();
     plant(root, files);
     return {
       root,
+      commit,
       expected: expectedOf(
         parseRegistry(
           JSON.stringify({
@@ -1001,6 +1010,28 @@ describe("the update", () => {
       "local-changes.json",
       "src",
     ]);
+  });
+
+  it("moves LICENSE's links to Damsko with the pin, and nothing else of it", async () => {
+    const { ui, local } = setUp();
+    plant(ui, { LICENSE: `${noticeAt(earlierPin)}Kept as it is.\n` });
+    const files = {
+      "src/components/button.tsx": "one\ntwo\nthree\nfour\nfive\n",
+      "src/lib/utils.ts": "utils\n",
+    };
+    const now = damskoWith(files, noticePin);
+    await updateTree({
+      ui,
+      install: installs(now),
+      was: damskoWith(files, earlierPin),
+      now,
+      local,
+      pin: `{ "commit": "${noticePin}" }\n`,
+      dependencies: { "@stylexjs/stylex": "catalog:" },
+    });
+    expect(readFileSync(nodePath.join(ui, "LICENSE"), "utf-8")).toBe(
+      `${noticeAt(noticePin)}Kept as it is.\n`
+    );
   });
 
   it("drops an entry once Damsko's file is the same", async () => {
@@ -1298,11 +1329,6 @@ describe("the update", () => {
     }
   );
 });
-
-const noticePin = "2d49f2dfd0fb6b86d78a224253bd788ec6fc9ba7";
-const earlierPin = "aba6f6e9327fdd78f9aee01c2f9dcf28593c4e74";
-const noticeAt = (at: string) =>
-  `Damsko's licence:\n${damskoLicence(at)}\nIts third-party notices:\n${damskoNotices(at)}\n`;
 
 describe("the notice that src/ stays under Damsko's licence", () => {
   it("links Damsko's licence and third-party notices at the pinned commit, and at no other", () => {

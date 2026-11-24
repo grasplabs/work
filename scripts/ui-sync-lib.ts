@@ -776,6 +776,8 @@ export const readLocalChanges = (file: string): LocalChange[] => {
 /** Damsko's tree at a pin: its checkout, and what the pinned items install. */
 export interface DamskoAt {
   readonly root: string;
+  /** The commit it is at. */
+  readonly commit: string;
   readonly expected: Expected;
 }
 
@@ -912,9 +914,10 @@ const swap = (
  * folder of its own: installed there, each listed change carried over (the
  * file as it is here, Damsko's at the old pin and at the new one), then
  * checked as check:ui checks. Only then does it take the place of
- * `packages/ui/src`, with `damsko.json` and `local-changes.json`; on any
- * failure before or during that, `packages/ui` is as it was. A conflict is
- * no failure: the file is left with git's markers, to resolve by hand.
+ * `packages/ui/src`, with `damsko.json`, `local-changes.json` and
+ * `LICENSE`'s links to Damsko moved to the new commit; on any failure
+ * before or during that, `packages/ui` is as it was. A conflict is no
+ * failure: the file is left with git's markers, to resolve by hand.
  */
 export const updateTree = async (input: UpdateInput): Promise<Updated> => {
   const { ui, was, now, local } = input;
@@ -923,6 +926,7 @@ export const updateTree = async (input: UpdateInput): Promise<Updated> => {
   const ours = new Map(
     local.map(({ path }) => [path, readWithin(ui, path)] as const)
   );
+  const notice = readWithin(ui, "LICENSE");
   const scratch = mkdtempSync(nodePath.join(tmpdir(), "damsko-update-"));
   try {
     const stage = nodePath.join(scratch, "packages", "ui");
@@ -974,6 +978,17 @@ export const updateTree = async (input: UpdateInput): Promise<Updated> => {
       {
         "damsko.json": input.pin,
         "local-changes.json": `${JSON.stringify(remaining, null, 2)}\n`,
+        // It links Damsko's licence and notices at the pin, so they move
+        // with it.
+        ...(notice === undefined
+          ? {}
+          : {
+              LICENSE: movedNotice(
+                new TextDecoder().decode(notice),
+                was.commit,
+                now.commit
+              ),
+            }),
       },
       input.files ?? nodeFiles
     );

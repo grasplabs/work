@@ -90,7 +90,6 @@ import {
   expectedOf,
   fetchFor,
   fontsUnpack,
-  movedNotice,
   namespace,
   noticeDifference,
   overdue,
@@ -146,6 +145,7 @@ const damskoAt = (checkout: string, pin: Pin): DamskoAt => {
   }
   return {
     root: checkout,
+    commit: pin.commit,
     expected: expectedOf(
       parseRegistry(new TextDecoder().decode(registry)),
       pin.items
@@ -359,14 +359,6 @@ const main = async (): Promise<boolean> => {
         console.log(`${file}: Damsko's is now the same; its entry is dropped.`);
       }
       ({ conflicts, removed } = updated);
-      // The notice links Damsko's licence and notices at the pin, so they
-      // move with it.
-      if (existsSync(noticePath)) {
-        writeFileSync(
-          noticePath,
-          movedNotice(readFileSync(noticePath, "utf-8"), kept.commit, commit)
-        );
-      }
       listed = readLocalChanges(localChangesPath);
     }
     const found = await check(damsko, commit, listed, conflicts);
