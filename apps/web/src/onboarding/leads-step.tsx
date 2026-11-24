@@ -111,22 +111,24 @@ const HrPlatformChoice = ({
             </Button>
           </>
         ) : (
-          <>
-            <Button
-              onClick={() => {
-                void (async () => {
-                  if (await save({ ...choices, hr: { kind: "none" } })) {
-                    onDone();
-                  }
-                })();
-              }}
-              size="lg"
-              variant="outline"
-            >
-              {t`We don’t use an HR platform`}
-            </Button>
-            <SupportLink page="hr">{t`More about this connection`}</SupportLink>
-          </>
+          <Button
+            onClick={() => {
+              void (async () => {
+                if (await save({ ...choices, hr: { kind: "none" } })) {
+                  onDone();
+                }
+              })();
+            }}
+            size="lg"
+            variant="outline"
+          >
+            {t`We don’t use an HR platform`}
+          </Button>
+        )
+      }
+      also={
+        chosen ? null : (
+          <SupportLink page="hr">{t`More about this connection`}</SupportLink>
         )
       }
       title={t`Which HR platform do you use?`}
@@ -235,6 +237,9 @@ const ConfirmOrg = ({
   };
   return (
     <CalmStep
+      also={
+        <ForgetTeams onErased={refresh} teamsInBrain={data.view.teamsInBrain} />
+      }
       body={t`I talk to each team lead first, so they hear about me before their team does. Check who leads which team, and which teams take part.`}
       end={
         saved ? (
@@ -319,7 +324,6 @@ const ConfirmOrg = ({
           onSaid={setSaid}
           roster={draft}
         />
-        <ForgetTeams onErased={refresh} teamsInBrain={data.view.teamsInBrain} />
       </div>
     </CalmStep>
   );
