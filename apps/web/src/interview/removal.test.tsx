@@ -79,9 +79,15 @@ const until = async (ready: () => boolean, what: string): Promise<void> => {
   );
 };
 
+/** The button with `label` as its words, or as the end of its name when it is an icon alone ("Hold to delete my interview"). */
 const buttonNamed = (label: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll("button")].find(
-    (each) => each.textContent === label
+    (each) =>
+      each.textContent === label ||
+      (each.textContent === "" &&
+        (each.getAttribute("aria-label") ?? "")
+          .toLowerCase()
+          .endsWith(label.toLowerCase()))
   );
 
 const text = (): string => document.body.textContent ?? "";
