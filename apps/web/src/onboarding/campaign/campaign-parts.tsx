@@ -65,7 +65,6 @@ const styles = stylex.create({
     display: { default: "none", [media.maxSm]: "flex" },
     margin: 0,
     alignItems: "center",
-    justifyContent: "center",
     gap: space[2],
   },
 });
