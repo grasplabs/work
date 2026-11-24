@@ -285,6 +285,7 @@ const answerThenRefresh = async ({
 const ItemFrame = ({
   frame,
   extra,
+  renderAnswers,
   acts,
   busy,
   failure,
@@ -292,6 +293,8 @@ const ItemFrame = ({
   frame: Frame;
   /** What has to be read before deciding, under what happened. */
   extra?: ReactNode;
+  /** Answers of the item's own there, drawn with whether they are held. */
+  renderAnswers?: (held: boolean) => ReactNode;
   acts: Act[];
   busy: boolean;
   failure: string | undefined;
@@ -302,8 +305,13 @@ const ItemFrame = ({
   const armed = useArmed(frame.arriving);
   // No action while the item has only just come, or waits no more.
   const held = busy || !armed || frame.gone;
-  // The pause after an answer, said to a screen reader on each action.
-  const paused = !armed && !busy && !frame.gone;
+  // The pause after an answer, said to a screen reader: on each action,
+  // and beside answers of the item's own that can't say it themselves.
+  const paused =
+    !armed &&
+    !busy &&
+    !frame.gone &&
+    (acts.length > 0 || renderAnswers !== undefined);
   const { item } = frame;
   // Who it is for, when it is someone in particular: an admin's by default.
   const facts: KeyValueItem[] = item.facts.map(({ label, value }) => ({
@@ -356,6 +364,7 @@ const ItemFrame = ({
               </Text>
             ))}
             {extra}
+            {renderAnswers?.(held)}
             {acts.length === 0 ? null : (
               <div {...stylex.props(styles.actions)}>
                 {acts.map((act, index) => (
@@ -367,13 +376,13 @@ const ItemFrame = ({
                     key={act.label}
                   />
                 ))}
-                {paused ? (
-                  <span id={pauseId} {...stylex.props(visuallyHidden)}>
-                    {t`Its answers can be used in a moment, so a press meant for the one before doesn't answer it.`}
-                  </span>
-                ) : null}
               </div>
             )}
+            {paused ? (
+              <span id={pauseId} {...stylex.props(visuallyHidden)}>
+                {t`Its answers can be used in a moment, so a press meant for the one before doesn't answer it.`}
+              </span>
+            ) : null}
             {failure === undefined ? null : (
               <Alert variant="destructive">
                 <AlertDescription>{failure}</AlertDescription>
@@ -687,37 +696,37 @@ const BindingsDetail = ({
   source: Extract<InboxSource, { type: "bindings" }>;
 }) => {
   const { t } = useLingui();
-  const router = useRouter();
   const { workflow, version, bindings } = source.item.pending;
-  const { busy, failure, run } = useCoreAction();
+  const { busy, failure, decide } = useDecide(frame);
   const approve = async (
     alias: string,
     target: WorkflowBindingTarget
   ): Promise<void> => {
-    await run(async (session) => {
-      await session.workflowResources.approveBinding(workflow.id, {
-        alias,
-        target,
-        reviewed: { version },
-      });
-      const { name } = workflow;
-      frame.onSaid(t`Approved: ${alias} of ${name}.`);
-      await router.invalidate({ sync: true });
-    });
+    const { name } = workflow;
+    await decide(
+      async (session) => {
+        await session.workflowResources.approveBinding(workflow.id, {
+          alias,
+          target,
+          reviewed: { version },
+        });
+      },
+      t`Approved: ${alias} of ${name}.`
+    );
   };
   const { about } = frame.item;
   return (
     <ItemFrame
       acts={about === undefined ? [] : [{ label: t`Open`, to: about }]}
       busy={busy}
-      extra={
+      renderAnswers={(held) => (
         <PendingBindingList
           bindings={bindings}
-          busy={busy}
+          busy={held}
           elsewhere={workflow.id}
           onApprove={approve}
         />
-      }
+      )}
       failure={failure}
       frame={frame}
     />
@@ -741,7 +750,6 @@ const AskedItem = ({
   const { t } = useLingui();
   const router = useRouter();
   const core = useCore();
-  const armed = useArmed(frame.arriving);
   const { notification } = source;
   const { owner, question } = notification;
   const asked = t`Asked of you as the ${owner}`;
@@ -783,7 +791,7 @@ const AskedItem = ({
     <ItemFrame
       acts={[]}
       busy={false}
-      extra={
+      renderAnswers={(held) => (
         <Questionnaire aria-label={t`Question`} key={tries} onSubmit={answer}>
           <fieldset
             disabled={closed}
@@ -796,12 +804,12 @@ const AskedItem = ({
             </QuestionnaireItem>
           </fieldset>
           <QuestionnaireActions>
-            <QuestionnaireSubmit disabled={closed || !armed}>
+            <QuestionnaireSubmit disabled={held}>
               {t`Answer`}
             </QuestionnaireSubmit>
           </QuestionnaireActions>
         </Questionnaire>
-      }
+      )}
       failure={failure}
       frame={{ ...frame, item: { ...frame.item, title: asked } }}
     />

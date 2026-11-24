@@ -499,10 +499,13 @@ describe("the inbox", () => {
       answered: page.answered,
       open: beside(),
       said: document.querySelector("output")?.textContent,
+      // The one after it holds its Answer back a moment, and says so.
+      pause: panelText().includes("Its answers can be used in a moment"),
     }).toStrictEqual({
       answered: ["gap-2: The sales lead."],
       open: { question: "Who signs a quote?", place: "2 of 2" },
       said: "Answered: Who pays the invoices?",
+      pause: true,
     });
   });
 
