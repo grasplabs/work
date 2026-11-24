@@ -12607,6 +12607,7 @@ msgid "Redone"
 msgstr "Rehecho"
 
 #: src/connections/part-not-loaded.tsx
+#: src/frame/page-states.tsx
 msgid "Reference for support"
 msgstr "Referencia para soporte"
 
@@ -14626,6 +14627,7 @@ msgid "Something went wrong while it opened."
 msgstr "Algo salió mal al abrirla."
 
 #: src/connections/part-not-loaded.tsx
+#: src/frame/page-states.tsx
 #: src/route-error.tsx
 msgid "Something went wrong."
 msgstr "Algo ha salido mal."
