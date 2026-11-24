@@ -184,3 +184,67 @@ test("a person opens a line of the brain's activity beside it, sees what the bra
     page.getByRole("heading", { level: 1, name: title })
   ).toBeVisible();
 });
+
+test("on a phone, a source's name on the Sources page reads whole, with where it lives and when on the line under it", async ({
+  pageOf,
+}) => {
+  const { admin } = peopleIn("brainActivity");
+  const tag = crypto.randomUUID().replaceAll("-", "").slice(0, 12);
+  const title = `Travel policy ${tag} with a long name that runs past a phone's width`;
+  const { core, api } = apiOf(admin);
+  try {
+    await api.brain.addRecords([
+      {
+        type: "source",
+        id: `src-${tag}`,
+        kind: "document",
+        title,
+        date: new Date().toISOString().slice(0, 10),
+        who: "Controller",
+        teamIds: [],
+      },
+    ]);
+  } finally {
+    core[Symbol.dispose]();
+  }
+
+  const page = await pageOf(admin);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/brain/sources");
+  const row = page
+    .getByRole("main")
+    .getByRole("listitem")
+    .filter({ hasText: title });
+  await expect(row).toBeVisible(brainRead);
+
+  // Every word of the name inside the row's title, none cut off; the detail
+  // starts under the name's last line, not beside it.
+  const place = await row
+    .locator('[data-slot="item-title"]')
+    .evaluate((box, name) => {
+      const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+      const words = document.createRange();
+      for (
+        let node = walker.nextNode();
+        node !== null;
+        node = walker.nextNode()
+      ) {
+        if (node.textContent === name) {
+          words.selectNodeContents(node);
+        }
+      }
+      const text = words.getBoundingClientRect();
+      const detail = box
+        .querySelector('[data-slot="item-detail"]')
+        ?.getBoundingClientRect();
+      return {
+        textEnd: text.right,
+        textBottom: text.bottom,
+        titleEnd: box.getBoundingClientRect().right,
+        detailTop: detail?.top ?? 0,
+      };
+    }, title);
+  expect(place.textBottom).toBeGreaterThan(0);
+  expect(place.textEnd).toBeLessThanOrEqual(place.titleEnd + 0.5);
+  expect(place.detailTop).toBeGreaterThanOrEqual(place.textBottom - 0.5);
+});

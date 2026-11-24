@@ -18,6 +18,8 @@ import {
   WorkflowIcon,
 } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
+import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 
 // One source of the Brain as a row, for its Sources page, where no answer
@@ -63,6 +65,21 @@ const kindIcons: Record<SourceKind, IconData> = {
   memory: BrainIcon,
 };
 
+// A side panel's card keeps an `xs` row's detail whole at its end and cuts the name to what is
+// left, which on a phone is a few letters. Here the name and the detail are words of their own,
+// laid out as the card does, so the name wraps, never cut; on a phone the detail is the line under
+// the name, as in #2503.
+const styles = stylex.create({
+  words: {
+    display: { default: "flex", [media.maxSm]: "block" },
+    flexGrow: 1,
+    alignItems: "center",
+    gap: space["2"],
+    minWidth: 0,
+  },
+  detail: { display: { default: null, [media.maxSm]: "block" } },
+});
+
 /** Where it lives and when, in one quiet line. */
 const detailOf = (source: SourceRow): string =>
   [source.origin, source.when]
@@ -84,8 +101,10 @@ export const SourceItem = ({
       </ItemMedia>
       <ItemContent>
         <ItemTitle>
-          {source.title}
-          <ItemDetail>{detailOf(source)}</ItemDetail>
+          <span {...stylex.props(styles.words)}>
+            {source.title}
+            <ItemDetail style={styles.detail}>{detailOf(source)}</ItemDetail>
+          </span>
         </ItemTitle>
       </ItemContent>
     </>
