@@ -20,7 +20,7 @@ const styles = stylex.create({
   canvas: {
     display: "block",
     width: "100%",
-    height: { default: "13rem", [media.maxSm]: "10rem" },
+    height: { default: "22rem", [media.maxSm]: "12rem" },
     imageRendering: "pixelated",
   },
   figure: {
@@ -156,10 +156,10 @@ const drawMeadow =
 
 const TeamLabel = ({ team }: { team: TeamPicture }) => (
   <span {...stylex.props(styles.label)}>
-    <Text as="span" truncate>
+    <Text size="lg" as="span" truncate>
       {team.name}
     </Text>
-    <Text as="span" color="muted" truncate>
+    <Text size="lg" as="span" color="muted" truncate>
       {talkedWords(team, true)}
     </Text>
   </span>

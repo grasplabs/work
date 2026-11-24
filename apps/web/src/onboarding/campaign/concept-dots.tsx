@@ -30,7 +30,7 @@ import type { Put } from "./pixels.ts";
 
 /** The rows' columns: the team, its week, what Grasp learned there. */
 const ROW = {
-  default: "10rem minmax(14rem, 22rem) minmax(0, 1fr)",
+  default: "12rem minmax(20rem, 28rem) minmax(0, 1fr)",
   [media.maxMd]: "minmax(0, 1fr)",
 };
 
@@ -58,7 +58,7 @@ const styles = stylex.create({
   canvas: {
     display: "block",
     width: "100%",
-    height: "3rem",
+    height: "4.5rem",
     imageRendering: "pixelated",
   },
   foot: {
@@ -70,8 +70,8 @@ const styles = stylex.create({
   },
 });
 
-/** A square is three cells, a cell apart, piled two wide and up to four high in a day. */
-const SQUARE = 3;
+/** A square is four cells, a cell apart, piled two wide and up to four high in a day. */
+const SQUARE = 4;
 const PITCH = SQUARE + 1;
 const WIDE = 2;
 const HIGH = 4;
@@ -80,11 +80,12 @@ const square = (
   put: Put,
   x: number,
   y: number,
-  tone: "foreground" | "mint" | "border"
+  tone: "foreground" | "mint" | "border",
+  alpha = 1
 ) => {
   for (let dx = 0; dx < SQUARE; dx += 1) {
     for (let dy = 0; dy < SQUARE; dy += 1) {
-      put(x + dx, y + dy, tone);
+      put(x + dx, y + dy, tone, alpha);
     }
   }
 };
@@ -97,10 +98,18 @@ const drawWeek =
     const foot = rows - SQUARE;
     for (const [day, count] of counts.entries()) {
       const left = Math.floor(day * width + (width - (WIDE * PITCH - 1)) / 2);
+      if (day === today) {
+        // Today's column holds the light, faintly, behind its pile.
+        for (let y = 0; y < rows; y += 1) {
+          for (let x = left - 2; x < left + WIDE * PITCH + 1; x += 1) {
+            put(x, y, "mint", 0.12);
+          }
+        }
+      }
       if (day > today) {
-        // A day to come: one quiet square where its pile will start.
-        square(put, left, foot, "border");
-        square(put, left + PITCH, foot, "border");
+        // A day to come: one faint square where its pile will start.
+        square(put, left, foot, "border", 0.6);
+        square(put, left + PITCH, foot, "border", 0.6);
         continue;
       }
       const shown = Math.min(count, WIDE * HIGH);
@@ -150,6 +159,7 @@ const DayLetters = ({ campaign }: { campaign: Campaign }) => {
         }).format(date);
         return (
           <Text
+            size="lg"
             as="span"
             color={day === today ? "default" : "muted"}
             key={letter + String(day)}
@@ -169,10 +179,10 @@ export const CampaignDots = ({ campaign }: { campaign: Campaign }) => {
   return (
     <div {...stylex.props(styles.page)}>
       <header {...stylex.props(styles.statement)}>
-        <Heading level={1} size="lg">
+        <Heading level={1} size="xl">
           {lead}
         </Heading>
-        <Text>{rest}</Text>
+        <Text size="lg">{rest}</Text>
       </header>
       <div {...stylex.props(styles.table)}>
         <div {...stylex.props(styles.row)}>
@@ -184,10 +194,10 @@ export const CampaignDots = ({ campaign }: { campaign: Campaign }) => {
           return (
             <div key={each.id} {...stylex.props(styles.row)}>
               <span {...stylex.props(styles.team)}>
-                <Text as="span" truncate>
+                <Text size="lg" as="span" truncate>
                   {campaign.grouped ? each.name : "Everyone"}
                 </Text>
-                <Text as="span" color="muted">
+                <Text size="lg" as="span" color="muted">
                   {counted}
                 </Text>
               </span>
@@ -197,7 +207,10 @@ export const CampaignDots = ({ campaign }: { campaign: Campaign }) => {
                 team={each}
               />
               <span {...stylex.props(wide.only)}>
-                <Text color={first === undefined ? "muted" : "default"}>
+                <Text
+                  size="lg"
+                  color={first === undefined ? "muted" : "default"}
+                >
                   {first === undefined
                     ? "Nothing learned yet. The first findings come on day two."
                     : findingSentence(first, each, {
