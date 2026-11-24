@@ -32,7 +32,8 @@ import { onboardingStore } from "./onboarding/store.ts";
 // What became of the brain's gaps (`brain.askAboutGap`, `answerGap`,
 // `closeGap`): the gap record itself is never written over (brain-records
 // .ts); its ask, answer and close are kept beside it, in
-// `brain_gap_states`, each set once. Threat model, and how each is closed
+// `brain_gap_states`: its answer and close set once, its ask each time
+// an admin asks while it is open. Threat model, and how each is closed
 // (the design is on GRA-527, the chat that answers from it on GRA-531):
 //
 // - Someone asking about or closing a gap who shouldn't: the company's own
@@ -61,6 +62,12 @@ import { onboardingStore } from "./onboarding/store.ts";
 //   the batch), at most `maxAsked` of them. The notification carries the
 //   gap's id; its question, which every member reads anyway, is read
 //   from the record as it is listed, and only while the gap is open.
+// - Asking again to reopen a gap, or to bury its owner in notices: a
+//   further ask is the same guarded write (`closed_at IS NULL`), so it
+//   never lands on a closed gap, and it is told through the one
+//   notification a person has per gap, made unread and current again,
+//   so however often an admin asks, the owner has one notice of it.
+//   Each ask is audited, with who asked.
 
 type GapState = typeof brainGapStates.$inferSelect;
 
@@ -223,12 +230,14 @@ const ownersOf = async (env: Env, owner: string): Promise<string[]> => {
 
 /**
  * Asks `gapId` of the members who hold its owner's role (`ownersOf`), as
- * `person`, once: for admins. The ask is kept with a notification for
+ * `person`: for admins. The ask is kept with a notification for
  * each of them in one batch, so the gap shows as asked only once its
  * question is theirs to read (notifications.ts): never when nobody holds
  * the role, nor when none of them is a member by the time it is written.
- * Asking an open gap again changes nothing; a closed gap is refused,
- * closed before the ask or while it was made.
+ * An open gap may be asked again, of who holds the role by then: the ask
+ * kept is the newest, and each owner's one notification of the gap is
+ * unread and current again. A closed gap is refused, closed before the
+ * ask or while it was made.
  */
 export const askAboutGap = async (
   env: Env,
@@ -240,9 +249,6 @@ export const askAboutGap = async (
   const before = await readGap(env, gap);
   if (before.closedAt !== undefined) {
     throw brainGapErrors.create("brain.gap_closed");
-  }
-  if (before.askedAt !== undefined) {
-    return before;
   }
   const owners = await ownersOf(env, gap.owner);
   const [first, ...rest] = owners;
@@ -266,14 +272,22 @@ export const askAboutGap = async (
     },
     "core"
   );
-  /** The notification that asks `owner`, once the ask is recorded. */
+  /**
+   * The notification that asks `owner`, once the ask is recorded: the
+   * one they have of this gap from an earlier ask, unread and current
+   * again, or a new one.
+   */
   const notify = (owner: string) =>
     db
       .insert(notifications)
       .select(
         sql`SELECT ${crypto.randomUUID()}, ${owner}, 'gap_asked', NULL, NULL, ${gap.id}, ${now}, ${now}, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL WHERE ${storedEvent(event.id)} AND ${activeMember(owner)}`
       )
-      .onConflictDoNothing();
+      .onConflictDoUpdate({
+        target: [notifications.personId, notifications.gapId],
+        targetWhere: sql`gap_id IS NOT NULL`,
+        set: { updatedAt: sql`excluded.updated_at`, readAt: null },
+      });
   const [asked] = await auditedBatch(env, db, [
     // The WHERE keeps SQLite from reading ON CONFLICT as a join.
     db
@@ -284,7 +298,7 @@ export const askAboutGap = async (
       .onConflictDoUpdate({
         target: brainGapStates.gapId,
         set: { askedAt: sql`excluded.asked_at` },
-        setWhere: sql`${brainGapStates.askedAt} IS NULL AND ${brainGapStates.closedAt} IS NULL`,
+        setWhere: sql`${brainGapStates.closedAt} IS NULL`,
       }),
     outboxedEventWhere(db, event, sql`changes() > 0`),
     notify(first),
@@ -293,14 +307,11 @@ export const askAboutGap = async (
   const after = await readGap(env, gap);
   // Asked by this call only if its guarded write changed the row: an
   // answer or close that landed first leaves it closed, and none of the
-  // owners a member any more leaves it unasked.
+  // owners a member any more leaves it as it was.
   if (asked.meta.changes === 0) {
-    if (after.closedAt !== undefined) {
-      throw brainGapErrors.create("brain.gap_closed");
-    }
-    if (after.askedAt === undefined) {
-      throw brainGapErrors.create("brain.gap_no_owner");
-    }
+    throw brainGapErrors.create(
+      after.closedAt === undefined ? "brain.gap_no_owner" : "brain.gap_closed"
+    );
   }
   return after;
 };

@@ -66,6 +66,7 @@ const stephen: Agent = {
   state: "on",
   ownerId: null,
   offeredAt: null,
+  madeBy: null,
   changedBy: null,
   changedAt: null,
 };
@@ -180,6 +181,7 @@ const fakeConnections = () => {
         state: "on",
         ownerId: null,
         offeredAt: null,
+        madeBy: "admin",
         changedBy: "admin",
         changedAt: "2026-11-12T09:00:00.000Z",
       };
@@ -205,6 +207,7 @@ const fakeConnections = () => {
         state: "on",
         ownerId: "user-me",
         offeredAt: null,
+        madeBy: "user-me",
         changedBy: "user-me",
         changedAt: "2026-11-12T09:00:00.000Z",
       };
