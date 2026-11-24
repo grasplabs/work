@@ -162,7 +162,6 @@ const ModelPicker = ({
   const name = modelName(model);
   const thinks = efforts.length > 0 && onEffort !== undefined;
   const makers = [...new Set(models.map(makerOf))];
-  const chosenMark = makerMark(makerOf(model));
   const level =
     thinks && effort !== undefined ? t(effortNames[effort]) : undefined;
   return (
@@ -193,9 +192,8 @@ const ModelPicker = ({
             : t`Model: ${name}. Change model`
         }
       >
-        {chosenMark === undefined ? null : (
-          <ModelSelectorLogo logo={chosenMark} />
-        )}
+        {/* The chosen model by its name alone, as #2503's chip: the makers'
+            marks stand in the list. */}
         <ModelSelectorName>
           {level === undefined ? name : `${name} · ${level}`}
         </ModelSelectorName>

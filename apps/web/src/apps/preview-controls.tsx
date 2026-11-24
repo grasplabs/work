@@ -5,15 +5,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@grasp-os/ui/components/select";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
 import { ArrowUpRightIcon, Icon, RefreshCwIcon } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useNavigate, useSearch } from "@tanstack/react-router";
+import { useSearch } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { useCoreRead } from "./use-core-read.ts";
@@ -190,49 +186,6 @@ export interface PreviewControlsProps {
   onPage: (page: string) => void;
   onReload: () => void;
 }
-
-/**
- * How wide the preview is drawn, kept in the address (`?width=`). In the
- * reference's frame it stands under the App's name in the sidebar; until
- * the frame is on Damsko it stands over the preview, at its end
- * (app-workspace.tsx), as the bar has no room for it beside the docked chat.
- */
-export const WidthSwitch = () => {
-  const { t } = useLingui();
-  const width = usePreviewWidth();
-  const navigate = useNavigate({ from: "/apps/$app" });
-  const labels: Record<PreviewWidth, string> = {
-    desktop: t`Desktop`,
-    tablet: t`Tablet`,
-    phone: t`Phone`,
-  };
-  return (
-    <ToggleGroup
-      aria-label={t`Preview width`}
-      onValueChange={(chosen: string[]) => {
-        const picked = previewWidthOrder.find((each) => each === chosen[0]);
-        if (picked === undefined) {
-          return;
-        }
-        void navigate({
-          replace: true,
-          search: (before) => ({
-            ...before,
-            width: picked === "desktop" ? undefined : picked,
-          }),
-        });
-      }}
-      size="sm"
-      value={[width]}
-    >
-      {previewWidthOrder.map((each) => (
-        <ToggleGroupItem key={each} value={each}>
-          {labels[each]}
-        </ToggleGroupItem>
-      ))}
-    </ToggleGroup>
-  );
-};
 
 /** The preview's width, Reload, page and Open in a new tab. */
 export const PreviewControls = ({

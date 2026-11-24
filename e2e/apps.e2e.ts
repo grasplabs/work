@@ -200,14 +200,14 @@ test("a builder finds an App in the list, opens it and uses its page with live d
   await counter.getByRole("button", { name: "Add one" }).click();
   await expect(counter.getByRole("status", { name: "Count" })).toHaveText("1");
 
-  // Its settings, beside the chat in its workspace: what it is, its
-  // connections and its members.
+  // Its settings, the sidebar's rows of its workspace, beside the chat:
+  // what it is, its connections and its members.
   await page
-    .getByRole("navigation", { name: "Workspace views" })
-    .getByRole("link", { name: "Settings" })
+    .getByRole("navigation", { name: /s workspace$/u })
+    .getByRole("link", { name: "General" })
     .click();
   await expect(page.getByLabel("What it is for")).toHaveValue("Counts clicks");
-  const sections = page.getByRole("navigation", { name: "Settings sections" });
+  const sections = page.getByRole("navigation", { name: /s workspace$/u });
   // A builder sees the connections it uses; this one uses none.
   await sections.getByRole("link", { name: "Connections" }).click();
   await expect(

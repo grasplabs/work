@@ -9,12 +9,14 @@ import {
   DialogContent,
   DialogDescription,
   DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
 import { Field, FieldError, FieldLabel } from "@grasp-os/ui/components/field";
 import { Form } from "@grasp-os/ui/components/form";
 import {
   InputGroup,
+  InputGroupAddon,
   InputGroupInput,
   InputGroupText,
 } from "@grasp-os/ui/components/input-group";
@@ -88,10 +90,12 @@ export const AppLinkDialog = ({
   return (
     <Dialog onOpenChange={handleOpenChange} open={open}>
       <DialogContent>
-        <DialogTitle>{t`Link to ${name}`}</DialogTitle>
-        <DialogDescription>
-          {t`Opens the App for the workspace's members who may use it, while it is published.`}
-        </DialogDescription>
+        <DialogHeader>
+          <DialogTitle>{t`Link to ${name}`}</DialogTitle>
+          <DialogDescription>
+            {t`Opens the App for the workspace's members who may use it, while it is published.`}
+          </DialogDescription>
+        </DialogHeader>
         <DialogBody>
           <Form
             id={formId}
@@ -105,7 +109,9 @@ export const AppLinkDialog = ({
             <Field data-invalid={wrong}>
               <FieldLabel>{t`Link`}</FieldLabel>
               <InputGroup>
-                <InputGroupText>{`${window.location.host}/`}</InputGroupText>
+                <InputGroupAddon>
+                  <InputGroupText>{`${window.location.host}/`}</InputGroupText>
+                </InputGroupAddon>
                 <InputGroupInput
                   autoComplete="off"
                   maxLength={appLinkMaxLength}
