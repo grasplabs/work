@@ -2073,6 +2073,13 @@
       "when": 1795480414785,
       "tag": "0295_app_request_askers",
       "breakpoints": true
+    },
+    {
+      "idx": 296,
+      "version": "6",
+      "when": 1795536358209,
+      "tag": "0296_app_version_pictures",
+      "breakpoints": true
     }
   ]
 }

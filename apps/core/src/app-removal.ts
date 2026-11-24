@@ -9,6 +9,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
+import { deletePictures } from "./app-pictures.ts";
 import { appFor } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import {
@@ -86,6 +87,8 @@ import {
 //   the organization's own admins, never Grasp staff, read, export and
 //   delete its default store (data-stores.ts, `managedBy`); the store's
 //   owner claim stays.
+// - Its versions' pictures outliving it (app-pictures.ts): deleted once
+//   it is removed, best effort; nobody may open it to read them anyway.
 // - Held actions waiting for ever: those it made in connect, which nobody
 //   can confirm now, are declined as expired, recorded by connect
 //   (`connection.action.expired`, reason `app.removed`).
@@ -175,8 +178,17 @@ const endedWith = (
   ] as const;
 };
 
-/** What follows a removal, best effort: its held actions, its preview. */
+/**
+ * What follows a removal, best effort: its versions' pictures, its held
+ * actions, its preview.
+ */
 const afterRemoval = async (env: Env, appId: AppId): Promise<void> => {
+  // Nobody may open it now, so nobody reads them (app-pictures.ts).
+  try {
+    await deletePictures(env, appId);
+  } catch (error) {
+    log.warn("app.pictures_delete_failed", { appId, ...errorFields(error) });
+  }
   // Its preview's test data, which nobody builds any more, and what the
   // preview kept (app-preview.ts).
   try {

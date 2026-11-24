@@ -1,5 +1,6 @@
 import { appWebhookEvents } from "@grasp-os/shared/app-webhooks";
 import type { AppWebhookEvent } from "@grasp-os/shared/app-webhooks";
+import { appPictureTypes } from "@grasp-os/shared/apps";
 import type { AgentProposer } from "@grasp-os/shared/apps";
 import { auditRejectReasons } from "@grasp-os/shared/audit";
 import type { ChatFileType } from "@grasp-os/shared/chat";
@@ -1448,7 +1449,8 @@ export const appVersions = sqliteTable(
      * Where publishing left the version (src/app-publish.ts): `published`
      * once it was built, sealed and its tests passed, `failed` when its
      * last publish was refused, null for one never published. With
-     * `published_manifest_hash`, the only columns of a version that change.
+     * `published_manifest_hash` and `picture`, the only columns of a
+     * version that change.
      */
     status: text({ enum: ["published", "failed"] }),
     /**
@@ -1458,6 +1460,13 @@ export const appVersions = sqliteTable(
      * core, or sealed again, is published again. Null until it is.
      */
     publishedManifestHash: text("published_manifest_hash"),
+    /**
+     * The type of the version's picture, as its bytes told it, once one
+     * was set (src/app-pictures.ts): kept in the files bucket under the
+     * App (src/apps.ts, `pictureKey`). Null while it has none; set again,
+     * it is replaced.
+     */
+    picture: text({ enum: appPictureTypes }),
   },
   (table) => [
     primaryKey({ columns: [table.appId, table.version] }),
