@@ -83,7 +83,7 @@ const styles = stylex.create({
   },
   fillColumn: { flexGrow: 1, minHeight: 0 },
   narrowColumn: { maxWidth: "34rem" },
-  wideColumn: { maxWidth: "40rem" },
+  wideColumn: { maxWidth: "48rem" },
 });
 
 /** A step of the whole setup, by the screen's name. */
