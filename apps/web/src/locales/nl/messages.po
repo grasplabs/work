@@ -14109,10 +14109,6 @@ msgstr "Digitaal ondertekenen"
 msgid "Signing in happens at {app}. It takes about a minute."
 msgstr "Aanmelden gebeurt bij {app}. Het duurt ongeveer een minuut."
 
-#: src/routes/interview.tsx
-msgid "Signing in is recorded by your company's sign-in, as every sign-in is."
-msgstr "Het inloggen wordt vastgelegd door de inlog van je bedrijf, zoals elke keer inloggen."
-
 #: src/frame/person-menu.tsx
 msgid "Signing out didn't work"
 msgstr "Uitloggen is niet gelukt"
@@ -16896,8 +16892,8 @@ msgid "Use the default"
 msgstr "Standaard gebruiken"
 
 #: src/routes/interview.tsx
-msgid "Use your work account, the one your link was sent to."
-msgstr "Gebruik je werkaccount, het account waar je link naartoe is gestuurd."
+msgid "Use the work account your link was sent to."
+msgstr "Gebruik het werkaccount waar je link naartoe is gestuurd."
 
 #: src/chat/thread.tsx
 msgid "Used {tool}"
@@ -18749,6 +18745,10 @@ msgstr "De naam van je bedrijf in Grasp."
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Your company’s name in Grasp. An admin changes it."
 msgstr "De naam van je bedrijf in Grasp. Een beheerder wijzigt hem."
+
+#: src/routes/interview.tsx
+msgid "Your company’s sign-in records it, like every sign-in."
+msgstr "De aanmelding van je bedrijf legt dit vast, zoals elke aanmelding."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Your company’s VAT number, as invoices show it."

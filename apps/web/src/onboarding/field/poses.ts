@@ -15,6 +15,29 @@ export const fromTheTop: Pose = {
   strength: 0.42,
 };
 
+/**
+ * Gathered round the words while a screen opens: close to the middle,
+ * brighter and quicker than at rest, so the wait is him getting it ready.
+ * From here he moves on to the pose of the screen that opens.
+ */
+export const gathering: Pose = {
+  // The words sit a little under the window's middle, below the header.
+  at: [0.5, 0.54],
+  reach: [0.3, 0.36],
+  seed: 3.3,
+  tempo: 1.7,
+  strength: 0.62,
+};
+
+/** Low beside the words, a screen of the interview that asks something of them. */
+export const beside: Pose = {
+  at: [0.5, 1],
+  reach: [0.9, 0.5],
+  seed: 5.6,
+  tempo: 0.8,
+  strength: 0.4,
+};
+
 export const poses: Record<SetupStep, Pose> = {
   // Beside the flags' far edge, where they stand whole.
   welcome: {

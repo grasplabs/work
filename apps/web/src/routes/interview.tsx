@@ -1,10 +1,8 @@
 import { interviewPagePath } from "@grasp-os/shared/interview-links";
 import type { SignInOption } from "@grasp-os/shared/rpc";
 import { Button } from "@grasp-os/ui/components/button";
-import { Text } from "@grasp-os/ui/components/text";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { Heading } from "@grasp-os/ui/components/heading";
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
@@ -24,6 +22,7 @@ import { Frame } from "../interview/frame.tsx";
 import { holdInterview, releaseInterview } from "../interview/kept.ts";
 import { InterviewPage } from "../interview/page.tsx";
 import { resumed } from "../interview/progress.ts";
+import { fromTheTop, gathering } from "../onboarding/field/poses.ts";
 import { signInErrorMessage, signInErrorSearch } from "../sign-in-errors.ts";
 import { SignInOptions } from "../sign-in-options.tsx";
 
@@ -97,17 +96,6 @@ const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
   return { state: "open", secret, session: answer };
 };
 
-const styles = stylex.create({
-  // The way in, under what there is to say.
-  signIn: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: space["4"],
-    width: "100%",
-  },
-});
-
 /**
  * Why the link opens no interview here, in the interview's own calm frame:
  * the serif title, one line under it, and what they can do about it.
@@ -125,7 +113,7 @@ const Notice = ({
   /** What they can do about it, under what there is to say. */
   children?: ReactNode;
 }) => (
-  <Frame>
+  <Frame pose={fromTheTop}>
     <Calm>
       <Words
         line={failed ? <ErrorText>{message}</ErrorText> : message}
@@ -136,15 +124,16 @@ const Notice = ({
   </Frame>
 );
 
+/** While the link opens: Stephen gathered round the words, in his serif, until the screen it opens takes him on. */
 const Loading = () => {
   const { t } = useLingui();
   return (
-    <Frame>
+    <Frame pose={gathering}>
       <Calm>
         <output>
-          <Text as="span" size="lg">
+          <Heading level={1} size="lg">
             {t`Opening your interview…`}
-          </Text>
+          </Heading>
         </output>
       </Calm>
     </Frame>
@@ -187,7 +176,7 @@ const signInRefusal = (error: string, wrongAccount: string): string =>
 
 /**
  * Before the interview: the company's sign-in, and that it is recorded
- * there, said before the button (GRA-1790).
+ * there, said before the button (GRA-1790), in the line under the title.
  */
 const SignIn = ({
   options,
@@ -198,29 +187,37 @@ const SignIn = ({
 }) => {
   const { t } = useLingui();
   return (
-    <Notice
-      message={t`Use your work account, the one your link was sent to.`}
-      title={t`Sign in to open your interview`}
-    >
-      <div {...stylex.props(styles.signIn)}>
-        <Text size="lg">
-          {t`Signing in is recorded by your company's sign-in, as every sign-in is.`}
-        </Text>
-        <ErrorText>
-          {error === undefined
-            ? undefined
-            : signInRefusal(
-                error,
-                t`That account can't open this interview. Sign in with the work account your link was sent to.`
-              )}
-        </ErrorText>
-        <SignInOptions
-          error={undefined}
-          options={options}
-          returnTo={interviewPagePath}
+    <Frame pose={fromTheTop}>
+      <Calm>
+        <Words
+          line={
+            // One sentence a line: which account, then that it is recorded.
+            <>
+              {t`Use the work account your link was sent to.`}
+              <br />
+              {t`Your company’s sign-in records it, like every sign-in.`}
+            </>
+          }
+          title={t`Sign in to open your interview`}
         />
-      </div>
-    </Notice>
+        <Actions>
+          <ErrorText>
+            {error === undefined
+              ? undefined
+              : signInRefusal(
+                  error,
+                  t`That account can't open this interview. Sign in with the work account your link was sent to.`
+                )}
+          </ErrorText>
+          <SignInOptions
+            error={undefined}
+            fit
+            options={options}
+            returnTo={interviewPagePath}
+          />
+        </Actions>
+      </Calm>
+    </Frame>
   );
 };
 

@@ -14109,10 +14109,6 @@ msgstr "Signing"
 msgid "Signing in happens at {app}. It takes about a minute."
 msgstr "Signing in happens at {app}. It takes about a minute."
 
-#: src/routes/interview.tsx
-msgid "Signing in is recorded by your company's sign-in, as every sign-in is."
-msgstr "Signing in is recorded by your company's sign-in, as every sign-in is."
-
 #: src/frame/person-menu.tsx
 msgid "Signing out didn't work"
 msgstr "Signing out didn't work"
@@ -16896,8 +16892,8 @@ msgid "Use the default"
 msgstr "Use the default"
 
 #: src/routes/interview.tsx
-msgid "Use your work account, the one your link was sent to."
-msgstr "Use your work account, the one your link was sent to."
+msgid "Use the work account your link was sent to."
+msgstr "Use the work account your link was sent to."
 
 #: src/chat/thread.tsx
 msgid "Used {tool}"
@@ -18749,6 +18745,10 @@ msgstr "Your company’s name in Grasp."
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Your company’s name in Grasp. An admin changes it."
 msgstr "Your company’s name in Grasp. An admin changes it."
+
+#: src/routes/interview.tsx
+msgid "Your company’s sign-in records it, like every sign-in."
+msgstr "Your company’s sign-in records it, like every sign-in."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Your company’s VAT number, as invoices show it."

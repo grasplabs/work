@@ -14109,10 +14109,6 @@ msgstr "Firma electrónica"
 msgid "Signing in happens at {app}. It takes about a minute."
 msgstr "El inicio de sesión se hace en {app}. Tarda alrededor de un minuto."
 
-#: src/routes/interview.tsx
-msgid "Signing in is recorded by your company's sign-in, as every sign-in is."
-msgstr "El inicio de sesión queda registrado en el inicio de sesión de tu empresa, como cualquier inicio de sesión."
-
 #: src/frame/person-menu.tsx
 msgid "Signing out didn't work"
 msgstr "No se pudo cerrar la sesión"
@@ -16896,8 +16892,8 @@ msgid "Use the default"
 msgstr "Usar el predeterminado"
 
 #: src/routes/interview.tsx
-msgid "Use your work account, the one your link was sent to."
-msgstr "Usa tu cuenta del trabajo, la cuenta a la que se envió tu enlace."
+msgid "Use the work account your link was sent to."
+msgstr "Usa la cuenta de trabajo a la que se envió tu enlace."
 
 #: src/chat/thread.tsx
 msgid "Used {tool}"
@@ -18749,6 +18745,10 @@ msgstr "El nombre de tu empresa en Grasp."
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Your company’s name in Grasp. An admin changes it."
 msgstr "El nombre de tu empresa en Grasp. Lo cambia un administrador."
+
+#: src/routes/interview.tsx
+msgid "Your company’s sign-in records it, like every sign-in."
+msgstr "El inicio de sesión de tu empresa lo registra, como cada inicio de sesión."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Your company’s VAT number, as invoices show it."
