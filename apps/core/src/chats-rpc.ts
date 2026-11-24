@@ -69,7 +69,7 @@ import { createFromBlueprint } from "./app-blueprints.ts";
 import { appKind, createApp, editableApp } from "./apps.ts";
 import { chatAgentOf, chatAgentsFor } from "./chat-agents.ts";
 import { chatRequests, decideInChat } from "./chat-connections.ts";
-import { readChatFile } from "./chat-files.ts";
+import { readChatFile, readChatPicture } from "./chat-files.ts";
 import { mentionablePeople, mentionsOf } from "./chat-mentions.ts";
 import { personOf } from "./connections.ts";
 import { chatWork, chatsWorkedOn, keepMadeInChat } from "./drafts.ts";
@@ -594,12 +594,14 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
 
   /**
    * Reads the file's text (chat-files.ts), outside the person's Workspace
-   * object, then attaches it to their chat there, audited.
+   * object, or takes it whole when its bytes are a picture, then attaches
+   * it to their chat there, audited.
    */
   async attachFile(chatId: string, file: ChatFileInput): Promise<ChatFile> {
     return await withPerson(this.#check, async (person) => {
       const id = chatIdOf(chatId);
-      const read = await readChatFile(this.#env, file);
+      const read =
+        readChatPicture(file) ?? (await readChatFile(this.#env, file));
       return await this.#chatsOf(person.userId).attachFile(
         id,
         person.userId,

@@ -1437,6 +1437,17 @@ export class ChatHarness {
               async () => await brainOf(env, scope.personId)
             ),
           }),
+      // The pictures its questions carry, shown to a model that takes
+      // pictures; to any other, their questions' words alone.
+      ...(admitted.model.input.includes("image")
+        ? {
+            picture: async (fileId: string, maxBytes: number) =>
+              await callObject(
+                async () =>
+                  await host().chatPicture(scope.chatId, fileId, maxBytes)
+              ),
+          }
+        : {}),
       withheld: async () => {
         const checked = await this.#guard(scope);
         this.#sources = checked.sources;
