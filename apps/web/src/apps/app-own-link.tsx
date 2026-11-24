@@ -1,32 +1,28 @@
-import { Button } from "@grasp-os/app-kit/components/button";
+import { appLinkMaxLength, appLinkSchema } from "@grasp-os/shared/apps";
+import type { App } from "@grasp-os/shared/apps";
+import { Alert, AlertTitle } from "@grasp-os/ui/components/alert";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   Dialog,
+  DialogBody,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
-  DialogHeader,
   DialogTitle,
-} from "@grasp-os/app-kit/components/dialog";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "@grasp-os/app-kit/components/field";
+} from "@grasp-os/ui/components/dialog";
+import { Field, FieldError, FieldLabel } from "@grasp-os/ui/components/field";
+import { Form } from "@grasp-os/ui/components/form";
 import {
   InputGroup,
-  InputGroupAddon,
   InputGroupInput,
   InputGroupText,
-} from "@grasp-os/app-kit/components/input-group";
-import { appLinkMaxLength, appLinkSchema } from "@grasp-os/shared/apps";
-import type { App } from "@grasp-os/shared/apps";
-import { Trans, useLingui } from "@lingui/react/macro";
+} from "@grasp-os/ui/components/input-group";
+import { useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
-import { useState } from "react";
+import { useId, useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
-import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
 // An App's own link, as the prototype's publish dialog gives one
@@ -86,83 +82,75 @@ export const AppLinkDialog = ({
     setTyped(undefined);
     onOpenChange(next);
   };
+  const formId = useId();
+  const { name } = app;
+  const wrong = link !== "" && !valid;
   return (
     <Dialog onOpenChange={handleOpenChange} open={open}>
       <DialogContent>
-        <DialogHeader>
-          <DialogTitle>
-            <Trans>Link to {app.name}</Trans>
-          </DialogTitle>
-          <DialogDescription>
-            <Trans>
-              Opens the App for the workspace&apos;s members who may use it,
-              while it is published.
-            </Trans>
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            save(link);
-          }}
-        >
-          <Field data-invalid={link !== "" && !valid}>
-            <FieldLabel htmlFor="app-link">
-              <Trans>Link</Trans>
-            </FieldLabel>
-            <InputGroup>
-              <InputGroupAddon>
+        <DialogTitle>{t`Link to ${name}`}</DialogTitle>
+        <DialogDescription>
+          {t`Opens the App for the workspace's members who may use it, while it is published.`}
+        </DialogDescription>
+        <DialogBody>
+          <Form
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!busy && valid && link !== app.link) {
+                save(link);
+              }
+            }}
+          >
+            <Field data-invalid={wrong}>
+              <FieldLabel>{t`Link`}</FieldLabel>
+              <InputGroup>
                 <InputGroupText>{`${window.location.host}/`}</InputGroupText>
-              </InputGroupAddon>
-              <InputGroupInput
-                aria-invalid={link !== "" && !valid}
-                autoComplete="off"
-                id="app-link"
-                maxLength={appLinkMaxLength}
-                onChange={(event) => {
-                  setTyped(event.target.value);
-                }}
-                placeholder={t`sales-pipeline`}
-                spellCheck={false}
-                value={link}
-              />
-            </InputGroup>
-            {link !== "" && !valid ? (
-              <FieldError>
-                <Trans>
-                  Lower-case letters and digits, with single dashes between
-                  them; not the name of one of the workspace&apos;s pages.
-                </Trans>
-              </FieldError>
-            ) : (
-              <FieldDescription>
-                <Trans>Only someone signed in to the workspace opens it.</Trans>
-              </FieldDescription>
+                <InputGroupInput
+                  autoComplete="off"
+                  maxLength={appLinkMaxLength}
+                  onValueChange={setTyped}
+                  placeholder={t`sales-pipeline`}
+                  spellCheck={false}
+                  value={link}
+                />
+              </InputGroup>
+              {wrong ? (
+                <FieldError match>
+                  {t`Lower-case letters and digits, with single dashes between them; not the name of one of the workspace's pages.`}
+                </FieldError>
+              ) : null}
+            </Field>
+            {failure === undefined ? null : (
+              <Alert variant="destructive">
+                <AlertTitle>{failure}</AlertTitle>
+              </Alert>
             )}
-          </Field>
-          <ErrorText>{failure}</ErrorText>
-          <DialogFooter>
-            {app.link === null ? null : (
-              <Button
-                disabled={busy}
-                onClick={() => {
-                  save(null);
-                }}
-                type="button"
-                variant="outline"
-              >
-                <Trans>Remove link</Trans>
-              </Button>
-            )}
+          </Form>
+        </DialogBody>
+        <DialogFooter>
+          {app.link === null ? (
+            <DialogClose>{t`Cancel`}</DialogClose>
+          ) : (
             <Button
-              disabled={busy || !valid || link === app.link}
-              type="submit"
+              disabled={busy}
+              onClick={() => {
+                save(null);
+              }}
+              variant="outline"
             >
-              <Trans>Save link</Trans>
+              {t`Remove link`}
             </Button>
-          </DialogFooter>
-        </form>
+          )}
+          <Button
+            disabled={busy || !valid || link === app.link}
+            form={formId}
+            type="submit"
+            variant="default"
+          >
+            {t`Save link`}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

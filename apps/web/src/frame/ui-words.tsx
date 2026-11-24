@@ -1,8 +1,10 @@
 import { I18nProvider } from "@grasp-os/ui/lib/i18n";
 import type { I18nCatalog } from "@grasp-os/ui/lib/i18n";
-import { plural } from "@lingui/core/macro";
+import { plural, selectOrdinal } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import type { ReactNode } from "react";
+
+import { formatList } from "../format.ts";
 
 /**
  * The few words Damsko's components say themselves ("Copied", "Working"),
@@ -48,13 +50,16 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
     },
     command: {
       dialogPlaceholder: t`Type a command or search`,
-      dialogTrigger: t({ message: "Search", context: "open the search" }),
+      dialogTrigger: t({
+        message: "Search",
+        context: "a command list's field",
+      }),
       empty: t`No results`,
-      error: t({ message: "Failed", context: "a search that failed" }),
+      error: t({ message: "Failed", context: "a list row's action" }),
       expand: (label) => t`More for ${label}`,
-      loading: t`Searching`,
+      loading: t({ message: "Searching", context: "a list fetching results" }),
       moreHint: t`Right arrow for more`,
-      placeholder: t({ message: "Search", context: "a search field" }),
+      placeholder: t({ message: "Search", context: "a command list's field" }),
     },
     dropdownMenu: {
       expand: t`More actions`,
@@ -82,7 +87,10 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       saved: (value) => t`Changed to ${value}`,
     },
     keyValue: {
-      copy: (label) => t`Copy ${label}`,
+      copy: (label) => {
+        const what = label.toLocaleLowerCase();
+        return t`Copy ${what}`;
+      },
       loading: t`Loading the value`,
     },
     link: {
@@ -438,6 +446,35 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
         error: t({ message: "Failed", context: "a step's state" }),
         pending: t({ message: "Waiting", context: "a step's state" }),
       },
+    },
+    // The parts the Apps pages use (apps/), from here on.
+    avatar: {
+      groupCount: (count) => t`+${count}`,
+      // The names shown and how many more, joined as the language joins a list.
+      groupName: (shown, rest) =>
+        formatList(
+          rest > 0
+            ? [
+                ...shown,
+                t`${plural(rest, { one: "# other", other: "# others" })}`,
+              ]
+            : shown
+        ),
+    },
+    table: {
+      sortIndex: (place) =>
+        t`${selectOrdinal(place, { one: "sorted #st", two: "sorted #nd", few: "sorted #rd", other: "sorted #th" })}`,
+    },
+    toast: {
+      close: t`Close`,
+      error: t`Could not finish`,
+      loading: t`Still working`,
+      name: t`Notifications`,
+    },
+    treeView: {
+      clear: t`Clear the filter`,
+      empty: t`No matches`,
+      filter: t`Filter`,
     },
   };
   return (

@@ -1,18 +1,21 @@
-import { Button } from "@grasp-os/app-kit/components/button";
+import { failureText } from "@grasp-os/shared/errors";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   Dialog,
+  DialogBody,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
-  DialogHeader,
   DialogTitle,
-} from "@grasp-os/app-kit/components/dialog";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { CheckIcon, LayoutTemplateIcon } from "lucide-react";
+} from "@grasp-os/ui/components/dialog";
+import { useAction } from "@grasp-os/ui/hooks/use-action";
+import { CheckIcon, FloorPlanIcon, Icon } from "@grasp-os/ui/lib/icons";
+import { useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 
-import { ErrorText } from "../error-text.tsx";
-import { useCoreAction } from "../use-core-action.ts";
+import { useCore } from "../use-core.ts";
 
 // Blueprints, as in the prototype (grasplabs/prototype
 // `blueprint-dialog.tsx`): a version of an App saved for Grasp's agent to
@@ -33,17 +36,22 @@ export const SaveAsBlueprint = ({
   version: number;
 }) => {
   const { t } = useLingui();
-  const { busy, failure, run } = useCoreAction();
+  const core = useCore();
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState(false);
-  const save = async (): Promise<void> => {
-    const marked = await run(
-      async (session) => await session.apps.blueprints.mark(app, version)
-    );
-    if (marked !== undefined) {
+  const save = useAction(
+    async () => {
+      await core.withSession(
+        async (session) => await session.apps.blueprints.mark(app, version)
+      );
       setSaved(true);
+    },
+    {
+      loadingText: t`Saving`,
+      successText: t`Saved`,
+      errorText: t`Could not save`,
     }
-  };
+  );
   return (
     <>
       <Button
@@ -51,69 +59,48 @@ export const SaveAsBlueprint = ({
           setSaved(false);
           setOpen(true);
         }}
-        size="sm"
         variant="outline"
       >
-        <LayoutTemplateIcon data-icon="inline-start" />
-        <Trans>Save as blueprint</Trans>
+        <Icon icon={FloorPlanIcon} />
+        {t`Save as blueprint`}
       </Button>
       <Dialog onOpenChange={setOpen} open={open}>
-        <DialogContent className="sm:max-w-md" closeLabel={t`Close`}>
-          <DialogHeader>
-            <DialogTitle>
-              {saved ? (
-                <Trans>Saved as a blueprint</Trans>
-              ) : (
-                <Trans>Save {name} as a blueprint</Trans>
-              )}
-            </DialogTitle>
-            <DialogDescription>
-              {saved ? (
-                <Trans>
-                  Anyone who builds and has a role in {name} can now start a new
-                  app from it. {name} itself stays as it is.
-                </Trans>
-              ) : (
-                <Trans>
-                  New Apps can start from version {version} of {name}, as a copy
-                  with none of its data. {name} itself stays as it is.
-                </Trans>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <ErrorText>{failure}</ErrorText>
+        <DialogContent>
+          <DialogTitle>
+            {saved ? t`Saved as a blueprint` : t`Save ${name} as a blueprint`}
+          </DialogTitle>
+          <DialogDescription>
+            {saved
+              ? t`Anyone who builds and has a role in ${name} can now start a new app from it. ${name} itself stays as it is.`
+              : t`New Apps can start from version ${version} of ${name}, as a copy with none of its data. ${name} itself stays as it is.`}
+          </DialogDescription>
+          {save.error === undefined || saved ? null : (
+            <DialogBody>
+              <Alert variant="destructive">
+                <AlertDescription>{failureText(save.error)}</AlertDescription>
+              </Alert>
+            </DialogBody>
+          )}
           <DialogFooter>
             {saved ? (
-              <>
-                <CheckIcon
-                  aria-hidden="true"
-                  className="text-status-agreed size-4 self-center"
-                />
-                <Button
-                  onClick={() => {
-                    setOpen(false);
-                  }}
-                >
-                  <Trans>Done</Trans>
-                </Button>
-              </>
+              <DialogClose variant="default">
+                <Icon icon={CheckIcon} />
+                {t`Done`}
+              </DialogClose>
             ) : (
               <>
+                <DialogClose>{t`Cancel`}</DialogClose>
                 <Button
+                  variant="default"
+                  errorText={save.labels.error}
+                  loadingText={save.labels.loading}
                   onClick={() => {
-                    setOpen(false);
+                    void save.run();
                   }}
-                  variant="ghost"
+                  status={save.status}
+                  successText={save.labels.success}
                 >
-                  <Trans>Cancel</Trans>
-                </Button>
-                <Button
-                  disabled={busy}
-                  onClick={() => {
-                    void save();
-                  }}
-                >
-                  <Trans>Save as blueprint</Trans>
+                  {t`Save as blueprint`}
                 </Button>
               </>
             )}

@@ -1,35 +1,47 @@
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from "@grasp-os/app-kit/components/breadcrumb";
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  FileTree,
-  FileTreeFile,
-  FileTreeFolder,
-} from "@grasp-os/app-kit/components/file-tree";
 import { isGeneratedServerFile } from "@grasp-os/runtime/host";
 import type { AppFiles, ViewedApp } from "@grasp-os/shared/apps";
 import type { Draft } from "@grasp-os/shared/drafts";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  CodeBlock,
+  CodeBlockActions,
+  CodeBlockContent,
+  CodeBlockCopyButton,
+  CodeBlockHeader,
+  CodeBlockTitle,
+} from "@grasp-os/ui/components/code-block";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@grasp-os/ui/components/empty";
+import { ScrollArea } from "@grasp-os/ui/components/scroll-area";
+import { Text } from "@grasp-os/ui/components/text";
+import { TreeView } from "@grasp-os/ui/components/tree-view";
+import type { TreeNode } from "@grasp-os/ui/components/tree-view";
+import {
+  CodeIcon,
+  DownloadIcon,
+  FolderIcon,
+  Icon,
+} from "@grasp-os/ui/lib/icons";
+import { media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { CheckIcon, CopyIcon } from "lucide-react";
-import { Fragment, useState } from "react";
-import type { ReactNode } from "react";
+import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
 
-import { useCopy } from "../copy.ts";
-import { LoadingLines } from "../frame/page-states.tsx";
-import { NotLoaded } from "../load-from-core.tsx";
+import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { CodeFile, CodeScroller, PathIcon } from "./code-view.tsx";
-import { useCoreRead } from "./use-core-read.ts";
+import { fileIconOf } from "./file-icon.ts";
+import { useHeldCoreRead } from "./use-core-read.ts";
 
 // An App's code in its workspace, for its builders (app-workspace.tsx's
 // Code view), as a code editor shows a project, read-only: the files of
-// the build the preview beside it shows as a tree of folders, and the one
-// open highlighted, line by line (code-view.tsx). While the App's draft
+// the build the preview beside it shows as a tree of folders (the
+// Damsko's TreeView), and the one open in Damsko's CodeBlock,
+// highlighted, line by line. While the App's draft
 // changes it, that is the draft's files as they are now, read again at
 // each of its writes; otherwise the live version's. The App changes
 // through its chat, which the note says. Everything is read with core's
@@ -68,103 +80,175 @@ const treeOf = (paths: readonly string[]): Folder => {
 
 const byName = (a: string, b: string): number => a.localeCompare(b);
 
-/**
- * One folder's entries, as an editor sorts them: its folders, then its
- * files, each by name. A folder starts open: an App is a few files.
- */
-const FolderEntries = ({
-  folder,
-  open,
-  onOpen,
-}: {
-  folder: Folder;
-  open: string;
-  onOpen: (path: string) => void;
-}) => (
-  <>
-    {[...folder.folders.entries()]
-      .toSorted(([a], [b]) => byName(a, b))
-      .map(([name, inner]) => (
-        <FileTreeFolder defaultOpen key={`folder:${name}`} name={name}>
-          <FolderEntries folder={inner} onOpen={onOpen} open={open} />
-        </FileTreeFolder>
-      ))}
-    {folder.files
-      .toSorted((a, b) => byName(a.name, b.name))
-      .map((file) => (
-        <FileTreeFile
-          active={file.path === open}
-          icon={<PathIcon path={file.path} />}
-          key={file.path}
-          onClick={() => {
-            onOpen(file.path);
-          }}
-          title={file.path}
-        >
-          {file.name}
-        </FileTreeFile>
-      ))}
-  </>
-);
+// How tall the file tree may grow above the code on a narrow screen, and
+// how wide it stands beside it on a wide one: Damsko has no token for a
+// side list's measure.
+const TREE_TALL = "12rem";
+const TREE_WIDE = "15rem";
 
-/** Where the open file is, folder by folder, as a breadcrumb. */
-const PathCrumbs = ({ path }: { path: string }) => {
-  const { t } = useLingui();
-  const parts = path.split("/");
-  const name = parts.pop() ?? path;
-  return (
-    <Breadcrumb aria-label={t`Open file`} className="min-w-0 flex-1">
-      <BreadcrumbList className="flex-nowrap">
-        {parts.map((part, index) => (
-          // A folder's place in the path is all that tells it apart.
-          <Fragment key={`${index}:${part}`}>
-            <BreadcrumbItem className="min-w-0">{part}</BreadcrumbItem>
-            <BreadcrumbSeparator />
-          </Fragment>
-        ))}
-        <BreadcrumbItem className="min-w-0">
-          <BreadcrumbPage>{name}</BreadcrumbPage>
-        </BreadcrumbItem>
-      </BreadcrumbList>
-    </Breadcrumb>
+// The page round the view keeps its own gutter, so the view adds none:
+// the filter stands under the page's title. Each scroller reaches a step
+// past its content (and pads it back), so a focus ring or a field's halo
+// at the content's edge is never cut by it.
+const outset = `calc(-1 * ${space[1]})`;
+
+const styles = stylex.create({
+  // The tree and the open file side by side on the page's own ground: the
+  // code block is the one box in it, so nothing is framed twice.
+  editor: {
+    display: "flex",
+    flexDirection: { default: "column", [media.md]: "row" },
+    gap: space[4],
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  files: {
+    flexShrink: 0,
+    maxHeight: { default: TREE_TALL, [media.md]: "none" },
+    width: { default: "auto", [media.md]: TREE_WIDE },
+    margin: outset,
+  },
+  tree: { padding: space[1] },
+  code: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+    minWidth: 0,
+  },
+  scroller: { flexGrow: 1, margin: outset },
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space[2],
+    padding: space[1],
+  },
+  // Under the code: that it is read only, in line with the code block's
+  // file name above.
+  foot: {
+    display: "flex",
+    alignItems: "center",
+    paddingInlineStart: `calc(${space[3]} + ${size.codeBlockBarWidth})`,
+  },
+  lines: { fontVariantNumeric: "tabular-nums" },
+  fill: { display: "flex", flexDirection: "column", flexGrow: 1, minHeight: 0 },
+});
+
+/**
+ * One folder's entries as the tree's nodes, as an editor sorts them: its
+ * folders, then its files, each by name.
+ */
+const nodesOf = (folder: Folder, at = ""): TreeNode[] => [
+  ...[...folder.folders.entries()]
+    .toSorted(([a], [b]) => byName(a, b))
+    .map(([name, inner]) => ({
+      value: `folder:${at}${name}`,
+      label: name,
+      icon: FolderIcon,
+      children: nodesOf(inner, `${at}${name}/`),
+    })),
+  ...folder.files
+    .toSorted((a, b) => byName(a.name, b.name))
+    .map((file) => ({
+      value: file.path,
+      label: file.name,
+      icon: fileIconOf(file.path),
+    })),
+];
+
+/** Every folder of the tree's nodes: an App is a few files, so all stand open. */
+const foldersOf = (nodes: readonly TreeNode[]): string[] =>
+  nodes.flatMap((node) =>
+    node.children === undefined ? [] : [node.value, ...foldersOf(node.children)]
   );
+
+/** Hands the reader the open file to save, under its own name. */
+const downloadFile = (path: string, text: string): void => {
+  const url = URL.createObjectURL(
+    new Blob([text], { type: "text/plain;charset=utf-8" })
+  );
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = path.split("/").at(-1) ?? path;
+  link.click();
+  URL.revokeObjectURL(url);
 };
 
 /** The lines of `text`; its last newline ends a line, not starts one. */
 const lineCount = (text: string): number =>
   text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
 
-/** The open file's bar: its path, its length, and a way to copy it. */
-const FileBar = ({ path, text }: { path: string; text: string }) => {
+/**
+ * The code block's language for a file, by its extension: those it
+ * highlights, the rest as text.
+ */
+const languages: Readonly<Record<string, string>> = {
+  ts: "ts",
+  mts: "ts",
+  tsx: "tsx",
+  js: "js",
+  mjs: "js",
+  jsx: "jsx",
+  json: "json",
+  css: "css",
+  html: "html",
+  svg: "svg",
+  md: "markdown",
+  yaml: "yaml",
+  yml: "yaml",
+  sql: "sql",
+};
+
+const languageOf = (path: string): string =>
+  languages[path.slice(path.lastIndexOf(".") + 1)] ?? "text";
+
+/**
+ * The open file: Damsko's code block, headed by its path with Download
+ * and Copy, whole (an editor never folds a file); under it, that it is read
+ * only.
+ */
+const OpenFileCode = ({ path, text }: { path: string; text: string }) => {
   const { t } = useLingui();
-  const { copied, copy } = useCopy();
+  // Named so the note's message keeps its placeholder, `{lines}`.
   const lines = lineCount(text);
   return (
-    <div className="flex flex-none items-center gap-3 border-b py-1.5 ps-4 pe-2">
-      <PathCrumbs path={path} />
-      <span className="text-muted-foreground flex-none text-xs tabular-nums">
-        <Plural one="# line" other="# lines" value={lines} />
-      </span>
-      <Button
-        aria-label={copied ? t`Copied` : t`Copy code`}
-        onClick={() => {
-          void copy(text);
-        }}
-        size="icon-sm"
-        variant="ghost"
-      >
-        {copied ? <CheckIcon /> : <CopyIcon />}
-      </Button>
+    <div {...stylex.props(styles.page)}>
+      <CodeBlock language={languageOf(path)}>
+        <CodeBlockHeader>
+          <CodeBlockTitle>{path}</CodeBlockTitle>
+          <CodeBlockActions>
+            <CodeBlockCopyButton value={text} />
+            {/* Save it, beside the copy, in the copy button's own form. */}
+            <Button
+              aria-label={t`Download the file`}
+              onClick={() => {
+                downloadFile(path, text);
+              }}
+              size="icon-sm"
+              variant="ghost"
+            >
+              <Icon icon={DownloadIcon} />
+            </Button>
+          </CodeBlockActions>
+        </CodeBlockHeader>
+        <CodeBlockContent lineNumbers maxLines={false}>
+          {text}
+        </CodeBlockContent>
+      </CodeBlock>
+      <div {...stylex.props(styles.foot)}>
+        <span {...stylex.props(styles.lines)}>
+          <Text as="span" size="xs" color="muted">
+            <Plural
+              one="# line, read only"
+              other="# lines, read only"
+              value={lines}
+            />
+          </Text>
+        </span>
+      </div>
     </div>
   );
 };
-
-/** The editor's frame: what it shows, on the page's muted ground. */
-const EditorFrame = ({ children }: { children: ReactNode }) => (
-  <div className="bg-card flex min-h-0 flex-1 flex-col overflow-hidden md:flex-row">
-    {children}
-  </div>
-);
 
 /** The first file of `folder`, as its tree lists them. */
 const firstIn = (folder: Folder): string | undefined => {
@@ -192,6 +276,10 @@ const FilesView = ({ files, asked, onAsk }: OpenFile & { files: AppFiles }) => {
     (path) => !isGeneratedServerFile(path)
   );
   const tree = treeOf(paths);
+  const nodes = nodesOf(tree);
+  // Every folder open, a new one too, but those the person folded.
+  const folders = foldersOf(nodes);
+  const [folded, setFolded] = useState<string[]>([]);
   // The one asked for while this version has it, else its config, else
   // the tree's first.
   const file =
@@ -200,48 +288,64 @@ const FilesView = ({ files, asked, onAsk }: OpenFile & { files: AppFiles }) => {
       : (paths.find((path) => path === "grasp.config.ts") ?? firstIn(tree));
   if (file === undefined) {
     return (
-      <EditorFrame>
-        <p className="text-muted-foreground p-4 text-sm">
-          <Trans>This version has no files.</Trans>
-        </p>
-      </EditorFrame>
+      <Empty>
+        <EmptyHeader>
+          <EmptyMedia icon={CodeIcon} />
+          <EmptyTitle>
+            <Trans>No files</Trans>
+          </EmptyTitle>
+        </EmptyHeader>
+      </Empty>
     );
   }
   const text = files[file] ?? "";
   return (
-    <EditorFrame>
-      <nav
-        aria-label={t`Files`}
-        className="max-h-48 flex-none overflow-y-auto border-b p-2 md:max-h-none md:w-60 md:border-e md:border-b-0"
-      >
-        <FileTree>
-          <FolderEntries folder={tree} onOpen={onAsk} open={file} />
-        </FileTree>
-      </nav>
-      <section
-        aria-label={t`Code of ${file}`}
-        className="flex min-h-0 min-w-0 flex-1 flex-col"
-      >
-        <FileBar path={file} text={text} />
+    <div {...stylex.props(styles.editor)}>
+      <ScrollArea style={styles.files}>
+        <div {...stylex.props(styles.tree)}>
+          <TreeView
+            aria-label={t`Files`}
+            expandedValue={folders.filter((folder) => !folded.includes(folder))}
+            // Damsko's own filter over the files: what is typed narrows
+            // the tree to the files that hold it, their folders opened.
+            filterable
+            items={nodes}
+            selectionMode="single"
+            onExpandedChange={(expanded) => {
+              setFolded(folders.filter((folder) => !expanded.includes(folder)));
+            }}
+            onValueChange={(value) => {
+              if (typeof value === "string" && !value.startsWith("folder:")) {
+                onAsk(value);
+              }
+            }}
+            value={file}
+          />
+        </div>
+      </ScrollArea>
+      <section aria-label={t`Code of ${file}`} {...stylex.props(styles.code)}>
         {/* Each file its own scroller: a file opens at its top. */}
-        <CodeScroller className="min-h-0 flex-1 overflow-auto" key={file}>
-          <CodeFile path={file} text={text} />
-        </CodeScroller>
+        <ScrollArea key={file} style={styles.scroller}>
+          <OpenFileCode path={file} text={text} />
+        </ScrollArea>
       </section>
-    </EditorFrame>
+    </div>
   );
 };
 
 /** A read not done: that it is being read, or why it failed. */
-const ReadState = ({ loaded }: { loaded: Loaded<unknown> | undefined }) => (
-  <div className="p-4">
-    {loaded === undefined ? (
-      <LoadingLines lines={6} />
-    ) : (
-      <NotLoaded page={loaded} />
-    )}
-  </div>
-);
+const ReadState = ({
+  loaded,
+  again,
+}: {
+  loaded: Exclude<Loaded<unknown>, { state: "ready" }> | undefined;
+  again: () => void;
+}) =>
+  loaded === undefined ? (
+    <LoadingLines lines={6} />
+  ) : (
+    <NotLoadedState again={again} heading="h2" page={loaded} />
+  );
 
 /** One version's files, read. */
 const VersionFiles = ({
@@ -250,7 +354,7 @@ const VersionFiles = ({
   asked,
   onAsk,
 }: OpenFile & { app: string; version: number }) => {
-  const files = useCoreRead(
+  const { loaded: files, again } = useHeldCoreRead(
     `${app}/${version}`,
     async (session) =>
       await session.versions.files({ kind: "app", id: app }, version)
@@ -259,7 +363,7 @@ const VersionFiles = ({
     // A version's own tree, the file asked for open while it has it.
     <FilesView asked={asked} files={files.data} key={version} onAsk={onAsk} />
   ) : (
-    <ReadState loaded={files} />
+    <ReadState again={again} loaded={files} />
   );
 };
 
@@ -269,7 +373,7 @@ const VersionFiles = ({
  */
 const DraftFiles = ({ app, revision }: { app: string; revision: number }) => {
   const [asked, setAsked] = useState<string>();
-  const files = useCoreRead(
+  const { loaded: files, again } = useHeldCoreRead(
     `${app}/${revision}`,
     async (session) => await session.drafts.files({ kind: "app", id: app }),
     app
@@ -277,7 +381,7 @@ const DraftFiles = ({ app, revision }: { app: string; revision: number }) => {
   return files?.state === "ready" ? (
     <FilesView asked={asked} files={files.data} onAsk={setAsked} />
   ) : (
-    <ReadState loaded={files} />
+    <ReadState again={again} loaded={files} />
   );
 };
 
@@ -297,20 +401,28 @@ export const AppCode = ({
   const current = app.currentVersion;
   if (building !== undefined) {
     return (
-      <div className="flex min-h-0 flex-1 flex-col">
+      <div {...stylex.props(styles.fill)}>
         <DraftFiles app={app.id} revision={building.revision} />
       </div>
     );
   }
   if (current === null) {
     return (
-      <p className="text-muted-foreground p-4 md:px-6">
-        <Trans>No code yet: Grasp writes the first version in the chat.</Trans>
-      </p>
+      <Empty>
+        <EmptyHeader>
+          <EmptyMedia icon={CodeIcon} />
+          <EmptyTitle>
+            <Trans>No code yet</Trans>
+          </EmptyTitle>
+          <EmptyDescription>
+            <Trans>Grasp writes the first version in the chat.</Trans>
+          </EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div {...stylex.props(styles.fill)}>
       <VersionFiles
         app={app.id}
         asked={file}

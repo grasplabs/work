@@ -1,21 +1,3 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
-import {
-  Field,
-  FieldLabel,
-  FieldLegend,
-  FieldSet,
-} from "@grasp-os/app-kit/components/field";
-import {
-  Item,
-  ItemContent,
-  ItemDescription,
-  ItemMedia,
-} from "@grasp-os/app-kit/components/item";
-import {
-  RadioGroup,
-  RadioGroupItem,
-} from "@grasp-os/app-kit/components/radio-group";
 import {
   accessAfter,
   changeAnswer,
@@ -32,9 +14,19 @@ import type {
   DataModelRule,
   DataModelTable,
 } from "@grasp-os/shared/data-model";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { UserIcon } from "lucide-react";
-import { useId, useState } from "react";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import { Button } from "@grasp-os/ui/components/button";
+import { Checkbox } from "@grasp-os/ui/components/checkbox";
+import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+import {
+  RadioGroup,
+  RadioGroupItem,
+} from "@grasp-os/ui/components/radio-group";
+import { CircleUserIcon } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
 
 import { formatList } from "../format.ts";
 import type { ModelOperation } from "./data-model-changes.tsx";
@@ -192,6 +184,24 @@ const useChangeSentence = () => {
   };
 };
 
+// A form's measure: Damsko has no token for a column of questions.
+const FORM_WIDE = "42rem";
+
+const styles = stylex.create({
+  scroll: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
+  form: {
+    display: "grid",
+    gap: space[8],
+    maxWidth: FORM_WIDE,
+    padding: space[6],
+  },
+  question: {
+    display: "grid",
+    gap: space[3],
+  },
+  start: { justifySelf: "start" },
+});
+
 /** One question: its answers to pick one of, and what the one picked means. */
 const Question = ({
   legend,
@@ -208,7 +218,6 @@ const Question = ({
   disabled: boolean;
   onPick: (answer: Answer) => void;
 }) => {
-  const ids = useId();
   const label = useChoiceLabel();
   const offered = (choice: AccessChoice): boolean =>
     answers.some((answer) => choiceKey(answer) === choiceKey(choice));
@@ -218,41 +227,34 @@ const Question = ({
     ? answers
     : [...answers, picked];
   return (
-    <FieldSet>
-      <FieldLegend>{legend}</FieldLegend>
-      <RadioGroup
-        disabled={disabled}
-        onValueChange={(next: unknown) => {
-          const answer = answers.find((each) => choiceKey(each) === next);
-          if (answer !== undefined) {
-            onPick(answer);
-          }
-        }}
-        value={choiceKey(picked)}
-      >
-        {shown.map((choice) => {
-          const key = choiceKey(choice);
-          return (
-            <Field key={key} orientation="horizontal">
-              <RadioGroupItem
-                disabled={!offered(choice)}
-                id={`${ids}-${key}`}
-                value={key}
-              />
-              <FieldLabel htmlFor={`${ids}-${key}`}>{label(choice)}</FieldLabel>
-            </Field>
-          );
-        })}
-      </RadioGroup>
-      <Item size="sm" variant="muted">
-        <ItemMedia variant="icon">
-          <UserIcon />
-        </ItemMedia>
-        <ItemContent>
-          <ItemDescription>{sentence}</ItemDescription>
-        </ItemContent>
-      </Item>
-    </FieldSet>
+    <div {...stylex.props(styles.question)}>
+      <Field>
+        <FieldLabel>{legend}</FieldLabel>
+        <RadioGroup
+          disabled={disabled}
+          onValueChange={(next) => {
+            const answer = answers.find((each) => choiceKey(each) === next);
+            if (answer !== undefined) {
+              onPick(answer);
+            }
+          }}
+          value={choiceKey(picked)}
+        >
+          {shown.map((choice) => {
+            const key = choiceKey(choice);
+            return (
+              <Field key={key} orientation="horizontal">
+                <RadioGroupItem disabled={!offered(choice)} value={key} />
+                <FieldLabel>{label(choice)}</FieldLabel>
+              </Field>
+            );
+          })}
+        </RadioGroup>
+      </Field>
+      <Alert icon={CircleUserIcon}>
+        <AlertDescription>{sentence}</AlertDescription>
+      </Alert>
+    </div>
   );
 };
 
@@ -267,7 +269,6 @@ export const AccessView = ({
   onChange: (operation: ModelOperation) => Promise<boolean>;
 }) => {
   const { t } = useLingui();
-  const ids = useId();
   const seeSentence = useSeeSentence();
   const changeSentence = useChangeSentence();
   const [read, setRead] = useState<Answer>();
@@ -289,10 +290,9 @@ export const AccessView = ({
   const dirty =
     read !== undefined || write !== undefined || sensitive !== table.sensitive;
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <div {...stylex.props(styles.scroll)}>
       <form
         aria-label={t`Access to ${name}`}
-        className="flex max-w-2xl flex-col gap-8 p-6"
         onSubmit={(event) => {
           event.preventDefault();
           void onChange({
@@ -302,6 +302,7 @@ export const AccessView = ({
             ...(sensitive ? { sensitive: true } : {}),
           });
         }}
+        {...stylex.props(styles.form)}
       >
         <Question
           answers={answers}
@@ -324,21 +325,22 @@ export const AccessView = ({
             checked={sensitive}
             // A table stays sensitive once it is: its history kept no values.
             disabled={disabled || table.sensitive}
-            id={`${ids}-sensitive`}
-            onCheckedChange={setSensitive}
+            onCheckedChange={(checked) => {
+              setSensitive(checked === true);
+            }}
           />
-          <FieldLabel htmlFor={`${ids}-sensitive`}>
-            <Trans>
-              Record every time someone looks at these records, and keep no past
-              values
-            </Trans>
+          <FieldLabel>
+            {t`Record every time someone looks at these records, and keep no past values`}
           </FieldLabel>
         </Field>
-        <div>
-          <Button disabled={disabled || !dirty} type="submit">
-            <Trans>Save access</Trans>
-          </Button>
-        </div>
+        <Button
+          disabled={disabled || !dirty}
+          style={styles.start}
+          type="submit"
+          variant="default"
+        >
+          {t`Save access`}
+        </Button>
       </form>
     </div>
   );

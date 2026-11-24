@@ -21,8 +21,7 @@ import { AppCode } from "./app-code.tsx";
 
 // An App's Code, in its workspace, against core's Apps API as the page
 // reaches it over RPC, faked: version 2 is live, and the App's draft, while
-// it changes the App, is read from `drafts`. What the page drew
-// (@pierre/diffs) is read from the shadow roots it draws in.
+// it changes the App, is read from `drafts`.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -217,51 +216,40 @@ const press = async (element: Element | undefined): Promise<void> => {
   await settled();
 };
 
-const named = (selector: string, name: string) =>
-  [...document.querySelectorAll(selector)].find(
-    (each) => each.textContent?.trim() === name
-  );
+/** A tree entry's own name, without the entries inside it. */
+const entryName = (entry: Element): string =>
+  (entry.matches('[role="treeitem"]')
+    ? entry.querySelector('[data-slot="tree-label"]')?.textContent.trim()
+    : entry.textContent?.trim()) ?? "";
 
-/**
- * The text `element` shows, the code @pierre/diffs draws in its shadow
- * roots included: what a person reads there.
- */
-const textShown = (node: Node | null | undefined): string => {
-  if (node === null || node === undefined) {
-    return "";
-  }
-  if (node.nodeType === Node.TEXT_NODE) {
-    return node.textContent ?? "";
-  }
-  const shadow = node instanceof Element ? node.shadowRoot : null;
-  return [...(shadow?.childNodes ?? []), ...node.childNodes]
-    .map((child) => textShown(child))
-    .join("");
-};
+/** The tree's entries. */
+const entries = '[role="tree"][aria-label="Files"] [role="treeitem"]';
+
+const named = (selector: string, name: string) =>
+  [...document.querySelectorAll<HTMLElement>(selector)].find(
+    (each) => entryName(each) === name
+  );
 
 /** The text of the open file's code, as the view shows it. */
 const codeShown = (): string =>
-  textShown(document.querySelector('section[aria-label^="Code of"]'));
+  document.querySelector('section[aria-label^="Code of"] code')?.textContent ??
+  "";
 
-/** Where the open file is, as its bar says it. */
-const pathShown = (): string[] =>
-  [
-    ...document.querySelectorAll(
-      'nav[aria-label="Open file"] [data-slot="breadcrumb-item"]'
-    ),
-  ].map((item) => item.textContent.trim());
+/** Where the open file is, as the head over its code says it. */
+const pathShown = (): string | undefined =>
+  document
+    .querySelector('section[aria-label^="Code of"] [title]')
+    ?.textContent.trim();
 
 /** The tree's folders and files as they stand, top to bottom. */
 const treeShown = (): string[] =>
-  [...document.querySelectorAll('nav[aria-label="Files"] button')].map(
-    (entry) => entry.textContent.trim()
-  );
+  [...document.querySelectorAll(entries)].map((entry) => entryName(entry));
 
 /** The file the tree marks as open. */
 const openInTree = (): string | undefined =>
-  document
-    .querySelector('nav[aria-label="Files"] [aria-current="true"]')
-    ?.textContent.trim();
+  [...document.querySelectorAll(`${entries}[aria-selected="true"]`)].map(
+    (entry) => entryName(entry)
+  )[0];
 
 describe("An App's Code", () => {
   afterEach(() => {
@@ -277,7 +265,7 @@ describe("An App's Code", () => {
 
     await expect.poll(codeShown).toContain("export const limit = 25;");
     expect({ path: pathShown(), open: openInTree() }).toStrictEqual({
-      path: ["grasp.config.ts"],
+      path: "grasp.config.ts",
       open: "grasp.config.ts",
     });
   });
@@ -293,14 +281,12 @@ describe("An App's Code", () => {
       },
     });
     const all = treeShown();
-    await press(named('nav[aria-label="Files"] button', "server"));
+    await press(named(entries, "server"));
     const folded = {
       tree: treeShown(),
-      expanded: named('nav[aria-label="Files"] button', "server")?.getAttribute(
-        "aria-expanded"
-      ),
+      expanded: named(entries, "server")?.getAttribute("aria-expanded"),
     };
-    await press(named('nav[aria-label="Files"] button', "server"));
+    await press(named(entries, "server"));
 
     expect({ all, folded, again: treeShown() }).toStrictEqual({
       all: [
@@ -344,11 +330,11 @@ describe("An App's Code", () => {
 
   it("opens the file picked, where it is in the tree", async () => {
     await shown("builder");
-    await press(named("button", "inbox.tsx"));
+    await press(named(entries, "inbox.tsx"));
     await expect.poll(codeShown).toContain("function Inbox()");
 
     expect({ path: pathShown(), open: openInTree() }).toStrictEqual({
-      path: ["src", "routes", "inbox.tsx"],
+      path: "src/routes/inbox.tsx",
       open: "inbox.tsx",
     });
   });
@@ -356,7 +342,7 @@ describe("An App's Code", () => {
   it("shows the App's draft as a chat's agent writes it, the file open kept", async () => {
     revisionNow = 1;
     await shown("builder", 1, smallVersions, true);
-    await press(named("button", "notes.ts"));
+    await press(named(entries, "notes.ts"));
     await expect.poll(codeShown).toContain("export const limit = 10;");
     const first = treeShown();
     await act(async () => {
