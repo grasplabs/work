@@ -2,11 +2,8 @@ import { chatPlanKinds } from "@grasp-os/shared/chat";
 import type { ChatPlanKind } from "@grasp-os/shared/chat";
 import { canBuild, isMemberAdmin } from "@grasp-os/shared/roles";
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect } from "react";
 
 import { opportunityOf } from "../brain/opportunity-drafts.ts";
-import { setActiveChat } from "../chat/active-chat.ts";
-import { openChat } from "../chat/chat-layout.ts";
 import { chatPresence } from "../chat/chat-presence.ts";
 import { ChatStart, ideasOf } from "../chat/chat-start.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -18,23 +15,11 @@ import { loadFromCore } from "../load-from-core.tsx";
 // opportunity an admin drafts (`&opportunity=`, Brain › Opportunities),
 // the box starts with its brief in place of the ideas. `?agent=` (the
 // Agents page's "Chat") mentions that agent in the box, so the question
-// goes to it. The person's other chats are in
-// Recents and one ⌘K window away (chat/chat-switcher.tsx), and a link to
-// one (`?chat=`) opens it there.
+// goes to it. Each chat has its own page (`/chats/$chatId`,
+// chat/chat-link.ts); the person's other chats are in the sidebar and one
+// ⌘K window away (chat/chat-switcher.tsx).
 
 const Chat = () => {
-  const { chat } = Route.useSearch();
-  const navigate = Route.useNavigate();
-  // A link to one chat (an App's workspace's "Open in chat", say) opens it
-  // full screen over the page, and the page's address is the page's again.
-  useEffect(() => {
-    if (chat === undefined) {
-      return;
-    }
-    setActiveChat(chat);
-    openChat("fullscreen");
-    void navigate({ search: {}, replace: true });
-  }, [chat, navigate]);
   const { make, project, agent } = Route.useSearch();
   const { ideas, opportunity } = Route.useLoaderData();
   return (
@@ -53,9 +38,8 @@ const Chat = () => {
   );
 };
 
-/** What the address says: a chat to open, or what to make, where and with which agent. */
+/** What the address says: what to make, where and with which agent. */
 interface ChatSearch {
-  chat?: string;
   agent?: string;
   make?: ChatPlanKind;
   project?: string;
@@ -68,12 +52,11 @@ const makeOf = (value: unknown): ChatPlanKind | undefined =>
   chatPlanKinds.find((kind) => kind === value);
 
 export const Route = createFileRoute("/_shell/")({
-  // Chat's own page is where to ask: the chat full screen over it, and no bar.
-  staticData: { chat: chatPresence.fullscreenOnly },
+  // Chat's start is where to ask: no docked chat beside it, and no bar.
+  staticData: { chat: chatPresence.hidden },
   validateSearch: (search: Record<string, unknown>): ChatSearch => {
     const make = makeOf(search.make);
     return {
-      ...(typeof search.chat === "string" ? { chat: search.chat } : {}),
       // The agent a new chat starts with, as the Agents page names it.
       ...(typeof search.agent === "string" ? { agent: search.agent } : {}),
       ...(make === undefined ? {} : { make }),

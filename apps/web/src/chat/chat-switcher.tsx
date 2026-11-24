@@ -1,4 +1,3 @@
-import { Button } from "@grasp-os/ui/components/button";
 import {
   createContext,
   lazy,
@@ -23,29 +22,6 @@ const ChatWindow = lazy(async () => {
 
 /** The chats window's key: ⌘K, or Ctrl K off a Mac. */
 export const chatsKey = "k";
-
-/** A quiet icon in the page's header, named by its tooltip, its key beside its name there. */
-export const HeaderIcon = ({
-  label,
-  shortcut,
-  onClick,
-  children,
-}: {
-  label: string;
-  shortcut?: string;
-  onClick?: () => void;
-  children: ReactNode;
-}) => (
-  <Button
-    aria-label={label}
-    onClick={onClick}
-    size="icon-sm"
-    tooltip={shortcut === undefined ? label : `${label} (${shortcut})`}
-    variant="ghost"
-  >
-    {children}
-  </Button>
-);
 
 /** Opens (or closes) the frame's chats window. */
 const OpenChats = createContext<(open: boolean) => void>(() => {
