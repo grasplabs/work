@@ -1,4 +1,7 @@
+import { Text } from "@grasp-os/ui/components/text";
 import { useLingui } from "@lingui/react/macro";
+
+import { reviewRow } from "./review-parts.tsx";
 
 // Where Grasp can send mail but no sender is set (core's `MAIL_FROM`):
 // there is no domain to let through yet, and each mail fails until it is
@@ -8,9 +11,13 @@ import { useLingui } from "@lingui/react/macro";
 export const NoSenderItem = () => {
   const { t } = useLingui();
   return (
-    <div className="flex flex-col border-t py-4 text-left last:border-b">
-      <span className="font-medium">{t`Grasp has no sender for its mail yet`}</span>
-      <span className="text-muted-foreground">{t`Until Grasp support sets one, interview links can’t go out by email. Send each one their link by hand from Interviews.`}</span>
+    <div {...reviewRow}>
+      <Text as="span" size="sm" weight="medium">
+        {t`Grasp has no sender for its mail yet`}
+      </Text>
+      <Text as="span" size="sm" color="muted">
+        {t`Until Grasp support sets one, interview links can’t go out by email. Send each one their link by hand from Interviews.`}
+      </Text>
     </div>
   );
 };
