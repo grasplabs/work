@@ -411,7 +411,9 @@ export const listedToolkits = async (key: string): Promise<ListedToolkit[]> =>
  * asks for every logo it shows at once, each in a request of its own; were
  * each to list the toolkits afresh once the list had gone stale, a
  * screenful of logos would read Composio's whole list that many times.
- * The catalog's own read, which the page makes first, keeps it current.
+ * The catalog's own read, which the page makes first, keeps it current in
+ * the isolate that read lands on; in another, the list is as old as that
+ * isolate's last listing, and a toolkit added since has no logo there.
  */
 export const lastListedToolkits = async (
   key: string
