@@ -83,7 +83,6 @@ export const ChatPanelsBeside = ({
       <Panels
         aside={false}
         card={card}
-        closeLabel={t`Close the chat`}
         covered={cover.place.covered}
         keep={keep}
         max={panels.maxWidth}

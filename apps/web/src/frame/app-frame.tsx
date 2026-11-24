@@ -68,6 +68,15 @@ const styles = stylex.create({
     transitionDelay: duration.press,
   },
   covered: { opacity: 0, transitionDelay: "0s" },
+  // The AI providers' banner across the card's top fades with the page
+  // under a panel gone full screen, whose head stands where it is.
+  banner: {
+    flexShrink: 0,
+    transitionProperty: "opacity",
+    transitionDuration: duration.ui,
+    transitionTimingFunction: duration.ease,
+    transitionDelay: duration.press,
+  },
   // The page and its panel, under the banner: what the chat's button
   // stands over.
   area: {
@@ -258,11 +267,16 @@ export const AppFrame = ({
       style={[panels !== undefined && styles.card, covered && styles.spans]}
     >
       <div {...stylex.props(styles.frame)}>
-        <AiKeyBanner
-          failing={failing}
-          identity={identity}
-          providers={providersOf(core)}
-        />
+        <div
+          inert={covered}
+          {...stylex.props(styles.banner, covered && styles.covered)}
+        >
+          <AiKeyBanner
+            failing={failing}
+            identity={identity}
+            providers={providersOf(core)}
+          />
+        </div>
         <div {...stylex.props(styles.area)}>
           <PageWithPanel>
             <div

@@ -9,8 +9,6 @@ export const FOCUSABLE =
 export const placeOf = (card: HTMLElement, element: HTMLElement): number =>
   [...card.querySelectorAll<HTMLElement>(FOCUSABLE)].indexOf(element);
 
-/** The first thing in the panels that takes focus: their close button first. */
+/** The first thing in the panels that takes focus. */
 export const firstStop = (panels: HTMLElement): HTMLElement | null =>
-  panels.querySelector<HTMLElement>(
-    "[data-slot=app-shell-panels-close] button"
-  ) ?? panels.querySelector<HTMLElement>(FOCUSABLE);
+  panels.querySelector<HTMLElement>(FOCUSABLE);

@@ -14,8 +14,6 @@
 // The group is always there, with or without panels: the page's card is the same element before,
 // while and after a panel stands beside it, so a page keeps its scroll place, its fields' text and
 // its state when a chat opens (the panels' side is simply at no width, with nothing in it).
-import { Button } from "@grasp-os/ui/components/button";
-import { Icon, XIcon } from "@grasp-os/ui/lib/icons";
 import { focusRing } from "@grasp-os/ui/lib/styles";
 import {
   colors,
@@ -317,15 +315,6 @@ const styles = stylex.create({
   },
   // Set aside for the page, on a phone only.
   panelsAside: { display: { default: null, [NARROW]: "none" } },
-  // The close button, at the panels' top end, over what the host put there: centred on the head's
-  // row, its glyph ending the page's room from the card's end, where the bar's last ink and the
-  // panel's words stand (FRESH.md F63).
-  close: {
-    position: "absolute",
-    insetBlockStart: `calc((${size.appShellBar} - ${size.controlSm}) / 2)`,
-    insetInlineEnd: `calc(${size.appShellPageInline} - (${size.controlSm} - ${size.iconSm}) / 2)`,
-    zIndex: 1,
-  },
   // Shown on a narrow shell only, so the script can read what the CSS decided.
   probe: {
     position: "absolute",
@@ -376,10 +365,9 @@ interface PanelsProps {
   onWidthChange?: (width: number) => void;
   /** Says whether the shell is narrow, as its CSS decided, each time that changes. */
   onNarrowChange: (narrow: boolean) => void;
-  /** Closes the panels while they cover the page for want of room; without it, no close button. */
+  /** Closes the panels on Escape while they cover the page for want of room (their host's head
+   * has the close button). */
   onClose?: () => void;
-  /** The close button's name. */
-  closeLabel: string;
   /** Where focus stood in the page's card when it was last taken down (AppShell's). */
   keep: RefObject<number>;
   /** Says whether the column is too crowded for the page beside the panels, each time that changes;
@@ -805,8 +793,6 @@ interface SideProps {
   aside: boolean;
   /** Where they are in going full screen or coming back. */
   cover: Cover;
-  onClose?: () => void;
-  closeLabel: string;
   headLine: boolean;
   float: ReturnType<typeof useFloat>;
 }
@@ -822,8 +808,6 @@ const PanelsCard = ({
   crowded,
   aside,
   cover,
-  onClose,
-  closeLabel,
   headLine,
   float,
 }: SideProps) => {
@@ -865,21 +849,6 @@ const PanelsCard = ({
             />
           )}
           {float.edges}
-          {crowded && onClose !== undefined && (
-            <span
-              data-slot="app-shell-panels-close"
-              {...stylex.props(styles.close)}
-            >
-              <Button
-                aria-label={closeLabel}
-                onClick={onClose}
-                size="icon-sm"
-                variant="ghost"
-              >
-                <Icon icon={XIcon} />
-              </Button>
-            </span>
-          )}
         </div>
       )}
     </div>
@@ -917,7 +886,6 @@ export const Panels = ({
   onNarrowChange,
   onCrowdedChange,
   onClose,
-  closeLabel,
   keep,
   headLine = true,
   narrow,
@@ -1067,8 +1035,6 @@ export const Panels = ({
               crowded={crowded}
               aside={aside}
               cover={cover}
-              onClose={onClose}
-              closeLabel={closeLabel}
               headLine={headLine}
               float={float}
             />

@@ -4455,10 +4455,6 @@ msgstr "Fermer {name}"
 msgid "Close it"
 msgstr "La fermer"
 
-#: src/frame/panels/chat-panels-beside.tsx
-msgid "Close the chat"
-msgstr "Fermer le chat"
-
 #: src/brain/gap-actions.tsx
 msgid "Close this question without an answer?"
 msgstr "Fermer cette question sans réponse ?"
@@ -11390,10 +11386,6 @@ msgstr "Ouvrir Stephen dans {app}, dans un nouvel onglet"
 #: src/inbox/item-detail.tsx
 msgid "Open the App"
 msgstr "Ouvrir l’application"
-
-#: src/chat/chat-bar.tsx
-msgid "Open the chat ({shortcut})"
-msgstr "Ouvrir le chat ({shortcut})"
 
 #: src/apps/app-workspace.tsx
 msgid "Open the chat in Chat"
