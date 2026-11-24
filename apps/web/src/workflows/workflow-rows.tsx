@@ -89,17 +89,35 @@ const startWords: Readonly<Record<TriggerKind, MessageDescriptor>> = {
   }),
 };
 
+const dayMs = 86_400_000;
+
+/** The start of `day` by the reader's calendar, in milliseconds. */
+const midnight = (day: Date): number =>
+  new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
+
+/** How many days `date` is from today, by the reader's calendar: -1 yesterday, 1 tomorrow. */
+const daysFromToday = (date: Date): number =>
+  Math.round((midnight(date) - midnight(new Date())) / dayMs);
+
 /**
  * When something happened or happens, as the overview says it: "Today
- * 11:20", else the day, its date and the time ("Mon 30 Nov, 07:00").
+ * 11:20", "Yesterday 15:40" or "Tomorrow 08:00", else the day, its date
+ * and the time ("Mon 30 Nov, 07:00").
  */
 const whenOf = (at: string, i18n: I18n): string => {
   const date = new Date(at);
-  if (date.toDateString() === new Date().toDateString()) {
-    const time = new Intl.DateTimeFormat(i18n.locale, {
-      timeStyle: "short",
-    }).format(date);
+  const time = new Intl.DateTimeFormat(i18n.locale, {
+    timeStyle: "short",
+  }).format(date);
+  const days = daysFromToday(date);
+  if (days === 0) {
     return i18n._(msg`Today ${time}`);
+  }
+  if (days === -1) {
+    return i18n._(msg`Yesterday ${time}`);
+  }
+  if (days === 1) {
+    return i18n._(msg`Tomorrow ${time}`);
   }
   return new Intl.DateTimeFormat(i18n.locale, {
     weekday: "short",

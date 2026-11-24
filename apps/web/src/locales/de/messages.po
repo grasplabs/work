@@ -19298,6 +19298,10 @@ msgstr "Vom Team erzählt, das es macht"
 msgid "Tomorrow"
 msgstr "Morgen"
 
+#: src/workflows/workflow-rows.tsx
+msgid "Tomorrow {time}"
+msgstr "Morgen {time}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Too large to read"
 msgstr "Zu groß zum Lesen"
@@ -21635,6 +21639,10 @@ msgstr "Gestern"
 msgctxt "chats from yesterday"
 msgid "Yesterday"
 msgstr "Gestern"
+
+#: src/workflows/workflow-rows.tsx
+msgid "Yesterday {time}"
+msgstr "Gestern {time}"
 
 #: src/inbox/item-detail.tsx
 msgid "you"
