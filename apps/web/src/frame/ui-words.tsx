@@ -4,14 +4,6 @@ import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import type { ReactNode } from "react";
 
-/** A count of characters: "no characters", "1 character", "120 characters". */
-const characters = (count: number): string =>
-  plural(count, {
-    0: "no characters",
-    one: "# character",
-    other: "# characters",
-  });
-
 /**
  * The few words Damsko's components say themselves ("Copied", "Working"),
  * in the page's language. Damsko knows nothing of Lingui: its components
@@ -78,6 +70,12 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
     empty: {
       error: t`This did not load`,
     },
+    holdButton: {
+      ask: (words) => t`${words}?`,
+      cancel: t`Cancel`,
+      confirm: t`Confirm`,
+      holdTo: (words) => t`Press and hold: ${words}`,
+    },
     inlineEdit: {
       edit: t({ message: "Edit", context: "edit a value in place" }),
       error: t`Could not save`,
@@ -102,7 +100,7 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
     },
     message: {
       actions: t`Message actions`,
-      assistant: t`Assistant`,
+      assistant: t({ message: "Assistant", context: "who wrote a message" }),
       done: t`Answer ready`,
       error: t`Could not answer`,
       retry: t`Try again`,
@@ -112,7 +110,7 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
     },
     messageScroller: {
       arrived: (count) =>
-        t`${plural(count, { one: "# new message", other: "# new messages" })}`,
+        plural(count, { one: "# new message", other: "# new messages" }),
       jumpToNew: (jumpLabel) => t`${jumpLabel}, new messages`,
       label: t`Messages`,
       loading: t`Loading the conversation`,
@@ -139,40 +137,49 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       add: t`Add to message`,
       addAttachments: t`Add files`,
       attachments: t`Files to send`,
-      count: (length, max) => t`${length}/${max}`,
-      cut: (max) => {
-        const limit = characters(max);
-        return max === 0
+      count: (length, max) => `${length}/${max}`,
+      cut: (max) =>
+        max === 0
           ? t`What was added was left out: no more can be written`
-          : t`What was added was cut at the limit of ${limit}`;
-      },
+          : plural(max, {
+              one: "What was added was cut at the limit of # character",
+              other: "What was added was cut at the limit of # characters",
+            }),
       drop: t`Drop to add`,
       failed: t`Could not send. Your message is kept.`,
       mentionEmpty: t`No matches`,
       mentionsError: t`Could not load suggestions`,
       mentionsFound: (count) =>
-        plural(count, {
-          0: "No results",
-          one: "# result",
-          other: "# results",
-        }),
-      mentionsLoading: t`Looking`,
-      near: (max) => {
-        const limit = characters(max);
-        return max === 0 ? t`No room left` : t`Close to the limit of ${limit}`;
-      },
-      reached: (max) => {
-        const limit = characters(max);
-        return max === 0
+        count === 0
+          ? t`No results`
+          : plural(count, { one: "# result", other: "# results" }),
+      mentionsLoading: t({
+        message: "Looking",
+        context: "searching for suggestions",
+      }),
+      near: (max) =>
+        max === 0
+          ? t`No room left`
+          : plural(max, {
+              one: "Close to the limit of # character",
+              other: "Close to the limit of # characters",
+            }),
+      reached: (max) =>
+        max === 0
           ? t`No more can be written`
-          : t`The limit of ${limit} is reached`;
-      },
+          : plural(max, {
+              one: "The limit of # character is reached",
+              other: "The limit of # characters is reached",
+            }),
       speechButton: {
         cancel: t`Cancel dictation`,
-        done: t({ message: "Done", context: "end dictation" }),
+        done: t({ message: "Done", context: "stop dictating" }),
         label: t`Dictate`,
         listening: t`Listening`,
-        mute: t`Mute`,
+        mute: t({
+          message: "Mute",
+          context: "turn your microphone off for a moment",
+        }),
         settling: t`Writing it down`,
       },
       stop: t({ message: "Stop", context: "stop an answer" }),
@@ -183,7 +190,7 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
         close: t`Type instead`,
         label: t`Voice conversation`,
         listening: t`Listening`,
-        speaking: t`Speaking`,
+        speaking: t({ message: "Speaking", context: "the other voice's turn" }),
       },
     },
     questionnaire: {
@@ -204,6 +211,9 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       thinking: t`Thinking`,
       thought: (seconds) =>
         t`${plural(seconds, { one: "Thought for # second", other: "Thought for # seconds" })}`,
+    },
+    sheet: {
+      close: t`Close`,
     },
     sources: {
       count: (count) =>

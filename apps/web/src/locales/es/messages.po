@@ -210,14 +210,6 @@ msgstr "{connections, plural, one {# conexión} other {# conexiones}}"
 msgid "{conversations, plural, one {# conversation} other {# conversations}}"
 msgstr "{conversations, plural, one {# conversación} other {# conversaciones}}"
 
-#: src/frame/ui-words.tsx
-msgid "{count, plural, =0 {no characters} one {# character} other {# characters}}"
-msgstr "{count, plural, =0 {ningún carácter} one {# carácter} other {# caracteres}}"
-
-#: src/frame/ui-words.tsx
-msgid "{count, plural, =0 {No results} one {# result} other {# results}}"
-msgstr "{count, plural, =0 {Sin resultados} one {# resultado} other {# resultados}}"
-
 #: src/brain/brain-log.tsx
 msgid "{count, plural, one {{label}: # thing} other {{label}: # things}}"
 msgstr "{count, plural, one {{label}: # elemento} other {{label}: # elementos}}"
@@ -357,6 +349,10 @@ msgstr "{count, plural, one {# persona} other {# personas}}"
 #: src/brain/brain.ts
 msgid "{count, plural, one {# remark on tools} other {# remarks on tools}}"
 msgstr "{count, plural, one {# comentario sobre herramientas} other {# comentarios sobre herramientas}}"
+
+#: src/frame/ui-words.tsx
+msgid "{count, plural, one {# result} other {# results}}"
+msgstr "{count, plural, one {# resultado} other {# resultados}}"
 
 #: src/brain/brain.ts
 msgid "{count, plural, one {# rule} other {# rules}}"
@@ -719,10 +715,6 @@ msgstr "{leadsHeard} de {leads}"
 msgid "{left, plural, one {# team here is not interviewed yet.} other {# teams here are not interviewed yet.}}"
 msgstr "{left, plural, one {# equipo de aquí aún no tiene entrevista.} other {# equipos de aquí aún no tienen entrevista.}}"
 
-#: src/frame/ui-words.tsx
-msgid "{length}/{max}"
-msgstr "{length}/{max}"
-
 #. What an answer's steps came to, then how many failed: Read 2 files; 1 step failed.
 #: src/chat/thread.tsx
 msgid "{line}; {failed}"
@@ -735,6 +727,18 @@ msgstr "{lines, plural, one {# línea} other {# líneas}}"
 #: src/onboarding/setup-steps.tsx
 msgid "{mapped, plural, one {One piece of work is mapped and ready for you.} other {# pieces of work are mapped and ready for you.}}"
 msgstr "{mapped, plural, one {Un trabajo está mapeado y listo para ti.} other {# trabajos están mapeados y listos para ti.}}"
+
+#: src/frame/ui-words.tsx
+msgid "{max, plural, one {Close to the limit of # character} other {Close to the limit of # characters}}"
+msgstr "{max, plural, one {Cerca del límite de # carácter} other {Cerca del límite de # caracteres}}"
+
+#: src/frame/ui-words.tsx
+msgid "{max, plural, one {The limit of # character is reached} other {The limit of # characters is reached}}"
+msgstr "{max, plural, one {Se ha llegado al límite de # carácter} other {Se ha llegado al límite de # caracteres}}"
+
+#: src/frame/ui-words.tsx
+msgid "{max, plural, one {What was added was cut at the limit of # character} other {What was added was cut at the limit of # characters}}"
+msgstr "{max, plural, one {Lo añadido se cortó en el límite de # carácter} other {Lo añadido se cortó en el límite de # caracteres}}"
 
 #: src/brain/learned-section.tsx
 msgid "{memories, plural, one {# memory from an earlier version is no longer in this source.} other {# memories from earlier versions are no longer in this source.}}"
@@ -1426,6 +1430,7 @@ msgid "{who} couldn't be taken off {name}. Try again."
 msgstr "No se ha podido quitar a {who} de {name}. Inténtalo de nuevo."
 
 #: src/interview/before.tsx
+#: src/interview/composer.tsx
 #: src/interview/voice-bar.tsx
 msgid "{who} is talking"
 msgstr "{who} está hablando"
@@ -1457,6 +1462,7 @@ msgstr "{who}, escuchando."
 msgid "{who}, reading back."
 msgstr "{who}, repasando lo anotado."
 
+#: src/interview/composer.tsx
 #: src/interview/talk.tsx
 msgid "{who}, thinking."
 msgstr "{who}, pensando."
@@ -1464,6 +1470,10 @@ msgstr "{who}, pensando."
 #: src/brain/brain-log.tsx
 msgid "{who}: “{answer}”"
 msgstr "{who}: «{answer}»"
+
+#: src/frame/ui-words.tsx
+msgid "{words}?"
+msgstr "¿{words}?"
 
 #: src/brain/brain-atlas.ts
 msgid "{work, plural, one {# piece of work} other {# pieces of work}}"
@@ -3130,6 +3140,7 @@ msgid "Asking to connect {binding}"
 msgstr "Pidiendo conectar {binding}"
 
 #: src/frame/ui-words.tsx
+msgctxt "who wrote a message"
 msgid "Assistant"
 msgstr "Asistente"
 
@@ -4039,10 +4050,6 @@ msgstr "Cerrarla"
 msgid "Close this question without an answer?"
 msgstr "¿Cerrar esta pregunta sin respuesta?"
 
-#: src/frame/ui-words.tsx
-msgid "Close to the limit of {limit}"
-msgstr "Cerca del límite de {limit}"
-
 #: src/brain/gap-actions.tsx
 #: src/chat/brain-questions.tsx
 msgid "Close without an answer"
@@ -4146,6 +4153,7 @@ msgid "Configuration"
 msgstr "Configuración"
 
 #: src/chat/held-writes.tsx
+#: src/frame/ui-words.tsx
 msgid "Confirm"
 msgstr "Confirmar"
 
@@ -5215,15 +5223,15 @@ msgctxt "a task ticked in a list"
 msgid "Done"
 msgstr "Hecha"
 
-#: src/frame/ui-words.tsx
-msgctxt "end dictation"
-msgid "Done"
-msgstr "Listo"
-
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox tab: what someone dealt with"
 msgid "Done"
 msgstr "Resuelto"
+
+#: src/frame/ui-words.tsx
+msgctxt "stop dictating"
+msgid "Done"
+msgstr "Listo"
 
 #: src/brain/work-knowledge.tsx
 msgctxt "what something known rests on: it happened in a run"
@@ -7034,10 +7042,6 @@ msgctxt "an app's settings section"
 msgid "History"
 msgstr "Historial"
 
-#: src/interview/closed.tsx
-msgid "Hold for 4 seconds"
-msgstr "Mantén pulsado 4 segundos"
-
 #: src/brain/opportunities-page.tsx
 msgid "Hours a week"
 msgstr "Horas por semana"
@@ -7957,7 +7961,7 @@ msgstr "Criterio propio"
 
 #: src/frame/ui-words.tsx
 msgid "Jump to latest"
-msgstr "Ir a lo más reciente"
+msgstr "Ir a lo último"
 
 #: src/frame/ui-words.tsx
 msgid "Jump to start"
@@ -7983,10 +7987,6 @@ msgstr "Mantener las dos"
 #: src/make/examples.ts
 msgid "Keep every client question in one place, and remind us when one waits too long for an answer."
 msgstr "Reúne cada pregunta de cliente en un solo sitio, y avísanos cuando una espere demasiado una respuesta."
-
-#: src/interview/closed.tsx
-msgid "Keep holding"
-msgstr "Sigue pulsando"
 
 #: src/brain/forget.tsx
 msgid "Keep it"
@@ -8437,6 +8437,7 @@ msgid "Looked at the uploads shared with a team or everyone"
 msgstr "Consultó los archivos subidos compartidos con un equipo o con todos"
 
 #: src/frame/ui-words.tsx
+msgctxt "searching for suggestions"
 msgid "Looking"
 msgstr "Buscando"
 
@@ -8863,18 +8864,9 @@ msgid "Mutations and actions of {app}"
 msgstr "Mutaciones y acciones de {app}"
 
 #: src/frame/ui-words.tsx
-msgid "Mute"
-msgstr "Silenciar"
-
-#: src/interview/voice-bar.tsx
 msgctxt "turn your microphone off for a moment"
 msgid "Mute"
 msgstr "Silenciar"
-
-#: src/interview/voice-bar.tsx
-msgctxt "your microphone is off for a moment"
-msgid "Muted"
-msgstr "En silencio"
 
 #: src/apps/app-workspace.tsx
 msgid "My version of the App didn't start. Find out why and fix it:"
@@ -11017,6 +11009,10 @@ msgid "Press a line to change it, take out what is wrong, or type what is missin
 msgstr "Pulsa una línea para cambiarla, quita lo que esté mal o escribe lo que falte. Elige adónde va cada línea. Lo que dejes es lo que cuenta."
 
 #: src/frame/ui-words.tsx
+msgid "Press and hold: {words}"
+msgstr "Mantén pulsado: {words}"
+
+#: src/frame/ui-words.tsx
 msgid "Presses \"{words}\""
 msgstr "Pulsa «{words}»"
 
@@ -12645,10 +12641,6 @@ msgstr "Visto, pero no descrito: {seenOnly}."
 msgid "Seen, never mentioned"
 msgstr "Vistas, nunca mencionadas"
 
-#: src/interview/composer.tsx
-msgid "Send"
-msgstr "Enviar"
-
 #: src/frame/ui-words.tsx
 msgctxt "send a message"
 msgid "Send"
@@ -13380,6 +13372,7 @@ msgid "Sparkles"
 msgstr "Destellos"
 
 #: src/frame/ui-words.tsx
+msgctxt "the other voice's turn"
 msgid "Speaking"
 msgstr "Hablando"
 
@@ -14070,10 +14063,6 @@ msgstr "Esa dirección de correo ya inicia sesión con otra cuenta."
 msgid "That is {who}."
 msgstr "Es decir, {who}."
 
-#: src/interview/composer.tsx
-msgid "That is too long to send in one go. Send it in two parts."
-msgstr "Es demasiado largo para enviarlo de una vez. Envíalo en dos partes."
-
 #: src/pages/page-files.ts
 msgid "That isn't a file call."
 msgstr "Esa no es una llamada de archivo."
@@ -14581,10 +14570,6 @@ msgstr "La última lectura no pudo listar las cuentas eliminadas en el directori
 #: src/workflows/traces.tsx
 msgid "The latest runs, newest first."
 msgstr "Las ejecuciones más recientes, primero las nuevas."
-
-#: src/frame/ui-words.tsx
-msgid "The limit of {limit} is reached"
-msgstr "Se alcanzó el límite de {limit}"
 
 #: src/interview/transcript.tsx
 msgid "The line is deleted now, and so is what I marked in it. What I wrote down from it is in what I read back to you at the end: take it out there, and it is deleted for good when our conversation is finished. This can’t be undone."
@@ -15608,7 +15593,6 @@ msgstr "Escribe un número entero."
 
 #: src/chat/asked-questions.tsx
 #: src/frame/ui-words.tsx
-#: src/interview/composer.tsx
 msgid "Type instead"
 msgstr "Prefiero escribir"
 
@@ -15714,11 +15698,6 @@ msgstr "Desvincular"
 #: src/settings/chat-accounts.tsx
 msgid "Unlink {app} account {shown}"
 msgstr "Desvincular la cuenta de {app} {shown}"
-
-#: src/interview/voice-bar.tsx
-msgctxt "turn your microphone back on"
-msgid "Unmute"
-msgstr "Activar el micrófono"
 
 #: src/activity/audit-log.tsx
 #: src/inbox/inbox-page.tsx
@@ -16663,10 +16642,6 @@ msgid "What waits on you"
 msgstr "Lo que te espera"
 
 #: src/frame/ui-words.tsx
-msgid "What was added was cut at the limit of {limit}"
-msgstr "Lo añadido se cortó en el límite de {limit}"
-
-#: src/frame/ui-words.tsx
 msgid "What was added was left out: no more can be written"
 msgstr "Lo añadido se dejó fuera: no cabe nada más"
 
@@ -17508,10 +17483,6 @@ msgstr "Te retiraste. Nada de lo que dijiste se usa a partir de ahora."
 #: src/interview/page.tsx
 msgid "You withdrew. What the Brain kept of it is being removed."
 msgstr "Te retiraste. Lo que el Cerebro guardó de ello se está eliminando."
-
-#: src/interview/transcript.tsx
-msgid "You:"
-msgstr "Tú:"
 
 #: src/chat/answer-words.tsx
 msgid "You’re about to visit an external website."
