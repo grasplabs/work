@@ -164,6 +164,10 @@ const styles = stylex.create({
     // what it holds (card-line.tsx), so a head's ground never covers it; the card is its box.
     position: "relative",
     [cardLine.width]: size.hairline,
+    // A box at the panels' foot (the chat's) rounds its corner no deeper
+    // than this card's round it, as #2503's (its shell-panel-composer-corner):
+    // the card's corner times 1.84, 22px against the box's own 24px.
+    "--damsko-prompt-input-radius": `calc(${radius.md} * 1.84)`,
   },
   headLine: {
     position: "absolute",
