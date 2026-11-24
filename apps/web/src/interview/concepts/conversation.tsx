@@ -28,7 +28,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { micLevel, reachMic, watchLevel } from "../mic.ts";
-import { useSaid, wordsOf } from "../spoken.tsx";
+import { shownAs, useSaid, wordsOf } from "../spoken.tsx";
 import {
   budgetSeconds,
   nearEnd,
@@ -37,6 +37,7 @@ import {
   wrapUpSeconds,
 } from "./clock.ts";
 import {
+  copy,
   fixture,
   hello,
   ignore,
@@ -509,12 +510,12 @@ const Composer = ({
         <PromptInputBanner
           action={
             <Button onClick={onRetryMic} size="xs" variant="outline">
-              Try again
+              {copy.talk.retry}
             </Button>
           }
           variant="warning"
         >
-          The microphone is blocked, so you type for now.
+          {copy.talk.blocked}
         </PromptInputBanner>
       ) : null}
       {spoken ? (
@@ -541,15 +542,18 @@ const Composer = ({
           <PromptInputBody>
             <PromptInputTextarea
               aria-label="Your answer"
-              placeholder="Type your answer"
+              placeholder={copy.talk.placeholder}
             />
           </PromptInputBody>
           <PromptInputFooter>
             <PromptInputTools>
               {micRefused ? null : (
-                <PromptInputButton onClick={onSpeak} tooltip="Talk instead">
+                <PromptInputButton
+                  onClick={onSpeak}
+                  tooltip={copy.talk.talkTooltip}
+                >
                   <Icon icon={AudioWaveformIcon} />
-                  Talk
+                  {copy.talk.talk}
                 </PromptInputButton>
               )}
             </PromptInputTools>
@@ -612,6 +616,8 @@ const Stage = ({
     ...(clock === "title" ? [usedWords(left)] : []),
   ].join(" · ");
   const speaking = talk.doing === "speaking";
+  // A long line, as today's interview shows it: its first sentence large, the rest under it.
+  const shown = shownAs(now?.text ?? "", 90);
   return (
     <div {...stylex.props(styles.stage)}>
       <div {...stylex.props(styles.question)}>
@@ -637,8 +643,17 @@ const Stage = ({
           </Text>
         )}
         <Heading level={1} size="xl">
-          <LitLine key={now?.id} speaking={speaking} text={now?.text ?? ""} />
+          <LitLine key={now?.id} speaking={speaking} text={shown.title} />
         </Heading>
+        {shown.rest === "" ? null : (
+          <Text size="lg">
+            <LitLine
+              key={`${now?.id}-rest`}
+              speaking={speaking}
+              text={shown.rest}
+            />
+          </Text>
+        )}
         {talk.doing === "heard" ? (
           <div {...stylex.props(styles.over)}>
             <Icon icon={CheckIcon} />
@@ -650,7 +665,7 @@ const Stage = ({
         {talk.doing === "over" ? (
           <div {...stylex.props(styles.next)}>
             <Button onClick={onReadBack} size="lg">
-              See what I wrote down
+              {copy.talk.readBack}
             </Button>
           </div>
         ) : null}
@@ -684,7 +699,7 @@ export const Conversation = ({
       {talk.doing === "over" ? (
         <div {...stylex.props(styles.done)}>
           <Button onClick={onReadBack} size="lg">
-            See what I wrote down
+            {copy.talk.readBack}
           </Button>
         </div>
       ) : (
