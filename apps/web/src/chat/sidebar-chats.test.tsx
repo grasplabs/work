@@ -20,7 +20,8 @@ import { FrameSidebar } from "../frame/sidebar.tsx";
 import { useRecentChats } from "./sidebar-chats.tsx";
 
 // The sidebar's recent chats on a phone, where the sidebar is a sheet over
-// the page: opening a chat or All chats navigates nowhere, so the sheet
+// the page: a chat is a link to its own page, which the frame's sheet
+// closes for as it navigates; All chats navigates nowhere, so the sheet
 // closes itself first, or it would stay over what opened and keep focus.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -125,15 +126,19 @@ describe("the sidebar's recent chats on a phone", () => {
     document.body.replaceChildren();
   });
 
-  it("closes the sheet when a chat opens from it", async () => {
+  it("links each chat to its own page, which the frame's sheet closes for", async () => {
     await shown();
     await vi.waitFor(() => {
-      expect(button(chat.title)).toBeDefined();
+      expect(
+        [...document.querySelectorAll("a")].find(
+          (each) => each.textContent.trim() === chat.title
+        )
+      ).toBeDefined();
     });
-    press("Open the sheet");
-    expect(sheet()).toBe("sheet open");
-    press(chat.title);
-    expect(sheet()).toBe("sheet closed");
+    const link = [...document.querySelectorAll("a")].find(
+      (each) => each.textContent.trim() === chat.title
+    );
+    expect(link?.getAttribute("href")).toBe(`/chats/${chat.id}`);
   });
 
   it("closes the sheet when All chats opens from it", async () => {

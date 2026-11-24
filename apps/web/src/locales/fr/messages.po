@@ -1734,10 +1734,6 @@ msgctxt "what an opportunity could become"
 msgid "A change to an existing App"
 msgstr "Une modification d'une App existante"
 
-#: src/chat/chat-more.tsx
-msgid "A chat's name is at most {chatTitleMaxLength} characters."
-msgstr "Le nom d'un chat fait au plus {chatTitleMaxLength} caractères."
-
 #: src/apps/app-access-requests.tsx
 #: src/apps/draft-changes.tsx
 msgid "A connection"
@@ -3190,6 +3186,10 @@ msgstr "Archivée : personne n’ouvre ses pages et rien ne s’exécute, jusqu�
 msgid "Areas finished"
 msgstr "Domaines terminés"
 
+#: src/frame/panels/head.tsx
+msgid "Arrow keys move it, Shift for a longer step, End docks it beside the page, Escape goes back to the page"
+msgstr "Les flèches le déplacent, Maj pour un pas plus grand, Fin l'ancre à côté de la page, Échap revient à la page"
+
 #: src/brain/brain-markdown.ts
 msgid "Article"
 msgstr "Article"
@@ -3805,6 +3805,8 @@ msgstr "Impossible de proposer Exécuter : {unread}"
 #: src/connections/http-connections.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/drafts/share-with-team.tsx
+#: src/frame/panels/head.tsx
+#: src/frame/panels/rename.tsx
 #: src/frame/ui-words.tsx
 #: src/inbox/decision-confirmation.tsx
 #: src/interview/destination.tsx
@@ -3946,15 +3948,15 @@ msgstr "Modifier le projet"
 msgid "Change something"
 msgstr "Changer quelque chose"
 
-#: src/chat/chat-panel.tsx
+#: src/chat/chat-body.tsx
 msgid "Change something about the agent"
 msgstr "Changer quelque chose à l’agent"
 
-#: src/chat/chat-panel.tsx
+#: src/chat/chat-body.tsx
 msgid "Change something about the change"
 msgstr "Changer quelque chose à la modification"
 
-#: src/chat/chat-panel.tsx
+#: src/chat/chat-body.tsx
 msgid "Change something about the plan"
 msgstr "Changer quelque chose au plan"
 
@@ -4119,6 +4121,7 @@ msgid "Chart"
 msgstr "Graphique"
 
 #: src/agents/agents-overview.tsx
+#: src/chat/chat-page.tsx
 #: src/chat/chat-panel.tsx
 #: src/frame/app-sidebar.tsx
 msgid "Chat"
@@ -4146,7 +4149,6 @@ msgstr "Applications de chat"
 msgid "Chat apps where Grasp knows it’s you. Write to Grasp in one, and it sends you a link to connect your account here. Unlink one you no longer use."
 msgstr "Les applications de chat où Grasp sait que c’est vous. Écrivez à Grasp dans l’une d’elles, et il vous envoie un lien pour relier votre compte ici. Dissociez celle que vous n’utilisez plus."
 
-#: src/chat/chat-more.tsx
 #: src/chat/chat-window.tsx
 msgid "Chat name"
 msgstr "Nom du chat"
@@ -4378,7 +4380,6 @@ msgid "Click or drop a picture."
 msgstr "Cliquez ou déposez une image."
 
 #: src/brain/forget.tsx
-#: src/chat/chat-panel.tsx
 #: src/connections/brain-audience.tsx
 #: src/connections/connect-dialog.tsx
 #: src/connections/connected-dialog.tsx
@@ -4386,6 +4387,7 @@ msgstr "Cliquez ou déposez une image."
 #: src/connections/http-connections.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/frame/app-sidebar.tsx
+#: src/frame/panels/head.tsx
 #: src/frame/ui-words.tsx
 #: src/interview/destination.tsx
 #: src/settings/erasures.tsx
@@ -4916,6 +4918,7 @@ msgid "Copy the URL of {name}"
 msgstr "Copier l’URL de {name}"
 
 #: src/brain/note-actions.tsx
+#: src/chat/chat-more.tsx
 #: src/copy.ts
 #: src/drafts/share-with-team.tsx
 msgid "Copying didn't work"
@@ -5625,6 +5628,10 @@ msgstr "Le faire plus tard"
 msgid "Do you have anything that explains how you work?"
 msgstr "Avez-vous quelque chose qui explique votre façon de travailler ?"
 
+#: src/frame/panels/head.tsx
+msgid "Dock beside the page"
+msgstr "Ancrer à côté de la page"
+
 #: src/brain/sources-page.tsx
 msgctxt "a source of the Brain"
 msgid "Document"
@@ -5740,7 +5747,10 @@ msgstr "Fait lors d’une exécution"
 msgid "Done right"
 msgstr "Travail bien fait"
 
-#: src/chat/chat-more.tsx
+#: src/frame/panels/rename.tsx
+msgid "Double-click or press F2 to rename"
+msgstr "Double-cliquez ou appuyez sur F2 pour renommer"
+
 #: src/inbox/report-row.tsx
 msgid "Download"
 msgstr "Télécharger"
@@ -5760,10 +5770,12 @@ msgid "Download {path}"
 msgstr "Télécharger {path}"
 
 #: src/brain/note-actions.tsx
+#: src/chat/chat-more.tsx
 msgid "Download as Markdown"
 msgstr "Télécharger en Markdown"
 
 #: src/brain/note-actions.tsx
+#: src/chat/chat-more.tsx
 msgid "Download as PDF"
 msgstr "Télécharger en PDF"
 
@@ -5800,14 +5812,6 @@ msgstr "Rédigées d'après vos propres exécutions d'un workflow qui réussisse
 #: src/settings/stephen-settings.tsx
 msgid "Drafts, events and files of their own, after they press a card."
 msgstr "Leurs propres brouillons, événements et fichiers, après avoir appuyé sur une carte."
-
-#: src/chat/chat-panel.tsx
-msgid "Drag or double-click to undock"
-msgstr "Faites glisser ou double-cliquez pour détacher"
-
-#: src/chat/chat-panel.tsx
-msgid "Drag to move, or double-click to dock"
-msgstr "Faites glisser pour déplacer, ou double-cliquez pour ancrer"
 
 #: src/brain/brain.ts
 msgctxt "workflow status"
@@ -6387,10 +6391,6 @@ msgstr "Exactement ce qui sera envoyé"
 msgid "Example"
 msgstr "Exemple"
 
-#: src/chat/chat-panel.tsx
-msgid "Exit full screen"
-msgstr "Quitter le plein écran"
-
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Expertise"
@@ -6719,6 +6719,10 @@ msgstr "Corriger avec Grasp"
 msgid "Fixing a problem…"
 msgstr "Correction d’un problème…"
 
+#: src/frame/panels/head.tsx
+msgid "Float over the page"
+msgstr "Faire flotter sur la page"
+
 #: src/agents/agent-form.tsx
 msgid "Flow"
 msgstr "Flux"
@@ -6971,7 +6975,7 @@ msgstr "De votre entretien, version {version}"
 msgid "Full access"
 msgstr "Accès complet"
 
-#: src/chat/chat-panel.tsx
+#: src/frame/panels/head.tsx
 msgid "Full screen"
 msgstr "Plein écran"
 
@@ -8818,6 +8822,10 @@ msgstr "Appris le {learned}"
 msgid "Leave"
 msgstr "Quitter"
 
+#: src/frame/panels/head.tsx
+msgid "Leave full screen"
+msgstr "Quitter le plein écran"
+
 #: src/apps/app-data.tsx
 msgid "Leave out"
 msgstr "Ignorer"
@@ -9256,7 +9264,6 @@ msgctxt "what the Brain remembers about something"
 msgid "Manager"
 msgstr "Responsable hiérarchique"
 
-#: src/chat/chat-more.tsx
 #: src/export/export-menu.tsx
 msgid "Markdown (.md)"
 msgstr "Markdown (.md)"
@@ -9477,6 +9484,7 @@ msgstr "En savoir plus sur ce réglage"
 msgid "More about who it’s for"
 msgstr "En savoir plus sur son public"
 
+#: src/frame/panels/head.tsx
 #: src/frame/ui-words.tsx
 msgid "More actions"
 msgstr "Plus d’actions"
@@ -9584,6 +9592,10 @@ msgstr "Avancer"
 msgid "Move later"
 msgstr "Reculer"
 
+#: src/frame/panels/head.tsx
+msgid "Move the panel"
+msgstr "Déplacer le panneau"
+
 #: src/activity/audit-words.ts
 msgid "Moved old entries out of the audit trail"
 msgstr "A déplacé d’anciennes entrées hors du journal d’audit"
@@ -9610,6 +9622,8 @@ msgstr "Ma version de l’App n’a pas démarré. Trouve pourquoi et corrige-le
 #: src/apps/app-settings.tsx
 #: src/apps/field-editor.tsx
 #: src/connections/http-connections.tsx
+#: src/frame/panels/head.tsx
+#: src/frame/panels/rename.tsx
 #: src/onboarding/interviews-progress.tsx
 #: src/projects/project-dialog.tsx
 #: src/routes/_shell.settings.profile.tsx
@@ -11302,6 +11316,10 @@ msgstr "Ouvrez une conversation avec Stephen, ou cherchez-le parmi les apps de T
 msgid "Open a link outside Grasp?"
 msgstr "Ouvrir un lien hors de Grasp ?"
 
+#: src/frame/panels/head.tsx
+msgid "Open as a page"
+msgstr "Ouvrir en page"
+
 #: src/workflows/workflow-rows.tsx
 msgid "Open Chat"
 msgstr "Ouvrir le chat"
@@ -11764,7 +11782,6 @@ msgstr "Moyen de paiement"
 msgid "Payment receipts"
 msgstr "Reçus de paiement"
 
-#: src/chat/chat-more.tsx
 #: src/export/export-menu.tsx
 msgid "PDF"
 msgstr "PDF"
@@ -12013,6 +12030,10 @@ msgstr "Maintenir appuyé : {words}"
 #: src/frame/ui-words.tsx
 msgid "Press Enter to add it."
 msgstr "Appuyez sur Entrée pour l’ajouter."
+
+#: src/frame/panels/head.tsx
+msgid "Press or press F2 to rename"
+msgstr "Appuyez ou appuyez sur F2 pour renommer"
 
 #: src/frame/ui-words.tsx
 msgid "Presses \"{words}\""
@@ -12721,6 +12742,8 @@ msgstr "Supprimée."
 #: src/chat/chat-more.tsx
 #: src/chat/chat-window.tsx
 #: src/chat/sidebar-chats.tsx
+#: src/frame/panels/head.tsx
+#: src/frame/panels/rename.tsx
 #: src/settings/teams.tsx
 msgid "Rename"
 msgstr "Renommer"
@@ -12862,9 +12885,17 @@ msgctxt "a drawer's handle"
 msgid "Resize"
 msgstr "Redimensionner"
 
-#: src/chat/chat-panel.tsx
+#: src/frame/panels/chat-panels-beside.tsx
 msgid "Resize the chat"
 msgstr "Redimensionner la conversation"
+
+#: src/frame/panels/float-window.tsx
+msgid "Resize the panel's height"
+msgstr "Redimensionner la hauteur du panneau"
+
+#: src/frame/panels/float-window.tsx
+msgid "Resize the panel's width"
+msgstr "Redimensionner la largeur du panneau"
 
 #: src/apps/resource-bindings.tsx
 msgid "Resource"
@@ -13385,6 +13416,8 @@ msgstr "Sam, comme tous ceux qui utilisent l’App, voit tous les enregistrement
 #: src/apps/field-editor.tsx
 #: src/brain/goals-editor.tsx
 #: src/brain/skills-page.tsx
+#: src/frame/panels/head.tsx
+#: src/frame/panels/rename.tsx
 #: src/projects/project-dialog.tsx
 #: src/settings/instruction-file.tsx
 #: src/workflows/resource-params.tsx
@@ -14093,6 +14126,7 @@ msgstr "Afficher les versions plus anciennes"
 msgid "Show or hide the chat"
 msgstr "Afficher ou masquer le chat"
 
+#: src/frame/app-frame.tsx
 #: src/frame/app-sidebar.tsx
 #: src/frame/site-header.tsx
 #: src/frame/ui-words.tsx

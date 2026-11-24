@@ -16,10 +16,18 @@ import type { ReactNode } from "react";
 
 import type { RegionId } from "../brain/brain-atlas.ts";
 import { useShownPresence } from "../chat/global-chat.tsx";
+import { RenamableName } from "./panels/rename.tsx";
 
 /** A step on the way to the page; the last one is the page itself. */
 export type Crumb =
-  | { label: string }
+  | {
+      label: string;
+      /** The page's own name only: renamed in place (panels/rename.tsx). */
+      onRename?: (name: string) => void;
+      /** Whether its rename is open, when a menu's Rename opens it. */
+      renaming?: boolean;
+      onRenamingChange?: (renaming: boolean) => void;
+    }
   | {
       label: string;
       to:
@@ -53,6 +61,29 @@ export type Crumb =
       to: "/workflows/$workflow";
       params: { workflow: string };
     };
+
+/** The page's own name, renamed in place where it may be. */
+const CrumbName = ({ crumb }: { crumb: Crumb }) => {
+  if (!("onRename" in crumb) || crumb.onRename === undefined) {
+    return crumb.label;
+  }
+  const {
+    label,
+    onRename: handleRename,
+    renaming,
+    onRenamingChange: handleRenamingChange,
+  } = crumb;
+  return (
+    <RenamableName
+      name={label}
+      onRename={handleRename}
+      {...(renaming === undefined ? {} : { open: renaming })}
+      {...(handleRenamingChange === undefined
+        ? {}
+        : { onOpenChange: handleRenamingChange })}
+    />
+  );
+};
 
 /** Where a crumb leads, as a router link holding its name. */
 const CrumbLink = ({ crumb }: { crumb: Extract<Crumb, { to: string }> }) => {
@@ -282,7 +313,9 @@ export const SiteHeader = ({
                       <CrumbLink crumb={crumb} />
                     </BreadcrumbLink>
                   ) : (
-                    <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+                    <BreadcrumbPage>
+                      <CrumbName crumb={crumb} />
+                    </BreadcrumbPage>
                   )}
                 </BreadcrumbItem>
               </Fragment>
