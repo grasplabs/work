@@ -7105,6 +7105,10 @@ msgid "Going well."
 msgstr "Het gaat goed."
 
 #: src/interview/start.tsx
+msgid "Got it"
+msgstr "Begrepen"
+
+#: src/interview/start.tsx
 msgid "Got it."
 msgstr "Genoteerd."
 
@@ -7667,10 +7671,6 @@ msgstr "Hoe je het werk doet, wordt in je bedrijf gedeeld als hoe je team werkt,
 #: src/routes/_shell.settings.security.tsx
 msgid "How you get into Grasp. Passwords and two-step sign-in live with your organization’s account."
 msgstr "Hoe je in Grasp komt. Wachtwoorden en tweestapsverificatie lopen via het account van je organisatie."
-
-#: src/interview/start.tsx
-msgid "How your answers are handled"
-msgstr "Wat er met je antwoorden gebeurt"
 
 #: src/brain/sources-page.tsx
 msgid "How your connections feed the Brain"
@@ -17548,6 +17548,10 @@ msgstr "Wat Grasp zag dat beter kan, per soort."
 msgid "What happened to this run"
 msgstr "Wat er met deze run gebeurde"
 
+#: src/interview/start.tsx
+msgid "What happens to your answers"
+msgstr "Wat er met je antwoorden gebeurt"
+
 #: src/settings/stephen-settings.tsx
 msgid "What he can do in each system, as one pack, with each person's own sign-in."
 msgstr "Wat hij in elk systeem kan doen, als één pakket, met ieders eigen aanmelding."
@@ -18785,8 +18789,8 @@ msgid "Your company account. Leaving the company stops new sign-ins; an admin ca
 msgstr "Je bedrijfsaccount. Na vertrek uit het bedrijf kun je niet opnieuw inloggen; een beheerder kan een sessie eerder beëindigen bij Leden en rollen."
 
 #: src/interview/start.tsx
-msgid "Your company asked everyone to have a short chat with {who}, our AI interviewer. It takes {minutes} minutes at most."
-msgstr "Je bedrijf vraagt iedereen om even te praten met {who}, onze AI-interviewer. Het duurt hooguit {minutes} minuten."
+msgid "Your company asked everyone to have a short chat with {who}, our AI interviewer. It takes {minutes} minutes at most, and you decide <0>what happens to your answers</0>."
+msgstr "Je bedrijf vraagt iedereen om even te praten met {who}, onze AI-interviewer. Het duurt hooguit {minutes} minuten, en jij bepaalt <0>wat er met je antwoorden gebeurt</0>."
 
 #: src/apps/apps-overview.tsx
 msgid "Your company has no other Apps yet."
