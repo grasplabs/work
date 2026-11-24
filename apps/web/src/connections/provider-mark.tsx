@@ -7,9 +7,6 @@ import { useState } from "react";
 import { brands } from "./brands.ts";
 import type { Brand } from "./brands.ts";
 
-/** BrandIcon's tile sizes the mark takes (#2624 names this in `app/parts.tsx`). */
-type MarkSize = "sm" | "default" | "lg";
-
 // A provider's mark wherever an app is named on the Integrations pages,
 // on Damsko's BrandIcon tile: the logo core serves for it
 // (`CatalogEntry.logo`) wins; where core serves none, the product's own
@@ -18,6 +15,9 @@ type MarkSize = "sm" | "default" | "lg";
 // by its name: a name that starts like a brand's is not that brand.
 // BrandIcon's sizes: `sm` 32px on a tile, `default` 40px at the head of an
 // app's panel, `lg` 48px at the head of its page.
+
+/** The size of an app's mark: Damsko's BrandIcon's own, by where it stands. */
+export type MarkSize = "sm" | "default" | "lg";
 
 /** Whether the product has its own mark for the connector `id`, by that id exactly. */
 const isBrand = (id: string): id is Brand => Object.hasOwn(brands, id);
@@ -61,7 +61,7 @@ export const ProviderMark = ({
     return (
       <BrandIcon
         decorative
-        label={name}
+        name={name}
         logo={logo === null && isBrand(id) ? brands[id].logo : undefined}
         size={size}
       />
