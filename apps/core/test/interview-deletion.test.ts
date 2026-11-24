@@ -730,11 +730,12 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
       words: [],
     });
     // The same words kept another way: another model and voice, another
-    // language. Every way of saying what was said goes.
+    // language, no tone. Every way of saying what was said goes.
     const before: SpokenKey = {
       text: stephenSays(said.max),
-      voice: "2222",
-      model: "kugelaudio/kugel-3",
+      spoken: stephenSays(said.max),
+      voice: "voice_590",
+      model: "mistral/voxtral-mini-tts-3-0",
       language: "nl",
     };
     await keepLine(env, before, answer);
@@ -756,11 +757,12 @@ describe("deleting an interview", { timeout: 180_000 }, () => {
     const flat = `spoken-lines/${"a".repeat(64)}.json`;
     const fresh: SpokenKey = {
       text: "Hello, I'm Stephen.",
+      spoken: "Hello, I'm Stephen.",
       voice: platformAi.speech.voices.stephen,
       model: speechModel,
       language: "en",
     };
-    const answer = JSON.stringify({ audio: "AAAA", mime: "audio/mpeg" });
+    const answer = JSON.stringify({ audio: "AAAA", mime: "audio/wav" });
     await env.FILES.put(flat, answer);
     await keepLine(env, fresh, answer);
 

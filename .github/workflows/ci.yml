@@ -20,7 +20,7 @@
 # runs them again, so its title and description, which become the commit
 # on main, are checked as they stood then (an edit after that isn't). The
 # test shards, the e2e stack and its parts, and the admin's journeys run
-# on the merge queue, a run by hand and the nightly run. A full run is 78
+# on the merge queue, a run by hand and the nightly run. A full run is 71
 # jobs, within the account's 60 concurrent runners because the e2e jobs
 # start only once e2e-build is done, when the quick jobs have ended: at 78
 # the most running at once was 56 (run 44331739408, November 2026). Two
@@ -557,11 +557,11 @@ jobs:
         with:
           save: true
       # The parts wait for it: every build at once (e2e/build.ts).
-      # Then the parallel parts' tests, listed once for all fourteen
+      # Then the parallel parts' tests, listed once for all seven
       # (scripts/e2e-parts.ts). The same count as e2e's matrix, below:
       # change both together. Each part checks that it got as many lists
       # as its name says, so a part the lists left out fails, not skips.
-      - run: node e2e/build.ts && node scripts/e2e-parts.ts --all 14
+      - run: node e2e/build.ts && node scripts/e2e-parts.ts --all 7
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: e2e-stack
@@ -591,10 +591,11 @@ jobs:
   # scripts/e2e-parts.ts gives it by their times (scripts/e2e-durations.json),
   # test by test; its Firefox and WebKit tests in a part of their own; and
   # each serial project on a stack of its own, where nothing runs before
-  # it, the journeys a file a stack (`--shard`). Fourteen parallel parts:
-  # their tests take about a minute each, near the longest test's 82 s
-  # (setup-voice.e2e.ts's story), after about a minute of setup and
-  # starting the stack (November 2026). Add a parallel part by adding an
+  # it, the journeys a file a stack (`--shard`). Seven parallel parts:
+  # by their recorded times each worker's tests take at most the longest
+  # test's 50 s (setup-voice.e2e.ts's sources), after about a minute of
+  # setup and starting the stack; six would put two long ones on one
+  # worker (November 2026). Add a parallel part by adding an
   # entry and raising the count in every entry's `part` and in e2e-build's
   # `--all` (above). Part of the required `check` (above) in the merge
   # queue, the run that tests the tree that lands.
@@ -619,20 +620,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { part: 1/14, project: parallel, artifact: 1-of-14 }
-          - { part: 2/14, project: parallel, artifact: 2-of-14 }
-          - { part: 3/14, project: parallel, artifact: 3-of-14 }
-          - { part: 4/14, project: parallel, artifact: 4-of-14 }
-          - { part: 5/14, project: parallel, artifact: 5-of-14 }
-          - { part: 6/14, project: parallel, artifact: 6-of-14 }
-          - { part: 7/14, project: parallel, artifact: 7-of-14 }
-          - { part: 8/14, project: parallel, artifact: 8-of-14 }
-          - { part: 9/14, project: parallel, artifact: 9-of-14 }
-          - { part: 10/14, project: parallel, artifact: 10-of-14 }
-          - { part: 11/14, project: parallel, artifact: 11-of-14 }
-          - { part: 12/14, project: parallel, artifact: 12-of-14 }
-          - { part: 13/14, project: parallel, artifact: 13-of-14 }
-          - { part: 14/14, project: parallel, artifact: 14-of-14 }
+          - { part: 1/7, project: parallel, artifact: 1-of-7 }
+          - { part: 2/7, project: parallel, artifact: 2-of-7 }
+          - { part: 3/7, project: parallel, artifact: 3-of-7 }
+          - { part: 4/7, project: parallel, artifact: 4-of-7 }
+          - { part: 5/7, project: parallel, artifact: 5-of-7 }
+          - { part: 6/7, project: parallel, artifact: 6-of-7 }
+          - { part: 7/7, project: parallel, artifact: 7-of-7 }
           # A company's own flow, a large staff list and Grasp's go as its
           # admin waits (e2e/onboarding-flow.e2e.ts), apart from the rest
           # of Grasp's go: on one stack, the onboarding's 13 tests took

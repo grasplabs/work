@@ -18,8 +18,8 @@ import type { IconData } from "@grasp-os/ui/lib/icons";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 
-// Settings' sections, in their groups: the workspace's for admins, the
-// account's for everyone. The sidebar lists them as a level of its own
+// Settings' sections, in their groups: the account's for everyone, then
+// the workspace's for admins. The sidebar lists them as a level of its own
 // while a Settings page is open, in its sheet on a phone
 // (frame/settings-level.tsx); the Settings pages name the one that is open
 // (routes/_shell.settings.tsx). Core checks the role on every call
@@ -111,19 +111,12 @@ export const groupsFor = ({
         { label: msg`Billing`, to: "/settings/billing", icon: DollarSignIcon },
       ]
     : [];
+  // The person's own account first, the one group everyone has, as the
+  // reference orders them.
   return [
-    ...(workspace.length === 0
-      ? []
-      : [
-          {
-            id: "workspace",
-            title: msg({ message: "Workspace", context: "settings group" }),
-            items: workspace,
-          },
-        ]),
     {
       id: "account",
-      title: msg`Your account`,
+      title: msg({ message: "Account", context: "settings group" }),
       items: [
         { label: msg`Profile`, to: "/settings/profile", icon: CircleUserIcon },
         // What their chats start with: Grasp's staff have no chats here.
@@ -139,5 +132,14 @@ export const groupsFor = ({
         { label: msg`Security`, to: "/settings/security", icon: KeyIcon },
       ],
     },
+    ...(workspace.length === 0
+      ? []
+      : [
+          {
+            id: "workspace",
+            title: msg({ message: "Workspace", context: "settings group" }),
+            items: workspace,
+          },
+        ]),
   ];
 };

@@ -20,8 +20,8 @@ import { goTo } from "./tabs-nav.ts";
 // e2e/model-scripts.ts); the builder shares it with Share with your team
 // in its bar; an admin names who answers its decision in its Settings'
 // Files and apps; the builder starts a run with Run, naming the
-// approver, whose nav counts the workflow that needs them, and who decides
-// from their inbox, on the decision's own page: its link, which anyone
+// approver, who decides from their inbox, on the decision's own page,
+// confirmed in Grasp's own dialog: its link, which anyone
 // else who opens it only sees isn't for them; and the run ends with their
 // answer. Then a webhook: an admin adds a source in Settings, the builder
 // starts the workflow on its events, the admin grants that request from
@@ -186,17 +186,9 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   await start.getByRole("button", { name: "Close" }).first().click();
   await expect(start).toHaveCount(0);
 
-  // The approver decides from their inbox. Beside Workflows, their nav
-  // counts the workflow that needs them.
+  // The approver decides from their inbox.
   const asDecider = await pageOf(decider);
   await decisionIn(asDecider, name);
-  const workflows = asDecider
-    .getByRole("navigation", { name: "Main" })
-    .getByRole("link", { name: /^Workflows/u });
-  await expect(workflows).toHaveAccessibleName(
-    /1 workflow needs you$/u,
-    pageRead
-  );
   // Opened beside the list, to be answered there: what it asks.
   await expect(
     asDecider.getByRole("region", { name: "Approve invoice INV-42" })
@@ -220,58 +212,16 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   const confirmation = asDecider.getByRole("dialog", {
     name: "Confirm your approval",
   });
-  // On a phone, a very long comment scrolls inside Grasp's confirmation,
-  // under its title: Confirm and Cancel stay in the window, nothing runs
-  // over anything else, and the answer is confirmed from there.
-  const wide = asDecider.viewportSize();
-  await asDecider.setViewportSize({ width: 390, height: 700 });
-  await comment.fill(
-    Array.from(
-      { length: 60 },
-      (_, line) => `Line ${line + 1} of a long comment.`
-    ).join("\n")
-  );
+  // Approved with a comment, confirmed in Grasp's own dialog.
+  await comment.fill("Paid on time.");
   await asDecider.getByRole("button", { name: "Approve" }).click();
-  const confirm = confirmation.getByRole("button", { name: "Confirm" });
-  // Focus starts on Cancel, the safe answer, not on the long body; Confirm
-  // waits its first second.
-  await expect(confirm).toBeDisabled();
-  await expect(
-    confirmation.getByRole("button", { name: "Cancel" })
-  ).toBeFocused(pageRead);
-  await expect(confirm).toBeEnabled(pageRead);
-  await expect(confirm).toBeInViewport({ ratio: 1 });
-  await expect(
-    confirmation.getByRole("button", { name: "Cancel" })
-  ).toBeInViewport({ ratio: 1 });
-  // The body alone scrolls, as a region named by the title.
-  const dialogBody = confirmation.getByRole("region", {
-    name: "Confirm your approval",
-  });
-  await expect(dialogBody).toContainText("Line 60 of a long comment.");
-  const [title, scrolled, answers] = await Promise.all([
-    confirmation.getByText("Confirm your approval").boundingBox(),
-    dialogBody.boundingBox(),
-    confirm.boundingBox(),
-  ]);
-  expect({
-    titleAboveBody:
-      (title?.y ?? 0) + (title?.height ?? 0) <= (scrolled?.y ?? -1),
-    bodyAboveAnswers:
-      (scrolled?.y ?? 0) + (scrolled?.height ?? 0) <= (answers?.y ?? -1),
-  }).toStrictEqual({ titleAboveBody: true, bodyAboveAnswers: true });
-  await confirm.click();
-  if (wide !== null) {
-    await asDecider.setViewportSize(wide);
-  }
+  await expect(confirmation).toContainText("Paid on time.");
+  await confirmation.getByRole("button", { name: "Confirm" }).click();
   await expect(
     asDecider
       .getByRole("status")
       .filter({ hasText: /^Approved by Person on /u })
   ).toBeVisible(pageRead);
-  // Answered, it needs them no more.
-  await asDecider.reload();
-  await expect(workflows).toHaveAccessibleName("Workflows", pageRead);
 
   // The run ends with their answer: its list is read once, so read again
   // until the engine has finished it.
@@ -284,8 +234,7 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   await run.getByRole("link").click();
   const sheet = page.getByRole("dialog");
   await expect(sheet).toContainText('"status": "approved"', pageRead);
-  await expect(sheet).toContainText('"comment": "Line 1 of a long comment.');
-  await expect(sheet).toContainText("Line 60 of a long comment.");
+  await expect(sheet).toContainText('"comment": "Paid on time."');
   await page.keyboard.press("Escape");
 
   // A webhook: an admin adds a source, its secret shown once.

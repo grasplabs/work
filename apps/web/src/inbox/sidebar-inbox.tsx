@@ -1,116 +1,179 @@
-import {
-  SidebarContent,
-  SidebarGroup,
-  SidebarMenu,
-  SidebarMenuBadge,
-  SidebarMenuButton,
-  SidebarMenuItem,
-} from "@grasp-os/ui/components/sidebar";
-import { BellIcon, Icon } from "@grasp-os/ui/lib/icons";
-import { visuallyHidden } from "@grasp-os/ui/lib/styles";
-import { colors, space } from "@grasp-os/ui/lib/tokens.stylex";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
-import { Link, useMatchRoute } from "@tanstack/react-router";
+import type { Identity } from "@grasp-os/shared/rpc";
+import { BellIcon } from "@grasp-os/ui/lib/icons";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import { Link, useLocation } from "@tanstack/react-router";
 
-import { readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
+import { formatAge } from "../format.ts";
 import { useFrameRead } from "../frame/frame-read.ts";
+import type { SidebarGroupEntry, SidebarRow } from "../frame/sidebar.tsx";
+import { kindMark } from "./inbox-kind.tsx";
+import { inboxItems, unread } from "./items.ts";
+import type { InboxItem } from "./items.ts";
+import { readWaiting } from "./read-waiting.ts";
+import type { Waiting } from "./waiting.ts";
 
-// The sidebar's Inbox view, chosen with the Home | Inbox switch under its
-// head (frame/app-sidebar.tsx), as the reference's: All, the inbox, with
-// how many things wait on the person, named as the inbox's filter names
-// it; or a sentence when nothing does. The count is
-// the Inbox tab's dot too. It counts everything core's feed of what waits
-// lists (`session.waiting.list`), the failed workflows, questions, stopped
-// schedules, sources and package notices among it only while unread. Read
-// again after every change on a page, and on the way to another once the
-// count is older than half a minute (frame/frame-read.ts); nothing is
-// marked read by counting.
+// The sidebar's Inbox view, as the reference's (#2503's
+// inbox/sidebar-inbox.tsx): the inbox's own navigation. First All, the
+// inbox, with how many things need the person; then the few items that
+// have waited longest, each to its place (`/inbox?item=`). The reference
+// also lists a row per group of the inbox's filter (`/inbox?group=`); the
+// inbox has no groups since #2659, so there is no view of one to lead to.
+//
+// What waits is read where the frame reads its counts (frame/frame-read.ts),
+// without marking a notification read (only the inbox, which shows them
+// whole, does that), and of the notifications only those still unread
+// count. The counted items are the Inbox tab's dot too, so the view and the
+// dot never disagree.
 
-/** The kinds that count only while unread: core counts those itself. */
-const notified = new Set([
-  "failedRun",
-  "openQuestion",
-  "stoppedSchedule",
-  "workflowChanged",
-  "packageNotice",
-  "stoppedEvents",
-  "appMessage",
-]);
+/** How many of the items that waited longest the view lists. */
+const longestShown = 3;
 
-/** How many things wait on the person; `undefined` when core couldn't say. Outside the component, as the React Compiler can't compile `try`. */
-const readCount = async (core: CoreConnection): Promise<number | undefined> => {
-  try {
-    return await readWithin(core, async (session) => {
-      const { items, unreadNotifications } = await session.waiting.list();
-      return (
-        items.filter(({ kind }) => !notified.has(kind)).length +
-        unreadNotifications
-      );
-    });
-  } catch {
-    return undefined;
-  }
-};
+/** What waits, with the notifications already read left out: they need nothing. */
+const unreadOnly = (waiting: Waiting): Waiting =>
+  waiting.notifications.state === "ready"
+    ? {
+        ...waiting,
+        notifications: {
+          ...waiting.notifications,
+          data: {
+            ...waiting.notifications.data,
+            page: {
+              ...waiting.notifications.data.page,
+              notifications:
+                waiting.notifications.data.page.notifications.filter(
+                  ({ read }) => !read
+                ),
+            },
+          },
+        },
+      }
+    : waiting;
 
-/** How many things wait on the person; `undefined` until core says. */
-export const useWaitingCount = (): number | undefined =>
-  useFrameRead(readCount).value;
-
-const styles = stylex.create({
-  // Said where the rows would stand, quiet, as the reference's empty view.
-  empty: {
-    margin: 0,
-    paddingBlock: space["2"],
-    paddingInline: space["2"],
-    color: colors.sidebarSecondaryForeground,
-  },
-});
+/** The frame's read of what waits, one for each person who signs in. */
+const reads = new WeakMap<
+  Identity,
+  (core: CoreConnection) => Promise<InboxItem[] | undefined>
+>();
 
 /**
- * The Inbox view's list: everything that waits, with how many, leading to
- * the inbox; "Nothing waits for you." once core said nothing does. Blank
- * while core can't be read, rather than claim nothing waits.
+ * What waits on `identity` and needs them, read without marking anything
+ * read; none when core couldn't say any of it (the dot then shows nothing).
  */
-export const InboxView = ({ waiting }: { waiting: number | undefined }) => {
+const readFor = (
+  identity: Identity
+): ((core: CoreConnection) => Promise<InboxItem[] | undefined>) => {
+  const known = reads.get(identity);
+  if (known !== undefined) {
+    return known;
+  }
+  const read = async (
+    core: CoreConnection
+  ): Promise<InboxItem[] | undefined> => {
+    let said: InboxItem[] | undefined;
+    try {
+      const waiting = await readWaiting(core, identity, {
+        markShownRead: false,
+      });
+      const items = inboxItems(
+        unreadOnly(waiting),
+        identity,
+        new Date().toISOString()
+      );
+      // Nothing read and something unread: core couldn't say, so say nothing.
+      if (items.length > 0 || unread(waiting).length === 0) {
+        said = items;
+      }
+    } catch {
+      // Core couldn't be read: say nothing.
+    }
+    return said;
+  };
+  reads.set(identity, read);
+  return read;
+};
+
+/** What waits on the person and needs them; `undefined` until core says, or while `enabled` is false. */
+export const useWaitingItems = (
+  identity: Identity,
+  enabled: boolean
+): InboxItem[] | undefined => useFrameRead(readFor(identity), enabled).value;
+
+/** How many things wait in a view, in words, for a screen reader. */
+const waitingLabel = (count: number): string =>
+  plural(count, {
+    one: "# thing waiting for you",
+    other: "# things waiting for you",
+  });
+
+/** The oldest first; an item with no date last. */
+const byAge = (a: InboxItem, b: InboxItem): number => {
+  if (a.date === "" || b.date === "") {
+    return Number(a.date === "") - Number(b.date === "");
+  }
+  return a.date.localeCompare(b.date);
+};
+
+/**
+ * The Inbox view's groups from what {@link useWaitingItems} read: All,
+ * then what waited longest; none while nothing waits, when the
+ * sidebar's `empty` sentence shows.
+ */
+export const useInboxGroups = (
+  items: readonly InboxItem[] | undefined
+): SidebarGroupEntry[] => {
   const { t } = useLingui();
-  const matchRoute = useMatchRoute();
-  return (
-    <SidebarContent aria-label={t`Inbox`}>
-      <SidebarGroup>
-        {waiting === 0 ? (
-          <p {...stylex.props(styles.empty)}>
-            <Trans>Nothing waits for you.</Trans>
-          </p>
-        ) : null}
-        {waiting !== undefined && waiting > 0 ? (
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                asChild
-                isActive={matchRoute({ to: "/inbox" }) !== false}
-              >
-                <Link to="/inbox">
-                  <Icon icon={BellIcon} />
-                  {t({ message: "All", context: "inbox filter, short" })}
-                  {/* Inside the link, so its name says how many wait. */}
-                  <span {...stylex.props(visuallyHidden)}>
-                    <Plural
-                      one="# thing waiting"
-                      other="# things waiting"
-                      value={waiting}
-                    />
-                  </span>
-                </Link>
-              </SidebarMenuButton>
-              <SidebarMenuBadge>
-                <span aria-hidden="true">{waiting}</span>
-              </SidebarMenuBadge>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        ) : null}
-      </SidebarGroup>
-    </SidebarContent>
-  );
+  const { pathname, search } = useLocation();
+  const waitedLabel = (duration: string): string => t`Waiting for ${duration}`;
+  const counted = items ?? [];
+  if (counted.length === 0) {
+    return [];
+  }
+  const onInbox = pathname === "/inbox";
+  const asked: { item?: unknown } = search;
+  const openItem = onInbox ? asked.item : undefined;
+  const all: SidebarRow = {
+    id: "view-all",
+    label: t({ message: "All", context: "inbox filter, short" }),
+    icon: BellIcon,
+    count: counted.length,
+    countLabel: waitingLabel(counted.length),
+    render: (look) => <Link {...look} to="/inbox" />,
+    current: onInbox && openItem === undefined,
+  };
+
+  const now = new Date();
+  const longest = counted.toSorted(byAge).slice(0, longestShown);
+  const longestRows: SidebarRow[] = longest.map((item) => {
+    const age = item.date === "" ? undefined : formatAge(item.date, now);
+    return {
+      id: item.id,
+      label: item.context,
+      icon: kindMark[item.kind],
+      ...(age === undefined
+        ? {}
+        : { end: age.short, endLabel: waitedLabel(age.long) }),
+      render: (look) => (
+        <Link {...look} search={{ item: item.id }} to="/inbox" />
+      ),
+      current: openItem === item.id,
+    };
+  });
+
+  return [
+    { id: "inbox-views", rows: [all] },
+    ...(longestRows.length === 0
+      ? []
+      : [
+          {
+            id: "inbox-longest",
+            label: t({
+              message: "Waiting longest",
+              context: "sidebar: the inbox items that have waited longest",
+            }),
+            rows: longestRows,
+          },
+        ]),
+  ];
 };

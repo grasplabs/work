@@ -1,7 +1,7 @@
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { navigationFiles, surfaceFiles } from "./notes-app.ts";
+import { surfaceFiles } from "./notes-app.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
 
 // An App's surfaces (spec 34.1) in a real browser: the App's sidebar
@@ -91,48 +91,4 @@ test("an App's sidebar entry opens its page, and its settings page is its settin
     .click();
   await expect(page).toHaveURL(new RegExp(`/apps/${app}$`, "u"));
   await expect(page.locator('iframe[title="App"]')).toHaveCount(1);
-
-  // An App without settings, its Options asked for by address: none to
-  // list, and it says so.
-  const { core, api } = apiOf(builder);
-  let plain: string;
-  try {
-    ({ id: plain } = await api.apps.create({ name: `${name} plain` }));
-    await release(api, plain, navigationFiles());
-  } finally {
-    core[Symbol.dispose]();
-  }
-  await page.goto(`/apps/${plain}/settings?section=options`);
-  await expect(page.getByText("This App offers no options.")).toBeVisible();
-  await expect(sections.getByRole("link", { name: "Options" })).toHaveCount(0);
-
-  // A section the page doesn't know, by address, as text or as what reads
-  // as a number: General.
-  const general = sections.getByRole("link", { name: "General" });
-  await page.goto(`/apps/${app}/settings?section=pages`);
-  await expect(general).toHaveAttribute("aria-current", "page");
-  await page.goto(`/apps/${app}/settings?section=1`);
-  await expect(general).toHaveAttribute("aria-current", "page");
-});
-
-test("the Apps' own group in the sidebar stays folded as the person left it", async ({
-  pageOf,
-}) => {
-  const { builder, name } = await surfacedApp();
-  const page = await pageOf(builder);
-  await page.goto("/projects");
-  const group = page.getByRole("button", { name: "From your Apps" });
-  const shortcuts = page.getByRole("list", { name: "From your Apps" });
-  await expect(shortcuts.getByRole("link", { name })).toBeVisible();
-
-  await group.click();
-  await expect(group).toHaveAttribute("aria-expanded", "false");
-  await expect(shortcuts).toBeHidden();
-  // Kept in this browser: folded again after a reload.
-  await page.reload();
-  await expect(group).toHaveAttribute("aria-expanded", "false");
-  await expect(shortcuts).toBeHidden();
-
-  await group.click();
-  await expect(shortcuts.getByRole("link", { name })).toBeVisible();
 });

@@ -15,21 +15,22 @@ import {
 describe("where a platform feature's requests go", () => {
   it("is the provider's EU host, said to run in the EU, unless the deployment was set up otherwise", () => {
     expect([
-      platformRouteOf("kugelaudio"),
+      platformRouteOf("mistral"),
       platformRouteOf("openai"),
-      platformHostOf("kugelaudio"),
+      platformHostOf("mistral"),
     ]).toStrictEqual([
+      // Mistral's one host is in the EU.
       {
-        host: "api.eu.kugelaudio.com",
+        host: "api.mistral.ai",
         region: "eu",
-        whereItRuns: "KugelAudio, European Union",
+        whereItRuns: "Mistral AI, European Union (France)",
       },
       {
         host: "eu.api.openai.com",
         region: "eu",
         whereItRuns: "OpenAI, European Union",
       },
-      "api.eu.kugelaudio.com",
+      "api.mistral.ai",
     ]);
   });
 
@@ -54,21 +55,18 @@ describe("where a platform feature's requests go", () => {
   it("takes from the setting only providers that have a usual host to test at", () => {
     expect([
       usualHostProviders("openai"),
-      usualHostProviders(" kugelaudio , openai,nonsense,"),
-      usualHostProviders("kugelaudio"),
+      usualHostProviders(" mistral , openai,nonsense,"),
+      usualHostProviders("mistral"),
       usualHostProviders("anthropic"),
       usualHostProviders(""),
       usualHostProviders(null),
       usualHostProviders(["openai"]),
     ]).toStrictEqual([["openai"], ["openai"], [], [], [], [], []]);
     // A provider with no usual host named here goes where it always did:
-    // KugelAudio's speech stays at its EU host.
+    // Mistral's speech stays at its EU host.
     expect([
-      platformRouteOf("kugelaudio", ["kugelaudio"]),
+      platformRouteOf("mistral", ["mistral"]),
       platformHostOf("anthropic", ["anthropic"]),
-    ]).toStrictEqual([
-      platformRouteOf("kugelaudio"),
-      platformHostOf("anthropic"),
-    ]);
+    ]).toStrictEqual([platformRouteOf("mistral"), platformHostOf("anthropic")]);
   });
 });

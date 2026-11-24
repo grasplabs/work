@@ -1,5 +1,5 @@
 import { chatPlanKinds } from "@grasp-os/shared/chat";
-import type { ChatMake } from "@grasp-os/shared/chat";
+import type { ChatPlanKind } from "@grasp-os/shared/chat";
 import { canBuild, isMemberAdmin } from "@grasp-os/shared/roles";
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
@@ -57,14 +57,14 @@ const Chat = () => {
 interface ChatSearch {
   chat?: string;
   agent?: string;
-  make?: ChatMake["kind"];
+  make?: ChatPlanKind;
   project?: string;
   /** The opportunity whose brief the box starts with (Brain › Opportunities' Draft it). */
   opportunity?: string;
 }
 
 /** What to make, as the address names it: an App or a workflow, or nothing. */
-const makeOf = (value: unknown): ChatMake["kind"] | undefined =>
+const makeOf = (value: unknown): ChatPlanKind | undefined =>
   chatPlanKinds.find((kind) => kind === value);
 
 export const Route = createFileRoute("/_shell/")({

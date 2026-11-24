@@ -209,7 +209,7 @@ const serialProjects = (before: string[]): Project[] => [
  * full on every shard, so `--shard` alone can't split a suite whose
  * serial tail depends on everything before it. CI runs the parallel part
  * in parts (`parallel`, with a test list of each, scripts/e2e-parts.ts:
- * Chromium's tests in fourteen, Firefox's and WebKit's a part each), and
+ * Chromium's tests in seven, Firefox's and WebKit's a part each), and
  * each serial project on a stack of its own (`onboarding-flow`,
  * `onboarding`, `interview`, `journeys`, the journeys a file a stack with
  * `--shard`): they run one after another only so that what one does
