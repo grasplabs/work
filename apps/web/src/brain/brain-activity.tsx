@@ -95,7 +95,7 @@ const Lines = ({
   lines: readonly BrainActivityLine[];
   onOpen: (id: string) => void;
 }) => (
-  <ItemGroup>
+  <ItemGroup stack>
     {lines.map((line, index) => (
       <Fragment key={line.id}>
         {index > 0 ? <ItemSeparator /> : null}

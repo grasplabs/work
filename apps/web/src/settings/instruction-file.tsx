@@ -1,17 +1,19 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-} from "@grasp-os/app-kit/components/field";
-import { Textarea } from "@grasp-os/app-kit/components/textarea";
 import type {
   InstructionFileRef,
   InstructionFileText,
 } from "@grasp-os/shared/instruction-files";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+} from "@grasp-os/ui/components/field";
+import { Textarea } from "@grasp-os/ui/components/textarea";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
@@ -24,6 +26,15 @@ import { useCoreAction } from "../use-core-action.ts";
 // version they started from, so it never overwrites a save they didn't
 // see; the one before stays as its history. Emptied, it loads nowhere. Core decides who may read and save each file; a
 // page shows one only to those core lets read it.
+
+const styles = stylex.create({
+  // The field's buttons at its end.
+  buttons: {
+    display: "flex",
+    justifyContent: "flex-end",
+    gap: space[2],
+  },
+});
 
 /** What was typed and couldn't be saved before an editor opened. */
 interface Unsaved {
@@ -55,10 +66,29 @@ const triedOf = (unsaved: Unsaved | undefined): Tried | undefined =>
     ? undefined
     : { change: unsaved.change, text: unsaved.text, after: 0 };
 
+/** The field's label, unless the card's title says it, and its sentence, if any. */
+const Words = ({
+  label,
+  labelHidden,
+  description,
+}: {
+  label: string;
+  labelHidden: boolean | undefined;
+  description: string | undefined;
+}) => (
+  <>
+    {labelHidden === true ? null : <FieldLabel>{label}</FieldLabel>}
+    {description === undefined ? null : (
+      <FieldDescription>{description}</FieldDescription>
+    )}
+  </>
+);
+
 export const InstructionFileEditor = ({
   file,
   saved,
   label,
+  labelHidden,
   description,
   onSaved,
   unsaved,
@@ -67,7 +97,9 @@ export const InstructionFileEditor = ({
   /** The file as it is now; null while it was never written. */
   saved: InstructionFileText | null;
   label: string;
-  description: string;
+  /** The label names the field for a screen reader only: the card's title already says it. */
+  labelHidden?: boolean;
+  description?: string;
   /** What else a save asks of core, once it landed and before the page is read again. */
   onSaved?: (session: Session) => Promise<void>;
   /**
@@ -79,7 +111,6 @@ export const InstructionFileEditor = ({
 }) => {
   const { t } = useLingui();
   const changedSince = t`Someone saved this file since you started. Put your changes aside to see their version, then make yours again.`;
-  const id = useId();
   const router = useRouter();
   const { busy, failure, run } = useCoreAction();
   // What they typed, and the version they started from: saved only after
@@ -144,15 +175,17 @@ export const InstructionFileEditor = ({
     });
   };
   return (
-    <Field>
-      <FieldLabel htmlFor={id}>{label}</FieldLabel>
-      <FieldDescription>{description}</FieldDescription>
+    <Field disabled={busy}>
+      <Words
+        description={description}
+        label={label}
+        labelHidden={labelHidden}
+      />
       <Textarea
-        disabled={busy}
-        id={id}
-        onChange={(event) => {
+        aria-label={label}
+        onValueChange={(next) => {
           setDraft({
-            text: event.target.value,
+            text: next,
             from: unchanged ? (saved?.version ?? 0) : draft.from,
           });
         }}
@@ -164,7 +197,7 @@ export const InstructionFileEditor = ({
       ) : (
         <ErrorText>{failure ?? handedFailure}</ErrorText>
       )}
-      <div className="flex justify-end gap-2">
+      <div {...stylex.props(styles.buttons)}>
         {stale ? (
           <Button
             disabled={busy}
@@ -172,13 +205,19 @@ export const InstructionFileEditor = ({
               setDraft(undefined);
               setTried(undefined);
             }}
-            variant="outline"
+            size="sm"
+            variant="ghost"
           >
-            <Trans>Put my changes aside</Trans>
+            {t`Put my changes aside`}
           </Button>
         ) : null}
-        <Button disabled={busy || unchanged || stale || nothing} onClick={save}>
-          <Trans>Save</Trans>
+        <Button
+          disabled={busy || unchanged || stale || nothing}
+          onClick={save}
+          size="sm"
+          variant="outline"
+        >
+          {t`Save`}
         </Button>
       </div>
     </Field>

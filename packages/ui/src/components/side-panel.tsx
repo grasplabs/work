@@ -63,6 +63,7 @@ import { className, isBlank } from "../lib/utils";
 import type { LayoutStyle } from "../lib/utils";
 import { iconVars, motionVars, sidePanelCardMarker } from "../lib/vars.stylex";
 import { Button } from "./button";
+import { ghostVars } from "./button.stylex";
 import { Item, ItemContent, ItemGroup, ItemMedia, ItemTitle } from "./item";
 import { Skeleton } from "./skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
@@ -1284,7 +1285,12 @@ const sectionStyles = stylex.create({
     borderRadius: radius.sm,
     cornerShape: radius.shape,
   },
+  // Its one action is quiet, as the title is: a ghost Button in it is muted until the pointer comes.
   end: {
+    [ghostVars.ink]: {
+      default: colors.mutedForeground,
+      ":hover": { default: null, [media.hover]: colors.foreground },
+    },
     display: "flex",
     flexShrink: 0,
     alignItems: "center",

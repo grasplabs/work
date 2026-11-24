@@ -125,9 +125,9 @@ export interface ConfirmationActionProps {
   /** Its words, a verb that says what it does ("Approve", "Delete drafts"). */
   children: ReactNode;
   /**
-   * Button's variant: `default` for the yes, `outline` for the way out beside it, `destructive`
+   * Button's variant: `success` for the yes, `outline` for the way out beside it, `destructive`
    * for a yes that deletes.
-   * @default "default"
+   * @default "success"
    */
   variant?: ButtonVariant;
   /**
@@ -442,7 +442,7 @@ const confirmOf = (
 /** One answer: a small Button described by the request, or a HoldButton with `hold`. */
 export const ConfirmationAction = ({
   children,
-  variant = "default",
+  variant = "success",
   onClick,
   hold = false,
   disabled = false,

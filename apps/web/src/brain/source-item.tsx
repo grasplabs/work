@@ -19,8 +19,6 @@ import {
   WorkflowIcon,
 } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
-import { media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
-import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 
 import { InvoiceIcon } from "../frame/sidebar-icons.ts";
@@ -58,39 +56,6 @@ export interface Source {
   noteId?: string;
 }
 
-const styles = stylex.create({
-  // The name and where it lives, as the row's one line: the name gives
-  // way with an ellipsis, the detail whole at the end. On a phone the
-  // detail goes on a line under the name and the name wraps, as the
-  // reference's stacking row list has it (Damsko's xs row keeps one line:
-  // the registry gap "an xs row in a side panel's card cuts its name").
-  words: {
-    display: { default: "flex", [media.maxSm]: "block" },
-    alignItems: "center",
-    gap: space["2"],
-    flexGrow: 1,
-    minWidth: 0,
-    paddingBlock: { default: 0, [media.maxSm]: space["2"] },
-  },
-  name: {
-    display: { default: null, [media.maxSm]: "block" },
-    minWidth: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: { default: "nowrap", [media.maxSm]: "normal" },
-  },
-  // Stacked, the mark stands on the name's line.
-  media: {
-    alignSelf: { default: null, [media.maxSm]: "flex-start" },
-    height: { default: null, [media.maxSm]: size.sidePanelTextLine },
-    marginBlockStart: { default: null, [media.maxSm]: space["2"] },
-  },
-  detail: {
-    display: { default: null, [media.maxSm]: "block" },
-    marginInlineStart: { default: "auto", [media.maxSm]: 0 },
-  },
-});
-
 const kindIcons: Record<SourceKind, IconData> = {
   file: FileIcon,
   web: Globe2Icon,
@@ -121,15 +86,13 @@ export const SourceItem = ({
 }) => {
   const parts = (
     <>
-      <ItemMedia style={styles.media}>
+      <ItemMedia>
         <Icon icon={kindIcons[source.kind]} />
       </ItemMedia>
       <ItemContent>
         <ItemTitle>
-          <span {...stylex.props(styles.words)}>
-            <span {...stylex.props(styles.name)}>{source.title}</span>
-            <ItemDetail style={styles.detail}>{detailOf(source)}</ItemDetail>
-          </span>
+          {source.title}
+          <ItemDetail>{detailOf(source)}</ItemDetail>
         </ItemTitle>
       </ItemContent>
     </>

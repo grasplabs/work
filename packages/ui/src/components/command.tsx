@@ -105,7 +105,7 @@ import {
 import { popup } from "../lib/tokens.values";
 import { announce, className, isThenable } from "../lib/utils";
 import type { LayoutStyle } from "../lib/utils";
-import { iconVars, menuMarker, motionVars } from "../lib/vars.stylex";
+import { iconVars, motionVars } from "../lib/vars.stylex";
 import { Button } from "./button";
 import { commandMarker, commandRowMarker } from "./command.stylex";
 import { Dialog, DialogTrigger, dialogStyles } from "./dialog";
@@ -705,7 +705,6 @@ const RowActionsMenu = ({
             }
           }}
           {...stylex.props(
-            menuMarker,
             menuStyles.panel,
             menuStyles.motion,
             scrollbarHidden
@@ -735,7 +734,10 @@ const RowActionsMenu = ({
                 }
               >
                 {action.icon && (
-                  <MenuItemIcon {...stylex.props(menuStyles.icon)}>
+                  <MenuItemIcon
+                    data-menu-icon=""
+                    {...stylex.props(menuStyles.icon)}
+                  >
                     <Icon icon={action.icon} />
                   </MenuItemIcon>
                 )}

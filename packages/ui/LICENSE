@@ -4,14 +4,14 @@ not covered by this repository's licence (AGPL-3.0, in LICENSE at its
 root) and remain under Damsko's own licence, as it stands at the commit
 packages/ui/damsko.json pins:
 
-https://github.com/grasplabs/damsko/blob/2d49f2dfd0fb6b86d78a224253bd788ec6fc9ba7/LICENSE
+https://github.com/grasplabs/damsko/blob/6d133526a2486885dba3804967ce4ec31adf7c09/LICENSE
 
 The fonts in packages/ui/src/styles/fonts are under the SIL Open Font
 License 1.1, as their OFL.txt says. A file that follows third-party work
 says so in a header line and keeps that work's licence, as Damsko's
 third-party notices at the same commit list:
 
-https://github.com/grasplabs/damsko/blob/2d49f2dfd0fb6b86d78a224253bd788ec6fc9ba7/THIRD_PARTY_NOTICES.md
+https://github.com/grasplabs/damsko/blob/6d133526a2486885dba3804967ce4ec31adf7c09/THIRD_PARTY_NOTICES.md
 
 At that commit there is one: packages/ui/src/components/diff-viewer-diff.ts
 follows jsdiff 9.0.0 (https://github.com/kpdecker/jsdiff), whose notice

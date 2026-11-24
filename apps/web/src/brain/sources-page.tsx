@@ -2182,7 +2182,7 @@ export const SourcesPage = ({
                           level={3}
                           title={kindHeading(kind)}
                         >
-                          <ItemGroup>
+                          <ItemGroup stack>
                             {ofKind.map((item, index) => (
                               <Fragment key={rowOf.get(item)?.key}>
                                 {index > 0 ? <ItemSeparator /> : null}
