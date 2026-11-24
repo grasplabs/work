@@ -617,7 +617,8 @@ const Stage = ({
   ].join(" · ");
   const speaking = talk.doing === "speaking";
   // A long line, as today's interview shows it: its first sentence large, the rest under it.
-  const shown = shownAs(now?.text ?? "", 90);
+  // Time's up too: "That's our 20 minutes." as the title, the rest under it.
+  const shown = shownAs(now?.text ?? "", now?.id === "time-up" ? 0 : 90);
   return (
     <div {...stylex.props(styles.stage)}>
       <div {...stylex.props(styles.question)}>

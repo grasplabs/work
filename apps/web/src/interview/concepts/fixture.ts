@@ -52,7 +52,9 @@ const filled = (line: string): string =>
  * Ruben's copy (24 November, "Grasp Interview Copy & Writing Guide", on the
  * pull request), every string by his ID. Translated like every other word
  * in the real build; core records the consent notice's VERSION with the
- * yes, raised whenever the consent's words change. No em-dashes.
+ * yes, raised whenever the consent's words change. No em-dashes. One
+ * meaning and one tense everywhere until Ruben says otherwise (orchestrator,
+ * 24 November): "until {close}" and "Nothing was recorded."
  */
 export const copy = {
   start: {
@@ -84,7 +86,7 @@ export const copy = {
   decline: {
     title: "Skip the interview?",
     line: filled(
-      "That’s completely fine. {sponsorFirst} will see that you opted out, but never why. Nothing has been recorded."
+      "That’s completely fine. {sponsorFirst} will see that you opted out, but never why. Nothing was recorded."
     ),
     yes: "Yes, skip it",
     back: "Back",
@@ -134,7 +136,7 @@ export const copy = {
   paused: {
     line: (left: number) =>
       filled(
-        `Your answers are saved and the clock is stopped. You have ${left} minutes left, and you can pick up where you left off any time before {close}.`
+        `Your answers are saved and the clock is stopped. You have ${left} minutes left, and you can pick up where you left off any time until {close}.`
       ),
     title: "Paused",
     carryOn: "Continue",
