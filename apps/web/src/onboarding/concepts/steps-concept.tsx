@@ -252,7 +252,7 @@ export const StepsConcept = ({
       language={step !== "welcome"}
       step={step}
       tools={speaks ? <SoundToggle /> : null}
-      wide={step === "welcome"}
+      wide={step === "welcome" && cards === "scene"}
     >
       <Body
         admin={admin}
