@@ -124,9 +124,14 @@ export const AddChat = ({
     setMine(listed ?? []);
   };
   const add = async (chatId: string): Promise<void> => {
-    await adding.run(async (session) => {
+    const added = await adding.run(async (session) => {
       await session.chats.setProject(chatId, project.id);
+      return true;
     });
+    if (added !== true) {
+      // The dialog stays open, with core's reason in it.
+      return;
+    }
     setOpen(false);
     await router.invalidate({ sync: true });
   };

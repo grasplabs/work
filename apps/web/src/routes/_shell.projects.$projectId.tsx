@@ -26,11 +26,14 @@ const shown = 3;
  * The project with as many of its items as the overview needs: core pages
  * Apps and workflows together, so a first page may hold none of one kind
  * while the project has some. Pages are read on, after the last, until
- * each kind has its three or none are left.
+ * each kind has its three, none are left, or `pages` more were read: a
+ * project of hundreds of Apps before its first workflow shows fewer, and
+ * its tab has them all.
  */
 const withOverviewItems = async (
   session: Session,
-  project: Project
+  project: Project,
+  pages = 2
 ): Promise<Project> => {
   const short = (kind: "app" | "workflow"): boolean =>
     project.items.filter(({ type }) => type === kind).length <
@@ -40,6 +43,7 @@ const withOverviewItems = async (
     );
   const last = project.items.at(-1);
   if (
+    pages === 0 ||
     !project.moreItems ||
     last === undefined ||
     (!short("app") && !short("workflow"))
@@ -51,11 +55,15 @@ const withOverviewItems = async (
     type: last.type,
     id: last.id,
   });
-  return await withOverviewItems(session, {
-    ...project,
-    items: [...project.items, ...page.items],
-    moreItems: page.more,
-  });
+  return await withOverviewItems(
+    session,
+    {
+      ...project,
+      items: [...project.items, ...page.items],
+      moreItems: page.more,
+    },
+    pages - 1
+  );
 };
 
 const ProjectPage = () => {
@@ -127,7 +135,11 @@ export const Route = createFileRoute("/_shell/projects/$projectId")({
             .get(projectId)
             .then(async (read) => await withOverviewItems(session, read)),
           session.chats.list({ project: projectId }),
-          session.projects.connections(projectId),
+          // Read from Connect: where it can't be reached, the project
+          // still opens, with no connections to show.
+          session.projects
+            .connections(projectId)
+            .catch(() => ({ connections: [], unseen: 0 })),
           // Its Apps stand as the Apps page shows them, on that page's read.
           noneIfRefused(session.apps.overview()),
         ]);
