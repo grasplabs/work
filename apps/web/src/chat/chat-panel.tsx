@@ -16,6 +16,7 @@ import { ArrowShrink01Icon } from "@hugeicons/core-free-icons";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useMatch, useRouteContext, useRouter } from "@tanstack/react-router";
+import { bindLayer } from "@ui-sdk/core";
 import { useEffect, useEffectEvent, useRef } from "react";
 
 import { shortcutLabel } from "../shortcuts.ts";
@@ -361,25 +362,32 @@ const Body = ({ open }: { open: boolean }) => {
       body.current?.querySelector<HTMLElement>('[role="textbox"]')?.focus();
     }
   }, [open]);
+  // While open, the whole chat is a layer in UI SDK's stack, as Damsko's
+  // menus, pickers, popovers and dialogs are: Escape goes to the topmost
+  // layer alone, so whatever was opened in the chat closes first, and the
+  // chat only once nothing of its own is open on top. An Escape pressed
+  // outside it is not its own.
   useEffect(() => {
-    const element = body.current;
-    if (element === null) {
+    const chat =
+      body.current?.closest<HTMLElement>('[data-slot="dockable-panel-card"]') ??
+      null;
+    if (!open || chat === null) {
       return () => {
-        // Nothing was listened to.
+        // Nothing was bound.
       };
     }
-    const onKey = (event: KeyboardEvent) => {
-      // What has its own use for Escape (a menu, the questions) keeps it.
-      if (event.key === "Escape" && !event.defaultPrevented) {
-        event.preventDefault();
-        onEscape();
-      }
-    };
-    element.addEventListener("keydown", onKey);
-    return () => {
-      element.removeEventListener("keydown", onKey);
-    };
-  }, []);
+    return bindLayer(chat, {
+      onDismiss: (reason, event) => {
+        if (
+          reason === "escape-key" &&
+          event.target instanceof Node &&
+          chat.contains(event.target)
+        ) {
+          onEscape();
+        }
+      },
+    });
+  }, [open]);
   return (
     <div ref={body} {...stylex.props(styles.body)}>
       {/* Full screen, the conversation reads as a column in the middle,

@@ -1,5 +1,5 @@
 import { expect } from "@playwright/test";
-import type { Page, WebSocketRoute } from "@playwright/test";
+import type { Locator, Page, WebSocketRoute } from "@playwright/test";
 
 import { execute } from "./connections-seed.ts";
 import { test } from "./csp.ts";
@@ -13,7 +13,8 @@ import type { Person } from "./people.ts";
 // there, reads the writes its agent holds for them
 // (one as its tool describes it, one by its raw input), confirms and
 // rejects them, and sees nothing of held writes while they are switched
-// off, and reads the agent's answer to a chat a script opens. The stack's
+// off, and reads the agent's answer to a chat a script opens; Escape over
+// the open chat closes only what was opened on top of it. The stack's
 // provider answers only a scripted chat (e2e/model-scripts.ts) and refuses
 // the key of any other, so that answer is the gateway's failure;
 // streaming, resuming and the person check themselves are core's tests
@@ -391,6 +392,79 @@ test("a person asks, and reads the agent's answer once its turn ends", async ({
     messages.getByRole("button", { name: "Ask again" })
   ).toBeVisible();
   await expect(messages.getByRole("alert")).toHaveCount(0);
+  // Asking again draws the answer anew: the person is taken to the box.
+  await messages.getByRole("button", { name: "Ask again" }).click();
+  await expect(
+    chatOf(page).getByRole("textbox", { name: "Ask Grasp" })
+  ).toBeFocused();
+});
+
+/**
+ * Escape on what `trigger` opens over the open chat (`opened`): that alone
+ * closes, the focus back on its trigger, the chat still open; a second
+ * Escape closes the chat, and the shortcut opens it again.
+ */
+const escapesAlone = async (
+  page: Page,
+  trigger: Locator,
+  opened: Locator
+): Promise<void> => {
+  const chat = chatOf(page);
+  await trigger.click();
+  await expect(opened).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(opened).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await expect(chat).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(chat).toBeHidden();
+  await page.keyboard.press("ControlOrMeta+j");
+  await expect(chat).toBeVisible();
+};
+
+test("Escape closes only what is open over the chat, and the chat once nothing is", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  const { opener } = modelScripts.answersTable;
+  const question = `${opener} (${crypto.randomUUID().slice(0, 8)})`;
+  await page.goto("/apps");
+  await page.getByRole("button", { name: "Open the chat" }).click();
+  const chat = chatOf(page);
+  await expect(chat).toBeVisible();
+  await chat.getByRole("textbox", { name: "Ask Grasp" }).fill(question);
+  await chat.getByRole("button", { name: "Send", exact: true }).click();
+  const answer = chat
+    .getByRole("log", { name: "Messages" })
+    .getByRole("article")
+    .last();
+  await expect(answer.getByRole("button", { name: "Copy table" })).toBeVisible({
+    timeout: 30_000,
+  });
+
+  const menu = page.getByRole("menu");
+  await escapesAlone(
+    page,
+    answer.getByRole("button", { name: "Copy table" }),
+    menu
+  );
+  await escapesAlone(
+    page,
+    answer.getByRole("button", { name: "Download table" }),
+    menu
+  );
+  await escapesAlone(
+    page,
+    answer.getByRole("button", { name: "weekly report" }),
+    page.getByRole("alertdialog", { name: "Open external link?" })
+  );
+  await escapesAlone(page, chat.getByRole("button", { name: "Add" }), menu);
+  await escapesAlone(
+    page,
+    chat.getByRole("button", { name: /^Model:/u }),
+    page.locator('[data-slot="model-selector-content"]')
+  );
 });
 
 test("a person answers the agent's questions in the box's place, types instead and comes back to them, and sends the answers", async ({
@@ -463,10 +537,11 @@ test("a person attaches files to a question, sees them, takes two off by pointer
     { name: draft, mimeType: "text/plain", buffer: Buffer.from("Draft") },
   ]);
   const main = page.getByRole("main");
-  for (const name of [plan, notes, draft]) {
-    // oxlint-disable-next-line no-await-in-loop -- each card in turn
-    await expect(main.getByText(name)).toBeVisible();
-  }
+  await Promise.all(
+    [plan, notes, draft].map(async (name) => {
+      await expect(main.getByText(name)).toBeVisible();
+    })
+  );
   await main.getByRole("button", { name: `Remove ${notes}` }).click();
   await expect(page.getByText(notes)).toHaveCount(0);
   // From the keyboard too: the focus on its Remove, Enter takes it off.

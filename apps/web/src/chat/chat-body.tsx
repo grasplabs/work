@@ -123,8 +123,11 @@ export const ChatConversation = ({
         compact={compact}
         loaded={view.loaded || failure !== undefined}
         messages={view.messages}
+        // Ask again goes as its answer is drawn anew: the person is taken
+        // to the box, not left on the page.
         onRetry={() => {
           if (lastQuestion !== undefined) {
+            focusBox();
             void ask(lastQuestion.text);
           }
         }}
@@ -150,7 +153,9 @@ export const ChatConversation = ({
             lastQuestion !== undefined ? (
               <div>
                 <Button
+                  // It goes as the question runs again: the box takes the focus.
                   onClick={() => {
+                    focusBox();
                     void ask(lastQuestion.text);
                   }}
                   size="sm"

@@ -133,6 +133,26 @@ export const modelScripts = {
     ],
   },
   /**
+   * An answer with a table and a link out of Grasp: what opens over the
+   * chat from an answer (the table's Copy and Download menus, the link's
+   * question before it leaves).
+   */
+  answersTable: {
+    opener: "Which regions sold most last week?",
+    replies: [
+      says(
+        [
+          "North sold most; the [weekly report](https://example.com/report) has the rest.",
+          "",
+          "| Region | Sales |",
+          "| --- | ---: |",
+          "| North | 12 |",
+          "| South | 9 |",
+        ].join("\n")
+      ),
+    ],
+  },
+  /**
    * The agent asks two questions in the box's place (`askQuestions`), and
    * answers once the person's answers come.
    */
