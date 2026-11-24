@@ -180,7 +180,38 @@ export interface Body {
   look: Lean;
   /** The eye's life (eye.ts). */
   life: EyeLife;
+  /** How far into thinking it is, 0 to 1, eased: the main agent's thought comes and goes with it. */
+  thinking: number;
+  /** Where that thought is on its way round, an angle. */
+  orbit: number;
 }
+
+/**
+ * The main agent thinking: a thought, a small light of its own, goes round its orb on a tilted
+ * way, in front and behind, and its eye follows it. Looking away alone (as the other figures
+ * think) was too little to see.
+ */
+const THOUGHT_SECONDS = 2.6;
+const THOUGHT_WAY = 0.86;
+const THOUGHT_SIZE = 0.14;
+/** The orb is this much smaller while it thinks, so the thought has room to go round. */
+const THOUGHT_ROOM = 0.14;
+
+const thoughtOf = (body: Body): Sphere => {
+  const tilt = 1.2;
+  const lean = 0.32;
+  const across = Math.cos(body.orbit) * THOUGHT_WAY;
+  const deep = Math.sin(body.orbit) * THOUGHT_WAY;
+  const z = deep * Math.sin(tilt);
+  return {
+    kind: "sphere",
+    x: across * Math.cos(lean) - deep * Math.cos(tilt) * Math.sin(lean),
+    y: across * Math.sin(lean) + deep * Math.cos(tilt) * Math.cos(lean),
+    z,
+    r: THOUGHT_SIZE * (1 + 0.22 * z) * body.thinking,
+    silk: false,
+  };
+};
 
 export const bodyOf = (
   state: FigureState,
@@ -200,6 +231,9 @@ export const bodyOf = (
   since: 9,
   look: { x: 0, y: 0 },
   life: eyeLifeOf(seed),
+  thinking: state === "thinking" ? 1 : 0,
+  // A still picture has it up and to the side, where the eye looks.
+  orbit: 0.75,
 });
 
 /** A new pose or shape, from wherever the numbers are now. */
@@ -228,8 +262,19 @@ export const stepBody = (body: Body, dt: number): void => {
   body.seconds += dt * Math.min(1, now.speed);
   body.travel += dt * 0.32 * now.speed;
   body.since += dt;
+  const busy = body.state === "thinking";
+  body.thinking += ((busy ? 1 : 0) - body.thinking) * (1 - Math.exp(-dt / 0.1));
+  body.orbit += (dt * TAU) / THOUGHT_SECONDS;
   if (body.eye && body.blinks) {
-    stepEye(body.life, body.state, dt, body.look, body.since);
+    const thought = busy && body.shape === "orb" ? thoughtOf(body) : undefined;
+    stepEye(
+      body.life,
+      body.state,
+      dt,
+      body.look,
+      body.since,
+      thought && { x: thought.x * 1.25, y: thought.y * 1.25 + 0.12 }
+    );
   }
 };
 
@@ -377,6 +422,19 @@ const ringHit = (part: Ring, x: number, y: number, reach: number): Hit => {
   };
 };
 
+/** The orb, and round the main agent's while it thinks, its thought. */
+const orbParts = (body: Body, size: number): Part[] => {
+  const orb: Sphere = {
+    kind: "sphere",
+    x: 0,
+    y: 0,
+    z: 0,
+    r: 0.74 * size * (body.eye ? 1 - THOUGHT_ROOM * body.thinking : 1),
+    silk: true,
+  };
+  return body.eye && body.thinking > 0.03 ? [orb, thoughtOf(body)] : [orb];
+};
+
 /** The scene a shape is now, in the unit square (-1 to 1, y up). */
 const partsOf = (body: Body): Part[] => {
   const { now, travel } = body;
@@ -386,7 +444,7 @@ const partsOf = (body: Body): Part[] => {
   const turn = travel * TAU;
   switch (body.shape) {
     case "orb": {
-      return [{ kind: "sphere", x: 0, y: 0, z: 0, r: 0.74 * size, silk: true }];
+      return orbParts(body, size);
     }
     case "trio": {
       return circling(3, 0.48 * spread, 0.32 * size, turn, 1.05, 0.12);
@@ -682,6 +740,35 @@ const eyeLight = (
   return (0.32 + 0.8 * light) * shade;
 };
 
+/**
+ * The light of a cell of the main agent: on its orb the eye's, where the eye is; on its thought a
+ * light of its own, bright at the middle whatever side the orb is lit from, with a dark edge that
+ * keeps it apart from the orb where it passes in front of the lit side.
+ */
+const mainLight = (
+  orb: Sphere,
+  onOrb: boolean,
+  front: Hit,
+  gaze: Gaze,
+  x: number,
+  y: number,
+  shone: number,
+  cell: number
+): number => {
+  if (!onOrb) {
+    return front.nz < 0.42 ? 0.12 : 0.3 + 0.8 * front.nz ** 1.6;
+  }
+  return (
+    eyeLight(
+      gaze,
+      (x - orb.x) / orb.r,
+      (y - orb.y) / orb.r,
+      shone,
+      cell / orb.r
+    ) ?? shone
+  );
+};
+
 /** The glow round a figure: how fast it fades (figure units), its gain, and the floor a lit dot clears. */
 const GLOW_FADE = 0.11;
 const GLOW_GAIN = 2.6;
@@ -893,17 +980,11 @@ const paintScene = (
       front.surface?.();
       // Its outline catches the rim light too, so a solid lit from behind still has an edge.
       const outline = now.rim * clamp(1 + front.edge / (cell * 2));
-      let value = lit(now, light, front) * (front.tone ?? 1) + outline;
-      if (orb?.kind === "sphere" && frontPart === orb) {
-        const seen = eyeLight(
-          gaze,
-          (x - orb.x) / orb.r,
-          (y - orb.y) / orb.r,
-          value,
-          cell / orb.r
-        );
-        value = seen ?? value;
-      }
+      const shone = lit(now, light, front) * (front.tone ?? 1) + outline;
+      const value =
+        orb?.kind === "sphere"
+          ? mainLight(orb, frontPart === orb, front, gaze, x, y, shone, cell)
+          : shone;
       const level = clamp(Math.floor(value * 5 + threshold - 0.15), 0, 5);
       out[at] = level + 1;
     }
