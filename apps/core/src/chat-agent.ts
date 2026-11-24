@@ -656,7 +656,9 @@ export const chatAgent = (agent: ChatAgent): Extension => {
     ...(agent.context.drafts === undefined
       ? []
       : [
-          draftAgent(agent.context.drafts),
+          draftAgent(agent.context.drafts, {
+            appsNamed: agent.context.make?.kind === "agent",
+          }),
           draftAgentChange(agent.context.drafts),
         ]),
   ];

@@ -287,7 +287,10 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
       audience: { who: "maker" },
       classes: ["read-company"],
       schedule: { cron: "0 7 * * 1-5", opening: "Rank today's applications." },
+      apps: [{ source: "native", provider: "google", name: "Gmail" }],
     } satisfies AgentDraft;
+    // Kinds of work and no apps: one naming none may use every app.
+    const { apps: _apps, ...withoutApps } = draft;
     const { stub, provider } = await personalChatsOf(
       admin.userId,
       // As many at once as a call takes, then past what is left of the
@@ -295,6 +298,7 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
       askStep(chatAskLimits.questions),
       askStep(chatMakeLimits.agentQuestions - chatAskLimits.questions + 1),
       askStep(chatMakeLimits.agentQuestions - chatAskLimits.questions),
+      draftStep(withoutApps),
       draftStep(draft),
       says("It's made.")
     );
@@ -333,6 +337,7 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
     await idle(admin, chat.id);
     const settings = await admin.api.connections.agentSettings(made.id);
     const wakes = await admin.api.connections.agentWakes(made.id);
+    const apps = await admin.api.connections.agentApps(made.id);
     const events = await allEvents();
     const madeEvents = events.filter(
       ({ action, target }) => action === "agent.made" && target?.id === made.id
@@ -364,6 +369,7 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
         .filter(({ audience }) => audience.who !== "nobody")
         .map(({ toolClass }) => toolClass),
       wakes: wakes.map(({ cron, personId }) => [cron, personId]),
+      apps: apps.map(({ app }) => app),
       audited: madeEvents.map(({ actor, detail }) => ({
         actor,
         from: detail?.from,
@@ -371,7 +377,8 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
     }).toStrictEqual({
       kept: { kind: "agent" },
       first: { asks: true, drafts: true, plans: false },
-      refused: 1,
+      // Past the bound, then the draft naming no apps.
+      refused: 2,
       answered: { asks: false, drafts: true },
       before: false,
       made: name,
@@ -379,6 +386,7 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
       audience: { who: "maker" },
       on: ["read-company"],
       wakes: [["0 7 * * 1-5", admin.userId]],
+      apps: ["native:google"],
       audited: [
         { actor: { type: "person", userId: admin.userId }, from: "chat" },
       ],

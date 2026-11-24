@@ -318,7 +318,11 @@ const draftParameters = (() => {
  * have is refused back to the model.
  */
 export const draftAgent = (
-  drafts: "company" | "own"
+  drafts: "company" | "own",
+  // In a chat started to set up an agent, what the person left open stays
+  // closed: a company agent with kinds of work must name its apps, since
+  // one naming none may use every app those kinds of work allow.
+  { appsNamed = false }: { appsNamed?: boolean } = {}
 ): AgentTool<typeof draftParameters> => ({
   name: "draftAgent",
   label: "Draft an agent",
@@ -334,6 +338,16 @@ export const draftAgent = (
     if (draft.data.whose === "company" && drafts !== "company") {
       throw new Error(
         `draftAgent refused: only an admin has one of the company's agents. Draft one of the person's own ("own").`
+      );
+    }
+    if (
+      appsNamed &&
+      draft.data.whose === "company" &&
+      (draft.data.classes?.length ?? 0) > 0 &&
+      (draft.data.apps?.length ?? 0) === 0
+    ) {
+      throw new Error(
+        `draftAgent refused: name the apps it uses (\`apps\`), as the person chose them, or leave out its kinds of work (\`classes\`) and let them choose on its page.`
       );
     }
     return draft.data;
@@ -566,7 +580,7 @@ export interface QuestionAbout {
  * which is what Make it sets through the agent builder: no model, which
  * an admin picks on the agent's page.
  */
-const agentSetupText = `The person, an admin, started this chat from New agent, to set up one of the company's agents. Grasp makes it from your draft once they press Make it: you never make it yourself, and nothing is made before. Ask with askQuestions, at most ${chatMakeLimits.agentQuestions} questions in all, each with answers to tap, and only what their words haven't said yet, in this order: what it is for; which apps it uses (from \`env.connections.available\`, only ones the company offers); what it may do (its kinds of work: reading their own, reading the company's, changing their own, changing the company's, reaching other people, reading other people's); who may ask it (nobody yet, only them, everyone, or some teams); and whether it works on its own on a schedule, and when. Then draft it with draftAgent, \`whose\` \`"company"\`: a short name, its job in one sentence, and its instructions in their terms, with only what they chose. What they left open stays closed: it reaches nobody and may do nothing until an admin says so on its page. To change the draft, they tell you, and you draft it again.`;
+const agentSetupText = `The person, an admin, started this chat from New agent, to set up one of the company's agents. Grasp makes it from your draft once they press Make it: you never make it yourself, and nothing is made before. Ask with askQuestions, at most ${chatMakeLimits.agentQuestions} questions in all, each with answers to tap, and only what their words haven't said yet, in this order: what it is for; which apps it uses (from \`env.connections.available\`, only ones the company offers); what it may do (its kinds of work: reading their own, reading the company's, changing their own, changing the company's, reaching other people, reading other people's); who may ask it (nobody yet, only them, everyone, or some teams); and whether it works on its own on a schedule, and when. Then draft it with draftAgent, \`whose\` \`"company"\`: a short name, its job in one sentence, and its instructions in their terms, with only what they chose. Name its apps whenever it has kinds of work: a draft with kinds of work and no apps is refused, since an agent naming none may use every app. What they left open stays closed: it reaches nobody and may do nothing until an admin says so on its page. To change the draft, they tell you, and you draft it again.`;
 
 /**
  * What the model reads beside a question in a chat "Make something"
