@@ -135,12 +135,20 @@ const Language = () => {
       }}
       value={locale}
     >
-      <SelectTrigger aria-label={t`Language`} size="sm" variant="ghost">
+      <SelectTrigger
+        aria-label={t`Language: ${localeNames[locale]}`}
+        size="sm"
+        variant="ghost"
+      >
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
         {languages.map(({ code, name }) => (
-          <SelectItem key={code} label={name} value={code}>
+          <SelectItem
+            key={code}
+            label={narrow ? code.toUpperCase() : name}
+            value={code}
+          >
             <span lang={code}>{name}</span>
           </SelectItem>
         ))}
@@ -157,7 +165,6 @@ const Language = () => {
 const Leave = () => {
   const { t } = useLingui();
   const core = useCore();
-  const narrow = useNarrow();
   const leave = async () => {
     try {
       await signOut(core);
@@ -165,29 +172,19 @@ const Leave = () => {
       // Still signed in: the page stays as it was.
     }
   };
-  if (narrow) {
-    return (
-      <Button
-        aria-label={t`Leave for now`}
-        onClick={() => {
-          void leave();
-        }}
-        size="icon-sm"
-        variant="ghost"
-      >
-        <Icon icon={LogOutIcon} />
-      </Button>
-    );
-  }
+  // Its icon alone, at every width: a ghost Button's words are ink, heavier
+  // than the quiet words of the sound and the language beside it. Its name
+  // is its tooltip and its accessible name.
   return (
     <Button
+      aria-label={t`Leave for now`}
       onClick={() => {
         void leave();
       }}
-      size="sm"
+      size="icon-sm"
       variant="ghost"
     >
-      {t`Leave for now`}
+      <Icon icon={LogOutIcon} />
     </Button>
   );
 };
