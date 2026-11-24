@@ -45,6 +45,94 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       error: t({ message: "Failed", context: "a menu item whose work failed" }),
       loading: t`Working`,
     },
+    holdButton: {
+      ask: (words) => t`${words}?`,
+      cancel: t`Cancel`,
+      confirm: t`Confirm`,
+      holdTo: (words) => t`Press and hold: ${words}`,
+    },
+    message: {
+      actions: t`Message actions`,
+      assistant: t({ message: "Assistant", context: "who wrote a message" }),
+      done: t`Answer ready`,
+      error: t`Could not answer`,
+      retry: t`Try again`,
+      stopped: t({ message: "Stopped", context: "an answer stopped part way" }),
+      streaming: t({ message: "Writing", context: "an answer being written" }),
+      user: t({ message: "You", context: "who wrote a message" }),
+    },
+    messageScroller: {
+      arrived: (count) =>
+        plural(count, { one: "# new message", other: "# new messages" }),
+      jumpToNew: (jumpLabel) => t`${jumpLabel}, new messages`,
+      label: t`Messages`,
+      loading: t`Loading the conversation`,
+      scrollToEnd: t`Jump to latest`,
+      scrollToStart: t`Jump to start`,
+    },
+    promptInput: {
+      add: t`Add to message`,
+      addAttachments: t`Add files`,
+      attachments: t`Files to send`,
+      count: (length, max) => `${length}/${max}`,
+      cut: (max) =>
+        max === 0
+          ? t`What was added was left out: no more can be written`
+          : plural(max, {
+              one: "What was added was cut at the limit of # character",
+              other: "What was added was cut at the limit of # characters",
+            }),
+      drop: t`Drop to add`,
+      failed: t`Could not send. Your message is kept.`,
+      mentionEmpty: t`No matches`,
+      mentionsError: t`Could not load suggestions`,
+      mentionsFound: (count) =>
+        count === 0
+          ? t`No results`
+          : plural(count, { one: "# result", other: "# results" }),
+      mentionsLoading: t({
+        message: "Looking",
+        context: "searching for suggestions",
+      }),
+      near: (max) =>
+        max === 0
+          ? t`No room left`
+          : plural(max, {
+              one: "Close to the limit of # character",
+              other: "Close to the limit of # characters",
+            }),
+      reached: (max) =>
+        max === 0
+          ? t`No more can be written`
+          : plural(max, {
+              one: "The limit of # character is reached",
+              other: "The limit of # characters is reached",
+            }),
+      speechButton: {
+        cancel: t`Cancel dictation`,
+        done: t({ message: "Done", context: "stop dictating" }),
+        label: t`Dictate`,
+        listening: t`Listening`,
+        mute: t({
+          message: "Mute",
+          context: "turn your microphone off for a moment",
+        }),
+        settling: t`Writing it down`,
+      },
+      stop: t({ message: "Stop", context: "stop an answer" }),
+      submit: t`Send`,
+      succeeded: t`Done`,
+      // Closing a spoken conversation gives the text back.
+      voice: {
+        close: t`Type instead`,
+        label: t`Voice conversation`,
+        listening: t`Listening`,
+        speaking: t({ message: "Speaking", context: "the other voice's turn" }),
+      },
+    },
+    sheet: {
+      close: t`Close`,
+    },
     action: {
       agentAsks: t`Does something that needs your yes`,
       agentPresses: (words) => t`Presses "${words}"`,
@@ -54,6 +142,26 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
     },
     alertDialog: {
       cancel: t`Cancel`,
+    },
+    breadcrumb: {
+      ellipsis: t`Show hidden levels`,
+      name: t`Breadcrumb`,
+    },
+    calendar: {
+      next: t`Next month`,
+      previous: t`Previous month`,
+    },
+    datePicker: {
+      last30: t`Last 30 days`,
+      last7: t`Last 7 days`,
+      presets: t`Presets`,
+      rangeEnd: (field) => t`${field}, end`,
+      rangeStart: (field) => t`${field}, start`,
+      rangeTrigger: t`Choose dates`,
+      select: t`Choose date`,
+      triggerWith: (trigger, chosen) => t`${trigger}, ${chosen}`,
+      thisMonth: t`This month`,
+      today: t`Today`,
     },
     dialog: {
       close: t`Close`,
@@ -105,6 +213,11 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       uploading: (percent) => t`Uploading, ${percent}%`,
       uploadingName: (name) => t`Uploading ${name}`,
     },
+    input: {
+      hidePassword: t`Hide password`,
+      replace: t`Replace`,
+      showPassword: t`Show password`,
+    },
     keyValue: {
       // A fact's name inside the sentence, lower case, but for German, whose
       // nouns keep their capital.
@@ -132,6 +245,22 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       close: t`Close`,
       showAll: t`Show all`,
       views: t`Views`,
+    },
+    stepper: {
+      count: (step, total) => t`Step ${step} of ${total}`,
+      current: (step, total, label) => t`Step ${step} of ${total}: ${label}`,
+      finished: t`All steps done`,
+      navBack: t`Back`,
+      navNext: t`Next`,
+      states: {
+        complete: t`done`,
+        active: t`current step`,
+        pending: t`not started`,
+        error: t`failed`,
+      },
+    },
+    switch: {
+      error: t`Could not save`,
     },
     toast: {
       close: t`Close`,

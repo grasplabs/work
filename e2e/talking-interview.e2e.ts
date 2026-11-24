@@ -316,11 +316,11 @@ test("their words show while they talk, and all of them a moment after they stop
 
   await startTalking(page, link, person);
 
-  // While they talk, what is heard so far shows over the bar.
-  await expect(page.getByText("Listening", { exact: true })).toBeVisible({
-    timeout: 30_000,
-  });
-  await expect(page.getByText(partials[0] ?? "")).toBeVisible({
+  // While they talk, what is heard so far is written in the spoken
+  // conversation, their turn's time running.
+  const spoken = page.getByRole("group", { name: "Voice conversation" });
+  await expect(spoken.getByRole("timer")).toBeVisible({ timeout: 30_000 });
+  await expect(spoken.getByText(partials[0] ?? "")).toBeVisible({
     timeout: 15_000,
   });
   // Then all of it, and Stephen is answered with it, as said, not typed.

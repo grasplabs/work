@@ -1,7 +1,13 @@
 import type { LinkToSend } from "@grasp-os/shared/onboarding";
+import { colors } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 
 import { formatList } from "../format.ts";
+
+const styles = stylex.create({
+  notice: { display: "block", color: colors.destructive },
+});
 
 // Whose link from Grasp failed, for the company's admin among the
 // interviews: the email with it didn't reach them, so they won't start
@@ -20,7 +26,7 @@ export const FailedMailNotice = ({
   }
   const names = formatList(failed.map(({ name }) => name));
   return (
-    <output className="text-destructive block">
+    <output {...stylex.props(styles.notice)}>
       <Trans>
         Our email didn’t reach {names}. Send them their link yourself from Links
         to send, or ask Grasp to check their address.

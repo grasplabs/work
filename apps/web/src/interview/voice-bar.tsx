@@ -1,67 +1,83 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { cn } from "@grasp-os/app-kit/lib/utils";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
+import {
+  colors,
+  duration,
+  font,
+  media,
+  radius,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
-import { MicIcon, MicOffIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import * as stylex from "@stylexjs/stylex";
 
+import { voice } from "./interview.stylex.ts";
 import { useInterviewer } from "./kept.ts";
-import { micLevel, muteMic, useMicMuted } from "./mic.ts";
+import { micLevel, useMicMuted } from "./mic.ts";
 import { voiceLevel } from "./speech.ts";
 import { VoiceWave } from "./voice-wave.tsx";
+import type { WaveOf } from "./voice-wave.tsx";
 
-// Talking, as a bar (prototype `voice-bar.tsx`): what is happening in
-// words on the left, and through the middle the sound as a wave of dots,
-// in ink with the interviewer's voice, warm and as loud as the person
-// talks. Never an icon for it. At its right end stands what it is given:
-// in the interview, the way to type instead. With `mute`, the dot is
-// their own microphone: a press mutes them for a moment, the next brings
-// them back. Muted, the bar says so in place of "Listening" and the wave
-// lies still, so nobody talks to a microphone that is off. It is the same
-// bar in the check before the interview, so what they see there is what
-// they get.
+// Talking, as a bar in the check before the interview (prototype
+// `voice-bar.tsx`): what is happening in words on the left, and through the
+// middle the sound as a wave of dots, in ink with the interviewer's voice,
+// warm and as loud as the person talks. Never an icon for it. In the
+// interview itself the box gives way to Damsko's PromptInputVoice
+// (composer.tsx), which draws the voice its own way.
 
-/** What the bar shows: the microphone being asked for, them talking, the interviewer talking, or a moment while he thinks. */
-export type BarDoing = "asking" | "listening" | "speaking" | "thinking";
+const pulse = stylex.keyframes({
+  "0%": { opacity: 1 },
+  "50%": { opacity: 0.4 },
+  "100%": { opacity: 1 },
+});
 
-/** Their own microphone, as the bar's dot: pressed, it mutes them, or brings them back. */
-const MuteButton = ({ listening }: { listening: boolean }) => {
-  const { t } = useLingui();
-  const muted = useMicMuted();
-  const label = muted
-    ? t({ message: "Unmute", context: "turn your microphone back on" })
-    : t({ message: "Mute", context: "turn your microphone off for a moment" });
-  return (
-    <Button
-      aria-label={label}
-      aria-pressed={muted}
-      className="-ml-2"
-      onClick={() => {
-        muteMic(!muted);
-      }}
-      size="icon-sm"
-      title={label}
-      variant={muted ? "secondary" : "ghost"}
-    >
-      {muted ? (
-        <MicOffIcon />
-      ) : (
-        <MicIcon className={cn(listening && "text-brain-heat")} />
-      )}
-    </Button>
-  );
-};
+const styles = stylex.create({
+  // A field of its own, where no box holds it.
+  bar: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["3"],
+    boxSizing: "border-box",
+    width: "100%",
+    height: "3.5rem",
+    paddingInline: space["4"],
+    borderWidth: size.hairline,
+    borderStyle: "solid",
+    borderColor: colors.border,
+    borderRadius: radius.promptInputRadius,
+    cornerShape: radius.shape,
+  },
+  state: {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    gap: space["2"],
+    color: colors.mutedForeground,
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+  },
+  dot: {
+    width: "0.5rem",
+    height: "0.5rem",
+    borderRadius: radius.circle,
+    backgroundColor: colors.border,
+    transitionProperty: "background-color",
+    transitionDuration: duration.ui,
+    transitionTimingFunction: duration.ease,
+  },
+  hearing: {
+    backgroundColor: voice.heat,
+    animationName: { default: pulse, [media.reducedMotion]: "none" },
+    animationDuration: "2s",
+    animationIterationCount: "infinite",
+  },
+  wave: { flexGrow: 1, minWidth: 0, height: "2.5rem" },
+});
 
-export const VoiceBar = ({
-  doing,
-  mute = false,
-  children,
-}: {
-  doing: BarDoing;
-  /** Whether they can mute themselves from the bar. */
-  mute?: boolean;
-  children?: ReactNode;
-}) => {
+/** What the bar shows: the microphone being asked for, them talking, or the interviewer talking. */
+export type BarDoing = "asking" | "listening" | "speaking";
+
+export const VoiceBar = ({ doing }: { doing: BarDoing }) => {
   const { t } = useLingui();
   const who = interviewerNames[useInterviewer()];
   const muted = useMicMuted();
@@ -71,46 +87,25 @@ export const VoiceBar = ({
     label = t`Listening`;
   } else if (doing === "speaking") {
     label = t`${who} is talking`;
-  } else if (doing === "listening") {
-    label = t({
-      message: "Muted",
-      context: "your microphone is off for a moment",
-    });
   }
-  let of: "person" | "interviewer" | "quiet" = "quiet";
+  let of: WaveOf = "quiet";
   if (listening) {
     of = "person";
   } else if (doing === "speaking") {
     of = "interviewer";
   }
   return (
-    <div
-      className={cn(
-        "border-input flex h-14 w-full items-center gap-3 rounded-xl border pl-4",
-        children === undefined ? "pr-4" : "pr-2"
-      )}
-    >
-      <span
-        aria-live="polite"
-        className="text-muted-foreground flex flex-none items-center gap-2.5"
-      >
-        {mute ? (
-          <MuteButton listening={listening} />
-        ) : (
-          <span
-            aria-hidden="true"
-            className={cn(
-              "size-2 rounded-full transition-colors duration-300",
-              listening ? "bg-brain-heat animate-pulse" : "bg-border"
-            )}
-          />
-        )}
+    <div {...stylex.props(styles.bar)}>
+      <span aria-live="polite" {...stylex.props(styles.state)}>
+        <span
+          aria-hidden="true"
+          {...stylex.props(styles.dot, listening && styles.hearing)}
+        />
         {label}
       </span>
-      <div className="h-10 min-w-0 flex-1">
+      <div {...stylex.props(styles.wave)}>
         <VoiceWave level={listening ? micLevel : voiceLevel} of={of} />
       </div>
-      {children}
     </div>
   );
 };
