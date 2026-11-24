@@ -224,3 +224,34 @@ export const imageHeaderOf = (bytes: Uint8Array): ImageHeader | undefined =>
   jpegHeader(bytes) ??
   webpHeader(bytes) ??
   gifHeader(bytes);
+
+/** The IEND chunk a PNG ends with: no data, then its CRC (PNG §11.2.5). */
+const pngEnd = [0, 0, 0, 0, ...ascii("IEND"), 0xae, 0x42, 0x60, 0x82];
+
+const endsOf: Record<ImageHeader["type"], (bytes: Uint8Array) => boolean> = {
+  "image/png": (bytes) => holds(bytes, pngEnd, bytes.length - pngEnd.length),
+  "image/gif": (bytes) => bytes.at(-1) === 0x3b,
+  // Some cameras write bytes after the end marker: the last one counts.
+  "image/jpeg": (bytes) => {
+    for (let at = bytes.length - 2; at > 2; at -= 1) {
+      if (bytes[at] === 0xff && bytes[at + 1] === 0xd9) {
+        return true;
+      }
+    }
+    return false;
+  },
+  // RIFF's length counts what follows its first eight bytes.
+  "image/webp": (bytes) => viewOf(bytes).getUint32(4, true) + 8 <= bytes.length,
+};
+
+/**
+ * Whether an image of `type` runs to its end in `bytes`, by its format's
+ * end marker: a PNG's IEND chunk, a GIF's trailer (0x3B), a JPEG's end
+ * of image (FF D9), a WebP's RIFF length. A header alone, or an upload
+ * cut short, has none, and a model can't read it: kept, it would fail
+ * every later turn that shows it. Nothing is decoded.
+ */
+export const imageEnded = (
+  bytes: Uint8Array,
+  type: ImageHeader["type"]
+): boolean => endsOf[type](bytes);

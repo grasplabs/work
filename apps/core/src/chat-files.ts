@@ -14,7 +14,7 @@ import { z } from "zod";
 
 import { ExtractorUnavailableError, localExtractor } from "./files/extract.ts";
 import type { LocalExtractorEnv } from "./files/extract.ts";
-import { imageHeaderOf } from "./files/image-header.ts";
+import { imageEnded, imageHeaderOf } from "./files/image-header.ts";
 import type { ImageHeader } from "./files/image-header.ts";
 import { hasText, signatures } from "./files/upload-checks.ts";
 
@@ -158,7 +158,8 @@ export const readChatFile = async (
  * `undefined` for anything that isn't one, to be read as a file by its
  * name (`readChatFile`). Refused as too large past
  * {@link chatPictureMaxBytes} or {@link chatPictureMaxPixels} a side, and
- * as unsupported when its header says it has no pixels.
+ * as unsupported when its header says it has no pixels or it stops
+ * short of its end.
  */
 export const readChatPicture = (
   input: unknown
@@ -177,7 +178,11 @@ export const readChatPicture = (
   if (bytes.byteLength > chatPictureMaxBytes) {
     throw agentErrors.create("agent.file_too_large");
   }
-  if (header.width < 1 || header.height < 1) {
+  if (
+    header.width < 1 ||
+    header.height < 1 ||
+    !imageEnded(bytes, header.type)
+  ) {
     throw agentErrors.create("agent.file_unsupported");
   }
   if (

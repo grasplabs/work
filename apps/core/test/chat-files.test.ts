@@ -134,7 +134,10 @@ const be32 = (value: number): number[] => {
   return [...out];
 };
 
-/** A PNG's signature and IHDR, `width` by `height`, `size` bytes in all. */
+/**
+ * A PNG's signature and IHDR, `width` by `height`, and its IEND, `size`
+ * bytes in all.
+ */
 const png = ({ width = 64, height = 64, size = 88 } = {}): Uint8Array => {
   const bytes = new Uint8Array(size).fill(1);
   bytes.set([
@@ -151,6 +154,7 @@ const png = ({ width = 64, height = 64, size = 88 } = {}): Uint8Array => {
     ...be32(width),
     ...be32(height),
   ]);
+  bytes.set([...be32(0), ...utf8("IEND"), 0xae, 0x42, 0x60, 0x82], size - 12);
   return bytes;
 };
 
@@ -749,6 +753,8 @@ describe("pictures attached to a question", slow, () => {
         png({ width: chatPictureMaxPixels + 1, height: 10 })
       ),
       noPixels: await attach("shot.png", png({ width: 0 })),
+      // Its header, then an upload cut short: no model can read it.
+      cutShort: await attach("shot.png", realPng.subarray(0, 40)),
       // Nothing refused was kept.
       kept: await keptFiles(ann),
       parts: await keptParts(ann),
@@ -767,6 +773,7 @@ describe("pictures attached to a question", slow, () => {
       oversized: "agent.file_too_large",
       tooWide: "agent.file_too_large",
       noPixels: "agent.file_unsupported",
+      cutShort: "agent.file_unsupported",
       kept: 0,
       parts: 0,
       atTheLimit: "ok",
