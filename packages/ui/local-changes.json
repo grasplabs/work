@@ -2,11 +2,13 @@
   {
     "path": "src/components/collapsible.tsx",
     "reason": "A trigger takes Text's size and weight, so a page keeps one body style; with fitContent it no longer wraps in a box that shrinks to fit.",
-    "since": "2026-11-24"
+    "since": "2026-11-24",
+    "pullRequest": "https://github.com/grasplabs/damsko/pull/66"
   },
   {
     "path": "src/lib/icons.ts",
     "reason": "The filled forms of the message and pause icons, for a header whose icons are filled.",
-    "since": "2026-11-24"
+    "since": "2026-11-24",
+    "pullRequest": "https://github.com/grasplabs/damsko/pull/66"
   }
 ]
