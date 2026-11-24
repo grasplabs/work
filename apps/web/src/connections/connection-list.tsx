@@ -98,6 +98,17 @@ const styles = stylex.create({
     borderInlineStartStyle: "solid",
     borderInlineStartColor: colors.border,
   },
+  // A stopped row's Disconnect it: after its sentence; in a column under 28rem (the app page's
+  // column is the container), on a line of its own under it, its word on the sentence's start
+  // edge, not on the button's own inset.
+  stoppedAction: {
+    display: { default: null, "@container (width < 28rem)": "flex" },
+    width: { default: null, "@container (width < 28rem)": "fit-content" },
+    marginInlineStart: {
+      default: null,
+      "@container (width < 28rem)": `calc(-1 * ${space["2"]})`,
+    },
+  },
 });
 
 /** Every permission the person may list, and the Apps' names. */
@@ -519,6 +530,7 @@ export const StoppedNotice = ({
           setOpen(true);
         }}
         size="xs"
+        style={styles.stoppedAction}
         variant="link"
       >
         {t`Disconnect it`}
