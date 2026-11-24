@@ -174,7 +174,7 @@ export const CampaignNotes = ({ campaign }: { campaign: Campaign }) => {
         <Heading level={1} size="xl">
           {lead}
         </Heading>
-        <Text>
+        <Text size="lg">
           <ReadAloud text={rest} />
         </Text>
       </header>
