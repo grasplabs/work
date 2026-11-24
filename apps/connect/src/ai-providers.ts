@@ -2,6 +2,7 @@ import {
   aiCredentialPlaceholder,
   aiGrantHeader,
   aiKeyErrors,
+  aiKeySavedAtSchema,
   aiProviderHost,
   platformHostOf,
   usualHostProviders,
@@ -349,19 +350,26 @@ export const saveAiProviderKey = async (
 /**
  * Deletes the organization's key for a provider, recorded in `by`'s name
  * (`ai_provider.removed`) in the same batch when it had one; whether it
- * had one.
+ * had one. With `savedAt`, only the key that save wrote: one saved again
+ * since, by another admin meanwhile, is kept.
  */
 export const removeAiProviderKey = async (
   env: Env,
   provider: unknown,
-  by: unknown
+  by: unknown,
+  savedAt?: unknown
 ): Promise<boolean> => {
   const parsed = organizationProviderIdSchema.safeParse(provider);
-  if (!parsed.success) {
+  const saved = aiKeySavedAtSchema.optional().safeParse(savedAt);
+  if (!parsed.success || !saved.success) {
     throw aiKeyErrors.create("ai_key.invalid");
   }
   const actor = changerOf(by);
-  const which = eq(aiProviderKeys.provider, parsed.data);
+  const byProvider = eq(aiProviderKeys.provider, parsed.data);
+  const which =
+    saved.data === undefined
+      ? byProvider
+      : sql`${byProvider} AND ${eq(aiProviderKeys.updatedAt, new Date(saved.data))}`;
   const removed = await writing(
     parsed.data,
     async () =>

@@ -1,9 +1,9 @@
 // Light, dark, or the system's colour scheme, through the theme's `dark`
-// class and, for Damsko's components, the `data-mode` attribute. Loaded as a classic script in <head>, so it runs before first paint
-// and dark mode never flashes light. Damsko's theme itself (its colours,
-// Evergreen: the sidebar's ground and the page's card on it) is the
-// product's one, fixed on the root in index.html. A file, not inline: the CSP allows no
-// inline script.
+// class and, for Damsko's components, the `data-mode` attribute; and
+// Damsko's theme, its colours (Evergreen, Pine, Paper), as the root's
+// `data-theme`, which index.html starts at Evergreen. Loaded as a classic
+// script in <head>, so it runs before first paint and nothing flashes. A
+// file, not inline: the CSP allows no inline script.
 //
 // The choice is the person's, kept in this browser (src/frame/theme.ts):
 // `grasp-theme` holds the one applied last, so the first paint already has
@@ -20,12 +20,15 @@ globalThis.__zod_globalConfig = { jitless: true };
 
 {
   const dark = matchMedia("(prefers-color-scheme: dark)");
+  const ids = new Set(["evergreen", "pine", "paper"]);
   const apply = () => {
     let theme = null;
+    let id = null;
     try {
       theme = localStorage.getItem("grasp-theme");
+      id = localStorage.getItem("grasp-theme-id");
     } catch {
-      // Storage blocked: follow the system.
+      // Storage blocked: follow the system, in Evergreen.
     }
     const isDark = theme === "dark" || (theme !== "light" && dark.matches);
     document.documentElement.classList.toggle("dark", isDark);
@@ -34,12 +37,13 @@ globalThis.__zod_globalConfig = { jitless: true };
     // its themes.css sets from it.
     document.documentElement.dataset.mode =
       theme === "light" || theme === "dark" ? theme : "system";
+    document.documentElement.dataset.theme = ids.has(id) ? id : "evergreen";
   };
   apply();
   dark.addEventListener("change", apply);
   document.addEventListener("grasp-theme", apply);
   addEventListener("storage", (event) => {
-    if (event.key === "grasp-theme") {
+    if (event.key === "grasp-theme" || event.key === "grasp-theme-id") {
       apply();
     }
   });

@@ -33,6 +33,12 @@ export type OrganizationProviderId = z.infer<
 >;
 
 /**
+ * Which save of a provider's key a removal means: the `updatedAt` that
+ * save returned. A key saved again since has another.
+ */
+export const aiKeySavedAtSchema = z.number().int().nonnegative();
+
+/**
  * Every provider: each is one an organization may add a key for. Grasp's
  * own speech feature reaches Mistral, on Grasp's key (core's
  * src/platform-ai.ts).
@@ -614,8 +620,12 @@ export interface AiProvidersApi {
   ) => Promise<AiProviderTest>;
   /** Sets the default model and its fallbacks, each a connected provider's. */
   setModels: (choice: z.input<typeof aiModelChoiceSchema>) => Promise<void>;
-  /** Removes the provider's key; connect deletes it. */
-  remove: (provider: OrganizationProviderId) => Promise<void>;
+  /**
+   * Removes the provider's key; connect deletes it. With `savedAt` (the
+   * `updatedAt` its `add` returned), only while that save is still the
+   * key kept: a key saved again since stays.
+   */
+  remove: (provider: OrganizationProviderId, savedAt?: number) => Promise<void>;
   /** Sets whose key the organization's AI runs on: its own, or Grasp's. */
   setSource: (source: AiSource) => Promise<void>;
 }
@@ -654,11 +664,13 @@ export interface AiProviderConnectApi {
   ) => Promise<AiProviderKey>;
   /**
    * Deletes the organization's key for a provider, recorded for the audit
-   * log in the same write, in `by`'s name; whether it had one.
+   * log in the same write, in `by`'s name; whether it had one. With
+   * `savedAt`, only the key that save wrote (`aiKeySavedAtSchema`).
    */
   removeAiProviderKey: (
     provider: AiProviderId,
-    by: AuditActor
+    by: AuditActor,
+    savedAt?: number
   ) => Promise<boolean>;
   /** The organization's keys, as masks. */
   aiProviderKeys: () => Promise<AiProviderKey[]>;
