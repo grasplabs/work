@@ -351,6 +351,16 @@ test("an admin comes back from connecting a stopped toolkit again, finds the sto
   const stopped = await seedStoppedToolkit(admin.userId);
   try {
     const page = await pageOf(admin);
+    // Every disconnect the page asks of core, as Cap'n Web writes the call.
+    const disconnects: string[] = [];
+    page.on("websocket", (socket) => {
+      socket.on("framesent", ({ payload }) => {
+        const text = String(payload);
+        if (text.includes('["connections","disconnect"]')) {
+          disconnects.push(text);
+        }
+      });
+    });
     await page.goto(`/integrations/composio:hubspot?connection=${toolkit.id}`);
     const done = page.getByRole("dialog", {
       name: "hubspot is connected again",
@@ -368,6 +378,17 @@ test("an admin comes back from connecting a stopped toolkit again, finds the sto
       "A connection that works has taken its place, so this one can be disconnected now."
     );
     await expect(rowOf(page, toolkit)).not.toContainText("can be disconnected");
+    // The row reads that from what core lists: the browser keeps no note of
+    // either connection, and nothing was asked to disconnect.
+    const kept = await page.evaluate(() =>
+      JSON.stringify([
+        Object.entries(localStorage),
+        Object.entries(sessionStorage),
+      ])
+    );
+    expect(kept).not.toContain(stopped.id);
+    expect(kept).not.toContain(toolkit.id);
+    expect(disconnects).toStrictEqual([]);
     await page.reload();
     await expect(stoppedRow).toBeVisible();
 
@@ -384,6 +405,9 @@ test("an admin comes back from connecting a stopped toolkit again, finds the sto
       .click();
     await expect(stoppedRow).toHaveCount(0);
     await expect(rowOf(page, toolkit)).toContainText("Connected");
+    // The one disconnect sent is the confirmed one, of the stopped connection.
+    expect(disconnects).toHaveLength(1);
+    expect(disconnects[0]).toContain(stopped.id);
   } finally {
     await removeSeeded(stopped);
   }
