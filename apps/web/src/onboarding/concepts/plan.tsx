@@ -1,30 +1,18 @@
 import { Bubble, BubbleContent } from "@grasp-os/ui/components/bubble";
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@grasp-os/ui/components/card";
-import {
   Item,
   ItemContent,
-  ItemDescription,
   ItemDetail,
   ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
-import { KeyValueList } from "@grasp-os/ui/components/key-value";
-import {
-  Message,
-  MessageContent,
-  MessageHeader,
-} from "@grasp-os/ui/components/message";
-import { Text } from "@grasp-os/ui/components/text";
+import { Message, MessageContent } from "@grasp-os/ui/components/message";
 import {
   CalendarIcon,
   CircleCheckIcon,
   Icon,
+  SparklesIcon,
   UsersIcon,
 } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
@@ -70,7 +58,6 @@ interface Moment {
   id: string;
   icon: IconData;
   title: string;
-  description: string;
   day: Date;
 }
 
@@ -83,29 +70,25 @@ export const CampaignTimeline = ({ today }: { today: Date }) => {
     {
       id: "first",
       icon: UsersIcon,
-      title: t`The first people`,
-      description: t`Those who know the work best talk to me first.`,
+      title: t`The people who know the work best go first`,
       day: days.first,
     },
     {
       id: "everyone",
       icon: UsersIcon,
-      title: t`Everyone else`,
-      description: t`Each person gets their own link. A talk takes up to 20 minutes.`,
+      title: t`Everyone else gets their own link`,
       day: days.everyone,
     },
     {
       id: "close",
       icon: CalendarIcon,
       title: t`The interviews close`,
-      description: t`One week after the start. You can add a second week.`,
       day: days.close,
     },
     {
       id: "findings",
       icon: CircleCheckIcon,
       title: t`You get what I learned`,
-      description: t`Team by team, with what to do first.`,
       day: days.findings,
     },
   ];
@@ -118,7 +101,6 @@ export const CampaignTimeline = ({ today }: { today: Date }) => {
           </ItemMedia>
           <ItemContent>
             <ItemTitle>{moment.title}</ItemTitle>
-            <ItemDescription>{moment.description}</ItemDescription>
           </ItemContent>
           <ItemDetail>
             <time dateTime={moment.day.toISOString().slice(0, 10)}>
@@ -131,53 +113,18 @@ export const CampaignTimeline = ({ today }: { today: Date }) => {
   );
 };
 
-/** What Grasp writes down from the example's answer. */
-const WrittenDown = () => {
+/** What Grasp makes of the example's answer: one finding, in one line. */
+const Finding = () => {
   const { t } = useLingui();
   return (
-    <Card size="sm">
-      <CardHeader>
-        <CardTitle level={3}>{t`What I write down`}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <KeyValueList
-          items={[
-            {
-              id: "work",
-              label: t`The work`,
-              value: t`Welcoming a new colleague`,
-            },
-            {
-              id: "who",
-              label: t`Who does it`,
-              value: t`The team lead, with IT`,
-            },
-            {
-              id: "stuck",
-              label: t`Where it sticks`,
-              value: t`The laptop takes 2 to 3 days`,
-            },
-          ]}
-          orientation="horizontal"
-        />
-      </CardContent>
-    </Card>
-  );
-};
-
-/** The example as one card, for a conversation, where it can't be messages in a message. */
-export const ExampleNote = () => {
-  const { t } = useLingui();
-  return (
-    <div {...stylex.props(styles.example)}>
-      <Text color="muted" size="sm">
-        {t`I ask: “When someone new joins your team, what happens in their first week?”`}
-      </Text>
-      <Text color="muted" size="sm">
-        {t`Someone answers: “I show them around and set up their accounts. The laptop comes from IT on day two or three, so the first days are mostly reading.”`}
-      </Text>
-      <WrittenDown />
-    </div>
+    <Item variant="outline">
+      <ItemMedia variant="icon">
+        <Icon icon={SparklesIcon} />
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle>{t`New people wait two to three days for a laptop from IT.`}</ItemTitle>
+      </ItemContent>
+    </Item>
   );
 };
 
@@ -188,11 +135,6 @@ export const ExampleAnswer = ({ interviewer }: { interviewer: string }) => {
     <div {...stylex.props(styles.example)}>
       <Message aria-label={interviewer}>
         <MessageContent>
-          <MessageHeader>
-            <Text as="span" size="sm" color="muted">
-              {interviewer}
-            </Text>
-          </MessageHeader>
           <Bubble variant="ghost">
             <BubbleContent>{t`When someone new joins your team, what happens in their first week?`}</BubbleContent>
           </Bubble>
@@ -201,11 +143,11 @@ export const ExampleAnswer = ({ interviewer }: { interviewer: string }) => {
       <Message align="end" aria-label={t`Someone on your team`}>
         <MessageContent>
           <Bubble align="end" variant="muted">
-            <BubbleContent>{t`I show them around and set up their accounts. The laptop comes from IT on day two or three, so the first days are mostly reading.`}</BubbleContent>
+            <BubbleContent>{t`I show them around and set up their accounts. The laptop usually comes on day two or three, so the first days are mostly reading.`}</BubbleContent>
           </Bubble>
         </MessageContent>
       </Message>
-      <WrittenDown />
+      <Finding />
     </div>
   );
 };

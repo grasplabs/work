@@ -17,13 +17,13 @@ import { LanguageCards } from "./language-cards.tsx";
 import { PlanBody } from "./plan.tsx";
 import { SaidWords } from "./said-words.tsx";
 import { SoundToggle } from "./sound-toggle.tsx";
-import { interviewer, StephenFigure, StephenMark } from "./stephen.tsx";
+import { interviewer, StephenFigure } from "./stephen.tsx";
 
 // Concepts B and C of the setup's first three steps. B, "calm steps": one
 // topic a screen, a short title, at most two sentences, the form, and the
 // flow's foot (the library's StepperNav: Back, and Next as the one
-// button); the interviewer a small mark and a name, never a narrator; no
-// speech. C, "Steps, Stephen speaks": B's screens, with each step's title
+// button); two text styles a screen, the serif title and the body; the
+// interviewer only in the welcome's title; no speech. C, "Steps, Stephen speaks": B's screens, with each step's title
 // and sentence said aloud as it arrives, the sentence lighting up word by
 // word as it is said, and the sound one toggle in the bar.
 
@@ -54,16 +54,14 @@ const StepHead = ({
   );
   return (
     <div {...stylex.props(styles.head)}>
-      {speaks ? <StephenFigure /> : <StephenMark />}
+      {speaks ? <StephenFigure size="sm" /> : null}
       <Heading level={1}>{title}</Heading>
       {speaks ? (
         <p aria-live="polite">
-          <SaidWords from={from} line={line} text={sentence} />
+          <SaidWords from={from} line={line} size="default" text={sentence} />
         </p>
       ) : (
-        <Text color="muted" size="lg">
-          {sentence}
-        </Text>
+        <Text>{sentence}</Text>
       )}
     </div>
   );
@@ -108,16 +106,20 @@ const Welcome = ({ admin, speaks, onNext }: StepBodyProps) => {
           total={wholeSetup.length}
         />
       }
-      sentence={t`I set up Grasp with you, in about 8 minutes. First, which language suits you?`}
+      sentence={t`I’ll set up Grasp with you, one step at a time. Which language would you like to work in?`}
       speaks={speaks}
-      title={t`Hi ${admin}, I’m Stephen`}
+      title={admin === "" ? t`Hi, I’m Stephen` : t`Hi ${admin}, I’m Stephen`}
     >
+      {/* A press on a card chooses it and goes on: one thing at a time. Next stays, for coming back. */}
       <LanguageCards
         chosen={picked && isLocale(i18n.locale) ? i18n.locale : null}
         onPick={(locale) => {
           setPicked(true);
           languagePicked = true;
-          void chooseLocale(locale);
+          void (async () => {
+            await chooseLocale(locale);
+            onNext();
+          })();
         }}
       />
     </Step>
@@ -132,16 +134,16 @@ const Ai = ({ data, speaks, onNext, onBack }: StepBodyProps) => {
       nav={
         <StepperNav
           disabled={!ready}
-          disabledReason={t`Choose your AI first`}
+          disabledReason={t`Choose an AI first`}
           onBack={onBack}
           onNext={onNext}
           step={1}
           total={wholeSetup.length}
         />
       }
-      sentence={t`Everything I read and say runs on an AI model. Use Grasp’s AI, or a key of your own.`}
+      sentence={t`Everything I read and say runs on it. Grasp’s AI works right away, or you can use your own key.`}
       speaks={speaks}
-      title={t`Which AI should I think with?`}
+      title={t`Which AI should I use?`}
     >
       <AiChoice ai={data.ai} onReady={onNext} />
     </Step>
@@ -160,7 +162,7 @@ const Plan = ({ speaks, onNext, onBack, today }: StepBodyProps) => {
           total={wholeSetup.length}
         />
       }
-      sentence={t`One week of short talks with your team, then you get what I learned. Below, what one answer gives me.`}
+      sentence={t`I talk with your team for one week. Then you get what I learned, team by team.`}
       speaks={speaks}
       title={t`Here’s the plan`}
     >
