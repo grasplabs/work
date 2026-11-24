@@ -1,3 +1,4 @@
+import type { BrainTools } from "@grasp-os/shared/brain";
 import type { BrainRecordInput } from "@grasp-os/shared/brain-records";
 import { visionFields } from "@grasp-os/shared/kickoff";
 import type { VisionField } from "@grasp-os/shared/kickoff";
@@ -244,6 +245,35 @@ const kickoffTeams = (teams: { sourceId: string; name: string }[]) =>
   teams.flatMap(({ sourceId, name }) =>
     sourceId === "src-kickoff" ? [name] : []
   );
+
+/** What `read` answers, and how many calls core made to connect meanwhile. */
+const withConnectCalls = async <T>(
+  read: () => Promise<T>
+): Promise<{ answer: T; calls: number }> => {
+  const connect = env.CONNECT;
+  let calls = 0;
+  Reflect.set(
+    env,
+    "CONNECT",
+    new Proxy(connect, {
+      get: (target, name): unknown => {
+        const value: unknown = Reflect.get(target, name);
+        if (typeof value !== "function") {
+          return value;
+        }
+        return async (...args: unknown[]): Promise<unknown> => {
+          calls += 1;
+          return await Reflect.apply(value, target, args);
+        };
+      },
+    })
+  );
+  try {
+    return { answer: await read(), calls };
+  } finally {
+    Reflect.set(env, "CONNECT", connect);
+  }
+};
 
 describe("the brain's workspace", { timeout: 120_000 }, () => {
   // The onboarding store's own alarm, set half a second on by every save
@@ -638,6 +668,115 @@ describe("the brain's workspace", { timeout: 120_000 }, () => {
           ai: "none",
         },
       ],
+    });
+  });
+
+  it("gives each member the tools and the teams' names as their workspace does, nothing taken out of the brain, without asking connect", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const member = await signedInApi(idp, "user");
+    // The kickoff names Finance and Legal; an admin's tool record names
+    // both, and two shared documents a tool each.
+    await bringInKickoff();
+    const { teams: named } = await member.api.brain.read();
+    const idOf = (name: string): string =>
+      named.find((team) => team.name === name)?.id ?? "";
+    const tag = unique();
+    await admin.api.brain.addRecords([
+      {
+        type: "source",
+        id: `src-${tag}`,
+        kind: "interview",
+        title: "Finance interview",
+        date: today(),
+      },
+      {
+        type: "tool",
+        id: `tool-${tag}`,
+        name: `ledger ${tag}`,
+        teamIds: [idOf("Legal"), idOf("Finance")],
+        sourceId: `src-${tag}`,
+      },
+    ]);
+    await shareDocument(
+      admin,
+      `kept-${crypto.randomUUID()}.docx`,
+      [`Claims ${tag}`],
+      ["Finance"]
+    );
+    const gone = await shareDocument(
+      admin,
+      `gone-${crypto.randomUUID()}.docx`,
+      [`Gone ${tag}`],
+      ["Finance"]
+    );
+    // Taken out of the brain: the second document, and Legal, which the
+    // next kickoff names no more. The roster names Finance, which the
+    // kickoff's Finance joins.
+    await admin.api.onboarding.removeDocument(gone.id);
+    await bringInKickoff(
+      {},
+      {
+        ...kickoffReading,
+        teams: [{ name: "Finance", does: "Bookkeeping", people: 8 }],
+      }
+    );
+    await admin.api.onboarding.confirmRoster(await teamsMade(roster));
+
+    /** `person`'s tools, as `brain.tools` and as `brain.read` give them, and whether each asked connect. */
+    const readsOf = async (person: typeof admin) => {
+      const tools = await withConnectCalls(
+        async () => await person.api.brain.tools()
+      );
+      const read = await withConnectCalls(
+        async () => await person.api.brain.read()
+      );
+      return {
+        tools: tools.answer,
+        read: {
+          tools: read.answer.tools,
+          teams: read.answer.teams.map(({ id, name }) => ({ id, name })),
+        },
+        asked: { tools: tools.calls, read: read.calls > 0 },
+      };
+    };
+    /** This test's tools in `read`, each with its teams' names. */
+    const ours = ({ tools, teams }: BrainTools) =>
+      tools
+        .filter(({ name }) => name.includes(tag))
+        .map(({ name, teamIds }) => ({
+          name,
+          teams: teamIds.map(
+            (id) => teams.find((team) => team.id === id)?.name ?? id
+          ),
+        }));
+
+    const asAdmin = await readsOf(admin);
+    const asMember = await readsOf(member);
+
+    expect({
+      admin: asAdmin.tools,
+      member: asMember.tools,
+      ours: { admin: ours(asAdmin.tools), member: ours(asMember.tools) },
+      asked: { admin: asAdmin.asked, member: asMember.asked },
+    }).toStrictEqual({
+      // Field for field what each one's workspace gives.
+      admin: asAdmin.read,
+      member: asMember.read,
+      ours: {
+        // The removed document's tool is gone; the record names Finance
+        // alone, the roster's, which the kickoff's Finance joined.
+        admin: [
+          { name: `Claims ${tag}`, teams: ["Finance"] },
+          { name: `ledger ${tag}`, teams: ["Finance"] },
+        ],
+        // A member reads no shared document: the record alone.
+        member: [{ name: `ledger ${tag}`, teams: ["Finance"] }],
+      },
+      // The workspace asks connect for the connections; the tools never do.
+      asked: {
+        admin: { tools: 0, read: true },
+        member: { tools: 0, read: true },
+      },
     });
   });
 
