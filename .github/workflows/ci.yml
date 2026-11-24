@@ -168,6 +168,9 @@ jobs:
       - run: vp run check:wrangler-configs
       - run: vp run check:vite-plus-oxc
       - run: vp run check:snowball
+      # packages/ui against Damsko at its pinned commit, fetched from
+      # GitHub (scripts/ui-sync.ts).
+      - run: vp run check:ui
       - run: vp run -r typegen && vp run -r db:generate && vp run -r i18n:extract
       - run: git diff --exit-code && test -z "$(git status --porcelain)"
 

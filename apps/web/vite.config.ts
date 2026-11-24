@@ -4,9 +4,11 @@ import linguiMacro from "@lingui/babel-plugin-lingui-macro";
 import { getConfig } from "@lingui/conf";
 import { lingui } from "@lingui/vite-plugin";
 import babel from "@rolldown/plugin-babel";
+import stylex from "@stylexjs/unplugin/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
+import { Features } from "lightningcss";
 import { defineConfig } from "vite-plus";
 
 import { localePreload } from "./locale-preload.ts";
@@ -18,7 +20,14 @@ const linguiConfigPath = fileURLToPath(
 );
 const linguiConfig = getConfig({ configPath: linguiConfigPath });
 
-export default defineConfig({
+// Damsko's tokens give a colour's light and dark values in one
+// `light-dark()`, which follows the `color-scheme` of the element that
+// uses it. Every browser the app supports reads it; rewritten for older
+// ones, it leans on variables only a `color-scheme` rule in the same
+// stylesheet sets, and without one each colour is invalid.
+const keepLightDark = { exclude: Features.LightDark };
+
+export default defineConfig(({ command }) => ({
   plugins: [
     tanstackRouter({
       target: "react",
@@ -32,6 +41,26 @@ export default defineConfig({
       // (`validateSearch`, `beforeLoad`) comes with the app too, so it
       // imports only small modules of plain checks.
       codeSplittingOptions: { defaultBehavior: [["loader", "component"]] },
+    }),
+    // Damsko's components (packages/ui) are StyleX: each `stylex.create`
+    // is compiled to class names before React's own transforms, in this
+    // app's files and the package's alike, and their CSS joins the build's
+    // stylesheet. StyleX names a variable by its file's package and path,
+    // so both sides of the package boundary agree with no alias here.
+    // Outside any cascade layer, where it holds over Tailwind's base
+    // layer whichever stylesheet the page loads first: in layers of its
+    // own it lost to it whenever its sheet came first, as after an edit
+    // in development.
+    stylex({
+      lightningcssOptions: {
+        ...keepLightDark,
+        // A cold start in development asks for the CSS before every file
+        // is compiled: what can't be read yet is left out, not an error,
+        // and the whole CSS follows a moment later. A build reads every
+        // file first, so there a CSS error fails it.
+        errorRecovery: command === "serve",
+        minify: true,
+      },
     }),
     react(),
     babel({
@@ -51,6 +80,7 @@ export default defineConfig({
     localePreload(),
     tailwindcss(),
   ],
+  css: { lightningcss: keepLightDark },
   define: {
     // The build a page runs, in the error reports it sends: the commit CI
     // built it from, or `local`.
@@ -80,4 +110,4 @@ export default defineConfig({
       "/docs": "http://localhost:8787",
     },
   },
-});
+}));

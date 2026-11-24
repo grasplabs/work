@@ -4266,6 +4266,7 @@ msgstr "Copenhagen"
 #: src/chat/answer-markdown.tsx
 #: src/chat/chat-more.tsx
 #: src/chat/thread.tsx
+#: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/shown-once.tsx
@@ -4289,6 +4290,7 @@ msgstr "Copied from another system"
 msgid "Copies"
 msgstr "Copies"
 
+#: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/shown-once.tsx
@@ -4356,6 +4358,10 @@ msgstr "Cost"
 msgctxt "what the Brain remembers about something"
 msgid "Cost"
 msgstr "Cost"
+
+#: src/frame/ui-words.tsx
+msgid "Could not finish"
+msgstr "Could not finish"
 
 #: src/activity/audit-words.ts
 msgid "Couldn't erase an upload from the Brain"
@@ -4899,6 +4905,10 @@ msgstr "Documents and workflow runs show here once they reach the Brain."
 msgid "Documents they or others shared with a team or the company stay, and their text can still name them."
 msgstr "Documents they or others shared with a team or the company stay, and their text can still name them."
 
+#: src/frame/ui-words.tsx
+msgid "Does something that needs your yes"
+msgstr "Does something that needs your yes"
+
 #: src/settings/stephen-settings.tsx
 msgid "Does things for people here"
 msgstr "Does things for people here"
@@ -4918,6 +4928,7 @@ msgstr "Don’t allow it while this record links to it"
 
 #: src/apps/blueprints.tsx
 #: src/chat/thread.tsx
+#: src/frame/ui-words.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/shown-once.tsx
@@ -5660,6 +5671,11 @@ msgstr "Failed"
 
 #: src/report/report.ts
 msgctxt "a figure of the report"
+msgid "Failed"
+msgstr "Failed"
+
+#: src/frame/ui-words.tsx
+msgctxt "a menu item whose work failed"
 msgid "Failed"
 msgstr "Failed"
 
@@ -9134,6 +9150,10 @@ msgstr "Not confirmed by the board yet"
 msgid "Not connected"
 msgstr "Not connected"
 
+#: src/frame/ui-words.tsx
+msgid "Not copied"
+msgstr "Not copied"
+
 #: src/brain/brain.ts
 msgid "Not drawn yet"
 msgstr "Not drawn yet"
@@ -10503,6 +10523,10 @@ msgstr "Preference"
 #: src/interview/read-back.tsx
 msgid "Press a line to change it, take out what is wrong, or type what is missing. Choose where each line goes. What you leave in is what counts."
 msgstr "Press a line to change it, take out what is wrong, or type what is missing. Choose where each line goes. What you leave in is what counts."
+
+#: src/frame/ui-words.tsx
+msgid "Presses \"{words}\""
+msgstr "Presses \"{words}\""
 
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
@@ -16597,6 +16621,10 @@ msgstr "Workflows the App starts"
 #: src/routes/_shell.settings.spend.tsx
 msgid "Workflows this month"
 msgstr "Workflows this month"
+
+#: src/frame/ui-words.tsx
+msgid "Working"
+msgstr "Working"
 
 #: src/chat/thread.tsx
 msgid "Working on it"

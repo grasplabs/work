@@ -1,0 +1,16 @@
+/* Geist, Geist Serif and Geist Mono (geist 1.9.1, SIL Open Font License 1.1: fonts/OFL.txt), under
+   the names the tokens use. Import it once, with the tokens. The registry's `fonts` item is this
+   sheet, the three it imports, the licence and the six files; the docs site loads the same sheet.
+
+   Each family is a sheet of its own beside its files (fonts/). An app that already serves one of
+   them imports the other sheets in place of this one, and sets that family's token to the name
+   its own has, after tokens.css:
+
+     @import "./fonts/geist-serif.css";
+     @import "./fonts/geist-mono.css";
+     :root { --damsko-font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif; }
+
+   So one Geist is loaded, never two side by side. */
+@import "./fonts/geist.css";
+@import "./fonts/geist-serif.css";
+@import "./fonts/geist-mono.css";
