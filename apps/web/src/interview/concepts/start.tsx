@@ -1,4 +1,3 @@
-import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Confirmation,
@@ -14,7 +13,6 @@ import { Heading } from "@grasp-os/ui/components/heading";
 import {
   Item,
   ItemContent,
-  ItemDescription,
   ItemGroup,
   ItemMedia,
   ItemTitle,
@@ -40,7 +38,6 @@ import {
 import { Text } from "@grasp-os/ui/components/text";
 import {
   CheckIcon,
-  ClockIcon,
   EyeIcon,
   Icon,
   LockIcon,
@@ -53,14 +50,7 @@ import type { ReactNode } from "react";
 
 import { micLevel, reachMic, watchLevel } from "../mic.ts";
 import type { Turn } from "./conversation.tsx";
-import {
-  checkAsk,
-  checkHeard,
-  fixture,
-  ignore,
-  languages,
-  consent,
-} from "./fixture.ts";
+import { checkHeard, fixture, ignore, languages, copy } from "./fixture.ts";
 import type { LanguageId } from "./fixture.ts";
 
 // CONCEPT ONLY: the screens before the conversation, and the ways out of
@@ -112,13 +102,14 @@ const styles = stylex.create({
 const marks = { yours: LockIcon, choose: EyeIcon, until: TrashIcon } as const;
 
 /** The consent's promises, each with its mark (B and C, as first built). */
+const promiseIds = ["yours", "choose", "until"] as const;
 const useConsent = () => ({
-  ...consent,
+  line: copy.start.who,
   language: "en",
-  promises: consent.labels.map((promise) => ({
-    ...promise,
-    icon: marks[promise.id],
-  })),
+  promises: copy.start.promises.map((label, at) => {
+    const id = promiseIds[at] ?? "until";
+    return { id, label, icon: marks[id] };
+  }),
 });
 
 /** The consent's line, as recorded, in the language on screen. */
@@ -181,18 +172,6 @@ const Words = ({
   </div>
 );
 
-/** Who asks: the sponsor, by name. */
-const Asker = () => (
-  <div {...stylex.props(styles.asker)}>
-    <Avatar decorative name={fixture.sponsor.name} size="xs">
-      <AvatarFallback />
-    </Avatar>
-    <Text as="span" color="muted" size="sm">
-      {`${fixture.sponsor.name} asked everyone at ${fixture.company}`}
-    </Text>
-  </div>
-);
-
 /** The quiet ways out under the yes. */
 /** The yes, "Not now" beside it as the lesser of the two, and "I'd rather not" as words under them. */
 const Answers = ({
@@ -212,12 +191,12 @@ const Answers = ({
         {agree}
       </Button>
       <Button onClick={onNotNow} size="lg" variant="outline">
-        Not now
+        {copy.start.later}
       </Button>
     </div>
     <div {...stylex.props(styles.quiet)}>
       <Button onClick={onRatherNot} variant="link">
-        I’d rather not
+        {copy.start.decline}
       </Button>
     </div>
   </div>
@@ -238,7 +217,7 @@ export const Consent = ({
   onRatherNot: () => void;
 }) => (
   <Page>
-    <Words over={<Asker />} title={title}>
+    <Words title={title}>
       <ConsentLine />
     </Words>
     <Promises />
@@ -348,18 +327,18 @@ export const SoundCheckB = ({
   const refused = state === "refused";
   return (
     <Page>
-      <Words line="Your first answer, and my sound check." title={checkAsk} />
+      <Words line={copy.check.line} title={copy.check.title} />
       <PromptInput aria-label="Your first answer">
         {refused ? (
           <PromptInputBanner
             action={
               <Button onClick={retry} size="xs" variant="outline">
-                Try again
+                {copy.check.retry}
               </Button>
             }
             variant="warning"
           >
-            The microphone is blocked.
+            {copy.check.blocked}
           </PromptInputBanner>
         ) : null}
         {refused ? (
@@ -367,7 +346,7 @@ export const SoundCheckB = ({
             <PromptInputBody>
               <PromptInputTextarea
                 aria-label="Your first answer"
-                placeholder="Your name and what you do"
+                placeholder={copy.check.placeholder}
               />
             </PromptInputBody>
             <PromptInputFooter>
@@ -388,22 +367,22 @@ export const SoundCheckB = ({
         {state === "heard" ? (
           <div {...stylex.props(styles.heard)}>
             <Icon icon={CheckIcon} />
-            <Text color="default">I can hear you clearly.</Text>
+            <Text color="default">{copy.check.heard}</Text>
           </div>
         ) : null}
         {refused ? (
           <Button onClick={onType} size="lg">
-            Type instead
+            {copy.check.typeMain}
           </Button>
         ) : (
           <Button disabled={state !== "heard"} onClick={onStart} size="lg">
-            Start the interview
+            {copy.check.start}
           </Button>
         )}
         {refused ? null : (
           <div {...stylex.props(styles.quiet)}>
             <Button onClick={onType} variant="link">
-              Type instead
+              {copy.check.type}
             </Button>
           </div>
         )}
@@ -421,10 +400,7 @@ export const NotNow = ({
   onBack: () => void;
 }) => (
   <Page>
-    <Words
-      line={`Same link. Open until ${fixture.closes}.`}
-      title="When suits you better?"
-    />
+    <Words line={copy.later.line} title={copy.later.title} />
     <ItemGroup aria-label="Remind me">
       {fixture.remindAt.map((each) => (
         <Item
@@ -434,19 +410,15 @@ export const NotNow = ({
           }}
           variant="outline"
         >
-          <ItemMedia>
-            <Icon icon={ClockIcon} />
-          </ItemMedia>
           <ItemContent>
             <ItemTitle>{each.label}</ItemTitle>
-            <ItemDescription>{each.when}</ItemDescription>
           </ItemContent>
         </Item>
       ))}
     </ItemGroup>
     <div {...stylex.props(styles.quiet)}>
       <Button onClick={onBack} variant="link">
-        Back
+        {copy.later.back}
       </Button>
     </div>
   </Page>
@@ -461,10 +433,10 @@ export const Reminded = ({
   onStart: () => void;
 }) => (
   <Page>
-    <Words line="Nothing was recorded." title={`We’ll remind you ${when}`} />
+    <Words line={copy.later.doneLine} title={copy.later.doneTitle(when)} />
     <div {...stylex.props(styles.actions)}>
       <Button onClick={onStart} variant="outline">
-        Start now after all
+        {copy.later.doneStart}
       </Button>
     </div>
   </Page>
@@ -479,17 +451,14 @@ export const RatherNot = ({
   onBack: () => void;
 }) => (
   <Page>
-    <Words
-      line={`${fixture.sponsor.name} will see that you’re not taking part, never why. Nothing was recorded.`}
-      title="Skip the interview?"
-    />
+    <Words line={copy.decline.line} title={copy.decline.title} />
     <div {...stylex.props(styles.actions)}>
       <Button onClick={onConfirm} size="lg">
-        Yes, skip it
+        {copy.decline.yes}
       </Button>
       <div {...stylex.props(styles.quiet)}>
         <Button onClick={onBack} variant="link">
-          Back
+          {copy.decline.back}
         </Button>
       </div>
     </div>
@@ -499,13 +468,10 @@ export const RatherNot = ({
 /** "I'd rather not" taken. */
 export const Declined = ({ onUndo }: { onUndo: () => void }) => (
   <Page>
-    <Words
-      line={`Changed your mind? This link works until ${fixture.closes}.`}
-      title="Thanks for letting us know"
-    />
+    <Words line={copy.decline.doneLine} title={copy.decline.doneTitle} />
     <div {...stylex.props(styles.actions)}>
       <Button onClick={onUndo} variant="outline">
-        I changed my mind
+        {copy.decline.undo}
       </Button>
     </div>
   </Page>
@@ -520,13 +486,10 @@ export const Paused = ({
   onCarryOn: () => void;
 }) => (
   <Page>
-    <Words
-      line={`${minutesLeft} of your ${fixture.minutes} minutes are left. The clock waits too.`}
-      title="Your place is kept"
-    />
+    <Words line={copy.paused.line(minutesLeft)} title={copy.paused.title} />
     <div {...stylex.props(styles.actions)}>
       <Button onClick={onCarryOn} size="lg">
-        Carry on
+        {copy.paused.carryOn}
       </Button>
     </div>
   </Page>
@@ -539,7 +502,7 @@ export const LanguageFirst = ({
   onPick: (language: LanguageId) => void;
 }) => (
   <Page>
-    <Words title="Which language?" />
+    <Words title={copy.c.languageTitle} />
     <ItemGroup aria-label="Languages">
       {languages.map((each) => (
         <Item
@@ -564,7 +527,7 @@ export const LanguageFirst = ({
 export type ConsentAnswer = "yes" | "not-now" | "rather-not" | null;
 
 /** Concept C: Stephen's first words in the thread say who asks, and ask for a yes. */
-export const consentText = `Hi ${fixture.person}, I’m ${fixture.interviewer}, an AI interviewer from Grasp. ${fixture.sponsor.name} asked everyone at ${fixture.company} to tell me how their work really goes. **${fixture.minutes} minutes at most**, and I keep time.`;
+export const consentText = copy.c.consent;
 
 export const consentTurn = (
   answer: ConsentAnswer,
@@ -583,10 +546,10 @@ export const consentTurn = (
       state={answer === null ? "approval-requested" : "approval-responded"}
     >
       <ConfirmationTitle>
-        <ConfirmationRequest>Shall we start?</ConfirmationRequest>
-        <ConfirmationAccepted>You agreed.</ConfirmationAccepted>
+        <ConfirmationRequest>{copy.c.ask}</ConfirmationRequest>
+        <ConfirmationAccepted>{copy.c.agreed}</ConfirmationAccepted>
         <ConfirmationRejected>
-          {answer === "not-now" ? "Not now." : "You’d rather not."}
+          {answer === "not-now" ? copy.c.later : copy.c.decline}
         </ConfirmationRejected>
       </ConfirmationTitle>
       <ConsentDetails />
@@ -597,14 +560,14 @@ export const consentTurn = (
           }}
           variant="outline"
         >
-          Not now
+          {copy.c.later}
         </ConfirmationAction>
         <ConfirmationAction
           onClick={() => {
             onAnswer("yes");
           }}
         >
-          Yes, let’s start
+          {copy.c.yes}
         </ConfirmationAction>
       </ConfirmationActions>
     </Confirmation>
@@ -618,7 +581,7 @@ export const remindTurn = (
 ): Turn => ({
   id: "remind",
   from: "stephen",
-  text: "Of course. When shall I remind you?",
+  text: copy.c.remindAsk,
   extra: (
     <Questionnaire
       onSubmit={(answers) => {
@@ -630,11 +593,11 @@ export const remindTurn = (
       }}
     >
       <QuestionnaireItem name="when">
-        <QuestionnaireTitle>Remind me</QuestionnaireTitle>
+        <QuestionnaireTitle>{copy.c.remindTitle}</QuestionnaireTitle>
         <QuestionnaireChoices>
           {fixture.remindAt.map((each) => (
             <QuestionnaireChoice key={each.id} value={each.id}>
-              {`${each.label}, ${each.when}`}
+              {each.label}
             </QuestionnaireChoice>
           ))}
         </QuestionnaireChoices>

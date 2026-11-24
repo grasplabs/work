@@ -25,9 +25,6 @@ import { fixture } from "./fixture.ts";
 // the question ("title", conversation.tsx), as a thin bar across the window
 // under the header ("bar"), or under the answer box ("note").
 
-/** A phone too short for the band and the whole page above the fold. */
-const shortPhone = "@media (width < 64rem) and (height < 760px)";
-
 const styles = stylex.create({
   frame: {
     display: "grid",
@@ -75,10 +72,19 @@ const styles = stylex.create({
     isolation: "isolate",
     overflow: "hidden",
     gridColumn: { default: "1", [media.lg]: "2" },
-    gridRow: { default: "2", [media.lg]: "1 / 3" },
-    height: { default: "24svh", [media.lg]: "auto" },
-    // On a short phone (an iPhone SE is 667 high) the band makes way, so the yes is always on the first screen.
-    display: { default: "block", [shortPhone]: "none" },
+    // On a phone the scene runs up behind the header (Ruben: no white bar over the artwork) and
+    // stays quiet: only as tall as the header ("header"), or a low band under it ("low").
+    gridRow: { default: "1", [media.lg]: "1 / 3" },
+    height: { default: "4rem", [media.sm]: "5rem", [media.lg]: "auto" },
+  },
+  sceneLow: {
+    height: { default: "7rem", [media.sm]: "8rem", [media.lg]: "auto" },
+  },
+  // The header stands at the top of the scene's room on a phone.
+  headerOnScene: { alignSelf: "start" },
+  // On the scene the mark is light on dark; beside it, on the page, as the page's text.
+  brandOnScene: {
+    color: { default: colors.brandPaper, [media.lg]: colors.foreground },
   },
   // Beside the page only: a phone keeps its whole height for the thread.
   wideOnly: { display: { default: "none", [media.lg]: "block" } },
@@ -102,8 +108,8 @@ const styles = stylex.create({
 });
 
 /** Grasp's mark and name, top start. */
-const Brand = () => (
-  <span {...stylex.props(styles.brand)}>
+const Brand = ({ onScene }: { onScene: boolean }) => (
+  <span {...stylex.props(styles.brand, onScene && styles.brandOnScene)}>
     <Icon icon={GraspLogo} />
     Grasp
   </span>
@@ -138,6 +144,7 @@ export const Frame = ({
   clock,
   scene,
   sceneOnPhone = true,
+  band = "low",
   actions,
   children,
 }: {
@@ -146,32 +153,43 @@ export const Frame = ({
   clock: ClockPlace;
   /** The scene beside the page, before the conversation. */
   scene?: Scene;
-  /** On a phone too, as a band under the header; else beside the page only. */
+  /** On a phone too, behind the header; else beside the page only. */
   sceneOnPhone?: boolean;
+  /** On a phone: the scene only behind the header, or a low band under it too. */
+  band?: "header" | "low";
   /** More at the header’s end, before the language: the way out for now. */
   actions?: ReactNode;
   children: ReactNode;
-}) => (
-  <div {...stylex.props(styles.frame, scene === undefined && styles.plain)}>
-    <header {...stylex.props(styles.header)}>
-      <Brand />
-      <div {...stylex.props(styles.end)}>
-        {actions}
-        <LanguageButton side="bottom" />
-      </div>
-    </header>
-    {scene === undefined ? null : (
-      <div {...stylex.props(styles.scene, !sceneOnPhone && styles.wideOnly)}>
-        <AppCardGround hue={undefined} scene={scene} />
-      </div>
-    )}
-    {left !== null && clock === "bar" && scene === undefined ? (
-      <TimeBar left={left} />
-    ) : null}
-    <main
-      {...stylex.props(styles.main, scene === undefined && styles.mainPlain)}
-    >
-      {children}
-    </main>
-  </div>
-);
+}) => {
+  const onScene = scene !== undefined && sceneOnPhone;
+  return (
+    <div {...stylex.props(styles.frame, scene === undefined && styles.plain)}>
+      <header {...stylex.props(styles.header, onScene && styles.headerOnScene)}>
+        <Brand onScene={onScene} />
+        <div {...stylex.props(styles.end)}>
+          {actions}
+          <LanguageButton side="bottom" />
+        </div>
+      </header>
+      {scene === undefined ? null : (
+        <div
+          {...stylex.props(
+            styles.scene,
+            band === "low" && styles.sceneLow,
+            !sceneOnPhone && styles.wideOnly
+          )}
+        >
+          <AppCardGround hue={undefined} scene={scene} />
+        </div>
+      )}
+      {left !== null && clock === "bar" && scene === undefined ? (
+        <TimeBar left={left} />
+      ) : null}
+      <main
+        {...stylex.props(styles.main, scene === undefined && styles.mainPlain)}
+      >
+        {children}
+      </main>
+    </div>
+  );
+};
