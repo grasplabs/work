@@ -430,6 +430,26 @@ test("someone goes through the screens before the interview in Dutch, chooses Cl
   await expect(
     page.getByRole("button", { name: "English", exact: true })
   ).toHaveAttribute("aria-pressed", "true");
+  // On a narrow phone every language stays on the page.
+  const desktop = page.viewportSize();
+  await page.setViewportSize({ width: 320, height: 740 });
+  await expect
+    .poll(
+      async () =>
+        await page
+          .getByRole("group", { name: "Choose your language" })
+          .getByRole("button")
+          .evaluateAll((buttons) =>
+            buttons.map((button) => {
+              const { left, right } = button.getBoundingClientRect();
+              return left >= 0 && right <= window.innerWidth;
+            })
+          )
+    )
+    .toStrictEqual([true, true, true, true, true]);
+  if (desktop !== null) {
+    await page.setViewportSize(desktop);
+  }
   await page.getByRole("button", { name: "Nederlands", exact: true }).click();
   await expect(
     page.getByRole("heading", {
