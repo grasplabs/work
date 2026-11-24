@@ -15035,6 +15035,10 @@ msgstr "De limiet van deze maand voor de AI van Grasp is bereikt. Je beheerder k
 msgid "This month’s limit of {limit} is reached: AI is stopped until next month, or until you switch to your own keys."
 msgstr "De limiet van {limit} voor deze maand is bereikt: AI is gestopt tot volgende maand, of tot je overstapt op je eigen sleutels."
 
+#: src/settings/ai-spend.tsx
+msgid "This month's spend came in a form this page can't read."
+msgstr "De kosten van deze maand kwamen in een vorm die deze pagina niet kan lezen."
+
 #: src/brain/memories-page.tsx
 msgid "This one is right"
 msgstr "Deze klopt"

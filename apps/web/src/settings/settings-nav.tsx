@@ -45,8 +45,15 @@ const styles = stylex.create({
     alignItems: "flex-start",
     gap: space[1],
   },
-  // The group's name, where the links' words start.
-  groupName: { marginInline: space[2], marginBlockEnd: space[1] },
+  // The group's name, where the links' words start. A flex item, it has
+  // its own small line (20px), not the list's 24px one it stood in inside
+  // a wrapper: the space above puts the links back where that line had
+  // them.
+  groupName: {
+    marginInline: space[2],
+    marginBlockStart: space[1],
+    marginBlockEnd: space[1],
+  },
   // The trigger's own display, gone where the list has room.
   control: {
     display: { default: "flex", [settingsLayout.roomForList]: "none" },
@@ -91,8 +98,10 @@ export const SettingsNav = ({
   const groups = groupedSectionsFor(viewer);
   const listed = groups.flatMap(({ sections }) => sections);
   // A section they may read but don't find listed (a member's Workspace) is
-  // chosen in neither.
+  // chosen in neither list; the control still names it, as the page they
+  // are on, without offering it among the choices.
   const chosen = listed.find(({ id }) => id === open?.id);
+  const named = chosen === undefined && open !== undefined ? [open] : [];
   return (
     <>
       <nav aria-label={t`Settings`} {...stylex.props(styles.list)}>
@@ -112,7 +121,7 @@ export const SettingsNav = ({
         ))}
       </nav>
       <Select
-        items={listed.map((section) => ({
+        items={[...listed, ...named].map((section) => ({
           value: section.href,
           label: i18n._(section.label),
         }))}
@@ -122,7 +131,7 @@ export const SettingsNav = ({
             void navigate({ to: section.href });
           }
         }}
-        value={chosen?.href ?? null}
+        value={open?.href ?? null}
       >
         <SelectTrigger aria-label={t`Settings`} style={styles.control}>
           <SelectValue />

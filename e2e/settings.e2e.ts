@@ -133,6 +133,21 @@ test("on a phone the sections are one control above the section", async ({
   await expect(sectionOf(page, "Team members")).toBeVisible();
 });
 
+test("on a phone the control names a section someone may read but doesn't find listed", async ({
+  pageOf,
+}) => {
+  // A member reads Workspace, which only admins find in the list.
+  const { member } = peopleIn("settings");
+  const page = await pageOf(member);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/settings/workspace");
+  const sections = page.getByRole("combobox", { name: "Settings" });
+  await expect(sections).toHaveText("Workspace");
+  await sections.click();
+  await expect(page.getByRole("option", { name: "Profile" })).toBeVisible();
+  await expect(page.getByRole("option", { name: "Workspace" })).toHaveCount(0);
+});
+
 test("on a phone a group's buttons stand under its title, which stays on one line", async ({
   pageOf,
 }) => {

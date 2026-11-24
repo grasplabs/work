@@ -22,6 +22,7 @@ import type { I18n } from "@lingui/core";
 import { msg, ph } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
+import { z } from "zod";
 
 import { formatDollars } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
@@ -110,11 +111,32 @@ const whereItWent = (
 };
 
 /**
+ * The days as core sends them (`ModelMonthSpend.days`): the company's date
+ * and what it cost. Read at the boundary, so days in another form (the
+ * plain amounts they were before they carried their dates) show the card's
+ * error rather than throwing in the chart.
+ */
+const monthDays = z.array(z.object({ date: z.iso.date(), amount: z.number() }));
+
+/**
+ * A company's day (`2026-10-31`) as its day and month, "Oct 31": the month
+ * too, as the first day can be the last of the month before (a company
+ * behind UTC) and the last the 1st of the month after (one ahead of it).
+ * Never two days alike among the at most 32 a month has, so the chart's
+ * table, which keys each row by it, keys it by its date. Written in UTC:
+ * the date is the company's already, and the reader's own zone must not
+ * move it to the day before.
+ */
+const dayAndMonth = (date: string): string =>
+  new Intl.DateTimeFormat(active.locale, {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  }).format(new Date(`${date}T00:00:00Z`));
+
+/**
  * The month so far as a running total, day by day: one calm line that
- * ends at the key figure above it, never a spike for a busy day. Each day
- * is the company's own (`2026-10-31`), named by its day of the month: the
- * first can be the last of the month before, where the company is behind
- * UTC.
+ * ends at the key figure above it, never a spike for a busy day.
  */
 const runningTotal = (
   days: readonly ModelDaySpend[]
@@ -123,7 +145,7 @@ const runningTotal = (
   let sofar = 0;
   for (const { date, amount } of days) {
     sofar += amount;
-    points.push({ day: String(Number(date.slice(8, 10))), spend: sofar });
+    points.push({ day: dayAndMonth(date), spend: sofar });
   }
   return points;
 };
@@ -183,6 +205,19 @@ export const SpendCard = ({
     return (
       <SettingsGroup flush={false} title={t`Spend`}>
         <NotLoadedState heading="h3" page={spend} />
+      </SettingsGroup>
+    );
+  }
+  if (!monthDays.safeParse(spend.data.days).success) {
+    return (
+      <SettingsGroup flush={false} title={t`Spend`}>
+        <NotLoadedState
+          heading="h3"
+          page={{
+            state: "refused",
+            message: t`This month's spend came in a form this page can't read.`,
+          }}
+        />
       </SettingsGroup>
     );
   }
