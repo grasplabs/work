@@ -11,6 +11,7 @@ import { cookieHeader, signInAs } from "./seed/local.ts";
 
 const out = process.argv[2] ?? "shots";
 const only = process.argv[3] ?? "";
+const onlySize = process.argv[4] ?? "";
 mkdirSync(out, { recursive: true });
 const origin = "http://localhost:5173";
 const cookie = cookieHeader(await signInAs("admin@acme.test"));
@@ -45,6 +46,9 @@ const browser = await chromium
   .launch({ executablePath: "/opt/pw-browsers/chromium" })
   .catch(async () => await chromium.launch());
 for (const size of sizes) {
+  if (onlySize !== "" && size.id !== onlySize) {
+    continue;
+  }
   for (const theme of themes) {
     const context = await browser.newContext({
       viewport: { width: size.width, height: size.height },
