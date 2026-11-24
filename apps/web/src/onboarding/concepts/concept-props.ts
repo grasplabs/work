@@ -23,4 +23,6 @@ export interface ConceptProps {
   go: (step: ConceptStep) => void;
   /** Past the plan: on to the setup's next step as it is today. */
   onward: () => void;
+  /** The welcome's foot only for one coming back to it (`?foot=back`), else from the first visit. */
+  footOnlyBack: boolean;
 }
