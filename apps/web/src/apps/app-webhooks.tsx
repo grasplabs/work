@@ -202,7 +202,6 @@ const AddWebhook = ({
         <DialogFooter>
           <DialogClose>{t`Cancel`}</DialogClose>
           <Button
-            size="sm"
             disabled={busy || url.trim() === "" || events.length === 0}
             errorText={t`Could not add`}
             loadingText={t`Adding`}

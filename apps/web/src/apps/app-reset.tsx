@@ -105,7 +105,7 @@ export const ResetAppData = ({ app }: { app: App }) => {
           </Form>
         </DialogBody>
         <DialogFooter>
-          <DialogClose size="default">{t`Cancel`}</DialogClose>
+          <DialogClose>{t`Cancel`}</DialogClose>
           <Button
             disabled={typed !== name}
             form={formId}

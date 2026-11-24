@@ -527,7 +527,6 @@ const TriggerRow = ({
                     onClick={async () => {
                       await deleting.hold(deleted);
                     }}
-                    size="sm"
                     variant="destructive"
                   >
                     {t`Delete the trigger`}
@@ -967,7 +966,7 @@ const AddTrigger = ({
             </Form>
           </DialogBody>
           <DialogFooter>
-            <DialogClose size="default">{t`Cancel`}</DialogClose>
+            <DialogClose>{t`Cancel`}</DialogClose>
             <Button disabled={busy} form={formId} type="submit">
               {t`Add the trigger`}
             </Button>

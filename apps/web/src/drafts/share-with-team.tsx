@@ -889,7 +889,7 @@ const PublishDialog = ({
           </div>
         </DialogBody>
         <DialogFooter>
-          <DialogClose size="default">{t`Cancel`}</DialogClose>
+          <DialogClose>{t`Cancel`}</DialogClose>
           <Button disabled={!canPublish} onClick={onPublish}>
             {t`Publish`}
           </Button>
@@ -962,7 +962,7 @@ const ShareDialog = ({
             <Icon icon={LinkIcon} />
             {t`Copy link`}
           </Button>
-          <DialogClose size="default">{t`Done`}</DialogClose>
+          <DialogClose>{t`Done`}</DialogClose>
         </DialogFooter>
       </DialogContent>
     </Dialog>

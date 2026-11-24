@@ -272,7 +272,6 @@ export const ReleaseDialog = ({
         <DialogFooter>
           <DialogClose>{t`Cancel`}</DialogClose>
           <Button
-            size="sm"
             disabled={!ready}
             errorText={t`Didn't work`}
             onClick={async () => {

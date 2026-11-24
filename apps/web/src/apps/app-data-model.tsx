@@ -384,7 +384,7 @@ const NewTableDialog = ({
           </form>
         </DialogBody>
         <DialogFooter>
-          <DialogClose size="default">{t`Cancel`}</DialogClose>
+          <DialogClose>{t`Cancel`}</DialogClose>
           <Button
             disabled={busy || named === ""}
             form={formId}

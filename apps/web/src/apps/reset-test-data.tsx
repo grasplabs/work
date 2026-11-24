@@ -68,7 +68,6 @@ export const ResetTestData = ({
           <AlertDialogFooter>
             <AlertDialogCancel />
             <Button
-              size="sm"
               errorText={t`Could not reset`}
               loadingText={t`Resetting`}
               onClick={async () => {

@@ -374,7 +374,6 @@ const ShareWith = ({
           <AlertDialogFooter>
             <AlertDialogCancel />
             <Button
-              size="sm"
               errorText={t`Couldn't stop sharing`}
               onClick={async () => {
                 if (removing === undefined) {

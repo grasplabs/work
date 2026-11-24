@@ -400,7 +400,7 @@ describe(AppSettings, () => {
     }).toStrictEqual({ afterCancel: [], calls: ["archive"], restore: true });
   });
 
-  it("sets the App's link in a dialog drawn by Damsko's own parts: its title over the field, the address before it, its actions the height of a plain Button, as the reference's", async () => {
+  it("sets the App's link in a dialog drawn by Damsko's own parts: its title over the field, the address before it, its actions one height, the design system's default for a footer", async () => {
     await opened(fakeCore("builder"));
     await press("Set the link");
 
@@ -411,54 +411,69 @@ describe(AppSettings, () => {
     const dialog = document.querySelector("[role=dialog]");
     const header = dialog?.querySelector("[data-slot=dialog-header]");
     const addon = dialog?.querySelector("[data-slot=input-group-addon]");
-    // A footer's actions stand 36px tall, as the reference's (DialogClose
-    // is small by its own default): the classes only a Button of the
-    // default size has, read from one drawn beside the dialog.
+    // A footer's actions stand the same height: each the design system's
+    // default for a footer, none sized by hand. Damsko draws a Button that
+    // names no size as `sm` there, as its DialogClose is by default. An
+    // action's height is the size whose own classes it carries, read from
+    // Buttons drawn beside the dialog, one of each size and one of none.
     const host = document.createElement("div");
     document.body.append(host);
     const sample = createRoot(host);
+    const sizes = [undefined, "xs", "sm", "default", "lg"] as const;
     act(() => {
       sample.render(
         <>
-          <Button size="sm">Small</Button>
-          <Button>Default</Button>
+          {sizes.map((size) => (
+            <Button key={size ?? "none"} size={size}>
+              {size ?? "none"}
+            </Button>
+          ))}
         </>
       );
     });
-    const [small, normal] = [...host.querySelectorAll("button")].map(
+    const drawn = [...host.querySelectorAll("button")].map(
       (each) => new Set(each.classList)
     );
-    const normalOnly = [...(normal ?? [])].filter(
-      (each) => small?.has(each) !== true
+    // The classes only a Button of each size, or of none, has.
+    const own = drawn.map((classes, index) =>
+      [...classes].filter((name) =>
+        drawn.every((other, at) => at === index || !other.has(name))
+      )
     );
     act(() => {
       sample.unmount();
     });
+    // Named none, a footer's own action is `sm`.
+    const heightOf = (action: HTMLElement) => {
+      const index = own.findIndex(
+        (classes) =>
+          classes.length > 0 &&
+          classes.every((name) => action.classList.contains(name))
+      );
+      return index === -1 ? undefined : (sizes[index] ?? "sm");
+    };
     const actions = [
       ...(dialog?.querySelectorAll<HTMLElement>(
-        "[data-slot=dialog-footer] button"
+        "[data-slot=dialog-footer] > button"
       ) ?? []),
     ];
+    const heights = actions.map(heightOf);
     expect({
       header: [
         header?.querySelector("h2")?.textContent,
         header?.querySelector("p")?.textContent,
       ],
       address: addon?.textContent,
-      sized: actions.map((each) => ({
-        action: nameOf(each),
-        normal: normalOnly.every((name) => each.classList.contains(name)),
-      })),
+      actions: actions.map(nameOf),
+      oneHeight: new Set(heights).size === 1 && !heights.includes(undefined),
     }).toStrictEqual({
       header: [
         "Link to Invoices",
         "Opens the App for the workspace's members who may use it, while it is published.",
       ],
       address: `${window.location.host}/`,
-      sized: [
-        { action: "Cancel", normal: true },
-        { action: "Save link", normal: true },
-      ],
+      actions: ["Cancel", "Save link"],
+      oneHeight: true,
     });
   });
 

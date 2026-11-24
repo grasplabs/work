@@ -490,7 +490,7 @@ const ReviewDialog = ({
           </Form>
         </DialogBody>
         <DialogFooter>
-          <DialogClose size="default">
+          <DialogClose>
             <Trans>Cancel</Trans>
           </DialogClose>
           <Button

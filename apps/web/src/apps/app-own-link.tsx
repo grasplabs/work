@@ -136,7 +136,7 @@ export const AppLinkDialog = ({
         </DialogBody>
         <DialogFooter>
           {app.link === null ? (
-            <DialogClose size="default">{t`Cancel`}</DialogClose>
+            <DialogClose>{t`Cancel`}</DialogClose>
           ) : (
             <Button
               disabled={busy}

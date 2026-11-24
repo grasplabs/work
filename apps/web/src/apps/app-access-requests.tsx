@@ -372,7 +372,6 @@ const AskDialog = ({
         <DialogFooter>
           <DialogClose>{t`Cancel`}</DialogClose>
           <Button
-            size="sm"
             disabled={busy || !ready}
             errorText={t`Could not ask`}
             loadingText={t`Asking`}
