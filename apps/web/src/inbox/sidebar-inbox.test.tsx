@@ -17,9 +17,9 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { InboxNavItem } from "./nav-item.tsx";
+import { InboxView, useWaitingCount } from "./sidebar-inbox.tsx";
 
-// The sidebar's Inbox, with how many things wait on the person, from
+// The sidebar's Inbox view, with how many things wait on the person, from
 // core's feed of what waits (`session.waiting.list()`, core's
 // waiting-rpc.ts): everything that needs them, and of the notifications
 // in it only those still unread. What could go wrong: a read notification
@@ -39,7 +39,10 @@ const feedOf = (kinds: string[], unread: number): WaitingFeed => ({
   unreadNotifications: unread,
 });
 
-/** The nav's Inbox, in the sidebar, as core answers `feed`: the link's text once read. */
+/** The Inbox view, as the sidebar counts it. */
+const Counted = () => <InboxView waiting={useWaitingCount()} />;
+
+/** The sidebar's Inbox view, as core answers `feed`: its text once read. */
 const shown = async (feed: WaitingFeed): Promise<string | undefined> => {
   const session = {
     waiting: { list: async () => await Promise.resolve(feed) },
@@ -53,7 +56,7 @@ const shown = async (feed: WaitingFeed): Promise<string | undefined> => {
   const page = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: InboxNavItem,
+    component: Counted,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
@@ -83,10 +86,10 @@ const shown = async (feed: WaitingFeed): Promise<string | undefined> => {
     }, 0);
     await promise;
   });
-  return host.querySelector('a[href="/inbox"]')?.textContent ?? undefined;
+  return host.textContent ?? undefined;
 };
 
-describe("the sidebar's Inbox", () => {
+describe("the sidebar's Inbox view", () => {
   afterEach(() => {
     act(() => {
       root?.unmount();
@@ -108,11 +111,11 @@ describe("the sidebar's Inbox", () => {
       ],
       2
     );
-    // The link's own words: the figure itself stands beside it, in the row.
-    await expect(shown(feed)).resolves.toBe("Inbox5 things waiting");
+    // The link's own words, then the figure beside it, in the row.
+    await expect(shown(feed)).resolves.toBe("Everything5 things waiting5");
   });
 
-  it("shows no count while nothing waits", async () => {
-    await expect(shown(feedOf([], 0))).resolves.toBe("Inbox");
+  it("says nothing waits, with no row, while nothing does", async () => {
+    await expect(shown(feedOf([], 0))).resolves.toBe("Nothing waits for you.");
   });
 });
