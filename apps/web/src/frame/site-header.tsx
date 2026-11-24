@@ -15,6 +15,7 @@ import { Fragment, useLayoutEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
 import type { RegionId } from "../brain/brain-atlas.ts";
+import { useChatPresence } from "../chat/chat-presence.ts";
 
 /** A step on the way to the page; the last one is the page itself. */
 export type Crumb =
@@ -136,7 +137,23 @@ const styles = stylex.create({
     gap: space["2"],
     minWidth: 0,
     overflow: "hidden",
+    // The crumbs in the sidebar's greys, as the reference's bar: the steps
+    // back in its rows' words, the slashes quieter, the page in its ink.
+    // Damsko's Breadcrumb takes the page's tinted greys (registry gap of
+    // 24 Nov 2026).
+    "--damsko-muted-foreground": colors.sidebarSecondaryForeground,
+    "--damsko-subtle-foreground": colors.sidebarTertiaryForeground,
+    "--damsko-foreground": colors.sidebarForeground,
   },
+  // The button's empty rim hangs out past the bar's room, so its glyph
+  // stands where the page's words begin, the crumbs 6px after its box, as
+  // the reference's.
+  trigger: {
+    marginInlineStart: `calc((${size.sidebarIcon} - ${size.sidebarIconButton}) / 2)`,
+    marginInlineEnd: "-2px",
+  },
+  // The slashes stand a step apart from the steps, as the reference's.
+  separator: { marginInline: space["1"] },
   trailing: { display: "flex", flexShrink: 0, alignItems: "center" },
   actions: {
     display: "flex",
@@ -144,6 +161,11 @@ const styles = stylex.create({
     alignItems: "center",
     gap: space["2"],
     marginInlineStart: "auto",
+  },
+  // Room at its end for the chat's button, which the frame lays over the
+  // card's end at the bar's height (app-frame.tsx), as the reference's.
+  roomForChat: {
+    paddingInlineEnd: `calc(${size.appShellPageInline} + ${size.sidebarIconButton})`,
   },
 });
 
@@ -170,6 +192,7 @@ export const SiteHeader = ({
 }) => {
   const { t } = useLingui();
   const { state, isMobile } = useSidebar();
+  const chatFloats = useChatPresence().placements.includes("floating");
   const away = isMobile || state === "collapsed";
   const last = crumbs.length - 1;
   const bar = useRef<HTMLElement>(null);
@@ -225,11 +248,12 @@ export const SiteHeader = ({
           !isMobile && target.dataset.slot === "sidebar-trigger";
       }}
       ref={bar}
-      {...stylex.props(styles.bar)}
+      {...stylex.props(styles.bar, chatFloats && styles.roomForChat)}
     >
       {away ? (
         <SidebarTrigger
           aria-label={t`Show or hide the sidebar`}
+          style={styles.trigger}
           onClick={() => {
             // The sheet takes focus itself, and gives it back on closing.
             handing.current = !isMobile;
@@ -243,7 +267,9 @@ export const SiteHeader = ({
               // A path's steps don't move: each stands at its own place.
               <Fragment key={index}>
                 {index === 0 ? null : (
-                  <BreadcrumbSeparator>/</BreadcrumbSeparator>
+                  <BreadcrumbSeparator style={styles.separator}>
+                    /
+                  </BreadcrumbSeparator>
                 )}
                 <BreadcrumbItem>
                   {index !== last && "to" in crumb ? (

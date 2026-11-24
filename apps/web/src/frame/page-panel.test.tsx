@@ -119,7 +119,7 @@ const drawn = async (root: Root, asked: Asked): Promise<void> => {
 
 /** Where the panel stands: beside the page, in a sheet, or nowhere in sight. */
 const placed = () => {
-  if (document.querySelector('[data-slot="app-shell-panel"]') !== null) {
+  if (document.querySelector('[data-slot="app-shell-page-panel"]') !== null) {
     return "beside";
   }
   const sheet = document.querySelector('[role="dialog"]');
@@ -156,7 +156,8 @@ describe("a page's side panel", () => {
     cardOf(1200);
     const { host, root } = mounted();
     await drawn(root, {});
-    const panel = () => host.querySelector('[data-slot="app-shell-panel"]');
+    const panel = () =>
+      host.querySelector('[data-slot="app-shell-page-panel"]');
     const besideBefore = panel()?.textContent;
     await drawn(root, { shown: false });
     expect({ besideBefore, after: panel() }).toStrictEqual({

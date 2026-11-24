@@ -80,7 +80,7 @@ const Workflows = () => {
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Workflows` }]} />
-      <Page wide>
+      <Page>
         <PageHeading action={<WorkflowsActions />} title={t`Workflows`} />
         <WorkflowRows
           rows={page.overview.data}
@@ -102,7 +102,7 @@ const WorkflowsPending = () => {
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Workflows` }]} />
-      <Page wide>
+      <Page>
         <PageHeading action={<WorkflowsActions />} title={t`Workflows`} />
         <LoadingLines lines={6} />
       </Page>
