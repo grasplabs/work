@@ -9,8 +9,8 @@
  * to another host, another path, in two headers, or after a redirect; a
  * credential of core's own; a custom endpoint aimed at a private,
  * internal or metadata address; a key read back, logged, or opened after
- * its row was tampered with; a realtime socket (Grasp's live listening,
- * and the lines it says) opened without a platform grant, to another
+ * its row was tampered with; a realtime socket (Grasp's live listening)
+ * opened without a platform grant, to another
  * path, or on an organization's key, or left open at one end; an on-prem
  * relay set where it can't be taken. Then what it is for.
  */
@@ -148,10 +148,10 @@ const openAiUrl = "https://api.openai.com/v1/responses";
 /** Where Grasp's own key goes at OpenAI: its EU data residency host. */
 const openAiEuUrl = "https://eu.api.openai.com/v1/responses";
 
-/** Grasp's own key at KugelAudio, as a connect secret. */
-const kugelAudioKey = "test-platform-kugelaudio-key-0001";
-/** The one host Grasp's key goes to at KugelAudio: its EU endpoint. */
-const kugelAudioHost = "api.eu.kugelaudio.com";
+/** Grasp's own key at Mistral, as a connect secret: it says Grasp's lines. */
+const mistralKey = "test-platform-mistral-key-0001";
+/** Where a line is said: Mistral's speech endpoint. */
+const speechUrl = "https://api.mistral.ai/v1/audio/speech";
 
 describe("AI providers in connect", () => {
   beforeEach(async () => {
@@ -680,49 +680,66 @@ describe("AI providers in connect", () => {
       });
     });
 
-    it("sends nothing to KugelAudio as a plain request, whatever its path: its speech is its socket alone", async () => {
-      const withKey = connect({ KUGELAUDIO_API_KEY: kugelAudioKey });
+    it("sends a line to say to Mistral with Grasp's key, and nothing else of Mistral's audio", async () => {
+      const withKey = connect({ MISTRAL_API_KEY: mistralKey });
       const grant = async () =>
         await grantFor({
-          provider: "kugelaudio",
-          host: kugelAudioHost,
+          provider: "mistral",
+          host: "api.mistral.ai",
           credential: "platform",
         });
 
-      const refusals = [
-        refusalOf(
+      const outcomes = {
+        speech: refusalOf(
+          await withKey.modelFetch(modelRequest(speechUrl), await grant())
+        ),
+        // Voices could be made or deleted with the key, recordings sent.
+        voices: refusalOf(
           await withKey.modelFetch(
-            modelRequest(`https://${kugelAudioHost}/ws/tts`),
+            modelRequest("https://api.mistral.ai/v1/audio/voices"),
             await grant()
           )
         ),
-        refusalOf(
+        below: refusalOf(
           await withKey.modelFetch(
-            modelRequest(`https://${kugelAudioHost}/v1/tts/generate`),
+            modelRequest(`${speechUrl}/voices`),
             await grant()
           )
         ),
-        refusalOf(
+        query: refusalOf(
           await withKey.modelFetch(
-            modelRequest(`https://${kugelAudioHost}/v1/voices`),
+            modelRequest(`${speechUrl}?stream=true`),
             await grant()
           )
         ),
-      ];
+        noKey: refusalOf(
+          await connect().modelFetch(modelRequest(speechUrl), await grant())
+        ),
+      };
 
-      expect(refusals).not.toContain("sent");
-      expect(sent).toStrictEqual([]);
-    });
-
-    it("takes no organization key for KugelAudio, which only Grasp's speech uses", async () => {
-      await expect(
-        outcome(
-          connect().saveAiProviderKey(
-            { provider: "kugelaudio", key: newKey() },
-            byAdmin
-          )
-        )
-      ).resolves.toBe("ai_key.invalid");
+      expect({
+        outcomes,
+        sent: sent.map(({ host, path, headers }) => ({
+          host,
+          path,
+          key: headers.authorization,
+        })),
+      }).toStrictEqual({
+        outcomes: {
+          speech: "sent",
+          voices: "path",
+          below: "path",
+          query: "endpoint",
+          noKey: "no_credential",
+        },
+        sent: [
+          {
+            host: "api.mistral.ai",
+            path: "/v1/audio/speech",
+            key: `Bearer ${mistralKey}`,
+          },
+        ],
+      });
     });
 
     it("sends a recording to write down, and nothing else of OpenAI's audio, its speech included", async () => {
@@ -774,11 +791,9 @@ describe("AI providers in connect", () => {
     });
   });
 
-  describe("a realtime socket, for Grasp's live listening and the lines it says", () => {
+  describe("a realtime socket, for Grasp's live listening", () => {
     const realtimeUrl =
       "https://eu.api.openai.com/v1/realtime?intent=transcription";
-    /** Where a line is said: KugelAudio's speech socket, with no query. */
-    const speechUrl = `https://${kugelAudioHost}/ws/tts`;
 
     /** The provider's end of each socket connect opens: what it got, and how it closed. */
     const upstreams: {
@@ -966,142 +981,6 @@ describe("AI providers in connect", () => {
         closed: await closed.promise,
         refused: refusalOf(refused),
       }).toStrictEqual({ closed: 1011, refused: "upgrade" });
-    });
-
-    it("opens KugelAudio's speech socket at its EU host with Grasp's key alone, and passes each message on both ways", async () => {
-      const withKey = connect({ KUGELAUDIO_API_KEY: kugelAudioKey });
-      const response = await withKey.fetch(
-        await upgrade(speechUrl, { provider: "kugelaudio" })
-      );
-      const core = response.webSocket;
-      core?.accept();
-      const heard = Promise.withResolvers<string>();
-      core?.addEventListener("message", (event) => {
-        heard.resolve(String(event.data));
-      });
-
-      core?.send('{"text":"Good morning.","flush":true}');
-      const [upstream] = upstreams;
-      await vi.waitFor(() => {
-        expect(upstream?.got).toStrictEqual([
-          '{"text":"Good morning.","flush":true}',
-        ]);
-      });
-      upstream?.socket.send('{"audio":"AAAA"}');
-
-      expect({
-        status: response.status,
-        answered: await heard.promise,
-        // Grasp's key in its one header; never the grant or the placeholder.
-        sent: sent.map(({ host, path, headers }) => ({
-          host,
-          path,
-          headers: Object.keys(headers).toSorted(),
-          key: headers.authorization,
-        })),
-        routes: await withKey.aiProviderRoutes(),
-      }).toStrictEqual({
-        status: 101,
-        answered: '{"audio":"AAAA"}',
-        sent: [
-          {
-            host: kugelAudioHost,
-            path: "/ws/tts",
-            headers: ["authorization", "upgrade"],
-            key: `Bearer ${kugelAudioKey}`,
-          },
-        ],
-        routes: { organization: [], platform: ["openai", "kugelaudio"] },
-      });
-      core?.close(1000, "Done");
-      await expect(upstream?.closed).resolves.toBe(1000);
-    });
-
-    it("refuses anything else of KugelAudio's: another path, a query, another host whatever the deployment's setting, a key of core's own, an organization's key, or no key of Grasp's", async () => {
-      const withKey = connect({ KUGELAUDIO_API_KEY: kugelAudioKey });
-      const line = async (
-        url: string,
-        options: { grant?: string; headers?: Record<string, string> } = {}
-      ): Promise<Request> =>
-        await upgrade(url, { provider: "kugelaudio", ...options });
-
-      const refusals = {
-        voices: refusalOf(
-          await withKey.fetch(await line(`https://${kugelAudioHost}/v1/voices`))
-        ),
-        below: refusalOf(await withKey.fetch(await line(`${speechUrl}/multi`))),
-        traversal: refusalOf(
-          await withKey.fetch(
-            await line(`https://${kugelAudioHost}/ws/tts%2F..%2F..%2Fv1/voices`)
-          )
-        ),
-        query: refusalOf(
-          await withKey.fetch(await line(`${speechUrl}?voice_id=1`))
-        ),
-        usualHost: refusalOf(
-          await withKey.fetch(await line("https://api.kugelaudio.com/ws/tts"))
-        ),
-        // Naming it in the setting sends it nowhere else: it has no usual
-        // host to test at.
-        usualHostNamed: refusalOf(
-          await connect({
-            KUGELAUDIO_API_KEY: kugelAudioKey,
-            PLATFORM_AI_USUAL_HOSTS: "kugelaudio",
-          }).fetch(await line("https://api.kugelaudio.com/ws/tts"))
-        ),
-        otherProvider: refusalOf(
-          await withKey.fetch(await line("https://eu.api.openai.com/ws/tts"))
-        ),
-        ownKey: refusalOf(
-          await withKey.fetch(
-            await line(speechUrl, {
-              headers: { authorization: "Bearer ka-core-of-its-own" },
-            })
-          )
-        ),
-        organization: refusalOf(
-          await withKey.fetch(
-            await line(speechUrl, {
-              grant: await grantFor({
-                provider: "kugelaudio",
-                host: kugelAudioHost,
-              }),
-            })
-          )
-        ),
-        // A grant for OpenAI's listening opens nothing of KugelAudio's.
-        otherGrant: refusalOf(
-          await withKey.fetch(
-            await line(speechUrl, {
-              grant: await grantFor({
-                provider: "openai",
-                host: kugelAudioHost,
-                credential: "platform",
-              }),
-            })
-          )
-        ),
-        noKey: refusalOf(await connect().fetch(await line(speechUrl))),
-      };
-
-      expect(refusals).toStrictEqual({
-        voices: "path",
-        below: "path",
-        traversal: "path",
-        query: "path",
-        usualHost: "endpoint",
-        usualHostNamed: "endpoint",
-        otherProvider: "endpoint",
-        ownKey: "credential_header",
-        organization: "no_credential",
-        otherGrant: "endpoint",
-        noKey: "no_credential",
-      });
-      expect(sent).toStrictEqual([]);
-      await expect(connect().aiProviderRoutes()).resolves.toStrictEqual({
-        organization: [],
-        platform: ["openai"],
-      });
     });
   });
 

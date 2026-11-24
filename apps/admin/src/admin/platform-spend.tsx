@@ -42,7 +42,7 @@ const featureWords: Record<PlatformAiFeature, string> = {
 const featureLabel = (feature: PlatformAiFeature | null): string =>
   feature === null ? "Other" : featureWords[feature];
 
-/** `kugelaudio/kugel-3.5` as "KugelAudio kugel-3.5". */
+/** `mistral/voxtral-mini-tts-3-0` as "Mistral AI voxtral-mini-tts-3-0". */
 const modelLabel = (model: string): string => {
   const [provider = "", ...rest] = model.split("/");
   const id = aiProviderIdSchema.safeParse(provider);
