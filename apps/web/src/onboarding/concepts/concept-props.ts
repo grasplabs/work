@@ -1,4 +1,5 @@
 import type { AiReadiness } from "../setup.ts";
+import type { CardLook } from "./language-cards.tsx";
 
 /** The concepts of the setup's first three steps, at `/setup?concept=`. */
 export const concepts = ["a", "b", "c"] as const;
@@ -23,6 +24,12 @@ export interface ConceptProps {
   go: (step: ConceptStep) => void;
   /** Past the plan: on to the setup's next step as it is today. */
   onward: () => void;
-  /** The welcome's foot only for one coming back to it (`?foot=back`), else from the first visit. */
-  footOnlyBack: boolean;
+  /**
+   * The end of a later step (`?foot=a|b|c`): `a` StepperNav's footer with a
+   * Next that works, `b` the same with its count, `c` StepperNav's bar at
+   * the top and the step's own button. None until Next can work.
+   */
+  foot: "a" | "b" | "c";
+  /** How the language cards are drawn (`?cards=a|b|c`). */
+  cards: CardLook;
 }
