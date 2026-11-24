@@ -458,7 +458,7 @@ export const Thread = ({ turns, doing }: { turns: Turn[]; doing: Doing }) => (
           }
         >
           <MessageAvatar>
-            <InterviewerAvatar size="xs" />
+            <InterviewerAvatar />
           </MessageAvatar>
           <MessageContent>
             <MessageResponse>
@@ -631,13 +631,14 @@ const Stage = ({
               variant={nearEnd(left) ? "warning" : "default"}
             />
           ) : (
-            <InterviewerAvatar size="xs" />
+            <InterviewerAvatar />
           )}
           <Text as="span" color="muted" size="sm">
             {over}
           </Text>
         </div>
-        {now?.lead === undefined ? null : (
+        {now?.lead === undefined ||
+        (talk.doing === "listening" && talk.interim !== "") ? null : (
           <Text color="muted" size="lg">
             {now.lead}
           </Text>

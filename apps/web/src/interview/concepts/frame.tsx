@@ -1,4 +1,3 @@
-import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
 import {
   Progress,
   ProgressLabel,
@@ -10,6 +9,7 @@ import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
+import { AgentAvatar } from "../../agents/agent-avatar.tsx";
 import { AppCardGround } from "../../apps/app-card/ground.tsx";
 import type { Scene } from "../../apps/app-card/scenes.ts";
 import { GraspLogo } from "../../connections/brand-logos.ts";
@@ -25,6 +25,9 @@ import { fixture } from "./fixture.ts";
 // header on a phone. The countdown stands in one of three places: over
 // the question ("title", conversation.tsx), as a thin bar across the window
 // under the header ("bar"), or under the answer box ("note").
+
+/** A phone too short for the band and the whole page above the fold. */
+const shortPhone = "@media (width < 64rem) and (height < 760px)";
 
 const styles = stylex.create({
   frame: {
@@ -75,6 +78,8 @@ const styles = stylex.create({
     gridColumn: { default: "1", [media.lg]: "2" },
     gridRow: { default: "2", [media.lg]: "1 / 3" },
     height: { default: "24svh", [media.lg]: "auto" },
+    // On a short phone (an iPhone SE is 667 high) the band makes way, so the yes is always on the first screen.
+    display: { default: "block", [shortPhone]: "none" },
   },
   // Beside the page only: a phone keeps its whole height for the thread.
   wideOnly: { display: { default: "none", [media.lg]: "block" } },
@@ -97,15 +102,9 @@ const styles = stylex.create({
   },
 });
 
-/** The interviewer's face: the company's interviewer, given, never chosen. */
-export const InterviewerAvatar = ({
-  size = "sm",
-}: {
-  size?: "xs" | "sm" | "default" | "lg";
-}) => (
-  <Avatar name={fixture.interviewer} size={size}>
-    <AvatarFallback />
-  </Avatar>
+/** The interviewer's face: the Stephen the product already has, still (the agents' avatar), given, never chosen. */
+export const InterviewerAvatar = () => (
+  <AgentAvatar face="stephen" size="default" />
 );
 
 /** Grasp's mark and name, top start. */
