@@ -112,15 +112,14 @@ const styles = stylex.create({
 });
 
 /**
- * The size of every tool in the frame, in each part's own words, all one
- * height (Damsko's controlSm): the language, light or dark, the way out
- * and the arrows. Every tool takes its size from here, never its own, so
- * they can't drift apart.
+ * The size of every tool in the frame, all Damsko's `sm` (32): the
+ * language, light or dark, the way out and the arrows. Every tool takes its
+ * size from here, never its own, so they can't drift apart.
  */
 const tool = {
   button: "icon-sm",
   select: "sm",
-  toggle: "default",
+  toggle: "sm",
 } as const;
 
 const languages = Object.entries(localeNames).flatMap(([code, name]) =>
