@@ -20,12 +20,14 @@ import { Button } from "@grasp-os/ui/components/button";
 import {
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
 } from "@grasp-os/ui/components/card";
 import {
   Field,
   FieldContent,
+  FieldDescription,
   FieldGroup,
   FieldLabel,
   FieldTitle,
@@ -616,12 +618,10 @@ const GeneralForm = ({
               </Field>
               <Field orientation="responsive">
                 <FieldContent>
-                  <WithInfo
-                    info={t`Shown with the App. It opens the App to nobody: who may use it is who it is shared with.`}
-                    label={t`More about who it’s for`}
-                  >
-                    <FieldLabel>{t`Made for`}</FieldLabel>
-                  </WithInfo>
+                  <FieldLabel>{t`Made for`}</FieldLabel>
+                  <FieldDescription>
+                    {t`Shown with the App. It opens the App to nobody: who may use it is who it is shared with.`}
+                  </FieldDescription>
                 </FieldContent>
                 <Select
                   disabled={disabled}
@@ -673,14 +673,12 @@ const GeneralForm = ({
           })}
         >
           <CardHeader>
-            <WithInfo
-              info={t`Who answers for the App: who is asked about it and decides what changes.`}
-              label={t`More about the owner`}
-            >
-              <CardTitle>
-                {t({ message: "Owner", context: "who answers for an app" })}
-              </CardTitle>
-            </WithInfo>
+            <CardTitle>
+              {t({ message: "Owner", context: "who answers for an app" })}
+            </CardTitle>
+            <CardDescription>
+              {t`Who answers for the App: who is asked about it and decides what changes.`}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {/* The platform's one owner control, as a workflow's line has it. */}

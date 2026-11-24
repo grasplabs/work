@@ -21,6 +21,7 @@ import {
   Card,
   CardAction,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
 } from "@grasp-os/ui/components/card";
@@ -63,7 +64,6 @@ import type { ReactNode } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { formatList } from "../format.ts";
-import { WithInfo } from "../frame/info-tip.tsx";
 import { decidesRequests } from "../inbox/waiting.ts";
 import { ShownOnceDialog } from "../shown-once.tsx";
 import { useCoreAction } from "../use-core-action.ts";
@@ -376,11 +376,10 @@ export const AppWebhooks = ({
     <Card size="sm" asChild>
       <section aria-label={t`Addresses`}>
         <CardHeader>
-          <WithInfo
-            info={t`Grasp sends this App's events to each address, signed with its secret. Until an admin approves an address, it gets IDs and the event only, never what someone sent in a form.`}
-          >
-            <CardTitle level={3}>{t`Addresses`}</CardTitle>
-          </WithInfo>
+          <CardTitle level={3}>{t`Addresses`}</CardTitle>
+          <CardDescription>
+            {t`Grasp sends this App's events to each address, signed with its secret. Until an admin approves an address, it gets IDs and the event only, never what someone sent in a form.`}
+          </CardDescription>
           <CardAction>
             <AddWebhook app={app} onSecret={setSecret} />
           </CardAction>

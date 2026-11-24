@@ -8,6 +8,7 @@ import {
   Card,
   CardAction,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
 } from "@grasp-os/ui/components/card";
@@ -44,7 +45,6 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import { AppLogo } from "../connections/app-logo.tsx";
 import { integrationKey } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
-import { WithInfo } from "../frame/info-tip.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
 // An App's integrations, on its settings page (grasplabs/prototype
@@ -197,11 +197,10 @@ export const AppIntegrations = ({
     <Card size="sm" asChild>
       <section aria-label={t`Integrations`}>
         <CardHeader>
-          <WithInfo
-            info={t`Where the App’s data comes from. Those its code asks for are here by themselves; add any other it needs. Adding one connects nothing.`}
-          >
-            <CardTitle level={3}>{t`Integrations`}</CardTitle>
-          </WithInfo>
+          <CardTitle level={3}>{t`Integrations`}</CardTitle>
+          <CardDescription>
+            {t`Where the App’s data comes from. Those its code asks for are here by themselves; add any other it needs. Adding one connects nothing.`}
+          </CardDescription>
           <CardAction>
             {builds ? (
               <AddPicker

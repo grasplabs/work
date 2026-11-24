@@ -124,14 +124,11 @@ const buttonNamed = (name: string): HTMLButtonElement | undefined =>
       (each.getAttribute("aria-label") ?? each.textContent?.trim()) === name
   );
 
-/** Every button's accessible name, its label else its text, but the card's info mark. */
+/** Every button's accessible name, its label else its text. */
 const buttons = (): string[] =>
-  [...document.querySelectorAll("button")]
-    .map(
-      (each) =>
-        each.getAttribute("aria-label") ?? each.textContent?.trim() ?? ""
-    )
-    .filter((name) => name !== "More about this section");
+  [...document.querySelectorAll("button")].map(
+    (each) => each.getAttribute("aria-label") ?? each.textContent?.trim() ?? ""
+  );
 
 describe("an App's integrations in its settings", () => {
   afterEach(() => {

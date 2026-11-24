@@ -22,6 +22,7 @@ import { Button } from "@grasp-os/ui/components/button";
 import {
   Card,
   CardContent,
+  CardDescription,
   CardHeader,
   CardTitle,
 } from "@grasp-os/ui/components/card";
@@ -579,15 +580,12 @@ export const ResourceBindings = ({
       <Card size="sm" asChild>
         <section aria-label={t`Resources`}>
           <CardHeader>
-            <WithInfo
-              info={
-                decides
-                  ? t`The App's actions reach a model, an integration or knowledge only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it.`
-                  : t`The App's actions reach a model, an integration or knowledge only through a binding an admin of your organization approves.`
-              }
-            >
-              <CardTitle level={3}>{t`Resources`}</CardTitle>
-            </WithInfo>
+            <CardTitle level={3}>{t`Resources`}</CardTitle>
+            <CardDescription>
+              {decides
+                ? t`The App's actions reach a model, an integration or knowledge only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it.`
+                : t`The App's actions reach a model, an integration or knowledge only through a binding an admin of your organization approves.`}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <div {...stylex.props(styles.body)}>
