@@ -540,8 +540,8 @@ export const attendField = (element: Element | null) => {
   if (element !== null) {
     him.attention.behind = false;
     // His line follows the element's own corner, read from the page.
-    const corner = Number.parseFloat(
-      getComputedStyle(element).borderTopLeftRadius
+    const corner = Number(
+      getComputedStyle(element).borderTopLeftRadius.replace("px", "")
     );
     him.attention.radius = Number.isFinite(corner) ? corner : 0;
   }
