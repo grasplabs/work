@@ -86,18 +86,6 @@ test("on a phone the person menu holds the languages and the themes, each within
 
   // Under their names in the menu itself, no submenu off the window's edge.
   await opened("Sidebar", "Show or hide the sidebar");
-  // Opened at its top, the person's name whole, once it has come in.
-  await expect
-    .poll(
-      async () =>
-        await menu.evaluate(async (element) => {
-          await Promise.all(
-            element.getAnimations().map(async (each) => await each.finished)
-          );
-          return element.scrollTop;
-        })
-    )
-    .toBe(0);
   await chosen(menu.getByRole("menuitemradio", { name: "Nederlands" }));
   await expect(page.locator("html")).toHaveAttribute("lang", "nl");
 
@@ -107,6 +95,106 @@ test("on a phone the person menu holds the languages and the themes, each within
   ).toHaveAttribute("aria-checked", "true");
   await chosen(menu.getByRole("menuitemradio", { name: "Donker" }));
   await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
+});
+
+test("on a phone the person menu opens at its top, however soon the person is pressed after the sheet opens", async ({
+  pageOf,
+}) => {
+  const { member } = peopleIn("languages");
+  const page = await pageOf(member, {
+    viewport: { width: 390, height: 844 },
+  });
+  await page.goto("/projects");
+  await expect(
+    page.getByRole("heading", { name: "Projects", exact: true })
+  ).toBeVisible({ timeout: 20_000 });
+  const sheet = page.getByRole("dialog", { name: "Sidebar" });
+  const menu = page.getByRole("menu");
+  // Every scroll in the menu, counted on the root from each opening on.
+  const root = page.locator("html");
+  await page.evaluate(() => {
+    document.addEventListener(
+      "scroll",
+      (event) => {
+        if (
+          event.target instanceof Element &&
+          event.target.closest('[role="menu"]') !== null
+        ) {
+          const { dataset } = document.documentElement;
+          dataset.menuScrolls = String(Number(dataset.menuScrolls ?? 0) + 1);
+        }
+      },
+      { capture: true }
+    );
+  });
+  /** The next frame, painted. */
+  const painted = async (): Promise<void> => {
+    await page.evaluate(async () => {
+      const { promise, resolve } = Promise.withResolvers<boolean>();
+      requestAnimationFrame(() => {
+        resolve(true);
+      });
+      await promise;
+    });
+  };
+  // Twenty times, one after another.
+  for (let time = 1; time <= 20; time += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- one opening at a time
+    await root.evaluate((element) => {
+      element.dataset.menuScrolls = "0";
+    });
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    await page
+      .getByRole("main")
+      .getByRole("button", { name: "Show or hide the sidebar" })
+      .click();
+    // The person, pressed as soon as they are whole in the window, while
+    // the sheet still slides in.
+    let box = null;
+    while (box === null || box.x < 0) {
+      // oxlint-disable-next-line no-await-in-loop -- frame by frame
+      await painted();
+      // oxlint-disable-next-line no-await-in-loop -- as above
+      box = await sheet
+        .getByRole("button", { name: "Person", exact: true })
+        .boundingBox({ timeout: 1000 })
+        .catch(() => null);
+    }
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    await expect(menu).toBeVisible();
+    // Once the sheet has come to rest, and what it does then is done,
+    // nothing in the menu has scrolled: the person's name stands whole.
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    await sheet.evaluate(async (element) => {
+      await Promise.all(
+        element
+          .getAnimations({ subtree: true })
+          .map(async (each) => await each.finished.catch(() => null))
+      );
+    });
+    for (let frame = 0; frame < 3; frame += 1) {
+      // oxlint-disable-next-line no-await-in-loop -- frame by frame
+      await painted();
+    }
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    const scrolled = await menu.evaluate((element) => ({
+      events: Number(document.documentElement.dataset.menuScrolls),
+      tops: [element, ...element.querySelectorAll("*")]
+        .map((each) => each.scrollTop)
+        .filter((top) => top !== 0),
+    }));
+    expect(scrolled, `opening ${time}`).toEqual({ events: 0, tops: [] });
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    await page.keyboard.press("Escape");
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    await expect(menu).toBeHidden();
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    await page.keyboard.press("Escape");
+    // oxlint-disable-next-line no-await-in-loop -- as above
+    await expect(sheet).toBeHidden();
+  }
 });
 
 test("signing in speaks the browser's language", async ({ newContext }) => {

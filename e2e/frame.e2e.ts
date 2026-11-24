@@ -288,7 +288,7 @@ const contrast = (one: number[], other: number[]): number => {
   return (lighter + 0.05) / (darker + 0.05);
 };
 
-test("in dark, the kit's muted fill stands out from the page's card as much as it did from the kit's own page", async ({
+test("in dark, the kit's muted fill is opaque and stands out from the page's card as much as it did from the kit's own page", async ({
   pageOf,
 }) => {
   const { member } = peopleIn("frame");
@@ -300,6 +300,25 @@ test("in dark, the kit's muted fill stands out from the page's card as much as i
     page.getByRole("heading", { name: "Projects", exact: true })
   ).toBeVisible();
   const { ground, painted } = await paintedOnCard(page, ["var(--muted)"]);
+  // Opaque, as the kit's own: nothing under it shows through, such as the
+  // rows under a sticky header row.
+  const opacity = await page.evaluate(() => {
+    const probe = document.createElement("div");
+    probe.style.backgroundColor = "var(--muted)";
+    document.body.append(probe);
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = 1;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (context === null) {
+      throw new Error("No 2D canvas to read a colour");
+    }
+    context.fillStyle = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    context.fillRect(0, 0, 1, 1);
+    return context.getImageData(0, 0, 1, 1).data[3];
+  });
+  expect(opacity).toBe(255);
   // The kit's own dark muted (#1b2a24) on its own dark page (#0d1714),
   // as the app had them before its frame moved onto Damsko.
   expect(contrast([0x1b, 0x2a, 0x24], [0x0d, 0x17, 0x14])).toBeCloseTo(1.22, 2);
