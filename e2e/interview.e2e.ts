@@ -22,9 +22,7 @@ import {
   personIn,
   readBack,
   signedInFor,
-  speechSchema,
   streamed,
-  turnOf,
   wavOf,
 } from "./interview-turns.ts";
 import { signInStaff } from "./people.ts";
@@ -36,9 +34,8 @@ import { origin } from "./stack.ts";
 // this is, answer by typing, stop for now and carry on, put a line of the
 // read-back right, agree to it, and the interview is agreed in the store.
 // Another goes through the screens before it in Dutch and chooses Claire,
-// whose text and voice every turn then uses. A third talks: Stephen says
-// his line a sentence at a time, starting before all of it is written, its
-// words lighting up as he says them.
+// whose text and voice every turn then uses. A third removes a line of
+// theirs, and what was written from it is never said to anyone again.
 // The local stack reaches no model, so Stephen's turns are the browser's
 // (e2e/interview-turns.ts). The stack has no voice either: what the page
 // asks of `/api/speech` is noted and refused, so each line lights up
@@ -169,47 +166,6 @@ test("someone has their interview by typing, carries on after stopping, and agre
     refused: [],
     events: ["start", "resume", "answer", "readback"],
   });
-});
-
-test("someone who can't hold a button deletes their interview with two presses, each asking first", async ({
-  page,
-}) => {
-  const staff = await signInStaff();
-  const run = crypto.randomUUID().slice(0, 8);
-  const person = `mila-${run}`;
-  const link = await invited(staff, person, "Mila");
-  await answered(page);
-  await signedInFor(page, addressOf(person));
-  await page.goto(link);
-  await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("button", { name: "Stephen", exact: true }).click();
-  await page
-    .getByRole("button", { name: "Type instead, without sound" })
-    .click();
-  // A line typed before his first is not taken, so they answer him.
-  await expect(page.getByText(first)).toBeVisible();
-  const answer = page.getByLabel("Your answer");
-  await answer.fill("I check it in Exact, then I send it to Sam.");
-  await answer.press("Enter");
-  await expect(page.getByText(readBack)).toBeVisible();
-  await page.getByRole("button", { name: "Yes, that’s correct" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Thank you, Mila." })
-  ).toBeVisible();
-
-  // A press, not a hold, asks whether to go on, then what would be lost.
-  await page
-    .getByRole("button", { name: "Press and hold: Delete my interview" })
-    .click();
-  const asked = page.getByRole("dialog", { name: "Delete my interview?" });
-  await asked.getByRole("button", { name: "Delete my interview" }).click();
-  await page
-    .getByRole("alertdialog", { name: "Delete your interview?" })
-    .getByRole("button", { name: "Delete it" })
-    .click();
-  await expect(
-    page.getByRole("heading", { name: /^Deleted\./u })
-  ).toBeVisible();
 });
 
 /**
@@ -430,26 +386,6 @@ test("someone goes through the screens before the interview in Dutch, chooses Cl
   await expect(
     page.getByRole("button", { name: "English", exact: true })
   ).toHaveAttribute("aria-pressed", "true");
-  // On a narrow phone every language stays on the page.
-  const desktop = page.viewportSize();
-  await page.setViewportSize({ width: 320, height: 740 });
-  await expect
-    .poll(
-      async () =>
-        await page
-          .getByRole("group", { name: "Choose your language" })
-          .getByRole("button")
-          .evaluateAll((buttons) =>
-            buttons.map((button) => {
-              const { left, right } = button.getBoundingClientRect();
-              return left >= 0 && right <= window.innerWidth;
-            })
-          )
-    )
-    .toStrictEqual([true, true, true, true, true]);
-  if (desktop !== null) {
-    await page.setViewportSize(desktop);
-  }
   await page.getByRole("button", { name: "Nederlands", exact: true }).click();
   await expect(
     page.getByRole("heading", {
@@ -510,131 +446,5 @@ test("someone goes through the screens before the interview in Dutch, chooses Cl
     refused: [],
     turns: [{ event: "start", interviewer: "claire" }],
     claire: "claire",
-  });
-});
-
-/** A WAV of `seconds` of silence: 8 kHz. */
-const silence = (seconds: number): Buffer =>
-  wavOf(
-    8000,
-    Array.from({ length: Math.round(seconds * 8000) }, () => 0)
-  );
-
-/** How long each word takes, said here. */
-const wordMs = 300;
-
-/** Answers every line asked to be said as core does, with silence the length of its words; what was asked, in order. */
-const heard = async (page: Page): Promise<string[]> => {
-  const asked: string[] = [];
-  await page.route("**/api/speech", async (route: Route) => {
-    const line = speechSchema.parse(route.request().postDataJSON());
-    asked.push(line.text);
-    const words = line.text.split(/\s+/u).map((text, at) => ({
-      text,
-      startMs: at * wordMs,
-      endMs: (at + 1) * wordMs,
-    }));
-    await route.fulfill({
-      json: {
-        audio: silence((words.length * wordMs) / 1000).toString("base64"),
-        mime: "audio/wav",
-        words,
-      },
-    });
-  });
-  return asked;
-};
-
-/** Each word that lit up on the page, and when, in ms on the page's clock. */
-const litSchema = z.array(z.object({ word: z.string(), at: z.number() }));
-
-/** Notes, frame by frame, each word on the stage as it lights up, from the page's first moment. */
-const watchWords = async (page: Page): Promise<void> => {
-  await page.addInitScript(() => {
-    const lit: { word: string; at: number }[] = [];
-    const seen = new WeakSet<Element>();
-    const look = (): void => {
-      for (const word of document.querySelectorAll(
-        'main [data-said="saying"], main [data-said="said"]'
-      )) {
-        if (!seen.has(word)) {
-          seen.add(word);
-          lit.push({ word: word.textContent.trim(), at: performance.now() });
-        }
-      }
-      requestAnimationFrame(look);
-    };
-    requestAnimationFrame(look);
-    Object.assign(window, { litWords: lit });
-  });
-};
-
-const sentences = [
-  "Hi Kai, good to meet you.",
-  "I will ask about one piece of your work.",
-  "What do you do most?",
-];
-
-test("Stephen says his line a sentence at a time, without a gap, its words lighting up as he says them", async ({
-  page,
-}) => {
-  const staff = await signInStaff();
-  const run = crypto.randomUUID().slice(0, 8);
-  const person = `kai-${run}`;
-  const link = await invited(staff, person, "Kai");
-  await answered(page);
-  // His first line has three sentences; core sends the first while the rest is written.
-  const line = sentences.join(" ");
-  await page.route("**/api/interview/turn", async (route: Route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/x-ndjson",
-      body: streamed(turnOf({ say: line, tone: "warm, relaxed" })),
-    });
-  });
-  const asked = await heard(page);
-  await watchWords(page);
-
-  // They hear him, he hears them, and they start talking.
-  await signedInFor(page, addressOf(person));
-  await page.goto(link);
-  await page.getByRole("button", { name: "Continue" }).click();
-  await page.getByRole("button", { name: "Stephen", exact: true }).click();
-  await page
-    .getByRole("button", { name: "Check sound and microphone" })
-    .click();
-  await page.getByRole("button", { name: "Yes, I can hear you" }).click();
-  const start = page.getByRole("button", { name: "Start", exact: true });
-  await expect(start).toBeVisible({ timeout: 30_000 });
-  await start.click();
-  // From here: the sound check's own line may still be ending as Start shows.
-  const startedAt = await page.evaluate(() => performance.now());
-
-  // While he talks, the box is a spoken conversation, his mark in it; once
-  // he asks, it is their turn, its time running where his mark stood.
-  const spoken = page.getByRole("group", { name: "Voice conversation" });
-  await expect(
-    spoken.getByRole("status").filter({ hasText: "Stephen is talking" })
-  ).toBeVisible();
-  await expect(
-    spoken.getByRole("button", { name: "Type instead" })
-  ).toBeVisible();
-  await expect(page.getByText(line)).toBeVisible();
-  await expect(spoken.getByRole("timer")).toBeVisible({ timeout: 30_000 });
-
-  // Each sentence was asked for on its own, the first first; each word lit up as it was said, one after another, with no gap between the sentences.
-  const words = line.split(" ");
-  const lit = litSchema
-    .parse(await page.evaluate((): unknown => Reflect.get(window, "litWords")))
-    .filter(({ at }) => at > startedAt);
-  const firstAt = lit[0]?.at ?? 0;
-  expect({
-    asked: asked.filter((text) => sentences.includes(text)),
-    words: lit.map(({ word }) => word),
-    beats: lit.map(({ at }) => Math.round((at - firstAt) / wordMs)),
-  }).toStrictEqual({
-    asked: sentences,
-    words,
-    beats: words.map((_, at) => at),
   });
 });

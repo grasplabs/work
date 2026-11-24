@@ -117,9 +117,6 @@ const besideWorkflow = /page of the workflow ".*?" \((?<found>[^)\s]+)\)/u;
 /** The App the agent plans for the contact list (`buildsApp`): its name. */
 export const appPlanned = "Sales contacts";
 
-/** The workflow the agent plans for suppliers' invoices (`drawsWorkflow`). */
-export const workflowPlanned = "Supplier payments";
-
 /** What the agent says once it wrote the contact list (`buildsApp`). */
 export const appReady = "Your contact list is ready to try in the preview.";
 
@@ -133,26 +130,6 @@ export const modelScripts = {
     opener: "What should the weekly sales report cover?",
     replies: [
       says("Revenue by region, the deals that closed, and the pipeline."),
-    ],
-  },
-  /**
-   * An answer with a table and a link out of Grasp: what opens over the
-   * chat from an answer (the table's Copy and Download menus, the link's
-   * question before it leaves).
-   */
-  answersTable: {
-    opener: "Which regions sold most last week?",
-    replies: [
-      says(
-        [
-          "North sold most; the [weekly report](https://example.com/report) has the rest.",
-          "",
-          "| Region | Sales |",
-          "| --- | ---: |",
-          "| North | 12 |",
-          "| South | 9 |",
-        ].join("\n")
-      ),
     ],
   },
   /**
@@ -211,29 +188,6 @@ export const modelScripts = {
     replies: [
       says("I asked for the packages it needs: approve them on the card."),
       says("They are approved, so the page uses them now."),
-    ],
-  },
-  /**
-   * Something new from Make something that runs on its own: the person
-   * says what they want done, Grasp proposes a workflow, and once they say
-   * Build it, asks on.
-   */
-  drawsWorkflow: {
-    opener: "Pay our suppliers' invoices once they are checked.",
-    replies: [
-      calls("planswf01", "proposePlan", {
-        parts: [
-          {
-            kind: "workflow",
-            name: workflowPlanned,
-            does: "Once an invoice is checked, it is paid.",
-          },
-        ],
-        who: "The finance team",
-      }),
-      says(
-        "Where does a supplier's invoice come in, and who looks at it first?"
-      ),
     ],
   },
   /**
@@ -372,43 +326,6 @@ export const modelScripts = {
           source: invoiceApproval(),
         }),
       says(approvalDrawn),
-    ],
-  },
-  /**
-   * An App's own chat whose first page doesn't build: the agent writes
-   * the tally with a page that doesn't parse, then, asked, fixes it.
-   */
-  fixesBrokenTally: {
-    opener: "Build a tally, and get it working.",
-    replies: [
-      (said) =>
-        calls(
-          "definesbr1",
-          "addTable",
-          sharedTable(readIn(said, ownApp), "tally", { added: "v.boolean()" })
-        ),
-      (said) =>
-        calls("writesbr1", "writeFile", {
-          app: readIn(said, ownApp),
-          files: {
-            ...codeOf(tallyFiles("in the preview")),
-            "src/routes/index.tsx": `import { createFileRoute } from "@tanstack/react-router";
-function Tally( {
-
-export const Route = createFileRoute("/")({ component: Tally });
-`,
-          },
-        }),
-      says("The tally's page doesn't build yet."),
-      // Told by the turn's check that its page doesn't build, it answers
-      // without fixing it: the draft stays broken until asked.
-      says("I'll fix the page when you ask."),
-      (said) =>
-        calls("fixestly1", "writeFile", {
-          app: readIn(said, ownApp),
-          files: { "src/routes/index.tsx": tallyPage("Add one") },
-        }),
-      says("The tally works now."),
     ],
   },
 } as const satisfies Record<string, ModelScript>;

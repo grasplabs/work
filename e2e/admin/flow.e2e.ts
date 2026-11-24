@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import { z } from "zod";
 
 /** What the organizations seed made (apps/admin/test/e2e-seed.ts). */
-const seededSchema = z.object({ answered: z.string(), unset: z.string() });
+const seededSchema = z.object({ answered: z.string() });
 
 // Staff set how much onboarding a company goes through: from a preset,
 // changed by hand, saved as one command, and read back from its Grasp.
