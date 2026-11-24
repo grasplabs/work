@@ -20,10 +20,12 @@ import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
 const styles = stylex.create({
+  // A link's words on the page's start edge: its padding hangs outside it.
+  flush: { marginInlineStart: `calc(-1 * ${space[4]})` },
   forget: {
     display: "flex",
     flexDirection: "column",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: space[2],
   },
 });
@@ -73,7 +75,7 @@ export const ForgetTeams = ({
   if (erased && teamsInBrain === null) {
     return (
       <output aria-live="polite">
-        <Text as="span" size="sm" color="muted">
+        <Text as="span" size="lg">
           {t`Erased. Your Brain keeps nothing of your teams until you confirm them again.`}
         </Text>
       </output>
@@ -82,7 +84,7 @@ export const ForgetTeams = ({
   if (teamsInBrain === "erasing") {
     return (
       <output aria-live="polite">
-        <Text as="span" size="sm" color="muted">
+        <Text as="span" size="lg">
           {t`I’m erasing your teams from your Brain. It isn’t finished yet, and I finish it by myself.`}
         </Text>
       </output>
@@ -98,8 +100,9 @@ export const ForgetTeams = ({
         onClick={() => {
           setOpen(true);
         }}
-        size="sm"
-        variant="ghost"
+        size="lg"
+        style={styles.flush}
+        variant="link"
       >
         {t`Erase your teams from your Brain`}
       </Button>

@@ -61,22 +61,6 @@ const bayer = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 export const bayerAt = (x: number, y: number): number =>
   ((bayer[(x % 4) + (y % 4) * 4] ?? 0) + 0.5) / 16;
 
-const fract = (value: number): number => value - Math.floor(value);
-
-/** A number from 0 to 1 for a cell, always the same for the same cell. */
-export const hash = (x: number, y: number, seed = 0): number =>
-  fract(Math.sin(x * 12.9898 + y * 78.233 + seed * 37.719) * 43_758.5453);
-
-/** A seeded random sequence from 0 to 1 (Park and Miller's), the same for the same seed. */
-export const seeded = (seed: number): (() => number) => {
-  const modulus = 2_147_483_647;
-  let state = (Math.abs(Math.floor(seed)) % (modulus - 1)) + 1;
-  return () => {
-    state = (state * 16_807) % modulus;
-    return (state - 1) / (modulus - 1);
-  };
-};
-
 /** Paints one cell of the grid. */
 export type Put = (x: number, y: number, tone: Tone, alpha?: number) => void;
 

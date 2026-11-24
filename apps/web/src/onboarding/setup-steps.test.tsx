@@ -18,15 +18,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
 import { InterviewsProgress } from "./interviews-progress.tsx";
-import { SetupFrame } from "./setup-frame.tsx";
 import { SetupStepBody, directoryProblemOf } from "./setup-steps.tsx";
 import type { SetupData } from "./setup-steps.tsx";
-import { listeningOf, stepIndex, steps } from "./setup.ts";
+import { steps } from "./setup.ts";
 import type { AiReadiness, SetupStep } from "./setup.ts";
-import { noteHeard } from "./visit.ts";
 
-// What the onboarding's step tells the company's admin while Stephen talks
-// to their people, from what it renders.
+// What the setup's steps tell the company's admin, and where the
+// interviews stand, from what they render.
 
 const today = "2026-10-14";
 
@@ -82,8 +80,6 @@ interface Shown {
   paused?: boolean;
   settled?: "mail"[];
   sponsor?: string | null;
-  /** Stephen finished this step before. */
-  seen?: boolean;
   choices?: SetupChoices;
   documents?: OnboardingDocument[];
   context?: OnboardingContext;
@@ -141,13 +137,12 @@ const aiOf = ({ ready }: { ready: boolean }): AiReadiness => {
 
 /** A step as it is drawn as it arrives, its markup and all. */
 const drawn = (
-  step: SetupStep,
+  step: Exclude<SetupStep, "pulse" | "listening">,
   {
     paused = false,
     settled = [],
     sponsor = null,
     context = noContext,
-    seen = false,
     choices = noChoices,
     documents = [],
     mailSends = true,
@@ -156,9 +151,6 @@ const drawn = (
     kickoff = sponsor === null ? null : "in",
   }: Shown
 ): string => {
-  if (seen) {
-    noteHeard(step);
-  }
   const data: SetupData = {
     admin: "Ada",
     company: null,
@@ -197,23 +189,14 @@ const drawn = (
   };
   return page(
     <SetupStepBody
-      cramped={false}
       data={data}
       furthest={0}
       go={() => {}}
-      onward={() => {}}
-      path={steps}
-      listening={listeningOf(
-        { roster: null, plan: data.view.plan, progress: null },
-        today
-      )}
       message={null}
-      onMadeWay={() => {}}
       onMessage={() => {}}
       onSettle={() => {}}
-      onStory={() => {}}
-      parts={[]}
-      percent={10}
+      onward={() => {}}
+      path={steps}
       settled={settled}
       step={step}
       today={today}
@@ -222,34 +205,107 @@ const drawn = (
 };
 
 /** What a step says, as text without its markup. */
-const said = (step: SetupStep, shown: Shown): string =>
+const said = (
+  step: Exclude<SetupStep, "pulse" | "listening">,
+  shown: Shown
+): string =>
   drawn(step, shown)
     .replaceAll(/<[^>]+>/gu, " ")
     .replaceAll(/\s+/gu, " ");
 
-describe("the step while Stephen talks to the team", () => {
-  it("says the interviews are paused, while Grasp paused them", () => {
-    const paused = said("listening", { paused: true });
+/** Where the interviews stand, as text: team Ops quiet, its lead named `lead`, the interviews `paused` or not. */
+const progressSaid = ({
+  lead = "Lea Smit",
+  paused = false,
+}: {
+  lead?: string;
+  paused?: boolean;
+}): string =>
+  page(
+    <InterviewsProgress
+      links={[]}
+      listening={{
+        progress: 0.5,
+        day: 7,
+        days: 14,
+        leadsHeard: 1,
+        colleaguesHeard: 0,
+        heard: [1],
+      }}
+      today={today}
+      view={{
+        ...view(paused, null, noContext, true, null, null),
+        roster: {
+          teams: [
+            { id: "ops", name: "Ops", lead: "lea", does: "", off: false },
+          ],
+          people: [
+            {
+              id: "lea",
+              name: lead,
+              email: "",
+              team: "ops",
+              title: "",
+              away: false,
+            },
+          ],
+        },
+        progress: {
+          teams: [
+            {
+              id: "ops",
+              name: "Ops",
+              people: 6,
+              off: false,
+              leadTalked: true,
+              talked: 0,
+              asked: 5,
+            },
+          ],
+          talked: 0,
+          asked: 5,
+          leadsTalked: 1,
+          leads: 1,
+          asOf: today,
+        },
+      }}
+    />
+  )
+    .replaceAll(/<[^>]+>/gu, " ")
+    .replaceAll(/\s+/gu, " ");
+
+describe("where the interviews stand", () => {
+  it("says the interviews are paused, while Grasp paused them, before the days", () => {
+    const paused = progressSaid({ paused: true });
     expect(paused).toContain(
       "Paused: no link opens and none goes out. The links that are due go out once they run again."
     );
     expect(paused.indexOf("Paused:")).toBeLessThan(
-      paused.indexOf("Day 3 of 14")
+      paused.indexOf("Day 7 of 14")
     );
-    expect(said("listening", {})).not.toContain("Paused:");
+    expect(progressSaid({})).not.toContain("Paused:");
   });
 
-  it("asks the admin to let Grasp's mail through, naming the sending domain, until they say it's done", () => {
-    const open = said("listening", {});
+  it("names a team far behind with its lead, and not at all once core erased the lead", () => {
+    expect({
+      named: progressSaid({}).includes(
+        "Ops has been quiet so far. A short message from Lea, their lead, usually helps."
+      ),
+      erased: progressSaid({ lead: "" }).includes("has been quiet"),
+    }).toStrictEqual({ named: true, erased: false });
+  });
+});
+
+describe("letting Grasp's mail through", () => {
+  it("is asked on the team step, before the links go out, naming the sending domain, until they say it's done", () => {
+    const open = said("team", {});
     expect({
       asked: open.includes("Let Grasp’s mail through"),
       named: open.includes(
         "Apply it if the sender’s domain is mail.example.test."
       ),
-      done: said("listening", { settled: ["mail"] }).includes(
-        "Let Grasp’s mail through"
-      ),
-    }).toStrictEqual({ asked: true, named: true, done: false });
+      done: said("team", { settled: ["mail"] }).includes("Settled: It’s done"),
+    }).toStrictEqual({ asked: true, named: true, done: true });
   });
 });
 
@@ -268,37 +324,6 @@ describe("what needs the admin", () => {
         done.includes("Continue"),
       ],
     }).toStrictEqual({ open: [true, false], done: [true, true, true] });
-  });
-
-  it("asks for the AI provider, its key and a model right after the welcome, until a model is ready for calls", () => {
-    const asked = said("ai", { ai: aiOf({ ready: false }) });
-    const ready = said("ai", {});
-    const unknown = said("ai", { ai: null });
-    expect({
-      asked: [
-        asked.includes("Which AI should I think with?"),
-        asked.includes("Provider"),
-        asked.includes("Key"),
-        asked.includes("Model"),
-        asked.includes("Connected:"),
-      ],
-      ready: [
-        ready.includes("Yours is ready."),
-        ready.includes("Connected: Anthropic"),
-        ready.includes("Provider"),
-        ready.includes("Continue"),
-      ],
-      // Core can't say: nothing is asked, and nothing holds them up.
-      unknown: [unknown.includes("Provider"), unknown.includes("Continue")],
-    }).toStrictEqual({
-      asked: [true, true, true, true, false],
-      ready: [true, true, false, true],
-      unknown: [false, true],
-    });
-    // The key is typed into a password field.
-    expect(drawn("ai", { ai: aiOf({ ready: false }) })).toContain(
-      'type="password"'
-    );
   });
 
   it("asks for no AI provider among what needs them: it was asked for before anything needed it", () => {
@@ -341,21 +366,45 @@ describe("what needs the admin", () => {
   });
 });
 
-describe("the welcome", () => {
-  it.each([
-    {
-      sponsor: "Anna",
-      says: "Anna told me a lot about your company in our first conversation. Before we start, which language do you prefer?",
-    },
-    // The kickoff named no one: no one is named.
-    { sponsor: null, says: "Ada, I’m Stephen Before we start, which language" },
-  ])(
-    "names the sponsor only when the kickoff gave a name ($sponsor)",
-    ({ sponsor, says }) => {
-      expect(said("welcome", { sponsor })).toContain(says);
-    }
-  );
+describe("the AI step", () => {
+  it("asks for a key until a model is ready for calls, and goes on once one is or core can't say", () => {
+    const asked = said("ai", { ai: aiOf({ ready: false }) });
+    const ready = said("ai", {});
+    const unknown = said("ai", { ai: null });
+    expect({
+      asked: [asked.includes("Your own key"), asked.includes("Continue")],
+      ready: [ready.includes("Your own key works"), ready.includes("Continue")],
+      unknown: [unknown.includes("Your own key"), unknown.includes("Continue")],
+    }).toStrictEqual({
+      asked: [true, false],
+      ready: [true, true],
+      unknown: [false, true],
+    });
+  });
 
+  it("offers Grasp's AI, and says so, only where this deployment offers it", () => {
+    const own = aiOf({ ready: false });
+    const offered: AiReadiness = {
+      ...own,
+      listing: {
+        ...own.listing,
+        grasp: { ...own.listing.grasp, available: true },
+      },
+    };
+    expect({
+      offered: [
+        said("ai", { ai: offered }).includes("Use Grasp’s AI"),
+        said("ai", { ai: offered }).includes("Grasp’s AI works right away"),
+      ],
+      notOffered: [
+        said("ai", { ai: own }).includes("Use Grasp’s AI"),
+        said("ai", { ai: own }).includes("Grasp’s AI works right away"),
+      ],
+    }).toStrictEqual({ offered: [true, true], notOffered: [false, false] });
+  });
+});
+
+describe("the welcome", () => {
   it("offers to forget the kickoff while it is in, and says when its erasure finishes by itself", () => {
     const offer = "Forget our first conversation";
     const erasing = "I’m still erasing what I took from it";
@@ -378,71 +427,15 @@ describe("the welcome", () => {
   });
 });
 
-describe("what Stephen says of the company", () => {
-  const context: OnboardingContext = {
-    suites: [],
-    sources: [],
-    words: {
-      en: {
-        business: "You build and renovate homes for housing associations.",
-        documents: ["calculations", "supplier invoices"],
-        example: null,
-      },
-    },
-  };
-
-  it("says what the company does as he says hello, before asking for the language", () => {
-    expect(said("welcome", { sponsor: "Anna", context })).toContain(
-      "Anna told me a lot about your company in our first conversation. You build and renovate homes for housing associations. Before we start, which language do you prefer?"
+describe("the documents and places the admin comes back to", () => {
+  it("shows the places chosen for the documents as noted", () => {
+    const sharePoint: SetupChoices = { ...noChoices, sources: ["sharepoint"] };
+    expect(said("sources", { choices: sharePoint })).toContain(
+      "SharePoint Noted"
     );
   });
-});
 
-/** Whether anything on a step comes in as it arrives: a fade, a slide, a check drawn. */
-const comesIn = (markup: string): boolean => /data-arrives/u.test(markup);
-
-describe("a step the admin comes back to", () => {
-  it("shows its way on at once, rather than after Stephen says it again", () => {
-    // Held back (inert) until explained on arrival; there at once when seen before.
-    expect({
-      first: drawn("review", { settled: ["mail"] }).includes("inert"),
-      again: drawn("review", { settled: ["mail"], seen: true }).includes(
-        "inert"
-      ),
-    }).toStrictEqual({ first: true, again: false });
-  });
-
-  it("keeps the language chosen on the welcome, with Stephen's answer in full", () => {
-    const answer = "English it is. This takes about 8 minutes. Ready to start?";
-    expect({
-      first: said("welcome", {}).includes(answer),
-      again: said("welcome", { seen: true }).includes(answer),
-    }).toStrictEqual({ first: false, again: true });
-    expect(comesIn(drawn("welcome", { seen: true }))).toBeFalsy();
-  });
-
-  it("shows the places chosen for the documents at once, rather than held back and coming in", () => {
-    const sharePoint: SetupChoices = { ...noChoices, sources: ["sharepoint"] };
-    const first = drawn("sources", { choices: sharePoint });
-    const again = drawn("sources", { choices: sharePoint, seen: true });
-    expect({
-      first: {
-        noted: first.includes("Noted"),
-        held: first.includes("inert"),
-        comesIn: comesIn(first),
-      },
-      again: {
-        noted: again.includes("Noted"),
-        held: again.includes("inert"),
-        comesIn: comesIn(again),
-      },
-    }).toStrictEqual({
-      first: { noted: true, held: true, comesIn: true },
-      again: { noted: true, held: false, comesIn: false },
-    });
-  });
-
-  it("shows the documents shared, read, as they were left, each one the admin can remove", () => {
+  it("lists the documents shared before, each one the admin can remove", () => {
     const handbook: OnboardingDocument = {
       id: "handbook",
       name: "Handbook.pdf",
@@ -456,62 +449,11 @@ describe("a step the admin comes back to", () => {
       },
       answer: null,
     };
-    const again = drawn("documents", { documents: [handbook], seen: true });
+    const again = drawn("documents", { documents: [handbook] });
     expect({
       listed: again.includes("Handbook.pdf"),
-      read: again.includes("How claims are handled, start to end."),
       removable: again.includes('aria-label="Remove Handbook.pdf"'),
-      held: again.includes("inert"),
-      comesIn: comesIn(again),
-    }).toStrictEqual({
-      listed: true,
-      read: true,
-      removable: true,
-      held: false,
-      comesIn: false,
-    });
-  });
-
-  it("has the plan summed up at once on how this works", () => {
-    const again = drawn("about", { seen: true });
-    expect({
-      summed: again.includes("Your people, documents and tools first."),
-      comesIn: comesIn(again),
-    }).toStrictEqual({ summed: true, comesIn: false });
-  });
-});
-
-/** The ways back and forward the frame offers on `step`, the admin having been as far as `furthest`. */
-const waysOn = (step: SetupStep, furthest: SetupStep) => {
-  const markup = page(
-    <SetupFrame
-      knowledge={{ parts: [], percent: 10, threshold: 80 }}
-      onExit={() => {}}
-      onGo={() => {}}
-      path={steps}
-      reached={stepIndex(furthest)}
-      step={step}
-    >
-      {null}
-    </SetupFrame>
-  );
-  return {
-    back: markup.includes(">Back<"),
-    forward: markup.includes(">Forward<"),
-  };
-};
-
-describe("going back and forward", () => {
-  it("goes back a step, and forward only as far as the admin has been", () => {
-    expect({
-      furthest: waysOn("documents", "documents"),
-      behind: waysOn("company", "documents"),
-      first: waysOn("welcome", "about"),
-    }).toStrictEqual({
-      furthest: { back: true, forward: false },
-      behind: { back: true, forward: true },
-      first: { back: false, forward: true },
-    });
+    }).toStrictEqual({ listed: true, removable: true });
   });
 });
 
@@ -536,72 +478,5 @@ describe("a directory the company step couldn't read", () => {
       "directory.too_large": "large",
       "directory.provider_failed": "failed",
     });
-  });
-});
-
-describe("a team far behind, halfway through the interviews", () => {
-  /** What the page says of team Ops, quiet, its lead named `lead` on the list. */
-  const saidOfQuiet = (lead: string): string =>
-    page(
-      <InterviewsProgress
-        links={[]}
-        listening={{
-          progress: 0.5,
-          day: 7,
-          days: 14,
-          leadsHeard: 1,
-          colleaguesHeard: 0,
-          heard: [1],
-        }}
-        spoken={false}
-        today={today}
-        view={{
-          ...view(false, null, noContext, true, null, null),
-          roster: {
-            teams: [
-              { id: "ops", name: "Ops", lead: "lea", does: "", off: false },
-            ],
-            people: [
-              {
-                id: "lea",
-                name: lead,
-                email: "",
-                team: "ops",
-                title: "",
-                away: false,
-              },
-            ],
-          },
-          progress: {
-            teams: [
-              {
-                id: "ops",
-                name: "Ops",
-                people: 6,
-                off: false,
-                leadTalked: true,
-                talked: 0,
-                asked: 5,
-              },
-            ],
-            talked: 0,
-            asked: 5,
-            leadsTalked: 1,
-            leads: 1,
-            asOf: today,
-          },
-        }}
-      />
-    )
-      .replaceAll(/<[^>]+>/gu, " ")
-      .replaceAll(/\s+/gu, " ");
-
-  it("is named with its lead, and not at all once core erased the lead", () => {
-    expect({
-      named: saidOfQuiet("Lea Smit").includes(
-        "Ops has been quiet so far. A short message from Lea, their lead, usually helps."
-      ),
-      erased: saidOfQuiet("").includes("has been quiet"),
-    }).toStrictEqual({ named: true, erased: false });
   });
 });

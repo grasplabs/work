@@ -1,165 +1,122 @@
-// Concepts only: the words every campaign concept shares, read from a
-// campaign (fixtures.ts), so the three say the same things in different
-// shapes. English only: the concepts are never merged.
 import { i18n } from "@lingui/core";
+import type { I18n, MessageDescriptor } from "@lingui/core";
+// What the campaign page says, read from a campaign (fixtures.ts), as
+// messages the page renders with `i18n._()`. Team names and findings are
+// core's data and stay as they are.
+import { msg, plural } from "@lingui/core/macro";
 
+import { formatList } from "../../format.ts";
 import { daysBetween, smallTeam } from "./fixtures.ts";
 import type { Campaign, Finding, TeamPicture } from "./fixtures.ts";
 
-/** An ISO day as "Monday 30 November". */
-export const longDay = (iso: string): string =>
-  new Intl.DateTimeFormat(i18n.locale, {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    timeZone: "UTC",
-  }).format(new Date(`${iso}T00:00:00Z`));
-
-/** An ISO day as "Mon 30 Nov". */
-export const shortDay = (iso: string): string =>
-  new Intl.DateTimeFormat(i18n.locale, {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    timeZone: "UTC",
-  }).format(new Date(`${iso}T00:00:00Z`));
-
-/** An ISO day as its weekday alone: "Monday". */
-export const weekday = (iso: string): string =>
-  new Intl.DateTimeFormat(i18n.locale, {
-    weekday: "long",
-    timeZone: "UTC",
-  }).format(new Date(`${iso}T00:00:00Z`));
-
-/** Days until the interviews close: 0 on the close day. */
-export const daysLeft = (campaign: Campaign): number =>
-  Math.max(0, daysBetween(campaign.today, campaign.closes));
-
-/** "3 days left", "1 day left", "Closes today". */
-export const daysLeftWords = (campaign: Campaign): string => {
-  const left = daysLeft(campaign);
-  if (left === 0) {
-    return "closes today";
-  }
-  return left === 1 ? "1 day left" : `${left} days left`;
-};
-
-/** Which day of the campaign today is, from 1. */
-export const dayNumber = (campaign: Campaign): number =>
-  daysBetween(campaign.start, campaign.today) + 1;
+/** Words as the page says them: a message translated, core's data as it is. */
+export const say = (
+  translator: I18n,
+  words: MessageDescriptor | string
+): string => (typeof words === "string" ? words : translator._(words));
 
 /** How many days the campaign runs, its first and its close day counted. */
 export const dayCount = (campaign: Campaign): number =>
   daysBetween(campaign.start, campaign.closes) + 1;
 
-/** Is it going well, as a badge: its words, and the status it stands for. */
-export const paceOf = (
-  campaign: Campaign
-): { label: string; variant: "default" | "success" | "warning" } => {
-  switch (campaign.pace) {
-    case "started": {
-      return { label: "Started today", variant: "default" };
-    }
-    case "onPace": {
-      return { label: "On pace", variant: "success" };
-    }
-    case "quiet": {
-      return {
-        label: campaign.grouped ? "One team is quiet" : "Quiet",
-        variant: "warning",
-      };
-    }
-    case "enough": {
-      return { label: "Enough known", variant: "success" };
-    }
-    default: {
-      return { label: "", variant: "default" };
-    }
-  }
-};
+/** Which day of the campaign today is, from 0. */
+export const todayIndex = (campaign: Campaign): number =>
+  daysBetween(campaign.start, campaign.today);
 
-/** How many talked, as the admin may see it: counts for five or more, the lead alone under five. */
-export const talkedWords = (each: TeamPicture, grouped: boolean): string => {
-  if (each.invited < smallTeam) {
-    return each.leadTalked ? "Lead talked" : "Lead not yet";
-  }
-  if (!grouped) {
-    return `${each.talked} of ${each.invited} people talked`;
-  }
-  return `${each.talked} of ${each.invited} talked`;
-};
-
-/** A team past a third of the way with fewer than a third talked is quiet. */
-export const isQuiet = (each: TeamPicture, campaign: Campaign): boolean =>
-  campaign.asks.some((ask) => ask.kind === "quiet" && ask.team === each.name);
-
-/** The quiet figure: how much Grasp knows. */
-export const knownWords = (campaign: Campaign): string =>
-  `${campaign.known}% known`;
-
-/** Is it going well, as the brand's statement: a short first half, and a quieter second. */
+/** Is it going well: the title, and one plain line under it. */
 export const statementOf = (
   campaign: Campaign
-): { lead: string; rest: string } => {
+): { lead: MessageDescriptor; rest: MessageDescriptor } => {
   const { talked, invited } = campaign;
-  switch (campaign.pace) {
-    case "started": {
-      return {
-        lead: "We’ve started.",
-        rest: `Your invitations reached all ${invited} people, and ${talked} have talked already.`,
-      };
-    }
-    case "onPace": {
-      return {
-        lead: "Going well.",
-        rest: campaign.grouped
-          ? `${talked} of ${invited} have talked, and every team has begun.`
-          : `${talked} of ${invited} have talked.`,
-      };
-    }
-    case "quiet": {
-      return {
-        lead: "Going well, mostly.",
-        rest: `${talked} of ${invited} have talked. One team is still quiet.`,
-      };
-    }
-    case "enough": {
-      return {
-        lead: "We have what we need.",
-        rest: `${talked} of ${invited} talked. Thank you.`,
-      };
-    }
-    default: {
-      return { lead: "", rest: "" };
-    }
+  if (campaign.pace === "started") {
+    return {
+      lead: msg`We’ve started.`,
+      rest: msg`Your invitations reached all ${invited} people. ${plural(
+        talked,
+        { one: "# has talked already.", other: "# have talked already." }
+      )}`,
+    };
   }
+  if (campaign.pace === "onPace") {
+    return {
+      lead: msg`Going well.`,
+      rest: campaign.grouped
+        ? msg`${talked} of ${invited} have talked. Every team has begun.`
+        : msg`${talked} of ${invited} have talked.`,
+    };
+  }
+  if (campaign.pace === "quiet") {
+    return {
+      lead: msg`Going well, mostly.`,
+      rest: msg`${talked} of ${invited} have talked. One team is still quiet.`,
+    };
+  }
+  return {
+    lead: msg`We have what we need.`,
+    rest: msg`${talked} of ${invited} talked. Thank you.`,
+  };
 };
 
-/** When: the close, the one date that matters on this page. */
-export const whenWords = (campaign: Campaign): string =>
-  campaign.pace === "enough"
-    ? "The interviews close tonight. We’ll tell you when Grasp opens"
-    : `The interviews close ${shortDay(campaign.closes)}, ${daysLeftWords(campaign)}`;
+/** A row's name: the team's, or everyone in a company without teams. */
+export const rowName = (
+  each: TeamPicture,
+  grouped: boolean
+): MessageDescriptor | string => (grouped ? each.name : msg`Everyone`);
+
+/** How many talked, as the admin may see it: counts for five or more, the lead alone under five. */
+export const talkedWords = (each: TeamPicture): MessageDescriptor => {
+  if (each.invited < smallTeam) {
+    return each.leadTalked ? msg`Lead talked` : msg`Lead not yet`;
+  }
+  const { talked, invited } = each;
+  return msg`${talked} of ${invited} talked`;
+};
 
 /**
- * A finding as one plain sentence: the team it is about starts it where
- * the page doesn't already say so, and one told two ways says that Grasp
- * settles it, so the admin needn't steer.
+ * A finding as plain sentences: one told two ways says that Grasp settles
+ * it, so the admin needn't steer.
  */
-export const findingSentence = (
+export const findingWords = (
   finding: Finding,
-  team: TeamPicture,
-  { named, grouped }: { named: boolean; grouped: boolean }
-): string => {
+  grouped: boolean
+): MessageDescriptor | string => {
   const { text } = finding;
-  const said =
-    named && grouped
-      ? `In ${team.name}, ${text.charAt(0).toLowerCase()}${text.slice(1)}`
-      : text;
   if (finding.kind !== "difference") {
-    return said;
+    return text;
   }
   return grouped
-    ? `${said} We’ll settle it with their lead.`
-    : `${said} We’ll settle it with whoever knows the work best.`;
+    ? msg`${text} We’ll settle it with their lead.`
+    : msg`${text} We’ll settle it with whoever knows the work best.`;
+};
+
+/** How it runs and when it closes, in one quiet line. */
+export const runningWords = (campaign: Campaign): MessageDescriptor => {
+  if (campaign.pace === "enough") {
+    return msg`The interviews close tonight. We’ll tell you when Grasp opens.`;
+  }
+  const left = Math.max(0, daysBetween(campaign.today, campaign.closes));
+  if (left === 0) {
+    return msg`Listening. The interviews close tonight.`;
+  }
+  const day = new Intl.DateTimeFormat(i18n.locale, {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    timeZone: "UTC",
+  }).format(new Date(`${campaign.closes}T00:00:00Z`));
+  return msg`Listening. The interviews close ${day}, ${plural(left, {
+    one: "in # day.",
+    other: "in # days.",
+  })}`;
+};
+
+/** Who declined, by first name; none when nobody did. */
+export const declinedWords = (campaign: Campaign): MessageDescriptor | null => {
+  if (campaign.declined.length === 0) {
+    return null;
+  }
+  const names = formatList(
+    campaign.declined.map((name) => name.split(" ")[0] ?? name)
+  );
+  return msg`${names} declined the interview.`;
 };

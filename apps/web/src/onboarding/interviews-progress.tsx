@@ -11,6 +11,7 @@ import {
   PopoverTrigger,
 } from "@grasp-os/ui/components/popover";
 import { Progress } from "@grasp-os/ui/components/progress";
+import { Stat } from "@grasp-os/ui/components/stat";
 import { Text } from "@grasp-os/ui/components/text";
 import {
   CheckIcon,
@@ -40,7 +41,6 @@ import { formatDate } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { FailedMailNotice } from "./failed-mail.tsx";
 import { fullLink, linksCsv, linksOf } from "./links-to-send.ts";
-import { Callout, Figure } from "./setup-parts.tsx";
 import { closesOn, teamNumbersOf } from "./setup.ts";
 import type { Listening } from "./setup.ts";
 
@@ -177,29 +177,17 @@ export const quietTeamOf = (
     : { team, lead: firstName(leadOf(team.id)?.name ?? "") };
 };
 
-/** A line that turns up: said by Stephen on the onboarding's step, only shown elsewhere. */
-const Line = ({ text, spoken }: { text: string; spoken: boolean }) =>
-  spoken ? (
-    <Callout text={text} />
-  ) : (
-    <p {...stylex.props(styles.line)}>{text}</p>
-  );
+/** A line that turns up. */
+const Line = ({ text }: { text: string }) => (
+  <p {...stylex.props(styles.line)}>{text}</p>
+);
 
 /** The one team far behind, named with the lead whose word usually helps. */
-const QuietTeam = ({
-  team,
-  lead,
-  spoken,
-}: {
-  team: string;
-  lead: string;
-  spoken: boolean;
-}) => {
+const QuietTeam = ({ team, lead }: { team: string; lead: string }) => {
   const { t } = useLingui();
   return (
     <div {...stylex.props(styles.quiet)}>
       <Line
-        spoken={spoken}
         text={t`${team} has been quiet so far. A short message from ${lead}, their lead, usually helps. I’ll remind everyone once myself.`}
       />
     </div>
@@ -216,31 +204,26 @@ const Waiting = ({
   paused,
   agreed,
   fresh,
-  spoken,
 }: {
   paused: boolean;
   agreed: boolean;
   fresh: number;
-  spoken: boolean;
 }) => {
   const { t } = useLingui();
   return (
     <>
       {paused ? (
         <Line
-          spoken={spoken}
           text={t`Paused: no link opens and none goes out. The links that are due go out once they run again.`}
         />
       ) : null}
       {agreed ? null : (
         <Line
-          spoken={spoken}
           text={t`Grasp is still putting the agreements in place. Your people’s links go out once that is done.`}
         />
       )}
       {agreed && !paused && fresh > 0 ? (
         <Line
-          spoken={spoken}
           text={plural(fresh, {
             one: "One new link is ready to send, under “Links to send”.",
             other: "# new links are ready to send, under “Links to send”.",
@@ -461,8 +444,7 @@ const LinksToSend = ({ links }: { links: LinkToSend[] }) => {
  * Where the interviews stand: how far the days are and when they close,
  * three numbers, the team that needs a word from its lead, every team in a
  * panel, and the links to send. Numbers per team only for teams of five or
- * more, and never who talked or what anyone said. `spoken`: Stephen says
- * its lines as they turn up, as on the onboarding's step. `children`
+ * more, and never who talked or what anyone said. `children`
  * come right after what keeps the links from going out.
  */
 export const InterviewsProgress = ({
@@ -470,14 +452,12 @@ export const InterviewsProgress = ({
   links,
   listening,
   today,
-  spoken,
   children,
 }: {
   view: OnboardingView;
   links: LinkToSend[];
   listening: Listening;
   today: string;
-  spoken: boolean;
   children?: ReactNode;
 }) => {
   const { t } = useLingui();
@@ -500,7 +480,6 @@ export const InterviewsProgress = ({
         agreed={agreed}
         fresh={linksOf(links).fresh.length}
         paused={paused}
-        spoken={spoken}
       />
       <FailedMailNotice links={links} />
       {children}
@@ -523,21 +502,21 @@ export const InterviewsProgress = ({
         </div>
       </div>
       <div {...stylex.props(styles.figures)}>
-        <Figure
+        <Stat
           label={t`team leads talked`}
           value={t`${leadsHeard} of ${leads}`}
         />
-        <Figure
+        <Stat
           label={t`colleagues talked`}
           value={String(listening.colleaguesHeard)}
         />
         {/* Core draws no work from the interviews yet: unknown stays unknown, never 0. */}
-        <Figure label={t`pieces of work found`} value="–" />
+        <Stat label={t`pieces of work found`} value="–" />
       </div>
       <div {...stylex.props(styles.foot)}>
         <div {...stylex.props(styles.grow)}>
           {quiet === undefined ? null : (
-            <QuietTeam lead={quietLead} spoken={spoken} team={quiet.name} />
+            <QuietTeam lead={quietLead} team={quiet.name} />
           )}
         </div>
         {links.length === 0 ? null : <LinksToSend links={links} />}

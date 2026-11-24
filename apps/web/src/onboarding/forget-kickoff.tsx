@@ -20,10 +20,12 @@ import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
 const styles = stylex.create({
+  // A link's words on the page's start edge: its padding hangs outside it.
+  flush: { marginInlineStart: `calc(-1 * ${space[4]})` },
   forget: {
     display: "flex",
     flexDirection: "column",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: space[2],
   },
 });
@@ -72,7 +74,7 @@ export const ForgetKickoff = ({
   if (forgotten) {
     return (
       <output aria-live="polite">
-        <Text as="span" size="sm" color="muted">
+        <Text as="span" size="lg">
           {t`Forgotten. Nothing of our first conversation is kept.`}
         </Text>
       </output>
@@ -81,7 +83,7 @@ export const ForgetKickoff = ({
   if (kickoff === "erasing") {
     return (
       <output aria-live="polite">
-        <Text as="span" size="sm" color="muted">
+        <Text as="span" size="lg">
           {t`Our first conversation is deleted. I’m still erasing what I took from it, and I finish that by myself.`}
         </Text>
       </output>
@@ -97,8 +99,9 @@ export const ForgetKickoff = ({
         onClick={() => {
           setOpen(true);
         }}
-        size="sm"
-        variant="ghost"
+        size="lg"
+        style={styles.flush}
+        variant="link"
       >
         {t`Forget our first conversation`}
       </Button>
