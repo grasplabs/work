@@ -16,6 +16,11 @@
     "since": "2026-11-24"
   },
   {
+    "path": "src/components/theme-toggle.tsx",
+    "reason": "The icon button's sizes under Button's names and at Button's heights: its sm was Button's xs, so tools of one size name stood at two heights.",
+    "since": "2026-11-24"
+  },
+  {
     "path": "src/lib/icons.ts",
     "reason": "The filled forms of the message and pause icons, for a header whose icons are filled.",
     "since": "2026-11-24",
