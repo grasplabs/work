@@ -19,7 +19,7 @@ import type { Crumb } from "../frame/site-header.tsx";
 import { brainSections } from "./brain-sections.ts";
 import { brainStyles } from "./brain-styles.ts";
 import { groupLabel } from "./brain.ts";
-import { PageSkeletonList } from "./page-skeletons.tsx";
+import { PageSkeletonCards, PageSkeletonList } from "./page-skeletons.tsx";
 
 // The Brain while its records are read on the way in (the layout's
 // loader, which every page of it waits for), from the reference's frame
@@ -190,8 +190,8 @@ const BrainBody = ({ page }: { page: BrainPage }) => {
           />
         ) : null}
         {page === "section" ? (
-          // A part's notes, as the part's page lists them.
-          <PageSkeletonList descriptionLines={0} rows={6} variant="items" />
+          // A part's notes as blocks, as the part's page has them.
+          <PageSkeletonCards />
         ) : null}
       </Container>
     </div>
