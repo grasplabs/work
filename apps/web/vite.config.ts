@@ -57,11 +57,14 @@ const devScriptPaths = [
  * through by its hash alone: any other inline script is still refused.
  * StyleX's stylesheet is a virtual module, outside `/assets/` too.
  */
+// Worked out once, as the config loads: should plugin-react stop giving
+// its preamble, the dev server fails to start rather than on a request.
+const preamble = createHash("sha256")
+  .update(react.preambleCode.replace("__BASE__", "/"))
+  .digest("base64");
+
 const devPolicy = (origin: string): string => {
   const production = frontendDirectives(origin);
-  const preamble = createHash("sha256")
-    .update(react.preambleCode.replace("__BASE__", "/"))
-    .digest("base64");
   const scripts = devScriptPaths.map((path) => `${origin}${path}`).join(" ");
   return policy({
     ...production,
@@ -76,8 +79,8 @@ const devPolicy = (origin: string): string => {
  * replaces it. The origin is the one the browser asked for, as Vite may
  * take another port than 5173.
  */
-const productionPolicy: Plugin = {
-  name: "grasp:production-policy",
+const devServerPolicy: Plugin = {
+  name: "grasp:dev-server-policy",
   apply: "serve",
   configureServer: (server) => {
     server.middlewares.use((request, response, next) => {
@@ -142,7 +145,7 @@ export default defineConfig(({ command }) => ({
     lingui({ configPath: linguiConfigPath }),
     localePreload(),
     tailwindcss(),
-    productionPolicy,
+    devServerPolicy,
   ],
   css: { lightningcss: keepLightDark },
   define: {
