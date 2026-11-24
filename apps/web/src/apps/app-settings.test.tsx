@@ -400,7 +400,7 @@ describe(AppSettings, () => {
     }).toStrictEqual({ afterCancel: [], calls: ["archive"], restore: true });
   });
 
-  it("sets the App's link in a dialog drawn by Damsko's own parts: its title over the field, the address before it, its actions small", async () => {
+  it("sets the App's link in a dialog drawn by Damsko's own parts: its title over the field, the address before it, its actions the height of a plain Button, as the reference's", async () => {
     await opened(fakeCore("builder"));
     await press("Set the link");
 
@@ -411,8 +411,9 @@ describe(AppSettings, () => {
     const dialog = document.querySelector("[role=dialog]");
     const header = dialog?.querySelector("[data-slot=dialog-header]");
     const addon = dialog?.querySelector("[data-slot=input-group-addon]");
-    // A footer's actions are small (DialogClose's own size): the classes
-    // only a small Button has, read from one drawn beside the dialog.
+    // A footer's actions stand 36px tall, as the reference's (DialogClose
+    // is small by its own default): the classes only a Button of the
+    // default size has, read from one drawn beside the dialog.
     const host = document.createElement("div");
     document.body.append(host);
     const sample = createRoot(host);
@@ -427,8 +428,8 @@ describe(AppSettings, () => {
     const [small, normal] = [...host.querySelectorAll("button")].map(
       (each) => new Set(each.classList)
     );
-    const smallOnly = [...(small ?? [])].filter(
-      (each) => normal?.has(each) !== true
+    const normalOnly = [...(normal ?? [])].filter(
+      (each) => small?.has(each) !== true
     );
     act(() => {
       sample.unmount();
@@ -444,9 +445,9 @@ describe(AppSettings, () => {
         header?.querySelector("p")?.textContent,
       ],
       address: addon?.textContent,
-      small: actions.map((each) => ({
+      sized: actions.map((each) => ({
         action: nameOf(each),
-        small: smallOnly.every((name) => each.classList.contains(name)),
+        normal: normalOnly.every((name) => each.classList.contains(name)),
       })),
     }).toStrictEqual({
       header: [
@@ -454,9 +455,9 @@ describe(AppSettings, () => {
         "Opens the App for the workspace's members who may use it, while it is published.",
       ],
       address: `${window.location.host}/`,
-      small: [
-        { action: "Cancel", small: true },
-        { action: "Save link", small: true },
+      sized: [
+        { action: "Cancel", normal: true },
+        { action: "Save link", normal: true },
       ],
     });
   });

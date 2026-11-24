@@ -200,7 +200,7 @@ const AddWebhook = ({
           </Form>
         </DialogBody>
         <DialogFooter>
-          <DialogClose>{t`Cancel`}</DialogClose>
+          <DialogClose size="default">{t`Cancel`}</DialogClose>
           <Button
             disabled={busy || url.trim() === "" || events.length === 0}
             errorText={t`Could not add`}
@@ -209,7 +209,6 @@ const AddWebhook = ({
               await add();
               setOpen(false);
             }}
-            size="sm"
             variant="default"
           >
             {t`Add webhook`}
@@ -247,8 +246,12 @@ const RemoveWebhook = ({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel />
-          <AlertDialogAction onClick={onRemove} variant="destructive">
+          <AlertDialogCancel size="default" />
+          <AlertDialogAction
+            size="default"
+            onClick={onRemove}
+            variant="destructive"
+          >
             {t`Remove`}
           </AlertDialogAction>
         </AlertDialogFooter>

@@ -66,7 +66,7 @@ export const ResetTestData = ({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel />
+            <AlertDialogCancel size="default" />
             <Button
               errorText={t`Could not reset`}
               loadingText={t`Resetting`}
@@ -74,7 +74,6 @@ export const ResetTestData = ({
                 await reset();
                 setAsking(false);
               }}
-              size="sm"
               variant="destructive"
             >
               {t`Reset`}

@@ -68,10 +68,14 @@ export const ArchiveDialog = ({
         </AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter>
-        <AlertDialogCancel>
+        <AlertDialogCancel size="default">
           <Trans>Cancel</Trans>
         </AlertDialogCancel>
-        <AlertDialogAction onClick={onArchive} variant="destructive">
+        <AlertDialogAction
+          size="default"
+          onClick={onArchive}
+          variant="destructive"
+        >
           <Trans>Archive</Trans>
         </AlertDialogAction>
       </AlertDialogFooter>

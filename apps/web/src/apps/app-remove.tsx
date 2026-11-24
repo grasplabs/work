@@ -84,12 +84,11 @@ export const RemoveApp = ({
           </Alert>
         )}
         <AlertDialogFooter>
-          <AlertDialogCancel />
+          <AlertDialogCancel size="default" />
           <Button
             errorText={t`Could not delete`}
             loadingText={t`Deleting`}
             onClick={remove}
-            size="sm"
             variant="destructive"
           >
             {t`Delete for good`}

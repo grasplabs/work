@@ -370,13 +370,12 @@ const AskDialog = ({
           </Form>
         </DialogBody>
         <DialogFooter>
-          <DialogClose>{t`Cancel`}</DialogClose>
+          <DialogClose size="default">{t`Cancel`}</DialogClose>
           <Button
             disabled={busy || !ready}
             errorText={t`Could not ask`}
             loadingText={t`Asking`}
             onClick={ask}
-            size="sm"
             variant="default"
           >
             {t`Ask an admin`}

@@ -490,13 +490,12 @@ const ReviewDialog = ({
           </Form>
         </DialogBody>
         <DialogFooter>
-          <DialogClose>
+          <DialogClose size="default">
             <Trans>Cancel</Trans>
           </DialogClose>
           <Button
             disabled={busy || waiting}
             form={formId}
-            size="sm"
             type="submit"
             variant={review?.removes === true ? "destructive" : "default"}
           >

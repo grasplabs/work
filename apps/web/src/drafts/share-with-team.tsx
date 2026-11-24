@@ -889,8 +889,8 @@ const PublishDialog = ({
           </div>
         </DialogBody>
         <DialogFooter>
-          <DialogClose>{t`Cancel`}</DialogClose>
-          <Button disabled={!canPublish} onClick={onPublish} size="sm">
+          <DialogClose size="default">{t`Cancel`}</DialogClose>
+          <Button disabled={!canPublish} onClick={onPublish}>
             {t`Publish`}
           </Button>
         </DialogFooter>
@@ -957,13 +957,12 @@ const ShareDialog = ({
                 toast.error(t`Copying didn't work`);
               })();
             }}
-            size="sm"
             variant="outline"
           >
             <Icon icon={LinkIcon} />
             {t`Copy link`}
           </Button>
-          <DialogClose>{t`Done`}</DialogClose>
+          <DialogClose size="default">{t`Done`}</DialogClose>
         </DialogFooter>
       </DialogContent>
     </Dialog>

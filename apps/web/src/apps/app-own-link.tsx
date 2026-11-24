@@ -136,14 +136,13 @@ export const AppLinkDialog = ({
         </DialogBody>
         <DialogFooter>
           {app.link === null ? (
-            <DialogClose>{t`Cancel`}</DialogClose>
+            <DialogClose size="default">{t`Cancel`}</DialogClose>
           ) : (
             <Button
               disabled={busy}
               onClick={() => {
                 save(null);
               }}
-              size="sm"
               variant="outline"
             >
               {t`Remove link`}
@@ -152,7 +151,6 @@ export const AppLinkDialog = ({
           <Button
             disabled={busy || !valid || link === app.link}
             form={formId}
-            size="sm"
             type="submit"
             variant="default"
           >

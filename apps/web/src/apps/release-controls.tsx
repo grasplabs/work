@@ -270,7 +270,7 @@ export const ReleaseDialog = ({
           </DialogBody>
         )}
         <DialogFooter>
-          <DialogClose>{t`Cancel`}</DialogClose>
+          <DialogClose size="default">{t`Cancel`}</DialogClose>
           <Button
             disabled={!ready}
             errorText={t`Didn't work`}
@@ -278,7 +278,6 @@ export const ReleaseDialog = ({
               await confirm();
               onClose();
             }}
-            size="sm"
             variant={action.kind === "revoke" ? "destructive" : "default"}
           >
             {labelOf(action)}

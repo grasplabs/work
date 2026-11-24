@@ -86,15 +86,14 @@ export const SaveAsBlueprint = ({
           )}
           <DialogFooter>
             {saved ? (
-              <DialogClose variant="default">
+              <DialogClose size="default" variant="default">
                 <Icon icon={CheckIcon} />
                 {t`Done`}
               </DialogClose>
             ) : (
               <>
-                <DialogClose>{t`Cancel`}</DialogClose>
+                <DialogClose size="default">{t`Cancel`}</DialogClose>
                 <Button
-                  size="sm"
                   variant="default"
                   errorText={save.labels.error}
                   loadingText={save.labels.loading}
