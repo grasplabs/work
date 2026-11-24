@@ -326,9 +326,7 @@ const Footer = ({ open }: { open: boolean }) => {
         dictates={open}
         style={fullscreen ? styles.boxFullscreen : undefined}
         label={words.title}
-        onAnswer={(text) => {
-          void ask(text);
-        }}
+        onAnswer={async (text) => await ask(text)}
         // The box's editor takes its placeholder as it starts: another
         // starts it afresh, with the text it holds.
         key={placeholder}

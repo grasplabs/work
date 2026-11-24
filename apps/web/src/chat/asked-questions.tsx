@@ -162,7 +162,8 @@ export const AskedQuestions = ({
   hidden: boolean;
   model?: string;
   models?: readonly string[];
-  onSend: (text: string, given: readonly AskAnswer[]) => void;
+  /** Sends the answers: true once core took them, false when it did not. */
+  onSend: (text: string, given: readonly AskAnswer[]) => Promise<boolean>;
   onType: () => void;
 }) => {
   const { t } = useLingui();
@@ -192,12 +193,16 @@ export const AskedQuestions = ({
     >
       <Questionnaire
         aria-label={t`Grasp asks`}
-        onSubmit={(sent) => {
+        // Sent only once core took the answers: until then the choices and
+        // actions stay, to send again or type instead.
+        onSubmit={async (sent) => {
           const given = asked.questions.map((_, index) => {
             const answer = sent[String(index)];
             return answer === undefined ? unanswered : answerOf(answer);
           });
-          onSend(answersText(asked, given), given);
+          if (!(await onSend(answersText(asked, given), given))) {
+            throw new Error("The answers were not sent.");
+          }
         }}
       >
         {asked.questions.length > 1 ? <QuestionnaireProgress /> : null}
@@ -280,7 +285,7 @@ export const AskOrCompose = ({
   ...composer
 }: ComponentProps<typeof Composer> & {
   asking: ChatAsked | undefined;
-  onAnswer: (text: string, given: readonly AskAnswer[]) => void;
+  onAnswer: (text: string, given: readonly AskAnswer[]) => Promise<boolean>;
 }) => {
   const [typing, setTyping] = useState<string>();
   const asked = asking !== undefined && typing !== asking.callId;

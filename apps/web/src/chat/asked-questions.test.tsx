@@ -58,10 +58,12 @@ const unmount = (): void => {
 
 /**
  * The box's place, waiting on `asked`, in the app's frame, with the model
- * `model` to answer; records what it sent, and keeps a control of its own.
+ * `model` to answer; records what it sent, which core takes while
+ * `core.takes`, and keeps a control of its own.
  */
 const placed = async (model = "openai/gpt-5") => {
   const sent: { text: string; given: readonly AskAnswer[] }[] = [];
+  const core = { takes: true };
   const router = createRouter({
     routeTree: createRootRoute({
       component: () => (
@@ -71,8 +73,9 @@ const placed = async (model = "openai/gpt-5") => {
           compact
           model={model}
           models={model === "" ? [] : [model]}
-          onAnswer={(text, given) => {
+          onAnswer={async (text, given) => {
             sent.push({ text, given });
+            return await Promise.resolve(core.takes);
           }}
           onSend={() => {
             // Typed questions go elsewhere.
@@ -100,7 +103,7 @@ const placed = async (model = "openai/gpt-5") => {
     );
     await router.load();
   });
-  return { sent };
+  return { sent, core };
 };
 
 /** Lets the questions settle: what they scheduled, focus moved a frame on. */
@@ -334,6 +337,32 @@ describe("questions in place of the box", () => {
       onSecond: true,
       inQuestion: true,
       kept: true,
+    });
+  });
+
+  it("keeps the choices and actions when core refuses the answers, to send them again or type instead", async () => {
+    const { sent, core } = await placed();
+    core.takes = false;
+    await pick("Weekly");
+    await click(button("Next"));
+    await pick("Me");
+    await click(button("Send answer"));
+    const refused = {
+      kept: picked("Me"),
+      send: button("Send answer").disabled,
+      typeInstead: button("Type instead").disabled,
+    };
+    core.takes = true;
+    await click(button("Send answer"));
+
+    expect({
+      refused,
+      tries: sent.length,
+      choicesOnceTaken: document.querySelectorAll('[role="checkbox"]').length,
+    }).toStrictEqual({
+      refused: { kept: true, send: false, typeInstead: false },
+      tries: 2,
+      choicesOnceTaken: 0,
     });
   });
 

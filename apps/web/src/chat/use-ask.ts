@@ -183,13 +183,14 @@ export const useAsk = (
       });
     }
   };
+  /** Asks `question`: true once core took it, false when it was not sent. */
   const ask = async (
     question: string,
     carried: readonly BoxFile[] = [],
     mentioned: readonly BoxMention[] = []
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     if (sending.current) {
-      return;
+      return false;
     }
     sending.current = true;
     const named = chatMentionsOf(mentioned);
@@ -242,7 +243,7 @@ export const useAsk = (
       if (created !== undefined) {
         unsent.current = { id: created, question, agentId: startWith };
       }
-      return;
+      return false;
     }
     unsent.current = null;
     // Clears the box only of what was sent from it: asking again sends an
@@ -259,6 +260,7 @@ export const useAsk = (
       setActiveChat(sent, slot);
     }
     onAsked?.(sent);
+    return true;
   };
   const stop = async (id: string): Promise<void> => {
     await run(async (session) => await session.chats.cancel(id));
