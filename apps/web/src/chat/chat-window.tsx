@@ -36,7 +36,7 @@ import {
   TrashIcon,
   UndoIcon,
 } from "@grasp-os/ui/lib/icons";
-import type { MessageDescriptor } from "@lingui/core";
+import type { I18n, MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
@@ -342,6 +342,25 @@ const useRowActions = (archived: boolean): CommandItemData["actions"] => {
 };
 
 /**
+ * The chats as rows: at rest in groups by when they were last used; a
+ * search's as it found them, as #2503 lists them.
+ */
+const groupsOf = (
+  chats: readonly ChatSummary[],
+  searching: boolean,
+  now: Date,
+  rowOf: (chat: ChatSummary) => CommandItemData,
+  i18n: I18n
+): CommandItems =>
+  searching
+    ? chats.map(rowOf)
+    : groupChats(chats, now).map(({ period, chats: inPeriod }) => ({
+        type: "group" as const,
+        label: i18n._(periodLabel[period]),
+        items: inPeriod.map(rowOf),
+      }));
+
+/**
  * The list's items: New chat first where it offers one, the chats by
  * when they were last used, Archived last with how many, where there are;
  * in the archived list the way back first; a search that failed, the one
@@ -483,14 +502,8 @@ const useChatItems = ({
     end: <RowEnd chat={chat} now={now} />,
     actions,
   });
-  const groups = groupChats(
-    shownChats({ chats, query, found: answered }),
-    now
-  ).map(({ period, chats: inPeriod }) => ({
-    type: "group" as const,
-    label: i18n._(periodLabel[period]),
-    items: inPeriod.map(rowOf),
-  }));
+  const inList = shownChats({ chats, query, found: answered });
+  const groups = groupsOf(inList, searching, now, rowOf, i18n);
   const items = useListItems({
     groups,
     archived,

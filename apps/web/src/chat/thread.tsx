@@ -156,6 +156,8 @@ const styles = stylex.create({
     rowGap: space["2"],
     minHeight: size.controlSm,
   },
+  // When an answer was given, beside its actions.
+  beside: { alignSelf: "center" },
   // How long Grasp worked, a step after the line's words.
   took: { marginInlineStart: space["2"] },
 });
@@ -672,8 +674,8 @@ const lastAnswerOf = (
 };
 
 /** When a message was sent, at its foot: the time of day. */
-const SentAt = ({ at }: { at: string }) => (
-  <MessageFooter>
+const SentAt = ({ at, style }: { at: string; style?: LayoutStyle }) => (
+  <MessageFooter {...(style === undefined ? {} : { style })}>
     <time dateTime={at}>{formatTime(at)}</time>
   </MessageFooter>
 );
@@ -1065,9 +1067,8 @@ const AnswerFoot = ({
   retry: (() => void) | undefined;
 }) => {
   const { t } = useLingui();
-  const time = at === undefined ? null : <SentAt at={at} />;
   if (copyText === "") {
-    return time;
+    return at === undefined ? null : <SentAt at={at} />;
   }
   return (
     <div {...stylex.props(styles.foot)}>
@@ -1079,7 +1080,8 @@ const AnswerFoot = ({
           </MessageAction>
         )}
       </MessageActions>
-      {time}
+      {/* Level with the actions, in the middle of their line. */}
+      {at === undefined ? null : <SentAt at={at} style={styles.beside} />}
     </div>
   );
 };

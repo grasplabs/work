@@ -100,9 +100,19 @@ const dialog = (): HTMLElement | null =>
  * it, under the day they were used; when it was, left out, and the
  * window's own rows ("New chat", "Archived") too.
  */
+/** The rows the window's own places take: not chats. */
+const placeRows = new Set(["new", "archived", "back", "retry-search"]);
+
 const rows = (): string[] =>
-  [...(dialog()?.querySelectorAll('[role="group"] [role="option"]') ?? [])].map(
-    (row) => {
+  [...(dialog()?.querySelectorAll('[role="option"]') ?? [])]
+    .filter(
+      (row) =>
+        !(
+          row instanceof HTMLElement &&
+          placeRows.has(row.dataset.commandValue ?? "")
+        )
+    )
+    .map((row) => {
       const read = row.cloneNode(true);
       if (!(read instanceof HTMLElement)) {
         return "";
@@ -111,8 +121,7 @@ const rows = (): string[] =>
         time.remove();
       }
       return (read.textContent ?? "").trim();
-    }
-  );
+    });
 
 /**
  * Core's archived chats: at once, as the window counts them when it opens
