@@ -6,9 +6,9 @@ import type { BrainDots } from "../brain/dot-ink.ts";
 // from the layer that plays it: every page's root reads it, and loads that
 // layer only once the platform is being built.
 
-export type RevealPhase = "idle" | "filling" | "clearing" | "building";
+type RevealPhase = "idle" | "filling" | "clearing" | "building";
 
-export interface Reveal {
+interface Reveal {
   phase: RevealPhase;
   /** The brain's dots as they were handed over. */
   from: BrainDots | null;

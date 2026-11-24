@@ -2458,6 +2458,7 @@ msgstr "Agents die mensen voor zichzelf maken. Alleen hun eigenaar ziet ze en st
 #: src/apps/resource-bindings.tsx
 #: src/brain/brain.ts
 #: src/interview/words.ts
+#: src/onboarding/setup-frame.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "AI"
 msgstr "AI"
@@ -3732,9 +3733,6 @@ msgstr "Uitvoeren kan niet: {unread}"
 #: src/interview/destination.tsx
 #: src/interview/transcript.tsx
 #: src/link-confirmation.tsx
-#: src/onboarding/document-drop.tsx
-#: src/onboarding/forget-kickoff.tsx
-#: src/onboarding/forget-teams.tsx
 #: src/onboarding/place-picker.tsx
 #: src/projects/file-item-dialog.tsx
 #: src/projects/project-dialog.tsx
@@ -4324,7 +4322,6 @@ msgstr "Klik of sleep een afbeelding hierheen."
 #: src/frame/app-sidebar.tsx
 #: src/frame/ui-words.tsx
 #: src/interview/destination.tsx
-#: src/onboarding/place-picker.tsx
 #: src/report/report-dialog.tsx
 #: src/settings/erasures.tsx
 #: src/settings/stephen-settings.tsx
@@ -4427,6 +4424,7 @@ msgid "Commerce"
 msgstr "Verkoop"
 
 #: src/brain/brain.ts
+#: src/onboarding/setup-frame.tsx
 #: src/routes/_shell.settings.billing.tsx
 msgid "Company"
 msgstr "Bedrijf"
@@ -4796,7 +4794,6 @@ msgstr "Kopenhagen"
 #: src/chat/chat-more.tsx
 #: src/chat/thread.tsx
 #: src/frame/ui-words.tsx
-#: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/shown-once.tsx
 msgid "Copied"
@@ -5518,6 +5515,7 @@ msgstr "Heb je iets dat uitlegt hoe jullie werken?"
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
 #: src/onboarding/document-drop.tsx
+#: src/onboarding/setup-frame.tsx
 msgid "Documents"
 msgstr "Documenten"
 
@@ -6693,6 +6691,10 @@ msgstr "Voor iedereen"
 msgid "For everyone in the company"
 msgstr "Voor iedereen in het bedrijf"
 
+#: src/onboarding/send-plan-form.tsx
+msgid "For example {example}"
+msgstr "Bijvoorbeeld {example}"
+
 #: src/connections/request-app-dialog.tsx
 msgid "For example Personio or Twinfield"
 msgstr "Bijvoorbeeld Personio of Twinfield"
@@ -7487,6 +7489,10 @@ msgstr "Hoe grondig het nadenkt"
 msgid "How it went then"
 msgstr "Hoe het toen ging"
 
+#: src/onboarding/setup-frame.tsx
+msgid "How it works"
+msgstr "Hoe het werkt"
+
 #: src/onboarding/about-story.tsx
 msgid "How long does one of those take you, {name}?"
 msgstr "Hoe lang ben je met zo’n factuur bezig, {name}?"
@@ -7590,6 +7596,10 @@ msgstr "HTTP-verbindingen"
 #: src/connections/http-connections.tsx
 msgid "https:// and a public host name, with nothing after it."
 msgstr "https:// en een openbare hostnaam, zonder iets erachter."
+
+#: src/onboarding/send-plan-form.tsx
+msgid "I can’t plan that day. Type one like {example}, from {earliest} to {latest}."
+msgstr "Die dag kan ik niet plannen. Typ er een zoals {example}, van {earliest} tot en met {latest}."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I can’t read {name}: it’s in an old format. As a PDF or a newer file, I can."
@@ -7924,6 +7934,7 @@ msgstr "Geïnterviewd: de {role}"
 
 #: src/brain/brain-log.tsx
 #: src/brain/brain.ts
+#: src/onboarding/setup-frame.tsx
 msgid "Interviews"
 msgstr "Interviews"
 
@@ -8656,6 +8667,10 @@ msgstr "Teamleider van {name}"
 #: src/onboarding/interviews-progress.tsx
 msgid "Lead talked"
 msgstr "Teamleider sprak"
+
+#: src/onboarding/setup-frame.tsx
+msgid "Leads"
+msgstr "Teamleiders"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Leads get their link {when}. Everyone else right after their lead has talked to me."
@@ -10921,6 +10936,7 @@ msgstr "Alleen jij ziet dit"
 
 #: src/connections/request-app-dialog.tsx
 #: src/inbox/item-detail.tsx
+#: src/onboarding/setup-frame.tsx
 #: src/settings/where-stephen.tsx
 msgid "Open"
 msgstr "Openen"
@@ -12645,6 +12661,7 @@ msgid "return a month, measured"
 msgstr "opbrengst per maand, gemeten"
 
 #: src/inbox/item-detail.tsx
+#: src/onboarding/setup-frame.tsx
 msgid "Review"
 msgstr "Beoordelen"
 
@@ -14180,6 +14197,7 @@ msgstr "Bron"
 
 #: src/brain/brain.ts
 #: src/chat/chat-markdown.ts
+#: src/onboarding/setup-frame.tsx
 #: src/routes/_shell.brain.$noteId.tsx
 msgid "Sources"
 msgstr "Bronnen"
@@ -14368,10 +14386,6 @@ msgstr "Stap"
 msgctxt "what the Brain remembers about something"
 msgid "Step"
 msgstr "Stap"
-
-#: src/onboarding/setup-frame.tsx
-msgid "Step {n}"
-msgstr "Stap {n}"
 
 #: src/frame/ui-words.tsx
 msgid "Step {step} of {total}"
@@ -14720,6 +14734,7 @@ msgstr "taken"
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
 #: src/onboarding/interviews-progress.tsx
+#: src/onboarding/setup-frame.tsx
 msgid "Team"
 msgstr "Team"
 
@@ -16347,6 +16362,7 @@ msgid "Tool"
 msgstr "Tool"
 
 #: src/brain/brain.ts
+#: src/onboarding/setup-frame.tsx
 msgid "Tools"
 msgstr "Tools"
 
@@ -17181,6 +17197,10 @@ msgstr "Week {week} van {weeks}"
 #: src/report/report.ts
 msgid "Week {week} of {weeks} · {stage}"
 msgstr "Week {week} van {weeks} · {stage}"
+
+#: src/onboarding/setup-frame.tsx
+msgid "Welcome"
+msgstr "Welkom"
 
 #: src/workflows/today-lanes.tsx
 msgid "went to people"
