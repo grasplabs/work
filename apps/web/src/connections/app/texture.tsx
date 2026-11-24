@@ -1,9 +1,9 @@
 // Texture: a very faint dither of the light, behind the head of the one app a page or a panel is
 // about, in the app's own colour where it is known (useMarkTint), else the mint from the top
-// corner. #2503's library Texture, as its app panel and page drew it: Damsko keeps its texture a
-// private part of PageHeader's banner, so an app's panel (SidePanel's `cover`) and its page's head
-// card draw this one (registry gap of 24 Nov 2026). Its dots are the library's composer grid,
-// 0.75px dots every 3px, at the page header's dither strength.
+// corner. #2503's library Texture, as its app panel and page drew it. Damsko's own `texture`
+// (lib/styles) is the mint alone, seen through 2px squares; an app's head takes the app's colour,
+// seen through the library's composer grid, 0.75px dots every 3px, at the system's texture strength
+// (registry gap of 24 Nov 2026).
 //
 // It is decoration: hidden from assistive tech, takes no pointer, never moves. It fills the nearest
 // positioned box (place it with `style`). In right to left the light comes from the start there,
@@ -21,7 +21,7 @@ const styles = stylex.create({
     position: "absolute",
     inset: 0,
     pointerEvents: "none",
-    opacity: sizes.pageHeaderDitherStrength,
+    opacity: sizes.textureStrength,
     backgroundImage: {
       default: `radial-gradient(120% 90% at 0% 0%, ${colors.mint}, transparent 70%)`,
       ":dir(rtl)": `radial-gradient(120% 90% at 100% 0%, ${colors.mint}, transparent 70%)`,

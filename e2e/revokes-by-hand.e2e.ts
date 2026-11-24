@@ -77,8 +77,9 @@ test("an admin sees the access Grasp couldn't remove, with where to remove it by
   const memberPage = await browser.newPage();
   await signInTo(memberPage.context(), owner);
   await memberPage.goto("/integrations");
+  // The page's own title: the sidebar's level for Integrations is titled so too.
   await expect(
-    memberPage.getByRole("heading", { level: 1, name: "Integrations" })
+    memberPage.getByRole("heading", { name: "Integrations", level: 1 })
   ).toBeVisible();
   await expect(
     memberPage.getByRole("region", { name: "Access to remove by hand" })

@@ -9,8 +9,10 @@ import {
   DialogContent,
   DialogDescription,
   DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
+import { DropdownMenuItem } from "@grasp-os/ui/components/dropdown-menu";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
 import { Textarea } from "@grasp-os/ui/components/textarea";
@@ -49,33 +51,46 @@ export const ReleaseBadges = ({ release }: { release: AppRelease }) => {
   );
 };
 
-/**
- * A release's actions in its version's menu, for an admin: each with its
- * words, for the menu that holds them (drafts/draft-history.tsx).
- */
-export const useReleaseActions = (
-  release: AppRelease
-): { label: string; action: ReleaseAction }[] => {
+/** A release's actions in its version's menu, for an admin. */
+export const ReleaseMenuItems = ({
+  release,
+  onAsk,
+}: {
+  release: AppRelease;
+  onAsk: (action: ReleaseAction) => void;
+}) => {
   const { t } = useLingui();
   const { version } = release;
-  return [
-    ...(release.revokedAt === null
-      ? [
-          {
-            label: t`Revoke this version`,
-            action: { kind: "revoke", version } as const,
-          },
-        ]
-      : []),
-    {
-      label: t`Place a legal hold`,
-      action: { kind: "hold", version },
-    },
-    ...release.holds.map(({ hold }) => ({
-      label: t`Lift the legal hold ${hold}`,
-      action: { kind: "lift", version, hold } as const,
-    })),
-  ];
+  return (
+    <>
+      {release.revokedAt === null ? (
+        <DropdownMenuItem
+          onSelect={() => {
+            onAsk({ kind: "revoke", version });
+          }}
+        >
+          {t`Revoke this version`}
+        </DropdownMenuItem>
+      ) : null}
+      <DropdownMenuItem
+        onSelect={() => {
+          onAsk({ kind: "hold", version });
+        }}
+      >
+        {t`Place a legal hold`}
+      </DropdownMenuItem>
+      {release.holds.map(({ hold }) => (
+        <DropdownMenuItem
+          key={hold}
+          onSelect={() => {
+            onAsk({ kind: "lift", version, hold });
+          }}
+        >
+          {t`Lift the legal hold ${hold}`}
+        </DropdownMenuItem>
+      ))}
+    </>
+  );
 };
 
 /**
@@ -220,8 +235,10 @@ export const ReleaseDialog = ({
       open
     >
       <DialogContent>
-        <ActionText action={action} label={label} />
-        {action.kind === "lift" ? null : (
+        <DialogHeader>
+          <ActionText action={action} label={label} />
+        </DialogHeader>
+        {action.kind === "lift" && failure === undefined ? null : (
           <DialogBody>
             {action.kind === "hold" ? (
               <Field>
@@ -245,12 +262,12 @@ export const ReleaseDialog = ({
                 />
               </Field>
             ) : null}
+            {failure === undefined ? null : (
+              <Alert variant="destructive">
+                <AlertTitle>{failure}</AlertTitle>
+              </Alert>
+            )}
           </DialogBody>
-        )}
-        {failure === undefined ? null : (
-          <Alert variant="destructive">
-            <AlertTitle>{failure}</AlertTitle>
-          </Alert>
         )}
         <DialogFooter>
           <DialogClose>{t`Cancel`}</DialogClose>
@@ -261,7 +278,6 @@ export const ReleaseDialog = ({
               await confirm();
               onClose();
             }}
-            size="sm"
             variant={action.kind === "revoke" ? "destructive" : "default"}
           >
             {labelOf(action)}

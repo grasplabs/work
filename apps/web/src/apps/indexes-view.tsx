@@ -348,6 +348,7 @@ export const IndexesView = ({
           <section aria-label={t`Indexes`}>
             <CardHeader>
               <WithInfo
+                of="title"
                 info={t`An index keeps records in order of a field, so queries that sort or filter by it stay fast. Search finds records by their words.`}
               >
                 <CardTitle>{t`Indexes`}</CardTitle>

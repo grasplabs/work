@@ -4,6 +4,9 @@
 // a row, then the count ("3 sources"). Pressed, the list opens under it: one row per source, at
 // least a large control tall, its mark on a tile, its title, and where it lives in a quiet line
 // under the title; the whole row takes the press. A source is not a step: no seat and no dots.
+// A source may say more: the number its citations carry in the answer (`index`), after its title,
+// and the passage the answer used (a SourceQuote, as Inline citation's InlineCitationQuote), under
+// where it lives.
 //
 //   <Sources>
 //     <SourcesTrigger count={2}>
@@ -33,7 +36,7 @@
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
-import { createContext, use } from "react";
+import { createContext, isValidElement, use } from "react";
 import type { ReactNode } from "react";
 
 import { useI18n } from "../lib/i18n";
@@ -53,7 +56,7 @@ import {
   size,
   space,
 } from "../lib/tokens.stylex";
-import { citedSource, safeHref } from "../lib/utils";
+import { citedSource, listOf, safeHref } from "../lib/utils";
 import type { LayoutStyle } from "../lib/utils";
 import { iconVars, motionVars } from "../lib/vars.stylex";
 import {
@@ -141,10 +144,24 @@ export interface SourceProps {
    * @default "open"
    */
   access?: SourceAccess;
-  /** Its mark: a SourceIcon. */
+  /**
+   * Its number, as its citations in the answer carry it: after the title, to the eye and in the
+   * name a screen reader says, so it holds whatever order the list is in.
+   */
+  index?: number;
+  /** Its mark, a SourceIcon, and the passage the answer used, a SourceQuote. */
   children?: ReactNode;
   /** Where it sits and how wide it is. */
   style?: LayoutStyle;
+}
+
+/** Every prop a SourceQuote takes. */
+export interface SourceQuoteProps {
+  /**
+   * The passage the answer used, in the source's own words: up to two lines under where it lives.
+   * A source that cannot be opened shows none.
+   */
+  children: ReactNode;
 }
 
 /** Every prop a SourceIcon takes. */
@@ -276,9 +293,11 @@ const styles = stylex.create({
     flexGrow: 1,
     minWidth: 0,
   },
-  // The title's row: where it lives takes the next one.
-  titleRow: { display: "block" },
+  // The title's row, a body line tall: where it lives takes the next one.
+  titleRow: { display: "block", lineHeight: font.textBaseLine },
   title: {
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
     // Its own run of words: a lock after it keeps the line's direction, so in a right-to-left
     // page it stands at the title's left.
     unicodeBidi: "isolate",
@@ -295,16 +314,38 @@ const styles = stylex.create({
     verticalAlign: "-2px",
     color: colors.mutedForeground,
   },
+  // Its number straight after the title's last word, also when the title wraps.
+  index: {
+    unicodeBidi: "isolate",
+    marginInlineStart: space["2"],
+    whiteSpace: "nowrap",
+    fontSize: font.textXs,
+    lineHeight: font.textXsLine,
+    fontVariantNumeric: "tabular-nums",
+    color: colors.subtleForeground,
+  },
   // Where it lives, a hair under the title.
   where: {
     display: "block",
-    marginBlockStart: `calc(${space["1"]} / 2 - ${space["1"]})`,
+    marginBlockStart: `calc(${space["1"]} / 2)`,
     fontSize: font.textXs,
     lineHeight: font.textXsLine,
     color: colors.mutedForeground,
     overflowWrap: "anywhere",
   },
   gone: { color: colors.destructive },
+  // The passage the answer used: two lines at most, in the body's ink.
+  quote: {
+    display: "-webkit-box",
+    marginBlockStart: `calc(${space["1"]} / 2)`,
+    overflow: "hidden",
+    fontSize: font.textXs,
+    lineHeight: font.textXsLine,
+    color: colors.bodyForeground,
+    overflowWrap: "anywhere",
+    WebkitBoxOrient: "vertical",
+    WebkitLineClamp: 2,
+  },
   tile: {
     position: "relative",
     display: "inline-grid",
@@ -414,6 +455,57 @@ export const SourcesContent = ({ children, style }: SourcesContentProps) => {
   );
 };
 
+/** The passage of a source the answer used, under where it lives: two lines at most. */
+export const SourceQuote = ({ children }: SourceQuoteProps) => (
+  <>
+    {/* A comma a screen reader says between the note and the passage; the eye has the line. */}
+    <span {...stylex.props(visuallyHidden)}>, </span>
+    <span data-slot="source-quote" {...stylex.props(styles.quote)}>
+      {children}
+    </span>
+  </>
+);
+
+/** Whether a child of a Source is its SourceQuote. */
+const isQuote = (part: ReactNode) =>
+  isValidElement(part) && part.type === SourceQuote;
+
+/** Under a source's title: where it lives, with what keeps it shut, then the passage used. */
+const SourceNotes = ({
+  access,
+  where,
+  quote,
+}: {
+  access: SourceAccess;
+  where: string | undefined;
+  quote: ReactNode[];
+}) => {
+  const words = useI18n().sources;
+  let note = where;
+  if (access === "gone") {
+    note = where === undefined ? words.gone : `${where}. ${words.gone}`;
+  } else if (access === "locked") {
+    note = where === undefined ? words.locked : `${where} · ${words.locked}`;
+  }
+  return (
+    <>
+      {note !== undefined && (
+        <>
+          {/* A comma a screen reader says between title and note; the eye has the line. */}
+          <span {...stylex.props(visuallyHidden)}>, </span>
+          <span
+            data-slot="source-where"
+            {...stylex.props(styles.where, access === "gone" && styles.gone)}
+          >
+            {note}
+          </span>
+        </>
+      )}
+      {access === "open" && quote}
+    </>
+  );
+};
+
 /** One source: a line with its mark, its title and where it lives, in a link or a button that opens it. */
 export const Source = ({
   title,
@@ -421,6 +513,7 @@ export const Source = ({
   onOpen,
   origin,
   access = "open",
+  index,
   children,
   style,
 }: SourceProps) => {
@@ -431,16 +524,14 @@ export const Source = ({
   const host = citedSource(href)?.host;
   const where = host ?? (origin === "" ? undefined : origin);
   const live = access === "open" && (safe !== null || onOpen !== undefined);
-  let note: ReactNode = where;
-  if (access === "gone") {
-    note = where === undefined ? words.gone : `${where}. ${words.gone}`;
-  } else if (access === "locked") {
-    note = where === undefined ? words.locked : `${where} · ${words.locked}`;
-  }
+  // The passage stands under the notes, the mark before the words.
+  const parts = listOf(children);
+  const quote = parts.filter(isQuote);
+  const mark = parts.filter((part) => !isQuote(part));
   // The mark's tile beside the line: a tile is wider than a line's mark seat.
   const line = (
     <>
-      <AccessContext value={access}>{children}</AccessContext>
+      <AccessContext value={access}>{mark}</AccessContext>
       <span {...stylex.props(styles.words)}>
         <TraceLine>
           <TraceTitle>
@@ -456,22 +547,20 @@ export const Source = ({
                   <Icon icon={LockIcon} />
                 </span>
               )}
+              {index !== undefined && (
+                <>
+                  {/* Said after the title as the eye reads it: the number its citations carry. */}
+                  <span {...stylex.props(visuallyHidden)}>, </span>
+                  <span
+                    data-slot="source-index"
+                    {...stylex.props(styles.index)}
+                  >
+                    {index}
+                  </span>
+                </>
+              )}
             </span>
-            {note !== undefined && (
-              <>
-                {/* A comma a screen reader says between title and note; the eye has the line. */}
-                <span {...stylex.props(visuallyHidden)}>, </span>
-                <span
-                  data-slot="source-where"
-                  {...stylex.props(
-                    styles.where,
-                    access === "gone" && styles.gone
-                  )}
-                >
-                  {note}
-                </span>
-              </>
-            )}
+            <SourceNotes access={access} where={where} quote={quote} />
           </TraceTitle>
           {safe !== null && live && (
             <span {...stylex.props(visuallyHidden)}> {words.newTab}</span>

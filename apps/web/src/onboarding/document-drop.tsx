@@ -5,6 +5,7 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
+  AlertDialogHeader,
   AlertDialogTitle,
 } from "@grasp-os/ui/components/alert-dialog";
 import { Button } from "@grasp-os/ui/components/button";
@@ -559,10 +560,12 @@ const RemoveRead = ({
       </Button>
       <AlertDialog onOpenChange={setOpen} open={open}>
         <AlertDialogContent>
-          <AlertDialogTitle>{t`Remove ${file}?`}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {t`I forget what I read in it, and draw again what I drew with it. If you shared it, its file in your Brain, if there is one, is deleted too; if another admin did, the file stays in theirs until they delete it. This can’t be undone.`}
-          </AlertDialogDescription>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t`Remove ${file}?`}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t`I forget what I read in it, and draw again what I drew with it. If you shared it, its file in your Brain, if there is one, is deleted too; if another admin did, the file stays in theirs until they delete it. This can’t be undone.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel />
             <AlertDialogAction
