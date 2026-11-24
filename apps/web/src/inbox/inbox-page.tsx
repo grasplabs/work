@@ -45,6 +45,7 @@ import { Fragment, useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ReactNode, RefObject } from "react";
 
 import { formatDayMonth } from "../format.ts";
+import { PagePanel } from "../frame/page-panel.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { useWide } from "../frame/wide.ts";
 import { notLoadedText } from "../load-from-core.tsx";
@@ -58,7 +59,7 @@ import { orderOf, placeIn, skip, stepFrom } from "./walk.ts";
 
 // The Inbox, on Damsko, laid out as #2503's: what waits on the person, to
 // work through quickly. The list is the page, under its bar; beside a wide
-// list, flush with the card's end from the bar's top down, Damsko's side
+// list, seated by the frame (page-panel.tsx) from the bar's top down, Damsko's side
 // panel holds the walk through what waits at its head ("1 of 3", back,
 // next, Skip), the item to decide, then its facts. On a phone the list
 // stands alone and a row opens the panel in a sheet. The open item is the
@@ -436,7 +437,11 @@ const useAddressOf = (item: string | undefined): void => {
   }, [navigate, item]);
 };
 
-/** The panel beside a wide list; on a phone, its sheet, open once a row is chosen. */
+/**
+ * The panel beside a wide list, seated by the frame beside the page, bar
+ * and all, so the chat box centres over the list alone; on a phone, its
+ * sheet, open once a row is chosen.
+ */
 const Beside = ({
   wide,
   reading,
@@ -451,12 +456,11 @@ const Beside = ({
   children: ReactNode;
 }) => {
   if (wide) {
+    // Beside the list whenever the window is wide: the page says when.
     return (
-      <div {...stylex.props(inboxStyles.panel)}>
-        <SidePanel aria-label={label} framed={false}>
-          {children}
-        </SidePanel>
-      </div>
+      <PagePanel label={label} open pageMinWidth={0}>
+        <SidePanel aria-label={label}>{children}</SidePanel>
+      </PagePanel>
     );
   }
   return (
@@ -701,7 +705,7 @@ const ToDo = ({
   }
   const label = i18n._(kindLabel[shownItem.kind]);
   return (
-    <div {...stylex.props(inboxStyles.page, wide && inboxStyles.pageBeside)}>
+    <div {...stylex.props(inboxStyles.page)}>
       <ListColumn
         failed={failed}
         foot={foot}

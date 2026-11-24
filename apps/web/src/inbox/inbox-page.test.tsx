@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
 import { brainGapErrors } from "@grasp-os/shared/brain-records";
 import {
   appIdSchema,
@@ -11,6 +10,7 @@ import {
 import type { GapAskedNotification } from "@grasp-os/shared/notifications";
 import { permissionErrors } from "@grasp-os/shared/permissions";
 import type { Permission } from "@grasp-os/shared/permissions";
+import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -27,6 +27,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { PageWithPanel } from "../frame/page-panel.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { InboxPage } from "./inbox-page.tsx";
 import { inboxItems } from "./items.ts";
@@ -148,6 +149,11 @@ const minWidth = /^\(min-width:\s*(?<at>[\d.]+)rem\)$/u;
 
 /** A window `width` wide: happy-dom lays nothing out, so the width queries say it. */
 const windowOf = (width: number): void => {
+  // The frame's card, which it reads to seat the panel beside the page:
+  // the whole window, less the sidebar and its gutters where it stands.
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+    DOMRect.fromRect({ width: width < 1024 ? width : width - 252, height: 800 })
+  );
   vi.stubGlobal("matchMedia", (query: string) => {
     const at = Number(minWidth.exec(query)?.groups?.at) * 16;
     return Object.assign(new EventTarget(), {
@@ -283,9 +289,12 @@ const shown = async ({
     root = createRoot(host);
     root.render(
       <I18nProvider i18n={i18n}>
-        {/* The page draws the frame's bar, whose sidebar button needs its sidebar. */}
+        {/* The page draws the frame's bar, whose sidebar button needs its
+            sidebar, and its panel goes where the frame seats it. */}
         <SidebarProvider>
-          <RouterProvider router={router} />
+          <PageWithPanel>
+            <RouterProvider router={router} />
+          </PageWithPanel>
         </SidebarProvider>
       </I18nProvider>
     );

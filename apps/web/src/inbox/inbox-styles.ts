@@ -1,4 +1,4 @@
-import { colors, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 
 // The Inbox's room, for the page and for the page while it loads, so the
@@ -6,18 +6,13 @@ import * as stylex from "@stylexjs/stylex";
 
 export const inboxStyles = stylex.create({
   // What the frame's card leaves under its banners, filled, so the list
-  // and the panel each scroll on their own.
+  // scrolls on its own, apart from the panel the frame seats beside it.
   page: {
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr)",
     flexGrow: 1,
     flexBasis: 0,
     minHeight: 0,
-  },
-  // Beside a wide list, the panel: flush with the card's end and foot,
-  // from the bar's top down, a hairline at its start.
-  pageBeside: {
-    gridTemplateColumns: `minmax(0, 1fr) ${size.sidePanelWidth}`,
   },
   // The page's own column: its bar, then the list under it.
   column: {
@@ -42,14 +37,4 @@ export const inboxStyles = stylex.create({
   },
   // Nothing in the list: its state in the middle of the page.
   listEmpty: { justifyContent: "center" },
-  // The panel's place beside the list.
-  panel: {
-    display: "grid",
-    boxSizing: "border-box",
-    minWidth: 0,
-    minHeight: 0,
-    borderInlineStartWidth: size.hairline,
-    borderInlineStartStyle: "solid",
-    borderInlineStartColor: colors.border,
-  },
 });
