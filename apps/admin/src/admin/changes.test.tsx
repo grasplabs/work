@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
-import { act } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  act,
   answeredAdmin,
   FailedError,
   gridRow,
