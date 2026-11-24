@@ -12,7 +12,7 @@ import {
   SidePanelHeader,
 } from "@grasp-os/ui/components/side-panel";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
-import { radius, size } from "@grasp-os/ui/lib/tokens.stylex";
+import { radius, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 
@@ -48,6 +48,14 @@ const styles = stylex.create({
     borderRadius: radius.sm,
   },
   fill: { height: "100%" },
+  // The item's text at the reference's inset inside the panel's content:
+  // paragraphs a step apart.
+  body: {
+    display: "grid",
+    gap: space["4"],
+    paddingInline: space["3"],
+    paddingBlock: space["4"],
+  },
   paragraph: { display: "grid" },
   // A paragraph's last line stops short, as a paragraph's does.
   last: { width: "60%" },
@@ -81,20 +89,18 @@ export const InboxPending = () => {
         <SidePanel aria-label={t`Inbox`}>
           <SidePanelHeader description="" loading title="" />
           <SidePanelContent>
-            {paragraphs.map((lines, index) => (
-              <div
-                aria-hidden="true"
-                key={index}
-                {...stylex.props(styles.paragraph)}
-              >
-                {Array.from({ length: lines }, (__, line) => (
-                  <Skeleton
-                    key={line}
-                    style={line === lines - 1 ? styles.last : undefined}
-                  />
-                ))}
-              </div>
-            ))}
+            <div aria-hidden="true" {...stylex.props(styles.body)}>
+              {paragraphs.map((lines, index) => (
+                <div key={index} {...stylex.props(styles.paragraph)}>
+                  {Array.from({ length: lines }, (__, line) => (
+                    <Skeleton
+                      key={line}
+                      style={line === lines - 1 ? styles.last : undefined}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
           </SidePanelContent>
         </SidePanel>
       </PagePanel>

@@ -329,6 +329,46 @@ const styles = stylex.create({
   // Renaming, the field over the row shows the words: the row's own stand hidden in their place,
   // and what stands at its end (its time, its Working mark) with them.
   renaming: { visibility: "hidden" },
+  // A row with its own menu keeps its hover while the pointer is anywhere on
+  // it, its dots too, and while their menu is open, as the reference's
+  // (#2503's sidebar.tsx `row`): a fill under the row's link, which is
+  // clear at rest (Damsko's row fills only under the pointer on itself:
+  // registry gap of 24 Nov 2026), and the name in the ink.
+  held: {
+    position: "absolute",
+    inset: 0,
+    borderRadius: radius.sidebarRowRadius,
+    pointerEvents: "none",
+    backgroundColor: {
+      default: "transparent",
+      [stylex.when.ancestor(":hover", sidebarMenuItemMarker)]: {
+        default: "transparent",
+        [HOVER]: colors.sidebarHover,
+      },
+      [stylex.when.ancestor(HELD_OPEN, sidebarMenuItemMarker)]:
+        colors.sidebarHover,
+    },
+    transitionProperty: "background-color",
+    transitionDuration: duration.hover,
+    transitionTimingFunction: duration.ease,
+  },
+  heldInk: {
+    color: {
+      default: null,
+      [stylex.when.ancestor(":hover", sidebarMenuItemMarker)]: {
+        default: null,
+        [HOVER]: colors.sidebarForeground,
+      },
+      [stylex.when.ancestor(HELD_OPEN, sidebarMenuItemMarker)]:
+        colors.sidebarForeground,
+    },
+  },
+  // The dots in the ink, as the reference's ghost button draws them
+  // (Damsko's action stays quiet until the pointer is on it: registry gap
+  // of 24 Nov 2026).
+  dotsInk: { display: "inline-flex", color: colors.sidebarForeground },
+  // The row's menu on a right-click, as narrow as the reference's.
+  contextMenu: { minWidth: "12rem" },
   // The Working mark at a row's end, in an icon's room, never squeezed.
   working: {
     display: "inline-flex",
@@ -562,7 +602,9 @@ const RowDots = ({
         showOnHover
         style={styles.action}
       >
-        <Icon icon={EllipsisIcon} />
+        <span {...stylex.props(styles.dotsInk)}>
+          <Icon icon={EllipsisIcon} />
+        </span>
       </SidebarMenuAction>
     </DropdownMenuTrigger>
     <DropdownMenuContent align="start">
@@ -629,6 +671,7 @@ const rowWords = (
       {...stylex.props(
         styles.name,
         row.quiet === true && styles.quiet,
+        dots && styles.heldInk,
         renaming && styles.renaming
       )}
     >
@@ -877,6 +920,9 @@ const Row = ({ row }: { row: SidebarRow }) => {
   );
   const held = (
     <>
+      {hasActions && (row.rows?.length ?? 0) === 0 ? (
+        <span aria-hidden="true" {...stylex.props(styles.held)} />
+      ) : null}
       {ownName(row) ? <CutTip draw={button} label={row.label} /> : button({})}
       {at === undefined ? null : (
         <RenameField
@@ -909,7 +955,10 @@ const Row = ({ row }: { row: SidebarRow }) => {
           <ContextMenuTrigger aria-label={row.label} tabStop={false}>
             {held}
           </ContextMenuTrigger>
-          <ContextMenuContent finalFocus={renaming ? "none" : linkOf}>
+          <ContextMenuContent
+            finalFocus={renaming ? "none" : linkOf}
+            style={styles.contextMenu}
+          >
             <MenuEntries actions={actions} menu="context" onChoose={choose} />
           </ContextMenuContent>
         </ContextMenu>
