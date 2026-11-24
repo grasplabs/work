@@ -386,7 +386,7 @@ test("a builder changes one step on the Flow, saved as the draft's next change, 
   await expect(page.getByText(passes)).toBeVisible();
 });
 
-test("a builder makes something that runs on its own by saying what they want done, which lands them on it with Grasp's chat docked beside it, not ready while nothing passes, and sees the Flow drawn once a draft passes", async ({
+test("a builder makes something that runs on its own by saying what they want done, which lands them on it with Grasp's chat docked beside it to close and open again, not ready while nothing passes, and sees the Flow drawn once a draft passes", async ({
   pageOf,
 }) => {
   const { builder } = peopleIn("workflowDrawn");
@@ -425,6 +425,12 @@ test("a builder makes something that runs on its own by saying what they want do
   await expect(
     page.getByText(`${workflowPlanned} isn't ready yet`)
   ).toBeVisible();
+
+  // Closed from its head, the chat goes; the shell's button brings it back beside it.
+  await page.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(chat).toBeHidden();
+  await page.getByRole("button", { name: "Show or hide the chat" }).click();
+  await expect(chat.getByText(reply.text)).toBeVisible();
 
   // A first step that passes is saved as the chat's agent would save it
   // (`env.workflowBuild.write`): this script only answers (a script that

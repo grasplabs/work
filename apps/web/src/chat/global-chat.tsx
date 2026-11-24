@@ -308,19 +308,15 @@ const useGlobalChatValue = () => {
   }, [running]);
   const layout = useChatLayout();
   const roomBeside = !useMatches(narrowQuery);
-  // About the page's subject, it stays open (chat-subject.ts), where the
-  // page has it: that page is where its subject is made. On a phone, where
-  // it would cover that page, the page shows first and the chat opens as
-  // anywhere else, when the person asks. Elsewhere, open where it was put,
-  // where this page allows it there; elsewhere it stays open, and shows
-  // again on a page that does.
+  // Open where it was put, where this page allows it there; elsewhere it
+  // stays open, and shows again on a page that does. Opened or closed as
+  // the person chooses, on a subject's page as anywhere else.
   const about = subjectOf(slot) !== undefined;
-  const keptOpen = about && !phone;
   // A subject's page has it docked, wherever it was put elsewhere.
   const placement = about
     ? (placementOn(presence, layout.placement) ?? layout.placement)
     : layout.placement;
-  const open = (keptOpen || layout.open) && allows(presence, placement);
+  const open = layout.open && allows(presence, placement);
   const stage = stageOf({
     available,
     open,
@@ -337,8 +333,6 @@ const useGlobalChatValue = () => {
     available,
     /** Whether it is open here: where it was put, if this page allows that. */
     open,
-    /** Whether it stays open here, about the page's subject: no closing it. */
-    keptOpen,
     /** Whether there is room beside the page to dock into: not on a phone. */
     roomBeside,
     /** Where it opens, or is. */
@@ -431,10 +425,10 @@ export const GlobalChatProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
     event.preventDefault();
-    if (!chat.open) {
-      openHere();
-    } else if (!chat.keptOpen) {
+    if (chat.open) {
       closeChat();
+    } else {
+      openHere();
     }
   });
   useEffect(() => {

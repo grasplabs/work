@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { markMade } from "../apps/made-tip.ts";
 import { useCoreRead } from "../apps/use-core-read.ts";
 import { setActiveChat } from "./active-chat.ts";
+import { openChat } from "./chat-layout.ts";
 import { slotOf } from "./chat-subject.ts";
 import { MakeActions } from "./make-card.tsx";
 import { PlanCard } from "./plan-card.tsx";
@@ -60,6 +61,8 @@ const PlanActions = ({
   const navigate = useNavigate();
   const land = (built: ChatBuilt): void => {
     const { app, workflow } = built;
+    // The conversation goes on beside what it made, docked there.
+    openChat("docked");
     if (app !== undefined) {
       setActiveChat(chatId, slotOf({ kind: "app", id: app.id }));
       markMade(app.id);

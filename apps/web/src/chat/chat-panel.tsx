@@ -124,18 +124,16 @@ interface HeadProps {
 
 /**
  * The library's window head: the chat's name (renamed where it stands),
- * full screen, the "…" with the head's own items and ours, and close. About
- * the page's subject the chat stays open, so it has no close
- * (chat-subject.ts).
+ * full screen, the "…" with the head's own items and ours, and close.
  */
 const Head = ({ expanded, menu }: HeadProps) => {
-  const { chatId, keptOpen } = useGlobalChat();
+  const { chatId } = useGlobalChat();
   return (
     <AppShellPanelHead
       expanded={expanded}
       menu={menu}
       onExpandedChange={expandChat}
-      {...(keptOpen ? {} : { onClose: closeChat })}
+      onClose={closeChat}
       // A chat not made yet has no page until its first question. The
       // router's link, so opening it doesn't load the app anew.
       {...(chatId === undefined
@@ -217,12 +215,10 @@ const BrainGaps = () => {
 const Body = ({ open, expanded }: { open: boolean; expanded: boolean }) => {
   const body = useRef<HTMLDivElement>(null);
   const chat = useGlobalChat();
-  const { summary, words, keptOpen } = chat;
-  // Escape closes it, where it doesn't stay open (about the page's subject).
+  const { summary, words } = chat;
+  // Escape closes it.
   const onEscape = useEffectEvent(() => {
-    if (!keptOpen) {
-      closeChat();
-    }
+    closeChat();
   });
   // Each time it opens, or is drawn anew (App shell may mount its panels
   // again as a layer elsewhere closes): never away from a dialog or menu
@@ -337,7 +333,7 @@ export interface ChatPanels {
 
 /** Grasp's chat for App shell's panels: where it is, how large, and how to move, size and close it. */
 export const useChatPanels = (): ChatPanels => {
-  const { stage, keptOpen, presence, roomBeside, available } = useGlobalChat();
+  const { stage, presence, roomBeside, available } = useGlobalChat();
   const layout = useChatLayout();
   const openHere = useOpenChat();
   // Where the page allows both, and there is room beside it (not a phone).
@@ -348,15 +344,13 @@ export const useChatPanels = (): ChatPanels => {
     // open or closed, a way back to a closed chat at every width.
     panels: available ? <ChatPanel /> : null,
     open: stage.card,
-    onOpenChange: keptOpen
-      ? undefined
-      : (open) => {
-          if (open) {
-            openHere();
-          } else {
-            closeChat();
-          }
-        },
+    onOpenChange: (open) => {
+      if (open) {
+        openHere();
+      } else {
+        closeChat();
+      }
+    },
     width: layout.width,
     onWidthChange: resizeChat,
     minWidth: chatWidth.min,
@@ -372,6 +366,6 @@ export const useChatPanels = (): ChatPanels => {
     height: layout.height ?? undefined,
     onHeightChange: heightenChat,
     covered: stage.card && layout.expanded,
-    onClose: keptOpen ? undefined : closeChat,
+    onClose: closeChat,
   };
 };
