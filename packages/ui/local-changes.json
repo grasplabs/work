@@ -16,8 +16,13 @@
     "since": "2026-11-24"
   },
   {
+    "path": "src/components/select.tsx",
+    "reason": "A tooltip prop on the trigger, drawn as Button's, for a select among a bar's tools: a Tooltip wrapped round it never opened.",
+    "since": "2026-11-24"
+  },
+  {
     "path": "src/components/theme-toggle.tsx",
-    "reason": "The icon button's sizes under Button's names and at Button's heights: its sm was Button's xs, so tools of one size name stood at two heights.",
+    "reason": "The icon button's sizes under Button's names and at Button's heights (its sm was Button's xs), and a tooltip as Button's, its name by default.",
     "since": "2026-11-24"
   },
   {
