@@ -610,7 +610,7 @@ const Concepts = ({ concept }: { concept: Concept }) => {
   const navigate = useNavigate();
   const { identity } = Route.useRouteContext();
   const loaded = Route.useLoaderData();
-  const { step: asked, foot } = Route.useSearch();
+  const { step: asked, foot, cards } = Route.useSearch();
   if (loaded.state !== "ready") {
     return <PageError reason={notLoadedText(loaded, i18n) ?? ""} />;
   }
@@ -624,11 +624,17 @@ const Concepts = ({ concept }: { concept: Concept }) => {
       admin={first === "Admin" ? "Marieke" : first}
       concept={concept}
       data={{ ai: loaded.data.ai }}
-      footOnlyBack={foot === "back"}
+      cards={cardLooks[cards ?? "a"]}
+      foot={foot ?? "a"}
       go={(next) => {
         void navigate({
           to: "/setup",
-          search: { concept, step: next, ...(foot && { foot }) },
+          search: {
+            concept,
+            step: next,
+            ...(foot && { foot }),
+            ...(cards && { cards }),
+          },
         });
       }}
       onward={() => {
@@ -639,6 +645,9 @@ const Concepts = ({ concept }: { concept: Concept }) => {
     />
   );
 };
+
+/** The language cards' looks, by the letter Ruben sees them by. */
+const cardLooks = { a: "flag", b: "brand", c: "scene" } as const;
 
 /** Today's setup, or one of the concepts of its first steps. */
 const SetupPage = () => {
@@ -710,13 +719,21 @@ export const Route = createFileRoute("/setup")({
     step?: SetupStep;
     connection?: string;
     concept?: Concept;
+    foot?: "a" | "b" | "c";
+    cards?: "a" | "b" | "c";
     state?: CampaignState;
-    foot?: "back";
   } => ({
     ...(isStep(search.step) && { step: search.step }),
     ...(isConcept(search.concept) && { concept: search.concept }),
     ...(isCampaignState(search.state) && { state: search.state }),
-    ...(search.foot === "back" && { foot: "back" as const }),
+    ...((search.foot === "a" || search.foot === "b" || search.foot === "c") && {
+      foot: search.foot,
+    }),
+    ...((search.cards === "a" ||
+      search.cards === "b" ||
+      search.cards === "c") && {
+      cards: search.cards,
+    }),
     ...(typeof search.connection === "string" && {
       connection: search.connection,
     }),
