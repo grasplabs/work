@@ -108,11 +108,23 @@ const shown = async (editable: boolean, readable = true) => {
   return { asked };
 };
 
-/** Presses the button whose text is `text` (the last one: a dialog's own comes last). */
+/** What an element says: its text, without what is hidden from a screen reader. */
+const wordsOf = (element: Element): string => {
+  const copy = element.cloneNode(true);
+  if (!(copy instanceof Element)) {
+    return "";
+  }
+  for (const hidden of copy.querySelectorAll("[aria-hidden='true']")) {
+    hidden.remove();
+  }
+  return copy.textContent.trim();
+};
+
+/** Presses the button whose words are `text` (the last one: a dialog's own comes last). */
 const press = async (text: string): Promise<void> => {
   await act(async () => {
     [...document.querySelectorAll("button")]
-      .findLast((each) => each.textContent.trim() === text)
+      .findLast((each) => wordsOf(each) === text)
       ?.click();
     await settled();
   });

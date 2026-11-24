@@ -1,20 +1,34 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Label } from "@grasp-os/app-kit/components/label";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/app-kit/components/native-select";
 import type {
   WorkflowResourceVersion,
   WorkflowVersionSource,
 } from "@grasp-os/shared/workflow-resources";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { DownloadIcon } from "lucide-react";
-import { useId, useState } from "react";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+  ItemMedia,
+  ItemSeparator,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "@grasp-os/ui/components/select";
+import { DownloadIcon, FileIcon, Icon } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useState, Fragment } from "react";
 
-import { ErrorText } from "../error-text.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { Code } from "./code.tsx";
+import { SectionCard } from "./section-card.tsx";
 
 // Any published version of an independent workflow, as its builders read
 // it (GRA-1329), by its label: its definition exactly as published
@@ -22,6 +36,16 @@ import { useCoreAction } from "../use-core-action.ts";
 // definition and the code generated from it read back from what was
 // sealed (`workflowResources.source`), each file to download. Core gives
 // both to the workflow's builders alone; nothing here changes a version.
+
+const styles = stylex.create({
+  body: { display: "flex", flexDirection: "column", gap: space["4"] },
+  pick: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["2"],
+  },
+});
 
 /** Saves `text` as a file named after `path`, in the person's downloads. */
 const save = (path: string, text: string): void => {
@@ -45,7 +69,6 @@ export const VersionSource = ({
   builder: boolean;
 }) => {
   const { t } = useLingui();
-  const ids = useId();
   const { busy, failure, run } = useCoreAction();
   const published =
     versions.state === "ready"
@@ -90,89 +113,94 @@ export const VersionSource = ({
   const shownVersion = shown === undefined ? "" : nameOf(shown.version);
   const sourceVersion = source === undefined ? "" : nameOf(source.version);
   return (
-    <section className="mt-8 flex flex-col gap-3">
-      <h2 className="font-medium">
-        <Trans>A version&apos;s definition and source</Trans>
-      </h2>
-      <div className="flex flex-wrap items-end gap-2">
-        <div className="flex flex-col gap-2">
-          <Label htmlFor={`${ids}-version`}>
-            <Trans>Version</Trans>
-          </Label>
-          <NativeSelect
-            id={`${ids}-version`}
-            onChange={(event) => {
-              setChosen(Number(event.target.value));
+    <SectionCard title={t`A version's definition and source`}>
+      <div {...stylex.props(styles.body)}>
+        <div {...stylex.props(styles.pick)}>
+          <Select
+            items={published.map(({ version }) => ({
+              value: String(version),
+              label: nameOf(version),
+            }))}
+            onValueChange={(value) => {
+              if (value !== null) {
+                setChosen(Number(value));
+              }
             }}
             value={String(chosen)}
           >
-            {published.map(({ version }) => (
-              <NativeSelectOption key={version} value={String(version)}>
-                {nameOf(version)}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
+            <SelectTrigger aria-label={t`Version`} size="sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent />
+          </Select>
+          <Button
+            disabled={busy}
+            onClick={() => {
+              void show();
+            }}
+            size="sm"
+            variant="outline"
+          >
+            {t`Show its definition`}
+          </Button>
+          <Button
+            disabled={busy}
+            onClick={() => {
+              void readSource();
+            }}
+            size="sm"
+            variant="outline"
+          >
+            {t`Its source files`}
+          </Button>
         </div>
-        <Button
-          disabled={busy}
-          onClick={() => {
-            void show();
-          }}
-          variant="outline"
-        >
-          <Trans>Show its definition</Trans>
-        </Button>
-        <Button
-          disabled={busy}
-          onClick={() => {
-            void readSource();
-          }}
-          variant="outline"
-        >
-          <Trans>Its source files</Trans>
-        </Button>
+        {failure === undefined ? null : (
+          <Alert variant="destructive">
+            <AlertDescription>{failure}</AlertDescription>
+          </Alert>
+        )}
+        {shown === undefined ? null : (
+          <Code
+            code={shown.text}
+            language="json"
+            languageLabel={t`The definition of version ${shownVersion}`}
+          />
+        )}
+        {source === undefined ? null : (
+          <ItemGroup
+            aria-label={t`The source files of version ${sourceVersion}`}
+          >
+            {Object.entries(source.files).map(([path, text], at) => (
+              <Fragment key={path}>
+                {at === 0 ? null : <ItemSeparator />}
+                <Item size="xs">
+                  <ItemMedia>
+                    <Icon icon={FileIcon} />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>
+                      <code>{path}</code>
+                    </ItemTitle>
+                  </ItemContent>
+                  <ItemActions>
+                    <Button
+                      aria-label={t`Download ${path}`}
+                      onClick={() => {
+                        save(path, text);
+                      }}
+                      size="sm"
+                      variant="ghost"
+                    >
+                      <Icon icon={DownloadIcon} />
+                      {t({ message: "Download", context: "download a file" })}
+                    </Button>
+                  </ItemActions>
+                </Item>
+              </Fragment>
+            ))}
+          </ItemGroup>
+        )}
       </div>
-      <ErrorText>{failure}</ErrorText>
-      {shown === undefined ? null : (
-        <div className="flex flex-col gap-2">
-          <h3 className="text-muted-foreground">
-            <Trans>The definition of version {shownVersion}</Trans>
-          </h3>
-          <pre className="bg-muted max-h-96 overflow-auto rounded-md p-3 text-xs">
-            {shown.text}
-          </pre>
-        </div>
-      )}
-      {source === undefined ? null : (
-        <div className="flex flex-col gap-2">
-          <h3 className="text-muted-foreground">
-            <Trans>The source files of version {sourceVersion}</Trans>
-          </h3>
-          <ul className="flex flex-col divide-y rounded-md border">
-            {Object.entries(source.files).map(([path, text]) => (
-              <li
-                className="flex items-center justify-between gap-3 px-3 py-2"
-                key={path}
-              >
-                <code className="min-w-0 truncate font-mono text-xs">
-                  {path}
-                </code>
-                <Button
-                  aria-label={t`Download ${path}`}
-                  onClick={() => {
-                    save(path, text);
-                  }}
-                  size="sm"
-                  variant="outline"
-                >
-                  <DownloadIcon aria-hidden="true" />
-                  <Trans context="download a file">Download</Trans>
-                </Button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </section>
+    </SectionCard>
   );
 };

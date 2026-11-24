@@ -28,12 +28,6 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       error: t({ message: "Failed", context: "a menu item whose work failed" }),
       loading: t`Working`,
     },
-    alert: {
-      close: t`Dismiss`,
-    },
-    alertDialog: {
-      cancel: t`Cancel`,
-    },
     attachment: {
       remove: (name) => t`Remove ${name}`,
     },
@@ -52,17 +46,6 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       shareOf: (share, source) => t`${share} of ${source}`,
       step: (name, value) => (name === "" ? value : t`${name} ${value}`),
     },
-    codeBlock: {
-      collapse: t`Show less`,
-      expand: t`Show more`,
-      moreLines: (count) =>
-        t`${plural(count, { one: "# more line", other: "# more lines" })}`,
-      plainText: t({ message: "Text", context: "a code block's language" }),
-      streaming: t({
-        message: "Writing",
-        context: "a code block being written",
-      }),
-    },
     command: {
       dialogPlaceholder: t`Type a command or search`,
       dialogTrigger: t({ message: "Search", context: "open the search" }),
@@ -72,9 +55,6 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       loading: t`Searching`,
       moreHint: t`Right arrow for more`,
       placeholder: t({ message: "Search", context: "a search field" }),
-    },
-    dialog: {
-      close: t`Close`,
     },
     dropdownMenu: {
       expand: t`More actions`,
@@ -89,12 +69,6 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
     },
     empty: {
       error: t`This did not load`,
-    },
-    field: {
-      statusError: t`Could not save. Your choice is kept.`,
-      statusLoading: t`Saving`,
-      statusRetry: t`Try again`,
-      statusSuccess: t`Saved`,
     },
     holdButton: {
       ask: (words) => t`${words}?`,
@@ -238,9 +212,6 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       thought: (seconds) =>
         t`${plural(seconds, { one: "Thought for # second", other: "Thought for # seconds" })}`,
     },
-    sheet: {
-      close: t`Close`,
-    },
     sources: {
       count: (count) =>
         count === 0
@@ -286,18 +257,6 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
         }),
       },
     },
-    trace: {
-      states: {
-        running: t({ message: "Working", context: "a step's state" }),
-        error: t({ message: "Failed", context: "a step's state" }),
-        pending: t({ message: "Waiting", context: "a step's state" }),
-      },
-    },
-    sidePanel: {
-      close: t`Close`,
-      showAll: t`Show all`,
-      views: t({ message: "Views", context: "a side panel's tabs" }),
-    },
     tabs: {
       close: (name) => t`Close ${name}`,
     },
@@ -308,6 +267,23 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       loading: t`Working`,
       success: t`Done`,
     },
+    alert: {
+      close: t({ message: "Close", context: "close a dialog or panel" }),
+    },
+    alertDialog: {
+      cancel: t({ message: "Cancel", context: "leave a question unanswered" }),
+    },
+    badge: {
+      dot: {
+        default: t({ message: "Note", context: "a badge's dot" }),
+        success: t({ message: "Done", context: "a badge's dot" }),
+        warning: t({ message: "Warning", context: "a badge's dot" }),
+        destructive: t({ message: "Error", context: "a badge's dot" }),
+        info: t({ message: "Info", context: "a badge's dot" }),
+      },
+      remove: t({ message: "Remove", context: "take a badge away" }),
+      removeNamed: (words) => t`Remove ${words}`,
+    },
     breadcrumb: {
       ellipsis: t`Show hidden levels`,
       name: t`Breadcrumb`,
@@ -315,6 +291,96 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
     calendar: {
       next: t`Next month`,
       previous: t`Previous month`,
+    },
+    codeBlock: {
+      collapse: t`Show less`,
+      expand: t`Show more`,
+      moreLines: (count) =>
+        t`${plural(count, { one: "# more line", other: "# more lines" })}`,
+      plainText: t({ message: "Text", context: "code's language: plain text" }),
+      streaming: t({ message: "Writing", context: "code still being written" }),
+    },
+    combobox: {
+      empty: t({ message: "No results", context: "a search finds nothing" }),
+      notChoice: (value) => t`${value} is not one of the choices`,
+      trigger: t`Show the choices`,
+    },
+    dataTable: {
+      actions: t({ message: "Actions", context: "a table's row actions" }),
+      actionsFor: (name) => t`Actions for ${name}`,
+      cancel: t({ message: "Cancel", context: "leave a question unanswered" }),
+      chooseAll: (one) => t`Choose every ${one} shown`,
+      chooseColumn: t({
+        message: "Choose",
+        context: "a table's choice column",
+      }),
+      clear: t({ message: "Clear", context: "empty a table's filter" }),
+      clearSearch: t`Clear search`,
+      close: (name) => t`Close ${name}`,
+      columnInfo: (header) => t`More about ${header}`,
+      columnMenu: (header) => t`Column: ${header}`,
+      columns: t({ message: "Columns", context: "a table's columns" }),
+      confirm: (action, count, unit) => t`${action} ${count} ${unit}?`,
+      confirmDetail: t`This cannot be undone.`,
+      done: (action, count, unit) => t`${action}: ${count} ${unit}`,
+      error: (many) => t`The ${many} did not load`,
+      exportCsv: t`Export CSV`,
+      failedDetail: t`Check the connection, then try again.`,
+      filterAtLeast: t({ message: "is at least", context: "a table filter" }),
+      filterAtMost: t({ message: "is at most", context: "a table filter" }),
+      filterContains: t({ message: "contains", context: "a table filter" }),
+      filterField: t({ message: "Field", context: "a table filter" }),
+      filterIs: t({ message: "is", context: "a table filter" }),
+      filterIsNot: t({ message: "is not", context: "a table filter" }),
+      filterLabel: (label) => t`Filter ${label}`,
+      filterLacks: t({
+        message: "does not contain",
+        context: "a table filter",
+      }),
+      filterName: t`Filter condition`,
+      filterOperator: t({ message: "Operator", context: "a table filter" }),
+      filterSegments: {
+        field: t`Filter field`,
+        operator: t`Filter operator`,
+        value: t`Filter value`,
+      },
+      filterValue: t({ message: "Value", context: "a table filter" }),
+      groupAttention: t({
+        message: "needs attention",
+        context: "a table's group of rows",
+      }),
+      hide: t`Hide column`,
+      loading: (many) => t`Loading ${many}`,
+      loadingMore: (many) => t`Loading more ${many}`,
+      moveEarlier: t`Move earlier`,
+      moveLater: t`Move later`,
+      noDate: t`No date`,
+      noMatch: (many, query) => t`No ${many} match “${query}”.`,
+      noneMeet: (many) => t`No ${many} meet the filter.`,
+      noneYet: (many) => t`No ${many} yet.`,
+      open: (name) => t`Open ${name}`,
+      pages: (label) => t`Pages of ${label}`,
+      pinEnd: t`Pin to the end`,
+      pinStart: t`Pin to the start`,
+      rowPending: t({ message: "pending", context: "a table row's state" }),
+      rowRemoved: t({ message: "removed", context: "a table row's state" }),
+      search: (many) => t`Search ${many}`,
+      searchLabel: (label) => t`Search ${label}`,
+      select: (name) => t`Choose ${name}`,
+      selected: (count, total) => t`${count} of ${total} chosen`,
+      sortDown: t`Sort high to low`,
+      sortNext: t`Sort by this next`,
+      sortUp: t`Sort low to high`,
+      tryAgain: t`Try again`,
+      undo: t({ message: "Undo", context: "take a table's change back" }),
+      unpin: t`Unpin`,
+      view: t({ message: "View", context: "a table's view settings" }),
+      width: (header) => t`Width of ${header}`,
+      withChosen: (many) => t`With the chosen ${many}`,
+      unit: {
+        one: t({ message: "row", context: "a table's row, one" }),
+        other: t({ message: "rows", context: "a table's rows, many" }),
+      },
     },
     datePicker: {
       last30: t`Last 30 days`,
@@ -328,10 +394,27 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       thisMonth: t`This month`,
       today: t`Today`,
     },
+    dialog: {
+      close: t({ message: "Close", context: "close a dialog or panel" }),
+    },
+    field: {
+      statusError: t`Could not save. Your choice is kept.`,
+      statusLoading: t({ message: "Saving", context: "a setting saving" }),
+      statusRetry: t`Try again`,
+      statusSuccess: t({ message: "Saved", context: "a setting saved" }),
+    },
     input: {
       hidePassword: t`Hide password`,
-      replace: t`Replace`,
+      replace: t({ message: "Replace", context: "replace a saved secret" }),
       showPassword: t`Show password`,
+    },
+    sheet: {
+      close: t({ message: "Close", context: "close a dialog or panel" }),
+    },
+    sidePanel: {
+      close: t({ message: "Close", context: "close a dialog or panel" }),
+      showAll: t`Show all`,
+      views: t({ message: "Views", context: "a side panel's views" }),
     },
     stepper: {
       count: (step, total) => t`Step ${step} of ${total}`,
@@ -348,6 +431,13 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
     },
     switch: {
       error: t`Could not save`,
+    },
+    trace: {
+      states: {
+        running: t({ message: "Working", context: "a step's state" }),
+        error: t({ message: "Failed", context: "a step's state" }),
+        pending: t({ message: "Waiting", context: "a step's state" }),
+      },
     },
   };
   return (

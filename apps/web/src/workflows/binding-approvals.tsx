@@ -1,19 +1,31 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/app-kit/components/native-select";
 import { decisionDecidersMax } from "@grasp-os/shared/workflow-resources";
 import type {
   PendingWorkflowBindings,
   WorkflowBindingTarget,
 } from "@grasp-os/shared/workflow-resources";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { Link } from "@grasp-os/ui/components/link";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "@grasp-os/ui/components/select";
+import { Text } from "@grasp-os/ui/components/text";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
-import { XIcon } from "lucide-react";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { Link as RouterLink } from "@tanstack/react-router";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
@@ -44,13 +56,36 @@ import { useCoreAction } from "../use-core-action.ts";
 // target serves. The workflow's page lists the bindings approved in the
 // same frame, each with what it reaches (`targetWords`).
 
+const styles = stylex.create({
+  choice: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["2"],
+  },
+  deciders: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["2"],
+  },
+  tags: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: space["2"],
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  frame: { display: "flex", flexDirection: "column", gap: space["2"] },
+});
+
 /** One binding that waits. */
-export type PendingBinding = PendingWorkflowBindings["bindings"][number];
+type PendingBinding = PendingWorkflowBindings["bindings"][number];
 
 type Offered = PendingBinding["offered"][number];
 
 /** The names of people and teams, by ID, where they are known. */
-export interface KnownNames {
+interface KnownNames {
   people: ReadonlyMap<string, string>;
   teams: ReadonlyMap<string, string>;
 }
@@ -149,26 +184,27 @@ const OfferedChoice = ({
   const choice = offered[chosen] ?? offered[0];
   const wordsOf = ({ target, label }: Offered) => targetWords(target, label);
   return (
-    <div className="flex flex-wrap items-end gap-2">
+    <div {...stylex.props(styles.choice)}>
       {offered.length === 1 ? (
         <span>{wordsOf(choice)}</span>
       ) : (
-        <NativeSelect
-          aria-label={t`What ${alias} reaches`}
-          onChange={(event) => {
-            setChosen(Number(event.target.value));
+        <Select
+          items={offered.map((each, at) => ({
+            value: String(at),
+            label: wordsOf(each),
+          }))}
+          onValueChange={(value) => {
+            if (value !== null) {
+              setChosen(Number(value));
+            }
           }}
           value={String(chosen)}
         >
-          {offered.map((each, at) => (
-            <NativeSelectOption
-              key={JSON.stringify(each.target)}
-              value={String(at)}
-            >
-              {wordsOf(each)}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
+          <SelectTrigger aria-label={t`What ${alias} reaches`} size="sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent />
+        </Select>
       )}
       <Button
         aria-label={t`Approve ${alias}`}
@@ -178,7 +214,7 @@ const OfferedChoice = ({
         }}
         size="sm"
       >
-        <Trans>Approve</Trans>
+        {t`Approve`}
       </Button>
     </div>
   );
@@ -209,39 +245,34 @@ const DecidersChoice = ({
     }
   };
   return (
-    <div className="flex flex-col gap-2">
-      <ul aria-label={t`Who answers ${alias}`} className="flex flex-wrap gap-2">
+    <div {...stylex.props(styles.deciders)}>
+      <ul aria-label={t`Who answers ${alias}`} {...stylex.props(styles.tags)}>
         {deciders.map((decider) => {
           const { name } = decider;
           return (
             <li key={subjectKey(decider)}>
-              <Badge variant="secondary">
+              <Badge
+                onRemove={() => {
+                  setDeciders(
+                    deciders.filter(
+                      (each) => subjectKey(each) !== subjectKey(decider)
+                    )
+                  );
+                }}
+                variant="secondary"
+              >
                 {name}
-                <Button
-                  aria-label={t`Remove ${name}`}
-                  onClick={() => {
-                    setDeciders(
-                      deciders.filter(
-                        (each) => subjectKey(each) !== subjectKey(decider)
-                      )
-                    );
-                  }}
-                  size="icon-xs"
-                  variant="ghost"
-                >
-                  <XIcon />
-                </Button>
               </Badge>
             </li>
           );
         })}
       </ul>
-      <div className="flex flex-wrap items-end gap-2">
+      <div {...stylex.props(styles.choice)}>
         <PeopleTeamsPicker
           candidates={candidates}
           disabled={busy || reading || deciders.length >= decisionDecidersMax}
           holding={holding}
-          label={<Trans>Add who answers</Trans>}
+          label={t`Add who answers`}
           // A decision sent to a role (`role:admin`) is answered only by a
           // binding that names that role.
           roles
@@ -263,7 +294,7 @@ const DecidersChoice = ({
           }}
           size="sm"
         >
-          <Trans>Approve</Trans>
+          {t`Approve`}
         </Button>
       </div>
       <ErrorText>{failure}</ErrorText>
@@ -287,6 +318,7 @@ const BindingChoice = ({
   onApprove: Approve;
   elsewhere: string | undefined;
 }) => {
+  const { t } = useLingui();
   const [first, ...rest] = offered;
   if (kind === "decision") {
     return <DecidersChoice alias={alias} busy={busy} onApprove={onApprove} />;
@@ -295,24 +327,22 @@ const BindingChoice = ({
   const slow = kind === "connector";
   if (first === undefined && slow && elsewhere !== undefined) {
     return (
-      <Link
-        className="underline-offset-4 hover:underline"
-        params={{ workflow: elsewhere }}
-        search={{ view: "settings", section: "files" }}
-        to="/workflows/$workflow"
-      >
-        <Trans>Approve it on the workflow&apos;s page</Trans>
+      <Link asChild>
+        <RouterLink
+          params={{ workflow: elsewhere }}
+          search={{ view: "settings", section: "files" }}
+          to="/workflows/$workflow"
+        >
+          {t`Approve it on the workflow's page`}
+        </RouterLink>
       </Link>
     );
   }
   if (first === undefined) {
     return (
-      <p className="text-muted-foreground">
-        <Trans>
-          Nothing the workflow may use serves it now: grant the workflow what it
-          needs, or try again later.
-        </Trans>
-      </p>
+      <Text color="muted" size="sm">
+        {t`Nothing the workflow may use serves it now: grant the workflow what it needs, or try again later.`}
+      </Text>
     );
   }
   return (
@@ -342,15 +372,17 @@ export const BindingFrame = ({
 }) => {
   const { t } = useLingui();
   return (
-    <li className="flex flex-col gap-2 rounded-lg border px-4 py-3">
-      <span className="flex flex-wrap items-center gap-2">
-        <code className="font-mono">{alias}</code>
-        <span className="text-muted-foreground">
-          {t`${kind}: ${contractId}`}
-        </span>
-      </span>
-      {children}
-    </li>
+    <Item size="sm" variant="outline">
+      <ItemContent>
+        <div {...stylex.props(styles.frame)}>
+          <ItemTitle>
+            <code>{alias}</code>
+          </ItemTitle>
+          <ItemDescription>{t`${kind}: ${contractId}`}</ItemDescription>
+          {children}
+        </div>
+      </ItemContent>
+    </Item>
   );
 };
 
@@ -398,7 +430,7 @@ export const PendingBindingList = ({
 }) => {
   const { t } = useLingui();
   return (
-    <ul aria-label={t`Its bindings`} className="flex flex-col gap-2">
+    <ItemGroup aria-label={t`Its bindings`}>
       {bindings.map((binding) => (
         <BindingRow
           binding={binding}
@@ -408,6 +440,6 @@ export const PendingBindingList = ({
           onApprove={onApprove}
         />
       ))}
-    </ul>
+    </ItemGroup>
   );
 };
