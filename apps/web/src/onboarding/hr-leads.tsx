@@ -34,7 +34,12 @@ import {
 
 const styles = stylex.create({
   form: { display: "grid", gap: space[4] },
-  end: { display: "flex", flexWrap: "wrap", gap: space[3] },
+  end: {
+    display: "flex",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: space[3],
+  },
 });
 
 /** The platform the leads step offers. */

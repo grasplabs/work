@@ -12,6 +12,7 @@ import {
 } from "@grasp-os/ui/components/item";
 import { Switch } from "@grasp-os/ui/components/switch";
 import { Text } from "@grasp-os/ui/components/text";
+import { ArrowRightIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { colors, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -44,6 +45,14 @@ const PHONE = "@media (max-width: 40rem)";
 
 const styles = stylex.create({
   stack: { display: "grid", gap: space[4] },
+  // The way on stands on the column's middle, under the centred words.
+  end: {
+    display: "flex",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: space[3],
+    width: "100%",
+  },
   rows: { margin: 0, padding: 0, listStyle: "none" },
   // A team a row: its name, who leads it, and whether it takes part; on a phone the name above the two.
   row: {
@@ -97,40 +106,44 @@ const HrPlatformChoice = ({
   return (
     <CalmStep
       body={body}
+      centred
       end={
-        chosen ? (
-          <>
-            <Button onClick={onDone} size="lg">
-              {t`Continue`}
-            </Button>
-            <Button
-              onClick={() => {
-                void choose(null);
-              }}
-              size="lg"
-              variant="outline"
-            >
-              {t`Use another platform`}
-            </Button>
-          </>
-        ) : (
-          <>
-            <Button
-              onClick={() => {
-                void (async () => {
-                  if (await save({ ...choices, hr: { kind: "none" } })) {
-                    onDone();
-                  }
-                })();
-              }}
-              size="lg"
-              variant="outline"
-            >
-              {t`We don’t use an HR platform`}
-            </Button>
-            <SupportLink page="hr">{t`More about this connection`}</SupportLink>
-          </>
-        )
+        <div {...stylex.props(styles.end)}>
+          {chosen ? (
+            <>
+              <Button onClick={onDone} size="lg">
+                {t`Continue`}
+                <Icon icon={ArrowRightIcon} />
+              </Button>
+              <Button
+                onClick={() => {
+                  void choose(null);
+                }}
+                size="lg"
+                variant="outline"
+              >
+                {t`Use another platform`}
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                onClick={() => {
+                  void (async () => {
+                    if (await save({ ...choices, hr: { kind: "none" } })) {
+                      onDone();
+                    }
+                  })();
+                }}
+                size="lg"
+                variant="outline"
+              >
+                {t`We don’t use an HR platform`}
+              </Button>
+              <SupportLink page="hr">{t`More about this connection`}</SupportLink>
+            </>
+          )}
+        </div>
       }
       title={t`Which HR platform do you use?`}
     >
@@ -239,27 +252,31 @@ const ConfirmOrg = ({
   return (
     <CalmStep
       body={t`I talk to each team lead first, so they hear about me before their team does. Check who leads which team, and which teams take part.`}
+      centred
       end={
-        saved ? (
-          <Button
-            onClick={() => {
-              void onward();
-            }}
-            size="lg"
-          >
-            {t`Continue`}
-          </Button>
-        ) : (
-          <Button
-            onClick={() => {
-              void confirm();
-            }}
-            size="lg"
-            status={busy || refreshing ? "loading" : "idle"}
-          >
-            {t`This is right`}
-          </Button>
-        )
+        <div {...stylex.props(styles.end)}>
+          {saved ? (
+            <Button
+              onClick={() => {
+                void onward();
+              }}
+              size="lg"
+            >
+              {t`Continue`}
+              <Icon icon={ArrowRightIcon} />
+            </Button>
+          ) : (
+            <Button
+              onClick={() => {
+                void confirm();
+              }}
+              size="lg"
+              status={busy || refreshing ? "loading" : "idle"}
+            >
+              {t`This is right`}
+            </Button>
+          )}
+        </div>
       }
       title={t`Is this your organization?`}
     >
@@ -360,15 +377,18 @@ export const LeadsStep = (props: StepProps) => {
     return (
       <CalmStep
         body={t`First I need your staff list.`}
+        centred
         end={
-          <Button
-            onClick={() => {
-              props.go("company");
-            }}
-            size="lg"
-          >
-            {t`Share your staff list`}
-          </Button>
+          <div {...stylex.props(styles.end)}>
+            <Button
+              onClick={() => {
+                props.go("company");
+              }}
+              size="lg"
+            >
+              {t`Share your staff list`}
+            </Button>
+          </div>
         }
         title={t`Is this your organization?`}
       />
