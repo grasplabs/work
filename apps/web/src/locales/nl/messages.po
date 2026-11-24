@@ -1822,10 +1822,6 @@ msgstr "Een verbinding weigerde te zeggen wat er veranderd is"
 msgid "A copy of everything the Brain keeps for you alone: your own sources and what it remembers from them. Only you can make it and download it, and it is deleted when your data is erased."
 msgstr "Een kopie van alles wat het Brain alleen voor jou bewaart: je eigen bronnen en wat het daaruit onthoudt. Alleen jij kunt hem maken en downloaden, en hij wordt verwijderd als je gegevens worden gewist."
 
-#: src/onboarding/company-step.tsx
-msgid "A CSV or Excel file, a row per person"
-msgstr "Een CSV- of Excel-bestand, een rij per persoon"
-
 #: src/drafts/publish-errors.ts
 msgid "A data migration moved this App's records on since this version, so it can't be shared again. Share a new version instead."
 msgstr "Een gegevensmigratie heeft de records van deze App sinds deze versie verder gezet, dus die kan niet opnieuw gedeeld worden. Deel in plaats daarvan een nieuwe versie."
@@ -1992,10 +1988,6 @@ msgstr "Een skill"
 #: src/brain/skills-page.tsx
 msgid "A SKILL.md: a name of lowercase letters, digits and hyphens, and a description of when to use it, then the steps. Saving a skill of a name you have already makes its next version."
 msgstr "Een SKILL.md: een naam van kleine letters, cijfers en koppeltekens, en een beschrijving van wanneer je hem gebruikt, dan de stappen. Sla je een skill op met een naam die je al hebt, dan wordt dat de volgende versie."
-
-#: src/onboarding/company-step.tsx
-msgid "A staff list is the quickest way in: names, email addresses, teams and jobs, as a CSV or Excel file. I only use it to know who to talk to."
-msgstr "Een personeelslijst is de snelste weg: namen, e-mailadressen, teams en functies, als CSV- of Excelbestand. Ik gebruik hem alleen om te weten met wie ik moet praten."
 
 #: src/workflows/workflow-flow.tsx
 msgid "A step is a JSON object."
@@ -2647,6 +2639,10 @@ msgstr "Ook aan gewerkt"
 #: src/chat/agent-change-card.tsx
 msgid "Also works on its own"
 msgstr "Werkt ook zelfstandig"
+
+#: src/onboarding/company-step.tsx
+msgid "Among them {names}."
+msgstr "Onder hen {names}."
 
 #: src/workflows/resource-params.tsx
 msgid "Amount"
@@ -4641,6 +4637,14 @@ msgstr "Koppel eerst: {systems}."
 #: src/routes/_shell.settings.members.tsx
 msgid "Connect shared accounts and decide what Apps may do"
 msgstr "Gedeelde accounts koppelen en bepalen wat apps mogen"
+
+#: src/onboarding/company-step.tsx
+msgid "Connect your {signIn} sign-in. I’ll only see names, teams and roles. No list at hand? Skip this, and we’ll sort it out with you."
+msgstr "Koppel je {signIn}-login. Ik zie alleen namen, teams en rollen. Geen lijst bij de hand? Sla dit over, dan regelen we het samen met je."
+
+#: src/onboarding/company-step.tsx
+msgid "Connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. No list at hand? Skip this, and we’ll sort it out with you."
+msgstr "Koppel je Microsoft- of Google-login. Ik zie alleen namen, teams en rollen. Geen lijst bij de hand? Sla dit over, dan regelen we het samen met je."
 
 #: src/onboarding/sources-step.tsx
 msgid "Connected"
@@ -13760,6 +13764,14 @@ msgstr "{name} met {team} delen?"
 msgid "Share {name} with the company?"
 msgstr "{name} met het bedrijf delen?"
 
+#: src/onboarding/company-step.tsx
+msgid "Share a staff list as a CSV or Excel file, a row per person. No list at hand? Skip this, and we’ll sort it out with you."
+msgstr "Deel een personeelslijst als CSV- of Excelbestand, één rij per persoon. Geen lijst bij de hand? Sla dit over, dan regelen we het samen met je."
+
+#: src/onboarding/company-step.tsx
+msgid "Share another staff list as a CSV or Excel file, a row per person. It replaces the one I have now."
+msgstr "Deel een andere personeelslijst als CSV- of Excelbestand, één rij per persoon. Die vervangt de lijst die ik nu heb."
+
 #: src/drafts/sharing.tsx
 msgid "Share as"
 msgstr "Delen als"
@@ -14194,6 +14206,10 @@ msgstr "Overslaan"
 msgctxt "skip a question"
 msgid "Skip"
 msgstr "Overslaan"
+
+#: src/onboarding/company-step.tsx
+msgid "Skip for now"
+msgstr "Nu overslaan"
 
 #: src/frame/ui-words.tsx
 msgid "Skipped {name}"
@@ -15720,14 +15736,6 @@ msgstr "de aanbieder het te druk had en vroeg te wachten"
 #: src/settings/ai-providers.tsx
 msgid "The providers and models below."
 msgstr "De aanbieders en modellen hieronder."
-
-#: src/onboarding/company-step.tsx
-msgid "The quickest way is to connect your {signIn} sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed."
-msgstr "De snelste manier is je {signIn}-login koppelen. Ik zie alleen namen, teams en rollen. Je e-mail, chats en agenda’s blijven dicht."
-
-#: src/onboarding/company-step.tsx
-msgid "The quickest way is to connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed."
-msgstr "De snelste manier is je Microsoft- of Google-login koppelen. Ik zie alleen namen, teams en rollen. Je e-mail, chats en agenda’s blijven dicht."
 
 #: src/apps/app-access-requests.tsx
 msgid "The request allows nothing until an admin grants it. They see what the app asks for and decide."
