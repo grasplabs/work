@@ -3460,7 +3460,22 @@ describe("erasing a person", () => {
     const admin = await signedInApi(idp, "admin");
     const person = await signedInApi(idp, "builder");
     const other = await signedInApi(idp, "user");
-    await person.api.chats.create("Theirs");
+    const theirs = await person.api.chats.create("Theirs");
+    // A picture they pasted there, kept whole in their workspace.
+    const picture = await person.api.chats.attachFile(theirs.id, {
+      name: "Image 1",
+      bytes: new Uint8Array([
+        ...new TextEncoder().encode("GIF89a"),
+        1,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0x3b,
+      ]),
+    });
     const kept = await other.api.chats.create("Someone else's");
     // Who was in a chat on a chat platform, as each chat's agent reads it:
     // one of their own, and someone else's they were in.
@@ -3483,6 +3498,7 @@ describe("erasing a person", () => {
     ]);
     await admin.api.members.remove(person.userId);
     const before = await inWorkspace(person.userId, "chats");
+    const picturesBefore = await inWorkspace(person.userId, "chat_file_parts");
 
     await admin.api.members.erase(person.userId, String(person.person.name));
     const others = await other.api.chats.list();
@@ -3490,15 +3506,27 @@ describe("erasing a person", () => {
       "SELECT chat_id AS chatId FROM chat_audiences WHERE chat_id IN ('their-group-chat', 'a-group-chat-they-were-in')"
     ).all<{ chatId: string }>();
 
+    // What would serve it to them: nothing.
+    const pictureAfter = await workspace(
+      env,
+      personalWorkspaceId(person.userId)
+    ).ownChatPicture(theirs.id, person.userId, picture.id);
+
     expect({
       before,
       after: await inWorkspace(person.userId, "chats"),
+      picturesBefore,
+      picturesAfter: await inWorkspace(person.userId, "chat_file_parts"),
+      pictureAfter,
       outbox: await inWorkspace(person.userId, "audit_outbox"),
       others: others.map(({ id }) => id),
       audiences: audiences.map(({ chatId }) => chatId),
     }).toStrictEqual({
       before: 1,
       after: 0,
+      picturesBefore: 1,
+      picturesAfter: 0,
+      pictureAfter: undefined,
       outbox: 0,
       others: [kept.id],
       // A shared chat elsewhere is the company's, and keeps its audience.

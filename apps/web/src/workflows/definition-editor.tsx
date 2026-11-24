@@ -17,8 +17,6 @@ import {
   ItemContent,
   ItemDescription,
   ItemDetail,
-  ItemGroup,
-  ItemSeparator,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import { Textarea } from "@grasp-os/ui/components/textarea";
@@ -26,11 +24,12 @@ import { visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { colors, font, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Fragment, useState } from "react";
+import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
 import { SectionCard } from "./section-card.tsx";
+import { SeparatedItems } from "./separated-items.tsx";
 
 // A workflow's definition as its builders edit it: the draft's JSON
 // (`workflow.json`, the draft every builder shares), each save one
@@ -110,16 +109,12 @@ const Problems = ({
   const { t } = useLingui();
   return problems.length === 0 ? null : (
     <SectionCard flush title={t`What to fix`}>
-      <ItemGroup>
-        {problems.map((problem, at) => (
-          <Fragment
-            key={`${problem.pointer} ${problem.code} ${problem.message}`}
-          >
-            {at === 0 ? null : <ItemSeparator />}
-            <Problem problem={problem} />
-          </Fragment>
-        ))}
-      </ItemGroup>
+      <SeparatedItems
+        rows={problems.map((problem) => ({
+          key: `${problem.pointer} ${problem.code} ${problem.message}`,
+          row: <Problem problem={problem} />,
+        }))}
+      />
     </SectionCard>
   );
 };

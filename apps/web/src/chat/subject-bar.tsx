@@ -86,7 +86,9 @@ const WorkedLink = ({
     <RouterLink
       {...props}
       params={{ workflow: worked.id }}
-      search={chatId === undefined ? {} : { chat: chatId }}
+      search={
+        chatId === undefined ? { view: "flow" } : { chat: chatId, view: "flow" }
+      }
       to="/workflows/$workflow"
     />
   );

@@ -2,6 +2,7 @@
 import type { RunFileListing } from "@grasp-os/shared/run-files";
 import type { MemberRole } from "@grasp-os/shared/subject-members";
 import type { WorkflowResourceRun } from "@grasp-os/shared/workflow-resources";
+import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -15,18 +16,11 @@ import {
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import {
-  afterEach,
-  beforeEach,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vite-plus/test";
+import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { RunBeside } from "./run-detail.tsx";
+import { RunPage } from "./run-page.tsx";
 
-// What a reader can do with a run opened beside the page, against core's
+// What a reader can do on a run's page, against core's
 // workflowResources as the page reaches them over RPC, faked: a builder
 // stops a run that hasn't ended, after being asked, and only that run; a
 // user is offered nothing to stop; the run's finished files link to
@@ -87,10 +81,11 @@ const opened = async (role: MemberRole, files: RunFileListing[] | null) => {
     getParentRoute: () => rootRoute,
     path: "/",
     component: () => (
-      <RunBeside
+      <RunPage
         admin={false}
+        decision={undefined}
+        name="Invoice intake"
         names={{ people: new Map(), me: "ada" }}
-        onClose={() => {}}
         opened={running}
         workflow="workflow-1"
       />
@@ -107,7 +102,9 @@ const opened = async (role: MemberRole, files: RunFileListing[] | null) => {
     root = createRoot(host);
     root.render(
       <I18nProvider i18n={i18n}>
-        <RouterProvider router={router} />
+        <SidebarProvider>
+          <RouterProvider router={router} />
+        </SidebarProvider>
       </I18nProvider>
     );
     await router.load();
@@ -145,16 +142,8 @@ const press = async (text: string): Promise<void> => {
   });
 };
 
-describe("a run opened beside the page", () => {
-  // A phone's page: the run opens in a Sheet over its list.
-  beforeEach(() => {
-    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
-      DOMRect.fromRect({ width: 390, height: 600 })
-    );
-  });
-
+describe("a run's page", () => {
   afterEach(() => {
-    vi.restoreAllMocks();
     act(() => {
       root?.unmount();
     });
@@ -171,7 +160,7 @@ describe("a run opened beside the page", () => {
     expect({
       asked,
       stopped,
-      cancelled: document.body.textContent.includes("Cancelled"),
+      cancelled: document.body.textContent.includes("Stopped"),
       stopOffered: button("Stop") !== undefined,
     }).toStrictEqual({
       asked: true,

@@ -1,6 +1,6 @@
 import type { Context } from "@earendil-works/chord";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import type { Message, UserMessage } from "@earendil-works/pi-ai";
+import type { ImageContent, Message, UserMessage } from "@earendil-works/pi-ai";
 import {
   estimateContextTokens,
   estimateMessageTokens,
@@ -25,7 +25,13 @@ import type {
   HookApi,
 } from "@earendil-works/pi-durable";
 import { agentErrors } from "@grasp-os/shared/agent";
-import { chatAskLimits } from "@grasp-os/shared/chat";
+import {
+  chatAskLimits,
+  chatPictureTypes,
+  isChatPictureType,
+} from "@grasp-os/shared/chat";
+import type { ChatPictureType } from "@grasp-os/shared/chat";
+import { toBase64 } from "@grasp-os/shared/encoding";
 import { z } from "zod";
 
 import { readDocs, searchDocs } from "./agent-docs.ts";
@@ -38,6 +44,7 @@ import {
   instructions,
   filesNoteText,
   makeQuestionsLeft,
+  pictureLine,
   draftAgent,
   draftAgentChange,
   proposePlan,
@@ -113,6 +120,16 @@ export interface ChatAgent {
    * asked before every model request and every compaction.
    */
   withheld: () => Promise<ReadonlySet<string>>;
+  /**
+   * One of the chat's pictures, for the model to see after its line
+   * (`pictureLine`), unless larger than `maxBytes`: only where the turn's
+   * model takes pictures; none where it doesn't, and its questions' words
+   * stand alone.
+   */
+  picture?: (
+    fileId: string,
+    maxBytes: number
+  ) => Promise<{ type: ChatPictureType; bytes: Uint8Array } | undefined>;
   /**
    * Stops the turn, for `reason`: a hook can't end a run itself, so the
    * host aborts the chat's conversation (`Conversation.abort`), and for
@@ -200,8 +217,10 @@ const recallRunOf = (part: {
 /**
  * A question as the model reads it: the person's words, what it is about
  * (`aboutNotes`: its subject and mentions), the note of the files it
- * carries, and what the recall before it found, each a part. Kept with the question, so a summary of
- * the chat keeps what each question was about too.
+ * carries, each picture's line, and what the recall before it found,
+ * each a part. Kept with the question, so a summary of the chat keeps
+ * what each question was about too. A picture itself is never kept here:
+ * each request shows it after its line (`withPictures`).
  */
 export const questionContent = (
   text: string,
@@ -214,6 +233,9 @@ export const questionContent = (
   ...(files.length === 0
     ? []
     : [{ type: "text" as const, text: filesNoteText(files) }]),
+  ...files
+    .filter(({ type }) => isChatPictureType(type))
+    .map(({ id }) => ({ type: "text" as const, text: pictureLine(id) })),
   ...(recall === undefined
     ? []
     : [
@@ -609,6 +631,105 @@ const guarded = async (
 };
 
 /**
+ * Most bytes of pictures one request shows the model: the newest that fit
+ * (`withPictures`). The providers take a request of 32 MB at most, and a
+ * picture goes as base64, a third larger; the rest is room for the
+ * transcript, and for the turn's memory, which holds each one shown.
+ */
+export const picturesPerRequestMaxBytes = 10 * 1024 * 1024;
+
+const pictureLinePattern = /^\[Picture (?<id>[^\]\s]+)\]$/u;
+
+/** A picture as the model is shown it, with its size in bytes. */
+type ShownPicture = { content: ImageContent; bytes: number } | undefined;
+
+/** A picture of the chat, unless larger than `maxBytes`, as shown. */
+type ShowPicture = (fileId: string, maxBytes: number) => Promise<ShownPicture>;
+
+/**
+ * `read`, kept for the turn: each picture shown is read from the
+ * Workspace and made base64 once, though every request of the turn shows
+ * it. One that didn't fit isn't read, or kept.
+ */
+const shown = (read: NonNullable<ChatAgent["picture"]>): ShowPicture => {
+  const kept = new Map<string, NonNullable<ShownPicture>>();
+  return async (fileId, maxBytes) => {
+    const known = kept.get(fileId);
+    if (known !== undefined) {
+      return known.bytes <= maxBytes ? known : undefined;
+    }
+    const picture = await read(fileId, maxBytes);
+    if (picture !== undefined) {
+      kept.set(fileId, {
+        content: {
+          type: "image",
+          data: toBase64(picture.bytes),
+          mimeType: chatPictureTypes[picture.type],
+        },
+        bytes: picture.bytes.byteLength,
+      });
+    }
+    return kept.get(fileId);
+  };
+};
+
+/** `picture(fileId, maxBytes)`, or none when it can't be read. */
+const shownOrNone = async (
+  picture: ShowPicture,
+  fileId: string,
+  maxBytes: number
+): Promise<ShownPicture> => {
+  try {
+    return await picture(fileId, maxBytes);
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * `messages` with each picture a question carries shown after its line
+ * (`pictureLine`), newest first, as many as fit in
+ * {@link picturesPerRequestMaxBytes}: an older one past it keeps its line
+ * alone, as does one the chat no longer has. Only a line core put after
+ * the person's own words counts. Never throws, as pi sends the request
+ * unchanged past a hook that throws: a picture that can't be read is left
+ * out.
+ */
+const withPictures = async (
+  messages: readonly Message[],
+  picture: ShowPicture
+): Promise<Message[]> => {
+  let room = picturesPerRequestMaxBytes;
+  const sent: Message[] = [];
+  for (const message of messages.toReversed()) {
+    if (message.role !== "user" || typeof message.content === "string") {
+      sent.push(message);
+      continue;
+    }
+    const content: Exclude<UserMessage["content"], string> = [];
+    const parts = message.content.toReversed();
+    for (const [index, part] of parts.entries()) {
+      const id =
+        part.type === "text" && index < parts.length - 1
+          ? pictureLinePattern.exec(part.text)?.groups?.id
+          : undefined;
+      let image: ShownPicture;
+      if (id !== undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- newest first, within the room left
+        image = await shownOrNone(picture, id, room);
+      }
+      if (image !== undefined) {
+        room -= image.bytes;
+        content.push(image.content);
+      }
+      content.push(part);
+    }
+    sent.push({ ...message, content: content.toReversed() });
+  }
+  return sent.toReversed();
+};
+
+/**
  * A chat's agent for one turn, as a pi-durable extension: the instructions
  * and the chat's sections (each tagged by itself, as the model has always
  * read them), `executeCode` in our locked isolate, `readApi`, the docs'
@@ -619,6 +740,8 @@ const guarded = async (
  */
 export const chatAgent = (agent: ChatAgent): Extension => {
   const { apis, scope, runs, assets } = agent;
+  const picture =
+    agent.picture === undefined ? undefined : shown(agent.picture);
   const sections = sectionsOf(apis, agent.context);
   // A chat "Make something" started counts its questions before a plan.
   const asksLeft =
@@ -682,8 +805,14 @@ export const chatAgent = (agent: ChatAgent): Extension => {
             } catch {
               // The request still goes out withheld.
             }
+            return { messages: sent.messages };
           }
-          return { messages: sent.messages };
+          return {
+            messages:
+              picture === undefined
+                ? sent.messages
+                : await withPictures(sent.messages, picture),
+          };
         },
       }),
       // pi's summarizer reads the context as stored: declined while it

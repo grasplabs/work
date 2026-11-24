@@ -23,6 +23,7 @@ import {
   chatFilesMax,
   chatFilesPerQuestionMax,
   chatPlatformName,
+  isChatPictureType,
   chatMentionsMax,
   chatPlanSchema,
   chatPlatformSchema,
@@ -34,6 +35,7 @@ import type {
   ChatFile,
   ChatFileType,
   ChatMake,
+  ChatPictureType,
   ChatMessage,
   ChatOutput,
   ChatPlan,
@@ -176,6 +178,7 @@ import {
   maxToolCallIdChars,
   chatDocuments,
   chatDrafts,
+  chatFileParts,
   chatFiles,
   chatMessages,
   chatRequestKeys,
@@ -608,6 +611,12 @@ const afterSchema = z.int().nonnegative().nullable();
  * (`recentHistory` in agent.ts), which for every model is less than this.
  */
 export const maxChatChars = 4_000_000;
+
+/**
+ * Most bytes of a picture one row keeps (`chat_file_parts`): SQLite here
+ * keeps no value past 2 MB.
+ */
+export const chatFilePartBytes = 1024 * 1024;
 
 /**
  * Most ended runs an object remembers, code runs and tool calls alike
@@ -1549,14 +1558,22 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Attaches a file to `personId`'s own chat, as the text core read from
-   * it (chats-rpc.ts), for its next question to carry: refused past
-   * {@link chatFilesMax}. Audited with its ID, type and size, never its
-   * name or text.
+   * it (chats-rpc.ts), or a picture whole, in parts
+   * ({@link chatFilePartBytes}), for its next question to carry: refused
+   * past {@link chatFilesMax}. Audited with its ID, type and size, never
+   * its name, text or picture.
    */
   attachFile(
     chatId: unknown,
     personId: string,
-    file: { name: string; type: ChatFileType; bytes: number; text: string },
+    file:
+      | { name: string; type: ChatFileType; bytes: number; text: string }
+      | {
+          name: string;
+          type: ChatPictureType;
+          bytes: number;
+          picture: Uint8Array;
+        },
     by: AuditActor
   ): ChatFile {
     const { id } = this.#graspChat(chatId, personId);
@@ -1578,11 +1595,35 @@ export class Workspace extends DurableObject<Env> {
           id: crypto.randomUUID(),
           chatId: id,
           messageId: null,
-          ...file,
+          name: file.name,
+          type: file.type,
+          bytes: file.bytes,
+          // A picture has no text: the model sees it (`chatPicture`).
+          text: "text" in file ? file.text : "",
           createdAt: new Date(),
         })
         .returning(chatFileCard)
         .get();
+      if ("picture" in file) {
+        const { picture } = file;
+        for (
+          let part = 0;
+          part * chatFilePartBytes < picture.byteLength;
+          part += 1
+        ) {
+          this.#db
+            .insert(chatFileParts)
+            .values({
+              fileId: row.id,
+              part,
+              bytes: picture.subarray(
+                part * chatFilePartBytes,
+                (part + 1) * chatFilePartBytes
+              ),
+            })
+            .run();
+        }
+      }
       this.#outboxed(by, "chat.file_attached", id, {
         file: row.id,
         type: file.type,
@@ -1617,6 +1658,26 @@ export class Workspace extends DurableObject<Env> {
       throw agentErrors.create("agent.busy");
     }
     this.ctx.storage.transactionSync(() => {
+      // A picture's parts first, as each names its file: only those of
+      // the file removed here, none of one a question carried.
+      this.#db
+        .delete(chatFileParts)
+        .where(
+          inArray(
+            chatFileParts.fileId,
+            this.#db
+              .select({ id: chatFiles.id })
+              .from(chatFiles)
+              .where(
+                and(
+                  eq(chatFiles.chatId, id),
+                  eq(chatFiles.id, fileId),
+                  isNull(chatFiles.messageId)
+                )
+              )
+          )
+        )
+        .run();
       const removed = this.#db
         .delete(chatFiles)
         .where(
@@ -1670,6 +1731,67 @@ export class Workspace extends DurableObject<Env> {
   }
 
   /**
+   * One of the chat's pictures, its type and bytes, for its turn to show
+   * the model (chat-harness.ts); `undefined` for none the chat has, and
+   * for one larger than `maxBytes`, which isn't read.
+   */
+  chatPicture(
+    chatId: ChatId,
+    fileId: string,
+    maxBytes = Number.POSITIVE_INFINITY
+  ): { type: ChatPictureType; bytes: Uint8Array } | undefined {
+    const file = this.#db
+      .select({ type: chatFiles.type, bytes: chatFiles.bytes })
+      .from(chatFiles)
+      .where(and(eq(chatFiles.chatId, chatId), eq(chatFiles.id, fileId)))
+      .get();
+    if (
+      file === undefined ||
+      !isChatPictureType(file.type) ||
+      file.bytes > maxBytes
+    ) {
+      return undefined;
+    }
+    const parts = this.#db
+      .select({ bytes: chatFileParts.bytes })
+      .from(chatFileParts)
+      .where(eq(chatFileParts.fileId, fileId))
+      .orderBy(asc(chatFileParts.part))
+      .all();
+    const bytes = new Uint8Array(
+      parts.reduce((total, part) => total + part.bytes.byteLength, 0)
+    );
+    let at = 0;
+    for (const part of parts) {
+      bytes.set(part.bytes, at);
+      at += part.bytes.byteLength;
+    }
+    return { type: file.type, bytes };
+  }
+
+  /**
+   * One of the pictures of `personId`'s own chat in Grasp, for its page to
+   * show again (chat-file-route.ts); `undefined` for any other chat's, a
+   * file that isn't a picture, and one the chat doesn't have.
+   */
+  ownChatPicture(
+    chatId: unknown,
+    personId: string,
+    fileId: string
+  ): { type: ChatPictureType; bytes: Uint8Array } | undefined {
+    const id = chatIdSchema.safeParse(chatId);
+    if (!id.success || this.#deleting.has(id.data)) {
+      return undefined;
+    }
+    const chat = this.#db
+      .select({ id: chats.id })
+      .from(chats)
+      .where(and(eq(chats.id, id.data), shownInGrasp(personId)))
+      .get();
+    return chat === undefined ? undefined : this.chatPicture(chat.id, fileId);
+  }
+
+  /**
    * The files `fileIds` names, in that order, each attached to the chat
    * and carried by no question yet: what a question may carry. Refused
    * with `agent.file_not_found` for any other.
@@ -1677,7 +1799,7 @@ export class Workspace extends DurableObject<Env> {
   #unsentFiles(
     chatId: ChatId,
     fileIds: readonly string[]
-  ): { id: string; name: string; type: ChatFileType }[] {
+  ): { id: string; name: string; type: ChatFileType | ChatPictureType }[] {
     if (fileIds.length === 0) {
       return [];
     }
@@ -4899,7 +5021,20 @@ export class Workspace extends DurableObject<Env> {
           .where(eq(brainCaptureIntents.evidenceId, id))
           .run();
         this.#db.delete(heldAppCalls).where(eq(heldAppCalls.chatId, id)).run();
-        // Before its messages: a file names the question that carried it.
+        // A picture's parts before its file, and the files before its
+        // messages: a file names the question that carried it.
+        this.#db
+          .delete(chatFileParts)
+          .where(
+            inArray(
+              chatFileParts.fileId,
+              this.#db
+                .select({ id: chatFiles.id })
+                .from(chatFiles)
+                .where(eq(chatFiles.chatId, id))
+            )
+          )
+          .run();
         this.#db.delete(chatFiles).where(eq(chatFiles.chatId, id)).run();
         this.#db
           .delete(chatSearchText)

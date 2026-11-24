@@ -13,17 +13,13 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import type {
-  OverviewRow,
-  ToolsByWorkflow,
-  TriggersByWorkflow,
-} from "./overview.ts";
+import type { OverviewRow, TriggersByWorkflow } from "./overview.ts";
 import { WorkflowRows } from "./workflow-rows.tsx";
 
-// The Workflows page's rows: the workflows stand under their phases, each
-// phase counted; a row says how the workflow stands, whose it is, what
-// starts it, the tools it works in and how its week went, and opens the
-// workflow within Grasp.
+// The Workflows page's table: a row a workflow, what needs the reader
+// first, each saying how it stands now, whose it is, how its last 7 days
+// went, when it last ran and what starts it next, and opening the workflow
+// within Grasp.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -32,6 +28,8 @@ const row = (name: string, change: Partial<OverviewRow>): OverviewRow => ({
   name,
   phase: "running",
   paused: false,
+  blocked: null,
+  role: null,
   process: null,
   owner: "Ada Lovelace",
   runs: 12,
@@ -44,9 +42,13 @@ const row = (name: string, change: Partial<OverviewRow>): OverviewRow => ({
 
 const rows = [
   row("Complaints", { phase: "needsYou", failed: 2 }),
-  row("Refunds", { phase: "needsYou", waiting: 1 }),
+  row("Refunds", { phase: "needsYou", waiting: 1, role: "user", runs: 3 }),
   row("Archive", {}),
   row("Expenses", { paused: true, owner: "Grace Hopper" }),
+  row("Intake", {
+    phase: "building",
+    blocked: { kind: "email", why: "waiting" },
+  }),
   row("Billing", {
     phase: "building",
     owner: null,
@@ -54,43 +56,69 @@ const rows = [
     version: null,
     lastRun: null,
   }),
+  row("Ledger", { runs: null, lastRun: null }),
+  row("Claims", {
+    phase: "building",
+    blocked: { kind: "schedule", why: "refused" },
+  }),
+  row("Payroll", {}),
 ];
-
-const tools: ToolsByWorkflow = new Map([
-  [
-    "wf-archive",
-    [
-      { name: "Microsoft 365", brand: "microsoft" },
-      { name: "Acme CRM", brand: undefined },
-    ],
-  ],
-]);
 
 const triggers: TriggersByWorkflow = new Map([
   [
     "wf-archive",
     [
-      { kind: "email", address: "archive", nextAt: null },
-      { kind: "schedule", address: null, nextAt: "2026-11-23T08:00:00.000Z" },
+      { kind: "webhook", address: null, nextAt: null, blocked: "waiting" },
+      { kind: "email", address: "archive", nextAt: null, blocked: null },
+      { kind: "email", address: "returns", nextAt: null, blocked: null },
+    ],
+  ],
+  [
+    "wf-claims",
+    [
+      {
+        kind: "schedule",
+        address: null,
+        nextAt: "2030-01-07T08:00:00.000Z",
+        blocked: "refused",
+      },
     ],
   ],
   ["wf-expenses", []],
+  [
+    "wf-intake",
+    [{ kind: "email", address: null, nextAt: null, blocked: "waiting" }],
+  ],
+  ["wf-ledger", []],
+  [
+    "wf-payroll",
+    [
+      {
+        kind: "schedule",
+        address: null,
+        nextAt: "2031-03-03T08:00:00.000Z",
+        blocked: null,
+      },
+      {
+        kind: "schedule",
+        address: null,
+        nextAt: "2030-02-04T08:00:00.000Z",
+        blocked: null,
+      },
+    ],
+  ],
 ]);
 
 let root: Root | undefined;
 
-/** The rows, as the Workflows page shows them; where the router stands is returned. */
-const shown = async ({ unread = false }: { unread?: boolean } = {}) => {
+/** The table, as the Workflows page shows it to an admin or not; where the router stands is returned. */
+const shown = async ({ admin = false }: { admin?: boolean } = {}) => {
   const rootRoute = createRootRoute();
   const index = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
     component: () => (
-      <WorkflowRows
-        rows={rows}
-        tools={tools}
-        triggers={unread ? undefined : triggers}
-      />
+      <WorkflowRows admin={admin} builds rows={rows} triggers={triggers} />
     ),
   });
   const page = createRoute({
@@ -116,27 +144,20 @@ const shown = async ({ unread = false }: { unread?: boolean } = {}) => {
   return router;
 };
 
-/** The link that opens the workflow called `name`: its name, on its row. */
-const linkOf = (name: string): HTMLAnchorElement => {
-  const found = [...document.querySelectorAll("a")].find(
-    (each) => each.textContent === name
+/** The table's row of the workflow called `name`, cell by cell. */
+const cellsOf = (name: string): string[] => {
+  const found = [...document.querySelectorAll("tbody tr")].find(
+    (each) => each.querySelector("th")?.textContent === name
   );
   if (found === undefined) {
     throw new TypeError(`No row for ${name}`);
   }
-  return found;
+  return [...found.querySelectorAll("th, td")].map(
+    (cell) => cell.textContent ?? ""
+  );
 };
 
-/** The row of the workflow called `name`: all it says, around its link. */
-const rowOf = (name: string): HTMLElement => {
-  const found = linkOf(name).closest<HTMLElement>("[data-slot=item]");
-  if (found === null) {
-    throw new TypeError(`No row around ${name}`);
-  }
-  return found;
-};
-
-describe("the Workflows page's rows", () => {
+describe("the Workflows page's table", () => {
   afterEach(() => {
     act(() => {
       root?.unmount();
@@ -145,82 +166,111 @@ describe("the Workflows page's rows", () => {
     document.body.innerHTML = "";
   });
 
-  it("gathers the workflows under their phases, each counted, what needs the reader first", async () => {
+  it("heads its columns and lists the workflows in the order given, each opening its page", async () => {
     await shown();
-    const groups = [...document.querySelectorAll("section, [role=region]")]
-      .filter((each) => each.querySelector("a") !== null)
-      .map((group) => ({
-        heading: group.querySelector("h2")?.textContent,
-        workflows: [...group.querySelectorAll("a")].map(
-          (link) => link.getAttribute("href") ?? ""
-        ),
-      }));
 
-    expect(groups).toStrictEqual([
-      {
-        heading: "Needs you",
-        workflows: ["/workflows/wf-complaints", "/workflows/wf-refunds"],
-      },
-      {
-        heading: "Running",
-        workflows: ["/workflows/wf-archive", "/workflows/wf-expenses"],
-      },
-      { heading: "Building", workflows: ["/workflows/wf-billing"] },
+    expect(
+      [...document.querySelectorAll("thead th")].map((each) => each.textContent)
+    ).toStrictEqual([
+      "Workflow",
+      "Now",
+      "Owner",
+      "Last 7 days",
+      "Last run",
+      "Next",
+    ]);
+    expect(
+      [...document.querySelectorAll("tbody th a")].map((link) =>
+        link.getAttribute("href")
+      )
+    ).toStrictEqual(rows.map(({ id }) => `/workflows/${id}`));
+  });
+
+  it("says how each workflow stands now, and what it asks of the reader", async () => {
+    await shown();
+
+    expect(rows.map(({ name }) => cellsOf(name)[1])).toStrictEqual([
+      "Needs a fix",
+      "Needs you1 waiting for a decision",
+      "On",
+      "Paused",
+      "Waiting for an admin to allow its email trigger",
+      "Not live yet",
+      "On, not used yet",
+      "Its trigger can't start it",
+      "On",
     ]);
   });
 
-  it("says how each workflow stands, in words beside its mark", async () => {
+  it("gives each workflow's owner, its last 7 days with what failed, and its last run", async () => {
     await shown();
 
-    expect(rowOf("Complaints").textContent).toContain("2 failed");
-    expect(rowOf("Refunds").textContent).toContain("1 waiting");
-    expect(rowOf("Archive").textContent).toContain("Ada Lovelace · v3 · Live");
+    expect(cellsOf("Complaints").slice(2, 4)).toStrictEqual([
+      "Ada Lovelace",
+      "12 done · 2 failed",
+    ]);
+    expect(cellsOf("Refunds")[3]).toBe("3 of yours done");
+    expect(cellsOf("Billing").slice(2, 5)).toStrictEqual([
+      "",
+      "0 done",
+      "No runs yet",
+    ]);
   });
 
-  it("says a paused workflow is paused, and one with no version is not live yet", async () => {
+  it("says what starts each workflow next", async () => {
     await shown();
 
-    expect(rowOf("Expenses").textContent).toContain("Paused");
-    expect(rowOf("Billing").textContent).toContain("Not live yet");
+    expect(rows.map(({ name }) => cellsOf(name)[5])).toStrictEqual([
+      "",
+      "",
+      "On each email to archive, and 1 more",
+      "When resumed",
+      "When an admin allows it",
+      "",
+      "By hand",
+      "",
+      expect.stringMatching(/2030.*, and 1 more$/u),
+    ]);
   });
 
-  it("draws a workflow's route: what starts it, then the tools it works in, then its week", async () => {
+  it("tells an admin a trigger waiting for one starts when they allow it", async () => {
+    await shown({ admin: true });
+
+    expect(cellsOf("Intake")[5]).toBe("When you allow it");
+  });
+
+  it("stacks each workflow as a card with the same facts", async () => {
     await shown();
-    const archive = rowOf("Archive");
+    const card = [
+      ...document.querySelectorAll('[aria-label="Workflows"] a'),
+    ].find(
+      (each) =>
+        each.closest("table") === null &&
+        each.textContent?.startsWith("Complaints")
+    );
 
-    expect(archive.textContent).toContain("Mail to archive, and 1 more");
-    expect(
-      archive
-        .querySelector('[data-slot="brand-icon-group"]')
-        ?.getAttribute("aria-label")
-    ).toBe("Microsoft 365 and Acme CRM");
-    // Microsoft's own mark, and Acme CRM's first letter: it has none.
-    expect(
-      [...archive.querySelectorAll('[data-slot="brand-icon"]')].map((tile) =>
-        tile.querySelector("svg") === null ? tile.textContent : "mark"
-      )
-    ).toStrictEqual(["mark", "A"]);
-    expect(archive.textContent).toContain("12 this week");
-  });
+    // The card's link carries its name; its facts describe it.
+    const described = card?.getAttribute("aria-describedby");
+    const facts =
+      described === null || described === undefined
+        ? ""
+        : (document.querySelector(`#${described}`)?.textContent ?? "");
 
-  it("says a workflow nothing starts is started by hand, and one that never ran has no runs yet", async () => {
-    await shown();
-
-    expect(rowOf("Expenses").textContent).toContain("By hand");
-    expect(rowOf("Billing").textContent).toContain("No runs yet");
-  });
-
-  it("says nothing of what starts a workflow until that is read", async () => {
-    await shown({ unread: true });
-
-    expect(rowOf("Expenses").textContent).not.toContain("By hand");
+    expect(card?.getAttribute("href")).toBe("/workflows/wf-complaints");
+    expect(facts).toContain("Needs a fix");
+    expect(facts).toContain("Owner Ada Lovelace");
+    expect(facts).toContain("Last 7 days 12 done · 2 failed");
   });
 
   it("opens a workflow from its row, within Grasp", async () => {
     const router = await shown();
 
     await act(async () => {
-      linkOf("Archive").click();
+      document
+        .querySelector<HTMLAnchorElement>(
+          'tbody th a[href="/workflows/wf-archive"]'
+        )
+        ?.click();
       await Promise.resolve();
     });
 
