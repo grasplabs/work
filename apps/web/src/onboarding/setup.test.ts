@@ -244,7 +244,7 @@ describe("the AI step", () => {
     });
   });
 
-  it("goes on to how this works, or back to where an admin sent back to it was", () => {
+  it("goes on to how this works, or to the step an admin held on it asked for", () => {
     expect({
       first: afterAi(stepIndex("ai")),
       sentBack: afterAi(listening),

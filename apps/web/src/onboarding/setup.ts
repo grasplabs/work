@@ -331,16 +331,17 @@ export const stepShown = (
 };
 
 /**
- * Where the AI step goes on to: the screen after it, or for an admin who
- * was sent back to it, the furthest step they `reached` before; none
- * where it is the flow's last screen.
+ * Where the AI step goes on to: the screen after it, or for an admin the
+ * setup held there on the way to a later step, the step they `asked` for;
+ * none where it is the flow's last screen. Never the furthest step they
+ * once reached: an admin walking the setup again goes through each screen.
  */
 export const afterAi = (
-  reached: number,
+  asked: number,
   path: SetupPath = steps
 ): SetupStep | undefined => {
   const next = stepIndex("ai", path) + 1;
-  return path[Math.max(reached, next)] ?? path[next];
+  return path[Math.max(asked, next)] ?? path[next];
 };
 
 /**
