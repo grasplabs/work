@@ -669,10 +669,19 @@ export type ChatAsk = z.infer<typeof chatAskSchema>;
  * (`proposePlan`): a page the team opens (an App), something that runs on
  * its own (a workflow), or both, each with a name and one plain sentence,
  * the connections each needs, and who gets it. Nothing new is made until
- * the person says Build it (`ChatsApi.build`).
+ * the person says Build it (`ChatsApi.build`). A chat started to set up an
+ * agent (`kind: "agent"`) asks at most
+ * {@link chatMakeLimits.agentQuestions} and drafts it instead
+ * (`draftAgent`): nothing is made until they press Make it
+ * (`ChatsApi.makeDraftedAgent`).
  */
 export const chatMakeLimits = {
   questions: 2,
+  // An agent's setup has five choices that change what is made, which an
+  // App's or a workflow's plan doesn't: what it is for, the apps it uses,
+  // what it may do, who may ask it and when it works on its own. Its name
+  // and instructions the chat drafts from those answers, asking nothing.
+  agentQuestions: 5,
   nameLength: 100,
   sentenceLength: 300,
   whoLength: 100,
@@ -687,14 +696,27 @@ export const chatPlanKinds = ["app", "workflow"] as const;
 export type ChatPlanKind = (typeof chatPlanKinds)[number];
 
 /**
- * What "Make something" started a chat to make, which the chat keeps
- * (`ChatsApi.create`): an App or a workflow, and the project what Build it
- * makes goes in, shared with everyone in it.
+ * What a chat can be started to make: what a plan makes, or one of the
+ * company's agents, which the chat drafts (`draftAgent`) for its admin.
  */
-export const chatMakeSchema = z.strictObject({
-  kind: z.enum(chatPlanKinds),
-  project: z.string().min(1).max(256).optional(),
-});
+export const chatMakeKinds = [...chatPlanKinds, "agent"] as const;
+export type ChatMakeKind = (typeof chatMakeKinds)[number];
+
+/**
+ * What "Make something" (or New agent's "Set up through chat") started a
+ * chat to make, which the chat keeps (`ChatsApi.create`): an App, a
+ * workflow or an agent, and, for an App or a workflow, the project what
+ * Build it makes goes in, shared with everyone in it. An agent is the
+ * company's, in no project.
+ */
+export const chatMakeSchema = z
+  .strictObject({
+    kind: z.enum(chatMakeKinds),
+    project: z.string().min(1).max(256).optional(),
+  })
+  .refine(({ kind, project }) => kind !== "agent" || project === undefined, {
+    message: "An agent is made in no project",
+  });
 export type ChatMake = z.infer<typeof chatMakeSchema>;
 
 /**
@@ -1284,7 +1306,11 @@ export interface ChatsApi {
    * Makes a chat with the agent `agentId`, one of `agents()`, or with
    * the company's first agent when none is named. An agent the person may
    * not talk to is `agent.unknown`, as one the company doesn't have. From
-   * "Make something", with what to make (`make`), which it keeps. With
+   * "Make something", with what to make (`make`), which it keeps; from New
+   * agent's "Set up through chat", `{ kind: "agent" }`, only for the
+   * company's own admins (`role.forbidden` for anyone else, Grasp staff
+   * among them): the chat asks, drafts the agent, and makes it on Make it
+   * (`makeDraftedAgent`). With
    * `key`, a UUID the page makes for this chat, a repeat within a day
    * answers the chat the first call made and makes none.
    */

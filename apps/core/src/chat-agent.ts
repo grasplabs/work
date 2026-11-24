@@ -624,14 +624,16 @@ export const chatAgent = (agent: ChatAgent): Extension => {
   const asksLeft =
     agent.context.make === undefined
       ? chatAskLimits.questions
-      : makeQuestionsLeft(agent.history);
+      : makeQuestionsLeft(agent.history, agent.context.make.kind);
   // Who builds proposes what to make, in Grasp's own chat, any of theirs.
   // Never in a turn nobody asked for (a wake-up): a plan waits on the
-  // person's press, as a drafted agent does.
+  // person's press, as a drafted agent does. Not in a chat started to set
+  // up an agent, which drafts it instead: a plan makes no agent.
   const plans =
     agent.context.builds === true &&
     agent.context.channel === undefined &&
-    scope.unattended !== true;
+    scope.unattended !== true &&
+    agent.context.make?.kind !== "agent";
   const tools: AgentTool[] = [
     executeCode(agent),
     readApi(apis),

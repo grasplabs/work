@@ -13,7 +13,12 @@ import {
   chatMakeLimits,
   chatPlanSchema,
 } from "@grasp-os/shared/chat";
-import type { ChatAsk, ChatMake, ChatPlan } from "@grasp-os/shared/chat";
+import type {
+  ChatAsk,
+  ChatMake,
+  ChatMakeKind,
+  ChatPlan,
+} from "@grasp-os/shared/chat";
 import { promptTextOf } from "@grasp-os/shared/instruction-files";
 import type { InstructionFileRef } from "@grasp-os/shared/instruction-files";
 import type { Role } from "@grasp-os/shared/roles";
@@ -215,11 +220,15 @@ export const askQuestions = (
 
 /**
  * How many questions Make something may still ask in a chat with
- * `history`: {@link chatMakeLimits.questions} in all, less every question
- * an `askQuestions` call the tool took asked. Counted from the transcript,
- * so no turn, however it is told, asks past the bound.
+ * `history`, started to make `kind`: {@link chatMakeLimits.questions} in
+ * all (an agent's setup {@link chatMakeLimits.agentQuestions}), less every
+ * question an `askQuestions` call the tool took asked. Counted from the
+ * transcript, so no turn, however it is told, asks past the bound.
  */
-export const makeQuestionsLeft = (history: readonly Message[]): number => {
+export const makeQuestionsLeft = (
+  history: readonly Message[],
+  kind: ChatMakeKind
+): number => {
   // A call the tool refused asked nothing.
   const refused = new Set(
     history.flatMap((message) =>
@@ -244,7 +253,9 @@ export const makeQuestionsLeft = (history: readonly Message[]): number => {
       }
     }
   }
-  return Math.max(0, chatMakeLimits.questions - asked);
+  const bound =
+    kind === "agent" ? chatMakeLimits.agentQuestions : chatMakeLimits.questions;
+  return Math.max(0, bound - asked);
 };
 
 /** `chatPlanSchema` as JSON Schema: what the model is told is what core checks. */
@@ -549,12 +560,25 @@ export interface QuestionAbout {
 }
 
 /**
+ * What the model reads beside a question in a chat started to set up one
+ * of the company's agents: what to ask, in what order, and to draft it
+ * (`draftAgent`) before anything is made. Only what `draftAgent` takes,
+ * which is what Make it sets through the agent builder: no model, which
+ * an admin picks on the agent's page.
+ */
+const agentSetupText = `The person, an admin, started this chat from New agent, to set up one of the company's agents. Grasp makes it from your draft once they press Make it: you never make it yourself, and nothing is made before. Ask with askQuestions, at most ${chatMakeLimits.agentQuestions} questions in all, each with answers to tap, and only what their words haven't said yet, in this order: what it is for; which apps it uses (from \`env.connections.available\`, only ones the company offers); what it may do (its kinds of work: reading their own, reading the company's, changing their own, changing the company's, reaching other people, reading other people's); who may ask it (nobody yet, only them, everyone, or some teams); and whether it works on its own on a schedule, and when. Then draft it with draftAgent, \`whose\` \`"company"\`: a short name, its job in one sentence, and its instructions in their terms, with only what they chose. What they left open stays closed: it reaches nobody and may do nothing until an admin says so on its page. To change the draft, they tell you, and you draft it again.`;
+
+/**
  * What the model reads beside a question in a chat "Make something"
  * started: what the person came to make. How making goes is in its
- * instructions, for every chat.
+ * instructions, for every chat; an agent's setup is its own.
  */
-const makeNoteText = ({ kind }: ChatMake): string =>
-  `The person started this chat from "Make something", to make ${kind === "app" ? "an App: a page their team opens" : "a workflow: something that runs on its own"}. Make it as Grasp makes anything new: a plan first, with proposePlan.`;
+const makeNoteText = ({ kind }: ChatMake): string => {
+  if (kind === "agent") {
+    return agentSetupText;
+  }
+  return `The person started this chat from "Make something", to make ${kind === "app" ? "an App: a page their team opens" : "a workflow: something that runs on its own"}. Make it as Grasp makes anything new: a plan first, with proposePlan.`;
+};
 
 /** What the model reads beside Make it or Change it: the agent, and what to say. */
 const agentNoteText = (
