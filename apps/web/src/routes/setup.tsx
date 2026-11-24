@@ -32,6 +32,7 @@ import type { Session } from "../core.ts";
 import { PageError } from "../frame/page-states.tsx";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import { CalmFrame } from "../onboarding/calm-frame.tsx";
+import type { Ways } from "../onboarding/calm-frame.tsx";
 import { CampaignFrame } from "../onboarding/campaign/campaign-page.tsx";
 import { isCampaignState } from "../onboarding/campaign/fixtures.ts";
 import type { CampaignState } from "../onboarding/campaign/fixtures.ts";
@@ -40,6 +41,7 @@ import { todayInUtc } from "../onboarding/send-plan.ts";
 import { SetupStepBody } from "../onboarding/setup-steps.tsx";
 import {
   finishedAt,
+  waysFrom,
   isReviewItem,
   isStep,
   keptAt,
@@ -158,6 +160,33 @@ const useKept = (userId: string, index: number, path: SetupPath) => {
   };
 };
 
+/** The frame's arrows on a step: back a step, and on as far as they went; none on the campaign page or the end. */
+const waysOf = (
+  index: number,
+  reached: number,
+  path: SetupPath,
+  go: (step: SetupStep) => void
+): Ways | undefined => {
+  const { back, on } = waysFrom(index, reached, path);
+  const step = path[index];
+  const ends = step === "listening" || step === "open";
+  const ways: Ways = {
+    onBack:
+      back === undefined
+        ? undefined
+        : () => {
+            go(back);
+          },
+    onNext:
+      on === undefined || on === "listening" || on === "open"
+        ? undefined
+        : () => {
+            go(on);
+          },
+  };
+  return ends ? undefined : ways;
+};
+
 const Setup = () => {
   const { i18n } = useLingui();
   const navigate = useNavigate();
@@ -226,6 +255,7 @@ const Setup = () => {
   return (
     <CalmFrame
       userId={identity.userId}
+      ways={waysOf(index, furthest, path, go)}
       centred={step === "open"}
       language={step !== "welcome"}
       pose={poses[step]}

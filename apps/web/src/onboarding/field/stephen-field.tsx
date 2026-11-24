@@ -31,6 +31,8 @@ const styles = stylex.create({
   },
   // Where he listens for what is under the pointer or the keyboard's focus; no box of its own.
   listening: { display: "contents" },
+  // Over the page: the pictures he draws on the things he holds.
+  marks: { zIndex: 1 },
   // His line on the edge of a thing he holds: placed and shown by the engine, a frame at a time.
   ring: {
     position: "fixed",
@@ -89,15 +91,17 @@ export const StephenField = ({
 }) => {
   const canvas = useRef<HTMLCanvasElement>(null);
   const rings = useRef<(HTMLSpanElement | null)[]>([]);
+  const marks = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
-    if (canvas.current === null) {
+    if (canvas.current === null || marks.current === null) {
       return () => {
         // Nothing started.
       };
     }
     const stop = attachField(
       canvas.current,
-      rings.current.filter((ring) => ring !== null)
+      rings.current.filter((ring) => ring !== null),
+      marks.current
     );
     return () => {
       stop?.();
@@ -136,6 +140,11 @@ export const StephenField = ({
       >
         {children}
       </div>
+      <canvas
+        aria-hidden="true"
+        ref={marks}
+        {...stylex.props(styles.layer, styles.marks)}
+      />
       {Array.from({ length: RINGS }, (_, slot) => (
         <span
           aria-hidden="true"

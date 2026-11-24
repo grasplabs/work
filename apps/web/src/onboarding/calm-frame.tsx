@@ -9,7 +9,17 @@ import {
 } from "@grasp-os/ui/components/select";
 import { Text } from "@grasp-os/ui/components/text";
 import { isThemeMode, ThemeToggle } from "@grasp-os/ui/components/theme-toggle";
-import { Icon, LogOutIcon } from "@grasp-os/ui/lib/icons";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@grasp-os/ui/components/tooltip";
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  Icon,
+  LogOutIcon,
+} from "@grasp-os/ui/lib/icons";
 import { media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
 import { useLingui } from "@lingui/react/macro";
@@ -59,6 +69,15 @@ const styles = stylex.create({
     paddingInline: { default: space[8], [media.maxSm]: space[4] },
   },
   mark: { display: "flex", [iconVars.size]: size.iconDefault },
+  // Back and on, two quiet arrows at the bottom corner, out of the step's way.
+  ways: {
+    position: "fixed",
+    insetBlockEnd: { default: space[6], [media.maxSm]: space[4] },
+    insetInlineEnd: { default: space[8], [media.maxSm]: space[4] },
+    zIndex: 1,
+    display: "flex",
+    gap: space[1],
+  },
   tools: { display: "flex", alignItems: "center", gap: space[1] },
   main: {
     display: "flex",
@@ -92,6 +111,18 @@ const styles = stylex.create({
   },
 });
 
+/**
+ * The size of every tool in the frame, in each part's own words, all one
+ * height (Damsko's controlSm): the language, light or dark, the way out
+ * and the arrows. Every tool takes its size from here, never its own, so
+ * they can't drift apart.
+ */
+const tool = {
+  button: "icon-sm",
+  select: "sm",
+  toggle: "default",
+} as const;
+
 const languages = Object.entries(localeNames).flatMap(([code, name]) =>
   isLocale(code) ? [{ code, name }] : []
 );
@@ -115,13 +146,19 @@ const Language = () => {
       }}
       value={locale}
     >
-      <SelectTrigger
-        aria-label={t`Language: ${language}`}
-        size="sm"
-        variant="ghost"
-      >
-        <SelectValue />
-      </SelectTrigger>
+      {/* Named on a pause, as the bar's other tools are. */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <SelectTrigger
+            aria-label={t`Language: ${language}`}
+            size={tool.select}
+            variant="ghost"
+          >
+            <SelectValue />
+          </SelectTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{t`Language`}</TooltipContent>
+      </Tooltip>
       <SelectContent>
         {languages.map(({ code, name }) => (
           <SelectItem
@@ -150,17 +187,64 @@ const Appearance = ({ userId }: { userId: string }) => {
     applyTheme(readTheme(userId));
   }, [userId]);
   return (
-    <ThemeToggle
-      aria-label={t`Appearance`}
-      mode={mode}
-      onModeChange={(next) => {
-        if (isThemeMode(next)) {
-          chooseTheme(userId, next);
-        }
-      }}
-      size="sm"
-      variant="icon"
-    />
+    // Named on a pause, as the bar's other tools are.
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <ThemeToggle
+          aria-label={t`Appearance`}
+          mode={mode}
+          onModeChange={(next) => {
+            if (isThemeMode(next)) {
+              chooseTheme(userId, next);
+            }
+          }}
+          size={tool.toggle}
+          variant="icon"
+        />
+      </TooltipTrigger>
+      <TooltipContent>{t`Light or dark`}</TooltipContent>
+    </Tooltip>
+  );
+};
+
+/** Where the arrows lead: back a step, and on as far as they went before. */
+export interface Ways {
+  onBack?: (() => void) | undefined;
+  onNext?: (() => void) | undefined;
+}
+
+/** Back and on, two quiet arrows; one that leads nowhere is not there. */
+const WayArrows = ({ ways }: { ways: Ways }) => {
+  const { t } = useLingui();
+  const { onBack, onNext } = ways;
+  if (onBack === undefined && onNext === undefined) {
+    return null;
+  }
+  return (
+    <nav aria-label={t`Steps`} {...stylex.props(styles.ways)}>
+      {onBack === undefined ? null : (
+        <Button
+          aria-label={t`Back`}
+          onClick={onBack}
+          size={tool.button}
+          tooltip={t`Back`}
+          variant="ghost"
+        >
+          <Icon icon={ArrowLeftIcon} />
+        </Button>
+      )}
+      {onNext === undefined ? null : (
+        <Button
+          aria-label={t`Next`}
+          onClick={onNext}
+          size={tool.button}
+          tooltip={t`Next`}
+          variant="ghost"
+        >
+          <Icon icon={ArrowRightIcon} />
+        </Button>
+      )}
+    </nav>
   );
 };
 
@@ -180,7 +264,7 @@ const Leave = () => {
           }
         })();
       }}
-      size="icon-sm"
+      size={tool.button}
       tooltip={t`Leave for now`}
       variant="ghost"
     >
@@ -191,6 +275,7 @@ const Leave = () => {
 
 export const CalmFrame = ({
   userId,
+  ways,
   language = true,
   pose = fromTheTop,
   centred = false,
@@ -198,6 +283,8 @@ export const CalmFrame = ({
 }: {
   /** Whose light or dark the bar's icon keeps. */
   userId: string;
+  /** Back and on, as two arrows at the bottom corner; none on a page that has no steps. */
+  ways?: Ways;
   /** Little on it: the column in the middle of the room, not at its top. */
   centred?: boolean;
   /** The language in the bar: not on the step that asks for it. */
@@ -223,6 +310,7 @@ export const CalmFrame = ({
           {children}
         </div>
       </main>
+      {ways === undefined ? null : <WayArrows ways={ways} />}
     </StephenField>
   </div>
 );

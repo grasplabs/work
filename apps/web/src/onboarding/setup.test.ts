@@ -15,6 +15,7 @@ import {
   sourcesFor,
   stepIndex,
   stepShown,
+  waysFrom,
   suitesFor,
   steps,
   teamNumbersOf,
@@ -329,13 +330,18 @@ describe("a company's own path of screens", () => {
     });
   });
 
-  it("never shows a screen the flow doesn't have", () => {
+  it("goes back and on along the path, never to a screen the flow doesn't have", () => {
+    const { back, on } = waysFrom(2, 4, short);
     expect({
+      back,
+      on,
       // Asked for by its address, a screen off the path gives where they were.
       offPath: stepShown("about", 3, { ready: true }, short),
       onPath: stepShown("company", 3, { ready: true }, short),
       nothingKept: stepShown(undefined, 0, null, setup),
     }).toStrictEqual({
+      back: "ai",
+      on: "leads",
       offPath: "leads",
       onPath: "company",
       nothingKept: "welcome",
