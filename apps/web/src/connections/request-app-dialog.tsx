@@ -353,6 +353,8 @@ const RequestFlow = ({
         <Button
           disabled={!details || badUrl || before !== undefined || busy}
           form={formId}
+          // #2503's stands a size above Cancel.
+          size="default"
           type="submit"
         >
           {t`Send request`}

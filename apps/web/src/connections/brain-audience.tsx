@@ -32,14 +32,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@grasp-os/ui/components/select";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { font, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useEffectEvent, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
-import { WithInfo } from "../frame/info-tip.tsx";
+import { InfoTip } from "../frame/info-tip.tsx";
 import { useCore } from "../use-core.ts";
 import { RowAlert } from "./app/rows.tsx";
 import { SyncPlaces } from "./sync-places.tsx";
@@ -57,6 +57,21 @@ import { useChange } from "./use-change.ts";
 // read it, are decided in one place.
 
 const styles = stylex.create({
+  // A setting's label and its info mark, as #2503's setting row: on one
+  // line, the label wrapping beside the mark.
+  named: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["1"],
+    width: "fit-content",
+    minWidth: 0,
+  },
+  // The mark in a box one line tall: its button never makes the row taller.
+  mark: {
+    display: "inline-flex",
+    alignItems: "center",
+    height: font.textSmLine,
+  },
   // The section's name in the card's flush rows, on their inset, as the
   // card's other sections have it (connection-list.tsx).
   head: {
@@ -513,11 +528,15 @@ export const BrainAudience = ({
       <FieldGroup>
         <Field orientation="responsive">
           <FieldContent>
-            <WithInfo
-              info={t`Who may read it, in the Brain and through their assistant in their own chat, is decided inside Grasp, not by the permissions in ${label}: choose a team if not everyone should have it.`}
-            >
+            {/* The label and its info mark on one line, the mark outside it so the select keeps the label's words, as #2503's setting row. */}
+            <div {...stylex.props(styles.named)}>
               <FieldLabel>{t`Keep what agents read through it for`}</FieldLabel>
-            </WithInfo>
+              <span {...stylex.props(styles.mark)}>
+                <InfoTip>
+                  {t`Who may read it, in the Brain and through their assistant in their own chat, is decided inside Grasp, not by the permissions in ${label}: choose a team if not everyone should have it.`}
+                </InfoTip>
+              </span>
+            </div>
           </FieldContent>
           <Select
             disabled={busy || erasing}
