@@ -17,7 +17,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
 
 import { buildBrain } from "./brain.ts";
-import { NoteBrainPage } from "./note-page.tsx";
+import { NoteBrainPage, openQuestionsOf } from "./note-page.tsx";
 import { testWorkspace } from "./test-workspace.ts";
 
 // A Brain note's page as the person reads it: a link out of Grasp in its
@@ -110,6 +110,44 @@ describe("a Brain note's page", () => {
       before: [],
       asked: true,
       opened: ["https://policy.example/leave"],
+    });
+  });
+
+  it("offers Ask on a question nobody was asked yet, to a reader who may ask, and asks its owner", async () => {
+    const gap = {
+      id: "g-1",
+      question: "What is the monthly budget for AI?",
+      owner: "Head of finance",
+      sourceId: "s-1",
+      about: [note.id],
+    };
+    const workspace = {
+      ...testWorkspace(),
+      gaps: [
+        gap,
+        { ...gap, id: "g-2", askedAt: "2026-11-20" },
+        { ...gap, id: "g-3", answer: "Ten thousand a month" },
+      ],
+    };
+    const asked: string[] = [];
+    const admin = openQuestionsOf(note, workspace, async (each) => {
+      asked.push(each.id);
+      await Promise.resolve();
+    });
+    await admin[0]?.onAsk?.();
+
+    expect({
+      shown: admin.map(({ id }) => id),
+      ask: admin.map(({ onAsk }) => onAsk !== undefined),
+      member: openQuestionsOf(note, workspace).map(
+        ({ onAsk }) => onAsk !== undefined
+      ),
+      asked,
+    }).toStrictEqual({
+      shown: ["g-1", "g-2"],
+      ask: [true, false],
+      member: [false, false],
+      asked: ["g-1"],
     });
   });
 });

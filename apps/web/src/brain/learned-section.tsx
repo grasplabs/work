@@ -303,6 +303,31 @@ export const LearnedSection = ({
   const out = memories.filter(({ part }) => part === "out");
   const contested = added.filter(({ memory }) => memory.contested);
   const next = pages.at(-1)?.next ?? null;
+  /** Reads the next page of what it learned, and adds it, or says why it didn't come. */
+  const readMore = async (): Promise<void> => {
+    if (next === null) {
+      return;
+    }
+    setMore({ state: "loading" });
+    const answer = await pageOf(core, source, version, next);
+    if (answer.state !== "ready") {
+      setMore({ state: "failed", page: answer });
+      return;
+    }
+    setMore(undefined);
+    const page = answer.data;
+    // None now, after a page before: erased, or no longer theirs
+    // to read, since. What was loaded goes with it, and so does
+    // the cursor that would ask for it again.
+    setLearned((before) => {
+      if (page === null) {
+        return { state: "gone" };
+      }
+      return before.state === "ready"
+        ? { state: "ready", pages: [...before.pages, page] }
+        : before;
+    });
+  };
   // While more pages follow, each count is of what is shown so far, and
   // says so.
   const partial = next !== null;
@@ -364,33 +389,15 @@ export const LearnedSection = ({
           withRivals
         />
       ) : null}
-      {more?.state === "failed" ? <PartNotLoaded page={more.page} /> : null}
+      {more?.state === "failed" ? (
+        <PartNotLoaded onRetry={readMore} page={more.page} />
+      ) : null}
       {next === null ? null : (
         <Button
           disabled={more?.state === "loading"}
           style={styles.start}
           onClick={() => {
-            setMore({ state: "loading" });
-            void (async () => {
-              const answer = await pageOf(core, source, version, next);
-              if (answer.state !== "ready") {
-                setMore({ state: "failed", page: answer });
-                return;
-              }
-              setMore(undefined);
-              const page = answer.data;
-              // None now, after a page before: erased, or no longer theirs
-              // to read, since. What was loaded goes with it, and so does
-              // the cursor that would ask for it again.
-              setLearned((before) => {
-                if (page === null) {
-                  return { state: "gone" };
-                }
-                return before.state === "ready"
-                  ? { state: "ready", pages: [...before.pages, page] }
-                  : before;
-              });
-            })();
+            void readMore();
           }}
           size="sm"
           variant="ghost"

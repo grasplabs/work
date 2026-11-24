@@ -62,9 +62,13 @@ export const PartNotLoaded = ({
         <Button
           errorText={t`Not loaded`}
           loadingText={t`Trying again…`}
-          onClick={async () => {
-            await (onRetry === undefined ? router?.invalidate() : onRetry());
-          }}
+          // A retry that runs at once (a read that reads again on its own) shows no outcome of its own.
+          onClick={
+            onRetry ??
+            (async () => {
+              await router?.invalidate();
+            })
+          }
           size="sm"
           successText={t`Loaded`}
           variant="outline"

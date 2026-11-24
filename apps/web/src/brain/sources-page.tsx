@@ -1969,9 +1969,11 @@ export const SourcesPage = ({
   const reads = useRef(0);
   useEffect(() => {
     let left = false;
+    const mine = reads.current;
     const read = async (): Promise<void> => {
       const answer = await readFrom(core, async (kept) => await kept.list());
-      if (!left) {
+      // A read again from the start since (a change) answers in its place.
+      if (!left && mine === reads.current) {
         setListed(answer);
       }
     };
@@ -2208,11 +2210,17 @@ export const SourcesPage = ({
                   style={styles.start}
                   onClick={() => {
                     setMore({ state: "loading" });
+                    const mine = reads.current;
                     void (async () => {
                       const answer = await readFrom(
                         core,
                         async (read) => await read.list(next)
                       );
+                      // The list read again from the start meanwhile (an upload,
+                      // a delete): this older page belongs to the list before it.
+                      if (mine !== reads.current) {
+                        return;
+                      }
                       setMore(answer.state === "refused" ? answer : undefined);
                       if (answer.state === "ready") {
                         setListed({

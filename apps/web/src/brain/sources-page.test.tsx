@@ -194,6 +194,8 @@ interface Faked {
   uploadRefusal?: string;
   /** Holds each upload until it settles. */
   uploading?: Promise<boolean>;
+  /** Holds each later page of the list until it settles. */
+  laterPage?: Promise<boolean>;
   /** Refuses the first upload with this coded error, as core refuses one. */
   firstUploadRefused?: { code: string; message: string };
   /** Holds each new version until it settles. */
@@ -239,6 +241,7 @@ const shown = async (
     empty = false,
     uploadRefusal,
     uploading,
+    laterPage,
     firstUploadRefused,
     versioning,
     deleting,
@@ -267,6 +270,9 @@ const shown = async (
       }
       if (empty) {
         return { sources: [], next: null };
+      }
+      if (after !== undefined) {
+        await (laterPage ?? Promise.resolve());
       }
       return after === undefined
         ? {
@@ -952,6 +958,31 @@ describe(SourcesPage, () => {
         "read u-1@1",
       ],
     });
+  });
+
+  it("drops a later page asked for before an upload read the list again", async () => {
+    const later = Promise.withResolvers<boolean>();
+    await shown([], { laterPage: later.promise });
+    await press("Show more");
+    await openUpload();
+    await pick(
+      uploadPicker(),
+      new File(["WEBVTT"], "notes.vtt", { type: "text/vtt" })
+    );
+    await uploadPressed();
+    await settle();
+    await act(async () => {
+      later.resolve(true);
+      await Promise.resolve();
+    });
+    await settle();
+    const listedText = document.body.textContent;
+
+    // The page belonged to the list before the upload: the list read since stands.
+    expect({
+      older: listedText.includes("No first line"),
+      more: listedText.includes("Show more"),
+    }).toStrictEqual({ older: false, more: true });
   });
 
   it("closes the source opened, and leaves the list as it was", async () => {

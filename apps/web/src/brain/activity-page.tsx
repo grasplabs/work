@@ -108,15 +108,14 @@ interface Opened {
 /** A line of the page, and what it opens beside it. */
 interface Listed {
   line: BrainActivityLine;
-  opened: Opened;
+  /** What the line says once opened: worked out only for the line in hand. */
+  opened: () => Opened;
 }
 
-const listed = (
-  id: string,
-  opened: Opened,
-  detail: string,
-  name = opened.title
-): Listed => ({ line: { id, icon: opened.icon, name, detail }, opened });
+const listed = (line: BrainActivityLine, opened: () => Opened): Listed => ({
+  line,
+  opened,
+});
 
 export const ActivityPage = () => {
   const { t } = useLingui();
@@ -265,11 +264,32 @@ export const ActivityPage = () => {
   };
   const waitingListed = workspace.gaps
     .filter((gap) => gap.closedAt === undefined)
-    .map((gap) => listed(`waiting:${gap.id}`, gapOpened(gap), gap.owner));
+    .map((gap) =>
+      listed(
+        {
+          id: `waiting:${gap.id}`,
+          icon: CircleHelpIcon,
+          name: gap.question,
+          detail: gap.owner,
+        },
+        () => gapOpened(gap)
+      )
+    );
   const log = brainLog(workspace, brain, todayHere());
   const logListed = (entries: LogEntry[]) =>
     entries.map((entry) =>
-      listed(entry.id, entryOpened(entry), formatDay(entry.day), nameOf(entry))
+      listed(
+        {
+          id: entry.id,
+          icon:
+            entry.question !== undefined && gaps.has(entry.question.gap)
+              ? CircleHelpIcon
+              : icons[entry.kind],
+          name: nameOf(entry),
+          detail: formatDay(entry.day),
+        },
+        () => entryOpened(entry)
+      )
     );
   const stretches = [
     { id: "this-week", label: t`This week`, listed: logListed(log.thisWeek) },
@@ -282,7 +302,7 @@ export const ActivityPage = () => {
     )
   );
 
-  const inHand = open === undefined ? undefined : opened.get(open);
+  const inHand = open === undefined ? undefined : opened.get(open)?.();
   const reason =
     failed !== undefined && failed.gap === inHand?.ask?.id
       ? failed.reason

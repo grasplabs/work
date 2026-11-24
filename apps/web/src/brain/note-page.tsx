@@ -1,3 +1,4 @@
+import type { Gap, Workspace } from "@grasp-os/shared/brain";
 import { Heading } from "@grasp-os/ui/components/heading";
 import { Link as TextLink } from "@grasp-os/ui/components/link";
 import { Markdown } from "@grasp-os/ui/components/markdown";
@@ -133,6 +134,36 @@ const noteText = (note: Note, byId: ReadonlyMap<string, Note>): string => {
     .filter((paragraph) => paragraph !== "")
     .join("\n\n");
 };
+
+/**
+ * The questions about `note` still waiting for an answer, as its Properties
+ * list them: each with whom it waits on, and Ask for one nobody was asked
+ * yet when the reader may ask (`ask`).
+ */
+export const openQuestionsOf = (
+  note: Note,
+  workspace: Workspace,
+  ask?: (gap: Gap) => Promise<unknown>
+): PageOpenQuestion[] =>
+  workspace.gaps
+    .filter(
+      (gap) =>
+        gap.about.includes(note.id) &&
+        gap.closedAt === undefined &&
+        gap.answer === undefined
+    )
+    .map((gap) => ({
+      id: gap.id,
+      question: gap.question,
+      who: gap.owner,
+      ...(ask === undefined || gap.askedAt !== undefined
+        ? {}
+        : {
+            onAsk: async () => {
+              await ask(gap);
+            },
+          }),
+    }));
 
 /**
  * Whether the note keeps its article (`brain-article/`) instead of page D: a team, and a subject

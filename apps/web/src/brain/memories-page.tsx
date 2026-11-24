@@ -667,11 +667,14 @@ const MemoryTexts = ({
  */
 const AudienceField = ({
   loaded,
+  onRetry,
   choice,
   busy,
   onPick,
 }: {
   loaded: Loaded<BrainShareAudiences> | undefined;
+  /** Reads whom they may share with again. */
+  onRetry: () => void;
   choice: string | undefined;
   busy: boolean;
   onPick: (picked: string) => void;
@@ -716,7 +719,7 @@ const AudienceField = ({
         ) : null}
       </Field>
       {loaded === undefined || loaded.state === "ready" ? null : (
-        <PartNotLoaded page={loaded} />
+        <PartNotLoaded onRetry={onRetry} page={loaded} />
       )}
     </>
   );
@@ -750,7 +753,7 @@ const ShareDialog = ({
   // three people or more (with fewer, the others would know who shared
   // it). Nothing is shared until that is read; a read that failed offers
   // no one, never "Everyone" alone.
-  const { loaded } = useHeldCoreRead(
+  const { loaded, again } = useHeldCoreRead(
     `share-audiences#${opening}`,
     async (session) => await session.brainMemories.shareAudiences()
   );
@@ -867,6 +870,7 @@ const ShareDialog = ({
               busy={busy}
               choice={choice}
               loaded={loaded}
+              onRetry={again}
               onPick={(picked) => {
                 if (tried !== undefined && picked !== tried) {
                   setChange(crypto.randomUUID());

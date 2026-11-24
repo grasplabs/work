@@ -1,4 +1,5 @@
 import type { Source, Statement, Workspace } from "@grasp-os/shared/brain";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Collapsible,
@@ -39,6 +40,8 @@ import {
   Link,
   useLocation,
   useNavigate,
+  useRouteContext,
+  useRouter,
 } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
@@ -67,14 +70,20 @@ import {
 } from "../brain/brain.ts";
 import type { Note, NoteEvent, NotePoint, NoteRef } from "../brain/brain.ts";
 import { useCanForget, useForget } from "../brain/forget.tsx";
-import { nameableFrom, NoteBrainPage, onArticle } from "../brain/note-page.tsx";
-import type { PageFact, PageOpenQuestion } from "../brain/page-properties.tsx";
+import {
+  nameableFrom,
+  NoteBrainPage,
+  onArticle,
+  openQuestionsOf,
+} from "../brain/note-page.tsx";
+import type { PageFact } from "../brain/page-properties.tsx";
 import { placeOf } from "../brain/transcript.ts";
 import { labelOf } from "../brain/witness.ts";
 import { WorkKnowledgeTab } from "../brain/work-knowledge.tsx";
 import { AppLogo } from "../connections/app-logo.tsx";
 import { ExportMenu } from "../export/export-menu.tsx";
 import { formatDay, formatList, formatMonth } from "../format.ts";
+import { useCore } from "../use-core.ts";
 
 // One note, as the prototype has it (`routes/brain/$noteId.tsx`). Where the
 // prototype links out of the brain, to a workflow on its Workflows page, a
@@ -691,19 +700,6 @@ const useNoteFacts = ({
 };
 
 /** The questions the brain still waits on about this note, each with the role that can answer. */
-const openQuestionsOf = (
-  note: Note,
-  workspace: Workspace
-): PageOpenQuestion[] =>
-  workspace.gaps
-    .filter(
-      (gap) =>
-        gap.about.includes(note.id) &&
-        gap.closedAt === undefined &&
-        gap.answer === undefined
-    )
-    .map((gap) => ({ id: gap.id, question: gap.question, who: gap.owner }));
-
 /** Exports the note, as Markdown or a PDF, with its full history. */
 const ExportButton = ({ note }: { note: Note }) => (
   <ExportMenu
@@ -822,7 +818,22 @@ const BrainPageNote = (parts: NoteParts) => {
   const { note, workspace, byId, statements } = parts;
   const company = note.kind === "company";
   const companyText = useCompanyText(brain);
-  const questions = openQuestionsOf(note, workspace);
+  const { identity } = useRouteContext({ from: "/_shell" });
+  const core = useCore();
+  const router = useRouter();
+  // The company's admins ask a question's owner from its row, as on Activity; core decides who may.
+  const questions = openQuestionsOf(
+    note,
+    workspace,
+    isMemberAdmin(identity)
+      ? async (gap) => {
+          await core.withSession(async (session) => {
+            await session.brain.askAboutGap(gap.id);
+          });
+          await router.invalidate({ sync: true });
+        }
+      : undefined
+  );
   const facts = useNoteFacts({
     note,
     byId,
