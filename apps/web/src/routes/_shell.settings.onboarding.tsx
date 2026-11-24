@@ -110,7 +110,6 @@ const OnboardingPage = () => {
           <InterviewsProgress
             links={links}
             listening={listeningOf(view, now)}
-            spoken={false}
             today={now}
             view={view}
           />

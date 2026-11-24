@@ -1,4 +1,4 @@
-import type { Locale } from "../../i18n.ts";
+import type { Locale } from "../i18n.ts";
 
 // Five flags, drawn as pixels: each a function from a point on the flag
 // (0 to 1 across, 0 to 1 down) to which of its colours stands there. Drawn
@@ -10,28 +10,12 @@ import type { Locale } from "../../i18n.ts";
 export interface Flag {
   /** Its colours in their real values: a flag's own, not the product's palette. */
   real: readonly string[];
-  /** The same colours as the brand's stops, night to paper, so the five are one family. */
-  brand: readonly BrandStop[];
   at: (u: number, v: number) => number;
   /** How wide it stands at the card's far edge, as times its height. */
   aspect: number;
-  /**
-   * Its bands stand side by side: the fade ends where the flag begins, so
-   * every band shows whole.
-   */
-  vertical?: boolean;
   /** What runs on under the fade, toward the name: its own edge, or its first colour alone. */
   under: "edge" | "field";
 }
-
-export type BrandStop =
-  | "night"
-  | "ink"
-  | "pine"
-  | "mint"
-  | "sea"
-  | "lime"
-  | "paper";
 
 /** Three bands across, top to bottom, `split` where the middle one starts and ends. */
 const across =
@@ -68,43 +52,37 @@ const unionJack = (u: number, v: number): number => {
 export const flags: Record<Locale, Flag> = {
   en: {
     real: ["#012169", "#ffffff", "#c8102e"],
-    brand: ["ink", "paper", "mint"],
     at: unionJack,
     aspect: 2,
     under: "field",
   },
   de: {
     real: ["#000000", "#dd0000", "#ffce00"],
-    brand: ["night", "pine", "lime"],
     at: across([1 / 3, 2 / 3]),
     aspect: 1.8,
     under: "edge",
   },
   nl: {
     real: ["#ae1c28", "#ffffff", "#21468b"],
-    brand: ["mint", "paper", "ink"],
     at: across([1 / 3, 2 / 3]),
     aspect: 1.8,
     under: "edge",
   },
   es: {
     real: ["#aa151b", "#f1bf00", "#aa151b"],
-    brand: ["pine", "lime", "pine"],
     at: across([1 / 4, 3 / 4]),
     aspect: 1.8,
     under: "edge",
   },
   fr: {
     real: ["#002654", "#ffffff", "#ce1126"],
-    brand: ["ink", "paper", "mint"],
     at: (u) => {
       if (u < 1 / 3) {
         return 0;
       }
       return u < 2 / 3 ? 1 : 2;
     },
-    aspect: 3.2,
-    vertical: true,
+    aspect: 1.8,
     under: "field",
   },
 };

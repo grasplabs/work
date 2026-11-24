@@ -1,23 +1,22 @@
-// Concepts only (never merged): the campaign page, what the client's
-// admin sees while the interviews run, in three concepts, each in five
-// states from fixtures. `/setup?step=listening&concept=a|b|c&state=…`
-// shows it full screen in its own calm frame; Settings, Onboarding shows
-// the same component in its section (`?concept=…&state=…`).
+// The campaign page, what the client's admin sees while the interviews
+// run, from fixtures in five states until core serves it:
+// `/setup?step=listening&concept=c&state=…` shows it full screen in its
+// own calm frame; Settings, Onboarding shows it in its section.
 import { Button } from "@grasp-os/ui/components/button";
 import { Container } from "@grasp-os/ui/components/container";
 import { Icon, XIcon } from "@grasp-os/ui/lib/icons";
 import { media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
+import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
 
 import { GraspLogo } from "../../connections/brand-logos.ts";
-import { CampaignDots } from "./concept-dots.tsx";
-import { CampaignMeadow } from "./concept-meadow.tsx";
-import { CampaignNotes } from "./concept-notes.tsx";
+import { CampaignWeek } from "./campaign-week.tsx";
 import { campaigns } from "./fixtures.ts";
 import type { CampaignState } from "./fixtures.ts";
 
+/** The routes' `?concept=` letter, which opens the campaign page; it no longer picks a look. */
 export type Concept = "a" | "b" | "c";
 
 export const isConcept = (value: unknown): value is Concept =>
@@ -39,71 +38,58 @@ const styles = stylex.create({
   },
   column: { width: "100%" },
   mark: { display: "flex", [iconVars.size]: size.iconDefault },
-  // On a phone what little there is stands in the window's middle, as the onboarding's steps did.
   main: {
     display: "flex",
     flexDirection: "column",
     flexGrow: 1,
-    justifyContent: { default: "flex-start", [media.maxSm]: "center" },
     paddingInline: { default: space[10], [media.maxSm]: space[4] },
-    paddingBlockStart: { default: space[8], [media.maxSm]: space[2] },
-    paddingBlockEnd: { default: space[16], [media.maxSm]: space[20] },
+    paddingBlockStart: { default: space[10], [media.maxSm]: space[6] },
+    paddingBlockEnd: { default: space[16], [media.maxSm]: space[10] },
   },
 });
 
-/** Which width each concept reads at: the meadow and the week wide, the notes a reading column. */
-const widths = { a: "lg", b: "lg", c: "lg" } as const;
-
-/** One concept in one state. */
+/** The campaign page's content in one state. `concept` is the route's switch, ignored. */
 export const CampaignConcept = ({
-  concept,
   state,
 }: {
-  concept: Concept;
+  concept?: Concept;
   state: CampaignState;
-}) => {
-  const campaign = campaigns[state];
-  if (concept === "a") {
-    return <CampaignMeadow campaign={campaign} />;
-  }
-  if (concept === "b") {
-    return <CampaignNotes campaign={campaign} />;
-  }
-  return <CampaignDots campaign={campaign} />;
-};
+}) => <CampaignWeek campaign={campaigns[state]} />;
 
 /**
- * The onboarding's campaign page, full screen: Grasp's mark and a way out
- * on one quiet bar, the concept in a column under it. The page scrolls.
+ * The campaign page, full screen: Grasp's mark and a way out on one quiet
+ * bar, the week in a column under it. The page scrolls.
  */
 export const CampaignFrame = ({
-  concept,
   state,
 }: {
-  concept: Concept;
+  concept?: Concept;
   state: CampaignState;
-}) => (
-  <div {...stylex.props(styles.window)}>
-    <header {...stylex.props(styles.bar)}>
-      <span {...stylex.props(styles.mark)}>
-        <Icon icon={GraspLogo} label="Grasp" />
-      </span>
-      <Button
-        aria-label="Close"
-        asChild
-        size="icon-sm"
-        tooltip="Close"
-        variant="ghost"
-      >
-        <Link to="/">
-          <Icon icon={XIcon} />
-        </Link>
-      </Button>
-    </header>
-    <main {...stylex.props(styles.main)}>
-      <Container size={widths[concept]} style={styles.column}>
-        <CampaignConcept concept={concept} state={state} />
-      </Container>
-    </main>
-  </div>
-);
+}) => {
+  const { t } = useLingui();
+  return (
+    <div {...stylex.props(styles.window)}>
+      <header {...stylex.props(styles.bar)}>
+        <span {...stylex.props(styles.mark)}>
+          <Icon icon={GraspLogo} label="Grasp" />
+        </span>
+        <Button
+          aria-label={t`Close`}
+          asChild
+          size="icon-sm"
+          tooltip={t`Close`}
+          variant="ghost"
+        >
+          <Link to="/">
+            <Icon icon={XIcon} />
+          </Link>
+        </Button>
+      </header>
+      <main {...stylex.props(styles.main)}>
+        <Container size="lg" style={styles.column}>
+          <CampaignConcept state={state} />
+        </Container>
+      </main>
+    </div>
+  );
+};

@@ -1,14 +1,9 @@
 import type { OnboardingProgress, Roster } from "@grasp-os/shared/onboarding";
-import { noChoices } from "@grasp-os/shared/onboarding-choices";
-import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   afterAi,
-  brainScene,
   closesOn,
-  documentSources,
-  dotsOf,
   finishedAt,
   heldAt,
   keptAt,
@@ -25,7 +20,6 @@ import {
   teamNumbersOf,
   teamsOf,
   waysFrom,
-  wizardOf,
 } from "./setup.ts";
 import type { Kept, SetupPath } from "./setup.ts";
 
@@ -126,68 +120,7 @@ describe("the interviews", () => {
   });
 });
 
-describe("the brain on each step", () => {
-  const listening = listeningOf({ roster, plan, progress }, "2026-10-06");
-
-  it("is the company brain with a nerve to each team once who is who is known", () => {
-    expect(
-      brainScene("company", {
-        roster: null,
-        listening,
-        known: 20,
-        choices: noChoices,
-      }).shape
-    ).toStrictEqual({ kind: "org", teams: [], leads: false, beyond: 0 });
-    expect(
-      brainScene("company", {
-        roster,
-        listening,
-        known: 35,
-        choices: noChoices,
-      }).shape
-    ).toStrictEqual({ kind: "org", teams: [2, 1], leads: false, beyond: 0 });
-    expect(
-      brainScene("leads", { roster, listening, known: 35, choices: noChoices })
-        .shape
-    ).toMatchObject({ leads: true });
-  });
-
-  it("keeps who is who as a nerve beyond the places where documents live", () => {
-    expect(
-      brainScene("sources", {
-        roster,
-        listening,
-        known: 35,
-        choices: noChoices,
-      }).shape
-    ).toStrictEqual({
-      kind: "hub",
-      linked: documentSources.map(() => false),
-      beyond: 1,
-    });
-  });
-
-  it("draws a nerve to each place noted, and keeps the tools and the HR platform as nerves beyond", () => {
-    const choices: SetupChoices = {
-      sources: ["notion", "sharepoint"],
-      sourcesWanted: ["Dropbox"],
-      pulse: "wanted",
-      hr: { kind: "platform", name: "Personio" },
-    };
-    const facts = { roster, listening, known: 35, choices };
-    expect({
-      sources: brainScene("sources", facts).shape,
-      leads: brainScene("leads", { ...facts, roster: null }).shape,
-    }).toStrictEqual({
-      sources: {
-        kind: "hub",
-        linked: [true, false, false, false, false, true],
-        beyond: 2,
-      },
-      leads: { kind: "org", teams: [], leads: true, beyond: 3 },
-    });
-  });
-
+describe("the places and sign-ins offered", () => {
   it("offers the places of the company's sign-in first", () => {
     expect(sourcesFor(["google"]).map(({ id }) => id)).toStrictEqual([
       "drive",
@@ -224,37 +157,6 @@ describe("the brain on each step", () => {
       ).toStrictEqual(offered);
     }
   );
-
-  it("has a figure for every step, as full as Grasp knows", () => {
-    for (const step of steps) {
-      const scene = brainScene(step, {
-        roster,
-        listening,
-        known: 35,
-        choices: noChoices,
-      });
-      expect(scene.shape.kind).toBeTruthy();
-      expect(scene.fill).toBe(0.35);
-      expect(scene.teams).toStrictEqual([0.5, 0]);
-    }
-  });
-});
-
-describe("the bar of what Grasp knows", () => {
-  it("gives each source its share of the dots, filled as far as it is known", () => {
-    const dots = dotsOf(
-      [
-        { weight: 20, known: 1 },
-        { weight: 15, known: 0 },
-        { weight: 65, known: 0.5 },
-      ],
-      20
-    );
-    expect(dots).toHaveLength(20);
-    expect(dots.filter((dot) => dot.filled)).toHaveLength(4 + 0 + 7);
-    expect(dots.findIndex((dot) => dot.next)).toBe(4);
-    expect(dots.filter((dot) => dot.first)).toHaveLength(2);
-  });
 });
 
 describe("how far the admin went", () => {
@@ -419,14 +321,12 @@ describe("a company's own path of screens", () => {
         reachedOf(0, { plan: { start: "2026-10-12", days: 14 } }, short),
         reachedOf(1, { plan: { start: "2026-10-12", days: 14 } }, setup),
       ],
-      dots: [wizardOf(short), wizardOf(setup)],
     }).toStrictEqual({
       at: 3,
       notOnIt: -1,
       reached: 2,
       finished: ["welcome", "ai", "company"],
       planned: [5, 1],
-      dots: [["welcome", "ai", "company", "leads", "team"], [...setup]],
     });
   });
 

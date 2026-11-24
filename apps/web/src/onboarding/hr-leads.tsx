@@ -6,8 +6,9 @@ import {
 } from "@grasp-os/shared/onboarding";
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
+import { Card } from "@grasp-os/ui/components/card";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
+import { Input, PasswordInput } from "@grasp-os/ui/components/input";
 import { Text } from "@grasp-os/ui/components/text";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
@@ -18,45 +19,30 @@ import { useState } from "react";
 
 import { useCore } from "../use-core.ts";
 import {
-  Asides,
-  LaterLink,
-  Onward,
-  SupportLink,
-  tones,
-} from "./setup-parts.tsx";
-import type { Answer } from "./setup-parts.tsx";
-import {
   directoryListOf,
   StaffListError,
   withLeadsFrom,
 } from "./staff-list.ts";
 
+// Who leads which team, from the company's HR platform (GRA-371), on the
+// leads step: the admin connects it there with a service user they make
+// in it, and its departments, people and who reports to whom come to the
+// organization on the screen, on the staff list's own path
+// (`directoryListOf`), so people keep their ids and links. Nothing is kept
+// until the admin has checked it and says it is right. HiBob is the first
+// platform Grasp reads.
+
 const styles = stylex.create({
-  form: {
-    display: "flex",
-    flexDirection: "column",
-    gap: space[4],
-    width: "100%",
-    maxWidth: "24rem",
-    textAlign: "start",
-  },
+  form: { display: "grid", gap: space[4] },
+  end: { display: "flex", flexWrap: "wrap", gap: space[3] },
 });
 
-// Who leads which team, from the company's HR platform (GRA-371; the
-// prototype's `Leads`, with `HR_PLATFORMS`), on the confirm step: the
-// admin connects it there with a service user they make in it, and its
-// departments, people and who reports to whom come to the organization on
-// the screen, on the staff list's own path (`directoryListOf`), so people
-// keep their ids and links. Nothing is kept until the admin has checked
-// it and says it is right. HiBob is the first platform Grasp reads.
-
-/** The platform the confirm step offers. */
+/** The platform the leads step offers. */
 const platform: HrPlatform = "hibob";
 
 /** Why the HR platform could not become the organization on the screen. */
 type HrProblem = "refused" | "large" | "empty" | "inactive" | "failed";
 
-/** The kind of problem `error` is, for Stephen to say. */
 const problemOf = (error: unknown): HrProblem => {
   if (error instanceof StaffListError) {
     return error.reason === "empty" ? "empty" : "large";
@@ -79,11 +65,7 @@ interface Typed {
   secret: string;
 }
 
-/**
- * Connects the platform with what the admin typed, if anything, and
- * reads it: the organization it holds, with what the admin set on the
- * screen kept, or why it could not be.
- */
+/** Connects the platform with what was typed, if anything, and reads it: the organization it holds, or why it could not be. */
 const readHrRoster = async (
   core: ReturnType<typeof useCore>,
   typed: Typed | null,
@@ -104,21 +86,21 @@ const readHrRoster = async (
 };
 
 /**
- * The HR platform on the confirm step: a way to connect it, or to read it
+ * The HR platform on the leads step: a way to connect it, or to read it
  * again once it is, and what it read, given to the step as the
- * organization to check (`onRoster`), with what Stephen says (`onAnswer`).
+ * organization to check (`onRoster`), with what it says of it (`onSaid`).
  */
 export const HrLeads = ({
   hr,
   roster,
   onRoster,
-  onAnswer,
+  onSaid,
 }: {
   hr: OnboardingHr | null;
   /** The organization as the screen shows it now. */
   roster: Roster;
   onRoster: (roster: Roster) => void;
-  onAnswer: (answer: Answer) => void;
+  onSaid: (said: string) => void;
 }) => {
   const { t } = useLingui();
   const core = useCore();
@@ -152,112 +134,100 @@ export const HrLeads = ({
       if (found === "inactive") {
         setOpen(true);
       }
-      onAnswer({
-        text: problems[found],
-        announce: true,
-        tone: tones.plain,
-        quick: true,
-      });
+      onSaid(problems[found]);
       return;
     }
     setOpen(false);
     setTyped({ id: "", secret: "" });
     onRoster(found);
     const teams = found.teams.length;
-    onAnswer({
-      text: plural(teams, {
+    onSaid(
+      plural(teams, {
         one: `${name} is connected. I can see # team, its lead and who reports to whom.`,
         other: `${name} is connected. I can see # teams, their leads and who reports to whom.`,
-      }),
-      announce: true,
-      tone: tones.plain,
-      quick: true,
-    });
+      })
+    );
   };
   const ready = typed.id.trim() !== "" && typed.secret.trim() !== "";
   const connectIt = t`Connect ${name}`;
-  return (
-    <>
-      {open ? (
-        <Onward>
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (ready) {
-                void read(typed);
-              }
-            }}
-            {...stylex.props(styles.form)}
-          >
-            <Text size="sm" color="muted">
-              {t`In ${name}, make a service user that may read people’s basic and work details, and paste its ID and token here.`}
-            </Text>
-            <Field disabled={busy}>
-              <FieldLabel>{t`Service user ID`}</FieldLabel>
-              <Input
-                autoComplete="off"
-                onValueChange={(id) => {
-                  setTyped({ ...typed, id });
-                }}
-                value={typed.id}
-              />
-            </Field>
-            <Field disabled={busy}>
-              <FieldLabel>{t`Token`}</FieldLabel>
-              <Input
-                autoComplete="off"
-                onValueChange={(secret) => {
-                  setTyped({ ...typed, secret });
-                }}
-                type="password"
-                value={typed.secret}
-              />
-            </Field>
-            <Button
-              disabled={busy || !ready}
-              successText={connectIt}
-              errorText={connectIt}
-              status={busy ? "loading" : "idle"}
-              type="submit"
-              variant="outline"
-            >
-              {connectIt}
-            </Button>
-          </form>
-        </Onward>
-      ) : null}
-      <Asides>
-        {connected && !open ? (
-          <LaterLink
-            onClick={() => {
-              if (!busy) {
-                void read(null);
-              }
-            }}
-          >
-            {t`Read the leads from ${name} again`}
-          </LaterLink>
-        ) : null}
-        {!connected && !open ? (
-          <LaterLink
-            onClick={() => {
+  if (!open) {
+    return (
+      <div {...stylex.props(styles.end)}>
+        <Button
+          disabled={busy}
+          onClick={() => {
+            if (connected) {
+              void read(null);
+            } else {
               setOpen(true);
+            }
+          }}
+          size="lg"
+          status={busy ? "loading" : "idle"}
+          variant="outline"
+        >
+          {connected
+            ? t`Read the leads from ${name} again`
+            : t`Take the leads from ${name}`}
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <Card padding="lg">
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (ready) {
+            void read(typed);
+          }
+        }}
+        {...stylex.props(styles.form)}
+      >
+        <Text size="lg">
+          {t`In ${name}, make a service user that may read people’s basic and work details, and paste its ID and token here.`}
+        </Text>
+        <Field disabled={busy}>
+          <FieldLabel>{t`Service user ID`}</FieldLabel>
+          <Input
+            autoComplete="off"
+            onValueChange={(id) => {
+              setTyped({ ...typed, id });
             }}
+            value={typed.id}
+          />
+        </Field>
+        <Field disabled={busy}>
+          <FieldLabel>{t`Token`}</FieldLabel>
+          <PasswordInput
+            autoComplete="off"
+            onValueChange={(secret) => {
+              setTyped({ ...typed, secret });
+            }}
+            value={typed.secret}
+          />
+        </Field>
+        <div {...stylex.props(styles.end)}>
+          <Button
+            disabled={busy || !ready}
+            status={busy ? "loading" : "idle"}
+            size="lg"
+            type="submit"
+            variant="outline"
           >
-            {t`Take the leads from ${name}`}
-          </LaterLink>
-        ) : null}
-        {open ? (
-          <LaterLink
+            {connectIt}
+          </Button>
+          <Button
             onClick={() => {
               setOpen(false);
             }}
+            size="lg"
+            variant="link"
           >
             {t`Not now`}
-          </LaterLink>
-        ) : null}
-        <SupportLink page="hr">{t`More about this connection`}</SupportLink>
-      </Asides>
-    </>
+          </Button>
+        </div>
+      </form>
+    </Card>
   );
 };

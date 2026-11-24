@@ -1,5 +1,5 @@
 import { Button } from "@grasp-os/ui/components/button";
-import { Checkbox } from "@grasp-os/ui/components/checkbox";
+import { Card } from "@grasp-os/ui/components/card";
 import { DatePicker } from "@grasp-os/ui/components/date-picker";
 import {
   Field,
@@ -7,24 +7,20 @@ import {
   FieldError,
 } from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
+import { Separator } from "@grasp-os/ui/components/separator";
+import { Switch } from "@grasp-os/ui/components/switch";
 import { Text } from "@grasp-os/ui/components/text";
 import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@grasp-os/ui/components/toggle-group";
-import { ChevronDownIcon, Icon } from "@grasp-os/ui/lib/icons";
-import {
-  colors,
-  font,
-  media,
-  radius,
-  size,
-  space,
-} from "@grasp-os/ui/lib/tokens.stylex";
-import { Plural, useLingui } from "@lingui/react/macro";
+import { colors, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { addYears, datePattern } from "@ui-sdk/react/date";
 import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { flushSync } from "react-dom";
 
 import { formatList } from "../format.ts";
@@ -33,83 +29,37 @@ import { dayChoices } from "./send-plan.ts";
 import type { SendChoice } from "./send-plan.ts";
 
 const styles = stylex.create({
-  // One card, a hairline between its parts.
-  card: {
+  stack: { display: "grid", gap: space[6] },
+  all: {
     display: "flex",
-    flexDirection: "column",
-    borderWidth: size.hairline,
-    borderStyle: "solid",
-    borderColor: colors.border,
-    borderRadius: radius.base,
-    cornerShape: radius.shape,
+    flexWrap: "wrap",
+    alignItems: "baseline",
+    columnGap: space[2],
   },
-  part: {
+  part: { display: "grid", gap: space[4], justifyItems: "start" },
+  // The day typed, the hour beside it; the day's hint or why it can't be hangs below it.
+  when: {
     display: "flex",
-    flexDirection: "column",
+    flexWrap: "wrap",
+    alignItems: "flex-start",
     gap: space[3],
-    minWidth: 0,
-    margin: 0,
+  },
+  day: { width: "12rem" },
+  hour: { width: "8rem" },
+  // "at" and the hour stay together on one line.
+  hourWith: { display: "flex", alignItems: "center", gap: space[3] },
+  at: { display: "flex" },
+  rows: { margin: 0, padding: 0, listStyle: "none" },
+  row: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space[4],
     paddingBlock: space[3],
-    paddingInline: space[4],
-    borderWidth: 0,
     borderBlockStartWidth: { default: size.hairline, ":first-child": 0 },
     borderBlockStartStyle: "solid",
     borderBlockStartColor: colors.border,
   },
-  teamsPart: { gap: space[2] },
-  words: { display: "flex", flexDirection: "column" },
-  // On one line by their words: a day's form to type it in, or why it can't be, hangs below it.
-  when: {
-    display: "flex",
-    flexWrap: "wrap",
-    alignItems: "baseline",
-    gap: space[2],
-  },
-  day: { width: "11rem" },
-  hour: { width: "7rem" },
-  // The legend's words stand in the fieldset's own flow, as a row.
-  legend: { display: "contents" },
-  head: { display: "flex", alignItems: "baseline", gap: space[3] },
-  grow: { flexGrow: 1 },
-  // Only on a phone, where the teams fold away, on the head's line.
-  change: {
-    // The Button's own display restated, as null would drop it.
-    display: { default: "inline-flex", [media.sm]: "none" },
-    marginBlock: `calc(-1 * ${space[1]})`,
-  },
-  // Many teams scroll in the list, so the step still fits on screen.
-  teams: {
-    display: "grid",
-    gridTemplateColumns: {
-      default: "minmax(0, 1fr)",
-      [media.sm]: "repeat(2, minmax(0, 1fr))",
-    },
-    columnGap: space[4],
-    rowGap: space[2],
-    maxHeight: "9rem",
-    margin: 0,
-    padding: 0,
-    overflowY: "auto",
-    listStyle: "none",
-  },
-  folded: { display: { default: "grid", [media.maxSm]: "none" } },
-  team: { display: "flex", alignItems: "center", gap: space[2] },
-  name: {
-    flexGrow: 1,
-    minWidth: 0,
-    overflow: "hidden",
-    whiteSpace: "nowrap",
-    textOverflow: "ellipsis",
-  },
-  count: {
-    flexShrink: 0,
-    whiteSpace: "nowrap",
-    color: colors.mutedForeground,
-    fontSize: font.textXs,
-    lineHeight: font.textXsLine,
-    fontVariantNumeric: "tabular-nums",
-  },
-  at: { color: colors.mutedForeground },
 });
 
 // When the links go out, and to whom (prototype
@@ -221,6 +171,9 @@ const DayField = ({
   const latest = formatDay(max, i18n.locale, yearOf(today));
   const box = useRef<HTMLDivElement>(null);
   const [wrong, setWrong] = useState(false);
+  const forget = useEffectEvent(() => {
+    onWrong(false);
+  });
   // At once: the press that left the field lands on a plan that waits.
   const tell = useEffectEvent((now: boolean) => {
     flushSync(() => {
@@ -245,7 +198,8 @@ const DayField = ({
     }
     return () => {
       watch.disconnect();
-      tell(false);
+      // Gone, it holds nothing up. Not at once: React is mid-commit here, where flushSync can't run.
+      forget();
     };
   }, []);
   return (
@@ -277,7 +231,10 @@ export const SendPlanForm = ({
   choice,
   onChange,
   onWrong,
+  summary,
 }: {
+  /** What happens next, as the plan stands: the card's last line. */
+  summary: ReactNode;
   today: string;
   teams: SendTeam[];
   choice: SendChoice;
@@ -289,6 +246,7 @@ export const SendPlanForm = ({
   const dayField = useId();
   const timeField = useId();
   const laterField = useId();
+  const teamsField = useId();
   const offered = dayChoices(today);
   const names = {
     tomorrow: t`Tomorrow`,
@@ -297,34 +255,25 @@ export const SendPlanForm = ({
   };
   const picked = offered.find((each) => each.day === choice.day)?.id ?? "other";
   const held = teams.filter((team) => choice.held.includes(team.id));
-  const going = teams.length - held.length;
+  const leftOut = formatList(held.map((team) => team.name));
+  const heldCount = held.length;
   const count = teams.length;
-  // On a phone the teams fold into how many go, until they are to be changed: most send to every team.
-  const teamsList = useId();
-  const list = useRef<HTMLUListElement>(null);
+  // Every team as the leads step left it: one line, until the admin wants to change which.
   const [choosing, setChoosing] = useState(false);
-  // Opened, the keys go on from the first team.
-  useEffect(() => {
-    if (choosing) {
-      list.current
-        ?.querySelector<HTMLElement>('[role="checkbox"], input')
-        ?.focus();
-    }
-  }, [choosing]);
+  const listed = choosing || heldCount > 0;
   const at = t({
     message: "at",
     context: "at an hour of the day: on Tuesday at 9:00",
   });
   return (
-    <div {...stylex.props(styles.card)}>
-      <div {...stylex.props(styles.part)}>
-        <div {...stylex.props(styles.words)}>
-          <span id={dayField}>{t`The first links go out`}</span>
-          <Text as="span" size="xs" color="muted">
-            {t`To the team leads. Everyone else follows once their lead has talked.`}
-          </Text>
-        </div>
-        <div {...stylex.props(styles.when)}>
+    <Card padding="lg">
+      <div {...stylex.props(styles.stack)}>
+        <div {...stylex.props(styles.part)}>
+          <div id={dayField}>
+            <Text size="lg">
+              {t`The first links go out to the team leads. Everyone else follows once their lead has talked.`}
+            </Text>
+          </div>
           <ToggleGroup
             aria-labelledby={dayField}
             onValueChange={(value: unknown[]) => {
@@ -333,7 +282,6 @@ export const SendPlanForm = ({
                 onChange({ ...choice, day });
               }
             }}
-            size="sm"
             value={[picked]}
           >
             {offered.map((each) => (
@@ -342,158 +290,154 @@ export const SendPlanForm = ({
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
-          <DayField
-            label={t`Another day`}
-            min={today}
-            onDay={(day) => {
-              onChange({ ...choice, day });
-            }}
-            onWrong={(wrong) => {
-              onWrong("first", wrong);
-            }}
-            today={today}
-            value={choice.day}
-          />
-          <label htmlFor={timeField} {...stylex.props(styles.at)}>
-            {at}
-          </label>
-          <Input
-            id={timeField}
-            style={styles.hour}
-            onValueChange={(time) => {
-              onChange({ ...choice, time });
-            }}
-            size="sm"
-            type="time"
-            value={choice.time}
-          />
-        </div>
-      </div>
-      <fieldset {...stylex.props(styles.part, styles.teamsPart)}>
-        <legend {...stylex.props(styles.legend)}>
-          <span {...stylex.props(styles.head)}>
-            <span {...stylex.props(styles.grow)}>{t`To these teams`}</span>
-            <span
-              {...stylex.props(styles.count)}
-            >{t`${going} of ${count}`}</span>
-            {choosing ? null : (
-              <Button
-                aria-controls={teamsList}
-                aria-expanded={false}
-
-                style={styles.change}
-                onClick={() => {
-                  setChoosing(true);
+          <div {...stylex.props(styles.when)}>
+            <DayField
+              label={t`Another day`}
+              min={today}
+              onDay={(day) => {
+                onChange({ ...choice, day });
+              }}
+              onWrong={(wrong) => {
+                onWrong("first", wrong);
+              }}
+              today={today}
+              value={choice.day}
+            />
+            <span {...stylex.props(styles.hourWith)}>
+              <label htmlFor={timeField} {...stylex.props(styles.at)}>
+                <Text as="span" size="lg">
+                  {at}
+                </Text>
+              </label>
+              <Input
+                id={timeField}
+                onValueChange={(time) => {
+                  onChange({ ...choice, time });
                 }}
-                size="xs"
-                variant="ghost"
-              >
-                {t({ message: "Change", context: "change which teams" })}
-                <Icon icon={ChevronDownIcon} />
-              </Button>
-            )}
-          </span>
-        </legend>
-        <ul
-          id={teamsList}
-          ref={list}
-          {...stylex.props(styles.teams, !choosing && styles.folded)}
-        >
-          {teams.map((team) => {
-            const inIt = !choice.held.includes(team.id);
-            return (
-              <li key={team.id}>
-                <label {...stylex.props(styles.team)}>
-                  <Checkbox
-                    checked={inIt}
-                    onCheckedChange={(checked) => {
-                      onChange({
-                        ...choice,
-                        held:
-                          checked === true
-                            ? choice.held.filter((id) => id !== team.id)
-                            : [...choice.held, team.id],
-                      });
-                    }}
-                  />
-                  <span {...stylex.props(styles.name)}>{team.name}</span>
-                  <span {...stylex.props(styles.count)}>
-                    <Plural
-                      one="# person"
-                      other="# people"
-                      value={team.people}
-                    />
-                  </span>
-                </label>
-              </li>
-            );
-          })}
-        </ul>
-      </fieldset>
-      {held.length > 0 ? (
-        <div {...stylex.props(styles.part)}>
-          <div {...stylex.props(styles.words)}>
-            <span id={laterField}>
-              <Plural
-                one="The team you left out"
-                other="The # teams you left out"
-                value={held.length}
+                style={styles.hour}
+                type="time"
+                value={choice.time}
               />
             </span>
-            <Text as="span" size="xs" color="muted">
-              {formatList(held.map((team) => team.name))}
-            </Text>
-          </div>
-          <div {...stylex.props(styles.when)}>
-            <ToggleGroup
-              aria-labelledby={laterField}
-              onValueChange={(value: unknown[]) => {
-                if (value[0] === "open") {
-                  onChange({ ...choice, heldDay: null });
-                }
-                if (value[0] === "day") {
-                  onChange({
-                    ...choice,
-                    heldDay: choice.heldDay ?? offered[2]?.day ?? choice.day,
-                  });
-                }
-              }}
-              size="sm"
-              value={[choice.heldDay === null ? "open" : "day"]}
-            >
-              <ToggleGroupItem value="open">{t`Not planned yet`}</ToggleGroupItem>
-              <ToggleGroupItem value="day">{t`On a later day`}</ToggleGroupItem>
-            </ToggleGroup>
-            {choice.heldDay === null ? null : (
-              <>
-                <DayField
-                  label={t`The day the other teams get their links`}
-                  min={choice.day}
-                  onDay={(heldDay) => {
-                    onChange({ ...choice, heldDay });
-                  }}
-                  onWrong={(wrong) => {
-                    onWrong("later", wrong);
-                  }}
-                  today={today}
-                  value={choice.heldDay}
-                />
-                <span {...stylex.props(styles.at)}>{at}</span>
-                <Input
-                  aria-label={t`The hour the other teams get their links`}
-                  style={styles.hour}
-                  onValueChange={(heldTime) => {
-                    onChange({ ...choice, heldTime });
-                  }}
-                  size="sm"
-                  type="time"
-                  value={choice.heldTime}
-                />
-              </>
-            )}
           </div>
         </div>
-      ) : null}
-    </div>
+        <Separator />
+        {listed ? (
+          <>
+            <div id={teamsField}>
+              <Text size="lg">{t`These teams get links. Switch one off to send its links later.`}</Text>
+            </div>
+            <ul aria-labelledby={teamsField} {...stylex.props(styles.rows)}>
+              {teams.map((team) => {
+                const inIt = !choice.held.includes(team.id);
+                const { name } = team;
+                return (
+                  <li key={team.id} {...stylex.props(styles.row)}>
+                    <Text size="lg">{name}</Text>
+                    <Switch
+                      aria-label={t`${name} gets links`}
+                      checked={inIt}
+                      onCheckedChange={(on: boolean) => {
+                        onChange({
+                          ...choice,
+                          held: on
+                            ? choice.held.filter((id) => id !== team.id)
+                            : [...choice.held, team.id],
+                        });
+                      }}
+                    />
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        ) : (
+          <div {...stylex.props(styles.all)}>
+            <Text size="lg">
+              {plural(count, {
+                one: "Your one team gets links.",
+                other: "All # teams get links.",
+              })}
+            </Text>
+            <Button
+              onClick={() => {
+                setChoosing(true);
+              }}
+              size="lg"
+              variant="link"
+            >
+              {t({ message: "Change", context: "change which teams" })}
+            </Button>
+          </div>
+        )}
+        {held.length > 0 ? (
+          <>
+            <Separator />
+            <div {...stylex.props(styles.part)}>
+              <div id={laterField}>
+                <Text size="lg">
+                  {plural(heldCount, {
+                    one: `The team you left out: ${leftOut}.`,
+                    other: `The # teams you left out: ${leftOut}.`,
+                  })}
+                </Text>
+              </div>
+              <ToggleGroup
+                aria-labelledby={laterField}
+                onValueChange={(value: unknown[]) => {
+                  if (value[0] === "open") {
+                    onChange({ ...choice, heldDay: null });
+                  }
+                  if (value[0] === "day") {
+                    onChange({
+                      ...choice,
+                      heldDay: choice.heldDay ?? offered[2]?.day ?? choice.day,
+                    });
+                  }
+                }}
+                value={[choice.heldDay === null ? "open" : "day"]}
+              >
+                <ToggleGroupItem value="open">{t`Not planned yet`}</ToggleGroupItem>
+                <ToggleGroupItem value="day">{t`On a later day`}</ToggleGroupItem>
+              </ToggleGroup>
+              {choice.heldDay === null ? null : (
+                <div {...stylex.props(styles.when)}>
+                  <DayField
+                    label={t`The day the other teams get their links`}
+                    min={choice.day}
+                    onDay={(heldDay) => {
+                      onChange({ ...choice, heldDay });
+                    }}
+                    onWrong={(wrong) => {
+                      onWrong("later", wrong);
+                    }}
+                    today={today}
+                    value={choice.heldDay}
+                  />
+                  <span {...stylex.props(styles.hourWith)}>
+                    <span {...stylex.props(styles.at)}>
+                      <Text as="span" size="lg">
+                        {at}
+                      </Text>
+                    </span>
+                    <Input
+                      aria-label={t`The hour the other teams get their links`}
+                      onValueChange={(heldTime) => {
+                        onChange({ ...choice, heldTime });
+                      }}
+                      style={styles.hour}
+                      type="time"
+                      value={choice.heldTime}
+                    />
+                  </span>
+                </div>
+              )}
+            </div>
+          </>
+        ) : null}
+        <Separator />
+        {summary}
+      </div>
+    </Card>
   );
 };

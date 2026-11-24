@@ -21,9 +21,9 @@ import { dateLocale } from "./date-locale.ts";
 import { firstChoice, todayInUtc } from "./send-plan.ts";
 import { SetupStepBody } from "./setup-steps.tsx";
 import type { SetupData } from "./setup-steps.tsx";
-import { listeningOf, steps } from "./setup.ts";
+import { steps } from "./setup.ts";
 import type { SetupStep } from "./setup.ts";
-import { noteHeard, planDraft } from "./visit.ts";
+import { planDraft } from "./visit.ts";
 
 // The team step's plan, as a person in a region of their own types its
 // day: read in their order, or refused in words, and what "What happens
@@ -149,7 +149,7 @@ const shown = async (
     reread,
     on = today,
   }: {
-    step?: SetupStep;
+    step?: Exclude<SetupStep, "pulse" | "listening">;
     given?: SetupData;
     reread?: Promise<unknown>;
     on?: string;
@@ -157,7 +157,6 @@ const shown = async (
 ): Promise<{ saved: PlanInput[]; confirmed: () => number }> => {
   i18n.loadAndActivate({ locale: language, messages: {} });
   browserIn(browser);
-  noteHeard(step);
   const saved: PlanInput[] = [];
   let confirms = 0;
   let loads = 0;
@@ -193,23 +192,14 @@ const shown = async (
       },
       component: () => (
         <SetupStepBody
-          cramped={false}
           data={given}
           furthest={0}
           go={() => {}}
-          listening={listeningOf(
-            { roster: null, plan: null, progress: null },
-            on
-          )}
           message={null}
-          onMadeWay={() => {}}
           onMessage={() => {}}
           onSettle={() => {}}
-          onStory={() => {}}
           onward={() => {}}
-          parts={[]}
           path={steps}
-          percent={10}
           settled={[]}
           step={step}
           today={on}
@@ -273,12 +263,13 @@ const sendButton = (): HTMLButtonElement => {
   return found;
 };
 
-/** What "What happens next" says. */
+/** What the step says happens next, under the plan. */
 const nextSaid = (): string =>
-  [...document.querySelectorAll('[role="status"]')]
+  [...document.querySelectorAll("output")]
     .map((each) => each.textContent ?? "")
-    .find((each) => each.startsWith("What happens next"))
-    ?.replace(/^What happens next/u, "") ?? "";
+    .find(
+      (each) => each.startsWith("Leads get") || each.startsWith("The lead")
+    ) ?? "";
 
 const send = async (): Promise<void> => {
   await act(async () => {

@@ -1,5 +1,6 @@
 import type { Difference, SettleChoice } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
+import { Card } from "@grasp-os/ui/components/card";
 import { Snippet } from "@grasp-os/ui/components/snippet";
 import {
   Tabs,
@@ -8,87 +9,39 @@ import {
   TabsTrigger,
 } from "@grasp-os/ui/components/tabs";
 import { Text } from "@grasp-os/ui/components/text";
-import { CheckIcon, Icon } from "@grasp-os/ui/lib/icons";
-import {
-  colors,
-  media,
-  radius,
-  size,
-  space,
-} from "@grasp-os/ui/lib/tokens.stylex";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
-import { comeIn, motion } from "./motion.ts";
-import { useArrives } from "./setup-parts.tsx";
+import { mailToLetThrough } from "./step-parts.ts";
+import type { StepProps } from "./step-parts.ts";
+
+// What only the admin can settle in their setup, a card each: a step
+// people told two ways when nobody could say why, and letting Grasp's mail
+// through their mail filter (GRA-968). Microsoft 365 filters mail with
+// Exchange Online Protection and Defender, Google Workspace with its own
+// rules: either can put mail from a domain it doesn't know in spam, and
+// the interview links with it.
 
 const styles = stylex.create({
-  // A row of the list of what needs the admin: a line over each, and one under the last.
-  row: {
-    display: "flex",
-    flexDirection: "column",
-    gap: space[3],
-    paddingBlock: space[4],
-    textAlign: "start",
-    borderBlockStartWidth: size.hairline,
-    borderBlockStartStyle: "solid",
-    borderBlockStartColor: colors.border,
-    borderBlockEndWidth: { default: 0, ":last-child": size.hairline },
-    borderBlockEndStyle: "solid",
-    borderBlockEndColor: colors.border,
-  },
-  words: { display: "flex", flexDirection: "column" },
-  choices: { display: "flex", flexWrap: "wrap", gap: space[2] },
+  item: { display: "grid", gap: space[4] },
+  choices: { display: "flex", flexWrap: "wrap", gap: space[3] },
   settled: {
     display: "flex",
-    alignItems: "center",
-    gap: space[2],
-    color: colors.mutedForeground,
-  },
-  tick: { display: "flex", color: colors.success },
-  settledWords: { flexGrow: 1, minWidth: 0 },
-  ways: {
-    display: "grid",
-    gridTemplateColumns: { default: "1fr", [media.sm]: "1fr 1fr" },
+    flexWrap: "wrap",
+    alignItems: "baseline",
     gap: space[3],
-    margin: 0,
-    padding: 0,
-    listStyle: "none",
   },
-  way: {
-    display: "flex",
-    flexDirection: "column",
-    gap: space[1],
-    paddingBlock: space[3],
-    paddingInline: space[4],
-    borderRadius: radius.base,
-    cornerShape: radius.shape,
-    backgroundColor: colors.card,
-    boxShadow: size.borderStrong,
-  },
-  steps: {
-    display: "flex",
-    flexDirection: "column",
+  list: {
+    display: "grid",
     gap: space[2],
     margin: 0,
     paddingInlineStart: space[5],
-    listStyleType: "decimal",
   },
 });
 
-/** A row of the list of what needs the admin, for an item kept elsewhere (no-sender.tsx). */
-export const reviewRow = stylex.props(styles.row, styles.words);
-
-// What only the admin can settle in their onboarding, one item each
-// (prototype `components/onboarding/review-parts.tsx`): a step people told
-// two ways when nobody could say why, and letting Grasp's mail through
-// their mail filter (GRA-968). Microsoft
-// 365 filters mail with Exchange Online Protection and Defender, Google
-// Workspace with its own rules: either can put mail from a domain it
-// doesn't know in spam, and the interview links with it.
-
-/** A way to settle it: the first is the one Stephen would take. */
+/** A way to settle it. */
 interface ReviewChoice {
   id: string;
   label: string;
@@ -119,80 +72,52 @@ const ReviewItem = ({
   onReopen: () => void;
 }) => {
   const { t } = useLingui();
-  const settled = chosen !== null;
   const choice = chosen?.label ?? "";
-  const settledArrives = useArrives(chosen?.id ?? "");
   return (
-    <div {...stylex.props(styles.row)}>
-      <div {...stylex.props(styles.words)}>
-        <Text
-          as="span"
-          size="sm"
-          color={settled ? "muted" : "secondary"}
-          weight={settled ? "normal" : "medium"}
-        >
-          {title}
-        </Text>
-        <Text as="span" size="sm" color="muted">
-          {context}
-        </Text>
-      </div>
-      {settled ? null : children}
-      {chosen === null ? (
-        <div key="choices" {...stylex.props(styles.choices)}>
-          {choices.map((each, at) => (
-            <Button
-              key={each.id}
-              onClick={() => {
-                onChoose(each);
-              }}
-              size="sm"
-              variant={at === 0 ? "default" : "outline"}
-            >
-              {each.label}
+    <Card padding="lg">
+      <div {...stylex.props(styles.item)}>
+        <Text size="lg">{`${title} ${context}`}</Text>
+        {chosen === null ? children : null}
+        {chosen === null ? (
+          <div {...stylex.props(styles.choices)}>
+            {choices.map((each) => (
+              <Button
+                key={each.id}
+                onClick={() => {
+                  onChoose(each);
+                }}
+                size="lg"
+                variant="outline"
+              >
+                {each.label}
+              </Button>
+            ))}
+          </div>
+        ) : (
+          <div {...stylex.props(styles.settled)}>
+            <Text size="lg">{t`Settled: ${choice}`}</Text>
+            <Button onClick={onReopen} size="lg" variant="link">
+              {t({ message: "Change", context: "change how it was settled" })}
             </Button>
-          ))}
-        </div>
-      ) : (
-        <div
-          key="settled"
-          {...comeIn(settledArrives, motion.fade, styles.settled)}
-        >
-          <span {...stylex.props(styles.tick)}>
-            <Icon icon={CheckIcon} />
-          </span>
-          <Text as="span" style={styles.settledWords} size="sm" color="muted">
-            {t`Settled: ${choice}`}
-          </Text>
-          <Button onClick={onReopen} size="sm" variant="ghost">
-            {t({ message: "Change", context: "change how it was settled" })}
-          </Button>
-        </div>
-      )}
-    </div>
+          </div>
+        )}
+      </div>
+    </Card>
   );
 };
 
-/** The ways to settle a difference, the one Stephen would take first. */
-const settleChoices: readonly SettleChoice[] = ["both", "first", "other"];
-
-/** One way a step is told, in a card: what is done, and how it was told, never by whom. */
-const Way = ({ text, told }: { text: string; told: string }) => (
-  <li {...stylex.props(styles.way)}>
-    <Text as="span" size="sm" weight="medium">
-      {text}
-    </Text>
-    <Text as="span" size="xs" color="muted">
-      {told}
-    </Text>
-  </li>
+/** A fact the admin can only read, as one quiet line: no way to settle it. */
+const Note = ({ title, context }: { title: string; context: string }) => (
+  <Text size="lg">{`${title} ${context}`}</Text>
 );
+
+/** The ways to settle a difference. */
+const settleChoices: readonly SettleChoice[] = ["both", "first", "other"];
 
 /**
  * A step of a piece of work its people told two ways, and nobody could
- * say why: the two ways side by side, never by whom, and whether both
- * hold or which one does. Settled, it says which; `open` while it is
- * being decided again.
+ * say why: the two ways, never by whom, and whether both hold or which
+ * one does. Settled, it says which; `open` while it is decided again.
  */
 export const DifferenceItem = ({
   difference,
@@ -227,27 +152,27 @@ export const DifferenceItem = ({
         }
       }}
       onReopen={onReopen}
-      title={t`People do “${name}” in two ways`}
+      title={t`People do “${name}” in two ways.`}
     >
-      <ul {...stylex.props(styles.ways)}>
-        <Way text={way} told={t`The way most told it`} />
-        <Way text={other} told={t`The way some told it`} />
-      </ul>
+      <ol {...stylex.props(styles.list)}>
+        <li>
+          <Text size="lg">{t`The first way: ${way}`}</Text>
+        </li>
+        <li>
+          <Text size="lg">{t`The second way: ${other}`}</Text>
+        </li>
+      </ol>
     </ReviewItem>
   );
 };
 
-/** The sending domain as the admin types it into their filter, with a way to copy it. */
-const DomainToCopy = ({ domain }: { domain: string }) => {
-  const { t } = useLingui();
-  return <Snippet aria-label={t`Copy`} value={domain} />;
-};
-
 /** Numbered steps, short enough to follow in the other window. */
 const Steps = ({ steps }: { steps: string[] }) => (
-  <ol {...stylex.props(styles.steps)}>
+  <ol {...stylex.props(styles.list)}>
     {steps.map((step) => (
-      <li key={step}>{step}</li>
+      <li key={step}>
+        <Text size="lg">{step}</Text>
+      </li>
     ))}
   </ol>
 );
@@ -281,9 +206,9 @@ export const MailItem = ({
       onReopen={() => {
         onSettle(false);
       }}
-      title={t`Let Grasp’s mail through`}
+      title={t`Let Grasp’s mail through.`}
     >
-      <DomainToCopy domain={domain} />
+      <Snippet aria-label={t`Copy`} value={domain} />
       <Tabs defaultValue="microsoft">
         <TabsList variant="line">
           <TabsTrigger value="microsoft">Microsoft 365</TabsTrigger>
@@ -312,21 +237,50 @@ export const MailItem = ({
   );
 };
 
-/**
- * Where Grasp sends no mail, as on hosting where mail isn't available yet:
- * nothing to let through, so nothing to settle. Says so, and that the
- * links go out by hand.
- */
+/** Where Grasp sends no mail, as on hosting where mail isn't available yet: nothing to settle, and the links go out by hand. */
 export const NoMailItem = () => {
   const { t } = useLingui();
   return (
-    <div {...reviewRow}>
-      <Text as="span" size="sm" weight="medium">
-        {t`Mail isn’t available on this hosting yet`}
-      </Text>
-      <Text as="span" size="sm" color="muted">
-        {t`Grasp can’t email your people their interview links for now. Send each one their link by hand from Interviews.`}
-      </Text>
-    </div>
+    <Note
+      context={t`Grasp can’t email your people their interview links for now. Send each one their link by hand from Interviews.`}
+      title={t`Mail isn’t available on this hosting yet.`}
+    />
+  );
+};
+
+/** Where Grasp can send mail but no sender is set (core's `MAIL_FROM`): every mail fails until it is, so it says so instead of guessing a domain. */
+export const NoSenderItem = () => {
+  const { t } = useLingui();
+  return (
+    <Note
+      context={t`Until Grasp support sets one, interview links can’t go out by email. Send each one their link by hand from Interviews.`}
+      title={t`Grasp has no sender for its mail yet.`}
+    />
+  );
+};
+
+/**
+ * Letting Grasp's mail through, as one of what needs the admin, on the
+ * team step before the links go out and among what needs them later;
+ * where Grasp sends no mail, or has no sender yet, that it doesn't.
+ */
+export const MailToLetThrough = ({
+  data,
+  settled,
+  onSettle,
+}: Pick<StepProps, "data" | "settled" | "onSettle">) => {
+  if (data.view.mailSends && data.sendingDomain === null) {
+    return <NoSenderItem />;
+  }
+  return mailToLetThrough(data) && data.sendingDomain !== null ? (
+    <MailItem
+      domain={data.sendingDomain}
+      onSettle={(done) => {
+        onSettle("mail", done);
+      }}
+      settled={settled.includes("mail")}
+    />
+  ) : (
+    <NoMailItem />
   );
 };

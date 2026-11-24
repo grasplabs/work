@@ -1,9 +1,7 @@
-// Concepts only (never merged): what the campaign page would read from
-// core while the interviews run, as fixtures in five states. Core gives
-// today only counts per team and the known percentage
-// (`onboarding.view`, `onboardingGate.view`); the findings, the pace, the
-// asks and the day Grasp expects to open are what core would have to
-// provide (see the pull request's "Needs from core").
+// What the campaign page reads while the interviews run, as fixtures in
+// five states (`?state=`) until core serves it. Core gives today only
+// counts per team (`onboarding.view`); the talks by day, the findings, the
+// pace, the asks and who declined are what core has to provide.
 
 /** Which state of the campaign a fixture shows. */
 export type CampaignState = "day1" | "day3" | "day5" | "close" | "small";
@@ -28,8 +26,6 @@ export interface Finding {
   id: string;
   kind: "flow" | "difference";
   text: string;
-  /** What piece of work it is about, in two or three words. */
-  topic: string;
 }
 
 /** A team, as the admin may see it: counts only, and for a team under five only its lead. */
@@ -53,29 +49,20 @@ export type Ask =
 export type Pace = "started" | "onPace" | "quiet" | "enough";
 
 export interface Campaign {
-  company: string;
   /** False for a small company: one group, and the word "team" never shows. */
   grouped: boolean;
   /** ISO days. */
   start: string;
   closes: string;
   today: string;
-  /** When Grasp expects to give its go and open for everyone. */
-  opensAround: string;
-  /** The day reminders go out by themselves. */
-  reminders: string[];
   invited: number;
   talked: number;
-  /** How much of the company Grasp knows, 0 to 100: a quiet figure. */
-  known: number;
   pace: Pace;
   /** By team; for a small company, one group holding everyone. */
   teams: TeamPicture[];
   asks: Ask[];
   /** Who declined the interview, by name (never why): Ruben's decision. */
   declined: string[];
-  /** What happened on which day, for the week's timeline: Grasp's own words. */
-  events: { day: string; text: string }[];
 }
 
 /** A team of fewer than this shows only whether its lead talked. */
@@ -88,19 +75,16 @@ const planning = {
   findings: [
     {
       id: "p1",
-      topic: "Weekly planning",
       kind: "flow",
       text: "A job is planned twice. First on the whiteboard on Monday morning, then in the planning tool by Wednesday.",
     },
     {
       id: "p2",
-      topic: "Urgent call-outs",
       kind: "difference",
       text: "Two people said differently who decides on an urgent call-out. One said the duty planner, the other whoever answers the phone.",
     },
     {
       id: "p3",
-      topic: "Changes to the week",
       kind: "flow",
       text: "Most changes to the week come in by phone after three in the afternoon.",
     },
@@ -114,19 +98,16 @@ const field = {
   findings: [
     {
       id: "f1",
-      topic: "Work orders",
       kind: "flow",
       text: "After a job, the work order is photographed and sent on WhatsApp. The office types it over.",
     },
     {
       id: "f2",
-      topic: "Parts used",
       kind: "flow",
       text: "Parts used on site are written down at the end of the day, from memory.",
     },
     {
       id: "f3",
-      topic: "Closing a job",
       kind: "difference",
       text: "Two people said differently when a job is closed. One said when the engineer leaves, the other once the customer signs.",
     },
@@ -140,13 +121,11 @@ const service = {
   findings: [
     {
       id: "s1",
-      topic: "Arrival times",
       kind: "flow",
       text: "Most calls ask when the engineer arrives, and the answer is looked up in two places.",
     },
     {
       id: "s2",
-      topic: "Complaints",
       kind: "difference",
       text: "Two people said differently where a complaint is kept. One said the shared mailbox, the other the complaints spreadsheet.",
     },
@@ -160,13 +139,11 @@ const finance = {
   findings: [
     {
       id: "n1",
-      topic: "Invoicing",
       kind: "flow",
       text: "Invoices go out once a week, after field service’s work orders are checked by hand.",
     },
     {
       id: "n2",
-      topic: "Credit checks",
       kind: "difference",
       text: "Two people said differently when the credit check is done. One said before the quote, the other after the first order.",
     },
@@ -180,7 +157,6 @@ const purchasing = {
   findings: [
     {
       id: "u1",
-      topic: "Ordering stock",
       kind: "flow",
       text: "Stock is ordered when a shelf looks empty. No minimum is written down.",
     },
@@ -202,24 +178,17 @@ const teamOn = (
   findings: base.findings.slice(0, shown),
 });
 
-const company = "Veldhuis Installaties";
 const start = "2026-11-23";
 const closes = "2026-11-30";
-const opensAround = "2026-12-02";
-const reminders = ["2026-11-25", "2026-11-29"];
 
 export const campaigns: Record<CampaignState, Campaign> = {
   day1: {
-    company,
     grouped: true,
     start,
     closes,
     today: "2026-11-23",
-    opensAround,
-    reminders,
     invited: 43,
     talked: 3,
-    known: 18,
     pace: "started",
     teams: [
       teamOn(planning, 2, true, 0),
@@ -230,21 +199,14 @@ export const campaigns: Record<CampaignState, Campaign> = {
     ],
     asks: [],
     declined: [],
-    events: [
-      { day: "2026-11-23", text: "Your message and the invitations went out." },
-    ],
   },
   day3: {
-    company,
     grouped: true,
     start,
     closes,
     today: "2026-11-25",
-    opensAround,
-    reminders,
     invited: 43,
     talked: 19,
-    known: 46,
     pace: "onPace",
     teams: [
       teamOn(planning, 5, true, 3),
@@ -255,23 +217,14 @@ export const campaigns: Record<CampaignState, Campaign> = {
     ],
     asks: [],
     declined: [],
-    events: [
-      { day: "2026-11-23", text: "Your message and the invitations went out." },
-      { day: "2026-11-24", text: "The first findings came in, from Planning." },
-      { day: "2026-11-25", text: "A reminder went to everyone still to talk." },
-    ],
   },
   day5: {
-    company,
     grouped: true,
     start,
     closes,
     today: "2026-11-27",
-    opensAround,
-    reminders,
     invited: 43,
     talked: 30,
-    known: 64,
     pace: "quiet",
     teams: [
       teamOn(planning, 8, true, 3),
@@ -290,24 +243,14 @@ export const campaigns: Record<CampaignState, Campaign> = {
       { id: "quiet", kind: "quiet", team: "Customer service", waiting: 7 },
     ],
     declined: ["Pieter de Groot"],
-    events: [
-      { day: "2026-11-23", text: "Your message and the invitations went out." },
-      { day: "2026-11-24", text: "The first findings came in, from Planning." },
-      { day: "2026-11-25", text: "A reminder went to everyone still to talk." },
-      { day: "2026-11-27", text: "Field service: three findings so far." },
-    ],
   },
   close: {
-    company,
     grouped: true,
     start,
     closes,
     today: "2026-11-30",
-    opensAround,
-    reminders,
     invited: 43,
     talked: 39,
-    known: 83,
     pace: "enough",
     teams: [
       teamOn(planning, 9, true, 3),
@@ -318,31 +261,14 @@ export const campaigns: Record<CampaignState, Campaign> = {
     ],
     asks: [],
     declined: ["Pieter de Groot"],
-    events: [
-      { day: "2026-11-23", text: "Your message and the invitations went out." },
-      { day: "2026-11-24", text: "The first findings came in, from Planning." },
-      { day: "2026-11-25", text: "A reminder went to everyone still to talk." },
-      {
-        day: "2026-11-28",
-        text: "Customer service picked up after your nudge.",
-      },
-      {
-        day: "2026-11-30",
-        text: "Enough is known. The interviews close tonight.",
-      },
-    ],
   },
   small: {
-    company: "Studio Lindeboom",
     grouped: false,
     start,
     closes,
     today: "2026-11-26",
-    opensAround,
-    reminders,
     invited: 7,
     talked: 4,
-    known: 52,
     pace: "onPace",
     teams: [
       {
@@ -354,19 +280,16 @@ export const campaigns: Record<CampaignState, Campaign> = {
         findings: [
           {
             id: "l1",
-            topic: "Starting a project",
             kind: "flow",
             text: "A project starts with a call and a site visit. The brief is written only after the second meeting.",
           },
           {
             id: "l2",
-            topic: "Permit drawings",
             kind: "flow",
             text: "Permit drawings are checked on paper before they go to the municipality.",
           },
           {
             id: "l3",
-            topic: "Logging hours",
             kind: "difference",
             text: "Two people said differently how hours are logged. One said daily in the timesheet, the other at the end of each project.",
           },
@@ -375,14 +298,6 @@ export const campaigns: Record<CampaignState, Campaign> = {
     ],
     asks: [],
     declined: [],
-    events: [
-      {
-        day: "2026-11-23",
-        text: "The first interview, with the person you said knows the work best.",
-      },
-      { day: "2026-11-24", text: "Everyone else got their invitation." },
-      { day: "2026-11-25", text: "The first findings came in." },
-    ],
   },
 };
 
