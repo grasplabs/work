@@ -187,7 +187,7 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
         <>
           <Button
             onClick={() => {
-              onward();
+              void onward();
             }}
             size="lg"
           >

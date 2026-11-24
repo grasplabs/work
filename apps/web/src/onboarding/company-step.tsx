@@ -231,7 +231,7 @@ const CompanyEnd = ({
   signInsFirst: boolean;
   fromDirectory: DirectorySuite | null;
   onAnother: () => void;
-  onward: () => void;
+  onward: () => Promise<void>;
 }) => {
   const { t } = useLingui();
   if (roster) {
@@ -239,7 +239,7 @@ const CompanyEnd = ({
       <>
         <Button
           onClick={() => {
-            onward();
+            void onward();
           }}
           size="lg"
         >

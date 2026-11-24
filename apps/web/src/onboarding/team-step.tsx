@@ -113,7 +113,7 @@ export const TeamStep = ({
       setRefreshing(true);
       await refresh();
       setRefreshing(false);
-      onward();
+      void onward();
     }
   };
   return (

@@ -252,7 +252,7 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
       end={
         <Button
           onClick={() => {
-            onward();
+            void onward();
           }}
           size="lg"
         >
