@@ -46,5 +46,7 @@ export const StephenFigure = ({
   if (busy) {
     state = "thinking";
   }
-  return <AgentFigure look={stephensLook} size={size} state={state} />;
+  return (
+    <AgentFigure look={stephensLook} size={size} state={state} still={false} />
+  );
 };
