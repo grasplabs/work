@@ -1,7 +1,7 @@
 import { Button } from "@grasp-os/ui/components/button";
 import { Chat } from "@grasp-os/ui/components/chat";
 import { Text } from "@grasp-os/ui/components/text";
-import { Icon, MessageSquareIcon, XIcon } from "@grasp-os/ui/lib/icons";
+import { Icon, MessageSquareIcon, PauseIcon } from "@grasp-os/ui/lib/icons";
 import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
@@ -290,7 +290,7 @@ const ConsentThread = ({
     turns.push({
       id: "declined",
       from: "stephen",
-      text: `That’s fine, ${fixture.person}. Nothing was recorded, and I won’t remind you. ${fixture.sponsor.name} sees that you said no, never why. If you change your mind, this link works until ${fixture.closes}.`,
+      text: `That’s fine, ${fixture.person}. ${fixture.sponsor.name} will see that you’re not taking part, never why. Nothing was recorded, and I won’t remind you. If you change your mind, this link works until ${fixture.closes}.`,
     });
   }
   return (
@@ -537,7 +537,7 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
               size="icon-sm"
               variant="ghost"
             >
-              <Icon icon={XIcon} />
+              <Icon icon={PauseIcon} />
             </Button>
           </>
         ) : null

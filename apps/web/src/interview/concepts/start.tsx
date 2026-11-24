@@ -47,6 +47,7 @@ import {
   TrashIcon,
 } from "@grasp-os/ui/lib/icons";
 import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
@@ -59,7 +60,7 @@ import {
   fixture,
   ignore,
   languages,
-  recordedConsent,
+  consentIn,
 } from "./fixture.ts";
 import type { LanguageId } from "./fixture.ts";
 
@@ -108,27 +109,51 @@ const styles = stylex.create({
   flush: { marginInline: `calc(-1 * ${space["3"]})` },
 });
 
-/** The three promises, the same RECORDED words in every concept (fixture.ts `recordedConsent`), each with its mark. */
-const marks = { yours: LockIcon, choose: EyeIcon, delete: TrashIcon } as const;
-export const promises = recordedConsent.promises.map((promise) => ({
-  ...promise,
-  icon: marks[promise.id],
-}));
+/** The three promises, the same RECORDED words in every concept (fixture.ts `recordedConsents`), each with its mark. */
+const marks = { yours: LockIcon, choose: EyeIcon, until: TrashIcon } as const;
 
-const Promises = () => (
-  <ItemGroup aria-label="Your words" style={styles.flush}>
-    {promises.map((promise) => (
-      <Item key={promise.id} size="sm">
-        <ItemMedia>
-          <Icon icon={promise.icon} />
-        </ItemMedia>
-        <ItemContent>
-          <ItemTitle>{promise.label}</ItemTitle>
-        </ItemContent>
-      </Item>
-    ))}
-  </ItemGroup>
+/** The recorded consent in the language on screen, each promise with its mark. */
+const useConsent = () => {
+  const { i18n } = useLingui();
+  const consent = consentIn(i18n.locale);
+  return {
+    ...consent,
+    promises: consent.promises.map((promise) => ({
+      ...promise,
+      icon: marks[promise.id],
+    })),
+  };
+};
+
+/** The consent's line, as recorded, in the language on screen. */
+const ConsentLine = () => <Text size="lg">{useConsent().line}</Text>;
+
+/** C's promises in the consent block: the same recorded words. */
+const ConsentDetails = () => (
+  <ConfirmationDetails
+    items={useConsent().promises.map(({ label, icon }) => ({ label, icon }))}
+  />
 );
+
+const Promises = () => {
+  const { promises, language } = useConsent();
+  return (
+    <ItemGroup aria-label="Your words" style={styles.flush}>
+      {promises.map((promise) => (
+        <Item key={promise.id} size="sm">
+          <ItemMedia>
+            <Icon icon={promise.icon} />
+          </ItemMedia>
+          <ItemContent>
+            <ItemTitle>
+              <span lang={language}>{promise.label}</span>
+            </ItemTitle>
+          </ItemContent>
+        </Item>
+      ))}
+    </ItemGroup>
+  );
+};
 
 /** A page of its own: one column in the middle of its room. */
 const Page = ({ children }: { children: ReactNode }) => (
@@ -142,10 +167,13 @@ const Words = ({
   over,
   title,
   line,
+  children,
 }: {
   over?: ReactNode;
   title: string;
   line?: string;
+  /** In the line's place: a line of its own (the recorded consent's). */
+  children?: ReactNode;
 }) => (
   <div {...stylex.props(styles.words)}>
     {over}
@@ -153,6 +181,7 @@ const Words = ({
       {title}
     </Heading>
     {line === undefined ? null : <Text size="lg">{line}</Text>}
+    {children}
   </div>
 );
 
@@ -213,7 +242,9 @@ export const Consent = ({
   onRatherNot: () => void;
 }) => (
   <Page>
-    <Words line={recordedConsent.line} over={<Asker />} title={title} />
+    <Words over={<Asker />} title={title}>
+      <ConsentLine />
+    </Words>
     <Promises />
     <Answers
       agree={agree}
@@ -453,7 +484,7 @@ export const RatherNot = ({
 }) => (
   <Page>
     <Words
-      line={`Nothing was recorded. ${fixture.sponsor.name} sees that you said no, never why.`}
+      line={`${fixture.sponsor.name} will see that you’re not taking part, never why. Nothing was recorded.`}
       title="Skip the interview?"
     />
     <div {...stylex.props(styles.actions)}>
@@ -562,9 +593,7 @@ export const consentTurn = (
           {answer === "not-now" ? "Not now." : "You’d rather not."}
         </ConfirmationRejected>
       </ConfirmationTitle>
-      <ConfirmationDetails
-        items={promises.map(({ label, icon }) => ({ label, icon }))}
-      />
+      <ConsentDetails />
       <ConfirmationActions>
         <ConfirmationAction
           onClick={() => {
