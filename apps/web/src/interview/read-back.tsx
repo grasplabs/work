@@ -1,5 +1,4 @@
 import type { InterviewFact } from "@grasp-os/shared/interview-links";
-import { interviewerNames } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
 import { Input } from "@grasp-os/ui/components/input";
 import { Text } from "@grasp-os/ui/components/text";
@@ -20,14 +19,13 @@ import * as stylex from "@stylexjs/stylex";
 import { useId, useRef, useState } from "react";
 
 import { Destination, moveLine } from "./destination.tsx";
-import { Head, headSizes, useHead } from "./head.tsx";
 import { voice } from "./interview.stylex.ts";
-import { update, useInterviewer, useProgress } from "./kept.ts";
+import { update, useProgress } from "./kept.ts";
 import { fullWidth, looks } from "./looks.ts";
 import { agreeToPart, changeLine, useLoop } from "./loop.ts";
 import type { LoopState } from "./loop.ts";
 import { partAt, withFactsBack, withFactToggled } from "./progress.ts";
-import { useSaidIn, voiceLevel } from "./speech.ts";
+import { useSaidIn } from "./speech.ts";
 import { SpokenText } from "./spoken.tsx";
 import { usePromise } from "./words.ts";
 
@@ -238,15 +236,12 @@ const ReadBackLine = ({
   );
 };
 
-export const ReadBack = ({ room }: { room: number }) => {
+export const ReadBack = () => {
   const { t } = useLingui();
   const promise = usePromise();
   const loop = useLoop();
   const progress = useProgress();
-  const interviewer = useInterviewer();
-  const who = interviewerNames[interviewer];
   const { parts, at, part } = partAt(progress);
-  const { body, size } = useHead(room, headSizes.reading);
   const saidIn = useSaidIn(loop.line, loop.from);
   // What he says lights up as he says it; while he tells the lines, they light up instead.
   const said =
@@ -272,15 +267,7 @@ export const ReadBack = ({ room }: { room: number }) => {
   const count = parts.length;
   return (
     <div {...stylex.props(looks.screen)}>
-      <Head
-        fill={1}
-        label={t`${who}, reading back.`}
-        sign={loop.sign}
-        size={size}
-        voice={voiceLevel}
-        who={interviewer}
-      />
-      <div ref={body} {...stylex.props(looks.body)}>
+      <div {...stylex.props(looks.body)}>
         <div aria-live="polite">
           <h1 {...stylex.props(looks.said)}>
             <SpokenText said={said} text={loop.line} />

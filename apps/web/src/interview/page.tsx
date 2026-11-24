@@ -1,44 +1,30 @@
-import { interviewPhases } from "@grasp-os/shared/interview-links";
-import type {
-  InterviewLine,
-  InterviewProgress,
-} from "@grasp-os/shared/interview-links";
-import type { InterviewPhase } from "@grasp-os/shared/interview-turn";
+import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
-import { Heading } from "@grasp-os/ui/components/heading";
-import { Text } from "@grasp-os/ui/components/text";
-import { Icon, MessageSquareIcon, XIcon } from "@grasp-os/ui/lib/icons";
-import { fadeIn, visuallyHidden } from "@grasp-os/ui/lib/styles";
 import {
-  colors,
-  duration,
-  media,
-  radius,
-  space,
-} from "@grasp-os/ui/lib/tokens.stylex";
+  Icon,
+  MessageSquareFilledIcon,
+  PauseFilledIcon,
+} from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
-import type { ReactNode, RefObject } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatDay } from "../format.ts";
 import { isLocale } from "../i18n.ts";
-import { LanguageButton } from "../language-picker.tsx";
-import { deleteInterview, isRefused, withdrawInterview } from "./api.ts";
+import {
+  deleteInterview,
+  isRefused,
+  participate,
+  withdrawInterview,
+} from "./api.ts";
 import type { OpenSession } from "./api.ts";
-import { Before } from "./before.tsx";
+import { Page, Words } from "./calm.tsx";
 import { Closed, DeleteInterview } from "./closed.tsx";
-import { Composer, SaveNote, SaveTrouble } from "./composer.tsx";
-import { Head, headSizes, useHead } from "./head.tsx";
-import { voice } from "./interview.stylex.ts";
+import { besideQuery, Conversation, TimeUp } from "./conversation.tsx";
+import { secondsLeft, useCountdownMarks, useNow } from "./countdown.tsx";
+import { Frame } from "./frame.tsx";
 import {
   forgetInterview,
   keepNow,
@@ -48,15 +34,8 @@ import {
   useInterviewer,
   useProgress,
 } from "./kept.ts";
-import { fullWidth, looks } from "./looks.ts";
-import {
-  sendTyped,
-  setLoopWords,
-  startLoop,
-  stopLoop,
-  useLoop,
-} from "./loop.ts";
-import { Mark } from "./mark.tsx";
+import { setLoopWords, startLoop, stopLoop } from "./loop.ts";
+import { reachMic } from "./mic.ts";
 import {
   begun,
   isReading,
@@ -65,382 +44,46 @@ import {
   rated,
   reopened,
   resumed,
-  withoutLine,
+  steered,
+  ticked,
 } from "./progress.ts";
-import { ReadBack } from "./read-back.tsx";
-import { Talk } from "./talk.tsx";
-import { Transcript, transcriptId } from "./transcript.tsx";
-import { useInterviewWords, useLoopWords } from "./words.ts";
+import { setSound } from "./speech.ts";
+import {
+  Consent,
+  Declined,
+  NotNow,
+  Paused,
+  RatherNot,
+  remindTimes,
+  Reminded,
+} from "./start.tsx";
+import type { RemindAt } from "./start.tsx";
+import { useLoopWords } from "./words.ts";
 
-// Someone's interview, as their own link opens it (prototype
-// `interview-view.tsx`): full screen, outside the app, as calm as the
-// onboarding. Before it, the language, Stephen or Claire, what this is and
-// a sound check (before.tsx). Then whoever they chose in the middle, the
-// line lighting up as it is said; the box to type in at the bottom, a
-// voice bar while he talks for whoever chose to talk, their own words as a
-// bubble over it; the parts of the interview as a row of marks at the top;
-// top left the way out for now, which keeps their place; top right the
-// transcript, which floats at the right side. Last he reads back what he
-// wrote down, a few lines at a time; what they leave in is what counts.
-// Nothing on the page scrolls.
+// Someone's interview, as their own link opens it: full screen, outside
+// the app, in the calm frame (frame.tsx). First one screen to agree, with
+// its two quiet ways out (start.tsx); then the conversation, Stephen's line
+// on a stage over the card they answer in, the minutes left over it
+// (conversation.tsx); at the end of the minutes, or when Stephen gets
+// there, the read-back; then his thanks (closed.tsx). The header holds the
+// transcript and the pause while they talk, and the way to delete what was
+// said once there is something to delete. Nothing on the page scrolls but
+// a screen's own room.
 
-const styles = stylex.create({
-  frame: {
-    display: "flex",
-    flexDirection: "column",
-    height: "100svh",
-    overflow: "hidden",
-    backgroundColor: colors.background,
-    color: colors.bodyForeground,
-  },
-  header: {
-    display: "flex",
-    flexShrink: 0,
-    alignItems: "center",
-    gap: space["3"],
-    height: "4.5rem",
-    paddingInline: { default: space["4"], [media.sm]: space["10"] },
-  },
-  side: { display: "flex", flexGrow: 1, flexBasis: 0 },
-  start: { justifyContent: "flex-start" },
-  end: { justifyContent: "flex-end" },
-  main: {
-    position: "relative",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    // Centred while it fits; on a window too low for it, it scrolls in its own room and never runs under the foot.
-    justifyContent: "safe center",
-    flexGrow: 1,
-    minHeight: 0,
-    overflowY: "auto",
-    paddingInline: space["4"],
-  },
-  // Room under the stage for their words, which float up from the box.
-  overBox: { paddingBlockEnd: "7rem" },
-  footer: {
-    display: "flex",
-    flexShrink: 0,
-    flexDirection: { default: "column", [media.sm]: "row" },
-    alignItems: { default: "stretch", [media.sm]: "flex-end" },
-    gap: { default: space["3"], [media.sm]: space["4"] },
-    paddingInline: { default: space["4"], [media.sm]: space["10"] },
-    paddingBlockStart: space["2"],
-    paddingBlockEnd: space["5"],
-  },
-  box: {
-    width: "100%",
-    minWidth: 0,
-    order: { default: null, [media.sm]: 2 },
-    maxWidth: { default: null, [media.sm]: "36rem" },
-  },
-  // On a phone the mark and the language share a row under the box; wider, they stand at its sides.
-  corners: {
-    display: { default: "flex", [media.sm]: "contents" },
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  corner: {
-    display: "flex",
-    alignItems: "center",
-    gap: space["2"],
-    height: "3.5rem",
-  },
-  cornerStart: {
-    order: { default: null, [media.sm]: 1 },
-    flexGrow: { default: null, [media.sm]: 1 },
-    flexBasis: { default: null, [media.sm]: 0 },
-  },
-  cornerEnd: {
-    justifyContent: "flex-end",
-    order: { default: null, [media.sm]: 3 },
-    flexGrow: { default: null, [media.sm]: 1 },
-    flexBasis: { default: null, [media.sm]: 0 },
-  },
-  // The stage, over the box and what floats up from it.
-  stage: {
-    position: "relative",
-    zIndex: 1,
-    display: "flex",
-    justifyContent: "center",
-    width: "100%",
-    opacity: 1,
-    transitionProperty: "opacity",
-    transitionDuration: duration.ui,
-    transitionTimingFunction: duration.ease,
-  },
-  away: { opacity: 0 },
-  shown: { display: "flex", justifyContent: "center", width: "100%" },
-  phases: { display: "flex", alignItems: "center", gap: space["1"] },
-  phase: {
-    display: "block",
-    width: "0.375rem",
-    height: "0.375rem",
-    borderRadius: radius.full,
-    backgroundColor: colors.border,
-    transitionProperty: "width, background-color",
-    transitionDuration: duration.ui,
-    transitionTimingFunction: duration.ease,
-  },
-  phaseDone: { backgroundColor: colors.foreground },
-  phaseNow: { width: "1.25rem", backgroundColor: colors.foreground },
-  // Something new is marked in the transcript.
-  fresh: {
-    display: "inline-block",
-    width: "0.375rem",
-    height: "0.375rem",
-    borderRadius: radius.circle,
-    backgroundColor: voice.heat,
-  },
-  failed: { paddingBlockStart: space["4"] },
-});
-
-/** Room kept free over the box, for their words that show there. */
-const overBox = 112;
-
-/** From this wide the transcript has room beside the stage. */
-const beside = "(min-width: 80rem)";
+/** Where they are before the conversation: the start, or one of its ways out. */
+type Before =
+  | { at: "start" }
+  | { at: "not-now" }
+  | { at: "reminded"; picked: RemindAt }
+  | { at: "rather-not" }
+  | { at: "declined" };
 
 const onBeside = (listener: () => void): (() => void) => {
-  const query = window.matchMedia(beside);
+  const query = window.matchMedia(besideQuery);
   query.addEventListener("change", listener);
   return () => {
     query.removeEventListener("change", listener);
   };
-};
-
-const onResize = (listener: () => void): (() => void) => {
-  window.addEventListener("resize", listener);
-  return () => {
-    window.removeEventListener("resize", listener);
-  };
-};
-
-/**
- * The height the stage has between the top and the bottom of the frame,
- * less `around`: so what is on stage is sized to fit, and nothing scrolls.
- */
-const useStageRoom = (around: number) => {
-  const top = useRef<HTMLElement>(null);
-  const bottom = useRef<HTMLElement>(null);
-  const [edges, setEdges] = useState(0);
-  useLayoutEffect(() => {
-    const measure = (): void => {
-      setEdges(
-        (top.current?.offsetHeight ?? 0) + (bottom.current?.offsetHeight ?? 0)
-      );
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    if (top.current !== null) {
-      observer.observe(top.current);
-    }
-    if (bottom.current !== null) {
-      observer.observe(bottom.current);
-    }
-    return () => {
-      observer.disconnect();
-    };
-  }, []);
-  const height = useSyncExternalStore(onResize, () => window.innerHeight);
-  return { top, bottom, room: height - edges - around };
-};
-
-/** Where the interview is: its parts as a row of marks, with no words on screen. */
-const PhaseBar = ({ phase }: { phase: InterviewPhase }) => {
-  const { t } = useLingui();
-  const label = useInterviewWords().phase[phase];
-  const at = interviewPhases.indexOf(phase);
-  const n = at + 1;
-  const parts = interviewPhases.length;
-  return (
-    <div>
-      <span {...stylex.props(visuallyHidden)}>
-        {t`Part ${n} of ${parts}: ${label}`}
-      </span>
-      <div aria-hidden="true" {...stylex.props(styles.phases)}>
-        {interviewPhases.map((each, index) => (
-          <span
-            key={each}
-            {...stylex.props(
-              styles.phase,
-              index < at && styles.phaseDone,
-              index === at && styles.phaseNow
-            )}
-          />
-        ))}
-      </div>
-    </div>
-  );
-};
-
-/** A screen of the interview with whoever holds it over what it says: after it, or instead of it. */
-const Said = ({
-  room,
-  sign = null,
-  fill = 0.35,
-  label,
-  children,
-}: {
-  room: number;
-  sign?: "question" | "heart" | "check" | null;
-  fill?: number;
-  label: string;
-  children: ReactNode;
-}) => {
-  const { body, size } = useHead(room, headSizes.talking);
-  const who = useInterviewer();
-  return (
-    <div {...stylex.props(looks.screen, looks.narrow)}>
-      <Head fill={fill} label={label} sign={sign} size={size} who={who} />
-      <div ref={body} {...stylex.props(looks.body)}>
-        {children}
-      </div>
-    </div>
-  );
-};
-
-/** The frame of every screen of the link: as little as possible around the stage. */
-const InterviewFrame = ({
-  top,
-  bottom,
-  left,
-  middle,
-  right,
-  box,
-  open = false,
-  children,
-}: {
-  /**
-   * Whether the interview is open here, for the account it belongs to,
-   * so what they say is kept: only then does the frame say "Saved". A link
-   * that can't be opened has kept nothing here.
-   */
-  open?: boolean;
-  /** Where the frame's top and bottom are measured, so the stage takes what is left. */
-  top: RefObject<HTMLElement | null>;
-  bottom: RefObject<HTMLElement | null>;
-  left?: ReactNode;
-  middle?: ReactNode;
-  right?: ReactNode;
-  box?: ReactNode;
-  children: ReactNode;
-}) => (
-  <div {...stylex.props(styles.frame)}>
-    <header ref={top} {...stylex.props(styles.header)}>
-      <div {...stylex.props(styles.side, styles.start)}>{left}</div>
-      {middle}
-      <div {...stylex.props(styles.side, styles.end)}>{right}</div>
-    </header>
-    <main {...stylex.props(styles.main, box !== undefined && styles.overBox)}>
-      {children}
-    </main>
-    <footer ref={bottom} {...stylex.props(styles.footer)}>
-      {box === undefined ? null : (
-        <div {...stylex.props(styles.box)}>{box}</div>
-      )}
-      <div {...stylex.props(styles.corners)}>
-        <div {...stylex.props(styles.corner, styles.cornerStart)}>
-          <Mark />
-          {open ? <SaveNote /> : null}
-        </div>
-        <div {...stylex.props(styles.corner, styles.cornerEnd)}>
-          <LanguageButton />
-        </div>
-      </div>
-    </footer>
-  </div>
-);
-
-/** They stopped for now: their place is kept. */
-const Stopped = ({
-  room,
-  onCarryOn,
-}: {
-  room: number;
-  onCarryOn: () => void;
-}) => {
-  const { t } = useLingui();
-  const who = interviewerNames[useInterviewer()];
-  return (
-    <Said label={t`${who}, drawn in dots.`} room={room}>
-      <div {...stylex.props(looks.words)}>
-        <Heading level={1} size="default">
-          {t`Your place is kept.`}
-        </Heading>
-        <Text color="muted">
-          {t`Open this link again whenever you like, and carry on where you stopped.`}
-        </Text>
-      </div>
-      <div {...stylex.props(looks.actions)}>
-        <div {...stylex.props(fullWidth.button)}>
-          <Button onClick={onCarryOn} size="lg">
-            {t`Carry on now`}
-          </Button>
-        </div>
-      </div>
-    </Said>
-  );
-};
-
-/** The interviews are over: what was said can be deleted, no more. */
-const Over = ({ room }: { room: number }) => {
-  const { t } = useLingui();
-  const who = interviewerNames[useInterviewer()];
-  return (
-    <Said fill={1} label={t`${who}, drawn in dots.`} room={room} sign="heart">
-      <div {...stylex.props(looks.words)}>
-        <Heading level={1} size="default">
-          {t`The interviews are over.`}
-        </Heading>
-        <Text color="muted">{t`Thank you for your time.`}</Text>
-      </div>
-    </Said>
-  );
-};
-
-/**
- * They deleted it; or, while what the Brain kept of it is still being
- * removed (`removing`), they are told that instead.
- */
-const Deleted = ({ room, removing }: { room: number; removing: boolean }) => {
-  const { t } = useLingui();
-  const who = interviewerNames[useInterviewer()];
-  return (
-    <Said label={t`${who}, drawn in dots.`} room={room}>
-      <div aria-live="polite">
-        <Heading level={1} size="default">
-          {removing
-            ? t`Deleted. What the Brain kept of it is being removed.`
-            : t`Deleted. Nothing you said is kept.`}
-        </Heading>
-      </div>
-    </Said>
-  );
-};
-
-/**
- * They withdrew: what they said stays theirs to read and delete, and
- * nothing of it is used; or, while what the Brain kept of it is still
- * being removed (`removing`), they are told that instead.
- */
-const Withdrawn = ({ room, removing }: { room: number; removing: boolean }) => {
-  const { t } = useLingui();
-  const who = interviewerNames[useInterviewer()];
-  return (
-    <Said label={t`${who}, drawn in dots.`} room={room}>
-      <div aria-live="polite" {...stylex.props(looks.words)}>
-        <Heading level={1} size="default">
-          {removing
-            ? t`You withdrew. What the Brain kept of it is being removed.`
-            : t`You withdrew. Nothing you said is used from now on.`}
-        </Heading>
-        <Text color="muted">
-          {t`It stays here for you to read. You can still delete it.`}
-        </Text>
-      </div>
-    </Said>
-  );
 };
 
 /**
@@ -474,166 +117,13 @@ const onEscape = (then: () => void): (() => void) => {
   };
 };
 
-/** The button top right that shows the transcript, with a dot when something new is marked. */
-const TranscriptButton = ({
-  open,
-  fresh,
-  onToggle,
-}: {
-  open: boolean;
-  fresh: boolean;
-  onToggle: () => void;
-}) => {
-  const { t } = useLingui();
-  return (
-    <Button
-      aria-controls={transcriptId}
-      aria-expanded={open}
-      onClick={onToggle}
-      size="sm"
-      variant="ghost"
-    >
-      <Icon icon={MessageSquareIcon} />
-      <span {...stylex.props(looks.wideOnly)}>{t`Transcript`}</span>
-      {fresh ? (
-        <>
-          <span aria-hidden="true" {...stylex.props(styles.fresh)} />
-          <span {...stylex.props(visuallyHidden)}>
-            {t`Something new is marked`}
-          </span>
-        </>
-      ) : null}
-    </Button>
-  );
-};
+/** In the conversation, and core holds that they agreed to take part. */
+const inConversation = (progress: InterviewProgress): boolean =>
+  isTalking(progress) && progress.told;
 
-/** What stands in the middle: before the interview, in it, after it, or instead of it. */
-const Stage = ({
-  session,
-  room,
-  reading,
-  stopped,
-  deleted,
-  withdrawn,
-  removingDeleted,
-  removingWithdrawn,
-  onCarryOn,
-}: {
-  session: OpenSession;
-  room: number;
-  reading: boolean;
-  stopped: boolean;
-  deleted: boolean;
-  withdrawn: boolean;
-  /** What the Brain kept is still being removed, after deleting or withdrawing. */
-  removingDeleted: boolean;
-  removingWithdrawn: boolean;
-  onCarryOn: () => void;
-}) => {
-  const progress = useProgress();
-  const started = progress.person !== "invited" && progress.person !== "opened";
-  let stage: ReactNode;
-  let key: string;
-  if (deleted) {
-    stage = <Deleted removing={removingDeleted} room={room} />;
-    key = "deleted";
-  } else if (withdrawn) {
-    stage = <Withdrawn removing={removingWithdrawn} room={room} />;
-    key = "withdrawn";
-  } else if (session.closed) {
-    stage = <Over room={room} />;
-    key = "over";
-  } else if (stopped) {
-    stage = <Stopped onCarryOn={onCarryOn} room={room} />;
-    key = "stopped";
-  } else if (progress.person === "completed" && progress.told) {
-    stage = (
-      <Closed
-        closes={formatDay(session.closes)}
-        name={session.name}
-        onAdd={() => {
-          update(reopened);
-        }}
-        onRate={(rating) => {
-          update((now) => rated(now, rating));
-          keepNow();
-        }}
-        rating={progress.rating}
-        room={room}
-      />
-    );
-    key = "closed";
-  } else if (!(started && progress.told)) {
-    // Not started, or core doesn't hold that they agreed to take part, to
-    // what this is as it says now: they read it, and agree, first.
-    stage = (
-      <Before
-        kind={session.kind}
-        name={session.name}
-        onStart={(by) => {
-          update((now) => begun(now, Date.now(), by));
-        }}
-        room={room}
-      />
-    );
-    key = "before";
-  } else if (reading) {
-    stage = <ReadBack room={room} />;
-    key = `part-${progress.confirmed}`;
-  } else {
-    stage = <Talk phase={progress.phase} room={room} />;
-    key = "talk";
-  }
-  return (
-    <div key={key} {...stylex.props(styles.shown, fadeIn)}>
-      {stage}
-    </div>
-  );
-};
-
-/** The box at the bottom, with what they must know about saving over it. */
-const AnswerBox = ({ reading }: { reading: boolean }) => {
-  const { t } = useLingui();
-  const loop = useLoop();
-  const words = useInterviewWords();
-  const { mode } = useProgress();
-  return (
-    <>
-      <SaveTrouble />
-      <Composer
-        doing={loop.doing}
-        line={loop.saying}
-        names={words.tag}
-        onSend={sendTyped}
-        placeholder={
-          reading ? t`Type what is missing, or yes` : t`Type your answer`
-        }
-        said={loop.said}
-        talking={mode === "talk"}
-      />
-    </>
-  );
-};
-
-/** The way out for now, top left: on a phone its sign alone, so the parts stay in the middle. */
-const StopButton = ({ onStop }: { onStop: () => void }) => {
-  const { t } = useLingui();
-  return (
-    <Button onClick={onStop} size="sm" variant="ghost">
-      <Icon icon={XIcon} />
-      <span {...stylex.props(looks.wideOnly)}>{t`Stop for now`}</span>
-    </Button>
-  );
-};
-
-/** How many things Stephen marked in what was said. */
-const markedIn = (lines: InterviewLine[]): number => {
-  let count = 0;
-  for (const { marks } of lines) {
-    count += marks?.length ?? 0;
-  }
-  return count;
-};
+/** Whether there is an interview to delete: something said, and it is agreed to, over or withdrawn from. */
+const deletable = (progress: InterviewProgress, ended: boolean): boolean =>
+  (progress.person === "completed" || ended) && progress.lines.length > 0;
 
 /** Deleting the interview: whether it is, and why it didn't work when it didn't. */
 const useDeleting = () => {
@@ -660,34 +150,6 @@ const useDeleting = () => {
   return { deleted, removingDeleted, deleteFailed, remove };
 };
 
-/** In the conversation, and core holds that they agreed to take part. */
-const inConversation = (progress: InterviewProgress): boolean =>
-  isTalking(progress) && progress.told;
-
-/** Whether there is an interview to delete: something said, and it is agreed to, over or withdrawn from. */
-const deletable = (progress: InterviewProgress, ended: boolean): boolean =>
-  (progress.person === "completed" || ended) && progress.lines.length > 0;
-
-/** Why deleting or withdrawing didn't work, when it didn't. */
-const Failed = ({ message }: { message: string | null }) =>
-  message === null ? null : (
-    <div {...stylex.props(styles.failed)}>
-      <ErrorText>{message}</ErrorText>
-    </div>
-  );
-
-/** Withdrawing is offered while they take part and haven't withdrawn. */
-const withdrawOffered = (
-  withdrawn: boolean,
-  told: boolean,
-  withdraw: () => Promise<void>
-): (() => void) | undefined =>
-  withdrawn || !told
-    ? undefined
-    : () => {
-        void withdraw();
-      };
-
 /** Withdrawing: whether they did, and why it didn't work when it didn't. */
 const useWithdrawing = (session: OpenSession) => {
   const [withdrawn, setWithdrawn] = useState(session.withdrawn);
@@ -711,6 +173,18 @@ const useWithdrawing = (session: OpenSession) => {
   return { withdrawn, removing, withdrawFailed, withdraw };
 };
 
+/** Withdrawing is offered while they take part and haven't withdrawn. */
+const withdrawOffered = (
+  withdrawn: boolean,
+  told: boolean,
+  withdraw: () => Promise<void>
+): (() => void) | undefined =>
+  withdrawn || !told
+    ? undefined
+    : () => {
+        void withdraw();
+      };
+
 /** What the conversation says by itself follows the language on screen. */
 const useWordsOnScreen = (): void => {
   const { i18n } = useLingui();
@@ -720,32 +194,281 @@ const useWordsOnScreen = (): void => {
   });
 };
 
-/** The interview on the link, held on this device. */
-export const InterviewPage = ({ session }: { session: OpenSession }) => {
-  const progress = useProgress();
-  const [stopped, setStopped] = useState(false);
-  const { deleted, removingDeleted, deleteFailed, remove } = useDeleting();
-  const { withdrawn, removing, withdrawFailed, withdraw } =
-    useWithdrawing(session);
+/**
+ * Back to talking, for whoever types: the microphone is asked for again,
+ * and given, the conversation goes on out loud from where it is.
+ */
+const talkAgain = async (): Promise<void> => {
+  if (!(await reachMic())) {
+    // Still refused: the line over the card stays.
+    return;
+  }
+  setSound(true);
+  update((now) => ({ ...now, mode: "talk" }));
+  stopLoop();
+  startLoop();
+};
+
+/** The header while they talk: the transcript, and the pause. */
+const TalkActions = ({
+  transcript,
+  onTranscript,
+  onPause,
+}: {
+  transcript: boolean;
+  onTranscript: () => void;
+  onPause: () => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <>
+      <Button
+        aria-expanded={transcript}
+        aria-label={t`Transcript`}
+        onClick={onTranscript}
+        size="icon-sm"
+        variant={transcript ? "secondary" : "ghost"}
+      >
+        <Icon icon={MessageSquareFilledIcon} />
+      </Button>
+      <Button
+        aria-label={t`Pause`}
+        onClick={onPause}
+        size="icon-sm"
+        variant="ghost"
+      >
+        <Icon icon={PauseFilledIcon} />
+      </Button>
+    </>
+  );
+};
+
+/** The interviews are over: what was said can be deleted, no more. */
+const Over = () => {
+  const { t } = useLingui();
+  return (
+    <Page>
+      <Words
+        line={t`Thank you for your time.`}
+        title={t`The interviews are over.`}
+      />
+    </Page>
+  );
+};
+
+/** They deleted it; or, while what the Brain kept of it is still being removed, they are told that instead. */
+const Deleted = ({ removing }: { removing: boolean }) => {
+  const { t } = useLingui();
+  return (
+    <Page>
+      <Words
+        live
+        title={
+          removing
+            ? t`Deleted. What the Brain kept of it is being removed.`
+            : t`Deleted. Nothing you said is kept.`
+        }
+      />
+    </Page>
+  );
+};
+
+/**
+ * They withdrew: what they said stays theirs to read and delete, and
+ * nothing of it is used; or, while what the Brain kept of it is still
+ * being removed, they are told that instead.
+ */
+const Withdrawn = ({ removing }: { removing: boolean }) => {
+  const { t } = useLingui();
+  return (
+    <Page>
+      <Words
+        line={t`It stays here for you to read. You can still delete it.`}
+        live
+        title={
+          removing
+            ? t`You withdrew. What the Brain kept of it is being removed.`
+            : t`You withdrew. Nothing you said is used from now on.`
+        }
+      />
+    </Page>
+  );
+};
+
+/** Before the conversation: the start, and its ways out. */
+const BeforeTalk = ({
+  session,
+  closes,
+}: {
+  session: OpenSession;
+  closes: string;
+}) => {
+  const who = interviewerNames[useInterviewer()];
+  const [before, setBefore] = useState<Before>({ at: "start" });
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const toStart = (): void => {
+    setBefore({ at: "start" });
+  };
+  /** Core keeps that they take part, then they talk; or it says why not. */
+  const agree = async (): Promise<void> => {
+    const link = linkNow();
+    if (link === null) {
+      return;
+    }
+    const answer = await participate(link.secret);
+    if (isRefused(answer)) {
+      setRefusal(answer.message);
+      return;
+    }
+    setRefusal(null);
+    // Voice first: whoever has no microphone here is told so, and types.
+    setSound(true);
+    update((now) => begun(now, Date.now(), "talk"));
+  };
+  switch (before.at) {
+    case "not-now": {
+      return (
+        <NotNow
+          closes={closes}
+          onBack={toStart}
+          onPick={(picked) => {
+            setBefore({ at: "reminded", picked });
+          }}
+          times={remindTimes(new Date())}
+        />
+      );
+    }
+    case "reminded": {
+      return <Reminded onStart={toStart} picked={before.picked} />;
+    }
+    case "rather-not": {
+      return (
+        <RatherNot
+          onBack={toStart}
+          onConfirm={() => {
+            setBefore({ at: "declined" });
+          }}
+        />
+      );
+    }
+    case "declined": {
+      return <Declined closes={closes} onUndo={toStart} />;
+    }
+    case "start": {
+      return (
+        <Consent
+          closes={closes}
+          name={session.name}
+          onAgree={() => {
+            void agree();
+          }}
+          onNotNow={() => {
+            setBefore({ at: "not-now" });
+          }}
+          onRatherNot={() => {
+            setBefore({ at: "rather-not" });
+          }}
+          refusal={refusal}
+          who={who}
+        />
+      );
+    }
+    default: {
+      return before satisfies never;
+    }
+  }
+};
+
+/** Why deleting or withdrawing didn't work, when it didn't. */
+const Failed = ({ message }: { message: string | null }) =>
+  message === null ? null : (
+    <Page>
+      <ErrorText>{message}</ErrorText>
+    </Page>
+  );
+
+/** They pause: the clock stops with them, and what is away from here is not interview time. */
+const pauseNow = (): void => {
+  update((was) => leftFor(ticked(was, Date.now())));
+  keepNow();
+};
+
+/** Back from the pause: all of it was time away. */
+const carryOn = (): void => {
+  const at = Date.now();
+  update((was) => ({
+    ...resumed(was),
+    seenAt: at,
+    awayMs: (was.awayMs ?? 0) + Math.max(0, at - (was.seenAt ?? at)),
+  }));
+};
+
+/** The minutes are over: on to the read-back. */
+const readBackNow = (): void => {
+  update((was) => steered(was, { phase: "readback", wants: "readback" }));
+  keepNow();
+};
+
+/** His thanks, once they agreed to the read-back. */
+const Thanks = ({ name, closes }: { name: string; closes: string }) => {
+  const { rating } = useProgress();
+  return (
+    <Page>
+      <Closed
+        closes={closes}
+        name={name}
+        onAdd={() => {
+          update(reopened);
+        }}
+        onRate={(given) => {
+          update((was) => rated(was, given));
+          keepNow();
+        }}
+        rating={rating}
+      />
+    </Page>
+  );
+};
+
+/** What stands once the interview is deleted, withdrawn from or over; nothing while it is none of these. */
+const endedAs = ({
+  deleted,
+  removingDeleted,
+  withdrawn,
+  removingWithdrawn,
+  closed,
+}: {
+  deleted: boolean;
+  removingDeleted: boolean;
+  withdrawn: boolean;
+  removingWithdrawn: boolean;
+  closed: boolean;
+}): ReactNode => {
+  if (deleted) {
+    return <Deleted removing={removingDeleted} />;
+  }
+  if (withdrawn) {
+    return <Withdrawn removing={removingWithdrawn} />;
+  }
+  return closed ? <Over /> : null;
+};
+
+/** The minutes left, counted while they are `asking`; the read-back is never cut short. */
+const useClock = (progress: InterviewProgress, asking: boolean) => {
+  const now = useNow(asking);
+  const left = secondsLeft(progress, now);
+  useCountdownMarks(left, asking);
+  return { left, timeUp: asking && left <= 0 };
+};
+
+/** The transcript goes with the conversation, beside the stage or in its place; Escape puts it away. */
+const useTranscript = (running: boolean) => {
   const [transcript, setTranscript] = useState(false);
-  const talking =
-    inConversation(progress) &&
-    !(stopped || withdrawn || session.closed) &&
-    deleted === "no";
-  const reading = talking && isReading(progress);
-  const { top, bottom, room } = useStageRoom(talking ? overBox + 8 : 16);
-
-  useWordsOnScreen();
-  // The conversation runs while it is on screen; a moment after, so a screen that only flashes by asks nothing.
-  useEffect(() => (talking ? runLoop() : undefined), [talking]);
-
-  // The transcript goes with the conversation; Escape puts it away.
-  const floating = transcript && talking;
+  const floating = transcript && running;
   const besideStage = useSyncExternalStore(
     onBeside,
-    () => window.matchMedia(beside).matches
+    () => window.matchMedia(besideQuery).matches
   );
-  const away = floating && !besideStage;
   useEffect(
     () =>
       floating
@@ -755,26 +478,84 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
         : undefined,
     [floating]
   );
-  // What he marked so far, and how much of it was looked at.
-  const marked = markedIn(progress.lines);
-  const [seen, setSeen] = useState(marked);
+  return {
+    transcript,
+    setTranscript,
+    floating,
+    alone: floating && !besideStage,
+  };
+};
+
+/** The conversation, its read-back, or the end of its minutes. */
+const Talking = ({
+  name,
+  left,
+  reading,
+  timeUp,
+  transcript,
+  alone,
+}: {
+  name: string;
+  left: number;
+  reading: boolean;
+  timeUp: boolean;
+  transcript: boolean;
+  alone: boolean;
+}) =>
+  timeUp ? (
+    <TimeUp name={name} onReadBack={readBackNow} />
+  ) : (
+    <Conversation
+      alone={alone}
+      left={left}
+      onTalk={() => {
+        void talkAgain();
+      }}
+      reading={reading}
+      transcript={transcript}
+    />
+  );
+
+/** The interview on the link, held on this device. */
+export const InterviewPage = ({ session }: { session: OpenSession }) => {
+  const progress = useProgress();
+  const [stopped, setStopped] = useState(false);
+  const { deleted, removingDeleted, deleteFailed, remove } = useDeleting();
+  const { withdrawn, removing, withdrawFailed, withdraw } =
+    useWithdrawing(session);
+  const closes = formatDay(session.closes);
+  const talking =
+    inConversation(progress) &&
+    !(stopped || withdrawn || session.closed) &&
+    deleted === "no";
+  const reading = talking && isReading(progress);
+  const { left, timeUp } = useClock(progress, talking && !reading);
+
+  useWordsOnScreen();
+  // The conversation runs while it is on screen; a moment after, so a screen that only flashes by asks nothing.
+  const running = talking && !timeUp;
+  useEffect(() => (running ? runLoop() : undefined), [running]);
+  const { transcript, setTranscript, floating, alone } = useTranscript(running);
   const canDelete =
     deleted !== "yes" && deletable(progress, session.closed || withdrawn);
 
-  let right: ReactNode = null;
-  if (talking) {
-    right = (
-      <TranscriptButton
-        fresh={marked > seen && !transcript}
-        onToggle={() => {
-          setSeen(marked);
+  let actions: ReactNode = null;
+  if (running) {
+    actions = (
+      <TalkActions
+        onPause={() => {
+          pauseNow();
+          setTranscript(false);
+          setStopped(true);
+        }}
+        onTranscript={() => {
           setTranscript(!transcript);
         }}
-        open={transcript}
+        transcript={transcript}
       />
     );
   } else if (canDelete) {
-    right = (
+    actions = (
       <DeleteInterview
         onDelete={() => {
           void remove();
@@ -784,59 +565,51 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
     );
   }
 
-  return (
-    <InterviewFrame
-      bottom={bottom}
-      box={talking ? <AnswerBox reading={reading} /> : undefined}
-      left={
-        talking ? (
-          <StopButton
-            onStop={() => {
-              update(leftFor);
-              keepNow();
-              setTranscript(false);
-              setStopped(true);
-            }}
-          />
-        ) : null
-      }
-      middle={
-        talking ? (
-          <PhaseBar phase={reading ? "readback" : progress.phase} />
-        ) : null
-      }
-      open
-      right={right}
-      top={top}
-    >
-      {/* The stage stands over the box and what floats up from it. Where there's no room beside it, it makes way for the transcript. */}
-      <div inert={away} {...stylex.props(styles.stage, away && styles.away)}>
-        <Stage
-          deleted={deleted === "yes"}
-          onCarryOn={() => {
-            update(resumed);
-            setStopped(false);
-          }}
-          reading={reading}
-          removingDeleted={removingDeleted}
-          removingWithdrawn={removing}
-          room={room}
-          session={session}
-          stopped={stopped}
-          withdrawn={withdrawn}
-        />
-      </div>
-      <Failed message={deleteFailed ?? withdrawFailed} />
-      <Transcript
-        alone={away}
-        lines={progress.lines}
-        onRemove={(at) => {
-          // Kept at once: removing can't wait for the next save.
-          update((now) => withoutLine(now, at));
-          keepNow();
+  const started = progress.person !== "invited" && progress.person !== "opened";
+  const ended = endedAs({
+    deleted: deleted === "yes",
+    removingDeleted,
+    withdrawn,
+    removingWithdrawn: removing,
+    closed: session.closed,
+  });
+  let stage: ReactNode;
+  if (ended !== null) {
+    stage = ended;
+  } else if (stopped) {
+    stage = (
+      <Paused
+        closes={closes}
+        minutesLeft={Math.ceil(left / 60)}
+        onCarryOn={() => {
+          carryOn();
+          setStopped(false);
         }}
-        open={floating}
       />
-    </InterviewFrame>
+    );
+  } else if (progress.person === "completed" && progress.told) {
+    stage = <Thanks closes={closes} name={session.name} />;
+  } else if (started && progress.told) {
+    stage = (
+      <Talking
+        alone={alone}
+        left={left}
+        name={session.name}
+        reading={reading}
+        timeUp={timeUp}
+        transcript={floating}
+      />
+    );
+  } else {
+    // Not started, or core doesn't hold that they agreed to take part, to
+    // what this is as it says now: they read it, and agree, first.
+    stage = <BeforeTalk closes={closes} session={session} />;
+  }
+
+  return (
+    <Frame actions={actions} strip={!reading}>
+      {stage}
+      <Failed message={deleteFailed ?? withdrawFailed} />
+    </Frame>
   );
 };

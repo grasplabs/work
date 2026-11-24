@@ -27,22 +27,22 @@ import {
 import { Text } from "@grasp-os/ui/components/text";
 import { Icon, XIcon } from "@grasp-os/ui/lib/icons";
 import { fadeIn } from "@grasp-os/ui/lib/styles";
-import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { announce } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
 
 import { useInterviewer } from "./kept.ts";
+import { Marked } from "./marked.tsx";
 import { soundIsOn } from "./speech.ts";
-import { Marked } from "./talk.tsx";
 import { useInterviewWords } from "./words.ts";
 
 // The transcript, from the button top right (prototype
 // `interview-view.tsx`, `Transcript`): the conversation as a normal chat,
 // Damsko's MessageScroller of Messages, the interviewer at the start and
 // them at the end, with what he marked in their words. It is no panel: it
-// floats at the right side with nothing around it, fades in, and follows
+// stands beside the stage with nothing around it, fades in, and follows
 // the newest line. It scrolls in itself; the page around it never does.
 // Each line can be removed, by them alone, once confirmed (GRA-1897): only
 // they read what was said, so only they can say which words should go.
@@ -52,16 +52,13 @@ import { useInterviewWords } from "./words.ts";
 export const transcriptId = "interview-transcript";
 
 const styles = stylex.create({
+  // The column it is given: beside the stage on a wide window, in its place on a narrow one.
   aside: {
-    position: "absolute",
-    zIndex: 1,
-    top: 0,
-    bottom: 0,
-    insetInlineStart: { default: space["4"], [media.sm]: "auto" },
-    insetInlineEnd: { default: space["4"], [media.sm]: space["10"] },
     display: "flex",
     flexDirection: "column",
-    width: { default: "auto", [media.sm]: "22rem" },
+    minHeight: 0,
+    height: "100%",
+    paddingBlockEnd: space["2"],
   },
   note: { flexShrink: 0, paddingBlockEnd: space["2"] },
   thread: { display: "flex", flexGrow: 1, minHeight: 0 },

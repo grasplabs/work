@@ -1,9 +1,8 @@
 import { interviewPagePath } from "@grasp-os/shared/interview-links";
 import type { SignInOption } from "@grasp-os/shared/rpc";
 import { Button } from "@grasp-os/ui/components/button";
-import { Heading } from "@grasp-os/ui/components/heading";
 import { Text } from "@grasp-os/ui/components/text";
-import { colors, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute } from "@tanstack/react-router";
@@ -20,12 +19,9 @@ import {
   openSession,
 } from "../interview/api.ts";
 import type { OpenSession } from "../interview/api.ts";
-import {
-  conceptSearch,
-  InterviewConcepts,
-} from "../interview/concepts/concepts.tsx";
+import { Actions, Page as Calm, Words } from "../interview/calm.tsx";
+import { Frame } from "../interview/frame.tsx";
 import { holdInterview, releaseInterview } from "../interview/kept.ts";
-import { Mark } from "../interview/mark.tsx";
 import { InterviewPage } from "../interview/page.tsx";
 import { resumed } from "../interview/progress.ts";
 import { signInErrorMessage, signInErrorSearch } from "../sign-in-errors.ts";
@@ -102,25 +98,6 @@ const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
 };
 
 const styles = stylex.create({
-  page: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: space["6"],
-    boxSizing: "border-box",
-    minHeight: "100svh",
-    paddingInline: space["4"],
-    textAlign: "center",
-    backgroundColor: colors.background,
-  },
-  words: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: space["3"],
-    maxWidth: "24rem",
-  },
   // The way in, under what there is to say.
   signIn: {
     display: "flex",
@@ -128,13 +105,12 @@ const styles = stylex.create({
     alignItems: "center",
     gap: space["4"],
     width: "100%",
-    maxWidth: "24rem",
   },
 });
 
 /**
- * Why the link opens no interview here, laid out as calm as the prototype's
- * (`routes/i/$code.tsx`): the mark, and what there is to say.
+ * Why the link opens no interview here, in the interview's own calm frame:
+ * the serif title, one line under it, and what they can do about it.
  */
 const Notice = ({
   title,
@@ -149,33 +125,29 @@ const Notice = ({
   /** What they can do about it, under what there is to say. */
   children?: ReactNode;
 }) => (
-  <main {...stylex.props(styles.page)}>
-    <Mark size="lg" />
-    <div {...stylex.props(styles.words)}>
-      <Heading level={1} size="default">
-        {title}
-      </Heading>
-      {failed ? (
-        <ErrorText>{message}</ErrorText>
-      ) : (
-        <Text color="muted">{message}</Text>
-      )}
-    </div>
-    {children}
-  </main>
+  <Frame>
+    <Calm>
+      <Words
+        line={failed ? <ErrorText>{message}</ErrorText> : message}
+        title={title}
+      />
+      {children === undefined ? null : <Actions>{children}</Actions>}
+    </Calm>
+  </Frame>
 );
 
 const Loading = () => {
   const { t } = useLingui();
   return (
-    <main {...stylex.props(styles.page)}>
-      <Mark size="lg" />
-      <output>
-        <Text as="span" color="muted">
-          {t`Opening your interview…`}
-        </Text>
-      </output>
-    </main>
+    <Frame>
+      <Calm>
+        <output>
+          <Text as="span" size="lg">
+            {t`Opening your interview…`}
+          </Text>
+        </output>
+      </Calm>
+    </Frame>
   );
 };
 
@@ -231,7 +203,7 @@ const SignIn = ({
       title={t`Sign in to open your interview`}
     >
       <div {...stylex.props(styles.signIn)}>
-        <Text color="muted">
+        <Text size="lg">
           {t`Signing in is recorded by your company's sign-in, as every sign-in is.`}
         </Text>
         <ErrorText>
@@ -321,55 +293,8 @@ const Interview = () => {
   }
 };
 
-/**
- * CONCEPT ONLY (never merged): `/interview` without a link's secret shows
- * the interview's new start and conversation on fixture data
- * (interview/concepts/concepts.tsx); with one (`/interview#<secret>`, or
- * the one this tab kept while signing in), the interview as it is, and
- * again when the address's fragment changes. `linkSecret` puts a kept
- * secret back in the address, so the interview reads it from there.
- */
-const InterviewOrConcept = () => {
-  const [secret, setSecret] = useState(linkSecret);
-  useEffect(() => {
-    const changed = (): void => {
-      setSecret(linkSecret());
-    };
-    window.addEventListener("hashchange", changed);
-    return () => {
-      window.removeEventListener("hashchange", changed);
-    };
-  }, []);
-  const search = Route.useSearch();
-  return secret === "" ? (
-    <InterviewConcepts search={conceptSearch(search)} />
-  ) : (
-    <Interview />
-  );
-};
-
-/** The address's concept switches, kept as they are written. */
-const conceptKeys = ["at", "left", "still", "name"] as const;
-
-/** The concept switches, by name, as the address writes them. */
-interface ConceptKeys {
-  at?: unknown;
-  left?: unknown;
-  still?: unknown;
-  name?: unknown;
-}
-
 export const Route = createFileRoute("/interview")({
-  validateSearch: (
-    search: Record<string, unknown>
-  ): { error?: string } & ConceptKeys => {
-    const kept: ConceptKeys = {};
-    for (const key of conceptKeys) {
-      if (search[key] !== undefined) {
-        kept[key] = search[key];
-      }
-    }
-    return { ...kept, ...signInErrorSearch(search) };
-  },
-  component: InterviewOrConcept,
+  validateSearch: (search: Record<string, unknown>): { error?: string } =>
+    signInErrorSearch(search),
+  component: Interview,
 });
