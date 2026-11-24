@@ -11,6 +11,7 @@ import { loadFromCore } from "../load-from-core.tsx";
 import { ProjectView, projectTabOf } from "../projects/project-view.tsx";
 import type { ProjectTab } from "../projects/project-view.tsx";
 import { readOverview } from "../workflows/overview.ts";
+import { noneIfRefused } from "../workflows/reads.ts";
 
 // One project's page (projects/project-view.tsx), on the tab the address
 // names (`?tab=`), with the person's own chats in it, the connections its
@@ -73,9 +74,10 @@ const ProjectPage = () => {
       />
     );
   }
-  const { project, chats, connections, workflows } = page.data;
+  const { project, chats, connections, workflows, apps } = page.data;
   return (
     <ProjectView
+      apps={apps}
       chats={chats}
       connections={connections}
       identity={identity}
@@ -126,14 +128,16 @@ export const Route = createFileRoute("/_shell/projects/$projectId")({
       loadFromCore(core, async (session) => {
         // The person's own chats in it come from their own Workspace; the
         // connections from what its items use.
-        const [project, chats, connections] = await Promise.all([
+        const [project, chats, connections, apps] = await Promise.all([
           session.projects
             .get(projectId)
             .then(async (read) => await withOverviewItems(session, read)),
           session.chats.list({ project: projectId }),
           session.projects.connections(projectId),
+          // Its Apps stand as the Apps page shows them, on that page's read.
+          noneIfRefused(session.apps.overview()),
         ]);
-        return { project, chats, connections };
+        return { project, chats, connections, apps };
       }),
       readOverview(core),
     ]);
