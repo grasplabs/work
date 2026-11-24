@@ -755,6 +755,8 @@ const UploadForm = ({
             </FieldLabel>
             <FileUpload
               accept={uploadAccept}
+              // The line under it says what it takes, once: none of its own.
+              description=""
               // Out of reach while a file uploads: the dialog closes when
               // it is done, which would drop a file chosen meanwhile.
               disabled={busy}
