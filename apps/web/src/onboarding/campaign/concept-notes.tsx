@@ -5,7 +5,6 @@
 // transcript, newest last; and what the admin must do, he asks as a
 // question with one press to answer. On a phone, the title, the sentence
 // and his latest line alone.
-import { Bubble, BubbleContent } from "@grasp-os/ui/components/bubble";
 import {
   Confirmation,
   ConfirmationAccepted,
@@ -88,11 +87,9 @@ const Line = ({
 }) => (
   <Message aria-label="Stephen">
     <MessageContent>
-      <Bubble variant="ghost">
-        <BubbleContent>
-          {findingSentence(finding, team, { named: true, grouped })}
-        </BubbleContent>
-      </Bubble>
+      <Text size="lg">
+        {findingSentence(finding, team, { named: true, grouped })}
+      </Text>
     </MessageContent>
   </Message>
 );
@@ -143,13 +140,11 @@ const Bounced = ({ ask }: { ask: Extract<Ask, { kind: "bounce" }> }) => {
   return (
     <Message aria-label="Stephen">
       <MessageContent>
-        <Bubble variant="ghost">
-          <BubbleContent>
-            {done
-              ? "Thanks. The invitation went out again."
-              : `My invitation to ${ask.address} bounced. Could you check the address?`}
-          </BubbleContent>
-        </Bubble>
+        <Text size="lg">
+          {done
+            ? "Thanks. The invitation went out again."
+            : `My invitation to ${ask.address} bounced. Could you check the address?`}
+        </Text>
         <div {...stylex.props(styles.press)}>
           <AskAction
             ask={ask}
