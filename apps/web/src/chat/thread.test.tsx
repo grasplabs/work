@@ -554,6 +554,50 @@ describe(ChatThread, () => {
     ]);
   });
 
+  it("says no duration while a later round's thoughts are not yet saved, then all rounds' together", async () => {
+    const first: ChatMessage = {
+      id: 2,
+      role: "assistant",
+      text: "Let me check.",
+      code: [],
+      tools: [],
+      reasoning: { text: "Look it up.", ms: 2000 },
+      end: "done",
+      at: "2026-10-27T09:00:05.000Z",
+    };
+    // The second round has thought and is writing its words.
+    await thread([asked, first], {
+      text: "Fo",
+      code: [],
+      tools: [],
+      reasoning: "Add two to two.",
+    });
+    const writing = firstStep().line;
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    await thread([
+      asked,
+      first,
+      {
+        id: 3,
+        role: "assistant",
+        text: "Four.",
+        code: [],
+        tools: [],
+        reasoning: { text: "Add two to two.", ms: 3000 },
+        end: "done",
+        at: "2026-10-27T09:00:09.000Z",
+      },
+    ]);
+
+    expect({ writing, saved: firstStep().line }).toStrictEqual({
+      writing: "Thought",
+      saved: "Thought for 5 seconds",
+    });
+  });
+
   it("says what each call of Grasp's tools did in one line, and unfolds what it was given and what came of it", async () => {
     const at = "2026-10-27T09:00:05.000Z";
     await thread([

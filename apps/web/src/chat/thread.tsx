@@ -819,11 +819,19 @@ const AnswerAfter = ({
   </>
 );
 
-/** What the model thought for an answer, all its replies' together, and for how long. */
+/**
+ * What the model thought for an answer, all its replies' together, and for
+ * how long: only once no round being written has thought, as that one
+ * isn't timed until it is saved (`timed`).
+ */
 const thoughtOf = (
   replies: readonly Answer[],
   partial: ChatPartial | null
-): { thoughts: string | undefined; seconds: number | undefined } => {
+): {
+  thoughts: string | undefined;
+  seconds: number | undefined;
+  timed: boolean;
+} => {
   const reasoning: ChatReasoning[] = [
     ...replies.flatMap(({ reasoning: thought }) =>
       thought === undefined ? [] : [thought]
@@ -842,10 +850,15 @@ const thoughtOf = (
       ms = (ms ?? 0) + thought.ms;
     }
   }
+  const timed = partial === null || partial.reasoning === "";
   return {
     thoughts: thoughts === "" ? undefined : thoughts,
     // At least a second, once it was timed.
-    seconds: ms === undefined ? undefined : Math.max(1, Math.round(ms / 1000)),
+    seconds:
+      ms === undefined || !timed
+        ? undefined
+        : Math.max(1, Math.round(ms / 1000)),
+    timed,
   };
 };
 
@@ -1117,6 +1130,41 @@ const stillThinks = (partial: ChatPartial | null): boolean =>
   partial.code.length === 0 &&
   partial.tools.length === 0;
 
+/**
+ * What the model thought for an answer, under Thinking while it thinks
+ * (`workingLabel` before anything else shows), then how long. Done
+ * thinking but not yet `timed`: no duration, nor Reasoning's own count of
+ * its last round alone.
+ */
+const Thoughts = ({
+  thoughts,
+  seconds,
+  timed,
+  streaming,
+  workingLabel,
+}: {
+  thoughts: string;
+  seconds: number | undefined;
+  timed: boolean;
+  streaming: boolean;
+  workingLabel: string | undefined;
+}) => {
+  const { t } = useLingui();
+  let line = workingLabel;
+  if (line === undefined && !streaming && !timed) {
+    line = t({ message: "Thought", context: "the model thought first" });
+  }
+  return (
+    <Reasoning
+      {...(seconds === undefined ? {} : { duration: seconds })}
+      isStreaming={streaming}
+    >
+      <ReasoningTrigger>{line}</ReasoningTrigger>
+      <ReasoningContent>{thoughts}</ReasoningContent>
+    </Reasoning>
+  );
+};
+
 /** One answer of Grasp's: what it thought, its steps, its words, and what came of them, as one Message. */
 const AnswerRow = ({
   turn,
@@ -1151,17 +1199,13 @@ const AnswerRow = ({
           <MessageHeader>{context.agentName}</MessageHeader>
         )}
         {thought.thoughts === undefined ? null : (
-          <Reasoning
-            {...(thought.seconds === undefined
-              ? {}
-              : { duration: thought.seconds })}
-            isStreaming={thinking || stillThinks(partial)}
-          >
-            <ReasoningTrigger>
-              {thinking ? context.workingLabel : undefined}
-            </ReasoningTrigger>
-            <ReasoningContent>{thought.thoughts}</ReasoningContent>
-          </Reasoning>
+          <Thoughts
+            seconds={thought.seconds}
+            streaming={thinking || stillThinks(partial)}
+            thoughts={thought.thoughts}
+            timed={thought.timed}
+            workingLabel={thinking ? context.workingLabel : undefined}
+          />
         )}
         {thinking && thought.thoughts === undefined ? (
           <Shimmer>{context.workingLabel}</Shimmer>

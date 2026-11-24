@@ -2909,6 +2909,10 @@ msgctxt "an App put away"
 msgid "Archived"
 msgstr "Archiviert"
 
+#: src/chat/chat-window.tsx
+msgid "Archived chats"
+msgstr "Archivierte Chats"
+
 #: src/settings/audit-archive.tsx
 msgid "Archived events"
 msgstr "Archivierte Ereignisse"
@@ -5869,6 +5873,14 @@ msgstr "Exakter Treffer"
 #: src/settings/erasures.tsx
 msgid "Exactly as it’s written here."
 msgstr "Genau so, wie es hier steht."
+
+#: src/chat/held-writes.tsx
+msgid "Exactly what was sent"
+msgstr "Genau das, was gesendet wurde"
+
+#: src/chat/held-writes.tsx
+msgid "Exactly what will be sent"
+msgstr "Genau das, was gesendet wird"
 
 #: src/interview/words.ts
 msgid "Example"
@@ -15282,6 +15294,7 @@ msgstr "Diese Version, nur lesen"
 msgid "Those marked Only you are yours alone: nobody else sees them, admins included."
 msgstr "Was mit Nur Sie markiert ist, gehört Ihnen allein: Niemand sonst sieht es, auch keine Admins."
 
+#: src/chat/thread.tsx
 #: src/frame/ui-words.tsx
 msgctxt "the model thought first"
 msgid "Thought"

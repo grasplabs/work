@@ -273,6 +273,32 @@ describe("the chats window", () => {
     });
   });
 
+  it("counts the archived chats in the search's name only once their list has come", async () => {
+    const later = Promise.withResolvers<ChatSummary[]>();
+    const old = { ...chat("old", "Old budget"), archived: true };
+    await shown(
+      async () => await Promise.resolve([]),
+      [board, lease, travel],
+      async () => await later.promise
+    );
+    await openWindow({ key: "k", metaKey: true });
+    const search = () =>
+      dialog()?.querySelector('[role="combobox"]')?.getAttribute("aria-label");
+
+    await choose("archived");
+    const whileRead = search();
+    await act(async () => {
+      later.resolve([old]);
+      await later.promise;
+    });
+    await settled();
+
+    expect({ whileRead, read: search() }).toStrictEqual({
+      whileRead: "Archived chats",
+      read: "1 archived chat",
+    });
+  });
+
   it("comes back from renaming an archived chat on the archived chats", async () => {
     const old = { ...chat("old", "Old budget"), archived: true };
     await shown(

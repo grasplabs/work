@@ -516,7 +516,6 @@ const useChatItems = ({
     filter: false,
     loading: listed === undefined,
   };
-  const count = chats.length;
   let empty = searching ? t`No chat has that.` : t`No chats here yet.`;
   if (archived) {
     empty = t`No archived chats.`;
@@ -548,14 +547,20 @@ const useChatItems = ({
       )}
     </>
   );
+  // How many only once the list has come: until then, no count.
+  let label = t`Search chats`;
+  if (archived && listed === undefined) {
+    label = t`Archived chats`;
+  } else if (archived) {
+    const count = chats.length;
+    label = t`${plural(count, { one: "# archived chat", other: "# archived chats" })}`;
+  }
   return {
     command,
     empty,
     failure: listing.failure ?? failure,
     dialogs,
-    label: archived
-      ? t`${plural(count, { one: "# archived chat", other: "# archived chats" })}`
-      : t`Search chats`,
+    label,
   };
 };
 

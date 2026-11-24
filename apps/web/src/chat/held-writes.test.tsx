@@ -31,13 +31,9 @@ import { HeldWrites } from "./held-writes.tsx";
 // nothing. A decision that fails is said above the list, as its card
 // may be gone, until the next decision, and in its own chat alone.
 
-/** The exact input the card shows, line by line, as its code block draws it. */
-const exactShown = (): string | undefined => {
-  const lines = [
-    ...document.querySelectorAll('[data-slot="code-block-line"]'),
-  ].map((line) => (line.textContent === "\n" ? "" : line.textContent));
-  return lines.length === 0 ? undefined : lines.join("\n");
-};
+/** The exact input the card shows, as its block draws it. */
+const exactShown = (): string | undefined =>
+  document.querySelector("pre")?.textContent ?? undefined;
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -337,18 +333,29 @@ describe("a write to an App held for the person", () => {
     });
   });
 
-  it("draws every line of a request longer than a code block draws, to its last field", async () => {
-    // Far under connect's 64 KiB, laid out past 2,000 lines.
+  it("shows every line of a request at connect's 64 KiB, to its last field", async () => {
+    // Just under 64 KiB as held, 32,705 lines laid out.
     const sent = JSON.stringify({
       reference: { name: "notes.create", kind: "mutation" },
       args: {
-        ids: Array.from({ length: 2500 }, (_, at) => at),
+        ids: Array.from({ length: 32_694 }, () => 0),
         cc: "eve@evil.test",
       },
     });
     await shown({ calls: { "chat-1": [{ ...held, request: sent }] } });
+    const laidOut = JSON.stringify(JSON.parse(sent), null, 2);
 
-    expect(exactShown()).toBe(JSON.stringify(JSON.parse(sent), null, 2));
+    expect({
+      size: sent.length <= 64 * 1024,
+      lines: laidOut.split("\n").length,
+      lastField: document.body.textContent?.includes('"cc": "eve@evil.test"'),
+      exact: exactShown(),
+    }).toStrictEqual({
+      size: true,
+      lines: 32_705,
+      lastField: true,
+      exact: laidOut,
+    });
   });
 
   it("keeps Confirm waiting for a described value cut short as it is shown, escapes counted, until it is shown whole", async () => {

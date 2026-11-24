@@ -13,10 +13,6 @@ import {
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
-  CodeBlock,
-  CodeBlockContent,
-} from "@grasp-os/ui/components/code-block";
-import {
   Confirmation,
   ConfirmationActions,
   ConfirmationRequest,
@@ -24,6 +20,8 @@ import {
 } from "@grasp-os/ui/components/confirmation";
 import { KeyValueList } from "@grasp-os/ui/components/key-value";
 import { Text } from "@grasp-os/ui/components/text";
+import { useScrollEdges } from "@grasp-os/ui/hooks/use-scroll-edges";
+import { codeStyles, focusRing } from "@grasp-os/ui/lib/styles";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -70,7 +68,15 @@ const styles = stylex.create({
     flexBasis: "100%",
     minWidth: 0,
   },
-  wide: { display: "grid", gap: space["2"], width: "100%" },
+  // The exact input on a code block's ground, every line drawn: long
+  // ones wrap, and what still overflows scrolls inside it, not the page.
+  exact: {
+    width: "100%",
+    margin: 0,
+    whiteSpace: "pre-wrap",
+    overflowWrap: "anywhere",
+    overflowX: "auto",
+  },
   list2: { display: "grid", gap: space["2"] },
   presses: { display: "flex", flexWrap: "wrap", gap: space["2"] },
   rejectAll: {
@@ -156,22 +162,6 @@ export const inputOf = (input: string): string => {
   } catch {
     return shownVisibly(input);
   }
-};
-
-/**
- * The most lines one CodeBlockContent draws, even never folded: past
- * them it only says how many more there are (Damsko's code block).
- */
-const drawnLines = 2000;
-
-/** `text` in runs of at most `drawnLines` lines, so a code block draws every line. */
-const runsOf = (text: string): string[] => {
-  const lines = text.split("\n");
-  const runs: string[] = [];
-  for (let at = 0; at < lines.length; at += drawnLines) {
-    runs.push(lines.slice(at, at + drawnLines).join("\n"));
-  }
-  return runs;
 };
 
 /** Lines of a value shown before the rest waits behind "Show all". */
@@ -308,8 +298,15 @@ export const ExactInput = ({
   sent?: boolean;
 }) => {
   const [open, setOpen] = useState(!shown);
+  const [scrolls, setScrolls] = useState(false);
+  const scroller = useScrollEdges({
+    onChange: ({ overflows }) => {
+      setScrolls(overflows);
+    },
+  });
   const id = useId();
   const { t } = useLingui();
+  const name = sent ? t`Exactly what was sent` : t`Exactly what will be sent`;
   let label = open
     ? t`Hide exactly what will be sent`
     : t`Show exactly what will be sent`;
@@ -336,18 +333,23 @@ export const ExactInput = ({
         </button>
       </Button>
       {open ? (
-        <div id={id} {...stylex.props(styles.wide)}>
-          {/* All of it: what is confirmed is never folded away, nor left
-              undrawn past a code block's most lines. */}
-          <CodeBlock language="json" size="sm">
-            {runsOf(inputOf(input)).map((run, at) => (
-              // A run's place is its key: runs never reorder.
-              <CodeBlockContent key={at} maxLines={false} wrap>
-                {run}
-              </CodeBlockContent>
-            ))}
-          </CodeBlock>
-        </div>
+        // All of it, in a plain block: what is confirmed is never folded
+        // away, and a code block draws only so many lines.
+        <pre
+          aria-label={scrolls ? name : undefined}
+          id={id}
+          ref={scroller}
+          role={scrolls ? "region" : undefined}
+          tabIndex={scrolls ? 0 : undefined}
+          {...stylex.props(
+            codeStyles.surface,
+            codeStyles.text,
+            styles.exact,
+            focusRing
+          )}
+        >
+          {inputOf(input)}
+        </pre>
       ) : null}
     </div>
   );
