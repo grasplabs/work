@@ -838,6 +838,11 @@ describe("erasing a person", () => {
     const asked = await person.api.connections.requestApp({
       name: `Wanted ${crypto.randomUUID().slice(0, 8)}`,
     });
+    // And one someone else asked for first, which they asked for too.
+    const joined = await admin.api.connections.requestApp({
+      name: `Wanted ${crypto.randomUUID().slice(0, 8)}`,
+    });
+    await person.api.connections.requestApp({ name: joined.name });
     await admin.api.members.remove(person.userId);
 
     await admin.api.members.erase(person.userId, name);
@@ -846,6 +851,11 @@ describe("erasing a person", () => {
     expect(
       requests.find(({ id }) => id === asked.id)?.requestedBy
     ).toStrictEqual({ userId: person.userId, name });
+    expect(
+      requests
+        .find(({ id }) => id === joined.id)
+        ?.askers.map(({ userId }) => userId)
+    ).toStrictEqual([admin.userId, person.userId]);
   });
 
   it("is for the client's admins only: not the person, a builder or Grasp staff, and a refusal changes and records nothing", async () => {
