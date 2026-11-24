@@ -1,34 +1,36 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Input } from "@grasp-os/app-kit/components/input";
+import type { Team, TeamGroup } from "@grasp-os/shared/brain";
+import { Button } from "@grasp-os/ui/components/button";
+import { FieldGroup } from "@grasp-os/ui/components/field";
+import { Input } from "@grasp-os/ui/components/input";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@grasp-os/app-kit/components/select";
-import type { Team, TeamGroup } from "@grasp-os/shared/brain";
-import { Trans, useLingui } from "@lingui/react/macro";
+} from "@grasp-os/ui/components/select";
+import { Text } from "@grasp-os/ui/components/text";
+import { Icon, PlusIcon } from "@grasp-os/ui/lib/icons";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { NotLoadedState } from "../frame/page-states.tsx";
+import { PageSkeletonSettings } from "../frame/skeletons/settings.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import {
-  SettingsBody,
+  SettingRow,
   SettingsError,
-  SettingsLoading,
-  SettingsSection,
-} from "../settings/settings-parts.tsx";
+  SettingsGroup,
+} from "../settings/section.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
 // Settings → Brain: the company's groups of teams, the brain's regions
-// (core's brain-team-groups.ts). The prototype keeps its groups as data
-// and has no page for them; this one is in its settings' language: a
-// card with the groups, each named in a field, and every team beside the
-// group it is in. Grasp arranges new teams into groups by itself; here an
+// (core's brain-team-groups.ts). The reference has no page for them; this
+// one is in its settings' language: a card of the groups, each named in a
+// field, then a card of every team beside the group it is in. Grasp arranges new teams into groups by itself; here an
 // admin renames a group or moves a team, and core keeps the set whole,
 // with the set before it. For admins; core refuses anyone else.
 
@@ -55,6 +57,11 @@ const moved = (
     };
   });
 
+const styles = stylex.create({
+  // Every control fills the rows' shared control column.
+  control: { width: "100%" },
+});
+
 /** One team, and the group it is in, to choose another. */
 const TeamRow = ({
   team,
@@ -76,8 +83,7 @@ const TeamRow = ({
     { value: none, label: t`No group` },
   ];
   return (
-    <li className="flex items-center justify-between gap-4 py-1">
-      <span className="min-w-0 truncate">{name}</span>
+    <SettingRow label={name}>
       <Select
         disabled={disabled}
         items={items}
@@ -88,18 +94,18 @@ const TeamRow = ({
         }}
         value={inGroup}
       >
-        <SelectTrigger aria-label={t`Group of ${name}`} className="w-48">
+        <SelectTrigger size="sm" style={styles.control}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
           {items.map((item) => (
-            <SelectItem key={item.value} value={item.value}>
+            <SelectItem key={item.value} label={item.label} value={item.value}>
               {item.label}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
-    </li>
+    </SettingRow>
   );
 };
 
@@ -132,78 +138,90 @@ const TeamGroups = ({
       }
     })();
   };
+  const description = t`The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here.`;
+  if (teams.length === 0) {
+    return (
+      <SettingsGroup description={description} title={t`Groups of teams`}>
+        <Text color="muted" size="sm">
+          {t`The brain has no teams to group yet.`}
+        </Text>
+      </SettingsGroup>
+    );
+  }
   return (
-    <SettingsSection
-      description={t`The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here.`}
-      title={t`Groups of teams`}
-    >
-      {teams.length === 0 ? (
-        <SettingsBody>
-          <p className="text-muted-foreground">
-            <Trans>The brain has no teams to group yet.</Trans>
-          </p>
-        </SettingsBody>
-      ) : (
-        <>
-          <SettingsBody>
-            {groups.map((group) => (
-              <Input
-                aria-label={t`Group name`}
-                key={group.id}
-                disabled={busy}
-                maxLength={80}
-                onChange={(event) => {
-                  const { value } = event.target;
-                  setGroups(
-                    groups.map((each) =>
-                      each.id === group.id ? { ...each, name: value } : each
-                    )
-                  );
-                }}
-                value={group.name}
-              />
-            ))}
-            <div>
-              <Button
-                disabled={busy}
-                onClick={() => {
-                  setGroups([
-                    ...groups,
-                    { id: newGroupId(), name: t`New group`, teamIds: [] },
-                  ]);
-                }}
-                size="sm"
-                variant="ghost"
-              >
-                <PlusIcon data-icon="inline-start" />
-                <Trans>Add a group</Trans>
-              </Button>
-            </div>
-          </SettingsBody>
-          <SettingsBody>
-            <ul aria-label={t`Teams`} className="flex flex-col">
-              {teams.map((team) => (
-                <TeamRow
+    <>
+      <SettingsGroup
+        actions={
+          <Button
+            disabled={busy}
+            onClick={() => {
+              setGroups([
+                ...groups,
+                { id: newGroupId(), name: t`New group`, teamIds: [] },
+              ]);
+            }}
+            size="xs"
+            variant="outline"
+          >
+            <Icon icon={PlusIcon} />
+            {t`Add a group`}
+          </Button>
+        }
+        description={description}
+        flush
+        title={t`Groups of teams`}
+      >
+        <FieldGroup>
+          {groups.map((group, index) => {
+            const number = index + 1;
+            return (
+              <SettingRow key={group.id} label={t`Group ${number}`}>
+                <Input
                   disabled={busy}
-                  groups={groups}
-                  key={team.id}
-                  onMove={(groupId) => {
-                    setGroups(moved(groups, team.id, groupId));
+                  maxLength={80}
+                  onValueChange={(value) => {
+                    setGroups(
+                      groups.map((each) =>
+                        each.id === group.id ? { ...each, name: value } : each
+                      )
+                    );
                   }}
-                  team={team}
+                  size="sm"
+                  style={styles.control}
+                  value={group.name}
                 />
-              ))}
-            </ul>
-          </SettingsBody>
-          <div className="flex flex-wrap items-center justify-end gap-3 border-t px-5 py-3">
+              </SettingRow>
+            );
+          })}
+        </FieldGroup>
+      </SettingsGroup>
+      <SettingsGroup
+        flush
+        footer={
+          <>
             <ErrorText>{failure}</ErrorText>
             <Button disabled={busy || unnamed} onClick={save} size="sm">
-              <Trans>Save groups</Trans>
+              {t`Save groups`}
             </Button>
-          </div>
-        </>
-      )}
-    </SettingsSection>
+          </>
+        }
+        title={t`Teams`}
+      >
+        <FieldGroup>
+          {teams.map((team) => (
+            <TeamRow
+              disabled={busy}
+              groups={groups}
+              key={team.id}
+              onMove={(groupId) => {
+                setGroups(moved(groups, team.id, groupId));
+              }}
+              team={team}
+            />
+          ))}
+        </FieldGroup>
+      </SettingsGroup>
+    </>
   );
 };
 
@@ -212,9 +230,9 @@ const BrainSettings = () => {
   const page = Route.useLoaderData();
   if (page.state !== "ready") {
     return (
-      <SettingsSection title={t`Groups of teams`}>
+      <SettingsGroup title={t`Groups of teams`}>
         <NotLoadedState heading="h3" page={page} />
-      </SettingsSection>
+      </SettingsGroup>
     );
   }
   const { teams, teamGroups } = page.data;
@@ -231,8 +249,11 @@ const BrainSettings = () => {
   );
 };
 
+/** The groups' card and the teams' while they are read. */
+const BrainPending = () => <PageSkeletonSettings sections={[2, 3]} />;
+
 export const Route = createFileRoute("/_shell/settings/brain")({
-  pendingComponent: SettingsLoading,
+  pendingComponent: BrainPending,
   errorComponent: SettingsError,
   component: BrainSettings,
   loader: async ({ context: { core } }) =>
