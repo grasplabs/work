@@ -1,7 +1,7 @@
 import { Button } from "@grasp-os/ui/components/button";
 import { Chat } from "@grasp-os/ui/components/chat";
 import { Text } from "@grasp-os/ui/components/text";
-import { Icon, XIcon } from "@grasp-os/ui/lib/icons";
+import { Icon, MessageSquareIcon, XIcon } from "@grasp-os/ui/lib/icons";
 import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
@@ -56,6 +56,7 @@ export interface ConceptSearch {
   left: number | undefined;
   still: boolean;
   lang: "unknown" | undefined;
+  transcript: boolean;
 }
 
 /** Reads the concept’s own part of the address; nothing when it names no concept. */
@@ -74,6 +75,7 @@ export const conceptSearch = (
     left: Number.isFinite(left) && search.left !== undefined ? left : undefined,
     still: search.still !== undefined,
     lang: search.lang === "unknown" ? "unknown" : undefined,
+    transcript: search.transcript !== undefined,
   };
 };
 
@@ -133,6 +135,7 @@ const leftAt: Record<string, number> = {
   "mic-refused": 19 * 60 + 20,
   "five-left": wrapUpSeconds - 10,
   "time-up": 0,
+  paused: 14 * 60 + 10,
 };
 
 /** What happened in the thread before the questions, per concept. */
@@ -443,6 +446,7 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
       ? (leftAt[screen] ?? budgetSeconds)
       : search.left * 60;
   const live = !search.still;
+  const [transcript, setTranscript] = useState(search.transcript);
   const left = useCountdown(startLeft, live && inTalk);
   const go = (next: string): void => {
     setScreen(next);
@@ -459,6 +463,7 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
         left={left}
         live={live}
         look={concept === "c" ? "thread" : "stage"}
+        transcript={transcript}
         onReadBack={() => {
           go("readback");
         }}
@@ -484,16 +489,31 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
     <Frame
       actions={
         inTalk ? (
-          <Button
-            aria-label="Stop for now"
-            onClick={() => {
-              go("paused");
-            }}
-            size="icon-sm"
-            variant="ghost"
-          >
-            <Icon icon={XIcon} />
-          </Button>
+          <>
+            {concept === "c" ? null : (
+              <Button
+                aria-expanded={transcript}
+                aria-label="Transcript"
+                onClick={() => {
+                  setTranscript(!transcript);
+                }}
+                size="icon-sm"
+                variant={transcript ? "secondary" : "ghost"}
+              >
+                <Icon icon={MessageSquareIcon} />
+              </Button>
+            )}
+            <Button
+              aria-label="Stop for now"
+              onClick={() => {
+                go("paused");
+              }}
+              size="icon-sm"
+              variant="ghost"
+            >
+              <Icon icon={XIcon} />
+            </Button>
+          </>
         ) : null
       }
       clock={clockOf[concept]}

@@ -22,12 +22,13 @@ import {
 } from "@grasp-os/ui/components/prompt-input";
 import { Text } from "@grasp-os/ui/components/text";
 import { AudioWaveformIcon, Icon } from "@grasp-os/ui/lib/icons";
-import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { colors, duration, media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { micLevel, reachMic, watchLevel } from "../mic.ts";
+import { useSaid, wordsOf } from "../spoken.tsx";
 import { longLeft, shortLeft, wrapUpSeconds } from "./clock.ts";
 import {
   fixture,
@@ -54,6 +55,24 @@ import { InterviewerAvatar } from "./frame.tsx";
 // minutes left Stephen says it is his last question, and at 0 he stops,
 // says nothing is lost, and hands over to the read-back.
 
+/** From this wide the transcript has room beside the stage, as today. */
+const besideQuery = "@media (width >= 80rem)";
+
+// Stephen's words lighting up as he says them, as the interview does today
+// (spoken.tsx): said in ink, the word being said in the accent, the rest
+// waiting in the subtle grey; once the line is said, every word rests in ink.
+const lit = stylex.create({
+  word: {
+    transitionProperty: { default: "color", [media.reducedMotion]: "none" },
+    transitionDuration: duration.ui,
+    transitionTimingFunction: duration.ease,
+  },
+  rest: { color: colors.foreground },
+  said: { color: colors.foreground },
+  saying: { color: colors.accent },
+  waiting: { color: colors.subtleForeground },
+});
+
 const styles = stylex.create({
   room: {
     display: "flex",
@@ -67,7 +86,36 @@ const styles = stylex.create({
     paddingInline: { default: space["3"], [media.sm]: space["6"] },
     paddingBlockEnd: { default: space["3"], [media.sm]: space["6"] },
   },
-  roomStage: { maxWidth: "48rem" },
+  // The stage takes the window; the transcript, when open, a column at its end.
+  roomStage: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    maxWidth: "none",
+    paddingInline: { default: space["4"], [media.sm]: space["10"] },
+  },
+  roomBeside: {
+    gridTemplateColumns: {
+      default: "minmax(0, 1fr)",
+      [besideQuery]: "minmax(0, 1fr) 26rem",
+    },
+    columnGap: space["10"],
+  },
+  centre: {
+    display: "flex",
+    flexDirection: "column",
+    minHeight: 0,
+    width: "100%",
+    maxWidth: "44rem",
+    marginInline: "auto",
+  },
+  // On a phone the open transcript takes the stage's place.
+  aside: {
+    display: "flex",
+    flexDirection: "column",
+    minHeight: 0,
+    paddingBlockEnd: space["2"],
+  },
+  hiddenNarrow: { display: { default: "none", [besideQuery]: "flex" } },
   chat: { flexGrow: 1, minHeight: 0 },
   // The stage: the question in the middle of the room the card leaves.
   stage: {
@@ -79,9 +127,21 @@ const styles = stylex.create({
     overflowY: "auto",
     paddingBlock: space["6"],
   },
-  question: { display: "flex", flexDirection: "column", gap: space["4"] },
+  question: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: space["5"],
+    textAlign: "center",
+  },
   over: { display: "flex", alignItems: "center", gap: space["2"] },
-  next: { display: "flex", paddingBlockStart: space["4"] },
+  next: {
+    display: "flex",
+    justifyContent: "center",
+    paddingBlockStart: space["4"],
+  },
+  // The card in the middle of its room, however wide the room is.
+  card: { width: "100%", marginInline: "auto" },
   composer: { flexShrink: 0, paddingBlockStart: space["2"] },
   done: {
     display: "flex",
@@ -411,6 +471,7 @@ const Composer = ({
   return (
     <PromptInput
       aria-label="Your answer"
+      style={styles.card}
       compact={!spoken}
       onSubmit={({ text }) => {
         const said = text.trim();
@@ -481,11 +542,36 @@ const Composer = ({
   );
 };
 
+/** A line of Stephen's, its words lighting up while he says it. */
+const LitLine = ({ text, speaking }: { text: string; speaking: boolean }) => {
+  const said = useSaid({ line: text, saying: text.length, from: 0, speaking });
+  return (
+    <>
+      {wordsOf(text).map(({ word, start, end }) => {
+        let look: "rest" | "said" | "saying" | "waiting" = "waiting";
+        if (said < 0) {
+          look = "rest";
+        } else if (said >= end) {
+          look = "said";
+        } else if (said > start) {
+          look = "saying";
+        }
+        return (
+          <span key={start} {...stylex.props(lit.word, lit[look])}>
+            {word}
+          </span>
+        );
+      })}
+    </>
+  );
+};
+
 /**
- * A and B: the conversation as a stage, the whole window for one thing:
- * Stephen's question now, large, in the serif of what Grasp says, and over
- * it who asks and, for A, the minutes left. What was said before is in the
- * transcript, not on the stage.
+ * A and B: the conversation as a stage, as the interview is today: one
+ * thing in the middle of the window, Stephen's line, large, centred, in the
+ * serif of what Grasp says, its words lighting up as he says them; over it
+ * who asks and, for A, the minutes left. What was said before is in the
+ * transcript, beside the stage on a wide window.
  */
 const Stage = ({
   talk,
@@ -503,6 +589,7 @@ const Stage = ({
     fixture.interviewer,
     ...(clock === "title" ? [shortLeft(left)] : []),
   ].join(" · ");
+  const speaking = talk.doing === "speaking";
   return (
     <div {...stylex.props(styles.stage)}>
       <div {...stylex.props(styles.question)}>
@@ -520,7 +607,7 @@ const Stage = ({
           </Text>
         )}
         <Heading level={1} size="xl">
-          {now?.text ?? ""}
+          <LitLine key={now?.id} speaking={speaking} text={now?.text ?? ""} />
         </Heading>
         {talk.doing === "over" ? (
           <div {...stylex.props(styles.next)}>
@@ -541,6 +628,7 @@ export const Conversation = ({
   left,
   clock,
   look,
+  transcript = false,
   onReadBack,
 }: {
   start: Talk;
@@ -548,6 +636,8 @@ export const Conversation = ({
   left: number;
   clock: ClockPlace;
   look: "stage" | "thread";
+  /** The transcript is open: beside the stage, or in its place on a phone. */
+  transcript?: boolean;
   onReadBack: () => void;
 }) => {
   const { talk, type, speak, send, retryMic } = useTalk(start, live, left);
@@ -575,9 +665,31 @@ export const Conversation = ({
   );
   if (look === "stage") {
     return (
-      <div {...stylex.props(styles.room, styles.roomStage)}>
-        <Stage clock={clock} left={left} onReadBack={onReadBack} talk={talk} />
-        {talk.doing === "over" ? null : foot}
+      <div
+        {...stylex.props(
+          styles.room,
+          styles.roomStage,
+          transcript && styles.roomBeside
+        )}
+      >
+        <div
+          {...stylex.props(styles.centre, transcript && styles.hiddenNarrow)}
+        >
+          <Stage
+            clock={clock}
+            left={left}
+            onReadBack={onReadBack}
+            talk={talk}
+          />
+          {talk.doing === "over" ? null : foot}
+        </div>
+        {transcript ? (
+          <div {...stylex.props(styles.aside)}>
+            <Chat style={styles.chat}>
+              <Thread doing={talk.doing} turns={talk.turns} />
+            </Chat>
+          </div>
+        ) : null}
       </div>
     );
   }

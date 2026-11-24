@@ -336,7 +336,15 @@ const InterviewOrConcept = () => {
 };
 
 /** The address's concept switches, kept as they are written. */
-const conceptKeys = ["concept", "stage", "at", "left", "still", "lang"];
+const conceptKeys = [
+  "concept",
+  "stage",
+  "at",
+  "left",
+  "still",
+  "lang",
+  "transcript",
+];
 
 export const Route = createFileRoute("/interview")({
   validateSearch: (
