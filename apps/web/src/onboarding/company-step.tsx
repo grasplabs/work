@@ -18,7 +18,6 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
-import { Link } from "@grasp-os/ui/components/link";
 import { Text } from "@grasp-os/ui/components/text";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
@@ -28,6 +27,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
+import { formatList } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { CalmStep } from "./calm-frame.tsx";
@@ -55,11 +55,24 @@ import { XlsxError, xlsxMost, xlsxRows } from "./xlsx.ts";
 // staff list the admin shares, a CSV or Excel file with a row per person,
 // read in this browser. Either way only names, email addresses, teams and
 // jobs are kept, in core. A sign-in is offered for each suite this
-// deployment signs in with, as a row pressed to connect it.
+// deployment signs in with, as a row pressed to connect it. Once they are
+// in, the line names a few of them, so the admin sees their own company.
+// Never forced: without a list the admin skips on, and Grasp's own people
+// sort the list out with them in their talks.
 
 const styles = stylex.create({
   stack: { display: "grid", gap: space[4] },
 });
+
+/** How many of the people the step names, so the admin sees it is their own company. */
+const namedMost = 3;
+
+/** The first few people on the list, by name; someone core erased has none. */
+const namesOf = (roster: Roster): string[] =>
+  roster.people
+    .map(({ name }) => name)
+    .filter((name) => name !== "")
+    .slice(0, namedMost);
 
 const xlsxName = /\.xlsx$/iu;
 
@@ -176,7 +189,7 @@ const directoryShown = (
 /** Whoever is new on a list saved while the plan runs gets no link until the organization is confirmed again. */
 export const WaitingNote = ({ waiting }: { waiting: number }) =>
   waiting > 0 ? (
-    <Text size="lg">
+    <Text>
       {plural(waiting, {
         one: "# person new on your list gets a link once you confirm your organization.",
         other:
@@ -188,36 +201,49 @@ export const WaitingNote = ({ waiting }: { waiting: number }) =>
 /** What there is now, said in the step's line: who is in, and from where; or the quickest way in. */
 const useBody = ({
   roster,
+  listShown,
   fromDirectory,
   suites,
   people,
   teams,
 }: {
   roster: Roster | null;
+  /** The upload is out: the line says what to share. */
+  listShown: boolean;
   fromDirectory: DirectorySuite | null;
   suites: DirectorySuite[];
   people: number;
   teams: number;
 }): string => {
   const { t } = useLingui();
-  if (roster !== null && fromDirectory !== null) {
-    const signIn = suiteNames[fromDirectory];
-    return t`${signIn} is connected. I can see ${people} people in ${teams} teams.`;
+  if (roster !== null && listShown) {
+    return t`Share another staff list as a CSV or Excel file, a row per person. It replaces the one I have now.`;
+  }
+  if (roster === null && listShown) {
+    return t`Share a staff list as a CSV or Excel file, a row per person. No list at hand? Skip this, and we’ll sort it out with you.`;
   }
   if (roster !== null) {
-    return t`From your staff list I can see ${people} people in ${teams} teams.`;
+    const signIn = fromDirectory === null ? "" : suiteNames[fromDirectory];
+    const seen =
+      fromDirectory === null
+        ? t`From your staff list I can see ${people} people in ${teams} teams.`
+        : t`${signIn} is connected. I can see ${people} people in ${teams} teams.`;
+    // A few of them by name, so the admin sees it is their own company.
+    const names = formatList(namesOf(roster));
+    const among = t`Among them ${names}.`;
+    return `${seen} ${among}`;
   }
   if (suites.length > 1) {
-    return t`The quickest way is to connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed.`;
+    return t`Connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. No list at hand? Skip this, and we’ll sort it out with you.`;
   }
   if (suites[0] !== undefined) {
     const signIn = suiteNames[suites[0]];
-    return t`The quickest way is to connect your ${signIn} sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed.`;
+    return t`Connect your ${signIn} sign-in. I’ll only see names, teams and roles. No list at hand? Skip this, and we’ll sort it out with you.`;
   }
-  return t`A staff list is the quickest way in: names, email addresses, teams and jobs, as a CSV or Excel file. I only use it to know who to talk to.`;
+  return t`Share a staff list as a CSV or Excel file, a row per person. No list at hand? Skip this, and we’ll sort it out with you.`;
 };
 
-/** The step's end: Continue once there is a roster, a staff list instead of a sign-in, and more about it. */
+/** The step's end: Continue once there is a roster, a staff list instead of a sign-in, and more about it; without one, a way past it. */
 const CompanyEnd = ({
   roster,
   another,
@@ -260,25 +286,40 @@ const CompanyEnd = ({
       </>
     );
   }
+  // No list yet: never forced. Grasp's own people sort it out with them in their talks.
+  const skip = (
+    <Button
+      onClick={() => {
+        void onward();
+      }}
+      size="lg"
+      variant={signInsFirst ? "link" : "outline"}
+    >
+      {t`Skip for now`}
+    </Button>
+  );
   if (signInsFirst) {
     return (
       <>
         <Button onClick={onAnother} size="lg" variant="outline">
           {t`Use a staff list instead`}
         </Button>
-        <SupportLink page="directory">{t`More about this connection`}</SupportLink>
+        {skip}
       </>
     );
   }
   return (
-    <Text as="span" size="lg">
-      <Link
-        download="staff-list-example.csv"
-        href={`data:text/csv;charset=utf-8,${encodeURIComponent(exampleList)}`}
-      >
-        {t`See an example`}
-      </Link>
-    </Text>
+    <>
+      {skip}
+      <Button asChild size="lg" variant="link">
+        <a
+          download="staff-list-example.csv"
+          href={`data:text/csv;charset=utf-8,${encodeURIComponent(exampleList)}`}
+        >
+          {t`See an example`}
+        </a>
+      </Button>
+    </>
   );
 };
 
@@ -391,9 +432,16 @@ export const CompanyStep = (props: StepProps) => {
     }
   });
   const fromDirectory = directoryShown(fresh, directory);
-  const body = useBody({ roster, fromDirectory, suites, people, teams });
   const signInsFirst = roster === null && suites.length > 0 && !another;
   const listShown = roster === null ? !signInsFirst : another;
+  const body = useBody({
+    roster,
+    listShown,
+    fromDirectory,
+    suites,
+    people,
+    teams,
+  });
   const end = (
     <CompanyEnd
       another={another}
@@ -407,7 +455,12 @@ export const CompanyStep = (props: StepProps) => {
     />
   );
   return (
-    <CalmStep end={end} title={t`Who’s who at your company?`} body={body}>
+    <CalmStep
+      body={body}
+      centred
+      end={end}
+      title={t`Who’s who at your company?`}
+    >
       {signInsFirst || listShown || problem !== null || waiting > 0 ? (
         <div {...stylex.props(styles.stack)}>
           {signInsFirst ? (
@@ -447,7 +500,6 @@ export const CompanyStep = (props: StepProps) => {
           {listShown ? (
             <FileUpload
               accept={[".csv", ".tsv", ".txt", ".xlsx"]}
-              description={t`A CSV or Excel file, a row per person`}
               disabled={reading !== null && reading !== "list"}
               onUpload={upload}
             />

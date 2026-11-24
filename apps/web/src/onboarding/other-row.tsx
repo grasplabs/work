@@ -4,10 +4,12 @@ import {
   Item,
   ItemActions,
   ItemContent,
+  ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import { useLingui } from "@lingui/react/macro";
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
 // The last row of a list of places or platforms: one Grasp can't connect
 // to yet, pressed to type its name, and asked for by name.
@@ -16,9 +18,12 @@ export const OtherRow = ({
   label,
   placeholder,
   disabled,
+  media,
   onAdd,
 }: {
   label: string;
+  /** What stands before the words, as the other rows of its list have. */
+  media?: ReactNode;
   placeholder: string;
   disabled: boolean;
   onAdd: (name: string) => void;
@@ -50,6 +55,9 @@ export const OtherRow = ({
         }}
         variant="outline"
       >
+        {media === undefined ? null : (
+          <ItemMedia variant="image">{media}</ItemMedia>
+        )}
         <ItemContent>
           <ItemTitle>{label}</ItemTitle>
         </ItemContent>
@@ -58,6 +66,9 @@ export const OtherRow = ({
   }
   return (
     <Item variant="outline">
+      {media === undefined ? null : (
+        <ItemMedia variant="image">{media}</ItemMedia>
+      )}
       <ItemContent>
         <Input
           aria-label={placeholder}

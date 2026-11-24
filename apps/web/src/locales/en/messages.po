@@ -1822,10 +1822,6 @@ msgstr "A connection refused to say what changed"
 msgid "A copy of everything the Brain keeps for you alone: your own sources and what it remembers from them. Only you can make it and download it, and it is deleted when your data is erased."
 msgstr "A copy of everything the Brain keeps for you alone: your own sources and what it remembers from them. Only you can make it and download it, and it is deleted when your data is erased."
 
-#: src/onboarding/company-step.tsx
-msgid "A CSV or Excel file, a row per person"
-msgstr "A CSV or Excel file, a row per person"
-
 #: src/drafts/publish-errors.ts
 msgid "A data migration moved this App's records on since this version, so it can't be shared again. Share a new version instead."
 msgstr "A data migration moved this App's records on since this version, so it can't be shared again. Share a new version instead."
@@ -1992,10 +1988,6 @@ msgstr "A skill"
 #: src/brain/skills-page.tsx
 msgid "A SKILL.md: a name of lowercase letters, digits and hyphens, and a description of when to use it, then the steps. Saving a skill of a name you have already makes its next version."
 msgstr "A SKILL.md: a name of lowercase letters, digits and hyphens, and a description of when to use it, then the steps. Saving a skill of a name you have already makes its next version."
-
-#: src/onboarding/company-step.tsx
-msgid "A staff list is the quickest way in: names, email addresses, teams and jobs, as a CSV or Excel file. I only use it to know who to talk to."
-msgstr "A staff list is the quickest way in: names, email addresses, teams and jobs, as a CSV or Excel file. I only use it to know who to talk to."
 
 #: src/workflows/workflow-flow.tsx
 msgid "A step is a JSON object."
@@ -2647,6 +2639,10 @@ msgstr "Also worked on"
 #: src/chat/agent-change-card.tsx
 msgid "Also works on its own"
 msgstr "Also works on its own"
+
+#: src/onboarding/company-step.tsx
+msgid "Among them {names}."
+msgstr "Among them {names}."
 
 #: src/workflows/resource-params.tsx
 msgid "Amount"
@@ -4641,6 +4637,14 @@ msgstr "Connect first: {systems}."
 #: src/routes/_shell.settings.members.tsx
 msgid "Connect shared accounts and decide what Apps may do"
 msgstr "Connect shared accounts and decide what Apps may do"
+
+#: src/onboarding/company-step.tsx
+msgid "Connect your {signIn} sign-in. I’ll only see names, teams and roles. No list at hand? Skip this, and we’ll sort it out with you."
+msgstr "Connect your {signIn} sign-in. I’ll only see names, teams and roles. No list at hand? Skip this, and we’ll sort it out with you."
+
+#: src/onboarding/company-step.tsx
+msgid "Connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. No list at hand? Skip this, and we’ll sort it out with you."
+msgstr "Connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. No list at hand? Skip this, and we’ll sort it out with you."
 
 #: src/onboarding/sources-step.tsx
 msgid "Connected"
@@ -13760,6 +13764,14 @@ msgstr "Share {name} with {team}?"
 msgid "Share {name} with the company?"
 msgstr "Share {name} with the company?"
 
+#: src/onboarding/company-step.tsx
+msgid "Share a staff list as a CSV or Excel file, a row per person. No list at hand? Skip this, and we’ll sort it out with you."
+msgstr "Share a staff list as a CSV or Excel file, a row per person. No list at hand? Skip this, and we’ll sort it out with you."
+
+#: src/onboarding/company-step.tsx
+msgid "Share another staff list as a CSV or Excel file, a row per person. It replaces the one I have now."
+msgstr "Share another staff list as a CSV or Excel file, a row per person. It replaces the one I have now."
+
 #: src/drafts/sharing.tsx
 msgid "Share as"
 msgstr "Share as"
@@ -14194,6 +14206,10 @@ msgstr "Skip"
 msgctxt "skip a question"
 msgid "Skip"
 msgstr "Skip"
+
+#: src/onboarding/company-step.tsx
+msgid "Skip for now"
+msgstr "Skip for now"
 
 #: src/frame/ui-words.tsx
 msgid "Skipped {name}"
@@ -15720,14 +15736,6 @@ msgstr "the provider was too busy and asked to wait"
 #: src/settings/ai-providers.tsx
 msgid "The providers and models below."
 msgstr "The providers and models below."
-
-#: src/onboarding/company-step.tsx
-msgid "The quickest way is to connect your {signIn} sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed."
-msgstr "The quickest way is to connect your {signIn} sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed."
-
-#: src/onboarding/company-step.tsx
-msgid "The quickest way is to connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed."
-msgstr "The quickest way is to connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. Your email, chats and calendars stay closed."
 
 #: src/apps/app-access-requests.tsx
 msgid "The request allows nothing until an admin grants it. They see what the app asks for and decide."

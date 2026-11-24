@@ -128,11 +128,12 @@ const Ai = ({ data, furthest, path, go, onward }: StepProps) => {
 };
 
 /** The plan: their campaign as plain rows, and what a finding looks like. */
-const About = ({ onward }: StepProps) => {
+const About = ({ onward, today }: StepProps) => {
   const { t } = useLingui();
   return (
     <CalmStep
       body={t`I talk with your team for one week. Then you get what I learned, team by team.`}
+      centred
       end={
         <Button
           onClick={() => {
@@ -145,7 +146,7 @@ const About = ({ onward }: StepProps) => {
       }
       title={t`Here’s the plan`}
     >
-      <PlanBody today={new Date()} />
+      <PlanBody today={today} />
     </CalmStep>
   );
 };

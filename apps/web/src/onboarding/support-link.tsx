@@ -1,11 +1,11 @@
-import { Link } from "@grasp-os/ui/components/link";
-import { Text } from "@grasp-os/ui/components/text";
+import { Button } from "@grasp-os/ui/components/button";
 import { useLingui } from "@lingui/react/macro";
 
 // More about what a step connects, on Grasp's support site, in a new tab:
 // every connection has a page of its own there, what it reads, what it
 // never reads, and how to take it away again. In a step's end, a third
-// way beside its buttons, at the size of the step's words.
+// way beside its buttons: a link Button, so its words are never larger
+// than theirs.
 
 /** Grasp's support site. */
 const supportUrl = "https://support.joingrasp.com";
@@ -31,14 +31,15 @@ export const SupportLink = ({
 }) => {
   const { t } = useLingui();
   return (
-    <Text as="span" size="lg">
-      <Link
+    <Button asChild size="lg" variant="link">
+      <a
         aria-label={t`${label}, on Grasp’s support site, in a new tab`}
-        external
         href={`${supportUrl}/${connectionPages[page]}`}
+        rel="noopener"
+        target="_blank"
       >
         {label}
-      </Link>
-    </Text>
+      </a>
+    </Button>
   );
 };

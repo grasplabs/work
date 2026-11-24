@@ -6,17 +6,32 @@ import {
   size,
   space,
 } from "@grasp-os/ui/lib/tokens.stylex";
-import { pixel } from "@grasp-os/ui/lib/vars.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
 
-// "Here's the plan": the admin's own campaign as plain rows, what happens
-// and on which day, then one small, neutral example of what a finding
-// looks like, quietly set on Damsko's calm dither of light. The dates are
+import { PlanDrawing } from "./plan-drawing.tsx";
+import type { PlanDay } from "./plan-drawing.tsx";
+
+// "Here's the plan": the admin's own campaign drawn as its two weeks
+// (plan-drawing.tsx), then the same in plain rows, what happens and on
+// which day, then one line of what a finding reads like. A
+// row under the pointer lights its days in the drawing. The dates are
 // counted from today: core plans no campaign yet.
 
 const styles = stylex.create({
-  stack: { display: "grid", gap: space[8] },
+  stack: { display: "grid", gap: space[6] },
+  week: {
+    display: "grid",
+    gap: space[2],
+    paddingBlockStart: space[6],
+    paddingBlockEnd: space[2],
+    paddingInline: { default: space[6], [media.maxSm]: space[3] },
+    borderRadius: radius.lg,
+    cornerShape: radius.shape,
+    backgroundColor: colors.card,
+    boxShadow: size.borderStrong,
+  },
   rows: { margin: 0, padding: 0, listStyle: "none" },
   row: {
     display: "flex",
@@ -24,98 +39,113 @@ const styles = stylex.create({
     justifyContent: "space-between",
     gap: space[4],
     paddingBlock: space[3],
-    borderBlockEndWidth: size.hairline,
-    borderBlockEndStyle: "solid",
-    borderBlockEndColor: colors.border,
+    borderBlockStartWidth: size.hairline,
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: colors.border,
   },
   day: { flexShrink: 0 },
   numbers: { fontVariantNumeric: "tabular-nums" },
-  example: {
-    position: "relative",
-    isolation: "isolate",
-    overflow: "hidden",
-    margin: 0,
-    padding: space[6],
-    borderRadius: radius.lg,
-    cornerShape: radius.shape,
-    backgroundColor: colors.card,
-    boxShadow: size.borderStrong,
-  },
-  // The light from the end corner, through the system's one pixel, at the banner's strength.
-  light: {
-    position: "absolute",
-    inset: 0,
-    zIndex: -1,
-    pointerEvents: "none",
-    opacity: size.pageHeaderDitherStrength,
-    backgroundImage: {
-      default: `radial-gradient(120% 140% at 100% 0%, ${colors.mint}, transparent 75%)`,
-      ":dir(rtl)": `radial-gradient(120% 140% at 0% 0%, ${colors.mint}, transparent 75%)`,
-    },
-    maskImage: pixel.mask,
-    maskSize: "3px 3px",
-    display: { default: "block", [media.forcedColors]: "none" },
-  },
 });
 
-const dayMs = 24 * 60 * 60 * 1000;
+/** The moments of the campaign, by how many days after today: until core plans one. */
+const after = { first: 2, everyone: 6, close: 9, findings: 13 } as const;
 
-/** The campaign's days, counted from `today`: until core plans one. */
-const campaignDays = (today: Date) => {
-  const at = (days: number) => new Date(today.getTime() + days * dayMs);
-  return {
-    first: at(2),
-    everyone: at(6),
-    close: at(9),
-    findings: at(13),
-  };
+type Moment = keyof typeof after;
+
+/** The days each moment stands for in the drawing: from it to the next. */
+const spans: Record<Moment, readonly [number, number]> = {
+  first: [after.first, after.everyone - 1],
+  everyone: [after.everyone, after.close - 1],
+  close: [after.close, after.close],
+  findings: [after.close + 1, after.findings],
 };
 
-export const PlanBody = ({ today }: { today: Date }) => {
+/** Who talks on a weekday of the interviews: a few at first, the whole company after, tailing off on the last day. */
+const talkersOn = (day: number): number => {
+  if (day < after.everyone) {
+    return 2 + ((day - after.first) % 2);
+  }
+  if (day === after.close) {
+    return 3;
+  }
+  return [6, 8, 7, 8][(day - after.everyone) % 4] ?? 6;
+};
+
+/** What each day from today to the findings holds. */
+const planDays = (today: Date): PlanDay[] =>
+  Array.from({ length: after.findings + 1 }, (_, day) => {
+    const date = new Date(today);
+    date.setUTCDate(today.getUTCDate() + day);
+    const weekend = date.getUTCDay() === 0 || date.getUTCDay() === 6;
+    if (day === after.findings) {
+      return { kind: "findings", count: 0 };
+    }
+    if (weekend || day < after.first) {
+      return { kind: "quiet", count: 0 };
+    }
+    if (day <= after.close) {
+      return { kind: "talks", count: talkersOn(day) };
+    }
+    return { kind: "reads", count: 0 };
+  });
+
+export const PlanBody = ({ today }: { today: string }) => {
   const { t, i18n } = useLingui();
+  const [lit, setLit] = useState<Moment | null>(null);
+  const start = new Date(`${today}T12:00:00Z`);
+  const dateOf = (moment: Moment) => {
+    const date = new Date(start);
+    date.setUTCDate(start.getUTCDate() + after[moment]);
+    return date;
+  };
   const format = new Intl.DateTimeFormat(i18n.locale, {
     weekday: "short",
     day: "numeric",
     month: "short",
+    timeZone: "UTC",
   });
-  const days = campaignDays(today);
-  const moments = [
-    {
-      id: "first",
-      what: t`The people who know the work best go first`,
-      day: days.first,
-    },
-    {
-      id: "everyone",
-      what: t`Everyone else gets their own link`,
-      day: days.everyone,
-    },
-    { id: "close", what: t`The interviews close`, day: days.close },
-    { id: "findings", what: t`You get what I learned`, day: days.findings },
+  const moments: { id: Moment; what: string }[] = [
+    { id: "first", what: t`The people who know the work best go first` },
+    { id: "everyone", what: t`Everyone else gets their own link` },
+    { id: "close", what: t`The interviews close` },
+    { id: "findings", what: t`You get what I learned` },
   ];
   return (
     <div {...stylex.props(styles.stack)}>
-      <ol aria-label={t`Your campaign`} {...stylex.props(styles.rows)}>
-        {moments.map(({ id, what, day }) => (
-          <li key={id} {...stylex.props(styles.row)}>
-            <Text as="span" size="lg">
-              {what}
-            </Text>
-            <Text as="span" size="lg" style={styles.day}>
-              <time
-                dateTime={day.toISOString().slice(0, 10)}
-                {...stylex.props(styles.numbers)}
+      <div {...stylex.props(styles.week)}>
+        <PlanDrawing
+          days={planDays(start)}
+          lit={lit === null ? null : spans[lit]}
+        />
+        <ol aria-label={t`Your campaign`} {...stylex.props(styles.rows)}>
+          {moments.map(({ id, what }) => {
+            const day = dateOf(id);
+            return (
+              <li
+                key={id}
+                onPointerEnter={() => {
+                  setLit(id);
+                }}
+                onPointerLeave={() => {
+                  setLit((current) => (current === id ? null : current));
+                }}
+                {...stylex.props(styles.row)}
               >
-                {format.format(day)}
-              </time>
-            </Text>
-          </li>
-        ))}
-      </ol>
-      <figure {...stylex.props(styles.example)}>
-        <span aria-hidden="true" {...stylex.props(styles.light)} />
-        <Text size="lg">{t`A finding reads like this: new people wait two to three days for a laptop from IT.`}</Text>
-      </figure>
+                <Text as="span">{what}</Text>
+                <Text as="span" style={styles.day}>
+                  <time
+                    dateTime={day.toISOString().slice(0, 10)}
+                    {...stylex.props(styles.numbers)}
+                  >
+                    {format.format(day)}
+                  </time>
+                </Text>
+              </li>
+            );
+          })}
+        </ol>
+      </div>
+      <Text>{t`A finding reads like this: new people wait two to three days for a laptop from IT.`}</Text>
     </div>
   );
 };

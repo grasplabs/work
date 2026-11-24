@@ -7,6 +7,7 @@ import {
   ItemActions,
   ItemContent,
   ItemGroup,
+  ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
@@ -27,8 +28,10 @@ import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { CalmStep } from "./calm-frame.tsx";
 import { OtherRow } from "./other-row.tsx";
+import { PixelMark } from "./pixel-mark.tsx";
 import { sourcesFor } from "./setup.ts";
 import type { DocumentSource } from "./setup.ts";
+import { otherLogo, sourceLogo, wantedLogo } from "./source-logos.ts";
 import type { SetupData, StepProps } from "./step-parts.ts";
 import { SupportLink } from "./support-link.tsx";
 
@@ -36,7 +39,9 @@ import { SupportLink } from "./support-link.tsx";
 // and those the kickoff named first, each a row pressed to note it; where
 // Grasp connects it through Integrations, its sign-in follows in the
 // connect dialog. Another place is asked for by name. Each choice goes to
-// core, which counts it in how much Grasp knows.
+// core, which counts it in how much Grasp knows. Every row carries its
+// mark in pixels (pixel-mark.tsx): half there until the place is chosen,
+// filling in as it is.
 
 const styles = stylex.create({
   stack: { display: "grid", gap: space[3] },
@@ -183,6 +188,7 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
           ? t`Procedures, handbooks, how-tos. Connect where they live, and I’ll only read what you share with me.`
           : t`${kinds}. Connect where they live, and I’ll only read what you share with me.`
       }
+      centred
       end={
         <>
           <Button
@@ -203,6 +209,7 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
           {listed.map((source) => {
             const state = stateOfRow(source);
             const done = noted.includes(source.id) && isConnected(source);
+            const logo = sourceLogo(source);
             return (
               <Item
                 key={source.id}
@@ -215,6 +222,11 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
                     })}
                 variant="outline"
               >
+                {logo === null ? null : (
+                  <ItemMedia variant="image">
+                    <PixelMark icon={logo} whole={noted.includes(source.id)} />
+                  </ItemMedia>
+                )}
                 <ItemContent>
                   <ItemTitle>{source.name}</ItemTitle>
                 </ItemContent>
@@ -224,6 +236,9 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
           })}
           {wanted.map((name) => (
             <Item key={name} variant="outline">
+              <ItemMedia variant="image">
+                <PixelMark icon={wantedLogo} whole />
+              </ItemMedia>
               <ItemContent>
                 <ItemTitle>{name}</ItemTitle>
               </ItemContent>
@@ -235,6 +250,7 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
           <OtherRow
             disabled={busy}
             label={t`Something else`}
+            media={<PixelMark icon={otherLogo} whole={false} />}
             onAdd={(name) => {
               void ask(name);
             }}
