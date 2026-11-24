@@ -519,12 +519,6 @@ export const ChatConcept = ({
     <ConceptFrame
       fill
       language={step !== "welcome"}
-      onGo={(to) => {
-        if (to === "welcome" || to === "ai" || to === "about") {
-          go(to);
-        }
-      }}
-      reached={(["welcome", "ai", "about"] as const).indexOf(step)}
       step={step}
       tools={<SoundToggle />}
       wide
