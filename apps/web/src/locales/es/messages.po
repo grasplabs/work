@@ -4304,9 +4304,17 @@ msgstr "Contexto"
 msgid "Continue"
 msgstr "Continuar"
 
+#: src/frame/sign-in/sign-in.tsx
+msgid "Continue with {provider}"
+msgstr "Continuar con {provider}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Continue with {signIn}"
 msgstr "Continuar con {signIn}"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Continue with Grasp staff"
+msgstr "Continuar como personal de Grasp"
 
 #: src/apps/resource-bindings.tsx
 msgid "Contract"
@@ -4901,6 +4909,10 @@ msgstr "Diagrama"
 msgctxt "inbox item kind: a change whose answer was lost"
 msgid "Did it happen?"
 msgstr "¿Ocurrió?"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Did not open"
+msgstr "No se abrió"
 
 #: src/inbox/items.ts
 msgid "Did this happen? {who}"
@@ -7380,8 +7392,8 @@ msgid "Invited a guest"
 msgstr "Añadió un invitado"
 
 #: src/routes/sign-in.tsx
-msgid "Invited as a guest? Sign in with a code"
-msgstr "¿Te invitaron como invitado? Inicia sesión con un código"
+msgid "Invited as a guest?"
+msgstr "¿Eres invitado?"
 
 #: src/brain/brain.ts
 msgid "Invited for step 2"
@@ -7988,6 +8000,7 @@ msgctxt "what the Brain remembers about something"
 msgid "Language"
 msgstr "Idioma"
 
+#: src/frame/language-button.tsx
 #: src/language-picker.tsx
 msgid "Language: {name}"
 msgstr "Idioma: {name}"
@@ -8025,6 +8038,10 @@ msgstr "Leído por última vez {lastRead}"
 #: src/workflows/workflows-table.tsx
 msgid "Last run"
 msgstr "Última ejecución"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Last used"
+msgstr "Último usado"
 
 #: src/interview/words.ts
 msgid "Last, the numbers and the result."
@@ -8276,6 +8293,10 @@ msgstr "Cargando…"
 msgctxt "what the Brain remembers about something"
 msgid "Location"
 msgstr "Ubicación"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Log in"
+msgstr "Iniciar sesión"
 
 #: src/settings/org-card.tsx
 msgid "Logo"
@@ -10304,6 +10325,14 @@ msgstr "Abiertas: {open}"
 #: src/settings/ai-providers.tsx
 msgid "OpenAI-compatible endpoint"
 msgstr "Endpoint compatible con OpenAI"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Opened"
+msgstr "Abierto"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Opening {provider}"
+msgstr "Abriendo {provider}"
 
 #: src/onboarding/platform-reveal.tsx
 msgid "Opening Grasp"
@@ -12983,6 +13012,10 @@ msgstr "Inicia sesión para abrir tu entrevista"
 msgid "Sign in with {label}"
 msgstr "Iniciar sesión con {label}"
 
+#: src/routes/sign-in.tsx
+msgid "Sign in with a code"
+msgstr "Inicia sesión con un código"
+
 #: src/sign-in-errors.ts
 msgid "Sign in with your organization's account."
 msgstr "Inicia sesión con la cuenta de tu organización."
@@ -15637,10 +15670,6 @@ msgstr "Usar la IA de Grasp"
 #: src/workflows/resource-params.tsx
 msgid "Use the default"
 msgstr "Usar el predeterminado"
-
-#: src/routes/sign-in.tsx
-msgid "Use your organization’s account to go on."
-msgstr "Usa la cuenta de tu organización para continuar."
 
 #: src/onboarding/ai-step.tsx
 msgid "Use your own key"

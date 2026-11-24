@@ -1,4 +1,5 @@
 import type {
+  ModelDaySpend,
   ModelMonthSpend,
   ModelSettings,
   SpendingWorkflow,
@@ -110,16 +111,19 @@ const whereItWent = (
 
 /**
  * The month so far as a running total, day by day: one calm line that
- * ends at the key figure above it, never a spike for a busy day.
+ * ends at the key figure above it, never a spike for a busy day. Each day
+ * is the company's own (`2026-10-31`), named by its day of the month: the
+ * first can be the last of the month before, where the company is behind
+ * UTC.
  */
 const runningTotal = (
-  days: readonly number[]
+  days: readonly ModelDaySpend[]
 ): { day: string; spend: number }[] => {
   const points: { day: string; spend: number }[] = [];
   let sofar = 0;
-  for (const [at, amount] of days.entries()) {
+  for (const { date, amount } of days) {
     sofar += amount;
-    points.push({ day: String(at + 1), spend: sofar });
+    points.push({ day: String(Number(date.slice(8, 10))), spend: sofar });
   }
   return points;
 };
