@@ -1,6 +1,5 @@
 import {
   Item,
-  ItemActions,
   ItemContent,
   ItemGrid,
   ItemGroup,
@@ -149,16 +148,17 @@ export const LanguageCards = ({
               tone={look === "flag" ? "real" : "brand"}
             />
           )}
+          {/* Coming back: the tick beside the name, clear of the flag at the far edge. */}
+          {chosen === code ? (
+            <ItemMedia variant="icon">
+              <Icon icon={CheckIcon} label={t`Chosen`} />
+            </ItemMedia>
+          ) : null}
           <ItemContent>
             <ItemTitle>
               <span lang={code}>{name}</span>
             </ItemTitle>
           </ItemContent>
-          {chosen === code ? (
-            <ItemActions>
-              <Icon icon={CheckIcon} label={t`Chosen`} />
-            </ItemActions>
-          ) : null}
         </Item>
       ))}
     </Group>
