@@ -5,6 +5,7 @@ import { expect } from "@playwright/test";
 import { test } from "./csp.ts";
 import { saidOf, toItem } from "./inbox.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
+import { expectNoError } from "./said.ts";
 
 // The Activity page: an admin grants one App's permission request in the
 // Inbox and declines another, finds the approval in the audit log with
@@ -147,7 +148,7 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   await expect(page.getByLabel("From")).toHaveValue("2024-02-29");
   await expect(page.getByLabel("To", { exact: true })).toHaveValue("");
   await expect(granted).toHaveCount(1);
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expectNoError(page);
 });
 
 test("an admin approves an App's request only for the version the list shows", async ({

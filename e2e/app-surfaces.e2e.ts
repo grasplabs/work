@@ -114,3 +114,25 @@ test("an App's sidebar entry opens its page, and its settings page is its settin
   await page.goto(`/apps/${app}/settings?section=1`);
   await expect(general).toHaveAttribute("aria-current", "page");
 });
+
+test("the Apps' own group in the sidebar stays folded as the person left it", async ({
+  pageOf,
+}) => {
+  const { builder, name } = await surfacedApp();
+  const page = await pageOf(builder);
+  await page.goto("/projects");
+  const group = page.getByRole("button", { name: "From your Apps" });
+  const shortcuts = page.getByRole("list", { name: "From your Apps" });
+  await expect(shortcuts.getByRole("link", { name })).toBeVisible();
+
+  await group.click();
+  await expect(group).toHaveAttribute("aria-expanded", "false");
+  await expect(shortcuts).toBeHidden();
+  // Kept in this browser: folded again after a reload.
+  await page.reload();
+  await expect(group).toHaveAttribute("aria-expanded", "false");
+  await expect(shortcuts).toBeHidden();
+
+  await group.click();
+  await expect(shortcuts.getByRole("link", { name })).toBeVisible();
+});

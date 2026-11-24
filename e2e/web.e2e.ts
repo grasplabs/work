@@ -7,6 +7,7 @@ import { z } from "zod";
 import { callGate } from "./call-gate.ts";
 import { test } from "./csp.ts";
 import { endSession, peopleIn, signInAs, signInTo } from "./people.ts";
+import { expectErrorsShown, toastSaying } from "./said.ts";
 
 /**
  * How long the page may take to show what came of a connection that had to
@@ -323,10 +324,11 @@ for (const [where, path, landed] of [
     await page.getByRole("button", { name: "Person", exact: true }).click();
     await page.getByRole("menuitem", { name: "Sign out" }).click();
 
-    await expect(page.getByText("Signing out didn't work")).toBeVisible();
-    await expect(
-      page.getByText("You're still signed in. Try again in a moment.")
-    ).toBeVisible();
+    const said = toastSaying(page, "Signing out didn't work");
+    await expect(said).toBeVisible();
+    await expect(said).toContainText(
+      "You're still signed in. Try again in a moment."
+    );
     await expect(page).toHaveURL(new RegExp(`${path}$`, "u"));
     await expect(
       page.getByRole("button", { name: "Person", exact: true })
@@ -616,7 +618,8 @@ test("shows the page loading while the members list is slow, then says core can'
   await page.goto("/settings/members");
   // In the frame, as skeletons, while the read is slow.
   await expect(page.getByRole("status", { name: "Loading…" })).toBeVisible();
-  const nav = page.getByRole("navigation", { name: "Main" });
+  // The sidebar, on Settings' own level.
+  const nav = page.getByRole("navigation", { name: "Settings" });
   await expect(nav).toBeVisible();
 
   // Then the page says it didn't load and why, with a way to ask again,
@@ -624,9 +627,9 @@ test("shows the page loading while the members list is slow, then says core can'
   await expect(
     page.getByRole("heading", { name: "This page didn't load" })
   ).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByRole("alert")).toHaveText(
-    "Grasp can't be reached right now. Try again in a moment."
-  );
+  await expectErrorsShown(page, [
+    "Grasp can't be reached right now. Try again in a moment.",
+  ]);
   await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
   await expect(nav).toBeVisible();
   await expect(page.getByRole("combobox", { name: /^Role of /u })).toHaveCount(
@@ -740,7 +743,7 @@ test("never sends what it gave up on while core was out of reach, once core is b
       server.send(message);
     });
   });
-  await page.goto("/settings/members");
+  await page.goto("/projects");
   const nav = page.getByRole("navigation", { name: "Main" });
   await expect(nav.getByRole("link", { name: "Brain" })).toBeVisible();
 

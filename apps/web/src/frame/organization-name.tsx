@@ -1,22 +1,19 @@
-import { BrandHeader } from "@grasp-os/app-kit/components/brand-header";
 import type { Organization } from "@grasp-os/shared/organization";
-import { useLingui } from "@lingui/react/macro";
 import { useEffect, useState, useSyncExternalStore } from "react";
 
 import { readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 
-// The sidebar's header: the kit's BrandHeader, which the admin shows too,
-// with the organization's name beside Grasp's mark, and the sidebar's own
-// fold. Until core says the name, or when it has none, "Grasp". Read from
-// core as the shell mounts, and changed at once when an admin renames the
-// organization on this page (`organizationRenamed`), so the header never
-// shows a name the page itself just replaced.
+// The organization's name, under the person's at the sidebar's foot
+// (frame/person-menu.tsx). Until core says the name, or when it has none,
+// "Grasp". Read from core as the shell mounts, and changed at once when an
+// admin renames the organization on this page (`organizationRenamed`), so
+// the sidebar never shows a name the page itself just replaced.
 
-/** The organization's name as the header shows it, for the tab. */
+/** The organization's name as the sidebar shows it. */
 let shownName: string | undefined;
 
-/** How often that name was set: a header shows only one set since it mounted. */
+/** How often that name was set: a name shows only one set since it mounted. */
 let shownVersion = 0;
 
 /** How many renames the page saved: a read begun before one doesn't undo it. */
@@ -34,7 +31,7 @@ const showName = (name?: string): void => {
 };
 
 /**
- * Tells the header the organization's name changed on this page: the
+ * Tells the sidebar the organization's name changed on this page: the
  * Workspace settings call it once core saved a new name.
  */
 export const organizationRenamed = (name: string): void => {
@@ -78,30 +75,15 @@ const readName = async (
 };
 
 /**
- * The header: the organization's name, or "Grasp" until core says it or
- * when it has none, with the sidebar's own fold beside it (the page's
- * header has none on a wide screen).
+ * The organization's name, read once with `organization`, with any rename
+ * since (`organizationRenamed`): "Grasp" until then, or when it has none.
  */
-const SidebarBrandView = ({ name }: { name?: string }) => {
-  const { t } = useLingui();
-  return (
-    <BrandHeader
-      title={name ?? "Grasp"}
-      toggleLabel={t`Show or hide the sidebar`}
-    />
-  );
-};
-
-/**
- * The header, reading the organization's name once with `organization`,
- * and showing any rename since (`organizationRenamed`).
- */
-export const SidebarBrandOf = ({
+export const OrganizationNameOf = ({
   organization,
 }: {
   organization: () => Promise<Organization>;
 }) => {
-  // A header mounted anew (another session, say) shows no name set before
+  // A name mounted anew (another session, say) shows no name set before
   // it mounted, not even for its first paint: only one core says, or a
   // rename, since.
   // oxlint-disable-next-line react/hook-use-state -- fixed at mount, never set
@@ -115,12 +97,12 @@ export const SidebarBrandOf = ({
       read.current = false;
     };
   }, [organization]);
-  return <SidebarBrandView name={name} />;
+  return <span data-slot="organization-name">{name ?? "Grasp"}</span>;
 };
 
-/** The header, reading the organization's name from core once. */
-export const SidebarBrand = ({ core }: { core: CoreConnection }) => (
-  <SidebarBrandOf
+/** The organization's name, read from core once. */
+export const OrganizationName = ({ core }: { core: CoreConnection }) => (
+  <OrganizationNameOf
     organization={async () =>
       await readWithin(
         core,

@@ -1,8 +1,3 @@
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/app-kit/components/alert";
 import { aiProviders } from "@grasp-os/shared/ai-providers";
 import type {
   AiProvidersListing,
@@ -10,9 +5,15 @@ import type {
 } from "@grasp-os/shared/ai-providers";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/ui/components/alert";
+import { Link } from "@grasp-os/ui/components/link";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
-import { KeyRoundIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
+import { Link as RouterLink } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -67,6 +68,11 @@ export const failingProviders = (
         ]
   );
 
+const styles = stylex.create({
+  // Across the top of the page's card, one under the other.
+  banners: { display: "flex", flexDirection: "column", flexShrink: 0 },
+});
+
 /** What to do about a provider that isn't answering. */
 const IfItLasts = ({ statusPage }: { statusPage: string | undefined }) => {
   if (statusPage === undefined) {
@@ -76,9 +82,9 @@ const IfItLasts = ({ statusPage }: { statusPage: string | undefined }) => {
   return (
     <Trans>
       If it lasts, check{" "}
-      <a href={statusPage} rel="noreferrer" target="_blank">
+      <Link external href={statusPage}>
         {page}
-      </a>{" "}
+      </Link>{" "}
       or switch provider.
     </Trans>
   );
@@ -94,8 +100,10 @@ const FailingLine = ({ failing }: { failing: FailingProvider }) => {
   if (failing.trouble === "refused") {
     title = t`${label} is refusing your key since ${since}.`;
     description = (
-      <Link to="/settings/ai-providers">
-        <Trans>Check or replace it in Settings › AI providers.</Trans>
+      <Link asChild>
+        <RouterLink to="/settings/ai-providers">
+          <Trans>Check or replace it in Settings › AI providers.</Trans>
+        </RouterLink>
       </Link>
     );
   } else if (failing.trouble === "not_answering") {
@@ -110,13 +118,10 @@ const FailingLine = ({ failing }: { failing: FailingProvider }) => {
     );
   }
   return (
-    <Alert live="polite" variant="attention">
-      <KeyRoundIcon aria-hidden="true" />
+    <Alert appearance="banner" live="polite" variant="warning">
       <AlertTitle>{title}</AlertTitle>
       {description === null ? null : (
-        <AlertDescription>
-          <p>{description}</p>
-        </AlertDescription>
+        <AlertDescription>{description}</AlertDescription>
       )}
     </Alert>
   );
@@ -149,7 +154,8 @@ export const failingUpFront = async (
 };
 
 /**
- * A banner over the page for each AI provider whose calls fail,
+ * A banner across the top of the page's card (Damsko's Alert, as a
+ * banner), for each AI provider whose calls fail,
  * for the organization's own admins; nothing for anyone else, or while
  * every key works.
  */
@@ -206,7 +212,7 @@ export const AiKeyBanner = ({
     return null;
   }
   return (
-    <div className="flex flex-col gap-2 px-4 pt-4">
+    <div {...stylex.props(styles.banners)}>
       {failing.map((key) => (
         <FailingLine failing={key} key={key.label} />
       ))}

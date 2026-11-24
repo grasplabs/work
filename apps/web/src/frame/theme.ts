@@ -1,25 +1,23 @@
-// Light, dark or the system's: a UI preference, the person's own, kept in
-// this browser's storage, one entry per person, so someone else signing in
-// here keeps theirs. public/theme.js applies it: `grasp-theme` is the choice
-// applied last, which it reads before first paint.
+import { isThemeMode } from "@grasp-os/ui/components/theme-toggle";
+import type { ThemeMode } from "@grasp-os/ui/components/theme-toggle";
 
-export const themes = ["light", "dark", "system"] as const;
-
-export type Theme = (typeof themes)[number];
+// Light, dark or the system's (Damsko's modes): a UI preference, the
+// person's own, kept in this browser's storage, one entry per person, so
+// someone else signing in here keeps theirs. public/theme.js applies it,
+// as Damsko's themes.css reads it (the root's `data-mode`) and the kit's
+// theme does (its `dark` class): `grasp-theme` is the choice applied last,
+// which it reads before first paint.
 
 /** The choice theme.js applies. */
 const appliedKey = "grasp-theme";
 
 const personKey = (userId: string): string => `grasp-theme:${userId}`;
 
-export const isTheme = (value: unknown): value is Theme =>
-  themes.some((theme) => theme === value);
-
 /** The theme `userId` chose in this browser; the system's until they choose. */
-export const readTheme = (userId: string): Theme => {
+export const readTheme = (userId: string): ThemeMode => {
   try {
     const kept = localStorage.getItem(personKey(userId));
-    return isTheme(kept) ? kept : "system";
+    return isThemeMode(kept) ? kept : "system";
   } catch {
     return "system";
   }
@@ -40,7 +38,7 @@ export const onThemeChange = (onChange: () => void): (() => void) => {
 };
 
 /** Has theme.js apply `theme` now, and on the next load before first paint. */
-export const applyTheme = (theme: Theme): void => {
+export const applyTheme = (theme: ThemeMode): void => {
   try {
     localStorage.setItem(appliedKey, theme);
   } catch {
@@ -50,7 +48,7 @@ export const applyTheme = (theme: Theme): void => {
 };
 
 /** Keeps `theme` as `userId`'s choice in this browser, and applies it. */
-export const chooseTheme = (userId: string, theme: Theme): void => {
+export const chooseTheme = (userId: string, theme: ThemeMode): void => {
   try {
     localStorage.setItem(personKey(userId), theme);
   } catch {

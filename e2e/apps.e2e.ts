@@ -243,7 +243,7 @@ test("a builder finds an App in the list, opens it and uses its page with live d
   await expect(page.getByText("Created by you.")).toBeVisible();
 });
 
-test("the sidebar shows everyone the sections, and Settings each person the sections they may open", async ({
+test("the sidebar shows everyone the sections, and, from the person's menu, Settings each person the sections they may open", async ({
   pageOf,
 }) => {
   const everyone = [
@@ -288,9 +288,8 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
     const menu = menuTexts.filter((text) =>
       ["Settings", "Sign out"].includes(text)
     );
-    await page.keyboard.press("Escape");
-    // Settings, in the sidebar's foot above the person.
-    await page.getByRole("link", { name: "Settings", exact: true }).click();
+    // Settings, in the person's menu: the sidebar then holds its sections.
+    await items.filter({ hasText: "Settings" }).click();
     await expect(page).toHaveURL(/\/settings\/profile$/u);
     const sections = page
       .getByRole("navigation", { name: "Settings" })
@@ -307,7 +306,7 @@ test("the sidebar shows everyone the sections, and Settings each person the sect
   };
   const [chat, ...rest] = everyone;
   const nav = [chat, "Inbox", ...rest];
-  const menu = ["Sign out"];
+  const menu = ["Settings", "Sign out"];
   // Each person's own instruction file is theirs to write, whatever their
   // role: in every person's Settings.
   const account = ["Profile", "Instructions", "Security"];

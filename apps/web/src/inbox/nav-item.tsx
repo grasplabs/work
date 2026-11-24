@@ -2,10 +2,12 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
-} from "@grasp-os/app-kit/components/sidebar";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
+} from "@grasp-os/ui/components/sidebar";
+import { Icon, InboxIcon } from "@grasp-os/ui/lib/icons";
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { Plural, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link, useMatchRoute } from "@tanstack/react-router";
-import { InboxIcon } from "lucide-react";
 
 import { readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
@@ -52,28 +54,29 @@ export const InboxNavItem = () => {
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
+        asChild
         isActive={matchRoute({ to: "/inbox" }) !== false}
-        render={<Link to="/inbox" />}
-        tooltip={t`Inbox`}
       >
-        <InboxIcon />
-        <span>
-          <Trans>Inbox</Trans>
-        </span>
-        {/* Inside the link, so its name says how many wait. */}
-        {shown ? (
-          <SidebarMenuBadge placement="inside">
-            <span aria-hidden="true">{waiting}</span>
-            <span className="sr-only">
+        <Link to="/inbox">
+          <Icon icon={InboxIcon} />
+          {t`Inbox`}
+          {/* Inside the link, so its name says how many wait. */}
+          {shown ? (
+            <span {...stylex.props(visuallyHidden)}>
               <Plural
                 one="# thing waiting"
                 other="# things waiting"
                 value={waiting}
               />
             </span>
-          </SidebarMenuBadge>
-        ) : null}
+          ) : null}
+        </Link>
       </SidebarMenuButton>
+      {shown ? (
+        <SidebarMenuBadge>
+          <span aria-hidden="true">{waiting}</span>
+        </SidebarMenuBadge>
+      ) : null}
     </SidebarMenuItem>
   );
 };

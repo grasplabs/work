@@ -1,12 +1,22 @@
 import type { DecisionView } from "@grasp-os/shared/decisions";
+import {
+  SidebarMenuBadge,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from "@grasp-os/ui/components/sidebar";
+import { Icon, WorkflowIcon } from "@grasp-os/ui/lib/icons";
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { Plural, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { Link, useMatchRoute } from "@tanstack/react-router";
 
 import { readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { useFrameRead } from "../frame/frame-read.ts";
 
-// How many workflows need the person, beside the sidebar's Workflows
-// (frame/app-sidebar.tsx): each workflow once, however many of its runs
-// ask.
+// The nav's way to Workflows, with how many workflows need the person, as
+// the prototype's badge (`components/app-sidebar.tsx`, `needsYou` in
+// `lib/builder.ts`): each workflow once, however many of its runs ask.
 // What needs them today is a decision of a run waiting for their answer;
 // a change waiting for its test and approval, and a workflow in testing,
 // join it with the workflow lifecycle (GRA-512). Read again as the
@@ -33,6 +43,36 @@ const readCount = async (core: CoreConnection): Promise<number | undefined> => {
   }
 };
 
-/** How many workflows need the person; `undefined` until core says. */
-export const useWorkflowsWaiting = (): number | undefined =>
-  useFrameRead(readCount).value;
+/** The sidebar's Workflows entry, with how many workflows need the person. */
+export const WorkflowsItem = () => {
+  const { t } = useLingui();
+  const matchRoute = useMatchRoute();
+  const { value: waiting } = useFrameRead(readCount);
+  const shown = waiting !== undefined && waiting > 0;
+  const inWorkflows = matchRoute({ to: "/workflows", fuzzy: true }) !== false;
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton asChild isActive={inWorkflows}>
+        <Link to="/workflows">
+          <Icon icon={WorkflowIcon} />
+          {t`Workflows`}
+          {/* Inside the link, so its name says how many wait. */}
+          {shown ? (
+            <span {...stylex.props(visuallyHidden)}>
+              <Plural
+                one="# workflow needs you"
+                other="# workflows need you"
+                value={waiting}
+              />
+            </span>
+          ) : null}
+        </Link>
+      </SidebarMenuButton>
+      {shown ? (
+        <SidebarMenuBadge>
+          <span aria-hidden="true">{waiting}</span>
+        </SidebarMenuBadge>
+      ) : null}
+    </SidebarMenuItem>
+  );
+};

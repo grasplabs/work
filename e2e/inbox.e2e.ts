@@ -4,6 +4,7 @@ import type { Locator, Page } from "@playwright/test";
 import { test } from "./csp.ts";
 import { inboxList, saidOf } from "./inbox.ts";
 import { apiOf, peopleIn } from "./people.ts";
+import { expectNoError } from "./said.ts";
 
 // The Inbox, from the nav: what waits on the person as a list, the item
 // open beside it, and the walk through what waits: its place in the list,
@@ -56,7 +57,7 @@ test("a person with nothing waiting finds their Inbox from the nav, with nothing
   await expect(
     page.getByRole("list", { name: "Your weekly report" })
   ).toHaveCount(0);
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expectNoError(page);
 });
 
 test("an admin walks through what waits: the next and the one before, Skip to the back, the open item kept in the address, and a declined one leaving for the one after", async ({
@@ -142,5 +143,5 @@ test("an admin walks through what waits: the next and the one before, Skip to th
   await expect(
     page.getByRole("complementary").getByRole("group").first()
   ).toBeVisible();
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expectNoError(page);
 });

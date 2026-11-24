@@ -5,6 +5,7 @@ import { publishApp, testApp } from "../apps/core/test/app-definitions.ts";
 import { test } from "./csp.ts";
 import { writeDraft } from "./draft-writes.ts";
 import { apiOf, peopleIn } from "./people.ts";
+import { toastSaying } from "./said.ts";
 
 // A chat's agent builds an App's draft, and a builder publishes it from
 // the App's workspace: the draft checked and live as the App's next
@@ -105,7 +106,7 @@ test("a builder publishes the draft a chat built from the App's workspace, which
       .getByRole("dialog", { name: `Share ${name}` })
       .getByRole("button", { name: "Share", exact: true })
       .click({ timeout: 20_000 });
-    await expect(page.getByText("Your changes are shared")).toBeVisible();
+    await expect(toastSaying(page, "Your changes are shared")).toBeVisible();
 
     // Live as the App's next version; the draft starts over from it.
     await expect
