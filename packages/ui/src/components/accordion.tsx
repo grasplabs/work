@@ -1,7 +1,6 @@
 // Accordion: a set of sections, each opened from its heading, in StyleX, built
 // on UI SDK's Accordion: a quiet full-width trigger for each heading, 8px
 // apart, its chevron at the end.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Accordion>
 //     <AccordionItem value="security">

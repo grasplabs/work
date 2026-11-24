@@ -40,6 +40,7 @@ import {
   SidePanelContent,
   SidePanelHeader,
   SidePanelSection,
+  SidePanelSectionAdd,
   SidePanelText,
 } from "../../components/side-panel";
 import type { SidePanelView } from "../../components/side-panel";
@@ -113,7 +114,7 @@ export interface InspectorSection {
   /** Adds to it: "Add" at the title's end, and the empty card's one row. */
   onAdd?: () => void;
   /** The empty card's words, where "Add" and the title read badly ("Add a trigger"). */
-  emptyLabel?: string;
+  emptyText?: string;
   /** Another action at the title's end, in place of "Add": a switch, a menu. */
   action?: ReactNode;
 }
@@ -268,12 +269,11 @@ const Section = ({
     content === undefined
   ) {
     return (
-      <SidePanelSection
-        title={section.title}
-        description={section.description}
-        emptyLabel={section.emptyLabel ?? words.addTo(section.title)}
-        onAdd={handleAdd}
-      />
+      <SidePanelSection title={section.title} description={section.description}>
+        <SidePanelSectionAdd onClick={handleAdd}>
+          {section.emptyText ?? words.addTo(section.title)}
+        </SidePanelSectionAdd>
+      </SidePanelSection>
     );
   }
   const add = handleAdd !== undefined && (

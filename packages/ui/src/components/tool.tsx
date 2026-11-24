@@ -1,9 +1,8 @@
-// Tool: one call an assistant made to a tool, from shadcn's Tool pattern (content/docs/ai-elements/
-// base/tool.mdx), built as it builds it: a Trace with a TraceCollapsible, its header a TraceLine with
-// a TraceIcon and a TraceTitle in the tense of its state, the line's status from the call's state
-// (running while it works or waits on its answer, error when it failed), its input and output
-// CodeBlocks. In Damsko's look: a card round it, the state a Badge beside the title.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
+// Tool: one call an assistant made to a tool. It is built from Trace: a Trace with a
+// TraceCollapsible, its header a TraceLine with a TraceIcon and a TraceTitle in the tense of its
+// state, the line's status from the call's state (running while it works or waits on its answer,
+// error when it failed), its input and output CodeBlocks. A card goes round it, the state a Badge
+// beside the title.
 //
 //   <Tool>
 //     <ToolHeader name="web_search" title="Searched the web" state={part.state} />
@@ -157,7 +156,7 @@ const styles = stylex.create({
     borderWidth: size.hairline,
     borderStyle: "solid",
     borderColor: { default: colors.border, [media.forcedColors]: "CanvasText" },
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
   },
   // The header's row in the card: Trace's row runs over the card's edge, a step of room round its line.

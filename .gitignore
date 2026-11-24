@@ -28,3 +28,7 @@ scripts/lab/out/
 # Vitest browser mode's failure screenshots and attachments
 __screenshots__/
 .vitest-attachments/
+
+# What vp run ui:update keeps aside while it swaps packages/ui/src, and
+# leaves only when putting it back failed (scripts/ui-sync-lib.ts)
+packages/ui/.update-*/

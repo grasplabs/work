@@ -18,11 +18,13 @@ import type {
   GateView,
   KnownPart,
 } from "@grasp-os/shared/onboarding-gate";
-import { and, eq, inArray, isNotNull, isNull, not, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, not, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import { auditedBatch, outboxed, outboxedIfChanged } from "../audit-outbox.ts";
 import { signInConfig } from "../auth/config.ts";
+import { activeMember } from "../auth/membership-sql.ts";
 import { onboardingGate, sessions, users } from "../db/core/schema.ts";
 import { closesOn } from "./rules.ts";
 import { onboardingStore } from "./store.ts";
@@ -43,27 +45,64 @@ import { onboardingStore } from "./store.ts";
 //   behind it (identity.ts `sessionIdentity`), and opening the gate ends
 //   it, so they sign in again as a member.
 // - A session from before the gate closed: closing it ends every session
-//   but staff's and those admins', in the same batch.
+//   but staff's and the admins', in the same batch.
 // - Opening or closing it without a trace, or by anyone else: only staff
 //   move it, and each move is in the audit log as the staff member.
 //
-// A deployment that never closed it is open: closing it is the first thing
-// staff do for a client that onboards.
+// A deployment whose gate was never moved is open, unless it was made
+// closed: one staff added with an onboarding starts closed
+// (`ONBOARDING_CLOSED_FROM`), so nobody but its admins comes in before
+// staff remember to close it. Any other is open until staff close it.
 
 const gateRow = "gate";
 
-/** The gate as stored: closed since when, and the threshold. */
+/** The env the gate reads: its row, and how the deployment starts. */
+type GateEnv = Pick<Env, "DB" | "ONBOARDING_CLOSED_FROM">;
+
+/** When a deployment that starts closed was made; null for one that starts open. */
+const startsClosedAt = (env: GateEnv): Date | null => {
+  const from = z.iso.datetime().safeParse(env.ONBOARDING_CLOSED_FROM);
+  return from.success ? new Date(from.data) : null;
+};
+
+/**
+ * Whether this deployment starts closed, as the admin's probe asks
+ * before it publishes a new company's address (provision-probe.ts).
+ */
+export const startsClosed = (
+  env: Pick<Env, "ONBOARDING_CLOSED_FROM">
+): boolean => z.iso.datetime().safeParse(env.ONBOARDING_CLOSED_FROM).success;
+
+/**
+ * The gate as stored: closed since when, and the threshold. A deployment
+ * that starts closed has that kept the first time its gate is read, as
+ * closed since it was made: from then on the gate is only what was done
+ * to it, and the deployment's config no longer says anything of it.
+ */
 const stored = async (
-  env: Pick<Env, "DB">
+  env: GateEnv
 ): Promise<{
   closedAt: Date | null;
   openedAt: Date | null;
   threshold: GateThreshold;
 }> => {
-  const [row] = await drizzle(env.DB)
-    .select()
-    .from(onboardingGate)
-    .where(eq(onboardingGate.id, gateRow));
+  const db = drizzle(env.DB);
+  const read = async () => {
+    const [found] = await db
+      .select()
+      .from(onboardingGate)
+      .where(eq(onboardingGate.id, gateRow));
+    return found;
+  };
+  let row = await read();
+  const start = row === undefined ? startsClosedAt(env) : null;
+  if (start !== null) {
+    await db
+      .insert(onboardingGate)
+      .values({ id: gateRow, closedAt: start, threshold: gateThresholdDefault })
+      .onConflictDoNothing();
+    row = await read();
+  }
   const threshold = gateThresholds.find((each) => each === row?.threshold);
   return {
     closedAt: row?.closedAt ?? null,
@@ -72,17 +111,76 @@ const stored = async (
   };
 };
 
-/** Whether `email` may sign in through the company's IdP now. */
+/** Whether the gate is open: the company's people come in. */
+export const gateOpen = async (env: Pick<Env, "DB">): Promise<boolean> => {
+  const { closedAt } = await stored(env);
+  return closedAt === null;
+};
+
+/**
+ * The company's admins as its members stand now: whoever holds the admin
+ * role and may act, whether the deployment's config names them or another
+ * admin made them one. As SQL on `users`.
+ */
+const isAdminMember = activeMember(users.id, ["admin"]);
+
+/**
+ * Whether `email` may sign in through the company's IdP now: anyone while
+ * the gate is open; while it is closed, the admins the deployment's config
+ * names, and every member who is an admin, so the onboarding is all of
+ * its admins' to do, not the first one's alone.
+ */
 export const mayComeIn = async (
-  env: Pick<Env, "DB">,
+  env: GateEnv,
   config: SignInConfig,
   email?: string
 ): Promise<boolean> => {
-  if (email !== undefined && config.admins.includes(email.toLowerCase())) {
+  const address = email?.toLowerCase();
+  if (address !== undefined && config.admins.includes(address)) {
     return true;
   }
   const { closedAt } = await stored(env);
-  return closedAt === null;
+  if (closedAt === null) {
+    return true;
+  }
+  if (address === undefined) {
+    return false;
+  }
+  const [admin] = await drizzle(env.DB)
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(sql`lower(${users.email})`, address), isAdminMember))
+    .limit(1);
+  return admin !== undefined;
+};
+
+/**
+ * Whether the member `userId` may hold a session now, as they are once
+ * they joined: anyone while the gate is open; while it is closed, an
+ * admin the deployment's config names, or a member who is an admin now.
+ * Asked after their membership is made, so whoever came in as the admin
+ * they were about to be, and joined as less, is not let in after all.
+ */
+export const memberMayBeIn = async (
+  env: Pick<Env, "DB">,
+  config: SignInConfig,
+  userId: string
+): Promise<boolean> => {
+  const [user] = await drizzle(env.DB)
+    .select({
+      email: users.email,
+      admin: sql<number>`${isAdminMember}`,
+    })
+    .from(users)
+    .where(eq(users.id, userId));
+  if (user === undefined) {
+    return false;
+  }
+  if (config.admins.includes(user.email.toLowerCase())) {
+    return true;
+  }
+  const { closedAt } = await stored(env);
+  return closedAt === null || user.admin === 1;
 };
 
 const part = (source: KnownPart["source"], known: number): KnownPart => ({
@@ -261,9 +359,9 @@ export const gateView = async (
 };
 
 /**
- * Closes the gate, and ends every session but staff's and the configured
- * admins': one batch, with its audit event, so either all of it happened
- * and is on record, or none.
+ * Closes the gate, and ends every session but staff's and the admins'
+ * (those the config names, and every member who is one): one batch, with
+ * its audit event, so either all of it happened and is on record, or none.
  */
 export const closeGate = async (
   env: Env,
@@ -278,8 +376,8 @@ export const closeGate = async (
     .from(users)
     .where(
       config.admins.length === 0
-        ? sql`0`
-        : inArray(sql`lower(${users.email})`, config.admins)
+        ? isAdminMember
+        : or(inArray(sql`lower(${users.email})`, config.admins), isAdminMember)
     );
   await auditedBatch(env, db, [
     db

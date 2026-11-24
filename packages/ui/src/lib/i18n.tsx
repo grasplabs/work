@@ -101,11 +101,11 @@ export interface I18nCatalog {
     /** What an agent is told before it presses a danger or approve button, from its words. */
     agentPresses: (words: string) => string;
     /**
-     * An action whose work failed when the host gives no `errorLabel` of its own: neutral, as the
+     * An action whose work failed when the host gives no `errorText` of its own: neutral, as the
      * work may be a save, a check or a send. Dialog's, Alert dialog's, Drawer's and Popover's actions.
      */
     error: string;
-    /** Said to a screen reader while it works, when no `loadingLabel` is given. */
+    /** Said to a screen reader while it works, when no `loadingText` is given. */
     loading: string;
     success: string;
   };
@@ -240,7 +240,7 @@ export interface I18nCatalog {
     dialogTrigger: string;
     /** What the list says when nothing matches. */
     empty: string;
-    /** What a failed command says when it has no `errorLabel` of its own. */
+    /** What a failed command says when it has no `errorText` of its own. */
     error: string;
     /** The More button's name, from the command's words. */
     expand: (label: string) => string;
@@ -570,9 +570,9 @@ export interface I18nCatalog {
   };
   /** The menus' items: a context menu's and a menubar's. */
   menu: {
-    /** Shown on an item and said when its work failed, unless it gives its own `errorLabel`. */
+    /** Shown on an item and said when its work failed, unless it gives its own `errorText`. */
     error: string;
-    /** Said as an item's work starts, unless it gives its own `loadingLabel`. */
+    /** Said as an item's work starts, unless it gives its own `loadingText`. */
     loading: string;
   };
   message: {
@@ -799,7 +799,7 @@ export interface I18nCatalog {
     name: string;
   };
   switch: {
-    /** Said under a switch and to a screen reader when its save failed (`errorLabel`). */
+    /** Said under a switch and to a screen reader when its save failed (`errorText`). */
     error: string;
   };
   table: {

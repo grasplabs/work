@@ -2,7 +2,6 @@
 // is the row: an avatar, and a column of a header, the surface and a footer, at the start of the
 // line or, with `align="end"`, at its end. The surface is a Bubble for the person's words, or the
 // assistant's answer drawn from Markdown across the column (MessageResponse).
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Message align="end">
 //     <MessageContent>
@@ -16,7 +15,7 @@
 //       <MessageResponse>{answer}</MessageResponse>
 //       <MessageActions>
 //         <CopyButton value={answer} />
-//         <MessageAction label="Good answer"><Icon icon={ThumbsUpIcon} /></MessageAction>
+//         <MessageAction aria-label="Good answer"><Icon icon={ThumbsUpIcon} /></MessageAction>
 //       </MessageActions>
 //       <MessageFooter><time dateTime="2026-11-12T12:00">2 min ago</time></MessageFooter>
 //     </MessageContent>
@@ -178,10 +177,10 @@ export interface MessageActionsProps {
 /** Every prop a MessageAction takes. */
 export interface MessageActionProps {
   /** Its name, for a screen reader and an agent ("Good answer"). */
-  label: string;
+  "aria-label": string;
   /**
    * What its tooltip says.
-   * @default label
+   * @default aria-label
    */
   tooltip?: string;
   /** The icon: `<Icon icon={ThumbsUpIcon} />`. */
@@ -271,7 +270,7 @@ const styles = stylex.create({
   end: { flexDirection: "row-reverse" },
   // The assistant's takes focus from code only (after Try again): the ring for words, keyboard only.
   start: {
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
   },
   avatar: {
@@ -694,7 +693,7 @@ export const MessageActions = ({
 
 /** One quiet icon button in a message's actions, named by `label`, with its tooltip. */
 export const MessageAction = ({
-  label,
+  "aria-label": ariaLabel,
   tooltip,
   children,
   onClick,
@@ -707,7 +706,7 @@ export const MessageAction = ({
       <Button
         variant="ghost"
         size="icon-sm"
-        aria-label={label}
+        aria-label={ariaLabel}
         aria-pressed={pressed}
         disabled={disabled}
         onClick={onClick === undefined ? undefined : () => onClick()}
@@ -720,7 +719,7 @@ export const MessageAction = ({
         </button>
       </Button>
     </TooltipTrigger>
-    <TooltipContent>{tooltip ?? label}</TooltipContent>
+    <TooltipContent>{tooltip ?? ariaLabel}</TooltipContent>
   </Tooltip>
 );
 

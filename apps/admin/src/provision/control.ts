@@ -114,6 +114,7 @@ export const createClient = async (
         jurisdiction: parsed.jurisdiction,
         attioCompanyId: parsed.attioCompanyId ?? null,
         startingFlow: parsed.onboarding === "full" ? null : parsed.onboarding,
+        closedFrom: parsed.onboarding === "none" ? null : now,
         createdBy: staff.email,
         createdAt: now,
         updatedAt: now,

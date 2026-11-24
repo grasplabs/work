@@ -483,6 +483,12 @@ export interface OnboardingApi
     OnboardingHrApi {
   /** The programme, for the weekly report; null without a plan. Any role. */
   programme: () => Promise<Programme | null>;
+  /**
+   * Whether the company has its onboarding behind it (`onboardingBehind`,
+   * onboarding-flow.ts): until it has, the platform waits. Any role, as
+   * everyone signed in is held by it. Only that, never how far it is.
+   */
+  behind: () => Promise<boolean>;
   view: () => Promise<OnboardingView>;
   /**
    * Replaces who works where. While a plan is set, whoever is new on it

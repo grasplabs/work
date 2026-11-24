@@ -1377,7 +1377,7 @@ describe("AI providers", { timeout: 60_000 }, () => {
         )
       ).toStrictEqual([
         "transcription: OpenAI, European Union",
-        "speech: ElevenLabs, European Union",
+        "speech: KugelAudio, European Union",
       ]);
     });
   });

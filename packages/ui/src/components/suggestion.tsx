@@ -2,7 +2,6 @@
 // built on Button. The
 // row never wraps: what does not fit runs past its end and scrolls, by wheel, touch, keys and focus,
 // with no bar, and the side with more beyond it fades out.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Suggestions>
 //     <Suggestion suggestion="Summarise this thread" onClick={send} />

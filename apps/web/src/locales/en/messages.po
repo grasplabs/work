@@ -4284,9 +4284,17 @@ msgstr "Context"
 msgid "Continue"
 msgstr "Continue"
 
+#: src/frame/sign-in/sign-in.tsx
+msgid "Continue with {provider}"
+msgstr "Continue with {provider}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Continue with {signIn}"
 msgstr "Continue with {signIn}"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Continue with Grasp staff"
+msgstr "Continue with Grasp staff"
 
 #: src/apps/resource-bindings.tsx
 msgid "Contract"
@@ -4861,6 +4869,10 @@ msgstr "Dictate"
 msgctxt "inbox item kind: a change whose answer was lost"
 msgid "Did it happen?"
 msgstr "Did it happen?"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Did not open"
+msgstr "Did not open"
 
 #: src/inbox/items.ts
 msgid "Did this happen? {who}"
@@ -5741,7 +5753,6 @@ msgid "failed"
 msgstr "failed"
 
 #: src/chat/thread.tsx
-#: src/frame/ui-words.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/traces.tsx
@@ -5751,6 +5762,11 @@ msgstr "Failed"
 
 #: src/report/report.ts
 msgctxt "a figure of the report"
+msgid "Failed"
+msgstr "Failed"
+
+#: src/frame/ui-words.tsx
+msgctxt "a menu item whose work failed"
 msgid "Failed"
 msgstr "Failed"
 
@@ -6419,6 +6435,10 @@ msgstr "Grasp has no sender for its mail yet"
 msgid "Grasp in your language. Numbers, dates and amounts follow it too."
 msgstr "Grasp in your language. Numbers, dates and amounts follow it too."
 
+#: src/routes/waiting.tsx
+msgid "Grasp is almost ready for you"
+msgstr "Grasp is almost ready for you"
+
 #: src/apps/app-workspace.tsx
 msgid "Grasp is building"
 msgstr "Grasp is building"
@@ -6442,6 +6462,10 @@ msgstr "Grasp is still working on it…"
 #: src/brain/own-export.tsx
 msgid "Grasp is writing your export. It takes a minute or two; it shows here as soon as it is ready, and you can leave this page meanwhile."
 msgstr "Grasp is writing your export. It takes a minute or two; it shows here as soon as it is ready, and you can leave this page meanwhile."
+
+#: src/sign-in-errors.ts
+msgid "Grasp isn’t open for everyone yet: your company’s admins are still setting it up, and you’ll get in as soon as they have finished. If you have an interview link, it is in your email."
+msgstr "Grasp isn’t open for everyone yet: your company’s admins are still setting it up, and you’ll get in as soon as they have finished. If you have an interview link, it is in your email."
 
 #: src/guest-sign-in.tsx
 msgid "Grasp isn't open yet. Try again later."
@@ -6482,10 +6506,6 @@ msgstr "Grasp no longer remembers this."
 #: src/brain/brain-log.tsx
 msgid "Grasp noticed it did not know"
 msgstr "Grasp noticed it did not know"
-
-#: src/sign-in-errors.ts
-msgid "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
-msgstr "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
 
 #: src/settings/ai-providers.tsx
 msgid "Grasp reads the interview's questions aloud with {whereItRuns}, using Grasp's own key."
@@ -7239,8 +7259,8 @@ msgid "Invited as {role} by {inviter} on {date} · hasn’t signed in yet"
 msgstr "Invited as {role} by {inviter} on {date} · hasn’t signed in yet"
 
 #: src/routes/sign-in.tsx
-msgid "Invited as a guest? Sign in with a code"
-msgstr "Invited as a guest? Sign in with a code"
+msgid "Invited as a guest?"
+msgstr "Invited as a guest?"
 
 #: src/brain/brain.ts
 msgid "Invited for step 2"
@@ -7826,6 +7846,7 @@ msgctxt "what the Brain remembers about something"
 msgid "Language"
 msgstr "Language"
 
+#: src/frame/language-button.tsx
 #: src/language-picker.tsx
 msgid "Language: {name}"
 msgstr "Language: {name}"
@@ -7863,6 +7884,10 @@ msgstr "Last read {lastRead}"
 #: src/workflows/workflows-table.tsx
 msgid "Last run"
 msgstr "Last run"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Last used"
+msgstr "Last used"
 
 #: src/interview/words.ts
 msgid "Last, the numbers and the result."
@@ -8112,6 +8137,10 @@ msgstr "Loading…"
 msgctxt "what the Brain remembers about something"
 msgid "Location"
 msgstr "Location"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Log in"
+msgstr "Log in"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
@@ -10095,6 +10124,14 @@ msgstr "Open your onboarding"
 #: src/report/report.ts
 msgid "Open: {open}"
 msgstr "Open: {open}"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Opened"
+msgstr "Opened"
+
+#: src/frame/sign-in/sign-in.tsx
+msgid "Opening {provider}"
+msgstr "Opening {provider}"
 
 #: src/onboarding/platform-reveal.tsx
 msgid "Opening Grasp"
@@ -12664,6 +12701,10 @@ msgstr "Sign in to open your interview"
 msgid "Sign in with {label}"
 msgstr "Sign in with {label}"
 
+#: src/routes/sign-in.tsx
+msgid "Sign in with a code"
+msgstr "Sign in with a code"
+
 #: src/sign-in-errors.ts
 msgid "Sign in with your organization's account."
 msgstr "Sign in with your organization's account."
@@ -12674,6 +12715,7 @@ msgstr "Sign in with your organization's account."
 #: src/routes/guest.tsx
 #: src/routes/interview.tsx
 #: src/routes/staff.tsx
+#: src/routes/waiting.tsx
 msgid "Sign out"
 msgstr "Sign out"
 
@@ -15343,10 +15385,6 @@ msgstr "Use the chat, the Brain and the Apps shared with them"
 msgid "Use the default"
 msgstr "Use the default"
 
-#: src/routes/sign-in.tsx
-msgid "Use your organization’s account to go on."
-msgstr "Use your organization’s account to go on."
-
 #: src/onboarding/ai-step.tsx
 msgid "Use your own key"
 msgstr "Use your own key"
@@ -17088,6 +17126,10 @@ msgstr "Your company wants to know how the work really goes. You lead your team,
 #: src/agents/agents-overview.tsx
 msgid "Your company's"
 msgstr "Your company's"
+
+#: src/routes/waiting.tsx
+msgid "Your company’s admins are still setting Grasp up. There is nothing you need to do: this page opens Grasp for you as soon as they have finished."
+msgstr "Your company’s admins are still setting Grasp up. There is nothing you need to do: this page opens Grasp for you as soon as they have finished."
 
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Your company’s name in Grasp."

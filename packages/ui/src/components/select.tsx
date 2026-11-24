@@ -2,7 +2,6 @@
 // in StyleX, built on UI SDK's
 // Select: closed, it is an Input (the same fill, hairline, heights and corner), so a select and a
 // field stand level in one form; open, it is a popup on the raised ground.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Field>
 //     <FieldLabel>Role</FieldLabel>
@@ -386,7 +385,7 @@ const styles = stylex.create({
     borderWidth: { default: 0, [FORCED]: 1 },
     borderStyle: "solid",
     borderColor: "currentColor",
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     backgroundColor: colors.popover,
     boxShadow: shadow.popupShadow,
@@ -532,7 +531,7 @@ const styles = stylex.create({
     boxSizing: "border-box",
     paddingBlock: space[2],
     paddingInline: `calc(${space[3]} - ${space.popupPadding})`,
-    borderRadius: `min(calc(${radius.base} - ${space.popupPadding}), calc(${size.controlDefault} / 2))`,
+    borderRadius: `min(${radius.lg}, calc(${size.controlDefault} / 2))`,
     cornerShape: radius.shape,
     color: colors.foreground,
     cursor: "pointer",

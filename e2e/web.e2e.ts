@@ -15,14 +15,32 @@ import { endSession, peopleIn, signInAs, signInTo } from "./people.ts";
  */
 const reconnectMs = 10_000;
 
+test("says a sign-in core would not start on the page, with focus on the first way in again", async ({
+  page,
+}) => {
+  await page.route("**/api/auth/sign-in/sso", async (route) => {
+    await route.fulfill({ status: 500, json: { code: "INTERNAL" } });
+  });
+  await page.goto("/sign-in");
+  await page.getByRole("button", { name: "Continue with Microsoft" }).click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "Sign-in didn't work. Try again, or ask an admin."
+  );
+  await expect(
+    page.getByRole("button", { name: "Continue with Microsoft" })
+  ).toBeFocused();
+});
+
 test("loads the frontend from core, reaches core over RPC, and asks whoever isn't signed in to sign in", async ({
   page,
 }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Grasp" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Log in" })
+  ).toBeVisible();
   // Only once core answered: without an answer, the page says so instead.
   await expect(
-    page.getByText("Use your organization’s account to go on.")
+    page.getByRole("link", { name: "Sign in with a code" })
   ).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);
   expect(new URL(page.url()).searchParams.get("returnTo")).toBe("/");
@@ -37,6 +55,103 @@ test("shows only its own words for a refused sign-in, never the link's", async (
     "Sign-in didn't work. Try again, or ask an admin."
   );
   await expect(page.getByText(planted)).toHaveCount(0);
+});
+
+test("offers each way in, marks the one used last in this browser, and gives a guest a code from the page's foot", async ({
+  page,
+}) => {
+  await page.goto("/sign-in");
+  // The page is its own main landmark, named by its title: there is no frame around it.
+  await expect(page.getByRole("main")).toHaveCount(1);
+  await expect(page.getByRole("main", { name: "Log in" })).toBeVisible();
+  const ways = page.getByRole("button", { name: /^Continue with /u });
+  await expect(ways).toHaveCount(2);
+  await expect(ways.first()).toHaveAccessibleName("Continue with Microsoft");
+  await expect(ways.last()).toHaveAccessibleName("Continue with Grasp staff");
+  await expect(page.getByText("Last used")).toHaveCount(0);
+
+  // Chosen, the page leaves for the company's sign-in once the door has
+  // opened, and coming back it marks that way (staff's is never kept).
+  await page.getByRole("button", { name: "Continue with Microsoft" }).click();
+  await expect(page.getByLabel("Email")).toBeVisible();
+  await page.goto("/sign-in");
+  await expect(page.getByText("Last used")).toBeVisible();
+  await expect(ways.first()).toHaveAccessibleName("Continue with Microsoft");
+
+  // A guest, from outside the company, asks for a code instead, and can
+  // go back to the company's ways in.
+  await page.getByRole("link", { name: "Sign in with a code" }).click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Sign in to Grasp" })
+  ).toBeAttached();
+  await expect(page.getByLabel("Your email address")).toBeVisible();
+  await expect(page.getByRole("main")).toHaveCount(1);
+  expect(new URL(page.url()).searchParams.get("by")).toBe("code");
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Log in" })
+  ).toBeVisible();
+});
+
+test("never leaves for the company's sign-in once the person has gone Back while the door opens", async ({
+  page,
+}) => {
+  // Core answers where to sign in only once the person has gone Back.
+  const { promise: wentBack, resolve: answer } = Promise.withResolvers<null>();
+  await page.route("**/api/auth/sign-in/sso", async (route) => {
+    const response = await route.fetch();
+    await wentBack;
+    await route.fulfill({ response });
+  });
+  await page.goto("/sign-in?by=code");
+  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByRole("button", { name: "Continue with Microsoft" }).click();
+  await page.goBack();
+  const codePage = page.getByRole("heading", {
+    level: 1,
+    name: "Sign in to Grasp",
+  });
+  await expect(codePage).toBeAttached();
+  answer(null);
+  // Longer than the door takes to open, and than core's answer to arrive.
+  await page.waitForTimeout(1500);
+  await expect(codePage).toBeAttached();
+  expect(new URL(page.url()).searchParams.get("by")).toBe("code");
+  await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
+});
+
+test("never leaves for the company's sign-in once the person has gone Back after the door opened, before core answered", async ({
+  page,
+}) => {
+  // Core answers where to sign in only once the person has gone Back.
+  const { promise: wentBack, resolve: answer } = Promise.withResolvers<null>();
+  await page.route("**/api/auth/sign-in/sso", async (route) => {
+    const response = await route.fetch();
+    await wentBack;
+    await route.fulfill({ response });
+  });
+  await page.goto("/sign-in?by=code");
+  await page.getByRole("button", { name: "Back" }).click();
+  await page.getByRole("button", { name: "Continue with Microsoft" }).click();
+  // The door has opened: the chosen way has faded too, and the page waits
+  // on core alone. Going Back now is the same page's other view (the
+  // code), so only the ways in, gone, keep it from leaving.
+  await expect(page.locator('[data-way="microsoft"]')).toHaveCSS(
+    "opacity",
+    "0"
+  );
+  await page.goBack();
+  const codePage = page.getByRole("heading", {
+    level: 1,
+    name: "Sign in to Grasp",
+  });
+  await expect(codePage).toBeAttached();
+  answer(null);
+  // Longer than core's answer takes to arrive and be acted on.
+  await page.waitForTimeout(1500);
+  await expect(codePage).toBeAttached();
+  expect(new URL(page.url()).searchParams.get("by")).toBe("code");
+  await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
 });
 
 test("an interview link nobody made asks to sign in first, then can't be opened with the request ID core refused it under, says nothing was saved, and lets them sign out to sign in again", async ({
@@ -391,7 +506,7 @@ test("shows the members page only to someone signed in, and never signs them out
 }) => {
   await page.goto("/settings/members");
   await expect(
-    page.getByText("Use your organization’s account to go on.")
+    page.getByRole("link", { name: "Sign in with a code" })
   ).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/sign-in");
   expect(new URL(page.url()).searchParams.get("returnTo")).toBe(
@@ -435,7 +550,7 @@ test("shows the members page only to someone signed in, and never signs them out
   ).toBeVisible({ timeout: reconnectMs });
   expect(new URL(page.url()).pathname).toBe("/settings/members");
   await expect(
-    page.getByText("Use your organization’s account to go on.")
+    page.getByRole("link", { name: "Sign in with a code" })
   ).toHaveCount(0);
 
   // Trying again shows it's trying, then says so again while core fails.
@@ -534,7 +649,7 @@ test("sends someone whose session ended elsewhere to sign in, and back to the pa
   await endSession(member);
   await nav.getByRole("link", { name: "Apps" }).click();
   await expect(
-    page.getByText("Use your organization’s account to go on.")
+    page.getByRole("link", { name: "Sign in with a code" })
   ).toBeVisible({
     timeout: reconnectMs,
   });

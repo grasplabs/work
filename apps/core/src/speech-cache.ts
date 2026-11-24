@@ -6,15 +6,15 @@ import { jsonOf } from "./request-body.ts";
 // Lines said before, kept in the deployment's file bucket (`FILES`), so a
 // line said again costs nothing: walking back and forth through the
 // onboarding, or a sample everyone hears, is said once. Kept by everything
-// that changes how it sounds: its words as sent (its direction among
-// them), the voice, the voice model and the language. In R2, not the Cache
+// that changes how it sounds: its words, the voice, the voice model and
+// the language. In R2, not the Cache
 // API: R2 is what core already keeps files in, and the on-prem profile has
 // it too (on-prem/r2.ts), where plain workerd has no cache behind
 // `caches.default`.
 //
 // Every way a line was said sits under one folder named by its words
 // alone (`storedKeyOf`): erasing a line (an interview deleted, a purge)
-// takes the whole folder, whatever voice, model, tone or language it was
+// takes the whole folder, whatever voice, model or language it was
 // said in, so no change of speech provider or settings can leave a copy
 // behind. A line kept the way it was before this layout (one flat object,
 // keyed with its model and voice) can't be found by its words: the sweep
@@ -35,10 +35,8 @@ const sweepSchema = z.object({ cursor: z.string().min(1) });
 
 /** What a line is kept by: everything that changes how it sounds. */
 export interface SpokenKey {
-  /** The line's own words, without its direction: its folder. */
+  /** The line's own words: its folder. */
   text: string;
-  /** The line as sent to the voice, its direction among it. */
-  spoken: string;
   voice: string;
   model: string;
   language: string;
@@ -53,12 +51,11 @@ export const storedKeyOf = async (text: string): Promise<string> =>
 
 const keyOf = async ({
   text,
-  spoken,
   voice,
   model,
   language,
 }: SpokenKey): Promise<string> =>
-  `${await storedKeyOf(text)}${await sha256Hex(JSON.stringify([model, voice, language, spoken]))}.json`;
+  `${await storedKeyOf(text)}${await sha256Hex(JSON.stringify([model, voice, language]))}.json`;
 
 /** Whether `key` is kept the way lines were before their folders: flat. */
 const isFlat = (key: string): boolean =>

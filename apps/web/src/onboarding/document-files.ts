@@ -1,19 +1,19 @@
 // Which dropped files the onboarding takes as documents (document-drop.tsx).
 // Pure.
 
-/** What Grasp reads, by extension; anything else is refused with a shake. */
-export const readable = [
-  "pdf",
+import { uploadTypes } from "@grasp-os/shared/uploads";
+
+/**
+ * What Grasp takes, by extension; anything else is refused with a shake.
+ * Every type core reads (`uploadTypes`), and the old Office formats, which
+ * core refuses with the way out: save it as a newer file.
+ */
+export const readable: readonly string[] = [
+  ...Object.keys(uploadTypes),
   "doc",
-  "docx",
   "xls",
-  "xlsx",
   "ppt",
-  "pptx",
-  "txt",
-  "md",
-  "csv",
-] as const;
+];
 
 export const extensionOf = (name: string): string =>
   name.toLowerCase().split(".").pop() ?? "";

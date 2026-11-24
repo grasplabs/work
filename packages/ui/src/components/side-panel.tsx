@@ -7,7 +7,9 @@
 //   <SidePanel aria-label="Agent" defaultValue="settings">
 //     <SidePanelHeader title="Weekly pipeline digest" views={[...]} actions={...} onClose={close} />
 //     <SidePanelContent value="settings">
-//       <SidePanelSection title="Triggers" emptyLabel="Add trigger" onAdd={openTriggers} />
+//       <SidePanelSection title="Triggers">
+//         <SidePanelSectionAdd onClick={openTriggers}>Add trigger</SidePanelSectionAdd>
+//       </SidePanelSection>
 //     </SidePanelContent>
 //   </SidePanel>
 //
@@ -181,7 +183,7 @@ const styles = stylex.create({
   framed: {
     backgroundColor: colors.card,
     boxShadow: shadow.lg,
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     outline: { default: "none", [FORCED]: "1px solid CanvasText" },
   },
@@ -481,7 +483,7 @@ const headerStyles = stylex.create({
     borderWidth: sizes.hairline,
     borderStyle: "solid",
     borderColor: "transparent",
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
     fontFamily: font.sans,
     fontSize: sizes.sidePanelText,
@@ -1102,7 +1104,7 @@ const textStyles = stylex.create({
     top: `calc(${space["4"]} + (${font.textBaseLine} - ${sizes.controlXs}) / 2)`,
     insetInlineEnd: space["2"],
     zIndex: 1,
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
     backgroundColor: { default: colors.card, [FORCED]: "Canvas" },
   },
@@ -1167,8 +1169,8 @@ export const SidePanelText = ({
 
 // ---- A section -----------------------------------------------------------------------------------
 
-/** What every section takes. */
-interface SectionBase {
+/** Every prop a SidePanelSection takes. */
+export interface SidePanelSectionProps {
   /** Its name, a word or two in sentence case, on one line ("Triggers"). */
   title: string;
   /**
@@ -1186,39 +1188,28 @@ interface SectionBase {
   level?: 2 | 3 | 4;
   /** Layout only: margins. */
   style?: LayoutStyle;
-}
-
-/**
- * A section with something in it.
- * @when with content
- */
-interface WithContent extends SectionBase {
-  /** What the card holds: an ItemGroup, a SidePanelText, or fields. */
+  /**
+   * What the card holds: an ItemGroup, a SidePanelText, or fields. Empty, a SidePanelSectionAdd:
+   * the one row that adds the first.
+   */
   children: ReactNode;
   /**
    * Draw the card round the children. Off for children that draw their own.
    * @default true
    */
   card?: boolean;
-  emptyLabel?: never;
-  onAdd?: never;
 }
 
-/**
- * A section with nothing in it yet: the card is one row that adds the first.
- * @when empty
- */
-interface Empty extends SectionBase {
-  children?: never;
-  card?: never;
-  /** The words of the row that adds the first one ("Add trigger"). */
-  emptyLabel: string;
-  /** Runs when that row is pressed. */
-  onAdd?: () => void;
+/** Every prop a SidePanelSectionAdd takes. */
+export interface SidePanelSectionAddProps {
+  /** Its words, what it adds ("Add trigger"). */
+  children: ReactNode;
+  /** Runs when the row is pressed. */
+  onClick?: () => void;
 }
 
-/** Every prop a SidePanelSection takes. */
-export type SidePanelSectionProps = WithContent | Empty;
+/** The id of the section's title, which names the row that adds its first. */
+const SectionContext = createContext<string | undefined>(undefined);
 
 const sectionStyles = stylex.create({
   section: {
@@ -1290,7 +1281,7 @@ const sectionStyles = stylex.create({
     textDecorationColor: colors.subtleForeground,
     textDecorationThickness: sizes.hairline,
     textUnderlineOffset: sizes.sidePanelDashOffset,
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
   },
   end: {
@@ -1301,7 +1292,7 @@ const sectionStyles = stylex.create({
   card: {
     minWidth: 0,
     overflow: "clip",
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     backgroundColor: colors.card,
     boxShadow: shadow.md,
@@ -1344,31 +1335,17 @@ const SectionTitle = ({
  * the end of the title's row, and one card under it. Empty, the card is one row that adds the
  * first. The title's words stand on the same line as the words in the card's rows.
  */
-export const SidePanelSection = (props: SidePanelSectionProps) => {
-  const { title, description, action, level = 3, style } = props;
+export const SidePanelSection = ({
+  title,
+  description,
+  action,
+  level = 3,
+  style,
+  children,
+  card = true,
+}: SidePanelSectionProps) => {
   const id = useId();
   const Heading = sectionHeadings[level];
-  const card =
-    props.emptyLabel === undefined ? (
-      props.children
-    ) : (
-      // A list of one, named by the title: the row that adds the first.
-      <ItemGroup aria-labelledby={id}>
-        <Item
-          size="xs"
-          onClick={() => {
-            props.onAdd?.();
-          }}
-        >
-          <ItemMedia>
-            <Icon icon={PlusIcon} />
-          </ItemMedia>
-          <ItemContent>
-            <ItemTitle>{props.emptyLabel}</ItemTitle>
-          </ItemContent>
-        </Item>
-      </ItemGroup>
-    );
   return (
     <section
       aria-labelledby={id}
@@ -1386,16 +1363,44 @@ export const SidePanelSection = (props: SidePanelSectionProps) => {
           <div {...stylex.props(sectionStyles.end)}>{action}</div>
         )}
       </div>
-      {props.emptyLabel === undefined && props.card === false ? (
-        props.children
-      ) : (
-        <div
-          data-slot="side-panel-section-card"
-          {...stylex.props(sidePanelCardMarker, sectionStyles.card)}
-        >
-          {card}
-        </div>
-      )}
+      <SectionContext value={id}>
+        {card ? (
+          <div
+            data-slot="side-panel-section-card"
+            {...stylex.props(sidePanelCardMarker, sectionStyles.card)}
+          >
+            {children}
+          </div>
+        ) : (
+          children
+        )}
+      </SectionContext>
     </section>
+  );
+};
+
+/** An empty section's card: the one row that adds the first, named by the section's title. */
+export const SidePanelSectionAdd = ({
+  children,
+  onClick,
+}: SidePanelSectionAddProps) => {
+  const id = use(SectionContext);
+  return (
+    // A list of one, named by the title.
+    <ItemGroup aria-labelledby={id}>
+      <Item
+        size="xs"
+        onClick={() => {
+          onClick?.();
+        }}
+      >
+        <ItemMedia>
+          <Icon icon={PlusIcon} />
+        </ItemMedia>
+        <ItemContent>
+          <ItemTitle>{children}</ItemTitle>
+        </ItemContent>
+      </Item>
+    </ItemGroup>
   );
 };
