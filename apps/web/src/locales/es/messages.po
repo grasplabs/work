@@ -2534,7 +2534,7 @@ msgctxt "inbox filter, short"
 msgid "All"
 msgstr "Todo"
 
-#: src/frame/app-sidebar.tsx
+#: src/chat/sidebar-chats.tsx
 msgid "All chats"
 msgstr "Todos los chats"
 
