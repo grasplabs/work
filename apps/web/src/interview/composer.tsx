@@ -5,13 +5,17 @@ import { AgentIndicator } from "@grasp-os/ui/components/agent-indicator";
 import { Bubble, BubbleContent } from "@grasp-os/ui/components/bubble";
 import {
   PromptInput,
+  PromptInputBanner,
   PromptInputBody,
+  PromptInputButton,
   PromptInputFooter,
   PromptInputSubmit,
   PromptInputTextarea,
+  PromptInputTools,
   PromptInputVoice,
 } from "@grasp-os/ui/components/prompt-input";
 import { Text } from "@grasp-os/ui/components/text";
+import { AudioWaveformIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { fadeIn } from "@grasp-os/ui/lib/styles";
 import { colors, font, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
@@ -21,9 +25,9 @@ import type { ReactNode } from "react";
 
 import { useInterviewer, useSaveState } from "./kept.ts";
 import type { LoopState, Said } from "./loop.ts";
+import { Marked } from "./marked.tsx";
 import { micLevel, muteMic, useMicMuted } from "./mic.ts";
 import { voiceLevel } from "./speech.ts";
-import { Marked } from "./talk.tsx";
 
 // The box at the bottom (prototype `interview-view.tsx`, `Composer` and
 // `ChatBox`): Damsko's PromptInput, as in any chat. Enter sends,
@@ -40,6 +44,8 @@ import { Marked } from "./talk.tsx";
 
 const styles = stylex.create({
   root: { position: "relative", display: "flex", flexDirection: "column" },
+  // The card in the middle of its room, however wide the room is.
+  card: { width: "100%", marginInline: "auto" },
   over: {
     position: "absolute",
     insetInline: 0,
@@ -130,26 +136,32 @@ const Spoken = ({
 export const Composer = ({
   placeholder,
   talking,
+  blocked,
   doing,
   line,
   said,
   names,
   onSend,
+  onTalk,
 }: {
   placeholder: string;
   /** They chose to talk, not to type. */
   talking: boolean;
+  /** The browser refused the microphone: a line over the card says so. */
+  blocked: boolean;
   doing: LoopState["doing"];
   /** Which of his lines is on screen. */
   line: number;
   said: Said | null;
   names: Record<FactTag, string>;
   onSend: (text: string) => void;
+  /** Back to talking, for whoever types now: the microphone is asked for again. */
+  onTalk: () => void;
 }) => {
   const { t } = useLingui();
   // Whether something is typed: the card is spoken only while the box is empty.
   const [typed, setTyped] = useState(false);
-  // The line during which they asked to type instead: the box stays until his next.
+  // The line during which they asked to type instead: the box stays until his next, or "Talk".
   const [typing, setTyping] = useState<number | null>(null);
   const spoken = talking && !typed && typing !== line && doing !== "idle";
   return (
@@ -173,6 +185,7 @@ export const Composer = ({
       </div>
       <PromptInput
         compact
+        style={styles.card}
         maxLength={turnAnswerMax}
         onSubmit={({ text }) => {
           const trimmed = text.trim();
@@ -184,6 +197,12 @@ export const Composer = ({
           setTyped(holdsWords(value));
         }}
       >
+        {blocked ? (
+          // One line, the banner's most compact honest form on a phone; "Talk" in the card asks again.
+          <PromptInputBanner variant="warning">
+            {t`Your browser blocked the microphone.`}
+          </PromptInputBanner>
+        ) : null}
         {spoken ? (
           <Spoken
             doing={doing}
@@ -204,28 +223,27 @@ export const Composer = ({
               />
             </PromptInputBody>
             <PromptInputFooter>
+              <PromptInputTools>
+                <PromptInputButton
+                  onClick={() => {
+                    if (talking) {
+                      setTyping(null);
+                    } else {
+                      onTalk();
+                    }
+                  }}
+                  tooltip={t`Switch back to voice`}
+                >
+                  <Icon icon={AudioWaveformIcon} />
+                  {t`Talk`}
+                </PromptInputButton>
+              </PromptInputTools>
               <PromptInputSubmit />
             </PromptInputFooter>
           </>
         )}
       </PromptInput>
     </div>
-  );
-};
-
-/** Whether what they said is kept, beside the mark: "Saved", or "Saving…" when it takes a moment. */
-export const SaveNote = () => {
-  const { t } = useLingui();
-  const { state } = useSaveState();
-  if (state !== "saved" && state !== "saving") {
-    return null;
-  }
-  return (
-    <span aria-live="polite">
-      <Text as="span" color="muted" size="xs">
-        {state === "saved" ? t`Saved` : t`Saving…`}
-      </Text>
-    </span>
   );
 };
 

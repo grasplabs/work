@@ -18,15 +18,15 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
-import { GraspLogo } from "../../connections/brand-logos.ts";
-import { chooseLocale, isLocale, localeNames } from "../../i18n.ts";
-import type { Locale } from "../../i18n.ts";
-import { useNarrow } from "../../onboarding/use-narrow.ts";
+import { GraspLogo } from "../connections/brand-logos.ts";
+import { chooseLocale, isLocale, localeNames } from "../i18n.ts";
+import type { Locale } from "../i18n.ts";
+import { useNarrow } from "../onboarding/use-narrow.ts";
 
-// CONCEPT ONLY: the frame the interview stands in, full screen, outside the
-// app, as the sign-in page before it: Grasp's mark at the window's top
-// start, the product's own language button at its top end, Damsko's calm
-// dither behind the header, and the page.
+// The frame every screen of someone's interview link stands in, full
+// screen, outside the app, as the sign-in page before it: Grasp's mark at
+// the window's top start, the language at its top end with what the screen
+// adds before it, Damsko's calm dither behind the header, and the page.
 
 const styles = stylex.create({
   frame: {
@@ -36,6 +36,8 @@ const styles = stylex.create({
     boxSizing: "border-box",
     height: "100svh",
     overflow: "hidden",
+    backgroundColor: colors.background,
+    color: colors.bodyForeground,
   },
   header: {
     position: "relative",
@@ -51,17 +53,13 @@ const styles = stylex.create({
   },
   // The header's controls: one quiet family, one gap.
   end: { display: "flex", alignItems: "center", gap: space["1"] },
-  // The website's mark beside its name, as the sign-in page has it.
+  // The website's mark, as the sign-in page has it.
   brand: {
     display: "inline-flex",
     alignItems: "center",
-    gap: space["2"],
     [iconVars.size]: "21px",
     color: colors.foreground,
     fontFamily: font.sans,
-    fontWeight: font.weightMedium,
-    fontSize: font.headingSm,
-    lineHeight: font.headingSmLine,
   },
   // The texture's room: the page's own ground, the texture over it.
   field: {
@@ -93,6 +91,7 @@ const styles = stylex.create({
   // Over a surface rather than behind it: above its fill, never catching a press.
   over: { zIndex: 1 },
   main: {
+    position: "relative",
     display: "flex",
     flexDirection: "column",
     gridColumn: "1 / -1",
@@ -106,10 +105,10 @@ const languages = Object.entries(localeNames).flatMap(([code, name]) =>
 );
 
 /**
- * The language: the library's Select in its quiet form (ghost, small, no box), as the setup's bar
- * has it (chore/concept-onboarding-setup, 8c71f5b), so both flows share one control. Closed, it
- * says the language's own name; on a phone its short code ("EN"). Its list names each in its own
- * words.
+ * The language: the library's Select in its quiet form (ghost, small, no
+ * box), as the setup's bar has it, so both flows share one control. Closed,
+ * it says the language's own name; on a phone its short code ("EN"). Its
+ * list names each in its own words.
  */
 const Language = () => {
   const { t, i18n } = useLingui();
@@ -142,13 +141,6 @@ const Language = () => {
   );
 };
 
-/** Grasp's mark alone, top start (Ruben: "the logo is enough"); "Grasp" is its name. */
-const Brand = () => (
-  <span {...stylex.props(styles.brand)}>
-    <Icon icon={GraspLogo} label="Grasp" />
-  </span>
-);
-
 /** The calm dither laid over a surface (the suggested reminder time): the header's touch, nothing new. */
 export const DitherOver = () => (
   <span aria-hidden="true" {...stylex.props(styles.texture, styles.over)} />
@@ -156,22 +148,25 @@ export const DitherOver = () => (
 
 /**
  * The frame: the header across the window, the calm dither behind it on
- * every page but the read-back, and the page.
+ * every screen but the read-back, and the screen.
  */
 export const Frame = ({
-  strip,
+  strip = true,
   actions,
   children,
 }: {
   /** The texture behind the header. */
-  strip: boolean;
-  /** More at the header's end, before the language: the way out for now. */
+  strip?: boolean;
+  /** More at the header's end, before the language. */
   actions?: ReactNode;
   children: ReactNode;
 }) => (
   <div {...stylex.props(styles.frame)}>
     <header {...stylex.props(styles.header)}>
-      <Brand />
+      {/* Grasp's mark alone: "Grasp" is its name. */}
+      <span {...stylex.props(styles.brand)}>
+        <Icon icon={GraspLogo} label="Grasp" />
+      </span>
       <div {...stylex.props(styles.end)}>
         {actions}
         <Language />

@@ -347,8 +347,7 @@ describe("moving a line after agreeing to it", () => {
     await press(shared);
     await press("Save where they go");
     await until(
-      () =>
-        text().includes("Which language do you want to do this interview in?"),
+      () => buttonNamed("I agree, let’s start") !== undefined,
       "what this interview is for"
     );
     // Longer than a save waits to be tried again, more than once.

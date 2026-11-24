@@ -30,7 +30,6 @@ import { useEffect, useState } from "react";
 
 import { SaveTrouble } from "./composer.tsx";
 import { WhereLinesGo } from "./destination.tsx";
-import { Head, headSizes, useHead } from "./head.tsx";
 import { useInterviewer, useProgress } from "./kept.ts";
 import { sayingMs } from "./loop.ts";
 import { SpokenText, useSaid } from "./spoken.tsx";
@@ -178,14 +177,12 @@ const Rating = ({
 
 /** His thanks, and what they can still do: add something, and say how it was. */
 export const Closed = ({
-  room,
   name,
   closes,
   rating,
   onRate,
   onAdd,
 }: {
-  room: number;
   name: string;
   /** The last day the link works, in words. */
   closes: string;
@@ -194,8 +191,6 @@ export const Closed = ({
   onAdd: () => void;
 }) => {
   const { t } = useLingui();
-  const interviewer = useInterviewer();
-  const who = interviewerNames[interviewer];
   const promise = usePromise();
   // Lines agreed under what this interview said before can only be moved
   // once they read what it says now: "Add something" takes them there.
@@ -203,7 +198,6 @@ export const Closed = ({
   const title = t`Thank you, ${name}.`;
   const message = t`What you agreed to is kept. Forgot something? This link works until ${closes}.`;
   const line = `${title} ${message}`;
-  const { body, size } = useHead(room, headSizes.talking);
   // He says his thanks once, as the screen comes.
   const [saying, setSaying] = useState(true);
   useEffect(() => {
@@ -217,16 +211,9 @@ export const Closed = ({
   const said = useSaid({ line, saying: 1, from: 0, speaking: saying });
   return (
     <div {...stylex.props(styles.page)}>
-      <Head
-        fill={1}
-        label={t`${who}, drawn in dots.`}
-        sign="heart"
-        size={size}
-        who={interviewer}
-      />
-      <div {...stylex.props(styles.body)} ref={body}>
+      <div {...stylex.props(styles.body)}>
         <div {...stylex.props(styles.words)}>
-          <Heading level={1}>
+          <Heading level={1} size="xl">
             <SpokenText said={said} text={title} />
           </Heading>
           <p aria-live="polite" {...stylex.props(styles.message)}>
