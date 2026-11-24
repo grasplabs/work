@@ -32,7 +32,11 @@ const styles = stylex.create({
     boxSizing: "border-box",
     paddingInline: { default: space["4"], [media.sm]: space["10"] },
     paddingBlockStart: { default: space["8"], [media.sm]: space["10"] },
-    paddingBlockEnd: { default: space["4"], [media.sm]: space["8"] },
+    // The decline at the foot stays clear of a phone's home bar.
+    paddingBlockEnd: {
+      default: `max(${space["4"]}, env(safe-area-inset-bottom))`,
+      [media.sm]: `max(${space["8"]}, env(safe-area-inset-bottom))`,
+    },
     textAlign: "center",
   },
   // The column takes the room above the foot, and stands in its middle.

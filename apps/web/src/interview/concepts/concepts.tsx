@@ -7,6 +7,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
+import { sceneKinds } from "../../apps/app-card/scenes.ts";
 import type { Scene } from "../../apps/app-card/scenes.ts";
 import {
   budgetSeconds,
@@ -69,6 +70,8 @@ export interface ConceptSearch {
   band: "header" | "low";
   /** Ruben's alternative title on A's start (`&title=alt`). */
   altTitle: boolean;
+  /** The scene behind the mark on a phone and in the conversation's header (`&phoneScene=`). */
+  phoneScene: Scene | undefined;
 }
 
 /** Reads the concept’s own part of the address; nothing when it names no concept. */
@@ -91,6 +94,7 @@ export const conceptSearch = (
     fold: search.fold !== undefined,
     band: search.band === "header" ? "header" : "low",
     altTitle: search.title === "alt",
+    phoneScene: sceneKinds.find((kind) => kind === search.phoneScene),
   };
 };
 
@@ -554,7 +558,7 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
                   setTranscript(!transcript);
                 }}
                 size="icon-sm"
-                variant={transcript ? "secondary" : "ghost"}
+                variant={transcript ? "secondary" : "outline"}
               >
                 <Icon icon={MessageSquareIcon} />
               </Button>
@@ -565,7 +569,7 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
                 go("paused");
               }}
               size="icon-sm"
-              variant="ghost"
+              variant="outline"
             >
               <Icon icon={PauseIcon} />
             </Button>
@@ -576,6 +580,8 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
       left={inTalk ? left : null}
       scene={withScene(concept, screen)}
       band={search.band}
+      phoneScene={search.phoneScene}
+      strip={inTalk}
       sceneOnPhone={concept !== "c" || screen === "language"}
     >
       {page}
