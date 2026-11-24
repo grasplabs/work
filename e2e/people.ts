@@ -560,7 +560,7 @@ const cast = {
   teams: { admin: "admin", member: "user" },
   roleChange: { admin: "admin", one: "user" },
   connections: { admin: "admin", user: "user" },
-  models: { admin: "admin", builder: "builder" },
+  aiSpend: { admin: "admin", builder: "builder" },
   settings: { admin: "admin" },
   ownSessions: { member: "user" },
   activity: { admin: "admin", builder: "builder" },

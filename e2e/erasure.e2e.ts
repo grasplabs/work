@@ -17,16 +17,23 @@ test("an admin removes someone, erases them by typing their name, follows it to 
   await signInTo(context, admin);
   await page.goto("/settings/members");
   const who = `Person (${leaving.email})`;
+  // The table shows a page at a time: the admin finds them first.
+  const search = page.getByRole("searchbox", { name: "Search members" });
+  await search.fill(leaving.email);
 
   // Removed first: only someone removed is erased.
   await page.getByRole("button", { name: `Actions for ${who}` }).click();
   await page.getByRole("menuitem", { name: "Remove" }).click();
   await page
-    .getByRole("dialog", { name: "Remove Person?" })
+    .getByRole("alertdialog", { name: "Remove Person?" })
     .getByRole("button", { name: "Remove" })
     .click();
-  const removed = page.getByRole("region", { name: "Removed people" });
-  const erase = removed.getByRole("button", { name: `Erase ${who}` });
+  // The removed stay in the people's table, a state of their row: Erase is in its menu.
+  const people = page.getByRole("table", { name: "Members" });
+  const removedRow = people.getByRole("row").filter({ hasText: leaving.email });
+  await expect(removedRow).toContainText("Removed");
+  await removedRow.getByRole("button", { name: `Actions for ${who}` }).click();
+  const erase = page.getByRole("menuitem", { name: "Erase…" });
   await expect(erase).toBeVisible();
 
   await erase.click();
@@ -56,18 +63,29 @@ test("an admin removes someone, erases them by typing their name, follows it to 
     .first()
     .click();
 
-  // Their row stays, by name, their address gone from it.
-  await expect(erase).toHaveCount(0);
-  await expect(removed.getByText(/email erased/u).first()).toBeVisible();
+  // Their row stays, by name, their address gone from it, and says they are erased.
+  await expect(
+    people.getByRole("button", { name: `Actions for ${who}` })
+  ).toHaveCount(0);
+  // The search finds people by their state too: an admin types it.
+  await search.fill("Erased");
+  const erasedRows = people
+    .getByRole("row")
+    .filter({ hasText: "Person" })
+    .filter({ hasText: "Erased" });
+  await expect(erasedRows.first()).toBeVisible();
 
   // The company gave their address to someone else: it may sign in again.
   // Someone erased on an earlier try may be listed too, under the same name.
-  const releases = removed.getByRole("button", {
-    name: "Let the old address of Person in again",
-  });
-  await expect(releases.first()).toBeVisible();
-  const kept = await releases.count();
-  await releases.first().click();
+  const releasable = people
+    .getByRole("row")
+    .filter({ has: page.getByRole("button", { name: "Actions for Person" }) });
+  const kept = await releasable.count();
+  await releasable
+    .first()
+    .getByRole("button", { name: "Actions for Person" })
+    .click();
+  await page.getByRole("menuitem", { name: "Release address…" }).click();
   const release = page.getByRole("dialog", {
     name: "Let Person’s old address in again?",
   });
@@ -82,5 +100,5 @@ test("an admin removes someone, erases them by typing their name, follows it to 
     .getByRole("button", { name: "Close", exact: true })
     .first()
     .click();
-  await expect(releases).toHaveCount(kept - 1);
+  await expect(releasable).toHaveCount(kept - 1);
 });

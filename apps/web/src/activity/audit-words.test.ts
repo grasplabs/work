@@ -28,7 +28,7 @@ describe("an audit entry's words", () => {
     });
   });
 
-  it("say code read the Brain's skills, and nothing of a release installing them", () => {
+  it("say code read the Brain's skills, apart from a release installing them", () => {
     expect({
       select: said("brain.skills.select"),
       read: said("brain.skills.read"),
@@ -36,7 +36,7 @@ describe("an audit entry's words", () => {
     }).toStrictEqual({
       select: "Read skills from the Brain",
       read: "Read skills from the Brain",
-      installed: undefined,
+      installed: "Installed Grasp's skills with a release",
     });
   });
 
