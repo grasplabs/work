@@ -53,7 +53,14 @@ import type { ReactNode } from "react";
 
 import { micLevel, reachMic, watchLevel } from "../mic.ts";
 import type { Turn } from "./conversation.tsx";
-import { checkAsk, checkHeard, fixture, ignore, languages } from "./fixture.ts";
+import {
+  checkAsk,
+  checkHeard,
+  fixture,
+  ignore,
+  languages,
+  recordedConsent,
+} from "./fixture.ts";
 import type { LanguageId } from "./fixture.ts";
 
 // CONCEPT ONLY: the screens before the conversation, and the ways out of
@@ -95,16 +102,18 @@ const styles = stylex.create({
     gap: space["2"],
   },
   heard: { display: "flex", alignItems: "center", gap: space["2"] },
+  pair: { display: "flex", gap: space["2"] },
+  grow: { flexGrow: 1 },
   // The list's rows keep their own inset: the list stands out by as much, so its words line up with the page's.
   flush: { marginInline: `calc(-1 * ${space["3"]})` },
 });
 
-/** The three promises, the same words in every concept. */
-export const promises = [
-  { id: "yours", icon: LockIcon, label: "Your voice isn’t kept" },
-  { id: "choose", icon: EyeIcon, label: "You choose what’s shared" },
-  { id: "delete", icon: TrashIcon, label: "Delete it any time" },
-] as const;
+/** The three promises, the same RECORDED words in every concept (fixture.ts `recordedConsent`), each with its mark. */
+const marks = { yours: LockIcon, choose: EyeIcon, delete: TrashIcon } as const;
+export const promises = recordedConsent.promises.map((promise) => ({
+  ...promise,
+  icon: marks[promise.id],
+}));
 
 const Promises = () => (
   <ItemGroup aria-label="Your words" style={styles.flush}>
@@ -160,20 +169,32 @@ const Asker = () => (
 );
 
 /** The quiet ways out under the yes. */
-const WaysOut = ({
+/** The yes, "Not now" beside it as the lesser of the two, and "I'd rather not" as words under them. */
+const Answers = ({
+  agree,
+  onAgree,
   onNotNow,
   onRatherNot,
 }: {
+  agree: string;
+  onAgree: () => void;
   onNotNow: () => void;
   onRatherNot: () => void;
 }) => (
-  <div {...stylex.props(styles.quiet)}>
-    <Button onClick={onNotNow} variant="ghost">
-      Not now
-    </Button>
-    <Button onClick={onRatherNot} variant="ghost">
-      I’d rather not
-    </Button>
+  <div {...stylex.props(styles.actions)}>
+    <div {...stylex.props(styles.pair)}>
+      <Button onClick={onAgree} size="lg" style={styles.grow}>
+        {agree}
+      </Button>
+      <Button onClick={onNotNow} size="lg" variant="outline">
+        Not now
+      </Button>
+    </div>
+    <div {...stylex.props(styles.quiet)}>
+      <Button onClick={onRatherNot} variant="link">
+        I’d rather not
+      </Button>
+    </div>
   </div>
 );
 
@@ -192,18 +213,14 @@ export const Consent = ({
   onRatherNot: () => void;
 }) => (
   <Page>
-    <Words
-      line={`A spoken conversation, ${fixture.minutes} minutes at most.`}
-      over={<Asker />}
-      title={title}
-    />
+    <Words line={recordedConsent.line} over={<Asker />} title={title} />
     <Promises />
-    <div {...stylex.props(styles.actions)}>
-      <Button onClick={onAgree} size="lg">
-        {agree}
-      </Button>
-      <WaysOut onNotNow={onNotNow} onRatherNot={onRatherNot} />
-    </div>
+    <Answers
+      agree={agree}
+      onAgree={onAgree}
+      onNotNow={onNotNow}
+      onRatherNot={onRatherNot}
+    />
   </Page>
 );
 
@@ -358,7 +375,7 @@ export const SoundCheckB = ({
         )}
         {refused ? null : (
           <div {...stylex.props(styles.quiet)}>
-            <Button onClick={onType} variant="ghost">
+            <Button onClick={onType} variant="link">
               Type instead
             </Button>
           </div>
@@ -401,7 +418,7 @@ export const NotNow = ({
       ))}
     </ItemGroup>
     <div {...stylex.props(styles.quiet)}>
-      <Button onClick={onBack} variant="ghost">
+      <Button onClick={onBack} variant="link">
         Back
       </Button>
     </div>
@@ -444,7 +461,7 @@ export const RatherNot = ({
         Yes, skip it
       </Button>
       <div {...stylex.props(styles.quiet)}>
-        <Button onClick={onBack} variant="ghost">
+        <Button onClick={onBack} variant="link">
           Back
         </Button>
       </div>

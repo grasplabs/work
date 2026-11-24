@@ -26,6 +26,22 @@ export const fixture = {
   ],
 } as const;
 
+/**
+ * RECORDED TEXT: the consent's wording, kept with the yes as what the person
+ * agreed to (Ruben, 24 November): one fixed wording per version, outside
+ * Lingui, never translated or reworded on the fly. Everything else on the
+ * screens (titles, buttons) is translated as usual.
+ */
+export const recordedConsent = {
+  version: 1,
+  line: `A spoken conversation, ${fixture.minutes} minutes at most.`,
+  promises: [
+    { id: "yours", label: "Your voice isn’t kept" },
+    { id: "choose", label: "You choose what’s shared" },
+    { id: "delete", label: "Delete it any time" },
+  ],
+} as const;
+
 /** The languages the interview speaks, each in its own words. */
 export const languages = [
   { id: "en", name: "English" },

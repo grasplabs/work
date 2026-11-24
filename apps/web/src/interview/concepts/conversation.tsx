@@ -8,6 +8,7 @@ import {
   MessageContent,
   MessageResponse,
 } from "@grasp-os/ui/components/message";
+import { ProgressCircle } from "@grasp-os/ui/components/progress";
 import {
   PromptInput,
   PromptInputBanner,
@@ -21,7 +22,7 @@ import {
   PromptInputVoice,
 } from "@grasp-os/ui/components/prompt-input";
 import { Text } from "@grasp-os/ui/components/text";
-import { AudioWaveformIcon, Icon } from "@grasp-os/ui/lib/icons";
+import { AudioWaveformIcon, CheckIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { colors, duration, media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
@@ -29,7 +30,13 @@ import type { ReactNode } from "react";
 
 import { micLevel, reachMic, watchLevel } from "../mic.ts";
 import { useSaid, wordsOf } from "../spoken.tsx";
-import { longLeft, shortLeft, wrapUpSeconds } from "./clock.ts";
+import {
+  budgetSeconds,
+  nearEnd,
+  usedSeconds,
+  usedWords,
+  wrapUpSeconds,
+} from "./clock.ts";
 import {
   fixture,
   hello,
@@ -164,7 +171,13 @@ export interface Turn {
 }
 
 /** What is going on now. */
-export type Doing = "speaking" | "thinking" | "listening" | "over";
+export type Doing =
+  | "speaking"
+  | "thinking"
+  | "listening"
+  /** A's fold-in: their first words stand written, "I can hear you clearly." under the line. */
+  | "heard"
+  | "over";
 
 export interface Talk {
   turns: Turn[];
@@ -179,6 +192,8 @@ export interface Talk {
   expect: string;
   /** Stephen said he wraps up. */
   wrapped: boolean;
+  /** B's "I can hear you clearly." folded into A's first line, as a moment of its own. */
+  fold?: boolean;
 }
 
 /** The talk as it starts: Stephen asks to hear them, voice first. */
@@ -239,7 +254,7 @@ const nextLine = (talk: Talk, left: number): Talk => {
   let lead: string | undefined;
   if (wrapping) {
     lead = wrapUp;
-  } else if (talk.next === 0 && talk.mode === "voice") {
+  } else if (talk.next === 0 && talk.mode === "voice" && talk.fold !== true) {
     lead = heardYou;
   }
   return {
@@ -255,12 +270,15 @@ const nextLine = (talk: Talk, left: number): Talk => {
   };
 };
 
-/** Their words, theirs in the thread; Stephen thinks. */
+/** Their words, theirs in the thread; Stephen thinks, or, folded in, first says he heard them. */
 const answered = (talk: Talk, text: string): Talk => ({
   ...talk,
   turns: [...talk.turns, { id: `you-${talk.turns.length}`, from: "you", text }],
   interim: "",
-  doing: "thinking",
+  doing:
+    talk.fold === true && talk.turns.at(-1)?.id === "hello"
+      ? "heard"
+      : "thinking",
 });
 
 /** The time is up: Stephen stops, and nothing is lost. */
@@ -345,6 +363,17 @@ export const useTalk = (start: Talk, live: boolean, left: number) => {
           })
         : undefined,
     [live, doing, mode, heard, all]
+  );
+
+  // Folded in: the heard words stand a moment with his "I can hear you clearly.", then he goes on.
+  useEffect(
+    () =>
+      live && doing === "heard"
+        ? after(1800, () => {
+            setKept((now) => ({ ...now, doing: "thinking" }));
+          })
+        : undefined,
+    [live, doing]
   );
 
   // Stephen thinks a moment, then asks the next.
@@ -496,7 +525,7 @@ const Composer = ({
       {spoken ? (
         <PromptInputVoice
           aria-label={`Talking with ${fixture.interviewer}`}
-          interim={stephenTurn ? "" : interim}
+          interim={stephenTurn || doing === "heard" ? "" : interim}
           onClose={onType}
           sample={() => ({ level: levelOf(doing, live) })}
           speaker={
@@ -509,7 +538,9 @@ const Composer = ({
             />
           }
           status={stephenTurn ? "speaking" : "listening"}
-        />
+        >
+          {doing === "heard" ? talk.turns.at(-1)?.text : null}
+        </PromptInputVoice>
       ) : (
         <>
           <PromptInputBody>
@@ -532,11 +563,7 @@ const Composer = ({
         </>
       )}
       {clock === "note" ? (
-        <PromptInputNote>
-          <span aria-label={longLeft(left)} role="timer">
-            {`${shortLeft(left)} of ${fixture.minutes}`}
-          </span>
-        </PromptInputNote>
+        <PromptInputNote>{usedWords(left)}</PromptInputNote>
       ) : null}
     </PromptInput>
   );
@@ -587,19 +614,28 @@ const Stage = ({
   const now = talk.turns.findLast((turn) => turn.from === "stephen");
   const over = [
     fixture.interviewer,
-    ...(clock === "title" ? [shortLeft(left)] : []),
+    ...(clock === "title" ? [usedWords(left)] : []),
   ].join(" · ");
   const speaking = talk.doing === "speaking";
   return (
     <div {...stylex.props(styles.stage)}>
       <div {...stylex.props(styles.question)}>
         <div {...stylex.props(styles.over)}>
-          <InterviewerAvatar size="xs" />
-          <span aria-label={longLeft(left)} role="timer">
-            <Text as="span" color="muted" size="sm">
-              {over}
-            </Text>
-          </span>
+          {clock === "title" ? (
+            <ProgressCircle
+              aria-label={`${fixture.minutes} minutes at most`}
+              getAriaValueText={() => usedWords(left)}
+              max={budgetSeconds}
+              size="sm"
+              value={usedSeconds(left)}
+              variant={nearEnd(left) ? "warning" : "default"}
+            />
+          ) : (
+            <InterviewerAvatar size="xs" />
+          )}
+          <Text as="span" color="muted" size="sm">
+            {over}
+          </Text>
         </div>
         {now?.lead === undefined ? null : (
           <Text color="muted" size="lg">
@@ -609,6 +645,14 @@ const Stage = ({
         <Heading level={1} size="xl">
           <LitLine key={now?.id} speaking={speaking} text={now?.text ?? ""} />
         </Heading>
+        {talk.doing === "heard" ? (
+          <div {...stylex.props(styles.over)}>
+            <Icon icon={CheckIcon} />
+            <Text color="default" size="lg">
+              {heardYou}
+            </Text>
+          </div>
+        ) : null}
         {talk.doing === "over" ? (
           <div {...stylex.props(styles.next)}>
             <Button onClick={onReadBack} size="lg">
