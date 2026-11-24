@@ -12,7 +12,7 @@ import { useRouteContext } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 
 import { useCoreAction } from "../use-core-action.ts";
-import { setActiveChat } from "./active-chat.ts";
+import { activeChat, setActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
 import type { Problem, StopNote } from "./dictation.ts";
 import type { BoxMention } from "./mentions.tsx";
@@ -29,6 +29,9 @@ import type { ModelChoice } from "./model-choice.ts";
 // the box's text, model, effort and files, and asking in the open chat, or
 // in a new one named after the question. A question's files are attached to
 // its chat as it is sent, one at a time, then the question names them.
+// What is typed belongs to the chat it was typed in: once the box is
+// another chat's, it starts empty, never sending one chat's words or files
+// to the next (the chat a question here just made is the same draft's).
 
 /** A new chat's title: the start of its first question. */
 export const titleOf = (question: string): string => {
@@ -127,6 +130,20 @@ export const useAsk = (
   const [files, setFiles] = useState<readonly BoxFile[]>([]);
   // Why a file the person chose stays out of the box.
   const [fileProblem, setFileProblem] = useState<string>();
+  // The chat what is typed belongs to, and the chat a question asked here
+  // made: the box is that one's still once it opens.
+  const [draftOf, setDraftOf] = useState(chatId);
+  const [made, setMade] = useState<string>();
+  if (chatId !== draftOf) {
+    setDraftOf(chatId);
+    if (chatId === undefined || chatId !== made) {
+      setText("");
+      setMentions([]);
+      setFiles([]);
+      setFileProblem(undefined);
+      setStopped(undefined);
+    }
+  }
   // The box's files core already took, by chat: asking again in the same
   // chat names them rather than attaching them twice.
   const attached = useRef(
@@ -256,7 +273,10 @@ export const useAsk = (
     for (const { id } of carried) {
       attached.current.delete(id);
     }
-    if (chatId === undefined) {
+    setMade(sent);
+    // The chat it made is the open one, unless another was opened while it
+    // was on its way: an answer that late selects nothing.
+    if (chatId === undefined && activeChat(slot) === undefined) {
       setActiveChat(sent, slot);
     }
     onAsked?.(sent);
