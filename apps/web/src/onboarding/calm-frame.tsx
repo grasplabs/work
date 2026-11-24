@@ -7,7 +7,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@grasp-os/ui/components/select";
-import { StepperNav } from "@grasp-os/ui/components/stepper";
 import { Text } from "@grasp-os/ui/components/text";
 import { isThemeMode, ThemeToggle } from "@grasp-os/ui/components/theme-toggle";
 import { Icon, LogOutIcon } from "@grasp-os/ui/lib/icons";
@@ -36,8 +35,7 @@ import { useNarrow } from "./use-narrow.ts";
 
 // The frame of the setup and of the page a member waits on: full screen,
 // outside the app. One quiet bar on top, Grasp's mark at its start, the
-// language, light or dark, and the way out at its end; under it, on a later step, the
-// library's StepperNav bar with how far along; then the step in one
+// language, light or dark, and the way out at its end; then the step in one
 // centred column, its words on the start edge, the page scrolling. Behind
 // it all, Stephen: the light of the page, alive, in another place on every
 // screen (field/stephen-field.tsx). Leaving signs out: the admin can't use
@@ -62,12 +60,6 @@ const styles = stylex.create({
   },
   mark: { display: "flex", [iconVars.size]: size.iconDefault },
   tools: { display: "flex", alignItems: "center", gap: space[1] },
-  along: {
-    width: "100%",
-    maxWidth: "44rem",
-    marginInline: "auto",
-    paddingInline: space[4],
-  },
   main: {
     display: "flex",
     flexDirection: "column",
@@ -197,42 +189,8 @@ const Leave = () => {
   );
 };
 
-/** How far along, under the bar on a later step. */
-export interface Along {
-  /** The step's place among the counted steps, from 0. */
-  at: number;
-  total: number;
-  onBack: () => void;
-  /** Forward as far as they went before; none past that. */
-  onNext?: (() => void) | undefined;
-}
-
-const AlongBar = ({ along }: { along: Along }) => {
-  const { t } = useLingui();
-  const { at, total, onBack, onNext } = along;
-  return (
-    <div {...stylex.props(styles.along)}>
-      <StepperNav
-        disabled={onNext === undefined}
-        {...(onNext === undefined
-          ? { disabledReason: t`Finish this step first` }
-          : { onNext })}
-        // The last counted step leads to the setup's end.
-        finishText={t`Finish setup`}
-        nextType="button"
-        onBack={onBack}
-        showCount
-        step={at}
-        total={total}
-        variant="bar"
-      />
-    </div>
-  );
-};
-
 export const CalmFrame = ({
   userId,
-  along,
   language = true,
   pose = fromTheTop,
   centred = false,
@@ -242,8 +200,6 @@ export const CalmFrame = ({
   userId: string;
   /** Little on it: the column in the middle of the room, not at its top. */
   centred?: boolean;
-  /** StepperNav's bar under the top bar, on a step after the welcome. */
-  along?: Along | undefined;
   /** The language in the bar: not on the step that asks for it. */
   language?: boolean;
   /** Where Stephen's light rests on this screen and how it moves there. */
@@ -262,7 +218,6 @@ export const CalmFrame = ({
           <Leave />
         </div>
       </header>
-      {along === undefined ? null : <AlongBar along={along} />}
       <main {...stylex.props(styles.main)}>
         <div {...stylex.props(styles.column, centred && styles.centred)}>
           {children}

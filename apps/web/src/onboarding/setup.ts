@@ -258,20 +258,6 @@ export const finishedAt = (
 ): SetupStep[] => path.slice(0, Math.max(reached, 0));
 
 /**
- * Where the admin can go from step `index`, having been as far as
- * `reached`: back a step always, and on a step only as far as they have
- * been. StepperNav's Back and Next go by it.
- */
-export const waysFrom = (
-  index: number,
-  reached: number,
-  path: SetupPath = steps
-) => ({
-  back: path[index - 1],
-  on: index < reached ? path[index + 1] : undefined,
-});
-
-/**
  * What only the admin can settle, by id (the prototype's `reviewItems`):
  * letting Grasp's mail through their mail filter, so their people's links
  * don't land in spam. Core keeps none of it; the admin says when it's done.

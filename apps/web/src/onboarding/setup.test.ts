@@ -19,7 +19,6 @@ import {
   steps,
   teamNumbersOf,
   teamsOf,
-  waysFrom,
 } from "./setup.ts";
 import type { Kept, SetupPath } from "./setup.ts";
 
@@ -330,18 +329,13 @@ describe("a company's own path of screens", () => {
     });
   });
 
-  it("goes back and on along the path, never to a screen the flow doesn't have", () => {
-    const { back, on } = waysFrom(2, 4, short);
+  it("never shows a screen the flow doesn't have", () => {
     expect({
-      back,
-      on,
       // Asked for by its address, a screen off the path gives where they were.
       offPath: stepShown("about", 3, { ready: true }, short),
       onPath: stepShown("company", 3, { ready: true }, short),
       nothingKept: stepShown(undefined, 0, null, setup),
     }).toStrictEqual({
-      back: "ai",
-      on: "leads",
       offPath: "leads",
       onPath: "company",
       nothingKept: "welcome",

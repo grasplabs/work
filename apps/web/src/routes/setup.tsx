@@ -32,7 +32,6 @@ import type { Session } from "../core.ts";
 import { PageError } from "../frame/page-states.tsx";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import { CalmFrame } from "../onboarding/calm-frame.tsx";
-import type { Along } from "../onboarding/calm-frame.tsx";
 import { CampaignFrame } from "../onboarding/campaign/campaign-page.tsx";
 import { isCampaignState } from "../onboarding/campaign/fixtures.ts";
 import type { CampaignState } from "../onboarding/campaign/fixtures.ts";
@@ -41,7 +40,6 @@ import { todayInUtc } from "../onboarding/send-plan.ts";
 import { SetupStepBody } from "../onboarding/setup-steps.tsx";
 import {
   finishedAt,
-  heldAt,
   isReviewItem,
   isStep,
   keptAt,
@@ -52,7 +50,6 @@ import {
   stepShown,
   steps,
   suitesFor,
-  waysFrom,
 } from "../onboarding/setup.ts";
 import type {
   AiReadiness,
@@ -61,6 +58,7 @@ import type {
   SetupPath,
   SetupStep,
 } from "../onboarding/setup.ts";
+import { smoothly } from "../onboarding/smoothly.ts";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 import { useCore } from "../use-core.ts";
 
@@ -72,9 +70,6 @@ const directorySuites = directorySuiteSchema.options;
  * Pulse, on the work laptops, is set up with the company outside it.
  */
 const dropped: ReadonlySet<SetupStep> = new Set(["pulse"]);
-
-/** The screens StepperNav's count goes by: every one but the campaign page and the end. */
-const uncounted: ReadonlySet<SetupStep> = new Set(["listening", "open"]);
 
 /** Where this browser keeps how far its admin went, the message they wrote and what they settled: a convenience of this browser alone. */
 const keptKey = (userId: string): string => `grasp.setup.${userId}`;
@@ -163,34 +158,6 @@ const useKept = (userId: string, index: number, path: SetupPath) => {
   };
 };
 
-/** StepperNav's bar on a step after the welcome: where the step is among the counted ones, Back, and Next as far as they went. */
-const alongOf = (
-  step: SetupStep,
-  index: number,
-  reached: number,
-  path: SetupPath,
-  go: (step: SetupStep) => void
-): Along | undefined => {
-  const { back, on } = waysFrom(index, reached, path);
-  if (step === "welcome" || uncounted.has(step) || back === undefined) {
-    return undefined;
-  }
-  const counted = path.filter((each) => !uncounted.has(each));
-  return {
-    at: counted.indexOf(step),
-    total: counted.length,
-    onBack: () => {
-      go(back);
-    },
-    onNext:
-      on === undefined
-        ? undefined
-        : () => {
-            go(on);
-          },
-  };
-};
-
 const Setup = () => {
   const { i18n } = useLingui();
   const navigate = useNavigate();
@@ -212,7 +179,9 @@ const Setup = () => {
   const ai = data?.ai ?? null;
   // Opened without a step, it goes on where they were; never past the AI step while no model is ready for calls.
   const step = stepShown(asked, reachedOf(placed, { plan }, path), ai, path);
-  const index = Math.max(stepIndex(step, path), 0);
+  const at = stepIndex(step, path);
+  // Off the path (it can't be, once shown): the first screen.
+  const index = Math.max(0, at);
   const kept = useKept(identity.userId, Math.max(index, placed), path);
   // Core hears of every screen they finished, so they go on from it anywhere, and Grasp sees how far they are.
   const core = useCore();
@@ -222,10 +191,11 @@ const Setup = () => {
     }
   }, [core, kept.reached, placed, path]);
   const furthest = reachedOf(kept.reached, { plan }, path);
-  const reached = heldAt(furthest, ai, path);
-  // Over once the screen is there, so Stephen can carry the page to it.
+  // Every screen settles into the next in one quiet fade; over once the screen is there.
   const turnTo = async (next: SetupStep): Promise<void> => {
-    await navigate({ to: "/setup", search: { step: next } });
+    await smoothly(async () => {
+      await navigate({ to: "/setup", search: { step: next } });
+    });
   };
   const go = (next: SetupStep) => {
     void turnTo(next);
@@ -253,10 +223,8 @@ const Setup = () => {
   if (step === "listening" || step === "pulse") {
     return <CampaignFrame state={campaignState ?? "day3"} />;
   }
-  const along = alongOf(step, index, reached, path, go);
   return (
     <CalmFrame
-      along={along}
       userId={identity.userId}
       centred={step === "open"}
       language={step !== "welcome"}

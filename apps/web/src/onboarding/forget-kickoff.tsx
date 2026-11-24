@@ -7,6 +7,7 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
+  AlertDialogHeader,
   AlertDialogTitle,
 } from "@grasp-os/ui/components/alert-dialog";
 import { Button } from "@grasp-os/ui/components/button";
@@ -108,10 +109,12 @@ export const ForgetKickoff = ({
       <ErrorText>{failure}</ErrorText>
       <AlertDialog onOpenChange={setOpen} open={open}>
         <AlertDialogContent>
-          <AlertDialogTitle>{t`Forget our first conversation?`}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {t`I delete what was said and everything I took from it: what I know about your company from it, and what your Brain learned from it. I then know less about your company, which can put off the day your Grasp opens. This can’t be undone.`}
-          </AlertDialogDescription>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t`Forget our first conversation?`}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t`I delete what was said and everything I took from it: what I know about your company from it, and what your Brain learned from it. I then know less about your company, which can put off the day your Grasp opens. This can’t be undone.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel />
             <AlertDialogAction

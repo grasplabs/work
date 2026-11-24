@@ -1,13 +1,10 @@
-import { wait } from "../../core.ts";
 import { readTones } from "../campaign/pixels.ts";
-import type { Flag } from "../flags.ts";
 import { FRAGMENT, VERTEX } from "./shader.ts";
 
-// What drives Stephen's field (shader.ts): the two canvases' sizes, the
-// page's colours, the pointer, what he attends to, where he rests on this
-// screen, and the carry from one screen to the next. One loop, a frame at a
-// time; under reduced motion it draws him once, still, and a carry is only
-// the page turning.
+// What drives Stephen's field (shader.ts): the canvas's size, the page's
+// colours, the pointer, what he holds, and where he rests on this screen.
+// One loop, a frame at a time; under reduced motion it draws him once,
+// still.
 
 /** A cell's side in CSS pixels: Damsko's own pixel, half a flag's, so he is a fine grain beside them. */
 const CELL = 2;
@@ -26,48 +23,20 @@ export interface Pose {
   strength: number;
 }
 
-/** A picture he takes from what was pressed and shows first: a flag. */
-export type Picture = Flag | null;
-
 type Rgb = readonly [number, number, number];
 type Box = [number, number, number, number];
-
-/** The picture's front runs this long; his own starts a moment after it and runs a little longer. */
-const SPREAD_MS = 520;
-const CHASE_MS = 150;
-const CHASE_SPREAD_MS = 600;
-const DRAIN_MS = 760;
-/** How far a front wanders and how wide its dithered edge is, in CSS pixels: what it must clear. */
-const FRONT_SLACK = 260;
-/** He stays with the new title this long after the carry. */
-const LINGER_MS = 1100;
 
 const UNIFORMS = [
   "u_cells",
   "u_cell",
   "u_time",
-  "u_layer",
   "u_amb[0]",
   "u_palette[0]",
-  "u_tones",
   "u_rest",
   "u_mood",
   "u_pointer",
   "u_holds[0]",
   "u_holdLooks[0]",
-  "u_phase",
-  "u_from",
-  "u_toward",
-  "u_fronts",
-  "u_flag[0]",
-  "u_flagShape",
-  "u_flagOn",
-  "u_style",
-  "u_progress",
-  "u_parts[0]",
-  "u_partMeta[0]",
-  "u_partCount",
-  "u_ground",
 ] as const;
 type Uniform = (typeof UNIFORMS)[number];
 
@@ -137,12 +106,6 @@ const mix = (from: Rgb, to: Rgb, part: number): Rgb => [
   from[2] + (to[2] - from[2]) * part,
 ];
 
-const hexRgb = (hex: string): Rgb => [
-  Number.parseInt(hex.slice(1, 3), 16) / 255,
-  Number.parseInt(hex.slice(3, 5), 16) / 255,
-  Number.parseInt(hex.slice(5, 7), 16) / 255,
-];
-
 /** The page's colours as the shader takes them, read from the tokens as the page resolves them. */
 const coloursOf = (canvas: HTMLCanvasElement) => {
   const tones = readTones(canvas);
@@ -189,19 +152,11 @@ const coloursOf = (canvas: HTMLCanvasElement) => {
           mix(sea, mint, 0.45),
           mint,
         ],
-    ground,
     palette: [night, ink, pine, mint, sea, lime, paper],
-    // On a dark page he covers it from night to lime; on a light one from mint to paper.
-    tones: dark ? ([0.06, 0.8] as const) : ([0.46, 1] as const),
   };
 };
 
 type Colours = ReturnType<typeof coloursOf>;
-
-const smoother = (part: number): number => {
-  const t = Math.min(1, Math.max(0, part));
-  return t * t * t * (t * (t * 6 - 15) + 10);
-};
 
 /** Halfway toward `to` every `halfLife` milliseconds. */
 const toward = (
@@ -216,119 +171,6 @@ const boxOf = (element: Element): Box => {
   return [x, y, width, height];
 };
 
-/** How far the window's farthest corner is from a box. */
-const farthest = (box: Box): number => {
-  const [x, y, width, height] = box;
-  const across = Math.max(x, window.innerWidth - (x + width));
-  const down = Math.max(y, window.innerHeight - (y + height));
-  return Math.hypot(Math.max(across, 0), Math.max(down, 0));
-};
-
-/** Once the next frame is drawn. */
-const nextFrame = async (): Promise<void> => {
-  // The frame's own time is what it resolves with.
-  const { promise, resolve } = Promise.withResolvers<number>();
-  requestAnimationFrame(resolve);
-  await promise;
-};
-
-/** How he carries the page to its next screen. */
-export type CarryStyle =
-  /** The flag he took fills the window, his light chases it, he drains to the new title. */
-  | "flag"
-  /** The page's parts dither away into him in reading order, and the new ones dither in. */
-  | "reading"
-  /** The same, in a wave: out from what was pressed, in from the new title. */
-  | "wave";
-
-/** One part of the page he dithers away or in: its box, when it goes (0 to 1), its corner. */
-interface Part {
-  box: Box;
-  when: number;
-  radius: number;
-}
-
-interface Carry {
-  phase: 1 | 2 | 3;
-  since: number;
-  from: Box;
-  toward: Box;
-  picture: Picture;
-  style: CarryStyle;
-  parts: Part[];
-}
-
-/** As many parts as the shader takes. */
-const PARTS = 24;
-/** The parts go out in this long, and come in in this long. */
-const OUT_MS = 620;
-const IN_MS = 820;
-
-/** What a screen is made of, outermost first: each its own part, never one inside another. */
-const PART_SELECTOR = [
-  "header > *",
-  "[data-field-part]",
-  "main :is(h1, h2, h3, p, li, label, input, textarea, button, a, img, canvas, table)",
-  "main [data-slot]",
-].join(", ");
-
-const centreOf = (box: Box): readonly [number, number] => [
-  box[0] + box[2] / 2,
-  box[1] + box[3] / 2,
-];
-
-/**
- * The parts of the screen as it is now, each with when it goes: in
- * reading order, or by how far it lies from `origin` (a wave).
- */
-const partsOf = (style: CarryStyle, origin: Box): Part[] => {
-  const found = [...document.querySelectorAll(PART_SELECTOR)].filter(
-    (element) => {
-      const { width, height, bottom, top } = element.getBoundingClientRect();
-      return width > 0 && height > 0 && bottom > 0 && top < window.innerHeight;
-    }
-  );
-  // The outermost of each: a card, not the button in it.
-  const outer = found.filter(
-    (element) =>
-      !found.some((other) => other !== element && other.contains(element))
-  );
-  const boxes = outer.map((element) => {
-    const corner = Number(
-      getComputedStyle(element).borderTopLeftRadius.replace("px", "")
-    );
-    return {
-      box: boxOf(element),
-      radius: Number.isFinite(corner) ? corner : 0,
-    };
-  });
-  const [ox, oy] = centreOf(origin);
-  const order = boxes.map(({ box }) => {
-    const [x, y] = centreOf(box);
-    return style === "wave" ? Math.hypot(x - ox, y - oy) : y * 4 + x;
-  });
-  const sorted = boxes
-    .map((part, index) => ({ ...part, order: order[index] ?? 0 }))
-    .toSorted((a, b) => a.order - b.order)
-    .slice(0, PARTS);
-  const first = sorted[0]?.order ?? 0;
-  const last = sorted.at(-1)?.order ?? 1;
-  return sorted.map(({ box, radius, order: at }) => ({
-    box,
-    radius,
-    when: last === first ? 0 : (at - first) / (last - first),
-  }));
-};
-
-const flagShape = (picture: Picture): Rgb => {
-  if (picture === null || picture.shape.kind === "across") {
-    const [first, second] =
-      picture?.shape.kind === "across" ? picture.shape.split : [1 / 3, 2 / 3];
-    return [0, first, second];
-  }
-  return picture.shape.kind === "upright" ? [1, 1 / 3, 2 / 3] : [2, 0, 0];
-};
-
 /** One thing he holds: its light builds up while he is on it and fades there once he leaves. */
 interface Hold {
   element: Element;
@@ -337,8 +179,6 @@ interface Hold {
   on: number;
   /** He is on it now. */
   held: boolean;
-  /** Behind words (a faint light) rather than round a thing to press (a line). */
-  behind: boolean;
   /** Its corner, read from the page: his line follows it. */
   radius: number;
 }
@@ -362,9 +202,6 @@ interface Him {
   };
   /** What he holds now and what he still lets go of: each its own light, in its own place. */
   holds: Hold[];
-  carry: Carry | null;
-  /** Told while he covers the page: nothing under him can be pressed then. */
-  onCovering: ((covering: boolean) => void) | null;
 }
 
 const him: Him = {
@@ -373,66 +210,14 @@ const him: Him = {
   clock: 0,
   pointer: { x: 0, y: 0, tx: 0, ty: 0, on: 0, there: false },
   holds: [],
-  carry: null,
-  onCovering: null,
 };
 
-/** The canvases he is drawn on now, with what stops the drawing; none between two screens. */
-let stage: { layers: readonly [Layer, Layer]; stop: () => void } | null = null;
+/** What stops the drawing on the canvas he is drawn on now; none between two screens. */
+let stopDrawing: (() => void) | null = null;
 
-const fronts = (now: number): Rgb => {
-  const { carry } = him;
-  if (carry === null) {
-    return [0, 0, 0];
-  }
-  const elapsed = now - carry.since;
-  if (carry.phase === 3) {
-    const reach = farthest(carry.toward) + FRONT_SLACK;
-    return [0, 0, reach - (reach + FRONT_SLACK) * smoother(elapsed / DRAIN_MS)];
-  }
-  // Nothing of a front shows at first; a frame later it is all over what was pressed.
-  const start = -(Math.min(carry.from[2], carry.from[3]) / 2 + FRONT_SLACK / 3);
-  const reach = farthest(carry.from) + FRONT_SLACK;
-  const along = (part: number) => start + (reach - start) * part;
-  return [
-    // The picture bursts out and slows; he wells up after it and sweeps.
-    along(1 - (1 - Math.min(1, Math.max(0, elapsed / SPREAD_MS))) ** 2.4),
-    along(smoother((elapsed - CHASE_MS) / CHASE_SPREAD_MS)),
-    0,
-  ];
-};
-
-/** How the page's parts dither: which carry, how far along, and the parts themselves. */
-const drawParts = (
-  gl: WebGLRenderingContext,
-  u: (name: Uniform) => WebGLUniformLocation | null,
-  carry: Carry | null,
-  now: number
-) => {
-  const style = carry?.style ?? "flag";
-  gl.uniform1f(u("u_style"), { flag: 0, reading: 1, wave: 2 }[style]);
-  const span = carry?.phase === 3 ? IN_MS : OUT_MS;
-  gl.uniform1f(
-    u("u_progress"),
-    carry === null ? 0 : smoother((now - carry.since) / span)
-  );
-  const parts = Array.from({ length: PARTS }, (_, slot) => carry?.parts[slot]);
-  gl.uniform4fv(
-    u("u_parts[0]"),
-    parts.flatMap((part) => part?.box ?? [0, 0, 0, 0])
-  );
-  gl.uniform4fv(
-    u("u_partMeta[0]"),
-    parts.flatMap((part) =>
-      part === undefined ? [0, 0, 0, 0] : [part.when, part.radius, 0, 0]
-    )
-  );
-  gl.uniform1f(u("u_partCount"), carry?.parts.length ?? 0);
-};
-
-const draw = (layer: Layer, index: number, now: number, colours: Colours) => {
+const draw = (layer: Layer, colours: Colours) => {
   const { gl, at, canvas } = layer;
-  const { pose, rest, pointer, carry } = him;
+  const { pose, rest, pointer } = him;
   const u = (name: Uniform) => at.get(name) ?? null;
   const width = window.innerWidth;
   const height = window.innerHeight;
@@ -441,10 +226,8 @@ const draw = (layer: Layer, index: number, now: number, colours: Colours) => {
   gl.uniform2f(u("u_cells"), canvas.width, canvas.height);
   gl.uniform1f(u("u_cell"), CELL);
   gl.uniform1f(u("u_time"), him.clock);
-  gl.uniform1f(u("u_layer"), index);
   gl.uniform3fv(u("u_amb[0]"), colours.amb.flat());
   gl.uniform3fv(u("u_palette[0]"), colours.palette.flat());
-  gl.uniform2f(u("u_tones"), colours.tones[0], colours.tones[1]);
   gl.uniform4f(
     u("u_rest"),
     rest.x * width,
@@ -462,26 +245,9 @@ const draw = (layer: Layer, index: number, now: number, colours: Colours) => {
   gl.uniform3fv(
     u("u_holdLooks[0]"),
     holds.flatMap((hold) =>
-      hold === undefined
-        ? [0, 0, 0]
-        : [hold.on, hold.behind ? 1 : 0, hold.radius]
+      hold === undefined ? [0, 0, 0] : [hold.on, 0, hold.radius]
     )
   );
-  gl.uniform1f(u("u_phase"), carry?.phase ?? 0);
-  gl.uniform4f(u("u_from"), ...(carry?.from ?? [0, 0, 0, 0]));
-  gl.uniform4f(u("u_toward"), ...(carry?.toward ?? [0, 0, 0, 0]));
-  gl.uniform3f(u("u_fronts"), ...fronts(now));
-  const picture = carry?.picture ?? null;
-  gl.uniform3fv(
-    u("u_flag[0]"),
-    (picture?.real ?? ["#000000", "#000000", "#000000"]).flatMap((hex) => [
-      ...hexRgb(hex),
-    ])
-  );
-  gl.uniform3f(u("u_flagShape"), ...flagShape(picture));
-  gl.uniform1f(u("u_flagOn"), picture === null ? 0 : 1);
-  drawParts(gl, u, carry, now);
-  gl.uniform3f(u("u_ground"), ...colours.ground);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 };
 
@@ -509,6 +275,26 @@ const settle = (elapsed: number) => {
   him.holds = him.holds.filter((hold) => hold.held || hold.on > 0.004);
 };
 
+/**
+ * Each ring on the edge of a thing he holds, as much there as his light
+ * is: it builds up and fades with it, in place. A ring not in use is gone.
+ */
+const placeRings = (rings: readonly HTMLElement[]) => {
+  for (const [slot, ring] of rings.entries()) {
+    const hold = him.holds[slot];
+    if (hold === undefined) {
+      ring.style.opacity = "0";
+      continue;
+    }
+    const [x, y, width, height] = hold.box;
+    ring.style.opacity = String(hold.on);
+    ring.style.transform = `translate(${x}px, ${y}px)`;
+    ring.style.width = `${width}px`;
+    ring.style.height = `${height}px`;
+    ring.style.borderRadius = `${hold.radius}px`;
+  }
+};
+
 /** Him at rest where this screen has him, nothing gathered: what reduced motion shows. */
 const rested = () => {
   const { pose, rest, pointer } = him;
@@ -522,70 +308,55 @@ const rested = () => {
 };
 
 /**
- * He is drawn on these two canvases from now on, one under the page and
- * one over it, as he is: a carry under way goes on, on the screen drawn
- * anew. Gives what stops it; nothing where WebGL can't run.
+ * He is drawn on this canvas, under the page, from now on, as he is: a
+ * screen drawn anew finds him where he was. Each thing he holds also gets
+ * one of `rings`: a crisp line on its edge, drawn by the page so it follows
+ * the element's own corner. Gives what stops it; nothing where WebGL can't
+ * run.
  */
 export const attachField = (
-  under: HTMLCanvasElement,
-  over: HTMLCanvasElement,
-  onCovering: (covering: boolean) => void
+  canvas: HTMLCanvasElement,
+  rings: readonly HTMLElement[]
 ): (() => void) | null => {
-  const ground = layerOf(under);
-  const cover = layerOf(over);
-  if (ground === null || cover === null) {
+  const layer = layerOf(canvas);
+  if (layer === null) {
     return null;
   }
-  stage?.stop();
-  const layers = [ground, cover] as const;
+  stopDrawing?.();
   const still = matchMedia("(prefers-reduced-motion: reduce)");
-  let colours = coloursOf(under);
+  let colours = coloursOf(canvas);
   let frame = 0;
   let last = performance.now();
-  let coverDrawn = false;
 
   const size = () => {
-    for (const { canvas, gl } of layers) {
-      canvas.width = Math.ceil(window.innerWidth / CELL);
-      canvas.height = Math.ceil(window.innerHeight / CELL);
-      gl.viewport(0, 0, canvas.width, canvas.height);
-    }
-  };
-  const paint = (now: number) => {
-    draw(ground, 0, now, colours);
-    if (him.carry !== null) {
-      draw(cover, 1, now, colours);
-      coverDrawn = true;
-    } else if (coverDrawn) {
-      cover.gl.clearColor(0, 0, 0, 0);
-      cover.gl.clear(cover.gl.COLOR_BUFFER_BIT);
-      coverDrawn = false;
-    }
+    canvas.width = Math.ceil(window.innerWidth / CELL);
+    canvas.height = Math.ceil(window.innerHeight / CELL);
+    layer.gl.viewport(0, 0, canvas.width, canvas.height);
   };
   const loop = (now: number) => {
     const elapsed = Math.min(Math.max(now - last, 0), 64);
     last = now;
     him.clock += elapsed / 1000;
     settle(elapsed);
-    paint(now);
+    draw(layer, colours);
+    placeRings(rings);
     frame = requestAnimationFrame(loop);
   };
   const run = () => {
     cancelAnimationFrame(frame);
     if (still.matches) {
       rested();
-      paint(performance.now());
+      draw(layer, colours);
       return;
     }
     last = performance.now();
-    // Drawn at once, before the page is next shown: a carry under way never blinks.
-    paint(last);
+    draw(layer, colours);
     frame = requestAnimationFrame(loop);
   };
   const onResize = () => {
     size();
     if (still.matches) {
-      paint(performance.now());
+      draw(layer, colours);
     }
   };
   const onMove = (event: PointerEvent) => {
@@ -605,9 +376,9 @@ export const attachField = (
     him.pointer.there = false;
   };
   const onColours = () => {
-    colours = coloursOf(under);
+    colours = coloursOf(canvas);
     if (still.matches) {
-      paint(performance.now());
+      draw(layer, colours);
     }
   };
 
@@ -623,8 +394,6 @@ export const attachField = (
   });
   const scheme = matchMedia("(prefers-color-scheme: dark)");
   scheme.addEventListener("change", onColours);
-  him.onCovering = onCovering;
-  onCovering(him.carry !== null);
 
   const stop = () => {
     cancelAnimationFrame(frame);
@@ -634,14 +403,14 @@ export const attachField = (
     still.removeEventListener("change", run);
     modes.disconnect();
     scheme.removeEventListener("change", onColours);
-    if (stage?.layers === layers) {
-      stage = null;
+    if (stopDrawing === stop) {
+      stopDrawing = null;
     }
-    if (him.onCovering === onCovering) {
-      him.onCovering = null;
+    for (const ring of rings) {
+      ring.style.opacity = "0";
     }
   };
-  stage = { layers, stop };
+  stopDrawing = stop;
   run();
   return stop;
 };
@@ -657,7 +426,7 @@ export const poseField = (pose: Pose) => {
 };
 
 /** He takes hold of an element (and lets go of the one before, which fades where it is). */
-const hold = (element: Element | null, behind: boolean) => {
+const hold = (element: Element | null) => {
   for (const each of him.holds) {
     each.held = false;
   }
@@ -678,8 +447,7 @@ const hold = (element: Element | null, behind: boolean) => {
     box: boxOf(element),
     on: 0,
     held: true,
-    behind,
-    radius: behind || !Number.isFinite(corner) ? 0 : corner,
+    radius: Number.isFinite(corner) ? corner : 0,
   });
   // The faintest that is fading makes room: never more than he can draw.
   while (him.holds.length > HOLDS) {
@@ -692,7 +460,7 @@ const hold = (element: Element | null, behind: boolean) => {
 
 /** He gathers round an element, a thing to press; `null` lets go. */
 export const attendField = (element: Element | null) => {
-  hold(element, false);
+  hold(element);
 };
 
 /** He lets go of this element, if he is on it; one he has moved on to keeps its light. */
@@ -700,70 +468,5 @@ export const releaseField = (element: Element) => {
   const held = him.holds.find((each) => each.element === element);
   if (held !== undefined) {
     held.held = false;
-  }
-};
-
-/**
- * He carries the page on: spreads from `from` (showing `picture` first,
- * where there is one), covers the window, lets the page `turn` under him
- * (`turn` is over once the new screen is there), and drains away toward
- * the new screen's title. Where he isn't drawn, or may not move, it is
- * only the page turning.
- */
-export const carryField = async (
-  from: Element,
-  picture: Picture,
-  turn: () => Promise<void>,
-  style: CarryStyle = "flag"
-): Promise<void> => {
-  const moving = !matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (stage === null || !moving || him.carry !== null) {
-    await turn();
-    return;
-  }
-  const origin = boxOf(from);
-  const carry: Carry = {
-    phase: 1,
-    since: performance.now(),
-    from: origin,
-    toward: origin,
-    picture,
-    style,
-    parts: style === "flag" ? [] : partsOf(style, origin),
-  };
-  him.carry = carry;
-  him.onCovering?.(true);
-  // What he holds goes with the page, at once: nothing of it lingers while the page turns.
-  him.holds = [];
-  await wait(style === "flag" ? CHASE_MS + CHASE_SPREAD_MS : OUT_MS);
-  carry.phase = 2;
-  try {
-    await turn();
-  } finally {
-    // The new screen is drawn a frame or two after the page turns.
-    await nextFrame();
-    await nextFrame();
-    const title = document.querySelector("main h1");
-    carry.toward =
-      title === null
-        ? [window.innerWidth / 2, window.innerHeight / 3, 0, 0]
-        : boxOf(title);
-    if (style !== "flag") {
-      carry.parts = partsOf(style, carry.toward);
-    }
-    carry.phase = 3;
-    carry.since = performance.now();
-    // He stays behind the new title a moment, a faint light, then lets go.
-    hold(title, true);
-    await wait(style === "flag" ? DRAIN_MS : IN_MS);
-    him.carry = null;
-    him.onCovering?.(false);
-    void (async () => {
-      await wait(LINGER_MS);
-      const lingering = him.holds.find((each) => each.element === title);
-      if (lingering !== undefined) {
-        lingering.held = false;
-      }
-    })();
   }
 };
