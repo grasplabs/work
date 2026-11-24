@@ -114,6 +114,8 @@ const styles = stylex.create({
     maskSize: "3px 3px",
     display: { default: "block", [media.forcedColors]: "none" },
   },
+  // Over a surface rather than behind it: above its fill, never catching a press.
+  over: { zIndex: 1 },
   // Beside the page: the light from the top end corner, falling across the half.
   lightBeside: {
     backgroundImage: `radial-gradient(140% 100% at 100% 0%, ${colors.mint}, transparent 75%)`,
@@ -172,6 +174,14 @@ const TimeBar = ({ left }: { left: number }) => (
  * concept puts it there, a scene beside the page before the conversation,
  * and the page.
  */
+/** The calm dither laid over a surface (the suggested reminder time): the header's touch, nothing new. */
+export const DitherOver = () => (
+  <span
+    aria-hidden="true"
+    {...stylex.props(styles.texture, styles.over, styles.lightTop)}
+  />
+);
+
 /** Damsko's calm dither in a room of its own: beside the page, or falling from the top. */
 const Field = ({
   room,

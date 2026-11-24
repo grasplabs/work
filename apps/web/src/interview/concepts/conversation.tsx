@@ -508,15 +508,10 @@ const Composer = ({
       status={doing === "thinking" ? "submitted" : "ready"}
     >
       {micRefused ? (
-        <PromptInputBanner
-          action={
-            <Button onClick={onRetryMic} size="xs" variant="outline">
-              {copy.talk.retry}
-            </Button>
-          }
-          variant="warning"
-        >
-          {copy.talk.blocked}
+        // The banner's most compact honest form on a phone: one line, no action of its own (a
+        // card under 24rem puts an action under the words); "Talk" in the card asks again.
+        <PromptInputBanner variant="warning">
+          {copy.check.blocked}
         </PromptInputBanner>
       ) : null}
       {spoken ? (
@@ -548,15 +543,13 @@ const Composer = ({
           </PromptInputBody>
           <PromptInputFooter>
             <PromptInputTools>
-              {micRefused ? null : (
-                <PromptInputButton
-                  onClick={onSpeak}
-                  tooltip={copy.talk.talkTooltip}
-                >
-                  <Icon icon={AudioWaveformIcon} />
-                  {copy.talk.talk}
-                </PromptInputButton>
-              )}
+              <PromptInputButton
+                onClick={micRefused ? onRetryMic : onSpeak}
+                tooltip={copy.talk.talkTooltip}
+              >
+                <Icon icon={AudioWaveformIcon} />
+                {copy.talk.talk}
+              </PromptInputButton>
             </PromptInputTools>
             <PromptInputSubmit />
           </PromptInputFooter>

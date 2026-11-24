@@ -13,6 +13,7 @@ import { Heading } from "@grasp-os/ui/components/heading";
 import {
   Item,
   ItemContent,
+  ItemDescription,
   ItemGroup,
   ItemMedia,
   ItemTitle,
@@ -43,7 +44,7 @@ import {
   LockIcon,
   TrashIcon,
 } from "@grasp-os/ui/lib/icons";
-import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { media, radius, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
@@ -52,6 +53,7 @@ import { micLevel, reachMic, watchLevel } from "../mic.ts";
 import type { Turn } from "./conversation.tsx";
 import { checkHeard, fixture, ignore, languages, copy } from "./fixture.ts";
 import type { LanguageId } from "./fixture.ts";
+import { DitherOver } from "./frame.tsx";
 
 // CONCEPT ONLY: the screens before the conversation, and the ways out of
 // it, for the three concepts, as few words as honestly do. A: one screen,
@@ -99,6 +101,13 @@ const styles = stylex.create({
     gap: space["2"],
   },
   heard: { display: "flex", alignItems: "center", gap: space["2"] },
+  // The suggested time: its dither clipped to the Item's own corner (the Item's token), above its fill.
+  suggested: {
+    position: "relative",
+    isolation: "isolate",
+    overflow: "hidden",
+    borderRadius: radius.lg,
+  },
   pair: { display: "flex", gap: space["2"] },
   grow: { flexGrow: 1 },
   // The list's rows keep their own inset: the list stands out by as much, so its words line up with the page's.
@@ -398,30 +407,50 @@ export const SoundCheckB = ({
   );
 };
 
+/** The reminder time we would pick: tomorrow morning, a fresh start. */
+const suggested = "tomorrow";
+
 /** "Not now": when to be reminded, one press. */
 export const NotNow = ({
+  look,
   onPick,
   onBack,
 }: {
+  /** A: the time first ("4:00 PM", "Later today" under it); B: the day first. */
+  look: "a" | "b";
   onPick: (when: string) => void;
   onBack: () => void;
 }) => (
   <Page>
     <Words line={copy.later.line} title={copy.later.title} />
     <ItemGroup aria-label="Remind me">
-      {fixture.remindAt.map((each) => (
-        <Item
-          key={each.id}
-          onClick={() => {
-            onPick(each.when);
-          }}
-          variant="outline"
-        >
-          <ItemContent>
-            <ItemTitle>{each.label}</ItemTitle>
-          </ItemContent>
-        </Item>
-      ))}
+      {fixture.remindAt.map((each) => {
+        const item = (
+          <Item
+            onClick={() => {
+              onPick(each.when);
+            }}
+            size="sm"
+            variant="outline"
+          >
+            <ItemContent>
+              <ItemTitle>{look === "a" ? each.time : each.day}</ItemTitle>
+              <ItemDescription>
+                {look === "a" ? each.day : each.time}
+              </ItemDescription>
+            </ItemContent>
+          </Item>
+        );
+        // The one we would pick carries the header's calm dither.
+        return each.id === suggested ? (
+          <div key={each.id} {...stylex.props(styles.suggested)}>
+            {item}
+            <DitherOver />
+          </div>
+        ) : (
+          <div key={each.id}>{item}</div>
+        );
+      })}
     </ItemGroup>
     <div {...stylex.props(styles.quiet)}>
       <Button onClick={onBack} variant="link">
@@ -440,9 +469,12 @@ export const Reminded = ({
   onStart: () => void;
 }) => (
   <Page>
-    <Words line={copy.later.doneLine} title={copy.later.doneTitle(when)} />
+    <Words
+      line={`${copy.later.doneRest(when)} ${copy.later.doneLine}`}
+      title={copy.later.doneHead}
+    />
     <div {...stylex.props(styles.actions)}>
-      <Button onClick={onStart} variant="outline">
+      <Button onClick={onStart} size="lg" variant="outline">
         {copy.later.doneStart}
       </Button>
     </div>
@@ -477,7 +509,7 @@ export const Declined = ({ onUndo }: { onUndo: () => void }) => (
   <Page>
     <Words line={copy.decline.doneLine} title={copy.decline.doneTitle} />
     <div {...stylex.props(styles.actions)}>
-      <Button onClick={onUndo} variant="outline">
+      <Button onClick={onUndo} size="lg" variant="outline">
         {copy.decline.undo}
       </Button>
     </div>
