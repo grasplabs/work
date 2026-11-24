@@ -256,19 +256,42 @@ const button = (name: string) =>
       each.getAttribute("aria-label") === name
   );
 
+/** The asking dialog's confirming action: its last, after Cancel. */
+const confirmation = () =>
+  [...document.querySelectorAll<HTMLElement>('[role="alertdialog"] button')].at(
+    -1
+  );
+
 /** The last control named `label`. */
 const labelled = (label: string) =>
   [...document.querySelectorAll(`[aria-label="${label}"]`)].at(-1);
 
+/** A Field label's required mark, at the end of its text. */
+const REQUIRED_MARK = /\*$/u;
+
 /** The control the label `label` is for: the last one, or the `first`. */
 const labelledBy = (label: string, which: "first" | "last" = "last") => {
   const labels = [...document.querySelectorAll("label")];
-  const matches = (each: HTMLLabelElement) => each.textContent.trim() === label;
+  // A Field's label carries its required mark in its text, shown only when
+  // the control is required: the name is what stands before it.
+  const matches = (each: HTMLLabelElement) =>
+    each.textContent.trim().replace(REQUIRED_MARK, "") === label;
   const named =
     which === "first" ? labels.find(matches) : labels.findLast(matches);
-  return named?.htmlFor === undefined || named.htmlFor === ""
-    ? undefined
-    : document.querySelector(`[id="${named.htmlFor}"]`);
+  if (named === undefined) {
+    return null;
+  }
+  // By the label's `for`, or by the control that names itself by the label
+  // (a Field's label and its Switch).
+  const byFor =
+    named.htmlFor === ""
+      ? null
+      : document.querySelector(`[id="${named.htmlFor}"]`);
+  const byName =
+    named.id === ""
+      ? null
+      : document.querySelector(`[aria-labelledby~="${named.id}"]`);
+  return byFor ?? byName;
 };
 
 /** Types `value` into the input named `label`. */
@@ -301,12 +324,9 @@ const choose = async (label: string, option: string): Promise<void> => {
 const fieldButtons = (): [string, HTMLElement][] =>
   [
     ...document.querySelectorAll<HTMLElement>(
-      '[data-slot="model-field-button"]'
+      '[aria-label="Fields"] [data-row-press]'
     ),
-  ].map((each) => [
-    (each.querySelector("span > span")?.textContent ?? "").trim(),
-    each,
-  ]);
+  ].map((each) => [each.textContent.trim(), each]);
 
 /** The fields the table's Fields view lists, by name. */
 const fieldsShown = (): string[] => fieldButtons().map(([name]) => name);
@@ -337,7 +357,9 @@ const addField = async (
   await press(button("Add field"));
   await press(
     [
-      ...document.querySelectorAll('[data-slot="field-type-gallery"] button'),
+      ...document.querySelectorAll(
+        '[aria-label="Kinds of field"] [data-row-press]'
+      ),
     ].find((each) => each.textContent.startsWith(kind))
   );
   await type("Field name", name);
@@ -394,13 +416,11 @@ describe("an App's data model, changed in its workspace", () => {
     const emptyShown = document.body.textContent.includes("No tables yet");
 
     await press(button("New table"));
-    await type("Table name", "Open tasks");
+    await type("Name", "Open tasks");
     const savedAs = document.body.textContent.includes("Saved as openTasks");
     await choose("Who can see and change its records", "Only the person");
     await press(button("Create table"));
-    const title = document.querySelector(
-      'nav [aria-current="true"]'
-    )?.textContent;
+    const title = document.querySelector("nav [aria-current]")?.textContent;
 
     const kinds: [string, string, (() => Promise<void>)?][] = [
       ["title", "Text"],
@@ -1005,7 +1025,7 @@ describe("an App's data model, changed in its workspace", () => {
     const warned = document.body.textContent.includes(
       "Every test record goes, for everyone who builds this App."
     );
-    await press(button("Reset"));
+    await press(confirmation());
 
     expect({
       before,
@@ -1036,7 +1056,7 @@ describe("an App's data model, changed in its workspace", () => {
       newTable: button("New table")?.hasAttribute("disabled"),
       addField: button("Add field")?.hasAttribute("disabled"),
       rename: labelled("Field name")?.hasAttribute("disabled"),
-      move: labelled("Move title")?.hasAttribute("disabled"),
+      move: labelled("Move title down")?.hasAttribute("disabled"),
     }).toStrictEqual({
       newTable: true,
       addField: true,

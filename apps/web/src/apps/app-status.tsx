@@ -1,3 +1,4 @@
+import type { App } from "@grasp-os/shared/apps";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -7,8 +8,8 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/app-kit/components/alert-dialog";
-import type { App } from "@grasp-os/shared/apps";
+} from "@grasp-os/ui/components/alert-dialog";
+import { Text } from "@grasp-os/ui/components/text";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
 
@@ -21,8 +22,21 @@ import { useCoreAction } from "../use-core-action.ts";
 // for its builders, and its triggers don't fire, until it is shared. Core decides who may move
 // it (app-status.ts); a refusal shows under the buttons.
 
+/** Where an App is: core keeps only `archived` and its live version. */
+type AppStatus = "draft" | "live" | "archived";
+
+/** The status of `app`, from whether it is archived and has a live version. */
+export const statusOf = (
+  app: Pick<App, "archived" | "currentVersion">
+): AppStatus => {
+  if (app.archived) {
+    return "archived";
+  }
+  return app.currentVersion === null ? "draft" : "live";
+};
+
 /** What a builder can move an App along, as core's `apps` names it. */
-type Transition = "archive" | "restore";
+export type Transition = "archive" | "restore";
 
 /**
  * Asks before archiving: it takes the App offline and stops its runs,
@@ -95,16 +109,16 @@ export const StatusNote = ({
   const { t } = useLingui();
   if (app.archived) {
     return (
-      <p className="text-muted-foreground">
+      <Text color="muted" size="sm">
         {t`Archived: nobody opens its pages and nothing runs, until a builder restores it.`}
-      </p>
+      </Text>
     );
   }
   if (app.currentVersion === null) {
     return (
-      <p className="text-muted-foreground">
+      <Text color="muted" size="sm">
         {t`Only its builders open it, and its triggers don't fire, until it is shared with the team.`}
-      </p>
+      </Text>
     );
   }
   return null;

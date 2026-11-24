@@ -101,8 +101,8 @@ test("two people see each other's notes live, in their theme, and a failing page
     openPage(second, app),
   ]);
 
-  // The page marks what the App draws as the App's, around the frame.
-  await expect(first.getByText("App page", { exact: true })).toBeVisible();
+  // The page marks what the App draws as the App's: its name heads the
+  // chrome around the frame.
   await expect(first.getByRole("heading", { name: "Notes" })).toBeVisible();
 
   // The page follows its page's theme.
@@ -224,10 +224,13 @@ test("a page whose open core never answers is given up on in its time, and opens
   });
   await page.goto(`/apps/${app}/full`);
   await stalled.promise;
-  await expect(page.getByText(timedOut)).toHaveCount(0);
+  // By its heading: the page says it to a screen reader too, in the live
+  // region, with its reason.
+  const failure = page.getByRole("heading", { name: timedOut });
+  await expect(failure).toHaveCount(0);
 
   await page.clock.runFor(20_000);
-  await expect(page.getByText(timedOut)).toBeVisible();
+  await expect(failure).toBeVisible();
 
   stall = false;
   await page.clock.resume();

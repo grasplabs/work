@@ -1,9 +1,17 @@
-import { Button } from "@grasp-os/app-kit/components/button";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  CodeBlock,
+  CodeBlockActions,
+  CodeBlockContent,
+  CodeBlockCopyButton,
+  CodeBlockHeader,
+  CodeBlockTitle,
+} from "@grasp-os/ui/components/code-block";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@grasp-os/app-kit/components/collapsible";
+} from "@grasp-os/ui/components/collapsible";
 import {
   Empty,
   EmptyContent,
@@ -11,26 +19,40 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/app-kit/components/empty";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
+} from "@grasp-os/ui/components/empty";
 import {
-  ChevronRightIcon,
+  Icon,
   LogOutIcon,
   RefreshCwIcon,
   SparklesIcon,
-  TriangleAlertIcon,
-} from "lucide-react";
+} from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import type { MessageDescriptor } from "@lingui/core";
+import { msg } from "@lingui/core/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 
 import type { FailureReason, PageState } from "./page-host.ts";
 
 // What an App's frame shows in place of its page once the page failed
-// or its person signed out (page-frame.tsx): centred where the page would
-// be, what happened as a title, one plain sentence why, Try again, and
-// for a preview its draft broke, Fix with Grasp, which asks the App's
-// chat. What core or the browser said is there too, folded away, for
-// whoever wants it.
+// or its person signed out (page-frame.tsx): a failed page where the page
+// would be, what happened as its heading,
+// one plain sentence why, Try again, and for a preview its draft broke,
+// Fix with Grasp, which asks the App's chat. What core or the browser said
+// is there too, folded away, for whoever wants it. No line on whether
+// Grasp can be reached: a preview keeps a connection of its own, which the
+// tab's does not speak for.
+
+const styles = stylex.create({
+  actions: {
+    display: "flex",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: space[2],
+  },
+  // The fold runs the width of the words above it.
+  fold: { width: "100%", textAlign: "start" },
+});
 
 const titles: Readonly<Record<FailureReason, MessageDescriptor>> = {
   forbidden: msg`You can't open this App`,
@@ -80,7 +102,7 @@ const draftFailures: ReadonlySet<FailureReason> = new Set([
 ]);
 
 /** Whether the draft in a preview caused `reason`: Grasp can fix it. */
-export const fromTheDraft = (reason: FailureReason): boolean =>
+const fromTheDraft = (reason: FailureReason): boolean =>
   draftFailures.has(reason);
 
 /** Failures of a preview said as the preview's rather than a page's. */
@@ -106,15 +128,13 @@ export const FrameFailure = ({
   onRetry: () => void;
   onFix?: (() => void) | undefined;
 }) => {
-  const { i18n } = useLingui();
+  const { i18n, t } = useLingui();
   if (state.status === "signed-out") {
     return (
       <Empty>
         <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <LogOutIcon />
-          </EmptyMedia>
-          <EmptyTitle>
+          <EmptyMedia icon={LogOutIcon} />
+          <EmptyTitle level={2}>
             <Trans>Your session has ended</Trans>
           </EmptyTitle>
           <EmptyDescription>
@@ -126,51 +146,51 @@ export const FrameFailure = ({
   }
   const { reason, detail } = state;
   const fixes = onFix !== undefined && fromTheDraft(reason);
+  const details = detail === undefined ? reason : `${reason}\n${detail}`;
   return (
-    <Empty>
+    <Empty variant="destructive">
       <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <TriangleAlertIcon />
-        </EmptyMedia>
-        <EmptyTitle>
-          {preview && previewStarts.has(reason) ? (
-            <Trans>The preview didn&apos;t start</Trans>
-          ) : (
-            i18n._(titles[reason])
-          )}
+        <EmptyMedia illustration="broken" />
+        <EmptyTitle level={2}>
+          {preview && previewStarts.has(reason)
+            ? t`The preview didn't start`
+            : i18n._(titles[reason])}
         </EmptyTitle>
         <EmptyDescription>
-          {preview && reason === "broken" ? (
-            <Trans>The draft&apos;s code doesn&apos;t build.</Trans>
-          ) : (
-            i18n._(reasons[reason])
-          )}
+          {preview && reason === "broken"
+            ? t`The draft's code doesn't build.`
+            : i18n._(reasons[reason])}
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
-        <div className="flex flex-wrap justify-center gap-2">
+        <div {...stylex.props(styles.actions)}>
           <Button onClick={onRetry} variant="outline">
-            <RefreshCwIcon data-icon="inline-start" />
-            <Trans>Try again</Trans>
+            <Icon icon={RefreshCwIcon} />
+            {t`Try again`}
           </Button>
           {fixes ? (
-            <Button onClick={onFix}>
-              <SparklesIcon data-icon="inline-start" />
-              <Trans>Fix with Grasp</Trans>
+            <Button onClick={onFix} variant="ghost">
+              <Icon icon={SparklesIcon} />
+              {t`Fix with Grasp`}
             </Button>
           ) : null}
         </div>
-        <Collapsible>
-          <CollapsibleTrigger render={<Button size="sm" variant="ghost" />}>
-            <ChevronRightIcon data-icon="inline-start" />
-            <Trans>Technical details</Trans>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <pre className="bg-muted text-muted-foreground rounded-md p-3 text-left font-mono text-xs break-all whitespace-pre-wrap">
-              {detail === undefined ? reason : `${reason}\n${detail}`}
-            </pre>
-          </CollapsibleContent>
-        </Collapsible>
+        <div {...stylex.props(styles.fold)}>
+          <Collapsible>
+            <CollapsibleTrigger>{t`Technical details`}</CollapsibleTrigger>
+            <CollapsibleContent>
+              <CodeBlock>
+                <CodeBlockHeader>
+                  <CodeBlockTitle />
+                  <CodeBlockActions>
+                    <CodeBlockCopyButton value={details} />
+                  </CodeBlockActions>
+                </CodeBlockHeader>
+                <CodeBlockContent wrap>{details}</CodeBlockContent>
+              </CodeBlock>
+            </CollapsibleContent>
+          </Collapsible>
+        </div>
       </EmptyContent>
     </Empty>
   );

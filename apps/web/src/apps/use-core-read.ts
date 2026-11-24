@@ -11,6 +11,7 @@ import { useCore } from "../use-core.ts";
  * `key` is read, and which read it is (`id`, minted as each read lands,
  * so a key read again is a new read). `read` gets the read's signal,
  * which ends when the read is no longer wanted (`loadFromCore`).
+ * `again` reads `key` once more (Try again).
  */
 export const useHeldCoreRead = <T>(
   key: string,
@@ -20,6 +21,7 @@ export const useHeldCoreRead = <T>(
   loaded: Loaded<T> | undefined;
   current: boolean;
   id: string | undefined;
+  again: () => void;
 } => {
   const core = useCore();
   const [held, setHeld] = useState<{
@@ -28,6 +30,10 @@ export const useHeldCoreRead = <T>(
     loaded: Loaded<T>;
     id: string;
   }>();
+  const [attempt, setAttempt] = useState(0);
+  const again = (): void => {
+    setAttempt((before) => before + 1);
+  };
   const onRead = useEffectEvent(
     async (signal: AbortSignal): Promise<Loaded<T>> =>
       await loadFromCore(core, read, signal)
@@ -44,12 +50,13 @@ export const useHeldCoreRead = <T>(
     return () => {
       left.abort();
     };
-  }, [key, scope]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `attempt` says when to read again
+  }, [key, scope, attempt]);
   if (held?.key === key) {
-    return { loaded: held.loaded, current: true, id: held.id };
+    return { loaded: held.loaded, current: true, id: held.id, again };
   }
   const kept = scope !== undefined && held?.scope === scope ? held : undefined;
-  return { loaded: kept?.loaded, current: false, id: kept?.id };
+  return { loaded: kept?.loaded, current: false, id: kept?.id, again };
 };
 
 /**

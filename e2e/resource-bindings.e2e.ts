@@ -65,7 +65,7 @@ const resourceOn = async (page: Page, app: string, alias: string) => {
   await page.goto(`/apps/${app}/settings?section=connections`);
   return page
     .getByRole("region", { name: "Resources" })
-    .getByRole("article", { name: alias });
+    .getByRole("region", { name: alias });
 };
 
 const unbound = "The App's actions can't use it until an admin binds it.";
@@ -100,7 +100,7 @@ test("an admin binds an App's AI to a model, with no budget of its own, and revo
   // Revoked, once confirmed: unbound again, for the admin and the builder
   // alike.
   await ai.getByRole("button", { name: "Revoke the binding of ai" }).click();
-  const confirm = deciding.getByRole("dialog", {
+  const confirm = deciding.getByRole("alertdialog", {
     name: "Revoke the binding of ai?",
   });
   await confirm.getByRole("button", { name: "Revoke", exact: true }).click();
@@ -110,6 +110,6 @@ test("an admin binds an App's AI to a model, with no budget of its own, and revo
   await expect(
     building
       .getByRole("region", { name: "Resources" })
-      .getByRole("article", { name: "ai" })
+      .getByRole("region", { name: "ai" })
   ).toContainText(unbound);
 });

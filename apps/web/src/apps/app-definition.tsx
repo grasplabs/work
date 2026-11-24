@@ -1,12 +1,14 @@
-import { Button } from "@grasp-os/app-kit/components/button";
 import type { ViewedApp } from "@grasp-os/shared/apps";
+import { failureText } from "@grasp-os/shared/errors";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { Trans } from "@lingui/react/macro";
-import { DownloadIcon } from "lucide-react";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import { Button } from "@grasp-os/ui/components/button";
+import { useAction } from "@grasp-os/ui/hooks/use-action";
+import { DownloadIcon, Icon } from "@grasp-os/ui/lib/icons";
+import { useLingui } from "@lingui/react/macro";
 
-import { ErrorText } from "../error-text.tsx";
 import { downloadText } from "../export/export-file.tsx";
-import { useCoreAction } from "../use-core-action.ts";
+import { useCore } from "../use-core.ts";
 import { buildsApp } from "./app-role.ts";
 
 // Exporting an App's definition from its page: its App's current sealed
@@ -30,7 +32,7 @@ const fileName = (name: string, version: number): string => {
 };
 
 /** Whether `identity` may export `app`'s definition. */
-export const exportsDefinition = (
+const exportsDefinition = (
   app: Pick<ViewedApp, "role" | "currentVersion">,
   identity: Pick<Identity, "staff">
 ): boolean => buildsApp(app, identity) && app.currentVersion !== null;
@@ -43,36 +45,50 @@ export const ExportDefinition = ({
   app: ViewedApp;
   identity: Pick<Identity, "staff">;
 }) => {
-  const { busy, failure, run } = useCoreAction();
-  if (!exportsDefinition(app, identity)) {
-    return null;
-  }
-  const save = async (): Promise<void> => {
-    const definition = await run(
-      async (session) => await session.apps.definition(app.id)
-    );
-    if (definition !== undefined) {
+  const { t } = useLingui();
+  const core = useCore();
+  const save = useAction(
+    async () => {
+      const definition = await core.withSession(
+        async (session) => await session.apps.definition(app.id)
+      );
       downloadText(
         fileName(app.name, definition.app.version),
         JSON.stringify(definition, null, 2),
         "application/json"
       );
+    },
+    {
+      loadingText: t`Exporting`,
+      successText: t`Exported`,
+      errorText: t`Could not export`,
     }
-  };
+  );
+  if (!exportsDefinition(app, identity)) {
+    return null;
+  }
+  // The error goes under the buttons of the card it sits in: a whole line
+  // of their row.
   return (
-    <div className="flex flex-col items-end gap-1">
+    <>
       <Button
-        disabled={busy}
+        errorText={save.labels.error}
+        loadingText={save.labels.loading}
         onClick={() => {
-          void save();
+          void save.run();
         }}
-        size="sm"
+        status={save.status}
+        successText={save.labels.success}
         variant="outline"
       >
-        <DownloadIcon data-icon="inline-start" />
-        <Trans>Export definition</Trans>
+        <Icon icon={DownloadIcon} />
+        {t`Export definition`}
       </Button>
-      <ErrorText>{failure}</ErrorText>
-    </div>
+      {save.error === undefined ? null : (
+        <Alert variant="destructive">
+          <AlertDescription>{failureText(save.error)}</AlertDescription>
+        </Alert>
+      )}
+    </>
   );
 };
