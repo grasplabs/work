@@ -2,7 +2,14 @@
 // do (nothing shows when there is nothing), and every finding, team by
 // team, in a sheet the page opens on request, so the page itself keeps to
 // a few.
+import { AgentIndicator } from "@grasp-os/ui/components/agent-indicator";
 import { Button } from "@grasp-os/ui/components/button";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@grasp-os/ui/components/empty";
 import { Heading } from "@grasp-os/ui/components/heading";
 import {
   Item,
@@ -27,7 +34,7 @@ import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 
 import { AskAction, askWords, useAsksDone } from "./campaign-asks.tsx";
-import { talkedWords } from "./campaign-words.ts";
+import { talkedWords, whenWords } from "./campaign-words.ts";
 import { findingsOf } from "./fixtures.ts";
 import type { Campaign, Finding } from "./fixtures.ts";
 
@@ -49,6 +56,14 @@ const styles = stylex.create({
     listStyle: "none",
   },
   line: { display: "flex", flexDirection: "column", gap: space[1] },
+  running: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "inherit",
+    flexWrap: "wrap",
+    gap: space[2],
+    margin: 0,
+  },
   desktop: {
     display: { default: "none", [media.maxSm]: "flex" },
     margin: 0,
@@ -180,3 +195,54 @@ export const AllFindings = ({
     </Sheet>
   );
 };
+
+/**
+ * How it runs and when it closes, in one quiet line: the Agent indicator
+ * with its words while the interviews run, the words alone once they
+ * close; who declined, by name, under it.
+ */
+export const RunningLine = ({
+  campaign,
+  indicator = true,
+}: {
+  campaign: Campaign;
+  /** False where the page already shows its one indicator. */
+  indicator?: boolean;
+}) => {
+  const running = indicator && campaign.pace !== "enough";
+  const words = [
+    running ? "Listening" : "",
+    whenWords(campaign),
+    `${campaign.known}% known`,
+  ]
+    .filter((part) => part !== "")
+    .join(" · ");
+  const { declined } = campaign;
+  return (
+    <>
+      <p {...stylex.props(styles.running)}>
+        {running ? <AgentIndicator /> : null}
+        <Text as="span" size="sm" color="muted">
+          {words}
+        </Text>
+      </p>
+      {declined.length === 0 ? null : (
+        <Text size="sm" color="muted">
+          {`Declined: ${declined.join(", ")}`}
+        </Text>
+      )}
+    </>
+  );
+};
+
+/** Before the first finding: what will appear here, and when. */
+export const NothingYet = () => (
+  <Empty size="sm">
+    <EmptyHeader>
+      <EmptyTitle>Nothing learned yet</EmptyTitle>
+      <EmptyDescription>
+        What we learn appears here from day two, once the first few have talked.
+      </EmptyDescription>
+    </EmptyHeader>
+  </Empty>
+);

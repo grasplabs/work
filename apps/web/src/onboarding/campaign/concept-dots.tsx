@@ -4,7 +4,6 @@
 // the light; the days to come wait as single dots. Beside each row the one
 // thing Grasp learned there. A team under five shows only its lead's
 // square; a company without teams has one row and no names.
-import { AgentIndicator } from "@grasp-os/ui/components/agent-indicator";
 import { Heading } from "@grasp-os/ui/components/heading";
 import { Text } from "@grasp-os/ui/components/text";
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
@@ -15,14 +14,10 @@ import {
   AllFindings,
   AskList,
   OnYourComputer,
+  RunningLine,
   wide,
 } from "./campaign-parts.tsx";
-import {
-  dayCount,
-  statementOf,
-  talkedWords,
-  whenWords,
-} from "./campaign-words.ts";
+import { dayCount, statementOf, talkedWords } from "./campaign-words.ts";
 import { daysBetween, talkedByDay } from "./fixtures.ts";
 import type { Campaign, TeamPicture } from "./fixtures.ts";
 import { usePixels } from "./pixels.ts";
@@ -68,7 +63,6 @@ const styles = stylex.create({
     flexWrap: "wrap",
     gap: space[3],
   },
-  when: { display: "flex", alignItems: "center", gap: space[2] },
 });
 
 /** A square is three cells, a cell apart, piled two wide and up to four high in a day. */
@@ -168,7 +162,6 @@ const DayLetters = ({ campaign }: { campaign: Campaign }) => {
 /** Concept C: the campaign page as the week, in dots. */
 export const CampaignDots = ({ campaign }: { campaign: Campaign }) => {
   const { lead, rest } = statementOf(campaign);
-  const enough = campaign.pace === "enough";
   return (
     <div {...stylex.props(styles.page)}>
       <header {...stylex.props(styles.statement)}>
@@ -206,7 +199,8 @@ export const CampaignDots = ({ campaign }: { campaign: Campaign }) => {
                   color={first === undefined ? "muted" : "default"}
                   size="sm"
                 >
-                  {first?.text ?? "Nothing learned yet."}
+                  {first?.text ??
+                    "Nothing learned yet: the first findings come on day two."}
                 </Text>
               </span>
             </div>
@@ -219,14 +213,8 @@ export const CampaignDots = ({ campaign }: { campaign: Campaign }) => {
       </div>
       <div {...stylex.props(wide.only)}>
         <div {...stylex.props(styles.foot)}>
-          <span {...stylex.props(styles.when)}>
-            <AgentIndicator
-              aria-label={enough ? "Done listening" : "Grasp is listening"}
-              success={enough}
-            />
-            <Text as="span" size="sm" color="muted">
-              {`${whenWords(campaign)} · ${campaign.known}% known`}
-            </Text>
+          <span>
+            <RunningLine campaign={campaign} />
           </span>
           <AllFindings campaign={campaign} />
         </div>

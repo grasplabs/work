@@ -5,7 +5,6 @@
 // one sentence that lights up as it is read; three things Grasp learned;
 // what the admin must do only when there is something; one quiet line for
 // when. On a phone, the meadow and the sentence alone.
-import { AgentIndicator } from "@grasp-os/ui/components/agent-indicator";
 import { Heading } from "@grasp-os/ui/components/heading";
 import { Text } from "@grasp-os/ui/components/text";
 import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
@@ -14,10 +13,12 @@ import * as stylex from "@stylexjs/stylex";
 import {
   AllFindings,
   AskList,
+  NothingYet,
   OnYourComputer,
+  RunningLine,
   wide,
 } from "./campaign-parts.tsx";
-import { statementOf, talkedWords, whenWords } from "./campaign-words.ts";
+import { statementOf, talkedWords } from "./campaign-words.ts";
 import type { Campaign } from "./fixtures.ts";
 import { MeadowField } from "./meadow-field.tsx";
 import { ReadAloud } from "./read-aloud.tsx";
@@ -56,13 +57,6 @@ const styles = stylex.create({
     textAlign: "center",
   },
   asks: { alignSelf: "stretch", maxWidth: "40rem", marginInline: "auto" },
-  when: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexWrap: "wrap",
-    gap: space[2],
-  },
 });
 
 /** The first finding of each team, up to three: one look across the company. */
@@ -79,7 +73,6 @@ const firstThree = (campaign: Campaign) =>
 export const CampaignMeadow = ({ campaign }: { campaign: Campaign }) => {
   const { lead, rest } = statementOf(campaign);
   const three = firstThree(campaign);
-  const enough = campaign.pace === "enough";
   const label = campaign.grouped
     ? `A meadow of everyone invited: ${campaign.teams
         .map((each) => `${each.name}, ${talkedWords(each, true)}`)
@@ -99,7 +92,11 @@ export const CampaignMeadow = ({ campaign }: { campaign: Campaign }) => {
         </Text>
       </header>
       <OnYourComputer />
-      {three.length === 0 ? null : (
+      {three.length === 0 ? (
+        <div {...stylex.props(wide.only)}>
+          <NothingYet />
+        </div>
+      ) : (
         <div {...stylex.props(wide.only)}>
           <ul aria-label="What we learned" {...stylex.props(styles.three)}>
             {three.map(({ finding, team }) => (
@@ -124,15 +121,7 @@ export const CampaignMeadow = ({ campaign }: { campaign: Campaign }) => {
       )}
       <div {...stylex.props(wide.only)}>
         <div {...stylex.props(styles.centre)}>
-          <span {...stylex.props(styles.when)}>
-            <AgentIndicator
-              aria-label={enough ? "Done listening" : "Grasp is listening"}
-              success={enough}
-            />
-            <Text as="span" size="sm" color="muted">
-              {`${whenWords(campaign)} · ${campaign.known}% known`}
-            </Text>
-          </span>
+          <RunningLine campaign={campaign} />
           <AllFindings campaign={campaign} variant="outline" />
         </div>
       </div>
