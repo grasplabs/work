@@ -4,10 +4,9 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   atlasOf,
   groupsOf,
+  OTHER_TEAMS,
   LOBES,
-  REGION_IDS,
   signalPaths,
-  storyOf,
   TEAM_FOLDER,
 } from "./brain-atlas.ts";
 import type { AtlasRegion, RegionId } from "./brain-atlas.ts";
@@ -61,10 +60,10 @@ describe(atlasOf, () => {
         "team-service": "parietal",
         "email-triage": undefined,
         "team-finance": "occipital",
-        // In no group the company keeps: one of its own, as Grasp would propose it.
+        // In no region yet: with the others waiting, under "Other teams".
         "team-revenue": "cerebellum",
       },
-      names: ["Front office", "Back office", "Revenue", ""],
+      names: ["Front office", "Back office", "Other teams", ""],
       does: "Customer service, Mortgage advice, and Client onboarding",
       teamPath: [TEAM_FOLDER, "team-service"],
       unplaced: [],
@@ -76,9 +75,18 @@ describe(atlasOf, () => {
     expect(work.every((note) => note.path[0] === TEAM_FOLDER)).toBeTruthy();
   });
 
-  it("proposes a group for every team the company placed in none, and holds the rest in the last lobe when there are more than four", () => {
-    const none: Workspace = { ...ws, teamGroups: [] };
-    const proposed = groupsOf(none);
+  it("shows the teams in no region, and the regions the four lobes have no room for, together under Other teams", () => {
+    const none = groupsOf({ ...ws, teamGroups: [] });
+    const five: Workspace = {
+      ...ws,
+      teamGroups: ws.teams.slice(0, 5).map((team) => ({
+        id: `g-${team.id}`,
+        name: team.name,
+        teamIds: [team.id],
+        confirmed: true,
+      })),
+    };
+    const many = groupsOf(five);
     const partly: Workspace = {
       ...ws,
       teamGroups: [
@@ -91,16 +99,18 @@ describe(atlasOf, () => {
       ],
     };
     expect({
-      lobes: proposed.length,
-      confirmed: proposed.some((group) => group.confirmed),
-      teams: proposed.flatMap((group) => group.teamIds).toSorted(),
-      lastHoldsMore: (proposed.at(-1)?.teamIds.length ?? 0) > 1,
+      none: none.map(({ id, teamIds }) => ({ id, teams: teamIds.length })),
+      many: many.map(({ id }) => id),
+      // The fourth lobe holds every team past the third region, and those in none.
+      rest: many.at(-1)?.teamIds.toSorted(),
       partly: groupsOf(partly)[0],
     }).toStrictEqual({
-      lobes: LOBES.length,
-      confirmed: false,
-      teams: ws.teams.map((team) => team.id).toSorted(),
-      lastHoldsMore: true,
+      none: [{ id: OTHER_TEAMS, teams: ws.teams.length }],
+      many: [...five.teamGroups.slice(0, 3).map(({ id }) => id), OTHER_TEAMS],
+      rest: ws.teams
+        .slice(3)
+        .map((team) => team.id)
+        .toSorted(),
       partly: {
         id: "g",
         name: "Front office",
@@ -163,28 +173,9 @@ describe(atlasOf, () => {
   });
 });
 
-describe(storyOf, () => {
+describe(signalPaths, () => {
   const ws = testWorkspace();
-  const brain = buildBrain(ws);
-  const atlas = atlasOf(ws, brain);
-
-  it("tells every region with teams in a few lines, each lighting up notes of the brain, ending with what is open", () => {
-    const known = new Set(brain.notes.map((note) => note.id));
-    for (const id of REGION_IDS.filter((each) => each !== "temporal")) {
-      const lines = storyOf(id, atlas, ws);
-      expect(lines.length).toBeGreaterThanOrEqual(1);
-      for (const line of lines) {
-        expect(line.text.length).toBeGreaterThan(0);
-        expect(line.notes.length).toBeGreaterThan(0);
-        expect(line.notes.every((note) => known.has(note))).toBeTruthy();
-      }
-    }
-    const front = storyOf("parietal", atlas, ws).map((line) => line.text);
-    expect(front[0]).toMatch(
-      /^Customer service, Mortgage advice, and Client onboarding work here, on \d+ pieces? of work/u
-    );
-    expect(front.at(-1)).toMatch(/^Still open: /u);
-  });
+  const atlas = atlasOf(ws, buildBrain(ws));
 
   it("runs each statement from the source that heard it, up the spine, to the teams and the work it is about", () => {
     const paths = signalPaths(ws, atlas);
@@ -192,11 +183,5 @@ describe(storyOf, () => {
     expect(
       paths.every((path) => path[0] === "stem" && path.length >= 2)
     ).toBeTruthy();
-  });
-
-  it("tells the same story every time", () => {
-    expect(storyOf("parietal", atlas, ws)).toStrictEqual(
-      storyOf("parietal", atlas, ws)
-    );
   });
 });

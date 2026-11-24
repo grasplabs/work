@@ -161,7 +161,7 @@ export const PlatformReveal = () => {
   }
   return (
     <DotsBuild
-      className={stylex.props(styles.layer).className ?? ""}
+      layer={styles.layer}
       from={from}
       label={t`Opening Grasp`}
       onEnd={endReveal}
