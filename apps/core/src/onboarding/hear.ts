@@ -16,10 +16,11 @@ import { errorResponse } from "../errors.ts";
 import { models } from "../models.ts";
 import type { Listening } from "../models.ts";
 import { boundedBytes } from "../request-body.ts";
+import { transcriptionModel } from "../transcription.ts";
 import { interviewCaller } from "./interview-caller.ts";
 import { linkHeaders, linkRefusal, noCallerRefusal } from "./links.ts";
 import { onboardingStore } from "./store.ts";
-import { heardBudgets, transcriptionModel } from "./transcription.ts";
+import { heardBudgets } from "./transcription.ts";
 
 // `POST /api/interview/hear` (`@grasp-os/shared/interview-hear`): a
 // stretch of what someone said on their interview link, written down from
