@@ -221,12 +221,13 @@ describe("connecting a Composio toolkit", () => {
     ]);
   });
 
-  it("needs the consent, word for word, and only tools the toolkit has", async () => {
+  it("needs the consent, word for word, and only tools the toolkit has and isn't retiring", async () => {
     const admin = someone("admin");
     const starts: Partial<Start>[] = [
       { consent: "I agree" },
       { consent: `${composioConsentText} ` },
       { tools: ["HUBSPOT_LIST_CONTACTS", "HUBSPOT_EXPORT_EVERYTHING"] },
+      { tools: ["HUBSPOT_LIST_CONTACTS", "HUBSPOT_EXPORT_CONTACTS"] },
       { tools: [] },
       { tools: ["HUBSPOT_LIST_CONTACTS", "HUBSPOT_LIST_CONTACTS"] },
     ];
@@ -964,11 +965,17 @@ describe("changing what a connected Composio toolkit may do", () => {
     });
   });
 
-  it("allows only tools the toolkit has, of a connection it can change, and changes nothing at Composio otherwise", async () => {
+  it("allows only tools the toolkit has and isn't retiring, of a connection it can change, and changes nothing at Composio otherwise", async () => {
     const admin = someone("admin");
     const connectionId = await connectHubSpot(admin);
     const ends = [
       await outcome(change(admin, connectionId, ["HUBSPOT_EXPORT_EVERYTHING"])),
+      await outcome(
+        change(admin, connectionId, [
+          "HUBSPOT_LIST_CONTACTS",
+          "HUBSPOT_EXPORT_CONTACTS",
+        ])
+      ),
       await outcome(change(admin, connectionId, [])),
       await outcome(
         change(admin, "no-such-connection", ["HUBSPOT_LIST_CONTACTS"])
@@ -981,6 +988,7 @@ describe("changing what a connected Composio toolkit may do", () => {
 
     expect({ ends, updates: updates() }).toStrictEqual({
       ends: [
+        "connection.invalid",
         "connection.invalid",
         "connection.invalid",
         "connect.connection_not_found",

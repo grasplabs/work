@@ -261,6 +261,8 @@ const toolSchema = z.object({
     .nullish(),
   /** Its behaviour tags, read on their own ({@link tagsSchema}). */
   tags: z.unknown().optional(),
+  /** Whether Composio is retiring it, read on its own (`isDeprecated`). */
+  is_deprecated: z.unknown().optional(),
 });
 
 /**
@@ -449,8 +451,24 @@ export const catalog = async (env: Env): Promise<Catalog> => {
 };
 
 /**
+ * Whether Composio marks a tool deprecated, on its way out: such a tool is
+ * neither listed nor allowed. A mark connect can't read counts as none,
+ * so the tool stays listed, and is logged.
+ */
+const isDeprecated = (
+  toolkit: string,
+  { slug, is_deprecated: deprecated }: z.infer<typeof toolSchema>
+): boolean => {
+  if (typeof deprecated !== "boolean") {
+    log.warn("catalog.tool_deprecation_unreadable", { toolkit, tool: slug });
+    return false;
+  }
+  return deprecated;
+};
+
+/**
  * A listed Composio toolkit's tools, by the names its MCP server gives
- * them, as Composio lists them now.
+ * them, as Composio lists them now, but for those it marks deprecated.
  */
 const toolsOf = async (
   key: string,
@@ -462,13 +480,15 @@ const toolsOf = async (
     toolSchema,
     toolPaging
   );
-  return tools.map(({ slug, description, input_parameters: input, tags }) => ({
-    name: slug,
-    description: description ?? null,
-    inputs: Object.keys(input?.properties ?? {}),
-    // Strictly the tag: a tool that says nothing isn't taken for a read.
-    readOnly: tagsSchema.safeParse(tags).data?.includes(readOnlyTag) === true,
-  }));
+  return tools
+    .filter((tool) => !isDeprecated(toolkit, tool))
+    .map(({ slug, description, input_parameters: input, tags }) => ({
+      name: slug,
+      description: description ?? null,
+      inputs: Object.keys(input?.properties ?? {}),
+      // Strictly the tag: a tool that says nothing isn't taken for a read.
+      readOnly: tagsSchema.safeParse(tags).data?.includes(readOnlyTag) === true,
+    }));
 };
 
 /**
