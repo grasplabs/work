@@ -15,7 +15,14 @@ import {
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
 import { RunBeside } from "./run-detail.tsx";
 
@@ -139,7 +146,15 @@ const press = async (text: string): Promise<void> => {
 };
 
 describe("a run opened beside the page", () => {
+  // A phone's page: the run opens in a Sheet over its list.
+  beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ width: 390, height: 600 })
+    );
+  });
+
   afterEach(() => {
+    vi.restoreAllMocks();
     act(() => {
       root?.unmount();
     });

@@ -374,9 +374,10 @@ export const Traces = ({
     onCloseRun?.();
   };
   // The run the address names: one of the table's, or Run's "Open the run".
+  // Open only while the runs show: Activity hides it, and Runs shows it again.
   const { opened, notFound, onDismiss } = useAddressedRun(
     runs.state === "ready" ? runs.data : undefined,
-    openRun,
+    part === "runs" ? openRun : undefined,
     close
   );
   // The opened run's status, as its followed trace last said it.

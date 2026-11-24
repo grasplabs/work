@@ -9,9 +9,9 @@ import type { Person } from "./people.ts";
 // gathered by the phase it stands in (a live one running, one with no
 // version yet building); its runs a page of their own, Workflows › Runs,
 // filtered by status in the address; and a run opened beside a workflow's
-// runs, which its address keeps open across a reload. An address the
-// pages don't know (a status, a view, a run the person can't open) opens
-// the page as it is without it.
+// runs, which its address keeps open across a reload, and open only while
+// its list shows. An address the pages don't know (a status, a view, a run
+// the person can't open) opens the page as it is without it.
 
 /** How long a read from core may take to show. */
 const pageRead = { timeout: 15_000 };
@@ -154,4 +154,54 @@ test("an address the workflows pages don't know opens them as they are without i
   await expect(page).not.toHaveURL(/[?&]run=/u);
   await page.goBack();
   await expect(page).toHaveURL(/\/workflows$/u);
+});
+
+test("a run is open only while its list shows: Activity hides it and Runs shows it again, and a run's address alone opens Runs with it", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("workflowOverview");
+  const live = await made(builder, "Order intake", waiting("1 hour"), true);
+  const page = await pageOf(builder);
+  await page.goto(`/workflows/${live}?view=runs`);
+  await page
+    .getByRole("table", { name: "Runs" })
+    .getByRole("link")
+    .first()
+    .click(pageRead);
+  await expect(page).toHaveURL(/[?&]run=/u);
+  const run = new URL(page.url()).searchParams.get("run") ?? "";
+  const opened = page.getByRole("complementary", {
+    name: /^The run started/u,
+  });
+  const views = page.getByRole("navigation", { name: "Workflow views" });
+
+  // Wide: the run beside its list. Activity hides both and opens nothing
+  // over the page; Runs shows them again, and the page answers throughout.
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.goto(`/workflows/${live}?view=runs&run=${run}`);
+  await expect(opened).toBeVisible(pageRead);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.getByRole("tab", { name: /^Activity/u }).click();
+  await expect(opened).toBeHidden();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  const runsTab = page.getByRole("tab", { name: "Runs", exact: true });
+  await runsTab.click();
+  await expect(runsTab).toHaveAttribute("aria-selected", "true");
+  await expect(opened).toBeVisible(pageRead);
+  await expect(page).toHaveURL(new RegExp(`[?&]run=${run}`, "u"));
+
+  // A run's address with no view: Runs, with the run open; closed, the
+  // page stays on Runs and answers.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`/workflows/${live}?run=${run}`);
+  await expect(views.locator('[aria-current="page"]')).toHaveText(
+    "Runs",
+    pageRead
+  );
+  await expect(opened).toBeVisible(pageRead);
+  await opened.getByRole("button", { name: "Close" }).click();
+  await expect(page).not.toHaveURL(/[?&]run=/u);
+  await expect(views.locator('[aria-current="page"]')).toHaveText("Runs");
+  await views.getByRole("link", { name: "Settings" }).click();
+  await expect(page).toHaveURL(/[?&]view=settings/u);
 });

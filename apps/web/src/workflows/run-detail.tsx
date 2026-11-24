@@ -439,23 +439,31 @@ const RunPanel = ({
 };
 
 /**
+ * Whether a list `width` wide has room for a run beside it; undefined for
+ * none: a list that isn't shown (another view or part shows) has no width,
+ * and is neither wide nor narrow.
+ */
+const fits = (width: number): boolean | undefined =>
+  width === 0 ? undefined : width >= besideFrom;
+
+/**
  * Whether the list's box (`measure`, its ref) is wide enough for a run
- * beside it; undefined until it is measured. Measured as the box is
- * attached, before the first paint, so a run opened by its address mounts
- * once, where it belongs, and is read once: never beside the list first
- * on a phone, then again in a Sheet.
+ * beside it; undefined until it is measured, and while it isn't shown.
+ * Measured as the box is attached, before the first paint, so a run opened
+ * by its address mounts once, where it belongs, and is read once: never
+ * beside the list first on a phone, then again in a Sheet.
  */
 const useWide = () => {
   const [wide, setWide] = useState<boolean>();
   const measure = (element: HTMLDivElement | null) => {
     if (element !== null) {
-      setWide(element.getBoundingClientRect().width >= besideFrom);
+      setWide(fits(element.getBoundingClientRect().width));
     }
     const watch =
       element === null || typeof ResizeObserver === "undefined"
         ? undefined
         : new ResizeObserver(([entry]) => {
-            setWide((entry?.contentRect.width ?? 0) >= besideFrom);
+            setWide(fits(entry?.contentRect.width ?? 0));
           });
     if (element !== null) {
       watch?.observe(element);

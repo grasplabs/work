@@ -151,6 +151,17 @@ describe("a workflow's runs, with a run named by the address", () => {
     }).toStrictEqual({ reads: ["run-1"], beside: true });
   });
 
+  it("opens nothing, beside or in a sheet, while its list isn't shown", async () => {
+    pageWidth(0);
+    const { reads } = await shown("run-1");
+
+    expect({
+      reads,
+      panel: panel(),
+      dialog: document.querySelector('[role="dialog"]'),
+    }).toStrictEqual({ reads: [], panel: null, dialog: null });
+  });
+
   it("says a run it doesn't list wasn't found or isn't theirs, reads nothing and leaves the address", async () => {
     pageWidth(1200);
     const { reads, closes } = await shown("run-of-someone-else");
