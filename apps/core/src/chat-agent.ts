@@ -648,7 +648,7 @@ export const chatAgent = (agent: ChatAgent): Extension => {
     // started asks a few in all, then proposes what to make: its questions
     // are counted from the transcript, so none is offered once spent.
     ...(agent.context.channel === undefined && asksLeft > 0
-      ? [askQuestions(asksLeft)]
+      ? [askQuestions(Math.min(asksLeft, chatAskLimits.questions))]
       : []),
     ...(plans ? [proposePlan()] : []),
     // An agent drafted for the person, only in a turn they asked for in
