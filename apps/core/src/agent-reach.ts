@@ -1,4 +1,5 @@
 import { agentErrors } from "@grasp-os/shared/agent";
+import type { AgentAudience } from "@grasp-os/shared/agents";
 import type { ToolClassAudience } from "@grasp-os/shared/connect";
 import type { StephenFor } from "@grasp-os/shared/stephen-reach";
 import { and, eq } from "drizzle-orm";
@@ -25,6 +26,15 @@ import { audienceOf, off, takesIn } from "./tool-classes.ts";
 //   `requireToolClassOn`) after the company's own setting and the app's,
 //   never instead of them.
 //
+// An agent's audience may also be its maker alone (`maker`): the person
+// its `made_by` names, by that ID and no other, so an admin may make an
+// agent for themselves among the company's. Being its maker is all it
+// asks, as being in a team is all a team's audience asks: whether that
+// person may act at all (a suspension, a removal) is decided where every
+// turn and call is (auth/membership-sql.ts, `mayAct`), and their role
+// counts for nothing. An erased maker's ID stays on the agent; nobody
+// else is ever given it, nor do they sign in again, so it answers nobody.
+//
 // A person's own agent (agents.ts) has none of the three: it reaches its
 // owner, in Grasp's own chat, and nobody anywhere else. Its classes are
 // as the company has each class for that person, with no row to narrow
@@ -37,7 +47,8 @@ import { audienceOf, off, takesIn } from "./tool-classes.ts";
 // gate on a turn.
 //
 // The ways it can fail, which the tests start from: an agent reaching
-// someone outside its audience, or in a place it is off in; one agent's
+// someone outside its audience, or in a place it is off in; an agent for
+// its maker reaching anyone but the person its `made_by` names; one agent's
 // settings read for another; an agent having a class for someone the
 // company doesn't, or the app doesn't; a row that can't be read letting
 // someone in.
@@ -48,6 +59,12 @@ const defaultReach = { on: true, audience: { who: "everyone" } } as const;
 /** The audience a stored row narrows to; off when it can't be read. */
 const narrowedTo = (row: { who: string; teams: string }): ToolClassAudience =>
   audienceOf(row) ?? off;
+
+/** The agent's audience a stored reach row says; off when it can't be read. */
+export const agentAudienceOf = (row: {
+  who: string;
+  teams: string;
+}): AgentAudience => (row.who === "maker" ? { who: "maker" } : narrowedTo(row));
 
 /**
  * What the agent `agentId` does for `userId` in `place`, a chat platform
@@ -69,7 +86,7 @@ export const agentFor = async (
   }
   const db = drizzle(env.DB);
   const owned = await db
-    .select({ ownerId: agents.ownerId })
+    .select({ ownerId: agents.ownerId, madeBy: agents.madeBy })
     .from(agents)
     .where(eq(agents.id, agentId))
     .get();
@@ -92,13 +109,18 @@ export const agentFor = async (
           .get(),
   ]);
   const on = whole?.on ?? defaultReach.on;
-  const audience: ToolClassAudience =
-    whole === undefined ? defaultReach.audience : narrowedTo(whole);
+  const audience: AgentAudience =
+    whole === undefined ? defaultReach.audience : agentAudienceOf(whole);
   const inPlace =
     row === undefined ||
     row.who === "asAgent" ||
     (await takesIn(env, narrowedTo(row), userId));
-  const reaches = on && (await takesIn(env, audience, userId)) && inPlace;
+  // Its maker by the ID its row keeps; an agent without a row has none.
+  const inAudience =
+    audience.who === "maker"
+      ? owned !== undefined && owned.madeBy === userId
+      : await takesIn(env, audience, userId);
+  const reaches = on && inAudience && inPlace;
   return { reaches, acts: reaches && (row?.acts ?? true) };
 };
 
