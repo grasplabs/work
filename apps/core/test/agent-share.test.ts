@@ -86,6 +86,7 @@ describe("a person's own agent offered to the company", slow, () => {
           state: "on",
           ownerId: ann.userId,
           offeredAt: asOwned?.offeredAt,
+          madeBy: ann.userId,
           changedBy: ann.userId,
           changedAt: asOwned?.changedAt,
         },

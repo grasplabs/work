@@ -47,9 +47,9 @@ export const SaveAsBlueprint = ({
       setSaved(true);
     },
     {
-      loadingLabel: t`Saving`,
-      successLabel: t`Saved`,
-      errorLabel: t`Could not save`,
+      loadingText: t`Saving`,
+      successText: t`Saved`,
+      errorText: t`Could not save`,
     }
   );
   return (
@@ -92,13 +92,13 @@ export const SaveAsBlueprint = ({
                 <DialogClose>{t`Cancel`}</DialogClose>
                 <Button
                   variant="default"
-                  errorLabel={save.labels.error}
-                  loadingLabel={save.labels.loading}
+                  errorText={save.labels.error}
+                  loadingText={save.labels.loading}
                   onClick={() => {
                     void save.run();
                   }}
                   status={save.status}
-                  successLabel={save.labels.success}
+                  successText={save.labels.success}
                 >
                   {t`Save as blueprint`}
                 </Button>

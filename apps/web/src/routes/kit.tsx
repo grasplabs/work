@@ -147,7 +147,6 @@ import {
   TooltipTrigger,
 } from "@grasp-os/app-kit/components/tooltip";
 import { cn } from "@grasp-os/app-kit/lib/utils";
-import { Button as DamskoButton } from "@grasp-os/ui/components/button";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import {
   BookOpenIcon,
@@ -225,26 +224,6 @@ const badgeVariants = [
   "ghost",
   "link",
 ] as const;
-
-/**
- * Damsko, the design system the product moves to (packages/ui): one of its
- * components, drawn by its own StyleX styles and tokens beside the kit's.
- */
-const Damsko = () => (
-  <Card>
-    <CardHeader>
-      <CardTitle>Damsko</CardTitle>
-      <CardDescription>
-        A button from the design system, installed in packages/ui.
-      </CardDescription>
-    </CardHeader>
-    <CardContent>
-      <div className="flex">
-        <DamskoButton variant="default">Save changes</DamskoButton>
-      </div>
-    </CardContent>
-  </Card>
-);
 
 /** The Grasp theme: its colours and type, and each variant. */
 const Theme = () => (
@@ -777,8 +756,6 @@ const Kit = () => (
         </div>
 
         <Theme />
-
-        <Damsko />
 
         <Frame />
 

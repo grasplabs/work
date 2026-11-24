@@ -68,8 +68,8 @@ export const ResetTestData = ({
           <AlertDialogFooter>
             <AlertDialogCancel />
             <Button
-              errorLabel={t`Could not reset`}
-              loadingLabel={t`Resetting`}
+              errorText={t`Could not reset`}
+              loadingText={t`Resetting`}
               onClick={async () => {
                 await reset();
                 setAsking(false);

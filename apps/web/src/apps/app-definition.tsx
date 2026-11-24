@@ -59,9 +59,9 @@ export const ExportDefinition = ({
       );
     },
     {
-      loadingLabel: t`Exporting`,
-      successLabel: t`Exported`,
-      errorLabel: t`Could not export`,
+      loadingText: t`Exporting`,
+      successText: t`Exported`,
+      errorText: t`Could not export`,
     }
   );
   if (!exportsDefinition(app, identity)) {
@@ -72,13 +72,13 @@ export const ExportDefinition = ({
   return (
     <>
       <Button
-        errorLabel={save.labels.error}
-        loadingLabel={save.labels.loading}
+        errorText={save.labels.error}
+        loadingText={save.labels.loading}
         onClick={() => {
           void save.run();
         }}
         status={save.status}
-        successLabel={save.labels.success}
+        successText={save.labels.success}
         variant="outline"
       >
         <Icon icon={DownloadIcon} />

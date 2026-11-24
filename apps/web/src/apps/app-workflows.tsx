@@ -188,8 +188,8 @@ const BindDialog = ({
           <DialogClose>{t`Cancel`}</DialogClose>
           <Button
             disabled={busy || workflow === null || revision === undefined}
-            errorLabel={t`Could not change`}
-            loadingLabel={t`Changing`}
+            errorText={t`Could not change`}
+            loadingText={t`Changing`}
             onClick={bind}
             size="sm"
             variant="default"

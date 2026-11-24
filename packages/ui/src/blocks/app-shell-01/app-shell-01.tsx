@@ -18,6 +18,12 @@
 // On a narrow window (under lg) the sidebar is Sidebar's own sheet from the start, and the panel a
 // Sheet from the end, opened by the header's panel button; a plain link followed in the sidebar's
 // sheet closes it. A block: install it and edit it.
+//
+// It is a window's frame: as tall as the window unless `style` gives it its frame's height, and
+// its two sheets are fixed to the window (the breakpoint is the window's width too). In a box of
+// its own, such as a gallery's card, the box gives it a height (`style` with `height: "100%"` and
+// `minHeight: 0` fills it) and is the containing block of what is fixed (`contain: layout`, or a
+// transform), so the sheets open in the box.
 "use client";
 
 import * as stylex from "@stylexjs/stylex";

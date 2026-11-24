@@ -256,7 +256,7 @@ export const ReleaseDialog = ({
           <DialogClose>{t`Cancel`}</DialogClose>
           <Button
             disabled={!ready}
-            errorLabel={t`Didn't work`}
+            errorText={t`Didn't work`}
             onClick={async () => {
               await confirm();
               onClose();

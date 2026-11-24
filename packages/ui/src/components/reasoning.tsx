@@ -1,11 +1,9 @@
-// Reasoning: the assistant's thinking, behind one quiet line that opens, from shadcn's Reasoning
-// pattern (content/docs/ai-elements/base/reasoning.mdx), built as it builds it: a Trace with a
-// TraceCollapsible, its line a TraceLine with a TraceIcon and a TraceTitle. While it streams the line
-// runs (`status="running"`: Trace shimmers its title) and the thoughts show open; a second after it
-// ends it settles into how long it thought ("Thought for 6 seconds") and closes, unless the person
-// opened or closed it meanwhile: their choice wins. It measures the time itself when no `duration`
-// is given.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
+// Reasoning: the assistant's thinking, behind one quiet line that opens. It is made of Damsko's
+// Trace: a Trace with a TraceCollapsible, its line a TraceLine with a TraceIcon and a TraceTitle.
+// While it streams the line runs (`status="running"`: Trace shimmers its title) and the thoughts
+// show open; a second after it ends it settles into how long it thought ("Thought for 6 seconds")
+// and closes, unless the person opened or closed it meanwhile: their choice wins. It measures the
+// time itself when no `duration` is given.
 //
 //   <Reasoning isStreaming={thinking} duration={seconds}>
 //     <ReasoningTrigger />
@@ -102,7 +100,7 @@ interface ReasoningState {
   duration: number | undefined;
 }
 
-// How long the thoughts stay open once the thinking has ended (AI Elements' AUTO_CLOSE_DELAY).
+// How long the thoughts stay open once the thinking has ended: a second, long enough to see it end.
 const CLOSE_AFTER = 1000;
 
 // Markdown, loaded the first time the thoughts show; NotYetShown stands in until then.

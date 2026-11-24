@@ -199,8 +199,8 @@ const AddWebhook = ({
           <DialogClose>{t`Cancel`}</DialogClose>
           <Button
             disabled={busy || url.trim() === "" || events.length === 0}
-            errorLabel={t`Could not add`}
-            loadingLabel={t`Adding`}
+            errorText={t`Could not add`}
+            loadingText={t`Adding`}
             onClick={async () => {
               await add();
               setOpen(false);

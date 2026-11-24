@@ -164,17 +164,17 @@ const styles = stylex.create({
   },
   // Each size sets its height and its corner, which the last step's fill meets.
   sm: {
-    "--number-corner": `min(${radius.base}, calc(${sizes.controlSm} / 2))`,
+    "--number-corner": `min(${radius.xl}, calc(${sizes.controlSm} / 2))`,
     minHeight: sizes.controlSm,
     borderRadius: "var(--number-corner)",
   },
   default: {
-    "--number-corner": `min(${radius.base}, calc(${sizes.controlDefault} / 2))`,
+    "--number-corner": `min(${radius.xl}, calc(${sizes.controlDefault} / 2))`,
     minHeight: sizes.controlDefault,
     borderRadius: "var(--number-corner)",
   },
   lg: {
-    "--number-corner": `min(${radius.base}, calc(${sizes.controlLg} / 2))`,
+    "--number-corner": `min(${radius.xl}, calc(${sizes.controlLg} / 2))`,
     minHeight: sizes.controlLg,
     borderRadius: "var(--number-corner)",
   },

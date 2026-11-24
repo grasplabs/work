@@ -2,7 +2,6 @@
 // a Trace with a TraceCollapsible for the run, whose line counts what passed and failed, and
 // one for each suite, open when it has a failure; each test a TraceLine, a failed one opening on its
 // error on the code surface.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <TestResults summary={{ passed: 12, failed: 1, skipped: 1, total: 14, duration: 1840 }}>
 //     <TestResultsHeader />
@@ -46,7 +45,7 @@ import type { IconData } from "../lib/icons";
 import { codeStyles } from "../lib/styles";
 import { colors, space } from "../lib/tokens.stylex";
 import type { LayoutStyle } from "../lib/utils";
-import { Progress } from "./progress";
+import { Progress, ProgressLabel, ProgressValue } from "./progress";
 import {
   Trace,
   TraceCollapsible,
@@ -390,12 +389,14 @@ export const TestResultsProgress = ({ style }: TestResultsProgressProps) => {
     <Progress
       value={summary.passed}
       max={summary.total}
-      label={label}
       getAriaValueText={() => label}
       variant={summary.failed > 0 ? "destructive" : "success"}
       size="sm"
       style={style}
-    />
+    >
+      <ProgressLabel>{label}</ProgressLabel>
+      <ProgressValue />
+    </Progress>
   );
 };
 

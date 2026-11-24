@@ -50,9 +50,9 @@ export const ResetAppData = ({ app }: { app: App }) => {
       await router.invalidate({ sync: true });
     },
     {
-      loadingLabel: t`Resetting`,
-      successLabel: t`Reset`,
-      errorLabel: t`Could not reset`,
+      loadingText: t`Resetting`,
+      successText: t`Reset`,
+      errorText: t`Could not reset`,
     }
   );
   const failure =
@@ -108,10 +108,10 @@ export const ResetAppData = ({ app }: { app: App }) => {
             form={formId}
             type="submit"
             variant="destructive"
-            errorLabel={reset.labels.error}
-            loadingLabel={reset.labels.loading}
+            errorText={reset.labels.error}
+            loadingText={reset.labels.loading}
             status={reset.status}
-            successLabel={reset.labels.success}
+            successText={reset.labels.success}
           >
             {t`Reset for good`}
           </Button>

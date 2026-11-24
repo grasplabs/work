@@ -1,6 +1,5 @@
 // AspectRatio: a box that keeps its width to its height, in StyleX. It holds the room of
 // an image, a video or a map before it loads, so nothing below it moves when it does.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <AspectRatio ratio={16 / 9}><img src={cover} alt="The team at the summit" /></AspectRatio>
 //
@@ -39,7 +38,7 @@ const styles = stylex.create({
     overflow: "hidden",
   }),
   rounded: {
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
   },
 });
