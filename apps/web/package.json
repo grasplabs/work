@@ -26,6 +26,7 @@
     "@stylexjs/stylex": "catalog:",
     "@tanstack/react-router": "catalog:",
     "@ui-sdk/core": "catalog:",
+    "@ui-sdk/react": "catalog:",
     "capnweb": "catalog:",
     "lucide-react": "catalog:",
     "react": "catalog:",

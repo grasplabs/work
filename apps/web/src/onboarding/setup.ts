@@ -149,10 +149,10 @@ export const sourcesFor = (
 };
 
 /** How long the interviews run unless planned otherwise, in days. */
-export const listenDays = 14;
+const listenDays = 14;
 
 /** One team as the brain lays it out: its name and head count. */
-export interface SetupTeam {
+interface SetupTeam {
   id: string;
   name: string;
   people: number;
@@ -233,7 +233,7 @@ export const closesOn = (plan: Pick<Plan, "start" | "days">): string =>
   addDays(plan.start, plan.days - 1);
 
 /** What the brain is drawn from on a step. */
-export interface SetupFacts {
+interface SetupFacts {
   roster: Roster | null;
   listening: Listening;
   /** How much Grasp knows, in percent. */
@@ -373,9 +373,9 @@ export const finishedAt = (
 
 /**
  * Where the admin can go from step `index`, having been as far as
- * `reached`: back a step always, on a step only as far as they have been,
- * and to any step up to there. The way back, the way on, the dots and the
- * arrow keys all go by it.
+ * `reached`: back a step always, and on a step only as far as they have
+ * been. The way back, the way on and the arrow keys go by it; the dots go
+ * to any step up to there by the Stepper's own `reached`.
  */
 export const waysFrom = (
   index: number,
@@ -384,7 +384,6 @@ export const waysFrom = (
 ) => ({
   back: path[index - 1],
   on: index < reached ? path[index + 1] : undefined,
-  open: (at: number) => at <= reached,
 });
 
 /**

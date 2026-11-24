@@ -1022,6 +1022,9 @@ importers:
       '@ui-sdk/core':
         specifier: 'catalog:'
         version: 0.1.0-beta.13
+      '@ui-sdk/react':
+        specifier: 'catalog:'
+        version: 0.1.0-beta.13(@types/react@19.3.0)(@ui-sdk/core@0.1.0-beta.13)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       capnweb:
         specifier: 'catalog:'
         version: 0.12.0
