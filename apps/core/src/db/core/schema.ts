@@ -4316,6 +4316,21 @@ export const appRequests = sqliteTable(
 );
 
 /**
+ * Everyone who asked for an app after the first to ask for it
+ * (catalog-requests.ts), once each: the first is on the request itself
+ * (`requested_by`).
+ */
+export const appRequestAskers = sqliteTable(
+  "app_request_askers",
+  {
+    requestId: text("request_id").notNull(),
+    userId: text("user_id").notNull(),
+    askedAt: timestamp("asked_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.requestId, table.userId] })]
+);
+
+/**
  * A person's ask to share one of their own skills with the company or one
  * of their teams (skill-shares.ts, GRA-1754, GRA-1844). `text` is the exact
  * `SKILL.md` they asked to share, kept only while it waits: an admin

@@ -67,30 +67,73 @@ describe("app requests", { timeout: 60_000 }, () => {
     expect(JSON.stringify(audited)).not.toMatch(/Exact|invoices|exact\.com/u);
   });
 
-  it("keep one request for an app, however its name is written, the first, recording nothing more", async () => {
+  it("keep one request for an app, however its name is written, as the first to ask wrote it, with everyone who asked after among its askers", async () => {
     const [first, second] = await Promise.all([
       signedInApi(idp, "user"),
       signedInApi(idp, "admin"),
     ]);
     const name = `AFAS Profit ${unique()}`;
     const asked = await first.api.connections.requestApp({ name });
+    expect(asked.askers).toStrictEqual([
+      { userId: first.userId, askedAt: asked.requestedAt },
+    ]);
 
+    const joined: AppRequest[] = [];
     const audited = await auditedDuring(async () => {
-      await expect(
-        second.api.connections.requestApp({
+      joined.push(
+        await second.api.connections.requestApp({
           name: name.toUpperCase(),
           why: "Payroll",
         })
-      ).resolves.toStrictEqual(asked);
+      );
     });
 
-    expect(audited).toStrictEqual([]);
-    const listed = await second.api.connections.appRequests();
+    // The first request stands as it was written; the second person is
+    // on it, and their asking is on record as theirs.
+    expect(
+      joined.map(({ askers, ...request }) => ({
+        ...request,
+        askers: askers.map(({ userId }) => userId),
+      }))
+    ).toStrictEqual([{ ...asked, askers: [first.userId, second.userId] }]);
+    expect(audited).toStrictEqual([
+      expect.objectContaining({
+        actor: { type: "person", userId: second.userId },
+        action: "connection.app_requested",
+        target: { type: "app_request", id: asked.id },
+      }),
+    ]);
+    const listed = await first.api.connections.appRequests();
     expect(
       listed.filter(
         ({ name: each }) => each.toLowerCase() === name.toLowerCase()
       )
-    ).toHaveLength(1);
+    ).toStrictEqual(joined);
+  });
+
+  it("count someone who asks for the same app again once, the first to ask and anyone after, recording nothing more", async () => {
+    const [first, second] = await Promise.all([
+      signedInApi(idp, "user"),
+      signedInApi(idp, "builder"),
+    ]);
+    const name = `Moneybird ${unique()}`;
+    const asked = await first.api.connections.requestApp({ name });
+    const joined = await second.api.connections.requestApp({ name });
+
+    const audited = await auditedDuring(async () => {
+      await expect(
+        Promise.all([
+          first.api.connections.requestApp({ name: name.toLowerCase() }),
+          second.api.connections.requestApp({ name: name.toUpperCase() }),
+        ])
+      ).resolves.toStrictEqual([joined, joined]);
+    });
+
+    expect(audited).toStrictEqual([]);
+    expect(joined.askers.map(({ userId }) => userId)).toStrictEqual([
+      asked.requestedBy.userId,
+      second.userId,
+    ]);
   });
 
   it("refuse a request it can't keep, Grasp staff, and anyone signed out, keeping and recording nothing", async () => {

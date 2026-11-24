@@ -50,6 +50,7 @@ const earlier: AppRequest = {
   url: null,
   requestedBy: { userId: "u1", name: "Sanne" },
   requestedAt: "2026-10-01T08:00:00.000Z",
+  askers: [{ userId: "u1", askedAt: "2026-10-01T08:00:00.000Z" }],
 };
 
 let root: Root | undefined;
