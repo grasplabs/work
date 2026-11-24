@@ -4,12 +4,6 @@
 // a few.
 import { AgentIndicator } from "@grasp-os/ui/components/agent-indicator";
 import { Button } from "@grasp-os/ui/components/button";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyTitle,
-} from "@grasp-os/ui/components/empty";
 import { Heading } from "@grasp-os/ui/components/heading";
 import {
   Sheet,
@@ -25,7 +19,12 @@ import { Icon, MonitorIcon } from "@grasp-os/ui/lib/icons";
 import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 
-import { AskAction, askLine, useAsksDone } from "./campaign-asks.tsx";
+import {
+  AskAction,
+  askLine,
+  asksInOrder,
+  useAsksDone,
+} from "./campaign-asks.tsx";
 import { findingSentence, talkedWords, whenWords } from "./campaign-words.ts";
 import { findingsOf } from "./fixtures.ts";
 import type { Campaign } from "./fixtures.ts";
@@ -107,15 +106,18 @@ export const AskList = ({ campaign }: { campaign: Campaign }) => {
   }
   return (
     <ul aria-label="For you" {...stylex.props(styles.asks)}>
-      {campaign.asks.map((ask) => (
+      {asksInOrder(campaign.asks).map((ask, index) => (
         <li key={ask.id} {...stylex.props(styles.ask)}>
-          <Text size="lg">{askLine(ask, isDone(ask))}</Text>
+          <Text size="lg" color={index === 0 ? "default" : "muted"}>
+            {askLine(ask, isDone(ask))}
+          </Text>
           <AskAction
             ask={ask}
             done={isDone(ask)}
             onDone={() => {
               markDone(ask);
             }}
+            quiet={index > 0}
           />
         </li>
       ))}
@@ -225,14 +227,9 @@ export const RunningLine = ({
   );
 };
 
-/** Before the first finding: what will appear here, and when. */
+/** Before the first finding: what will appear, and when, in one line at the page's edge. */
 export const NothingYet = () => (
-  <Empty size="sm">
-    <EmptyHeader>
-      <EmptyTitle>Nothing learned yet</EmptyTitle>
-      <EmptyDescription>
-        What we learn appears here from day two, once the first few have talked.
-      </EmptyDescription>
-    </EmptyHeader>
-  </Empty>
+  <Text size="lg" color="muted">
+    Nothing learned yet. The first findings come on day two.
+  </Text>
 );

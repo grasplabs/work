@@ -34,18 +34,20 @@ const styles = stylex.create({
     flexDirection: "column",
     alignItems: "flex-start",
     gap: space[3],
-    maxWidth: "40rem",
   },
+  // The findings across the meadow's width: three side by side on a wide screen.
   three: {
-    display: "flex",
-    flexDirection: "column",
-    gap: space[3],
-    maxWidth: "40rem",
+    display: "grid",
+    gridTemplateColumns: {
+      default: "repeat(3, minmax(0, 1fr))",
+      [media.maxMd]: "minmax(0, 1fr)",
+    },
+    columnGap: space[10],
+    rowGap: space[4],
     margin: 0,
     padding: 0,
     listStyle: "none",
   },
-  asks: { maxWidth: "40rem" },
 });
 
 /** The first finding of each team, up to three: one look across the company. */
@@ -99,9 +101,7 @@ export const CampaignMeadow = ({ campaign }: { campaign: Campaign }) => {
       )}
       {campaign.asks.length === 0 ? null : (
         <div {...stylex.props(wide.only)}>
-          <div {...stylex.props(styles.asks)}>
-            <AskList campaign={campaign} />
-          </div>
+          <AskList campaign={campaign} />
         </div>
       )}
       <div {...stylex.props(wide.only)}>
