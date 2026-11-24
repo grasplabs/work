@@ -178,11 +178,14 @@ export const appToolsOf = (
 /**
  * `allowed` after a change from the app's page: a tool set to Never is
  * taken away, one set to Read or Write is allowed as that, keeping its
- * resource rule. Tools the change doesn't name stay as they were.
+ * resource rule. Tools the change doesn't name stay as they were, and so
+ * does a tool the toolkit no longer offers (not in `offered`) unless it is
+ * taken away: connect keeps such a tool only with its rule unchanged.
  */
 export const withChoices = (
   allowed: readonly AllowedTool[],
-  changes: readonly { id: string; choice: AppToolChoice }[]
+  changes: readonly { id: string; choice: AppToolChoice }[],
+  offered: ReadonlySet<string>
 ): AllowedTool[] => {
   const next = new Map(changes.map(({ id, choice }) => [id, choice]));
   const kept = allowed.flatMap((tool) => {
@@ -190,7 +193,12 @@ export const withChoices = (
     if (choice === undefined) {
       return [tool];
     }
-    return choice === "never" ? [] : [{ ...tool, read: choice === "read" }];
+    if (choice === "never") {
+      return [];
+    }
+    return offered.has(tool.name)
+      ? [{ ...tool, read: choice === "read" }]
+      : [tool];
   });
   const known = new Set(allowed.map(({ name }) => name));
   const added = changes

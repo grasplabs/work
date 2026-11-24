@@ -450,6 +450,20 @@ describe("changing what Grasp may do in a connected app", () => {
     });
   });
 
+  it("only takes away a tool the toolkit no longer offers: another choice leaves its rule as it was", async () => {
+    const retired = {
+      ...connection,
+      tools: ["HUBSPOT_LIST_CONTACTS", "HUBSPOT_ARCHIVED_TOOL"],
+      readTools: ["HUBSPOT_LIST_CONTACTS", "HUBSPOT_ARCHIVED_TOOL"],
+    };
+    const sent = await shown(retired);
+    await openGroup("Other");
+    // Connect would refuse its rule changed: nothing is sent.
+    await pick("Archived tool", "Write");
+
+    expect(sent).toStrictEqual([]);
+  });
+
   it("keeps the last tool allowed", async () => {
     const one = { ...connection, tools: ["HUBSPOT_LIST_CONTACTS"] };
     const sent = await shown(one);

@@ -115,7 +115,15 @@ export const IntegrationAppPage = ({
       return;
     }
     const allowed = allowedOf(changeable);
-    const next = withChoices(allowed, changes);
+    const offered = new Set(
+      tools?.state === "ready" ? tools.data.map(({ name }) => name) : []
+    );
+    const next = withChoices(allowed, changes, offered);
+    if (
+      JSON.stringify(toolRules(next)) === JSON.stringify(toolRules(allowed))
+    ) {
+      return;
+    }
     if (next.length === 0) {
       toast.error(
         t`A connection allows at least one tool. Disconnect it instead.`
