@@ -413,7 +413,7 @@ const StartDialog = ({
           </form>
         </DialogBody>
         <DialogFooter>
-          <DialogClose size="default">{t`Close`}</DialogClose>
+          <DialogClose>{t`Close`}</DialogClose>
           {/* Once started, the next step is to see it: Open the run takes
               Start's place, and Close closes as before. */}
           {runId !== undefined && onOpenRun !== undefined ? (

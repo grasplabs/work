@@ -489,8 +489,8 @@ msgid "{count, plural, one {From your last run of {workflow}, version {version},
 msgstr "{count, plural, one {De tu última ejecución de {workflow}, versión {version}, que salió bien el {ended}.} other {De tus últimas # ejecuciones de {workflow}, versión {version}, que salieron todas bien, la última el {ended}.}}"
 
 #: src/drafts/share-with-team.tsx
-msgid "{count, plural, one {It can't be shared yet: # problem} other {It can't be shared yet: # problems}}"
-msgstr "{count, plural, one {Aún no se puede compartir: # problema} other {Aún no se puede compartir: # problemas}}"
+msgid "{count, plural, one {It can't be published yet: # problem} other {It can't be published yet: # problems}}"
+msgstr "{count, plural, one {Aún no se puede publicar: # problema} other {Aún no se puede publicar: # problemas}}"
 
 #: src/workflows/run-detail.tsx
 msgid "{count, plural, one {It started without # kept value: the run that kept it read something that is no longer there to read.} other {It started without # kept values: the runs that kept them read something that is no longer there to read.}}"
@@ -1036,6 +1036,10 @@ msgstr "{name} está borrado."
 #: src/brain/brain-atlas.ts
 msgid "{name} is invited but not interviewed yet."
 msgstr "{name} está invitado, pero aún no entrevistado."
+
+#: src/drafts/share-with-team.tsx
+msgid "{name} is live"
+msgstr "{name} está publicada"
 
 #: src/brain/brain-atlas.ts
 msgid "{name} is named, but not seen in use yet."
@@ -2132,6 +2136,14 @@ msgctxt "who reaches a table's records"
 msgid "Access"
 msgstr "Acceso"
 
+#: src/drafts/share-access.tsx
+msgid "Access for {name}"
+msgstr "Acceso para {name}"
+
+#: src/drafts/share-access.tsx
+msgid "Access for who you add"
+msgstr "Acceso para quien añadas"
+
 #: src/agents/agent-page.tsx
 msgid "Access isn't shown"
 msgstr "El acceso no se muestra"
@@ -2175,7 +2187,6 @@ msgstr "Acción"
 
 #: src/apps/app-workflows.tsx
 #: src/apps/resource-bindings.tsx
-#: src/drafts/sharing.tsx
 msgid "Actions"
 msgstr "Acciones"
 
@@ -2233,6 +2244,8 @@ msgstr "Actividad"
 #: src/agents/agent-apps-card.tsx
 #: src/apps/indexes-view.tsx
 #: src/chat/composer.tsx
+#: src/drafts/share-access.tsx
+#: src/drafts/share-with-team.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/directory-placement.tsx
@@ -2356,6 +2369,10 @@ msgstr "Añadir índice"
 #: src/apps/field-editor.tsx
 msgid "Add option"
 msgstr "Añadir opción"
+
+#: src/drafts/share-access.tsx
+msgid "Add people, teams or projects"
+msgstr "Añade personas, equipos o proyectos"
 
 #: src/apps/indexes-view.tsx
 msgid "Add search"
@@ -2496,6 +2513,7 @@ msgid "Adding an app or workflow shares it with nobody. Only those it is shared 
 msgstr "Añadir una app o un flujo de trabajo no lo comparte con nadie. Aquí solo lo ven aquellos con quienes está compartido."
 
 #: src/apps/app-webhooks.tsx
+#: src/drafts/share-with-team.tsx
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
 #: src/settings/billing-card.tsx
@@ -3021,11 +3039,6 @@ msgstr "¿Algo más?"
 #: src/routes/_shell.apps.$app.tsx
 msgid "App"
 msgstr "Aplicación"
-
-#: src/apps/app-workspace.tsx
-msgctxt "an app's workspace view"
-msgid "App"
-msgstr "App"
 
 #: src/apps/app-data.tsx
 #: src/connections/connection-list.tsx
@@ -3901,8 +3914,7 @@ msgstr "No se puede ofrecer Ejecutar: {unread}"
 #: src/connections/connect-dialog.tsx
 #: src/connections/http-connections.tsx
 #: src/connections/request-app-dialog.tsx
-#: src/drafts/draft-history.tsx
-#: src/drafts/sharing.tsx
+#: src/drafts/share-with-team.tsx
 #: src/frame/ui-words.tsx
 #: src/inbox/decision-confirmation.tsx
 #: src/interview/destination.tsx
@@ -3966,6 +3978,7 @@ msgid "Cases a week: {cases}."
 msgstr "Casos por semana: {cases}."
 
 #: src/apps/app-workflows.tsx
+#: src/drafts/share-with-team.tsx
 #: src/projects/project-view.tsx
 #: src/routes/_shell.settings.outcomes.tsx
 #: src/settings/ai-providers.tsx
@@ -4363,6 +4376,14 @@ msgstr "Comprobando la App…"
 msgid "Checking…"
 msgstr "Comprobando…"
 
+#: src/drafts/share-with-team.tsx
+msgid "Checks"
+msgstr "Comprobaciones"
+
+#: src/drafts/share-with-team.tsx
+msgid "Checks pass"
+msgstr "Las comprobaciones pasan"
+
 #: src/apps/field-kinds.tsx
 msgctxt "a kind of field"
 msgid "Choice"
@@ -4503,8 +4524,6 @@ msgstr "Haz clic o suelta una imagen."
 #: src/connections/connection-list.tsx
 #: src/connections/http-connections.tsx
 #: src/connections/request-app-dialog.tsx
-#: src/drafts/draft-history.tsx
-#: src/drafts/share-with-team.tsx
 #: src/frame/app-sidebar.tsx
 #: src/frame/ui-words.tsx
 #: src/interview/destination.tsx
@@ -4560,7 +4579,6 @@ msgid "Code"
 msgstr "Código"
 
 #: src/apps/app-section.tsx
-#: src/apps/app-workspace.tsx
 msgctxt "an app's workspace view"
 msgid "Code"
 msgstr "Código"
@@ -5024,6 +5042,10 @@ msgstr "Copiar al Brain desde {label}"
 msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgstr "Cópialo ahora: no lo volverás a ver. Si se pierde, solo se puede sustituir."
 
+#: src/drafts/share-with-team.tsx
+msgid "Copy link"
+msgstr "Copiar enlace"
+
 #: src/chat/thread.tsx
 msgid "Copy the answer"
 msgstr "Copiar la respuesta"
@@ -5054,6 +5076,7 @@ msgid "Copy the URL of {name}"
 msgstr "Copiar la URL de {name}"
 
 #: src/copy.ts
+#: src/drafts/share-with-team.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/guests.tsx
 msgid "Copying didn't work"
@@ -5162,6 +5185,14 @@ msgstr "No se pudo cargar quién puede responder por ella."
 #: src/apps/app-settings.tsx
 msgid "Couldn't refresh. This may be out of date."
 msgstr "No se pudo actualizar. Puede que no esté al día."
+
+#: src/drafts/sharing.tsx
+msgid "Couldn't share"
+msgstr "No se pudo compartir"
+
+#: src/drafts/sharing.tsx
+msgid "Couldn't stop sharing"
+msgstr "No se pudo dejar de compartir"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgctxt "permission group"
@@ -5272,7 +5303,6 @@ msgid "Data"
 msgstr "Datos"
 
 #: src/apps/app-section.tsx
-#: src/apps/app-workspace.tsx
 msgctxt "an app's workspace view"
 msgid "Data"
 msgstr "Datos"
@@ -5630,7 +5660,6 @@ msgid "Designed"
 msgstr "Diseñado"
 
 #: src/apps/app-section.tsx
-#: src/apps/preview-controls.tsx
 msgid "Desktop"
 msgstr "Escritorio"
 
@@ -5856,6 +5885,7 @@ msgid "done"
 msgstr "hecho"
 
 #: src/apps/blueprints.tsx
+#: src/drafts/share-with-team.tsx
 #: src/frame/ui-words.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.workflows.runs.tsx
@@ -6541,6 +6571,10 @@ msgstr "Todos en este equipo podrán encontrar lo que los agentes leen a través
 msgid "Everyone in this team will be able to read everything in the places you pick, whatever their permissions in {label}."
 msgstr "Todos en este equipo podrán leer todo lo que haya en los lugares que elijas, sean cuales sean sus permisos en {label}."
 
+#: src/drafts/share-with-team.tsx
+msgid "Everyone it is shared with can open it once it is published."
+msgstr "Todas las personas con quienes se comparte pueden abrirla en cuanto se publique."
+
 #: src/apps/access-view.tsx
 #: src/apps/draft-changes.tsx
 msgid "everyone who uses the App"
@@ -6942,8 +6976,8 @@ msgid "Five or more people asked Stephen “{wording}” and he didn't know. Who
 msgstr "Cinco o más personas preguntaron a Stephen «{wording}» y no lo sabía. ¿Quién en la empresa puede responderlo, para que lo sepa a partir de ahora?"
 
 #: src/drafts/share-with-team.tsx
-msgid "Fix these problems the check found, so it can be shared:"
-msgstr "Corrige estos problemas que encontró la comprobación, para que se pueda compartir:"
+msgid "Fix these problems the check found, so it can be published:"
+msgstr "Corrige estos problemas que encontró la comprobación para poder publicarlo:"
 
 #: src/drafts/share-with-team.tsx
 #: src/pages/frame-failure.tsx
@@ -7640,6 +7674,7 @@ msgstr "Agrupa las apps y los flujos de trabajo de un proceso, un equipo o un ob
 msgid "Groups of teams"
 msgstr "Grupos de equipos"
 
+#: src/drafts/sharing.tsx
 #: src/people/person-picker.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/erasures.tsx
@@ -7674,9 +7709,9 @@ msgstr "Traspaso"
 msgid "Handovers"
 msgstr "Traspasos"
 
-#: src/drafts/share-with-team.tsx
-msgid "has it"
-msgstr "lo tiene"
+#: src/drafts/share-access.tsx
+msgid "Has access"
+msgstr "Tiene acceso"
 
 #: src/activity/audit-event.tsx
 msgid "Hash"
@@ -8367,8 +8402,8 @@ msgid "It can't start until you approve what each binding reaches, for the versi
 msgstr "No puede iniciarse hasta que apruebes lo que alcanza cada vínculo, para la versión que ejecuta."
 
 #: src/drafts/share-with-team.tsx
-msgid "It changed since you shared it. Going back drops those changes, for everyone who builds it."
-msgstr "Ha cambiado desde que lo compartiste. Volver atrás descarta esos cambios, para todos los que lo construyen."
+msgid "It changed since you published it. Going back drops those changes, for everyone who builds it."
+msgstr "Ha cambiado desde que lo publicaste. Volver atrás descarta esos cambios para todos los que lo construyen."
 
 #: src/apps/data-model-changes.tsx
 msgid "It changes no record the App holds."
@@ -9208,6 +9243,10 @@ msgstr "líneas {start} a {end}"
 msgid "Link"
 msgstr "Enlace"
 
+#: src/drafts/share-with-team.tsx
+msgid "Link copied"
+msgstr "Enlace copiado"
+
 #: src/apps/app-own-link.tsx
 msgid "Link to {name}"
 msgstr "Enlace a {name}"
@@ -9265,6 +9304,14 @@ msgctxt "how a workflow stands"
 msgid "Live"
 msgstr "Activo"
 
+#: src/drafts/share-with-team.tsx
+msgid "Live, {named}"
+msgstr "En vivo, {named}"
+
+#: src/drafts/share-with-team.tsx
+msgid "Live, {named}; changes not live yet"
+msgstr "En vivo, {named}; cambios aún no publicados"
+
 #: src/brain/brain.ts
 msgid "Live, being measured"
 msgstr "En marcha, en medición"
@@ -9307,7 +9354,6 @@ msgstr "Cargando el valor"
 
 #: src/activity/audit-log.tsx
 #: src/apps/app-workspace.tsx
-#: src/drafts/share-with-team.tsx
 #: src/frame/page-states.tsx
 #: src/settings/erasures.tsx
 #: src/settings/section.tsx
@@ -9487,6 +9533,7 @@ msgid "Makes {table} sensitive: its history keeps no values, and every read is r
 msgstr "Hace sensible {table}: su historial no guarda valores y cada lectura queda registrada."
 
 #: src/connections/integration-row.tsx
+#: src/drafts/share-with-team.tsx
 #: src/settings/ai-providers.tsx
 msgid "Manage"
 msgstr "Gestionar"
@@ -9690,6 +9737,10 @@ msgstr "Más sobre Pulse"
 msgid "More about putting it away"
 msgstr "Más sobre guardarla"
 
+#: src/apps/app-settings.tsx
+msgid "More about the owner"
+msgstr "Más sobre el propietario"
+
 #: src/onboarding/setup-steps.tsx
 msgid "More about the staff list"
 msgstr "Más sobre la lista de personal"
@@ -9714,6 +9765,10 @@ msgstr "Más sobre esta sección"
 #: src/workflows/workflow-settings.tsx
 msgid "More about this setting"
 msgstr "Más sobre este ajuste"
+
+#: src/apps/app-settings.tsx
+msgid "More about who it’s for"
+msgstr "Más sobre para quién está hecha"
 
 #: src/settings/chat-accounts.tsx
 msgid "More about your conversations in chat apps"
@@ -10518,11 +10573,6 @@ msgstr "Nadie cambia los registros de {table}, tampoco Sam."
 msgid "Nobody else to add."
 msgstr "No hay nadie más que añadir."
 
-#: src/drafts/share-with-team.tsx
-#: src/drafts/sharing.tsx
-msgid "Nobody else to share with."
-msgstr "No hay nadie más con quien compartir."
-
 #: src/agents/own-agents-admin.tsx
 msgid "Nobody has an agent of their own yet."
 msgstr "Nadie tiene todavía un agente propio."
@@ -10590,6 +10640,7 @@ msgstr "Aún no hay ninguna publicada."
 
 #: src/apps/app-settings.tsx
 #: src/brain/brain.ts
+#: src/drafts/share-with-team.tsx
 #: src/routes/_shell.settings.billing.tsx
 #: src/settings/ai-providers.tsx
 msgid "None yet"
@@ -10738,6 +10789,10 @@ msgstr "No invitados: {notInvited}. {sent, plural, one {La otra invitación se e
 #: src/brain/brain-source-contents.tsx
 msgid "Not listed"
 msgstr "No indicados"
+
+#: src/drafts/share-with-team.tsx
+msgid "Not live"
+msgstr "Sin publicar"
 
 #: src/workflows/workflow-rows.tsx
 #: src/workflows/workflow-status.tsx
@@ -10894,7 +10949,6 @@ msgid "Not working"
 msgstr "No funciona"
 
 #: src/agents/agent-page.tsx
-#: src/drafts/share-with-team.tsx
 msgid "Not yet"
 msgstr "Todavía no"
 
@@ -10935,6 +10989,10 @@ msgstr "Anotado: {name}. La conectaremos contigo. Mientras tanto, comprueba qui�
 #: src/onboarding/connect-steps.tsx
 msgid "Noted. We’ll get in touch to put it on the laptops with you."
 msgstr "Anotado. Nos pondremos en contacto para instalarlo contigo en los portátiles."
+
+#: src/drafts/share-with-team.tsx
+msgid "Nothing changed since the live version."
+msgstr "Nada ha cambiado desde la versión publicada."
 
 #: src/frame/ui-words.tsx
 msgid "Nothing changed: both are the same."
@@ -11019,6 +11077,10 @@ msgstr "Nada coincide con «{query}»."
 #: src/workflows/workflow-status.tsx
 msgid "Nothing new starts until you resume it: a start is refused while it is paused. Runs already going carry on to their end."
 msgstr "No empieza nada nuevo hasta que lo reanudes: mientras está en pausa, se rechaza cada inicio. Las ejecuciones en curso siguen hasta el final."
+
+#: src/drafts/share-with-team.tsx
+msgid "Nothing new to publish"
+msgstr "Nada nuevo que publicar"
 
 #: src/apps/draft-changes.tsx
 msgid "Nothing new: it needs no admin."
@@ -11401,6 +11463,10 @@ msgstr "Solo cuenta de forma anónima"
 #: src/workflows/workflow-diagram.tsx
 msgid "Only if its condition holds"
 msgstr "Solo si se cumple su condición"
+
+#: src/drafts/share-with-team.tsx
+msgid "Only its builders"
+msgstr "Solo quienes la construyen"
 
 #: src/apps/app-settings.tsx
 msgid "Only its builders change these settings."
@@ -12187,7 +12253,6 @@ msgid "Personal Knowledge and memories"
 msgstr "Conocimiento personal y recuerdos"
 
 #: src/apps/app-section.tsx
-#: src/apps/preview-controls.tsx
 msgid "Phone"
 msgstr "Teléfono"
 
@@ -12317,7 +12382,6 @@ msgid "Presses \"{words}\""
 msgstr "Pulsa «{words}»"
 
 #: src/apps/app-section.tsx
-#: src/apps/preview-controls.tsx
 msgid "Preview width"
 msgstr "Ancho de la vista previa"
 
@@ -12430,9 +12494,21 @@ msgstr "Proveedor"
 msgid "Providers"
 msgstr "Proveedores"
 
+#: src/drafts/share-with-team.tsx
+msgid "Publish"
+msgstr "Publicar"
+
+#: src/drafts/share-with-team.tsx
+msgid "Publish {name}"
+msgstr "Publicar {name}"
+
 #: src/activity/audit-words.ts
 msgid "Published a version"
 msgstr "Publicó una versión"
+
+#: src/drafts/share-with-team.tsx
+msgid "Publishing undone"
+msgstr "Publicación deshecha"
 
 #. Product name: keep it as it is
 #: src/brain/brain-atlas.ts
@@ -12866,6 +12942,7 @@ msgstr "Recargar"
 #: src/apps/data-model-changes.tsx
 #: src/apps/field-editor.tsx
 #: src/connections/tool-permissions.tsx
+#: src/drafts/share-access.tsx
 #: src/interview/transcript.tsx
 #: src/onboarding/document-drop.tsx
 #: src/routes/_shell.settings.members.tsx
@@ -13429,7 +13506,6 @@ msgstr "Risk-to-Compliance"
 msgid "Rocket"
 msgstr "Cohete"
 
-#: src/drafts/sharing.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/invitations.tsx
 msgid "Role"
@@ -13444,7 +13520,6 @@ msgstr "Rol"
 msgid "Role in the project"
 msgstr "Rol en el proyecto"
 
-#: src/drafts/sharing.tsx
 #: src/routes/_shell.settings.members.tsx
 msgid "Role of {name}"
 msgstr "Rol de {name}"
@@ -13452,10 +13527,6 @@ msgstr "Rol de {name}"
 #: src/routes/_shell.settings.members.tsx
 msgid "Role of {who}"
 msgstr "Rol de {who}"
-
-#: src/drafts/sharing.tsx
-msgid "Role to share with"
-msgstr "Rol con el que compartir"
 
 #: src/brain/brain-source-contents.tsx
 #: src/brain/brain.ts
@@ -14253,7 +14324,6 @@ msgid "Settings"
 msgstr "Ajustes"
 
 #: src/apps/app-section.tsx
-#: src/apps/app-workspace.tsx
 msgctxt "an app's workspace view"
 msgid "Settings"
 msgstr "Ajustes"
@@ -14281,7 +14351,6 @@ msgstr "Varias por cada pregunta"
 
 #: src/brain/memories-page.tsx
 #: src/drafts/share-with-team.tsx
-#: src/drafts/sharing.tsx
 msgid "Share"
 msgstr "Compartir"
 
@@ -14296,14 +14365,6 @@ msgstr "¿Compartir {name} con {team}?"
 #: src/inbox/items.ts
 msgid "Share {name} with the company?"
 msgstr "¿Compartir {name} con la empresa?"
-
-#: src/drafts/sharing.tsx
-msgid "Share as"
-msgstr "Compartir como"
-
-#: src/drafts/share-with-team.tsx
-msgid "Share changes"
-msgstr "Compartir cambios"
 
 #: src/frame/setting-up.tsx
 msgid "Share once it's ready"
@@ -14330,7 +14391,6 @@ msgstr "Compartir con otros: {statement}"
 msgid "Share with the company"
 msgstr "Compartir con la empresa"
 
-#: src/drafts/share-with-team.tsx
 #: src/frame/setting-up.tsx
 msgid "Share with your team"
 msgstr "Compartir con tu equipo"
@@ -14375,10 +14435,6 @@ msgstr "Archivos subidos compartidos"
 msgid "Shared with"
 msgstr "Compartida con"
 
-#: src/drafts/share-with-team.tsx
-msgid "Shared with {who}"
-msgstr "Compartido con {who}"
-
 #: src/brain/memories-page.tsx
 msgid "Shared with a team you are no longer in."
 msgstr "Compartido con un equipo del que ya no formas parte."
@@ -14408,10 +14464,6 @@ msgstr "Compartir"
 msgctxt "an app's settings section"
 msgid "Sharing"
 msgstr "Compartir"
-
-#: src/drafts/share-with-team.tsx
-msgid "Sharing undone"
-msgstr "Se deshizo el compartir"
 
 #: src/apps/app-data-model.tsx
 #: src/brain/atlas-overlays.tsx
@@ -14867,6 +14919,10 @@ msgstr "Otra cosa"
 msgid "Something new is marked"
 msgstr "Hay algo nuevo marcado"
 
+#: src/drafts/share-with-team.tsx
+msgid "Something to fix first"
+msgstr "Hay algo que corregir antes"
+
 #: src/pages/frame-failure.tsx
 msgid "Something went wrong while it opened."
 msgstr "Algo salió mal al abrirla."
@@ -15097,6 +15153,11 @@ msgctxt "what the Brain remembers about something"
 msgid "Status"
 msgstr "Estado"
 
+#: src/drafts/share-with-team.tsx
+msgctxt "where an App stands"
+msgid "Status"
+msgstr "Estado"
+
 #: src/pages/leave-confirm-dialog.tsx
 msgid "Stay"
 msgstr "Quedarse"
@@ -15211,12 +15272,8 @@ msgid "Stop sharing"
 msgstr "Dejar de compartir"
 
 #: src/drafts/sharing.tsx
-msgid "Stop sharing with {name}"
-msgstr "Dejar de compartir con {name}"
-
-#: src/drafts/sharing.tsx
-msgid "Stop sharing with {name}?"
-msgstr "¿Dejar de compartir con {name}?"
+msgid "Stop sharing with {gone}?"
+msgstr "¿Dejar de compartir con {gone}?"
 
 #: src/workflows/stop-run.tsx
 msgid "Stop the run"
@@ -15342,7 +15399,6 @@ msgid "Tables"
 msgstr "Tablas"
 
 #: src/apps/app-section.tsx
-#: src/apps/preview-controls.tsx
 msgid "Tablet"
 msgstr "Tableta"
 
@@ -15968,8 +16024,8 @@ msgid "The changes only you see are dropped, and you go on from this version."
 msgstr "Los cambios que solo ves tú se descartan, y sigues desde esta versión."
 
 #: src/drafts/share-with-team.tsx
-msgid "The changes you shared couldn't be put back as the draft. They're in its History, to restore from there."
-msgstr "No se pudieron recuperar como borrador los cambios que compartiste. Están en su historial, para restaurarlos desde allí."
+msgid "The changes you published couldn't be put back as the draft. They're in its History, to restore from there."
+msgstr "Los cambios que publicaste no se pudieron recuperar como borrador. Están en su historial, para restaurarlos desde allí."
 
 #: src/apps/indexes-view.tsx
 msgid "The chat adds indexes as it writes the App’s queries."
@@ -16554,8 +16610,16 @@ msgid "They will read exactly what is below, as someone's own word, without your
 msgstr "Leerán exactamente lo que aparece abajo, como palabra propia de alguien, sin tu nombre. Tu recuerdo sigue siendo solo tuyo, y puedes retirar la copia."
 
 #: src/drafts/share-with-team.tsx
+msgid "They'll find it under Apps once it is published."
+msgstr "La encontrarán en Apps cuando esté publicada."
+
+#: src/drafts/share-with-team.tsx
 msgid "They'll find it under Apps, and see it as it is now."
 msgstr "Lo encontrarán en Apps y lo verán tal como está ahora."
+
+#: src/drafts/share-with-team.tsx
+msgid "They'll find it under Workflows once it is published."
+msgstr "Lo encontrarán en Flujos de trabajo cuando esté publicado."
 
 #: src/drafts/share-with-team.tsx
 msgid "They'll find it under Workflows, and run it as it is now."
@@ -17356,10 +17420,6 @@ msgstr "Evento ilegible"
 msgid "Unsaved changes"
 msgstr "Cambios sin guardar"
 
-#: src/drafts/sharing.tsx
-msgid "Unshare"
-msgstr "Dejar de compartir"
-
 #: src/settings/directory-reads.tsx
 msgid "Until a read succeeds, nobody joins, moves or is suspended through the directory."
 msgstr "Hasta que una lectura funcione, nadie se une, cambia de equipo ni es suspendido a través del directorio."
@@ -17384,10 +17444,6 @@ msgstr "Actualizó Grasp"
 msgctxt "what happened to a workflow run"
 msgid "Updates"
 msgstr "Novedades"
-
-#: src/frame/setting-up.tsx
-msgid "Updating"
-msgstr "Actualizando"
 
 #: src/frame/setting-up.tsx
 msgid "Updating {name}…"
@@ -17533,6 +17589,7 @@ msgstr "Usando {tool}"
 msgid "UTC"
 msgstr "UTC"
 
+#: src/drafts/draft-history.tsx
 #: src/workflows/resource-runs.tsx
 #: src/workflows/version-source.tsx
 msgid "v{version}"
@@ -17605,6 +17662,7 @@ msgstr "La versión {live} está activa."
 #: src/brain/brain.ts
 #: src/brain/skills-page.tsx
 #: src/brain/sources-page.tsx
+#: src/drafts/share-with-team.tsx
 msgid "Version {version}"
 msgstr "Versión {version}"
 
@@ -18598,6 +18656,10 @@ msgstr "Quién puede responder"
 msgid "Who can change them?"
 msgstr "¿Quién puede cambiarlos?"
 
+#: src/drafts/share-with-team.tsx
+msgid "Who can open it"
+msgstr "Quién puede abrirla"
+
 #: src/apps/app-data-model.tsx
 msgid "Who can see and change its records"
 msgstr "Quién puede ver y cambiar sus registros"
@@ -18615,7 +18677,6 @@ msgid "Who does it"
 msgstr "Quién lo hace"
 
 #: src/chat/plan-card.tsx
-#: src/drafts/share-with-team.tsx
 msgid "Who gets it"
 msgstr "Quién lo recibe"
 
@@ -18673,6 +18734,10 @@ msgstr "Quién lo encuentra en {name}"
 #: src/apps/draft-changes.tsx
 msgid "Who sees which rows"
 msgstr "Quién ve qué filas"
+
+#: src/drafts/sharing.tsx
+msgid "Who to share with couldn't be read. Try again in a moment."
+msgstr "No se pudo leer con quién compartir. Vuelve a intentarlo en un momento."
 
 #: src/connections/connect-dialog.tsx
 msgid "Who uses it"
@@ -18975,10 +19040,6 @@ msgctxt "settings group"
 msgid "Workspace"
 msgstr "Espacio de trabajo"
 
-#: src/apps/app-workspace.tsx
-msgid "Workspace views"
-msgstr "Vistas del espacio de trabajo"
-
 #: src/projects/project-dialog.tsx
 msgid "Wrench"
 msgstr "Llave inglesa"
@@ -19266,13 +19327,13 @@ msgstr "Tu navegador no deja que Grasp use el micrófono. Permítelo en los ajus
 msgid "Your browser is not letting me use the microphone. Allow it next to the address, and try again."
 msgstr "Tu navegador no me deja usar el micrófono. Permítelo junto a la dirección y vuelve a intentarlo."
 
-#: src/drafts/share-with-team.tsx
-msgid "Your changes are shared"
-msgstr "Tus cambios están compartidos"
-
 #: src/drafts/draft-history.tsx
 msgid "Your changes go back to how they were then, for everyone who builds it. What came after stays in its history."
 msgstr "Tus cambios vuelven a como estaban entonces, para todos los que lo construyen. Lo que vino después se queda en su historial."
+
+#: src/drafts/share-with-team.tsx
+msgid "Your changes go live for everyone it is shared with."
+msgstr "Tus cambios se publican para todas las personas con quienes se comparte."
 
 #: src/inbox/items.ts
 msgid "Your chat's agent asked to start this workflow for you. Nothing runs until you confirm it, with exactly the input shown."

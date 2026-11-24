@@ -41,7 +41,7 @@ import {
   useSubjectChat,
 } from "./chat-subject.ts";
 import { useFollowedChat } from "./chat-watch.ts";
-import { useNarrow } from "./narrow.ts";
+import { useNarrow, usePhone } from "./narrow.ts";
 import type { SourceName } from "./sources.tsx";
 import { useAsk } from "./use-ask.ts";
 
@@ -141,16 +141,21 @@ export interface ChatWords {
  * Where the chat may show on this page (chat-presence.ts): nowhere for
  * Grasp staff who reach the onboarding alone, whom core refuses chats;
  * docked beside a page about a subject (chat-subject.ts), as part of it,
- * whatever its route says for anyone who isn't building there.
+ * whatever its route says for anyone who isn't building there; on a
+ * `phone`, its bar there too, to open it by.
  */
-const usePresenceHere = (): ChatPresence => {
+const usePresenceHere = (phone: boolean): ChatPresence => {
   const { identity } = useRouteContext({ from: "/_shell" });
   const presence = useChatPresence();
   const about = subjectOf(useShownSlot());
   if (identity.onboardingOnly === true) {
     return chatPresence.hidden;
   }
-  return about === undefined ? presence : chatPresence.docked;
+  if (about === undefined) {
+    return presence;
+  }
+  // On a phone the subject's page shows first, its chat a bar to open.
+  return phone ? { ...chatPresence.docked, bar: true } : chatPresence.docked;
 };
 
 /**
@@ -181,7 +186,8 @@ const useQuestionSubject = (
 };
 
 const useGlobalChatValue = () => {
-  const presence = usePresenceHere();
+  const phone = usePhone();
+  const presence = usePresenceHere(phone);
   const available = presence.placements.length > 0;
   // Read once for every page, not again as the person moves between them.
   const { value: models, readAgain } = useFrameRead(readModels, available);
@@ -220,11 +226,15 @@ const useGlobalChatValue = () => {
   const layout = useChatLayout();
   const roomBeside = !useNarrow();
   // About the page's subject, it stays open (chat-subject.ts), where the
-  // page has it: that page is where its subject is made. Elsewhere, open
-  // where it was put, where this page allows it there; elsewhere it stays
-  // open, and shows again on a page that does.
-  const keptOpen = subjectOf(slot) !== undefined;
-  const placement = keptOpen
+  // page has it: that page is where its subject is made. On a phone, where
+  // it would cover that page, the page shows first and the chat opens as
+  // anywhere else, when the person asks. Elsewhere, open where it was put,
+  // where this page allows it there; elsewhere it stays open, and shows
+  // again on a page that does.
+  const about = subjectOf(slot) !== undefined;
+  const keptOpen = about && !phone;
+  // A subject's page has it docked, wherever it was put elsewhere.
+  const placement = about
     ? (placementOn(presence, layout.placement) ?? layout.placement)
     : layout.placement;
   const open = (keptOpen || layout.open) && allows(presence, placement);
@@ -302,6 +312,17 @@ export const useGlobalChat = (): GlobalChat => {
     throw new Error("useGlobalChat must be used within a GlobalChatProvider.");
   }
   return chat;
+};
+
+/**
+ * Where the chat stands on this page: the chat's own, about the page's
+ * subject too; the page's alone outside the chat's provider (a page that
+ * couldn't load).
+ */
+export const useShownPresence = (): ChatPresence => {
+  const chat = use(GlobalChatContext);
+  const presence = useChatPresence();
+  return chat?.presence ?? presence;
 };
 
 /**

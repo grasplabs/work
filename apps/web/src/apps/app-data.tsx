@@ -23,6 +23,7 @@ import {
   DialogContent,
   DialogDescription,
   DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
 import {
@@ -43,8 +44,8 @@ import { FileUpload } from "@grasp-os/ui/components/file-upload";
 import { Heading } from "@grasp-os/ui/components/heading";
 import {
   InputGroup,
+  InputGroupAddon,
   InputGroupInput,
-  InputGroupText,
 } from "@grasp-os/ui/components/input-group";
 import { KeyValueList } from "@grasp-os/ui/components/key-value";
 import {
@@ -58,6 +59,7 @@ import {
   SheetBody,
   SheetContent,
   SheetDescription,
+  SheetHeader,
   SheetTitle,
 } from "@grasp-os/ui/components/sheet";
 import { Text } from "@grasp-os/ui/components/text";
@@ -450,8 +452,12 @@ const RecordSheet = ({
       open
     >
       <SheetContent>
-        <SheetTitle>{shown}</SheetTitle>
-        <SheetDescription>{formatDateTime(record.updatedAt)}</SheetDescription>
+        <SheetHeader>
+          <SheetTitle>{shown}</SheetTitle>
+          <SheetDescription>
+            {formatDateTime(record.updatedAt)}
+          </SheetDescription>
+        </SheetHeader>
         <SheetBody>
           <div {...stylex.props(styles.stack)}>
             <KeyValueList
@@ -599,10 +605,12 @@ const ImportDialog = ({
       open
     >
       <DialogContent>
-        <DialogTitle>{t`Import into ${name}`}</DialogTitle>
-        <DialogDescription>
-          {t`Every row is checked first. If one is wrong, nothing is added.`}
-        </DialogDescription>
+        <DialogHeader>
+          <DialogTitle>{t`Import into ${name}`}</DialogTitle>
+          <DialogDescription>
+            {t`Every row is checked first. If one is wrong, nothing is added.`}
+          </DialogDescription>
+        </DialogHeader>
         <DialogBody>
           <div {...stylex.props(styles.stack)}>
             <Field>
@@ -939,9 +947,9 @@ const RecordActions = ({
           {...stylex.props(styles.barField)}
         >
           <InputGroup>
-            <InputGroupText>
+            <InputGroupAddon>
               <Icon icon={SearchIcon} />
-            </InputGroupText>
+            </InputGroupAddon>
             <InputGroupInput
               aria-label={t`Find a record by its ID`}
               onValueChange={(value: string) => {

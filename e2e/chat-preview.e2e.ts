@@ -103,9 +103,9 @@ test("a chat building an App offers its workspace, whose preview changes none of
       .getByRole("button", { name: `Build ${tag}`, exact: true });
     await expect(chatName).toBeVisible();
     // There, the draft this chat builds is the preview, not the live App.
-    // Shared with nobody yet: Share with your team is on.
+    // Shared with nobody yet: Publish is on.
     await expect(
-      page.getByRole("button", { name: "Share with your team" })
+      page.getByRole("button", { name: "Publish", exact: true })
     ).toBeEnabled();
     const preview = page.getByRole("region", { name: `${name}, your version` });
     // Its own store: none of the App's tally, then only what it added,
@@ -160,10 +160,10 @@ test("an App's own chat writes its page and server code, and its workspace previ
 
     // The page the agent wrote runs in the preview, on a store of its own.
     const preview = page.getByRole("region", { name: `${name}, your version` });
-    // Only its builder sees it: Share with your team is on, once the
+    // Only its builder sees it: Publish is on, once the
     // turn's check of the draft is done.
     await expect(
-      page.getByRole("button", { name: "Share with your team" })
+      page.getByRole("button", { name: "Publish", exact: true })
     ).toBeEnabled(afterTurnCheck);
     const frame = preview.frameLocator("iframe");
     await expect(frame.getByRole("status")).toHaveText("0 in the preview", {
@@ -228,7 +228,7 @@ test("an App's own chat writes its page and server code, and its workspace previ
     // published: the App's project as the agent wrote it, its last write
     // too.
     await page
-      .getByRole("navigation", { name: "Workspace views" })
+      .getByRole("navigation", { name: /s workspace$/u })
       .getByRole("link", { name: "Code" })
       .click();
     await page

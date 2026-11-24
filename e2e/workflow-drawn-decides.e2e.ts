@@ -16,8 +16,8 @@ import { origin } from "./stack.ts";
 // builder makes it from Make something, saying what they want done, and
 // Grasp's chat draws it once they say Build it (the stack's scripted
 // model saves an invoice approval, a person's decision, as its draft,
-// e2e/model-scripts.ts); the builder shares it with Share with your team
-// in its bar; an admin names who answers its decision in its Settings'
+// e2e/model-scripts.ts); the builder publishes it with Publish in its
+// bar; an admin names who answers its decision in its Settings'
 // Files and apps; the builder starts a run with Run, naming the
 // approver, who decides from their inbox, on the decision's own page,
 // confirmed in Grasp's own dialog: its link, which anyone
@@ -80,7 +80,7 @@ const decisionIn = async (page: Page, name: string): Promise<void> => {
 
 /**
  * Makes a new workflow saying what it should do, which Grasp's chat draws
- * as the approval on its Flow, and shares it, its first version, as the
+ * as the approval on its Flow, and publishes it, its first version, as the
  * builder on `page`: its ID and name.
  */
 const drawnAndPublished = async (
@@ -114,17 +114,16 @@ const drawnAndPublished = async (
     pageRead
   );
 
-  // Share with your team, in its bar, makes the draft its first version.
+  // Publish, in its bar, makes the draft its first version.
   await page
-    .getByRole("button", { name: "Share with your team" })
+    .getByRole("button", { name: "Publish", exact: true })
+    .filter({ visible: true })
     .click(pageRead);
   await page
-    .getByRole("dialog")
-    .getByRole("button", { name: "Share", exact: true })
+    .getByRole("dialog", { name: /^Publish /u })
+    .getByRole("button", { name: "Publish", exact: true })
     .click(pageRead);
-  await expect(toastSaying(page, "Your changes are shared")).toBeVisible(
-    pageRead
-  );
+  await expect(toastSaying(page, / is live/u)).toBeVisible(pageRead);
   return { workflow, name: newName };
 };
 

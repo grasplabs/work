@@ -16,6 +16,7 @@ import {
   DialogClose,
   DialogContent,
   DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
@@ -223,7 +224,7 @@ export const PlanList = ({
                 onAnswer(asks);
               }}
               size="xs"
-              variant="secondary"
+              variant="outline"
             >
               <Trans>Give a value</Trans>
             </Button>
@@ -441,9 +442,11 @@ const ReviewDialog = ({
       open={review !== undefined}
     >
       <DialogContent>
-        <DialogTitle>
-          <Trans>Before you make this change</Trans>
-        </DialogTitle>
+        <DialogHeader>
+          <DialogTitle>
+            <Trans>Before you make this change</Trans>
+          </DialogTitle>
+        </DialogHeader>
         <DialogBody>
           <Form
             id={formId}

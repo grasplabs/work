@@ -28,12 +28,11 @@ import { useCoreAction } from "../use-core-action.ts";
 // page shows one only to those core lets read it.
 
 const styles = stylex.create({
-  // One field the card's whole width, its buttons at its end.
-  whole: { maxWidth: "none" },
+  // The field's buttons at its end.
   buttons: {
     display: "flex",
     justifyContent: "flex-end",
-    gap: space["2"],
+    gap: space[2],
   },
 });
 
@@ -176,7 +175,7 @@ export const InstructionFileEditor = ({
     });
   };
   return (
-    <Field disabled={busy} style={styles.whole}>
+    <Field disabled={busy}>
       <Words
         description={description}
         label={label}

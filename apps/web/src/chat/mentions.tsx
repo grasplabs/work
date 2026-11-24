@@ -7,7 +7,6 @@ import type {
 } from "@grasp-os/ui/components/prompt-input";
 import {
   CircleUserIcon,
-  LayoutGridIcon,
   UserSparklesIcon,
   WorkflowIcon,
 } from "@grasp-os/ui/lib/icons";
@@ -15,6 +14,7 @@ import type { IconData } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
 import { useEffect, useState } from "react";
 
+import { AppWindowIcon } from "../frame/sidebar-icons.ts";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
@@ -56,7 +56,7 @@ export const useMentionKinds = (): Record<
   const { t } = useLingui();
   return {
     agent: { label: t`Agents`, icon: UserSparklesIcon },
-    app: { label: t`Apps`, icon: LayoutGridIcon },
+    app: { label: t`Apps`, icon: AppWindowIcon },
     workflow: { label: t`Workflows`, icon: WorkflowIcon },
     person: { label: t`People`, icon: CircleUserIcon },
   };
