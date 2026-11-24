@@ -9,6 +9,60 @@
 @import "@grasp-os/ui/styles/tokens.css";
 @import "@grasp-os/ui/styles/themes.css";
 @import "@grasp-os/ui/styles/fonts.css";
+
+/*
+ * The token bridge: the kit's page colours, read from Damsko's tokens, so
+ * a page still on the kit stands on the same ground, ink and hairlines as
+ * the Damsko components beside it, in light and in dark (Damsko's follow
+ * the root's `data-mode`, which public/theme.js writes with the kit's
+ * `dark` class). So these colours change on the kit's pages too, a little:
+ * a page gets Damsko's own as its area moves onto Damsko. Only the
+ * meanings the two themes share one to one. The kit's sidebar, its
+ * buttons' fills and its fields keep the kit's own values: Damsko pairs
+ * those differently, and they change with the frame itself. For this app
+ * alone, never App pages. It goes when the kit leaves the frontend.
+ *
+ * The kit's muted fill (a view switch, a strip of tabs, a sticky header
+ * row) is opaque, as the kit's own was, so nothing shows through it: in
+ * light Damsko's muted; in dark Damsko's muted lies almost on the page's
+ * card (1.02:1), where the kit's stood out from its page (1.22:1), so it
+ * is the page's card with a little of the light that Damsko's dark
+ * control-hover lays over it (12% of it there): 9% of it stands out
+ * 1.25:1, and stays apart from the hairline, which is that light at 12%
+ * (e2e/frame.e2e.ts).
+ */
+:root,
+.dark {
+  --background: var(--damsko-background);
+  --foreground: var(--damsko-foreground);
+  --card: var(--damsko-card);
+  --card-foreground: var(--damsko-foreground);
+  --popover: var(--damsko-popover);
+  --popover-foreground: var(--damsko-foreground);
+  --muted: light-dark(
+    var(--damsko-muted),
+    color-mix(in srgb, var(--damsko-sidebar-card) 91%, oklch(0.96 0.02 150))
+  );
+  --muted-foreground: var(--damsko-muted-foreground);
+  --border: var(--damsko-border);
+  --destructive: var(--damsko-destructive);
+  --ring: var(--damsko-ring);
+  --status-agreed: var(--damsko-success);
+  --status-attention: var(--damsko-warning);
+}
+
+/*
+ * Paper is light, as the kit's theme has it (packages/app-kit/src/styles.css):
+ * in print every colour of Damsko's, and of the kit's read from them above,
+ * takes its light side, whatever the mode on screen, so a page printed from
+ * dark isn't light text on white.
+ */
+@media print {
+  :root,
+  :root[data-mode] {
+    color-scheme: light;
+  }
+}
 /* The theme's sans, bundled so it is served from this origin (the CSP's default-src). */
 @import "@fontsource-variable/geist";
 /*
@@ -41,10 +95,12 @@
   }
 }
 
-/* The frame's sizes: the app's sidebar and the bar above each page. */
+/*
+ * The height of the bar above each page, as the kit's page header
+ * (packages/app-kit's site-header.tsx) and the pages sized under it read it.
+ */
 @layer base {
   [data-slot="sidebar-wrapper"] {
-    --sidebar-width: calc(var(--spacing) * 60);
     --header-height: calc(var(--spacing) * 12);
   }
 }

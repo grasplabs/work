@@ -9,6 +9,7 @@ import { inboxList, toItem } from "./inbox.ts";
 import { approvalDrawn, modelScripts } from "./model-scripts.ts";
 import { peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
+import { toastSaying } from "./said.ts";
 import { origin } from "./stack.ts";
 import { goTo } from "./tabs-nav.ts";
 
@@ -122,7 +123,9 @@ const drawnAndPublished = async (
     .getByRole("dialog")
     .getByRole("button", { name: "Share", exact: true })
     .click(pageRead);
-  await expect(page.getByText("Your changes are shared")).toBeVisible(pageRead);
+  await expect(toastSaying(page, "Your changes are shared")).toBeVisible(
+    pageRead
+  );
   return { workflow, name: newName };
 };
 
