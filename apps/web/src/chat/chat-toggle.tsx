@@ -34,6 +34,7 @@ export const ChatToggle = ({ style }: { style?: LayoutStyle }) => {
         <Button
           aria-expanded={open}
           aria-label={label}
+          data-slot="chat-toggle"
           onClick={() => {
             if (open) {
               closeChat();

@@ -43,13 +43,11 @@ const styles = stylex.create({
     opacity: 0,
     transform: "translateY(0.5rem)",
   },
-  delayed: { transitionDelay: duration.stagger },
 });
 
 /** The chat's idle bar: on every page the chat shows on, while it is closed. */
 export const ChatBar = () => {
-  const { stage, delays, settled, composer, words, modelsUnavailable } =
-    useGlobalChat();
+  const { stage, composer, words, modelsUnavailable } = useGlobalChat();
   const unavailable = unavailableText(modelsUnavailable);
   const openHere = useOpenChat();
   const bar = useRef<HTMLDivElement>(null);
@@ -57,7 +55,7 @@ export const ChatBar = () => {
   // Whether the bar was away (the chat open) before it came back: only
   // then does it take the cursor the chat lost, never as a page opens.
   const wasAway = useRef(!open);
-  // Settled once it has risen or sunk: the chat's own moves wait for it.
+  // Once it has risen back, it takes the cursor the chat had.
   useEffect(() => {
     let current = true;
     const back = open && wasAway.current;
@@ -79,23 +77,18 @@ export const ChatBar = () => {
       if (back && document.activeElement === document.body) {
         element?.querySelector<HTMLElement>('[role="textbox"]')?.focus();
       }
-      settled("bar");
     };
     void settle();
     return () => {
       current = false;
     };
-  }, [open, settled]);
+  }, [open]);
   const { onAttach } = composer;
   return (
     <div
       inert={!open}
       ref={bar}
-      {...stylex.props(
-        styles.bar,
-        !open && styles.closed,
-        delays.bar && styles.delayed
-      )}
+      {...stylex.props(styles.bar, !open && styles.closed)}
     >
       <Composer
         busy={composer.busy}

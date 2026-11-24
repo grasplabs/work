@@ -55,6 +55,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { setActiveChat } from "../chat/active-chat.ts";
+import { chatLink } from "../chat/chat-link.ts";
 import { slotOf } from "../chat/chat-subject.ts";
 import { useChatAbout, useGlobalChat } from "../chat/global-chat.tsx";
 import { ConfirmChange, useDraftChange } from "../drafts/draft-history.tsx";
@@ -329,9 +330,7 @@ const MoreMenu = ({
           ) : null}
           {chatId === undefined ? null : (
             <DropdownMenuItem asChild icon={MessageCircleIcon}>
-              <Link search={{ chat: chatId }} to="/">
-                {t`Open the chat in Chat`}
-              </Link>
+              <Link {...chatLink(chatId)}>{t`Open the chat in Chat`}</Link>
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>

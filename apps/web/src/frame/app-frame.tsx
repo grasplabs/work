@@ -1,13 +1,20 @@
 import { Toaster as KitToaster } from "@grasp-os/app-kit/components/toast";
 import { TooltipProvider as KitTooltipProvider } from "@grasp-os/app-kit/components/tooltip";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { SidebarInset, SidebarProvider } from "@grasp-os/ui/components/sidebar";
+import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "@grasp-os/ui/components/sidebar";
+import { sidebarMarker } from "@grasp-os/ui/components/sidebar.stylex";
 import { Toaster } from "@grasp-os/ui/components/toast";
-import { duration, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { duration, media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
+import type { ChatPanels } from "../chat/chat-panel.tsx";
 import { ChatToggle } from "../chat/chat-toggle.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import { AiKeyBanner, providersOf } from "./ai-key-banner.tsx";
@@ -15,6 +22,10 @@ import type { FailingProvider } from "./ai-key-banner.tsx";
 import { AppSidebar } from "./app-sidebar.tsx";
 import { InFrame } from "./in-frame.ts";
 import { PageWithPanel } from "./page-panel.tsx";
+import {
+  ChatPanelsBeside,
+  useChatCover,
+} from "./panels/chat-panels-beside.tsx";
 
 /**
  * Where the person's sidebar choices are kept in this browser: whether it
@@ -75,6 +86,14 @@ const styles = stylex.create({
     insetInlineEnd: `calc(${size.appShellPageInline} - (${size.sidebarIconButton} - ${size.sidebarIcon}) / 2)`,
     zIndex: 25,
   },
+  // The menu's button at the row's start on a phone, where the page's bar
+  // has its trigger (site-header.tsx), while the chat covers the page.
+  menu: {
+    position: "absolute",
+    insetBlockStart: `calc((${size.appShellBar} - ${size.sidebarIconButton}) / 2)`,
+    insetInlineStart: `calc(${size.appShellPageInline} + (${size.sidebarIcon} - ${size.sidebarIconButton}) / 2)`,
+    zIndex: 25,
+  },
   // Over the page, centred at the card's foot, clear of its edges: what
   // stays at hand on every page. Not in the card's own box, which is the
   // main landmark (SidebarInset), so it is no part of the page's content:
@@ -96,6 +115,19 @@ const styles = stylex.create({
   // What it holds takes presses again: inherited, through a wrapper that
   // draws no box of its own.
   docked: { display: "contents", pointerEvents: "auto" },
+  // Beside the chat's panels the card keeps no room at its end: the gutter
+  // between the two is the panels' handle, as wide as the card's margin
+  // (#2503's shell, frame/panels/panels.tsx), which is the card's end
+  // margin when no panel stands there.
+  card: { marginInlineEnd: 0 },
+  // Under the chat lying over it (full screen, or for want of room), the
+  // card spans the room beside the sidebar, its margins in, edge to edge on
+  // a phone: the ground the chat stands on (#2503's `cardCovered`).
+  spans: {
+    position: "absolute",
+    inset: { default: size.sidebarCardGap, [media.maxSm]: 0 },
+    margin: 0,
+  },
 });
 
 /**
@@ -165,7 +197,7 @@ export const AppFrame = ({
   failing,
   dock,
   panels,
-  covered = false,
+
   children,
 }: {
   core: CoreConnection;
@@ -174,13 +206,48 @@ export const AppFrame = ({
   failing?: FailingProvider[];
   /** Over the page, centred at its foot: the chat's idle bar. */
   dock?: ReactNode;
-  /** Beside or over the page: the chat. */
-  panels?: ReactNode;
-  /** A panel is full screen over the page, whose content fades out under it. */
-  covered?: boolean;
+  /** Beside the page, floating over it, or over it full screen: Grasp's chat. */
+  panels?: ChatPanels;
   children: ReactNode;
 }) => {
+  const { t } = useLingui();
   const page = usePublishedPage();
+  const cover = useChatCover(panels);
+  const { covered, phone } = cover.place;
+  const card = (
+    <SidebarInset
+      style={[panels !== undefined && styles.card, covered && styles.spans]}
+    >
+      <div {...stylex.props(styles.frame)}>
+        <AiKeyBanner
+          failing={failing}
+          identity={identity}
+          providers={providersOf(core)}
+        />
+        <div {...stylex.props(styles.area)}>
+          <PageWithPanel>
+            <div
+              data-slot="app-shell-page"
+              inert={covered}
+              ref={page}
+              {...stylex.props(styles.page, covered && styles.covered)}
+            >
+              <InFrame value>{children}</InFrame>
+            </div>
+          </PageWithPanel>
+          <ChatToggle style={styles.chatToggle} />
+          {/* On a phone the chat lies over the page under the bar's row,
+              which keeps the menu's button, as #2503's shell does. */}
+          {phone ? (
+            <SidebarTrigger
+              aria-label={t`Show or hide the sidebar`}
+              style={styles.menu}
+            />
+          ) : null}
+        </div>
+      </div>
+    </SidebarInset>
+  );
   return (
     // Damsko's Toaster (below) is the app's one place for toasts: a page
     // mounts none of its own and calls Damsko's `toast`. The kit's stays
@@ -193,38 +260,42 @@ export const AppFrame = ({
       <KitTooltipProvider>
         <SidebarProvider storageKey={sidebarKey}>
           <AppSidebar core={core} identity={identity} />
-          <SidebarInset>
-            <div {...stylex.props(styles.frame)}>
-              <AiKeyBanner
-                failing={failing}
-                identity={identity}
-                providers={providersOf(core)}
-              />
-              <div {...stylex.props(styles.area)}>
-                <PageWithPanel>
-                  <div
-                    data-slot="app-shell-page"
-                    inert={covered}
-                    ref={page}
-                    {...stylex.props(styles.page, covered && styles.covered)}
-                  >
-                    <InFrame value>{children}</InFrame>
-                  </div>
-                </PageWithPanel>
-                <ChatToggle style={styles.chatToggle} />
-              </div>
-            </div>
-          </SidebarInset>
+          {panels === undefined ? (
+            card
+          ) : (
+            <ChatPanelsBeside
+              card={
+                <>
+                  {/* Damsko's SidebarInset is a card only beside an inset
+                      Sidebar, its sibling; beside the chat it stands in the
+                      panels' group, so it is given that sibling's mark here
+                      (registry gap of 24 Nov 2026: an inset that is a card
+                      wherever it stands). */}
+                  <span
+                    aria-hidden="true"
+                    data-variant="inset"
+                    hidden
+                    {...stylex.props(sidebarMarker)}
+                  />
+                  {card}
+                </>
+              }
+              cover={cover}
+              panels={panels}
+            />
+          )}
           {dock === undefined ? null : (
             <div
               data-slot="app-shell-dock"
-              inert={covered}
-              {...stylex.props(styles.dock, covered && styles.covered)}
+              inert={panels?.covered === true}
+              {...stylex.props(
+                styles.dock,
+                panels?.covered === true && styles.covered
+              )}
             >
               <div {...stylex.props(styles.docked)}>{dock}</div>
             </div>
           )}
-          {panels}
         </SidebarProvider>
         <Toaster />
       </KitTooltipProvider>

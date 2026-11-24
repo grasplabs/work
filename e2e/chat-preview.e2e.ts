@@ -74,7 +74,7 @@ test("a chat building an App offers its workspace, whose preview changes none of
     await expect(own.getByRole("status")).toHaveText("1 in the App");
 
     // Nothing built yet: the conversation alone.
-    await page.goto(`/?chat=${chat.id}`);
+    await page.goto(`/chats/${chat.id}`);
     const thread = page.getByRole("region", {
       name: `Build ${tag}`,
       exact: true,
@@ -90,7 +90,7 @@ test("a chat building an App offers its workspace, whose preview changes none of
         tallyFiles("in the preview").files["server/tally.ts"] ?? "",
     });
     // Opened afresh from its link: the address left it once it opened.
-    await page.goto(`/?chat=${chat.id}`);
+    await page.goto(`/chats/${chat.id}`);
 
     // The App's workspace is the bar's link away.
     await building.click();

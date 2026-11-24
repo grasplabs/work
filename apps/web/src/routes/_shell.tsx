@@ -3,9 +3,9 @@ import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import type { ErrorComponentProps } from "@tanstack/react-router";
 
 import { ChatBar } from "../chat/chat-bar.tsx";
-import { ChatPanel } from "../chat/chat-panel.tsx";
+import { useChatPanels } from "../chat/chat-panel.tsx";
 import { ChatSwitcherProvider } from "../chat/chat-switcher.tsx";
-import { GlobalChatProvider, useGlobalChat } from "../chat/global-chat.tsx";
+import { GlobalChatProvider } from "../chat/global-chat.tsx";
 import { shellStatus } from "../core-connection.ts";
 import { failingUpFront, providersOf } from "../frame/ai-key-banner.tsx";
 import { AppFrame } from "../frame/app-frame.tsx";
@@ -24,17 +24,15 @@ import { signInErrorSearch } from "../sign-in-errors.ts";
  */
 const ShellFrame = () => {
   const { core, identity } = Route.useRouteContext();
-  const { stage } = useGlobalChat();
+  const panels = useChatPanels();
   const { failing } = Route.useLoaderData();
   return (
     <AppFrame
       core={core}
-      // The chat full screen: the page's content fades out under it.
-      covered={stage.card && stage.placement === "fullscreen"}
       dock={<ChatBar />}
       failing={failing}
       identity={identity}
-      panels={<ChatPanel />}
+      panels={panels}
     >
       <Outlet />
     </AppFrame>
