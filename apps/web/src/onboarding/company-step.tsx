@@ -46,6 +46,7 @@ import {
   useRefresh,
 } from "./step-parts.ts";
 import type { StepProps } from "./step-parts.ts";
+import { StepWays } from "./step-ways.tsx";
 import { SupportLink } from "./support-link.tsx";
 import { XlsxError, xlsxMost, xlsxRows } from "./xlsx.ts";
 
@@ -262,28 +263,34 @@ const CompanyEnd = ({
   const { t } = useLingui();
   if (roster) {
     return (
-      <>
-        <Button
-          onClick={() => {
-            void onward();
-          }}
-          size="lg"
-        >
-          {t`Continue`}
-        </Button>
-        {another ? null : (
-          <Button onClick={onAnother} size="lg" variant="outline">
-            {fromDirectory === null
-              ? t`Use another list`
-              : t`Use a staff list instead`}
-          </Button>
-        )}
-        {fromDirectory === null ? (
-          <SupportLink page="staffList">{t`More about the staff list`}</SupportLink>
-        ) : (
-          <SupportLink page="directory">{t`More about this connection`}</SupportLink>
-        )}
-      </>
+      <StepWays
+        buttons={
+          <>
+            {another ? null : (
+              <Button onClick={onAnother} size="lg" variant="outline">
+                {fromDirectory === null
+                  ? t`Use another list`
+                  : t`Use a staff list instead`}
+              </Button>
+            )}
+            <Button
+              onClick={() => {
+                void onward();
+              }}
+              size="lg"
+            >
+              {t`Continue`}
+            </Button>
+          </>
+        }
+        link={
+          fromDirectory === null ? (
+            <SupportLink page="staffList">{t`More about the staff list`}</SupportLink>
+          ) : (
+            <SupportLink page="directory">{t`More about this connection`}</SupportLink>
+          )
+        }
+      />
     );
   }
   // No list yet: never forced. Grasp's own people sort it out with them in their talks.
@@ -300,26 +307,30 @@ const CompanyEnd = ({
   );
   if (signInsFirst) {
     return (
-      <>
-        <Button onClick={onAnother} size="lg" variant="outline">
-          {t`Use a staff list instead`}
-        </Button>
-        {skip}
-      </>
+      <StepWays
+        buttons={
+          <Button onClick={onAnother} size="lg" variant="outline">
+            {t`Use a staff list instead`}
+          </Button>
+        }
+        link={skip}
+      />
     );
   }
   return (
-    <>
-      {skip}
-      <Button asChild size="lg" variant="link">
-        <a
-          download="staff-list-example.csv"
-          href={`data:text/csv;charset=utf-8,${encodeURIComponent(exampleList)}`}
-        >
-          {t`See an example`}
-        </a>
-      </Button>
-    </>
+    <StepWays
+      buttons={skip}
+      link={
+        <Button asChild size="lg" variant="link">
+          <a
+            download="staff-list-example.csv"
+            href={`data:text/csv;charset=utf-8,${encodeURIComponent(exampleList)}`}
+          >
+            {t`See an example`}
+          </a>
+        </Button>
+      }
+    />
   );
 };
 
@@ -455,12 +466,7 @@ export const CompanyStep = (props: StepProps) => {
     />
   );
   return (
-    <CalmStep
-      body={body}
-      centred
-      end={end}
-      title={t`Who’s who at your company?`}
-    >
+    <CalmStep body={body} centred title={t`Who’s who at your company?`}>
       {signInsFirst || listShown || problem !== null || waiting > 0 ? (
         <div {...stylex.props(styles.stack)}>
           {signInsFirst ? (
@@ -508,6 +514,7 @@ export const CompanyStep = (props: StepProps) => {
           <WaitingNote waiting={waiting} />
         </div>
       ) : null}
+      {end}
     </CalmStep>
   );
 };

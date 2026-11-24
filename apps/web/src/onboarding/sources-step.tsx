@@ -33,6 +33,7 @@ import { sourcesFor } from "./setup.ts";
 import type { DocumentSource } from "./setup.ts";
 import { otherLogo, sourceLogo, wantedLogo } from "./source-logos.ts";
 import type { SetupData, StepProps } from "./step-parts.ts";
+import { StepWays } from "./step-ways.tsx";
 import { SupportLink } from "./support-link.tsx";
 
 // Where the documents live: the places, those of the company's sign-in
@@ -189,19 +190,6 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
           : t`${kinds}. Connect where they live, and I’ll only read what you share with me.`
       }
       centred
-      end={
-        <>
-          <Button
-            onClick={() => {
-              void onward();
-            }}
-            size="lg"
-          >
-            {t`Continue`}
-          </Button>
-          <SupportLink page="documents">{t`More about these connections`}</SupportLink>
-        </>
-      }
       title={t`Where does the work get written down?`}
     >
       <div {...stylex.props(styles.stack)}>
@@ -272,6 +260,21 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
           returnTo={sourcesReturn}
         />
       )}
+      <StepWays
+        buttons={
+          <Button
+            onClick={() => {
+              void onward();
+            }}
+            size="lg"
+          >
+            {t`Continue`}
+          </Button>
+        }
+        link={
+          <SupportLink page="documents">{t`More about these connections`}</SupportLink>
+        }
+      />
     </CalmStep>
   );
 };
