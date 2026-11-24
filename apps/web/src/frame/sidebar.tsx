@@ -4,13 +4,19 @@ import {
   CollapsibleTrigger,
 } from "@grasp-os/ui/components/collapsible";
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@grasp-os/ui/components/context-menu";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@grasp-os/ui/components/dropdown-menu";
-import { InlineEdit } from "@grasp-os/ui/components/inline-edit";
 import {
   Sidebar,
   SidebarCollapsible,
@@ -32,6 +38,12 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "@grasp-os/ui/components/sidebar";
+import { sidebarMenuItemMarker } from "@grasp-os/ui/components/sidebar.stylex";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@grasp-os/ui/components/tooltip";
 import {
   ChevronRightIcon,
   EllipsisIcon,
@@ -40,19 +52,27 @@ import {
   XIcon,
 } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
-import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { focusRingInset, visuallyHidden } from "@grasp-os/ui/lib/styles";
 import {
   colors,
   duration,
   font,
   media,
+  radius,
   size,
   space,
 } from "@grasp-os/ui/lib/tokens.stylex";
+import { announce } from "@grasp-os/ui/lib/utils";
 import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
 import * as stylex from "@stylexjs/stylex";
-import { useId, useState } from "react";
-import type { MouseEvent, ReactElement, ReactNode } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
+import type {
+  FocusEvent,
+  KeyboardEvent,
+  MouseEvent,
+  ReactElement,
+  ReactNode,
+} from "react";
 
 import { LevelHead, SidebarSwitch, SwitchPanel } from "./sidebar-switch.tsx";
 import type { RenderLink, SidebarTab } from "./sidebar-switch.tsx";
@@ -109,14 +129,22 @@ export interface SidebarRow extends SidebarSubRow {
   /** An agent works there now: the Working mark at the row's end. */
   working?: boolean;
   workingLabel?: string;
-  /** Its menu, behind three dots at its end. */
+  /** Its menu: behind three dots at its end, and on a right-click, a long press, the menu key or Shift+F10. */
   actions?: readonly RowAction[];
   /** The dots' name ("More for Weekly numbers"). */
   actionsLabel?: string;
   onAction?: (value: string) => void;
-  /** Renamed in place: its menu's `rename` opens a field over its words. */
+  /**
+   * Renamed in place: its menu's `rename`, F2 or a double-click lays a field over its words;
+   * runs with the new name, trimmed, when it is not empty and differs.
+   */
   onRename?: (name: string) => void;
+  /** The rename field's name ("Rename Weekly numbers"). */
   renameLabel?: string;
+  /** Said of a row that renames, after its name ("Double-click or press F2 to rename"). */
+  renameHint?: string;
+  /** What a screen reader hears once it is renamed ("Renamed to Board report"). */
+  renamedLabel?: (name: string) => string;
 }
 
 /** The last, quiet row of a group: the way to all of them ("All chats"). */
@@ -168,6 +196,9 @@ export interface SidebarSection {
 }
 
 const HOVER = media.hover;
+const COARSE = media.pointerCoarse;
+// A row whose dots' menu is open.
+const HELD_OPEN = ":has([data-slot=sidebar-menu-action][aria-expanded=true])";
 
 const styles = stylex.create({
   // Grasp's mark at the start, the search and the fold at the end, in one
@@ -295,7 +326,70 @@ const styles = stylex.create({
       [media.forcedColors]: "CanvasText",
     },
   },
-  rename: { position: "absolute", inset: 0, display: "flex" },
+  // Renaming, the field over the row shows the words: the row's own stand hidden in their place,
+  // and what stands at its end (its time, its Working mark) with them.
+  renaming: { visibility: "hidden" },
+  // The Working mark at a row's end, in an icon's room, never squeezed.
+  working: {
+    display: "inline-flex",
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    marginInlineStart: "auto",
+  },
+  // On a row with dots, where the dots stand: it gives way to them while the row is pointed at,
+  // holds focus or has its menu open; on a touch screen, where the dots always show, before them.
+  workingSlot: {
+    position: { default: "absolute", [COARSE]: "static" },
+    insetBlock: 0,
+    insetInlineEnd: space["1"],
+    width: { default: size.sidebarIconButton, [COARSE]: "auto" },
+    opacity: {
+      default: 1,
+      [stylex.when.ancestor(":hover", sidebarMenuItemMarker)]: {
+        default: 1,
+        [HOVER]: 0,
+      },
+      [stylex.when.ancestor(":focus-within", sidebarMenuItemMarker)]: 0,
+      [stylex.when.ancestor(HELD_OPEN, sidebarMenuItemMarker)]: 0,
+      [COARSE]: 1,
+    },
+    transitionProperty: "opacity",
+    transitionDuration: {
+      default: duration.hover,
+      [media.reducedMotion]: "0s",
+    },
+    transitionTimingFunction: duration.ease,
+  },
+  // The rename field: the row's own box (its fill's start, end, height and corner) over the row's
+  // link, which stays drawn under it, its words hidden; the row's type, so nothing jumps.
+  field: {
+    position: "absolute",
+    inset: 0,
+    boxSizing: "border-box",
+    width: "100%",
+    height: "100%",
+    margin: 0,
+    paddingInlineEnd: size.sidebarRowInline,
+    borderWidth: 0,
+    borderRadius: radius.sidebarRowRadius,
+    backgroundColor: "transparent",
+    color: colors.sidebarForeground,
+    fontFamily: font.sans,
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+    fontWeight: font.weightMedium,
+    letterSpacing: size.sidebarTracking,
+  },
+});
+
+// Where the row's name stood when renaming started, so the field's words stand exactly there.
+const fieldAt = stylex.create({
+  at: (start: string, top: string, bottom: string) => ({
+    paddingInlineStart: start,
+    paddingBlockStart: top,
+    paddingBlockEnd: bottom,
+  }),
 });
 
 /** The search of the person's chats, a round button in the head. */
@@ -318,13 +412,148 @@ const SearchButton = ({
   </SidebarMenuButton>
 );
 
-/** A row's menu: three dots at its end, shown while the row is pointed at or holds focus. */
-const RowMenu = ({
+// A row with a menu or a rename, as the reference's (#2503's
+// grasp/sidebar/row-actions.tsx) on Damsko's parts: three dots at its end
+// and the same entries on a right-click, a long press, the menu key or
+// Shift+F10; renamed in place from the menu, by F2 or a double-click, by a
+// field laid over the row where its words stood, which hides them. One
+// text at every step: the row's own words while it rests, the field's while
+// it is renamed.
+
+/** Where the name stands in the row's link: from its start, its top and its bottom, in pixels. */
+interface NameAt {
+  start: number;
+  top: number;
+  bottom: number;
+}
+
+/** Reads where the row's name stands in its link, as renaming starts. */
+const nameIn = (link: HTMLElement | null): NameAt | undefined => {
+  const name = link?.querySelector<HTMLElement>("[data-row-name]");
+  if (link === null || name === null || name === undefined) {
+    return undefined;
+  }
+  const box = link.getBoundingClientRect();
+  const words = name.getBoundingClientRect();
+  const rtl = getComputedStyle(link).direction === "rtl";
+  return {
+    start: rtl ? box.right - words.right : words.left - box.left,
+    top: words.top - box.top,
+    bottom: box.bottom - words.bottom,
+  };
+};
+
+/** Whether the row's own name is cut: its words run past their box. */
+const isCut = (row: HTMLElement | null) => {
+  const name = row?.querySelector<HTMLElement>("[data-row-name]");
+  return (
+    name !== null && name !== undefined && name.scrollWidth > name.clientWidth
+  );
+};
+
+/** The rename field: its words chosen as it opens; Enter or leaving it saves, Escape keeps the name. */
+const RenameField = ({
+  label,
+  name,
+  at,
+  onDone,
+}: {
+  label: string;
+  name: string;
+  at: NameAt;
+  /** With the new name, or none to keep the old one; `byKey` when a key ended it. */
+  onDone: (name: string | undefined, byKey: boolean) => void;
+}) => {
+  const field = useRef<HTMLInputElement>(null);
+  const ended = useRef(false);
+  useEffect(() => {
+    field.current?.focus();
+    field.current?.select();
+  }, []);
+  const end = (next: string | undefined, byKey: boolean): void => {
+    if (ended.current) {
+      return;
+    }
+    ended.current = true;
+    onDone(next, byKey);
+  };
+  return (
+    <input
+      aria-label={label}
+      data-row-rename=""
+      defaultValue={name}
+      onBlur={(event: FocusEvent<HTMLInputElement>) => {
+        end(event.currentTarget.value, false);
+      }}
+      onKeyDown={(event: KeyboardEvent<HTMLInputElement>) => {
+        if (event.nativeEvent.isComposing) {
+          return;
+        }
+        if (event.key === "Enter") {
+          event.preventDefault();
+          end(event.currentTarget.value, true);
+        } else if (event.key === "Escape") {
+          // Escape ends the rename only: it does not also close a sheet round it.
+          event.preventDefault();
+          event.stopPropagation();
+          end(undefined, true);
+        }
+      }}
+      ref={field}
+      type="text"
+      {...stylex.props(
+        styles.field,
+        fieldAt.at(
+          `${String(at.start)}px`,
+          `${String(at.top)}px`,
+          `${String(at.bottom)}px`
+        ),
+        focusRingInset
+      )}
+    />
+  );
+};
+
+/** A row's menu entries, as a Dropdown menu's or a Context menu's items. */
+const MenuEntries = ({
+  actions,
+  menu,
+  onChoose,
+}: {
+  actions: readonly RowAction[];
+  menu: "dropdown" | "context";
+  onChoose: (value: string) => void;
+}) => {
+  const Item = menu === "dropdown" ? DropdownMenuItem : ContextMenuItem;
+  const Separator =
+    menu === "dropdown" ? DropdownMenuSeparator : ContextMenuSeparator;
+  return actions.map((action, index) =>
+    action === "separator" ? (
+      <Separator key={`separator-${String(index)}`} />
+    ) : (
+      <Item
+        icon={action.icon}
+        key={action.value}
+        onSelect={() => {
+          onChoose(action.value);
+        }}
+        variant={action.danger === true ? "destructive" : "default"}
+      >
+        {action.label}
+      </Item>
+    )
+  );
+};
+
+/** A row's three dots at its end, shown while the row is pointed at, holds focus or has its menu open. */
+const RowDots = ({
   row,
-  onRename,
+  actions,
+  onChoose,
 }: {
   row: SidebarRow;
-  onRename: () => void;
+  actions: readonly RowAction[];
+  onChoose: (value: string) => void;
 }) => (
   <DropdownMenu>
     <DropdownMenuTrigger asChild>
@@ -337,58 +566,91 @@ const RowMenu = ({
       </SidebarMenuAction>
     </DropdownMenuTrigger>
     <DropdownMenuContent align="start">
-      {(row.actions ?? []).map((action, index) =>
-        action === "separator" ? (
-          <DropdownMenuSeparator key={`separator-${index}`} />
-        ) : (
-          <DropdownMenuItem
-            icon={action.icon}
-            key={action.value}
-            onSelect={() => {
-              if (action.value === "rename" && row.onRename !== undefined) {
-                onRename();
-                return;
-              }
-              row.onAction?.(action.value);
-            }}
-            variant={action.danger === true ? "destructive" : "default"}
-          >
-            {action.label}
-          </DropdownMenuItem>
-        )
-      )}
+      <MenuEntries actions={actions} menu="dropdown" onChoose={onChoose} />
     </DropdownMenuContent>
   </DropdownMenu>
 );
 
+/** Whether the row draws its name itself (its weight, a second line, a rename), not as Damsko's bare words. */
+const ownName = (row: SidebarRow) =>
+  row.detail !== undefined || row.quiet === true || row.onRename !== undefined;
+
+/** Short words at a row's end ("2d"), quiet, and what a screen reader hears of them. */
+const rowEnd = (row: SidebarRow, renaming: boolean): ReactNode =>
+  row.end === undefined ? null : (
+    <span key="end" {...stylex.props(styles.end, renaming && styles.renaming)}>
+      <span aria-hidden="true">{row.end}</span>
+      <span {...stylex.props(visuallyHidden)}>{row.endLabel ?? row.end}</span>
+    </span>
+  );
+
+/** The Working mark while an agent works there: where the dots stand, on a row that has them. */
+const workingMark = (
+  row: SidebarRow,
+  renaming: boolean,
+  dots: boolean
+): ReactNode =>
+  row.working === true ? (
+    <span
+      aria-hidden="true"
+      data-slot="sidebar-row-working"
+      key="working-mark"
+      {...stylex.props(
+        styles.working,
+        dots && styles.workingSlot,
+        renaming && styles.renaming
+      )}
+    >
+      <AgentIndicator />
+    </span>
+  ) : null;
+
 /**
  * A row's own words and what stands with them: its icon, its name, a second
- * line. A list, not an element of its own, so a name given as bare words
- * reaches the row as such: Damsko's row cuts it with an ellipsis before
- * what stands at its end, and shows it whole in a tooltip while it is cut.
+ * line, its end, its Working mark. A list, not an element of its own, so a
+ * name given as bare words reaches the row as such: Damsko's row cuts it
+ * with an ellipsis before what stands at its end, and shows it whole in a
+ * tooltip while it is cut. A name the row draws itself (`ownName`) is
+ * marked `data-row-name`: the rename field stands where it does, and the
+ * row's own tooltip (`CutTip`) reads whether it is cut. Renaming, the name
+ * and what stands at the end are hidden in their places under the field.
  */
-const rowWords = (row: SidebarRow): ReactNode[] => [
+const rowWords = (
+  row: SidebarRow,
+  renaming: boolean,
+  dots: boolean
+): ReactNode[] => [
   row.icon === undefined ? null : <Icon icon={row.icon} key="icon" />,
-  row.detail === undefined && row.quiet !== true ? row.label : null,
-  row.detail === undefined && row.quiet === true ? (
-    <span key="name" {...stylex.props(styles.name, styles.quiet)}>
+  ownName(row) ? null : row.label,
+  ownName(row) && row.detail === undefined ? (
+    <span
+      data-row-name=""
+      key="name"
+      {...stylex.props(
+        styles.name,
+        row.quiet === true && styles.quiet,
+        renaming && styles.renaming
+      )}
+    >
       {row.label}
     </span>
   ) : null,
   row.detail === undefined ? null : (
-    <span key="words" {...stylex.props(styles.words)}>
-      <span {...stylex.props(styles.name, row.quiet === true && styles.quiet)}>
+    <span
+      key="words"
+      {...stylex.props(styles.words, renaming && styles.renaming)}
+    >
+      <span
+        data-row-name=""
+        {...stylex.props(styles.name, row.quiet === true && styles.quiet)}
+      >
         {row.label}
       </span>
       <span {...stylex.props(styles.detail)}>{row.detail}</span>
     </span>
   ),
-  row.end === undefined ? null : (
-    <span key="end" {...stylex.props(styles.end)}>
-      <span aria-hidden="true">{row.end}</span>
-      <span {...stylex.props(visuallyHidden)}>{row.endLabel ?? row.end}</span>
-    </span>
-  ),
+  rowEnd(row, renaming),
+  workingMark(row, renaming, dots),
   row.count !== undefined && row.count > 0 && row.countLabel !== undefined ? (
     <span key="count" {...stylex.props(visuallyHidden)}>
       {row.countLabel}
@@ -401,74 +663,260 @@ const rowWords = (row: SidebarRow): ReactNode[] => [
   ) : null,
 ];
 
-const Row = ({ row }: { row: SidebarRow }) => {
-  const [renaming, setRenaming] = useState(false);
-  const tall = row.detail === undefined ? undefined : styles.tall;
-  const words = rowWords(row);
+/** What a row's tooltip gives its trigger, less the description: the tooltip repeats the row's own name. */
+const RowTrigger = ({
+  draw,
+  "aria-describedby": _repeats,
+  ...trigger
+}: {
+  draw: (trigger: Record<string, unknown>) => ReactElement;
+  "aria-describedby"?: string;
+} & Record<string, unknown>) => draw(trigger);
+
+/**
+ * The row's whole name in a tooltip, only while it is cut, for a row that
+ * draws its name itself (Damsko's row shows its own for bare words): at the
+ * row's end, on a pointer's rest or on focus, never on a phone.
+ */
+const CutTip = ({
+  label,
+  draw,
+}: {
+  label: string;
+  draw: (trigger: Record<string, unknown>) => ReactElement;
+}) => {
+  const { isMobile } = useSidebar();
+  const node = useRef<HTMLElement | null>(null);
   return (
-    <SidebarMenuItem>
-      {row.render === undefined ? (
-        <SidebarMenuButton
-          isActive={row.current === true}
-          onClick={(event) => {
-            row.onClick?.(event);
-          }}
-          style={tall}
-        >
-          {words}
-        </SidebarMenuButton>
-      ) : (
-        <SidebarMenuButton asChild isActive={row.current === true} style={tall}>
-          {row.render({ children: words })}
-        </SidebarMenuButton>
+    <Tooltip
+      disabled={isMobile}
+      onOpenChange={(open, details) => {
+        if (open && !isCut(node.current)) {
+          details.cancel();
+        }
+      }}
+    >
+      <TooltipTrigger
+        asChild
+        ref={(element: HTMLElement | null) => {
+          node.current = element;
+        }}
+      >
+        <RowTrigger draw={draw} />
+      </TooltipTrigger>
+      <TooltipContent side="end">{label}</TooltipContent>
+    </Tooltip>
+  );
+};
+
+/** Whether an event came from the row's link, not its dots or its field. */
+const fromLink = (event: Event): boolean =>
+  event.target instanceof Element &&
+  event.target.closest("[data-slot=sidebar-menu-button]") !== null;
+
+/**
+ * Renaming a row in place: where its name stood as it started, the way to
+ * start it, and how it ends. A double-click on the row's link, or F2 on it,
+ * starts it; listened to on the item round the link (the events come from
+ * the link inside it), so the link stays as the caller drew it. Ending by a
+ * key puts focus back on the link, once it is drawn again.
+ */
+const useRename = (row: SidebarRow) => {
+  const itemRef = useRef<HTMLLIElement>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [at, setAt] = useState<NameAt>();
+  const renames = row.onRename !== undefined;
+  const linkOf = () =>
+    itemRef.current?.querySelector<HTMLElement>(
+      "[data-slot=sidebar-menu-button]"
+    ) ?? null;
+  const start = (): void => {
+    const where = nameIn(linkOf());
+    if (renames && where !== undefined) {
+      setAt(where);
+      setRenaming(true);
+    }
+  };
+  const onDoubleClick = useEffectEvent((event: Event) => {
+    if (fromLink(event)) {
+      start();
+    }
+  });
+  const onKey = useEffectEvent((event: globalThis.KeyboardEvent) => {
+    if (event.key === "F2" && fromLink(event)) {
+      event.preventDefault();
+      start();
+    }
+  });
+  useEffect(() => {
+    const box = itemRef.current;
+    const listening = box !== null && renames && !renaming;
+    if (listening) {
+      box.addEventListener("dblclick", onDoubleClick);
+      box.addEventListener("keydown", onKey);
+    }
+    return () => {
+      if (listening) {
+        box.removeEventListener("dblclick", onDoubleClick);
+        box.removeEventListener("keydown", onKey);
+      }
+    };
+  }, [renames, renaming]);
+  const done = (next: string | undefined, byKey: boolean): void => {
+    setRenaming(false);
+    const trimmed = next?.trim();
+    if (trimmed !== undefined && trimmed !== "" && trimmed !== row.label) {
+      row.onRename?.(trimmed);
+      if (row.renamedLabel !== undefined) {
+        announce(row.renamedLabel(trimmed));
+      }
+    }
+    if (byKey) {
+      requestAnimationFrame(() => {
+        linkOf()?.focus();
+      });
+    }
+  };
+  return {
+    itemRef,
+    renames,
+    renaming,
+    at: renaming ? at : undefined,
+    start,
+    onDone: done,
+    linkOf,
+  };
+};
+
+/** The row's link, or its button: its words, and what the rename gives it. */
+const RowButton = ({
+  row,
+  words,
+  trigger,
+  describedBy,
+  inert,
+}: {
+  row: SidebarRow;
+  words: ReactNode[];
+  /** The tooltip trigger's props (CutTip), when the row has its own. */
+  trigger: Record<string, unknown>;
+  describedBy: string | undefined;
+  inert: boolean;
+}) => {
+  const tall = row.detail === undefined ? undefined : styles.tall;
+  const own = {
+    "aria-describedby": describedBy,
+    // While it is renamed: drawn under the field, out of reach.
+    inert: inert || undefined,
+  };
+  return row.render === undefined ? (
+    <SidebarMenuButton
+      {...trigger}
+      {...own}
+      isActive={row.current === true}
+      onClick={(event) => {
+        row.onClick?.(event);
+      }}
+      style={tall}
+    >
+      {words}
+    </SidebarMenuButton>
+  ) : (
+    <SidebarMenuButton
+      {...trigger}
+      {...own}
+      asChild
+      isActive={row.current === true}
+      style={tall}
+    >
+      {row.render({ children: words })}
+    </SidebarMenuButton>
+  );
+};
+
+/** A row's sub rows: the pages within it. */
+const SubRows = ({ rows }: { rows: readonly SidebarSubRow[] | undefined }) =>
+  rows === undefined || rows.length === 0 ? null : (
+    <SidebarMenuSub>
+      {rows.map((sub) => (
+        <SidebarMenuSubItem key={sub.id ?? sub.label}>
+          {sub.render === undefined ? null : (
+            <SidebarMenuSubButton asChild isActive={sub.current === true}>
+              {sub.render({ children: sub.label })}
+            </SidebarMenuSubButton>
+          )}
+        </SidebarMenuSubItem>
+      ))}
+    </SidebarMenuSub>
+  );
+
+const Row = ({ row }: { row: SidebarRow }) => {
+  const hint = useId();
+  const { itemRef, renames, renaming, at, start, onDone, linkOf } =
+    useRename(row);
+  const actions = row.actions ?? [];
+  const hasActions = actions.length > 0;
+  const choose = (value: string): void => {
+    if (value === "rename" && renames) {
+      start();
+      return;
+    }
+    row.onAction?.(value);
+  };
+  const words = rowWords(row, renaming, hasActions);
+  const describedBy =
+    renames && !renaming && row.renameHint !== undefined ? hint : undefined;
+  const button = (trigger: Record<string, unknown>) => (
+    <RowButton
+      describedBy={describedBy}
+      inert={renaming}
+      row={row}
+      trigger={trigger}
+      words={words}
+    />
+  );
+  const held = (
+    <>
+      {ownName(row) ? <CutTip draw={button} label={row.label} /> : button({})}
+      {at === undefined ? null : (
+        <RenameField
+          at={at}
+          label={row.renameLabel ?? row.label}
+          name={row.label}
+          onDone={onDone}
+        />
       )}
-      {renaming && row.onRename !== undefined ? (
-        <div {...stylex.props(styles.rename)}>
-          <InlineEdit
-            aria-label={row.renameLabel ?? row.label}
-            defaultEditing
-            onCancel={() => {
-              setRenaming(false);
-            }}
-            onSubmit={(name) => {
-              setRenaming(false);
-              row.onRename?.(name);
-            }}
-            value={row.label}
-          />
-        </div>
-      ) : null}
-      {row.count !== undefined && row.count > 0 ? (
+      {describedBy === undefined ? null : (
+        <span id={hint} {...stylex.props(visuallyHidden)}>
+          {row.renameHint}
+        </span>
+      )}
+      {row.count !== undefined && row.count > 0 && !renaming ? (
         <SidebarMenuBadge>
           <span aria-hidden="true">{row.count}</span>
         </SidebarMenuBadge>
       ) : null}
-      {row.working === true ? (
-        <SidebarMenuBadge>
-          <AgentIndicator aria-hidden="true" />
-        </SidebarMenuBadge>
+      {hasActions && !renaming ? (
+        <RowDots actions={actions} onChoose={choose} row={row} />
       ) : null}
-      {row.actions === undefined ? null : (
-        <RowMenu
-          onRename={() => {
-            setRenaming(true);
-          }}
-          row={row}
-        />
+    </>
+  );
+  return (
+    <SidebarMenuItem ref={itemRef}>
+      {/* The row's link is what the keys reach, so the area takes no tab stop; the menu gives focus back to the link, or to nobody when its choice starts renaming (the field takes it). */}
+      {hasActions ? (
+        <ContextMenu>
+          <ContextMenuTrigger aria-label={row.label} tabStop={false}>
+            {held}
+          </ContextMenuTrigger>
+          <ContextMenuContent finalFocus={renaming ? "none" : linkOf}>
+            <MenuEntries actions={actions} menu="context" onChoose={choose} />
+          </ContextMenuContent>
+        </ContextMenu>
+      ) : (
+        held
       )}
-      {row.rows === undefined || row.rows.length === 0 ? null : (
-        <SidebarMenuSub>
-          {row.rows.map((sub) => (
-            <SidebarMenuSubItem key={sub.id ?? sub.label}>
-              {sub.render === undefined ? null : (
-                <SidebarMenuSubButton asChild isActive={sub.current === true}>
-                  {sub.render({ children: sub.label })}
-                </SidebarMenuSubButton>
-              )}
-            </SidebarMenuSubItem>
-          ))}
-        </SidebarMenuSub>
-      )}
+      <SubRows rows={row.rows} />
     </SidebarMenuItem>
   );
 };
