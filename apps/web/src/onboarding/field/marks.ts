@@ -17,10 +17,10 @@ const CELL = 4;
 const ROOMY = 2.4;
 
 /** The picture's height, as times the component's: it bleeds off the far edge. */
-const SCALE = 1.5;
+const SCALE = 2.1;
 
 /** How much of the component's width, from its far edge, the picture fades over. */
-const REACH = 0.5;
+const REACH = 0.6;
 
 const bayerAt = (x: number, y: number): number =>
   ((BAYER_MATRIX[y % 4]?.[x % 4] ?? 0) + 0.5) / DITHER_LEVELS;
@@ -55,35 +55,31 @@ const readMark = async (svg: SVGSVGElement, rows: number): Promise<Mark> => {
   const columns = Math.max(1, Math.round(rows * aspect));
   copy.setAttribute("width", String(columns * 4));
   copy.setAttribute("height", String(rows * 4));
-  // Every shape solid, so its outline and fill both read as the mark.
+  // Its look comes from the page's classes, which a picture alone doesn't have: solid, in one ink.
+  copy.removeAttribute("class");
+  copy.setAttribute("fill", "#000");
   copy.setAttribute("color", "#000");
-  copy.setAttribute("fill", "currentColor");
-  const url = URL.createObjectURL(
-    new Blob([new XMLSerializer().serializeToString(copy)], {
-      type: "image/svg+xml",
-    })
-  );
-  try {
-    const image = new Image();
-    image.src = url;
-    await image.decode();
-    const flat = document.createElement("canvas");
-    flat.width = columns;
-    flat.height = rows;
-    const context = flat.getContext("2d", { willReadFrequently: true });
-    if (context === null) {
-      return { columns: 0, rows: 0, lit: new Uint8Array() };
-    }
-    context.drawImage(image, 0, 0, columns, rows);
-    const { data } = context.getImageData(0, 0, columns, rows);
-    const lit = new Uint8Array(columns * rows);
-    for (let at = 0; at < lit.length; at += 1) {
-      lit[at] = (data[at * 4 + 3] ?? 0) > 96 ? 1 : 0;
-    }
-    return { columns, rows, lit };
-  } finally {
-    URL.revokeObjectURL(url);
+  // The page allows pictures from itself and `data:` addresses only, not `blob:`.
+  const source = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+    new XMLSerializer().serializeToString(copy)
+  )}`;
+  const image = new Image();
+  image.src = source;
+  await image.decode();
+  const flat = document.createElement("canvas");
+  flat.width = columns;
+  flat.height = rows;
+  const context = flat.getContext("2d", { willReadFrequently: true });
+  if (context === null) {
+    return { columns: 0, rows: 0, lit: new Uint8Array() };
   }
+  context.drawImage(image, 0, 0, columns, rows);
+  const { data } = context.getImageData(0, 0, columns, rows);
+  const lit = new Uint8Array(columns * rows);
+  for (let at = 0; at < lit.length; at += 1) {
+    lit[at] = (data[at * 4 + 3] ?? 0) > 96 ? 1 : 0;
+  }
+  return { columns, rows, lit };
 };
 
 /** The mark of a component, once read; it starts reading it the first time it is asked. */
