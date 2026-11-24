@@ -36,7 +36,9 @@ import {
 } from "@grasp-os/ui/components/prompt-input";
 import type { PromptInputSpeechButtonProps } from "@grasp-os/ui/components/prompt-input";
 import { Text } from "@grasp-os/ui/components/text";
+import type { IconData } from "@grasp-os/ui/lib/icons";
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import type { LayoutStyle } from "@grasp-os/ui/lib/utils";
 import { msg, select } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
@@ -90,14 +92,20 @@ const styles = stylex.create({
     gridArea: "end",
     justifySelf: "end",
   },
-  // The files take the header's whole line, over the subject's: their row
-  // takes no width from its files, and would shrink to nothing beside it.
+  // The files take the header's whole line, their cards 16px from the
+  // card's top and side and the text 12px under them, as #2503's and as
+  // Damsko's own PromptInputAttachments (its `attachments` style), which
+  // shows only files the box keeps itself: the row keeps 4px of its own
+  // round them for a focus ring.
   files: {
     position: "relative",
-    zIndex: 1,
-    flexBasis: "100%",
+    zIndex: 2,
+    flexBasis: `calc(100% + 2 * ${space["1"]})`,
     flexShrink: 0,
     minWidth: 0,
+    marginInline: `calc(-1 * ${space["1"]})`,
+    marginBlockStart: `calc(-1 * ${space["1"]})`,
+    marginBlockEnd: `calc(${space["3"]} - ${space["1"]} - ${space["4"]})`,
   },
 });
 
@@ -374,6 +382,16 @@ const BoxFiles = ({
     </div>
   );
 
+/**
+ * What the question is about, on the band above the box (subject-bar.tsx):
+ * the kind's mark, the line (its name), and what else at its end ("+N").
+ */
+export interface SubjectBar {
+  icon: IconData;
+  line: ReactNode;
+  more: ReactNode;
+}
+
 /** Where nobody picks a model. */
 export const noModels: readonly string[] = [];
 
@@ -428,6 +446,14 @@ const noProviderBanner = (canConnect: boolean) => (
     )}
   </PromptInputBanner>
 );
+
+/** What the question is about, as the band above the box; a call too, as `noProviderBanner`. */
+const subjectBanner = (subject: SubjectBar | undefined) =>
+  subject === undefined ? null : (
+    <PromptInputBanner action={subject.more} icon={subject.icon}>
+      {subject.line}
+    </PromptInputBanner>
+  );
 
 /**
  * Hands every file picked, pasted or dropped on the box to the page, which
@@ -668,8 +694,8 @@ export const Composer = ({
   placeholder?: string;
   /** After Send: such as the way to open the chat from its bar. */
   children?: ReactNode;
-  /** What the question is about, over the text: a page's subject. */
-  subject?: ReactNode;
+  /** What the question is about: a band above the box, tucked under its top. */
+  subject?: SubjectBar;
   /** The files the question will carry, each shown as a card. */
   files?: readonly CardFile[];
   /** Adds files to the question; without it, the box takes none. */
@@ -748,13 +774,14 @@ export const Composer = ({
       {...(style === undefined ? {} : { style })}
       value={value}
     >
-      {noProvider ? noProviderBanner(canConnect) : null}
+      {/* The band above the box: no AI provider yet, else what the
+          question is about. */}
+      {noProvider ? noProviderBanner(canConnect) : subjectBanner(subject)}
       {/* Under the box: why dictating stopped, else why the last question
           didn't go. Each send clears the first, so the newest shows. */}
       {note === undefined ? null : <PromptInputNote>{note}</PromptInputNote>}
-      {subject === undefined && files.length === 0 ? null : (
+      {files.length === 0 ? null : (
         <PromptInputHeader>
-          {subject}
           <BoxFiles busy={busy} files={files} onRemove={onRemoveFile} />
         </PromptInputHeader>
       )}
