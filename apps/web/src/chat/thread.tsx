@@ -72,11 +72,12 @@ import {
 } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import type { LayoutStyle } from "@grasp-os/ui/lib/utils";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link as RouterLink, useLocation } from "@tanstack/react-router";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
 import type { ThinkingOf } from "../brain/thinking/play.ts";
@@ -140,9 +141,6 @@ type Result = Extract<ChatMessage, { role: "result" }>;
 type Answer = Extract<ChatMessage, { role: "assistant" }>;
 type Asked = Extract<ChatMessage, { role: "user" }>;
 
-/** How wide the conversation reads beside nothing: one column in the middle. */
-const readingWidth = "48rem";
-
 const styles = stylex.create({
   // The thread takes the room the chat gives it; the scroller is as tall as its box.
   room: {
@@ -151,11 +149,11 @@ const styles = stylex.create({
     flexGrow: 1,
     minHeight: 0,
   },
-  // Full screen, the conversation reads as one column in the middle.
+  // Full screen (the panel's column in the middle), each row's words as
+  // far in from its sides as #2503's: 32px, the row's own 16 and these.
   column: {
-    width: "100%",
-    maxWidth: readingWidth,
-    marginInline: "auto",
+    width: "auto",
+    marginInline: space["4"],
   },
   // What stands with an answer: its steps, notes and words, the Markdown's own gap apart.
   stack: {
@@ -909,6 +907,49 @@ const StepOutput = ({ step }: { step: AnswerStep }) => {
  * long it worked; each step a line, holding its call as a Tool that opens
  * to what went in and came back.
  */
+/**
+ * Whether a fold has been opened yet, and its open state: what it holds
+ * is drawn only once it has, and then kept, so it closes as it opened.
+ * A thread holds many folds no one opens (every answer's steps), each
+ * drawn whole until now.
+ */
+const useOpened = (): {
+  open: boolean;
+  opened: boolean;
+  onOpenChange: (next: boolean) => void;
+} => {
+  const [open, setOpen] = useState(false);
+  const [opened, setOpened] = useState(false);
+  return {
+    open,
+    opened,
+    onOpenChange: (next) => {
+      setOpen(next);
+      if (next) {
+        setOpened(true);
+      }
+    },
+  };
+};
+
+/** A step's call, opening to what went in and came back; drawn once opened. */
+const StepCall = ({ step }: { step: AnswerStep }) => {
+  const { open, opened, onOpenChange } = useOpened();
+  return (
+    <Tool onOpenChange={onOpenChange} open={open}>
+      <ToolHeader name={step.tool} state={toolStates[step.status]} />
+      <ToolContent>
+        {opened ? (
+          <>
+            <ToolInput input={step.input} />
+            <StepOutput step={step} />
+          </>
+        ) : null}
+      </ToolContent>
+    </Tool>
+  );
+};
+
 const AnswerSteps = ({
   steps,
   line,
@@ -917,35 +958,36 @@ const AnswerSteps = ({
   line: ReactNode;
 }) => {
   const { t } = useLingui();
+  const { open, opened, onOpenChange } = useOpened();
   return (
-    <ChainOfThought aria-label={t`What Grasp did`}>
+    <ChainOfThought
+      aria-label={t`What Grasp did`}
+      onOpenChange={onOpenChange}
+      open={open}
+    >
       <ChainOfThoughtHeader>{line}</ChainOfThoughtHeader>
       <ChainOfThoughtContent>
-        {steps.map((step) => {
-          let description: string | undefined;
-          if (step.status === "retried") {
-            description = t`Retried`;
-          } else if (step.status === "stopped") {
-            description = t`Stopped`;
-          }
-          return (
-            <ChainOfThoughtStep
-              description={description}
-              icon={step.tool === "code" ? CodeIcon : kindIcons[step.kind]}
-              key={step.id}
-              label={step.label}
-              status={chainStatuses[step.status]}
-            >
-              <Tool>
-                <ToolHeader name={step.tool} state={toolStates[step.status]} />
-                <ToolContent>
-                  <ToolInput input={step.input} />
-                  <StepOutput step={step} />
-                </ToolContent>
-              </Tool>
-            </ChainOfThoughtStep>
-          );
-        })}
+        {opened
+          ? steps.map((step) => {
+              let description: string | undefined;
+              if (step.status === "retried") {
+                description = t`Retried`;
+              } else if (step.status === "stopped") {
+                description = t`Stopped`;
+              }
+              return (
+                <ChainOfThoughtStep
+                  description={description}
+                  icon={step.tool === "code" ? CodeIcon : kindIcons[step.kind]}
+                  key={step.id}
+                  label={step.label}
+                  status={chainStatuses[step.status]}
+                >
+                  <StepCall step={step} />
+                </ChainOfThoughtStep>
+              );
+            })
+          : null}
       </ChainOfThoughtContent>
     </ChainOfThought>
   );
@@ -1357,7 +1399,9 @@ export const ChatThread = ({
     children === undefined || children === null
       ? rows
       : [...rows, { kind: "after", id: "after", children }];
-  const column = !compact && styles.column;
+  const column: { style?: LayoutStyle } = compact
+    ? {}
+    : { style: styles.column };
   return (
     <div {...stylex.props(styles.room)}>
       <AnswerLinks>
@@ -1371,21 +1415,20 @@ export const ChatThread = ({
                         key={row.id}
                         messageId={row.id}
                         scrollAnchor={row.kind === "question"}
+                        {...column}
                       >
-                        <div {...stylex.props(column)}>
-                          {row.kind === "question" ? (
-                            <Question asked={row.asked} message={row.message} />
-                          ) : null}
-                          {row.kind === "answer" ? (
-                            <AnswerRow context={contextOf(row)} turn={row} />
-                          ) : null}
-                          {row.kind === "after" ? row.children : null}
-                        </div>
+                        {row.kind === "question" ? (
+                          <Question asked={row.asked} message={row.message} />
+                        ) : null}
+                        {row.kind === "answer" ? (
+                          <AnswerRow context={contextOf(row)} turn={row} />
+                        ) : null}
+                        {row.kind === "after" ? row.children : null}
                       </MessageScrollerItem>
                     ))
                   : loadingPairs.map((key) => (
-                      <MessageScrollerItem key={key}>
-                        <div {...stylex.props(column, styles.pair)}>
+                      <MessageScrollerItem key={key} {...column}>
+                        <div {...stylex.props(styles.pair)}>
                           <MessageSkeleton align="end" />
                           <MessageSkeleton />
                         </div>

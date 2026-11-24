@@ -430,6 +430,8 @@ describe(ChatThread, () => {
         saved: { memory, type: "fact", statement: "Acme renews on 1 March" },
       },
     ]);
+    // The steps are drawn once opened.
+    await openSteps();
     const shown = document.body.textContent;
     const undo = [...document.querySelectorAll("button")].find(
       (button) => button.textContent === "Undo"

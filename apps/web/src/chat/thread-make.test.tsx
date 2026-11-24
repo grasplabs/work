@@ -325,6 +325,15 @@ describe("making something in a chat's thread", () => {
       result(7, 4, "call-2", false),
       reply(8, 5, { text: "It's ready to try." }),
     ]);
+    // The steps are drawn once opened.
+    await act(async () => {
+      for (const steps of document.querySelectorAll<HTMLElement>(
+        '[data-slot="chain-of-thought"] button[aria-expanded="false"]'
+      )) {
+        steps.click();
+      }
+      await Promise.resolve();
+    });
     const shown = document.body.textContent ?? "";
 
     expect({

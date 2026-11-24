@@ -86,6 +86,9 @@ const styles = stylex.create({
   },
   // Full screen, the conversation and the box read as one column in the middle.
   fullscreen: { maxWidth: "48rem" },
+  // There the box is as far in as the thread's words, and as wide (#2503).
+  footerFullscreen: { paddingInline: space["8"] },
+  boxFullscreen: { maxWidth: "100%" },
 });
 
 /**
@@ -254,6 +257,7 @@ const BrainGaps = () => {
 /** The box to ask in, or the agent's questions in its place; dictating only while the chat is open. */
 const Footer = ({ open }: { open: boolean }) => {
   const { t } = useLingui();
+  const fullscreen = useDockablePanel().placement === "fullscreen";
   const {
     builds,
     subject,
@@ -292,7 +296,9 @@ const Footer = ({ open }: { open: boolean }) => {
       ? undefined
       : { ...subject.about, name: subject.name };
   return (
-    <div {...stylex.props(styles.footer)}>
+    <div
+      {...stylex.props(styles.footer, fullscreen && styles.footerFullscreen)}
+    >
       <BuildsFailure read={builds} />
       <ChatSources names={sourceNames} provenance={view.provenance} />
       <AskOrCompose
@@ -317,6 +323,7 @@ const Footer = ({ open }: { open: boolean }) => {
         asking={asking}
         // The panel stays while it is closed: nothing listens from it then.
         dictates={open}
+        style={fullscreen ? styles.boxFullscreen : undefined}
         label={words.title}
         onAnswer={(text) => {
           void ask(text);
