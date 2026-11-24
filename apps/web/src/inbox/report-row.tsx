@@ -390,23 +390,26 @@ export const ReportItem = ({
   return (
     <>
       <ItemGroup aria-label={t`Your weekly report`}>
-        <Item
-          onClick={() => {
-            // Read again first, so the report is as it stands now.
-            void (async () => {
-              await router.invalidate({ sync: true });
-              setOpen(true);
-            })();
-          }}
-          size="xs"
-        >
-          <ItemMedia>
-            <Icon icon={FileIcon} />
-          </ItemMedia>
-          <ItemContent>
-            <ItemTitle>{title}</ItemTitle>
-            <ItemDescription>{detail}</ItemDescription>
-          </ItemContent>
+        {/* A button of its own, so the row has the chevron a list's rows have. */}
+        <Item asChild size="xs">
+          <button
+            onClick={() => {
+              // Read again first, so the report is as it stands now.
+              void (async () => {
+                await router.invalidate({ sync: true });
+                setOpen(true);
+              })();
+            }}
+            type="button"
+          >
+            <ItemMedia>
+              <Icon icon={FileIcon} />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>{title}</ItemTitle>
+              <ItemDescription>{detail}</ItemDescription>
+            </ItemContent>
+          </button>
         </Item>
       </ItemGroup>
       <Sheet onOpenChange={setOpen} open={open}>

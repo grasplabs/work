@@ -1,4 +1,5 @@
 import type { Identity } from "@grasp-os/shared/rpc";
+import { Badge } from "@grasp-os/ui/components/badge";
 import {
   Sidebar,
   SidebarContent,
@@ -15,8 +16,15 @@ import {
   useSidebar,
 } from "@grasp-os/ui/components/sidebar";
 import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@grasp-os/ui/components/tabs";
+import {
+  BellIcon,
   BrainIcon,
-  FolderIcon,
+  HouseIcon,
   Icon,
   LayoutGridIcon,
   LinkIcon,
@@ -29,20 +37,22 @@ import type { IconData } from "@grasp-os/ui/lib/icons";
 import { size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
 import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
+import { msg, plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import {
   Link,
   useLocation,
   useMatchRoute,
+  useNavigate,
   useRouter,
 } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 import { chatsKey, useChatsWindow } from "../chat/chat-switcher.tsx";
+import { RecentChats } from "../chat/sidebar-chats.tsx";
 import type { CoreConnection } from "../core-connection.ts";
-import { InboxNavItem } from "../inbox/nav-item.tsx";
+import { InboxView, useWaitingCount } from "../inbox/sidebar-inbox.tsx";
 import { shortcutLabel } from "../shortcuts.ts";
 import { WorkflowsItem } from "../workflows/nav-item.tsx";
 import { GraspMark } from "./grasp-mark.ts";
@@ -52,29 +62,31 @@ import { SettingsLevel } from "./settings-level.tsx";
 import { SurfaceNav } from "./surface-nav.tsx";
 import { useWayOut } from "./way-out.tsx";
 
-// The app's sidebar, Damsko's Sidebar on its own light ground, the page a
-// card beside it: Grasp's mark at the top, with the search of the chats
-// and the sidebar's own fold; under it the product's sections and the
-// Apps' own entries, or, while a Settings page is open, Settings' own
-// level in their place; at the foot the person signed in, with their
+// The app's sidebar, as the reference's, on Damsko's Sidebar on its own
+// light ground, the page a card beside it: Grasp's mark at the top, with
+// the search of the chats and the sidebar's own fold; under it a switch of
+// two views, Home and Inbox. Home holds the product's sections (Chat,
+// Brain, Apps, Workflows, Agents and Integrations, the same for every
+// role), the person's recent chats and the Apps' own entries; Inbox, what
+// waits on the person. While a Settings page is open, Settings' own level
+// stands in their place. At the foot, the person signed in, with their
 // menu. Folded, it goes off the side whole, and each page's bar holds the
 // way back (frame/site-header.tsx). On a phone it is a sheet from the
-// start. Staff who reach the onboarding alone get none of the sections:
-// Grasp steers the onboarding from its admin.
+// start. Staff who reach the onboarding alone get no views and none of
+// the sections: Grasp steers the onboarding from its admin.
+//
+// Projects has no row, as in the reference: a project's page is the back
+// step of an App or a workflow started from it (frame/item-shell.tsx), and
+// its crumb leads to the list of projects.
 
 interface Section {
-  to: "/" | "/brain" | "/projects" | "/apps" | "/agents" | "/integrations";
+  to: "/" | "/brain" | "/apps" | "/agents" | "/integrations";
   label: MessageDescriptor;
   icon: IconData;
 }
 
 const chat: Section = { to: "/", label: msg`Chat`, icon: MessageCircleIcon };
 const brain: Section = { to: "/brain", label: msg`Brain`, icon: BrainIcon };
-const projects: Section = {
-  to: "/projects",
-  label: msg`Projects`,
-  icon: FolderIcon,
-};
 const apps: Section = { to: "/apps", label: msg`Apps`, icon: LayoutGridIcon };
 // The company's agents: the ones a person may ask, and for admins all of them.
 const agents: Section = {
@@ -98,6 +110,16 @@ const styles = stylex.create({
     minHeight: size.sidebarMenuButtonHeight,
     paddingInlineStart: size.sidebarRowInline,
   },
+  // The views' switch, under the head, at the rows' inset; the views
+  // themselves stand in the level as its list did, each scrolling.
+  views: { display: "contents" },
+  switch: {
+    flexShrink: 0,
+    marginInline: space["2"],
+    marginBlockEnd: space["1"],
+  },
+  // A view's icon and words, a row's gap apart, as a row's are.
+  tab: { display: "inline-flex", alignItems: "center", gap: space["2"] },
   // The mark at the shell's mark size, in the sidebar's ink.
   mark: {
     [iconVars.size]: size.appShellMark,
@@ -178,7 +200,90 @@ const Head = ({ searching }: { searching: boolean }) => {
   );
 };
 
-/** The app's sidebar: Grasp's mark, search and the fold, the sections or a level, and the person. */
+/** What waits, in words, for a screen reader: the Inbox's dot shows no number. */
+const thingsWaiting = (waiting: number): string =>
+  plural(waiting, { one: "# thing waiting", other: "# things waiting" });
+
+/** The sidebar's two views. */
+type View = "home" | "inbox";
+
+const isView = (value: string | null): value is View =>
+  value === "home" || value === "inbox";
+
+/**
+ * Home and Inbox, the switch under the head and the view it shows: Home,
+ * the sections, the recent chats and the Apps' entries; Inbox, what waits.
+ * Choosing Inbox opens the inbox's page too, so there is something to see
+ * even when nothing waits; Home keeps the page the person is on.
+ */
+const Views = ({ core }: { core: CoreConnection }) => {
+  const { t } = useLingui();
+  const navigate = useNavigate();
+  const [view, setView] = useState<View>("home");
+  // The Inbox tab's dot, and the Inbox view's count.
+  const waiting = useWaitingCount();
+  const dotted = waiting !== undefined && waiting > 0;
+  return (
+    <Tabs
+      onValueChange={(next) => {
+        if (!isView(next)) {
+          return;
+        }
+        setView(next);
+        if (next === "inbox") {
+          void navigate({ to: "/inbox" });
+        }
+      }}
+      style={styles.views}
+      value={view}
+    >
+      <TabsList aria-label={t`Views`} style={styles.switch}>
+        <TabsTrigger value="home">
+          <span {...stylex.props(styles.tab)}>
+            <Icon icon={HouseIcon} />
+            {t`Home`}
+          </span>
+        </TabsTrigger>
+        <TabsTrigger value="inbox">
+          <span {...stylex.props(styles.tab)}>
+            <Icon icon={BellIcon} />
+            {t`Inbox`}
+            {/* The red dot: something waits; how much, in its name. */}
+            {dotted ? (
+              <Badge
+                aria-label={thingsWaiting(waiting)}
+                dot
+                variant="destructive"
+              />
+            ) : null}
+          </span>
+        </TabsTrigger>
+      </TabsList>
+      <TabsContent style={styles.views} value="home">
+        <SidebarContent aria-label={t`Main`}>
+          <SidebarGroup>
+            <SidebarMenu>
+              <SectionItem section={chat} />
+              <SectionItem section={brain} />
+              <SectionItem section={apps} />
+              {/* With how many workflows need the person. */}
+              <WorkflowsItem />
+              <SectionItem section={agents} />
+              <SectionItem section={integrations} />
+            </SidebarMenu>
+          </SidebarGroup>
+          <RecentChats />
+          <SurfaceNav core={core} />
+        </SidebarContent>
+      </TabsContent>
+      <TabsContent style={styles.views} value="inbox">
+        <InboxView waiting={waiting} />
+      </TabsContent>
+    </Tabs>
+  );
+};
+
+/** The app's sidebar: Grasp's mark, search and the fold, the views or a level, and the person. */
 export const AppSidebar = ({
   core,
   identity,
@@ -212,25 +317,7 @@ export const AppSidebar = ({
         <SidebarLevel value="main">
           {/* No landmark with nothing in it: who reaches the onboarding
               alone has no sections. */}
-          {sections ? (
-            <SidebarContent aria-label={t`Main`}>
-              <SidebarGroup>
-                <SidebarMenu>
-                  <SectionItem section={chat} />
-                  {/* With how many things wait on the person. */}
-                  <InboxNavItem />
-                  <SectionItem section={brain} />
-                  <SectionItem section={projects} />
-                  <SectionItem section={apps} />
-                  {/* With how many workflows need the person. */}
-                  <WorkflowsItem />
-                  <SectionItem section={agents} />
-                  <SectionItem section={integrations} />
-                </SidebarMenu>
-              </SidebarGroup>
-              <SurfaceNav core={core} />
-            </SidebarContent>
-          ) : null}
+          {sections ? <Views core={core} /> : null}
         </SidebarLevel>
         <SettingsLevel identity={identity} outside={outside} />
       </SidebarLevels>

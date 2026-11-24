@@ -19,24 +19,29 @@ test("follows the browser's language, then the one the person picks", async ({
   await expect(nav.getByRole("link", { name: "Gehirn" })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("lang", "de");
 
-  // The language is in the person menu, at the sidebar's foot.
+  // The language is in Settings › Profile, which the person menu's
+  // Settings opens.
   await page.getByRole("button", { name: "Person", exact: true }).click();
-  await page.getByRole("menuitem", { name: /^Sprache/u }).click();
-  await page.getByRole("menuitemradio", { name: "Nederlands" }).click();
+  await page.getByRole("menuitem", { name: "Einstellungen" }).click();
+  await expect(page).toHaveURL(/\/settings\/profile$/u);
+  await page.getByRole("combobox", { name: "Sprache" }).click();
+  await page.getByRole("option", { name: "Nederlands" }).click();
+  await expect(page.getByRole("heading", { name: "Profiel" })).toBeVisible();
+
+  // Kept for this browser, over its own language.
+  await page.goto("/projects");
   await expect(
     page.getByRole("navigation", { name: "Hoofdmenu" }).getByRole("link", {
       name: "Brein",
     })
   ).toBeVisible();
-
-  // Kept for this browser, over its own language.
   await page.reload();
   await expect(
     page.getByRole("heading", { name: "Projecten", exact: true })
   ).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("lang", "nl");
 
-  // And in Settings → Profile, which the person menu's Settings opens.
+  // And back, in the same place.
   await page.getByRole("button", { name: "Person", exact: true }).click();
   await page.getByRole("menuitem", { name: "Instellingen" }).click();
   await expect(page).toHaveURL(/\/settings\/profile$/u);
@@ -50,6 +55,7 @@ test("follows the browser's language, then the one the person picks", async ({
 
 /** Presses `option` where it stands, once it is seen whole in a window 390px across. */
 const chosen = async (option: Locator): Promise<void> => {
+  await expect(option).toBeVisible();
   const box = await option.boundingBox();
   expect(box).not.toBeNull();
   expect(box?.x).toBeGreaterThanOrEqual(0);
@@ -57,7 +63,7 @@ const chosen = async (option: Locator): Promise<void> => {
   await option.click();
 };
 
-test("on a phone the person menu holds the languages and the themes, each within the window", async ({
+test("on a phone the person menu holds the themes and the organization, each within the window", async ({
   pageOf,
 }) => {
   const { member } = peopleIn("languages");
@@ -69,32 +75,34 @@ test("on a phone the person menu holds the languages and the themes, each within
     page.getByRole("heading", { name: "Projects", exact: true })
   ).toBeVisible({ timeout: 20_000 });
   const menu = page.getByRole("menu");
-  /** The person menu, from the sidebar's sheet, named in the page's language. */
-  const opened = async (sidebar: string, toggle: string) => {
+  /** The person menu, from the sidebar's sheet. */
+  const opened = async () => {
     if (await menu.isVisible()) {
       return;
     }
-    const sheet = page.getByRole("dialog", { name: sidebar });
+    const sheet = page.getByRole("dialog", { name: "Sidebar" });
     if (!(await sheet.isVisible())) {
       await page
         .getByRole("main")
-        .getByRole("button", { name: toggle })
+        .getByRole("button", { name: "Show or hide the sidebar" })
         .click();
     }
     await sheet.getByRole("button", { name: "Person", exact: true }).click();
   };
 
   // Under their names in the menu itself, no submenu off the window's edge.
-  await opened("Sidebar", "Show or hide the sidebar");
-  await chosen(menu.getByRole("menuitemradio", { name: "Nederlands" }));
-  await expect(page.locator("html")).toHaveAttribute("lang", "nl");
-
-  await opened("Zijbalk", "Zijbalk tonen of verbergen");
-  await expect(
-    menu.getByRole("menuitemradio", { name: "Nederlands" })
-  ).toHaveAttribute("aria-checked", "true");
-  await chosen(menu.getByRole("menuitemradio", { name: "Donker" }));
+  await opened();
+  await chosen(menu.getByRole("menuitemradio", { name: "Dark" }));
   await expect(page.locator("html")).toHaveAttribute("data-mode", "dark");
+
+  await opened();
+  await expect(
+    menu.getByRole("menuitemradio", { name: "Dark" })
+  ).toHaveAttribute("aria-checked", "true");
+  // The organization the person is in, chosen.
+  const organization = menu.getByRole("menuitemradio").last();
+  await expect(organization).toHaveAttribute("aria-checked", "true");
+  await chosen(organization);
 });
 
 test("on a phone the person menu opens at its top, however soon the person is pressed after the sheet opens", async ({
