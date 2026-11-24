@@ -111,7 +111,11 @@ const styles = stylex.create({
     color: colors.sidebarSecondaryForeground,
     fontSize: font.textXs,
     lineHeight: font.sidebarNoteLine,
+    fontWeight: font.weightNormal,
+    letterSpacing: "normal",
   },
+  // The initials in their own spacing, not the row's tighter one.
+  face: { display: "contents", letterSpacing: "normal" },
   // The chevrons quieter than the words, as the rows' end marks are.
   chevrons: {
     display: "flex",
@@ -252,9 +256,11 @@ export const PersonMenu = ({
           <DropdownMenuTrigger asChild>
             {/* Named by the person alone. */}
             <SidebarMenuButton aria-label={identity.name} size="lg">
-              <Avatar decorative name={identity.name} size="sm">
-                <AvatarFallback>{initials(identity.name)}</AvatarFallback>
-              </Avatar>
+              <span {...stylex.props(styles.face)}>
+                <Avatar decorative name={identity.name} size="sm">
+                  <AvatarFallback>{initials(identity.name)}</AvatarFallback>
+                </Avatar>
+              </span>
               <span {...stylex.props(styles.who)}>
                 <span {...stylex.props(styles.name)}>{identity.name}</span>
                 <span {...stylex.props(styles.organization)}>

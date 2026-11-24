@@ -15,7 +15,7 @@ import { Fragment, useLayoutEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
 import type { RegionId } from "../brain/brain-atlas.ts";
-import { ChatToggle } from "../chat/chat-bar.tsx";
+import { useChatPresence } from "../chat/chat-presence.ts";
 
 /** A step on the way to the page; the last one is the page itself. */
 export type Crumb =
@@ -155,15 +155,11 @@ const styles = stylex.create({
     gap: space["2"],
     marginInlineStart: "auto",
   },
-  // The chat's own button, last, its empty rim hanging out past the bar's
-  // room so its glyph ends where the page's words do.
-  chat: {
-    display: "flex",
-    flexShrink: 0,
-    marginInlineStart: "auto",
-    marginInlineEnd: `calc((${size.sidebarIcon} - ${size.sidebarIconButton}) / 2)`,
+  // Room at its end for the chat's button, which the frame lays over the
+  // card's end at the bar's height (app-frame.tsx), as the reference's.
+  roomForChat: {
+    paddingInlineEnd: `calc(${size.appShellPageInline} + ${size.sidebarIconButton})`,
   },
-  chatAfter: { marginInlineStart: 0 },
 });
 
 /**
@@ -189,6 +185,7 @@ export const SiteHeader = ({
 }) => {
   const { t } = useLingui();
   const { state, isMobile } = useSidebar();
+  const chatFloats = useChatPresence().placements.includes("floating");
   const away = isMobile || state === "collapsed";
   const last = crumbs.length - 1;
   const bar = useRef<HTMLElement>(null);
@@ -244,7 +241,7 @@ export const SiteHeader = ({
           !isMobile && target.dataset.slot === "sidebar-trigger";
       }}
       ref={bar}
-      {...stylex.props(styles.bar)}
+      {...stylex.props(styles.bar, chatFloats && styles.roomForChat)}
     >
       {away ? (
         <SidebarTrigger
@@ -286,9 +283,6 @@ export const SiteHeader = ({
       {actions === undefined ? null : (
         <div {...stylex.props(styles.actions)}>{actions}</div>
       )}
-      <ChatToggle
-        style={[styles.chat, actions !== undefined && styles.chatAfter]}
-      />
     </header>
   );
 };

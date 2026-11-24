@@ -30,8 +30,8 @@ const styles = stylex.create({
     // The row's width, which its box answers to (composer.tsx).
     containerType: "inline-size",
     width: "100%",
-    // The reference's dock: 32rem, over the middle of the page.
-    maxWidth: "32rem",
+    // The reference's dock: a 32rem box, over the middle of the page.
+    maxWidth: `calc(32rem + 2 * ${space["2"]})`,
     marginInline: "auto",
     paddingInline: space["2"],
     opacity: 1,
