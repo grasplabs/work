@@ -154,8 +154,9 @@ export default defineConfig({
           ],
         },
       ],
-      // shadcn's, but a Damsko component's `style` (StyleX layout styles,
-      // which its type holds) is left to the type checker
+      // Refuses inline style objects as the rule it replaces did, and lets
+      // StyleX styles through to a component's `style`, whose type
+      // (Damsko's LayoutStyle) holds them to layout
       // (scripts/lint/grasp-plugin.ts).
       "shadcn/no-inline-styles": "off",
       "grasp/no-inline-styles": "error",

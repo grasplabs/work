@@ -5733,7 +5733,6 @@ msgid "failed"
 msgstr "échouée"
 
 #: src/chat/thread.tsx
-#: src/frame/ui-words.tsx
 #: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/workflow-diagram.tsx
@@ -5744,6 +5743,11 @@ msgstr "En échec"
 msgctxt "a figure of the report"
 msgid "Failed"
 msgstr "Échouées"
+
+#: src/frame/ui-words.tsx
+msgctxt "a menu item whose work failed"
+msgid "Failed"
+msgstr "Échec"
 
 #: src/frame/ui-words.tsx
 msgctxt "a step's state"
