@@ -400,6 +400,56 @@ describe("changing what Grasp may do in a connected app", () => {
     ]);
   });
 
+  it("shows a tool its rule lets run without asking as Read, whether or not the toolkit still hints or offers it", async () => {
+    const reads = {
+      ...connection,
+      tools: [
+        "HUBSPOT_LIST_CONTACTS",
+        "HUBSPOT_CREATE_NOTE",
+        "HUBSPOT_ARCHIVED_TOOL",
+      ],
+      // Connect runs these without asking, whatever Composio's hint says.
+      readTools: [
+        "HUBSPOT_LIST_CONTACTS",
+        "HUBSPOT_CREATE_NOTE",
+        "HUBSPOT_ARCHIVED_TOOL",
+      ],
+    };
+    await shown(reads);
+    await openGroup("Notes");
+    await openGroup("Other");
+
+    expect({
+      unhinted: wordsOf(choiceOf("Create note") ?? document.body),
+      retired: wordsOf(choiceOf("Archived tool") ?? document.body),
+    }).toStrictEqual({ unhinted: "Read", retired: "Read" });
+  });
+
+  it("names a workflow that uses it by the name people gave it, and follows it in the app on a plain press", async () => {
+    await shown(connection, {
+      uses: {
+        state: "ready",
+        data: [
+          {
+            connectionId: "connection-1",
+            workflows: [
+              { id: "w1", name: "follow-up", title: "Follow up on leads" },
+            ],
+          },
+        ],
+      },
+    });
+    const usedBy = document.querySelector('[aria-label="Used by"]');
+    const row = usedBy?.querySelector("button");
+    const name = row === null || row === undefined ? "" : wordsOf(row);
+    await press(row);
+
+    expect({ name, at: history?.location.pathname }).toStrictEqual({
+      name: "Follow up on leads Workflow",
+      at: "/workflows/w1",
+    });
+  });
+
   it("keeps the last tool allowed", async () => {
     const one = { ...connection, tools: ["HUBSPOT_LIST_CONTACTS"] };
     const sent = await shown(one);

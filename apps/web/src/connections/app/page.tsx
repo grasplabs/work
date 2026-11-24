@@ -56,6 +56,7 @@ import * as stylex from "@stylexjs/stylex";
 import { Fragment, useId, useState } from "react";
 import type { ReactNode } from "react";
 
+import { useFollow } from "../follow-links.tsx";
 import { SectionCard } from "../section-card.tsx";
 import type { App, AppConnection, AppTool, AppToolChoice } from "./model.ts";
 import {
@@ -787,46 +788,52 @@ const UsedByRows = ({
 }: {
   app: App;
   words: AppIntegrationWords;
-}) => (
-  <ItemGroup aria-label={words.usedBy}>
-    {(app.workflows ?? []).map((user, index) => (
-      <Fragment key={user.name}>
-        {index > 0 && <ItemSeparator />}
-        <Item
-          onClick={
-            user.href === undefined
-              ? undefined
-              : () => {
-                  window.location.assign(user.href ?? "");
-                }
-          }
-          size="xs"
-        >
-          <ItemMedia>
-            <Icon
-              icon={user.kind === "agent" ? WandSparklesIcon : WorkflowIcon}
-            />
-          </ItemMedia>
-          <ItemContent>
-            <ItemTitle>
-              {user.name}
-              <ItemDetail>
-                <span {...stylex.props(styles.kind)}>
-                  {user.kind === "agent" ? words.agent : words.workflow}
-                  {user.href === undefined ? null : (
-                    <span aria-hidden="true" {...stylex.props(styles.chevron)}>
-                      <Icon icon={ChevronRightIcon} />
-                    </span>
-                  )}
-                </span>
-              </ItemDetail>
-            </ItemTitle>
-          </ItemContent>
-        </Item>
-      </Fragment>
-    ))}
-  </ItemGroup>
-);
+}) => {
+  const follow = useFollow();
+  return (
+    <ItemGroup aria-label={words.usedBy}>
+      {(app.workflows ?? []).map(({ href, ...user }, index) => (
+        <Fragment key={href ?? user.name}>
+          {index > 0 && <ItemSeparator />}
+          <Item
+            onClick={
+              href === undefined
+                ? undefined
+                : (event) => {
+                    follow(href, event);
+                  }
+            }
+            size="xs"
+          >
+            <ItemMedia>
+              <Icon
+                icon={user.kind === "agent" ? WandSparklesIcon : WorkflowIcon}
+              />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>
+                {user.name}
+                <ItemDetail>
+                  <span {...stylex.props(styles.kind)}>
+                    {user.kind === "agent" ? words.agent : words.workflow}
+                    {href === undefined ? null : (
+                      <span
+                        aria-hidden="true"
+                        {...stylex.props(styles.chevron)}
+                      >
+                        <Icon icon={ChevronRightIcon} />
+                      </span>
+                    )}
+                  </span>
+                </ItemDetail>
+              </ItemTitle>
+            </ItemContent>
+          </Item>
+        </Fragment>
+      ))}
+    </ItemGroup>
+  );
+};
 
 /** An app's own page: its head, its connection, what uses it, what Grasp may do, and whether it is offered. */
 export const AppPage = ({

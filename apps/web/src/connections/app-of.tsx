@@ -1,6 +1,7 @@
 import { canSignInAgain } from "@grasp-os/shared/connect";
 import type { CatalogTool, ListedConnection } from "@grasp-os/shared/connect";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { workflowLabel } from "@grasp-os/shared/workflow-resources";
 import type { ConnectionWorkflows } from "@grasp-os/shared/workflows";
 import { useLingui } from "@lingui/react/macro";
 import { useEffect, useState } from "react";
@@ -155,7 +156,8 @@ export const useAppOf = (
       uses === undefined
         ? undefined
         : workflowsOf(integration, uses).map((workflow) => ({
-            name: workflow.name,
+            // The name people gave it, else its key.
+            name: workflowLabel(workflow),
             kind: "workflow" as const,
             href: `/workflows/${encodeURIComponent(workflow.id)}`,
           }));

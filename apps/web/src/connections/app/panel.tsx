@@ -36,8 +36,9 @@ import { visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { colors, size as sizes, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { Fragment } from "react";
-import type { ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 
+import { useFollow } from "../follow-links.tsx";
 import type { App } from "./model.ts";
 import {
   AppMark,
@@ -101,7 +102,7 @@ interface PanelRow {
   name: string;
   icon?: IconData;
   detail: ReactNode;
-  onClick?: () => void;
+  onClick?: (event: MouseEvent) => void;
 }
 
 /** A section's rows, as one list named by its title, a hairline between them. */
@@ -244,6 +245,7 @@ const UsedBySection = ({
   app: App;
   words: AppIntegrationWords;
 }) => {
+  const follow = useFollow();
   const users = app.workflows ?? [];
   if (users.length === 0) {
     return null;
@@ -252,16 +254,16 @@ const UsedBySection = ({
     <SidePanelSection title={words.usedBy}>
       <Rows
         label={words.usedBy}
-        rows={users.map((user) => ({
-          id: user.name,
+        rows={users.map(({ href, ...user }) => ({
+          id: href ?? user.name,
           name: user.name,
           icon: user.kind === "agent" ? WandSparklesIcon : WorkflowIcon,
           detail: user.kind === "agent" ? words.agent : words.workflow,
-          ...(user.href === undefined
+          ...(href === undefined
             ? {}
             : {
-                onClick: () => {
-                  window.location.assign(user.href ?? "");
+                onClick: (event: MouseEvent) => {
+                  follow(href, event);
                 },
               }),
         }))}

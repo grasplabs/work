@@ -123,11 +123,12 @@ export const changeableConnectionOf = (
  * An app's tools as the app parts (app/) draw them: each in plain
  * words, reading where its provider says it only reads, and what Grasp
  * may do with it through `connection`. A Composio connection allows the
- * tools its admin chose, a Read only where both the admin's rule and the
- * provider say it only reads; a native one allows every tool; with none,
- * nothing is allowed. A tool the connection allows that the toolkit no
- * longer offers comes last, under `goneGroup`, so it can still be taken
- * away.
+ * tools its admin chose, each as its rule says: connect runs a tool its
+ * rule calls a read without asking, whatever the provider's hint, so one
+ * reads here too; a native one allows every tool; with none, nothing is
+ * allowed. A tool the connection allows that the toolkit no longer offers
+ * comes last, under `goneGroup`, as its rule says, so it can still be
+ * taken away.
  */
 export const appToolsOf = (
   tools: readonly CatalogTool[],
@@ -150,23 +151,25 @@ export const appToolsOf = (
     if (rule === undefined) {
       return "never";
     }
-    return rule.read && tool.readOnly ? "read" : "write";
+    return rule.read ? "read" : "write";
   };
+  const savedRead = (name: string): boolean =>
+    allowed?.some((rule) => rule.name === name && rule.read) ?? false;
   const listed = tools.map((tool): AppTool => ({
     id: tool.name,
     name: toolWords(tool.name, integration.id),
     ...(tool.description === null ? {} : { description: tool.description }),
-    kind: tool.readOnly ? "read" : "write",
+    kind: tool.readOnly || savedRead(tool.name) ? "read" : "write",
     choice: choiceOf(tool),
   }));
   const offered = new Set(tools.map(({ name }) => name));
   const gone = (allowed ?? [])
     .filter(({ name }) => !offered.has(name))
-    .map(({ name }): AppTool => ({
+    .map(({ name, read }): AppTool => ({
       id: name,
       name: toolWords(name, integration.id),
-      kind: "write",
-      choice: "write",
+      kind: read ? "read" : "write",
+      choice: read ? "read" : "write",
       group: goneGroup,
     }));
   return [...listed, ...gone];
