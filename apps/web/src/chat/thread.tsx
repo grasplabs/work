@@ -49,7 +49,7 @@ import {
 } from "@grasp-os/ui/components/trace";
 import { Icon, MessageCircleIcon, RefreshCwIcon } from "@grasp-os/ui/lib/icons";
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
-import { size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { colors, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import type { LayoutStyle } from "@grasp-os/ui/lib/utils";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
@@ -159,7 +159,11 @@ const styles = stylex.create({
   // When an answer was given, beside its actions.
   beside: { alignSelf: "center" },
   // How long Grasp worked, a step after the line's words.
-  took: { marginInlineStart: space["2"] },
+  took: {
+    marginInlineStart: space["2"],
+    color: colors.mutedForeground,
+    fontVariantNumeric: "tabular-nums",
+  },
 });
 
 /** A text a tool call was given, by its field; an ellipsis while none has arrived. */
@@ -913,9 +917,7 @@ const AnswerBody = ({
         <>
           {/* The space a screen reader says; the eye has the gap. */}
           <span {...stylex.props(visuallyHidden)}> </span>
-          <Text as="span" color="muted" style={styles.took}>
-            {saidShort(workedMs)}
-          </Text>
+          <span {...stylex.props(styles.took)}>{saidShort(workedMs)}</span>
         </>
       )}
     </>

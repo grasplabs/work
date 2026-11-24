@@ -134,13 +134,6 @@ const styles = stylex.create({
   stopped: { textDecorationLine: "line-through" },
   // A step's words, as an item of the steps' list: no box of their own.
   item: { display: "contents" },
-  // A step that opens: its row beside its mark, no taller than a step.
-  // Trace gives a row that opens among steps the room a trigger lacks
-  // (a small control's height over a line of words); this press is the
-  // line itself, so that room is taken back.
-  opens: {
-    marginBlock: `calc((${size.controlSm} - ${font.textSmLine}) / 2 - ${space["2"]})`,
-  },
   // Its line as the press that opens it: its words, then a small chevron.
   press: {
     position: "relative",
@@ -310,7 +303,7 @@ const Step = ({ step }: { step: AnswerStep }) => {
     <TraceLine status={status}>
       <StepMark status={step.status} />
       <StepItem>
-        <TraceCollapsible style={styles.opens}>
+        <TraceCollapsible>
           <TraceCollapsibleTrigger asChild>
             <button
               type="button"
