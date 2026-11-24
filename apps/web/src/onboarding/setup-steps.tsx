@@ -8,8 +8,6 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
 import type { ComponentType } from "react";
 
-import { AgentFigure } from "../agents/figure/agent-figure.tsx";
-import { stephensLook } from "../agents/figure/look.ts";
 import { ErrorText } from "../error-text.tsx";
 import { chooseLocale, isLocale } from "../i18n.ts";
 import { useCoreAction } from "../use-core-action.ts";
@@ -318,7 +316,6 @@ const Open = ({ data, onward }: StepProps) => {
           </Button>
         ) : null
       }
-      figure={<AgentFigure look={stephensLook} size="xl" state="done" />}
       title={t`Thank you, ${admin}`}
     />
   );
