@@ -92,9 +92,8 @@ import { resealBatchSize, vaultFor } from "./vault.ts";
 //   limit's wait.
 // - A request that streams forever: the grant names the call's deadline,
 //   which cuts the provider's request off here too.
-// - A realtime socket (`modelSocket`, Grasp's live listening and the
-//   lines it says): the same grant, placeholder, host and credential
-//   checks as a request, only to
+// - A realtime socket (`modelSocket`, Grasp's live listening): the same
+//   grant, placeholder, host and credential checks as a request, only to
 //   the provider's realtime paths with their one query, and only on
 //   Grasp's own key (an organization's key never opens one). Connect holds
 //   both ends and passes each message on as it comes, keeping and logging

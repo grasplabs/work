@@ -242,7 +242,7 @@ describe("model spend", { timeout: 60_000 }, () => {
       work: { onboarding: true },
     }).speak({
       text: "Hello there.",
-      voice: "1656",
+      voice: "voice_485",
       language: "en",
     });
     const [grasp] = await recordedUsage(month, 1, { credential: "platform" });
@@ -255,7 +255,7 @@ describe("model spend", { timeout: 60_000 }, () => {
       // The organization's spend is what its own key cost: the call.
       user: pricedMicros,
       organization: pricedMicros,
-      grasp: ["speech", "kugelaudio/kugel-3.5", true],
+      grasp: ["speech", "mistral/voxtral-mini-tts-3-0", true],
     });
   });
 
