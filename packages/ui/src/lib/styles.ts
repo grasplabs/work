@@ -19,11 +19,12 @@ import {
   space,
 } from "./tokens.stylex";
 import {
+  pixel,
   fieldControlMarker,
   focusMarker,
   iconVars,
   listMarker,
-  menuMarker,
+  menuVars,
   motionVars,
   ringInsetMarker,
   traceCardMarker,
@@ -765,10 +766,16 @@ export const listStyles = stylex.create({
 // An item's corner nests inside the panel's, capped at half a control's height.
 const ITEM_CORNER = `min(${radius.lg}, calc(${size.controlDefault} / 2))`;
 
+// A panel one of whose own rows has an icon. A row stands in the panel, in a group or in a group in
+// a group; a submenu is a menu inside the panel, and the chain stops at it, so its rows' icons are
+// its own and never the parent's.
+const OWN = ":not([role=menu])";
+const OWN_ICON = `:has(> ${OWN} > [data-menu-icon], > ${OWN} > ${OWN} > [data-menu-icon], > ${OWN} > ${OWN} > ${OWN} > [data-menu-icon], > ${OWN} > ${OWN} > ${OWN} > ${OWN} > [data-menu-icon])`;
+
 /**
- * A menu: the panel and its items, for dropdown menu, context menu and menubar. The panel carries
- * menuMarker. A 4px padded panel at high lift, items 36px tall with 8px round their icon and words,
- * labels, and separators that run to the panel's edge.
+ * A menu: the panel and its items, for dropdown menu, context menu and menubar. A 4px padded panel
+ * at high lift, items 36px tall with 8px round their icon and words, labels, and separators that run
+ * to the panel's edge.
  */
 export const menuStyles = stylex.create({
   // Raised, at high lift, the one corner. At least menu-width, as wide as its longest item up to
@@ -776,6 +783,11 @@ export const menuStyles = stylex.create({
   panel: {
     [iconVars.size]: size.iconSm,
     [iconVars.stroke]: size.iconStroke,
+    // Its rows' words leave room for an icon only when one of its own rows has one.
+    [menuVars.lead]: {
+      default: "0px",
+      [OWN_ICON]: `calc(${size.iconSm} + ${space[2]})`,
+    },
     boxSizing: "border-box",
     minWidth: `min(${size.menuWidth}, 100vw - 2 * ${space.popupGutter})`,
     maxWidth: `min(${size.popupWidth}, 100vw - 2 * ${space.popupGutter})`,
@@ -886,16 +898,15 @@ export const menuStyles = stylex.create({
     minWidth: 0,
     alignSelf: { default: "baseline", [COARSE]: "auto" },
   },
-  // The words of an item with no icon, in a panel where other items have one: they start where the
-  // others' words do, so the column of words stays one edge.
+  // The words of an item with no icon: in a panel where other items have one, they start where the
+  // others' words do, so the column of words stays one edge; in a panel where none has, at the
+  // item's padding. Each panel, a submenu too, decides for its own rows (menuVars.lead).
   inset: {
-    paddingInlineStart: {
-      default: 0,
-      [stylex.when.ancestor(":has([data-menu-icon])", menuMarker)]:
-        `calc(${size.iconSm} + ${space[2]})`,
-    },
+    paddingInlineStart: menuVars.lead,
   },
-  // The end of an item: the keys of its shortcut, quieter and smaller than its words.
+  // The end of an item: the keys of its shortcut, quieter and smaller than its words. They sit on
+  // the words' baseline, and their line is no taller than their letters, so they never make their
+  // row taller than one without keys.
   shortcut: {
     display: "inline-flex",
     alignItems: "center",
@@ -904,9 +915,17 @@ export const menuStyles = stylex.create({
     alignSelf: { default: "baseline", [COARSE]: "auto" },
     color: { default: colors.mutedForeground, [FORCED]: "inherit" },
     fontSize: font.textXs,
-    lineHeight: font.textXsLine,
+    lineHeight: 1,
     fontWeight: font.weightNormal,
     whiteSpace: "nowrap",
+  },
+  // A submenu's chevron at the end of its item: an icon, so centred in the row as the leading icon
+  // is, never set on the words' baseline (which would lift it by half its height).
+  chevron: {
+    display: "inline-flex",
+    flexShrink: 0,
+    marginInlineStart: "auto",
+    color: { default: colors.mutedForeground, [FORCED]: "inherit" },
   },
   // The words of an action that failed.
   error: {
@@ -1206,6 +1225,33 @@ const tileStyles = stylex.create({
 
 /** A tile's edge: the system's strong edge, and in forced colours, where shadows drop, a hairline. */
 export const tileEdge = tileStyles.edge;
+
+// ---- Texture ------------------------------------------------------------------------------------
+
+const textureStyles = stylex.create({
+  texture: {
+    position: "absolute",
+    inset: 0,
+    pointerEvents: "none",
+    opacity: size.textureStrength,
+    backgroundImage: {
+      default: `radial-gradient(120% 90% at 0% 0%, ${colors.mint}, transparent 70%)`,
+      ":dir(rtl)": `radial-gradient(120% 90% at 100% 0%, ${colors.mint}, transparent 70%)`,
+    },
+    // The dither: the system's one pixel, a 2px square in every 3px.
+    maskImage: pixel.mask,
+    maskSize: "3px 3px",
+    display: { default: "block", [FORCED]: "none" },
+  },
+});
+
+/**
+ * The faint dither of light behind the head of the one thing a page is about: mint light from the
+ * top corner at the start (the right, right to left), seen through the system's pixel. It fills its
+ * positioned box. Decoration: hidden from a screen reader, takes no pointer, never moves, not drawn
+ * in forced colours. Page header's banner draws it; a page puts it in a SidePanel's `cover`.
+ */
+export const { texture } = textureStyles;
 
 // ---- A choice in a Field's row ------------------------------------------------------------------
 //

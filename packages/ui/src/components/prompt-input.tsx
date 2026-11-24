@@ -154,8 +154,8 @@ import {
 import type { LayoutStyle } from "../lib/utils";
 import {
   iconVars,
-  menuMarker,
   pixel,
+  promptInputRowMarker,
   ringInsetMarker,
 } from "../lib/vars.stylex";
 import { Alert, AlertAction, AlertTitle } from "./alert";
@@ -379,6 +379,13 @@ export interface PromptInputFooterProps {
 export interface PromptInputToolsProps {
   /** The tools before Submit: the action menu, a model selector, the speech button. */
   children: ReactNode;
+  /**
+   * Which end of the footer they stand at: `start`, a space-1 apart (the action menu, the model);
+   * `end`, at the footer's end a space-2 apart, Submit among them last (the model, the speech
+   * button, Submit).
+   * @default "start"
+   */
+  align?: "start" | "end";
   /** Layout only. */
   style?: LayoutStyle;
 }
@@ -518,9 +525,10 @@ export interface PromptInputBannerProps {
    */
   icon?: IconData | false;
   /**
-   * What it means: `default` a plain note, read where it stands; `warning` or `destructive` when
-   * it stops work, said at once as it appears. The strip is the same quiet one for each: the
-   * mark takes the colour.
+   * What it means: `default` a plain note (what the prompt is about), read where it stands and
+   * never said as it appears, and it describes the text; `warning` or `destructive` when it stops
+   * work, said at once as it appears. The strip is the same quiet one for each: the mark takes the
+   * colour.
    * @default "default"
    */
   variant?: "default" | "warning" | "destructive";
@@ -1062,6 +1070,10 @@ const styles = stylex.create({
   // controls is 56px tall. The rows are named, so the text can take the whole width over a foot
   // row of the tools and Submit (compactTall) with nothing moved in the page.
   compact: {
+    // The row answers to its own width: on a phone's, a model chip's level folds to the maker's
+    // mark (model-selector.tsx).
+    containerType: "inline-size",
+    containerName: "prompt-input-row",
     gridTemplateColumns: "auto minmax(0, 1fr) auto",
     gridTemplateAreas: '"header header header" "start field end"',
     alignItems: "center",
@@ -1269,6 +1281,9 @@ const styles = stylex.create({
     minWidth: 0,
   },
   compactTools: { gridArea: "start" },
+  // The tools at the footer's end, with Submit: a space-2 apart, as the original's end side.
+  toolsEnd: { gap: space["2"], marginInlineStart: "auto" },
+  compactToolsEnd: { gridArea: "end", justifySelf: "end" },
   end: {
     position: "relative",
     display: "inline-flex",
@@ -1329,13 +1344,15 @@ const styles = stylex.create({
   // A banner above the card: the quiet strip, in from the card's sides so its side lies inside the
   // card's rounded corner, its foot behind the card's top so the two read as one piece. An Alert
   // stands in it without a fill of its own: what the notice means is in its mark's colour, and in
-  // how the Alert says it.
+  // how the Alert says it. In from its sides by the card's text inset less its own, so the mark
+  // starts where the card's words and its first tool do.
   banner: {
     position: "relative",
     zIndex: 1,
     marginInline: space["2"],
     marginBlockEnd: `calc(-1 * ${radius.xl})`,
-    padding: space["3"],
+    paddingBlockStart: space["3"],
+    paddingInline: `calc(${space["4"]} - ${space["2"]})`,
     // Room for the card's corner to lie over its foot.
     paddingBlockEnd: `calc(${space["3"]} + ${radius.xl})`,
     borderStartStartRadius: radius.xl,
@@ -1346,12 +1363,16 @@ const styles = stylex.create({
     // Forced colours drop the fill and the shadow: a real line draws the strip.
     outline: { default: "none", [FORCED]: `${size.hairline} solid CanvasText` },
   },
-  // The mark and the words: level with the action's button where it stands beside them.
+  // The mark and the words, a space-2 apart.
   bannerLine: {
     display: "flex",
     alignItems: "flex-start",
-    gap: space["1"],
+    gap: space["2"],
     minWidth: 0,
+  },
+  // Level with the action's button, or the close button, where one stands beside them; with
+  // neither, no room is kept, so a note alone is as tall as its line.
+  bannerLineBesideAction: {
     marginBlockStart: {
       default: 0,
       [WIDE]: `calc((${size.controlSm} - ${font.textSmLine}) / 2)`,
@@ -1378,7 +1399,7 @@ const styles = stylex.create({
     alignSelf: "flex-start",
     gap: space["2"],
     marginInlineStart: {
-      default: `calc(${size.iconSm} + ${space["1"]})`,
+      default: `calc(${size.iconSm} + ${space["2"]})`,
       [WIDE]: 0,
     },
   },
@@ -1585,12 +1606,11 @@ const styles = stylex.create({
     lineHeight: font.textXsLine,
     fontWeight: font.weightNormal,
   },
-  // The chevron at a kind's end, which the reading direction turns.
+  // The chevron at a kind's end; it turns with the reading direction itself (Icon).
   mentionInto: {
     display: "flex",
     marginInlineStart: "auto",
     color: colors.mutedForeground,
-    transform: { default: null, ":dir(rtl)": "scaleX(-1)" },
   },
   // The menu's words when it has no rows. It stays in the menu, wordless, while there are rows,
   // and takes no room then.
@@ -1631,6 +1651,10 @@ interface PromptInputContextValue {
   changeDrawn: (by: number) => void;
   /** The id of the band under the card, which describes the text while it says a send failed. */
   noteId: string;
+  /** The ids of the plain banners' words above the card, which describe the text. */
+  bannerIds: readonly string[];
+  /** Adds a plain banner's words to what describes the text (`true`), or takes them off. */
+  changeBannerIds: (change: readonly [string, boolean]) => void;
   /** The footer's element, where a dictation's bar is drawn, and what says it is there. */
   footer: HTMLElement | null;
   setFooter: (footer: HTMLElement | null) => void;
@@ -1748,6 +1772,10 @@ const settle = async (
 
 /** Adds `by` to a count: the reducer of a count its parts change (`change(1)`, then `change(-1)`). */
 const countBy = (now: number, by: number) => now + by;
+const listBy = (
+  now: readonly string[],
+  [id, on]: readonly [string, boolean]
+): readonly string[] => (on ? [...now, id] : now.filter((each) => each !== id));
 
 /** Says `on(true)` while `send` runs, and `on(false)` once it is done, however it ends. */
 const during = async (
@@ -2195,83 +2223,191 @@ const useTypedQuiet = (
 // oxlint-disable-next-line unicorn/prefer-number-coercion -- a length reads "8px", which Number() makes NaN
 const px = (value: string) => Number.parseFloat(value) || 0;
 
+/** A length token ("var(--damsko-…)", set in rem or px) as the browser resolves it on `element`, in px. */
+const tokenPx = (element: Element, token: string) => {
+  const value = getComputedStyle(element)
+    .getPropertyValue(token.slice("var(".length, -1))
+    .trim();
+  return value.endsWith("rem")
+    ? px(value) * px(getComputedStyle(document.documentElement).fontSize)
+    : px(value);
+};
+
+/** What the one row decides about its room (`rowFit`), as the original's composer does. */
+interface RowFit {
+  /** The text has the card's whole width, the tools and Submit under it. */
+  tall: boolean;
+  /** A model chip's level folds to its maker's mark. */
+  fold: boolean;
+  /** At rest, the model chips are away until something is typed. */
+  away: boolean;
+}
+
+/** What the row keeps between reads: the room the chips need to come back, and to unfold. */
+interface RowRoom {
+  /** The chips' width and the gap each keeps, while they show. */
+  chips: number;
+  /** The sides' width while a level shows. */
+  wide: number;
+}
+
+/** Every group of tools in the one row, and Submit where it stands apart from them. */
+const sidesOf = (card: HTMLElement) =>
+  [
+    ...card.querySelectorAll<HTMLElement>(
+      '[data-slot="prompt-input-tools"], [data-slot="prompt-input-end"]'
+    ),
+  ].filter(
+    (side) =>
+      side.parentElement?.closest('[data-slot="prompt-input-tools"]') === null
+  );
+
 /**
- * Whether the one row's words have outgrown their line: they take two lines where they stand, or
- * one that is wider than the room between the tools and Submit, or that room is under the text's
- * least width. The text then takes the card's whole width and the tools go under it. Every width
- * is read from the card and its two sides, which stand alike in both forms, so the answer never
- * depends on the form it changes and nothing flickers at the edge.
+ * A model chip's width in its row and the gap it keeps there, and its step's (the empty box after
+ * it in a one-row prompt input: model-selector.tsx): what it takes while it shows.
  */
-const outgrown = (card: HTMLElement) => {
+const chipRoom = (chip: HTMLElement) => {
+  const drawn = [...chip.children].filter(
+    (part) =>
+      part.getClientRects().length > 0 &&
+      !["absolute", "fixed"].includes(getComputedStyle(part).position)
+  );
+  const width = drawn
+    .map((part) => part.getBoundingClientRect().width)
+    .reduce((sum, each) => sum + each, 0);
+  const step = !["none", "normal"].includes(
+    getComputedStyle(chip, "::after").content
+  );
+  const gaps = (drawn.length > 0 ? 1 : 0) + (step ? 1 : 0);
+  return (
+    width + gaps * px(getComputedStyle(chip.parentElement ?? chip).columnGap)
+  );
+};
+
+/**
+ * How the one row fits its room, step for step as the original's composer decides it. The text
+ * never gives. First a model chip's level (its words, where they are the level: ModelSelectorName
+ * in a trigger with a tooltip) folds to the maker's mark, while with it the text would go under
+ * its least width (`prompt-input-field-min`; at rest the placeholder's,
+ * `prompt-input-placeholder-min`); a model's name never folds. On a phone's row the level is
+ * folded by a container query alone (model-selector.tsx). Then, at rest, the chips are away while
+ * the placeholder would still be under its least, and come back once something is typed; only
+ * where nothing is left to fold is the placeholder cut. With words, they outgrow their line when
+ * they take two lines, or one wider than the room between the tools and Submit, or that room is
+ * under the text's least: the text then takes the card's whole width and the tools go under it.
+ * Every width is read from the card and its sides, which stand alike in both forms, so the answer
+ * never depends on the form it changes and nothing flickers at the edge. A fold or an away that
+ * changes is drawn before the rest is read.
+ */
+const rowFit = (
+  card: HTMLElement,
+  was: RowFit,
+  room: RowRoom
+): RowFit | null => {
   const editor = card.querySelector<HTMLElement>(
     '[data-slot="prompt-input-textarea"]'
   );
   if (editor === null) {
     return null;
   }
-  if (editor.dataset.empty !== undefined) {
-    return false;
-  }
   const look = getComputedStyle(card);
-  const own = getComputedStyle(editor);
-  // Every group of tools, and Submit where it stands apart from them.
-  const sides = [
-    ...card.querySelectorAll<HTMLElement>(
-      '[data-slot="prompt-input-tools"], [data-slot="prompt-input-end"]'
-    ),
-  ]
-    .filter(
-      (side) =>
-        side.parentElement?.closest('[data-slot="prompt-input-tools"]') === null
-    )
-    .map((side) => side.getBoundingClientRect().width)
-    .reduce((sum, width) => sum + width, 0);
-  const room =
+  const sides = sidesOf(card);
+  const chips = sides.flatMap((side) => [
+    ...side.querySelectorAll<HTMLElement>('[data-slot="model-selector"]'),
+  ]);
+  if (!was.away) {
+    room.chips = chips.map(chipRoom).reduce((sum, width) => sum + width, 0);
+  }
+  // The sides as they stand with the chips in sight, away or not.
+  const sidesWidth =
+    sides
+      .map((side) => side.getBoundingClientRect().width)
+      .reduce((sum, width) => sum + width, 0) + (was.away ? room.chips : 0);
+  const levels = chips
+    .map((chip) => chip.querySelector("[data-level]"))
+    .filter((level) => level !== null);
+  if (!was.fold && levels.some((level) => level.getClientRects().length > 0)) {
+    room.wide = sidesWidth;
+  }
+  const beside =
     card.clientWidth -
     px(look.paddingInlineStart) -
     px(look.paddingInlineEnd) -
-    2 * px(look.columnGap) -
-    sides;
+    2 * px(look.columnGap);
+  const resting = editor.dataset.empty !== undefined;
+  const least = resting
+    ? tokenPx(card, size.promptInputPlaceholderMin)
+    : px(getComputedStyle(editor.parentElement ?? editor).minWidth);
+  // Folded only while the level would leave the text under its least width.
+  const fold =
+    levels.length > 0 && beside - Math.max(room.wide, sidesWidth) < least;
+  if (fold !== was.fold) {
+    // The sides change width with the fold: the rest is read once it is drawn.
+    return { ...was, fold };
+  }
+  // At rest, after the level, the chips are away while the placeholder would be under its least.
+  const away = resting && chips.length > 0 && beside - sidesWidth < least;
+  if (away !== was.away) {
+    return { ...was, away };
+  }
+  if (resting) {
+    return { tall: false, fold, away };
+  }
+  const text = beside - sidesWidth;
+  const own = getComputedStyle(editor);
   const lines =
     (editor.scrollHeight - px(own.paddingBlockStart)) / px(own.lineHeight);
-  const least = px(getComputedStyle(editor.parentElement ?? editor).minWidth);
-  if (lines > 1.5 || room < least) {
-    return true;
+  if (lines > 1.5 || text < least) {
+    return { tall: true, fold, away };
   }
-  const words = document.createRange();
-  words.selectNodeContents(editor);
+  const typed = document.createRange();
+  typed.selectNodeContents(editor);
   // A caret's width to spare, so the last letter is never under Submit.
-  return (
-    words.getBoundingClientRect().width + 2 >
-    room - px(own.paddingInlineStart) - px(own.paddingInlineEnd)
-  );
+  return {
+    tall:
+      typed.getBoundingClientRect().width + 2 >
+      text - px(own.paddingInlineStart) - px(own.paddingInlineEnd),
+    fold,
+    away,
+  };
 };
 
+const ROW_AT_REST: RowFit = { tall: false, fold: false, away: false };
+
 /**
- * In one row, whether the text has the card's whole width (`outgrown`): read as the card comes,
- * and again, before paint, as anything in it changes (the words, a tool that comes or goes) or it
- * changes width. While something stands in the text's place the answer stays as it was.
+ * In one row, how it fits its room (`rowFit`): read as the card comes, and again, before paint,
+ * as anything in it changes (the words, a choice in a chip, a tool that comes or goes, a fold),
+ * as the card or one of its sides changes width (a chip laid out late, its font come in). While
+ * something stands in the text's place the answer stays as it was.
  */
-const useRowTall = (
+const useRowFit = (
   on: boolean,
   card: { current: HTMLElement | null },
   dictating: boolean
-) => {
-  const [tall, setTall] = useState(false);
+): { tall: boolean; fold: true | undefined; away: true | undefined } => {
+  const [fit, setFit] = useState(ROW_AT_REST);
+  const room = useRef<RowRoom>({ chips: 0, wide: 0 });
   useLayoutEffect(() => {
     const box = card.current;
     if (!on || box === null) {
       return nothing;
     }
     const read = () => {
-      const next = outgrown(box);
-      if (next !== null) {
-        setTall(next);
+      const next = rowFit(box, fit, room.current);
+      if (
+        next !== null &&
+        (next.tall !== fit.tall ||
+          next.fold !== fit.fold ||
+          next.away !== fit.away)
+      ) {
+        setFit(next);
       }
     };
     read();
     const resized = new ResizeObserver(read);
-    resized.observe(box);
+    for (const part of [box, ...sidesOf(box)]) {
+      resized.observe(part);
+    }
     const changed = new MutationObserver(read);
     changed.observe(box, {
       characterData: true,
@@ -2282,9 +2418,17 @@ const useRowTall = (
       resized.disconnect();
       changed.disconnect();
     };
-  }, [on, card]);
-  // A dictation's bar is the foot row, so the words stand over it.
-  return on && (tall || dictating);
+  }, [on, card, fit]);
+  if (!on) {
+    return { tall: false, fold: undefined, away: undefined };
+  }
+  // A dictation's bar is the foot row, so the words stand over it. The fold and the away are the
+  // card's marks (`data-fold`, `data-away`), there only while they hold.
+  return {
+    tall: fit.tall || dictating,
+    fold: fit.fold || undefined,
+    away: fit.away || undefined,
+  };
 };
 
 /**
@@ -2379,6 +2523,8 @@ const cardLook = ({
   styles.card,
   glass && styles.glass,
   compact && styles.compact,
+  // A model chip in one row answers what the row decides about its room (`useRowFit`).
+  compact && promptInputRowMarker,
   tall && styles.compactTall,
   dragging && styles.dragging,
   over && styles.over,
@@ -2579,7 +2725,22 @@ export const PromptInputBanner = ({
 }: PromptInputBannerProps) => {
   const words = useI18n().alert;
   const form = usePromptInput();
-  if (!useOutside()) {
+  const drawn = useOutside();
+  // A plain note is never said as it appears: it describes the text instead, so a screen reader
+  // still hears it there.
+  const wordsId = useId();
+  const describes = drawn && variant === "default";
+  const describe = form?.changeBannerIds;
+  useEffect(() => {
+    if (!describes || describe === undefined) {
+      return nothing;
+    }
+    describe([wordsId, true]);
+    return () => {
+      describe([wordsId, false]);
+    };
+  }, [describes, describe, wordsId]);
+  if (!drawn) {
     return null;
   }
   const mark = icon === false ? undefined : (icon ?? bannerIcons[variant]);
@@ -2591,14 +2752,16 @@ export const PromptInputBanner = ({
     >
       <Alert
         appearance="subtle"
-        // Said at once when it warns or stops work, else read where it stands.
-        live={variant === "default" ? "polite" : "assertive"}
+        // Said at once when it warns or stops work; a plain note (what the prompt is about) is no
+        // news, so it is read where it stands and never said as the page opens.
+        live={variant === "default" ? "off" : "assertive"}
         icon={false}
       >
         <AlertTitle>
           <span
             {...stylex.props(
               styles.bannerLine,
+              (!isBlank(action) || closable) && styles.bannerLineBesideAction,
               closable && styles.bannerLineClosable
             )}
           >
@@ -2614,7 +2777,12 @@ export const PromptInputBanner = ({
                 <Icon icon={mark} />
               </span>
             )}
-            <span {...stylex.props(styles.bannerWords)}>{children}</span>
+            <span
+              id={describes ? wordsId : undefined}
+              {...stylex.props(styles.bannerWords)}
+            >
+              {children}
+            </span>
           </span>
         </AlertTitle>
         {!isBlank(action) && (
@@ -2818,6 +2986,7 @@ export const PromptInput = ({
   const warned = useRef(false);
   const failure = useFailure(status);
   const noteId = useId();
+  const [bannerIds, changeBannerIds] = useReducer(listBy, []);
   const form = useRef<HTMLFormElement | null>(null);
   const card = useRef<HTMLFieldSetElement | null>(null);
   const picker = useRef<HTMLInputElement | null>(null);
@@ -2834,7 +3003,8 @@ export const PromptInput = ({
   const empty = emptyOf(current);
   const still = disabled || loading;
   const takeFiles = still ? undefined : attachments.value.add;
-  const tall = useRowTall(compact && !loading, card, dictating);
+  const row = useRowFit(compact && !loading, card, dictating);
+  const { tall } = row;
   useTypedQuiet(card, dictating, current);
   const success = useSuccessCount(status, words.succeeded);
   const drags = useFileDrags(form, takeFiles, globalDrop);
@@ -3042,6 +3212,8 @@ export const PromptInput = ({
           changeWritten,
           changeDrawn,
           noteId,
+          bannerIds,
+          changeBannerIds,
           footer,
           setFooter,
           dictating,
@@ -3099,6 +3271,8 @@ export const PromptInput = ({
                   // Still while the page loads: nothing in it is focused or read out.
                   inert={loading}
                   aria-hidden={loading || undefined}
+                  data-fold={row.fold}
+                  data-away={row.away}
                   onPointerDown={onPointerDown}
                   {...stylex.props(
                     // The rings of the controls in the card are drawn inside them.
@@ -3318,12 +3492,18 @@ export const PromptInputTextarea = ({
       controller?.focus({ at: "end" });
     }
   }, [autoFocus, controller]);
+  // A plain banner above says what the prompt is about (it is never said as it appears); the band
+  // under the card says why the words are still here.
+  const describers = [...(form?.bannerIds ?? [])];
+  if (form?.failed === true) {
+    describers.push(form.noteId);
+  }
+  const describedBy = describers.join(" ");
   const editor = (
     <TokenInputEditor
       aria-label={ariaLabel}
       aria-labelledby={labelledBy}
-      // The band under the card says why the words are still here.
-      aria-describedby={form?.failed === true ? form.noteId : undefined}
+      aria-describedby={describedBy === "" ? undefined : describedBy}
       placeholder={placeholder}
       onKeyDown={onKeyDown}
       ref={(element: HTMLDivElement | null) => {
@@ -3396,16 +3576,23 @@ export const PromptInputFooter = ({
   );
 };
 
-/** The tools before Submit. */
+/** The tools at the footer's start; with `align="end"`, those by Submit, Submit among them. */
 export const PromptInputTools = ({
   children,
+  align = "start",
   style,
 }: PromptInputToolsProps) => {
   const compact = usePromptInput()?.compact === true;
+  const end = align === "end";
   return (
     <div
       data-slot="prompt-input-tools"
-      {...stylex.props(styles.tools, compact && styles.compactTools, style)}
+      {...stylex.props(
+        styles.tools,
+        end && styles.toolsEnd,
+        compact && (end ? styles.compactToolsEnd : styles.compactTools),
+        style
+      )}
     >
       {children}
     </div>
@@ -4569,7 +4756,6 @@ export const PromptInputMentionContent = ({
           {...props}
           data-slot="prompt-input-mention-content"
           {...stylex.props(
-            menuMarker,
             menuStyles.panel,
             menuStyles.motion,
             styles.mentionPanel,

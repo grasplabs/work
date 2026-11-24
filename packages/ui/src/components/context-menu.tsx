@@ -51,7 +51,6 @@ import { radius } from "../lib/tokens.stylex";
 import { popup } from "../lib/tokens.values";
 import { slotProps, slotted } from "../lib/utils";
 import type { LayoutStyle } from "../lib/utils";
-import { menuMarker } from "../lib/vars.stylex";
 
 type FinalFocus = ComponentProps<typeof MenuContent>["finalFocus"];
 type OpenChange = ComponentProps<typeof Menu>["onOpenChange"];
@@ -429,7 +428,6 @@ export const ContextMenuContent = ({
     collisionPadding={popup.gutter}
     render={slotted("div", "context-menu-content")}
     {...stylex.props(
-      menuMarker,
       menuStyles.panel,
       menuStyles.motion,
       scrollbarHidden,
