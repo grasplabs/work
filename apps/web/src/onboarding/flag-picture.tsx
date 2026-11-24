@@ -10,9 +10,9 @@ import type { Flag } from "./flags.ts";
 // with the system's one dither (Damsko's 4x4 Bayer matrix) between each
 // colour and its shade, the light falling across a flag that waves. It
 // lies over the whole card it stands in: whole at the far edge, its cells
-// thinning out by the same dither over a long run toward the name, so the
-// name stands clear and the flag has no hard edge; the card's own corner,
-// read from the page, clips it. At rest it is still. While Stephen is on
+// thinning out by the same dither over a long run toward the name, each
+// flag its own way and ending in finer grain, so the name stands clear and
+// the flag has no hard edge; the card's own corner (a squircle) clips it. At rest it is still. While Stephen is on
 // the card (`lit`) it lives: the flag waves and comes a little closer to
 // the name. Under reduced motion it stays still.
 
@@ -47,7 +47,7 @@ const shadeOf = (hex: string): string => {
 const cell = 4;
 
 /** Where the flag starts to show, in CSS pixels from the name's side: well clear of the longest name. */
-const clearOfName = 200;
+const clearOfName = 150;
 
 /** How much closer to the name it comes while Stephen is on the card, in CSS pixels. */
 const drawnIn = 48;
@@ -69,8 +69,8 @@ const rowNoise = (y: number): number => {
 const presence = (at: number, whole: number, clear: number): number => {
   const end = Math.max(clear + cell * 12, whole);
   const t = Math.min(1, Math.max(0, (at - clear) / (end - clear)));
-  // Slow at first: a few cells, far apart, before the flag gathers.
-  return t * t * t * (t * (t * 6 - 15) + 10);
+  // Slow at first, a few cells far apart, then gathering evenly all the way to the flag.
+  return t ** 1.7;
 };
 
 /** What the drawing needs each frame: how much Stephen is on the card, and how far the flag has waved. */
@@ -85,42 +85,75 @@ interface Grid {
 }
 
 /** The flag's own cells, thinning out toward the name. */
+/** Each language its own number, so each flag's fade is its own. */
+const seedOf = (locale: Locale): number =>
+  ({ en: 11, de: 37, nl: 58, es: 73, fr: 89 })[locale];
+
+/** A number from 0 to 1 for a cell of a flag, always the same for the same cell: a little chance. */
+const chance = (x: number, y: number, seed: number): number => {
+  const value = Math.sin(x * 127.1 + y * 311.7 + seed * 74.7) * 43_758.5453;
+  return value - Math.floor(value);
+};
+
+/** From this much of the flag on, its cells are whole; below it they shrink and pale. */
+const whole = 0.78;
+/** The smallest a cell gets at the very end, as a part of a whole one, and how faint. */
+const minSide = 0.25;
+const minAlpha = 0.18;
+
 const drawFlag = (
   context: CanvasRenderingContext2D,
   flag: Flag,
   { columns, rows }: Grid,
-  { level, wave }: Life
+  { level, wave }: Life,
+  seed: number
 ) => {
   const flagColumns = Math.min(columns, Math.round(rows * flag.aspect));
   const flagStart = columns - flagColumns;
-  const clear = clearOfName - drawnIn * level;
+  // Each flag fades its own way: its own start, its own wander.
+  const clear =
+    clearOfName - drawnIn * level + (chance(seed, 1, seed) - 0.5) * 36;
+  const reach = wander * (0.7 + chance(seed, 2, seed) * 0.8);
+  const colourOf = (x: number, y: number): string => {
+    const along = (x - flagStart + 0.5) / flagColumns;
+    // Under the fade, toward the name: the flag's own edge, or its first colour alone.
+    const under = along < 0 && flag.under === "field";
+    const u = Math.max(0, along);
+    // Waving: the flag rises and falls across, its light with it.
+    const phase = u * Math.PI * 2.4 + 0.5 - wave * 3.2;
+    const v = Math.min(
+      1,
+      Math.max(0, (y + 0.5) / rows + Math.sin(phase) * 0.05)
+    );
+    const light =
+      0.55 + 0.35 * Math.cos(phase) - 0.15 * ((x + y) / (columns + rows));
+    const own = flag.real[under ? 0 : colourAt(flag.shape, u, v)] ?? "#000";
+    return bayerAt(Math.floor(x), Math.floor(y)) > light ? shadeOf(own) : own;
+  };
   for (let y = 0; y < rows; y += 1) {
     for (let x = 0; x < columns; x += 1) {
       // Each row starts a little earlier or later, so the fade has no edge.
-      const shifted = x + 0.5 - rowNoise(y) * wander;
-      if (
-        bayerAt(x + 2, y + 1) >=
-        presence(shifted * cell, flagStart * cell, clear)
-      ) {
+      const shifted = x + 0.5 - rowNoise(y + seed * 31) * reach;
+      const much = presence(shifted * cell, flagStart * cell, clear);
+      if (much <= 0) {
         continue;
       }
-      const along = (x - flagStart + 0.5) / flagColumns;
-      // Under the fade, toward the name: the flag's own edge, or its first colour alone.
-      const under = along < 0 && flag.under === "field";
-      const u = Math.max(0, along);
-      // Waving: the flag rises and falls across, its light with it.
-      const phase = u * Math.PI * 2.4 + 0.5 - wave * 3.2;
-      const v = Math.min(
-        1,
-        Math.max(0, (y + 0.5) / rows + Math.sin(phase) * 0.05)
-      );
-      const light =
-        0.55 + 0.35 * Math.cos(phase) - 0.15 * ((x + y) / (columns + rows));
-      const own = flag.real[under ? 0 : colourAt(flag.shape, u, v)] ?? "#000";
-      context.fillStyle = bayerAt(x, y) > light ? shadeOf(own) : own;
-      context.fillRect(x * cell, y * cell, cell, cell);
+      // Mostly the dither, with a little chance, so no two flags end alike.
+      const threshold =
+        bayerAt(x + 2, y + 1) * 0.75 + chance(x, y, seed) * 0.25;
+      if (threshold >= much * 1.12) {
+        continue;
+      }
+      // Toward the name each cell shrinks and pales by degrees, from a whole cell to a speck.
+      const eased = Math.min(1, much / whole);
+      const side = cell * (minSide + (1 - minSide) * eased ** 0.6);
+      const inset = (cell - side) / 2;
+      context.globalAlpha = minAlpha + (1 - minAlpha) * eased ** 0.7;
+      context.fillStyle = colourOf(x, y);
+      context.fillRect(x * cell + inset, y * cell + inset, side, side);
     }
   }
+  context.globalAlpha = 1;
 };
 
 export const FlagPicture = ({
@@ -163,22 +196,7 @@ export const FlagPicture = ({
         columns: Math.ceil(width / cell),
         rows: Math.ceil(height / cell),
       };
-      // The card's own corner clips the picture, smoothly, as the card's edge does.
-      const card = element.closest("button");
-      const corner =
-        card === null
-          ? 0
-          : Number(
-              getComputedStyle(card).borderTopRightRadius.replace("px", "")
-            );
-      context.save();
-      if (Number.isFinite(corner)) {
-        context.beginPath();
-        context.roundRect(0, 0, width, height, corner);
-        context.clip();
-      }
-      drawFlag(context, flag, grid, life);
-      context.restore();
+      drawFlag(context, flag, grid, life, seedOf(locale));
     };
     const step = (now: number) => {
       const elapsed = Math.min(now - last, 64);

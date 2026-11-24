@@ -62,6 +62,12 @@ const UNIFORMS = [
   "u_flag[0]",
   "u_flagShape",
   "u_flagOn",
+  "u_style",
+  "u_progress",
+  "u_parts[0]",
+  "u_partMeta[0]",
+  "u_partCount",
+  "u_ground",
 ] as const;
 type Uniform = (typeof UNIFORMS)[number];
 
@@ -183,6 +189,7 @@ const coloursOf = (canvas: HTMLCanvasElement) => {
           mix(sea, mint, 0.45),
           mint,
         ],
+    ground,
     palette: [night, ink, pine, mint, sea, lime, paper],
     // On a dark page he covers it from night to lime; on a light one from mint to paper.
     tones: dark ? ([0.06, 0.8] as const) : ([0.46, 1] as const),
@@ -225,13 +232,93 @@ const nextFrame = async (): Promise<void> => {
   await promise;
 };
 
+/** How he carries the page to its next screen. */
+export type CarryStyle =
+  /** The flag he took fills the window, his light chases it, he drains to the new title. */
+  | "flag"
+  /** The page's parts dither away into him in reading order, and the new ones dither in. */
+  | "reading"
+  /** The same, in a wave: out from what was pressed, in from the new title. */
+  | "wave";
+
+/** One part of the page he dithers away or in: its box, when it goes (0 to 1), its corner. */
+interface Part {
+  box: Box;
+  when: number;
+  radius: number;
+}
+
 interface Carry {
   phase: 1 | 2 | 3;
   since: number;
   from: Box;
   toward: Box;
   picture: Picture;
+  style: CarryStyle;
+  parts: Part[];
 }
+
+/** As many parts as the shader takes. */
+const PARTS = 24;
+/** The parts go out in this long, and come in in this long. */
+const OUT_MS = 620;
+const IN_MS = 820;
+
+/** What a screen is made of, outermost first: each its own part, never one inside another. */
+const PART_SELECTOR = [
+  "header > *",
+  "[data-field-part]",
+  "main :is(h1, h2, h3, p, li, label, input, textarea, button, a, img, canvas, table)",
+  "main [data-slot]",
+].join(", ");
+
+const centreOf = (box: Box): readonly [number, number] => [
+  box[0] + box[2] / 2,
+  box[1] + box[3] / 2,
+];
+
+/**
+ * The parts of the screen as it is now, each with when it goes: in
+ * reading order, or by how far it lies from `origin` (a wave).
+ */
+const partsOf = (style: CarryStyle, origin: Box): Part[] => {
+  const found = [...document.querySelectorAll(PART_SELECTOR)].filter(
+    (element) => {
+      const { width, height, bottom, top } = element.getBoundingClientRect();
+      return width > 0 && height > 0 && bottom > 0 && top < window.innerHeight;
+    }
+  );
+  // The outermost of each: a card, not the button in it.
+  const outer = found.filter(
+    (element) =>
+      !found.some((other) => other !== element && other.contains(element))
+  );
+  const boxes = outer.map((element) => {
+    const corner = Number(
+      getComputedStyle(element).borderTopLeftRadius.replace("px", "")
+    );
+    return {
+      box: boxOf(element),
+      radius: Number.isFinite(corner) ? corner : 0,
+    };
+  });
+  const [ox, oy] = centreOf(origin);
+  const order = boxes.map(({ box }) => {
+    const [x, y] = centreOf(box);
+    return style === "wave" ? Math.hypot(x - ox, y - oy) : y * 4 + x;
+  });
+  const sorted = boxes
+    .map((part, index) => ({ ...part, order: order[index] ?? 0 }))
+    .toSorted((a, b) => a.order - b.order)
+    .slice(0, PARTS);
+  const first = sorted[0]?.order ?? 0;
+  const last = sorted.at(-1)?.order ?? 1;
+  return sorted.map(({ box, radius, order: at }) => ({
+    box,
+    radius,
+    when: last === first ? 0 : (at - first) / (last - first),
+  }));
+};
 
 const flagShape = (picture: Picture): Rgb => {
   if (picture === null || picture.shape.kind === "across") {
@@ -315,6 +402,34 @@ const fronts = (now: number): Rgb => {
   ];
 };
 
+/** How the page's parts dither: which carry, how far along, and the parts themselves. */
+const drawParts = (
+  gl: WebGLRenderingContext,
+  u: (name: Uniform) => WebGLUniformLocation | null,
+  carry: Carry | null,
+  now: number
+) => {
+  const style = carry?.style ?? "flag";
+  gl.uniform1f(u("u_style"), { flag: 0, reading: 1, wave: 2 }[style]);
+  const span = carry?.phase === 3 ? IN_MS : OUT_MS;
+  gl.uniform1f(
+    u("u_progress"),
+    carry === null ? 0 : smoother((now - carry.since) / span)
+  );
+  const parts = Array.from({ length: PARTS }, (_, slot) => carry?.parts[slot]);
+  gl.uniform4fv(
+    u("u_parts[0]"),
+    parts.flatMap((part) => part?.box ?? [0, 0, 0, 0])
+  );
+  gl.uniform4fv(
+    u("u_partMeta[0]"),
+    parts.flatMap((part) =>
+      part === undefined ? [0, 0, 0, 0] : [part.when, part.radius, 0, 0]
+    )
+  );
+  gl.uniform1f(u("u_partCount"), carry?.parts.length ?? 0);
+};
+
 const draw = (layer: Layer, index: number, now: number, colours: Colours) => {
   const { gl, at, canvas } = layer;
   const { pose, rest, pointer, carry } = him;
@@ -365,6 +480,8 @@ const draw = (layer: Layer, index: number, now: number, colours: Colours) => {
   );
   gl.uniform3f(u("u_flagShape"), ...flagShape(picture));
   gl.uniform1f(u("u_flagOn"), picture === null ? 0 : 1);
+  drawParts(gl, u, carry, now);
+  gl.uniform3f(u("u_ground"), ...colours.ground);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 };
 
@@ -596,7 +713,8 @@ export const releaseField = (element: Element) => {
 export const carryField = async (
   from: Element,
   picture: Picture,
-  turn: () => Promise<void>
+  turn: () => Promise<void>,
+  style: CarryStyle = "flag"
 ): Promise<void> => {
   const moving = !matchMedia("(prefers-reduced-motion: reduce)").matches;
   if (stage === null || !moving || him.carry !== null) {
@@ -610,10 +728,14 @@ export const carryField = async (
     from: origin,
     toward: origin,
     picture,
+    style,
+    parts: style === "flag" ? [] : partsOf(style, origin),
   };
   him.carry = carry;
   him.onCovering?.(true);
-  await wait(CHASE_MS + CHASE_SPREAD_MS);
+  // What he holds goes with the page, at once: nothing of it lingers while the page turns.
+  him.holds = [];
+  await wait(style === "flag" ? CHASE_MS + CHASE_SPREAD_MS : OUT_MS);
   carry.phase = 2;
   try {
     await turn();
@@ -626,11 +748,14 @@ export const carryField = async (
       title === null
         ? [window.innerWidth / 2, window.innerHeight / 3, 0, 0]
         : boxOf(title);
+    if (style !== "flag") {
+      carry.parts = partsOf(style, carry.toward);
+    }
     carry.phase = 3;
     carry.since = performance.now();
     // He stays behind the new title a moment, a faint light, then lets go.
     hold(title, true);
-    await wait(DRAIN_MS);
+    await wait(style === "flag" ? DRAIN_MS : IN_MS);
     him.carry = null;
     him.onCovering?.(false);
     void (async () => {

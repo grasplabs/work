@@ -16,6 +16,7 @@ import { AiChoice } from "./ai-choice.tsx";
 import { CalmStep } from "./calm-frame.tsx";
 import { CompanyStep } from "./company-step.tsx";
 import { DocumentsStep } from "./documents-step.tsx";
+import type { CarryStyle } from "./field/engine.ts";
 import { useField } from "./field/stephen-field.tsx";
 import { flags } from "./flags.ts";
 import { ForgetKickoff } from "./forget-kickoff.tsx";
@@ -46,6 +47,18 @@ const styles = stylex.create({
   stack: { display: "grid", gap: space[4] },
 });
 
+/**
+ * Concepts only, for Ruben to compare, until he picks one: how Stephen
+ * carries the page on from the welcome, `?carry=a|b|c` on the address.
+ */
+const carryStyle = (): CarryStyle => {
+  const asked = new URLSearchParams(window.location.search).get("carry");
+  if (asked === "b") {
+    return "reading";
+  }
+  return asked === "c" ? "wave" : "flag";
+};
+
 /** A language other than the page's was picked a moment ago: the page drawn anew in it knows. */
 let languagePicked = false;
 
@@ -71,12 +84,17 @@ const Welcome = ({ data, onward }: StepProps) => {
           chosen={picked && isLocale(i18n.locale) ? i18n.locale : null}
           onPick={(locale, card) => {
             // Stephen takes the flag from the card and carries the page to its next screen.
-            void field.carry(card, flags[locale], async () => {
-              setPicked(true);
-              languagePicked = true;
-              await chooseLocale(locale);
-              await onward();
-            });
+            void field.carry(
+              card,
+              flags[locale],
+              async () => {
+                setPicked(true);
+                languagePicked = true;
+                await chooseLocale(locale);
+                await onward();
+              },
+              carryStyle()
+            );
           }}
         />
         <ForgetKickoff kickoff={data.view.kickoff} onForgotten={refresh} />
