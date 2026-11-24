@@ -21,17 +21,15 @@ import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { ItemGrid } from "../grasp/item/index.ts";
 import { IntegrationTile } from "./integration-tile.tsx";
-import { IntegrationsBand } from "./integrations-band.tsx";
 import { integrationsOf } from "./integrations.ts";
 import type { Integration } from "./integrations.ts";
 import { RecommendedApps } from "./recommended-apps.tsx";
 import { nothingKnown, recommendedOf } from "./recommended.ts";
 import type { Known } from "./recommended.ts";
 
-// The Integrations overview as people meet it: the slim band says how
-// many apps are connected; Recommended names the apps to connect first,
-// each with its reason; every app is the library's tile, saying where it
-// stands, that opens it over the page.
+// The Integrations overview as people meet it: Recommended names the apps
+// to connect first, each with its reason; every app is the library's tile,
+// saying where it stands, that opens it over the page.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -123,7 +121,6 @@ const opened = async (
     path: "/integrations/",
     component: () => (
       <>
-        <IntegrationsBand identity={identity} integrations={integrations} />
         <RecommendedApps
           identity={identity}
           onOpen={() => {
@@ -187,19 +184,6 @@ describe("the Integrations overview", () => {
     document.body.replaceChildren();
   });
 
-  it("sums up the connected apps: how many need someone", async () => {
-    const { host } = await opened([
-      connection("microsoft", { scope: "personal", ownerUserId: "u1" }),
-      connection("google", { status: "needs_reauth" }),
-    ]);
-    expect(host.querySelector("h2")?.textContent).toBe(
-      "Connect the apps your work runs on"
-    );
-    expect(host.querySelector("section")?.textContent).toContain(
-      "1 app needs you"
-    );
-  });
-
   it("recommends the apps to connect first, each with its one reason", async () => {
     const { host } = await opened([], admin, {
       suites: ["microsoft"],
@@ -236,7 +220,6 @@ describe("the Integrations overview", () => {
       suites: ["microsoft"],
     });
     expect(host.querySelector('ul[aria-label="Recommended"]')).toBeNull();
-    expect(host.querySelector("section")?.textContent).toContain("1 connected");
   });
 
   it("tells someone who can't sign in again who can, with nothing to press", async () => {
@@ -249,9 +232,6 @@ describe("the Integrations overview", () => {
     ].find((each) => heard(each).startsWith("Google Workspace"));
     expect(tile === undefined ? "" : heard(tile)).toBe(
       "Google WorkspaceWaiting for an admin"
-    );
-    expect(host.querySelector("section")?.textContent).toContain(
-      "1 app waits for an admin"
     );
   });
 
@@ -298,8 +278,5 @@ describe("the Integrations overview", () => {
       "Acme CRM3 tools",
       "Ledger3 tools",
     ]);
-    expect(host.querySelector("section")?.textContent).toContain(
-      "2 apps need you"
-    );
   });
 });

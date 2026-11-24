@@ -297,6 +297,7 @@ export const AgentCard = ({
       <AgentFigureAura
         key={paused ? "asleep" : "awake"}
         ground="page"
+        from="corner"
         look={look}
         bright={paused ? 0.45 : 1}
       />

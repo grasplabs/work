@@ -22,6 +22,7 @@ import type {
   ConnectAppChoice,
   ConnectAppConsentChoice,
 } from "../grasp/blocks/connect-app/connect-app.tsx";
+import { Button } from "../grasp/button/index.ts";
 import { toast } from "../grasp/toast/index.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
@@ -235,14 +236,15 @@ const stoppedOf = (
  * the library's for a native connector not yet connected, or for a toolkit
  * not yet connected (or stopped) once its tools are read; ours for a toolkit
  * that takes a key, or whose tools couldn't be read, as it asks for the key,
- * or reads them again and says why not.
+ * or reads them again and says why not. While a listed toolkit's tools are
+ * still read, its Connect waits.
  */
 const connectWayOf = (
   integration: Integration,
   identity: Identity,
   tools: Loaded<CatalogTool[]> | undefined,
   stopped: readonly ListedConnection[]
-): "native" | "toolkit" | "dialog" | undefined => {
+): "native" | "toolkit" | "dialog" | "waiting" | undefined => {
   if (!canConnect(integration, identity)) {
     return undefined;
   }
@@ -260,7 +262,24 @@ const connectWayOf = (
   ) {
     return "toolkit";
   }
-  return tools === undefined ? undefined : "dialog";
+  if (tools === undefined) {
+    return integration.listed ? "waiting" : undefined;
+  }
+  return "dialog";
+};
+
+/**
+ * Connect while the toolkit's tools are read: it holds its place in the
+ * head, so nothing moves and the panel doesn't look empty, and can't be
+ * pressed until it knows what to ask.
+ */
+const WaitingConnect = ({ size }: { size: "xs" | "sm" }) => {
+  const { t } = useLingui();
+  return (
+    <Button disabled size={size} variant="ink">
+      {t`Connect`}
+    </Button>
+  );
 };
 
 /** What the native dialog is open for: connecting, or signing in again to one connection. */
@@ -323,6 +342,8 @@ export const useAppActions = ({
     );
   } else if (way === "dialog") {
     actions.onConnect = openNative();
+  } else if (way === "waiting") {
+    actions.connect = <WaitingConnect size={size} />;
   }
   if (again !== undefined && !accountRows) {
     actions.onSignIn = openNative(again);

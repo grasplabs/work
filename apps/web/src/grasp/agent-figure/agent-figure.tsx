@@ -235,6 +235,12 @@ export interface AgentFigureAuraProps {
    * @default "night"
    */
   ground?: "night" | "page";
+  /**
+   * Where its light rises: `centre`, behind a figure in the middle; `corner`, from the end corner
+   * where an agent card's figure stands, leaving the card's words on a clean ground.
+   * @default "centre"
+   */
+  from?: "centre" | "corner";
 }
 
 /**
@@ -247,6 +253,7 @@ export const AgentFigureAura = ({
   bright = 1,
   state = "idle",
   ground = "night",
+  from = "centre",
 }: AgentFigureAuraProps) => {
   const canvas = useRef<HTMLCanvasElement>(null);
   const asleep = state === "asleep";
@@ -256,6 +263,7 @@ export const AgentFigureAura = ({
     state,
     onPage,
     bright: asleep ? bright * RESTING_BRIGHT : bright,
+    corner: from === "corner",
   });
   const [live, setLive] = useState<ReturnType<typeof mountAura> | null>(null);
   useEffect(() => {
@@ -272,6 +280,7 @@ export const AgentFigureAura = ({
       colours: auraColours(first.look, first.state, first.onPage),
       seed: seedOf(first.look),
       bright: first.bright,
+      corner: first.corner,
     });
     setLive(made);
     return () => {

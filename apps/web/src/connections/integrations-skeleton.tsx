@@ -18,17 +18,18 @@ import { Sheet, SheetContent, SheetTitle } from "../grasp/sheet/index.ts";
 import { useWords } from "../grasp/words/words.tsx";
 
 // The Integrations overview before it arrives, as the library's skeleton
-// stands it, so nothing moves when it does: on the overview with the slim
-// band (integrations-band.tsx); with an app's panel waiting
-// over it too, when the address opens one (`?app=`).
+// stands it: Yours' Connected and Recommended, or Browse's kinds; with an
+// app's panel waiting over it too, when the address opens one (`?app=`).
+// The library's skeleton has no tab row yet, so the tabs arrive with the
+// page (logged in .context/library-changes.md).
 
 /** The overview, waiting, and the panel of the app the address names. */
 export const IntegrationsSkeleton = () => {
   const { t } = useLingui();
   const words = useWords("appIntegration", appIntegrationWords);
-  const { app, group, q } = useSearch({ strict: false });
-  // The overview shows the slim band, then Recommended, Connected and a kind.
-  const overview = group === undefined && q === undefined;
+  const { app, group, q, tab } = useSearch({ strict: false });
+  // Yours: Connected, then Recommended with its note; Browse: the kinds.
+  const yours = tab !== "browse" && group === undefined && q === undefined;
   const navigate = useNavigate({ from: "/integrations/" });
   const close = (): void => {
     void navigate({
@@ -40,9 +41,8 @@ export const IntegrationsSkeleton = () => {
       <SiteHeader crumbs={[{ label: t`Integrations` }]} />
       <Page>
         <PageSkeletonIntegrations
-          band={overview}
           label={t`Loading integrations`}
-          runs={overview ? [{ tiles: 3, note: true }, 2, 4] : undefined}
+          runs={yours ? [2, { tiles: 3, note: true }] : [4, 4, 4]}
         />
       </Page>
       {app === undefined ? null : (
