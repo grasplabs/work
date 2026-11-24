@@ -540,6 +540,9 @@ for (const [file, text] of Object.entries({
   "kit-made.ts":
     'import { make } from "@grasp-os/app-kit/components/button";\nexport const Button = make();',
   "kit-let.ts": "export let Button = () => null;",
+  "own-module.mts": "export function Strip({ style }) { return style; }",
+  "kit-module.mts":
+    'export { Button } from "@grasp-os/app-kit/components/button";',
 })) {
   mkdirSync(path.dirname(path.join(modules, file)), { recursive: true });
   writeFileSync(path.join(modules, file), `${text}\n`);
@@ -590,6 +593,18 @@ describe("through a relative module", () => {
         filename: page,
       },
       {
+        name: "a component of a module named by its .jsx or .mjs path, as TypeScript reads it",
+        code: `import { SaveBar } from "./own.jsx";
+  import { Strip } from "./own-module.mjs";${styles}
+  const Page = () => (
+    <>
+      <SaveBar style={layout.wide} />
+      <Strip style={layout.wide} />
+    </>
+  );`,
+        filename: page,
+      },
+      {
         name: "a component of the module's own beside everything of another package",
         code: `import { SaveBar } from "./own-and-kit.ts";${styles}
   const Page = () => <SaveBar style={layout.wide} />;`,
@@ -636,6 +651,26 @@ describe("through a relative module", () => {
   );`,
         filename: page,
         errors: Array.from({ length: 5 }, () => ({ messageId: "stylexStyle" })),
+      },
+      {
+        name: "a component of a module that cannot be found, or that the module doesn't export",
+        code: `import { Panel } from "./missing.tsx";
+  import { Nowhere } from "./own.tsx";${styles}
+  const Page = () => (
+    <>
+      <Panel style={layout.wide} />
+      <Nowhere style={layout.wide} />
+    </>
+  );`,
+        filename: page,
+        errors: Array.from({ length: 2 }, () => ({ messageId: "stylexStyle" })),
+      },
+      {
+        name: "the kit's component, passed on by a module named by its .mjs path",
+        code: `import { Button } from "./kit-module.mjs";${styles}
+  const Page = () => <Button style={layout.wide} />;`,
+        filename: page,
+        errors: [{ messageId: "stylexStyle" }],
       },
     ],
   });

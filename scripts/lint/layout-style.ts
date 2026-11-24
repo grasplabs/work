@@ -689,15 +689,27 @@ const isNode = (value: unknown): value is StyleNode =>
 /** The modules parsed so far, by file, as of when they last changed. */
 const parsed = new Map<string, { mtimeMs: number; body: StyleNode[] }>();
 
+/** The TypeScript files a JavaScript extension of an import stands for. */
+const typedExtensions: Record<string, readonly string[]> = {
+  ".js": [".ts", ".tsx"],
+  ".jsx": [".tsx"],
+  ".mjs": [".mts"],
+  ".cjs": [".cts"],
+};
+
 /**
  * The file a relative import names, as TypeScript finds it: a `.js` path
- * as `.ts` or `.tsx`, as written, or with `.tsx` or `.ts`, or its folder's
- * `index`. Undefined if none is.
+ * as `.ts` or `.tsx` (`.jsx` as `.tsx`, `.mjs` as `.mts`, `.cjs` as
+ * `.cts`), as written, or with `.tsx` or `.ts`, or its folder's `index`.
+ * Undefined if none is.
  */
 const moduleFile = (from: string, specifier: string): string | undefined => {
   const base = nodePath.resolve(nodePath.dirname(from), specifier);
-  const stem = base.slice(0, -".js".length);
-  const typed = base.endsWith(".js") ? [`${stem}.ts`, `${stem}.tsx`] : [];
+  const extension = nodePath.extname(base);
+  const stem = base.slice(0, base.length - extension.length);
+  const typed = (typedExtensions[extension] ?? []).map(
+    (typedExtension) => `${stem}${typedExtension}`
+  );
   return [
     ...typed,
     base,
