@@ -167,6 +167,9 @@ const ProjectForm = ({
         <Button
           disabled={!valid || busy}
           form={formId}
+          // At the footer's own height, as #2503's: Damsko's footer makes
+          // a Button with no size a small one.
+          size="default"
           type="submit"
           variant="default"
         >

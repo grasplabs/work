@@ -16,13 +16,16 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
+import { PageHeader } from "@grasp-os/ui/components/page-header";
 import { Icon, FolderKanbanIcon, PlusIcon } from "@grasp-os/ui/lib/icons";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { PageNotLoaded } from "../frame/page-states.tsx";
-import { Page, PageHeading } from "../frame/page.tsx";
+import { pageText } from "../frame/page-text.ts";
+import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import { projectCountsWords } from "../projects/project-counts.tsx";
@@ -90,28 +93,30 @@ const Projects = () => {
     <>
       <SiteHeader crumbs={[{ label: t`Projects` }]} />
       <Page>
-        <PageHeading
-          action={builds && page.data.length > 0 ? make : undefined}
-          title={<Trans>Projects</Trans>}
-        />
-        {page.data.length === 0 ? (
-          <Empty>
-            <EmptyHeader>
-              <EmptyMedia icon={FolderKanbanIcon} />
-              {/* What a project is, New project's dialog says as one is made. */}
-              <EmptyTitle>{t`No projects yet`}</EmptyTitle>
-            </EmptyHeader>
-            {builds ? <EmptyContent>{make}</EmptyContent> : null}
-          </Empty>
-        ) : (
-          <SeparatedItems
-            aria-label={t`Projects`}
-            rows={page.data.map((project) => ({
-              key: project.id,
-              row: <ProjectRow key={project.id} project={project} />,
-            }))}
+        <div {...stylex.props(pageText.text)}>
+          <PageHeader
+            {...(builds && page.data.length > 0 ? { actions: make } : {})}
+            title={t`Projects`}
           />
-        )}
+          {page.data.length === 0 ? (
+            <Empty>
+              <EmptyHeader>
+                <EmptyMedia icon={FolderKanbanIcon} />
+                {/* What a project is, New project's dialog says as one is made. */}
+                <EmptyTitle>{t`No projects yet`}</EmptyTitle>
+              </EmptyHeader>
+              {builds ? <EmptyContent>{make}</EmptyContent> : null}
+            </Empty>
+          ) : (
+            <SeparatedItems
+              aria-label={t`Projects`}
+              rows={page.data.map((project) => ({
+                key: project.id,
+                row: <ProjectRow key={project.id} project={project} />,
+              }))}
+            />
+          )}
+        </div>
       </Page>
       <ProjectDialog
         onDone={(projectId) => {
