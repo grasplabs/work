@@ -2,7 +2,7 @@ import type { DecisionView } from "@grasp-os/shared/decisions";
 import { decisionErrors } from "@grasp-os/shared/decisions";
 import { describe, expect, it } from "vite-plus/test";
 
-import type { PendingConfirmation } from "../decision-confirmation.tsx";
+import type { PendingConfirmation } from "../inbox/decision-confirmation.tsx";
 import { cancelPauseMs, frameQuestions } from "./frame-questions.ts";
 import type { Asked, PageQuestions } from "./frame-questions.ts";
 

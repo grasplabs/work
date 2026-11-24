@@ -21,8 +21,8 @@ import { InfoIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
-import { DecisionConfirmDialog } from "../decision-confirmation.tsx";
-import type { PendingConfirmation } from "../decision-confirmation.tsx";
+import { DecisionConfirmDialog } from "../inbox/decision-confirmation.tsx";
+import type { PendingConfirmation } from "../inbox/decision-confirmation.tsx";
 import { LinkConfirmDialog } from "../link-confirmation.tsx";
 import type { PendingLink } from "../link-confirmation.tsx";
 import { useCore } from "../use-core.ts";

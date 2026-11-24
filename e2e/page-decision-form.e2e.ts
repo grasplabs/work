@@ -376,7 +376,7 @@ test("a reviewer answers a run's decision through a decision form on a page, con
   await form.getByRole("radio", { name: "Approve" }).check();
   await form.getByRole("textbox", { name: "Comment" }).fill("Looks right");
   await form.getByRole("button", { name: "Send answer" }).click();
-  const confirmation = second.getByRole("alertdialog", {
+  const confirmation = second.getByRole("dialog", {
     name: "Confirm your approval",
   });
   await expect(confirmation).toBeVisible(live);

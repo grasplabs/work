@@ -1,5 +1,8 @@
 // @vitest-environment happy-dom
+import { setTimeout as sleep } from "node:timers/promises";
+
 import type { BindingApprovalItem } from "@grasp-os/shared/waiting";
+import { workflowResourceErrors } from "@grasp-os/shared/workflow-resources";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -25,6 +28,8 @@ import type { Waiting } from "./waiting.ts";
 // the version shown; a connector it offers none for leads to the
 // workflow's page, where such kinds are offered targets, and a binding
 // nothing serves says it needs a grant; neither offers anything to press.
+// Opened in place of an item just answered, Approve waits a moment; once
+// an approval is through or refused, the inbox is told it landed.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -74,13 +79,22 @@ const item: BindingApprovalItem = {
   },
 };
 
-/** The item's detail, with what core was asked to approve. */
-const shown = async () => {
+/**
+ * The item's detail, with what core was asked to approve: `arriving` in
+ * place of an item just answered; `refused`, core refuses each approval.
+ */
+const shown = async ({
+  arriving = false,
+  refused = false,
+}: { arriving?: boolean; refused?: boolean } = {}) => {
   const approved: { id: string; input: unknown }[] = [];
   const workflowResources = {
     approveBinding: async (id: string, input: unknown) => {
       await Promise.resolve();
       approved.push({ id, input });
+      if (refused) {
+        throw workflowResourceErrors.create("workflow.binding_conflict");
+      }
       return {};
     },
   };
@@ -113,14 +127,22 @@ const shown = async () => {
     throw new Error("No item");
   }
   const said: string[] = [];
+  const told = { landed: 0, refused: 0 };
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
     component: () => (
       <ItemDetail
+        arriving={arriving}
+        gone={false}
         item={shownItem}
-        onBack={() => {}}
+        onLanded={() => {
+          told.landed += 1;
+        }}
+        onRefused={() => {
+          told.refused += 1;
+        }}
         onSaid={(line) => {
           said.push(line);
         }}
@@ -143,7 +165,14 @@ const shown = async () => {
     );
     await router.load();
   });
-  return { approved, said, title: shownItem.title };
+  return { approved, said, told, title: shownItem.title };
+};
+
+/** Lets an approval and the read after it settle. */
+const settle = async () => {
+  await act(async () => {
+    await sleep(0);
+  });
 };
 
 /** The button named `name`. */
@@ -217,4 +246,54 @@ describe("a workflow's bindings in the inbox", () => {
       leads: ["/workflows/workflow-quotes?view=settings&section=files"],
     });
   });
+
+  it("holds Approve a moment when it opens in place of an item just answered, and says why", async () => {
+    const { approved } = await shown({ arriving: true });
+    const arrived = {
+      disabled: button("Approve summary")?.disabled,
+      pause: document.body.textContent.includes(
+        "Its answers can be used in a moment"
+      ),
+    };
+    await act(async () => {
+      button("Approve summary")?.click();
+      await Promise.resolve();
+    });
+    const pressedEarly = approved.length;
+    // Longer than the pause the arriving item's answers hold for.
+    await act(async () => {
+      await sleep(1100);
+    });
+
+    expect({
+      arrived,
+      pressedEarly,
+      later: button("Approve summary")?.disabled,
+    }).toStrictEqual({
+      arrived: { disabled: true, pause: true },
+      pressedEarly: 0,
+      later: false,
+    });
+  });
+
+  it.each([
+    { refused: false, landed: 1, kept: 0, alerts: 0 },
+    { refused: true, landed: 1, kept: 1, alerts: 1 },
+  ])(
+    "tells the inbox an approval landed, so focus that fell goes to the item's heading (refused: $refused)",
+    async ({ refused, ...expected }) => {
+      const { told } = await shown({ refused });
+      await act(async () => {
+        button("Approve summary")?.click();
+        await Promise.resolve();
+      });
+      await settle();
+
+      expect({
+        landed: told.landed,
+        kept: told.refused,
+        alerts: document.querySelectorAll("[role='alert']").length,
+      }).toStrictEqual(expected);
+    }
+  );
 });
