@@ -13,6 +13,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
 import type { AnyRouter } from "@tanstack/react-router";
 
+import { splitReference } from "../frame/page-states.tsx";
 import { notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 
@@ -32,20 +33,6 @@ const styles = stylex.create({
   },
   reference: { width: "min(100%, 18rem)" },
 });
-
-/** How a reason carries its reference: `withReference` in @grasp-os/shared/errors. */
-const referenced = /^(?<sentence>[\s\S]*?)\s*Reference: (?<reference>\S+)$/u;
-
-/** A failure's words and its reference apart, where core gave one. */
-const splitReference = (
-  reason: string
-): { sentence: string; reference?: string } => {
-  const found = referenced.exec(reason)?.groups;
-  if (found?.sentence === undefined || found.reference === undefined) {
-    return { sentence: reason };
-  }
-  return { sentence: found.sentence, reference: found.reference };
-};
 
 /**
  * Why a part of a page did not load: core's reason, its reference to copy,

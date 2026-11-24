@@ -13927,6 +13927,7 @@ msgid "Redone"
 msgstr "Opnieuw gedaan"
 
 #: src/connections/part-not-loaded.tsx
+#: src/frame/page-states.tsx
 msgid "Reference for support"
 msgstr "Referentie voor support"
 
@@ -16068,6 +16069,7 @@ msgid "Something went wrong while it opened."
 msgstr "Er ging iets mis bij het openen."
 
 #: src/connections/part-not-loaded.tsx
+#: src/frame/page-states.tsx
 #: src/route-error.tsx
 msgid "Something went wrong."
 msgstr "Er ging iets mis."
