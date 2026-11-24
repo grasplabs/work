@@ -7,7 +7,6 @@ import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import type { Scene } from "../../apps/app-card/scenes.ts";
 import {
   budgetSeconds,
   useCountdown,
@@ -65,7 +64,7 @@ export interface ConceptSearch {
   lang: "unknown" | undefined;
   transcript: boolean;
   fold: boolean;
-  /** On a phone: the scene only behind the header, or a low band under it. */
+  /** On a phone: the texture only behind the header, or a low band under it. */
   band: "header" | "low";
   /** Ruben's alternative title on A's start (`&title=alt`). */
   altTitle: boolean;
@@ -241,16 +240,9 @@ const talkFor = (concept: Concept, at: string): Talk => {
   }
 };
 
-/** The scene beside a page before the conversation: A’s wave, B’s mountain, C’s aurora. */
-const scenes: Record<Concept, Scene> = { a: "wave", b: "fuji", c: "aurora" };
-
-/** Whether a screen stands beside its concept's scene: every page but the conversation, the read-back and C's thread. */
-const withScene = (concept: Concept, screen: string): Scene | undefined => {
-  if (talking.has(screen) || screen === "readback") {
-    return undefined;
-  }
-  return scenes[concept];
-};
+/** Whether a screen stands beside the calm dither: every page but the conversation, the read-back and C's thread. */
+const withScene = (screen: string): boolean =>
+  !(talking.has(screen) || screen === "readback");
 
 /** A's fold-in variant: B's "I can hear you clearly." moment, with `&fold`. */
 const talkFold = (search: ConceptSearch, screen: string): boolean =>
@@ -574,9 +566,10 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
       }
       clock={clockOf[concept]}
       left={inTalk ? left : null}
-      scene={withScene(concept, screen)}
+      beside={withScene(screen)}
       band={search.band}
-      sceneOnPhone={concept !== "c" || screen === "language"}
+      strip={inTalk}
+      besideOnPhone={concept !== "c" || screen === "language"}
     >
       {page}
     </Frame>
