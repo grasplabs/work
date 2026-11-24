@@ -15,9 +15,7 @@ import {
   Item,
   ItemActions,
   ItemContent,
-  ItemDescription,
   ItemGroup,
-  ItemTitle,
 } from "@grasp-os/ui/components/item";
 import {
   Sheet,
@@ -33,10 +31,10 @@ import { Icon, MonitorIcon } from "@grasp-os/ui/lib/icons";
 import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 
-import { AskAction, askWords, useAsksDone } from "./campaign-asks.tsx";
-import { talkedWords, whenWords } from "./campaign-words.ts";
+import { AskAction, askLine, useAsksDone } from "./campaign-asks.tsx";
+import { findingSentence, talkedWords, whenWords } from "./campaign-words.ts";
 import { findingsOf } from "./fixtures.ts";
-import type { Campaign, Finding } from "./fixtures.ts";
+import type { Campaign } from "./fixtures.ts";
 
 const styles = stylex.create({
   teams: { display: "flex", flexDirection: "column", gap: space[6] },
@@ -55,11 +53,10 @@ const styles = stylex.create({
     padding: 0,
     listStyle: "none",
   },
-  line: { display: "flex", flexDirection: "column", gap: space[1] },
   running: {
     display: "flex",
     alignItems: "center",
-    justifyContent: "inherit",
+
     flexWrap: "wrap",
     gap: space[2],
     margin: 0,
@@ -87,8 +84,8 @@ export const wide = stylex.create({
 export const OnYourComputer = () => (
   <p {...stylex.props(styles.desktop)}>
     <Icon icon={MonitorIcon} />
-    <Text as="span" size="sm" color="muted">
-      Every team and every finding is on your computer.
+    <Text as="span" color="muted">
+      The whole picture is on your computer.
     </Text>
   </p>
 );
@@ -101,43 +98,25 @@ export const AskList = ({ campaign }: { campaign: Campaign }) => {
   }
   return (
     <ItemGroup aria-label="For you">
-      {campaign.asks.map((ask) => {
-        const words = askWords(ask, isDone(ask));
-        return (
-          <Item key={ask.id} size="sm" variant="outline">
-            <ItemContent>
-              <ItemTitle>{words.title}</ItemTitle>
-              <ItemDescription>{words.sentence}</ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <AskAction
-                ask={ask}
-                done={isDone(ask)}
-                onDone={() => {
-                  markDone(ask);
-                }}
-              />
-            </ItemActions>
-          </Item>
-        );
-      })}
+      {campaign.asks.map((ask) => (
+        <Item key={ask.id} size="sm" variant="outline">
+          <ItemContent>
+            <Text>{askLine(ask, isDone(ask))}</Text>
+          </ItemContent>
+          <ItemActions>
+            <AskAction
+              ask={ask}
+              done={isDone(ask)}
+              onDone={() => {
+                markDone(ask);
+              }}
+            />
+          </ItemActions>
+        </Item>
+      ))}
     </ItemGroup>
   );
 };
-
-/** One finding as a line: a "told two ways" one says so first, quietly. */
-export const FindingText = ({ finding }: { finding: Finding }) => (
-  <span {...stylex.props(styles.line)}>
-    {finding.kind === "difference" ? (
-      <Text as="span" size="xs" color="muted">
-        Told two ways
-      </Text>
-    ) : null}
-    <Text as="span" size="sm">
-      {finding.text}
-    </Text>
-  </span>
-);
 
 /** Every finding, team by team, in a sheet; the button says how many. */
 export const AllFindings = ({
@@ -175,7 +154,7 @@ export const AllFindings = ({
                       <Heading level={3} size="2xs">
                         {each.name}
                       </Heading>
-                      <Text as="span" size="xs" color="muted">
+                      <Text as="span" color="muted">
                         {talkedWords(each, grouped)}
                       </Text>
                     </div>
@@ -183,7 +162,12 @@ export const AllFindings = ({
                   <ul {...stylex.props(styles.lines)}>
                     {each.findings.map((finding) => (
                       <li key={finding.id}>
-                        <FindingText finding={finding} />
+                        <Text>
+                          {findingSentence(finding, each, {
+                            named: false,
+                            grouped,
+                          })}
+                        </Text>
                       </li>
                     ))}
                   </ul>
@@ -222,14 +206,12 @@ export const RunningLine = ({
     <>
       <p {...stylex.props(styles.running)}>
         {running ? <AgentIndicator /> : null}
-        <Text as="span" size="sm" color="muted">
+        <Text as="span" color="muted">
           {words}
         </Text>
       </p>
       {declined.length === 0 ? null : (
-        <Text size="sm" color="muted">
-          {`Declined: ${declined.join(", ")}`}
-        </Text>
+        <Text color="muted">{`Declined: ${declined.join(", ")}`}</Text>
       )}
     </>
   );

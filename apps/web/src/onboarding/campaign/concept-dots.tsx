@@ -17,7 +17,12 @@ import {
   RunningLine,
   wide,
 } from "./campaign-parts.tsx";
-import { dayCount, statementOf, talkedWords } from "./campaign-words.ts";
+import {
+  dayCount,
+  findingSentence,
+  statementOf,
+  talkedWords,
+} from "./campaign-words.ts";
 import { daysBetween, talkedByDay } from "./fixtures.ts";
 import type { Campaign, TeamPicture } from "./fixtures.ts";
 import { usePixels } from "./pixels.ts";
@@ -148,7 +153,6 @@ const DayLetters = ({ campaign }: { campaign: Campaign }) => {
             as="span"
             color={day === today ? "default" : "muted"}
             key={letter + String(day)}
-            size="xs"
             weight={day === today ? "medium" : "normal"}
           >
             {letter}
@@ -168,9 +172,7 @@ export const CampaignDots = ({ campaign }: { campaign: Campaign }) => {
         <Heading level={1} size="lg">
           {lead}
         </Heading>
-        <Text size="lg" color="muted">
-          {rest}
-        </Text>
+        <Text>{rest}</Text>
       </header>
       <div {...stylex.props(styles.table)}>
         <div {...stylex.props(styles.row)}>
@@ -182,10 +184,10 @@ export const CampaignDots = ({ campaign }: { campaign: Campaign }) => {
           return (
             <div key={each.id} {...stylex.props(styles.row)}>
               <span {...stylex.props(styles.team)}>
-                <Text as="span" size="sm" truncate weight="medium">
+                <Text as="span" truncate>
                   {campaign.grouped ? each.name : "Everyone"}
                 </Text>
-                <Text as="span" size="xs" color="muted">
+                <Text as="span" color="muted">
                   {counted}
                 </Text>
               </span>
@@ -195,12 +197,13 @@ export const CampaignDots = ({ campaign }: { campaign: Campaign }) => {
                 team={each}
               />
               <span {...stylex.props(wide.only)}>
-                <Text
-                  color={first === undefined ? "muted" : "default"}
-                  size="sm"
-                >
-                  {first?.text ??
-                    "Nothing learned yet: the first findings come on day two."}
+                <Text color={first === undefined ? "muted" : "default"}>
+                  {first === undefined
+                    ? "Nothing learned yet: the first findings come on day two."
+                    : findingSentence(first, each, {
+                        named: false,
+                        grouped: campaign.grouped,
+                      })}
                 </Text>
               </span>
             </div>

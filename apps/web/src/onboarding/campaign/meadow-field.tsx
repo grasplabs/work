@@ -156,10 +156,10 @@ const drawMeadow =
 
 const TeamLabel = ({ team }: { team: TeamPicture }) => (
   <span {...stylex.props(styles.label)}>
-    <Text as="span" size="xs" truncate weight="medium">
+    <Text as="span" truncate>
       {team.name}
     </Text>
-    <Text as="span" size="xs" color="muted" truncate>
+    <Text as="span" color="muted" truncate>
       {talkedWords(team, true)}
     </Text>
   </span>

@@ -4,7 +4,7 @@
 import { i18n } from "@lingui/core";
 
 import { daysBetween, smallTeam } from "./fixtures.ts";
-import type { Campaign, TeamPicture } from "./fixtures.ts";
+import type { Campaign, Finding, TeamPicture } from "./fixtures.ts";
 
 /** An ISO day as "Monday 30 November". */
 export const longDay = (iso: string): string =>
@@ -140,3 +140,26 @@ export const whenWords = (campaign: Campaign): string =>
   campaign.pace === "enough"
     ? "The interviews close tonight"
     : `The interviews close ${shortDay(campaign.closes)}, ${daysLeftWords(campaign)}`;
+
+/**
+ * A finding as one plain sentence: the team it is about starts it where
+ * the page doesn't already say so, and one told two ways says that Grasp
+ * settles it, so the admin needn't steer.
+ */
+export const findingSentence = (
+  finding: Finding,
+  team: TeamPicture,
+  { named, grouped }: { named: boolean; grouped: boolean }
+): string => {
+  const { text } = finding;
+  const said =
+    named && grouped
+      ? `In ${team.name}, ${text.charAt(0).toLowerCase()}${text.slice(1)}`
+      : text;
+  if (finding.kind !== "difference") {
+    return said;
+  }
+  return grouped
+    ? `${said} We’ll settle it with their lead.`
+    : `${said} We’ll settle it with whoever knows the work best.`;
+};
