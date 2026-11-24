@@ -7438,7 +7438,7 @@ msgstr "Dit gaat Grasp maken"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Here’s your Grasp."
-msgstr ""
+msgstr "Hier is je Grasp."
 
 #: src/onboarding/setup-steps.tsx
 msgid "Hi {admin}, I’m Stephen"
