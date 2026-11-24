@@ -207,6 +207,24 @@ describe(LogRecords, () => {
     });
   });
 
+  it("offers Older when the latest stretch has no match, and reads on in core to the older ones that do", async () => {
+    const asked = await shown({ records: [], next: 91 }, (before) =>
+      before === 91
+        ? { records: [], next: 51 }
+        : { records: records(50, 41), next: null }
+    );
+    const said = document.body.textContent.includes(
+      "No events match in the latest stretch of the log."
+    );
+    await press("Older");
+
+    expect({ said, asked, page: page() }).toStrictEqual({
+      said: true,
+      asked: [91, 51],
+      page: { range: "1–10", rows: 10 },
+    });
+  });
+
   it("opens an event's details beside the table: what happened, and its place in the chain under Integrity", async () => {
     await shown({ records: records(3, 1), next: null }, () => ({
       records: [],

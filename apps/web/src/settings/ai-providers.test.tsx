@@ -62,9 +62,12 @@ const fakeAiProviders = ({
   tested = { ok: true, model: "openai/gpt-5-mini" },
   platform = [],
   graspAvailable = false,
+  savedDuringTest,
 }: {
   /** Whether this deployment has Grasp's key for Grasp's AI. */
   graspAvailable?: boolean;
+  /** A key another admin saves for the same provider while a test runs. */
+  savedDuringTest?: string;
   connected?: { provider: OrganizationProviderId; status?: AiProviderStatus }[];
   choice?: AiModelChoiceNow | null;
   tested?: AiProviderTest;
@@ -72,6 +75,8 @@ const fakeAiProviders = ({
 } = {}) => {
   const asked: unknown[][] = [];
   let source: AiSource = "own";
+  // Each save of a key is told apart by when it was saved, as core's are.
+  let saves = 0;
   const listed = (
     provider: OrganizationProviderId,
     key: string,
@@ -82,7 +87,7 @@ const fakeAiProviders = ({
     mask: `…${key.slice(-4)}`,
     baseUrl,
     addedAt: 0,
-    updatedAt: 0,
+    updatedAt: saves,
     label: aiProviders[provider].label,
     whereItRuns: aiProviders[provider].whereItRuns,
     status,
@@ -120,6 +125,7 @@ const fakeAiProviders = ({
     add: async (request: AiProviderAdd): Promise<AiProviderListed> => {
       await Promise.resolve();
       asked.push(["add", request]);
+      saves += 1;
       const added = listed(
         request.provider,
         request.key,
@@ -137,6 +143,13 @@ const fakeAiProviders = ({
     ): Promise<AiProviderTest> => {
       await Promise.resolve();
       asked.push(["test", provider, model]);
+      if (savedDuringTest !== undefined) {
+        saves += 1;
+        providers = [
+          ...providers.filter((each) => each.provider !== provider),
+          listed(provider, savedDuringTest, null),
+        ];
+      }
       return tested;
     },
     setModels: async (next: AiModelChoice): Promise<void> => {
@@ -149,22 +162,30 @@ const fakeAiProviders = ({
       asked.push(["source", next]);
       source = next;
     },
-    remove: async (provider: OrganizationProviderId): Promise<void> => {
+    remove: async (
+      provider: OrganizationProviderId,
+      savedAt?: number
+    ): Promise<void> => {
       await Promise.resolve();
       asked.push(["remove", provider]);
+      // As core removes: with `savedAt`, only while that save is the key kept.
+      const kept = providers.find((each) => each.provider === provider);
+      if (savedAt !== undefined && kept?.updatedAt !== savedAt) {
+        return;
+      }
       providers = providers.filter((each) => each.provider !== provider);
       // As core keeps the choice: none of the removed provider's models,
       // its default none when it was one of them.
-      const kept = (model: string) => !model.startsWith(`${provider}/`);
+      const stays = (model: string) => !model.startsWith(`${provider}/`);
       choice =
         choice === null
           ? null
           : {
               defaultModel:
-                choice.defaultModel !== null && kept(choice.defaultModel)
+                choice.defaultModel !== null && stays(choice.defaultModel)
                   ? choice.defaultModel
                   : null,
-              fallbacks: choice.fallbacks.filter(kept),
+              fallbacks: choice.fallbacks.filter(stays),
             };
     },
   };
@@ -493,6 +514,25 @@ describe("Settings › AI providers", () => {
       cleared: "",
       connected: null,
     });
+  });
+
+  it("removes only the key it tested: one another admin saved meanwhile stays connected", async () => {
+    const { api } = fakeAiProviders({
+      tested: {
+        ok: false,
+        model: "anthropic/claude-haiku-4-5",
+        code: "model.provider_key_failed",
+      },
+      savedDuringTest: "sk-ant-another-admins-key-b7c9",
+    });
+    await shown(api);
+
+    await press(button("Anthropic"));
+    await enter(textField("Key"), pastedKey);
+    await press(button("Connect"));
+    const { providers } = await api.list();
+
+    expect(providers.map(({ mask }) => mask)).toStrictEqual(["…b7c9"]);
   });
 
   it("connects an OpenAI-compatible endpoint from the line under the tiles, asking its address first", async () => {

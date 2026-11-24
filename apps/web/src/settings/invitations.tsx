@@ -188,10 +188,18 @@ export const InviteButton = () => {
   return (
     <Dialog
       onOpenChange={(open, details) => {
-        if (!open) {
+        // Cleared only once it really closes: a close refused while the
+        // invitations are sent keeps what was chosen.
+        let refused = false;
+        dialog.handleOpenChange(open, {
+          cancel: () => {
+            refused = true;
+            details.cancel();
+          },
+        });
+        if (!open && !refused) {
           reset();
         }
-        dialog.handleOpenChange(open, details);
       }}
       open={dialog.open}
     >

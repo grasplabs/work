@@ -19,7 +19,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import type { Loaded } from "../load-from-core.tsx";
-import { EventSourcesSettings } from "./event-sources.tsx";
+import { EventSourcesSettings, sourceStartsOf } from "./event-sources.tsx";
 import type { SourceStarts } from "./event-sources.tsx";
 
 // Settings › Incoming events, against core's workflowResources.sources
@@ -62,6 +62,15 @@ const shop: EventSource = {
   activity: { lastEventAt: null, acceptedLastDay: 0, refusedLastDay: 0 },
 };
 
+/** A live webhook trigger on the shop's source, of `workflow`. */
+const trigger = (id: string, workflow: { id: string; name: string }) => ({
+  id,
+  type: "payment.paid",
+  enabled: true,
+  start: "active" as const,
+  workflow,
+});
+
 /** A delivery the shop's source accepted. */
 const paid: EventSourceDelivery = {
   id: "delivery-1",
@@ -75,13 +84,15 @@ const paid: EventSourceDelivery = {
 /**
  * The page listing `listed`, its changes failing when `fails`, and every
  * read of the list after the first refused when `readsFail`, as its
- * route reads it again after each change: what core was asked.
+ * route reads it again after each change: what core was asked. A new
+ * source is answered only once `created` settles, when given.
  */
 const shown = async (
   listed: readonly EventSource[] = [shop],
   fails = false,
   readsFail = false,
-  starts: SourceStarts = {}
+  starts: SourceStarts = {},
+  created: Promise<unknown> = Promise.resolve()
 ): Promise<unknown[]> => {
   const asked: unknown[] = [];
   const answer = async <T,>(call: unknown, value: T): Promise<T> => {
@@ -93,8 +104,10 @@ const shown = async (
     return value;
   };
   const sources = {
-    create: async (input: unknown) =>
-      await answer({ create: input }, { source: shop, secret }),
+    create: async (input: unknown) => {
+      await created;
+      return await answer({ create: input }, { source: shop, secret });
+    },
     rotateSecret: async (id: string) =>
       await answer(
         { rotateSecret: id },
@@ -348,6 +361,26 @@ describe("the Incoming events settings", () => {
     });
   });
 
+  it("shows a new source's secret only in the form that asked for it: never in one opened after that form was closed", async () => {
+    const answered = Promise.withResolvers<boolean>();
+    await shown([], false, false, {}, answered.promise);
+    await openAdd();
+    await typeName("Stripe");
+    await submit();
+    await press("Cancel");
+    answered.resolve(true);
+    await act(async () => {
+      await settled();
+    });
+    await openAdd();
+
+    expect({
+      secret: copyValue("Copy the secret"),
+      inPage: document.body.textContent.includes(secret),
+      asksName: document.querySelector("form input") !== null,
+    }).toStrictEqual({ secret: undefined, inPage: false, asksName: true });
+  });
+
   it("keeps a new source's secret shown when reading the list again after it fails, and says why in the list's place", async () => {
     await shown([], false, true);
     await openAdd();
@@ -507,6 +540,53 @@ describe("the Incoming events settings", () => {
         { sendTest: ["source-shop", { type: "payment.paid", data: {} }] },
       ],
       matched: [true, true, true],
+    });
+  });
+
+  it("reads the workflows each listed source starts from that source's triggers alone, each workflow once", async () => {
+    const asked: unknown[] = [];
+    const invoices = { id: "wf-invoices", name: "Invoice check" };
+    const thanks = { id: "wf-thanks", name: "Thank the payer" };
+    const session = {
+      workflowResources: {
+        list: async () => {
+          asked.push("every workflow");
+          return await Promise.resolve([]);
+        },
+        sources: {
+          triggers: async (id: string) => {
+            asked.push({ triggers: id });
+            return await Promise.resolve(
+              id === shop.id
+                ? [
+                    trigger("trigger-1", invoices),
+                    trigger("trigger-2", invoices),
+                    trigger("trigger-3", thanks),
+                  ]
+                : []
+            );
+          },
+        },
+      },
+    };
+    const core = {
+      withSession: async <T,>(
+        action: (reached: never) => Promise<T>
+      ): Promise<T> =>
+        // SAFETY: a stand-in for the parts of core's API the read reaches.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+        await action(session as never),
+    };
+    const quiet: EventSource = { ...shop, id: "source-quiet", name: "Quiet" };
+
+    const starts = await sourceStartsOf(core, [shop, quiet]);
+
+    expect({ asked, starts }).toStrictEqual({
+      asked: [{ triggers: shop.id }, { triggers: quiet.id }],
+      starts: {
+        state: "ready",
+        data: { [shop.id]: [invoices, thanks], [quiet.id]: [] },
+      },
     });
   });
 });

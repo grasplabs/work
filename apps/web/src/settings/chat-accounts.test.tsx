@@ -9,6 +9,7 @@ import {
   RouterProvider,
 } from "@tanstack/react-router";
 import { act } from "react";
+import type { ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -35,8 +36,20 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** The section, with core answering a delete as `answer` does; how often it was asked. */
-const shown = async (answer: () => Promise<number>) => {
+/** No chat accounts linked, as core read them. */
+const noAccounts: ComponentProps<typeof ChatAppsSection>["chat"] = {
+  state: "ready",
+  data: { accounts: [] },
+};
+
+/**
+ * The section on `chat`, with core answering a delete as `answer` does;
+ * how often it was asked.
+ */
+const shown = async (
+  answer: () => Promise<number>,
+  chat: ComponentProps<typeof ChatAppsSection>["chat"] = noAccounts
+) => {
   const asked: number[] = [];
   const session = {
     channelAccounts: {
@@ -52,12 +65,7 @@ const shown = async (answer: () => Promise<number>) => {
     ): Promise<T> => await run(session),
   };
   const rootRoute = createRootRoute({
-    component: () => (
-      <ChatAppsSection
-        chat={{ state: "ready", data: { accounts: [] } }}
-        waiting={false}
-      />
-    ),
+    component: () => <ChatAppsSection chat={chat} waiting={false} />,
   });
   const router = createRouter({
     routeTree: rootRoute,
@@ -173,5 +181,20 @@ describe("Settings › Security › Chat apps › Your conversations in chat app
     expect(text()).toContain(
       agentErrors.create("agent.chat_not_found").message
     );
+  });
+
+  it("says in the card why the linked accounts couldn't be read, rather than showing none", async () => {
+    await shown(async () => await Promise.resolve(0), {
+      state: "refused",
+      message: "Core refused the read.",
+    });
+
+    const card = [...document.querySelectorAll("section")].find(
+      (each) =>
+        document.querySelector(
+          `[id="${each.getAttribute("aria-labelledby") ?? ""}"]`
+        )?.textContent === "Chat apps"
+    );
+    expect(card?.textContent).toContain("Core refused the read.");
   });
 });

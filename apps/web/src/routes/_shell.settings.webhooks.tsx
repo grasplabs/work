@@ -39,14 +39,15 @@ export const Route = createFileRoute("/_shell/settings/webhooks")({
   errorComponent: SettingsError,
   component: IncomingEventsPage,
   loader: async ({ context: { core } }) => {
-    const [sources, starts] = await Promise.all([
-      loadFromCore(
-        core,
-        async (session) => await session.workflowResources.sources.list()
-      ),
-      // The workflows each source starts: read once for the page.
-      sourceStartsOf(core),
-    ]);
+    const sources = await loadFromCore(
+      core,
+      async (session) => await session.workflowResources.sources.list()
+    );
+    // The workflows each listed source starts: read once for the page.
+    const starts =
+      sources.state === "ready"
+        ? await sourceStartsOf(core, sources.data)
+        : sources;
     return { sources, starts };
   },
 });

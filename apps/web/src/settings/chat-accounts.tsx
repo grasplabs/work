@@ -418,6 +418,11 @@ export const ChatAppsSection = ({
         {chat.state === "ready" ? (
           <LinkedChatAccounts accounts={chat.data.accounts} />
         ) : null}
+        {/* Why the accounts couldn't be read, where they would be; above,
+            with the link, while one waits. */}
+        {chat.state !== "ready" && !waiting ? (
+          <NotLoadedState heading="h3" page={chat} />
+        ) : null}
       </SettingsGroup>
     </>
   );

@@ -24,6 +24,7 @@ import * as stylex from "@stylexjs/stylex";
 
 import { formatDollars } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
+import { notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { monthEnd } from "./money.ts";
 import { RowAlert, SettingsGroup } from "./section.tsx";
@@ -220,6 +221,11 @@ export const SpendCard = ({
   const unreadable = (bound?.bindings.listed ?? []).filter(
     ({ model }) => model === null
   );
+  // The Apps' part couldn't be read: said, so it never reads as nothing spent.
+  const appsMissing =
+    settings.state === "ready"
+      ? undefined
+      : (notLoadedText(settings, i18n) ?? "");
   return (
     <SettingsGroup title={t`Spend`}>
       <div {...stylex.props(styles.body)}>
@@ -245,6 +251,11 @@ export const SpendCard = ({
               </Text>
             ) : null}
           </>
+        )}
+        {appsMissing === undefined ? null : (
+          <RowAlert variant="warning">
+            {t`What the Apps spent couldn't be read, so it is left out here. ${appsMissing}`}
+          </RowAlert>
         )}
         {unreadable.map((binding) => {
           const app = binding.appName;

@@ -18219,6 +18219,10 @@ msgstr "Ce qui le lance"
 msgid "What the App may do with it"
 msgstr "Ce que l’application peut en faire"
 
+#: src/settings/ai-spend.tsx
+msgid "What the Apps spent couldn't be read, so it is left out here. {appsMissing}"
+msgstr "Les dépenses des Apps n’ont pas pu être lues : elles ne figurent donc pas ici. {appsMissing}"
+
 #: src/brain/brain-sections.ts
 msgid "What the board wants from the sprint: its goals and the rules of the road."
 msgstr "Ce que la direction attend du sprint : ses objectifs et les règles du jeu."

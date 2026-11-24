@@ -171,33 +171,31 @@ export type SourceStarts = Readonly<
 >;
 
 /**
- * The workflows each source starts, as the admin sees them: every workflow's
- * triggers, read once for the page, the webhook ones kept by their source.
+ * The workflows each of `sources` starts, as the admin sees them: only
+ * the listed sources' triggers, read once for the page, each workflow
+ * named once per source.
  */
 export const sourceStartsOf = async (
-  core: Pick<CoreConnection, "withSession">
+  core: Pick<CoreConnection, "withSession">,
+  sources: readonly EventSource[]
 ): Promise<Loaded<SourceStarts>> =>
   await loadFromCore(core, async (session) => {
-    const workflows = await session.workflowResources.list();
     const triggered = await Promise.all(
-      workflows.map(async (workflow) => ({
-        workflow,
-        triggers: await session.workflowResources.triggers.list(workflow.id),
+      sources.map(async ({ id }) => ({
+        id,
+        triggers: await session.workflowResources.sources.triggers(id),
       }))
     );
-    const starts: Record<string, { id: string; name: string }[]> = {};
-    for (const { workflow, triggers } of triggered) {
-      const sources = new Set(
-        triggers.flatMap(({ source }) => (source === null ? [] : [source.id]))
-      );
-      for (const source of sources) {
-        starts[source] = [
-          ...(starts[source] ?? []),
-          { id: workflow.id, name: workflow.name },
-        ];
-      }
-    }
-    return starts;
+    return Object.fromEntries(
+      triggered.map(({ id, triggers }) => [
+        id,
+        [
+          ...new Map(
+            triggers.map(({ workflow }) => [workflow.id, workflow])
+          ).values(),
+        ].map(({ id: workflowId, name }) => ({ id: workflowId, name })),
+      ])
+    );
   });
 
 /**
@@ -790,17 +788,23 @@ const AddSource = ({
   const { busy, failure, run } = useCoreAction();
   const [name, setName] = useState("");
   const [made, setMade] = useState<{ url: string; secret: string }>();
+  // Which opening of the form a reply belongs to: one that comes after its
+  // form was closed is dropped, so a secret shows only in the form that
+  // asked for it, never in one opened later.
+  const opening = useRef(0);
   const close = (): void => {
+    opening.current += 1;
     onOpenChange(false);
     setName("");
     setMade(undefined);
   };
   const add = async (): Promise<void> => {
+    const asked = opening.current;
     const created = await run(
       async (session) =>
         await session.workflowResources.sources.create({ name: name.trim() })
     );
-    if (created !== undefined) {
+    if (created !== undefined && asked === opening.current) {
       const token = created.source.delivery?.token;
       setMade({
         url: token === undefined ? "" : urlOf(token),

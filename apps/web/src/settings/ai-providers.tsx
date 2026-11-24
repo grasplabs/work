@@ -430,7 +430,9 @@ const KeyDialog = ({
               size="sm"
               status={test.status}
               variant="outline"
-              {...test.labels}
+              errorText={test.labels.error}
+              loadingText={test.labels.loading}
+              successText={test.labels.success}
             >
               {t`Test`}
             </Button>
@@ -482,7 +484,9 @@ const KeyDialog = ({
             size="sm"
             status={save.status}
             type="submit"
-            {...save.labels}
+            errorText={save.labels.error}
+            loadingText={save.labels.loading}
+            successText={save.labels.success}
           >
             {t`Replace key`}
           </Button>
@@ -1085,11 +1089,10 @@ const addProvider = async (
   provider: OrganizationProviderId,
   key: string,
   baseUrl: string
-): Promise<void> => {
+): Promise<AiProviderListed> =>
   await (provider === "openai-compatible"
     ? session.aiProviders.add({ provider, key, baseUrl })
     : session.aiProviders.add({ provider, key }));
-};
 
 /**
  * Connecting the first provider: Damsko's Connect API key block, one
@@ -1212,17 +1215,19 @@ export const AiProvidersSettings = ({
   // is removed again: kept, it would stand as the organization's provider,
   // close this card on a key that doesn't work, and leave every chat, agent
   // and workflow failing on it, while the admin, told why under the field,
-  // pastes the right one here. A custom endpoint is kept untested: it is
-  // tested once a model it serves is named (testModelOf).
+  // pastes the right one here. Only the key this attempt saved is
+  // removed: one another admin saved meanwhile stays. A custom endpoint is
+  // kept untested: it is tested once a model it serves is named
+  // (testModelOf).
   const connect: Connect = async (provider, key, baseUrl) => {
     await changeOrThrow(async (session) => {
-      await addProvider(session, provider, key, baseUrl);
+      const saved = await addProvider(session, provider, key, baseUrl);
       if (provider === "openai-compatible") {
         return;
       }
       const outcome = await session.aiProviders.test(provider);
       if (!outcome.ok) {
-        await session.aiProviders.remove(provider);
+        await session.aiProviders.remove(provider, saved.updatedAt);
         throw new Error(testFailureText(outcome.code, i18n));
       }
     });
