@@ -1,35 +1,90 @@
-import { buttonVariants } from "@grasp-os/app-kit/components/button";
 import { failureText } from "@grasp-os/shared/errors";
 import { runFileContentPath } from "@grasp-os/shared/run-files";
 import type { RunFileListing } from "@grasp-os/shared/run-files";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { DownloadIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemSeparator,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { DownloadIcon, FileIcon, Icon } from "@grasp-os/ui/lib/icons";
+import { useLingui } from "@lingui/react/macro";
+import { useEffect, useEffectEvent, Fragment } from "react";
+import type { ReactNode } from "react";
 
-import { ErrorText } from "../error-text.tsx";
 import { formatBytes } from "../format.ts";
 import { useCore } from "../use-core.ts";
 
 // The files an independent workflow's run finished writing, to download
-// from its run sheet (`workflowResources.runFiles`). Core lists them only
+// from its panel (`workflowResources.runFiles`). Core lists them only
 // to whoever may download them, the run's person and, unless the run is
 // restricted, the organization's admins, and checks again as each
 // download streams (core's workflows/run-file-downloads.ts); anyone else
 // is shown nothing here, as they see nothing of what the run returned.
 
-/** Run `run`'s finished files, read once as it mounts. */
-export const RunFiles = ({
+/** One file, a row with its size and the way to download it. */
+const FileRow = ({
   workflow,
   run,
+  file,
 }: {
   workflow: string;
   run: string;
+  file: RunFileListing;
+}) => {
+  const { t } = useLingui();
+  const { name } = file;
+  return (
+    <Item size="xs">
+      <ItemMedia>
+        <Icon icon={FileIcon} />
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle>{name}</ItemTitle>
+        <ItemDescription>{formatBytes(file.size)}</ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        <Button asChild size="xs" variant="ghost">
+          <a
+            aria-label={t`Download ${name}`}
+            download
+            href={runFileContentPath(workflow, run, file.id)}
+          >
+            <Icon icon={DownloadIcon} />
+            {t({ message: "Download", context: "download a file" })}
+          </a>
+        </Button>
+      </ItemActions>
+    </Item>
+  );
+};
+
+/** What reading a run's files came to: none yet, the files, or why not. */
+export interface RunFilesRead {
+  files: RunFileListing[] | null;
+  failure: string | undefined;
+}
+
+/**
+ * Reads run `run`'s finished files once as it mounts, into `onRead`; the
+ * panel mounts it again once the run ends, with what it finished last.
+ */
+export const RunFilesReader = ({
+  workflow,
+  run,
+  onRead,
+}: {
+  workflow: string;
+  run: string;
+  onRead: (read: RunFilesRead) => void;
 }) => {
   const core = useCore();
-  const { t } = useLingui();
-  const [files, setFiles] = useState<RunFileListing[] | null>(null);
-  const [failure, setFailure] = useState<string>();
-
+  const told = useEffectEvent(onRead);
   useEffect(() => {
     let stopped = false;
     const read = async (): Promise<void> => {
@@ -39,12 +94,11 @@ export const RunFiles = ({
             await session.workflowResources.runFiles(workflow, run)
         );
         if (!stopped) {
-          setFiles(listed);
-          setFailure(undefined);
+          told({ files: listed, failure: undefined });
         }
       } catch (error) {
         if (!stopped) {
-          setFailure(failureText(error));
+          told({ files: null, failure: failureText(error) });
         }
       }
     };
@@ -53,45 +107,39 @@ export const RunFiles = ({
       stopped = true;
     };
   }, [core, run, workflow]);
+  return null;
+};
 
-  if (failure !== undefined) {
-    return <ErrorText>{failure}</ErrorText>;
-  }
+/** A section of a run's panel: its title, and what it holds. */
+export interface RunPanelSection {
+  id: string;
+  label: string;
+  content: ReactNode;
+}
+
+/** The panel's section of the files `read` lists; none while there are none. */
+export const useRunFilesSection = (
+  workflow: string,
+  run: string,
+  read: RunFilesRead | undefined
+): RunPanelSection | undefined => {
+  const { t } = useLingui();
+  const files = read === undefined ? null : read.files;
   if (files === null || files.length === 0) {
-    return null;
+    return undefined;
   }
-  return (
-    <section className="flex flex-col gap-2">
-      <h3 className="text-muted-foreground">
-        <Trans>Files it wrote</Trans>
-      </h3>
-      <ul className="flex flex-col divide-y rounded-md border">
-        {files.map((file) => {
-          const { name } = file;
-          return (
-            <li
-              className="flex items-center justify-between gap-3 px-3 py-2"
-              key={file.id}
-            >
-              <span className="flex min-w-0 flex-col">
-                <span className="truncate">{name}</span>
-                <span className="text-muted-foreground text-xs tabular-nums">
-                  {formatBytes(file.size)}
-                </span>
-              </span>
-              <a
-                aria-label={t`Download ${name}`}
-                className={buttonVariants({ size: "sm", variant: "outline" })}
-                download
-                href={runFileContentPath(workflow, run, file.id)}
-              >
-                <DownloadIcon aria-hidden="true" />
-                <Trans context="download a file">Download</Trans>
-              </a>
-            </li>
-          );
-        })}
-      </ul>
-    </section>
-  );
+  return {
+    id: "files",
+    label: t`Files it wrote`,
+    content: (
+      <ItemGroup aria-label={t`Files it wrote`}>
+        {files.map((file, at) => (
+          <Fragment key={file.id}>
+            {at === 0 ? null : <ItemSeparator />}
+            <FileRow file={file} run={run} workflow={workflow} />
+          </Fragment>
+        ))}
+      </ItemGroup>
+    ),
+  };
 };

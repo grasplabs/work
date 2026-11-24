@@ -404,10 +404,6 @@ msgstr "{count, plural, one {# wens} other {# wensen}}"
 msgid "{count, plural, one {# workflow serves it} other {# workflows serve it}}"
 msgstr "{count, plural, one {# workflow dient het} other {# workflows dienen het}}"
 
-#: src/routes/_shell.workflows.index.tsx
-msgid "{count, plural, one {# workflow} other {# workflows}}"
-msgstr "{count, plural, one {# workflow} other {# workflows}}"
-
 #: src/onboarding/place-picker.tsx
 msgid "{count, plural, one {Add # document} other {Add # documents}}"
 msgstr "{count, plural, one {# document toevoegen} other {# documenten toevoegen}}"
@@ -545,13 +541,9 @@ msgstr "{each, plural, one {# uur per week} other {# uur per week}}"
 msgid "{event}, at {account}"
 msgstr "{event}, bij {account}"
 
-#: src/workflows/workflows-table.tsx
-msgid "{failed, plural, one {# failed in the last {days} days} other {# failed in the last {days} days}}"
-msgstr "{failed, plural, one {# mislukt in de afgelopen {days} dagen} other {# mislukt in de afgelopen {days} dagen}}"
-
-#: src/workflows/workflows-table.tsx
-msgid "{failed, plural, one {# failed run} other {# failed runs}} of {name}"
-msgstr "{failed, plural, one {# mislukte run} other {# mislukte runs}} van {name}"
+#: src/workflows/workflow-rows.tsx
+msgid "{failed} failed"
+msgstr "{failed} mislukt"
 
 #: src/chat/thread.tsx
 msgid "{failedCount, plural, one {# step failed} other {# steps failed}}"
@@ -679,7 +671,7 @@ msgstr "{kind}: {contractId}"
 msgid "{label} (optional)"
 msgstr "{label} (optioneel)"
 
-#: src/routes/_shell.workflows.index.tsx
+#: src/routes/_shell.workflows.runs.tsx
 msgctxt "filter: \"Place is All\""
 msgid "{label} is"
 msgstr "{label} is"
@@ -938,6 +930,7 @@ msgid "{name} isn't ready yet"
 msgstr "{name} is nog niet klaar"
 
 #: src/connections/app-logo.tsx
+#: src/connections/provider-mark.tsx
 msgid "{name} logo"
 msgstr "Logo van {name}"
 
@@ -1171,6 +1164,10 @@ msgstr "{rows, plural, one {# rij om te importeren.} other {# rijen om te import
 msgid "{runs, plural, one {# run} other {# runs}}"
 msgstr "{runs, plural, one {# run} other {# runs}}"
 
+#: src/workflows/workflow-rows.tsx
+msgid "{runs} this week"
+msgstr "{runs} deze week"
+
 #: src/brain/brain-log.tsx
 msgid "{said, plural, one {# thing said} other {# things said}}"
 msgstr "{said, plural, one {# ding gezegd} other {# dingen gezegd}}"
@@ -1235,6 +1232,10 @@ msgstr "{sponsor} gaf me het grote plaatje. Nu heb ik de details nodig."
 #: src/onboarding/setup-steps.tsx
 msgid "{sponsor} told me a lot about your company in our first conversation."
 msgstr "{sponsor} heeft me in ons eerste gesprek veel over jullie bedrijf verteld."
+
+#: src/workflows/workflow-rows.tsx
+msgid "{start}, and {more} more"
+msgstr "{start} en nog {more}"
 
 #: src/settings/event-source-activity.tsx
 msgid "{started, plural, one {Started # workflow} other {Started # workflows}}"
@@ -1410,21 +1411,17 @@ msgstr "{waiting, plural, one {# nieuwe persoon op je lijst krijgt een link zodr
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
 msgstr "{waiting, plural, one {# ding wacht} other {# dingen wachten}}"
 
-#: src/workflows/workflows-table.tsx
-msgid "{waiting, plural, one {# waiting run} other {# waiting runs}} of {name}"
-msgstr "{waiting, plural, one {# wachtende run} other {# wachtende runs}} van {name}"
-
-#: src/workflows/workflows-table.tsx
-msgid "{waiting, plural, one {# waiting} other {# waiting}}"
-msgstr "{waiting, plural, one {# wacht} other {# wachten}}"
-
-#: src/workflows/nav-item.tsx
+#: src/frame/app-sidebar.tsx
 msgid "{waiting, plural, one {# workflow needs you} other {# workflows need you}}"
 msgstr "{waiting, plural, one {# workflow heeft je nodig} other {# workflows hebben je nodig}}"
 
 #: src/drafts/share-with-team.tsx
 msgid "{waiting, plural, one {It uses # new kind of access. An admin approves that once.} other {It uses # new kinds of access. An admin approves those once.}}"
 msgstr "{waiting, plural, one {Het gebruikt # nieuw soort toegang. Een beheerder keurt dat één keer goed.} other {Het gebruikt # nieuwe soorten toegang. Een beheerder keurt die één keer goed.}}"
+
+#: src/workflows/workflow-rows.tsx
+msgid "{waiting} waiting"
+msgstr "{waiting} wachten"
 
 #: src/chat/held-writes.tsx
 msgid "{what} didn't go through."
@@ -1544,8 +1541,8 @@ msgid "A bearer token"
 msgstr "Een bearer-token"
 
 #: src/workflows/resource-params.tsx
-msgid "A change applies to runs that start after it: runs already going keep the values they started with. Each change is recorded, without its value."
-msgstr "Een wijziging geldt voor runs die daarna starten: runs die al bezig zijn houden de waarden waarmee ze begonnen. Elke wijziging wordt vastgelegd, zonder de waarde."
+msgid "A change applies to runs that start after it."
+msgstr "Een wijziging geldt voor runs die daarna starten."
 
 #: src/chat/agent-change-card.tsx
 msgid "A change to {name}"
@@ -1720,11 +1717,6 @@ msgstr "Een run van een workflow vroeg om dit antwoord."
 msgid "A run of a workflow waits for this answer."
 msgstr "Een run van een workflow wacht op dit antwoord."
 
-#: src/workflows/run-detail.tsx
-msgctxt "what a side panel shows: one run of a workflow"
-msgid "A run of this workflow"
-msgstr "Een run van deze workflow"
-
 #: src/workflows/activity-bar.tsx
 msgid "A run of version {version} for someone else ended: {status}"
 msgstr "Een run van versie {version} voor iemand anders is afgelopen: {status}"
@@ -1789,10 +1781,6 @@ msgstr "Een vinkje: ja of nee"
 #: src/connections/connect-dialog.tsx
 msgid "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's badge to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
 msgstr "Een tool die je aanzet begint als Lezen waar Composio zegt dat hij alleen leest; Grasp controleert dat niet. Een tool op Lezen draait zonder te vragen. Een aanroep van een tool op Schrijven vanuit een chat, of door iemand die een app gebruikt, wacht tot die persoon bevestigt; een workflowrun voert hem uit als een van zijn stappen. Klik op het label van een tool om het te wijzigen. Zet een tool alleen op Lezen als hij niets wijzigt: verkeerd gemarkeerd wijzigt hij dingen zonder te vragen."
-
-#: src/workflows/workflow-triggers.tsx
-msgid "A trigger starts a run of the live version on its own, as whoever made it. Adding one asks an admin to allow it to start this workflow, and one on a connection to read its events there: it starts nothing until they do."
-msgstr "Een trigger start zelf een run van de live versie, namens wie hem heeft gemaakt. Wie er een toevoegt, vraagt een beheerder om hem deze workflow te laten starten, en een trigger op een koppeling om daar de gebeurtenissen te lezen: tot dan start hij niets."
 
 #: src/apps/field-kinds.tsx
 msgid "A type the App's code declares"
@@ -1896,7 +1884,11 @@ msgstr "Actie"
 #: src/apps/app-workflows.tsx
 #: src/apps/resource-bindings.tsx
 #: src/drafts/sharing.tsx
+msgid "Actions"
+msgstr "Acties"
+
 #: src/frame/ui-words.tsx
+msgctxt "a table's row actions"
 msgid "Actions"
 msgstr "Acties"
 
@@ -2299,7 +2291,7 @@ msgstr "AI-tool"
 #: src/agents/agents-overview.tsx
 #: src/brain/atlas-overlays.tsx
 #: src/brain/brain-log.tsx
-#: src/routes/_shell.workflows.index.tsx
+#: src/routes/_shell.workflows.runs.tsx
 msgid "All"
 msgstr "Alles"
 
@@ -2310,11 +2302,6 @@ msgstr "Iedereen"
 
 #: src/routes/_shell.integrations.index.tsx
 msgctxt "filter: every integration"
-msgid "All"
-msgstr "Alle"
-
-#: src/routes/_shell.workflows.index.tsx
-msgctxt "tab listing every workflow"
 msgid "All"
 msgstr "Alle"
 
@@ -3206,10 +3193,6 @@ msgstr "Aan het eind van de zoekopdracht maakt de pijl naar het eind van de rege
 msgid "At these times it looks into something without being asked. It only reads. What it wants to change waits in that person's chat until they confirm it."
 msgstr "Op deze tijden kijkt hij iets na zonder dat het gevraagd is. Hij leest alleen. Wat hij wil wijzigen, wacht in de chat van die persoon tot die het bevestigt."
 
-#: src/workflows/workflows-table.tsx
-msgid "At work"
-msgstr "Aan het werk"
-
 #: src/agents/agent-wakes.tsx
 msgid "At, in the company's time zone"
 msgstr "Om, in de tijdzone van het bedrijf"
@@ -3434,6 +3417,11 @@ msgstr "Nieuwe app bouwen"
 msgid "Builder"
 msgstr "Bouwer"
 
+#: src/workflows/workflow-rows.tsx
+msgctxt "workflow phase"
+msgid "Building"
+msgstr "In aanbouw"
+
 #: src/chat/subject-bar.tsx
 msgid "Building…"
 msgstr "Wordt gebouwd…"
@@ -3442,7 +3430,6 @@ msgstr "Wordt gebouwd…"
 msgid "Built approved packages"
 msgstr "Goedgekeurde pakketten gebouwd"
 
-#: src/routes/_shell.workflows.index.tsx
 #: src/workflows/workflow-settings.tsx
 msgid "Business process"
 msgstr "Bedrijfsproces"
@@ -3456,6 +3443,11 @@ msgstr "door een import"
 msgctxt "how search found a passage"
 msgid "By common words only"
 msgstr "Alleen via veelvoorkomende woorden"
+
+#: src/workflows/workflow-rows.tsx
+msgctxt "what starts a workflow"
+msgid "By hand"
+msgstr "Met de hand"
 
 #: src/brain/sources-page.tsx
 msgctxt "how search found a memory"
@@ -3568,9 +3560,12 @@ msgstr "Uitvoeren kan niet: {unread}"
 #: src/settings/staff-access.tsx
 #: src/settings/stephen-card.tsx
 #: src/settings/teams.tsx
-#: src/workflows/delete-workflow.tsx
-#: src/workflows/kept-state.tsx
 #: src/workflows/workflow-triggers.tsx
+msgid "Cancel"
+msgstr "Annuleren"
+
+#: src/frame/ui-words.tsx
+msgctxt "leave a question unanswered"
 msgid "Cancel"
 msgstr "Annuleren"
 
@@ -3961,7 +3956,7 @@ msgid "Choice"
 msgstr "Keuze"
 
 #: src/frame/ui-words.tsx
-msgctxt "a table's checkbox column"
+msgctxt "a table's choice column"
 msgid "Choose"
 msgstr "Kiezen"
 
@@ -4056,14 +4051,9 @@ msgid "Clear"
 msgstr "Wissen"
 
 #: src/frame/ui-words.tsx
-msgctxt "rows chosen in a table"
+msgctxt "empty a table's filter"
 msgid "Clear"
 msgstr "Wissen"
-
-#. placeholder {0}: field.name
-#: src/workflows/start-run.tsx
-msgid "Clear {0}"
-msgstr "{0} wissen"
 
 #: src/settings/filter-menu.tsx
 msgid "Clear filters"
@@ -4095,6 +4085,11 @@ msgstr "Filter wissen"
 #: src/settings/stephen-settings.tsx
 #: src/shown-once.tsx
 #: src/workflows/start-run.tsx
+msgid "Close"
+msgstr "Sluiten"
+
+#: src/frame/ui-words.tsx
+msgctxt "close a dialog or panel"
 msgid "Close"
 msgstr "Sluiten"
 
@@ -4155,6 +4150,7 @@ msgid "Column: {header}"
 msgstr "Kolom: {header}"
 
 #: src/frame/ui-words.tsx
+msgctxt "a table's columns"
 msgid "Columns"
 msgstr "Kolommen"
 
@@ -4486,7 +4482,7 @@ msgid "Contact"
 msgstr "Contactpersoon"
 
 #: src/frame/ui-words.tsx
-msgctxt "a filter's operator"
+msgctxt "a table filter"
 msgid "contains"
 msgstr "bevat"
 
@@ -4705,10 +4701,6 @@ msgstr "Kon niet laden wie ervoor verantwoordelijk mag zijn."
 msgid "Couldn't refresh. This may be out of date."
 msgstr "Kon niet vernieuwen. Dit is misschien niet meer actueel."
 
-#: src/workflows/figures.tsx
-msgid "Counted over the workflows of the Apps you can open; independent workflows aren't counted here."
-msgstr "Geteld over de workflows van de apps die je kunt openen; zelfstandige workflows tellen hier niet mee."
-
 #: src/routes/_shell.integrations.$integration.tsx
 msgctxt "permission group"
 msgid "Create and change"
@@ -4908,6 +4900,10 @@ msgstr "Standaard"
 #: src/settings/ai-providers.tsx
 msgid "Default model"
 msgstr "Standaardmodel"
+
+#: src/workflows/definition-editor.tsx
+msgid "Definition"
+msgstr "Definitie"
 
 #: src/workflows/workflow-settings.tsx
 msgctxt "a workflow's settings section"
@@ -5119,6 +5115,7 @@ msgstr "Desktop"
 
 #: src/activity/audit-log.tsx
 #: src/routes/_shell.brain.$noteId.tsx
+#: src/workflows/run-detail.tsx
 msgid "Details"
 msgstr "Details"
 
@@ -5254,7 +5251,6 @@ msgstr "Een account ontkoppeld"
 msgid "Disconnected on {since}."
 msgstr "Ontkoppeld op {since}."
 
-#: src/frame/ui-words.tsx
 #: src/settings/chat-accounts.tsx
 msgid "Dismiss"
 msgstr "Sluiten"
@@ -5297,7 +5293,7 @@ msgid "Documents they or others shared with a team or the company stay, and thei
 msgstr "Documenten die zij of anderen met een team of het bedrijf deelden blijven, en hun tekst kan hen nog steeds noemen."
 
 #: src/frame/ui-words.tsx
-msgctxt "a filter's operator"
+msgctxt "a table filter"
 msgid "does not contain"
 msgstr "bevat niet"
 
@@ -5329,7 +5325,7 @@ msgstr "klaar"
 #: src/apps/blueprints.tsx
 #: src/frame/ui-words.tsx
 #: src/onboarding/setup-steps.tsx
-#: src/routes/_shell.workflows.index.tsx
+#: src/routes/_shell.workflows.runs.tsx
 #: src/shown-once.tsx
 msgid "Done"
 msgstr "Klaar"
@@ -5426,7 +5422,6 @@ msgid "Download the file"
 msgstr "Bestand downloaden"
 
 #: src/workflows/workflow-settings.tsx
-#: src/workflows/workflows-table.tsx
 msgid "Draft"
 msgstr "Concept"
 
@@ -5526,10 +5521,6 @@ msgstr "Elk staat alles eronder toe; / staat alle paden toe."
 #: src/settings/erasures.tsx
 msgid "Each area is erased on its own. One that fails is tried again until it is done, even after you close this."
 msgstr "Elk onderdeel wordt apart gewist. Mislukt er een, dan wordt het opnieuw geprobeerd tot het klaar is, ook nadat u dit sluit."
-
-#: src/workflows/workflow-triggers.tsx
-msgid "Each event of this type from the source starts a run, with its data as the input."
-msgstr "Elke gebeurtenis van dit type uit de bron start een run, met de gegevens ervan als invoer."
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Each invoice as a PDF, as soon as it is issued."
@@ -5943,6 +5934,7 @@ msgid "Everyone with Grasp"
 msgstr "Iedereen met Grasp"
 
 #: src/people/people-teams-picker.tsx
+#: src/workflows/start-run.tsx
 msgid "Everyone with the {name} role"
 msgstr "Iedereen met de rol {name}"
 
@@ -6042,10 +6034,6 @@ msgstr "Volledig scherm sluiten"
 msgid "Expand the navigation"
 msgstr "Navigatie uitklappen"
 
-#: src/workflows/workflows-table.tsx
-msgid "expected on top, from designs and tests"
-msgstr "verwacht daarbovenop, uit ontwerpen en tests"
-
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Expertise"
@@ -6121,9 +6109,8 @@ msgctxt "a run that ended in failure"
 msgid "failed"
 msgstr "mislukt"
 
-#: src/routes/_shell.workflows.index.tsx
+#: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/runs.tsx
-#: src/workflows/traces.tsx
 #: src/workflows/workflow-diagram.tsx
 msgid "Failed"
 msgstr "Mislukt"
@@ -6156,6 +6143,11 @@ msgstr "Mislukt"
 #: src/report/report.ts
 msgid "Failed: {failed}"
 msgstr "Mislukt: {failed}"
+
+#: src/workflows/workflow-rows.tsx
+msgctxt "how a workflow stands"
+msgid "Failing"
+msgstr "Mislukt"
 
 #: src/settings/ai-providers.tsx
 msgid "Fallbacks"
@@ -6196,7 +6188,7 @@ msgid "Field"
 msgstr "Veld"
 
 #: src/frame/ui-words.tsx
-msgctxt "what a filter looks at"
+msgctxt "a table filter"
 msgid "Field"
 msgstr "Veld"
 
@@ -6282,8 +6274,8 @@ msgid "Filter"
 msgstr "Filter"
 
 #: src/frame/ui-words.tsx
-msgid "Filter {name}"
-msgstr "{name} filteren"
+msgid "Filter {label}"
+msgstr "{label} filteren"
 
 #: src/frame/ui-words.tsx
 msgid "Filter condition"
@@ -7744,22 +7736,22 @@ msgid "Invoices and receipts go here."
 msgstr "Facturen en betaalbewijzen gaan hierheen."
 
 #: src/frame/ui-words.tsx
-msgctxt "a filter's operator"
+msgctxt "a table filter"
 msgid "is"
 msgstr "is"
 
 #: src/frame/ui-words.tsx
-msgctxt "a filter's operator"
+msgctxt "a table filter"
 msgid "is at least"
 msgstr "is minstens"
 
 #: src/frame/ui-words.tsx
-msgctxt "a filter's operator"
+msgctxt "a table filter"
 msgid "is at most"
 msgstr "is hoogstens"
 
 #: src/frame/ui-words.tsx
-msgctxt "a filter's operator"
+msgctxt "a table filter"
 msgid "is not"
 msgstr "is niet"
 
@@ -7909,6 +7901,10 @@ msgstr "Het opent voor het lid dat het maakte, de beheerders en iedereen met wie
 msgid "It passes its checks."
 msgstr "Het doorstaat de controles."
 
+#: src/workflows/workflow-triggers.tsx
+msgid "It runs as you, and starts nothing until an admin allows it."
+msgstr "Hij draait als jou, en start niets tot een beheerder het toestaat."
+
 #: src/apps/app-workspace.tsx
 msgid "It shows here as soon as there is something to see."
 msgstr "Het verschijnt hier zodra er iets te zien is."
@@ -7945,6 +7941,10 @@ msgstr "Hij stopt meteen, ook lopende aanroepen, en kan nooit meer draaien. Hij 
 msgid "It stops where it is and never goes on. What it already did stays done. This can't be undone."
 msgstr "Hij stopt waar hij is en gaat nooit verder. Wat hij al deed, blijft gedaan. Dit kan niet ongedaan worden gemaakt."
 
+#: src/workflows/start-run.tsx
+msgid "It takes {fields}."
+msgstr "Het neemt {fields}."
+
 #: src/brain/sources-page.tsx
 msgid "It takes {types} files of up to {size}. Who may read it stays as you choose: to share it with others, upload it again for them."
 msgstr "Je kunt {types}-bestanden van maximaal {size} uploaden. Wie het mag lezen blijft zoals je kiest: wil je het met anderen delen, upload het dan opnieuw voor hen."
@@ -7956,6 +7956,10 @@ msgstr "Ze neemt geen gebeurtenis aan totdat je er een nieuw geheim voor maakt."
 #: src/pages/frame-failure.tsx
 msgid "It took too long to start: the connection may be slow, or the page never finished drawing."
 msgstr "Het starten duurde te lang: de verbinding is misschien traag, of de pagina werd nooit helemaal getekend."
+
+#: src/workflows/kept-state.tsx
+msgid "It uses {used} KB of {cap} KB."
+msgstr "Het gebruikt {used} KB van {cap} KB."
 
 #: src/workflows/today-lanes.tsx
 msgid "It waits on you since {since}."
@@ -8362,9 +8366,9 @@ msgstr "Laatst uitgevoerd op {when}"
 msgid "Last read {lastRead}"
 msgstr "Laatst gelezen {lastRead}"
 
-#: src/workflows/workflows-table.tsx
-msgid "Last run"
-msgstr "Laatste run"
+#: src/workflows/workflow-rows.tsx
+msgid "Last run {since}"
+msgstr "Laatste run {since}"
 
 #: src/frame/sign-in/sign-in.tsx
 msgid "Last used"
@@ -8595,6 +8599,11 @@ msgstr "Lissabon"
 msgid "Listening"
 msgstr "Luistert"
 
+#: src/workflows/workflow-rows.tsx
+msgctxt "how a workflow stands"
+msgid "Live"
+msgstr "Live"
+
 #: src/brain/brain.ts
 msgid "Live, being measured"
 msgstr "Live, wordt gemeten"
@@ -8719,6 +8728,10 @@ msgstr "Mail en berichten aan anderen, nadat ze op een kaart met elke ontvanger 
 #: src/onboarding/review-parts.tsx
 msgid "Mail isn’t available on this hosting yet"
 msgstr "Mail is op deze hosting nog niet beschikbaar"
+
+#: src/workflows/workflow-rows.tsx
+msgid "Mail to {address}"
+msgstr "Mail naar {address}"
 
 #: src/inbox/items.ts
 msgid "Mailbox"
@@ -8999,8 +9012,13 @@ msgid "More about this connection"
 msgstr "Meer over deze koppeling"
 
 #: src/frame/info-tip.tsx
+#: src/workflows/info-tip.tsx
 msgid "More about this section"
 msgstr "Meer over dit onderdeel"
+
+#: src/workflows/info-tip.tsx
+msgid "More about this setting"
+msgstr "Meer over deze instelling"
 
 #: src/frame/ui-words.tsx
 msgid "More actions"
@@ -9196,12 +9214,17 @@ msgid "Needs an app Grasp hasn't registered"
 msgstr "Vraagt een app die Grasp niet heeft geregistreerd"
 
 #: src/frame/ui-words.tsx
+msgctxt "a table's group of rows"
 msgid "needs attention"
 msgstr "vraagt aandacht"
 
 #: src/connections/integration-row.tsx
 msgid "Needs signing in again"
 msgstr "Opnieuw aanmelden nodig"
+
+#: src/workflows/figures.tsx
+msgid "Needs someone"
+msgstr "Heeft iemand nodig"
 
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -9210,14 +9233,10 @@ msgstr "Opnieuw aanmelden nodig"
 msgid "Needs someone to sign in again"
 msgstr "Iemand moet opnieuw aanmelden"
 
-#: src/routes/_shell.workflows.index.tsx
-msgctxt "tab listing the workflows that need a person"
+#: src/workflows/workflow-rows.tsx
+msgctxt "workflow phase"
 msgid "Needs you"
 msgstr "Heeft je nodig"
-
-#: src/workflows/workflows-table.tsx
-msgid "Never"
-msgstr "Nooit"
 
 #: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
@@ -9302,10 +9321,6 @@ msgctxt "inbox sort"
 msgid "Newest first"
 msgstr "Nieuwste eerst"
 
-#: src/workflows/item-test.tsx
-msgid "Newest item first. Nothing was sent or changed: every call was answered from what you gave."
-msgstr "Nieuwste item eerst. Er is niets verzonden of gewijzigd: elke aanroep is beantwoord met wat jij hebt opgegeven."
-
 #: src/frame/ui-words.tsx
 msgid "Next"
 msgstr "Volgende"
@@ -9314,6 +9329,10 @@ msgstr "Volgende"
 msgctxt "the next question"
 msgid "Next"
 msgstr "Volgende"
+
+#: src/workflows/workflow-rows.tsx
+msgid "Next {when}"
+msgstr "Volgende {when}"
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Next invoice"
@@ -9619,6 +9638,11 @@ msgid "No results"
 msgstr "Geen resultaten"
 
 #: src/frame/ui-words.tsx
+msgctxt "a search finds nothing"
+msgid "No results"
+msgstr "Geen resultaten"
+
+#: src/frame/ui-words.tsx
 msgid "No room left"
 msgstr "Geen ruimte meer"
 
@@ -9626,13 +9650,16 @@ msgstr "Geen ruimte meer"
 msgid "No run asked anyone for a decision."
 msgstr "Geen enkele run vroeg iemand om een beslissing."
 
-#: src/routes/_shell.workflows.index.tsx
+#: src/routes/_shell.workflows.runs.tsx
 msgid "No runs match these filters."
 msgstr "Geen runs passen bij deze filters."
 
+#: src/workflows/workflow-rows.tsx
+msgid "No runs yet"
+msgstr "Nog geen runs"
+
 #: src/report/report.ts
 #: src/workflows/resource-runs.tsx
-#: src/workflows/traces.tsx
 msgid "No runs yet."
 msgstr "Nog geen runs."
 
@@ -9692,17 +9719,9 @@ msgstr "Geen enkele workflow heeft deze maand een model aangeroepen."
 msgid "No workflow is open to asking yet."
 msgstr "Nog geen workflow staat open om te vragen."
 
-#: src/routes/_shell.workflows.index.tsx
-msgid "No workflow needs attention: nothing waits for a decision, nothing failed lately."
-msgstr "Geen workflow vraagt aandacht: niets wacht op een beslissing, niets is onlangs mislukt."
-
 #: src/report/report.ts
 msgid "No workflow ran in this time."
 msgstr "In deze tijd liep geen workflow."
-
-#: src/routes/_shell.workflows.index.tsx
-msgid "No workflow serves this process."
-msgstr "Geen workflow dient dit proces."
 
 #: src/connections/workflows-using.tsx
 msgid "No workflow uses {app} yet."
@@ -9713,7 +9732,7 @@ msgid "No workflow yet"
 msgstr "Nog geen workflow"
 
 #: src/projects/project-counts.tsx
-#: src/workflows/workflows-table.tsx
+#: src/workflows/workflow-rows.tsx
 msgid "No workflows yet"
 msgstr "Nog geen workflows"
 
@@ -9771,6 +9790,10 @@ msgstr "Niemand van Grasp kan nu inloggen in deze werkruimte."
 #: src/agents/own-agents-admin.tsx
 msgid "Nobody has an agent of their own yet."
 msgstr "Nog niemand heeft een eigen agent."
+
+#: src/workflows/start-run.tsx
+msgid "Nobody has that name."
+msgstr "Niemand heeft die naam."
 
 #: src/apps/app-settings.tsx
 msgid "Nobody in particular"
@@ -9895,6 +9918,11 @@ msgstr "Niet verbonden"
 msgid "Not copied"
 msgstr "Niet gekopieerd"
 
+#: src/workflows/delete-workflow.tsx
+#: src/workflows/workflow-triggers.tsx
+msgid "Not deleted"
+msgstr "Niet verwijderd"
+
 #: src/frame/ui-words.tsx
 msgctxt "a task not ticked in a list"
 msgid "Not done"
@@ -9948,6 +9976,11 @@ msgstr "Nog niet geïnterviewd."
 msgid "Not listed"
 msgstr "Niet vermeld"
 
+#: src/workflows/workflow-rows.tsx
+msgctxt "how a workflow stands"
+msgid "Not live yet"
+msgstr "Nog niet live"
+
 #: src/settings/chat-accounts.tsx
 msgid "Not mine"
 msgstr "Niet van mij"
@@ -9989,6 +10022,14 @@ msgstr "Niet gelezen: geen verbinding"
 msgid "Not requested yet"
 msgstr "Nog niet aangevraagd"
 
+#: src/workflows/kept-state.tsx
+msgid "Not reset"
+msgstr "Niet teruggezet"
+
+#: src/workflows/files-and-apps.tsx
+msgid "Not revoked"
+msgstr "Niet ingetrokken"
+
 #: src/interview/composer.tsx
 msgid "Not saved yet. Trying again."
 msgstr "Nog niet opgeslagen. Nieuwe poging volgt."
@@ -10020,6 +10061,10 @@ msgstr "Niet getoond"
 #: src/frame/ui-words.tsx
 msgid "not started"
 msgstr "niet begonnen"
+
+#: src/workflows/stop-run.tsx
+msgid "Not stopped"
+msgstr "Niet gestopt"
 
 #: src/brain/thinking/use-thinking.ts
 msgid "Not the same in {team}"
@@ -10405,6 +10450,26 @@ msgstr "Op {where}"
 msgid "On a later day"
 msgstr "Op een latere dag"
 
+#: src/workflows/workflow-rows.tsx
+msgctxt "what starts a workflow"
+msgid "On a schedule"
+msgstr "Volgens een schema"
+
+#: src/workflows/workflow-rows.tsx
+msgctxt "what starts a workflow"
+msgid "On a webhook"
+msgstr "Bij een webhook"
+
+#: src/workflows/workflow-rows.tsx
+msgctxt "what starts a workflow"
+msgid "On an email"
+msgstr "Bij een e-mail"
+
+#: src/workflows/workflow-rows.tsx
+msgctxt "what starts a workflow"
+msgid "On an event"
+msgstr "Bij een gebeurtenis"
+
 #: src/onboarding/ai-step.tsx
 msgid "On Grasp’s AI: {grasp}"
 msgstr "Op de AI van Grasp: {grasp}"
@@ -10420,10 +10485,6 @@ msgstr "Volgens het schema {cron}, in {zone}"
 #: src/settings/sign-in-settings.tsx
 msgid "On the sign-in page"
 msgstr "Op de inlogpagina"
-
-#: src/workflows/workflows-table.tsx
-msgid "On the way"
-msgstr "Onderweg"
 
 #: src/brain/brain.ts
 msgctxt "links: drawn workflows, opened on the Workflows page"
@@ -10627,17 +10688,6 @@ msgstr "Alleen jij ziet dit"
 msgid "Open"
 msgstr "Openen"
 
-#: src/workflows/resource-runs.tsx
-#: src/workflows/traces.tsx
-msgctxt "column: a button that opens a run"
-msgid "Open"
-msgstr "Openen"
-
-#: src/workflows/workflows-table.tsx
-msgctxt "column: a link that opens the workflow"
-msgid "Open"
-msgstr "Openen"
-
 #: src/brain/brain-markdown.ts
 #: src/routes/_shell.brain.$noteId.tsx
 msgctxt "on a timeline: not happened yet"
@@ -10646,11 +10696,6 @@ msgstr "Open"
 
 #: src/link-confirmation.tsx
 msgctxt "open a link to another site"
-msgid "Open"
-msgstr "Openen"
-
-#: src/workflows/resource-runs.tsx
-msgctxt "open one run of a workflow"
 msgid "Open"
 msgstr "Openen"
 
@@ -10667,7 +10712,7 @@ msgstr "Open een chat met Stephen, of zoek hem bij de apps in Teams."
 msgid "Open a link outside Grasp?"
 msgstr "Een link buiten Grasp openen?"
 
-#: src/workflows/workflows-table.tsx
+#: src/workflows/workflow-rows.tsx
 msgid "Open Chat"
 msgstr "Chat openen"
 
@@ -10731,9 +10776,9 @@ msgstr "De chat openen in Chat"
 msgid "Open the connection"
 msgstr "Verbinding openen"
 
-#: src/workflows/resource-runs.tsx
-msgid "Open the run started {started}"
-msgstr "Run gestart op {started} openen"
+#: src/workflows/start-run.tsx
+msgid "Open the run"
+msgstr "Open de run"
 
 #: src/interview/page.tsx
 msgid "Open this link again whenever you like, and carry on where you stopped."
@@ -10794,7 +10839,7 @@ msgid "Operations"
 msgstr "Bewerkingen"
 
 #: src/frame/ui-words.tsx
-msgctxt "a filter's part"
+msgctxt "a table filter"
 msgid "Operator"
 msgstr "Operator"
 
@@ -10928,11 +10973,6 @@ msgctxt "a project's owner"
 msgid "Owner"
 msgstr "Eigenaar"
 
-#: src/workflows/workflows-table.tsx
-msgctxt "column: who owns a workflow"
-msgid "Owner"
-msgstr "Eigenaar"
-
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Owner"
@@ -10988,8 +11028,12 @@ msgid "Pages"
 msgstr "Pagina’s"
 
 #: src/frame/ui-words.tsx
-msgid "Pages of {name}"
-msgstr "Pagina’s van {name}"
+msgid "Pages of {label}"
+msgstr "Pagina’s van {label}"
+
+#: src/workflows/resource-params.tsx
+msgid "Parameters"
+msgstr "Parameters"
 
 #: src/workflows/workflow-settings.tsx
 msgctxt "a workflow's settings section"
@@ -11066,6 +11110,7 @@ msgstr "Stephen buiten Grasp pauzeren?"
 msgid "Paused"
 msgstr "Gepauzeerd"
 
+#: src/workflows/workflow-rows.tsx
 #: src/workflows/workflow-status.tsx
 msgctxt "a workflow someone paused"
 msgid "Paused"
@@ -11122,7 +11167,7 @@ msgid "Pen"
 msgstr "Pen"
 
 #: src/frame/ui-words.tsx
-msgctxt "a table row not yet in effect"
+msgctxt "a table row's state"
 msgid "pending"
 msgstr "in afwachting"
 
@@ -11136,6 +11181,7 @@ msgstr "In afwachting"
 #: src/people/share-picker.tsx
 #: src/projects/project-dialog.tsx
 #: src/projects/project-view.tsx
+#: src/workflows/start-run.tsx
 msgid "People"
 msgstr "Mensen"
 
@@ -11529,7 +11575,6 @@ msgstr "Liever typen?"
 msgid "Reach others"
 msgstr "Anderen bereiken"
 
-#: src/workflows/traces.tsx
 #: src/workflows/workflow-diagram.tsx
 msgid "Reached"
 msgstr "Bereikt"
@@ -11862,7 +11907,7 @@ msgid "Remove"
 msgstr "Verwijderen"
 
 #: src/frame/ui-words.tsx
-msgctxt "a badge that can be taken off"
+msgctxt "take a badge away"
 msgid "Remove"
 msgstr "Verwijderen"
 
@@ -11900,7 +11945,6 @@ msgstr "{model} uit favorieten verwijderen"
 #: src/chat/chat-files.tsx
 #: src/connections/tool-permissions.tsx
 #: src/frame/ui-words.tsx
-#: src/workflows/binding-approvals.tsx
 msgid "Remove {name}"
 msgstr "{name} verwijderen"
 
@@ -11994,7 +12038,7 @@ msgid "Remove your line: {words}"
 msgstr "Je beurt verwijderen: {words}"
 
 #: src/frame/ui-words.tsx
-msgctxt "a table row of something taken away"
+msgctxt "a table row's state"
 msgid "removed"
 msgstr "verwijderd"
 
@@ -12063,7 +12107,7 @@ msgid "Renewal date"
 msgstr "Verlengingsdatum"
 
 #: src/frame/ui-words.tsx
-msgctxt "a secret key, typed again"
+msgctxt "replace a saved secret"
 msgid "Replace"
 msgstr "Vervangen"
 
@@ -12267,10 +12311,6 @@ msgstr "{name} buiten gebruik stellen?"
 msgid "Retried"
 msgstr "Opnieuw geprobeerd"
 
-#: src/workflows/workflows-table.tsx
-msgid "return a month, measured"
-msgstr "opbrengst per maand, gemeten"
-
 #: src/inbox/item-detail.tsx
 #: src/onboarding/setup-frame.tsx
 msgid "Review"
@@ -12432,6 +12472,7 @@ msgstr "Rol bij het delen"
 #: src/brain/brain.ts
 #: src/people/people-teams-picker.tsx
 #: src/routes/_shell.settings.members.tsx
+#: src/workflows/start-run.tsx
 msgid "Roles"
 msgstr "Rollen"
 
@@ -12458,7 +12499,7 @@ msgid "Routines"
 msgstr "Routines"
 
 #: src/frame/ui-words.tsx
-msgctxt "a table's rows, counted"
+msgctxt "a table's row, one"
 msgid "row"
 msgstr "rij"
 
@@ -12467,7 +12508,7 @@ msgid "Row {row} {where}: {message}"
 msgstr "Rij {row} {where}: {message}"
 
 #: src/frame/ui-words.tsx
-msgctxt "a table's rows, counted"
+msgctxt "a table's rows, many"
 msgid "rows"
 msgstr "rijen"
 
@@ -12479,6 +12520,11 @@ msgstr "Regel"
 #: src/brain/brain.ts
 msgid "Rules"
 msgstr "Regels"
+
+#: src/workflows/resource-runs.tsx
+#: src/workflows/runs.tsx
+msgid "run"
+msgstr "run"
 
 #: src/workflows/start-run.tsx
 msgctxt "start a workflow's run by hand"
@@ -12500,7 +12546,7 @@ msgctxt "a run going on now"
 msgid "running"
 msgstr "bezig"
 
-#: src/routes/_shell.workflows.index.tsx
+#: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/runs.tsx
 msgid "Running"
 msgstr "Draait"
@@ -12510,7 +12556,6 @@ msgctxt "a tool call's state"
 msgid "Running"
 msgstr "Bezig"
 
-#: src/workflows/traces.tsx
 #: src/workflows/workflow-diagram.tsx
 msgctxt "an attempt of a step"
 msgid "Running"
@@ -12520,6 +12565,11 @@ msgstr "Bezig"
 msgctxt "status of a workflow run"
 msgid "Running"
 msgstr "Bezig"
+
+#: src/workflows/workflow-rows.tsx
+msgctxt "workflow phase"
+msgid "Running"
+msgstr "Draait"
 
 #: src/brain/brain.ts
 msgctxt "workflow status"
@@ -12534,6 +12584,18 @@ msgstr "Voert een codestap uit"
 msgid "Running now"
 msgstr "Nu bezig"
 
+#: src/workflows/resource-runs.tsx
+#: src/workflows/runs.tsx
+msgid "runs"
+msgstr "runs"
+
+#: src/routes/_shell.workflows.index.tsx
+#: src/routes/_shell.workflows.runs.tsx
+#: src/workflows/resource-runs.tsx
+#: src/workflows/runs.tsx
+msgid "Runs"
+msgstr "Runs"
+
 #: src/routes/_shell.workflows.$workflow.tsx
 msgctxt "a workflow's view"
 msgid "Runs"
@@ -12543,19 +12605,6 @@ msgstr "Runs"
 msgctxt "activity of a workflow: what ran"
 msgid "Runs"
 msgstr "Runs"
-
-#: src/routes/_shell.workflows.index.tsx
-msgctxt "tab listing the runs of workflows"
-msgid "Runs"
-msgstr "Runs"
-
-#: src/workflows/workflows-table.tsx
-msgid "Runs a week"
-msgstr "Runs per week"
-
-#: src/workflows/workflows-table.tsx
-msgid "runs a week by these workflows"
-msgstr "runs per week door deze workflows"
 
 #: src/onboarding/ai-step.tsx
 #: src/settings/ai-providers.tsx
@@ -12730,9 +12779,13 @@ msgid "Save where they go"
 msgstr "Opslaan waar ze naartoe gaan"
 
 #: src/apps/blueprints.tsx
-#: src/frame/ui-words.tsx
 #: src/interview/composer.tsx
 #: src/interview/destination.tsx
+msgid "Saved"
+msgstr "Opgeslagen"
+
+#: src/frame/ui-words.tsx
+msgctxt "a setting saved"
 msgid "Saved"
 msgstr "Opgeslagen"
 
@@ -12762,14 +12815,17 @@ msgid "Saved, but it doesn't pass yet: Definition says what to fix."
 msgstr "Bewaard, maar het doorstaat de controle nog niet: onder Definitie staat wat je moet oplossen."
 
 #: src/workflows/definition-editor.tsx
-#: src/workflows/resource-params.tsx
 msgid "Saved."
 msgstr "Opgeslagen."
 
 #: src/apps/blueprints.tsx
-#: src/frame/ui-words.tsx
 msgid "Saving"
 msgstr "Bezig met opslaan"
+
+#: src/frame/ui-words.tsx
+msgctxt "a setting saving"
+msgid "Saving"
+msgstr "Opslaan"
 
 #: src/chat/thread.tsx
 msgid "Saving to your memory"
@@ -12829,10 +12885,13 @@ msgid "Search"
 msgstr "Zoeken"
 
 #: src/frame/ui-words.tsx
+msgid "Search {label}"
+msgstr "{label} doorzoeken"
+
+#: src/frame/ui-words.tsx
 msgid "Search {many}"
 msgstr "{many} zoeken"
 
-#: src/frame/ui-words.tsx
 #: src/onboarding/place-picker.tsx
 msgid "Search {name}"
 msgstr "{name} doorzoeken"
@@ -12873,6 +12932,7 @@ msgid "Search people and teams"
 msgstr "Mensen en teams zoeken"
 
 #: src/people/people-teams-picker.tsx
+#: src/workflows/start-run.tsx
 msgid "Search people, teams and roles"
 msgstr "Mensen, teams en rollen zoeken"
 
@@ -13319,6 +13379,10 @@ msgctxt "shows a hidden opportunity again for every admin"
 msgid "Show again"
 msgstr "Weer tonen"
 
+#: src/frame/ui-words.tsx
+msgid "Show all"
+msgstr "Alles tonen"
+
 #: src/chat/held-writes.tsx
 msgid "Show all {count} lines ({characters} characters)"
 msgstr "Alle {count} regels tonen ({characters} tekens)"
@@ -13407,10 +13471,6 @@ msgstr "Payload van {type} tonen"
 #: src/settings/event-source-activity.tsx
 msgid "Show what {name} received"
 msgstr "Tonen wat {name} heeft ontvangen"
-
-#: src/routes/_shell.workflows.index.tsx
-msgid "Show workflows"
-msgstr "Workflows tonen"
 
 #: src/workflows/runs.tsx
 msgid "Showing the first {runsPageSize} runs of more."
@@ -13646,10 +13706,8 @@ msgstr "Iemand heeft dit concept gewijzigd sinds je het las. Lees het opnieuw en
 msgid "Someone changed this draft since you read it. Your text is still here: read their revision, then save again, or take theirs instead."
 msgstr "Iemand heeft dit concept gewijzigd sinds je het las. Je tekst staat er nog: lees hun revisie en sla opnieuw op, of neem die van hen over."
 
-#: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
 #: src/workflows/runs.tsx
-#: src/workflows/traces.tsx
 msgid "Someone else"
 msgstr "Iemand anders"
 
@@ -13845,7 +13903,6 @@ msgstr "Run starten"
 
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
-#: src/workflows/traces.tsx
 msgid "Started"
 msgstr "Gestart"
 
@@ -13856,7 +13913,6 @@ msgstr "Een chat gestart"
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
 #: src/workflows/runs.tsx
-#: src/workflows/traces.tsx
 msgid "Started by"
 msgstr "Gestart door"
 
@@ -13907,15 +13963,8 @@ msgstr "Uitspraken"
 #: src/apps/app-settings.tsx
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
-#: src/routes/_shell.workflows.index.tsx
+#: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/resource-runs.tsx
-#: src/workflows/run-detail.tsx
-#: src/workflows/traces.tsx
-msgid "Status"
-msgstr "Status"
-
-#: src/workflows/workflows-table.tsx
-msgctxt "column: where a workflow stands"
 msgid "Status"
 msgstr "Status"
 
@@ -14330,6 +14379,7 @@ msgstr "Teamomvang onbekend."
 #: src/routes/_shell.settings.profile.tsx
 #: src/settings/members-tabs.tsx
 #: src/settings/teams.tsx
+#: src/workflows/start-run.tsx
 msgid "Teams"
 msgstr "Teams"
 
@@ -14399,13 +14449,13 @@ msgctxt "files of an App"
 msgid "Tests"
 msgstr "Tests"
 
-#: src/frame/ui-words.tsx
-msgctxt "a code block's language"
+#: src/apps/field-kinds.tsx
+msgctxt "a kind of field"
 msgid "Text"
 msgstr "Tekst"
 
-#: src/apps/field-kinds.tsx
-msgctxt "a kind of field"
+#: src/frame/ui-words.tsx
+msgctxt "code's language: plain text"
 msgid "Text"
 msgstr "Tekst"
 
@@ -14492,6 +14542,10 @@ msgstr "Dat is geen link die geopend kan worden."
 #: src/workflows/resource-params.tsx
 msgid "That isn't a value this parameter takes."
 msgstr "Deze parameter accepteert die waarde niet."
+
+#: src/workflows/run-detail.tsx
+msgid "That run wasn't found, or isn't yours to see."
+msgstr "Die run is niet gevonden, of is niet voor jou zichtbaar."
 
 #: src/sign-in-errors.ts
 msgid "That staff account hasn't been given access here."
@@ -14980,11 +15034,6 @@ msgstr "De interviews zijn nog niet gepland. Je plant ze aan het eind van je onb
 msgid "The last read couldn’t list the accounts deleted in the directory."
 msgstr "De laatste uitlezing kon de in de directory verwijderde accounts niet ophalen."
 
-#: src/workflows/resource-runs.tsx
-#: src/workflows/traces.tsx
-msgid "The latest runs, newest first."
-msgstr "De laatste runs, nieuwste eerst."
-
 #: src/interview/transcript.tsx
 msgid "The line is deleted now, and so is what I marked in it. What I wrote down from it is in what I read back to you at the end: take it out there, and it is deleted for good when our conversation is finished. This can’t be undone."
 msgstr "De beurt wordt nu verwijderd, net als wat ik erin heb gemarkeerd. Wat ik eruit heb opgeschreven, staat in wat ik je aan het eind voorlees: haal het daar weg, dan wordt het voorgoed verwijderd zodra ons gesprek klaar is. Dit kan niet ongedaan worden gemaakt."
@@ -15142,6 +15191,10 @@ msgstr "De invoervelden van de run, elk uit het bericht als JSON Pointer, als JS
 #: src/workflows/binding-approvals.tsx
 msgid "The run's own files"
 msgstr "De eigen bestanden van de run"
+
+#: src/workflows/figures.tsx
+msgid "The runs, in figures"
+msgstr "De runs, in cijfers"
 
 #: src/brain/thinking/shapes.ts
 msgid "The same pain in more than one team"
@@ -15889,6 +15942,10 @@ msgstr "Trigger"
 msgid "Trigger {trigger}"
 msgstr "Trigger {trigger}"
 
+#: src/workflows/workflow-triggers.tsx
+msgid "Triggers"
+msgstr "Triggers"
+
 #: src/workflows/workflow-settings.tsx
 msgctxt "a workflow's settings section"
 msgid "Triggers"
@@ -16033,7 +16090,6 @@ msgstr "In volle gang"
 
 #: src/chat/saved-memory.tsx
 #: src/drafts/share-with-team.tsx
-#: src/frame/ui-words.tsx
 msgid "Undo"
 msgstr "Ongedaan maken"
 
@@ -16049,6 +16105,11 @@ msgstr "Ongedaan maken"
 
 #: src/brain/forget.tsx
 msgctxt "take a removal back before it happens"
+msgid "Undo"
+msgstr "Ongedaan maken"
+
+#: src/frame/ui-words.tsx
+msgctxt "take a table's change back"
 msgid "Undo"
 msgstr "Ongedaan maken"
 
@@ -16282,12 +16343,16 @@ msgstr "{tool} gebruiken"
 msgid "UTC"
 msgstr "UTC"
 
+#: src/workflows/workflow-rows.tsx
+msgid "v{version}"
+msgstr "v{version}"
+
 #: src/workflows/kept-state.tsx
 msgid "Value"
 msgstr "Waarde"
 
 #: src/frame/ui-words.tsx
-msgctxt "a filter's part"
+msgctxt "a table filter"
 msgid "Value"
 msgstr "Waarde"
 
@@ -16343,7 +16408,6 @@ msgstr "Keten controleren"
 #: src/inbox/items.ts
 #: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
-#: src/workflows/traces.tsx
 #: src/workflows/version-source.tsx
 msgid "Version"
 msgstr "Versie"
@@ -16352,7 +16416,6 @@ msgstr "Versie"
 #: src/brain/skills-page.tsx
 #: src/brain/sources-page.tsx
 #: src/workflows/version-source.tsx
-#: src/workflows/workflows-table.tsx
 msgid "Version {version}"
 msgstr "Versie {version}"
 
@@ -16404,13 +16467,18 @@ msgid "Vienna"
 msgstr "Wenen"
 
 #: src/frame/ui-words.tsx
-msgctxt "a table's view menu"
+msgctxt "a table's view settings"
 msgid "View"
 msgstr "Weergave"
 
 #: src/drafts/draft-history.tsx
 msgid "View changes"
 msgstr "Wijzigingen bekijken"
+
+#: src/frame/ui-words.tsx
+msgctxt "a side panel's views"
+msgid "Views"
+msgstr "Weergaven"
 
 #: src/brain/brain.ts
 msgid "Vision"
@@ -16447,7 +16515,6 @@ msgstr "wachten nu op een beslissing"
 
 #: src/inbox/items.ts
 #: src/interview/words.ts
-#: src/workflows/traces.tsx
 #: src/workflows/workflow-diagram.tsx
 msgid "Waiting"
 msgstr "Wacht"
@@ -16477,7 +16544,7 @@ msgstr "Wacht sinds {since} op {label}, dat niet antwoordt. Gaat vanzelf verder 
 msgid "Waiting for {signIn}"
 msgstr "Wachten op {signIn}"
 
-#: src/routes/_shell.workflows.index.tsx
+#: src/routes/_shell.workflows.runs.tsx
 #: src/workflows/runs.tsx
 msgid "Waiting for a decision"
 msgstr "Wacht op een beslissing"
@@ -16520,6 +16587,11 @@ msgstr "Wacht op jou: {title}"
 #: src/workflows/files-and-apps.tsx
 msgid "Waiting for your approval"
 msgstr "Wacht op je goedkeuring"
+
+#: src/workflows/workflow-rows.tsx
+msgctxt "how a workflow stands"
+msgid "Waiting on you"
+msgstr "Wacht op jou"
 
 #: src/apps/draft-changes.tsx
 msgid "Waits for an admin to grant it"
@@ -16819,7 +16891,7 @@ msgstr "Wat met {name} gedeeld is, is met ieder van hen gedeeld."
 msgid "What is shared with this team stops being shared with its members through it, and the workflows it owns no longer have a team. Its members stay in the organization."
 msgstr "Wat met dit team gedeeld is, wordt niet meer via het team met de leden gedeeld, en de workflows van dit team hebben geen team meer. De leden blijven in de organisatie."
 
-#: src/workflows/traces.tsx
+#: src/workflows/run-detail.tsx
 msgid "What it did"
 msgstr "Wat hij deed"
 
@@ -16886,8 +16958,8 @@ msgid "What its code remembered in the Brain until now goes too; a call already 
 msgstr "Wat haar code tot nu toe in het Brein onthield, gaat ook; een aanroep die al loopt, kan nog onthouden wat hij eerder las."
 
 #: src/workflows/kept-state.tsx
-msgid "What its steps keep for later runs, which each run reads as it starts. It uses {used} KB of {cap} KB."
-msgstr "Wat de stappen bewaren voor latere runs, die elke run bij de start leest. Gebruikt {used} KB van {cap} KB."
+msgid "What its steps keep for later runs, which each run reads as it starts."
+msgstr "Wat de stappen bewaren voor latere runs, en wat elke run bij de start leest."
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "What its tools do, as its provider declares them. Apps and agents use only what they are granted, and a tool that changes something waits for its person to confirm it."
@@ -17541,7 +17613,6 @@ msgstr "Bepaald wat er beter kan"
 #: src/inbox/items.ts
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/workflows/runs.tsx
-#: src/workflows/workflows-table.tsx
 msgid "Workflow"
 msgstr "Workflow"
 
@@ -17588,14 +17659,15 @@ msgstr "workflow.json"
 
 #: src/brain/goals-editor.tsx
 #: src/chat/mentions.tsx
+#: src/frame/app-sidebar.tsx
 #: src/projects/file-item-dialog.tsx
 #: src/report/report.ts
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.workflows.$workflow.tsx
 #: src/routes/_shell.workflows.index.tsx
+#: src/routes/_shell.workflows.runs.tsx
 #: src/routes/decisions.$decision.tsx
 #: src/settings/stephen-settings.tsx
-#: src/workflows/nav-item.tsx
 msgid "Workflows"
 msgstr "Workflows"
 
@@ -17624,7 +17696,7 @@ msgctxt "note property: the workflows a tool or team is part of"
 msgid "Workflows"
 msgstr "Workflows"
 
-#: src/workflows/workflows-table.tsx
+#: src/workflows/workflow-rows.tsx
 msgid "Workflows are made in chat: describe what should run on its own, and Grasp builds it."
 msgstr "Workflows maak je in de chat: beschrijf wat vanzelf moet lopen, en Grasp bouwt het."
 
@@ -17709,14 +17781,14 @@ msgid "Writing"
 msgstr "Schrijft"
 
 #: src/frame/ui-words.tsx
-msgctxt "a code block being written"
-msgid "Writing"
-msgstr "Wordt geschreven"
-
-#: src/frame/ui-words.tsx
 msgctxt "an answer being written"
 msgid "Writing"
 msgstr "Schrijft"
+
+#: src/frame/ui-words.tsx
+msgctxt "code still being written"
+msgid "Writing"
+msgstr "Wordt geschreven"
 
 #: src/chat/thread.tsx
 msgid "Writing {file}"
@@ -17785,10 +17857,8 @@ msgstr "Ja: de hash klopt en hij verwijst naar de gebeurtenis ervoor."
 #: src/connections/connection-list.tsx
 #: src/drafts/draft-history.tsx
 #: src/routes/_shell.settings.members.tsx
-#: src/workflows/resource-runs.tsx
 #: src/workflows/run-detail.tsx
 #: src/workflows/runs.tsx
-#: src/workflows/traces.tsx
 msgid "You"
 msgstr "Jij"
 

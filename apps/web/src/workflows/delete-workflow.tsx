@@ -1,6 +1,7 @@
+import { workflowLabel } from "@grasp-os/shared/workflow-resources";
+import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -8,18 +9,19 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@grasp-os/app-kit/components/alert-dialog";
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
-import { Label } from "@grasp-os/app-kit/components/label";
-import { workflowLabel } from "@grasp-os/shared/workflow-resources";
-import type { WorkflowResource } from "@grasp-os/shared/workflow-resources";
-import { Trans, useLingui } from "@lingui/react/macro";
+} from "@grasp-os/ui/components/alert-dialog";
+import { Button } from "@grasp-os/ui/components/button";
+import { Checkbox } from "@grasp-os/ui/components/checkbox";
+import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+import { Icon, TrashIcon } from "@grasp-os/ui/lib/icons";
+import { useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+import { useHeldDialog } from "./held-dialog.ts";
+import { SectionCard } from "./section-card.tsx";
 
 // Deleting an independent workflow (GRA-1329), for its builders, asked
 // first: core deletes it only while nothing holds it (another workflow's
@@ -42,30 +44,31 @@ export const DeleteWorkflow = ({
   admin: boolean;
 }) => {
   const { t } = useLingui();
-  const ids = useId();
   const router = useRouter();
-  const { busy, failure, run } = useCoreAction();
+  const { failure, run } = useCoreAction();
   const [release, setRelease] = useState(false);
   const [releaseFailure, setReleaseFailure] = useState<string>();
   const name = workflowLabel(resource);
   const reason = releaseFailure;
+  const dialog = useHeldDialog();
 
   if (resource.role !== "builder") {
     return null;
   }
 
-  const remove = async (): Promise<void> => {
+  const removed = async (): Promise<void> => {
     setReleaseFailure(undefined);
     const deleted = await run(async (session) => {
       await session.workflowResources.delete(resource.id);
       return true;
     });
     if (deleted !== true) {
-      return;
+      // The question stays open, with core's reason in it.
+      throw new Error("It wasn't deleted.");
     }
     if (release) {
-      // Deleted already: a refused release is said here, and the name can
-      // be released later in Settings.
+      // Deleted already: a refused release is said on the page, and the
+      // name can be released later in Settings.
       const released = await run(async (session) => {
         await session.workflowResources.releaseName(resource.name);
         return true;
@@ -76,79 +79,63 @@ export const DeleteWorkflow = ({
     }
     await router.navigate({ to: "/workflows" });
   };
+  const remove = async (): Promise<void> => {
+    await dialog.hold(removed);
+  };
 
   return (
-    <section className="mt-8 flex flex-col gap-3 border-t pt-6">
-      <h2 className="font-medium">
-        <Trans>Delete this workflow</Trans>
-      </h2>
-      <p className="text-muted-foreground">
-        <Trans>
-          It can be deleted once nothing uses it: no other workflow calls it, no
-          trigger or app starts it, and none of its runs is still going.
-        </Trans>
-      </p>
-      <div>
-        <AlertDialog>
-          <AlertDialogTrigger
-            disabled={busy}
-            render={<Button size="sm" variant="outline" />}
-          >
-            <Trans>Delete the workflow</Trans>
+    <SectionCard
+      actions={
+        <AlertDialog onOpenChange={dialog.handleOpenChange} open={dialog.open}>
+          <AlertDialogTrigger asChild>
+            <Button size="sm" variant="destructive">
+              <Icon icon={TrashIcon} />
+              {t`Delete the workflow`}
+            </Button>
           </AlertDialogTrigger>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>
-                <Trans>Delete {name}?</Trans>
-              </AlertDialogTitle>
+              <AlertDialogTitle>{t`Delete ${name}?`}</AlertDialogTitle>
               <AlertDialogDescription>
-                <Trans>
-                  Nobody can open or start it again. Its versions are kept but
-                  never served. This can&apos;t be undone.
-                </Trans>
+                {t`Nobody can open or start it again. Its versions are kept but never served. This can't be undone.`}
               </AlertDialogDescription>
             </AlertDialogHeader>
             {admin ? (
-              <div className="flex items-start gap-2">
+              <Field orientation="horizontal">
                 <Checkbox
                   checked={release}
-                  id={`${ids}-release`}
                   onCheckedChange={(checked) => {
-                    setRelease(checked);
+                    setRelease(checked === true);
                   }}
                 />
-                <Label htmlFor={`${ids}-release`}>
-                  <Trans>
-                    Also release its name, so a new workflow can take it.
-                  </Trans>
-                </Label>
-              </div>
+                <FieldLabel>
+                  {t`Also release its name, so a new workflow can take it.`}
+                </FieldLabel>
+              </Field>
             ) : null}
+            <ErrorText>{failure}</ErrorText>
             <AlertDialogFooter>
-              <AlertDialogCancel>
-                <Trans>Cancel</Trans>
-              </AlertDialogCancel>
-              <AlertDialogAction
-                disabled={busy}
-                onClick={() => {
-                  void remove();
-                }}
+              <AlertDialogCancel />
+              <Button
+                errorText={t`Not deleted`}
+                onClick={remove}
+                size="sm"
                 variant="destructive"
               >
                 {t`Delete the workflow`}
-              </AlertDialogAction>
+              </Button>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-      </div>
-      <ErrorText>{failure}</ErrorText>
+      }
+      info={t`It can be deleted once nothing uses it: no other workflow calls it, no trigger or app starts it, and none of its runs is still going.`}
+      title={t`Delete this workflow`}
+    >
       {reason === undefined ? null : (
-        <p className="text-destructive text-sm" role="alert">
-          <Trans>
-            The workflow is deleted, but its name wasn&apos;t released: {reason}
-          </Trans>
-        </p>
+        <ErrorText>
+          {t`The workflow is deleted, but its name wasn't released: ${reason}`}
+        </ErrorText>
       )}
-    </section>
+    </SectionCard>
   );
 };

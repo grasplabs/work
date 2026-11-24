@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { startFieldsOf, startInputOf } from "./start-input.ts";
+import { inputSketchOf, startFieldsOf, startInputOf } from "./start-input.ts";
 
 // A workflow's input schema as a start form, and what a filled-in form
 // sends: plain fields only, everything else typed as JSON; what the
@@ -61,6 +61,40 @@ describe("a workflow's input as a start form", () => {
       nullable: undefined,
       unread: undefined,
       empty: [],
+    });
+  });
+
+  it("starts JSON typed by hand from the input's fields, each empty of its kind, and from nothing when it names none", () => {
+    const sketch = inputSketchOf({
+      type: "object",
+      properties: {
+        client: { type: "string" },
+        documents: { type: "array", items: { type: "string" } },
+        address: { type: "object", properties: {} },
+        count: { type: "integer" },
+        urgent: { type: "boolean" },
+        either: { anyOf: [{ type: "string" }, { type: "null" }] },
+      },
+    });
+    const value: unknown =
+      sketch === undefined ? undefined : JSON.parse(sketch.json);
+    expect({
+      keys: sketch?.keys,
+      value,
+      none: inputSketchOf({ type: "object", properties: {} }),
+      unread: inputSketchOf(null),
+    }).toStrictEqual({
+      keys: ["client", "documents", "address", "count", "urgent", "either"],
+      value: {
+        client: "",
+        documents: [],
+        address: {},
+        count: 0,
+        urgent: false,
+        either: null,
+      },
+      none: undefined,
+      unread: undefined,
     });
   });
 

@@ -30,31 +30,24 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       error: t({ message: "Failed", context: "a menu item whose work failed" }),
       loading: t`Working`,
     },
-    alert: {
-      close: t`Dismiss`,
-    },
-    alertDialog: {
-      cancel: t`Cancel`,
-    },
     attachment: {
       remove: (name) => t`Remove ${name}`,
     },
     chainOfThought: {
       name: t`Steps`,
     },
-    codeBlock: {
-      collapse: t`Show less`,
-      expand: t`Show more`,
-      moreLines: (count) =>
-        t`${plural(count, { one: "# more line", other: "# more lines" })}`,
-      plainText: t({ message: "Text", context: "a code block's language" }),
-      streaming: t({
-        message: "Writing",
-        context: "a code block being written",
+    command: {
+      dialogPlaceholder: t`Type a command or search`,
+      dialogTrigger: t({
+        message: "Search",
+        context: "a command list's field",
       }),
-    },
-    dialog: {
-      close: t`Close`,
+      empty: t`No results`,
+      error: t({ message: "Failed", context: "a list row's action" }),
+      expand: (label) => t`More for ${label}`,
+      loading: t({ message: "Searching", context: "a list fetching results" }),
+      moreHint: t`Right arrow for more`,
+      placeholder: t({ message: "Search", context: "a command list's field" }),
     },
     dropdownMenu: {
       expand: t`More actions`,
@@ -72,6 +65,13 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       edit: t({ message: "Edit", context: "edit a value in place" }),
       error: t`Could not save`,
       saved: (value) => t`Changed to ${value}`,
+    },
+    keyValue: {
+      copy: (label) => {
+        const what = label.toLocaleLowerCase();
+        return t`Copy ${what}`;
+      },
+      loading: t`Loading the value`,
     },
     link: {
       external: t`opens in a new tab`,
@@ -200,9 +200,6 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       thought: (seconds) =>
         t`${plural(seconds, { one: "Thought for # second", other: "Thought for # seconds" })}`,
     },
-    sheet: {
-      close: t`Close`,
-    },
     sources: {
       count: (count) =>
         count === 0
@@ -248,19 +245,29 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
         }),
       },
     },
-    trace: {
-      states: {
-        running: t({ message: "Working", context: "a step's state" }),
-        error: t({ message: "Failed", context: "a step's state" }),
-        pending: t({ message: "Waiting", context: "a step's state" }),
-      },
-    },
     action: {
       agentAsks: t`Does something that needs your yes`,
       agentPresses: (words) => t`Presses "${words}"`,
       error: t`Could not finish`,
       loading: t`Working`,
       success: t`Done`,
+    },
+    alert: {
+      close: t({ message: "Close", context: "close a dialog or panel" }),
+    },
+    alertDialog: {
+      cancel: t({ message: "Cancel", context: "leave a question unanswered" }),
+    },
+    badge: {
+      dot: {
+        default: t({ message: "Note", context: "a badge's dot" }),
+        success: t({ message: "Done", context: "a badge's dot" }),
+        warning: t({ message: "Warning", context: "a badge's dot" }),
+        destructive: t({ message: "Error", context: "a badge's dot" }),
+        info: t({ message: "Info", context: "a badge's dot" }),
+      },
+      remove: t({ message: "Remove", context: "take a badge away" }),
+      removeNamed: (words) => t`Remove ${words}`,
     },
     breadcrumb: {
       ellipsis: t`Show hidden levels`,
@@ -269,6 +276,96 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
     calendar: {
       next: t`Next month`,
       previous: t`Previous month`,
+    },
+    codeBlock: {
+      collapse: t`Show less`,
+      expand: t`Show more`,
+      moreLines: (count) =>
+        t`${plural(count, { one: "# more line", other: "# more lines" })}`,
+      plainText: t({ message: "Text", context: "code's language: plain text" }),
+      streaming: t({ message: "Writing", context: "code still being written" }),
+    },
+    combobox: {
+      empty: t({ message: "No results", context: "a search finds nothing" }),
+      notChoice: (value) => t`${value} is not one of the choices`,
+      trigger: t`Show the choices`,
+    },
+    dataTable: {
+      actions: t({ message: "Actions", context: "a table's row actions" }),
+      actionsFor: (name) => t`Actions for ${name}`,
+      cancel: t({ message: "Cancel", context: "leave a question unanswered" }),
+      chooseAll: (one) => t`Choose every ${one} shown`,
+      chooseColumn: t({
+        message: "Choose",
+        context: "a table's choice column",
+      }),
+      clear: t({ message: "Clear", context: "empty a table's filter" }),
+      clearSearch: t`Clear search`,
+      close: (name) => t`Close ${name}`,
+      columnInfo: (header) => t`More about ${header}`,
+      columnMenu: (header) => t`Column: ${header}`,
+      columns: t({ message: "Columns", context: "a table's columns" }),
+      confirm: (action, count, unit) => t`${action} ${count} ${unit}?`,
+      confirmDetail: t`This cannot be undone.`,
+      done: (action, count, unit) => t`${action}: ${count} ${unit}`,
+      error: (many) => t`The ${many} did not load`,
+      exportCsv: t`Export CSV`,
+      failedDetail: t`Check the connection, then try again.`,
+      filterAtLeast: t({ message: "is at least", context: "a table filter" }),
+      filterAtMost: t({ message: "is at most", context: "a table filter" }),
+      filterContains: t({ message: "contains", context: "a table filter" }),
+      filterField: t({ message: "Field", context: "a table filter" }),
+      filterIs: t({ message: "is", context: "a table filter" }),
+      filterIsNot: t({ message: "is not", context: "a table filter" }),
+      filterLabel: (label) => t`Filter ${label}`,
+      filterLacks: t({
+        message: "does not contain",
+        context: "a table filter",
+      }),
+      filterName: t`Filter condition`,
+      filterOperator: t({ message: "Operator", context: "a table filter" }),
+      filterSegments: {
+        field: t`Filter field`,
+        operator: t`Filter operator`,
+        value: t`Filter value`,
+      },
+      filterValue: t({ message: "Value", context: "a table filter" }),
+      groupAttention: t({
+        message: "needs attention",
+        context: "a table's group of rows",
+      }),
+      hide: t`Hide column`,
+      loading: (many) => t`Loading ${many}`,
+      loadingMore: (many) => t`Loading more ${many}`,
+      moveEarlier: t`Move earlier`,
+      moveLater: t`Move later`,
+      noDate: t`No date`,
+      noMatch: (many, query) => t`No ${many} match “${query}”.`,
+      noneMeet: (many) => t`No ${many} meet the filter.`,
+      noneYet: (many) => t`No ${many} yet.`,
+      open: (name) => t`Open ${name}`,
+      pages: (label) => t`Pages of ${label}`,
+      pinEnd: t`Pin to the end`,
+      pinStart: t`Pin to the start`,
+      rowPending: t({ message: "pending", context: "a table row's state" }),
+      rowRemoved: t({ message: "removed", context: "a table row's state" }),
+      search: (many) => t`Search ${many}`,
+      searchLabel: (label) => t`Search ${label}`,
+      select: (name) => t`Choose ${name}`,
+      selected: (count, total) => t`${count} of ${total} chosen`,
+      sortDown: t`Sort high to low`,
+      sortNext: t`Sort by this next`,
+      sortUp: t`Sort low to high`,
+      tryAgain: t`Try again`,
+      undo: t({ message: "Undo", context: "take a table's change back" }),
+      unpin: t`Unpin`,
+      view: t({ message: "View", context: "a table's view settings" }),
+      width: (header) => t`Width of ${header}`,
+      withChosen: (many) => t`With the chosen ${many}`,
+      unit: {
+        one: t({ message: "row", context: "a table's row, one" }),
+        other: t({ message: "rows", context: "a table's rows, many" }),
+      },
     },
     datePicker: {
       last30: t`Last 30 days`,
@@ -282,10 +379,27 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       thisMonth: t`This month`,
       today: t`Today`,
     },
+    dialog: {
+      close: t({ message: "Close", context: "close a dialog or panel" }),
+    },
+    field: {
+      statusError: t`Could not save. Your choice is kept.`,
+      statusLoading: t({ message: "Saving", context: "a setting saving" }),
+      statusRetry: t`Try again`,
+      statusSuccess: t({ message: "Saved", context: "a setting saved" }),
+    },
     input: {
       hidePassword: t`Hide password`,
-      replace: t({ message: "Replace", context: "a secret key, typed again" }),
+      replace: t({ message: "Replace", context: "replace a saved secret" }),
       showPassword: t`Show password`,
+    },
+    sheet: {
+      close: t({ message: "Close", context: "close a dialog or panel" }),
+    },
+    sidePanel: {
+      close: t({ message: "Close", context: "close a dialog or panel" }),
+      showAll: t`Show all`,
+      views: t({ message: "Views", context: "a side panel's views" }),
     },
     stepper: {
       count: (step, total) => t`Step ${step} of ${total}`,
@@ -303,6 +417,13 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
     switch: {
       error: t`Could not save`,
     },
+    trace: {
+      states: {
+        running: t({ message: "Working", context: "a step's state" }),
+        error: t({ message: "Failed", context: "a step's state" }),
+        pending: t({ message: "Waiting", context: "a step's state" }),
+      },
+    },
     // The parts the Apps pages use (apps/), from here on.
     avatar: {
       groupCount: (count) => t`+${count}`,
@@ -316,151 +437,6 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
               ]
             : shown
         ),
-    },
-    badge: {
-      dot: {
-        default: t({ message: "Note", context: "a badge's dot" }),
-        success: t({ message: "Done", context: "a badge's dot" }),
-        warning: t({ message: "Warning", context: "a badge's dot" }),
-        destructive: t({ message: "Error", context: "a badge's dot" }),
-        info: t({ message: "Info", context: "a badge's dot" }),
-      },
-      remove: t({
-        message: "Remove",
-        context: "a badge that can be taken off",
-      }),
-      removeNamed: (words) => t`Remove ${words}`,
-    },
-    combobox: {
-      empty: t`No results`,
-      notChoice: (value) => t`${value} is not one of the choices`,
-      trigger: t`Show the choices`,
-    },
-    command: {
-      dialogPlaceholder: t`Type a command or search`,
-      dialogTrigger: t({
-        message: "Search",
-        context: "a command list's field",
-      }),
-      empty: t`No results`,
-      error: t({ message: "Failed", context: "a list row's action" }),
-      expand: (label) => t`More for ${label}`,
-      loading: t({ message: "Searching", context: "a list fetching results" }),
-      moreHint: t`Right arrow for more`,
-      placeholder: t({ message: "Search", context: "a command list's field" }),
-    },
-    // `one` and `many` are the table's own nouns ("record", "records"),
-    // which the page gives in its language.
-    dataTable: {
-      actions: t`Actions`,
-      actionsFor: (name) => t`Actions for ${name}`,
-      cancel: t`Cancel`,
-      chooseAll: (one) => t`Choose every ${one} shown`,
-      chooseColumn: t({
-        message: "Choose",
-        context: "a table's checkbox column",
-      }),
-      clear: t({ message: "Clear", context: "rows chosen in a table" }),
-      clearSearch: t`Clear search`,
-      close: (name) => t`Close ${name}`,
-      columnInfo: (header) => t`More about ${header}`,
-      columnMenu: (header) => t`Column: ${header}`,
-      columns: t`Columns`,
-      confirm: (action, count, unit) => t`${action} ${count} ${unit}?`,
-      confirmDetail: t`This cannot be undone.`,
-      done: (action, count, unit) => t`${action}: ${count} ${unit}`,
-      error: (many) => t`The ${many} did not load`,
-      exportCsv: t`Export CSV`,
-      failedDetail: t`Check the connection, then try again.`,
-      filterAtLeast: t({
-        message: "is at least",
-        context: "a filter's operator",
-      }),
-      filterAtMost: t({
-        message: "is at most",
-        context: "a filter's operator",
-      }),
-      filterContains: t({
-        message: "contains",
-        context: "a filter's operator",
-      }),
-      filterField: t({ message: "Field", context: "what a filter looks at" }),
-      filterIs: t({ message: "is", context: "a filter's operator" }),
-      filterIsNot: t({ message: "is not", context: "a filter's operator" }),
-      filterLabel: (label) => {
-        const name = label.toLowerCase();
-        return t`Filter ${name}`;
-      },
-      filterLacks: t({
-        message: "does not contain",
-        context: "a filter's operator",
-      }),
-      filterName: t`Filter condition`,
-      filterOperator: t({ message: "Operator", context: "a filter's part" }),
-      filterSegments: {
-        field: t`Filter field`,
-        operator: t`Filter operator`,
-        value: t`Filter value`,
-      },
-      filterValue: t({ message: "Value", context: "a filter's part" }),
-      groupAttention: t`needs attention`,
-      hide: t`Hide column`,
-      loading: (many) => t`Loading ${many}`,
-      loadingMore: (many) => t`Loading more ${many}`,
-      moveEarlier: t`Move earlier`,
-      moveLater: t`Move later`,
-      noDate: t`No date`,
-      noMatch: (many, query) => t`No ${many} match “${query}”.`,
-      noneMeet: (many) => t`No ${many} meet the filter.`,
-      noneYet: (many) => t`No ${many} yet.`,
-      open: (name) => t`Open ${name}`,
-      pages: (label) => {
-        const name = label.toLowerCase();
-        return t`Pages of ${name}`;
-      },
-      pinEnd: t`Pin to the end`,
-      pinStart: t`Pin to the start`,
-      rowPending: t({
-        message: "pending",
-        context: "a table row not yet in effect",
-      }),
-      rowRemoved: t({
-        message: "removed",
-        context: "a table row of something taken away",
-      }),
-      search: (many) => t`Search ${many}`,
-      searchLabel: (label) => {
-        const name = label.toLowerCase();
-        return t`Search ${name}`;
-      },
-      select: (name) => t`Choose ${name}`,
-      selected: (count, total) => t`${count} of ${total} chosen`,
-      sortDown: t`Sort high to low`,
-      sortNext: t`Sort by this next`,
-      sortUp: t`Sort low to high`,
-      tryAgain: t`Try again`,
-      undo: t`Undo`,
-      unpin: t`Unpin`,
-      view: t({ message: "View", context: "a table's view menu" }),
-      width: (header) => t`Width of ${header}`,
-      withChosen: (many) => t`With the chosen ${many}`,
-      unit: {
-        one: t({ message: "row", context: "a table's rows, counted" }),
-        other: t({ message: "rows", context: "a table's rows, counted" }),
-      },
-    },
-    field: {
-      statusError: t`Could not save. Your choice is kept.`,
-      statusLoading: t`Saving`,
-      statusRetry: t`Try again`,
-      statusSuccess: t`Saved`,
-    },
-    keyValue: {
-      copy: (label) => {
-        const what = label.toLocaleLowerCase();
-        return t`Copy ${what}`;
-      },
-      loading: t`Loading the value`,
     },
     table: {
       sortIndex: (place) =>

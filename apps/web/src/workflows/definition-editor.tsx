@@ -1,19 +1,36 @@
-import { Alert, AlertDescription } from "@grasp-os/app-kit/components/alert";
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Label } from "@grasp-os/app-kit/components/label";
-import { Textarea } from "@grasp-os/app-kit/components/textarea";
 import { draftErrors } from "@grasp-os/shared/drafts";
 import { failureText } from "@grasp-os/shared/errors";
 import type {
   WorkflowDefinitionProblem,
   WorkflowDraft,
 } from "@grasp-os/shared/workflow-resources";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { useState } from "react";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+} from "@grasp-os/ui/components/field";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemDetail,
+  ItemGroup,
+  ItemSeparator,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { Textarea } from "@grasp-os/ui/components/textarea";
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { colors, font, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { Fragment, useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
+import { SectionCard } from "./section-card.tsx";
 
 // A workflow's definition as its builders edit it: the draft's JSON
 // (`workflow.json`, the draft every builder shares), each save one
@@ -24,6 +41,31 @@ import { useCore } from "../use-core.ts";
 // step changed (`define`) comes back here as the draft's newer
 // revision. Sharing it with the team is the bar's (Share with your team).
 
+/** How many lines the definition's field shows before its text scrolls. */
+const DEFINITION_ROWS = 24;
+
+const styles = stylex.create({
+  body: { display: "flex", flexDirection: "column", gap: space["4"] },
+  actions: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["2"],
+  },
+  unsaved: {
+    color: colors.mutedForeground,
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+  },
+  conflict: { display: "flex", flexDirection: "column", gap: space["2"] },
+  where: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["2"],
+  },
+});
+
 /** What the editor last heard of a save. */
 type Outcome =
   | { kind: "saved" }
@@ -32,51 +74,55 @@ type Outcome =
 
 /** One problem core found, where it is, and what to change. */
 const Problem = ({ problem }: { problem: WorkflowDefinitionProblem }) => (
-  <li className="flex flex-col gap-1 border-b py-3 last:border-b-0">
-    <div className="flex flex-wrap items-center gap-2">
-      {problem.taskId === undefined ? null : (
-        <Badge variant="outline">{problem.taskId}</Badge>
-      )}
-      <code className="text-muted-foreground text-xs">{problem.pointer}</code>
-      <code className="text-muted-foreground text-xs">{problem.code}</code>
-    </div>
-    <p>{problem.message}</p>
-    <p className="text-muted-foreground">{problem.remedy}</p>
-  </li>
+  <Item size="sm">
+    <ItemContent>
+      <ItemTitle>{problem.message}</ItemTitle>
+      <ItemDescription>{problem.remedy}</ItemDescription>
+      <span {...stylex.props(styles.where)}>
+        {problem.taskId === undefined ? null : (
+          <Badge size="sm">{problem.taskId}</Badge>
+        )}
+        <ItemDetail>
+          <code>{problem.pointer}</code>
+        </ItemDetail>
+        <ItemDetail>
+          <code>{problem.code}</code>
+        </ItemDetail>
+      </span>
+    </ItemContent>
+  </Item>
 );
 
 /** Whether the draft passes, in words. */
-const DraftStatus = ({ draft }: { draft: WorkflowDraft }) => (
-  <p className="text-muted-foreground">
-    {draft.problems.length === 0 ? (
-      <Trans>It passes its checks.</Trans>
-    ) : (
-      <Trans>It doesn&apos;t pass yet: what to fix is below.</Trans>
-    )}
-  </p>
-);
+const DraftStatus = ({ draft }: { draft: WorkflowDraft }) => {
+  const { t } = useLingui();
+  return draft.problems.length === 0
+    ? t`It passes its checks.`
+    : t`It doesn't pass yet: what to fix is below.`;
+};
 
 /** What core found in the latest revision, when it found anything. */
 const Problems = ({
   problems,
 }: {
   problems: readonly WorkflowDefinitionProblem[];
-}) =>
-  problems.length === 0 ? null : (
-    <section aria-labelledby="definition-problems">
-      <h2 className="font-medium" id="definition-problems">
-        <Trans>What to fix</Trans>
-      </h2>
-      <ul>
-        {problems.map((problem) => (
-          <Problem
+}) => {
+  const { t } = useLingui();
+  return problems.length === 0 ? null : (
+    <SectionCard flush title={t`What to fix`}>
+      <ItemGroup>
+        {problems.map((problem, at) => (
+          <Fragment
             key={`${problem.pointer} ${problem.code} ${problem.message}`}
-            problem={problem}
-          />
+          >
+            {at === 0 ? null : <ItemSeparator />}
+            <Problem problem={problem} />
+          </Fragment>
         ))}
-      </ul>
-    </section>
+      </ItemGroup>
+    </SectionCard>
   );
+};
 
 /**
  * The draft the editor goes by, and the text in it, from
@@ -176,83 +222,80 @@ export const DefinitionEditor = ({
   };
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="workflow-definition">
-          <Trans>workflow.json</Trans>
-        </Label>
-        <Textarea
-          className="min-h-96"
-          variant="code"
-          id="workflow-definition"
-          onChange={(event) => {
-            setText(event.target.value);
-          }}
-          readOnly={replacing}
-          spellCheck={false}
-          value={text}
-        />
-        <DraftStatus draft={draft} />
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          // The definition it starts from is saved as it is, too, as the
-          // draft's first change, to check.
-          disabled={busy || (!edited && draft.revision > 0)}
-          onClick={() => {
-            void save();
-          }}
-        >
-          {busy ? t`Checking…` : t`Check and save`}
-        </Button>
-        {edited ? (
-          <span className="text-muted-foreground">
-            <Trans>Unsaved changes</Trans>
-          </span>
-        ) : null}
-      </div>
-      {outcome?.kind === "conflict" ? (
-        <Alert variant="destructive">
-          <AlertDescription>
-            <p>
-              <Trans>
-                Someone changed this draft since you read it. Your text is still
-                here: read their revision, then save again, or take theirs
-                instead.
-              </Trans>
-            </p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <Button
-                disabled={busy}
-                onClick={() => {
-                  void reload(false);
-                }}
-                size="sm"
-                variant="outline"
-              >
-                <Trans>Keep my text</Trans>
-              </Button>
-              <Button
-                disabled={busy}
-                onClick={() => {
-                  void reload(true);
-                }}
-                size="sm"
-                variant="outline"
-              >
-                <Trans>Take theirs</Trans>
-              </Button>
+    <>
+      <SectionCard aria-label={t`Definition`}>
+        <div {...stylex.props(styles.body)}>
+          <Field>
+            <FieldLabel>{t`workflow.json`}</FieldLabel>
+            <Textarea
+              autoResize={false}
+              onValueChange={setText}
+              readOnly={replacing}
+              rows={DEFINITION_ROWS}
+              spellCheck={false}
+              value={text}
+            />
+            <FieldDescription>
+              <DraftStatus draft={draft} />
+            </FieldDescription>
+          </Field>
+          <div {...stylex.props(styles.actions)}>
+            <Button
+              // The definition it starts from is saved as it is, too, as the
+              // draft's first change, to check.
+              disabled={busy || (!edited && draft.revision > 0)}
+              onClick={() => {
+                void save();
+              }}
+            >
+              {busy ? t`Checking…` : t`Check and save`}
+            </Button>
+            {edited ? (
+              <span {...stylex.props(styles.unsaved)}>
+                {t`Unsaved changes`}
+              </span>
+            ) : null}
+          </div>
+          {outcome?.kind === "conflict" ? (
+            <div {...stylex.props(styles.conflict)}>
+              <Alert variant="destructive">
+                <AlertDescription>
+                  {t`Someone changed this draft since you read it. Your text is still here: read their revision, then save again, or take theirs instead.`}
+                </AlertDescription>
+              </Alert>
+              <div {...stylex.props(styles.actions)}>
+                <Button
+                  disabled={busy}
+                  onClick={() => {
+                    void reload(false);
+                  }}
+                  size="sm"
+                  variant="outline"
+                >
+                  {t`Keep my text`}
+                </Button>
+                <Button
+                  disabled={busy}
+                  onClick={() => {
+                    void reload(true);
+                  }}
+                  size="sm"
+                  variant="outline"
+                >
+                  {t`Take theirs`}
+                </Button>
+              </div>
             </div>
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      {outcome?.kind === "saved" ? (
-        <output className="sr-only">{t`Saved.`}</output>
-      ) : null}
-      <ErrorText>
-        {outcome?.kind === "failed" ? outcome.reason : undefined}
-      </ErrorText>
+          ) : null}
+          {outcome?.kind === "saved" ? (
+            <output {...stylex.props(visuallyHidden)}>{t`Saved.`}</output>
+          ) : null}
+          <ErrorText>
+            {outcome?.kind === "failed" ? outcome.reason : undefined}
+          </ErrorText>
+        </div>
+      </SectionCard>
       <Problems problems={draft.problems} />
-    </div>
+    </>
   );
 };
