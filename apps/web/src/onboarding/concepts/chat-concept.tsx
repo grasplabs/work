@@ -49,7 +49,7 @@ import { AiChoice } from "./ai-choice.tsx";
 import type { ConceptProps, ConceptStep } from "./concept-props.ts";
 import { ConceptFrame } from "./frame.tsx";
 import { LanguageCards } from "./language-cards.tsx";
-import { CampaignPicture, CampaignTimeline, ExampleNote } from "./plan.tsx";
+import { CampaignTimeline, ExampleNote } from "./plan.tsx";
 import { SoundToggle } from "./sound-toggle.tsx";
 import { interviewer, StephenFigure } from "./stephen.tsx";
 
@@ -254,12 +254,7 @@ const useTurns = (
       id: "plan",
       from: "stephen",
       text: t`That works. Here’s the plan: one week of short talks with your team, then you get what I learned.`,
-      more: (
-        <>
-          <CampaignPicture />
-          <CampaignTimeline today={today} />
-        </>
-      ),
+      more: <CampaignTimeline today={today} />,
     },
     {
       id: "example",
