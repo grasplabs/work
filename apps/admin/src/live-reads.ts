@@ -5,6 +5,7 @@
  * deadline. The grid (src/clients/grid.ts) and the revocation check
  * (src/rollout/shared-secrets.ts) both read this way.
  */
+import "@tanstack/react-start/server-only";
 import { deadline, whenAborted } from "@grasp-os/shared/deadline";
 
 /** How reading clients live may go. */

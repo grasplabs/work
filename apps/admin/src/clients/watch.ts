@@ -15,6 +15,7 @@
  * A client whose company ended Grasp's staff access refuses the read, and
  * isn't watched until it opens it again.
  */
+import "@tanstack/react-start/server-only";
 import { log } from "@grasp-os/shared/log";
 import { eq } from "drizzle-orm";
 

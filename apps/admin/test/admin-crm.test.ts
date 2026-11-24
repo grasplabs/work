@@ -2,17 +2,20 @@ import { env } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
+import type { ClientAdmin } from "../src/clients/admin.ts";
+import { fetchClientAdmin } from "../src/clients/functions.ts";
 import { attioLimits } from "../src/crm/attio.ts";
+import type { Crm } from "../src/crm/crm.ts";
 import { setAttioCompanyFn } from "../src/crm/functions.ts";
 import { adminDatabase } from "../src/db/act.ts";
 import { auditEvents, clients } from "../src/db/schema.ts";
 import { mockAccess } from "./access.ts";
 import { attioValue, fakeAttio } from "./attio-fake.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { emptyAdminSnapshot } from "./cloudflare-api.ts";
-import { callServerFn, page } from "./pages.ts";
+import { callServerFn } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import { setStoreSecret, useStoreSecrets } from "./secrets-store.ts";
+import { emptyAdminSnapshot } from "./snapshots.ts";
 
 const token = "test-deployer-token-admin-crm-7d2e41";
 /** Attio's read-only key; never a real one. */
@@ -64,25 +67,14 @@ const link = async (clientId: string, recordId: string | null) =>
     { email: staff.email }
   );
 
-/** The page's main part, past the column of sections. */
-const mainOf = (html: string): string => html.slice(html.indexOf("<main"));
+/** Client `clientId` as its organization's page reads it, as the staff member. */
+const adminOf = async (clientId: string): Promise<ClientAdmin | null> =>
+  await callServerFn(fetchClientAdmin, { clientId }, { email: staff.email });
 
-/** The text of the line under `label`, tags taken out. */
-const lineOf = (html: string, label: string): string => {
-  const at = html.indexOf(`>${label}</dt>`);
-  if (at === -1) {
-    return "";
-  }
-  const start = html.indexOf("<dd", at);
-  const end = html.indexOf("</dd>", start);
-  return html
-    .slice(html.indexOf(">", start) + 1, end)
-    .replaceAll(/<[^>]*>/gu, "");
-};
-
-const detailsOf = async (clientId: string) => {
-  const { html } = await page(`/organizations/${clientId}/details`);
-  return { html, main: mainOf(html) };
+/** Client `clientId`'s company in Attio, as its page reads it. */
+const crmOf = async (clientId: string): Promise<Crm | undefined> => {
+  const admin = await adminOf(clientId);
+  return admin?.state === "answered" ? admin.crm : undefined;
 };
 
 /**
@@ -139,50 +131,60 @@ const noordkade = () => {
 const daysAgo = (days: number): string =>
   new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
+/** The day `days` ago. */
+const dayAgo = (days: number): string => daysAgo(days).slice(0, 10);
+
 describe("an organization's company in Attio, with Attio's key", () => {
   useStoreSecrets({ deployer: token });
   eachTest({ withKey: true });
 
-  it("shows a linked company, its people and its deals, read only", async () => {
+  it("reads a linked company, its people and its deals, writing nothing, and nothing of anyone else or of the key", async () => {
     const clientId = await liveClient();
     const { companyId } = noordkade();
 
     const linked = await link(clientId, companyId);
-    const { html, main } = await detailsOf(clientId);
+    const admin = await adminOf(clientId);
+    const sent = JSON.stringify(admin);
 
     expect({
       linked,
-      name: lineOf(main, "Name in Attio"),
-      domains: lineOf(main, "Domains"),
-      categories: lineOf(main, "Categories"),
-      employees: lineOf(main, "Employees"),
-      opens: main.includes(
-        `https://app.attio.com/grasp/company/${companyId}/overview`
-      ),
-      deal: main.includes("Noordkade Finance: Business"),
-      dealLine: main.includes("Won 🎉 · €21,780.00 · owned by Ruben Jansen"),
-      people: [
-        "Sanne de Wit",
-        "COO · sanne@noordkade.test",
-        "Pieter de Boer",
-      ].map((text) => main.includes(text)),
-      stranger: html.includes("someone@elsewhere.test"),
-      notConnected: main.includes("Attio isn’t connected"),
-      // The key never reaches the page, hydration data included.
-      key: html.includes(attioKey),
+      crm: admin?.state === "answered" ? admin.crm : undefined,
+      stranger: sent.includes("someone@elsewhere.test"),
+      key: sent.includes(attioKey),
       writes: attio.writes,
     }).toStrictEqual({
       linked: { changed: true, refused: null },
-      name: "Noordkade Finance",
-      domains: "noordkade.test",
-      categories: "Financial Services and B2B",
-      employees: "51-250",
-      opens: true,
-      deal: true,
-      dealLine: true,
-      people: [true, true, true],
+      crm: {
+        state: "read",
+        recordId: companyId,
+        records: {
+          company: {
+            name: "Noordkade Finance",
+            domains: ["noordkade.test"],
+            categories: ["Financial Services", "B2B"],
+            employeeRange: "51-250",
+            url: `https://app.attio.com/grasp/company/${companyId}/overview`,
+          },
+          people: [
+            { name: "Pieter de Boer", title: "Head of Finance", email: "" },
+            {
+              name: "Sanne de Wit",
+              title: "COO",
+              email: "sanne@noordkade.test",
+            },
+          ],
+          deals: [
+            {
+              name: "Noordkade Finance: Business",
+              stage: { title: "Won 🎉", kind: "won" },
+              value: { amount: 21_780, currency: "EUR" },
+              owner: "Ruben Jansen",
+            },
+          ],
+          calls: { from: "meetings", calls: [] },
+        },
+      },
       stranger: false,
-      notConnected: false,
       key: false,
       writes: 0,
     });
@@ -228,31 +230,18 @@ describe("an organization's company in Attio, with Attio's key", () => {
     });
 
     await link(clientId, companyId);
-    const { main } = await detailsOf(clientId);
-    const calls = main.slice(main.indexOf(">Calls</h2>"));
-    const kickoff = calls.indexOf("Kickoff with the team leads");
-    const first = calls.indexOf("First conversation");
+    const crm = await crmOf(clientId);
 
-    expect({
-      deal: calls.includes(
-        "Noordkade Finance: Business · Won 🎉 · Ruben Jansen"
-      ),
-      newestFirst: kickoff !== -1 && first !== -1 && kickoff < first,
-      with: calls.includes("With Sanne de Wit and joost@noordkade.test"),
-      grasp: calls.includes("ruben@grasp.test"),
-      future: calls.includes("Next week"),
-      other: calls.includes("Another company"),
-      note: calls.includes("A note, not a call"),
-      notConnected: calls.includes("Once Attio is connected"),
-    }).toStrictEqual({
-      deal: true,
-      newestFirst: true,
-      with: true,
-      grasp: false,
-      future: false,
-      other: false,
-      note: false,
-      notConnected: false,
+    expect(crm?.state === "read" ? crm.records.calls : crm).toStrictEqual({
+      from: "meetings",
+      calls: [
+        {
+          on: dayAgo(10),
+          title: "Kickoff with the team leads",
+          with: ["Sanne de Wit", "joost@noordkade.test"],
+        },
+        { on: dayAgo(40), title: "First conversation", with: ["Sanne de Wit"] },
+      ],
     });
   });
 
@@ -269,14 +258,11 @@ describe("an organization's company in Attio, with Attio's key", () => {
       }
     );
     await link(clientId, companyId);
-    const { main } = await detailsOf(clientId);
-    const inCalls = (text: string): boolean =>
-      main.includes(text, main.indexOf(">Calls</h2>"));
-    expect({
-      from: inCalls("from its notes in Attio"),
-      note: inCalls("Call with Sanne"),
-      other: inCalls("Another company"),
-    }).toStrictEqual({ from: true, note: true, other: false });
+    const crm = await crmOf(clientId);
+    expect(crm?.state === "read" ? crm.records.calls : crm).toStrictEqual({
+      from: "notes",
+      calls: [{ on: dayAgo(4), title: "Call with Sanne", with: [] }],
+    });
   });
 
   it("reads no more than a page's worth of a company's people", async () => {
@@ -295,22 +281,21 @@ describe("an organization's company in Attio, with Attio's key", () => {
       });
     }
     await link(clientId, companyId);
-    await detailsOf(clientId);
+    await adminOf(clientId);
     expect(
       attio.paths.filter((path) => path.includes("/objects/people/"))
     ).toHaveLength(attioLimits.people);
   });
 
-  it("says when Attio has no such company, and still offers the link", async () => {
+  it("reads a company Attio doesn't have as such, keeping the link", async () => {
     const clientId = await liveClient();
-    await link(clientId, crypto.randomUUID());
-    const { main } = await detailsOf(clientId);
-    expect({
-      line: main.includes(
-        "Attio can’t be read for it now: Attio has no such company."
-      ),
-      form: main.includes('name="recordId"'),
-    }).toStrictEqual({ line: true, form: true });
+    const recordId = crypto.randomUUID();
+    await link(clientId, recordId);
+    await expect(crmOf(clientId)).resolves.toStrictEqual({
+      state: "unread",
+      recordId,
+      error: "not_found",
+    });
   });
 
   it("refuses a company Attio answers for another id", async () => {
@@ -318,11 +303,14 @@ describe("an organization's company in Attio, with Attio's key", () => {
     const { companyId } = noordkade();
     attio.swapped.set(companyId, crypto.randomUUID());
     await link(clientId, companyId);
-    const { main } = await detailsOf(clientId);
+    const admin = await adminOf(clientId);
     expect({
-      line: main.includes("what Attio answered can’t be read"),
-      shown: main.includes("Sanne de Wit"),
-    }).toStrictEqual({ line: true, shown: false });
+      crm: admin?.state === "answered" ? admin.crm : undefined,
+      shown: JSON.stringify(admin).includes("Sanne de Wit"),
+    }).toStrictEqual({
+      crm: { state: "unread", recordId: companyId, error: "invalid_answer" },
+      shown: false,
+    });
   });
 
   it("links only by a company's record id, audits each change, and unlinks", async () => {
@@ -376,16 +364,16 @@ describe("an organization's company in Attio, without Attio's key", () => {
   useStoreSecrets({ deployer: token });
   eachTest({ withKey: false });
 
-  it("says Attio isn't connected and asks Attio nothing", async () => {
+  it("reads Attio as not connected, keeps the company it is linked to, and asks Attio nothing", async () => {
     const clientId = await liveClient();
     const { companyId } = noordkade();
     await link(clientId, companyId);
-    const { main } = await detailsOf(clientId);
     expect({
-      line: main.includes(
-        "Attio isn’t connected yet. Once it is, this fills in by itself. Add ATTIO_READ_KEY to the stage’s 1Password Environment, then run Deploy platform."
-      ),
+      crm: await crmOf(clientId),
       requests: attio.requests,
-    }).toStrictEqual({ line: true, requests: 0 });
+    }).toStrictEqual({
+      crm: { state: "not_connected", recordId: companyId },
+      requests: 0,
+    });
   });
 });

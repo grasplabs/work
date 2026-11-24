@@ -4,6 +4,7 @@
  * does, and the order the Workers go live in (connect before core, which
  * binds it).
  */
+import "@tanstack/react-start/server-only";
 import type { WorkerEntry } from "@grasp-os/shared/release";
 
 import { DeployError } from "./errors.ts";

@@ -10,6 +10,7 @@
  * Without `ADMIN_HOST` nothing moves here: the admin is served at the root
  * of whatever hostname it's asked on.
  */
+import "@tanstack/react-start/server-only";
 
 /** What the redirect reads from the admin's env. */
 export interface AdminHostEnv {

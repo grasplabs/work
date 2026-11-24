@@ -12,7 +12,7 @@ import type {
   BrainSourcesAfter,
   BrainUploadReaders,
 } from "@grasp-os/shared/brain-sources";
-import { uploadMaxBytes } from "@grasp-os/shared/uploads";
+import { uploadMaxBytes, uploadTypes } from "@grasp-os/shared/uploads";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -1333,7 +1333,7 @@ describe(SourcesPage, () => {
 
     expect({
       chosen,
-      accepts: picker.accept.split(",").map((type) => type.trim()),
+      accepts: picker.accept,
       // The limit, as core's own holds it.
       says: refusedText.includes(
         "PDF, Word, Excel or transcripts, up to 10 MB."
@@ -1342,7 +1342,9 @@ describe(SourcesPage, () => {
       panelSaysWhy: panel().includes(refused),
     }).toStrictEqual({
       chosen: "Only me",
-      accepts: [".pdf", ".docx", ".xlsx", ".vtt"],
+      accepts: Object.keys(uploadTypes)
+        .map((type) => `.${type}`)
+        .join(","),
       says: true,
       uploadSaysWhy: true,
       panelSaysWhy: true,

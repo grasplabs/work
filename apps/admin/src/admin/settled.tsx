@@ -102,10 +102,5 @@ export const Ago = ({ at }: { at: string }) => {
       clearInterval(timer);
     };
   }, []);
-  return (
-    // Rendered on the server a moment before the page hydrates: the words may move on in that moment.
-    <time dateTime={at} suppressHydrationWarning>
-      {agoWords(Date.parse(at), now)}
-    </time>
-  );
+  return <time dateTime={at}>{agoWords(Date.parse(at), now)}</time>;
 };

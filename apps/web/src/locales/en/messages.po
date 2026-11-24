@@ -8405,6 +8405,10 @@ msgstr "Grasp has no sender for its mail yet"
 msgid "Grasp hasn't confirmed your question yet. It's kept here, and goes once Grasp answers."
 msgstr "Grasp hasn't confirmed your question yet. It's kept here, and goes once Grasp answers."
 
+#: src/routes/waiting.tsx
+msgid "Grasp is almost ready for you"
+msgstr "Grasp is almost ready for you"
+
 #: src/frame/part-words.tsx
 msgid "Grasp is answering"
 msgstr "Grasp is answering"
@@ -8446,6 +8450,10 @@ msgstr "Grasp is still working on it…"
 msgid "Grasp is writing your export. It takes a minute or two; it shows here as soon as it is ready, and you can leave this page meanwhile."
 msgstr "Grasp is writing your export. It takes a minute or two; it shows here as soon as it is ready, and you can leave this page meanwhile."
 
+#: src/sign-in-errors.ts
+msgid "Grasp isn’t open for everyone yet: your company’s admins are still setting it up, and you’ll get in as soon as they have finished. If you have an interview link, it is in your email."
+msgstr "Grasp isn’t open for everyone yet: your company’s admins are still setting it up, and you’ll get in as soon as they have finished. If you have an interview link, it is in your email."
+
 #: src/guest-sign-in.tsx
 msgid "Grasp isn't open yet. Try again later."
 msgstr "Grasp isn't open yet. Try again later."
@@ -8481,10 +8489,6 @@ msgstr "Grasp may use {app} only through the tools you allowed."
 #: src/chat/saved-memory.tsx
 msgid "Grasp no longer remembers this."
 msgstr "Grasp no longer remembers this."
-
-#: src/sign-in-errors.ts
-msgid "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
-msgstr "Grasp opens for everyone soon, once Stephen has talked with the teams. If you have an interview link, it is in your email."
 
 #: src/frame/part-words.tsx
 msgid "Grasp opens for everyone soon. If you have an interview link, it is in your email."
@@ -16679,6 +16683,7 @@ msgstr "Sign in with your organization's account."
 #: src/routes/guest.tsx
 #: src/routes/interview.tsx
 #: src/routes/staff.tsx
+#: src/routes/waiting.tsx
 msgid "Sign out"
 msgstr "Sign out"
 
@@ -21925,6 +21930,10 @@ msgstr "Your company wants to know how the work really goes. You lead your team,
 #: src/agents/agents-overview.tsx
 msgid "Your company's"
 msgstr "Your company's"
+
+#: src/routes/waiting.tsx
+msgid "Your company’s admins are still setting Grasp up. There is nothing you need to do: this page opens Grasp for you as soon as they have finished."
+msgstr "Your company’s admins are still setting Grasp up. There is nothing you need to do: this page opens Grasp for you as soon as they have finished."
 
 #: src/settings/chat-accounts.tsx
 msgid "Your conversations are being deleted. If any remain, try again in a moment."

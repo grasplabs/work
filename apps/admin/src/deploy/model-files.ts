@@ -29,6 +29,7 @@
  * (src/cloudflare/api.ts), which already creates and deletes the client's
  * buckets: no other credential.
  */
+import "@tanstack/react-start/server-only";
 import { log } from "@grasp-os/shared/log";
 import {
   deployedModelKey,

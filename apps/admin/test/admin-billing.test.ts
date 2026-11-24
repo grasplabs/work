@@ -2,17 +2,23 @@ import { env, exports } from "cloudflare:workers";
 import { and, eq } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { formatDate } from "../src/admin/words.ts";
+import type { Billing } from "../src/billing/billing.ts";
 import { setStripeCustomerFn } from "../src/billing/functions.ts";
 import { stripeReadTools } from "../src/billing/stripe.ts";
+import type { ClientAdmin } from "../src/clients/admin.ts";
+import {
+  fetchClientAdmin,
+  fetchClientAdmins,
+  fetchClientGrid,
+} from "../src/clients/functions.ts";
 import { adminDatabase } from "../src/db/act.ts";
 import { auditEvents, clients } from "../src/db/schema.ts";
 import { accessJwt, mockAccess } from "./access.ts";
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { emptyAdminSnapshot } from "./cloudflare-api.ts";
-import { callServerFn, page } from "./pages.ts";
+import { callServerFn } from "./pages.ts";
 import { livePlacedClient, placedRelease } from "./placed.ts";
 import { setStoreSecret, useStoreSecrets } from "./secrets-store.ts";
+import { emptyAdminSnapshot } from "./snapshots.ts";
 import { daysFrom, fakeStripeMcp } from "./stripe-mcp.ts";
 
 const token = "test-deployer-token-admin-billing-7d2e41";
@@ -70,38 +76,23 @@ const link = async (clientId: string, customerId: string | null) =>
     { email: staff.email }
   );
 
-/** The page's main part, past the column of sections. */
-const mainOf = (html: string): string => html.slice(html.indexOf("<main"));
+/** Client `clientId` as its organization's page reads it, as the staff member. */
+const adminOf = async (clientId: string): Promise<ClientAdmin | null> =>
+  await callServerFn(fetchClientAdmin, { clientId }, { email: staff.email });
 
-/** The text of the line under `label`, tags taken out. */
-const lineOf = (html: string, label: string): string => {
-  const at = html.indexOf(`>${label}</dt>`);
-  if (at === -1) {
-    return "";
-  }
-  const start = html.indexOf("<dd", at);
-  const end = html.indexOf("</dd>", start);
-  return html
-    .slice(html.indexOf(">", start) + 1, end)
-    .replaceAll(/<[^>]*>/gu, "");
-};
-
-const contractOf = async (clientId: string): Promise<string> => {
-  const { html } = await page(
-    `/organizations/${clientId}/details?tab=contract`
-  );
-  return mainOf(html);
-};
-
-const overviewOf = async (clientId: string): Promise<string> => {
-  const { html } = await page(`/organizations/${clientId}`);
-  return mainOf(html);
+/** Client `clientId`'s billing, as its page reads it. */
+const billingOf = async (clientId: string): Promise<Billing | undefined> => {
+  const admin = await adminOf(clientId);
+  return admin?.state === "answered" ? admin.billing : undefined;
 };
 
 const now = new Date();
-/** The day a Unix time falls on, as the page says it. */
+/** The day a Unix time falls on. */
 const dayOf = (seconds: number): string =>
-  formatDate(new Date(seconds * 1000).toISOString().slice(0, 10));
+  new Date(seconds * 1000).toISOString().slice(0, 10);
+
+/** `amount` euros. */
+const euros = (amount: number) => ({ amount, currency: "eur" });
 
 /** A customer Stripe charges each month, with its last two invoices paid. */
 const paying = (customerId: string) => {
@@ -220,82 +211,95 @@ describe("an organization's billing, with Stripe's key", () => {
   useStoreSecrets({ deployer: token });
   eachTest({ withKey: true });
 
-  it("shows a linked company's customer, how it pays, what it paid last and its next invoice, all paid, and nothing that needs Grasp", async () => {
+  it("reads a linked company's customer, how it pays, what it paid last and its next invoice, all paid", async () => {
     const clientId = await liveClient();
     const customerId = "cus_NoordkadePaid1";
     const { held, renews, paidAt } = paying(customerId);
     stripe.customers.set(customerId, held);
 
     const linked = await link(clientId, customerId);
-    const contract = await contractOf(clientId);
-    const overview = await overviewOf(clientId);
+    const admin = await adminOf(clientId);
 
     expect({
       linked,
-      line: contract.includes("Everything billed is paid."),
-      customer: lineOf(contract, "Customer in Stripe"),
-      opens: contract.includes(
-        `https://dashboard.stripe.com/test/customers/${customerId}`
-      ),
-      pays: lineOf(contract, "How it pays"),
-      open: lineOf(contract, "Open"),
-      overdue: lineOf(contract, "Overdue"),
-      lastPaid: lineOf(contract, "Last paid"),
-      next: lineOf(contract, "Next invoice"),
-      invoices: ["NK-0002", "NK-0001"].map((number) =>
-        contract.includes(`>${number}</span>`)
-      ),
-      inStripe: contract.includes("From Stripe, the latest 2. All are paid."),
-      notConnected: contract.includes("Once Stripe is connected"),
-      // Nothing of the customer's email is shown, or needed.
-      email: contract.includes("finance@noordkade.test"),
-      needs: overview.includes("overdue"),
+      billing: admin?.state === "answered" ? admin.billing : undefined,
+      // Nothing of the customer's email is read, or needed.
+      email: JSON.stringify(admin).includes("finance@noordkade.test"),
       keyed: stripe.unkeyed,
     }).toStrictEqual({
       linked: { changed: true, refused: null },
-      line: true,
-      customer: "Noordkade B.V.",
-      opens: true,
-      pays: "Stripe charges it each time",
-      open: "Nothing",
-      overdue: "Nothing",
-      lastPaid: `€1,815.00 on ${dayOf(paidAt)}`,
-      next: `€1,500.00 on ${dayOf(renews)}, before tax`,
-      invoices: [true, true],
-      inStripe: true,
-      notConnected: false,
+      billing: {
+        state: "read",
+        customerId,
+        account: {
+          name: "Noordkade B.V.",
+          url: `https://dashboard.stripe.com/test/customers/${customerId}`,
+          pays: { by: "charge" },
+          subscription: {
+            status: "active",
+            next: { on: dayOf(renews), amount: euros(1500) },
+            ends: null,
+          },
+          open: { count: 0, amount: [] },
+          overdue: { count: 0, amount: [], since: null },
+          lastPaid: { on: dayOf(paidAt), amount: euros(1815) },
+          invoices: [
+            {
+              number: "NK-0002",
+              date: dayOf(daysFrom(now, -10)),
+              amount: 1815,
+              currency: "eur",
+              status: "paid",
+              due: null,
+            },
+            {
+              number: "NK-0001",
+              date: dayOf(daysFrom(now, -40)),
+              amount: 1815,
+              currency: "eur",
+              status: "paid",
+              due: null,
+            },
+          ],
+        },
+      },
       email: false,
-      needs: false,
       keyed: 0,
     });
   });
 
-  it("shows an overdue invoice in Billing and among what needs Grasp", async () => {
+  it("reads an invoice past its due date as overdue, with the day it was due", async () => {
     const clientId = await liveClient();
     const customerId = "cus_NoordkadeLate1";
     const { held, due } = late(customerId);
     stripe.customers.set(customerId, held);
 
     await link(clientId, customerId);
-    const contract = await contractOf(clientId);
-    const overview = await overviewOf(clientId);
+    const billing = await billingOf(clientId);
 
-    expect({
-      line: contract.includes("1 invoice is overdue, €1,815.00 in all."),
-      pays: lineOf(contract, "How it pays"),
-      open: lineOf(contract, "Open"),
-      overdue: lineOf(contract, "Overdue"),
-      invoice: /NK-0003<\/span>.*?>Overdue</su.test(contract),
-      need: overview.includes(
-        `An invoice of €1,815.00 is overdue: it was due on ${dayOf(due)}.`
-      ),
-    }).toStrictEqual({
-      line: true,
-      pays: "It is sent each invoice, to pay within 14 days",
-      open: "€1,815.00, 1 invoice",
-      overdue: `€1,815.00, due since ${dayOf(due)}`,
-      invoice: true,
-      need: true,
+    expect(
+      billing?.state === "read"
+        ? {
+            pays: billing.account.pays,
+            open: billing.account.open,
+            overdue: billing.account.overdue,
+            invoice: billing.account.invoices.find(
+              ({ number }) => number === "NK-0003"
+            ),
+          }
+        : billing
+    ).toStrictEqual({
+      pays: { by: "invoice", daysToPay: 14 },
+      open: { count: 1, amount: [euros(1815)] },
+      overdue: { count: 1, amount: [euros(1815)], since: dayOf(due) },
+      invoice: {
+        number: "NK-0003",
+        date: dayOf(daysFrom(now, -24)),
+        amount: 1815,
+        currency: "eur",
+        status: "overdue",
+        due: dayOf(due),
+      },
     });
   });
 
@@ -311,12 +315,16 @@ describe("an organization's billing, with Stripe's key", () => {
     });
 
     await link(clientId, customerId);
-    const contract = await contractOf(clientId);
+    const billing = await billingOf(clientId);
 
-    expect({
-      theirs: contract.includes("NK-0003"),
-      line: contract.includes("Everything billed is paid."),
-    }).toStrictEqual({ theirs: false, line: true });
+    expect(
+      billing?.state === "read"
+        ? {
+            invoices: billing.account.invoices.map(({ number }) => number),
+            open: billing.account.open.count,
+          }
+        : billing
+    ).toStrictEqual({ invoices: ["NK-0002", "NK-0001"], open: 0 });
   });
 
   it("calls only the read tools on its list, though Stripe's server lists write tools too", async () => {
@@ -325,8 +333,7 @@ describe("an organization's billing, with Stripe's key", () => {
     stripe.customers.set(customerId, late(customerId).held);
 
     await link(clientId, customerId);
-    await contractOf(clientId);
-    await overviewOf(clientId);
+    await adminOf(clientId);
 
     const called = stripe.called.map(({ tool }) => tool);
     const allowed: readonly string[] = stripeReadTools;
@@ -354,35 +361,36 @@ describe("an organization's billing, with Stripe's key", () => {
     stripe.customers.set(customerId, paying(customerId).held);
     await link(clientId, customerId);
 
-    // The whole page, scripts and the data they hydrate with included.
-    const response = await exports.default.fetch(
+    // Everything the organization's page gets: its document, and the
+    // answers of each server function it reads with.
+    const document = await exports.default.fetch(
       `https://ops.grasp.test/organizations/${clientId}/details?tab=contract`,
       { headers: { "cf-access-jwt-assertion": await accessJwt(staff.email) } }
     );
-    const html = await response.text();
+    const sent = JSON.stringify([
+      await document.text(),
+      await callServerFn(fetchClientGrid, undefined, { email: staff.email }),
+      await callServerFn(fetchClientAdmins, undefined, { email: staff.email }),
+      await adminOf(clientId),
+    ]);
 
     expect({
-      status: response.status,
-      key: html.includes(stripeKey),
-      email: html.includes("finance@noordkade.test"),
-      shown: html.includes("Noordkade B.V."),
+      status: document.status,
+      key: sent.includes(stripeKey),
+      email: sent.includes("finance@noordkade.test"),
+      shown: sent.includes("Noordkade B.V."),
     }).toStrictEqual({ status: 200, key: false, email: false, shown: true });
   });
 
-  it("says a company not linked yet isn't, and asks Stripe nothing for it", async () => {
+  it("reads a company not linked yet as such, and asks Stripe nothing for it", async () => {
     const clientId = await liveClient();
 
-    const contract = await contractOf(clientId);
+    const billing = await billingOf(clientId);
 
-    expect({
-      line: contract.includes(
-        "Not linked to its customer in Stripe yet. Link it by the customer’s id, and this fills in by itself."
-      ),
-      form: contract.includes('name="customerId"'),
-      // No invoices without Stripe.
-      invoices: contract.includes('id="contract-invoices"'),
-      requests: stripe.requests,
-    }).toStrictEqual({ line: true, form: true, invoices: false, requests: 0 });
+    expect({ billing, requests: stripe.requests }).toStrictEqual({
+      billing: { state: "not_linked" },
+      requests: 0,
+    });
   });
 
   it("links only by a customer's id, audits each change, and unlinks", async () => {
@@ -439,26 +447,16 @@ describe("an organization's billing, without Stripe's key", () => {
   useStoreSecrets({ deployer: token });
   eachTest({ withKey: false });
 
-  it("says Stripe isn't connected, keeps the customer it is linked to, and asks Stripe nothing", async () => {
+  it("reads Stripe as not connected, keeps the customer it is linked to, and asks Stripe nothing", async () => {
     const clientId = await liveClient();
     const customerId = "cus_NoordkadeNoKey1";
     stripe.customers.set(customerId, late(customerId).held);
 
     await link(clientId, customerId);
-    const contract = await contractOf(clientId);
-    const overview = await overviewOf(clientId);
+    const billing = await billingOf(clientId);
 
-    expect({
-      line: contract.includes(
-        "Once Stripe is connected, this fills in by itself. Add STRIPE_RESTRICTED_KEY to the stage’s 1Password Environment, then run Deploy platform."
-      ),
-      linkedTo: contract.includes(`value="${customerId}"`),
-      overdue: overview.includes("overdue"),
-      requests: stripe.requests,
-    }).toStrictEqual({
-      line: true,
-      linkedTo: true,
-      overdue: false,
+    expect({ billing, requests: stripe.requests }).toStrictEqual({
+      billing: { state: "not_connected", customerId },
       requests: 0,
     });
   });

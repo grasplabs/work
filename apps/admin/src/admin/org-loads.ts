@@ -15,13 +15,11 @@
  *
  * Neither ever rejects: a read that fails is a client not answering.
  */
-import { whenAborted } from "@grasp-os/shared/deadline";
 
 import type { ClientAdmin } from "../clients/admin.ts";
 import { fetchClientAdmin, fetchClientAdmins } from "../clients/functions.ts";
 import type { GridRow } from "../clients/grid.ts";
-import { freshMs } from "./org-reads.ts";
-import type { AnsweredAdmin, OrgRead, OrgReads } from "./org-reads.ts";
+import type { OrgRead, OrgReads } from "./org-reads.ts";
 import type { Deferred } from "./settled.tsx";
 
 const openOrganization = /^\/organizations\/(?<clientId>[^/]+)/u;
@@ -32,48 +30,54 @@ export const openClientId = (pathname: string): string | undefined => {
   return clientId === undefined ? undefined : decodeURIComponent(clientId);
 };
 
-/** Client `clientId` as read through `reads`: shared with any read of it under way. */
+/**
+ * Client `clientId` as read through `reads`: shared with any read of it
+ * under way, or asked `anew` only one begun in the router's load under way.
+ */
 const readOne = async (
   reads: OrgReads,
-  clientId: string
+  clientId: string,
+  options: { anew?: boolean; after?: number } = {}
 ): Promise<ClientAdmin | null> =>
   await reads.read(
     clientId,
-    async () => await fetchClientAdmin({ data: { clientId } })
+    async () => await fetchClientAdmin({ data: { clientId } }),
+    options
   );
 
-/**
- * Every client in `clients`, as its core answers now, in their order;
- * the open one's (`open`) read on its own, as its page reads it. Null
- * when they couldn't be read at all.
- */
-export const readAdmins = async (
+/** Every client as `readAdmins` reads them, asked at `asked`. */
+const adminsAnswer = async (
   reads: OrgReads,
-  clients: readonly GridRow[],
-  open: string | undefined
+  asked: number,
+  clients: Promise<readonly GridRow[]>,
+  open: string | undefined,
+  anew: boolean
 ): Promise<ClientAdmin[] | null> => {
-  const opened =
-    open !== undefined && clients.some(({ id }) => id === open)
-      ? open
-      : undefined;
-  const [rest, one] = await Promise.all([
+  const [rest, one, rows] = await Promise.all([
     (async () => {
       try {
         return await fetchClientAdmins({
-          data: { except: opened === undefined ? [] : [opened] },
+          data: { except: open === undefined ? [] : [open] },
         });
       } catch {
         return null;
       }
     })(),
     (async () => {
-      if (opened === undefined) {
+      if (open === undefined) {
         return null;
       }
       try {
-        return await readOne(reads, opened);
+        return await readOne(reads, open, { anew });
       } catch {
         return null;
+      }
+    })(),
+    (async () => {
+      try {
+        return await clients;
+      } catch {
+        return [];
       }
     })(),
   ]);
@@ -81,9 +85,9 @@ export const readAdmins = async (
     return null;
   }
   for (const admin of rest) {
-    reads.remember(admin);
+    reads.remember(admin, asked);
   }
-  const order = new Map(clients.map(({ id }, index) => [id, index]));
+  const order = new Map(rows.map(({ id }, index) => [id, index]));
   return [...rest, ...(one === null ? [] : [one])].toSorted(
     (a, b) =>
       (order.get(a.client.id) ?? order.size) -
@@ -91,42 +95,48 @@ export const readAdmins = async (
   );
 };
 
-/** What a settled promise is, at once, or `notYet` while it isn't. */
-const notYet = Symbol("not yet");
-const peek = async <T>(value: Promise<T>): Promise<T | typeof notYet> =>
-  // A promise settled already wins the race: its callbacks run first.
-  await Promise.race([value, Promise.resolve(notYet)]);
+/**
+ * Every client, as its core answers now, in the order of `clients` (the
+ * grid, read beside it rather than before it: neither waits on the
+ * other); the open one's (`open`) read on its own, as its page reads it:
+ * `anew` when the tab shows it already, so the page's read in the same
+ * load joins this one. Null when they couldn't be read at all. With when
+ * they were asked (`asked`, src/admin/org-reads.ts), so a page can tell
+ * whether they are newer than an answer it has.
+ */
+export const readAdmins = (
+  reads: OrgReads,
+  clients: Promise<readonly GridRow[]>,
+  open: string | undefined,
+  anew: boolean
+): { asked: number; admins: Promise<ClientAdmin[] | null> } => {
+  const asked = reads.ask();
+  return { asked, admins: adminsAnswer(reads, asked, clients, open, anew) };
+};
 
 /**
  * How long an organization's page waits on the frame's read for its
  * client before asking it alone: a little past the page's own deadline
  * (3 s, `pageReadOptions`), as the frame's waits on every client.
  */
-const frameWaitMs = 4000;
+export const frameWaitMs = 4000;
 
 /**
- * What the frame's read (`admins`) answered for `clientId`, once it is in,
- * or undefined: when it holds up the page past `frameWaitMs`, failed, or
- * has no fresh answer from its core (asked alone then, as staff opened
- * it).
+ * Waits for the frame's read (`admins`) to be in, which keeps what it
+ * read (`readAdmins`), but no longer than `frameWaitMs`.
  */
-const framedAnswer = async (
-  admins: Promise<ClientAdmin[] | null>,
-  clientId: string
-): Promise<AnsweredAdmin | undefined> => {
+const frameIn = async (admins: Promise<unknown>): Promise<void> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const framed = await Promise.race([
+    await Promise.race([
       admins,
-      whenAborted(AbortSignal.timeout(frameWaitMs)),
+      // oxlint-disable-next-line promise/avoid-new -- setTimeout has no promise form here
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, frameWaitMs);
+      }),
     ]);
-    const found = framed?.find((admin) => admin.client.id === clientId);
-    // Only an answer that is still fresh: an older one is read again.
-    return found?.state === "answered" &&
-      Date.now() - Date.parse(found.at) < freshMs
-      ? found
-      : undefined;
-  } catch {
-    return undefined;
+  } finally {
+    clearTimeout(timer);
   }
 };
 
@@ -140,39 +150,62 @@ const unanswered = (client: GridRow): ClientAdmin => ({
 
 /**
  * Organization `client`'s page as read: an answer the page has while it
- * is fresh, at once (unless staff asked anew over it); otherwise its core
- * asked now, unless only preloaded (undefined: asked once opened). The
- * frame's read (`admins`) counts once it is in.
+ * is fresh, at once, when staff come to the page (a navigation, a
+ * preload); otherwise its core asked now, unless only preloaded
+ * (undefined: asked once opened). The frame's read (`admins`) counts once
+ * it is in.
+ *
+ * Coming to the page, an answer kept from before the last change staff
+ * made (src/router.tsx) is never shown as current: the page takes a read
+ * asked after that change if one is under way (the frame's, or one of
+ * its own), and otherwise asks its core alone; not answering, it shows
+ * the answer it had, marked stale. An answer asked after it shows at
+ * once.
+ *
+ * The rule for when a fresh answer may be reused: only on coming to the
+ * page. When the page loads while the tab already shows this
+ * organization (`onIt`, as the router resolved the tab's address): after
+ * any change staff made there (every change reads the page again,
+ * `router.invalidate`), Read again, Try again, or its answer going stale,
+ * its core is asked anew, by a read begun in that load, and the page
+ * waits for that answer. So a change can't be followed by the answer from
+ * before it, whichever action made it: none of them has to say so, and
+ * nothing is remembered of where the tab was.
  */
 export const readOrganization = async ({
   reads,
   client,
   admins,
-  again,
+  adminsAsked,
+  onIt,
   preload,
 }: {
   reads: OrgReads;
   client: GridRow;
   admins: Promise<ClientAdmin[] | null>;
-  again: boolean;
+  /** When the frame's read was asked (`readAdmins`). */
+  adminsAsked: number;
+  /**
+   * The tab shows this organization's page already: the address the
+   * router last resolved is one of its pages. Never a navigation to it,
+   * which the router may count as staying, from another organization.
+   */
+  onIt: boolean;
   /** Only pointed at, not opened: what the page has, its core never asked. */
   preload: boolean;
 }): Promise<{ read: Deferred<OrgRead> | undefined }> => {
-  // Run again where a fresh answer shows: staff asked anew (Read again,
-  // Try again), so the answer isn't reused. Run again without one (it
-  // went stale, or the page opens from a preload): read as on opening.
-  const anew = again && reads.fresh(client.id, Date.now()) !== undefined;
+  // Loading on the organization the tab shows: a change, Read again, Try
+  // again, a stale answer. Coming to it takes the answer it has, or the
+  // frame's read.
+  const anew = onIt && !preload;
+  // An answer kept from before the last change staff made
+  // (src/router.tsx) is never shown as current: a read asked after that
+  // change answers for it, the frame's or its own, if one is under way,
+  // and otherwise its core is asked alone. One asked after it shows at
+  // once.
   if (!anew) {
-    const framed = await peek(admins);
-    const found =
-      framed === notYet || framed === null
-        ? undefined
-        : framed.find((admin) => admin.client.id === client.id);
-    if (found !== undefined) {
-      reads.remember(found);
-    }
     const fresh = reads.fresh(client.id, Date.now());
-    if (fresh !== undefined) {
+    if (fresh !== undefined && !reads.predates(client.id)) {
       // Still marked stale when reading it again failed since.
       return { read: reads.settle(fresh, Date.now()) };
     }
@@ -186,25 +219,31 @@ export const readOrganization = async ({
     // When the frame reads this client alone (the open one), the page
     // takes that read as soon as it answers (`readOne` joins it), never
     // waiting on other cores. Otherwise the frame's read of every client,
-    // still under way, has this one in it: waited on, rather than asking
-    // its core, Stripe and Attio a second time, unless it holds up the
-    // page past `frameWaitMs`.
-    const framed =
-      anew || reads.reading(client.id)
-        ? undefined
-        : await framedAnswer(admins, client.id);
-    if (framed !== undefined) {
-      reads.remember(framed);
-      return reads.settle(framed, Date.now());
-    }
-    // An answer kept while the page waited is not asked for again.
-    const kept = anew ? undefined : reads.fresh(client.id, Date.now());
-    if (kept !== undefined) {
-      return reads.settle(kept, Date.now());
+    // if asked after the last change, has this one in it:
+    // waited on, rather than asking its core, Stripe and Attio a second
+    // time, unless it holds up the page past `frameWaitMs`. When neither
+    // gives an answer asked after the last change, its core is asked alone.
+    if (!anew) {
+      // Only a read asked after the last change holds every change made.
+      const after = reads.lastChange();
+      const own = reads.reading(client.id);
+      if ((own === undefined || own <= after) && adminsAsked > after) {
+        await frameIn(admins);
+      }
+      // An answer kept by now, asked after the last change, is not asked
+      // for again: the frame's, or one that came in while the page waited.
+      const kept = reads.fresh(client.id, Date.now());
+      if (kept !== undefined && !reads.predates(client.id)) {
+        return reads.settle(kept, Date.now());
+      }
     }
     let admin: ClientAdmin | null = null;
     try {
-      admin = await readOne(reads, client.id);
+      // Not answering, the page shows the answer it had, marked stale.
+      admin = await readOne(reads, client.id, {
+        anew,
+        after: reads.lastChange(),
+      });
     } catch {
       // As a core that didn't answer.
     }
@@ -215,5 +254,5 @@ export const readOrganization = async ({
   // it isn't waited on, so the page shows at once and waits for it in
   // place; held in an object, as an async function awaits a promise it
   // returns.
-  return again ? { read: await read } : { read };
+  return anew ? { read: await read } : { read };
 };

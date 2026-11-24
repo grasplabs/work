@@ -1,15 +1,16 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
+import type { SetupTab } from "../src/admin/setup.tsx";
 import { setSignIn } from "../src/clients/settings.ts";
 import { act, adminDatabase } from "../src/db/act.ts";
 import { clientDeploys, clientProvisions, clients } from "../src/db/schema.ts";
 import { episodeOf, markNeedsAttention } from "../src/hosting/attention.ts";
 import { importReleases } from "../src/releases/import.ts";
 import { mockAccess } from "./access.ts";
-import { page } from "./pages.ts";
 import { publishRelease } from "./releases.ts";
 import { adminOf } from "./secrets-store-admin.ts";
+import { setupPage } from "./setup-page.ts";
 
 mockAccess();
 
@@ -55,10 +56,9 @@ const importedRelease = async (notes: string): Promise<string> => {
 };
 
 /** Client `clientId`'s Setup, on `tab` (how it stands when none). */
-const setupOf = async (clientId: string, tab?: string) =>
-  await page(
-    `/organizations/${clientId}/setup${tab === undefined ? "" : `?tab=${tab}`}`
-  );
+const setupOf = async (clientId: string, tab: SetupTab = "status") => ({
+  html: (await setupPage(clientId, tab)) ?? "",
+});
 
 /** The part of a page titled `title`: from its label to its end. */
 const sectionOf = (html: string, title: string): string => {
@@ -67,28 +67,15 @@ const sectionOf = (html: string, title: string): string => {
 };
 
 describe("the company pages, in the admin", () => {
-  it("lists every organization, and a way to add one", async () => {
-    const live = await recordClient("active");
-
-    const { status, html } = await page("/");
-
-    expect({
-      status,
-      listed: html.includes(`href="/organizations/${live.id}"`),
-      add: html.includes('href="/new-organization"'),
-    }).toStrictEqual({ status: 200, listed: true, add: true });
-  });
-
   it("shows a company just added its setting up step by step, and its Hosting under its settings with nothing to choose", async () => {
     await importedRelease("feat(core): newest of all");
     const client = await recordClient();
 
-    const { status, html } = await setupOf(client.id);
+    const { html } = await setupOf(client.id);
     const settings = await setupOf(client.id, "settings");
     const hosting = sectionOf(settings.html, "Hosting");
 
     expect({
-      status,
       steps: [
         `Reserving ${client.id}.grasp.test`,
         "Installing Grasp",
@@ -100,7 +87,6 @@ describe("the company pages, in the admin", () => {
       where: hosting.includes("Grasp Cloud, data kept in the EU"),
       account: settings.html.includes("Account id"),
     }).toStrictEqual({
-      status: 200,
       steps: true,
       onStatus: false,
       place: false,
@@ -172,14 +158,13 @@ describe("the company pages, in the admin", () => {
       updatedAt: now,
     });
 
-    const { status, html } = await setupOf(client.id);
+    const { html } = await setupOf(client.id);
 
     expect({
-      status,
       named: html.includes(
         "A try stopped in its ignition step without recording why"
       ),
-    }).toStrictEqual({ status: 200, named: true });
+    }).toStrictEqual({ named: true });
   });
 
   it("says why a later run stopped by its own losses, not by an earlier deploy's failure", async () => {
@@ -282,15 +267,13 @@ describe("the company pages, in the admin", () => {
   it("shows an active company nothing left to set up, and nothing of its account's numbers before they are read", async () => {
     const client = await recordClient("active");
 
-    const { status, html } = await setupOf(client.id);
+    const { html } = await setupOf(client.id);
 
     expect({
-      status,
       settingUp: html.includes('aria-label="Setting it up"'),
       resume: html.includes("Resume"),
       numbers: html.includes("Its platform in numbers"),
     }).toStrictEqual({
-      status: 200,
       settingUp: false,
       resume: false,
       numbers: false,
@@ -321,7 +304,6 @@ describe("the company pages, in the admin", () => {
     const history = sectionOf(historyTab.html, "Its history");
 
     expect({
-      statuses: [releases.status, settings.status, historyTab.status],
       channel:
         releases.html.includes('name="channel"') &&
         releases.html.includes('value="beta"'),
@@ -339,7 +321,6 @@ describe("the company pages, in the admin", () => {
         history.includes(words)
       ),
     }).toStrictEqual({
-      statuses: [200, 200, 200],
       channel: true,
       signIn: true,
       pending: true,
@@ -361,7 +342,6 @@ describe("the company pages, in the admin", () => {
 
     expect({
       pinned: {
-        status: pinnedPage.status,
         says: pinnedPage.html.includes(`Pinned to ${release}`),
         unpin: pinnedPage.html.includes("Unpin"),
       },
@@ -373,13 +353,13 @@ describe("the company pages, in the admin", () => {
       },
       settingUp: settingUpPage.html.includes("Pin it to"),
     }).toStrictEqual({
-      pinned: { status: 200, says: true, unpin: true },
+      pinned: { says: true, unpin: true },
       unpinned: { says: true, unpin: false },
       settingUp: false,
     });
   });
 
-  it("says when its deploy of the release it should run failed, and why, sending staff to Platform; never for a release it no longer should run", async () => {
+  it("says when its deploy of the release it should run failed, and why, with Retry beside it; never for a release it no longer should run", async () => {
     const release = await importedRelease("feat(core): fails to deploy");
     const other = await importedRelease("feat(core): no longer its target");
     const failed = await recordClient("active", release);
@@ -412,31 +392,22 @@ describe("the company pages, in the admin", () => {
     expect({
       failed: failedPage.html.includes(`Its deploy of ${release} failed`),
       why: failedPage.html.includes("cloudflare_400_10000"),
-      platform: failedPage.html.includes('href="/platform"'),
+      retry: sectionOf(failedPage.html, "What needs a look").includes("Retry"),
       moved: movedPage.html.includes(`Its deploy of ${other} failed`),
     }).toStrictEqual({
       failed: true,
       why: true,
-      platform: true,
+      retry: true,
       moved: false,
     });
   });
 
-  it("answers 404 for a company that doesn't exist, or can't be one", async () => {
-    const pages = await Promise.all(
-      ["nobody-here", "Not_A_Client"].map(async (id) => await setupOf(id))
+  // The browser says such a page isn't there (src/admin/frame.test.tsx).
+  it("has no Setup for a company that doesn't exist, or can't be one", async () => {
+    const setups = await Promise.all(
+      ["nobody-here", "Not_A_Client"].map(async (id) => await setupPage(id))
     );
 
-    expect(pages.map(({ status }) => status)).toStrictEqual([404, 404]);
-  });
-
-  it("answers 404 for a page there isn't, with the way to the admin", async () => {
-    const { status, html } = await page("/no-such-page");
-
-    expect({
-      status,
-      says: html.includes("There&#x27;s no such page."),
-      back: html.includes("Back to the admin") && html.includes('href="/"'),
-    }).toStrictEqual({ status: 404, says: true, back: true });
+    expect(setups).toStrictEqual([null, null]);
   });
 });

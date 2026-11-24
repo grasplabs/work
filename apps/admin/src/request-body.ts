@@ -4,6 +4,8 @@
  * read, or else as it streams in, the stream cancelled there. A body that
  * declares no length is never held whole before it is measured.
  */
+import "@tanstack/react-start/server-only";
+
 export const boundedText = async (
   request: Request,
   maxBytes: number

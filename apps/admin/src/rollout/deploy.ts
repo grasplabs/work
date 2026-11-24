@@ -18,6 +18,7 @@
  * and gives the claim back, audited. A run that never gets there
  * (terminated) is settled by the reconciler's next tick.
  */
+import "@tanstack/react-start/server-only";
 import type { WorkflowDefinition } from "@grasp-os/workerflow/contracts";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";

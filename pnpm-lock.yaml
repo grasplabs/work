@@ -673,6 +673,9 @@ importers:
       drizzle-kit:
         specifier: 'catalog:'
         version: 0.31.11
+      happy-dom:
+        specifier: 'catalog:'
+        version: 21.0.4
       seroval:
         specifier: 'catalog:'
         version: 1.7.5
@@ -818,6 +821,9 @@ importers:
       jose:
         specifier: 'catalog:'
         version: 6.2.12
+      parse5:
+        specifier: 'catalog:'
+        version: 8.1.0
       postal-mime:
         specifier: 'catalog:'
         version: 4.2.0

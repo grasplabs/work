@@ -23,6 +23,7 @@
  * makes to the client's record carries `stillHolds` in the same
  * statement, so one that lost the client changes nothing.
  */
+import "@tanstack/react-start/server-only";
 import type { Workflow } from "@grasp-os/workerflow/binding";
 import type { InstanceStatus } from "@grasp-os/workerflow/contracts";
 import type { WorkflowInstance } from "@grasp-os/workerflow/instance";

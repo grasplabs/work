@@ -12,7 +12,7 @@ import { ChatBar } from "../chat/chat-bar.tsx";
 import { useChatPanels } from "../chat/chat-panel.tsx";
 import { ChatSwitcherProvider } from "../chat/chat-switcher.tsx";
 import { GlobalChatProvider, useGlobalChat } from "../chat/global-chat.tsx";
-import { readWithin, shellStatus } from "../core-connection.ts";
+import { shellStatus } from "../core-connection.ts";
 import { failingUpFront, providersOf } from "../frame/ai-key-banner.tsx";
 import { AppFrame } from "../frame/app-frame.tsx";
 import { useMatchLatest } from "../frame/match-latest.ts";
@@ -20,11 +20,7 @@ import { usePageDock } from "../frame/page-fill.ts";
 import { PageError } from "../frame/page-states.tsx";
 import { ShellPending } from "../frame/shell-pending.tsx";
 import { forgetSignedIn, markSignedIn } from "../frame/signed-in-here.ts";
-import {
-  landingAfterSignIn,
-  onboardingBehind,
-  takeJustSignedIn,
-} from "../landing.ts";
+import { heldWhileOnboarding, onboardingIsBehind } from "../landing.ts";
 import { RouteError } from "../route-error.tsx";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 
@@ -207,39 +203,18 @@ export const Route = createFileRoute("/_shell")({
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
       throw redirect({ to: "/guest", replace: true });
     }
-    // Just back from signing in, an admin with screens of their company's
-    // onboarding left starts in the onboarding. Core out of reach for it: home, as ever.
-    const landing = takeJustSignedIn()
-      ? await landingAfterSignIn({
-          path: location.pathname,
-          identity,
-          open: async () => {
-            try {
-              const [gate, flow, place] = await readWithin(
-                core,
-                async (session) =>
-                  await Promise.all([
-                    session.onboardingGate.view(),
-                    session.onboarding.flow(),
-                    session.onboarding.place(),
-                  ])
-              );
-              return onboardingBehind({
-                flow,
-                done: place.done,
-                open: gate.open,
-              });
-            } catch {
-              return true;
-            }
-          },
-        })
-      : null;
+    // Until the company's onboarding is behind it, no page of the platform
+    // opens: its admins go to the onboarding, everyone else waits.
+    const held = heldWhileOnboarding({
+      path: location.pathname,
+      identity,
+      behind: await onboardingIsBehind(core),
+    });
     // The next reload paints the frame at once (frame/shell-pending.tsx).
     markSignedIn();
-    if (landing !== null) {
+    if (held !== null) {
       // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
-      throw redirect({ to: landing, replace: true });
+      throw redirect({ to: held, replace: true });
     }
     return { identity };
   },

@@ -9,7 +9,8 @@
  * channel's release. Nothing records a rollout: what's still to deploy is
  * whatever runs something other than its target.
  */
-import type { Channel } from "../db/schema.ts";
+import "@tanstack/react-start/server-only";
+import type { Channel } from "./channel-ids.ts";
 
 /**
  * How many clients deploy at once, every channel together: they share one

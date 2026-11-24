@@ -1,36 +1,13 @@
+// @vitest-environment happy-dom
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
-import { env } from "cloudflare:workers";
-import { ne } from "drizzle-orm";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
-import { adminDatabase } from "../src/db/act.ts";
-import { clients } from "../src/db/schema.ts";
-import { mockAccess } from "./access.ts";
-import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
-import { emptyAdminSnapshot } from "./cloudflare-api.ts";
-import { page } from "./pages.ts";
-import { livePlacedClient, placedRelease } from "./placed.ts";
-import { useStoreSecrets } from "./secrets-store.ts";
+import { companies } from "../../test/app.tsx";
+import { emptyAdminSnapshot } from "../../test/snapshots.ts";
 
-const token = "test-deployer-token-admin-usage-5c1e9a";
-const cloudflare = mockCloudflareApi(token);
-// After the fake API: Access's keys are served, the rest goes to the fake.
-mockAccess();
-
-const db = adminDatabase(env.DB);
-
-/** An active client running a new release, as a deploy made it live, answering with `snapshot`. */
-const liveClient = async (snapshot: AdminSnapshot) => {
-  const release = await placedRelease("feat(core): ai use");
-  const clientId = `client-${crypto.randomUUID().slice(0, 8)}`;
-  const { core } = await livePlacedClient(cloudflare, release, {
-    id: clientId,
-    name: `Acme ${clientId}`,
-    signIn: null,
-  });
-  core.admin = snapshot;
-  return `/organizations/${clientId}`;
-};
+// An organization's AI use and hours, as the browser shows them from the
+// snapshot its core answers, which the Worker passes through unchanged
+// (test/client-admins.test.ts).
 
 /** One model's calls on a day, as core counts them. */
 const calls = (tokensIn: number, tokensOut: number, seconds = 0) => ({
@@ -45,9 +22,9 @@ const calls = (tokensIn: number, tokensOut: number, seconds = 0) => ({
  * A company whose core counted, today: Stephen reading the first
  * conversation with the careful model (2 million tokens read, 200
  * thousand written: €15) and interviewing with the quick one (1 million
- * read, 200 thousand written: €6), his voice (20 minutes: €3), and
+ * read, 200 thousand written: €6), his voice (20 minutes: €1.05), and
  * core's own default model, which has no price (500 thousand read, 100
- * thousand written: its tokens count, not its cost). €24 in all, with
+ * thousand written: its tokens count, not its cost). €22.05 in all, with
  * its contract not known.
  */
 const usedSnapshot = (): AdminSnapshot => {
@@ -79,28 +56,32 @@ const monthName = (iso: string): string =>
   });
 
 describe("an organization's AI use and hours", () => {
-  useStoreSecrets({ deployer: token });
-  beforeEach(async () => {
-    await db
-      .update(clients)
-      .set({ status: "offboarded" })
-      .where(ne(clients.status, "offboarded"));
+  let shown = companies();
+  beforeEach(() => {
+    shown = companies();
   });
+  /** A company answering `snapshot`: its page's path. */
+  const liveClient = async (snapshot: AdminSnapshot): Promise<string> =>
+    await Promise.resolve(shown.add(snapshot));
+  /** The page at `path`, its markup as the browser shows it. */
+  const page = async (path: string) => {
+    const opened = await shown.open(path);
+    return { html: opened.html() };
+  };
 
   it("shows what core counted: this month and in all, the tokens and minutes, and each use by model", async () => {
     const snapshot = usedSnapshot();
     const base = await liveClient(snapshot);
 
-    const { status, html } = await page(`${base}/ai-use`);
+    const { html } = await page(`${base}/ai-use`);
     const has = (text: string) => html.includes(text);
 
     expect({
-      status,
       // What core counted isn't said to be worked out.
       workedOut: has("Worked out from what happened"),
       month: has(`${monthName(snapshot.now)}</span>`),
       inAll: has("In all, so far"),
-      spend: html.split(">€24<").length - 1,
+      spend: html.split(">€22<").length - 1,
       // Core doesn't send the contract yet: unknown, not unsigned.
       contract: [
         has("the contract isn’t known yet"),
@@ -114,14 +95,13 @@ describe("an organization's AI use and hours", () => {
       // By use: reading and interviews cost; what took nothing, like chat, isn't listed.
       byUse: [
         has(">€15<"),
-        has(">€9.00<"),
+        has(">€7.05<"),
         has(">Chat<"),
         // The unpriced model's tokens are among the interviews'.
         has("1.5 million read, 300 thousand written"),
       ],
       toCome: has("This section isn’t in the admin yet."),
     }).toStrictEqual({
-      status: 200,
       workedOut: false,
       month: true,
       inAll: true,
@@ -147,17 +127,15 @@ describe("an organization's AI use and hours", () => {
       usage: used === undefined ? [] : [{ ...used, day: earlier }],
     });
 
-    const { status, html } = await page(`${base}/ai-use`);
+    const { html } = await page(`${base}/ai-use`);
 
     expect({
-      status,
       thisMonth: html.includes(`>${monthName(snapshot.now)}</span>`),
       // This month took nothing; everything so far is the earlier month's.
       nothingYet: html.includes(">€0.00<"),
-      inAll: html.includes(">€24<"),
+      inAll: html.includes(">€22<"),
       since: html.includes(`since ${monthName(earlier)}`),
     }).toStrictEqual({
-      status: 200,
       thisMonth: true,
       nothingYet: true,
       inAll: true,
@@ -168,14 +146,13 @@ describe("an organization's AI use and hours", () => {
   it("says nothing is used yet where core counted nothing, with the way to the first conversation", async () => {
     const base = await liveClient(emptyAdminSnapshot("Acme"));
 
-    const { status, html } = await page(`${base}/ai-use`);
+    const { html } = await page(`${base}/ai-use`);
 
     expect({
-      status,
       nothing: html.includes("Nothing used yet"),
       way: html.includes(`href="${base}/steps"`),
       figures: html.includes("In all, so far"),
-    }).toStrictEqual({ status: 200, nothing: true, way: true, figures: false });
+    }).toStrictEqual({ nothing: true, way: true, figures: false });
   });
 
   it("shows the use of a model without a price, though it cost nothing", async () => {
@@ -221,7 +198,6 @@ describe("an organization's AI use and hours", () => {
     const during = await page(`${told}/hours`);
 
     expect({
-      statuses: [before.status, during.status],
       none: [before, during].map(({ html }) =>
         html.includes("No hours known yet")
       ),
@@ -235,7 +211,6 @@ describe("an organization's AI use and hours", () => {
         html.includes("This section isn’t in the admin yet.")
       ),
     }).toStrictEqual({
-      statuses: [200, 200],
       none: [true, true],
       before: true,
       during: true,
