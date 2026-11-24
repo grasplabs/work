@@ -29,24 +29,24 @@ export const turnsOf = (messages: readonly ChatMessage[]): Turn[] => {
 };
 
 /**
- * How many whole seconds a turn took, from its question to its last reply;
- * undefined for a turn with no reply, or one that took under a second.
+ * How long a turn took, in milliseconds, from its question to its last
+ * reply; undefined for a turn with no reply, or one too short to say
+ * (under a tenth of a second).
  */
-export const workedSeconds = ({ asked, replies }: Turn): number | undefined => {
+export const workedMs = ({ asked, replies }: Turn): number | undefined => {
   const last = replies.at(-1);
   if (last === undefined) {
     return undefined;
   }
-  const seconds = Math.round(
-    (Date.parse(last.at) - Date.parse(asked.at)) / 1000
-  );
-  return Number.isFinite(seconds) && seconds >= 1 ? seconds : undefined;
+  const ms = Date.parse(last.at) - Date.parse(asked.at);
+  return Number.isFinite(ms) && ms >= 100 ? ms : undefined;
 };
 
 /**
- * How long Grasp worked on each question it is done with, by the ID of
- * the question's first reply: the line over that reply says it. The
- * question it still works on (`unfinished`) has no time yet.
+ * How long Grasp worked on each question it is done with, in
+ * milliseconds, by the ID of the question's first reply: the line over
+ * that reply says it. The question it still works on (`unfinished`) has
+ * no time yet.
  */
 export const workedFor = (
   turns: readonly Turn[],
@@ -55,18 +55,29 @@ export const workedFor = (
   const worked = new Map<number, number>();
   for (const turn of turns) {
     const [first] = turn.replies;
-    const seconds = turn === unfinished ? undefined : workedSeconds(turn);
-    if (first !== undefined && seconds !== undefined) {
-      worked.set(first.id, seconds);
+    const ms = turn === unfinished ? undefined : workedMs(turn);
+    if (first !== undefined && ms !== undefined) {
+      worked.set(first.id, ms);
     }
   }
   return worked;
 };
 
-/** A length of time in minutes and the seconds over them, to be said short: "4m 21s". */
-export const minutesAndSeconds = (
-  seconds: number
-): { minutes: number; rest: number } => ({
-  minutes: Math.floor(seconds / 60),
-  rest: seconds % 60,
-});
+/**
+ * A length of time in the parts it is said short in, as #2503 says it:
+ * seconds to a tenth under ten seconds ("5.0s"), whole seconds under a
+ * minute ("14s"), else minutes and the seconds over them ("2m 05s").
+ */
+export const shortTime = (
+  ms: number
+): { minutes: number; seconds: number; tenths: boolean } => {
+  if (ms < 9950) {
+    return { minutes: 0, seconds: Math.round(ms / 100) / 10, tenths: true };
+  }
+  const whole = Math.round(ms / 1000);
+  return {
+    minutes: Math.floor(whole / 60),
+    seconds: whole % 60,
+    tenths: false,
+  };
+};

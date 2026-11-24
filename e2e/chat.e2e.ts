@@ -1,5 +1,5 @@
 import { expect } from "@playwright/test";
-import type { Page, WebSocketRoute } from "@playwright/test";
+import type { Locator, Page, WebSocketRoute } from "@playwright/test";
 
 import { execute } from "./connections-seed.ts";
 import { test } from "./csp.ts";
@@ -13,7 +13,8 @@ import type { Person } from "./people.ts";
 // there, reads the writes its agent holds for them
 // (one as its tool describes it, one by its raw input), confirms and
 // rejects them, and sees nothing of held writes while they are switched
-// off, and reads the agent's answer to a chat a script opens. The stack's
+// off, and reads the agent's answer to a chat a script opens; Escape over
+// the open chat closes only what was opened on top of it. The stack's
 // provider answers only a scripted chat (e2e/model-scripts.ts) and refuses
 // the key of any other, so that answer is the gateway's failure;
 // streaming, resuming and the person check themselves are core's tests
@@ -34,6 +35,18 @@ const rowOf = (window: ReturnType<Page["getByRole"]>, title: string) =>
   window
     .getByRole("option")
     .filter({ has: window.page().getByText(title, { exact: true }) });
+
+/**
+ * Opens the actions of the row titled `title` in the window, as its
+ * arrow does: the row highlighted, then the arrow toward the line's end.
+ */
+const rowActions = async (
+  window: ReturnType<Page["getByRole"]>,
+  title: string
+): Promise<void> => {
+  await rowOf(window, title).hover();
+  await window.getByRole("combobox").press("ArrowRight");
+};
 
 /**
  * Waits until the page reads nothing from core for its pages: the router it
@@ -169,8 +182,10 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   const chat = chatOf(page);
   await expect(chat).toBeVisible();
   await expect(page).toHaveURL(/\/$/u);
-  const messages = chat.getByRole("list", { name: "Messages" });
-  await expect(messages.getByRole("listitem").first()).toHaveText(question);
+  const messages = chat.getByRole("log", { name: "Messages" });
+  await expect(
+    messages.getByRole("article", { name: "You" }).first()
+  ).toContainText(question);
   // The local stack's provider refuses unscripted requests' keys
   // (e2e/model-fake.ts): the answer says so once the turn ends, and who can
   // put it right.
@@ -191,7 +206,7 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   await box.fill(draft);
   await messages.getByRole("button", { name: "Try again" }).click();
   await expect(
-    messages.getByRole("listitem").filter({ hasText: question })
+    messages.getByRole("article", { name: "You" }).filter({ hasText: question })
   ).toHaveCount(2);
   await expect(box).toHaveText(draft);
   // The first try's failure stays where it was; the new one is last.
@@ -201,32 +216,52 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   );
   await box.fill("");
 
-  // Renamed from the chat's menu in the window, in place: the name is in
-  // a field, Escape keeps the one it had and Enter keeps the new one.
+  // Renamed from the chat's menu in the window, in a dialog of its own,
+  // which takes the window's place: Escape keeps the name it had and
+  // Enter keeps the new one; either way the window comes back, on the
+  // chat's row.
   chats = await chatsWindow(page);
-  await chats.getByRole("button", { name: `More for ${question}` }).click();
+  await rowActions(chats, question);
   await page.getByRole("menuitem", { name: "Rename" }).click();
-  const name = chats.getByLabel("Chat name");
+  await expect(chats).toBeHidden();
+  const renaming = page.getByRole("dialog", { name: "Rename chat" });
+  const name = renaming.getByLabel("Chat name");
   await expect(name).toBeFocused();
   await name.fill("Never kept");
   await name.press("Escape");
-  await expect(rowOf(chats, question)).toBeVisible();
-  await chats.getByRole("button", { name: `More for ${question}` }).click();
+  await expect(renaming).toBeHidden();
+  await expect(chats).toBeVisible();
+  const field = chats.getByRole("combobox", { name: "Search chats" });
+  await expect(field).toBeFocused();
+  await expect(field).toHaveAttribute(
+    "aria-activedescendant",
+    (await rowOf(chats, question).getAttribute("id")) ?? "-"
+  );
+  await rowActions(chats, question);
   await page.getByRole("menuitem", { name: "Rename" }).click();
-  await chats.getByLabel("Chat name").fill(title);
-  await chats.getByLabel("Chat name").press("Enter");
+  await name.fill(title);
+  await name.press("Enter");
+  await expect(renaming).toBeHidden();
+  await expect(chats).toBeVisible();
   await expect(rowOf(chats, title)).toBeVisible();
+  await expect(field).toHaveAttribute(
+    "aria-activedescendant",
+    (await rowOf(chats, title).getAttribute("id")) ?? "-"
+  );
 
   // Found by what was said in it, which its title no longer holds, with
   // the line it was said in under the title; a word nobody said finds
   // nothing.
-  const search = chats.getByLabel("Search chats");
+  const search = chats.getByRole("combobox", { name: "Search chats" });
   await search.fill(`ben ${tag}`);
   await expect(rowOf(chats, title)).toContainText(`Send Ben invoice ${tag}.`);
   await expect(rowOf(chats, title).locator("mark")).toHaveText("Ben");
   await search.fill(`never said ${tag}`);
   await expect(chats.getByRole("option")).toHaveCount(0);
   await expect(chats).toContainText("No chat has that.");
+  // Escape clears the search first, then closes the window.
+  await page.keyboard.press("Escape");
+  await expect(search).toHaveValue("");
   await page.keyboard.press("Escape");
   await expect(chats).toHaveCount(0);
 
@@ -345,8 +380,10 @@ test("a person asks, and reads the agent's answer once its turn ends", async ({
   await page.getByLabel("Your question").fill(question);
   await page.getByRole("button", { name: "Send", exact: true }).click();
 
-  const messages = page.getByRole("list", { name: "Messages" });
-  await expect(messages.getByRole("listitem").first()).toHaveText(question);
+  const messages = page.getByRole("log", { name: "Messages" });
+  await expect(
+    messages.getByRole("article", { name: "You" }).first()
+  ).toContainText(question);
   await expect(messages.getByText(answer.text)).toBeVisible({
     timeout: 30_000,
   });
@@ -355,9 +392,128 @@ test("a person asks, and reads the agent's answer once its turn ends", async ({
     messages.getByRole("button", { name: "Ask again" })
   ).toBeVisible();
   await expect(messages.getByRole("alert")).toHaveCount(0);
+  // Asking again draws the answer anew: the person is taken to the box.
+  await messages.getByRole("button", { name: "Ask again" }).click();
+  await expect(
+    chatOf(page).getByRole("textbox", { name: "Ask Grasp" })
+  ).toBeFocused();
 });
 
-test("a person attaches files to a question, takes one off, and sees the question carry the other", async ({
+/**
+ * Escape on what `trigger` opens over the open chat (`opened`): that alone
+ * closes, the focus back on its trigger, the chat still open; a second
+ * Escape closes the chat, and the shortcut opens it again.
+ */
+const escapesAlone = async (
+  page: Page,
+  trigger: Locator,
+  opened: Locator
+): Promise<void> => {
+  const chat = chatOf(page);
+  await trigger.click();
+  await expect(opened).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(opened).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await expect(chat).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(chat).toBeHidden();
+  await page.keyboard.press("ControlOrMeta+j");
+  await expect(chat).toBeVisible();
+};
+
+test("Escape closes only what is open over the chat, and the chat once nothing is", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  const { opener } = modelScripts.answersTable;
+  const question = `${opener} (${crypto.randomUUID().slice(0, 8)})`;
+  await page.goto("/apps");
+  await page.getByRole("button", { name: "Open the chat" }).click();
+  const chat = chatOf(page);
+  await expect(chat).toBeVisible();
+  await chat.getByRole("textbox", { name: "Ask Grasp" }).fill(question);
+  await chat.getByRole("button", { name: "Send", exact: true }).click();
+  const answer = chat
+    .getByRole("log", { name: "Messages" })
+    .getByRole("article")
+    .last();
+  await expect(answer.getByRole("button", { name: "Copy table" })).toBeVisible({
+    timeout: 30_000,
+  });
+
+  const menu = page.getByRole("menu");
+  await escapesAlone(
+    page,
+    answer.getByRole("button", { name: "Copy table" }),
+    menu
+  );
+  await escapesAlone(
+    page,
+    answer.getByRole("button", { name: "Download table" }),
+    menu
+  );
+  await escapesAlone(
+    page,
+    answer.getByRole("button", { name: "weekly report" }),
+    page.getByRole("alertdialog", { name: "Open external link?" })
+  );
+  await escapesAlone(page, chat.getByRole("button", { name: "Add" }), menu);
+  await escapesAlone(
+    page,
+    chat.getByRole("button", { name: /^Model:/u }),
+    page.locator('[data-slot="model-selector-content"]')
+  );
+});
+
+test("a person answers the agent's questions in the box's place, types instead and comes back to them, and sends the answers", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  const { opener, replies } = modelScripts.asksFirst;
+  const [, answer] = replies;
+  const question = `${opener} (${crypto.randomUUID().slice(0, 8)})`;
+  await page.goto("/");
+  await page.getByLabel("Your question").fill(question);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+
+  // One question at a time, in the box's place, the agent's pick marked.
+  const chat = chatOf(page);
+  const asked = chat.getByRole("group", { name: "Grasp asks" });
+  await expect(asked).toContainText("1 of 2", { timeout: 30_000 });
+  await expect(chat.getByRole("textbox", { name: "Ask Grasp" })).toHaveCount(0);
+  await expect(
+    asked.getByRole("radio", { name: "Weekly Recommended" })
+  ).toBeVisible();
+  await asked.getByRole("radio", { name: /^Weekly/u }).click();
+  await asked.getByRole("button", { name: "Next" }).click();
+  await asked.getByRole("checkbox", { name: "Me" }).click();
+  await asked.getByRole("checkbox", { name: "Finance" }).click();
+
+  // Typing instead keeps what was answered for when they come back.
+  await chat.getByRole("button", { name: "Type instead" }).click();
+  await expect(chat.getByRole("textbox", { name: "Ask Grasp" })).toBeVisible();
+  await chat.getByRole("button", { name: "Back to the 2 questions" }).click();
+  await expect(asked.getByRole("checkbox", { name: "Finance" })).toBeChecked();
+  await asked.getByRole("button", { name: "Send answer" }).click();
+
+  // Their message is the answers, each after its question; the agent goes on.
+  const messages = chat.getByRole("log", { name: "Messages" });
+  await expect(
+    messages.getByRole("article", { name: "You" }).last()
+  ).toContainText("How often should it come?Weekly");
+  await expect(
+    messages.getByRole("article", { name: "You" }).last()
+  ).toContainText("Who should get it?Me and Finance");
+  await expect(messages.getByText(answer.text)).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(chat.getByRole("textbox", { name: "Ask Grasp" })).toBeVisible();
+});
+
+test("a person attaches files to a question, sees them, takes two off by pointer and by keyboard, and sees the question carry the other", async ({
   pageOf,
 }) => {
   const { user } = peopleIn("chat");
@@ -365,6 +521,7 @@ test("a person attaches files to a question, takes one off, and sees the questio
   const tag = crypto.randomUUID().slice(0, 8);
   const plan = `plan-${tag}.md`;
   const notes = `notes-${tag}.txt`;
+  const draft = `draft-${tag}.txt`;
   const question = `What does the plan say ${tag}?`;
   await page.goto("/");
 
@@ -377,9 +534,21 @@ test("a person attaches files to a question, takes one off, and sees the questio
       buffer: Buffer.from("# Plan\n\nShip it."),
     },
     { name: notes, mimeType: "text/plain", buffer: Buffer.from("Notes") },
+    { name: draft, mimeType: "text/plain", buffer: Buffer.from("Draft") },
   ]);
-  await page.getByRole("button", { name: `Remove ${notes}` }).click();
+  const main = page.getByRole("main");
+  await Promise.all(
+    [plan, notes, draft].map(async (name) => {
+      await expect(main.getByText(name)).toBeVisible();
+    })
+  );
+  await main.getByRole("button", { name: `Remove ${notes}` }).click();
   await expect(page.getByText(notes)).toHaveCount(0);
+  // From the keyboard too: the focus on its Remove, Enter takes it off.
+  await main.getByRole("button", { name: `Remove ${draft}` }).focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByText(draft)).toHaveCount(0);
+  await expect(page.locator("body")).not.toBeFocused();
   await expect(page.getByText(plan)).toBeVisible();
   // A type core doesn't take stays out, and the box says why.
   await picker.setInputFiles({
@@ -394,33 +563,14 @@ test("a person attaches files to a question, takes one off, and sees the questio
   await page.getByRole("button", { name: "Send" }).click();
   // The question shows the file it carried; the box is empty again.
   const asked = chatOf(page)
-    .getByRole("list", { name: "Messages" })
-    .getByRole("listitem")
+    .getByRole("log", { name: "Messages" })
+    .getByRole("article", { name: "You" })
     .first();
   await expect(asked).toContainText(question);
   await expect(asked).toContainText(plan);
   await expect(
     page.getByRole("main").getByRole("button", { name: `Remove ${plan}` })
   ).toHaveCount(0);
-});
-
-test("a person starts a chat from one of the questions under the box", async ({
-  pageOf,
-}) => {
-  const { user } = peopleIn("chat");
-  const page = await pageOf(user);
-  await page.goto("/");
-  const questions = page.getByRole("list", { name: "Questions to start with" });
-  await expect(questions.getByRole("button")).toHaveCount(4);
-  await questions
-    .getByRole("button", { name: "What waits on me today?" })
-    .click();
-  await expect(
-    chatOf(page)
-      .getByRole("list", { name: "Messages" })
-      .getByRole("listitem")
-      .first()
-  ).toHaveText("What waits on me today?");
 });
 
 test("a followed chat says core can't be reached when it stays out of reach", async ({
@@ -445,10 +595,10 @@ test("a followed chat says core can't be reached when it stays out of reach", as
   // The turn has ended (the local stack's provider refuses unscripted
   // requests' keys), so nothing else is on its way when the connection drops.
   const chat = chatOf(page);
-  const messages = chat.getByRole("list", { name: "Messages" });
-  await expect(messages.getByRole("listitem").first()).toHaveText(
-    `Out of reach ${tag}.`
-  );
+  const messages = chat.getByRole("log", { name: "Messages" });
+  await expect(
+    messages.getByRole("article", { name: "You" }).first()
+  ).toContainText(`Out of reach ${tag}.`);
   await expect(messages.getByRole("alert")).toContainText(
     "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
     { timeout: 30_000 }
@@ -491,31 +641,37 @@ test("one control picks the model and how hard it thinks, sends both with the qu
     "Model: mistral-large-latest. Change model"
   );
   await control.click();
-  const choices = page.getByRole("menuitemradio");
-  await expect(choices).toHaveText([
-    /mistral-large-latest/u,
-    /claude-sonnet-4-6/u,
-  ]);
-
-  // One that thinks offers its efforts in the same menu, which stays open
-  // for them, at the model's own default.
-  await page
-    .getByRole("menuitemradio", { name: /^claude-sonnet-4-6/u })
-    .click();
-  await expect(choices).toHaveText([
-    /mistral-large-latest/u,
-    /claude-sonnet-4-6/u,
+  // The models by their makers: each maker's beside the list, its models
+  // in the list while it is chosen, the default's first.
+  const models = page.getByRole("option");
+  const makers = page.getByRole("listbox", { name: "Makers" });
+  await expect(makers.getByRole("option")).toHaveCount(2);
+  await expect(makers.getByRole("option").first()).toHaveAccessibleName(
+    "Mistral AI"
+  );
+  await expect(
+    page.getByRole("option", { name: /^mistral-large-latest/u })
+  ).toBeVisible();
+  // A model picked closes the panel; one that thinks then offers its
+  // efforts beside the models, at the model's own default.
+  await makers.getByRole("option", { name: "Anthropic" }).click();
+  await page.getByRole("option", { name: /^claude-sonnet-4-6/u }).click();
+  await expect(models).toHaveCount(0);
+  await control.click();
+  const effort = page.getByRole("group", { name: "How hard it thinks" });
+  await expect(effort.getByRole("button")).toHaveText([
     "Low",
     "Medium",
     "High",
     "Max",
   ]);
-  await expect(
-    page.getByRole("menuitemradio", { name: "Medium" })
-  ).toHaveAttribute("aria-checked", "true");
-  await page.getByRole("menuitemradio", { name: "Max" }).click();
+  await expect(effort.getByRole("button", { name: "Medium" })).toHaveAttribute(
+    "aria-pressed",
+    "true"
+  );
+  await effort.getByRole("button", { name: "Max" }).click();
   await page.keyboard.press("Escape");
-  await expect(choices).toHaveCount(0);
+  await expect(models).toHaveCount(0);
   await expect(control).toHaveAccessibleName(
     "Model: claude-sonnet-4-6, thinking max. Change model or thinking"
   );
@@ -525,8 +681,11 @@ test("one control picks the model and how hard it thinks, sends both with the qu
   await page.getByRole("button", { name: "Send", exact: true }).click();
   const chat = chatOf(page);
   await expect(
-    chat.getByRole("list", { name: "Messages" }).getByRole("listitem").first()
-  ).toHaveText(question);
+    chat
+      .getByRole("log", { name: "Messages" })
+      .getByRole("article", { name: "You" })
+      .first()
+  ).toContainText(question);
   // The question, not the new chat named after it.
   const asked = sent.find(
     (message) => message.includes('"send"') && message.includes(question)
@@ -544,11 +703,11 @@ test("one control picks the model and how hard it thinks, sends both with the qu
 
   // Back on the model that doesn't think, the effort goes.
   await control.click();
-  await page
-    .getByRole("menuitemradio", { name: /^mistral-large-latest/u })
-    .click();
-  await expect(choices).toHaveCount(2);
+  await makers.getByRole("option", { name: "Mistral AI" }).click();
+  await page.getByRole("option", { name: /^mistral-large-latest/u }).click();
+  await expect(effort).toHaveCount(0);
   await page.keyboard.press("Escape");
+  await expect(models).toHaveCount(0);
   await expect(control).toHaveAccessibleName(
     "Model: mistral-large-latest. Change model"
   );
@@ -577,8 +736,10 @@ test("the chat on every other page carries on the open chat, which is the same c
   await box.fill(question);
   await expect(send).toBeEnabled();
   await box.press("Enter");
-  const messages = chat.getByRole("list", { name: "Messages" });
-  await expect(messages.getByRole("listitem").first()).toHaveText(question);
+  const messages = chat.getByRole("log", { name: "Messages" });
+  await expect(
+    messages.getByRole("article", { name: "You" }).first()
+  ).toContainText(question);
   await expect(messages.getByRole("alert")).toContainText(
     "Your AI provider is refusing your key. Ask your admin to check or replace it in Settings › AI providers.",
     { timeout: 30_000 }
@@ -593,23 +754,28 @@ test("the chat on every other page carries on the open chat, which is the same c
   await expect(box).toBeFocused();
   await box.fill(`Half a thought ${tag}`);
   await page.keyboard.press("ControlOrMeta+j");
-  await expect(messages.getByRole("listitem").first()).toHaveText(question);
+  await expect(
+    messages.getByRole("article", { name: "You" }).first()
+  ).toContainText(question);
   await expect(box).toBeFocused();
   await expect(box).toHaveText(`Half a thought ${tag}`);
 
   // On another page it is still open, on the same chat; a new chat starts
   // afresh.
   await page.goto("/projects");
-  await expect(messages.getByRole("listitem").first()).toHaveText(question);
+  await expect(
+    messages.getByRole("article", { name: "You" }).first()
+  ).toContainText(question);
   await chat.getByRole("button", { name: "New chat" }).click();
   await expect(messages).toHaveCount(0);
-  await expect(chat).toContainText("Ask anything, or describe a process");
   const second = `Another from another page ${tag}?`;
   await box.fill(second);
   // A page load reads the models again.
   await expect(send).toBeEnabled();
   await box.press("Enter");
-  await expect(messages.getByRole("listitem").first()).toHaveText(second);
+  await expect(
+    messages.getByRole("article", { name: "You" }).first()
+  ).toContainText(second);
 
   // On Chat, from the sidebar, it is still beside the page on that chat,
   // with no idle bar (the page is where to ask), and both chats are in its
@@ -619,7 +785,9 @@ test("the chat on every other page carries on the open chat, which is the same c
     .getByRole("link", { name: "Chat" })
     .click();
   await expect(page).toHaveURL(/\/$/u);
-  await expect(messages.getByRole("listitem").first()).toHaveText(second);
+  await expect(
+    messages.getByRole("article", { name: "You" }).first()
+  ).toContainText(second);
   await expect(page.getByRole("button", { name: "Open the chat" })).toHaveCount(
     0
   );

@@ -80,14 +80,16 @@ const bar = (): Element => {
   return found;
 };
 
-/** The bar's line: its link or name, and what it says beside it. */
-const line = () => ({
-  text: [...bar().children]
-    .filter((each) => each.tagName !== "BUTTON" && each.tagName !== "svg")
-    .map((each) => each.textContent),
-  href: bar().querySelector(":scope > a")?.getAttribute("href") ?? null,
-  more: bar().querySelector("button")?.textContent ?? null,
-});
+/** The bar's line: what leads it, a link or a name, whether it says it builds, and "+N". */
+const line = () => {
+  const link = bar().querySelector("a");
+  return {
+    lead: (link ?? bar().querySelector('[data-slot="text"]'))?.textContent,
+    building: bar().textContent.includes("Building…"),
+    href: link?.getAttribute("href") ?? null,
+    more: bar().querySelector("button")?.textContent ?? null,
+  };
+};
 
 /** Opens "+N" and reads what it lists: each by name and where it goes. */
 const listed = async () => {
@@ -123,7 +125,8 @@ describe(SubjectBarContent, () => {
 
     expect({ first, rest: await listed() }).toStrictEqual({
       first: {
-        text: ["Intake", "Building…"],
+        lead: "Intake",
+        building: true,
         href: "/apps/app-intake?chat=chat-1",
         more: "+2",
       },
@@ -138,7 +141,8 @@ describe(SubjectBarContent, () => {
     await shown(undefined, drafts, "2026-11-08T12:00:00.000Z");
 
     expect(line()).toStrictEqual({
-      text: ["Intake"],
+      lead: "Intake",
+      building: false,
       href: "/apps/app-intake?chat=chat-1",
       more: "+2",
     });
@@ -149,7 +153,7 @@ describe(SubjectBarContent, () => {
     const first = line();
 
     expect({ first, rest: await listed() }).toStrictEqual({
-      first: { text: ["Desk"], href: null, more: "+2" },
+      first: { lead: "Desk", building: false, href: null, more: "+2" },
       rest: [
         { name: "Intake", href: "/apps/app-intake?chat=chat-1" },
         { name: "Ledger", href: "/apps/app-ledger?chat=chat-1" },
@@ -160,6 +164,11 @@ describe(SubjectBarContent, () => {
   it("shows the subject alone where the chat worked on nothing else", async () => {
     await shown({ kind: "app", id: "app-desk", name: "Desk" }, []);
 
-    expect(line()).toStrictEqual({ text: ["Desk"], href: null, more: null });
+    expect(line()).toStrictEqual({
+      lead: "Desk",
+      building: false,
+      href: null,
+      more: null,
+    });
   });
 });

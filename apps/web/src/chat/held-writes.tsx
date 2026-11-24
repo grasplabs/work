@@ -1,10 +1,3 @@
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/app-kit/components/alert";
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
 import { heldAppCallsPage, shownVisibly } from "@grasp-os/shared/chat";
 import type { HeldAppCall } from "@grasp-os/shared/chat";
 import type {
@@ -12,17 +5,37 @@ import type {
   PendingAction,
 } from "@grasp-os/shared/connect";
 import { failureText } from "@grasp-os/shared/errors";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/ui/components/alert";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Confirmation,
+  ConfirmationActions,
+  ConfirmationRequest,
+  ConfirmationTitle,
+} from "@grasp-os/ui/components/confirmation";
+import { KeyValueList } from "@grasp-os/ui/components/key-value";
+import { Text } from "@grasp-os/ui/components/text";
+import { useScrollEdges } from "@grasp-os/ui/hooks/use-scroll-edges";
+import { codeStyles, focusRing } from "@grasp-os/ui/lib/styles";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { ClockIcon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
+import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
 import { formatDateTime } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { DecisionButton } from "./decision-button.tsx";
+import { FailureLine } from "./failure-line.tsx";
 
 // The changes the chat's agent asked for in outside systems (sending,
 // booking, deleting), which connect holds until the person confirms or
@@ -36,6 +49,51 @@ import { useCore } from "../use-core.ts";
 // sent has been shown in full. Beside them, the writes to Apps core holds
 // once the chat used something only the person can read, each with that
 // reason and its exact request, open from the start.
+
+const styles = stylex.create({
+  // A value as the input holds it, its lines and runs of spaces too.
+  value: {
+    display: "grid",
+    justifyItems: "start",
+    gap: space["1"],
+    whiteSpace: "pre-wrap",
+    overflowWrap: "anywhere",
+  },
+  list: { margin: 0, paddingInlineStart: 0, listStyleType: "none" },
+  stack: {
+    display: "grid",
+    justifyItems: "start",
+    gap: space["2"],
+    // A line of its own in the confirmation, under its title.
+    flexBasis: "100%",
+    minWidth: 0,
+  },
+  // The exact input on a code block's ground, every line drawn: long
+  // ones wrap, and what still overflows scrolls inside it, not the page.
+  exact: {
+    width: "100%",
+    margin: 0,
+    whiteSpace: "pre-wrap",
+    overflowWrap: "anywhere",
+    overflowX: "auto",
+  },
+  list2: { display: "grid", gap: space["2"] },
+  presses: { display: "flex", flexWrap: "wrap", gap: space["2"] },
+  rejectAll: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space["2"],
+  },
+});
+
+/** Muted words of a held write's card, a sentence of their own. */
+const Quiet = ({ children, id }: { children: ReactNode; id?: string }) => (
+  <Text as="p" color="muted" id={id} size="sm">
+    {children}
+  </Text>
+);
 
 /**
  * What the page read of the chat's held writes: connect's (`actions`), and
@@ -152,28 +210,27 @@ const TextValue = ({
   const count = lines.length;
   const characters = value.length;
   return (
-    <dd className="flex flex-col items-start gap-1">
-      <span className="break-words whitespace-pre-wrap">
-        {all || !long ? value : `${start}…`}
-      </span>
+    <span {...stylex.props(styles.value)}>
+      <span>{all || !long ? value : `${start}…`}</span>
       {long ? (
-        <Button
-          aria-expanded={all}
-          onClick={() => {
-            if (!all) {
-              onShowAll();
-            }
-            setAll(!all);
-          }}
-          size="sm"
-          variant="outline"
-        >
-          {all
-            ? t`Show less`
-            : t`Show all ${count} lines (${characters} characters)`}
+        <Button asChild size="sm" variant="outline">
+          <button
+            aria-expanded={all}
+            onClick={() => {
+              if (!all) {
+                onShowAll();
+              }
+              setAll(!all);
+            }}
+            type="button"
+          >
+            {all
+              ? t`Show less`
+              : t`Show all ${count} lines (${characters} characters)`}
+          </button>
         </Button>
       ) : null}
-    </dd>
+    </span>
   );
 };
 
@@ -188,16 +245,12 @@ const FieldValue = ({
   typeof value === "string" ? (
     <TextValue onShowAll={onShowAll} value={value} />
   ) : (
-    <dd>
-      <ul className="flex flex-col">
-        {value.map((item, index) => (
-          // By position: the input's own order, and values may repeat.
-          <li className="break-words whitespace-pre-wrap" key={index}>
-            {shownVisibly(item)}
-          </li>
-        ))}
-      </ul>
-    </dd>
+    <ul {...stylex.props(styles.list, styles.value)}>
+      {value.map((item, index) => (
+        // By position: the input's own order, and values may repeat.
+        <li key={index}>{shownVisibly(item)}</li>
+      ))}
+    </ul>
   );
 
 /**
@@ -211,19 +264,20 @@ export const Described = ({
   description: ActionDescription;
   onShowAll: (input: string) => void;
 }) => (
-  <dl className="flex flex-col gap-2 text-sm">
-    {description.fields.map(({ input, label, value }) => (
-      <div className="flex flex-col" key={input}>
-        <dt className="text-muted-foreground">{label}</dt>
+  <KeyValueList
+    items={description.fields.map(({ input, label, value }) => ({
+      id: input,
+      label,
+      value: (
         <FieldValue
           onShowAll={() => {
             onShowAll(input);
           }}
           value={value}
         />
-      </div>
-    ))}
-  </dl>
+      ),
+    }))}
+  />
 );
 
 /**
@@ -244,8 +298,15 @@ export const ExactInput = ({
   sent?: boolean;
 }) => {
   const [open, setOpen] = useState(!shown);
+  const [scrolls, setScrolls] = useState(false);
+  const scroller = useScrollEdges({
+    onChange: ({ overflows }) => {
+      setScrolls(overflows);
+    },
+  });
   const id = useId();
   const { t } = useLingui();
+  const name = sent ? t`Exactly what was sent` : t`Exactly what will be sent`;
   let label = open
     ? t`Hide exactly what will be sent`
     : t`Show exactly what will be sent`;
@@ -255,27 +316,39 @@ export const ExactInput = ({
       : t`Show exactly what was sent`;
   }
   return (
-    <div className="flex flex-col items-start gap-2">
-      <Button
-        aria-controls={id}
-        aria-expanded={open}
-        onClick={() => {
-          if (!open) {
-            onOpen();
-          }
-          setOpen(!open);
-        }}
-        size="sm"
-        variant="ghost"
-      >
-        {label}
+    <div {...stylex.props(styles.stack)}>
+      <Button asChild size="sm" variant="ghost">
+        <button
+          aria-controls={id}
+          aria-expanded={open}
+          onClick={() => {
+            if (!open) {
+              onOpen();
+            }
+            setOpen(!open);
+          }}
+          type="button"
+        >
+          {label}
+        </button>
       </Button>
       {open ? (
+        // All of it, in a plain block: what is confirmed is never folded
+        // away, and a code block draws only so many lines.
         <pre
-          className="bg-muted w-full overflow-x-auto rounded-md p-3 text-sm"
+          aria-label={scrolls ? name : undefined}
           id={id}
+          ref={scroller}
+          role={scrolls ? "region" : undefined}
+          tabIndex={scrolls ? 0 : undefined}
+          {...stylex.props(
+            codeStyles.surface,
+            codeStyles.text,
+            styles.exact,
+            focusRing
+          )}
         >
-          <code className="font-mono">{inputOf(input)}</code>
+          {inputOf(input)}
         </pre>
       ) : null}
     </div>
@@ -359,17 +432,19 @@ const WithheldInput = ({
   id?: string;
 }) => (
   <p id={id} role="note">
-    {withheld === "revoked" ? (
-      <Trans>
-        What this would send is withheld: the run that asked for it may no
-        longer read what it read, so you can only reject it.
-      </Trans>
-    ) : (
-      <Trans>
-        What this would send can&apos;t be shown right now, so you can only
-        reject it for now. Try again in a moment.
-      </Trans>
-    )}
+    <Text as="span" size="sm">
+      {withheld === "revoked" ? (
+        <Trans>
+          What this would send is withheld: the run that asked for it may no
+          longer read what it read, so you can only reject it.
+        </Trans>
+      ) : (
+        <Trans>
+          What this would send can&apos;t be shown right now, so you can only
+          reject it for now. Try again in a moment.
+        </Trans>
+      )}
+    </Text>
   </p>
 );
 
@@ -402,17 +477,17 @@ export const HeldWriteDetails = ({
     where = t`${connection} (${tool})`;
   }
   return (
-    <div className="flex flex-col gap-2">
-      <p className="text-muted-foreground">
+    <div {...stylex.props(styles.stack)}>
+      <Quiet>
         <Trans>On {where}</Trans>
-      </p>
-      <p className="text-muted-foreground">
+      </Quiet>
+      <Quiet>
         <Trans>
           Asked for <time dateTime={action.requestedAt}>{asked}</time>
         </Trans>
-      </p>
+      </Quiet>
       {action.restricted ? (
-        <Badge variant="attention">
+        <Badge variant="warning">
           <Trans>
             This chat read private or restricted data: this may send it out
           </Trans>
@@ -430,10 +505,12 @@ export const HeldWriteDetails = ({
           )}
           {description?.complete === false ? (
             <p role="note">
-              <Trans>
-                More will be sent than is shown above. Read exactly what will be
-                sent before you confirm.
-              </Trans>
+              <Text as="span" size="sm">
+                <Trans>
+                  More will be sent than is shown above. Read exactly what will
+                  be sent before you confirm.
+                </Trans>
+              </Text>
             </p>
           ) : null}
           <ExactInput
@@ -448,17 +525,18 @@ export const HeldWriteDetails = ({
         <WithheldInput id={withheldId} withheld={action.withheld} />
       )}
       {shown.unseen ? (
-        <p className="text-muted-foreground" id={shown.unseenId}>
+        <Quiet id={shown.unseenId}>
           <Trans>
             Part of what will be sent is cut short above. Show it all, or
             exactly what will be sent, to confirm.
           </Trans>
-        </p>
+        </Quiet>
       ) : null}
     </div>
   );
 };
 
+/** A held write as a confirmation in the chat: what it is, everything it sends, Reject and Confirm. */
 export const HeldWrite = ({
   action,
   onDecided,
@@ -499,45 +577,38 @@ export const HeldWrite = ({
     await router.invalidate();
   };
   return (
-    <article
-      aria-label={what}
-      className="bg-card flex w-full flex-col gap-4 rounded-xl border p-4 text-sm"
-    >
-      <h3 className="flex items-start gap-2 font-medium">
-        <ClockIcon
-          aria-hidden="true"
-          className="text-status-attention mt-0.5 size-4 flex-none"
-        />
-        <span>
-          <Trans>Waiting for you: {title}</Trans>
-        </span>
-      </h3>
-      <div className="flex flex-col gap-2">
+    <section aria-label={what}>
+      <Confirmation approval={{ id: action.id }} state="approval-requested">
+        <ConfirmationTitle>
+          <ConfirmationRequest>
+            <Trans>Waiting for you: {title}</Trans>
+          </ConfirmationRequest>
+        </ConfirmationTitle>
         <HeldWriteDetails action={action} shown={shown} />
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <Button
-          aria-describedby={shown.unseen ? shown.unseenId : undefined}
-          aria-label={t`Confirm ${what}`}
-          disabled={busy || shown.unseen}
-          onClick={() => {
-            void decide(confirmHeld(action), true);
-          }}
-        >
-          <Trans>Confirm</Trans>
-        </Button>
-        <Button
-          aria-label={t`Reject ${what}`}
-          disabled={busy}
-          onClick={() => {
-            void decide(declineHeld(action), false);
-          }}
-          variant="outline"
-        >
-          <Trans>Reject</Trans>
-        </Button>
-      </div>
-    </article>
+        <ConfirmationActions>
+          <DecisionButton
+            disabled={busy}
+            label={t`Reject ${what}`}
+            onPress={async () => {
+              await decide(declineHeld(action), false);
+            }}
+            variant="outline"
+          >
+            <Trans>Reject</Trans>
+          </DecisionButton>
+          <DecisionButton
+            describedBy={shown.unseen ? shown.unseenId : undefined}
+            disabled={busy || shown.unseen}
+            label={t`Confirm ${what}`}
+            onPress={async () => {
+              await decide(confirmHeld(action), true);
+            }}
+          >
+            <Trans>Confirm</Trans>
+          </DecisionButton>
+        </ConfirmationActions>
+      </Confirmation>
+    </section>
   );
 };
 
@@ -558,7 +629,6 @@ const DecisionFailedAlert = ({ failed }: { failed: DecisionFailed }) => {
   const { t } = useLingui();
   return (
     <Alert variant="destructive">
-      <TriangleAlertIcon />
       <AlertTitle>{t`${what} didn't go through.`}</AlertTitle>
       <AlertDescription>{reason}</AlertDescription>
     </Alert>
@@ -614,69 +684,64 @@ const HeldAppCallCard = ({
     await router.invalidate();
   };
   return (
-    <article
-      aria-label={what}
-      className="bg-card flex w-full flex-col gap-4 rounded-xl border p-4 text-sm"
-    >
-      <h3 className="flex items-start gap-2 font-medium">
-        <ClockIcon
-          aria-hidden="true"
-          className="text-status-attention mt-0.5 size-4 flex-none"
-        />
-        <span>
-          <Trans>Waiting for you: {title}</Trans>
-        </span>
-      </h3>
-      <div className="flex flex-col gap-2">
-        <Badge variant="attention">
-          <Trans>This uses something only you can read</Trans>
-        </Badge>
-        <p className="text-muted-foreground">
-          <Trans>On {where}</Trans>
-        </p>
-        <p className="text-muted-foreground">
-          <Trans>
-            Asked for <time dateTime={call.heldAt}>{asked}</time>
-          </Trans>
-        </p>
-        <ExactInput
-          input={call.request}
-          onOpen={() => {
-            // Open from the start: nothing waits for it.
-          }}
-          shown={false}
-        />
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <Button
-          aria-label={t`Confirm ${what}`}
-          disabled={busy}
-          onClick={() => {
-            void decide(async (session) => {
-              await session.chats.confirmHeldCall(
-                chatId,
-                call.id,
-                call.requestHash
-              );
-            }, true);
-          }}
-        >
-          <Trans>Confirm</Trans>
-        </Button>
-        <Button
-          aria-label={t`Reject ${what}`}
-          disabled={busy}
-          onClick={() => {
-            void decide(async (session) => {
-              await session.chats.declineHeldCall(chatId, call.id);
-            }, false);
-          }}
-          variant="outline"
-        >
-          <Trans>Reject</Trans>
-        </Button>
-      </div>
-    </article>
+    <section aria-label={what}>
+      <Confirmation approval={{ id: call.id }} state="approval-requested">
+        <ConfirmationTitle>
+          <ConfirmationRequest>
+            <Trans>Waiting for you: {title}</Trans>
+          </ConfirmationRequest>
+        </ConfirmationTitle>
+        <div {...stylex.props(styles.stack)}>
+          <Badge variant="warning">
+            <Trans>This uses something only you can read</Trans>
+          </Badge>
+          <Quiet>
+            <Trans>On {where}</Trans>
+          </Quiet>
+          <Quiet>
+            <Trans>
+              Asked for <time dateTime={call.heldAt}>{asked}</time>
+            </Trans>
+          </Quiet>
+          <ExactInput
+            input={call.request}
+            onOpen={() => {
+              // Open from the start: nothing waits for it.
+            }}
+            shown={false}
+          />
+        </div>
+        <ConfirmationActions>
+          <DecisionButton
+            disabled={busy}
+            label={t`Reject ${what}`}
+            onPress={async () => {
+              await decide(async (session) => {
+                await session.chats.declineHeldCall(chatId, call.id);
+              }, false);
+            }}
+            variant="outline"
+          >
+            <Trans>Reject</Trans>
+          </DecisionButton>
+          <DecisionButton
+            disabled={busy}
+            label={t`Confirm ${what}`}
+            onPress={async () => {
+              await decide(async (session) => {
+                await session.chats.confirmHeldCall(
+                  chatId,
+                  call.id,
+                  call.requestHash
+                );
+              }, true);
+            }}
+          >
+            <Trans>Confirm</Trans>
+          </DecisionButton>
+        </ConfirmationActions>
+      </Confirmation>
+    </section>
   );
 };
 
@@ -718,14 +783,14 @@ const RejectAll = ({
     }),
   ];
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-      <p className="text-muted-foreground">
+    <div {...stylex.props(styles.rejectAll)}>
+      <Quiet>
         <Plural
           one="# change waits for you to confirm or reject it."
           other="# changes wait for you to confirm or reject them."
           value={count}
         />
-      </p>
+      </Quiet>
       <Button
         disabled={busy}
         onClick={() => {
@@ -804,7 +869,7 @@ const ChatHeldWrites = ({
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `version` and `reads` say when to read again
   }, [core, chatId, version, reads]);
   if (held.state === "refused") {
-    return <ErrorText>{held.message}</ErrorText>;
+    return <FailureLine>{held.message}</FailureLine>;
   }
   const count =
     held.state === "loading" ? 0 : held.actions.length + held.calls.length;
@@ -812,7 +877,7 @@ const ChatHeldWrites = ({
     return null;
   }
   return (
-    <section aria-label={t`Waiting for you`} className="flex flex-col gap-2">
+    <section aria-label={t`Waiting for you`} {...stylex.props(styles.list2)}>
       {failed === undefined ? null : <DecisionFailedAlert failed={failed} />}
       {count > 1 ? (
         <RejectAll

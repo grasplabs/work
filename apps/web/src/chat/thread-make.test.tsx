@@ -260,7 +260,7 @@ describe("making something in a chat's thread", () => {
     );
     await settle();
     const card = document.querySelector(
-      'section[aria-label="Here\'s what Grasp will make"]'
+      '[aria-label="Here\'s what Grasp will make"]'
     );
     const shown = {
       parts: [...(card?.querySelectorAll("li") ?? [])].map(
@@ -325,6 +325,15 @@ describe("making something in a chat's thread", () => {
       result(7, 4, "call-2", false),
       reply(8, 5, { text: "It's ready to try." }),
     ]);
+    // The steps are drawn once opened.
+    await act(async () => {
+      for (const steps of document.querySelectorAll<HTMLElement>(
+        '[data-slot="chain-of-thought"] button[aria-expanded="false"]'
+      )) {
+        steps.click();
+      }
+      await Promise.resolve();
+    });
     const shown = document.body.textContent ?? "";
 
     expect({
@@ -399,7 +408,7 @@ describe("making something in a chat's thread", () => {
     ]);
     await settle();
     const cards = [
-      ...document.querySelectorAll('section[aria-label^="An agent to make"]'),
+      ...document.querySelectorAll('[aria-label^="An agent to make"]'),
     ];
     const shown = cards.map((card) =>
       [...card.querySelectorAll("dd")].map((each) => each.textContent)
@@ -456,9 +465,7 @@ describe("making something in a chat's thread", () => {
       reply(2, 1, { agentChange: change }),
     ]);
     await settle();
-    const card = document.querySelector(
-      'section[aria-label="A change to Claire"]'
-    );
+    const card = document.querySelector('[aria-label="A change to Claire"]');
     const shown = [...(card?.querySelectorAll("dd") ?? [])].map(
       (each) => each.textContent
     );

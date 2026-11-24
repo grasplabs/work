@@ -76,6 +76,8 @@ describe("the programme", () => {
       today: today(),
       week: 1,
       inProgramme: true,
+      // No kickoff is in: no suite is named.
+      suites: [],
     });
     expect(JSON.stringify(programme)).not.toContain(sentinel);
   });

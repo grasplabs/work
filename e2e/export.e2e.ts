@@ -166,8 +166,10 @@ test("a brain note and a chat each export as Markdown and as a page to print", a
   // title, which the export is named after.
   const messages = page
     .getByRole("region", { name: question })
-    .getByRole("list", { name: "Messages" });
-  await expect(messages.getByRole("listitem").first()).toHaveText(question);
+    .getByRole("log", { name: "Messages" });
+  await expect(
+    messages.getByRole("article", { name: "You" }).first()
+  ).toContainText(question);
   const chat = page.waitForEvent("download");
   await downloadChat(page, "Markdown (.md)");
   const chatFile = await chat;

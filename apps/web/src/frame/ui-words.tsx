@@ -28,11 +28,55 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       error: t({ message: "Failed", context: "a menu item whose work failed" }),
       loading: t`Working`,
     },
+    attachment: {
+      remove: (name) => t`Remove ${name}`,
+    },
+    chainOfThought: {
+      name: t`Steps`,
+    },
+    command: {
+      dialogPlaceholder: t`Type a command or search`,
+      dialogTrigger: t({ message: "Search", context: "open the search" }),
+      empty: t`No results`,
+      error: t({ message: "Failed", context: "a search that failed" }),
+      expand: (label) => t`More for ${label}`,
+      loading: t`Searching`,
+      moreHint: t`Right arrow for more`,
+      placeholder: t({ message: "Search", context: "a search field" }),
+    },
+    dropdownMenu: {
+      expand: t`More actions`,
+    },
+    empty: {
+      error: t`This did not load`,
+    },
     holdButton: {
       ask: (words) => t`${words}?`,
       cancel: t`Cancel`,
       confirm: t`Confirm`,
       holdTo: (words) => t`Press and hold: ${words}`,
+    },
+    inlineEdit: {
+      edit: t({ message: "Edit", context: "edit a value in place" }),
+      error: t`Could not save`,
+      saved: (value) => t`Changed to ${value}`,
+    },
+    keyValue: {
+      copy: (label) => t`Copy ${label}`,
+      loading: t`Loading the value`,
+    },
+    link: {
+      external: t`opens in a new tab`,
+    },
+    markdown: {
+      back: (number) => t`Back to reference ${number}`,
+      done: t({ message: "Done", context: "a task ticked in a list" }),
+      footnote: (number) => t`Footnote ${number}`,
+      notDone: t({
+        message: "Not done",
+        context: "a task not ticked in a list",
+      }),
+      table: t`Table`,
     },
     message: {
       actions: t`Message actions`,
@@ -52,6 +96,22 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       loading: t`Loading the conversation`,
       scrollToEnd: t`Jump to latest`,
       scrollToStart: t`Jump to start`,
+    },
+    modelSelector: {
+      empty: t`No models found`,
+      search: t`Search models`,
+      trigger: t({ message: "Model", context: "the model an answer uses" }),
+      triggerWith: (trigger, model) => t`${trigger}: ${model}`,
+      makers: t`Makers`,
+      favorites: t`Favourites`,
+      noFavorites: t`No favourites yet`,
+      effort: t({ message: "Thinking", context: "how hard a model thinks" }),
+      addFavorite: (model) => t`Add ${model} to favourites`,
+      removeFavorite: (model) => t`Remove ${model} from favourites`,
+      added: (model) => t`${model} added to favourites`,
+      removed: (model) => t`${model} removed from favourites`,
+      chosen: (model) => t`${model} chosen`,
+      favoriteKeys: t`At the end of the search, the arrow toward the line's end stars or unstars the highlighted model`,
     },
     promptInput: {
       add: t`Add to message`,
@@ -103,14 +163,78 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
         settling: t`Writing it down`,
       },
       stop: t({ message: "Stop", context: "stop an answer" }),
-      submit: t`Send`,
-      succeeded: t`Done`,
+      submit: t({ message: "Send", context: "send a message" }),
+      succeeded: t({ message: "Done", context: "a message sent" }),
       // Closing a spoken conversation gives the text back.
       voice: {
         close: t`Type instead`,
         label: t`Voice conversation`,
         listening: t`Listening`,
         speaking: t({ message: "Speaking", context: "the other voice's turn" }),
+      },
+    },
+    questionnaire: {
+      error: t`Could not send the answer`,
+      next: t({ message: "Next", context: "the next question" }),
+      other: t`In my own words`,
+      previous: t({ message: "Previous", context: "the question before" }),
+      progress: (current, total) => t`Question ${current} of ${total}`,
+      progressLabel: t`Progress`,
+      step: (current, total) => t`${current} of ${total}`,
+      recommended: t`Recommended`,
+      required: t`Answer this question to go on`,
+      skip: t({ message: "Skip", context: "skip a question" }),
+      submit: t`Send answer`,
+    },
+    reasoning: {
+      done: t({ message: "Thought", context: "the model thought first" }),
+      thinking: t`Thinking`,
+      thought: (seconds) =>
+        t`${plural(seconds, { one: "Thought for # second", other: "Thought for # seconds" })}`,
+    },
+    sources: {
+      count: (count) =>
+        count === 0
+          ? t`No sources`
+          : t`${plural(count, { one: "# source", other: "# sources" })}`,
+      gone: t`Could not be opened`,
+      heading: t`Sources`,
+      locked: t`You cannot open this`,
+      newTab: t`(opens in a new tab)`,
+    },
+    tool: {
+      error: t({ message: "Error", context: "what a tool call failed with" }),
+      input: t({ message: "Input", context: "what went into a tool call" }),
+      output: t({ message: "Output", context: "what a tool call gave back" }),
+      states: {
+        "input-streaming": t({
+          message: "Pending",
+          context: "a tool call's state",
+        }),
+        "input-available": t({
+          message: "Running",
+          context: "a tool call's state",
+        }),
+        "approval-requested": t({
+          message: "Awaiting approval",
+          context: "a tool call's state",
+        }),
+        "approval-responded": t({
+          message: "Responded",
+          context: "a tool call's state",
+        }),
+        "output-available": t({
+          message: "Completed",
+          context: "a tool call's state",
+        }),
+        "output-error": t({
+          message: "Error",
+          context: "a tool call's state",
+        }),
+        "output-denied": t({
+          message: "Denied",
+          context: "a tool call's state",
+        }),
       },
     },
     action: {

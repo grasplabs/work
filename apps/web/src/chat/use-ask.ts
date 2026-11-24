@@ -1,4 +1,3 @@
-import type { PromptMention } from "@grasp-os/app-kit/components/prompt-editor";
 import { agentErrors } from "@grasp-os/shared/agent";
 import {
   chatFileMaxBytes,
@@ -15,6 +14,8 @@ import { useRef, useState } from "react";
 import { useCoreAction } from "../use-core-action.ts";
 import { setActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
+import type { Problem, StopNote } from "./dictation.ts";
+import type { BoxMention } from "./mentions.tsx";
 import { chatMentionsOf } from "./mentions.tsx";
 import {
   readChoice,
@@ -116,9 +117,13 @@ export const useAsk = (
   const { identity } = useRouteContext({ from: "/_shell" });
   const { busy, failure, run } = useCoreAction();
   const [text, setText] = useState("");
+  // Why dictating into the text stopped on its own, kept with it: the box
+  // it stopped in may have gone (dictation.ts).
+  const [stopped, setStopped] = useState<Problem>();
+  const stopNote: StopNote = [stopped, setStopped];
   // What the person mentioned in the box (`@`), each once: what the
   // question names exactly, beside its words, and the chips the box shows.
-  const [mentions, setMentions] = useState<readonly PromptMention[]>([]);
+  const [mentions, setMentions] = useState<readonly BoxMention[]>([]);
   const [files, setFiles] = useState<readonly BoxFile[]>([]);
   // Why a file the person chose stays out of the box.
   const [fileProblem, setFileProblem] = useState<string>();
@@ -178,13 +183,14 @@ export const useAsk = (
       });
     }
   };
+  /** Asks `question`: true once core took it, false when it was not sent. */
   const ask = async (
     question: string,
     carried: readonly BoxFile[] = [],
-    mentioned: readonly PromptMention[] = []
-  ): Promise<void> => {
+    mentioned: readonly BoxMention[] = []
+  ): Promise<boolean> => {
     if (sending.current) {
-      return;
+      return false;
     }
     sending.current = true;
     const named = chatMentionsOf(mentioned);
@@ -237,7 +243,7 @@ export const useAsk = (
       if (created !== undefined) {
         unsent.current = { id: created, question, agentId: startWith };
       }
-      return;
+      return false;
     }
     unsent.current = null;
     // Clears the box only of what was sent from it: asking again sends an
@@ -254,16 +260,16 @@ export const useAsk = (
       setActiveChat(sent, slot);
     }
     onAsked?.(sent);
+    return true;
   };
-  const stop = async (): Promise<void> => {
-    if (chatId !== undefined) {
-      await run(async (session) => await session.chats.cancel(chatId));
-    }
+  const stop = async (id: string): Promise<void> => {
+    await run(async (session) => await session.chats.cancel(id));
   };
   return {
     composer: {
       text,
       onText: setText,
+      stopNote,
       mentions,
       onMentions: setMentions,
       models,
@@ -289,9 +295,14 @@ export const useAsk = (
         setFileProblem(undefined);
         void ask(text, files, mentions);
       },
-      onStop: () => {
-        void stop();
-      },
+      // Only in a chat: before there is one, nothing is answered to stop.
+      ...(chatId === undefined
+        ? {}
+        : {
+            onStop: () => {
+              void stop(chatId);
+            },
+          }),
     },
     ask,
   };
