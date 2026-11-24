@@ -1,3 +1,5 @@
+import type { Gap } from "@grasp-os/shared/brain";
+import { isMemberAdmin } from "@grasp-os/shared/roles";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -8,11 +10,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@grasp-os/app-kit/components/alert-dialog";
-import { Button } from "@grasp-os/app-kit/components/button";
-import type { Gap } from "@grasp-os/shared/brain";
-import { isMemberAdmin } from "@grasp-os/shared/roles";
-import { Trans, useLingui } from "@lingui/react/macro";
+} from "@grasp-os/ui/components/alert-dialog";
+import { Button } from "@grasp-os/ui/components/button";
+import { useLingui } from "@lingui/react/macro";
 import { useRouteContext, useRouter } from "@tanstack/react-router";
 
 import { ErrorText } from "../error-text.tsx";
@@ -43,10 +43,10 @@ const Confirmed = ({
   onConfirm: () => void;
 }) => (
   <AlertDialog>
-    <AlertDialogTrigger
-      render={<Button disabled={busy} size="sm" variant="outline" />}
-    >
-      {label}
+    <AlertDialogTrigger asChild>
+      <Button disabled={busy} size="sm" variant="outline">
+        {label}
+      </Button>
     </AlertDialogTrigger>
     <AlertDialogContent>
       <AlertDialogHeader>
@@ -54,9 +54,7 @@ const Confirmed = ({
         <AlertDialogDescription>{description}</AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter>
-        <AlertDialogCancel>
-          <Trans>Cancel</Trans>
-        </AlertDialogCancel>
+        <AlertDialogCancel />
         <AlertDialogAction onClick={onConfirm} variant="destructive">
           {confirm}
         </AlertDialogAction>
@@ -114,7 +112,7 @@ const Actions = ({ gap }: { gap: Gap }) => {
     const done = await run(action);
     if (done !== undefined) {
       // The brain is read again: the question shows as it is now.
-      await router.invalidate();
+      await router.invalidate({ sync: true });
     }
   };
   return (

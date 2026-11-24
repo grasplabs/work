@@ -181,12 +181,20 @@ const mix = (
 ];
 
 /**
- * A theme token's value where `element` stands, as the kit's stylesheet
- * resolves it for light or dark: a canvas paints with what the theme says,
- * never with a copy of its colours.
+ * A theme colour where `element` stands, resolved for light or dark: a canvas
+ * paints with what the theme says, never with a copy of its colours. The
+ * theme's colours are `light-dark()` pairs, which a custom property hands on
+ * unresolved and a canvas can't paint (it paints black), so the colour is read
+ * from an element that uses it, as the browser computes it.
  */
-export const token = (element: Element, name: string): string =>
-  getComputedStyle(element).getPropertyValue(name).trim();
+export const token = (element: Element, name: string): string => {
+  const sample = document.createElement("span");
+  sample.style.setProperty("color", `var(${name})`);
+  (element.parentElement ?? element).append(sample);
+  const { color } = getComputedStyle(sample);
+  sample.remove();
+  return color;
+};
 
 /** Every colour a dot can have, in bucket order: warmth × ALPHAS + ink. */
 export const palette = (element: HTMLElement): string[] => {

@@ -1,3 +1,5 @@
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import * as stylex from "@stylexjs/stylex";
 import { useLayoutEffect, useRef } from "react";
 
 import {
@@ -141,7 +143,7 @@ const play = (
   element.height = Math.round(height * dpr);
   context.setTransform(dpr, 0, 0, dpr, 0, 0);
   const styles = palette(element);
-  const background = rgb(token(element, "--background"));
+  const background = rgb(token(element, "--damsko-background"));
   const ground = `rgb(${background.join(", ")})`;
 
   const brain = from ?? disc(width / 2, height / 2);
@@ -551,12 +553,12 @@ const play = (
  * each dot melts into what it drew. The way `flow`, they stream out instead and lay the page down
  * from its top.
  *
- * The layer covers what its `className` makes it cover: the whole screen, or one part of it. The
+ * The layer covers what its `layer` style makes it cover: the whole screen, or one part of it. The
  * dots are given in its own pixels.
  */
 export const DotsBuild = ({
   from,
-  className,
+  layer,
   label,
   pace = 1,
   way = "flow",
@@ -569,7 +571,7 @@ export const DotsBuild = ({
   /** The dots to take over, where they are in this layer; without any, a soft disc in its middle. */
   from: BrainDots | null;
   /** Where the layer lies and what it covers. */
-  className: string;
+  layer: stylex.StyleXStyles;
   /** What is happening, for a screen reader. */
   label: string;
   /** How long it all takes, as a share of the way into the platform: lower is quicker. */
@@ -609,8 +611,8 @@ export const DotsBuild = ({
 
   return (
     <>
-      <canvas aria-hidden="true" className={className} ref={canvas} />
-      <output className="sr-only">{label}</output>
+      <canvas aria-hidden="true" ref={canvas} {...stylex.props(layer)} />
+      <output {...stylex.props(visuallyHidden)}>{label}</output>
     </>
   );
 };

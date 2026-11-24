@@ -29,7 +29,7 @@ import type { Thought } from "./shapes.ts";
  * off `after`, each a `stagger` after the one before but all within
  * `spread`, and takes `travel` to arrive; what is new grows in over `grow`.
  */
-export const MOVE = {
+const MOVE = {
   leave: 320,
   after: 240,
   travel: 950,
@@ -71,7 +71,7 @@ export interface LiveNeuron {
 }
 
 /** A dot put on the screen: where (pixels), how large, how bold, how warm, and whether in the attention colour (1). */
-export type Put = (
+type Put = (
   x: number,
   y: number,
   radius: number,
@@ -81,7 +81,7 @@ export type Put = (
 ) => void;
 
 /** A neuron printed from its design: its soma, and its dendrites unless it is a bead on a nerve. */
-export const printNeuron = (neuron: ThinkingNeuron, step: number): Print => {
+const printNeuron = (neuron: ThinkingNeuron, step: number): Print => {
   const design = designFor(neuron.id, neuronKind(neuron));
   const out: number[] = [];
   const grain = seeded(design.index * 131 + 7);

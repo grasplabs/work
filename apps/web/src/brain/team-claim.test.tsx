@@ -17,11 +17,11 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { BannerHeader } from "./brain-article/kern.tsx";
 import { MentionLinks } from "./brain-article/mention-links.tsx";
 import { NoteChip } from "./brain-chips.tsx";
 import { buildBrain } from "./brain.ts";
 import type { Note } from "./brain.ts";
+import { NoteBrainPage } from "./note-page.tsx";
 import { testWorkspace } from "./test-workspace.ts";
 
 // A team's claim from the interviews (GRA-1084, GRA-1987) is how the
@@ -107,8 +107,9 @@ describe("a team's claim, wherever the Brain names it", () => {
 
   it("heads its page in plain words, and says it is how the team works, with no count of people", async () => {
     const host = await shown(
-      <BannerHeader
-        kern={{ interviewed: [], counts: [] }}
+      <NoteBrainPage
+        byId={new Map()}
+        facts={[]}
         note={statementNote(claimId, claimText)}
       />
     );
@@ -122,8 +123,9 @@ describe("a team's claim, wherever the Brain names it", () => {
 
   it("heads someone's own statement in quotation marks, with no basis", async () => {
     const host = await shown(
-      <BannerHeader
-        kern={{ interviewed: [], counts: [] }}
+      <NoteBrainPage
+        byId={new Map()}
+        facts={[]}
         note={statementNote(ownId, ownText)}
       />
     );
@@ -148,7 +150,8 @@ describe("a team's claim, wherever the Brain names it", () => {
     const preview = document.querySelector('[data-slot="hover-card-content"]');
     expect({
       open: preview !== null,
-      title: preview?.querySelector(".font-medium")?.textContent,
+      // The card's title, its first paragraph, above the summary.
+      title: preview?.querySelector("p")?.textContent,
     }).toStrictEqual({ open: true, title: claimText });
   });
 

@@ -36,10 +36,10 @@ const NAME_PX = {
 /** Over this many neurons, names wait: at this size only the finding has room for them. */
 const NAMED_UP_TO = 3;
 /** How far apart the card prints a neuron's dots, in pixels on screen: a little finer than the brain, as the picture is small. */
-export const SPACING = 2.6;
+const SPACING = 2.6;
 
 /** A dot of the picture: where, how large and how bold. */
-export interface Dot {
+interface Dot {
   x: number;
   y: number;
   r: number;
@@ -50,7 +50,7 @@ const named = (map: ThinkingMap): ThinkingNeuron[] =>
   map.neurons.filter((neuron) => neuron.quiet !== true && neuron.bare !== true);
 
 /** What the shape takes up, on the screen's axes (y down): each soma with its dendrites over and beside it. */
-export const boundsOf = (
+const boundsOf = (
   map: ThinkingMap
 ): { left: number; right: number; top: number; bottom: number } => {
   const box = {
@@ -69,7 +69,7 @@ export const boundsOf = (
 };
 
 /** How the card looks at the shape. */
-export interface CardView {
+interface CardView {
   /** Whether the neurons are named: only when few are, at this size the finding. */
   naming: boolean;
   /** How many letters a line of a name may take; none where only the hours fit. */
