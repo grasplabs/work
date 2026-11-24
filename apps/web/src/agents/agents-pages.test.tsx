@@ -51,6 +51,7 @@ const agentOf = (id: string, name: string, change: Partial<Agent>): Agent => ({
   modelRole: null,
   model: null,
   state: "on",
+  madeBy: null,
   changedBy: null,
   changedAt: null,
   ...change,

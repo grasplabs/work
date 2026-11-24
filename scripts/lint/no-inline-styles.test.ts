@@ -96,15 +96,10 @@ const Renamed = ({ style: placement }: Props) => <Card style={[layout.wide, plac
       filename,
     },
     {
-      name: "a component from another file of the product, or a part of a Damsko component",
+      name: "a part of a Damsko component",
       code: `${styles}
-import { SaveBar } from "./save-bar.tsx";
 import { Sidebar } from "@grasp-os/ui/components/sidebar";
-const Page = () => (
-  <Sidebar.Item style={layout.wide}>
-    <SaveBar style={layout.wide} />
-  </Sidebar.Item>
-);`,
+const Page = () => <Sidebar.Item style={layout.wide} />;`,
       filename,
     },
     {
@@ -527,6 +522,27 @@ for (const [file, text] of Object.entries({
     "export const SaveBar = ({ style }) => <div {...stylex.props(style)} />;",
   "own-and-kit.ts":
     'export * from "./own.tsx";\nexport * from "@grasp-os/app-kit/components/button";',
+  "own-ways.tsx": [
+    'import { memo } from "react";',
+    "export function Panel({ style }) { return <div {...stylex.props(style)} />; }",
+    "const Held = memo(({ style }) => <div {...stylex.props(style)} />);",
+    "export { Held };",
+    "export default function Page({ style }) { return <div {...stylex.props(style)} />; }",
+  ].join("\n"),
+  "damsko-member.ts":
+    'import * as Damsko from "@grasp-os/ui/components/button";\nexport const Button = Damsko.Button;',
+  "kit-member.ts":
+    'import * as Kit from "@grasp-os/app-kit/components/button";\nexport const Button = Kit.Button;',
+  "kit-destructured.ts":
+    'import * as Kit from "@grasp-os/app-kit/components/button";\nexport const { Button } = Kit;',
+  "kit-member-local.ts":
+    'import * as Kit from "@grasp-os/app-kit/components/button";\nconst Button = Kit.Button;\nexport { Button };',
+  "kit-made.ts":
+    'import { make } from "@grasp-os/app-kit/components/button";\nexport const Button = make();',
+  "kit-let.ts": "export let Button = () => null;",
+  "own-module.mts": "export function Strip({ style }) { return style; }",
+  "kit-module.mts":
+    'export { Button } from "@grasp-os/app-kit/components/button";',
 })) {
   mkdirSync(path.dirname(path.join(modules, file)), { recursive: true });
   writeFileSync(path.join(modules, file), `${text}\n`);
@@ -554,6 +570,36 @@ describe("through a relative module", () => {
     <>
       <Button style={layout.wide} />
       <Parts.Button style={layout.wide} />
+    </>
+  );`,
+        filename: page,
+      },
+      {
+        name: "a component the module declares as a function, a const it exports by name, or its default",
+        code: `import Page, { Panel, Held } from "./own-ways.tsx";${styles}
+  const Shell = () => (
+    <>
+      <Panel style={layout.wide} />
+      <Held style={layout.wide} />
+      <Page style={layout.wide} />
+    </>
+  );`,
+        filename: page,
+      },
+      {
+        name: "a member of Damsko's namespace the module passes on",
+        code: `import { Button } from "./damsko-member.ts";${styles}
+  const Page = () => <Button style={layout.wide} />;`,
+        filename: page,
+      },
+      {
+        name: "a component of a module named by its .jsx or .mjs path, as TypeScript reads it",
+        code: `import { SaveBar } from "./own.jsx";
+  import { Strip } from "./own-module.mjs";${styles}
+  const Page = () => (
+    <>
+      <SaveBar style={layout.wide} />
+      <Strip style={layout.wide} />
     </>
   );`,
         filename: page,
@@ -587,39 +633,94 @@ describe("through a relative module", () => {
         filename: page,
         errors: Array.from({ length: 6 }, () => ({ messageId: "stylexStyle" })),
       },
+      {
+        name: "something the module holds that is no function or class of its own",
+        code: `import { Button as One } from "./kit-member.ts";
+  import { Button as Two } from "./kit-destructured.ts";
+  import { Button as Three } from "./kit-member-local.ts";
+  import { Button as Four } from "./kit-made.ts";
+  import { Button as Five } from "./kit-let.ts";${styles}
+  const Page = () => (
+    <>
+      <One style={layout.wide} />
+      <Two style={layout.wide} />
+      <Three style={layout.wide} />
+      <Four style={layout.wide} />
+      <Five style={layout.wide} />
+    </>
+  );`,
+        filename: page,
+        errors: Array.from({ length: 5 }, () => ({ messageId: "stylexStyle" })),
+      },
+      {
+        name: "a component of a module that cannot be found, or that the module doesn't export",
+        code: `import { Panel } from "./missing.tsx";
+  import { Nowhere } from "./own.tsx";${styles}
+  const Page = () => (
+    <>
+      <Panel style={layout.wide} />
+      <Nowhere style={layout.wide} />
+    </>
+  );`,
+        filename: page,
+        errors: Array.from({ length: 2 }, () => ({ messageId: "stylexStyle" })),
+      },
+      {
+        name: "the kit's component, passed on by a module named by its .mjs path",
+        code: `import { Button } from "./kit-module.mjs";${styles}
+  const Page = () => <Button style={layout.wide} />;`,
+        filename: page,
+        errors: [{ messageId: "stylexStyle" }],
+      },
     ],
   });
 });
 
-// RuleTester binds no globals, the repository's config does (`undefined`
-// among them): the forms that hold `undefined` once more, in a file linted
-// by the repository's own `vp lint`, as `vp check` lints it. A disable
-// comment there for an inline style object, which an unused one fails,
-// shows the rule ran.
+// RuleTester binds no globals and reads no files of the repository, the
+// repository's own `vp lint` does, as `vp check` lints it: files of
+// `apps/web/src/lint-fixtures`, linted there. A disable comment for each
+// style the rule refuses, which an unused one fails, shows the rule ran.
 describe("grasp/no-inline-styles under the repository's config", () => {
   const root = path.join(import.meta.dirname, "../..");
   const report = z.object({
     diagnostics: z.array(z.object({ code: z.string(), message: z.string() })),
   });
 
-  it("lets undefined through beside StyleX styles: in a condition, an array and after ??", async () => {
+  /** What `vp lint` reports for a file of the fixtures. */
+  const lint = async (fixture: string) => {
     // `vp lint` exits 1 on any report, and prints its JSON all the same.
-    const lint = spawn(
+    const linter = spawn(
       path.join(root, "node_modules/.bin/vp"),
-      [
-        "lint",
-        "--format",
-        "json",
-        "apps/web/src/lint-fixtures/style-or-nothing.tsx",
-      ],
+      ["lint", "--format", "json", `apps/web/src/lint-fixtures/${fixture}`],
       { cwd: root, stdio: ["ignore", "pipe", "ignore"] }
     );
-    lint.stdout.setEncoding("utf-8");
+    linter.stdout.setEncoding("utf-8");
     let stdout = "";
-    lint.stdout.on("data", (chunk: string) => {
+    linter.stdout.on("data", (chunk: string) => {
       stdout += chunk;
     });
-    await once(lint, "close");
-    expect(report.parse(JSON.parse(stdout)).diagnostics).toStrictEqual([]);
+    await once(linter, "close");
+    return report.parse(JSON.parse(stdout)).diagnostics;
+  };
+
+  it("lets undefined through beside StyleX styles: in a condition, an array and after ??", async () => {
+    // The config binds `undefined` as a global, RuleTester doesn't.
+    await expect(lint("style-or-nothing.tsx")).resolves.toStrictEqual([]);
+  }, 60_000);
+
+  it("takes nothing alone for no styles, on an element or another package's component, and refuses it beside StyleX styles there", async () => {
+    await expect(lint("nothing-alone.tsx")).resolves.toStrictEqual([]);
+  }, 60_000);
+
+  it("follows a const named twice in one style, in an array and a condition, each time", async () => {
+    await expect(lint("alias-twice.tsx")).resolves.toStrictEqual([]);
+  }, 60_000);
+
+  it("refuses a member of the feature's own component that is the kit's, here or in another module, and allows one of its own", async () => {
+    await expect(lint("member-of-own.tsx")).resolves.toStrictEqual([]);
+  }, 60_000);
+
+  it("follows a .js path to its .ts module, refusing the kit's component it passes on and allowing the feature's own", async () => {
+    await expect(lint("js-path.tsx")).resolves.toStrictEqual([]);
   }, 60_000);
 });
