@@ -594,7 +594,6 @@ const cast = {
   dataModel: { builder: "builder" },
   workflowDrawnDecides: { builder: "builder", admin: "admin", decider: "user" },
   languages: { member: "user" },
-  iconMoves: { member: "user" },
   pageRecovery: { member: "user" },
   brain: { member: "user" },
   brainMeaning: { member: "user" },
