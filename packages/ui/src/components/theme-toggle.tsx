@@ -63,13 +63,17 @@ export const isThemeMode = (value: unknown): value is ThemeMode =>
 export const isThemeId = (value: unknown): value is ThemeId =>
   themeIds.some((id) => id === value);
 
+/** The icon button's sizes: Button's own. */
+type ThemeToggleSize = "xs" | "sm" | "default" | "lg";
+
 /** What every ThemeToggle takes, whatever its variant. */
 interface ThemeToggleBase {
   /**
-   * The icon button's size.
+   * The icon button's size, under Button's names and at Button's heights: `xs` 28px, `sm` 32px,
+   * `default` 36px, `lg` 44px. Beside a Button or a Select of the same size it is as tall.
    * @default "default"
    */
-  size?: "sm" | "default";
+  size?: ThemeToggleSize;
   /** The chosen mode. */
   mode: ThemeMode;
   /** Called with the mode a person or an agent chose; the caller applies and keeps it. */
@@ -179,15 +183,25 @@ const styles = stylex.create({
     WebkitTapHighlightColor: "transparent",
   },
   // Button's corner at each size: the one corner, capped at half the height.
-  iconSm: {
+  iconXs: {
     width: size.controlXs,
     height: size.controlXs,
     borderRadius: `min(${radius.xl}, calc(${size.controlXs} / 2))`,
   },
-  iconDefault: {
+  iconSm: {
     width: size.controlSm,
     height: size.controlSm,
     borderRadius: `min(${radius.xl}, calc(${size.controlSm} / 2))`,
+  },
+  iconDefault: {
+    width: size.controlDefault,
+    height: size.controlDefault,
+    borderRadius: `min(${radius.xl}, calc(${size.controlDefault} / 2))`,
+  },
+  iconLg: {
+    width: size.controlLg,
+    height: size.controlLg,
+    borderRadius: `min(${radius.xl}, calc(${size.controlLg} / 2))`,
   },
   // A finger's 44px, unseen, on a touch screen, from the button's own size.
   target: {
@@ -663,6 +677,13 @@ const Segmented = ({
   );
 };
 
+const iconSizes = {
+  xs: styles.iconXs,
+  sm: styles.iconSm,
+  default: styles.iconDefault,
+  lg: styles.iconLg,
+};
+
 /**
  * One icon button that cycles Light, Dark, System. The three icons stand in one cell and swap by
  * fading through a small blur; its name says where it is and where a press takes it.
@@ -674,7 +695,7 @@ const IconButton = ({
   onChoose,
 }: {
   mode: ThemeMode;
-  size: "sm" | "default";
+  size: ThemeToggleSize;
   name: (current: ThemeMode, next: ThemeMode) => string;
   onChoose: (mode: ThemeMode) => void;
 }) => {
@@ -687,11 +708,7 @@ const IconButton = ({
       onClick={() => {
         onChoose(next);
       }}
-      {...stylex.props(
-        styles.icon,
-        buttonSize === "sm" ? styles.iconSm : styles.iconDefault,
-        focusRing
-      )}
+      {...stylex.props(styles.icon, iconSizes[buttonSize], focusRing)}
     >
       <span aria-hidden="true" {...stylex.props(styles.target)} />
       {themeModes.map((each) => (
