@@ -24,7 +24,7 @@ export const toItem = async (
     .filter({ has: page.getByText(row) })
     .first()
     .click({ timeout: 20_000 });
-  const opened = page.getByRole("group", { name: card });
+  const opened = page.getByRole("region", { name: card });
   await expect(opened).toBeVisible();
   return opened;
 };

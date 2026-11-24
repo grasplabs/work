@@ -4,22 +4,21 @@ import type { Page } from "@playwright/test";
 
 import { callGate } from "./call-gate.ts";
 import { test } from "./csp.ts";
-import { modelScripts, workflowPlanned } from "./model-scripts.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
+import { toastSaying } from "./said.ts";
 import { goTo } from "./tabs-nav.ts";
 
 // A builder writes an independent workflow's definition in the editor:
 // core checks each save against grasp-workflow/2 and says what to fix at
 // its JSON Pointer, only a draft that passes is shared with the team (Share
 // with your team, in its bar, as an App's), and of two people saving the
-// same draft, the second is told and keeps their text. The page opens on
-// its Flow, drawn from the draft every builder shares, which follows what
-// anyone saves; a step is changed there too, and the JSON is behind it,
-// in its Settings' Definition. Its History rolls back to a version. New
-// workflow opens the workflow's shell asking what it should do; once
-// answered, the workflow is made and opens on an empty Flow with Grasp's
-// chat docked beside it, which draws it as its draft passes.
+// same draft, the second is told and keeps their text. The workflow opens
+// on its page, whose Workshop opens its Steps: the Flow, drawn from the
+// draft every builder shares; a step is changed there too, and the JSON is
+// behind it, in its Settings' Definition. A run opens on a page of its
+// own. Its History rolls back to a version. Making one with Grasp's chat is
+// workflow-drawn-decides.e2e.ts.
 
 /** How long a read from core may take to show. */
 const pageRead = { timeout: 15_000 };
@@ -68,9 +67,13 @@ const create = async (page: Page, person: Person): Promise<string> => {
   }
 };
 
-/** Opens view `name` of the workflow on `page`: Flow, Runs or Settings. */
+/**
+ * Opens builder tool `name` of the workflow on `page` from the Workshop
+ * on its page: Steps, Runs and tests, or Settings.
+ */
 const view = async (page: Page, name: string): Promise<void> => {
-  await goTo(page.getByRole("navigation", { name: "Workflow views" }), name);
+  await page.goto(new URL(page.url()).pathname);
+  await page.getByRole("button", { name: `Open ${name}` }).click(pageRead);
 };
 
 /** Opens section `name` of the workflow's Settings on `page`. */
@@ -127,7 +130,9 @@ const share = async (page: Page, label: string): Promise<void> => {
     .getByRole("dialog")
     .getByRole("button", { name: "Share", exact: true })
     .click();
-  await expect(page.getByText("Your changes are shared")).toBeVisible(pageRead);
+  await expect(toastSaying(page, "Your changes are shared")).toBeVisible(
+    pageRead
+  );
 };
 
 /** A version's label, `YY.MM.N`, as History names it. */
@@ -207,25 +212,6 @@ test("a builder writes a workflow's definition, fixes what core finds, shares it
   await expect(page.getByLabel("workflow.json")).toBeEditable();
 });
 
-test("a builder's Flow follows the draft another builder's tab saves, as it is shared by everyone who builds it", async ({
-  pageOf,
-}) => {
-  const { builder } = peopleIn("workflowEditor");
-  const page = await pageOf(builder);
-  await create(page, builder);
-  const diagram = page.getByRole("region", { name: "Diagram", exact: true });
-  await expect(diagram.getByRole("listitem", { name: "route" })).toHaveCount(0);
-
-  // Another tab saves it: this one's Flow draws it, unasked.
-  const other = await pageOf(builder);
-  await other.goto(page.url());
-  await save(other, routing());
-  await expect(other.getByText(passes)).toBeVisible();
-  await expect(diagram.getByRole("listitem", { name: "route" })).toBeVisible(
-    pageRead
-  );
-});
-
 test("a builder sees every declared branch of the checked definition, a test run marks only the tasks it reached, and they pause it and roll it back", async ({
   pageOf,
 }) => {
@@ -235,7 +221,7 @@ test("a builder sees every declared branch of the checked definition, a test run
 
   await save(page, routing());
   await expect(page.getByText(passes)).toBeVisible();
-  await view(page, "Flow");
+  await view(page, "Steps");
   const diagram = page.getByRole("region", { name: "Diagram", exact: true });
   const route = diagram.getByRole("listitem", { name: "route" });
   await expect(route.getByText("When it holds")).toBeVisible();
@@ -245,18 +231,6 @@ test("a builder sees every declared branch of the checked definition, a test run
     await expect(diagram.getByRole("listitem", { name: task })).toBeVisible();
   }
 
-  // Text that doesn't pass leaves the diagram as it last passed, and no
-  // step to change on it.
-  await save(page, "{ not yet");
-  await view(page, "Flow");
-  await expect(
-    page.getByText("The Flow shows it as it last passed.", { exact: false })
-  ).toBeVisible();
-  await expect(
-    diagram.getByRole("button", { name: "Change step route" })
-  ).toHaveCount(0);
-  await save(page, routing());
-  await expect(page.getByText(passes)).toBeVisible();
   await share(page, "Share with your team");
 
   // A run of the live version, started with Run in the bar.
@@ -275,25 +249,24 @@ test("a builder sees every declared branch of the checked definition, a test run
   await expect(page.getByText(passes)).toBeVisible();
   await share(page, "Share with your team");
 
-  // Runs: the run of version 1, opened beside the page, with what it
-  // returned to whoever started it, and each step its journal recorded
+  // Runs: the run of version 1, on its own page, with what it returned to
+  // whoever started it, and in its Workshop each step its journal recorded
   // laid over its version's diagram, marking only the tasks it reached.
-  await view(page, "Runs");
+  await view(page, "Runs and tests");
   await page
     .getByRole("table", { name: "Runs" })
-    .getByRole("link")
+    .getByRole("row")
     .last()
+    .getByRole("button")
+    .first()
     .click();
-  const steps = page.getByRole("dialog");
-  await expect(steps.getByText("What it returned")).toBeVisible({
-    timeout: 30_000,
-  });
-  // Its steps' trace, folded under one line that opens it (and works,
-  // drawn twice for its shimmer, while the run goes on).
+  await expect(page).toHaveURL(/\/runs\/[^/?]+$/u, pageRead);
   await expect(
-    steps.getByRole("button", { name: /^Step by step/u })
-  ).toBeVisible(pageRead);
-  const ran = steps.getByRole("region", {
+    page.getByRole("button", { name: "What it returned" })
+  ).toBeVisible({ timeout: 30_000 });
+  // Its steps speak the workflow's code: folded away until a builder asks.
+  await page.getByRole("button", { name: "Open its steps" }).click();
+  const ran = page.getByRole("region", {
     name: "What the run of version 1 did",
   });
   // Each task's own mark: `route` holds its branches' tasks, and their
@@ -306,16 +279,14 @@ test("a builder sees every declared branch of the checked definition, a test run
     );
   }
   await expect(
-    ran.getByRole("listitem", { name: "greetAda" }).getByText("Reached")
+    ran
+      .getByRole("listitem", { name: "greetAda" })
+      .getByText("Done", { exact: true })
   ).toBeVisible();
   await expect(
     ran.getByRole("listitem", { name: "greetOther" })
   ).toHaveAttribute("data-state", "none");
-  await page.keyboard.press("Escape");
-  // Gone, the sheet with it: a press meanwhile would close it.
-  await expect(
-    page.getByRole("dialog", { name: /^The run started/u })
-  ).toHaveCount(0);
+  await page.goBack();
 
   // Paused once the person says so and the moment to take it back has
   // passed: it says so, and Resume runs it again.
@@ -351,16 +322,10 @@ test("a builder changes one step on the Flow, saved as the draft's next change, 
   const { builder } = peopleIn("workflowDiagram");
   const page = await pageOf(builder);
   await create(page, builder);
-  // It opens on its Flow.
-  await expect(
-    page
-      .getByRole("navigation", { name: "Workflow views" })
-      .getByRole("link", { name: "Flow" })
-  ).toHaveAttribute("aria-current", "page");
   await save(page, routing());
   await expect(page.getByText(passes)).toBeVisible();
 
-  await view(page, "Flow");
+  await view(page, "Steps");
   await page.getByRole("button", { name: "Change step greetAda" }).click();
   const step = page.getByRole("dialog");
   await expect(step.getByLabel("The step, as JSON")).toHaveValue(
@@ -375,69 +340,4 @@ test("a builder changes one step on the Flow, saved as the draft's next change, 
   await definitionOf(page);
   await expect(page.getByLabel("workflow.json")).toHaveValue(/hi ada/u);
   await expect(page.getByText(passes)).toBeVisible();
-});
-
-test("a builder makes something that runs on its own by saying what they want done, which lands them on it with Grasp's chat docked beside it, not ready while nothing passes, and sees the Flow drawn once a draft passes", async ({
-  pageOf,
-}) => {
-  const { builder } = peopleIn("workflowDrawn");
-  const page = await pageOf(builder);
-  const { opener, replies } = modelScripts.drawsWorkflow;
-  const [, reply] = replies;
-  await page.goto("/workflows");
-  await page.getByRole("link", { name: "Make something" }).click();
-
-  // Make something asks what they want done: nothing is made yet.
-  await expect(page).toHaveURL(/\/\?make=workflow$/u);
-  await expect(
-    page.getByRole("heading", { name: "What do you want to get done?" })
-  ).toBeVisible();
-  const ask = page.getByRole("textbox", { name: "Your question" });
-  await ask.fill(opener);
-  await ask.press("Enter");
-
-  // Grasp's plan: something that runs on its own, made on Build it.
-  const plan = page.getByRole("region", {
-    name: "Here's what Grasp will make",
-  });
-  await expect(plan.getByText("Runs on its own")).toBeVisible(pageRead);
-  await expect(plan.getByText(workflowPlanned)).toBeVisible();
-  await plan.getByRole("button", { name: "Build it" }).click();
-
-  // Build it lands on the workflow at once, with Grasp's chat docked
-  // beside it. This script only answers, so the turn ends with nothing
-  // drawn: it isn't ready yet, with Try again, never an empty Flow.
-  await expect(page).toHaveURL(/\/workflows\/[^/?]+$/u);
-  const workflow = new URL(page.url()).pathname.split("/").at(-1) ?? "";
-  const chat = page.getByRole("region", { name: "Chat" });
-  // Exactly: the recall's step ("Searched the brain for …") holds it too.
-  await expect(chat.getByText(opener, { exact: true })).toBeVisible();
-  await expect(chat.getByText(reply.text)).toBeVisible(pageRead);
-  await expect(
-    page.getByText(`${workflowPlanned} isn't ready yet`)
-  ).toBeVisible();
-
-  // A first step that passes is saved as the chat's agent would save it
-  // (`env.workflowBuild.write`): this script only answers (a script that
-  // saves through the agent's tools is workflow-drawn-decides.e2e.ts), so
-  // the builder's own session saves it.
-  const { core, api } = apiOf(builder);
-  try {
-    await api.drafts.write({ kind: "workflow", id: workflow }, 0, {
-      "workflow.json": definition("received"),
-    });
-    // Once a draft passes, it is set up: its Flow draws it.
-    await page.reload();
-    await expect(
-      page
-        .getByRole("navigation", { name: "Workflow views" })
-        .getByRole("link", { name: "Flow" })
-    ).toHaveAttribute("aria-current", "page", pageRead);
-    const diagram = page.getByRole("region", { name: "Diagram", exact: true });
-    await expect(diagram.getByRole("listitem", { name: "finish" })).toBeVisible(
-      pageRead
-    );
-  } finally {
-    core[Symbol.dispose]();
-  }
 });

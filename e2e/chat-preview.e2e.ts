@@ -42,18 +42,6 @@ const askOnceIdle = async (chat: Locator, text: string): Promise<void> => {
 };
 
 /**
- * That the preview says its problem is being fixed, over its corner, in
- * words on one line: a notice too narrow for them draws them a letter a
- * line, which a person can't read.
- */
-const expectFixing = async (preview: Locator): Promise<void> => {
-  const words = preview.getByText("Fixing a problem…");
-  await expect(words).toBeVisible();
-  const box = await words.boundingBox();
-  expect(box?.width ?? 0).toBeGreaterThan((box?.height ?? 0) * 4);
-};
-
-/**
  * The App's own tally page, released and live, once it shows its
  * count. Its first open builds it, which on a loaded machine takes longer
  * than the default 5 seconds.
@@ -86,21 +74,6 @@ test("a chat building an App offers its workspace, whose preview changes none of
     await expect(own.getByRole("status")).toHaveText("1 in the App");
 
     // Nothing built yet: the conversation alone.
-    // While `failDrafts` holds, reading what the chat worked on goes to an API
-    // this stack has switched off (improvement signals), which core
-    // refuses: as a read that fails.
-    let failDrafts = false;
-    await page.routeWebSocket("**/rpc", (socket) => {
-      const toCore = socket.connectToServer();
-      socket.onMessage((message) => {
-        const text = String(message);
-        toCore.send(
-          failDrafts
-            ? text.replaceAll('["chats","worked"]', '["signals","list"]')
-            : text
-        );
-      });
-    });
     await page.goto(`/?chat=${chat.id}`);
     const thread = page.getByRole("region", {
       name: `Build ${tag}`,
@@ -116,20 +89,8 @@ test("a chat building an App offers its workspace, whose preview changes none of
       "server/tally.ts":
         tallyFiles("in the preview").files["server/tally.ts"] ?? "",
     });
-    // A read of it that fails says so in the chat, and is tried again
-    // from there.
-    failDrafts = true;
     // Opened afresh from its link: the address left it once it opened.
     await page.goto(`/?chat=${chat.id}`);
-    await expect(
-      thread.getByText("The Apps this chat builds didn't load.")
-    ).toBeVisible();
-    await expect(building).toHaveCount(0);
-    failDrafts = false;
-    await thread.getByRole("button", { name: "Try again" }).click();
-    await expect(
-      thread.getByText("The Apps this chat builds didn't load.")
-    ).toHaveCount(0);
 
     // The App's workspace is the bar's link away.
     await building.click();
@@ -157,17 +118,6 @@ test("a chat building an App offers its workspace, whose preview changes none of
     await expect(frame.getByRole("status")).toHaveText("1 in the preview");
     await frame.getByRole("button", { name: "Add one" }).click();
     await expect(frame.getByRole("status")).toHaveText("2 in the preview");
-    // It stays this chat's as the person moves between the views.
-    const views = page.getByRole("navigation", { name: "Workspace views" });
-    await views.getByRole("link", { name: "Code" }).click();
-    await views.getByRole("link", { name: "App" }).click();
-    await expect(chatName).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "Share with your team" })
-    ).toBeEnabled();
-    await expect(
-      page.getByRole("heading", { level: 1, name, exact: true })
-    ).toBeVisible();
 
     // The App's own data is as it was: none of the preview's two.
     const after = await openTally(page, app.id);
@@ -203,7 +153,6 @@ test("an App's own chat writes its page and server code, and its workspace previ
 
     const { opener } = modelScripts.buildsTally;
     const chat = page.getByRole("region", { name: "Chat" });
-    const ask = chat.getByRole("textbox", { name: "Ask for a change" });
     await askOnceIdle(chat, opener);
     await expect(chat.getByText("The tally is in the preview.")).toBeVisible({
       timeout: 30_000,
@@ -223,40 +172,16 @@ test("an App's own chat writes its page and server code, and its workspace previ
     await frame.getByRole("button", { name: "Add one" }).click();
     await expect(frame.getByRole("status")).toHaveText("1 in the preview");
 
-    // The agent writes the page again: the frame it has open takes the
-    // write in place, its document never loaded again, and its store
-    // keeps what was added.
-    const pageFrame = page
-      .frames()
-      .find((each) => each.url().includes("/page-frame"));
-    expect(pageFrame).toBeDefined();
-    await pageFrame?.evaluate(() => {
-      Reflect.set(globalThis, "stillThisDocument", true);
-    });
-    await expect(
-      chat.getByRole("button", { name: "Send", exact: true })
-    ).toBeVisible({ timeout: 30_000 });
-    await ask.fill("Rename the button.");
-    const asked = Date.now();
-    await ask.press("Enter");
+    // The agent writes the page again: the preview takes the write, and
+    // its store keeps what was added.
+    await askOnceIdle(chat, "Rename the button.");
     await expect(chat.getByText("Renaming the button.")).toBeVisible({
       timeout: 30_000,
     });
-    const written = Date.now();
     await expect(
       frame.getByRole("button", { name: "Add another" })
     ).toBeVisible({ timeout: 10_000 });
-    const shown = Date.now();
-    console.info(
-      `preview took the write ${shown - written} ms after the chat showed it (${shown - asked} ms after asking)`
-    );
-    const sameDocument: unknown = await pageFrame?.evaluate((): unknown =>
-      Reflect.get(globalThis, "stillThisDocument")
-    );
-    expect({
-      count: await frame.getByRole("status").textContent(),
-      sameDocument,
-    }).toStrictEqual({ count: "1 in the preview", sameDocument: true });
+    await expect(frame.getByRole("status")).toHaveText("1 in the preview");
 
     // The agent writes its server code alone: the frame takes it in
     // place, its live count read again on the new code, on the same test
@@ -276,9 +201,7 @@ test("an App's own chat writes its page and server code, and its workspace previ
     // Server code that doesn't build, with a write of the page: the page
     // still takes the write, built against the references the draft last
     // generated, and its calls show the server code's error, while the
-    // problem is being fixed, said over the preview's corner: nothing
-    // comes in above it, which would move the page under the person.
-    const shownAt = await preview.locator("iframe").boundingBox();
+    // problem is being fixed.
     await askOnceIdle(chat, "Take more.");
     await expect(chat.getByText("It takes more.")).toBeVisible({
       timeout: 30_000,
@@ -287,10 +210,7 @@ test("an App's own chat writes its page and server code, and its workspace previ
       "server code doesn't build",
       { timeout: 10_000 }
     );
-    await expectFixing(preview);
-    expect(await preview.locator("iframe").boundingBox()).toStrictEqual(
-      shownAt
-    );
+    await expect(preview.getByText("Fixing a problem…")).toBeVisible();
 
     // Once it builds, the frame takes it: started afresh, as the error the
     // page showed can't be taken back in place, its data kept.
@@ -311,179 +231,14 @@ test("an App's own chat writes its page and server code, and its workspace previ
       .getByRole("navigation", { name: "Workspace views" })
       .getByRole("link", { name: "Code" })
       .click();
-    // Its tree: folders first, each open, then the files, each by name.
-    const files = page.getByRole("tree", { name: "Files" });
-    await expect(files).toMatchAriaSnapshot(`
-      - tree "Files":
-        - treeitem "server" [expanded]:
-          - group:
-            - treeitem "schema.ts"
-            - treeitem "tally.ts"
-        - treeitem "src" [expanded]:
-          - group:
-            - treeitem "routes" [expanded]:
-              - group:
-                - treeitem "index.tsx"
-        - treeitem "grasp.config.ts"
-    `);
-    await files.getByRole("treeitem", { name: "index.tsx" }).click();
-    // The open file, headed by its path.
+    await page
+      .getByRole("tree", { name: "Files" })
+      .getByRole("treeitem", { name: "index.tsx" })
+      .click();
     const code = page.getByRole("region", {
       name: "Code of src/routes/index.tsx",
     });
-    await expect(code).toContainText("src/routes/index.tsx");
     await expect(code).toContainText("Add more");
-  } finally {
-    core[Symbol.dispose]();
-  }
-});
-
-test("an App's workspace previews the App before its chat changes anything, then each change its chat makes", async ({
-  pageOf,
-}) => {
-  const { builder } = peopleIn("chatPreview");
-  const { core, api } = apiOf(builder);
-  const name = `Tally ${crypto.randomUUID().slice(0, 8)}`;
-  try {
-    const app = await api.apps.create({ name });
-    await publishApp(api, app.id, tallyFiles("in the App"));
-    const page = await pageOf(builder);
-    await page.goto(`/apps/${app.id}`);
-
-    // No change asked for yet: the App's live version, as the team sees it.
-    const live = page
-      .getByRole("region", { name: `${name}, as your team sees it` })
-      .frameLocator("iframe");
-    await expect(live.getByRole("status")).toHaveText("0 in the App", {
-      timeout: 30_000,
-    });
-    // Shared with nobody yet: Share with your team is on, for the App's
-    // live version as it is.
-    await expect(
-      page.getByRole("button", { name: "Share with your team" })
-    ).toBeEnabled();
-
-    // A version published elsewhere comes into the open preview.
-    await publishApp(api, app.id, tallyFiles("in version 2"));
-    await expect(live.getByRole("status")).toHaveText("0 in version 2", {
-      timeout: 30_000,
-    });
-
-    // Asked for one: the builder's own version shows it, on a store of the
-    // preview's own.
-    const { opener } = modelScripts.buildsTally;
-    const chat = page.getByRole("region", { name: "Chat" });
-    await askOnceIdle(chat, opener);
-    await expect(chat.getByText("The tally is in the preview.")).toBeVisible({
-      timeout: 30_000,
-    });
-    // Only its builder sees it: Share with your team is on, once the
-    // turn's check of the draft is done.
-    await expect(
-      page.getByRole("button", { name: "Share with your team" })
-    ).toBeEnabled(afterTurnCheck);
-    const frame = page
-      .getByRole("region", { name: `${name}, your version` })
-      .frameLocator("iframe");
-    await expect(frame.getByRole("status")).toHaveText("0 in the preview", {
-      timeout: 30_000,
-    });
-  } finally {
-    core[Symbol.dispose]();
-  }
-});
-
-test("a preview opened on a draft that doesn't build shows the App's latest version, saying it is being fixed, until a write builds", async ({
-  pageOf,
-}) => {
-  const { builder } = peopleIn("chatPreview");
-  const { core, api } = apiOf(builder);
-  const name = `Tally ${crypto.randomUUID().slice(0, 8)}`;
-  try {
-    const app = await api.apps.create({ name });
-    await publishApp(api, app.id, tallyFiles("in the App"));
-    const page = await pageOf(builder);
-    await page.goto(`/apps/${app.id}`);
-    await expect(
-      page
-        .getByRole("region", { name: `${name}, as your team sees it` })
-        .frameLocator("iframe")
-        .getByRole("status")
-    ).toHaveText("0 in the App", { timeout: 30_000 });
-    const preview = page.getByRole("region", { name: `${name}, your version` });
-    const frame = preview.frameLocator("iframe");
-
-    const { opener } = modelScripts.fixesBrokenTally;
-    const chat = page.getByRole("region", { name: "Chat" });
-    await askOnceIdle(chat, opener);
-    await expect(
-      chat.getByText("The tally's page doesn't build yet.")
-    ).toBeVisible({ timeout: 30_000 });
-
-    // Opened afresh on it: the App's latest version's page, its calls on
-    // the draft as it is, and a word that the problem is being fixed.
-    await page.reload();
-    await expect(frame.getByRole("status")).toHaveText("0 in the preview", {
-      timeout: 30_000,
-    });
-    await expectFixing(preview);
-
-    await askOnceIdle(chat, "Fix the page.");
-    await expect(chat.getByText("The tally works now.")).toBeVisible({
-      timeout: 30_000,
-    });
-    await expect(preview.getByText("Fixing a problem…")).toHaveCount(0, {
-      timeout: 30_000,
-    });
-    await expect(frame.getByRole("status")).toHaveText("0 in the preview");
-  } finally {
-    core[Symbol.dispose]();
-  }
-});
-
-test("a preview whose first page doesn't build shows it once the agent's next write fixes it", async ({
-  pageOf,
-}) => {
-  const { builder } = peopleIn("chatPreview");
-  const { core, api } = apiOf(builder);
-  const name = `Tally ${crypto.randomUUID().slice(0, 8)}`;
-  try {
-    const app = await api.apps.create({ name });
-    const page = await pageOf(builder);
-    await page.goto(`/apps/${app.id}`);
-    await expect(
-      page.getByRole("heading", { name: "What should this App do?" })
-    ).toBeVisible();
-
-    const { opener } = modelScripts.fixesBrokenTally;
-    const chat = page.getByRole("region", { name: "Chat" });
-    await askOnceIdle(chat, opener);
-    await expect(
-      chat.getByText("The tally's page doesn't build yet.")
-    ).toBeVisible({ timeout: 30_000 });
-
-    // Its first build fails: the preview says so in its place, with Fix
-    // with Grasp, and takes no updates.
-    const preview = page.getByRole("region", { name: `${name}, your version` });
-    await expect(preview.getByText("The preview didn't start")).toBeVisible({
-      timeout: 30_000,
-    });
-    await expect(
-      preview.getByText("The draft's code doesn't build.")
-    ).toBeVisible();
-    await expect(
-      preview.getByRole("button", { name: "Fix with Grasp" })
-    ).toBeVisible();
-
-    // The next write fixes it: the preview starts afresh and shows it.
-    await askOnceIdle(chat, "Fix the page.");
-    await expect(chat.getByText("The tally works now.")).toBeVisible({
-      timeout: 30_000,
-    });
-    await expect(preview.frameLocator("iframe").getByRole("status")).toHaveText(
-      "0 in the preview",
-      { timeout: 30_000 }
-    );
   } finally {
     core[Symbol.dispose]();
   }

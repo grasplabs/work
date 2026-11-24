@@ -51,9 +51,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
-  ItemGroup,
   ItemMedia,
-  ItemSeparator,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import {
@@ -79,7 +77,7 @@ import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useId, useState, Fragment } from "react";
+import { useEffect, useId, useState } from "react";
 import { z } from "zod";
 
 import type { CoreConnection } from "../core-connection.ts";
@@ -90,6 +88,7 @@ import { useCore } from "../use-core.ts";
 import { useHeldDialog } from "./held-dialog.ts";
 import { workflowVersions } from "./reads.ts";
 import { SectionCard } from "./section-card.tsx";
+import { SeparatedItems } from "./separated-items.tsx";
 import { inputSketchOf } from "./start-input.ts";
 import { ExpectedInput } from "./start-run.tsx";
 import {
@@ -1105,10 +1104,10 @@ const TriggersRead = ({
             </EmptyHeader>
           </Empty>
         ) : (
-          <ItemGroup>
-            {read.triggers.map((trigger, at) => (
-              <Fragment key={trigger.id}>
-                {at === 0 ? null : <ItemSeparator />}
+          <SeparatedItems
+            rows={read.triggers.map((trigger) => ({
+              key: trigger.id,
+              row: (
                 <TriggerRow
                   builder={builder}
                   connections={read.connections}
@@ -1116,9 +1115,9 @@ const TriggersRead = ({
                   onChanged={changed}
                   trigger={trigger}
                 />
-              </Fragment>
-            ))}
-          </ItemGroup>
+              ),
+            }))}
+          />
         )}
       </SectionCard>
     </>

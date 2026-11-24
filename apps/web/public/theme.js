@@ -1,6 +1,8 @@
 // Light, dark, or the system's colour scheme, through the theme's `dark`
 // class and, for Damsko's components, the `data-mode` attribute. Loaded as a classic script in <head>, so it runs before first paint
-// and dark mode never flashes light. A file, not inline: the CSP allows no
+// and dark mode never flashes light. Damsko's theme itself (its colours,
+// Evergreen: the sidebar's ground and the page's card on it) is the
+// product's one, fixed on the root in index.html. A file, not inline: the CSP allows no
 // inline script.
 //
 // The choice is the person's, kept in this browser (src/frame/theme.ts):

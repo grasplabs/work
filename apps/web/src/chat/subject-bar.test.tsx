@@ -14,9 +14,9 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import type { NamedWork } from "./builds.tsx";
-import { SubjectBarContent } from "./subject-bar.tsx";
+import { useSubjectBar } from "./subject-bar.tsx";
 
-// What the chat is about and what it worked on, on the bar above its box:
+// What the chat is about and what it worked on, on the band above its box:
 // the page's subject, or else the App it changed last, a way into its
 // workspace; the rest behind "+N", the latest first, each a way into its
 // own; building only where the running turn wrote its draft.
@@ -37,6 +37,17 @@ const drafts = [
 
 let root: Root | undefined;
 
+/** The band's line and "+N", as the box draws them in its banner. */
+const Bar = (props: Parameters<typeof useSubjectBar>[0]) => {
+  const bar = useSubjectBar(props);
+  return bar === undefined ? null : (
+    <div data-slot="prompt-input-subject-bar">
+      <span data-slot="line">{bar.line}</span>
+      {bar.more}
+    </div>
+  );
+};
+
 const shown = async (
   subject: { kind: "app"; id: string; name: string } | undefined,
   worked: NamedWork[],
@@ -45,14 +56,7 @@ const shown = async (
   const router = createRouter({
     routeTree: createRootRoute({
       component: () => (
-        <div data-slot="prompt-input-subject-bar">
-          <SubjectBarContent
-            chatId="chat-1"
-            work={worked}
-            since={since}
-            subject={subject}
-          />
-        </div>
+        <Bar chatId="chat-1" since={since} subject={subject} work={worked} />
       ),
     }),
     history: createMemoryHistory(),
@@ -84,7 +88,7 @@ const bar = (): Element => {
 const line = () => {
   const link = bar().querySelector("a");
   return {
-    lead: (link ?? bar().querySelector('[data-slot="text"]'))?.textContent,
+    lead: (link ?? bar().querySelector('[data-slot="line"]'))?.textContent,
     building: bar().textContent.includes("Building…"),
     href: link?.getAttribute("href") ?? null,
     more: bar().querySelector("button")?.textContent ?? null,
@@ -110,7 +114,7 @@ const listed = async () => {
   }));
 };
 
-describe(SubjectBarContent, () => {
+describe(useSubjectBar, () => {
   afterEach(() => {
     act(() => {
       root?.unmount();

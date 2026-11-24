@@ -4,9 +4,9 @@ import type { RunActivity } from "@grasp-os/shared/workflows";
 // `Big`, `builder-runs.tsx` `Stats`), from what core counted
 // (`workflows.activity`): the runs of the independent workflows the
 // person has a role in, as they may list them (core's `run-view.ts`),
-// started over its window, how many of them needed no person, and how
-// many wait for one. Pure, so the views only draw them. Core counts no
-// cost.
+// started over its window, how many of them asked no one for a decision,
+// and how many wait for one. Pure, so the views only draw them. Core
+// counts no cost.
 
 /** The figures over a list of runs. */
 export interface RunFigures {

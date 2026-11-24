@@ -3,14 +3,15 @@ import {
   FieldContent,
   FieldError,
   FieldGroup,
+  FieldLabel,
   FieldStatus,
 } from "@grasp-os/ui/components/field";
 import { Switch } from "@grasp-os/ui/components/switch";
 import { useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 
+import { WithInfo } from "../frame/info-tip.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import { LabelWithInfo } from "./info-tip.tsx";
 
 // Whether people may ask Stephen to start a workflow in their chat app
 // (core's channels/workflow-offers.ts): for its owner only, off until
@@ -44,10 +45,12 @@ export const AskStephen = ({
         {...(failure === undefined ? {} : { "data-invalid": true })}
       >
         <FieldContent>
-          <LabelWithInfo
+          <WithInfo
             info={t`Stephen can offer it in Microsoft Teams to anyone who may start it. It starts only when they press Start, and runs as them.`}
-            label={t`Let people ask Stephen to start it`}
-          />
+            label={t`More about this setting`}
+          >
+            <FieldLabel>{t`Let people ask Stephen to start it`}</FieldLabel>
+          </WithInfo>
           {failure === undefined ? null : <FieldError>{failure}</FieldError>}
         </FieldContent>
         <Switch

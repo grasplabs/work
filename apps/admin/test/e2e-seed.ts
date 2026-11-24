@@ -157,18 +157,16 @@ export const seedPlaced = async (
   return { clientId, releaseIds: [first, second] };
 };
 
-/** What the organizations seed made: a client whose core answers, and one not set up yet. */
+/** What the organizations seed made: a client whose core answers. */
 export interface SeededOrganizations {
   /** Live, its core answering the admin's snapshot. */
   answered: { clientId: string; core: CoreState };
-  /** Added, never provisioned: it has no core to answer. */
-  unset: { clientId: string };
 }
 
 /**
- * Seeds the admin for the organization sections' journey: every client an
- * earlier seed made offboarded, and its account in the fake gone, then one client live on a release and one
- * only added, as staff leave an organization before its Setup runs.
+ * Seeds the admin for an organization's journeys: every client an earlier
+ * seed made offboarded, and its account in the fake gone, then one client
+ * live on a release.
  */
 export const seedOrganizations = async (
   cloudflare: ReturnType<typeof fakeCloudflareApi>,
@@ -191,11 +189,7 @@ export const seedOrganizations = async (
     name: "Answering Acme",
   });
   await deployPlaced(answered.clientId, release);
-  const unset = await placedClientRecord(cloudflare, { name: "Unset Acme" });
-  return {
-    answered: { clientId: answered.clientId, core: answered.core },
-    unset: { clientId: unset.clientId },
-  };
+  return { answered: { clientId: answered.clientId, core: answered.core } };
 };
 
 /**

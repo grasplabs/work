@@ -34,6 +34,13 @@ const toolkits: FakeToolkit[] = [
         description: "Create a contact",
         tags: ["createHint"],
       },
+      // On its way out: neither listed nor allowed.
+      {
+        slug: "HUBSPOT_EXPORT_CONTACTS",
+        description: "Export contacts",
+        tags: ["readOnlyHint"],
+        isDeprecated: true,
+      },
       // Tagged with nothing: not taken for a read.
       { slug: "HUBSPOT_UPDATE_CONTACT" },
     ],
@@ -76,6 +83,12 @@ const toolkits: FakeToolkit[] = [
         tags: Array.from({ length: 65 }, () => "readOnlyHint"),
       },
       { slug: "NOTION_NOT_A_LIST", tags: "readOnlyHint" },
+      // A deprecation mark connect can't read: taken for none.
+      {
+        slug: "NOTION_UNCLEAR",
+        tags: ["readOnlyHint"],
+        isDeprecated: "soon",
+      },
     ],
   },
 ];
@@ -121,7 +134,8 @@ describe("the catalog", () => {
       id: "hubspot",
       name: "HubSpot",
       categories: ["CRM", "Marketing"],
-      toolCount: 3,
+      // Composio's own count, its deprecated tool among them.
+      toolCount: 4,
       // Served from the deployment's origin: a browser showing Composio's
       // would tell it who looks (catalog-logos.test.ts).
       logo: "/api/catalog/logos/composio/hubspot",
@@ -294,7 +308,7 @@ describe("a catalog entry's tools", () => {
       .map(({ path }) => path)
       .filter((path) => path.startsWith("/tools"));
 
-  it("lists a Composio toolkit's tools by the names its server gives them, read-only only where Composio tags them so", async () => {
+  it("lists a Composio toolkit's tools by the names its server gives them, read-only only where Composio tags them so, but for those it marks deprecated", async () => {
     await expect(
       exports.default.catalogTools({
         source: "composio",
@@ -345,7 +359,24 @@ describe("a catalog entry's tools", () => {
       ["NOTION_TOO_LONG", false],
       ["NOTION_TOO_MANY", false],
       ["NOTION_NOT_A_LIST", false],
+      ["NOTION_UNCLEAR", true],
     ]);
+  });
+
+  it("lists a tool whose deprecation mark it can't read, and logs it", async () => {
+    const lines: unknown[] = [];
+    vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
+      lines.push(args);
+    });
+    const tools = await exports.default.catalogTools({
+      source: "composio",
+      id: "notion",
+    });
+    expect(tools.map(({ name }) => name)).toContain("NOTION_UNCLEAR");
+    const logged = JSON.stringify(lines);
+    expect(logged).toContain("catalog.tool_deprecation_unreadable");
+    expect(logged).toContain("NOTION_UNCLEAR");
+    expect(logged).not.toContain("NOTION_SEARCH");
   });
 
   it("keeps a toolkit's tools for ten minutes, for that toolkit only", async () => {

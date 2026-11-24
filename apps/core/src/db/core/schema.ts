@@ -4096,13 +4096,15 @@ export const agents = sqliteTable(
 /**
  * Whether one of the company's agents answers at all, and for whom
  * (agent-reach.ts): one row per agent an admin set it for, by the agent's
- * ID. The organization's own agent keeps `stephen_reach`. No row: on, for
+ * ID. `who` is `nobody`, `everyone`, `teams` (the team IDs in `teams`),
+ * or `maker`: the person the agent's `made_by` names, alone. The
+ * organization's own agent keeps `stephen_reach`. No row: on, for
  * everyone, as the organization's agent is until an admin changes it.
  */
 export const agentReach = sqliteTable("agent_reach", {
   agentId: text("agent_id").primaryKey(),
   on: integer({ mode: "boolean" }).notNull(),
-  who: text({ enum: ["nobody", "everyone", "teams"] }).notNull(),
+  who: text({ enum: ["nobody", "everyone", "teams", "maker"] }).notNull(),
   teams: text().notNull().default("[]"),
   changedBy: text("changed_by").notNull(),
   changedAt: timestamp("changed_at").notNull(),

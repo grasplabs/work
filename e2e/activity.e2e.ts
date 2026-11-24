@@ -4,12 +4,15 @@ import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { saidOf, toItem } from "./inbox.ts";
-import { apiOf, peopleIn, release } from "./people.ts";
+import { apiOf, peopleIn } from "./people.ts";
+import { expectNoError } from "./said.ts";
 
 // The Activity page: an admin grants one App's permission request in the
 // Inbox and declines another, finds the approval in the audit log with
 // its details, and exports what the log's filters match. Search, export
-// and the grant themselves are core's tests.
+// and the grant themselves are core's tests, a grant refused once another
+// version was published since the list was read among them
+// (apps/core/test/app-version-approval.test.ts).
 
 test("an admin approves a permission request, finds it in the audit log, and exports it", async ({
   pageOf,
@@ -136,69 +139,5 @@ test("an admin approves a permission request, finds it in the audit log, and exp
   expect(lines[0]).toMatch(/^seq,received_at,at,type,action,/u);
   expect(lines[1]).toContain(",permission,permission.granted,");
   expect(lines[1]).toContain(approved);
-
-  // Text that can't start an action is dropped, not refused by core, and
-  // so is a day no calendar has, rather than searched as the next month's.
-  await page.goto(
-    `/settings/audit?target=${approved}&action=${encodeURIComponent("no such action!")}&from=2024-02-29&to=2099-02-29`
-  );
-  await expect(page.getByRole("textbox", { name: "Action" })).toHaveValue("");
-  // A leap day is a day; 2099 has none.
-  await expect(page.getByLabel("From")).toHaveValue("2024-02-29");
-  await expect(page.getByLabel("To", { exact: true })).toHaveValue("");
-  await expect(granted).toHaveCount(1);
-  await expect(page.getByRole("alert")).toHaveCount(0);
-});
-
-test("an admin approves an App's request only for the version the list shows", async ({
-  pageOf,
-}) => {
-  const { admin, builder } = peopleIn("activityAgain");
-  const appName = `Minutes ${crypto.randomUUID()}`;
-  const builds = apiOf(builder);
-  try {
-    const { id: appId } = await builds.api.apps.create({
-      name: appName,
-      description: "Reads the Brain for the minutes",
-    });
-    await release(builds.api, appId, { "README.md": "One" });
-    await builds.api.permissions.request({
-      subject: { type: "app", appId },
-      object: { type: "platform" },
-      actions: ["brain"],
-      binding: "BRAIN",
-    });
-
-    const page = await pageOf(admin);
-    await page.goto("/inbox");
-    const card = await toItem(
-      page,
-      new RegExp(`^${appName}$`, "u"),
-      new RegExp(`^Grant ${appName}: brain on Company Brain, read only\\.`, "u")
-    );
-    const approve = card.getByRole("button", { name: "Grant it" });
-    await card.getByRole("button", { name: "Details" }).click();
-    // Versions as people know them: YY.MM.N, the first this month.
-    await expect(card).toContainText(/Version to review: \d{2}\.\d{2}\.1/u);
-
-    // Another version is published while the admin looks at version 1: the
-    // grant is refused, and the card shows the version there is now.
-    await release(builds.api, appId, { "README.md": "Two" });
-    await approve.click();
-    await expect(card.getByRole("alert")).toHaveText(
-      "Another version of this App was published since this list was read. The list now shows it: review that version, then approve again."
-    );
-    await expect(card).toContainText(/Version to review: \d{2}\.\d{2}\.2/u);
-    await expect(saidOf(page).filter({ hasText: "Approved:" })).toHaveCount(0);
-
-    await approve.click();
-    await expect(
-      saidOf(page).filter({
-        hasText: `Approved: Grant ${appName}: brain on Company Brain, read only.`,
-      })
-    ).toHaveCount(1);
-    await expect(card).toHaveCount(0);
-  } finally {
-    builds.core[Symbol.dispose]();
-  }
+  await expectNoError(page);
 });

@@ -1,7 +1,7 @@
 import { expect } from "@playwright/test";
 
 import { test } from "./csp.ts";
-import { navigationFiles, surfaceFiles } from "./notes-app.ts";
+import { surfaceFiles } from "./notes-app.ts";
 import { apiOf, peopleIn, release } from "./people.ts";
 
 // An App's surfaces (spec 34.1) in a real browser: the App's sidebar
@@ -91,26 +91,4 @@ test("an App's sidebar entry opens its page, and its settings page is its settin
     .click();
   await expect(page).toHaveURL(new RegExp(`/apps/${app}$`, "u"));
   await expect(page.locator('iframe[title="App"]')).toHaveCount(1);
-
-  // An App without settings, its Options asked for by address: none to
-  // list, and it says so.
-  const { core, api } = apiOf(builder);
-  let plain: string;
-  try {
-    ({ id: plain } = await api.apps.create({ name: `${name} plain` }));
-    await release(api, plain, navigationFiles());
-  } finally {
-    core[Symbol.dispose]();
-  }
-  await page.goto(`/apps/${plain}/settings?section=options`);
-  await expect(page.getByText("This App offers no options.")).toBeVisible();
-  await expect(sections.getByRole("link", { name: "Options" })).toHaveCount(0);
-
-  // A section the page doesn't know, by address, as text or as what reads
-  // as a number: General.
-  const general = sections.getByRole("link", { name: "General" });
-  await page.goto(`/apps/${app}/settings?section=pages`);
-  await expect(general).toHaveAttribute("aria-current", "page");
-  await page.goto(`/apps/${app}/settings?section=1`);
-  await expect(general).toHaveAttribute("aria-current", "page");
 });

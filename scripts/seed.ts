@@ -55,6 +55,8 @@ import { boardCsv, boards } from "./seed/pages.ts";
 import type { Board } from "./seed/pages.ts";
 import { projects } from "./seed/projects.ts";
 import { seedRuns } from "./seed/runs.ts";
+import { appTriggers, ownWorkflows, triggerOf } from "./seed/workflows.ts";
+import type { OwnWorkflowSeed, TriggerSeed } from "./seed/workflows.ts";
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -290,7 +292,8 @@ const seedWorkflow = async (
   }
   let created: { id: string; name: string };
   try {
-    created = found ?? (await resources.create(workflow.id));
+    created =
+      found ?? (await resources.create(workflow.id, undefined, workflow.title));
   } catch (error) {
     if (isTaken(error)) {
       throw new Error(
@@ -500,6 +503,108 @@ const seedApp = async (
     db: core,
   });
   return { id: app.id, runs };
+};
+
+/**
+ * Gives workflow `id` what starts it, as its builder `owner`, unless it
+ * has a trigger already (a seed before, or someone since).
+ */
+const seedTrigger = async (
+  owner: Session,
+  id: string,
+  trigger: TriggerSeed
+): Promise<boolean> => {
+  const { triggers } = owner.api.workflowResources;
+  const there = await triggers.list(id);
+  if (there.length > 0) {
+    return false;
+  }
+  await triggers.create(triggerOf(id, trigger));
+  return true;
+};
+
+/**
+ * What starts the Apps' own workflows (scripts/seed/workflows.ts), each
+ * as its owner; one that isn't there is left out.
+ */
+const seedAppTriggers = async (
+  sessions: ReadonlyMap<PersonKey, Session>
+): Promise<number> => {
+  const listed = await sessionFor(
+    sessions,
+    admin.key
+  ).api.workflowResources.list();
+  let made = 0;
+  for (const appSeed of apps) {
+    for (const workflow of appSeed.workflows) {
+      const trigger = appTriggers[workflow.id];
+      const found = listed.find(({ name }) => name === workflow.id);
+      if (trigger !== undefined && found !== undefined) {
+        const owner = sessionFor(sessions, workflow.owner ?? appSeed.owner);
+        // oxlint-disable-next-line no-await-in-loop -- one change at a time
+        made += (await seedTrigger(owner, found.id, trigger)) ? 1 : 0;
+      }
+    }
+  }
+  return made;
+};
+
+/**
+ * A workflow of the company's own (scripts/seed/workflows.ts): made by
+ * its owner and shared with their team; then, unless it is still being
+ * built, published, started by what starts it, run over the last 30 days
+ * and paused where someone paused it. One there already is left as it is.
+ */
+const seedOwnWorkflow = async (
+  workflow: OwnWorkflowSeed,
+  sessions: ReadonlyMap<PersonKey, Session>,
+  teams: ReadonlyMap<TeamName, string>
+): Promise<string> => {
+  const owner = sessionFor(sessions, workflow.owner);
+  const resources = owner.api.workflowResources;
+  const listed = await sessionFor(
+    sessions,
+    admin.key
+  ).api.workflowResources.list();
+  if (listed.some(({ name }) => name === workflow.id)) {
+    return "there already";
+  }
+  const created = await resources.create(
+    workflow.id,
+    undefined,
+    workflow.title
+  );
+  const draft = await resources.draft(created.id);
+  const subject = { kind: "workflow", id: created.id } as const;
+  const drafted = await owner.api.drafts.write(subject, draft.revision, {
+    "workflow.json": definitionText(workflow.parts),
+  });
+  const team = teams.get(workflow.team);
+  if (team !== undefined) {
+    await resources.members.add(created.id, {
+      type: "team",
+      id: team,
+      role: "builder",
+    });
+  }
+  if (workflow.drafted === true) {
+    return "drafted";
+  }
+  await owner.api.drafts.publish(subject, drafted.revision);
+  if (workflow.trigger !== undefined) {
+    await seedTrigger(owner, created.id, workflow.trigger);
+  }
+  const runs = await seedRuns({
+    workflowIds: new Map([[workflow.alias, created.id]]),
+    app: "own",
+    workflows: [workflow],
+    sessions,
+    db: core,
+  });
+  if (workflow.paused === true) {
+    await resources.pause(created.id);
+  }
+  return `${runs} runs${workflow.paused === true ? ", paused" : ""}`;
 };
 
 /**
@@ -746,6 +851,14 @@ const main = async (): Promise<void> => {
         ran = "has its runs already";
       }
       console.info(`App ${seed.name}: ${ran}`);
+    }
+
+    const triggered = await seedAppTriggers(sessions);
+    console.info(`${triggered} new triggers on the Apps' workflows`);
+    for (const workflow of ownWorkflows) {
+      // oxlint-disable-next-line no-await-in-loop -- one workflow at a time
+      const made = await seedOwnWorkflow(workflow, sessions, teams);
+      console.info(`Workflow ${workflow.id}: ${made}`);
     }
 
     const created = await seedChats(sessions, uploadsDeleted);

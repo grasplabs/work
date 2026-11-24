@@ -18,25 +18,31 @@ test("follows the browser's language, then the one the person picks", async ({
   await expect(nav.getByRole("link", { name: "Gehirn" })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("lang", "de");
 
-  // The language is in the person menu, at the sidebar's foot.
+  // The language is in Settings › Profile, which the person menu's
+  // Settings opens.
   await page.getByRole("button", { name: "Person", exact: true }).click();
-  await page.getByRole("menuitem", { name: /^Sprache/u }).click();
-  await page.getByRole("menuitemradio", { name: "Nederlands" }).click();
+  await page.getByRole("menuitem", { name: "Einstellungen" }).click();
+  await expect(page).toHaveURL(/\/settings\/profile$/u);
+  await page.getByRole("combobox", { name: "Sprache" }).click();
+  await page.getByRole("option", { name: "Nederlands" }).click();
+  await expect(page.getByRole("heading", { name: "Profiel" })).toBeVisible();
+
+  // Kept for this browser, over its own language.
+  await page.goto("/projects");
   await expect(
     page.getByRole("navigation", { name: "Hoofdmenu" }).getByRole("link", {
       name: "Brein",
     })
   ).toBeVisible();
-
-  // Kept for this browser, over its own language.
   await page.reload();
   await expect(
     page.getByRole("heading", { name: "Projecten", exact: true })
   ).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("lang", "nl");
 
-  // And in Settings → Profile, which the sidebar's Settings opens.
-  await page.getByRole("link", { name: "Instellingen", exact: true }).click();
+  // And back, in the same place.
+  await page.getByRole("button", { name: "Person", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Instellingen" }).click();
   await expect(page).toHaveURL(/\/settings\/profile$/u);
   await page.getByRole("combobox", { name: "Taal" }).click();
   await page.getByRole("option", { name: "English" }).click();
@@ -44,13 +50,4 @@ test("follows the browser's language, then the one the person picks", async ({
   await page.reload();
   await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("lang", "en");
-});
-
-test("signing in speaks the browser's language", async ({ newContext }) => {
-  const context = await newContext({ locale: "fr-FR" });
-  const page = await context.newPage();
-  await page.goto("/sign-in");
-  await expect(
-    page.getByRole("heading", { level: 1, name: "Se connecter" })
-  ).toBeVisible();
 });

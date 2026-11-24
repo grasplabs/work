@@ -437,6 +437,16 @@ export interface ThinkingGround {
 }
 
 /**
+ * The brain's tools as `brain.read` gives them, and the brain's teams by
+ * name (`brain.tools`): what Integrations' Recommended reads, without the
+ * rest of the workspace or its connections.
+ */
+export interface BrainTools {
+  tools: Tool[];
+  teams: Pick<Team, "id" | "name">[];
+}
+
+/**
  * The brain's workspace, assembled by core from what it holds: the
  * onboarding, the brain's records and the connections. Each part as the
  * person may read it; what core has no source for yet comes back empty.
@@ -448,6 +458,11 @@ export interface BrainApi {
    * it, and nothing else: no Knowledge, so nothing to audit.
    */
   thinking: () => Promise<ThinkingGround>;
+  /**
+   * The brain's tools and its teams' names, as `read` gives them, and
+   * nothing else: no connections, so connect isn't asked.
+   */
+  tools: () => Promise<BrainTools>;
   /**
    * Adds records to the brain (brain-records.ts), all or none: for
    * admins. A record core holds already, exactly so, is left as it is.
@@ -464,6 +479,13 @@ export interface BrainApi {
    * staff.
    */
   answerGap: (gapId: string, answer: string) => Promise<Gap>;
+  /**
+   * The open gaps the person may answer from their inbox: every one the
+   * brain still has for the company's own admins, asked of someone or
+   * not; for anyone else only those asked of them. In the order the
+   * brain added them.
+   */
+  openGaps: () => Promise<Gap[]>;
   /**
    * What taking a source or statements out of the brain takes with it,
    * nothing taken yet: for the company's admins.

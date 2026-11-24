@@ -1,9 +1,21 @@
-import { SiteHeader as SiteHeaderBar } from "@grasp-os/app-kit/components/site-header";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@grasp-os/ui/components/breadcrumb";
+import { SidebarTrigger, useSidebar } from "@grasp-os/ui/components/sidebar";
+import { colors, media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
+import { Fragment, useLayoutEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
 import type { RegionId } from "../brain/brain-atlas.ts";
+import { useChatPresence } from "../chat/chat-presence.ts";
 
 /** A step on the way to the page; the last one is the page itself. */
 export type Crumb =
@@ -42,63 +54,243 @@ export type Crumb =
       params: { workflow: string };
     };
 
-/** Where a crumb leads, as a link. */
-const crumbLink = (crumb: Extract<Crumb, { to: string }>) => {
+/** Where a crumb leads, as a router link holding its name. */
+const CrumbLink = ({ crumb }: { crumb: Extract<Crumb, { to: string }> }) => {
+  const { label } = crumb;
   // A place on the brain's atlas: a region, a folder in it, a note there.
   if ("search" in crumb) {
-    return <Link search={crumb.search} to="/brain" />;
+    return (
+      <Link search={crumb.search} to="/brain">
+        {label}
+      </Link>
+    );
   }
   if (!("params" in crumb)) {
-    return <Link to={crumb.to} />;
+    return <Link to={crumb.to}>{label}</Link>;
   }
   if (crumb.to === "/workflows/$workflow") {
-    return <Link params={crumb.params} to="/workflows/$workflow" />;
+    return (
+      <Link params={crumb.params} to="/workflows/$workflow">
+        {label}
+      </Link>
+    );
   }
   if (crumb.to === "/projects/$projectId") {
-    return <Link params={crumb.params} to="/projects/$projectId" />;
+    return (
+      <Link params={crumb.params} to="/projects/$projectId">
+        {label}
+      </Link>
+    );
   }
   if (crumb.to === "/brain/$noteId") {
-    return <Link params={crumb.params} to="/brain/$noteId" />;
+    return (
+      <Link params={crumb.params} to="/brain/$noteId">
+        {label}
+      </Link>
+    );
   }
   if (crumb.to === "/brain/sections/$sectionId") {
-    return <Link params={crumb.params} to="/brain/sections/$sectionId" />;
+    return (
+      <Link params={crumb.params} to="/brain/sections/$sectionId">
+        {label}
+      </Link>
+    );
   }
-  return <Link params={crumb.params} to="/apps/$app" />;
+  return (
+    <Link params={crumb.params} to="/apps/$app">
+      {label}
+    </Link>
+  );
 };
 
+const styles = stylex.create({
+  // One row the shell's bar height, across the page's card from edge to
+  // edge, at the top of the page, which scrolls under it: on the card's
+  // own ground (Damsko's SidebarInset: the page's ground under the lg
+  // breakpoint, the sidebar's card from it), with a hairline at its foot.
+  bar: {
+    position: "sticky",
+    insetBlockStart: 0,
+    zIndex: 20,
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    gap: space["2"],
+    boxSizing: "border-box",
+    minWidth: 0,
+    height: size.appShellBar,
+    paddingInline: size.appShellPageInline,
+    backgroundColor: {
+      default: colors.background,
+      [media.lg]: colors.sidebarCard,
+    },
+    borderBlockEndWidth: size.hairline,
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: colors.border,
+  },
+  // Where the page is, then where its subject stands: they give way to the
+  // actions, never the other way round.
+  where: {
+    display: "flex",
+    flexGrow: 1,
+    alignItems: "center",
+    gap: space["2"],
+    minWidth: 0,
+    overflow: "hidden",
+    // The crumbs in the sidebar's greys, as the reference's bar: the steps
+    // back in its rows' words, the slashes quieter, the page in its ink.
+    // Damsko's Breadcrumb takes the page's tinted greys (registry gap of
+    // 24 Nov 2026).
+    "--damsko-muted-foreground": colors.sidebarSecondaryForeground,
+    "--damsko-subtle-foreground": colors.sidebarTertiaryForeground,
+    "--damsko-foreground": colors.sidebarForeground,
+  },
+  // The button's empty rim hangs out past the bar's room, so its glyph
+  // stands where the page's words begin, the crumbs 6px after its box, as
+  // the reference's.
+  trigger: {
+    marginInlineStart: `calc((${size.sidebarIcon} - ${size.sidebarIconButton}) / 2)`,
+    marginInlineEnd: "-2px",
+  },
+  // The slashes stand a step apart from the steps, as the reference's.
+  separator: { marginInline: space["1"] },
+  trailing: { display: "flex", flexShrink: 0, alignItems: "center" },
+  actions: {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    gap: space["2"],
+    marginInlineStart: "auto",
+  },
+  // Room at its end for the chat's button, which the frame lays over the
+  // card's end at the bar's height (app-frame.tsx), as the reference's.
+  roomForChat: {
+    paddingInlineEnd: `calc(${size.appShellPageInline} + ${size.sidebarIconButton})`,
+  },
+});
+
 /**
- * The bar above every signed-in page (`SiteHeader` in the kit, the same
- * as the admin's): the sidebar's trigger, then where the page is, with
- * where its subject stands after it (`trailing`), and on the right any
- * page action. `phoneCrumbs` says which crumbs a phone keeps (the kit's
- * `phoneCrumbs`).
+ * The bar above every signed-in page, the one way a page heads itself, so
+ * the frame changes every page's bar here: Damsko's SidebarTrigger at its
+ * start while the sidebar is away (folded, or a sheet on a narrow window;
+ * otherwise the sidebar's head holds it), then where the page is (Damsko's
+ * Breadcrumb, which under 640px keeps only the step back; its steps parted
+ * by a slash, as the product's bar has them), with where its
+ * subject stands after it (`trailing`), and at its end the page's actions.
+ * It is app-shell-01's header, drawn by the page: the block draws its own
+ * from props (the crumbs, the title, the actions), which the pages here
+ * draw themselves.
  */
 export const SiteHeader = ({
   crumbs,
   actions,
   trailing,
-  phoneCrumbs,
 }: {
   crumbs: readonly Crumb[];
   actions?: ReactNode;
   trailing?: ReactNode;
-  phoneCrumbs?: "last-two" | "first";
 }) => {
   const { t } = useLingui();
+  const { state, isMobile } = useSidebar();
+  const chatFloats = useChatPresence().placements.includes("floating");
+  const away = isMobile || state === "collapsed";
+  const last = crumbs.length - 1;
+  const bar = useRef<HTMLElement>(null);
+  // This bar's trigger opened the sidebar (pressed, or held focus as the
+  // shortcut opened it) and went as it did: focus goes on to the fold in
+  // the sidebar's head, and never stays on the page. Until Damsko's
+  // SidebarProvider does this itself (the registry gap "the sidebar gives
+  // no focus back when it opens from a trigger that then goes"); then this
+  // goes.
+  const handing = useRef(false);
+  useLayoutEffect(() => {
+    if (away || !handing.current) {
+      return () => {
+        // Nothing to hand on.
+      };
+    }
+    handing.current = false;
+    const sidebar = bar.current
+      ?.closest('[data-slot="sidebar-wrapper"]')
+      ?.querySelector<HTMLElement>('[data-slot="sidebar-container"]');
+    const fold = sidebar?.querySelector<HTMLElement>(
+      '[data-slot="sidebar-trigger"]'
+    );
+    let left = false;
+    // Hidden until it has slid in (none of it with reduced motion): the
+    // fold takes focus once the sidebar's own transitions are over, done
+    // or cut off, unless it is folded again first.
+    const slid = Promise.allSettled(
+      (sidebar?.getAnimations() ?? []).map(
+        async ({ finished }) => await finished
+      )
+    );
+    const handOn = async () => {
+      await slid;
+      if (!left) {
+        fold?.focus();
+      }
+    };
+    void handOn();
+    return () => {
+      left = true;
+    };
+  }, [away]);
   return (
-    <SiteHeaderBar
-      actions={actions}
-      trailing={trailing}
-      phoneCrumbs={phoneCrumbs}
-      breadcrumbLabel={t`Breadcrumb`}
-      crumbs={crumbs.map((crumb) =>
-        "to" in crumb
-          ? { label: crumb.label, link: crumbLink(crumb) }
-          : { label: crumb.label }
+    <header
+      data-slot="site-header"
+      // The trigger holding focus, as the shortcut may open the sidebar.
+      onBlur={() => {
+        handing.current = false;
+      }}
+      onFocus={({ target }) => {
+        handing.current =
+          !isMobile && target.dataset.slot === "sidebar-trigger";
+      }}
+      ref={bar}
+      {...stylex.props(styles.bar, chatFloats && styles.roomForChat)}
+    >
+      {away ? (
+        <SidebarTrigger
+          aria-label={t`Show or hide the sidebar`}
+          style={styles.trigger}
+          onClick={() => {
+            // The sheet takes focus itself, and gives it back on closing.
+            handing.current = !isMobile;
+          }}
+        />
+      ) : null}
+      <div {...stylex.props(styles.where)}>
+        <Breadcrumb aria-label={t`Breadcrumb`}>
+          <BreadcrumbList>
+            {crumbs.map((crumb, index) => (
+              // A path's steps don't move: each stands at its own place.
+              <Fragment key={index}>
+                {index === 0 ? null : (
+                  <BreadcrumbSeparator style={styles.separator}>
+                    /
+                  </BreadcrumbSeparator>
+                )}
+                <BreadcrumbItem>
+                  {index !== last && "to" in crumb ? (
+                    <BreadcrumbLink asChild>
+                      <CrumbLink crumb={crumb} />
+                    </BreadcrumbLink>
+                  ) : (
+                    <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+                  )}
+                </BreadcrumbItem>
+              </Fragment>
+            ))}
+          </BreadcrumbList>
+        </Breadcrumb>
+        {trailing === undefined ? null : (
+          <div {...stylex.props(styles.trailing)}>{trailing}</div>
+        )}
+      </div>
+      {actions === undefined ? null : (
+        <div {...stylex.props(styles.actions)}>{actions}</div>
       )}
-      // The sidebar holds its own fold on a wider screen (frame/sidebar-brand.tsx).
-      trigger="mobile"
-      triggerLabel={t`Show or hide the sidebar`}
-    />
+    </header>
   );
 };

@@ -44,10 +44,10 @@ describe("the workflows pages' addresses", () => {
     }).toStrictEqual({ bad: {}, good: { status: "failed" } });
   });
 
-  it("drops a view, section or run a workflow's page doesn't have, so it opens on its default view", () => {
+  it("drops a view or section a workflow's page doesn't have, so it opens on its page", () => {
     expect({
       bad: searchAt(
-        "/page?view=bogus&section=bogus&run=&project=p-1",
+        "/page?view=bogus&section=bogus&project=p-1",
         workflowSearchOf
       ),
       good: searchAt(
@@ -57,20 +57,6 @@ describe("the workflows pages' addresses", () => {
     }).toStrictEqual({
       bad: { project: "p-1" },
       good: { view: "settings", section: "triggers", chat: "c-1" },
-    });
-  });
-
-  it("opens a run only on Runs: with no view it opens Runs, with another it is dropped", () => {
-    expect({
-      alone: searchAt("/page?run=r-1", workflowSearchOf),
-      onRuns: searchAt("/page?view=runs&run=r-1", workflowSearchOf),
-      onFlow: searchAt("/page?view=flow&run=r-1", workflowSearchOf),
-      onSettings: searchAt("/page?view=settings&run=r-1", workflowSearchOf),
-    }).toStrictEqual({
-      alone: { view: "runs", run: "r-1" },
-      onRuns: { view: "runs", run: "r-1" },
-      onFlow: { view: "flow" },
-      onSettings: { view: "settings" },
     });
   });
 });
