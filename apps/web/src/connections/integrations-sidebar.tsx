@@ -31,7 +31,7 @@ import type { SidebarSection } from "../frame/sidebar.tsx";
 import { WayOut } from "../frame/way-out.tsx";
 import type { Outside } from "../frame/way-out.tsx";
 import { groupLabel } from "./groups.ts";
-import { filterCounts, integrationsOf } from "./integrations.ts";
+import { integrationsOf } from "./integrations.ts";
 
 // Integrations as the sidebar's section while the person is in it, as
 // Settings and the Brain are (frame/app-sidebar.tsx): its name
@@ -60,6 +60,24 @@ const kindIcons: Readonly<Record<CatalogGroup, IconData>> = {
   Other: AppWindowIcon,
 };
 
+/**
+ * How many apps each kind holds, by the same rule as the kind's own page:
+ * the apps of that kind nobody connected yet (what is connected stands
+ * under Connected).
+ */
+const kindCounts = (
+  entries: Parameters<typeof integrationsOf>[0],
+  connections: Parameters<typeof integrationsOf>[1]
+): Map<CatalogGroup, number> => {
+  const counts = new Map<CatalogGroup, number>();
+  for (const integration of integrationsOf(entries, connections)) {
+    if (integration.listed && integration.connections.length === 0) {
+      counts.set(integration.group, (counts.get(integration.group) ?? 0) + 1);
+    }
+  }
+  return counts;
+};
+
 /** Integrations' kinds of app, as the sidebar's section; undefined outside Integrations. */
 export const useIntegrationsSection = (
   outside: Outside | undefined
@@ -85,9 +103,10 @@ export const useIntegrationsSection = (
   const connections = read?.connections;
   const entries = catalog?.state === "ready" ? catalog.data.entries : [];
   const chosen = overview?.search.group;
-  // As many as the kind's own page lists: connected apps too.
-  const listed = connections?.state === "ready" ? connections.data : [];
-  const counts = filterCounts(integrationsOf(entries, listed), listed).groups;
+  const counts = kindCounts(
+    entries,
+    connections?.state === "ready" ? connections.data : []
+  );
   const kinds = catalogGroups.filter(
     (group) => entries.length === 0 || (counts.get(group) ?? 0) > 0
   );

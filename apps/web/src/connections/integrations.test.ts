@@ -7,13 +7,11 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   beyond,
-  filterCounts,
   find,
   integrationsOf,
   keeps,
   nearestApps,
   parseIntegrationKey,
-  roundedDown,
   sectionsOf,
   stateOf,
   workflowsOf,
@@ -89,13 +87,21 @@ describe(integrationsOf, () => {
     expect(listed[1]?.connections).toStrictEqual([]);
   });
 
-  it("keeps a connection whose entry the catalog doesn't list, under its provider's ID", () => {
+  it("keeps a connection whose entry the catalog doesn't list, under its product's name or else its provider's ID", () => {
     const listed = integrationsOf(
       [],
-      [connection("hubspot", "shared", "active")]
+      [
+        connection("hubspot", "shared", "active"),
+        connection("microsoft-directory", "shared", "active"),
+      ]
     );
     expect(listed).toMatchObject([
       { key: "native:hubspot", name: "hubspot", listed: false, offered: false },
+      {
+        key: "native:microsoft-directory",
+        name: "Microsoft Entra ID",
+        listed: false,
+      },
     ]);
   });
 
@@ -188,52 +194,6 @@ describe("filters, search and sections", () => {
         [zapier, linear].filter((integration) => integration !== undefined)
       ).map(({ id }) => id)
     ).toStrictEqual(["linear", "zapier"]);
-  });
-
-  it("counts live HTTP connections under All and Connected, as both list them, but under no kind of app", () => {
-    const http = (status: ListedConnection["status"]): ListedConnection => ({
-      ...connection("http", "shared", status),
-      source: "http",
-      http: {
-        name: "Billing API",
-        origin: "https://billing.example.com",
-        pathPrefixes: ["/"],
-        methods: ["GET"],
-        credentialHeader: "x-api-key",
-      },
-    });
-    const listed: ListedConnection[] = [
-      connection("google", "personal", "needs_reauth"),
-      http("active"),
-      http("disconnected"),
-      // One whose summary connect couldn't read: not listed, so not counted.
-      { ...connection("http", "shared", "active"), source: "http" },
-    ];
-    const integrations = integrationsOf(
-      [
-        entry("microsoft", ["Email"], { group: "Email and calendar" }),
-        entry("google", ["Email"], { group: "Email and calendar" }),
-        entry("hubspot", ["CRM"], { group: "CRM" }),
-      ],
-      listed
-    );
-    const counts = filterCounts(integrations, listed);
-
-    expect({
-      all: counts.all,
-      connected: counts.connected,
-      groups: Object.fromEntries(counts.groups),
-    }).toStrictEqual({
-      all: 4,
-      connected: 2,
-      groups: { "Email and calendar": 2, CRM: 1 },
-    });
-  });
-
-  it("rounds a count down to say more than it", () => {
-    expect(roundedDown(1487)).toBe(1400);
-    expect(roundedDown(187)).toBe(150);
-    expect(roundedDown(47)).toBe(40);
   });
 });
 
@@ -392,7 +352,7 @@ describe(sectionsOf, () => {
     });
   });
 
-  it("calls an app lapsed only when the connection relied on did, not a spare beside one that works", () => {
+  it("calls an app lapsed when any of its connections ran out, a spare beside one that works too", () => {
     const working = connection("notion", "shared", "active");
     const spare = connection("notion", "shared", "needs_reauth");
     const ownOnly = connection("zoom", "personal", "needs_reauth");
@@ -409,8 +369,8 @@ describe(sectionsOf, () => {
     expect(
       ids(sectionsOf(apps, { show: "all" }, undefined, workflows))
     ).toStrictEqual({
-      lapsed: ["zoom", "jira"],
-      connected: ["notion"],
+      lapsed: ["notion", "zoom", "jira"],
+      connected: [],
       unused: [],
       others: [],
     });

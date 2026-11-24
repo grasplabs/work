@@ -21,7 +21,9 @@ export const useChange = ({
   const router = useRouter();
   const action = useCoreAction();
   const change = async (
-    make: (session: Session) => Promise<unknown>
+    make: (session: Session) => Promise<unknown>,
+    /** Where a failure is said, in place of `failure`: a toast, say. */
+    report?: (reason: string) => void
   ): Promise<void> => {
     await action.run(async (session) => {
       await changeThenRefresh(
@@ -43,7 +45,7 @@ export const useChange = ({
           await router.invalidate({ sync: true });
         }
       );
-    });
+    }, report);
   };
   return { busy: action.busy, failure: action.failure, change };
 };

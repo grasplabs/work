@@ -24,6 +24,13 @@ const files = import.meta.glob<string>("./*/messages.po", {
 const fieldLine = /^(?<field>msgctxt|msgid|msgstr) (?<value>".*")$/u;
 const blankLine = /\n\s*\n/u;
 const numberedTag = /<\/?\d+\/?>/gu;
+/** A language code used as a key, as in `{'de': '…', 'nl': '…'}`. */
+const languageKey = /["'](?:en|de|nl|es|fr)["']\s*:/u;
+const wholeWords = (text: string): RegExp =>
+  new RegExp(
+    `(?<!\\p{L})${text.replaceAll(/[.*+?^${}()|[\]\\]/gu, "\\$&")}(?!\\p{L})`,
+    "u"
+  );
 
 const unquote = (quoted: string): string => {
   const value: unknown = JSON.parse(quoted);
@@ -122,6 +129,35 @@ describe("translations", () => {
         }
       });
       expect(broken).toStrictEqual([]);
+    }
+  );
+
+  it.each(translated)(
+    "%s holds its own sentence, not every language's at once",
+    (locale) => {
+      const others = translated
+        .filter((other) => other !== locale)
+        .map((other) => new Map(catalog(other).map((e) => [e.key, e.str])));
+      const mixed = catalog(locale).flatMap((entry) => {
+        const looksLikeData =
+          /^\s*\{\s*["']/u.test(entry.str) || languageKey.test(entry.str);
+        // One word can sit inside another language's ("Diagram" in
+        // "Diagramme", "Un admin" in "Un administrador"), and Spanish may only
+        // add its "¿"; another language's sentence, as whole words, beside
+        // more words, cannot. The plain substring test comes first: building
+        // a pattern for every message of every language took seconds.
+        const holdsAnother = others.some((other) => {
+          const theirs = other.get(entry.key)?.trim() ?? "";
+          return (
+            /\s/u.test(theirs) &&
+            entry.str.includes(theirs) &&
+            wholeWords(theirs).test(entry.str) &&
+            /\p{L}/u.test(entry.str.replace(theirs, ""))
+          );
+        });
+        return looksLikeData || holdsAnother ? [entry.key] : [];
+      });
+      expect(mixed).toStrictEqual([]);
     }
   );
 });

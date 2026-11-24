@@ -573,7 +573,6 @@ const CorrectDialog = ({
           <Button
             disabled={!ready || busy}
             form={formId}
-            size="sm"
             type="submit"
             variant="default"
           >
@@ -887,7 +886,6 @@ const ShareDialog = ({
           <Button
             disabled={busy || choice === undefined}
             form={formId}
-            size="sm"
             type="submit"
             variant="default"
           >

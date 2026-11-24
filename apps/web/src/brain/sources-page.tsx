@@ -825,7 +825,6 @@ const UploadForm = ({
             }
             onUploaded(answer.data.source);
           }}
-          size="sm"
         >
           {t`Upload`}
         </Button>

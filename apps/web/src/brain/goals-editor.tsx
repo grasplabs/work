@@ -222,7 +222,6 @@ const WordingDialog = ({
               }
               onOpenChange(false);
             }}
-            size="sm"
           >
             {t`Save`}
           </Button>
@@ -306,7 +305,6 @@ const WorkflowsDialog = ({
               await save();
               onOpenChange(false);
             }}
-            size="sm"
           >
             {t`Save`}
           </Button>
