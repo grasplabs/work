@@ -440,10 +440,6 @@ msgstr "{count, plural, one {# outil autorisé} other {# outils autorisés}}"
 msgid "{count, plural, one {# trigger matches this type. A test event starts no workflow.} other {# triggers match this type. A test event starts no workflow.}}"
 msgstr "{count, plural, one {# déclencheur correspond à ce type. Un événement de test ne lance aucun workflow.} other {# déclencheurs correspondent à ce type. Un événement de test ne lance aucun workflow.}}"
 
-#: src/inbox/inbox-page.tsx
-msgid "{count, plural, one {# waiting} other {# waiting}}"
-msgstr "{count, plural, one {# en attente} other {# en attente}}"
-
 #: src/brain/brain.ts
 msgid "{count, plural, one {# wish} other {# wishes}}"
 msgstr "{count, plural, one {# souhait} other {# souhaits}}"
@@ -1903,14 +1899,6 @@ msgstr "Un enregistrement d’une autre table"
 msgid "A run of {name} waits for your answer. Nothing more happens in it until someone answers, or until it stops waiting."
 msgstr "Une exécution de {name} attend votre réponse. Rien d'autre ne s'y passe tant que personne ne répond ou qu'elle n'arrête pas d'attendre."
 
-#: src/inbox/decision-card.tsx
-msgid "A run of a workflow asked for this answer."
-msgstr "Une exécution d’un workflow a demandé cette réponse."
-
-#: src/inbox/decision-card.tsx
-msgid "A run of a workflow waits for this answer."
-msgstr "Une exécution d’un workflow attend cette réponse."
-
 #: src/workflows/activity-bar.tsx
 msgid "A run of version {version} for someone else ended: {status}"
 msgstr "Une exécution de la version {version} pour quelqu’un d’autre est terminée : {status}"
@@ -2007,7 +1995,6 @@ msgctxt "note property: what a note is about"
 msgid "About"
 msgstr "Sujet"
 
-#: src/inbox/decision-card.tsx
 #: src/inbox/decision-confirmation.tsx
 msgctxt "what a decision is about, as its workflow run passed it"
 msgid "About"
@@ -2164,6 +2151,10 @@ msgstr "Ajouter {model} aux favoris"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Add a card"
 msgstr "Ajouter une carte"
+
+#: src/inbox/decision-card.tsx
+msgid "Add a comment"
+msgstr "Ajouter un commentaire"
 
 #: src/settings/ai-providers.tsx
 msgid "Add a fallback"
@@ -2516,7 +2507,7 @@ msgctxt "filter: every integration"
 msgid "All"
 msgstr "Toutes"
 
-#: src/inbox/groups.ts
+#: src/inbox/sidebar-inbox.tsx
 msgctxt "inbox filter, short"
 msgid "All"
 msgstr "Tout"
@@ -2958,11 +2949,6 @@ msgstr "Applications"
 msgid "Apply it if the sender’s domain is {domain}."
 msgstr "Appliquez-la si le domaine de l’expéditeur est {domain}."
 
-#: src/inbox/groups.ts
-msgctxt "inbox filter"
-msgid "Approvals"
-msgstr "Approbations"
-
 #: src/apps/app-webhooks.tsx
 #: src/brain/skills-page.tsx
 #: src/chat/package-requests.tsx
@@ -3347,11 +3333,6 @@ msgstr "demandé par l’agent, dans son chat"
 msgid "Asked it, or it works for them on a schedule"
 msgstr "L'ont interrogé, ou il travaille pour elles selon un horaire"
 
-#: src/inbox/groups.ts
-msgctxt "inbox filter"
-msgid "Asked of you"
-msgstr "Posée à vous"
-
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
 msgid "Asked of you"
@@ -3615,11 +3596,6 @@ msgstr "Lié à"
 #: src/settings/sections.ts
 msgid "Brain"
 msgstr "Cerveau"
-
-#: src/inbox/groups.ts
-msgctxt "inbox filter, short"
-msgid "Brain"
-msgstr "Brain"
 
 #: src/frame/site-header.tsx
 #: src/frame/ui-words.tsx
@@ -5203,6 +5179,11 @@ msgstr "Décision introuvable"
 msgid "Decline"
 msgstr "Refuser"
 
+#: src/inbox/decision-card.tsx
+msgctxt "a workflow's decision"
+msgid "Decline"
+msgstr "Refuser"
+
 #: src/brain/skills-page.tsx
 #: src/frame/ui-words.tsx
 msgid "Declined"
@@ -5211,6 +5192,10 @@ msgstr "Refusé"
 #: src/activity/audit-words.ts
 msgid "Declined a write to an App"
 msgstr "A refusé une modification dans une application"
+
+#: src/inbox/decision-card.tsx
+msgid "Declined by {name} on {date}."
+msgstr "Refusé par {name} le {date}."
 
 #: src/inbox/approval-request.tsx
 #: src/inbox/item-detail.tsx
@@ -6431,6 +6416,10 @@ msgctxt "thinking effort"
 msgid "Extra high"
 msgstr "Très élevé"
 
+#: src/inbox/inbox-page.tsx
+msgid "Facts"
+msgstr "Faits"
+
 #: src/workflows/today-lanes.tsx
 msgctxt "a run that ended in failure"
 msgid "failed"
@@ -6447,6 +6436,11 @@ msgstr "échouée"
 #: src/workflows/workflow-diagram.tsx
 msgid "Failed"
 msgstr "En échec"
+
+#: src/inbox/approval-request.tsx
+msgctxt "a decline that did not go through"
+msgid "Failed"
+msgstr "Échec"
 
 #: src/frame/ui-words.tsx
 msgctxt "a list row's action"
@@ -6465,6 +6459,11 @@ msgstr "Échoué"
 
 #: src/frame/ui-words.tsx
 msgctxt "an answer that did not go through"
+msgid "Failed"
+msgstr "Échec"
+
+#: src/inbox/approval-request.tsx
+msgctxt "an approval that did not go through"
 msgid "Failed"
 msgstr "Échec"
 
@@ -6863,7 +6862,6 @@ msgstr "Fréquence"
 msgid "From"
 msgstr "Source"
 
-#: src/inbox/decision-card.tsx
 #: src/inbox/decision-confirmation.tsx
 msgctxt "where a decision comes from"
 msgid "From"
@@ -7920,8 +7918,9 @@ msgid "In your own words, as you would tell a colleague."
 msgstr "Avec vos propres mots, comme vous le diriez à un collègue."
 
 #: src/frame/app-sidebar.tsx
+#: src/inbox/inbox-page.tsx
+#: src/inbox/inbox-pending.tsx
 #: src/inbox/sidebar-inbox.tsx
-#: src/routes/_shell.inbox.tsx
 msgid "Inbox"
 msgstr "Boîte de réception"
 
@@ -9756,6 +9755,7 @@ msgid "Next: {0}"
 msgstr "Prochaine fois : {0}"
 
 #: src/apps/field-editor.tsx
+#: src/inbox/json-fields.tsx
 #: src/routes/_shell.settings.members.tsx
 msgid "No"
 msgstr "Non"
@@ -9811,6 +9811,10 @@ msgstr "Aucun fournisseur d'IA n'est encore connecté, donc les fonctions d'IA d
 #: src/chat/failure.ts
 msgid "No AI provider is connected yet. Ask your admin to connect one."
 msgstr "Aucun fournisseur d'IA n'est encore connecté. Demandez à votre admin d'en connecter un."
+
+#: src/inbox/decision-card.tsx
+msgid "No answer by {date}: it closes."
+msgstr "Sans réponse d'ici le {date} : elle se ferme."
 
 #: src/routes/_shell.settings.models.tsx
 msgid "No App has a model bound to it."
@@ -11193,7 +11197,6 @@ msgstr "Ouvrir l'exécution"
 msgid "Open this link again whenever you like, and carry on where you stopped."
 msgstr "Rouvrez ce lien quand vous voulez, et reprenez là où vous vous êtes arrêté."
 
-#: src/inbox/decision-card.tsx
 #: src/inbox/decision-confirmation.tsx
 msgctxt "until when a decision can be answered"
 msgid "Open until"
@@ -12298,7 +12301,6 @@ msgstr "Région"
 msgid "Reject"
 msgstr "Rejeter"
 
-#: src/inbox/decision-card.tsx
 #: src/inbox/decision-confirmation.tsx
 msgctxt "a workflow's decision"
 msgid "Reject"
@@ -12320,10 +12322,6 @@ msgstr "Tout rejeter"
 #: src/frame/ui-words.tsx
 msgid "Rejected"
 msgstr "Rejeté"
-
-#: src/inbox/decision-card.tsx
-msgid "Rejected by {name} on {date}."
-msgstr "Rejeté par {name} le {date}."
 
 #: src/workflows/today-lanes.tsx
 msgid "Rejected in {left} s"
@@ -12780,10 +12778,6 @@ msgstr "Réessayé"
 msgid "Review"
 msgstr "Examiner"
 
-#: src/inbox/item-detail.tsx
-msgid "Review and answer"
-msgstr "Examiner et répondre"
-
 #: src/workflows/item-test.tsx
 msgid "Revision {draftRevision} on it"
 msgstr "Révision {draftRevision} dessus"
@@ -13000,7 +12994,6 @@ msgctxt "start a workflow's run by hand"
 msgid "Run"
 msgstr "Exécuter"
 
-#: src/inbox/decision-card.tsx
 #: src/inbox/decision-confirmation.tsx
 msgctxt "the run of a workflow a decision is for"
 msgid "Run"
@@ -13839,7 +13832,6 @@ msgstr "Partage annulé"
 
 #: src/apps/app-data-model.tsx
 #: src/brain/atlas-overlays.tsx
-#: src/inbox/inbox-page.tsx
 msgid "Show"
 msgstr "Afficher"
 
@@ -18371,6 +18363,7 @@ msgid "Wrote {file}"
 msgstr "{file} écrit"
 
 #: src/apps/field-editor.tsx
+#: src/inbox/json-fields.tsx
 #: src/routes/_shell.settings.members.tsx
 msgid "Yes"
 msgstr "Oui"

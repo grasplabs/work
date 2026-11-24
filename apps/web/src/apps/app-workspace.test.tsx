@@ -1083,7 +1083,7 @@ describe(AppWorkspace, () => {
     }).toStrictEqual({ shown: true, after: true, close: false });
   });
 
-  it("asks about the App: each question carries it, named in the bar on the box", async () => {
+  it("asks about the App: each question carries it, named on the band above the box", async () => {
     const { sent } = await opened(
       fakeApps().apps,
       identityOf(false),
@@ -1091,7 +1091,7 @@ describe(AppWorkspace, () => {
     );
     await settled();
     const bar = document.querySelector(
-      '[data-slot="prompt-input-header"]'
+      '[data-slot="prompt-input-banner"]'
     )?.textContent;
     await typeAndSend("Add a due date column");
     await typeAndSend("What's a good name for it?");
