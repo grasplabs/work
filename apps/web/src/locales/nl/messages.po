@@ -4985,8 +4985,16 @@ msgid "Dictation isn't set up here yet."
 msgstr "Dicteren is hier nog niet ingesteld."
 
 #: src/chat/dictation.ts
+msgid "Dictation stopped as its box went out of sight. What was heard is kept."
+msgstr "Dicteren is gestopt omdat het invoerveld uit beeld ging. Wat er gehoord is, blijft bewaard."
+
+#: src/chat/dictation.ts
 msgid "Dictation stopped as you left this tab. What was heard is kept."
 msgstr "Dicteren is gestopt omdat je dit tabblad verliet. Wat er gehoord is, blijft bewaard."
+
+#: src/chat/dictation.ts
+msgid "Dictation stopped as you went to another page. What was heard is kept."
+msgstr "Dicteren is gestopt omdat je naar een andere pagina ging. Wat er gehoord is, blijft bewaard."
 
 #: src/chat/dictation.ts
 msgid "Dictation stopped: the microphone was lost. What was heard is kept."

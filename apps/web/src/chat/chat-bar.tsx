@@ -124,6 +124,7 @@ export const ChatBar = () => {
         }}
         placeholder={words.placeholder}
         running={false}
+        stopNote={composer.stopNote}
         text={composer.text}
         {...(onAttach === undefined
           ? {}

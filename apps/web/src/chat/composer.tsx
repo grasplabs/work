@@ -52,6 +52,7 @@ import type { CardFile } from "./chat-files.tsx";
 import { promptStatusOf } from "./chat-states.ts";
 import { ConnectAiProvider } from "./connect-ai-provider.tsx";
 import { useDictation } from "./dictation.ts";
+import type { StopNote } from "./dictation.ts";
 import {
   mentionsOf,
   textOf,
@@ -592,6 +593,7 @@ const useBoxValue = (
 export const Composer = ({
   text,
   onText,
+  stopNote,
   mentions = noMentions,
   onMentions,
   models: offered,
@@ -621,6 +623,11 @@ export const Composer = ({
 }: {
   text: string;
   onText: (text: string) => void;
+  /**
+   * Why dictating stopped on its own, kept where the text is: a box that
+   * goes mid-dictation leaves the line under it to the box that comes.
+   */
+  stopNote?: StopNote;
   /** The mentions the page holds: where it sets words, they stand as tokens. */
   mentions?: readonly BoxMention[];
   /** The mentions in what is typed, as they change. */
@@ -689,7 +696,10 @@ export const Composer = ({
   // No AI provider to call yet: the box takes nothing. Not while the models
   // are still being read, so what is typed then stays.
   const noProvider = offered !== undefined && lacksModel(model);
-  const dictation = useDictation(text, onText, { off: !dictates });
+  const dictation = useDictation(text, onText, {
+    off: !dictates,
+    note: stopNote,
+  });
   const { held, heldFailure, submit, letGo } = useSend({
     text,
     running,

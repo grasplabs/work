@@ -32,7 +32,10 @@ import type { DictationMic } from "./dictation-mic.ts";
 // screen: the box that dictates watches its bar itself, so a page that
 // hides a box without saying so (`off`) still stops it. One dictation in
 // the app at a time. Its mute is its own and ends with it. Where it stops
-// on its own, what was heard goes in, and a line under the box says why.
+// on its own, what was heard goes in, and a line under the box says why:
+// both are kept with the box's text (the draft its page keeps, `note`), so
+// a box that goes away mid-word leaves them for the box that comes, in the
+// chat's panel or its bar. Only Cancel keeps nothing.
 
 /** Why dictating stopped, as the line under the box says it. */
 export type Problem =
@@ -42,7 +45,9 @@ export type Problem =
   | "limited"
   | "failed"
   | "lost"
-  | "hidden";
+  | "hidden"
+  | "away"
+  | "page";
 
 const problemWords: Record<Problem, MessageDescriptor> = {
   blocked: msg`Your browser doesn't let Grasp use the microphone. Allow it in the browser's settings to dictate.`,
@@ -52,7 +57,18 @@ const problemWords: Record<Problem, MessageDescriptor> = {
   failed: msg`Dictation stopped. What was heard is kept.`,
   lost: msg`Dictation stopped: the microphone was lost. What was heard is kept.`,
   hidden: msg`Dictation stopped as you left this tab. What was heard is kept.`,
+  away: msg`Dictation stopped as its box went out of sight. What was heard is kept.`,
+  page: msg`Dictation stopped as you went to another page. What was heard is kept.`,
 };
+
+/**
+ * Why dictating stopped last, and the way to say it anew: kept beside the
+ * box's text by the page that keeps that, so it outlives the box.
+ */
+export type StopNote = readonly [
+  Problem | undefined,
+  (why: Problem | undefined) => void,
+];
 
 /**
  * Core refused to listen in this visit because live transcription isn't
@@ -315,6 +331,10 @@ const barShown = (): boolean => {
   return bars.length === 0 || bars.some(onScreen);
 };
 
+/** Whether the focus is on no control: fallen to the page. */
+const lostFocus = (): boolean =>
+  document.activeElement === null || document.activeElement === document.body;
+
 /** `text` with `said` after it, a space between. */
 const after = (text: string, said: string): string =>
   [text.trimEnd(), said].filter((part) => part !== "").join(" ");
@@ -325,7 +345,9 @@ const after = (text: string, said: string): string =>
  * microphone; core not set up for it; the box `off`, such as the idle bar
  * while the chat is open), and the line that says why it stopped
  * (`problem`), until `clearProblem`. `text` is what is typed; `onText`
- * takes it back with the dictated words after it.
+ * takes it back with the dictated words after it, also as the box goes.
+ * `note` keeps why it stopped where the text is kept; the box's own
+ * without it.
  */
 export const useDictation = (
   text: string,
@@ -333,7 +355,12 @@ export const useDictation = (
   {
     off = false,
     parts = browserParts,
-  }: { off?: boolean; parts?: DictationParts } = {}
+    note,
+  }: {
+    off?: boolean;
+    parts?: DictationParts;
+    note?: StopNote | undefined;
+  } = {}
 ): {
   speech: PromptInputSpeechButtonProps | undefined;
   problem: string | undefined;
@@ -349,7 +376,8 @@ export const useDictation = (
   const [settling, setSettling] = useState(false);
   const [muted, setMuted] = useState(false);
   const [interim, setInterim] = useState("");
-  const [problem, setProblem] = useState<Problem>();
+  const [ownProblem, setOwnProblem] = useState<Problem>();
+  const [problem, setProblem] = note ?? [ownProblem, setOwnProblem];
   const running = useRef<Dictation | null>(null);
   // What was heard of the one running, for a stop that keeps it.
   const heard = useRef("");
@@ -392,15 +420,18 @@ export const useDictation = (
   useEffect(() => {
     stopNow.current = stop;
   });
-  // The box goes away, or can't dictate any more: its dictation goes too.
+  // The box goes away (the agent's questions in its place, the chat
+  // undocked), or can't dictate any more (the chat opened over its bar, or
+  // closed over its box): its dictation goes too, what was heard kept in
+  // the text, and why, for the box that shows next.
   useEffect(() => {
     if (!can) {
-      stopNow.current(false);
+      stopNow.current(true, "away");
     }
   }, [can]);
   useEffect(
     () => () => {
-      stopNow.current(false);
+      stopNow.current(true, "away");
     },
     []
   );
@@ -409,7 +440,7 @@ export const useDictation = (
   useEffect(() => {
     if (page.current !== pathname) {
       page.current = pathname;
-      stopNow.current(true);
+      stopNow.current(true, "page");
     }
   }, [pathname]);
   // Its bar out of sight (the chat closed over it, the box hidden by its
@@ -418,7 +449,7 @@ export const useDictation = (
     const timer = listening
       ? window.setInterval(() => {
           if (!barShown()) {
-            stopNow.current(true);
+            stopNow.current(true, "away");
           }
         }, shownCheckMs)
       : undefined;
@@ -429,26 +460,35 @@ export const useDictation = (
   // Started by a press of the pointer, Damsko's box leaves the focus on
   // the page as its microphone gives way to the bar, where Escape reaches
   // nothing: the focus goes to the bar's Done, as it does from the keys.
+  // As the bar goes (Done written down, Cancel, Escape), the focus it took
+  // comes back to the microphone, as Damsko does from the keys, not to
+  // the page.
+  const barUp = listening || settling;
   useEffect(() => {
-    if (!listening) {
+    if (!barUp) {
       return nothing;
     }
+    let gaveTo: Element | null = null;
     const frame = window.requestAnimationFrame(() => {
-      const lost =
-        document.activeElement === null ||
-        document.activeElement === document.body;
-      if (lost) {
-        document
-          .querySelector<HTMLElement>(
-            '[data-slot="prompt-input-dictation-done"]'
-          )
-          ?.focus();
+      if (lostFocus()) {
+        const done = document.querySelector<HTMLElement>(
+          '[data-slot="prompt-input-dictation-done"]'
+        );
+        done?.focus();
+        gaveTo = done?.closest('[data-slot="prompt-input"]') ?? null;
       }
     });
     return () => {
       window.cancelAnimationFrame(frame);
+      if (gaveTo?.isConnected === true && lostFocus()) {
+        gaveTo
+          .querySelector<HTMLElement>(
+            '[data-slot="prompt-input-speech-button"]'
+          )
+          ?.focus();
+      }
     };
-  }, [listening]);
+  }, [barUp]);
   // The tab hidden: it stops, and says so; the tab closed: it goes.
   useEffect(() => {
     const onHidden = (): void => {

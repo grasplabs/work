@@ -26,7 +26,7 @@ import type { LiveLine, LiveLineOptions } from "../interview/live-line.ts";
 import { micMuted } from "../interview/mic.ts";
 import type { DictationMic } from "./dictation-mic.ts";
 import { dictate, lineReadyMs, useDictation } from "./dictation.ts";
-import type { DictationParts, Problem } from "./dictation.ts";
+import type { DictationParts, Problem, StopNote } from "./dictation.ts";
 
 // One dictation, from the moment the browser is asked for the microphone
 // to its end, on a fake microphone and a fake line to core: every way out
@@ -426,7 +426,12 @@ const shown = async (parts: DictationParts, boxes = 1) => {
     }, [hook, index, text]);
     // What takes dictation away from the box, as the chat's bar does while the chat is open.
     return (
-      <div data-box={index}>
+      <div data-box={index} data-slot="prompt-input">
+        <button
+          aria-label="Dictate"
+          data-slot="prompt-input-speech-button"
+          type="button"
+        />
         <button
           aria-label="Dictation off"
           data-off
@@ -492,6 +497,113 @@ const shown = async (parts: DictationParts, boxes = 1) => {
   };
   return { now: () => nowOf(0), nowOf, router };
 };
+
+/**
+ * The chat's two boxes, its idle bar (0) and its panel (1), writing into
+ * one draft that their page keeps, as the chat's does (use-ask.ts): its
+ * text and why dictating stopped last. Each box can be taken away from
+ * the page (the agent's questions in its place, the chat undocked) or
+ * kept from dictating (the bar while the chat is open, the panel while it
+ * is closed), as `set` says; the panel starts closed.
+ */
+const sharing = async (parts: DictationParts) => {
+  const seen: (Seen | undefined)[] = [];
+  interface Change {
+    shown?: boolean;
+    off?: boolean;
+  }
+  const control: { set?: (index: number, box: Change) => void } = {};
+  const Box = ({
+    index,
+    text,
+    onText,
+    note,
+    off,
+  }: {
+    index: number;
+    text: string;
+    onText: (text: string) => void;
+    note: StopNote;
+    off: boolean;
+  }) => {
+    const hook = useDictation(text, onText, { off, parts, note });
+    useEffect(() => {
+      seen[index] = { hook, text };
+    }, [hook, index, text]);
+    return hook.speech?.listening === true ? (
+      <div data-slot="prompt-input-dictation" />
+    ) : null;
+  };
+  const Draft = () => {
+    const [text, setText] = useState("For finance:");
+    const [stopped, setStopped] = useState<Problem>();
+    const note: StopNote = [stopped, setStopped];
+    const [boxes, setBoxes] = useState([
+      { shown: true, off: false },
+      { shown: true, off: true },
+    ]);
+    useEffect(() => {
+      control.set = (index, box) => {
+        setBoxes((now) =>
+          now.map((each, at) => (at === index ? { ...each, ...box } : each))
+        );
+      };
+    }, []);
+    return boxes.map((box, index) =>
+      box.shown ? (
+        <Box
+          index={index}
+          key={index}
+          note={note}
+          off={box.off}
+          onText={setText}
+          text={text}
+        />
+      ) : null
+    );
+  };
+  const rootRoute = createRootRoute({ component: Outlet });
+  const shell = createRoute({
+    getParentRoute: () => rootRoute,
+    id: "_shell",
+    component: Draft,
+  });
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([shell]),
+    history: createMemoryHistory(),
+  });
+  const host = document.createElement("div");
+  document.body.append(host);
+  await act(async () => {
+    root = createRoot(host);
+    root.render(
+      <I18nProvider i18n={i18n}>
+        <RouterProvider router={router} />
+      </I18nProvider>
+    );
+    await router.load();
+  });
+  const nowOf = (index: number) => (): Seen => {
+    const box = seen[index];
+    if (box === undefined) {
+      throw new Error("No box");
+    }
+    return box;
+  };
+  return {
+    bar: nowOf(0),
+    panel: nowOf(1),
+    set: (index: number, box: Change) => {
+      act(() => {
+        control.set?.(index, box);
+      });
+    },
+  };
+};
+
+/** What a box says when its dictation stopped as it went out of sight. */
+const awayWords =
+  "Dictation stopped as its box went out of sight. What was heard is kept.";
 
 /** Takes dictation away from the box, or gives it back. */
 const toggleOff = (): void => {
@@ -608,11 +720,14 @@ describe("dictating in the box", () => {
       closed: fake.line().closed,
       listening: speechOf(now()).listening,
       text: now().text,
+      problem: now().hook.problem,
     }).toStrictEqual({
       stopped: true,
       closed: true,
       listening: false,
       text: "For finance: which invoices are late",
+      problem:
+        "Dictation stopped as you went to another page. What was heard is kept.",
     });
   });
 
@@ -724,11 +839,96 @@ describe("dictating in the box", () => {
       sent: fake.line().sent - sentBefore,
       listening: speechOf(now()).listening,
       text: now().text,
+      problem: now().hook.problem,
     }).toStrictEqual({
       closed: true,
       sent: 0,
       listening: false,
       text: "For finance: which invoices are late",
+      problem: awayWords,
+    });
+  });
+
+  it("keeps what was heard as the draft when the box goes mid-dictation (the agent's questions in its place, the chat undocked), and the box that comes back says why", async () => {
+    const fake = rig();
+    const { bar, set } = await sharing(fake.parts);
+    const mic = await dictating(bar, fake);
+
+    set(0, { shown: false });
+    const gone = { stopped: mic.stopped, closed: fake.line().closed };
+    set(0, { shown: true });
+
+    expect({
+      gone,
+      text: bar().text,
+      problem: bar().hook.problem,
+      listening: speechOf(bar()).listening,
+    }).toStrictEqual({
+      gone: { stopped: true, closed: true },
+      text: "For finance: which invoices are late",
+      problem: awayWords,
+      listening: false,
+    });
+  });
+
+  it("keeps what was heard in the idle bar for the panel as the chat opens over it, and says why there", async () => {
+    const fake = rig();
+    const { bar, panel, set } = await sharing(fake.parts);
+    const mic = await dictating(bar, fake);
+
+    // The chat opens: its bar dictates no more, its panel does.
+    set(0, { off: true });
+    set(1, { off: false });
+
+    expect({
+      stopped: mic.stopped,
+      text: panel().text,
+      problem: panel().hook.problem,
+    }).toStrictEqual({
+      stopped: true,
+      text: "For finance: which invoices are late",
+      problem: awayWords,
+    });
+  });
+
+  it("keeps what was heard in the panel for the idle bar as the chat closes (Close, or the shortcut), and says why there", async () => {
+    const fake = rig();
+    const { bar, panel, set } = await sharing(fake.parts);
+    set(0, { off: true });
+    set(1, { off: false });
+    const mic = await dictating(panel, fake);
+
+    set(1, { off: true });
+    set(0, { off: false });
+
+    expect({
+      stopped: mic.stopped,
+      text: bar().text,
+      problem: bar().hook.problem,
+    }).toStrictEqual({
+      stopped: true,
+      text: "For finance: which invoices are late",
+      problem: awayWords,
+    });
+  });
+
+  it("keeps nothing on Cancel, and says nothing", async () => {
+    const fake = rig();
+    const { bar } = await sharing(fake.parts);
+    const mic = await dictating(bar, fake);
+
+    act(() => {
+      speechOf(bar()).onCancel?.();
+    });
+
+    expect({
+      stopped: mic.stopped,
+      text: bar().text,
+      problem: bar().hook.problem,
+    }).toStrictEqual({
+      stopped: true,
+      text: "For finance:",
+      problem: undefined,
     });
   });
 
@@ -748,6 +948,32 @@ describe("dictating in the box", () => {
         );
       });
     });
+  });
+
+  it("gives the focus it took for the bar back to the microphone as the bar goes", async () => {
+    const fake = rig();
+    const { now } = await shown(fake.parts);
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    await dictating(now, fake);
+    await act(async () => {
+      await vi.waitFor(() => {
+        const focused = document.activeElement;
+        expect(focused instanceof HTMLElement && focused.dataset.slot).toBe(
+          "prompt-input-dictation-done"
+        );
+      });
+    });
+
+    act(() => {
+      speechOf(now()).onCancel?.();
+    });
+
+    const focused = document.activeElement;
+    expect(focused instanceof HTMLElement && focused.dataset.slot).toBe(
+      "prompt-input-speech-button"
+    );
   });
 
   it("dictates in one box of the app at a time: another starting stops the first, keeping what it heard", async () => {

@@ -14,6 +14,7 @@ import { useRef, useState } from "react";
 import { useCoreAction } from "../use-core-action.ts";
 import { setActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
+import type { Problem, StopNote } from "./dictation.ts";
 import type { BoxMention } from "./mentions.tsx";
 import { chatMentionsOf } from "./mentions.tsx";
 import {
@@ -116,6 +117,10 @@ export const useAsk = (
   const { identity } = useRouteContext({ from: "/_shell" });
   const { busy, failure, run } = useCoreAction();
   const [text, setText] = useState("");
+  // Why dictating into the text stopped on its own, kept with it: the box
+  // it stopped in may have gone (dictation.ts).
+  const [stopped, setStopped] = useState<Problem>();
+  const stopNote: StopNote = [stopped, setStopped];
   // What the person mentioned in the box (`@`), each once: what the
   // question names exactly, beside its words, and the chips the box shows.
   const [mentions, setMentions] = useState<readonly BoxMention[]>([]);
@@ -262,6 +267,7 @@ export const useAsk = (
     composer: {
       text,
       onText: setText,
+      stopNote,
       mentions,
       onMentions: setMentions,
       models,
