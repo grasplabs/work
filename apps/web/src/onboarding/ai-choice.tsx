@@ -204,6 +204,8 @@ export const AiChoice = ({
         />
       ) : null}
       <ConnectApiKey
+        // Two and two: the four providers stand as a square, not three and one.
+        columns={2}
         connected={connected}
         labels={{
           keyNote: t`We store it sealed. You’ll only see its last four characters again.`,
