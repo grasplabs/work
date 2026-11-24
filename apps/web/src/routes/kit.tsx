@@ -73,10 +73,10 @@ import {
 } from "@grasp-os/app-kit/components/item";
 import { Kbd } from "@grasp-os/app-kit/components/kbd";
 import { Label } from "@grasp-os/app-kit/components/label";
-// Local check that the UI kit renders with the theme, in light and dark mode
-// (e2e/kit.e2e.ts). Not product UI: builds in production mode answer not
-// found. Gated on the mode rather than `DEV`, because the local stack serves
-// a `--mode development` build, which Vite still builds with `DEV` false.
+// Local check that the UI kit renders with the theme, in light and dark
+// mode. Not product UI: builds in production mode answer not found. Gated on
+// the mode rather than `DEV`, because the local stack serves a
+// `--mode development` build, which Vite still builds with `DEV` false.
 import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
 import {
   PageSidebar,
