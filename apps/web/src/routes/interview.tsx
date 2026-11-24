@@ -322,51 +322,41 @@ const Interview = () => {
 };
 
 /**
- * CONCEPT ONLY (never merged): `?concept=a|b|c` shows a concept of the
- * interview's start or read-back on fixture data
- * (interview/concepts/concepts.tsx); without it, the interview as it is.
+ * CONCEPT ONLY (never merged): `/interview` without a link's secret shows
+ * the interview's new start and conversation on fixture data
+ * (interview/concepts/concepts.tsx); with one (`/interview#<secret>`, or
+ * the one this tab kept while signing in), the interview as it is, and
+ * again when the address's fragment changes. `linkSecret` puts a kept
+ * secret back in the address, so the interview reads it from there.
  */
 const InterviewOrConcept = () => {
-  const concept = conceptSearch(Route.useSearch());
-  return concept === undefined ? (
-    <Interview />
+  const [secret, setSecret] = useState(linkSecret);
+  useEffect(() => {
+    const changed = (): void => {
+      setSecret(linkSecret());
+    };
+    window.addEventListener("hashchange", changed);
+    return () => {
+      window.removeEventListener("hashchange", changed);
+    };
+  }, []);
+  const search = Route.useSearch();
+  return secret === "" ? (
+    <InterviewConcepts search={conceptSearch(search)} />
   ) : (
-    <InterviewConcepts search={concept} />
+    <Interview />
   );
 };
 
 /** The address's concept switches, kept as they are written. */
-const conceptKeys = [
-  "concept",
-  "stage",
-  "at",
-  "left",
-  "still",
-  "lang",
-  "transcript",
-  "fold",
-  "band",
-  "title",
-  "layout",
-  "name",
-  "later",
-] as const;
+const conceptKeys = ["at", "left", "still", "name"] as const;
 
 /** The concept switches, by name, as the address writes them. */
 interface ConceptKeys {
-  concept?: unknown;
-  stage?: unknown;
   at?: unknown;
   left?: unknown;
   still?: unknown;
-  lang?: unknown;
-  transcript?: unknown;
-  fold?: unknown;
-  band?: unknown;
-  title?: unknown;
-  layout?: unknown;
   name?: unknown;
-  later?: unknown;
 }
 
 export const Route = createFileRoute("/interview")({

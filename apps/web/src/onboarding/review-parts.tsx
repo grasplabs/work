@@ -27,11 +27,13 @@ import type { StepProps } from "./step-parts.ts";
 const styles = stylex.create({
   item: { display: "grid", gap: space[4] },
   choices: { display: "flex", flexWrap: "wrap", gap: space[3] },
+  // The sentence, and "Change" a little apart on its baseline, so it reads as the action.
   settled: {
     display: "flex",
     flexWrap: "wrap",
     alignItems: "baseline",
-    gap: space[3],
+    columnGap: space[4],
+    rowGap: space[2],
   },
   list: {
     display: "grid",

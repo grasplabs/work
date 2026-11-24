@@ -13,7 +13,6 @@ import {
   PromptInputBody,
   PromptInputButton,
   PromptInputFooter,
-  PromptInputNote,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
@@ -24,11 +23,10 @@ import { AudioWaveformIcon, CheckIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { colors, duration, media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
 
 import { micLevel, reachMic, watchLevel } from "../mic.ts";
 import { shownAs, useSaid, wordsOf } from "../spoken.tsx";
-import { usedWords, wrapUpSeconds } from "./clock.ts";
+import { wrapUpSeconds } from "./clock.ts";
 import { Countdown } from "./countdown.tsx";
 import {
   copy,
@@ -41,11 +39,10 @@ import {
   timeUp,
   wrapUp,
 } from "./fixture.ts";
-import type { ClockPlace } from "./frame.tsx";
 
-// CONCEPT ONLY: the conversation, as every concept reaches it: Damsko’s
-// Chat (the thread, Stephen’s turns at the start, the person’s at the end
-// in a muted Bubble) over its PromptInput. Voice first: the card is
+// CONCEPT ONLY: the conversation, after the yes: Stephen's line on a
+// stage over Damsko's PromptInput, the thread (Chat, Stephen's turns at
+// the start, the person's at the end in a muted Bubble) in the transcript. Voice first: the card is
 // PromptInputVoice while Stephen speaks and while the person talks; its
 // close button is the quiet way to type, at any moment, and "Talk" in the
 // typed card’s tools the way back. A microphone the browser refused is a
@@ -165,8 +162,6 @@ export interface Turn {
   text: string;
   /** A few words Stephen says before it ("I can hear you clearly."). */
   lead?: string;
-  /** Under Stephen’s words: a Confirmation, a Questionnaire (concept C). */
-  extra?: ReactNode;
 }
 
 /** What is going on now. */
@@ -174,7 +169,7 @@ export type Doing =
   | "speaking"
   | "thinking"
   | "listening"
-  /** A's fold-in: their first words stand written, "I can hear you clearly." under the line. */
+  /** Folded in: their first words stand written, "I can hear you clearly." under the line. */
   | "heard"
   | "over";
 
@@ -191,13 +186,13 @@ export interface Talk {
   expect: string;
   /** Stephen said he wraps up. */
   wrapped: boolean;
-  /** B's "I can hear you clearly." folded into A's first line, as a moment of its own. */
+  /** "I can hear you clearly." folded into the first line, as a moment of its own. */
   fold?: boolean;
 }
 
 /** The talk as it starts: Stephen asks to hear them, voice first. */
-export const helloTalk = (before: Turn[] = []): Talk => ({
-  turns: [...before, { id: "hello", from: "stephen", text: hello }],
+export const helloTalk = (): Talk => ({
+  turns: [{ id: "hello", from: "stephen", text: hello }],
   doing: "listening",
   interim: "",
   mode: "voice",
@@ -295,7 +290,7 @@ const timeIsUp = (talk: Talk): Talk => ({
 });
 
 /** Runs `then` after `ms`, unless stopped first. */
-export const after = (ms: number, then: () => void): (() => void) => {
+const after = (ms: number, then: () => void): (() => void) => {
   const id = window.setTimeout(then, ms);
   return () => {
     window.clearTimeout(id);
@@ -303,7 +298,7 @@ export const after = (ms: number, then: () => void): (() => void) => {
 };
 
 /** Asks for the microphone, and runs `refused` when it isn’t given, unless stopped first. */
-export const whenMicRefused = (refused: () => void): (() => void) => {
+const whenMicRefused = (refused: () => void): (() => void) => {
   let current = true;
   const ask = async (): Promise<void> => {
     const given = await reachMic();
@@ -322,7 +317,7 @@ export const whenMicRefused = (refused: () => void): (() => void) => {
  * answer is "heard" word by word (spoken) or typed, Stephen thinks and
  * asks the next. Not live, it stands still where it was opened.
  */
-export const useTalk = (start: Talk, live: boolean, left: number) => {
+const useTalk = (start: Talk, live: boolean, left: number) => {
   const [kept, setKept] = useState(start);
   // At 0 the interviewer stops, whatever is going on.
   const talk =
@@ -431,7 +426,7 @@ const levelOf = (doing: Doing, live: boolean): number => {
 };
 
 /** The thread: Stephen’s turns at the start, theirs at the end. */
-export const Thread = ({ turns, doing }: { turns: Turn[]; doing: Doing }) => (
+const Thread = ({ turns, doing }: { turns: Turn[]; doing: Doing }) => (
   <ChatMessages
     aria-busy={doing === "thinking"}
     aria-label={`Interview with ${fixture.interviewer}`}
@@ -462,7 +457,6 @@ export const Thread = ({ turns, doing }: { turns: Turn[]; doing: Doing }) => (
                 ? turn.text
                 : `${turn.lead} ${turn.text}`}
             </MessageResponse>
-            {turn.extra}
           </MessageContent>
         </ChatMessage>
       )
@@ -474,8 +468,6 @@ export const Thread = ({ turns, doing }: { turns: Turn[]; doing: Doing }) => (
 const Composer = ({
   talk,
   live,
-  left,
-  clock,
   onType,
   onSpeak,
   onSend,
@@ -483,8 +475,6 @@ const Composer = ({
 }: {
   talk: Talk;
   live: boolean;
-  left: number;
-  clock: ClockPlace;
   onType: () => void;
   onSpeak: () => void;
   onSend: (text: string) => void;
@@ -510,7 +500,7 @@ const Composer = ({
         // The banner's most compact honest form on a phone: one line, no action of its own (a
         // card under 24rem puts an action under the words); "Talk" in the card asks again.
         <PromptInputBanner variant="warning">
-          {copy.check.blocked}
+          {copy.talk.blocked}
         </PromptInputBanner>
       ) : null}
       {spoken ? (
@@ -554,9 +544,6 @@ const Composer = ({
           </PromptInputFooter>
         </>
       )}
-      {clock === "note" ? (
-        <PromptInputNote>{usedWords(left)}</PromptInputNote>
-      ) : null}
     </PromptInput>
   );
 };
@@ -602,21 +589,19 @@ const LitLine = ({
 };
 
 /**
- * A and B: the conversation as a stage, as the interview is today: one
- * thing in the middle of the window, Stephen's line, large, centred, in the
- * serif of what Grasp says, its words lighting up as he says them; over it,
- * for A, the minutes left, alone. What was said before is in the
+ * The conversation as a stage, as the interview is today: one thing in the
+ * middle of the window, Stephen's line, large, centred, in the serif of what
+ * Grasp says, its words lighting up as he says them; over it the minutes
+ * left, alone. What was said before is in the
  * transcript, beside the stage on a wide window.
  */
 const Stage = ({
   talk,
   left,
-  clock,
   onReadBack,
 }: {
   talk: Talk;
   left: number;
-  clock: ClockPlace;
   onReadBack: () => void;
 }) => {
   const now = talk.turns.findLast((turn) => turn.from === "stephen");
@@ -629,7 +614,7 @@ const Stage = ({
   return (
     <div {...stylex.props(styles.stage)}>
       <div {...stylex.props(styles.question)}>
-        {clock === "title" ? <Countdown left={left} /> : null}
+        <Countdown left={left} />
         {now?.lead === undefined ||
         (talk.doing === "listening" && talk.interim !== "") ? null : (
           <Text color="muted" size="lg">
@@ -679,21 +664,17 @@ const Stage = ({
   );
 };
 
-/** The conversation: on a stage (A, B) or in a thread (C), the card at its foot, or the way to the read-back once time is up. */
+/** The conversation on a stage, the card at its foot, or the way to the read-back once time is up. */
 export const Conversation = ({
   start,
   live,
   left,
-  clock,
-  look,
   transcript = false,
   onReadBack,
 }: {
   start: Talk;
   live: boolean;
   left: number;
-  clock: ClockPlace;
-  look: "stage" | "thread";
   /** The transcript is open: beside the stage, or in its place on a phone. */
   transcript?: boolean;
   onReadBack: () => void;
@@ -709,8 +690,6 @@ export const Conversation = ({
         </div>
       ) : (
         <Composer
-          clock={clock}
-          left={left}
           live={live}
           onRetryMic={retryMic}
           onSend={send}
@@ -721,42 +700,25 @@ export const Conversation = ({
       )}
     </div>
   );
-  if (look === "stage") {
-    return (
-      <div
-        {...stylex.props(
-          styles.room,
-          styles.roomStage,
-          transcript && styles.roomBeside
-        )}
-      >
-        <div
-          {...stylex.props(styles.centre, transcript && styles.hiddenNarrow)}
-        >
-          <Stage
-            clock={clock}
-            left={left}
-            onReadBack={onReadBack}
-            talk={talk}
-          />
-          {talk.doing === "over" ? null : foot}
-        </div>
-        {transcript ? (
-          <div {...stylex.props(styles.aside)}>
-            <Chat style={styles.chat}>
-              <Thread doing={talk.doing} turns={talk.turns} />
-            </Chat>
-          </div>
-        ) : null}
-      </div>
-    );
-  }
   return (
-    <div {...stylex.props(styles.room)}>
-      <Chat style={styles.chat}>
-        <Thread doing={talk.doing} turns={talk.turns} />
-        {foot}
-      </Chat>
+    <div
+      {...stylex.props(
+        styles.room,
+        styles.roomStage,
+        transcript && styles.roomBeside
+      )}
+    >
+      <div {...stylex.props(styles.centre, transcript && styles.hiddenNarrow)}>
+        <Stage left={left} onReadBack={onReadBack} talk={talk} />
+        {talk.doing === "over" ? null : foot}
+      </div>
+      {transcript ? (
+        <div {...stylex.props(styles.aside)}>
+          <Chat style={styles.chat}>
+            <Thread doing={talk.doing} turns={talk.turns} />
+          </Chat>
+        </div>
+      ) : null}
     </div>
   );
 };

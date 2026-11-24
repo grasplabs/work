@@ -3,12 +3,11 @@ import { useEffect, useState } from "react";
 
 import { copy, fixture } from "./fixture.ts";
 
-// CONCEPT ONLY: the interview’s countdown. It runs from the first second of
-// the conversation over the one budget (20 minutes), shown as time USED,
-// going forward ("12 of 20 minutes": a bar never goes backwards), said
-// aloud only at its marks; a page
-// opened with `&left=<minutes>` starts there, so the moments at 5 and at 0
-// can be seen without waiting. Frozen, it stands still for a screenshot.
+// CONCEPT ONLY: the interview's countdown. It runs from the first second of
+// the conversation over the one budget (20 minutes), said aloud only at its
+// marks; a page opened with `&left=<minutes>` starts there, so the moments
+// at 5 and at 0 can be seen without waiting. Frozen, it stands still for a
+// screenshot.
 
 /** The whole budget, in seconds. */
 export const budgetSeconds = fixture.minutes * 60;
@@ -40,18 +39,6 @@ export const useCountdown = (
   );
   return left;
 };
-
-/** The minutes used, going forward: "12 / 20 min". */
-export const usedWords = (left: number): string => {
-  const used = Math.min(
-    fixture.minutes,
-    Math.floor((budgetSeconds - left) / 60)
-  );
-  return copy.clock.used(used);
-};
-
-/** Seconds used, for a Progress that only ever goes forward. */
-export const usedSeconds = (left: number): number => budgetSeconds - left;
 
 /** Near the end: the interviewer wraps up, and the countdown shows it (`warning`). */
 export const nearEnd = (left: number): boolean => left <= wrapUpSeconds;

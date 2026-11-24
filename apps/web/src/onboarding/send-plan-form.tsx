@@ -30,11 +30,12 @@ import type { SendChoice } from "./send-plan.ts";
 
 const styles = stylex.create({
   stack: { display: "grid", gap: space[6] },
+  // The sentence, and "Change" a little apart on its baseline, so it reads as the action.
   all: {
     display: "flex",
     flexWrap: "wrap",
     alignItems: "baseline",
-    columnGap: space[2],
+    columnGap: space[4],
   },
   part: { display: "grid", gap: space[4], justifyItems: "start" },
   // The day typed, the hour beside it; the day's hint or why it can't be hangs below it.

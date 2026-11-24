@@ -19,6 +19,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
 
 import { failureMessage } from "../chat/failure.ts";
+import { aiProviderLogos } from "../connections/brands.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import type { AiReadiness } from "./setup.ts";
@@ -178,9 +179,11 @@ export const AiChoice = ({
     .filter((each) => keyed(each.provider))
     .map((each) => {
       const region = regionOf(each.whereItRuns);
+      const logo = aiProviderLogos[each.provider];
       return {
         id: each.provider,
         name: each.label,
+        ...(logo === undefined ? {} : { logo }),
         ...(region === undefined
           ? {}
           : { region: { icon: null, label: region } }),

@@ -22,21 +22,18 @@ export const fixture = {
       id: "today",
       day: "Later today",
       time: "4:00 PM",
-      label: "Later today, at 4:00 PM",
       when: "later today at 4:00 PM",
     },
     {
       id: "tomorrow",
       day: "Tomorrow morning",
       time: "9:00 AM",
-      label: "Tomorrow morning, at 9:00 AM",
       when: "tomorrow morning at 9:00 AM",
     },
     {
       id: "monday",
       day: "Monday morning",
       time: "9:00 AM",
-      label: "Monday morning, at 9:00 AM",
       when: "on Monday morning at 9:00 AM",
     },
   ],
@@ -64,16 +61,11 @@ const filled = (line: string): string =>
  */
 export const copy = {
   start: {
-    title: filled("Hi {name}, got a few minutes to talk about your work?"),
-    titleAlt: "Tell us how your work really goes",
     /** The title on exactly two lines (Ruben, 24 November), `{name}` still to fill. */
     titleLines: ["Hi {name}, got a few minutes", "to talk about your work?"],
     /** The one short paragraph (Ruben: "it just feels too long"). */
     whoShort: filled(
       "{sponsorFirst} asked everyone at {company} to have a short chat with Stephen, our AI interviewer. It takes {minutes} minutes at most."
-    ),
-    who: filled(
-      "{sponsorFirst} asked everyone at {company} to have a short chat with Stephen, our AI interviewer. We want to understand how your work actually goes and where things get stuck. It takes {minutes} minutes at most."
     ),
     promises: [
       "Your voice isn’t saved, only your words.",
@@ -91,8 +83,7 @@ export const copy = {
       "We’ll send a reminder with this same link. It stays open until {close}."
     ),
     back: "Back",
-    doneTitle: (when: string) => `Got it. We’ll remind you ${when}.`,
-    /** The same, split as the hello: "Got it." as the title, the rest under it. */
+    /** Split as the hello: "Got it." as the title, the rest under it. */
     doneHead: "Got it.",
     doneRest: (when: string) => `We’ll remind you ${when}.`,
     doneLine: "Nothing was recorded.",
@@ -111,17 +102,6 @@ export const copy = {
     ),
     undo: "I changed my mind",
   },
-  check: {
-    title: "Say your name and what you do",
-    line: "That’s your first answer, and a quick check that I can hear you.",
-    heard: "Loud and clear. Nice to meet you.",
-    start: "Let’s get started",
-    type: "I’d rather type",
-    blocked: "Your browser blocked the microphone.",
-    retry: "Try again",
-    typeMain: "Type instead",
-    placeholder: "Your name and what you do",
-  },
   talk: {
     hello: filled(
       "Hi {name}, I’m Stephen. Talking to an AI can feel a bit odd at first, so just talk to me like you would a colleague. Say a quick hello so I know I can hear you."
@@ -135,15 +115,12 @@ export const copy = {
     placeholder: "Type your answer...",
     talk: "Talk",
     talkTooltip: "Switch back to voice",
-    blocked:
-      "Your browser blocked the microphone. You can type your answers instead.",
-    retry: "Try again",
+    /** One line, the banner's most compact honest form on a phone. */
+    blocked: "Your browser blocked the microphone.",
     transcript: "Transcript",
     stop: "Pause",
   },
   clock: {
-    used: (used: number) => `${used} / ${fixture.minutes} min`,
-    label: "Stephen",
     mark5: "5 minutes left",
     mark1: "1 minute left",
     mark0: "Time’s up",
@@ -156,28 +133,6 @@ export const copy = {
     title: "Paused",
     carryOn: "Continue",
   },
-  c: {
-    languageTitle: "Which language do you prefer?",
-    consent: filled(
-      "Hi {name}, I’m Stephen, an AI interviewer from Grasp. {sponsorFirst} asked everyone at {company} to chat with me about how work actually goes and where things get stuck. It takes {minutes} minutes at most, and I’ll keep an eye on the time."
-    ),
-    ask: "Ready to start?",
-    yes: "I agree, let’s start",
-    later: "Not right now",
-    decline: "I’d rather skip this",
-    micOff: "Your microphone stays off until you agree.",
-    agreed: "You agreed.",
-    remindAsk: "No problem. When should I remind you?",
-    remindTitle: "Remind me",
-    remindDone: (when: string) =>
-      filled(
-        `Got it. I’ll remind you ${when}. Nothing was recorded, and this link stays open until {close}.`
-      ),
-    declined: filled(
-      "That’s completely fine, {name}. {sponsorFirst} will see that you opted out, but never why. Nothing was recorded, and I won’t send any reminders. If you change your mind, this link works until {close}."
-    ),
-    undo: "I changed my mind",
-  },
   readback: {
     title: "Here’s what I took away",
     line: "Have a quick read to make sure this sounds right. You can edit or remove anything before it’s shared.",
@@ -188,20 +143,6 @@ export const copy = {
   },
 } as const;
 
-/** The consent notice's version: core records it with the yes; raised as its words change. */
-export const consentVersion = 3;
-
-/** The languages the interview speaks, each in its own words. */
-export const languages = [
-  { id: "en", name: "English" },
-  { id: "de", name: "Deutsch" },
-  { id: "nl", name: "Nederlands" },
-  { id: "es", name: "Español" },
-  { id: "fr", name: "Français" },
-] as const;
-
-export type LanguageId = (typeof languages)[number]["id"];
-
 /** What Stephen says first in the conversation, after the yes, to hear them. */
 export const { hello } = copy.talk;
 
@@ -210,11 +151,6 @@ export const helloHeard = "Coffee and a sandwich on the way in, as always.";
 
 /** What Stephen says once he heard them. */
 export const heardYou = copy.talk.heard;
-
-/** The sound check of concept B: one sentence that is also the first answer. */
-export const checkAsk = copy.check.title;
-export const checkHeard =
-  "I’m Sanne, and I plan the delivery routes for the north region.";
 
 /** Stephen’s questions, in order, and what the fixture hears as each answer. */
 export const script = [
