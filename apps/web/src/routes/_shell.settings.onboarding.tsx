@@ -13,6 +13,11 @@ import { ArrowRightIcon, CircleDashedIcon } from "lucide-react";
 
 import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
+import {
+  CampaignConcept,
+  isConcept,
+} from "../onboarding/campaign/campaign-page.tsx";
+import { isCampaignState } from "../onboarding/campaign/fixtures.ts";
 import { InterviewsProgress } from "../onboarding/interviews-progress.tsx";
 import { listeningOf } from "../onboarding/setup.ts";
 import {
@@ -34,7 +39,16 @@ const today = (): string => new Date().toISOString().slice(0, 10);
 const OnboardingPage = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
+  const { concept, state } = Route.useSearch();
   const title = t`Onboarding`;
+  // Concepts only: the campaign page's concept, as the onboarding shows it, from fixtures.
+  if (concept !== undefined) {
+    return (
+      <SettingsSection title={title}>
+        <CampaignConcept concept={concept} state={state ?? "day3"} />
+      </SettingsSection>
+    );
+  }
   if (page.state !== "ready") {
     return (
       <SettingsSection title={title}>
@@ -107,6 +121,10 @@ const OnboardingPage = () => {
 };
 
 export const Route = createFileRoute("/_shell/settings/onboarding")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    ...(isConcept(search.concept) && { concept: search.concept }),
+    ...(isCampaignState(search.state) && { state: search.state }),
+  }),
   pendingComponent: SettingsLoading,
   errorComponent: SettingsError,
   component: OnboardingPage,
