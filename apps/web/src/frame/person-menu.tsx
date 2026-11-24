@@ -1,10 +1,8 @@
-import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
@@ -25,13 +23,13 @@ import { isThemeMode, themeModes } from "@grasp-os/ui/components/theme-toggle";
 import type { ThemeMode } from "@grasp-os/ui/components/theme-toggle";
 import { toast } from "@grasp-os/ui/components/toast";
 import {
+  ArrowUpDownIcon,
   ChevronsUpDownIcon,
-  GlobeIcon,
   Icon,
+  InfoIcon,
   LogOutIcon,
   MonitorIcon,
   MoonIcon,
-  RocketIcon,
   SettingsIcon,
   SunIcon,
 } from "@grasp-os/ui/lib/icons";
@@ -47,15 +45,13 @@ import type { ReactNode } from "react";
 
 import { signOut } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
-import { chooseLocale, isLocale, localeNames } from "../i18n.ts";
-import type { Locale } from "../i18n.ts";
-import { roleLabel } from "../labels.ts";
 import { OrganizationName } from "./organization-name.tsx";
 import { applyTheme, chooseTheme, onThemeChange, readTheme } from "./theme.ts";
 
 // The person signed in, at the foot of the sidebar: their initials, their
-// name and their organization's, and their menu: Settings, their
-// onboarding, the language, the theme, and signing out.
+// name and their organization's, and their menu, as the reference's:
+// Settings, Appearance (the theme), Support, then the organization they
+// are in, and signing out. The language is in Settings › Profile.
 
 const nameParts = /\s+/u;
 
@@ -116,9 +112,6 @@ const styles = stylex.create({
     fontSize: font.textXs,
     lineHeight: font.sidebarNoteLine,
   },
-  // Atop the menu: who is signed in, and their role.
-  signedIn: { display: "grid", gap: space["1"] },
-  role: { fontWeight: font.weightNormal },
   // A submenu's words, then its choice now at the row's end, before the
   // chevron, quiet, cut short when there is no room, as the reference's.
   choice: { display: "flex", gap: space["4"] },
@@ -210,7 +203,7 @@ const ThemeMenu = ({ userId, inline }: { userId: string; inline: boolean }) => {
     <Choice
       icon={themeIcons[theme]}
       inline={inline}
-      name={t`Theme`}
+      name={t`Appearance`}
       now={
         <span {...stylex.props(styles.current)}>
           {i18n._(themeNames[theme])}
@@ -233,35 +226,31 @@ const ThemeMenu = ({ userId, inline }: { userId: string; inline: boolean }) => {
 };
 
 /**
- * The language the product speaks, a choice of the person menu. Each
- * language is named in its own words, so anyone can find theirs.
+ * The organizations the person is in, the one they are in now chosen: one,
+ * until Grasp lets a person be in more. A choice of the person menu.
  */
-const LanguageMenu = ({ inline }: { inline: boolean }) => {
-  const { t, i18n } = useLingui();
-  const locale: Locale = isLocale(i18n.locale) ? i18n.locale : "en";
+const OrganizationMenu = ({
+  core,
+  inline,
+}: {
+  core: CoreConnection;
+  inline: boolean;
+}) => {
+  const { t } = useLingui();
   return (
     <Choice
-      icon={GlobeIcon}
+      icon={ArrowUpDownIcon}
       inline={inline}
-      name={t`Language`}
-      now={
-        // The language now, in its own words.
-        <span lang={locale} {...stylex.props(styles.current)}>
-          {localeNames[locale]}
-        </span>
-      }
-      onValueChange={(value) => {
-        if (isLocale(value)) {
-          void chooseLocale(value);
-        }
+      name={t`Switch organization`}
+      now={null}
+      onValueChange={() => {
+        // The one there is: nothing to switch to yet.
       }}
-      value={locale}
+      value="current"
     >
-      {Object.entries(localeNames).map(([value, label]) => (
-        <DropdownMenuRadioItem key={value} label={label} value={value}>
-          <span lang={value}>{label}</span>
-        </DropdownMenuRadioItem>
-      ))}
+      <DropdownMenuRadioItem value="current">
+        <OrganizationName core={core} />
+      </DropdownMenuRadioItem>
     </Choice>
   );
 };
@@ -281,7 +270,6 @@ export const PersonMenu = ({
     applyTheme(readTheme(identity.userId));
   }, [identity.userId]);
   const { isMobile } = useSidebar();
-  const role = roleLabel(identity.role);
   // The menu is gone once pressed: a sign-out core didn't carry out is
   // said in a toast, and the page stays.
   const signOutOrSay = async (): Promise<void> => {
@@ -299,7 +287,7 @@ export const PersonMenu = ({
       <SidebarMenuItem>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            {/* Named by the person alone: their role is in the menu. */}
+            {/* Named by the person alone. */}
             <SidebarMenuButton aria-label={identity.name} size="lg">
               <Avatar decorative name={identity.name} size="sm">
                 <AvatarFallback>{initials(identity.name)}</AvatarFallback>
@@ -315,43 +303,22 @@ export const PersonMenu = ({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" side={isMobile ? "top" : "right"}>
             <div {...stylex.props(styles.items)}>
-              <DropdownMenuGroup>
-                <DropdownMenuLabel>
-                  <span {...stylex.props(styles.signedIn)}>
-                    <span>{identity.name}</span>
-                    <span {...stylex.props(styles.role)}>
-                      {identity.staff ? t`${role}, Grasp staff` : role}
-                    </span>
-                  </span>
-                </DropdownMenuLabel>
-              </DropdownMenuGroup>
+              <DropdownMenuItem asChild icon={SettingsIcon}>
+                <Link to="/settings/profile">{t`Settings`}</Link>
+              </DropdownMenuItem>
+              {/* On a phone the theme's options stand in the menu itself,
+                  under its name, as the organizations do. */}
+              {isMobile ? <DropdownMenuSeparator /> : null}
+              <ThemeMenu inline={isMobile} userId={identity.userId} />
+              {isMobile ? <DropdownMenuSeparator /> : null}
+              <DropdownMenuItem asChild icon={InfoIcon}>
+                <a href="/docs" rel="noopener" target="_blank">
+                  {t`Support`}
+                </a>
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuGroup>
-                <DropdownMenuItem asChild icon={SettingsIcon}>
-                  <Link to="/settings/profile">{t`Settings`}</Link>
-                </DropdownMenuItem>
-                {/* The company's own onboarding, which only its admins go through. */}
-                {isAdmin(identity.role) && identity.onboardingOnly !== true ? (
-                  <DropdownMenuItem asChild icon={RocketIcon}>
-                    <Link to="/setup">{t`Your onboarding`}</Link>
-                  </DropdownMenuItem>
-                ) : null}
-                {isMobile ? null : (
-                  <>
-                    <LanguageMenu inline={false} />
-                    <ThemeMenu inline={false} userId={identity.userId} />
-                  </>
-                )}
-              </DropdownMenuGroup>
-              {isMobile ? (
-                <>
-                  <DropdownMenuSeparator />
-                  <LanguageMenu inline />
-                  <DropdownMenuSeparator />
-                  <ThemeMenu inline userId={identity.userId} />
-                </>
-              ) : null}
-              <DropdownMenuSeparator />
+              <OrganizationMenu core={core} inline={isMobile} />
+              {isMobile ? <DropdownMenuSeparator /> : null}
               <DropdownMenuItem
                 icon={LogOutIcon}
                 onSelect={() => {
