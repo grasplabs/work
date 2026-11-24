@@ -195,7 +195,7 @@ const drawn = (
       message={null}
       onMessage={() => {}}
       onSettle={() => {}}
-      onward={() => {}}
+      onward={async () => {}}
       path={steps}
       settled={settled}
       step={step}

@@ -10,8 +10,8 @@ import {
 import { StepperNav } from "@grasp-os/ui/components/stepper";
 import { Text } from "@grasp-os/ui/components/text";
 import { Icon, LogOutIcon } from "@grasp-os/ui/lib/icons";
-import { colors, media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
-import { iconVars, pixel } from "@grasp-os/ui/lib/vars.stylex";
+import { media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
@@ -21,6 +21,9 @@ import { signOut } from "../core-connection.ts";
 import { chooseLocale, isLocale, localeNames } from "../i18n.ts";
 import type { Locale } from "../i18n.ts";
 import { useCore } from "../use-core.ts";
+import type { Pose } from "./field/engine.ts";
+import { fromTheTop } from "./field/poses.ts";
+import { StephenField } from "./field/stephen-field.tsx";
 import { useNarrow } from "./use-narrow.ts";
 
 // The frame of the setup and of the page a member waits on: full screen,
@@ -28,8 +31,8 @@ import { useNarrow } from "./use-narrow.ts";
 // language and the way out at its end; under it, on a later step, the
 // library's StepperNav bar with how far along; then the step in one
 // centred column, its words on the start edge, the page scrolling. Behind
-// the top, Damsko's calm dither of light, as the page header's banner and
-// the interview's header draw it. Leaving signs out: the admin can't use
+// it all, Stephen: the light of the page, alive, in another place on every
+// screen (field/stephen-field.tsx). Leaving signs out: the admin can't use
 // Grasp before the setup is done, so a way "home" would only lead back
 // here; everything finished is kept, and signing in again goes on there.
 
@@ -40,21 +43,6 @@ const styles = stylex.create({
     display: "flex",
     flexDirection: "column",
     minHeight: "100svh",
-  },
-  // Mint light falling from the top, seen through the system's one pixel at the banner's faint
-  // strength. Decoration: hidden from assistive tech, never moves, not drawn in forced colours.
-  light: {
-    position: "absolute",
-    insetInline: 0,
-    insetBlockStart: 0,
-    zIndex: -1,
-    height: { default: "22rem", [media.maxSm]: "14rem" },
-    pointerEvents: "none",
-    opacity: size.pageHeaderDitherStrength,
-    backgroundImage: `linear-gradient(to bottom, ${colors.mint}, transparent 95%)`,
-    maskImage: pixel.mask,
-    maskSize: "3px 3px",
-    display: { default: "block", [media.forcedColors]: "none" },
   },
   bar: {
     display: "flex",
@@ -208,7 +196,7 @@ const AlongBar = ({ along }: { along: Along }) => {
 export const CalmFrame = ({
   along,
   language = true,
-  light = true,
+  pose = fromTheTop,
   centred = false,
   children,
 }: {
@@ -218,27 +206,28 @@ export const CalmFrame = ({
   along?: Along | undefined;
   /** The language in the bar: not on the step that asks for it. */
   language?: boolean;
-  /** The dither of light behind the top: not where the screen has a picture of its own. */
-  light?: boolean;
+  /** Where Stephen's light rests on this screen and how it moves there. */
+  pose?: Pose;
   children: ReactNode;
 }) => (
   <div {...stylex.props(styles.window)}>
-    {light ? <span aria-hidden="true" {...stylex.props(styles.light)} /> : null}
-    <header {...stylex.props(styles.bar)}>
-      <span {...stylex.props(styles.mark)}>
-        <Icon icon={GraspLogo} label="Grasp" />
-      </span>
-      <div {...stylex.props(styles.tools)}>
-        {language ? <Language /> : null}
-        <Leave />
-      </div>
-    </header>
-    {along === undefined ? null : <AlongBar along={along} />}
-    <main {...stylex.props(styles.main)}>
-      <div {...stylex.props(styles.column, centred && styles.centred)}>
-        {children}
-      </div>
-    </main>
+    <StephenField pose={pose}>
+      <header {...stylex.props(styles.bar)}>
+        <span {...stylex.props(styles.mark)}>
+          <Icon icon={GraspLogo} label="Grasp" />
+        </span>
+        <div {...stylex.props(styles.tools)}>
+          {language ? <Language /> : null}
+          <Leave />
+        </div>
+      </header>
+      {along === undefined ? null : <AlongBar along={along} />}
+      <main {...stylex.props(styles.main)}>
+        <div {...stylex.props(styles.column, centred && styles.centred)}>
+          {children}
+        </div>
+      </main>
+    </StephenField>
   </div>
 );
 

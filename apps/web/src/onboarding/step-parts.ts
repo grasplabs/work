@@ -72,8 +72,8 @@ export interface StepProps {
   settled: ReviewItemId[];
   onSettle: (item: ReviewItemId, settled: boolean) => void;
   go: (step: SetupStep) => void;
-  /** Goes on to the screen after this one on the company's path; past its last, into the platform. */
-  onward: () => void;
+  /** Goes on to the screen after this one on the company's path; past its last, into the platform. Over once that screen is there. */
+  onward: () => Promise<void>;
   /** The screens this company's admin goes through, in order. */
   path: SetupPath;
   /** The furthest step they reached before, by its place on the path. */

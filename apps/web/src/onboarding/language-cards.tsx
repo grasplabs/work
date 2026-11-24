@@ -4,9 +4,11 @@ import { focusRing } from "@grasp-os/ui/lib/styles";
 import { colors, radius, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
 
 import { isLocale, localeNames } from "../i18n.ts";
 import type { Locale } from "../i18n.ts";
+import { useField } from "./field/stephen-field.tsx";
 import { FlagPicture } from "./flag-picture.tsx";
 
 // The language, chosen from five cards, one a language, each named in its
@@ -18,7 +20,9 @@ import { FlagPicture } from "./flag-picture.tsx";
 // current one) and a tick; never on a first visit. The flag is decoration:
 // the language's own name is the card's name. A component of the setup's
 // own, not an Item: the card's corner clips its picture, which an Item
-// can't hold without a layer inside it.
+// can't hold without a layer inside it. Under the pointer or the keyboard's
+// focus, Stephen comes to the card: his light gathers round it and comes in
+// over its edge, and its flag starts to wave.
 
 /** Under a pointer that can hover, as Damsko's own parts write it. */
 const HOVER = "@media (hover: hover)";
@@ -72,17 +76,46 @@ export const LanguageCards = ({
 }: {
   /** The language in use, when they come back to the step; never on a first visit. */
   chosen: Locale | null;
-  onPick: (locale: Locale) => void;
+  /** Told which, and the card that was pressed: where Stephen carries the page on from. */
+  onPick: (locale: Locale, card: Element) => void;
 }) => {
   const { t } = useLingui();
+  const field = useField();
+  const [lit, setLit] = useState<Locale | null>(null);
+  const come = (code: Locale, card: Element) => {
+    setLit(code);
+    field.attend(card);
+  };
+  const go = (code: Locale) => {
+    // Only the card he is on lets him go: he may already be on the next one.
+    setLit((current) => {
+      if (current === code) {
+        field.attend(null);
+        return null;
+      }
+      return current;
+    });
+  };
   return (
     <ul aria-label={t`Your language`} {...stylex.props(styles.list)}>
       {languages.map(({ code, name }) => (
         <li key={code}>
           <button
             {...(chosen === code && { "aria-current": true })}
-            onClick={() => {
-              onPick(code);
+            onBlur={() => {
+              go(code);
+            }}
+            onClick={(event) => {
+              onPick(code, event.currentTarget);
+            }}
+            onFocus={(event) => {
+              come(code, event.currentTarget);
+            }}
+            onPointerEnter={(event) => {
+              come(code, event.currentTarget);
+            }}
+            onPointerLeave={() => {
+              go(code);
             }}
             type="button"
             {...stylex.props(
@@ -91,7 +124,7 @@ export const LanguageCards = ({
               focusRing
             )}
           >
-            <FlagPicture locale={code} />
+            <FlagPicture lit={lit === code} locale={code} />
             <span {...stylex.props(styles.name)}>
               {chosen === code ? (
                 <Icon icon={CheckIcon} label={t`Chosen`} />

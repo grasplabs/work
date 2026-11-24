@@ -237,7 +237,7 @@ const ConfirmOrg = ({
         saved ? (
           <Button
             onClick={() => {
-              onward();
+              void onward();
             }}
             size="lg"
           >

@@ -16,6 +16,8 @@ import { AiChoice } from "./ai-choice.tsx";
 import { CalmStep } from "./calm-frame.tsx";
 import { CompanyStep } from "./company-step.tsx";
 import { DocumentsStep } from "./documents-step.tsx";
+import { useField } from "./field/stephen-field.tsx";
+import { flags } from "./flags.ts";
 import { ForgetKickoff } from "./forget-kickoff.tsx";
 import { LanguageCards } from "./language-cards.tsx";
 import { LeadsStep } from "./leads-step.tsx";
@@ -56,6 +58,7 @@ const Welcome = ({ data, onward }: StepProps) => {
   const { t, i18n } = useLingui();
   const refresh = useRefresh();
   const [picked, setPicked] = useState(languagePicked);
+  const field = useField();
   const { admin } = data;
   return (
     <CalmStep
@@ -65,13 +68,14 @@ const Welcome = ({ data, onward }: StepProps) => {
       <div {...stylex.props(styles.stack)}>
         <LanguageCards
           chosen={picked && isLocale(i18n.locale) ? i18n.locale : null}
-          onPick={(locale) => {
-            setPicked(true);
-            languagePicked = true;
-            void (async () => {
+          onPick={(locale, card) => {
+            // Stephen takes the flag from the card and carries the page to its next screen.
+            void field.carry(card, flags[locale], async () => {
+              setPicked(true);
+              languagePicked = true;
               await chooseLocale(locale);
-              onward();
-            })();
+              await onward();
+            });
           }}
         />
         <ForgetKickoff kickoff={data.view.kickoff} onForgotten={refresh} />
@@ -94,7 +98,7 @@ const Ai = ({ data, furthest, path, go, onward }: StepProps) => {
   const onReady = () => {
     const next = afterAi(furthest, path);
     if (next === undefined) {
-      onward();
+      void onward();
     } else {
       go(next);
     }
@@ -133,7 +137,7 @@ const About = ({ onward }: StepProps) => {
       end={
         <Button
           onClick={() => {
-            onward();
+            void onward();
           }}
           size="lg"
         >
@@ -214,7 +218,7 @@ const Review = (props: StepProps) => {
         open === 0 ? (
           <Button
             onClick={() => {
-              props.onward();
+              void props.onward();
             }}
             size="lg"
           >
@@ -297,7 +301,7 @@ const Open = ({ data, onward }: StepProps) => {
         open ? (
           <Button
             onClick={() => {
-              onward();
+              void onward();
             }}
             size="lg"
           >

@@ -36,6 +36,7 @@ import type { Along } from "../onboarding/calm-frame.tsx";
 import { CampaignFrame } from "../onboarding/campaign/campaign-page.tsx";
 import { isCampaignState } from "../onboarding/campaign/fixtures.ts";
 import type { CampaignState } from "../onboarding/campaign/fixtures.ts";
+import { poses } from "../onboarding/field/poses.ts";
 import { todayInUtc } from "../onboarding/send-plan.ts";
 import { SetupStepBody } from "../onboarding/setup-steps.tsx";
 import {
@@ -222,20 +223,22 @@ const Setup = () => {
   }, [core, kept.reached, placed, path]);
   const furthest = reachedOf(kept.reached, { plan }, path);
   const reached = heldAt(furthest, ai, path);
+  // Over once the screen is there, so Stephen can carry the page to it.
+  const turnTo = async (next: SetupStep): Promise<void> => {
+    await navigate({ to: "/setup", search: { step: next } });
+  };
   const go = (next: SetupStep) => {
-    void navigate({ to: "/setup", search: { step: next } });
+    void turnTo(next);
   };
   // The screen after this one; past the last, every screen is finished and the admin is in the platform.
-  const onward = () => {
+  const onward = async (): Promise<void> => {
     const next = path[index + 1];
     if (next !== undefined) {
-      go(next);
+      await turnTo(next);
       return;
     }
-    void (async () => {
-      await notePlace(core, [...path]);
-      await navigate({ to: "/" });
-    })();
+    await notePlace(core, [...path]);
+    await navigate({ to: "/" });
   };
 
   if (data === null) {
@@ -256,7 +259,7 @@ const Setup = () => {
       along={along}
       centred={step === "open"}
       language={step !== "welcome"}
-      light={step !== "welcome"}
+      pose={poses[step]}
     >
       <SetupStepBody
         data={{

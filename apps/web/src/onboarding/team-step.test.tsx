@@ -198,7 +198,7 @@ const shown = async (
           message={null}
           onMessage={() => {}}
           onSettle={() => {}}
-          onward={() => {}}
+          onward={async () => {}}
           path={steps}
           settled={[]}
           step={step}
