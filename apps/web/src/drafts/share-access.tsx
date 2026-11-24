@@ -44,7 +44,10 @@ export interface ShareMember {
   name: string;
   note?: string;
   kind: "person" | "group" | "project";
-  level: string;
+  /** Their level: one of the levels' values; none for the owner. */
+  level?: string;
+  /** The owner: says the owner's word in place of a level, and can't be changed or taken away here. */
+  owner?: boolean;
 }
 
 /** One level of access ("User"). */
@@ -119,6 +122,15 @@ const styles = stylex.create({
     color: colors.mutedForeground,
     overflowWrap: "anywhere",
   },
+  // The owner's word ends where every level's chevron ends: the quiet
+  // trigger keeps space-1 after its chevron, so the word keeps the same.
+  owner: {
+    justifySelf: "end",
+    paddingInlineEnd: space[1],
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+    color: colors.mutedForeground,
+  },
   failed: {
     gridColumn: "1 / -1",
     margin: 0,
@@ -163,12 +175,14 @@ const AddRow = ({
   members,
   levels,
   failedLabel,
+  findLabel,
   onAdd,
 }: {
   candidates: readonly ShareCandidate[];
   members: readonly ShareMember[];
   levels: readonly ShareLevel[];
   failedLabel: string;
+  findLabel: string | undefined;
   onAdd: (ids: string[], level: string) => unknown;
 }) => {
   const { t } = useLingui();
@@ -177,7 +191,7 @@ const AddRow = ({
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const has = new Set(members.map(({ id }) => id));
-  const find = t`Add people, teams or projects`;
+  const find = findLabel ?? t`Add people, teams or projects`;
   const hasAccess = t`Has access`;
   const add = async (): Promise<void> => {
     if (picked === null) {
@@ -258,11 +272,13 @@ const AddRow = ({
 const Row = ({
   member,
   levels,
+  ownerLabel,
   onLevelChange,
   onRemove,
 }: {
   member: ShareMember;
   levels: readonly ShareLevel[];
+  ownerLabel: string | undefined;
   onLevelChange: (id: string, level: string) => void;
   onRemove: (id: string) => void;
 }) => {
@@ -277,30 +293,34 @@ const Row = ({
           <span {...stylex.props(styles.note)}>{member.note}</span>
         )}
       </span>
-      <Select
-        items={[
-          ...levels,
-          { type: "separator" },
-          { value: REMOVE, label: t`Remove` },
-        ]}
-        onValueChange={(value: string | null) => {
-          if (value === REMOVE) {
-            onRemove(member.id);
-          } else if (value !== null) {
-            onLevelChange(member.id, value);
-          }
-        }}
-        value={member.level}
-      >
-        <SelectTrigger
-          aria-label={t`Access for ${name}`}
-          size="sm"
-          variant="ghost"
+      {member.owner === true ? (
+        <span {...stylex.props(styles.owner)}>{ownerLabel}</span>
+      ) : (
+        <Select
+          items={[
+            ...levels,
+            { type: "separator" },
+            { value: REMOVE, label: t`Remove` },
+          ]}
+          onValueChange={(value: string | null) => {
+            if (value === REMOVE) {
+              onRemove(member.id);
+            } else if (value !== null) {
+              onLevelChange(member.id, value);
+            }
+          }}
+          value={member.level}
         >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent />
-      </Select>
+          <SelectTrigger
+            aria-label={t`Access for ${name}`}
+            size="sm"
+            variant="ghost"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent />
+        </Select>
+      )}
     </li>
   );
 };
@@ -312,6 +332,8 @@ export const ShareAccess = ({
   levels,
   listLabel,
   failedLabel,
+  findLabel,
+  ownerLabel,
   onAdd,
   onLevelChange,
   onRemove,
@@ -323,6 +345,10 @@ export const ShareAccess = ({
   listLabel: string;
   /** Said under the add row when adding failed. */
   failedLabel: string;
+  /** The add row's field, its name and its placeholder. @default "Add people, teams or projects" */
+  findLabel?: string;
+  /** What the owner's row says in place of a level ("Owner"). */
+  ownerLabel?: string;
   /** Adds who was picked at the level chosen; a rejection says `failedLabel`. */
   onAdd: (ids: string[], level: string) => unknown;
   onLevelChange: (id: string, level: string) => void;
@@ -332,6 +358,7 @@ export const ShareAccess = ({
     <AddRow
       candidates={candidates}
       failedLabel={failedLabel}
+      findLabel={findLabel}
       levels={levels}
       members={members}
       onAdd={onAdd}
@@ -344,6 +371,7 @@ export const ShareAccess = ({
           key={member.id}
           levels={levels}
           member={member}
+          ownerLabel={ownerLabel}
           onLevelChange={onLevelChange}
           onRemove={onRemove}
         />
