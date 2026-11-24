@@ -9,6 +9,7 @@ import {
   DialogContent,
   DialogDescription,
   DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
@@ -220,8 +221,10 @@ export const ReleaseDialog = ({
       open
     >
       <DialogContent>
-        <ActionText action={action} label={label} />
-        {action.kind === "lift" ? null : (
+        <DialogHeader>
+          <ActionText action={action} label={label} />
+        </DialogHeader>
+        {action.kind === "lift" && failure === undefined ? null : (
           <DialogBody>
             {action.kind === "hold" ? (
               <Field>
@@ -245,12 +248,12 @@ export const ReleaseDialog = ({
                 />
               </Field>
             ) : null}
+            {failure === undefined ? null : (
+              <Alert variant="destructive">
+                <AlertTitle>{failure}</AlertTitle>
+              </Alert>
+            )}
           </DialogBody>
-        )}
-        {failure === undefined ? null : (
-          <Alert variant="destructive">
-            <AlertTitle>{failure}</AlertTitle>
-          </Alert>
         )}
         <DialogFooter>
           <DialogClose>{t`Cancel`}</DialogClose>

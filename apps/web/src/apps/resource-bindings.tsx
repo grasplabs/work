@@ -14,6 +14,7 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
+  AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@grasp-os/ui/components/alert-dialog";
@@ -347,10 +348,12 @@ const Revoke = ({
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
-        <AlertDialogTitle>{t`Revoke the binding of ${alias}?`}</AlertDialogTitle>
-        <AlertDialogDescription>
-          {t`The App's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again.`}
-        </AlertDialogDescription>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t`Revoke the binding of ${alias}?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t`The App's next request through it is refused, and actions waiting on it are dropped. Bind it again to use it again.`}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel />
           <AlertDialogAction

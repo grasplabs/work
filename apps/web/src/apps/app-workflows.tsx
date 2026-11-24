@@ -20,6 +20,7 @@ import {
   DialogContent,
   DialogDescription,
   DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
@@ -149,10 +150,12 @@ const BindDialog = ({
       open
     >
       <DialogContent>
-        <DialogTitle>{t`Change what ${alias} starts`}</DialogTitle>
-        <DialogDescription>
-          {t`The change goes into the App's draft, which declares what the workflow's live version has. Once you publish the draft, the App starts that workflow's live version by this name. Starting it still takes the App's own permission on the workflow, which an admin grants.`}
-        </DialogDescription>
+        <DialogHeader>
+          <DialogTitle>{t`Change what ${alias} starts`}</DialogTitle>
+          <DialogDescription>
+            {t`The change goes into the App's draft, which declares what the workflow's live version has. Once you publish the draft, the App starts that workflow's live version by this name. Starting it still takes the App's own permission on the workflow, which an admin grants.`}
+          </DialogDescription>
+        </DialogHeader>
         <DialogBody>
           <Form
             id={formId}

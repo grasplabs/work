@@ -4,6 +4,7 @@ import type { ListedConnection } from "@grasp-os/shared/connect";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { SubjectMember } from "@grasp-os/shared/subject-members";
+import { Button } from "@grasp-os/ui/components/button";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -397,6 +398,67 @@ describe(AppSettings, () => {
       calls: fake.calls,
       restore: button("Restore") !== undefined,
     }).toStrictEqual({ afterCancel: [], calls: ["archive"], restore: true });
+  });
+
+  it("sets the App's link in a dialog drawn by Damsko's own parts: its title over the field, the address before it, its actions small", async () => {
+    await opened(fakeCore("builder"));
+    await press("Set the link");
+
+    // Each part takes its look from the part round it: the title's and the
+    // description's inset (clear of the close button) from the header, the
+    // address's padding and single line from the addon. Outside them they
+    // ran under the close button and broke the address over two lines.
+    const dialog = document.querySelector("[role=dialog]");
+    const header = dialog?.querySelector("[data-slot=dialog-header]");
+    const addon = dialog?.querySelector("[data-slot=input-group-addon]");
+    // A footer's actions are small (DialogClose's own size): the classes
+    // only a small Button has, read from one drawn beside the dialog.
+    const host = document.createElement("div");
+    document.body.append(host);
+    const sample = createRoot(host);
+    act(() => {
+      sample.render(
+        <>
+          <Button size="sm">Small</Button>
+          <Button>Default</Button>
+        </>
+      );
+    });
+    const [small, normal] = [...host.querySelectorAll("button")].map(
+      (each) => new Set(each.classList)
+    );
+    const smallOnly = [...(small ?? [])].filter(
+      (each) => normal?.has(each) !== true
+    );
+    act(() => {
+      sample.unmount();
+    });
+    const actions = [
+      ...(dialog?.querySelectorAll<HTMLElement>(
+        "[data-slot=dialog-footer] button"
+      ) ?? []),
+    ];
+    expect({
+      header: [
+        header?.querySelector("h2")?.textContent,
+        header?.querySelector("p")?.textContent,
+      ],
+      address: addon?.textContent,
+      small: actions.map((each) => ({
+        action: nameOf(each),
+        small: smallOnly.every((name) => each.classList.contains(name)),
+      })),
+    }).toStrictEqual({
+      header: [
+        "Link to Invoices",
+        "Opens the App for the workspace's members who may use it, while it is published.",
+      ],
+      address: `${window.location.host}/`,
+      small: [
+        { action: "Cancel", small: true },
+        { action: "Save link", small: true },
+      ],
+    });
   });
 
   it("shows a change made in a section, read again with the page", async () => {

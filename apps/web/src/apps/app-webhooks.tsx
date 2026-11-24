@@ -12,6 +12,7 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
+  AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@grasp-os/ui/components/alert-dialog";
@@ -32,6 +33,7 @@ import {
   DialogClose,
   DialogContent,
   DialogFooter,
+  DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@grasp-os/ui/components/dialog";
@@ -144,7 +146,9 @@ const AddWebhook = ({
         </Button>
       </DialogTrigger>
       <DialogContent>
-        <DialogTitle>{t`Add webhook`}</DialogTitle>
+        <DialogHeader>
+          <DialogTitle>{t`Add webhook`}</DialogTitle>
+        </DialogHeader>
         <DialogBody>
           <Form
             id={formId}
@@ -236,10 +240,12 @@ const RemoveWebhook = ({
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
-        <AlertDialogTitle>{t`Remove the webhook to ${url}?`}</AlertDialogTitle>
-        <AlertDialogDescription>
-          {t`Grasp stops sending the App's events there. Its secret can't be used again.`}
-        </AlertDialogDescription>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t`Remove the webhook to ${url}?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t`Grasp stops sending the App's events there. Its secret can't be used again.`}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel />
           <AlertDialogAction onClick={onRemove} variant="destructive">

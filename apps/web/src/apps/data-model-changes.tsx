@@ -16,6 +16,7 @@ import {
   DialogClose,
   DialogContent,
   DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
@@ -441,9 +442,11 @@ const ReviewDialog = ({
       open={review !== undefined}
     >
       <DialogContent>
-        <DialogTitle>
-          <Trans>Before you make this change</Trans>
-        </DialogTitle>
+        <DialogHeader>
+          <DialogTitle>
+            <Trans>Before you make this change</Trans>
+          </DialogTitle>
+        </DialogHeader>
         <DialogBody>
           <Form
             id={formId}
@@ -493,6 +496,7 @@ const ReviewDialog = ({
           <Button
             disabled={busy || waiting}
             form={formId}
+            size="sm"
             type="submit"
             variant={review?.removes === true ? "destructive" : "default"}
           >

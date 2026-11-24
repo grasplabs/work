@@ -8,6 +8,7 @@ import {
   DialogContent,
   DialogDescription,
   DialogFooter,
+  DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@grasp-os/ui/components/dialog";
@@ -72,11 +73,13 @@ export const ResetAppData = ({ app }: { app: App }) => {
         </Button>
       </DialogTrigger>
       <DialogContent>
-        <DialogTitle>{t`Reset ${name}’s data?`}</DialogTitle>
-        <DialogDescription>
-          {t`Every record it holds and every file in them is gone for good, and its current version runs again with no records. Its pages, versions, members and history stay.`}{" "}
-          {t`What its code remembered in the Brain until now goes too; a call already running may still remember what it read before.`}
-        </DialogDescription>
+        <DialogHeader>
+          <DialogTitle>{t`Reset ${name}’s data?`}</DialogTitle>
+          <DialogDescription>
+            {t`Every record it holds and every file in them is gone for good, and its current version runs again with no records. Its pages, versions, members and history stay.`}{" "}
+            {t`What its code remembered in the Brain until now goes too; a call already running may still remember what it read before.`}
+          </DialogDescription>
+        </DialogHeader>
         <DialogBody>
           <Form
             id={formId}
@@ -106,6 +109,7 @@ export const ResetAppData = ({ app }: { app: App }) => {
           <Button
             disabled={typed !== name}
             form={formId}
+            size="sm"
             type="submit"
             variant="destructive"
             errorText={reset.labels.error}

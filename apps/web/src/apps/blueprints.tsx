@@ -8,6 +8,7 @@ import {
   DialogContent,
   DialogDescription,
   DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
 import { useAction } from "@grasp-os/ui/hooks/use-action";
@@ -66,14 +67,16 @@ export const SaveAsBlueprint = ({
       </Button>
       <Dialog onOpenChange={setOpen} open={open}>
         <DialogContent>
-          <DialogTitle>
-            {saved ? t`Saved as a blueprint` : t`Save ${name} as a blueprint`}
-          </DialogTitle>
-          <DialogDescription>
-            {saved
-              ? t`Anyone who builds and has a role in ${name} can now start a new app from it. ${name} itself stays as it is.`
-              : t`New Apps can start from version ${version} of ${name}, as a copy with none of its data. ${name} itself stays as it is.`}
-          </DialogDescription>
+          <DialogHeader>
+            <DialogTitle>
+              {saved ? t`Saved as a blueprint` : t`Save ${name} as a blueprint`}
+            </DialogTitle>
+            <DialogDescription>
+              {saved
+                ? t`Anyone who builds and has a role in ${name} can now start a new app from it. ${name} itself stays as it is.`
+                : t`New Apps can start from version ${version} of ${name}, as a copy with none of its data. ${name} itself stays as it is.`}
+            </DialogDescription>
+          </DialogHeader>
           {save.error === undefined || saved ? null : (
             <DialogBody>
               <Alert variant="destructive">
@@ -91,6 +94,7 @@ export const SaveAsBlueprint = ({
               <>
                 <DialogClose>{t`Cancel`}</DialogClose>
                 <Button
+                  size="sm"
                   variant="default"
                   errorText={save.labels.error}
                   loadingText={save.labels.loading}

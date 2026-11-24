@@ -27,6 +27,7 @@ import {
   DialogContent,
   DialogDescription,
   DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
 import {
@@ -307,10 +308,12 @@ const AskDialog = ({
       open
     >
       <DialogContent>
-        <DialogTitle>{t`Ask for access for this App`}</DialogTitle>
-        <DialogDescription>
-          {t`The request allows nothing until an admin grants it. They see what the app asks for and decide.`}
-        </DialogDescription>
+        <DialogHeader>
+          <DialogTitle>{t`Ask for access for this App`}</DialogTitle>
+          <DialogDescription>
+            {t`The request allows nothing until an admin grants it. They see what the app asks for and decide.`}
+          </DialogDescription>
+        </DialogHeader>
         <DialogBody>
           <Form
             id={formId}
