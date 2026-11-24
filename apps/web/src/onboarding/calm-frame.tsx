@@ -192,6 +192,8 @@ const AlongBar = ({ along }: { along: Along }) => {
         {...(onNext === undefined
           ? { disabledReason: t`Finish this step first` }
           : { onNext })}
+        // The last counted step leads to the setup's end.
+        finishText={t`Finish setup`}
         nextType="button"
         onBack={onBack}
         showCount

@@ -1,7 +1,15 @@
+import type { OrganizationProviderId } from "@grasp-os/shared/ai-providers";
 import type { OAuthProvider } from "@grasp-os/shared/connect";
 import type { IconData } from "@grasp-os/ui/lib/icons";
 
-import { GoogleLogo, MicrosoftLogo } from "./brand-logos.ts";
+import {
+  AnthropicLogo,
+  GoogleLogo,
+  MicrosoftLogo,
+  MistralLogo,
+  OpenAiLogo,
+  OpenRouterLogo,
+} from "./brand-logos.ts";
 
 // The marks the product draws itself, for Grasp's own connectors: core
 // serves no logo for them (their `CatalogEntry.logo` is null), unlike a
@@ -17,3 +25,13 @@ export const brands = {
 
 /** A connector with a mark of its own. */
 export type Brand = keyof typeof brands;
+
+/** The mark of each AI provider a company brings its own key for; an OpenAI-compatible endpoint has none of its own. */
+export const aiProviderLogos: Partial<
+  Record<OrganizationProviderId, IconData>
+> = {
+  anthropic: AnthropicLogo,
+  openai: OpenAiLogo,
+  mistral: MistralLogo,
+  openrouter: OpenRouterLogo,
+};

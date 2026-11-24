@@ -41,6 +41,8 @@ const styles = stylex.create({
     columnGap: space[4],
     rowGap: space[3],
   },
+  // A second ask's press is a link: on the sentence's baseline, a little apart, so it reads as the action.
+  askQuiet: { alignItems: "baseline", columnGap: space[6] },
 });
 
 /** What core would do to send: here, nothing (fixtures). */
@@ -185,7 +187,10 @@ export const Asks = ({ asks }: { asks: Ask[] }) => {
             );
         }
         return (
-          <li key={ask.id} {...stylex.props(styles.ask)}>
+          <li
+            key={ask.id}
+            {...stylex.props(styles.ask, !first && styles.askQuiet)}
+          >
             <AskLine ask={ask} done={isDone} first={first} />
             {press}
           </li>

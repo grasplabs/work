@@ -6638,6 +6638,10 @@ msgid "Find Stephen under Apps in your Slack workspace."
 msgstr "Encontrarás a Stephen en Aplicaciones, en tu espacio de trabajo de Slack."
 
 #: src/onboarding/calm-frame.tsx
+msgid "Finish setup"
+msgstr "Terminar la configuración"
+
+#: src/onboarding/calm-frame.tsx
 msgid "Finish this step first"
 msgstr "Termina primero este paso"
 
@@ -11297,10 +11301,6 @@ msgstr "API externas que un administrador aprobó, por origen, métodos y rutas.
 #: src/routes/_shell.settings.billing.tsx
 msgid "Outside Grasp this month."
 msgstr "Fuera de Grasp este mes."
-
-#: src/onboarding/team-step.tsx
-msgid "Over the next two weeks you’ll get a short personal link to talk with Stephen, Grasp’s AI interviewer: leads for about 20 minutes, everyone else for 10 to 15. By voice or by typing."
-msgstr "En las próximas dos semanas recibirás un enlace personal breve para hablar con Stephen, el entrevistador de IA de Grasp: los responsables unos 20 minutos, los demás de 10 a 15. Hablando o escribiendo."
 
 #: src/agents/agent-page.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -16181,6 +16181,10 @@ msgstr "Esta versión se revocó"
 #: src/apps/app-workspace.tsx
 msgid "This version, read-only"
 msgstr "Esta versión, solo lectura"
+
+#: src/onboarding/team-step.tsx
+msgid "This week you’ll get a short personal link to talk with Stephen, Grasp’s AI interviewer. It takes 20 minutes at most, by voice or by typing."
+msgstr "Esta semana recibirás un enlace personal breve para hablar con Stephen, el entrevistador de IA de Grasp. Dura 20 minutos como mucho, hablando o escribiendo."
 
 #: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx

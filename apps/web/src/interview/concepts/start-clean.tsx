@@ -5,26 +5,25 @@ import {
   CollapsibleTrigger,
 } from "@grasp-os/ui/components/collapsible";
 import { Heading } from "@grasp-os/ui/components/heading";
-import { Link } from "@grasp-os/ui/components/link";
 import { Text } from "@grasp-os/ui/components/text";
 import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
 
 import { copy, ignore } from "./fixture.ts";
 
-// CONCEPT ONLY: A's start, as Ruben shaped it (24 November), in his words
+// CONCEPT ONLY: the start, as Ruben shaped it (24 November), in his words
 // (fixture.ts `copy.start`): the title on two lines, one short paragraph
 // and the promises behind "How your answers are handled", the one button,
-// and "Not right now" and "I'd rather skip this" as two quiet links at the
-// foot. One decision on the screen: agree and start. Two text styles (the
-// serif title, the body's words at one size), centred on one axis, calm:
-// air round the title, one gap between blocks; the ways out apart at the
-// foot of the screen.
+// and "Not right now" and "I'd rather skip this" as two link Buttons at
+// the foot (an action that reads as words is a link Button, never a Link).
+// One decision on the screen: agree and start. Two text styles (the serif
+// title, the body's words at one size) and the buttons' label, centred on
+// one axis, calm: air round the title, one gap between blocks; the ways out
+// apart at the foot of the screen.
 
 const styles = stylex.create({
-  // The page's room: the column under the header, the two quiet links at its foot.
+  // The page's room: the column under the header, the two quiet ways out at its foot.
   page: {
     display: "flex",
     flexDirection: "column",
@@ -95,7 +94,7 @@ const styles = stylex.create({
   },
   // The one button: the whole width on a phone, its own width on a wider window.
   agree: { width: { default: "100%", [media.sm]: "auto" } },
-  // The two quiet ways out, side by side at the foot, apart.
+  // The two quiet ways out, side by side at the foot, centred, apart.
   foot: {
     display: "flex",
     flexWrap: "wrap",
@@ -103,18 +102,6 @@ const styles = stylex.create({
     columnGap: space["8"],
     rowGap: space["2"],
     paddingBlockStart: space["6"],
-  },
-  // A link's look on a button (these go nowhere, they answer): none of the button's own box, and
-  // the words of the Text round it.
-  bare: {
-    margin: 0,
-    padding: 0,
-    borderWidth: 0,
-    backgroundColor: "transparent",
-    fontFamily: "inherit",
-    fontSize: "inherit",
-    lineHeight: "inherit",
-    fontWeight: "inherit",
   },
 });
 
@@ -184,33 +171,13 @@ const useTitleSize = () => {
   };
 };
 
-/** One of the two quiet ways out: the paragraph's words, underlined as a link is. */
-const Quiet = ({
-  onClick,
-  children,
-}: {
-  onClick: () => void;
-  children: ReactNode;
-}) => (
-  <Text as="span" size="lg">
-    <Link asChild>
-      <button onClick={onClick} type="button" {...stylex.props(styles.bare)}>
-        {children}
-      </button>
-    </Link>
-  </Text>
-);
-
-/** A's start: one decision, centred. */
+/** The start: one decision, centred. */
 export const ConsentClean = ({
-  altTitle,
   name,
   onAgree,
   onNotNow,
   onRatherNot,
 }: {
-  /** Ruben's alternative title, to compare (`&title=alt`). */
-  altTitle: boolean;
   /** The person's name in the title (`&name=` tries a long one). */
   name: string;
   onAgree: () => void;
@@ -221,31 +188,25 @@ export const ConsentClean = ({
   return (
     <div {...stylex.props(styles.page)}>
       <div {...stylex.props(styles.column)}>
-        <Heading
-          level={1}
-          size={altTitle ? "xl" : title.size}
-          style={styles.title}
-        >
-          {altTitle
-            ? copy.start.titleAlt
-            : copy.start.titleLines.map((line, at) => (
-                <span
-                  key={line}
-                  ref={at === 0 ? title.firstLine : undefined}
-                  {...stylex.props(
-                    styles.titleLine,
-                    title.whole && styles.titleWhole
-                  )}
-                >
-                  {/* On a phone the two lines are one run of words: a space between them. */}
-                  {at === 0 ? "" : " "}
-                  {line.replace("{name}", name)}
-                </span>
-              ))}
+        <Heading level={1} size={title.size} style={styles.title}>
+          {copy.start.titleLines.map((line, at) => (
+            <span
+              key={line}
+              ref={at === 0 ? title.firstLine : undefined}
+              {...stylex.props(
+                styles.titleLine,
+                title.whole && styles.titleWhole
+              )}
+            >
+              {/* On a phone the two lines are one run of words: a space between them. */}
+              {at === 0 ? "" : " "}
+              {line.replace("{name}", name)}
+            </span>
+          ))}
         </Heading>
         <div {...stylex.props(styles.block)}>
           <Text size="lg">{copy.start.whoShort}</Text>
-          <Collapsible fitContent>
+          <Collapsible fitContent variant="plain">
             <CollapsibleTrigger size="lg" style={styles.centre} weight="normal">
               {copy.start.more}
             </CollapsibleTrigger>
@@ -267,8 +228,12 @@ export const ConsentClean = ({
         </Button>
       </div>
       <div {...stylex.props(styles.foot)}>
-        <Quiet onClick={onNotNow}>{copy.start.later}</Quiet>
-        <Quiet onClick={onRatherNot}>{copy.start.decline}</Quiet>
+        <Button onClick={onNotNow} variant="link">
+          {copy.start.later}
+        </Button>
+        <Button onClick={onRatherNot} variant="link">
+          {copy.start.decline}
+        </Button>
       </div>
     </div>
   );

@@ -50,7 +50,7 @@ export const TeamStep = ({
   const written = [
     t`Hi everyone,`,
     t`We want to spend less time on repetitive work, so there’s more time for our clients. This is about how work flows, not about jobs.`,
-    t`Over the next two weeks you’ll get a short personal link to talk with Stephen, Grasp’s AI interviewer: leads for about 20 minutes, everyone else for 10 to 15. By voice or by typing.`,
+    t`This week you’ll get a short personal link to talk with Stephen, Grasp’s AI interviewer. It takes 20 minutes at most, by voice or by typing.`,
     admin,
   ].join("\n\n");
   const message = kept ?? written;
