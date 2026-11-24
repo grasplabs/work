@@ -79,13 +79,15 @@ export const stepWorking = (status: StepStatus): boolean =>
   status === "writing" || status === "running";
 
 const styles = stylex.create({
-  // As wide as its longest line, never wider than the column: long lines wrap there.
-  root: { width: "max-content", maxWidth: "100%" },
   // A step's input and result, under its line: the panel's own room
   // above them, none under (the step's own room ends the row).
+  // As wide as its longest line, never wider than the column, as #2503's
+  // steps are: long lines wrap there.
   detail: {
     display: "grid",
     rowGap: space["2"],
+    width: "max-content",
+    maxWidth: "100%",
     minWidth: 0,
     marginBlockEnd: `calc(-1 * ${space["2"]})`,
   },
@@ -383,7 +385,6 @@ export const AnswerSteps = ({
   return (
     <ChainOfThought
       aria-label={t`What Grasp did`}
-      style={styles.root}
       onOpenChange={(next) => {
         setChosen(true);
         setOpen(next);
