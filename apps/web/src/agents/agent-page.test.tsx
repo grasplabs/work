@@ -1,3 +1,4 @@
+import { agentErrors } from "@grasp-os/shared/agent";
 // @vitest-environment happy-dom
 import type {
   Agent,
@@ -247,6 +248,10 @@ const fakeConnections = () => {
     changeAgent: async (id: string, input: AgentInput) => {
       await Promise.resolve();
       asked.push(["change", id, input]);
+      // As core refuses a name another agent has, by its code.
+      if (agents.some((each) => each.id !== id && each.name === input.name)) {
+        throw agentErrors.create("agent.name_taken");
+      }
       changed(id, input);
     },
     setAgentPaused: async (id: string, paused: boolean) => {
@@ -1256,6 +1261,42 @@ describe("an agent's page", () => {
     ]);
   });
 
+  it("says in the Edit dialog, on the name and to a screen reader, that another agent has it, and never behind the dialog", async () => {
+    const fake = await withClaire();
+    const { asked } = fake;
+    await shown(fake, { agent: "Claire" });
+    await press(await fromMenu("Edit"));
+    await set(field("Name"), "Stephen", "input");
+    await press(dialogButton("Save"));
+    const dialog = document.querySelector("[role='dialog']");
+    const name = field("Name");
+    const describedBy = (name.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .map(
+        (id) => document.querySelector(`#${CSS.escape(id)}`)?.textContent ?? ""
+      )
+      .join(" ");
+    expect({
+      open: dialog !== null,
+      kept: name.value,
+      invalid: name.getAttribute("aria-invalid"),
+      described: describedBy.includes("Another agent has this name."),
+      // Said as it appears, inside the dialog, and nowhere else.
+      alerts: [...document.querySelectorAll("[role='alert']")].map((each) => [
+        each.textContent,
+        dialog?.contains(each) ?? false,
+      ]),
+      asked,
+    }).toStrictEqual({
+      open: true,
+      kept: "Stephen",
+      invalid: "true",
+      described: true,
+      alerts: [["Another agent has this name.", true]],
+      asked: [["change", "agent-1", { ...claire, name: "Stephen" }]],
+    });
+  });
+
   it("pauses an agent from its heading, and says it is paused", async () => {
     const fake = await withClaire();
     const { asked } = fake;
@@ -1430,7 +1471,9 @@ describe("an agent's page", () => {
         documentsListed().includes("Terms.txt"),
       ],
       // Who may learn what a document says, said where one is added.
-      warned: listed.includes("Anyone who may ask it can learn what they say."),
+      warned: listed.includes(
+        "Anyone who may ask Claire can learn what they say."
+      ),
     }).toStrictEqual({
       asked: [
         [

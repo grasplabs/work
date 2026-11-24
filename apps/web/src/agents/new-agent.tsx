@@ -397,6 +397,8 @@ export const NewAgent = ({
 }) => {
   const { t, i18n } = useLingui();
   const words = useWording();
+  /** A review row's Change, named by the part of the agent it changes. */
+  const changeLabel = (name: string): string => t`Change ${name}`;
   const navigate = useNavigate();
   const { failure, run } = useCoreAction();
   const [draft, setDraft] = useState<Draft>({
@@ -807,6 +809,7 @@ export const NewAgent = ({
                     </ItemContent>
                     <ItemActions>
                       <Button
+                        aria-label={changeLabel(words.short[each])}
                         onClick={() => {
                           setReviewing(false);
                           setAt(index);

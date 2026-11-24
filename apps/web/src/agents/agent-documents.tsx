@@ -48,7 +48,7 @@ import type { Change } from "./settings-card.tsx";
 // keeps only that (agent-documents.ts); the agent is told its documents
 // by name and reads one when a question needs it. Whoever may ask the
 // agent may learn what a document says, and the card says so where one
-// is added (behind the card's info mark). A card of Damsko's Items under
+// is added, in its line under its title. A card of Damsko's Items under
 // File upload's drop zone, with a line on what to give it and why: each
 // file is sent to core as it is dropped or chosen, said on its row in the
 // zone, and once core keeps it, it is a document's row.
@@ -115,11 +115,10 @@ export const AgentDocuments = ({
   const editing = editable && documents !== undefined;
   return (
     <SettingsCard
-      // Behind the info mark: who may learn what a document says.
-      info={t`Files ${name} reads when a question needs them. Anyone who may ask it can learn what they say.`}
       // What to give it, and what it gets from them (Ruben, 21 November:
-      // say what people should drop in and how it helps the agent).
-      description={t`Give ${name} what it should know by heart: a checklist, a price list, a policy. It reads them when a question needs them, so its answers follow your own documents.`}
+      // say what people should drop in and how it helps the agent), then
+      // who may learn what a document says.
+      description={t`Give ${name} what it should know by heart: a checklist, a price list, a policy. It reads them when a question needs them, so its answers follow your own documents. Anyone who may ask ${name} can learn what they say.`}
       title={t`Documents`}
     >
       {editing ? (

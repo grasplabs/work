@@ -124,13 +124,14 @@ export const OwnAgentsCard = ({
   return (
     <>
       <SettingsCard
-        // Behind the info mark: what an admin sees of them, and never.
-        info={t`Agents people make for themselves. Only their owner sees and asks them, and they do at most what Grasp may do for that person. You see how many each person has and what they cost, never what they are told.`}
+        // What they may do and what an admin sees of them, and never: in
+        // plain sight, as the switch under it is decided on it.
+        description={t`Agents people make for themselves. Only their owner sees and asks them, and they do at most what Grasp may do for that person. You see how many each person has and what they cost, never what they are told.`}
         title={t`People's own agents`}
       >
         <FieldGroup>
           <SettingRow
-            info={
+            help={
               admin.on
                 ? t`Anyone in the company can make agents of their own.`
                 : t`Nobody can make one, and those people have don't answer until you turn this back on.`

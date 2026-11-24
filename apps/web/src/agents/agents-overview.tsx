@@ -232,9 +232,11 @@ const useFacts = (teams: StephenReach["teams"]) => {
 const AgentPortrait = ({
   shown,
   facts,
+  headingLevel,
 }: {
   shown: Shown;
   facts: Facts | undefined;
+  headingLevel: 2 | 3;
 }) => {
   const { t } = useLingui();
   const { name } = shown;
@@ -244,7 +246,7 @@ const AgentPortrait = ({
     return (
       <AgentCard
         aria-label={t`Chat with ${name}`}
-        headingLevel={2}
+        headingLevel={headingLevel}
         job={job}
         look={look}
         name={name}
@@ -257,7 +259,7 @@ const AgentPortrait = ({
     <AgentCard
       audience={facts.audience}
       details={facts.details}
-      headingLevel={2}
+      headingLevel={headingLevel}
       job={job}
       look={look}
       name={name}
@@ -279,20 +281,27 @@ const AgentPortrait = ({
   );
 };
 
-/** A group of agents' cards. */
+/** A group of agents' cards, each card's name a heading a level under what it stands under. */
 const AgentGrid = ({
   agents,
   facts,
   label,
+  headingLevel = 2,
 }: {
   agents: readonly Shown[];
   facts: (shown: Shown) => Facts | undefined;
   label: string;
+  /** 3 under a group's own heading. */
+  headingLevel?: 2 | 3;
 }) => (
   <ul aria-label={label} {...stylex.props(agentCardStyles.grid)}>
     {agents.map((agent) => (
       <li key={agent.id}>
-        <AgentPortrait facts={facts(agent)} shown={agent} />
+        <AgentPortrait
+          facts={facts(agent)}
+          headingLevel={headingLevel}
+          shown={agent}
+        />
       </li>
     ))}
   </ul>
@@ -318,7 +327,12 @@ const AgentGroups = ({
             size="sm"
             title={t`Yours`}
           />
-          <AgentGrid agents={mine} facts={facts} label={t`Your agents`} />
+          <AgentGrid
+            agents={mine}
+            facts={facts}
+            headingLevel={3}
+            label={t`Your agents`}
+          />
         </section>
       )}
       {agents.length === 0 ? null : (
@@ -326,7 +340,12 @@ const AgentGroups = ({
           {mine.length === 0 ? null : (
             <SectionHeader size="sm" title={t`Your company's`} />
           )}
-          <AgentGrid agents={agents} facts={facts} label={t`Agents`} />
+          <AgentGrid
+            agents={agents}
+            facts={facts}
+            headingLevel={mine.length === 0 ? 2 : 3}
+            label={t`Agents`}
+          />
         </section>
       )}
     </div>

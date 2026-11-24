@@ -22,7 +22,7 @@ import { Question } from "./question.tsx";
 const askersOwn = "asker";
 
 const styles = stylex.create({
-  control: { display: "block", width: "16rem", maxWidth: "100%" },
+  control: { width: "16rem", maxWidth: "100%" },
 });
 
 export const ThinkingStep = ({ setup, change, name, models }: StepProps) => {
@@ -44,22 +44,20 @@ export const ThinkingStep = ({ setup, change, name, models }: StepProps) => {
             }
             label={t`Model`}
           >
-            <span {...stylex.props(styles.control)}>
-              <Select
-                items={options}
-                onValueChange={(value) => {
-                  change({
-                    model: value === null || value === askersOwn ? null : value,
-                  });
-                }}
-                value={chosen}
-              >
-                <SelectTrigger size="sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent />
-              </Select>
-            </span>
+            <Select
+              items={options}
+              onValueChange={(value) => {
+                change({
+                  model: value === null || value === askersOwn ? null : value,
+                });
+              }}
+              value={chosen}
+            >
+              <SelectTrigger size="sm" style={styles.control}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent />
+            </Select>
           </SettingRow>
         </FieldGroup>
       </SettingsCard>

@@ -2517,6 +2517,7 @@ msgstr "Und der Rest."
 msgid "Another agent has this name"
 msgstr "Ein anderer Agent hat diesen Namen"
 
+#: src/agents/agent-page.tsx
 #: src/agents/setup/name-step.tsx
 msgid "Another agent has this name."
 msgstr "Ein anderer Agent hat diesen Namen."
@@ -2979,7 +2980,7 @@ msgstr "{0} fragen"
 
 #: src/agents/setup/schedule-step.tsx
 msgid "Ask {name} in any chat"
-msgstr "Frag {name} in jedem Chat"
+msgstr "Fragen Sie {name} in jedem Chat"
 
 #: src/connections/revocations-by-hand.tsx
 msgid "Ask {owner} to remove Grasp at {link}."
@@ -3604,6 +3605,7 @@ msgstr "Änderung"
 msgid "Change “{was}” to “{now}”."
 msgstr "Bitte „{was}“ in „{now}“ ändern."
 
+#: src/agents/new-agent.tsx
 #: src/apps/app-data-model.tsx
 #: src/chat/agent-change-card.tsx
 msgid "Change {name}"
@@ -4755,7 +4757,7 @@ msgstr "Tag {day} von {days}"
 
 #: src/agents/schedule.ts
 msgid "Day {day} of every month at {time}"
-msgstr "Am {day}. jedes Monats um {time}"
+msgstr "Am {day}. jeden Monats um {time}"
 
 #: src/brain/brain-log.tsx
 msgid "Day by day"
@@ -6130,10 +6132,6 @@ msgstr "Datei {where}: {message}"
 msgid "Files"
 msgstr "Dateien"
 
-#: src/agents/agent-documents.tsx
-msgid "Files {name} reads when a question needs them. Anyone who may ask it can learn what they say."
-msgstr "Dateien, die {name} liest, wenn eine Frage sie braucht. Wer ihn fragen darf, kann erfahren, was darin steht."
-
 #: src/workflows/workflow-settings.tsx
 msgctxt "a workflow's settings section"
 msgid "Files and apps"
@@ -6571,8 +6569,8 @@ msgid "Give {app} back"
 msgstr "{app} zurückgeben"
 
 #: src/agents/agent-documents.tsx
-msgid "Give {name} what it should know by heart: a checklist, a price list, a policy. It reads them when a question needs them, so its answers follow your own documents."
-msgstr "Geben Sie {name}, was es auswendig wissen soll: eine Checkliste, eine Preisliste, eine Richtlinie. Es liest sie, wenn eine Frage sie braucht, damit seine Antworten Ihren eigenen Dokumenten folgen."
+msgid "Give {name} what it should know by heart: a checklist, a price list, a policy. It reads them when a question needs them, so its answers follow your own documents. Anyone who may ask {name} can learn what they say."
+msgstr "Geben Sie {name}, was er auswendig wissen soll: eine Checkliste, eine Preisliste, eine Richtlinie. Er liest sie, wenn eine Frage sie braucht, damit seine Antworten Ihren eigenen Dokumenten folgen. Wer {name} fragen darf, kann erfahren, was darin steht."
 
 #: src/apps/data-model-changes.tsx
 msgid "Give a value"
@@ -7408,10 +7406,6 @@ msgstr "Ist ein Teil unlesbar, sagen Sie, welcher."
 #: src/agents/agent-templates.ts
 msgid "If a week was quiet, say so in a short report."
 msgstr "War die Woche ruhig, sagen Sie das in einem kurzen Bericht."
-
-#: src/agents/agent-share.tsx
-msgid "If an admin takes it on, it becomes one of the company's agents: they choose who may ask it and what it may do. What you told it doesn't go with it, and you can no longer change or open it."
-msgstr "Übernimmt eine Administratorin oder ein Administrator es, wird es einer der Agenten des Unternehmens: Sie entscheiden, wer es fragen darf und was es tun darf. Was Sie ihm gesagt haben, geht nicht mit, und Sie können es nicht mehr ändern oder öffnen."
 
 #: src/agents/agent-templates.ts
 msgid "If an amount or a client is unclear, say so instead of guessing."
@@ -10331,12 +10325,16 @@ msgid "Offer {name}"
 msgstr "{name} anbieten"
 
 #: src/agents/agent-share.tsx
+msgid "Offer {name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it."
+msgstr "Biete {name} den Admins deines Unternehmens an. Übernehmen sie ihn, wird er ein Agent des Unternehmens: Sie legen fest, wer ihn fragen darf und was er tun darf, und du änderst ihn nicht mehr."
+
+#: src/agents/agent-share.tsx
 msgid "Offer to the company"
 msgstr "Dem Unternehmen anbieten"
 
 #: src/agents/agent-share.tsx
-msgid "Offered on {since}"
-msgstr "Angeboten am {since}"
+msgid "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
+msgstr "Angeboten am {since}. Die Admins eurer Firma können {name} übernehmen. Was du ihm gesagt hast, geht nicht mit, und sobald sie es übernommen haben, kannst du es nicht mehr öffnen."
 
 #: src/agents/agent-share.tsx
 msgid "Offered to the company"
@@ -14159,7 +14157,7 @@ msgstr "Stripe ist noch nicht verknüpft"
 
 #: src/agents/agent-templates.ts
 msgid "Suggest up to three points to raise."
-msgstr "Schlag bis zu drei Punkte vor, die man ansprechen sollte."
+msgstr "Schlagen Sie bis zu drei Punkte vor, die man ansprechen sollte."
 
 #: src/agents/agent-apps-card.tsx
 msgid "Suggested apps"
@@ -14867,10 +14865,6 @@ msgstr "Das Brain des Unternehmens: {percent} % bekannt. Dunkle Punkte sind, wa
 #: src/brain/skills-page.tsx
 msgid "The company has no skills of its own yet."
 msgstr "Das Unternehmen hat noch keine eigenen Skills."
-
-#: src/agents/agent-share.tsx
-msgid "The company's admins may take {name} on"
-msgstr "Die Administratoren des Unternehmens können {name} übernehmen"
 
 #: src/agents/agent-templates.ts
 msgid "The company's documents and knowledge."
@@ -17867,7 +17861,7 @@ msgstr "Funktioniert. Zuletzt verwendet am {when}."
 
 #: src/agents/setup/review-step.tsx
 msgid "Works"
-msgstr "Funktioniert"
+msgstr "Arbeitet"
 
 #: src/brain/brain-article/team-work.tsx
 msgid "Works in"

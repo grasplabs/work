@@ -2517,6 +2517,7 @@ msgstr "Et le reste."
 msgid "Another agent has this name"
 msgstr "Un autre agent porte ce nom"
 
+#: src/agents/agent-page.tsx
 #: src/agents/setup/name-step.tsx
 msgid "Another agent has this name."
 msgstr "Un autre agent porte ce nom."
@@ -3604,6 +3605,7 @@ msgstr "Modification"
 msgid "Change “{was}” to “{now}”."
 msgstr "Remplacer « {was} » par « {now} »."
 
+#: src/agents/new-agent.tsx
 #: src/apps/app-data-model.tsx
 #: src/chat/agent-change-card.tsx
 msgid "Change {name}"
@@ -5684,7 +5686,7 @@ msgstr "Les événements plus anciens que ce que conserve le journal d’audit, 
 
 #: src/agents/agent-look.tsx
 msgid "Evergreen"
-msgstr "Persistant"
+msgstr "Vert sapin"
 
 #: src/agents/schedule.ts
 msgid "Every {days} at {time}"
@@ -6130,10 +6132,6 @@ msgstr "Fichier {where} : {message}"
 msgid "Files"
 msgstr "Fichiers"
 
-#: src/agents/agent-documents.tsx
-msgid "Files {name} reads when a question needs them. Anyone who may ask it can learn what they say."
-msgstr "Fichiers que {name} lit quand une question en a besoin. Quiconque peut l'interroger peut apprendre ce qu'ils disent."
-
 #: src/workflows/workflow-settings.tsx
 msgctxt "a workflow's settings section"
 msgid "Files and apps"
@@ -6571,8 +6569,8 @@ msgid "Give {app} back"
 msgstr "Rendre {app}"
 
 #: src/agents/agent-documents.tsx
-msgid "Give {name} what it should know by heart: a checklist, a price list, a policy. It reads them when a question needs them, so its answers follow your own documents."
-msgstr "Donnez à {name} ce qu’il doit connaître par cœur : une checklist, une grille tarifaire, une politique. Il les lit quand une question en a besoin, pour que ses réponses suivent vos propres documents."
+msgid "Give {name} what it should know by heart: a checklist, a price list, a policy. It reads them when a question needs them, so its answers follow your own documents. Anyone who may ask {name} can learn what they say."
+msgstr "Donnez à {name} ce qu’il doit connaître par cœur : une checklist, une grille tarifaire, une politique. Il les lit quand une question en a besoin, pour que ses réponses suivent vos propres documents. Toute personne pouvant interroger {name} peut apprendre ce qu’ils contiennent."
 
 #: src/apps/data-model-changes.tsx
 msgid "Give a value"
@@ -7409,10 +7407,6 @@ msgstr "Si une partie est illisible, dis laquelle."
 msgid "If a week was quiet, say so in a short report."
 msgstr "Si la semaine a été calme, dis-le dans un rapport court."
 
-#: src/agents/agent-share.tsx
-msgid "If an admin takes it on, it becomes one of the company's agents: they choose who may ask it and what it may do. What you told it doesn't go with it, and you can no longer change or open it."
-msgstr "Si un administrateur le reprend, il devient l’un des agents de l’entreprise : il choisit qui peut l’interroger et ce qu’il peut faire. Ce que vous lui avez dit ne le suit pas, et vous ne pouvez plus le modifier ni l’ouvrir."
-
 #: src/agents/agent-templates.ts
 msgid "If an amount or a client is unclear, say so instead of guessing."
 msgstr "Si un montant ou un client n’est pas clair, dis-le au lieu de deviner."
@@ -7854,7 +7848,7 @@ msgstr "Il passe ses vérifications."
 
 #: src/agents/new-agent.tsx
 msgid "It reads, and what it wants to change waits for you"
-msgstr "Il lit, et ce qu'il veut modifier t'attend"
+msgstr "Il lit, et ce qu’il veut modifier vous attend"
 
 #: src/apps/app-workspace.tsx
 msgid "It shows here as soon as there is something to see."
@@ -10331,12 +10325,16 @@ msgid "Offer {name}"
 msgstr "Proposer {name}"
 
 #: src/agents/agent-share.tsx
+msgid "Offer {name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it."
+msgstr "Proposez {name} aux administrateurs de votre entreprise. S'ils le reprennent, il devient un agent de l'entreprise : ils choisissent qui peut l'interroger et ce qu'il peut faire, et vous ne le modifiez plus."
+
+#: src/agents/agent-share.tsx
 msgid "Offer to the company"
 msgstr "Proposer à l'entreprise"
 
 #: src/agents/agent-share.tsx
-msgid "Offered on {since}"
-msgstr "Proposé le {since}"
+msgid "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
+msgstr "Proposé le {since}. Les administrateurs de votre entreprise peuvent reprendre {name}. Ce que vous lui avez dit ne part pas avec lui, et une fois qu'ils l'ont repris, vous ne pouvez plus l'ouvrir."
 
 #: src/agents/agent-share.tsx
 msgid "Offered to the company"
@@ -14868,10 +14866,6 @@ msgstr "Le Brain de l’entreprise : {percent} % connu. Les points foncés s
 msgid "The company has no skills of its own yet."
 msgstr "L'entreprise n'a pas encore de skills à elle."
 
-#: src/agents/agent-share.tsx
-msgid "The company's admins may take {name} on"
-msgstr "Les administrateurs de l’entreprise peuvent reprendre {name}"
-
 #: src/agents/agent-templates.ts
 msgid "The company's documents and knowledge."
 msgstr "Les documents et les connaissances de l’entreprise."
@@ -17074,7 +17068,7 @@ msgstr "Que doit faire Grasp là-bas ?"
 
 #: src/agents/new-agent.tsx
 msgid "What should the agent do? Pick a starting point or say it in your own words."
-msgstr "Que doit faire l'agent ? Choisis un point de départ ou dis-le avec tes mots."
+msgstr "Que doit faire l’agent ? Choisissez un point de départ ou dites-le avec vos mots."
 
 #: src/apps/app-start.tsx
 msgid "What should this App do?"
@@ -17867,7 +17861,7 @@ msgstr "Fonctionne. Dernière utilisation : {when}."
 
 #: src/agents/setup/review-step.tsx
 msgid "Works"
-msgstr "Fonctionne"
+msgstr "Travaille"
 
 #: src/brain/brain-article/team-work.tsx
 msgid "Works in"
@@ -18065,7 +18059,7 @@ msgstr "Vous ne pouvez pas lire cette version."
 
 #: src/agents/new-agent.tsx
 msgid "You choose people and teams on its page"
-msgstr "Tu choisis les personnes et équipes sur sa page"
+msgstr "Vous choisissez les personnes et les équipes sur sa page"
 
 #: src/connections/connect-dialog.tsx
 msgid "You come back to {app}’s page here."

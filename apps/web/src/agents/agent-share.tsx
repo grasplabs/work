@@ -58,18 +58,17 @@ export const ShareAgent = ({
       : new Intl.DateTimeFormat(i18n.locale, { dateStyle: "medium" }).format(
           new Date(agent.offeredAt)
         );
-  // A row as Settings has its settings: a switch, one short line, and
-  // what it means behind the info mark.
+  // A row as Settings has its settings: a switch, and under its name what
+  // offering it means.
   return (
     <SettingsCard title={t`Sharing`}>
       <FieldGroup>
         <SettingRow
           help={
             offered
-              ? t`Offered on ${since}`
-              : t`The company's admins may take ${name} on`
+              ? t`Offered on ${since}. Your company's admins may take ${name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it.`
+              : t`Offer ${name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it.`
           }
-          info={t`If an admin takes it on, it becomes one of the company's agents: they choose who may ask it and what it may do. What you told it doesn't go with it, and you can no longer change or open it.`}
           label={t`Offer to the company`}
         >
           <Switch

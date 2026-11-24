@@ -1,3 +1,4 @@
+import { agentErrors } from "@grasp-os/shared/agent";
 import type {
   Agent,
   AgentDocument,
@@ -100,7 +101,7 @@ import {
   wakesOn,
 } from "./agent-facts.tsx";
 import { AgentForm } from "./agent-form.tsx";
-import type { Part, Typed } from "./agent-form.tsx";
+import type { Part, Refusal, Typed } from "./agent-form.tsx";
 import { AgentLook } from "./agent-look.tsx";
 import { ShareAgent } from "./agent-share.tsx";
 import { AgentWakes, useLast } from "./agent-wakes.tsx";
@@ -160,13 +161,29 @@ const styles = stylex.create({
   },
   // A tab's name and its count, a small step apart.
   counted: { display: "inline-flex", alignItems: "center", gap: space["2"] },
-  // A setting's control at its own width beside its name, on a phone too.
-  control: { display: "block", width: "9rem", maxWidth: "100%" },
   // The header, then the tab shown, as far apart as its cards.
   column: { display: "grid", gap: space["6"], width: "100%" },
   // A part's cards, as far apart as the column sets its own.
   stack: { display: "grid", gap: space["8"] },
 });
+
+/**
+ * Makes `change`, and tells `refused` what it threw instead of throwing it:
+ * whether it went through. Outside components, as the React Compiler
+ * can't compile `try`/`catch`.
+ */
+const tellingRefusal = async (
+  change: () => Promise<void>,
+  refused: (error: unknown) => void
+): Promise<boolean> => {
+  try {
+    await change();
+    return true;
+  } catch (error) {
+    refused(error);
+    return false;
+  }
+};
 
 /** A date and time as people read it here. */
 const useMoment = () => {
@@ -395,7 +412,7 @@ const AccessRow = ({
   const { status, save } = useRowSave();
   return (
     <SettingRow info={info} label={label} saving={status}>
-      <span {...stylex.props(styles.control)}>{children(save)}</span>
+      {children(save)}
     </SettingRow>
   );
 };
@@ -548,6 +565,15 @@ const AgentInstructions = ({
   );
 };
 
+/**
+ * Saves what a form says over the agent: whether it went through. Given
+ * `refused`, why not is told there, not under the page's header.
+ */
+type Save = (
+  said: Partial<Typed>,
+  refused?: (refusal: Refusal) => void
+) => Promise<boolean>;
+
 /** Edit: the agent's name, job, picture and model, in a dialog the head's menu opens. */
 const EditAgent = ({
   agent,
@@ -564,14 +590,23 @@ const EditAgent = ({
   typed: Typed;
   models: readonly string[];
   can: boolean;
-  save: (said: Partial<Typed>) => Promise<boolean>;
+  save: Save;
 }) => {
   const { t } = useLingui();
   const formId = useId();
   const { name } = agent;
   const parts: readonly Part[] = ["name", "job", "model"];
+  // Why the last save was refused: in the dialog, never behind it, on the
+  // field it concerns where it concerns one.
+  const [refused, setRefused] = useState<Refusal>();
   return (
-    <Dialog onOpenChange={setOpen} open={open}>
+    <Dialog
+      onOpenChange={(next) => {
+        setRefused(undefined);
+        setOpen(next);
+      }}
+      open={open}
+    >
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{t`Edit ${name}`}</DialogTitle>
@@ -585,13 +620,18 @@ const EditAgent = ({
               initial={typed}
               models={models}
               onSave={async (said) => {
-                if (await save(said)) {
+                setRefused(undefined);
+                if (await save(said, setRefused)) {
                   setOpen(false);
                 }
               }}
               parts={parts}
+              refused={refused}
             />
           ) : null}
+          <AgentFailure>
+            {refused?.part === undefined ? refused?.words : undefined}
+          </AgentFailure>
         </DialogBody>
         <DialogFooter>
           <DialogClose>{t`Cancel`}</DialogClose>
@@ -902,8 +942,8 @@ export const AgentPage = ({
   };
   // What a form says, over the agent as core has it now: a form saves its
   // own parts and never what another saved since it was shown.
-  const save = async (said: Partial<Typed>): Promise<boolean> => {
-    const done = await run(async (session) => {
+  const save: Save = async (said, refused) => {
+    const changeIt = async (session: Session): Promise<void> => {
       await changeThenRefresh(
         async () => {
           await session.connections.changeAgent(agent.id, {
@@ -916,8 +956,41 @@ export const AgentPage = ({
           await router.invalidate({ sync: true });
         }
       );
-      return true;
-    });
+    };
+    // Where it concerns a field, on that field: a name another agent has
+    // in the product's words, a model core doesn't know in core's.
+    const refusalOf = (error: unknown): Refusal => {
+      const code = agentErrors.codeOf(error);
+      if (code === "agent.name_taken") {
+        return { part: "name", words: t`Another agent has this name.` };
+      }
+      const words = failureWords(error, i18n);
+      return code === "agent.model_unknown"
+        ? { part: "model", words }
+        : { words };
+    };
+    const done = await run(
+      async (session) => {
+        if (refused === undefined) {
+          await changeIt(session);
+          return true;
+        }
+        return await tellingRefusal(
+          async () => {
+            await changeIt(session);
+          },
+          (error) => {
+            refused(refusalOf(error));
+          }
+        );
+      },
+      // No session at all: said where it was asked, too.
+      refused === undefined
+        ? undefined
+        : (reason) => {
+            refused({ words: reason });
+          }
+    );
     return done === true;
   };
   const remove = async (): Promise<void> => {

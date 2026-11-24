@@ -2517,6 +2517,7 @@ msgstr "Y el resto."
 msgid "Another agent has this name"
 msgstr "Otro agente ya tiene este nombre"
 
+#: src/agents/agent-page.tsx
 #: src/agents/setup/name-step.tsx
 msgid "Another agent has this name."
 msgstr "Otro agente ya tiene este nombre."
@@ -3604,6 +3605,7 @@ msgstr "Cambio"
 msgid "Change “{was}” to “{now}”."
 msgstr "Cambia «{was}» por «{now}»."
 
+#: src/agents/new-agent.tsx
 #: src/apps/app-data-model.tsx
 #: src/chat/agent-change-card.tsx
 msgid "Change {name}"
@@ -6130,10 +6132,6 @@ msgstr "Archivo {where}: {message}"
 msgid "Files"
 msgstr "Archivos"
 
-#: src/agents/agent-documents.tsx
-msgid "Files {name} reads when a question needs them. Anyone who may ask it can learn what they say."
-msgstr "Archivos que {name} lee cuando una pregunta los necesita. Quien puede preguntarle puede saber lo que dicen."
-
 #: src/workflows/workflow-settings.tsx
 msgctxt "a workflow's settings section"
 msgid "Files and apps"
@@ -6571,8 +6569,8 @@ msgid "Give {app} back"
 msgstr "Devolver {app}"
 
 #: src/agents/agent-documents.tsx
-msgid "Give {name} what it should know by heart: a checklist, a price list, a policy. It reads them when a question needs them, so its answers follow your own documents."
-msgstr "Dale a {name} lo que debe saber de memoria: una lista de comprobación, una lista de precios, una política. Los lee cuando una pregunta lo necesita, así sus respuestas siguen tus propios documentos."
+msgid "Give {name} what it should know by heart: a checklist, a price list, a policy. It reads them when a question needs them, so its answers follow your own documents. Anyone who may ask {name} can learn what they say."
+msgstr "Dale a {name} lo que debe saber de memoria: una lista de comprobación, una lista de precios, una política. Los lee cuando una pregunta lo necesita, así sus respuestas siguen tus propios documentos. Quien pueda preguntar a {name} puede saber lo que dicen."
 
 #: src/apps/data-model-changes.tsx
 msgid "Give a value"
@@ -7408,10 +7406,6 @@ msgstr "Si una parte no se puede leer, di cuál."
 #: src/agents/agent-templates.ts
 msgid "If a week was quiet, say so in a short report."
 msgstr "Si la semana fue tranquila, dilo en un informe breve."
-
-#: src/agents/agent-share.tsx
-msgid "If an admin takes it on, it becomes one of the company's agents: they choose who may ask it and what it may do. What you told it doesn't go with it, and you can no longer change or open it."
-msgstr "Si un administrador lo adopta, pasa a ser uno de los agentes de la empresa: decide quién puede preguntarle y qué puede hacer. Lo que le dijiste no va con él, y ya no podrás cambiarlo ni abrirlo."
 
 #: src/agents/agent-templates.ts
 msgid "If an amount or a client is unclear, say so instead of guessing."
@@ -10331,12 +10325,16 @@ msgid "Offer {name}"
 msgstr "Ofrecer {name}"
 
 #: src/agents/agent-share.tsx
+msgid "Offer {name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it."
+msgstr "Ofrece {name} a los administradores de tu empresa. Si lo adoptan, pasa a ser un agente de la empresa: ellos eligen quién puede preguntarle y qué puede hacer, y tú ya no lo cambias."
+
+#: src/agents/agent-share.tsx
 msgid "Offer to the company"
 msgstr "Ofrecer a la empresa"
 
 #: src/agents/agent-share.tsx
-msgid "Offered on {since}"
-msgstr "Ofrecido el {since}"
+msgid "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
+msgstr "Ofrecido el {since}. Los administradores de tu empresa pueden quedarse con {name}. Lo que le dijiste no se va con él y, una vez que se lo queden, ya no podrás abrirlo."
 
 #: src/agents/agent-share.tsx
 msgid "Offered to the company"
@@ -14868,10 +14866,6 @@ msgstr "El Brain de la empresa: {percent} % conocido. Los puntos oscuros son lo
 msgid "The company has no skills of its own yet."
 msgstr "La empresa aún no tiene skills propias."
 
-#: src/agents/agent-share.tsx
-msgid "The company's admins may take {name} on"
-msgstr "Los administradores de la empresa pueden adoptar a {name}"
-
 #: src/agents/agent-templates.ts
 msgid "The company's documents and knowledge."
 msgstr "Los documentos y el conocimiento de la empresa."
@@ -17867,7 +17861,7 @@ msgstr "Funciona. Último uso: {when}."
 
 #: src/agents/setup/review-step.tsx
 msgid "Works"
-msgstr "Funciona"
+msgstr "Trabaja"
 
 #: src/brain/brain-article/team-work.tsx
 msgid "Works in"

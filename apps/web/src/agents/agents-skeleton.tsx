@@ -24,7 +24,6 @@ const waits = stylex.create({
   column: { display: "grid", gap: space["8"], width: "100%" },
   group: { display: "grid", rowGap: space["2"] },
   title: {
-    display: "block",
     width: "7rem",
     marginInline: space.tableCellInline,
   },
@@ -56,6 +55,8 @@ export const AgentsSkeleton = ({
     <PageHeader
       actions={
         action ? (
+          // A box of its own: the rectangle is a control's height, and
+          // drawn in place of the small button's it would stand 2px higher.
           <span {...stylex.props(waits.action)}>
             <Skeleton variant="rectangular" />
           </span>
@@ -71,17 +72,11 @@ export const AgentsSkeleton = ({
           <Card padding="none">
             <span {...stylex.props(agentCardStyles.portrait)}>
               <span {...stylex.props(agentCardStyles.words)}>
-                <span {...stylex.props(waits.name)}>
-                  <Skeleton size="lg" />
-                </span>
-                <span {...stylex.props(waits.job)}>
-                  <Skeleton />
-                </span>
+                <Skeleton size="lg" style={waits.name} />
+                <Skeleton style={waits.job} />
               </span>
               <span {...stylex.props(agentCardStyles.foot)}>
-                <span {...stylex.props(waits.fact)}>
-                  <Skeleton size="sm" />
-                </span>
+                <Skeleton size="sm" style={waits.fact} />
               </span>
             </span>
           </Card>
@@ -105,19 +100,13 @@ export const AgentSkeleton = ({
       <PageHeader loading size="sm" title="" />
       {sections.map((rows, section) => (
         <div aria-hidden="true" key={section} {...stylex.props(waits.group)}>
-          <span {...stylex.props(waits.title)}>
-            <Skeleton />
-          </span>
+          <Skeleton style={waits.title} />
           <Card size="sm">
             <CardContent flush>
               {Array.from({ length: rows }, (_, row) => (
                 <div key={row} {...stylex.props(waits.row)}>
-                  <span {...stylex.props(waits.label)}>
-                    <Skeleton size="sm" />
-                  </span>
-                  <span {...stylex.props(waits.value)}>
-                    <Skeleton size="sm" />
-                  </span>
+                  <Skeleton size="sm" style={waits.label} />
+                  <Skeleton size="sm" style={waits.value} />
                 </div>
               ))}
             </CardContent>

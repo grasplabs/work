@@ -2517,6 +2517,7 @@ msgstr "And the rest."
 msgid "Another agent has this name"
 msgstr "Another agent has this name"
 
+#: src/agents/agent-page.tsx
 #: src/agents/setup/name-step.tsx
 msgid "Another agent has this name."
 msgstr "Another agent has this name."
@@ -3604,6 +3605,7 @@ msgstr "Change"
 msgid "Change “{was}” to “{now}”."
 msgstr "Change “{was}” to “{now}”."
 
+#: src/agents/new-agent.tsx
 #: src/apps/app-data-model.tsx
 #: src/chat/agent-change-card.tsx
 msgid "Change {name}"
@@ -6130,10 +6132,6 @@ msgstr "File {where}: {message}"
 msgid "Files"
 msgstr "Files"
 
-#: src/agents/agent-documents.tsx
-msgid "Files {name} reads when a question needs them. Anyone who may ask it can learn what they say."
-msgstr "Files {name} reads when a question needs them. Anyone who may ask it can learn what they say."
-
 #: src/workflows/workflow-settings.tsx
 msgctxt "a workflow's settings section"
 msgid "Files and apps"
@@ -6571,8 +6569,8 @@ msgid "Give {app} back"
 msgstr "Give {app} back"
 
 #: src/agents/agent-documents.tsx
-msgid "Give {name} what it should know by heart: a checklist, a price list, a policy. It reads them when a question needs them, so its answers follow your own documents."
-msgstr "Give {name} what it should know by heart: a checklist, a price list, a policy. It reads them when a question needs them, so its answers follow your own documents."
+msgid "Give {name} what it should know by heart: a checklist, a price list, a policy. It reads them when a question needs them, so its answers follow your own documents. Anyone who may ask {name} can learn what they say."
+msgstr "Give {name} what it should know by heart: a checklist, a price list, a policy. It reads them when a question needs them, so its answers follow your own documents. Anyone who may ask {name} can learn what they say."
 
 #: src/apps/data-model-changes.tsx
 msgid "Give a value"
@@ -7408,10 +7406,6 @@ msgstr "If a part is unreadable, say which part."
 #: src/agents/agent-templates.ts
 msgid "If a week was quiet, say so in a short report."
 msgstr "If a week was quiet, say so in a short report."
-
-#: src/agents/agent-share.tsx
-msgid "If an admin takes it on, it becomes one of the company's agents: they choose who may ask it and what it may do. What you told it doesn't go with it, and you can no longer change or open it."
-msgstr "If an admin takes it on, it becomes one of the company's agents: they choose who may ask it and what it may do. What you told it doesn't go with it, and you can no longer change or open it."
 
 #: src/agents/agent-templates.ts
 msgid "If an amount or a client is unclear, say so instead of guessing."
@@ -10331,12 +10325,16 @@ msgid "Offer {name}"
 msgstr "Offer {name}"
 
 #: src/agents/agent-share.tsx
+msgid "Offer {name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it."
+msgstr "Offer {name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it."
+
+#: src/agents/agent-share.tsx
 msgid "Offer to the company"
 msgstr "Offer to the company"
 
 #: src/agents/agent-share.tsx
-msgid "Offered on {since}"
-msgstr "Offered on {since}"
+msgid "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
+msgstr "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
 
 #: src/agents/agent-share.tsx
 msgid "Offered to the company"
@@ -14867,10 +14865,6 @@ msgstr "The company brain: {percent}% known. Dark dots are what I know, grey dot
 #: src/brain/skills-page.tsx
 msgid "The company has no skills of its own yet."
 msgstr "The company has no skills of its own yet."
-
-#: src/agents/agent-share.tsx
-msgid "The company's admins may take {name} on"
-msgstr "The company's admins may take {name} on"
 
 #: src/agents/agent-templates.ts
 msgid "The company's documents and knowledge."

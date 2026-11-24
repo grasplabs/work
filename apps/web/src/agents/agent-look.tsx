@@ -61,7 +61,7 @@ export const useLookWords = () => {
 };
 
 const styles = stylex.create({
-  control: { display: "block", width: "12rem", maxWidth: "100%" },
+  control: { width: "12rem", maxWidth: "100%" },
 });
 
 /** The Look card: the agent's shape and colours, each pressed to change it. */
@@ -103,52 +103,48 @@ export const AgentLook = ({
     >
       <FieldGroup>
         <SettingRow label={t`Shape`} saving={shapeSave.status}>
-          <span {...stylex.props(styles.control)}>
-            <Select
-              disabled={!can}
-              items={shapes.map((shape) => ({
-                value: shape,
-                label: shapeNameOf(shape),
-              }))}
-              onValueChange={(value) => {
-                const shape = shapes.find((each) => each === value);
-                if (shape !== undefined) {
-                  choose(shapeSave, { ...look, shape });
-                }
-              }}
-              value={look.shape}
-            >
-              <SelectTrigger size="sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent />
-            </Select>
-          </span>
+          <Select
+            disabled={!can}
+            items={shapes.map((shape) => ({
+              value: shape,
+              label: shapeNameOf(shape),
+            }))}
+            onValueChange={(value) => {
+              const shape = shapes.find((each) => each === value);
+              if (shape !== undefined) {
+                choose(shapeSave, { ...look, shape });
+              }
+            }}
+            value={look.shape}
+          >
+            <SelectTrigger size="sm" style={styles.control}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent />
+          </Select>
         </SettingRow>
         <SettingRow label={t`Colours`} saving={paletteSave.status}>
-          <span {...stylex.props(styles.control)}>
-            <Select
-              disabled={!can}
-              items={agentFigurePalettes.map((palette) => ({
-                value: palette,
-                label: paletteNames[palette],
-              }))}
-              onValueChange={(value) => {
-                const palette = agentFigurePalettes.find(
-                  (each) => each === value
-                );
-                if (palette !== undefined) {
-                  choose(paletteSave, { ...look, palette });
-                }
-              }}
-              value={look.palette}
-            >
-              <SelectTrigger size="sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent />
-            </Select>
-          </span>
+          <Select
+            disabled={!can}
+            items={agentFigurePalettes.map((palette) => ({
+              value: palette,
+              label: paletteNames[palette],
+            }))}
+            onValueChange={(value) => {
+              const palette = agentFigurePalettes.find(
+                (each) => each === value
+              );
+              if (palette !== undefined) {
+                choose(paletteSave, { ...look, palette });
+              }
+            }}
+            value={look.palette}
+          >
+            <SelectTrigger size="sm" style={styles.control}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent />
+          </Select>
         </SettingRow>
       </FieldGroup>
     </SettingsCard>

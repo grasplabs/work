@@ -40,6 +40,12 @@ const askersOwn = "asker";
 /** Which of an agent's words a form asks for. */
 export type Part = Exclude<keyof Typed, "face">;
 
+/** Why a save was refused, on the field it concerns where it concerns one. */
+export interface Refusal {
+  part?: "name" | "model";
+  words: string;
+}
+
 /** A form for `parts` of an agent, saved together by the button tied to `id`. */
 export const AgentForm = ({
   id,
@@ -47,6 +53,7 @@ export const AgentForm = ({
   parts,
   can,
   models = noModels,
+  refused,
   onSave,
 }: {
   /** The form's id, which its submit button names. */
@@ -56,11 +63,20 @@ export const AgentForm = ({
   can: boolean;
   /** The models the organization chose, which an agent can be given. */
   models?: readonly string[];
+  /** Why the last save was refused where it concerns one of its fields: said under it. */
+  refused?: Refusal | undefined;
   /** What the form's own `parts` now say: nothing of the rest of the agent. */
   onSave: (said: Partial<Typed>) => Promise<void>;
 }) => {
   const { t } = useLingui();
   const [typed, setTyped] = useState<Typed>(initial);
+  // Said as it appears (`role="alert"`), and with the field it is under.
+  const refusalOf = (part: Refusal["part"]) =>
+    refused !== undefined && refused.part === part ? (
+      <FieldError match role="alert">
+        {refused.words}
+      </FieldError>
+    ) : null;
   // Its own model stays offered while it has one the organization no longer chose.
   const offered = [
     ...models,
@@ -86,7 +102,10 @@ export const AgentForm = ({
       }}
     >
       {parts.includes("name") ? (
-        <Field disabled={!can}>
+        <Field
+          data-invalid={refused?.part === "name" || undefined}
+          disabled={!can}
+        >
           <FieldLabel>{t`Name`}</FieldLabel>
           <Input
             autoComplete="off"
@@ -98,6 +117,7 @@ export const AgentForm = ({
             value={typed.name}
           />
           <FieldError match="valueMissing">{t`Give it a name.`}</FieldError>
+          {refusalOf("name")}
         </Field>
       ) : null}
       {parts.includes("job") ? (
@@ -115,7 +135,10 @@ export const AgentForm = ({
         </Field>
       ) : null}
       {parts.includes("model") ? (
-        <Field disabled={!can}>
+        <Field
+          data-invalid={refused?.part === "model" || undefined}
+          disabled={!can}
+        >
           <FieldLabel>{t`Model`}</FieldLabel>
           <Select
             disabled={!can}
@@ -139,6 +162,7 @@ export const AgentForm = ({
             </SelectTrigger>
             <SelectContent />
           </Select>
+          {refusalOf("model")}
         </Field>
       ) : null}
     </Form>

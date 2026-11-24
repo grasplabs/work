@@ -43,11 +43,13 @@ export const AgentTabList = () => {
 
 /**
  * An admin's tabs before the agents arrive, in their place over the
- * skeleton's cards: on the tab the address names, else Organization,
- * which always holds the company's first agent.
+ * skeleton's cards: on the tab the address names. With none named, none
+ * is chosen yet, as the loaded page then opens on My agents only while
+ * the person has agents of their own, which isn't known until it loads
+ * (`""` is no tab's value).
  */
 export const AgentTabsWaiting = ({ tab }: { tab: AgentsTab | undefined }) => (
-  <Tabs value={tab ?? "organization"}>
+  <Tabs value={tab ?? ""}>
     <AgentTabList />
   </Tabs>
 );

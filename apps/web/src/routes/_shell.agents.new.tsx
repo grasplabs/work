@@ -36,8 +36,7 @@ const styles = stylex.create({
     marginInline: "auto",
     paddingBlock: space["16"],
   },
-  line: { display: "block", width: "100%" },
-  short: { display: "block", width: "60%" },
+  short: { width: "60%" },
 });
 
 const NewAgentPage = () => {
@@ -98,12 +97,8 @@ const NewAgentLoading = () => {
       />
       <Page>
         <div aria-busy="true" {...stylex.props(styles.waiting)}>
-          <span {...stylex.props(styles.line)}>
-            <Skeleton size="lg" />
-          </span>
-          <span {...stylex.props(styles.short)}>
-            <Skeleton />
-          </span>
+          <Skeleton size="lg" />
+          <Skeleton style={styles.short} />
         </div>
       </Page>
     </>

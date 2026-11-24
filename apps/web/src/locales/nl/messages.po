@@ -2517,6 +2517,7 @@ msgstr "En de rest."
 msgid "Another agent has this name"
 msgstr "Een andere agent heeft deze naam"
 
+#: src/agents/agent-page.tsx
 #: src/agents/setup/name-step.tsx
 msgid "Another agent has this name."
 msgstr "Een andere agent heeft deze naam."
@@ -3604,6 +3605,7 @@ msgstr "Wijziging"
 msgid "Change “{was}” to “{now}”."
 msgstr "Verander „{was}” in „{now}”."
 
+#: src/agents/new-agent.tsx
 #: src/apps/app-data-model.tsx
 #: src/chat/agent-change-card.tsx
 msgid "Change {name}"
@@ -6130,10 +6132,6 @@ msgstr "Bestand {where}: {message}"
 msgid "Files"
 msgstr "Bestanden"
 
-#: src/agents/agent-documents.tsx
-msgid "Files {name} reads when a question needs them. Anyone who may ask it can learn what they say."
-msgstr "Bestanden die {name} leest als een vraag erom vraagt. Wie het iets mag vragen, kan te weten komen wat erin staat."
-
 #: src/workflows/workflow-settings.tsx
 msgctxt "a workflow's settings section"
 msgid "Files and apps"
@@ -6571,8 +6569,8 @@ msgid "Give {app} back"
 msgstr "{app} teruggeven"
 
 #: src/agents/agent-documents.tsx
-msgid "Give {name} what it should know by heart: a checklist, a price list, a policy. It reads them when a question needs them, so its answers follow your own documents."
-msgstr "Geef {name} wat het uit het hoofd moet weten: een checklist, een prijslijst, een beleid. Het leest ze wanneer een vraag erom vraagt, zodat zijn antwoorden je eigen documenten volgen."
+msgid "Give {name} what it should know by heart: a checklist, a price list, a policy. It reads them when a question needs them, so its answers follow your own documents. Anyone who may ask {name} can learn what they say."
+msgstr "Geef {name} wat hij uit het hoofd moet weten: een checklist, een prijslijst, een beleid. Hij leest ze wanneer een vraag erom vraagt, zodat zijn antwoorden je eigen documenten volgen. Wie {name} iets mag vragen, kan te weten komen wat erin staat."
 
 #: src/apps/data-model-changes.tsx
 msgid "Give a value"
@@ -7408,10 +7406,6 @@ msgstr "Is een deel onleesbaar, zeg dan welk deel."
 #: src/agents/agent-templates.ts
 msgid "If a week was quiet, say so in a short report."
 msgstr "Was het een rustige week, zeg dat dan in een kort verslag."
-
-#: src/agents/agent-share.tsx
-msgid "If an admin takes it on, it becomes one of the company's agents: they choose who may ask it and what it may do. What you told it doesn't go with it, and you can no longer change or open it."
-msgstr "Neemt een beheerder het over, dan wordt het een van de agents van het bedrijf: zij kiezen wie het mag vragen en wat het mag doen. Wat jij het vertelde gaat niet mee, en je kunt het niet meer wijzigen of openen."
 
 #: src/agents/agent-templates.ts
 msgid "If an amount or a client is unclear, say so instead of guessing."
@@ -10331,12 +10325,16 @@ msgid "Offer {name}"
 msgstr "{name} aanbieden"
 
 #: src/agents/agent-share.tsx
+msgid "Offer {name} to your company's admins. If they take it on, it becomes one of the company's agents: they choose who may ask it and what it may do, and you no longer change it."
+msgstr "Bied {name} aan de beheerders van je bedrijf aan. Nemen zij hem over, dan wordt hij een agent van het bedrijf: zij kiezen wie hem iets mag vragen en wat hij mag doen, en jij wijzigt hem niet meer."
+
+#: src/agents/agent-share.tsx
 msgid "Offer to the company"
 msgstr "Aan het bedrijf aanbieden"
 
 #: src/agents/agent-share.tsx
-msgid "Offered on {since}"
-msgstr "Aangeboden op {since}"
+msgid "Offered on {since}. Your company's admins may take {name} on. What you told it doesn't go with it, and once they take it on, you can no longer open it."
+msgstr "Aangeboden op {since}. De beheerders van jullie bedrijf kunnen {name} overnemen. Wat je het hebt verteld, gaat niet mee, en zodra ze het hebben overgenomen, kun je het niet meer openen."
 
 #: src/agents/agent-share.tsx
 msgid "Offered to the company"
@@ -14868,10 +14866,6 @@ msgstr "Het Brain van het bedrijf: {percent}% bekend. Donkere stippen zijn wat i
 msgid "The company has no skills of its own yet."
 msgstr "Het bedrijf heeft nog geen eigen skills."
 
-#: src/agents/agent-share.tsx
-msgid "The company's admins may take {name} on"
-msgstr "De beheerders van het bedrijf mogen {name} overnemen"
-
 #: src/agents/agent-templates.ts
 msgid "The company's documents and knowledge."
 msgstr "De documenten en kennis van het bedrijf."
@@ -15796,7 +15790,7 @@ msgstr "Heeft {time} nagedacht"
 
 #: src/agents/agent-look.tsx
 msgid "Three circling"
-msgstr "Drie cirkelend"
+msgstr "Drie in een kring"
 
 #: src/connections/connect-dialog.tsx
 msgid "Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow."
