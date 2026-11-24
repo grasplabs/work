@@ -77,7 +77,7 @@ import {
   readDirectory,
 } from "../directory.ts";
 import type { Directory } from "../directory.ts";
-import { AppWindowIcon } from "../settings/icons.ts";
+import { AppWindowIcon } from "../frame/sidebar-icons.ts";
 import { RowAlert } from "../settings/section.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { actionWords } from "./audit-words.ts";

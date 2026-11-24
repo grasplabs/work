@@ -30,13 +30,13 @@ import type { CoreConnection } from "../core-connection.ts";
 import { formatDateTime } from "../format.ts";
 import { BrandChrome, BrandFirefox, BrandSafari } from "../frame/brands.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
+import { LaptopIcon, SmartphoneIcon } from "../frame/sidebar-icons.ts";
 import { PageSkeletonSettings } from "../frame/skeletons/settings.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { ChatAppsSection } from "../settings/chat-accounts.tsx";
 import type { ChatAccounts } from "../settings/chat-accounts.tsx";
 import { pendingChatLink } from "../settings/chat-link.ts";
-import { LaptopIcon, SmartphoneIcon } from "../settings/icons.ts";
 import {
   SettingsError,
   SettingsGroup,

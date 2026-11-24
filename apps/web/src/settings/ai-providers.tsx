@@ -78,9 +78,9 @@ import {
   BrandOpenRouter,
 } from "../frame/brands.ts";
 import { EU, Flag, US } from "../frame/flag.tsx";
+import { CableIcon } from "../frame/sidebar-icons.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { CableIcon } from "../workflows/icons.ts";
 import { SeparatedItems } from "../workflows/separated-items.tsx";
 import { AddConnection } from "./add-connection/add-connection.tsx";
 import { ReadOnlyRow } from "./read-only-row.tsx";
