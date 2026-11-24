@@ -1250,6 +1250,51 @@ describe("the update", () => {
     expect(message).not.toContain("git checkout");
   });
 
+  it("puts LICENSE back as it was when writing it fails half-way, and src/ and the pin with it", async () => {
+    const { ui, local } = setUp();
+    plant(ui, { LICENSE: `${noticeAt(earlierPin)}Kept as it is.\n` });
+    const before = snapshot(ui);
+    const files = {
+      "src/components/button.tsx": "one\ntwo\nthree\nfour\nfive\n",
+      "src/lib/utils.ts": "utils\n",
+    };
+    const now = damskoWith(
+      { ...files, "src/lib/new.ts": "new in Damsko\n" },
+      noticePin
+    );
+    let licenceWrites = 0;
+    await expect(
+      updateTree({
+        ui,
+        install: installs(now),
+        was: damskoWith(files, earlierPin),
+        now,
+        local,
+        pin: `{ "commit": "${noticePin}" }\n`,
+        dependencies: { "@stylexjs/stylex": "catalog:" },
+        files: {
+          rename: renameSync,
+          write: (root, relative, content) => {
+            // The moved notice, cut short as a full disk leaves it.
+            if (relative === "LICENSE" && (licenceWrites += 1) === 1) {
+              writeWithin(root, relative, content?.slice(0, 20));
+              throw ioError(relative);
+            }
+            writeWithin(root, relative, content);
+          },
+        },
+      })
+    ).rejects.toThrow("EIO: i/o error, LICENSE");
+    expect(licenceWrites).toBe(2);
+    expect(snapshot(ui)).toStrictEqual(before);
+    expect(readdirSync(ui).toSorted()).toStrictEqual([
+      "LICENSE",
+      "damsko.json",
+      "local-changes.json",
+      "src",
+    ]);
+  });
+
   const noDependencies: Record<string, string> = {};
   const newPin = {
     "src/components/button.tsx": "one\ntwo\nthree\nfour\nFIVE\n",
