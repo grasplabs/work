@@ -1,8 +1,13 @@
 // @vitest-environment happy-dom
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
-import { describe, expect, it } from "vite-plus/test";
+import { beforeAll, describe, expect, it } from "vite-plus/test";
 
-import { answeredAdmin, gridRow, openAdmin } from "../../test/app.tsx";
+import {
+  answeredAdmin,
+  gridRow,
+  loadPages,
+  openAdmin,
+} from "../../test/app.tsx";
 import type { Answers } from "../../test/app.tsx";
 import { daysAgo, emptyAdminSnapshot } from "../../test/snapshots.ts";
 import type { ClientAdmin } from "../clients/admin.ts";
@@ -14,6 +19,19 @@ import { formatDate } from "./words.ts";
 // An organization's integrations, workflows and members, and its sections
 // when its core didn't answer or it was offboarded, as the Worker answers
 // them (test/client-admins.test.ts reads them).
+
+/**
+ * Every organization page's code, loaded before a block's first test: most
+ * of a page's first opening was loading and transforming its code (its
+ * charts, its controls), and nearly every test here opens a page the file
+ * hasn't opened yet. That load is the file's, not a test's: on a busy
+ * machine it took up to 18 s, so it has a limit of its own. The second
+ * block finds it all loaded.
+ */
+const loadOrganizationPages = async (): Promise<void> => {
+  await loadPages("/organizations/$clientId");
+};
+const loadMs = 30_000;
 
 const acme = gridRow({ id: "acme", name: "Acme" });
 
@@ -159,89 +177,88 @@ const expected = (state: string[]) => ({
 });
 
 describe("an organization's integrations, workflows and members", () => {
-  it("shows what a company connected only once it signed in, says core doesn't report its connections yet, and that what is still to connect comes from Composio", async () => {
-    const before = await openAcme(
-      "/integrations",
-      emptyAdminSnapshot("Before")
-    );
-    const beforeSays = integrationsOf(before.container);
-    const signed = await openAcme(
-      "/integrations",
-      signedIn(emptyAdminSnapshot("Signed"))
-    );
+  beforeAll(loadOrganizationPages, loadMs);
 
-    expect({
-      before: beforeSays,
-      signed: integrationsOf(signed.container),
-    }).toStrictEqual({
-      before: {
+  it.each([
+    {
+      when: "before it signed in",
+      snapshot: emptyAdminSnapshot("Before"),
+      says: {
         nothing: true,
         waits: true,
         connected: false,
         notReported: false,
-        stillToConnect: true,
-        needsNotReported: true,
-        source: true,
-        toCome: false,
       },
-      signed: {
+    },
+    {
+      when: "once it signed in",
+      snapshot: signedIn(emptyAdminSnapshot("Signed")),
+      says: {
         nothing: false,
         waits: false,
         connected: true,
         notReported: true,
+      },
+    },
+  ])(
+    "shows what a company connected only once it signed in ($when), says core doesn't report its connections yet, and that what is still to connect comes from Composio",
+    async ({ snapshot, says }) => {
+      const { container } = await openAcme("/integrations", snapshot);
+
+      expect(integrationsOf(container)).toStrictEqual({
+        ...says,
         stillToConnect: true,
         needsNotReported: true,
         source: true,
         toCome: false,
-      },
-    });
-  });
+      });
+    }
+  );
 
-  it("shows what a company connected, the app a workflow is bound to that isn't connected any more, and the workflow waiting on it", async () => {
-    const crmSync = { id: "workflow-crm", name: "CRM sync" };
-    const snapshot: AdminSnapshot = {
-      ...signedIn(emptyAdminSnapshot("Acme")),
-      // As core sends it once a workflow's HubSpot was disconnected.
-      integrations: {
-        connected: [
-          {
-            source: "composio",
-            provider: "google_drive",
-            state: "works",
-            hidden: false,
-            connectedBy: "Anna de Vries",
-            connectedAt: daysAgo(3),
-            account: null,
-            tools: ["GOOGLEDRIVE_LIST_FILES"],
-          },
-        ],
-        personal: [
-          { source: "native", provider: "microsoft", people: 4, again: 1 },
-        ],
-        needed: [
-          {
-            workflow: crmSync,
-            alias: "crm",
-            app: { source: "composio", provider: "hubspot" },
-            state: "missing",
-          },
-          { workflow: crmSync, alias: "mail", app: null, state: "unbound" },
-        ],
-        requests: [
-          {
-            source: "native",
-            provider: "microsoft",
-            decidedBy: "person",
-            waiting: 2,
-            since: daysAgo(1),
-          },
-        ],
-      },
-    };
-    const integrations = await openAcme("/integrations", snapshot);
+  const crmSync = { id: "workflow-crm", name: "CRM sync" };
+  /** As core sends it once a workflow's HubSpot was disconnected. */
+  const disconnected: AdminSnapshot = {
+    ...signedIn(emptyAdminSnapshot("Acme")),
+    integrations: {
+      connected: [
+        {
+          source: "composio",
+          provider: "google_drive",
+          state: "works",
+          hidden: false,
+          connectedBy: "Anna de Vries",
+          connectedAt: daysAgo(3),
+          account: null,
+          tools: ["GOOGLEDRIVE_LIST_FILES"],
+        },
+      ],
+      personal: [
+        { source: "native", provider: "microsoft", people: 4, again: 1 },
+      ],
+      needed: [
+        {
+          workflow: crmSync,
+          alias: "crm",
+          app: { source: "composio", provider: "hubspot" },
+          state: "missing",
+        },
+        { workflow: crmSync, alias: "mail", app: null, state: "unbound" },
+      ],
+      requests: [
+        {
+          source: "native",
+          provider: "microsoft",
+          decidedBy: "person",
+          waiting: 2,
+          since: daysAgo(1),
+        },
+      ],
+    },
+  };
+
+  it("shows what a company connected, and the app a workflow is bound to that isn't connected any more", async () => {
+    const integrations = await openAcme("/integrations", disconnected);
     const page = integrations.main();
-    const workflows = await openAcme("/workflows", snapshot);
-    const waiting = workflows.main();
 
     expect({
       drive: page.includes(
@@ -257,9 +274,6 @@ describe("an organization's integrations, workflows and members", () => {
         `Asked for in 2 chats since ${formatDate(daysAgo(1))}, waiting on the person in the chat`
       ),
       notReported: page.includes("doesn’t report"),
-      waiting: waiting.includes("Waiting on a connection"),
-      crm: waiting.includes("crm: Hubspot, not connected"),
-      mail: waiting.includes("mail: No connection approved yet"),
     }).toStrictEqual({
       drive: true,
       microsoft: true,
@@ -269,161 +283,183 @@ describe("an organization's integrations, workflows and members", () => {
       notConnected: true,
       asked: true,
       notReported: false,
-      waiting: true,
-      crm: true,
-      mail: true,
     });
   });
 
-  it("lists an organization's members with where each stands and their role, ready before Grasp opens and in after", async () => {
-    const empty = emptyAdminSnapshot("Acme");
-    const members: AdminSnapshot["members"] = [
-      {
-        userId: "user-anna",
-        name: "Anna de Vries",
-        email: "anna@acme.test",
-        role: "admin",
-        joinedAt: daysAgo(3),
-      },
-      {
-        userId: "user-ben",
-        name: "Ben Okafor",
-        email: "ben@acme.test",
-        role: "builder",
-        joinedAt: daysAgo(1),
-      },
-    ];
+  it("shows the workflow waiting on an app that isn't connected any more", async () => {
+    const workflows = await openAcme("/workflows", disconnected);
+    const waiting = workflows.main();
+
+    expect({
+      waiting: waiting.includes("Waiting on a connection"),
+      crm: waiting.includes("crm: Hubspot, not connected"),
+      mail: waiting.includes("mail: No connection approved yet"),
+    }).toStrictEqual({ waiting: true, crm: true, mail: true });
+  });
+
+  const empty = emptyAdminSnapshot("Acme");
+  const members: AdminSnapshot["members"] = [
+    {
+      userId: "user-anna",
+      name: "Anna de Vries",
+      email: "anna@acme.test",
+      role: "admin",
+      joinedAt: daysAgo(3),
+    },
+    {
+      userId: "user-ben",
+      name: "Ben Okafor",
+      email: "ben@acme.test",
+      role: "builder",
+      joinedAt: daysAgo(1),
+    },
+  ];
+  const joined = formatDate(members[0]?.joinedAt ?? "");
+
+  it("lists an organization's members with where each stands and their role, ready before Grasp opens", async () => {
     const closed = await openAcme("/details?tab=members", {
       ...empty,
       members,
     });
-    const closedSays = {
+
+    expect({
       anna: memberOf(closed.container, "Anna de Vries"),
       ben: memberOf(closed.container, "Ben Okafor").includes("Builder"),
       // No contract is known, so only the seats taken are counted.
       seats: closed.main().includes("2 seats taken"),
       toCome: closed.main().includes("This section isn’t in the admin yet."),
-    };
+    }).toStrictEqual({
+      anna: `AVAnna de Vriesanna@acme.testReady since ${joined}Role: Admin`,
+      ben: true,
+      seats: true,
+      toCome: false,
+    });
+  });
+
+  it("lists an organization's members as in once Grasp opened", async () => {
     const open = await openAcme("/details?tab=members", {
       ...empty,
       members,
       gate: { ...empty.gate, open: true, openedAt: empty.now },
     });
-    const openSays = { anna: memberOf(open.container, "Anna de Vries") };
-    const nobody = await openAcme("/details?tab=members", empty);
-    const joined = formatDate(daysAgo(3));
 
-    expect({
-      closed: closedSays,
-      open: openSays,
-      nobody: nobody.main().includes("Nobody has made an account yet."),
-    }).toStrictEqual({
-      closed: {
-        anna: `AVAnna de Vriesanna@acme.testReady since ${joined}Role: Admin`,
-        ben: true,
-        seats: true,
-        toCome: false,
-      },
-      open: {
-        anna: `AVAnna de Vriesanna@acme.testIn since ${joined}Role: Admin`,
-      },
-      nobody: true,
-    });
+    expect(memberOf(open.container, "Anna de Vries")).toBe(
+      `AVAnna de Vriesanna@acme.testIn since ${joined}Role: Admin`
+    );
+  });
+
+  it("says when nobody of an organization has made an account yet", async () => {
+    const nobody = await openAcme("/details?tab=members", empty);
+
+    expect(nobody.main()).toContain("Nobody has made an account yet.");
   });
 });
 
 describe("an organization's sections without its core", () => {
-  // One test a section: a section opened the first time loads its route's
-  // code, most of the time it takes, and all of them in one test took
-  // longer than a test may on a busy machine. Here no test's time grows
-  // with the number of sections.
-  it.each(coreSections)(
-    "opens its %s for an organization whose core didn't answer, and one not deployed yet, saying why nothing of it is read and what to do",
-    async (section) => {
-      const downSays = await sectionOf(downRow, downAdmin, section);
-      const waitingSays = await sectionOf(waitingRow, waitingAdmin, section);
+  beforeAll(loadOrganizationPages, loadMs);
 
-      expect({ down: downSays, waiting: waitingSays }).toStrictEqual({
-        down: expected(["’s Grasp didn’t answer", "Try again"]),
-        waiting: expected(["isn’t set up yet", "See its Setup progress"]),
-      });
+  // One page a test: a busy machine slows each page down, so a test that
+  // opened several took several times as long.
+  const unreadOnes = [
+    {
+      which: "an organization whose core didn't answer",
+      client: downRow,
+      admin: downAdmin,
+      state: ["’s Grasp didn’t answer", "Try again"],
+    },
+    {
+      which: "one not deployed yet",
+      client: waitingRow,
+      admin: waitingAdmin,
+      state: ["isn’t set up yet", "See its Setup progress"],
+    },
+  ];
+
+  it.each(
+    coreSections.flatMap((section) =>
+      unreadOnes.map((unreadOne) => ({ section, ...unreadOne }))
+    )
+  )(
+    "opens its $section for $which, saying why nothing of it is read and what to do",
+    async ({ section, client, admin, state }) => {
+      await expect(sectionOf(client, admin, section)).resolves.toStrictEqual(
+        expected(state)
+      );
     }
   );
 
-  it("says why an organization whose core didn't answer can't be read, and one not deployed yet, and opens its Setup", async () => {
-    const downPage = await openAt(downRow, downAdmin);
-    const downWhy = downPage.main();
-    const membersPage = await openAt(
-      downRow,
-      downAdmin,
-      "/details?tab=members"
-    );
-    const membersWhy = membersPage.main();
-    const setupPage = await openAt(downRow, downAdmin, "/setup");
-    const setup = setupPage.main();
-    const waitingPage = await openAt(waitingRow, waitingAdmin);
-    const waitingWhy = waitingPage.main();
+  it.each([
+    {
+      page: "the page of an organization whose core didn't answer",
+      client: downRow,
+      admin: downAdmin,
+      path: "",
+      says: "Its Grasp can’t be read now:",
+    },
+    {
+      page: "its members",
+      client: downRow,
+      admin: downAdmin,
+      path: "/details?tab=members",
+      says: "Its Grasp can’t be read now:",
+    },
+    {
+      page: "the page of one not deployed yet",
+      client: waitingRow,
+      admin: waitingAdmin,
+      path: "",
+      says: "Its Grasp isn’t deployed yet, so there is nothing of it to read.",
+    },
+  ])(
+    "says why it can't be read on $page",
+    async ({ client, admin, path, says }) => {
+      const { main } = await openAt(client, admin, path);
 
-    expect({
-      downWhy: downWhy.includes("Its Grasp can’t be read now:"),
-      membersWhy: membersWhy.includes("Its Grasp can’t be read now:"),
-      // Its Setup is the admin's own record, read whatever its core does.
-      setup: setup.includes("Setup"),
-      waitingWhy: waitingWhy.includes(
-        "Its Grasp isn’t deployed yet, so there is nothing of it to read."
-      ),
-    }).toStrictEqual({
-      downWhy: true,
-      membersWhy: true,
-      setup: true,
-      waitingWhy: true,
-    });
+      expect(main()).toContain(says);
+    }
+  );
+
+  it("opens the Setup of an organization whose core didn't answer: the admin's own record, read whatever its core does", async () => {
+    const { main } = await openAt(downRow, downAdmin, "/setup");
+
+    expect(main()).toContain("Setup");
   });
 
-  it("says an offboarded organization was offboarded on each of its sections, and leaves it out of the sidebar", async () => {
-    const gone = gridRow({ id: "gone", name: "Gone", status: "offboarded" });
+  const gone = gridRow({ id: "gone", name: "Gone", status: "offboarded" });
 
-    const shown = [];
-    for (const path of ["", "/details", "/setup"]) {
-      // oxlint-disable-next-line no-await-in-loop -- one page at a time, as one tab opens them
+  it.each(["", "/details", "/setup"])(
+    "says an offboarded organization was offboarded on its page at '%s', and leaves it out of the sidebar",
+    async (path) => {
       const { container, main } = await openAt(gone, null, path);
       const sidebar =
         container.querySelector('[data-slot="sidebar"]')?.textContent ?? "";
-      shown.push({
+
+      expect({
         said: main().includes(`${gone.name} was offboarded`),
         toOffboarded:
           container.querySelector('main a[href="/platform/offboarded"]') !==
           null,
         inSidebar: sidebar.includes(gone.name),
-      });
+      }).toStrictEqual({ said: true, toOffboarded: true, inSidebar: false });
     }
+  );
 
-    expect(shown).toStrictEqual(
-      Array.from({ length: 3 }, () => ({
-        said: true,
-        toOffboarded: true,
-        inSidebar: false,
-      }))
-    );
-  });
-
-  it("has no page for a section an organization doesn't have, nor for an organization the admin doesn't know", async () => {
+  it("has no page for a section an organization doesn't have", async () => {
     const missing = await openAt(
       acme,
       answeredAdmin({ client: acme }),
       "/nothing"
     );
-    // Read before the next page opens: one page at a time.
-    const missingSays = missing.main();
+
+    expect(missing.main()).toContain("This page is not here");
+  });
+
+  it("has no page for an organization the admin doesn't know", async () => {
     const unknown = await openAdmin("/organizations/client-unknown/details", {
       fetchClientGrid: [acme],
       fetchClientAdmin: null,
     });
 
-    expect(
-      [missingSays, unknown.main()].map((main) =>
-        main.includes("This page is not here")
-      )
-    ).toStrictEqual([true, true]);
+    expect(unknown.main()).toContain("This page is not here");
   });
 });

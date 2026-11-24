@@ -12,6 +12,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
+import type { AnyRoute } from "@tanstack/react-router";
 import { act as reactAct } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
@@ -140,9 +141,21 @@ interface Run {
   page: Opened | undefined;
   scopes: Set<Promise<void>>;
   ended: boolean;
+  /** When a page that hasn't come to rest fails the test: just before its own timeout. */
+  restBy: number;
   /** Settles when the test ends: an `act` scope it left open closes then. */
   ending: PromiseWithResolvers<void>;
 }
+
+/**
+ * How long before its test's own timeout a page still not at rest fails
+ * it, saying so: the runner's timeout would say only that time ran out.
+ * A test given longer (`{ timeout }`) gives its pages longer too.
+ */
+const restMarginMs = 250;
+
+/** The real clock, which a test's fake one (`vi.useFakeTimers`) leaves alone. */
+const realNow = Date.now;
 
 /** The run of the test whose code is calling: carried along its awaits, timers and calls. */
 const runs = new AsyncLocalStorage<Run>();
@@ -188,11 +201,12 @@ const unmountOpened = (): void => {
 // then throws, so it renders into, waits on or acts on no page of the
 // next test's. And a clock it faked goes back to the real one, as its own
 // `finally` would run only once its body ends.
-aroundEach(async (runTest) => {
+aroundEach(async (runTest, { task }) => {
   const run: Run = {
     page: undefined,
     scopes: new Set(),
     ended: false,
+    restBy: realNow() + task.timeout - restMarginMs,
     ending: Promise.withResolvers(),
   };
   try {
@@ -232,9 +246,6 @@ export const act = async (move: () => unknown): Promise<void> => {
   own();
 };
 
-/** How long a page may take to come to rest before a test fails on it. */
-const restMs = 5000;
-
 /** One macrotask on the calling test's page, past React's and the router's microtasks. */
 const tick = async (): Promise<void> => {
   await act(async () => {
@@ -252,10 +263,10 @@ const tick = async (): Promise<void> => {
  */
 export const settle = async (): Promise<void> => {
   const page = ownPage();
-  const until = Date.now() + restMs;
+  const { restBy } = own();
   let still = 0;
   while (still < 3) {
-    if (Date.now() > until) {
+    if (realNow() > restBy) {
       throw new Error("The page didn't come to rest");
     }
     // oxlint-disable-next-line no-await-in-loop -- each turn waits on what the last one started
@@ -270,9 +281,9 @@ export const settle = async (): Promise<void> => {
 /** Waits until `shown` holds, as the calling test's page goes on: a page that never comes to rest. */
 export const until = async (shown: () => boolean): Promise<void> => {
   ownPage();
-  const deadline = Date.now() + restMs;
+  const { restBy } = own();
   while (!shown()) {
-    if (Date.now() > deadline) {
+    if (realNow() > restBy) {
       throw new Error("The page never showed it");
     }
     // oxlint-disable-next-line no-await-in-loop -- each turn waits on what the last one started
@@ -374,6 +385,31 @@ export const openAdmin = async (
     /** The whole page's markup. */
     html: (): string => container.innerHTML,
   };
+};
+
+/**
+ * Loads the code of the admin's routes under `under` (a route's id, such
+ * as `/organizations/$clientId`), as the router does the first time a
+ * page shows one: each route's component, error and not-found pages are
+ * split into modules of their own. For a file whose tests open many of
+ * them, so that each test times opening its pages, not loading and
+ * transforming their code the first time.
+ */
+export const loadPages = async (under: string): Promise<void> => {
+  const router = getRouter();
+  // SAFETY: `routesById` holds the tree's routes by their ids; its values
+  // come out as `any` here.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const routes = Object.entries(router.routesById) as [string, AnyRoute][];
+  await Promise.all(
+    routes
+      .filter(([id]) => id.startsWith(under))
+      .map(async ([, route]) => {
+        await router.loadRouteChunk(route);
+        await router.loadRouteChunk(route, "errorComponent");
+        await router.loadRouteChunk(route, "notFoundComponent");
+      })
+  );
 };
 
 /** What an organization's sections read beside its snapshot, while nothing more is set. */
