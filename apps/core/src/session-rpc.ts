@@ -40,6 +40,7 @@ import { SignalsRpc } from "./signals-rpc.ts";
 import { SkillsRpc } from "./skills-rpc.ts";
 import { staffAudited } from "./staff-audit.ts";
 import { StephenRequestsRpc } from "./stephen-requests.ts";
+import { dictationSetUp } from "./transcription.ts";
 import { UnknownOutcomesRpc } from "./unknown-outcomes.ts";
 import { VersionsRpc } from "./versions-rpc.ts";
 import { WaitingRpc } from "./waiting-rpc.ts";
@@ -344,5 +345,14 @@ export class SessionRpc extends CoreRpcTarget implements SessionApi {
     // The connection's reading of who they are holds their old name: the
     // next `whoami` reads them again.
     this.#full.forget?.();
+  }
+
+  async dictationSetUp(): Promise<boolean> {
+    // Every member, whatever their role, as every member may dictate. Not
+    // Grasp's staff or a guest: no chat is theirs to dictate into.
+    return await withPerson(
+      this.#full,
+      async () => await dictationSetUp(this.#env)
+    );
   }
 }
