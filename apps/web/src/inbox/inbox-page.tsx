@@ -271,12 +271,12 @@ const NoItems = ({
       <EmptyContent>
         {/* Reads the inbox again, and works until it has. */}
         <Button
-          errorLabel={t`Not loaded`}
-          loadingLabel={t`Trying again…`}
+          errorText={t`Not loaded`}
+          loadingText={t`Trying again…`}
           onClick={async () => {
             await router.invalidate({ sync: true });
           }}
-          successLabel={t`Loaded`}
+          successText={t`Loaded`}
         >
           {t`Try again`}
         </Button>
@@ -421,11 +421,9 @@ const Beside = ({
 }) => {
   if (wide) {
     return (
-      // A wrapper only until #2611's lint fix lets SidePanel's own `style`
-      // prop take this.
-      <div {...stylex.props(styles.besideClearOfChat)}>
-        <SidePanel aria-label={label}>{children}</SidePanel>
-      </div>
+      <SidePanel aria-label={label} style={styles.besideClearOfChat}>
+        {children}
+      </SidePanel>
     );
   }
   return (
