@@ -81,8 +81,15 @@ const styles = stylex.create({
     gap: { default: space["6"], [media.sm]: space["8"] },
     width: "100%",
     maxWidth: "28rem",
+    // One centred axis, as the start (Ruben, 24 November).
+    textAlign: "center",
   },
-  words: { display: "flex", flexDirection: "column", gap: space["3"] },
+  words: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: space["3"],
+  },
   asker: { display: "flex", alignItems: "center", gap: space["2"] },
   actions: { display: "flex", flexDirection: "column", gap: space["3"] },
   quiet: {
