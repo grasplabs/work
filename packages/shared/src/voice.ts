@@ -7,7 +7,7 @@
 //
 // Each goes to the provider and model the platform's settings name
 // (@grasp-os/shared/platform-ai), with Grasp's own key, which connect
-// holds: KugelAudio says lines, OpenAI writes down what is heard.
+// holds: Mistral says lines, OpenAI writes down what is heard.
 //
 // Speech is core's src/speech.ts, said for the onboarding's pages at
 // `POST /api/speech` (core's src/onboarding/speech.ts). Live transcription
@@ -24,6 +24,13 @@ import { interviewLocaleSchema } from "./onboarding.ts";
 
 /** The longest line one request may have said, so no request runs up the bill. */
 export const maxSpeechChars = 600;
+
+/**
+ * The most a direction to the voice may add in front of a line, such as
+ * `[emotion=appreciative]`: sent with the line, never part of what the
+ * page may ask for.
+ */
+export const maxDirectionChars = 32;
 
 /** A line to say. */
 export interface SpeechRequest {
@@ -50,7 +57,7 @@ export interface SpokenWord {
 /** A line as said: its audio, and when each of its words is said. */
 export interface Speech {
   audio: Uint8Array;
-  /** The audio's media type, such as `audio/wav`. */
+  /** The audio's media type, such as `audio/mpeg`. */
   mime: string;
   /** In the order they are said; punctuation stays with its word. */
   words: SpokenWord[];
@@ -124,7 +131,11 @@ const directionMark = /[[\]]/u;
 
 /** What the page asks to have said. */
 export const speechRequestSchema = z.strictObject({
-  /** The line as written, with no direction of its own. */
+  /**
+   * The line as written, with no direction of its own: a tone comes only
+   * from {@link voiceTags}, as `tone`, so nobody has a line said in one
+   * Stephen may not use.
+   */
   text: z
     .string()
     .trim()
@@ -135,16 +146,12 @@ export const speechRequestSchema = z.strictObject({
   language: interviewLocaleSchema,
   speaker: z.enum(speakers).default("stephen"),
   /**
-   * Whether the line is only known as it is said, such as one with a
-   * count or a name. KugelAudio has one speech model, as quick for any
-   * line, so it changes nothing of how the line is said.
+   * For a line only known as it is said, such as one with a count or a
+   * name. Grasp has one speech model, as quick for any line, so this
+   * changes nothing of how it is said.
    */
   quick: z.boolean().default(false),
-  /**
-   * How the page means the line, one of the tones Stephen may use.
-   * KugelAudio's voice takes no direction, so the line is said as
-   * written whatever its tone.
-   */
+  /** How the line is said: one of the tones Stephen may use. */
   tone: z.enum(voiceTags).optional(),
   /** Someone's interview link: its secret (the session says whose it is). */
   link: z.strictObject({ secret: interviewSecretSchema }).optional(),
@@ -155,7 +162,7 @@ export type SpeechRequestBody = z.input<typeof speechRequestSchema>;
 export interface SpeechAnswer {
   /** The audio, base64. */
   audio: string;
-  /** Its media type, such as `audio/wav`. */
+  /** Its media type, such as `audio/mpeg`. */
   mime: string;
   /** The words of the line as written, and when each is said. */
   words: SpokenWord[];

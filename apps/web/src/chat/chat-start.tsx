@@ -1,5 +1,5 @@
 import type { Blueprint } from "@grasp-os/shared/apps";
-import type { ChatMake } from "@grasp-os/shared/chat";
+import type { ChatMake, ChatPlanKind } from "@grasp-os/shared/chat";
 import type { Opportunity } from "@grasp-os/shared/opportunities";
 import { SidebarTrigger, useSidebar } from "@grasp-os/ui/components/sidebar";
 import { Text } from "@grasp-os/ui/components/text";
@@ -177,7 +177,7 @@ const Making = ({
 /** What Make something offers for `make`, read for the person. */
 export const ideasOf = async (
   session: Session,
-  make: ChatMake["kind"]
+  make: ChatPlanKind
 ): Promise<MakeIdeas> => {
   if (make === "app") {
     return { kind: make, blueprints: await session.apps.blueprints.list() };
@@ -202,7 +202,8 @@ export const ChatStart = ({
   agent,
   opportunity,
 }: {
-  make: ChatMake | undefined;
+  /** Only an App or a workflow: Make something starts no agent's setup. */
+  make: (ChatMake & { kind: ChatPlanKind }) | undefined;
   ideas: Promise<Loaded<MakeIdeas>> | undefined;
   agent?: string | undefined;
   /** The opportunity whose brief the box starts with, once read. */

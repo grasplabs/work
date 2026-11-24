@@ -27,6 +27,11 @@ export interface FakeComposioTool {
    * that connect can't read.
    */
   tags?: unknown;
+  /**
+   * Composio's `is_deprecated`: false by default, as Composio sends it for
+   * every tool. Anything but a boolean stands for a mark connect can't read.
+   */
+  isDeprecated?: unknown;
 }
 
 /** One field of a toolkit's key auth, as Composio describes it. */
@@ -782,7 +787,7 @@ export const fakeComposioApi = (
       );
       return page(
         (toolkit?.tools ?? []).map(
-          ({ slug, description, inputs = [], tags }) => ({
+          ({ slug, description, inputs = [], tags, isDeprecated = false }) => ({
             slug,
             name: slug,
             description,
@@ -794,6 +799,7 @@ export const fakeComposioApi = (
               ),
             },
             tags,
+            is_deprecated: isDeprecated,
           })
         ),
         cursor

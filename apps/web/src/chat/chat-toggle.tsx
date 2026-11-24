@@ -5,24 +5,26 @@ import {
   TooltipTrigger,
 } from "@grasp-os/ui/components/tooltip";
 import { Icon, PanelRightIcon } from "@grasp-os/ui/lib/icons";
+import type { LayoutStyle } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 
 import { shortcutLabel } from "../shortcuts.ts";
-import { closeChat } from "./chat-layout.ts";
-import { useOpenChat } from "./chat-presence.ts";
-import { chatKey, useShellChat } from "./global-chat.tsx";
+import { closeChat, useChatLayout } from "./chat-layout.ts";
+import { useChatPresence, useOpenChat } from "./chat-presence.ts";
+import { chatKey } from "./global-chat.tsx";
 
 /**
- * Shows or hides Grasp's chat beside the page, at the end of the page's
- * bar (frame/site-header.tsx), as #2503's shell has it: on every page whose
- * foot has the chat's bar, so its history opens without asking. Not where
- * the chat stays open about the page's subject, nor outside the shell.
+ * Shows or hides Grasp's chat beside the page, at the card's end at the
+ * page bar's height (frame/app-frame.tsx lays it there, and the bar keeps
+ * room for it: frame/site-header.tsx), as #2503's shell has it: on every
+ * page the chat may float over, so its history opens without asking.
  */
-export const ChatToggle = () => {
+export const ChatToggle = ({ style }: { style?: LayoutStyle }) => {
   const { t } = useLingui();
-  const chat = useShellChat();
+  const presence = useChatPresence();
+  const { open } = useChatLayout();
   const openHere = useOpenChat();
-  if (chat === null || !chat.available || !chat.presence.bar) {
+  if (!presence.placements.includes("floating")) {
     return null;
   }
   const label = t`Show or hide the chat`;
@@ -30,16 +32,17 @@ export const ChatToggle = () => {
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
-          aria-expanded={chat.open}
+          aria-expanded={open}
           aria-label={label}
           onClick={() => {
-            if (chat.open) {
+            if (open) {
               closeChat();
             } else {
               openHere();
             }
           }}
-          size="icon-sm"
+          size="icon-xs"
+          style={style}
           variant="ghost"
         >
           <Icon icon={PanelRightIcon} />

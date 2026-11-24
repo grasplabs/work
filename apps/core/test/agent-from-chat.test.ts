@@ -1,4 +1,5 @@
 import type { AgentDraft } from "@grasp-os/shared/agents";
+import { chatAskLimits, chatMakeLimits } from "@grasp-os/shared/chat";
 import type { ChatMessage, ChatUpdate } from "@grasp-os/shared/chat";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
@@ -17,7 +18,14 @@ import type { WorkspaceStub } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import type { Answer, FakeProvider } from "./model-provider.ts";
-import { outcome, signedInApi, unique } from "./sign-in.ts";
+import {
+  openRpc,
+  outcome,
+  signedIn,
+  signedInApi,
+  staffPerson,
+  unique,
+} from "./sign-in.ts";
 
 // An agent made from the chat (GRA-1854): the person asks for one in
 // their words, the chat's agent drafts it (`draftAgent`), and Make it
@@ -25,8 +33,11 @@ import { outcome, signedInApi, unique } from "./sign-in.ts";
 // an agent made without the person's press, by the draft itself; one made
 // for someone who may not have it (one of the company's for someone who
 // isn't an admin); access or an audience wider than the card showed; a
-// draft made twice, or from a chat that isn't the person's. The model
-// provider is the one outside system, faked.
+// draft made twice, or from a chat that isn't the person's. A chat New
+// agent started to set one up (`make: { kind: "agent" }`) adds: one
+// started by someone who isn't the company's own admin, Grasp staff
+// among them; more questions than its bound; an agent made before Make
+// it, or by a plan. The model provider is the one outside system, faked.
 
 const idp = mockIdp();
 
@@ -34,6 +45,16 @@ type Person = Awaited<ReturnType<typeof signedInApi>>;
 
 const draftStep = (draft: Record<string, unknown>): Answer =>
   toolStep("draftAgent", draft);
+
+/** The model asks the person `count` questions at once (`askQuestions`). */
+const askStep = (count: number): Answer =>
+  toolStep("askQuestions", {
+    questions: Array.from({ length: count }, (_, index) => ({
+      kind: "choice",
+      question: `Question ${index + 1}?`,
+      options: [{ label: "Yes" }, { label: "No" }],
+    })),
+  });
 
 const toolsSchema = z.object({
   tools: z.array(z.object({ name: z.string() })),
@@ -252,6 +273,155 @@ describe("an agent made from the chat", { timeout: 120_000 }, () => {
       made: name,
       told: hr(name).instructions,
       mine: [[name, user.userId]],
+    });
+  });
+
+  it("sets up one of the company's agents in a chat New agent started: its questions bounded, drafted, and made as drafted only on Make it", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const name = `Recruiter ${unique()}`;
+    const draft = {
+      name,
+      job: "Screens new applications for HR.",
+      instructions: "Each morning, read new applications and rank them.",
+      whose: "company",
+      audience: { who: "maker" },
+      classes: ["read-company"],
+      schedule: { cron: "0 7 * * 1-5", opening: "Rank today's applications." },
+      apps: [{ source: "native", provider: "google", name: "Gmail" }],
+    } satisfies AgentDraft;
+    // Kinds of work and no apps: one naming none may use every app.
+    const { apps: _apps, ...withoutApps } = draft;
+    const { stub, provider } = await personalChatsOf(
+      admin.userId,
+      // As many at once as a call takes, then past what is left of the
+      // bound: refused, and the agent goes on within it.
+      askStep(chatAskLimits.questions),
+      askStep(chatMakeLimits.agentQuestions - chatAskLimits.questions + 1),
+      askStep(chatMakeLimits.agentQuestions - chatAskLimits.questions),
+      draftStep(withoutApps),
+      draftStep(draft),
+      says("It's made.")
+    );
+    const chat = await admin.api.chats.create("New agent", undefined, {
+      kind: "agent",
+    });
+    await admin.api.chats.send(chat.id, {
+      text: "I want to set up an agent",
+      model,
+    });
+    await idle(admin, chat.id);
+    await admin.api.chats.send(chat.id, {
+      text: "Applications, Gmail, read the company's, only me.",
+      model,
+    });
+    await idle(admin, chat.id);
+    await admin.api.chats.send(chat.id, {
+      text: "Weekday mornings.",
+      model,
+    });
+    await idle(admin, chat.id);
+    const messages = await messagesOf(stub, chat.id, admin.userId);
+    const drafted = messages.findLast(
+      (message) =>
+        message.role === "assistant" && message.agentDraft !== undefined
+    );
+    const callId =
+      drafted?.role === "assistant" ? drafted.agentDraft?.callId : undefined;
+    const before = await admin.api.connections.agents();
+
+    const made = await admin.api.chats.makeDraftedAgent(chat.id, {
+      draft: callId ?? "",
+      text: "Make it",
+      model,
+    });
+    await idle(admin, chat.id);
+    const settings = await admin.api.connections.agentSettings(made.id);
+    const wakes = await admin.api.connections.agentWakes(made.id);
+    const apps = await admin.api.connections.agentApps(made.id);
+    const events = await allEvents();
+    const madeEvents = events.filter(
+      ({ action, target }) => action === "agent.made" && target?.id === made.id
+    );
+    const [first, answered] = [0, 3].map((at) => offered(provider, at));
+    const summary = await admin.api.chats.summary(chat.id);
+
+    expect({
+      kept: summary.make,
+      // Asked and drafted, never a plan: a plan makes no agent.
+      first: {
+        asks: first?.includes("askQuestions"),
+        drafts: first?.includes("draftAgent"),
+        plans: first?.includes("proposePlan"),
+      },
+      refused: messages.filter(
+        (message) => message.role === "result" && message.failed
+      ).length,
+      // The bound spent: only the draft is left.
+      answered: {
+        asks: answered?.includes("askQuestions"),
+        drafts: answered?.includes("draftAgent"),
+      },
+      before: before.some((agent) => agent.name === name),
+      made: made.name,
+      told: await toldTo(admin, made.id),
+      audience: settings.audience,
+      on: settings.classes
+        .filter(({ audience }) => audience.who !== "nobody")
+        .map(({ toolClass }) => toolClass),
+      wakes: wakes.map(({ cron, personId }) => [cron, personId]),
+      apps: apps.map(({ app }) => app),
+      audited: madeEvents.map(({ actor, detail }) => ({
+        actor,
+        from: detail?.from,
+      })),
+    }).toStrictEqual({
+      kept: { kind: "agent" },
+      first: { asks: true, drafts: true, plans: false },
+      // Past the bound, then the draft naming no apps.
+      refused: 2,
+      answered: { asks: false, drafts: true },
+      before: false,
+      made: name,
+      told: draft.instructions,
+      audience: { who: "maker" },
+      on: ["read-company"],
+      wakes: [["0 7 * * 1-5", admin.userId]],
+      apps: ["native:google"],
+      audited: [
+        { actor: { type: "person", userId: admin.userId }, from: "chat" },
+      ],
+    });
+  });
+
+  it("starts an agent's setup only for the company's own admins: never a member, a builder or Grasp staff, and in no project", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const member = await signedInApi(idp, "user");
+    const builder = await signedInApi(idp, "builder");
+    const staffRpc = await openRpc(
+      await signedIn(idp, "grasp-staff", staffPerson())
+    );
+    const staff = staffRpc.core.authenticate();
+    const setUp = { kind: "agent" } as const;
+
+    expect({
+      member: await outcome(
+        member.api.chats.create("New agent", undefined, setUp)
+      ),
+      builder: await outcome(
+        builder.api.chats.create("New agent", undefined, setUp)
+      ),
+      staff: await outcome(staff.chats.create("New agent", undefined, setUp)),
+      inProject: await outcome(
+        admin.api.chats.create("New agent", undefined, {
+          ...setUp,
+          project: "project-1",
+        })
+      ),
+    }).toStrictEqual({
+      member: "role.forbidden",
+      builder: "role.forbidden",
+      staff: "role.forbidden",
+      inProject: "agent.invalid_request",
     });
   });
 

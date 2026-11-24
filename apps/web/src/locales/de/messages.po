@@ -420,6 +420,10 @@ msgstr "{count, plural, one {# Team, mit seinen Rollen} other {# Teams, mit ihre
 msgid "{count, plural, one {# test} other {# tests}}"
 msgstr "{count, plural, one {# Test} other {# Tests}}"
 
+#: src/inbox/sidebar-inbox.tsx
+msgid "{count, plural, one {# thing waiting for you} other {# things waiting for you}}"
+msgstr "{count, plural, one {# Sache wartet auf Sie} other {# Sachen warten auf Sie}}"
+
 #: src/brain/brain.ts
 msgid "{count, plural, one {# time waster} other {# time wasters}}"
 msgstr "{count, plural, one {# Zeitfresser} other {# Zeitfresser}}"
@@ -1111,6 +1115,14 @@ msgstr "{name}: {value}"
 msgid "{name}: {value}, {share}"
 msgstr "{name}: {value}, {share}"
 
+#: src/agents/agent-section.tsx
+msgid "{name}'s pages"
+msgstr "Seiten von {name}"
+
+#: src/apps/app-section.tsx
+msgid "{name}'s workspace"
+msgstr "Arbeitsbereich von {name}"
+
 #: src/drafts/status-badge.tsx
 msgid "{names} use it"
 msgstr "{names} nutzen es"
@@ -1158,6 +1170,10 @@ msgstr "{only} nutzt es"
 #: src/brain/region-marks.tsx
 msgid "{open, plural, one {# open question} other {# open questions}}"
 msgstr "{open, plural, one {# offene Frage} other {# offene Fragen}}"
+
+#: src/brain/brain-section.tsx
+msgid "{open} still open"
+msgstr "{open} noch offen"
 
 #: src/onboarding/setup-steps.tsx
 msgid "{openCount, plural, =0 {Nothing needs you} =1 {Just one thing for you} other {# things for you}}"
@@ -1601,11 +1617,10 @@ msgid "{waiting, plural, one {# person new on your list gets a link once you con
 msgstr "{waiting, plural, one {# neue Person auf Ihrer Liste bekommt einen Link, sobald Sie Ihre Organisation bestätigen.} other {# neue Personen auf Ihrer Liste bekommen ihre Links, sobald Sie Ihre Organisation bestätigen.}}"
 
 #: src/frame/app-sidebar.tsx
-#: src/inbox/sidebar-inbox.tsx
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
 msgstr "{waiting, plural, one {# Sache wartet} other {# Sachen warten}}"
 
-#: src/workflows/nav-item.tsx
+#: src/frame/app-sidebar.tsx
 msgid "{waiting, plural, one {# workflow needs you} other {# workflows need you}}"
 msgstr "{waiting, plural, one {# Workflow braucht Sie} other {# Workflows brauchen Sie}}"
 
@@ -2026,6 +2041,7 @@ msgid "Accepted"
 msgstr "Angenommen"
 
 #: src/agents/agent-page.tsx
+#: src/agents/agent-section.tsx
 #: src/drafts/share-with-team.tsx
 msgid "Access"
 msgstr "Zugriff"
@@ -2057,6 +2073,11 @@ msgstr "Zugriffe, die auf einen Admin warten"
 
 #: src/connections/connection-list.tsx
 #: src/routes/_shell.integrations.$integration.tsx
+msgid "Account"
+msgstr "Konto"
+
+#: src/settings/sections.ts
+msgctxt "settings group"
 msgid "Account"
 msgstr "Konto"
 
@@ -2110,6 +2131,7 @@ msgstr "Aktiv, nur für Sie"
 
 #: src/brain/brain-log.tsx
 #: src/brain/brain-nav.tsx
+#: src/brain/brain-section.tsx
 #: src/routes/_shell.brain.tsx
 msgctxt "the brain's log"
 msgid "Activity"
@@ -3072,6 +3094,7 @@ msgid "Approving it replaces the team {team}'s own skill {name} for its members.
 msgstr "Mit der Freigabe ersetzt er den eigenen Skill {name} des Teams {team} für seine Mitglieder."
 
 #: src/agents/agent-apps-card.tsx
+#: src/apps/app-section.tsx
 #: src/apps/apps-overview.tsx
 #: src/chat/mentions.tsx
 #: src/frame/app-sidebar.tsx
@@ -3128,6 +3151,7 @@ msgstr "Hier stehen die Apps, die Sie bauen oder verantworten."
 #: src/apps/app-status.tsx
 #: src/apps/apps-overview.tsx
 #: src/chat/chat-window.tsx
+#: src/chat/sidebar-chats.tsx
 msgid "Archive"
 msgstr "Archivieren"
 
@@ -3446,9 +3470,12 @@ msgctxt "a tool's state"
 msgid "Awaiting approval"
 msgstr "Wartet auf Freigabe"
 
+#: src/agents/agent-section.tsx
 #: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
-#: src/frame/settings-level.tsx
+#: src/brain/brain-section.tsx
+#: src/connections/integrations-sidebar.tsx
+#: src/frame/app-sidebar.tsx
 #: src/frame/ui-words.tsx
 #: src/guest-sign-in.tsx
 #: src/onboarding/setup-frame.tsx
@@ -3587,6 +3614,7 @@ msgstr "Gebunden an"
 #: src/agents/agent-form.tsx
 #: src/apps/resource-bindings.tsx
 #: src/brain/brain-nav.tsx
+#: src/brain/brain-section.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.brain.index.tsx
 #: src/routes/_shell.brain.tsx
@@ -4125,7 +4153,7 @@ msgid "Chat with {name}"
 msgstr "Mit {name} chatten"
 
 #: src/chat/chat-window.tsx
-#: src/chat/sidebar-chats.tsx
+#: src/frame/app-sidebar.tsx
 msgid "Chats"
 msgstr "Chats"
 
@@ -4397,6 +4425,7 @@ msgstr "Den Abschluss machen und die Zahlen erstellen, auf die die Geschäftslei
 msgid "Code"
 msgstr "Code"
 
+#: src/apps/app-section.tsx
 #: src/apps/app-workspace.tsx
 msgctxt "an app's workspace view"
 msgid "Code"
@@ -5079,6 +5108,7 @@ msgstr "Dunkel"
 msgid "Data"
 msgstr "Daten"
 
+#: src/apps/app-section.tsx
 #: src/apps/app-workspace.tsx
 msgctxt "an app's workspace view"
 msgid "Data"
@@ -5214,6 +5244,7 @@ msgstr "Definition"
 #: src/chat/chat-more.tsx
 #: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
+#: src/chat/sidebar-chats.tsx
 #: src/projects/project-view.tsx
 #: src/settings/chat-accounts.tsx
 #: src/settings/event-sources.tsx
@@ -5406,6 +5437,7 @@ msgctxt "workflow status"
 msgid "Designed"
 msgstr "Neu gestaltet"
 
+#: src/apps/app-section.tsx
 #: src/apps/preview-controls.tsx
 msgid "Desktop"
 msgstr "Desktop"
@@ -6895,7 +6927,7 @@ msgstr "Aus dem, was Ihr Team gesagt hat, Version {version}"
 msgid "From when each event was recorded, archive included. After this, archived events are deleted."
 msgstr "Ab der Aufzeichnung jedes Ereignisses, Archiv eingeschlossen. Danach werden archivierte Ereignisse gelöscht."
 
-#: src/frame/surface-nav.tsx
+#: src/frame/app-sidebar.tsx
 msgid "From your Apps"
 msgstr "Aus Ihren Apps"
 
@@ -7855,6 +7887,7 @@ msgstr "Anstelle von: {replaced}"
 msgid "In progress"
 msgstr "Läuft"
 
+#: src/brain/brain-section.tsx
 #: src/brain/brain.ts
 msgid "In the brain"
 msgstr "Im Brain"
@@ -7887,7 +7920,6 @@ msgstr "In Ihren eigenen Worten, wie Sie es einer Kollegin oder einem Kollegen s
 #: src/frame/app-sidebar.tsx
 #: src/inbox/inbox-page.tsx
 #: src/inbox/inbox-pending.tsx
-#: src/inbox/sidebar-inbox.tsx
 msgid "Inbox"
 msgstr "Posteingang"
 
@@ -7945,6 +7977,7 @@ msgstr "Anweisung"
 
 #: src/agents/agent-form.tsx
 #: src/agents/agent-page.tsx
+#: src/agents/agent-section.tsx
 #: src/apps/app-settings.tsx
 #: src/routes/_shell.settings.instructions.tsx
 #: src/settings/sections.ts
@@ -7961,6 +7994,7 @@ msgid "Integration"
 msgstr "Integration"
 
 #: src/apps/app-integrations.tsx
+#: src/connections/integrations-sidebar.tsx
 #: src/frame/app-sidebar.tsx
 #: src/routes/_shell.integrations.$integration.tsx
 #: src/routes/_shell.integrations.index.tsx
@@ -8601,6 +8635,10 @@ msgstr "Schlüssel: <0>{mask}</0>"
 msgid "Kind"
 msgstr "Art"
 
+#: src/connections/integrations-sidebar.tsx
+msgid "Kinds of app"
+msgstr "App-Arten"
+
 #: src/apps/field-editor.tsx
 msgid "Kinds of field"
 msgstr "Arten von Feldern"
@@ -9212,6 +9250,7 @@ msgid "members of the team in {field}"
 msgstr "Mitgliedern des Teams in {field}"
 
 #: src/brain/brain-nav.tsx
+#: src/brain/brain-section.tsx
 #: src/brain/memories-page.tsx
 msgctxt "the Brain's memories page"
 msgid "Memories"
@@ -9381,6 +9420,10 @@ msgstr "Mehr für {label}"
 #: src/apps/app-page.tsx
 msgid "More for {name}"
 msgstr "Mehr zu {name}"
+
+#: src/chat/sidebar-chats.tsx
+msgid "More for {title}"
+msgstr "Mehr zu {title}"
 
 #: src/chat/chat-more.tsx
 msgid "More for this chat"
@@ -10665,7 +10708,7 @@ msgstr "Nichts nutzt sie, bis du sie genehmigst. Bekannte Schadsoftware wird imm
 msgid "Nothing waits for you"
 msgstr "Nichts wartet auf Sie"
 
-#: src/inbox/sidebar-inbox.tsx
+#: src/frame/app-sidebar.tsx
 msgid "Nothing waits for you."
 msgstr "Nichts wartet auf Sie."
 
@@ -11019,6 +11062,12 @@ msgstr "Nur genutzt, um zu wissen, wen wir fragen"
 msgid "Only when asked"
 msgstr "Nur auf Anfrage"
 
+#: src/agents/agent-facts.tsx
+#: src/chat/agent-draft-card.tsx
+#: src/settings/stephen-audience.tsx
+msgid "Only whoever made it"
+msgstr "Nur wer ihn angelegt hat"
+
 #: src/agents/agent-page.tsx
 #: src/agents/agents-overview.tsx
 msgid "Only you"
@@ -11070,6 +11119,7 @@ msgid "Only you see this"
 msgstr "Nur Sie sehen das"
 
 #: src/apps/apps-overview.tsx
+#: src/chat/sidebar-chats.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/inbox/item-detail.tsx
 #: src/onboarding/setup-frame.tsx
@@ -11215,6 +11265,7 @@ msgid "Operator"
 msgstr "Operator"
 
 #: src/brain/brain-nav.tsx
+#: src/brain/brain-section.tsx
 #: src/brain/opportunities-page.tsx
 #: src/routes/_shell.brain.tsx
 msgctxt "the Brain's opportunities page"
@@ -11679,6 +11730,7 @@ msgstr "Persönliche Verbindungen"
 msgid "Personal Knowledge and memories"
 msgstr "Persönliches Wissen und Erinnerungen"
 
+#: src/apps/app-section.tsx
 #: src/apps/preview-controls.tsx
 msgid "Phone"
 msgstr "Smartphone"
@@ -11804,6 +11856,7 @@ msgstr "Drücken Sie die Eingabetaste, um es hinzuzufügen."
 msgid "Presses \"{words}\""
 msgstr "Drückt „{words}“"
 
+#: src/apps/app-section.tsx
 #: src/apps/preview-controls.tsx
 msgid "Preview width"
 msgstr "Breite der Vorschau"
@@ -12505,6 +12558,7 @@ msgstr "Entfernt."
 
 #: src/chat/chat-more.tsx
 #: src/chat/chat-window.tsx
+#: src/chat/sidebar-chats.tsx
 #: src/settings/teams.tsx
 msgid "Rename"
 msgstr "Umbenennen"
@@ -12512,6 +12566,10 @@ msgstr "Umbenennen"
 #: src/settings/teams.tsx
 msgid "Rename {name}"
 msgstr "{name} umbenennen"
+
+#: src/chat/sidebar-chats.tsx
+msgid "Rename {title}"
+msgstr "{title} umbenennen"
 
 #: src/chat/chat-window.tsx
 msgid "Rename chat"
@@ -12645,10 +12703,6 @@ msgstr "Größe ändern"
 #: src/chat/chat-panel.tsx
 msgid "Resize the chat"
 msgstr "Breite des Chats ändern"
-
-#: src/frame/page-panel.tsx
-msgid "Resize the panel"
-msgstr "Größe des Bereichs ändern"
 
 #: src/apps/resource-bindings.tsx
 msgid "Resource"
@@ -13296,6 +13350,7 @@ msgid "Say what you want to build, and Grasp builds it."
 msgstr "Sagen Sie, was Sie bauen möchten, und Grasp baut es."
 
 #: src/agents/agent-page.tsx
+#: src/agents/agent-section.tsx
 msgid "Schedule"
 msgstr "Zeitplan"
 
@@ -13637,8 +13692,8 @@ msgstr "{name} wird eingerichtet…"
 
 #: src/apps/app-page.tsx
 #: src/apps/apps-overview.tsx
+#: src/frame/app-sidebar.tsx
 #: src/frame/person-menu.tsx
-#: src/frame/settings-level.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.settings.tsx
 msgid "Settings"
@@ -13649,6 +13704,7 @@ msgctxt "a workflow's view"
 msgid "Settings"
 msgstr "Einstellungen"
 
+#: src/apps/app-section.tsx
 #: src/apps/app-workspace.tsx
 msgctxt "an app's workspace view"
 msgid "Settings"
@@ -14115,6 +14171,7 @@ msgid "Skill"
 msgstr "Skill"
 
 #: src/brain/brain-nav.tsx
+#: src/brain/brain-section.tsx
 #: src/brain/skills-page.tsx
 msgctxt "the Brain's skills page"
 msgid "Skills"
@@ -14285,6 +14342,7 @@ msgid "Sources"
 msgstr "Quellen"
 
 #: src/brain/brain-nav.tsx
+#: src/brain/brain-section.tsx
 #: src/brain/sources-page.tsx
 #: src/routes/_shell.brain.tsx
 msgctxt "the Brain's sources page"
@@ -14677,6 +14735,7 @@ msgstr "Tabelle"
 msgid "Tables"
 msgstr "Tabellen"
 
+#: src/apps/app-section.tsx
 #: src/apps/preview-controls.tsx
 msgid "Tablet"
 msgstr "Tablet"
@@ -15278,6 +15337,10 @@ msgstr "Das Gehirn behält möglicherweise nur für Sie einen Teil dessen, was e
 msgid "The Brain, as each run's person may read it"
 msgstr "Das Gehirn, so wie die Person jedes Laufs es lesen darf"
 
+#: src/brain/brain-section.tsx
+msgid "The Brain's pages"
+msgstr "Die Seiten des Gehirns"
+
 #: src/routes/_shell.settings.brain.tsx
 msgid "The brain's regions: your teams, grouped the way your company is. Grasp groups new teams by itself; rename a group or move a team here."
 msgstr "Die Bereiche des Brains: Ihre Teams, so gruppiert wie Ihr Unternehmen. Grasp gruppiert neue Teams selbst; hier benennen Sie eine Gruppe um oder verschieben ein Team."
@@ -15322,7 +15385,12 @@ msgstr "Die geteilten Änderungen konnten nicht als Entwurf zurückgeholt werden
 msgid "The chat adds indexes as it writes the App’s queries."
 msgstr "Der Chat fügt Indizes hinzu, während er die Abfragen der App schreibt."
 
+#: src/chat/sidebar-chats.tsx
+msgid "The chat couldn't be archived. Try again."
+msgstr "Der Chat konnte nicht archiviert werden. Versuchen Sie es erneut."
+
 #: src/chat/chat-more.tsx
+#: src/chat/sidebar-chats.tsx
 msgid "The chat couldn't be renamed. Try again."
 msgstr "Der Chat konnte nicht umbenannt werden. Versuche es erneut."
 
@@ -17071,6 +17139,10 @@ msgstr "Wartet"
 msgid "Waiting for {app}"
 msgstr "Warten auf {app}"
 
+#: src/inbox/sidebar-inbox.tsx
+msgid "Waiting for {duration}"
+msgstr "Wartezeit: {duration}"
+
 #: src/workflows/runs.tsx
 msgid "Waiting for {label}, which is limiting requests, since {since}. It goes on by itself once calls work."
 msgstr "Wartet seit {since} auf {label}, das die Anfragen begrenzt. Läuft von selbst weiter, sobald Aufrufe funktionieren."
@@ -17121,6 +17193,11 @@ msgstr "Wartet auf Sie: {title}"
 #: src/workflows/files-and-apps.tsx
 msgid "Waiting for your approval"
 msgstr "Wartet auf Ihre Freigabe"
+
+#: src/inbox/sidebar-inbox.tsx
+msgctxt "sidebar: the inbox items that have waited longest"
+msgid "Waiting longest"
+msgstr "Wartet am längsten"
 
 #: src/workflows/workflow-rows.tsx
 msgctxt "how a workflow stands"
@@ -18185,6 +18262,7 @@ msgstr "workflow.json"
 
 #: src/brain/goals-editor.tsx
 #: src/chat/mentions.tsx
+#: src/frame/app-sidebar.tsx
 #: src/inbox/report-view.tsx
 #: src/projects/file-item-dialog.tsx
 #: src/routes/_shell.integrations.$integration.tsx
@@ -18193,7 +18271,6 @@ msgstr "workflow.json"
 #: src/routes/_shell.workflows.runs.tsx
 #: src/routes/decisions.$decision.tsx
 #: src/settings/stephen-settings.tsx
-#: src/workflows/nav-item.tsx
 msgid "Workflows"
 msgstr "Workflows"
 
@@ -18513,10 +18590,6 @@ msgstr "Sie sind noch angemeldet. Versuchen Sie es gleich noch einmal."
 #: src/chat/dictation.ts
 msgid "You've dictated as much as you can today."
 msgstr "Sie haben heute so viel diktiert, wie möglich ist."
-
-#: src/settings/sections.ts
-msgid "Your account"
-msgstr "Ihr Konto"
 
 #: src/agents/agents-overview.tsx
 msgid "Your agents"

@@ -295,9 +295,6 @@ export type GlobalChat = ReturnType<typeof useGlobalChatValue>;
 
 const GlobalChatContext = createContext<GlobalChat | null>(null);
 
-/** Grasp's one chat where the shell holds one; none outside it (a page drawn alone). */
-export const useShellChat = (): GlobalChat | null => use(GlobalChatContext);
-
 /** Grasp's one chat, as the idle bar and the panel show it. */
 export const useGlobalChat = (): GlobalChat => {
   const chat = use(GlobalChatContext);

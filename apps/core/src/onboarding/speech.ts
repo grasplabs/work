@@ -20,10 +20,11 @@ import { platformAi } from "../platform-ai.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { keepLine, keptLine, storedKeyOf } from "../speech-cache.ts";
 import type { SpokenKey } from "../speech-cache.ts";
-import { platformSpeech, speechModel } from "../speech.ts";
+import { platformSpeech, speechModelOf } from "../speech.ts";
 import { auditStaffRoute } from "../staff-audit.ts";
 import { interviewCaller } from "./interview-caller.ts";
 import { linkHeaders, linkRefusal, noCallerRefusal } from "./links.ts";
+import { spokenOf } from "./spoken-lines.ts";
 import { adminWho, onboardingStore } from "./store.ts";
 import type { Took } from "./store.ts";
 
@@ -33,7 +34,7 @@ import type { Took } from "./store.ts";
 // prototype, packages/grasp: worker/speech.ts).
 //
 // Said through speech synthesis behind its interface (speech.ts): the
-// KugelAudio voices fixed in src/platform-ai.ts, through the model
+// Mistral voices fixed in src/platform-ai.ts, through the model
 // gateway: the deployment's rules judge every line, its
 // budgets are charged, and the audit log records it, never the line.
 //
@@ -51,10 +52,9 @@ import type { Took } from "./store.ts";
 //   link and each admin has seconds of voice a day (`voiceBudgets`); the
 //   router limits the endpoint per address, the store counts calls per
 //   link, and the gateway's budgets hold too.
-// - Say anything but the line: a line with a bracket of its own is
-//   refused, so no direction is slipped in, and its tone, one of
-//   `voiceTags`, is the page's alone (how the figure looks as it is
-//   said): KugelAudio's voice takes no direction, so none is sent.
+// - Say a line in a tone Stephen may not use: the only direction a line
+//   takes is one of `voiceTags`, none of them sad, and a line with a
+//   bracket of its own is refused, so no direction is slipped in.
 
 /** What the gateway is told every line is for. */
 const purpose = "onboarding.speech";
@@ -308,11 +308,14 @@ const say = async (
   stored: string,
   requestId: string
 ): Promise<Response> => {
+  const model = speechModelOf();
   const voice = platformAi.speech.voices[asked.speaker];
+  const spoken = spokenOf(asked.text, asked.tone);
   const key: SpokenKey = {
     text: asked.text,
+    spoken,
     voice,
-    model: speechModel,
+    model,
     language: asked.language,
   };
   const kept = await keptAnswer(env, key, requestId);
@@ -331,7 +334,7 @@ const say = async (
       trigger: listener.trigger,
       work: { onboarding: true },
       requestId,
-    }).speak({ text: asked.text, voice, language: asked.language });
+    }).speak({ text: spoken, voice, language: asked.language, model });
   } catch (error) {
     return failed(error, requestId);
   }
