@@ -107,11 +107,11 @@ test("someone it is shared with uses the live App and moves between its pages; i
   await page.goto(`/apps/${app}/pages/list`);
   await pageShowing(page, "The list");
 
-  // The live App is its people's: nothing to share here, no views, and
-  // no chat about the App.
+  // The live App is its people's: nothing to share here, no workspace
+  // in the sidebar, and no chat about the App.
   await expect(page.getByRole("button", { name: /^Share/u })).toHaveCount(0);
   await expect(
-    page.getByRole("navigation", { name: "Workspace views" })
+    page.getByRole("navigation", { name: /s workspace$/u })
   ).toHaveCount(0);
   await expect(
     page.getByRole("textbox", { name: "Ask for a change" })
@@ -132,20 +132,20 @@ test("someone it is shared with uses the live App and moves between its pages; i
     preview.frameLocator("iframe").getByRole("heading", { name: "The board" })
   ).toBeVisible({ timeout: 20_000 });
   await expect(
-    workspace.getByRole("button", { name: "Share changes" })
+    workspace.getByRole("region", { name: "Changes only you see" })
   ).toHaveCount(0);
   const chat = workspace.getByRole("region", { name: "Chat" });
   await expect(
     chat.getByRole("textbox", { name: "Ask for a change" })
   ).toBeVisible();
 
-  // Its settings are a view of the workspace, beside the chat.
+  // Its settings are the sidebar's rows of its workspace, beside the chat.
   await workspace
-    .getByRole("navigation", { name: "Workspace views" })
-    .getByRole("link", { name: "Settings" })
+    .getByRole("navigation", { name: /s workspace$/u })
+    .getByRole("link", { name: "General" })
     .click();
   await expect(workspace).toHaveURL(
-    new RegExp(`/apps/${app}\\?view=settings$`, "u")
+    new RegExp(`/apps/${app}\\?view=settings&section=general$`, "u")
   );
   await expect(workspace.getByLabel("Name", { exact: true })).toHaveValue(name);
 });

@@ -89,7 +89,6 @@ export const RemoveApp = ({
             errorText={t`Could not delete`}
             loadingText={t`Deleting`}
             onClick={remove}
-            size="sm"
             variant="destructive"
           >
             {t`Delete for good`}
