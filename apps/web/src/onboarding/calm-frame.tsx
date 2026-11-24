@@ -67,14 +67,18 @@ const styles = stylex.create({
     paddingInline: { default: space[8], [media.maxSm]: space[4] },
   },
   mark: { display: "flex", [iconVars.size]: size.iconDefault },
-  // Back and on, two quiet arrows at the bottom corner, out of the step's way.
+  // Back and on, two quiet arrows at the bottom corner, out of the step's way. On a phone there is no
+  // room beside the step, so they follow it at the page's end instead of lying over its buttons.
   ways: {
-    position: "fixed",
-    insetBlockEnd: { default: space[6], [media.maxSm]: space[4] },
-    insetInlineEnd: { default: space[8], [media.maxSm]: space[4] },
+    position: { default: "fixed", [media.maxSm]: "static" },
+    insetBlockEnd: space[6],
+    insetInlineEnd: space[8],
+    alignSelf: "flex-end",
     zIndex: 1,
     display: "flex",
     gap: space[1],
+    paddingInline: { default: 0, [media.maxSm]: space[4] },
+    paddingBlockEnd: { default: 0, [media.maxSm]: space[6] },
   },
   tools: { display: "flex", alignItems: "center", gap: space[1] },
   main: {
@@ -360,11 +364,11 @@ export const CalmStep = ({
   title,
   body,
   figure,
-  centred = false,
+  centred = true,
   children,
   end,
 }: {
-  /** The title and its line on the column's middle; what the step asks stays full width. */
+  /** The title and its line on the column's middle (every step's, Ruben: "every step"); what the step asks stays full width. */
   centred?: boolean;
   /** Stephen over the title, on a page with little else; then it all stands centred. */
   figure?: ReactNode;
@@ -384,7 +388,8 @@ export const CalmStep = ({
         <Heading level={1} size="xl">
           {title}
         </Heading>
-        {typeof body === "string" ? <Text size="lg">{body}</Text> : body}
+        {/* The body's own size, a step below the large one: Ruben found the line too big. */}
+        {typeof body === "string" ? <Text>{body}</Text> : body}
       </div>
       {children}
       {end === undefined || end === null ? null : (
