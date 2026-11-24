@@ -14716,10 +14716,6 @@ msgstr "Atención al cliente"
 msgid "Suspended"
 msgstr "Suspendido"
 
-#: src/onboarding/leads-step.tsx
-msgid "Switch a team off and nobody in it gets a link."
-msgstr "Desactiva un equipo y nadie en él recibe un enlace."
-
 #: src/pages/page-frame.tsx
 msgid "Switch now"
 msgstr "Cambiar ahora"
