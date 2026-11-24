@@ -240,7 +240,7 @@ const teamIds = (noTeam: string) => {
 };
 
 /** What a staff list came to: the teams and their people, how many rows were left out, and whether its leads were said or guessed. */
-export interface StaffList {
+interface StaffList {
   roster: { teams: RosterTeam[]; people: RosterPerson[] } & RosterInput;
   /** Rows without a name, left out. */
   skipped: number;
