@@ -1,5 +1,6 @@
-import type { OnboardingView, PlanInput } from "@grasp-os/shared/onboarding";
 // @vitest-environment happy-dom
+import { dayOf } from "@grasp-os/shared/admin/org-record";
+import type { OnboardingView, PlanInput } from "@grasp-os/shared/onboarding";
 import { noChoices } from "@grasp-os/shared/onboarding-choices";
 import { noContext } from "@grasp-os/shared/onboarding-context";
 import { i18n } from "@lingui/core";
@@ -14,10 +15,10 @@ import { datePattern, parseDate } from "@ui-sdk/react/date";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { dateLocale } from "./date-locale.ts";
-import { firstChoice } from "./send-plan.ts";
+import { firstChoice, todayInUtc } from "./send-plan.ts";
 import { SetupStepBody } from "./setup-steps.tsx";
 import type { SetupData } from "./setup-steps.tsx";
 import { listeningOf, steps } from "./setup.ts";
@@ -26,8 +27,8 @@ import { noteHeard, planDraft } from "./visit.ts";
 
 // The team step's plan, as a person in a region of their own types its
 // day: read in their order, or refused in words, and what "What happens
-// next" says is what core is asked to save; and the leads step's
-// confirmation, pressed once. Core's answer is faked.
+// next" says is what core is asked to save, on any clock; and the leads
+// and team steps' confirmations, pressed once. Core's answer is faked.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -146,7 +147,13 @@ const shown = async (
     step = "team",
     given = data,
     reread,
-  }: { step?: SetupStep; given?: SetupData; reread?: Promise<unknown> } = {}
+    on = today,
+  }: {
+    step?: SetupStep;
+    given?: SetupData;
+    reread?: Promise<unknown>;
+    on?: string;
+  } = {}
 ): Promise<{ saved: PlanInput[]; confirmed: () => number }> => {
   i18n.loadAndActivate({ locale: language, messages: {} });
   browserIn(browser);
@@ -192,7 +199,7 @@ const shown = async (
           go={() => {}}
           listening={listeningOf(
             { roster: null, plan: null, progress: null },
-            today
+            on
           )}
           message={null}
           onMadeWay={() => {}}
@@ -205,7 +212,7 @@ const shown = async (
           percent={10}
           settled={[]}
           step={step}
-          today={today}
+          today={on}
         />
       ),
     }),
@@ -580,4 +587,125 @@ describe("the leads step's confirmation", () => {
       confirmed: confirmed(),
     }).toStrictEqual({ next: false, confirmed: 1 });
   });
+});
+
+describe("the team step's confirmation", () => {
+  afterEach(() => {
+    act(() => {
+      root?.unmount();
+    });
+    root = undefined;
+    document.body.replaceChildren();
+    planDraft.keep("forgotten", firstChoice(today));
+  });
+
+  it("stays busy until every step reads what core now has, so a second press sends nothing more", async () => {
+    const { promise: reread, resolve: answered } =
+      Promise.withResolvers<boolean>();
+    const { saved } = await shown("en", ["en-GB"], { reread });
+    await press("I sent it");
+    expect({
+      busy: button("I sent it")?.getAttribute("aria-busy"),
+      saved: saved.length,
+    }).toStrictEqual({ busy: "true", saved: 1 });
+    await press("I sent it");
+    expect(saved).toHaveLength(1);
+    await act(async () => {
+      answered(true);
+      await Promise.resolve();
+    });
+    await settled();
+    expect({
+      busy: button("I sent it")?.getAttribute("aria-busy") ?? null,
+      saved: saved.length,
+    }).toStrictEqual({ busy: null, saved: 1 });
+  });
+});
+
+// Where it is already another day than in UTC, or the same one: the first
+// day the field takes is one core takes, and "What happens next" says the
+// day that is sent.
+const clocks = [
+  {
+    zone: "America/Los_Angeles",
+    // 17:21 on Monday 23 November there; the 24th in UTC.
+    at: "2026-11-24T01:21:00Z",
+    browser: "en-US",
+    before: "11/23/2026",
+    earliest: "11/24/2026",
+    day: "2026-11-24",
+    said: "on 24 Nov at 9:00",
+  },
+  {
+    zone: "Pacific/Auckland",
+    // 9:00 on Wednesday 25 November there; still the 24th in UTC.
+    at: "2026-11-24T20:00:00Z",
+    browser: "en-NZ",
+    before: "23/11/2026",
+    earliest: "24/11/2026",
+    day: "2026-11-24",
+    said: "on 24 Nov at 9:00",
+  },
+  {
+    zone: "Europe/Amsterdam",
+    // Midday on Monday 23 November there and in UTC.
+    at: "2026-11-23T11:00:00Z",
+    browser: "nl-NL",
+    before: "22-11-2026",
+    earliest: "23-11-2026",
+    day: "2026-11-23",
+    said: "on 23 Nov at 9:00",
+  },
+] as const;
+
+describe("the team step's first day, on the device's clock", () => {
+  const zone = process.env.TZ;
+
+  afterEach(() => {
+    act(() => {
+      root?.unmount();
+    });
+    root = undefined;
+    document.body.replaceChildren();
+    vi.useRealTimers();
+    if (zone === undefined) {
+      delete process.env.TZ;
+    } else {
+      process.env.TZ = zone;
+    }
+    planDraft.keep("forgotten", firstChoice(today));
+  });
+
+  it.each(clocks)(
+    "in $zone, is one core takes, and is said as the day sent",
+    async (clock) => {
+      process.env.TZ = clock.zone;
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date(clock.at));
+      const { saved } = await shown("en", [clock.browser], {
+        on: todayInUtc(),
+      });
+      await typeDay(clock.before);
+      const refused = sendButton().disabled;
+      await typeDay(clock.earliest);
+      const said = nextSaid();
+      await send();
+      expect({
+        refused,
+        error: error(),
+        said: said.includes(clock.said),
+        saved: saved.map((plan) => plan.start),
+        // Core's own rule (onboarding/rpc.ts, savePlan): no start before today in UTC.
+        taken: saved.every(
+          (plan) => plan.start >= dayOf(new Date().toISOString())
+        ),
+      }).toStrictEqual({
+        refused: true,
+        error: undefined,
+        said: true,
+        saved: [clock.day],
+        taken: true,
+      });
+    }
+  );
 });

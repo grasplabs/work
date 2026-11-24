@@ -6,6 +6,13 @@ import type { PlanInput } from "@grasp-os/shared/onboarding";
 // send-plan-form.tsx, and what comes of it is the onboarding's plan, which
 // core sends by. From the prototype's `lib/send-plan.ts`.
 
+/**
+ * Today as core counts it, in UTC: the first day a plan can start, as core
+ * refuses one before it. Not the device's day: in a US evening that is
+ * still the day before, which core refuses.
+ */
+export const todayInUtc = (): string => new Date().toISOString().slice(0, 10);
+
 /** The ISO day `count` days after `day`. */
 export const addDays = (day: string, count: number): string => {
   const date = new Date(`${day.slice(0, 10)}T12:00:00Z`);

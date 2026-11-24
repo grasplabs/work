@@ -1880,6 +1880,8 @@ const Team = (props: StepProps) => {
   const [copied, setCopied] = useState(false);
   // A day field holding typed text that is no day to plan: the plan waits for one, as what it says and saves is the day before it.
   const [wrong, setWrong] = useState({ first: false, later: false });
+  // Sent, it stays busy until every step reads what core now has, so it can't be pressed twice.
+  const [refreshing, setRefreshing] = useState(false);
   const when = useSendWords(props.today)(choice.day, choice.time);
   const going = teams.length - choice.held.length;
   const next =
@@ -1974,7 +1976,7 @@ const Team = (props: StepProps) => {
         </div>
       </div>
       <Primary
-        busy={busy}
+        busy={busy || refreshing}
         disabled={
           wrong.first ||
           wrong.later ||
@@ -1992,7 +1994,9 @@ const Team = (props: StepProps) => {
                 )
             );
             if (saved !== undefined) {
+              setRefreshing(true);
               await refresh();
+              setRefreshing(false);
               props.onward();
             }
           })();

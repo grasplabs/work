@@ -28,7 +28,6 @@ import {
   redirect,
   useNavigate,
 } from "@tanstack/react-router";
-import { todayDate } from "@ui-sdk/react/date";
 import {
   useEffect,
   useMemo,
@@ -45,6 +44,7 @@ import { PageError } from "../frame/page-states.tsx";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import { motion } from "../onboarding/motion.ts";
 import { useReveal } from "../onboarding/reveal-state.ts";
+import { todayInUtc } from "../onboarding/send-plan.ts";
 import { Arriving, SetupFrame } from "../onboarding/setup-frame.tsx";
 import { SetupStepBody } from "../onboarding/setup-steps.tsx";
 import {
@@ -239,11 +239,6 @@ const notePlace = async (
     // Said again with the next screen.
   }
 };
-
-// Today on this device's calendar, as the plan's hours are read on its clock
-// (send-plan.ts, momentOf): in UTC, an evening in the US was already
-// tomorrow. The organization's zone is UTC until an admin sets one.
-const today = (): string => todayDate();
 
 /**
  * How far this browser's admin went, the message they wrote and what they
@@ -467,7 +462,7 @@ const Setup = () => {
   // How far they went, and how far they can go now.
   const furthest = reachedOf(kept.reached, { plan }, path);
   const reached = heldAt(furthest, ai, path);
-  const now = today();
+  const now = todayInUtc();
   const listening = listeningOf({ roster, plan, progress }, now);
   // "How this works" tells its story in the brain's figures, so the figure follows the story there.
   const [story, setStory] = useState<BrainScene | null>(null);
