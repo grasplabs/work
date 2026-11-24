@@ -9,10 +9,12 @@
 // screen its own place and tempo), a light that follows the pointer, and
 // the light he gathers round each thing he holds (`u_holds`).
 // Layer 1, over the page, only while he carries the page to its next
-// screen: a first front spreads from what was pressed and shows the picture
-// he took from it (a flag), his own light chases it and covers the window,
-// the page turns under him, and he drains away toward the new screen's
-// title.
+// screen, in one of three ways (`u_style`): the flag (a first front shows
+// the picture he took from what was pressed, his own light chases it and
+// covers the window, the page turns, he drains toward the new title); or
+// the page's parts dithering away into the light behind the page, in
+// reading order or in a wave from what was pressed, and the new screen's
+// parts dithering in out of it, his light on the edge of each.
 
 export const VERTEX = `
 attribute vec2 a_pos;
@@ -55,6 +57,16 @@ uniform vec3 u_fronts;
 uniform vec3 u_flag[3];
 uniform vec3 u_flagShape;
 uniform float u_flagOn;
+// How he carries the page: 0 the flag, 1 its parts in reading order, 2 its parts in a wave.
+uniform float u_style;
+// How far the parts' dither has come, 0 to 1.
+uniform float u_progress;
+// The page's parts: each box, and (when it goes, 0 to 1; its corner).
+uniform vec4 u_parts[24];
+uniform vec4 u_partMeta[24];
+uniform float u_partCount;
+// The page's own ground, where nothing of him lies behind it.
+uniform vec3 u_ground;
 
 float hash(vec2 p) {
   p = fract(p * vec2(123.34, 456.21));
@@ -103,12 +115,16 @@ float bayer2(vec2 a) {
 float bayer4(vec2 a) {
   return bayer2(0.5 * a) * 0.25 + bayer2(a) + 0.03125;
 }
-// How far a point is outside a box with rounded corners (inside: below zero).
+// How far a point is outside a box with the page's corners (inside: below zero). Damsko's corners
+// are squircles (corner-shape: squircle, a superellipse of power 4), so his line follows that
+// curve, not a circle's.
 float roundBox(vec2 p, vec4 rect, float radius) {
   vec2 half_ = rect.zw * 0.5;
   float r = min(radius, min(half_.x, half_.y));
   vec2 q = abs(p - (rect.xy + half_)) - half_ + r;
-  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+  vec2 m = max(q, 0.0);
+  float corner = r > 0.5 ? pow(pow(m.x, 4.0) + pow(m.y, 4.0), 0.25) : length(m);
+  return corner + min(max(q.x, q.y), 0.0) - r;
 }
 float box(vec2 p, vec4 rect) {
   return roundBox(p, rect, 0.0);
@@ -142,17 +158,9 @@ vec3 flag(vec2 p, vec2 window, float b) {
   return b > light ? own * 0.8 : own;
 }
 
-void main() {
-  vec2 at = floor(gl_FragCoord.xy);
-  // CSS pixels from the window's top left, at the cell's middle.
-  vec2 cellAt = vec2(at.x, u_cells.y - 1.0 - at.y);
-  vec2 p = (cellAt + 0.5) * u_cell;
-  vec2 window = u_cells * u_cell;
-  float b = bayer4(cellAt);
-  float seed = u_mood.x;
-  float t = u_time * u_mood.y;
-
-  if (u_layer < 0.5) {
+// Him behind the page at a cell: where he rests, the pointer's light, and the light round each
+// thing he holds. Clear (alpha 0) where there is none of him.
+vec4 ambient(vec2 p, vec2 cellAt, vec2 window, float b, float seed, float t) {
     float flow = silk(p / 540.0 + seed, t);
     float level = 0.0;
     // Where he rests on this screen: a wide, soft light, never a shape.
@@ -184,25 +192,95 @@ void main() {
       vec3 look = u_holdLooks[i];
       if (look.x < 0.004) continue;
       float d = roundBox(p, u_holds[i], look.z);
-      // The line sits on the edge and just outside it, never inward.
-      float line = exp(-abs(d - 1.5) / 2.2) * 0.8 * step(-1.0, d);
-      float halo = exp(-max(d, 0.0) / (6.0 + 26.0 * look.x)) * step(0.0, d) * (0.1 + 0.6 * round_);
+      // His line is the element's own ring, drawn by the page so it follows its corner exactly;
+      // here only the soft light outside it, from just beyond the ring.
+      float line = 0.0;
+      float halo = exp(-max(d - 3.0, 0.0) / (6.0 + 22.0 * look.x)) * step(3.0, d) * (0.06 + 0.5 * round_);
       float behind = exp(-max(d, 0.0) / 90.0) * (0.1 + 0.3 * flow);
       level += look.x * mix(line + halo, behind, look.y);
     }
 
     float q = floor(clamp(level, 0.0, 1.0) * 4.0 + b);
     if (q < 1.0) {
-      gl_FragColor = vec4(0.0);
-      return;
+      return vec4(0.0);
     }
     vec3 colour = q < 2.0 ? u_amb[0] : (q < 3.0 ? u_amb[1] : (q < 4.0 ? u_amb[2] : u_amb[3]));
-    gl_FragColor = vec4(colour, 1.0);
+    return vec4(colour, 1.0);
+}
+
+// The page's parts dithering away (phase 1) into what lies behind the page, his light gathering
+// in the middle of the window while the page turns (2), and the new screen's parts dithering in
+// out of it (3) as it goes. Each part is wiped by the ordered dither, a clean front crossing it,
+// in reading order (left to right, top to bottom) or in a wave from where he starts; the cells
+// on the front are his light.
+vec4 parts(vec2 p, vec2 cellAt, vec2 window, float b, float seed, float t) {
+  vec4 behind = ambient(p, cellAt, window, b, seed, t);
+  vec4 hidden = behind.a > 0.5 ? behind : vec4(u_ground, 1.0);
+  // His light, gathering where the page's words stand.
+  vec2 middle = (p - vec2(window.x * 0.5, window.y * 0.42)) / vec2(window.x * 0.3, window.y * 0.34);
+  float gather = exp(-dot(middle, middle)) * (0.25 + 0.95 * silk(p / 380.0 + seed + 2.0, u_time * 1.4));
+  float amount = u_phase < 1.5 ? u_progress : (u_phase < 2.5 ? 1.0 : 1.0 - u_progress);
+  float glowQ = floor(clamp(gather * amount, 0.0, 1.0) * 3.0 + b);
+  vec4 glow = glowQ < 1.0 ? vec4(0.0) : vec4(glowQ < 2.0 ? u_amb[0] : (glowQ < 3.0 ? u_amb[1] : u_amb[2]), 1.0);
+  if (u_phase > 1.5 && u_phase < 2.5) {
+    return glow.a > 0.5 ? glow : hidden;
+  }
+  // Where the wave starts: what was pressed going out, the new title coming in.
+  vec4 start = u_phase < 1.5 ? u_from : u_toward;
+  vec2 origin = start.xy + start.zw * 0.5;
+  float reach = max(length(max(origin, window - origin)), 1.0);
+  float inside = 0.0;
+  float ramp = 1.0;
+  for (int i = 0; i < 24; i++) {
+    if (float(i) >= u_partCount) break;
+    vec4 part = u_parts[i];
+    vec4 meta = u_partMeta[i];
+    if (roundBox(p, part, meta.y) > 3.0) continue;
+    inside = 1.0;
+    float across = clamp((p.x - part.x) / max(part.z, 1.0), 0.0, 1.0);
+    float here = u_style < 1.5 ? meta.x * 0.62 + across * 0.38 : length(p - origin) / reach;
+    ramp = min(ramp, here);
+  }
+  if (inside < 0.5) {
+    return glow;
+  }
+  // The front: past it the part is gone (going out) or there (coming in); on it, his light.
+  // Steep, so the dithered front is a narrow edge a few cells deep, not a wide band.
+  float front = (u_progress * 1.45 - ramp) * 4.0;
+  float threshold = b * 0.5;
+  float past = step(threshold, front);
+  float near = threshold - front;
+  if (near > 0.0 && near < 0.09) {
+    return vec4(u_amb[3], 1.0);
+  }
+  bool covered = u_phase < 1.5 ? past > 0.5 : past < 0.5;
+  if (!covered) {
+    return vec4(0.0);
+  }
+  return glow.a > 0.5 ? glow : hidden;
+}
+
+void main() {
+  vec2 at = floor(gl_FragCoord.xy);
+  // CSS pixels from the window's top left, at the cell's middle.
+  vec2 cellAt = vec2(at.x, u_cells.y - 1.0 - at.y);
+  vec2 p = (cellAt + 0.5) * u_cell;
+  vec2 window = u_cells * u_cell;
+  float b = bayer4(cellAt);
+  float seed = u_mood.x;
+  float t = u_time * u_mood.y;
+
+  if (u_layer < 0.5) {
+    gl_FragColor = ambient(p, cellAt, window, b, seed, t);
     return;
   }
 
   if (u_phase < 0.5) {
     gl_FragColor = vec4(0.0);
+    return;
+  }
+  if (u_style > 0.5) {
+    gl_FragColor = parts(p, cellAt, window, b, seed, t);
     return;
   }
   // The fronts are never straight: each wanders by its own noise.

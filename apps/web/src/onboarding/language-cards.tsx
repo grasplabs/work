@@ -1,7 +1,14 @@
 import { Text } from "@grasp-os/ui/components/text";
 import { CheckIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { focusRing } from "@grasp-os/ui/lib/styles";
-import { colors, radius, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import {
+  colors,
+  duration,
+  media,
+  radius,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
@@ -56,7 +63,12 @@ const styles = stylex.create({
       ":active": colors.controlActive,
     },
     boxShadow: size.borderStrong,
+    // Stephen's line: the card's own ring, so it follows its corner exactly; his dither lies outside it.
+    transitionProperty: "box-shadow",
+    transitionDuration: { default: duration.ui, [media.reducedMotion]: "0s" },
+    transitionTimingFunction: duration.ease,
   },
+  lit: { boxShadow: `0 0 0 2px ${colors.mint}` },
   current: { backgroundColor: colors.accentActive },
   name: {
     position: "relative",
@@ -115,6 +127,7 @@ export const LanguageCards = ({
             type="button"
             {...stylex.props(
               styles.card,
+              lit === code && styles.lit,
               chosen === code && styles.current,
               focusRing
             )}

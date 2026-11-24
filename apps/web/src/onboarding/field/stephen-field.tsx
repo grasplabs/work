@@ -10,7 +10,7 @@ import {
   poseField,
   releaseField,
 } from "./engine.ts";
-import type { Picture, Pose } from "./engine.ts";
+import type { CarryStyle, Picture, Pose } from "./engine.ts";
 
 // Stephen in the setup: never a figure, always the light behind the page.
 // Two canvases the size of the window, one under the page and one over it,
@@ -54,7 +54,8 @@ export interface Field {
   carry: (
     from: Element,
     picture: Picture,
-    turn: () => Promise<void>
+    turn: () => Promise<void>,
+    style?: CarryStyle
   ) => Promise<void>;
 }
 
