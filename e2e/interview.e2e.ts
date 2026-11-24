@@ -171,6 +171,47 @@ test("someone has their interview by typing, carries on after stopping, and agre
   });
 });
 
+test("someone who can't hold a button deletes their interview with two presses, each asking first", async ({
+  page,
+}) => {
+  const staff = await signInStaff();
+  const run = crypto.randomUUID().slice(0, 8);
+  const person = `mila-${run}`;
+  const link = await invited(staff, person, "Mila");
+  await answered(page);
+  await signedInFor(page, addressOf(person));
+  await page.goto(link);
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Stephen", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Type instead, without sound" })
+    .click();
+  // A line typed before his first is not taken, so they answer him.
+  await expect(page.getByText(first)).toBeVisible();
+  const answer = page.getByLabel("Your answer");
+  await answer.fill("I check it in Exact, then I send it to Sam.");
+  await answer.press("Enter");
+  await expect(page.getByText(readBack)).toBeVisible();
+  await page.getByRole("button", { name: "Yes, that’s correct" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Thank you, Mila." })
+  ).toBeVisible();
+
+  // A press, not a hold, asks whether to go on, then what would be lost.
+  await page
+    .getByRole("button", { name: "Press and hold: Delete my interview" })
+    .click();
+  const asked = page.getByRole("dialog", { name: "Delete my interview?" });
+  await asked.getByRole("button", { name: "Delete my interview" }).click();
+  await page
+    .getByRole("alertdialog", { name: "Delete your interview?" })
+    .getByRole("button", { name: "Delete it" })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: /^Deleted\./u })
+  ).toBeVisible();
+});
+
 /**
  * Holds back core's answer to `page`'s next save, which core still takes:
  * `taken` once it has, and `release` lets the answer go (to a page gone
@@ -389,6 +430,26 @@ test("someone goes through the screens before the interview in Dutch, chooses Cl
   await expect(
     page.getByRole("button", { name: "English", exact: true })
   ).toHaveAttribute("aria-pressed", "true");
+  // On a narrow phone every language stays on the page.
+  const desktop = page.viewportSize();
+  await page.setViewportSize({ width: 320, height: 740 });
+  await expect
+    .poll(
+      async () =>
+        await page
+          .getByRole("group", { name: "Choose your language" })
+          .getByRole("button")
+          .evaluateAll((buttons) =>
+            buttons.map((button) => {
+              const { left, right } = button.getBoundingClientRect();
+              return left >= 0 && right <= window.innerWidth;
+            })
+          )
+    )
+    .toStrictEqual([true, true, true, true, true]);
+  if (desktop !== null) {
+    await page.setViewportSize(desktop);
+  }
   await page.getByRole("button", { name: "Nederlands", exact: true }).click();
   await expect(
     page.getByRole("heading", {
@@ -549,15 +610,17 @@ test("Stephen says his line a sentence at a time, without a gap, its words light
   // From here: the sound check's own line may still be ending as Start shows.
   const startedAt = await page.evaluate(() => performance.now());
 
-  // While he talks, the box is a voice bar; once he asks, the bar listens to them.
-  await expect(page.getByText("Stephen is talking")).toBeVisible();
+  // While he talks, the box is a spoken conversation, his mark in it; once
+  // he asks, it is their turn, its time running where his mark stood.
+  const spoken = page.getByRole("group", { name: "Voice conversation" });
   await expect(
-    page.getByRole("button", { name: "Type instead" })
+    spoken.getByRole("status").filter({ hasText: "Stephen is talking" })
+  ).toBeVisible();
+  await expect(
+    spoken.getByRole("button", { name: "Type instead" })
   ).toBeVisible();
   await expect(page.getByText(line)).toBeVisible();
-  await expect(page.getByText("Listening", { exact: true })).toBeVisible({
-    timeout: 30_000,
-  });
+  await expect(spoken.getByRole("timer")).toBeVisible({ timeout: 30_000 });
 
   // Each sentence was asked for on its own, the first first; each word lit up as it was said, one after another, with no gap between the sentences.
   const words = line.split(" ");
