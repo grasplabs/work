@@ -20,6 +20,7 @@ import { z } from "zod";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { activeMember, organizationId } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
+import { companyDayZone, midnight } from "./company-day.ts";
 import { organizations, teams } from "./db/core/schema.ts";
 import { requireOwnAdmin, stillAdmin } from "./organization-admin.ts";
 import {
@@ -55,12 +56,6 @@ const storedOrganization = async (
   };
 };
 
-/** The time zone the organization works in, as stored. */
-export const organizationTimeZone = async (db: D1Database): Promise<string> => {
-  const { timeZone } = await storedOrganization(db);
-  return timeZone;
-};
-
 /** The organization as stored, with what the deployment says about it. */
 export const readOrganization = async (env: Env): Promise<Organization> => {
   const { name, timeZone, logo } = await storedOrganization(env.DB);
@@ -83,13 +78,9 @@ export const startOfCompanyDay = async (
   env: Env,
   now: number = Date.now()
 ): Promise<{ start: number; timeZone: string }> => {
-  const { timeZone: stored } = await readOrganization(env);
-  const midnight = { cron: "0 0 * * *" };
+  const timeZone = await companyDayZone(env.DB);
   // A day is at most 25 hours long, across a change of the clocks.
   const earliest = new Date(now - 26 * 60 * 60 * 1000);
-  const known =
-    nextScheduledRun({ ...midnight, timeZone: stored }, earliest) !== undefined;
-  const timeZone = known ? stored : defaultTimeZone;
   let start = nextScheduledRun({ ...midnight, timeZone }, earliest);
   if (start === undefined) {
     throw new Error("Midnight always comes");
@@ -114,7 +105,6 @@ export const endOfCompanyDay = async (
   now: number = Date.now()
 ): Promise<number> => {
   const { timeZone } = await readOrganization(env);
-  const midnight = { cron: "0 0 * * *" };
   const next =
     nextScheduledRun({ ...midnight, timeZone }, new Date(now)) ??
     nextScheduledRun({ ...midnight, timeZone: defaultTimeZone }, new Date(now));
