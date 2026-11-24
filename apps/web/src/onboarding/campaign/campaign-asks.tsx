@@ -28,7 +28,7 @@ const sent = async (): Promise<void> => {
 export const askLine = (ask: Ask, done: boolean): string => {
   if (ask.kind === "quiet") {
     return done
-      ? `Done: ${ask.team} got a nudge from you.`
+      ? `${ask.team} got a nudge from you.`
       : `${ask.team} is quiet, with ${ask.waiting} still to talk. A nudge from you usually helps.`;
   }
   return done
@@ -48,7 +48,7 @@ export const askWords = (
         }
       : {
           title: `${ask.team} is quiet`,
-          sentence: `${ask.waiting} still to talk. A nudge from you usually helps: we send it in your name.`,
+          sentence: `${ask.waiting} still to talk. A nudge from you usually helps, and we send it in your name.`,
         };
   }
   return done
