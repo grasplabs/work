@@ -518,6 +518,8 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "workspace.chat_draft_version_files": { erased: "workspace" },
   "workspace.chat_draft_versions": { erased: "workspace" },
   "workspace.chat_drafts": { erased: "workspace" },
+  // A picture's bytes, kept with its file in the person's own Workspace.
+  "workspace.chat_file_parts": { erased: "workspace" },
   "workspace.chat_files": { erased: "workspace" },
   "workspace.chat_messages": { erased: "workspace" },
   "workspace.chat_request_keys": { erased: "workspace" },

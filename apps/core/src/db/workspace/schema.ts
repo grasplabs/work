@@ -6,11 +6,13 @@ import type {
   ChatChannel,
   ChatFileType,
   ChatMakeKind,
+  ChatPictureType,
 } from "@grasp-os/shared/chat";
 import type { ChatId } from "@grasp-os/shared/ids";
 import { sql } from "drizzle-orm";
 import {
   check,
+  customType,
   foreignKey,
   index,
   integer,
@@ -466,9 +468,10 @@ export const brainCaptureIntents = sqliteTable(
 /**
  * Files the person attached to the chat's questions (`chats.attachFile`):
  * the text core read from each, never the file itself, which nothing
- * keeps. `messageId` is the question that carried it, null while it waits
- * for one. Its agent reads the text through `env.chat.readFile`, as data.
- * Deleted with the chat.
+ * keeps; but a picture, which has no text, and is kept whole in
+ * `chat_file_parts`. `messageId` is the question that carried it, null
+ * while it waits for one. Its agent reads the text through
+ * `env.chat.readFile`, as data. Deleted with the chat.
  */
 export const chatFiles = sqliteTable(
   "chat_files",
@@ -480,13 +483,42 @@ export const chatFiles = sqliteTable(
       .references(() => chats.id),
     messageId: integer("message_id").references(() => chatMessages.id),
     name: text().notNull(),
-    type: text().$type<ChatFileType>().notNull(),
+    type: text().$type<ChatFileType | ChatPictureType>().notNull(),
     /** The file's size, in bytes. */
     bytes: integer().notNull(),
     text: text().notNull(),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [index("chat_files_chat").on(table.chatId, table.createdAt)]
+);
+
+/**
+ * Bytes as SQLite keeps a blob, read and written as a `Uint8Array`: the
+ * Durable Object's SQL takes and gives an `ArrayBuffer`.
+ */
+const bytes = customType<{ data: Uint8Array; driverData: ArrayBuffer }>({
+  dataType: () => "blob",
+  // A copy: its own buffer holds exactly its bytes.
+  toDriver: (value) => new Uint8Array(value).buffer,
+  fromDriver: (value) => new Uint8Array(value),
+});
+
+/**
+ * A picture attached to a chat (`chat_files`), its bytes in order: a part
+ * at most `chatFilePartBytes` (workspace.ts), as SQLite here keeps no
+ * value past 2 MB. Kept in the person's own Workspace, as their chat is,
+ * which only they reach; deleted with its file's chat.
+ */
+export const chatFileParts = sqliteTable(
+  "chat_file_parts",
+  {
+    fileId: text("file_id")
+      .notNull()
+      .references(() => chatFiles.id),
+    part: integer().notNull(),
+    bytes: bytes().notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.fileId, table.part] })]
 );
 
 /** Where a held App call stands (held-app-calls.ts). */
