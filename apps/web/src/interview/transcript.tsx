@@ -28,11 +28,13 @@ import { Text } from "@grasp-os/ui/components/text";
 import { Icon, XIcon } from "@grasp-os/ui/lib/icons";
 import { fadeIn } from "@grasp-os/ui/lib/styles";
 import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { announce } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useInterviewer } from "./kept.ts";
+import { soundIsOn } from "./speech.ts";
 import { Marked } from "./talk.tsx";
 import { useInterviewWords } from "./words.ts";
 
@@ -175,6 +177,28 @@ const Line = ({
   );
 };
 
+/**
+ * While the transcript stands alone, the stage that reads his line out is
+ * inert, and the transcript's log only says how many lines came: each new
+ * line of his is said once, in his words. Not their own, which they know,
+ * and not when it is heard, which would say it twice.
+ */
+const useHisNewLinesSaid = (alone: boolean, lines: InterviewLine[]): void => {
+  const known = useRef(lines.length);
+  useEffect(() => {
+    const before = known.current;
+    known.current = lines.length;
+    if (!alone || soundIsOn()) {
+      return;
+    }
+    for (const line of lines.slice(before)) {
+      if (line.from === "stephen" && line.removed !== true) {
+        announce(line.text);
+      }
+    }
+  }, [alone, lines]);
+};
+
 export const Transcript = ({
   open,
   alone,
@@ -190,6 +214,7 @@ export const Transcript = ({
 }) => {
   const { t } = useLingui();
   const [removing, setRemoving] = useState<number | null>(null);
+  useHisNewLinesSaid(alone, lines);
   if (!open) {
     return null;
   }
@@ -210,10 +235,7 @@ export const Transcript = ({
       {lines.length === 0 ? (
         <Text color="muted">{t`Nothing said yet.`}</Text>
       ) : (
-        <div
-          aria-live={alone ? "polite" : "off"}
-          {...stylex.props(styles.thread)}
-        >
+        <div {...stylex.props(styles.thread)}>
           <MessageScrollerProvider autoScroll>
             <MessageScroller>
               <MessageScrollerViewport aria-label={t`Transcript`}>
