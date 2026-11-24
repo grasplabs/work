@@ -5,7 +5,7 @@
 import type {
   ChatChannel,
   ChatFileType,
-  ChatPlanKind,
+  ChatMakeKind,
 } from "@grasp-os/shared/chat";
 import type { ChatId } from "@grasp-os/shared/ids";
 import { sql } from "drizzle-orm";
@@ -78,11 +78,11 @@ export const chats = sqliteTable(
      */
     appId: text("app_id"),
     /**
-     * What "Make something" started the chat to make (`ChatMake`): an App
-     * or a workflow; null for any other chat. Kept for good, so a reload
+     * What "Make something" started the chat to make (`ChatMake`): an App,
+     * a workflow or an agent; null for any other chat. Kept for good, so a reload
      * offers what it came for.
      */
-    makeKind: text("make_kind").$type<ChatPlanKind>(),
+    makeKind: text("make_kind").$type<ChatMakeKind>(),
     /**
      * The project Build it makes things in, shared with everyone in it,
      * for a chat "Make something" started in one; null otherwise.

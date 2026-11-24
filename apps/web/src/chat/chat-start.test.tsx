@@ -1,7 +1,12 @@
 // @vitest-environment happy-dom
 
 import type { Blueprint } from "@grasp-os/shared/apps";
-import type { ChatAgent, ChatMake, ChatQuestion } from "@grasp-os/shared/chat";
+import type {
+  ChatAgent,
+  ChatMake,
+  ChatPlanKind,
+  ChatQuestion,
+} from "@grasp-os/shared/chat";
 import { blueprintIdSchema } from "@grasp-os/shared/ids";
 import type { Opportunity } from "@grasp-os/shared/opportunities";
 import type { Identity } from "@grasp-os/shared/rpc";
@@ -106,7 +111,7 @@ const opportunity: Opportunity = {
  * the opportunity `from` whose brief the box starts with.
  */
 const shown = async (
-  make?: ChatMake,
+  make?: ChatMake & { kind: ChatPlanKind },
   ideas?: MakeIdeas,
   {
     agents = [],

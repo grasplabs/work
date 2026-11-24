@@ -35,6 +35,8 @@ export const composio = fakeComposioApi(
         { slug: "HUBSPOT_LIST_CONTACTS", inputs: ["pipeline"] },
         { slug: "HUBSPOT_CREATE_CONTACT" },
         { slug: "HUBSPOT_UPDATE_CONTACT" },
+        // On its way out: never allowed.
+        { slug: "HUBSPOT_EXPORT_CONTACTS", isDeprecated: true },
       ],
     },
     // Composio holds no app for it, and it takes a key an admin types in.

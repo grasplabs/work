@@ -624,14 +624,16 @@ export const chatAgent = (agent: ChatAgent): Extension => {
   const asksLeft =
     agent.context.make === undefined
       ? chatAskLimits.questions
-      : makeQuestionsLeft(agent.history);
+      : makeQuestionsLeft(agent.history, agent.context.make.kind);
   // Who builds proposes what to make, in Grasp's own chat, any of theirs.
   // Never in a turn nobody asked for (a wake-up): a plan waits on the
-  // person's press, as a drafted agent does.
+  // person's press, as a drafted agent does. Not in a chat started to set
+  // up an agent, which drafts it instead: a plan makes no agent.
   const plans =
     agent.context.builds === true &&
     agent.context.channel === undefined &&
-    scope.unattended !== true;
+    scope.unattended !== true &&
+    agent.context.make?.kind !== "agent";
   const tools: AgentTool[] = [
     executeCode(agent),
     readApi(apis),
@@ -646,7 +648,7 @@ export const chatAgent = (agent: ChatAgent): Extension => {
     // started asks a few in all, then proposes what to make: its questions
     // are counted from the transcript, so none is offered once spent.
     ...(agent.context.channel === undefined && asksLeft > 0
-      ? [askQuestions(asksLeft)]
+      ? [askQuestions(Math.min(asksLeft, chatAskLimits.questions))]
       : []),
     ...(plans ? [proposePlan()] : []),
     // An agent drafted for the person, only in a turn they asked for in
@@ -654,7 +656,9 @@ export const chatAgent = (agent: ChatAgent): Extension => {
     ...(agent.context.drafts === undefined
       ? []
       : [
-          draftAgent(agent.context.drafts),
+          draftAgent(agent.context.drafts, {
+            appsNamed: agent.context.make?.kind === "agent",
+          }),
           draftAgentChange(agent.context.drafts),
         ]),
   ];

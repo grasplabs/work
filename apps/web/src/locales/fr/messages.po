@@ -11091,6 +11091,12 @@ msgstr "Utilisé seulement pour savoir à qui demander"
 msgid "Only when asked"
 msgstr "Seulement sur demande"
 
+#: src/agents/agent-facts.tsx
+#: src/chat/agent-draft-card.tsx
+#: src/settings/stephen-audience.tsx
+msgid "Only whoever made it"
+msgstr "Seulement la personne qui l’a créé"
+
 #: src/agents/agent-page.tsx
 #: src/agents/agents-overview.tsx
 msgid "Only you"
