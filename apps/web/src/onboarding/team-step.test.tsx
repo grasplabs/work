@@ -10,6 +10,7 @@ import {
   createRootRoute,
   createRouter,
 } from "@tanstack/react-router";
+import { datePattern, parseDate } from "@ui-sdk/react/date";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
@@ -20,6 +21,7 @@ import { firstChoice } from "./send-plan.ts";
 import { SetupStepBody } from "./setup-steps.tsx";
 import type { SetupData } from "./setup-steps.tsx";
 import { listeningOf, steps } from "./setup.ts";
+import type { SetupStep } from "./setup.ts";
 import { noteHeard, planDraft } from "./visit.ts";
 
 // The team step's plan, as a person in a region of their own types its
@@ -30,6 +32,9 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 /** A Monday: the first links go out tomorrow, Tuesday 24 November. */
 const today = "2026-11-23";
+
+/** The year the picker's example is in: this one, on the clock the test runs by. */
+const thisYear = new Date().getFullYear();
 
 const view: OnboardingView = {
   roster: {
@@ -127,19 +132,34 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** The team step, on a page in `language` in a browser set to `browser`; what core is asked to save. */
+/**
+ * The team step (or `step`), on a page in `language` in a browser set to
+ * `browser`, showing `given`; what core is asked to save, and how often the
+ * leads are confirmed. Read again after a change, core answers once
+ * `reread` settles.
+ */
 const shown = async (
   language: string,
-  browser: string[]
-): Promise<{ saved: PlanInput[] }> => {
+  browser: string[],
+  {
+    step = "team",
+    given = data,
+    reread,
+  }: { step?: SetupStep; given?: SetupData; reread?: Promise<unknown> } = {}
+): Promise<{ saved: PlanInput[]; confirmed: () => number }> => {
   i18n.loadAndActivate({ locale: language, messages: {} });
   browserIn(browser);
-  noteHeard("team");
+  noteHeard(step);
   const saved: PlanInput[] = [];
+  let confirms = 0;
+  let loads = 0;
   const core = {
     withSession: async <T,>(
       action: (session: {
-        onboarding: { savePlan: (plan: PlanInput) => Promise<OnboardingView> };
+        onboarding: {
+          savePlan: (plan: PlanInput) => Promise<OnboardingView>;
+          confirmRoster: () => Promise<OnboardingView>;
+        };
       }) => Promise<T>
     ): Promise<T> =>
       await action({
@@ -148,15 +168,25 @@ const shown = async (
             saved.push(plan);
             return await Promise.resolve(view);
           },
+          confirmRoster: async () => {
+            confirms += 1;
+            return await Promise.resolve(view);
+          },
         },
       }),
   };
   const router = createRouter({
     routeTree: createRootRoute({
+      loader: async () => {
+        loads += 1;
+        if (loads > 1) {
+          await reread;
+        }
+      },
       component: () => (
         <SetupStepBody
           cramped={false}
-          data={data}
+          data={given}
           furthest={0}
           go={() => {}}
           listening={listeningOf(
@@ -173,7 +203,7 @@ const shown = async (
           path={steps}
           percent={10}
           settled={[]}
-          step="team"
+          step={step}
           today={today}
         />
       ),
@@ -193,7 +223,7 @@ const shown = async (
     await router.load();
   });
   await settled();
-  return { saved };
+  return { saved, confirmed: () => confirms };
 };
 
 /** The field named `name`. */
@@ -254,6 +284,11 @@ const send = async (): Promise<void> => {
 const error = (): string | undefined =>
   document.querySelector('[data-slot="field-error"]')?.textContent?.trim();
 
+// Browsers whose first language counts in another calendar. Safari writes
+// "en-SA" in the Islamic one ("22/07/1448 AH"), which the picker reads as no day.
+const calendars = [["ar-SA"], ["fa-IR"], ["th-TH"], ["ja-JP-u-ca-japanese"]];
+const languages = ["en", "nl", "de", "fr", "es"];
+
 describe("the locale a day is typed in", () => {
   it("is the page's language in the browser's region, else its first language's", () => {
     expect({
@@ -268,18 +303,38 @@ describe("the locale a day is typed in", () => {
       nothing: dateLocale("fr", []),
       broken: dateLocale("es", ["not a tag", "es-MX"]),
     }).toStrictEqual({
-      uk: "en-GB",
-      us: "en-US",
-      onlyEnglish: "en-US",
-      dutchFirst: "en-US",
-      dutchOnly: "en-NL",
-      regionless: "en-NL",
-      dutch: "nl-BE",
-      german: "de-AT",
-      nothing: "fr",
-      broken: "es-MX",
+      uk: "en-GB-u-ca-gregory-nu-latn",
+      us: "en-US-u-ca-gregory-nu-latn",
+      onlyEnglish: "en-US-u-ca-gregory-nu-latn",
+      dutchFirst: "en-US-u-ca-gregory-nu-latn",
+      dutchOnly: "en-NL-u-ca-gregory-nu-latn",
+      regionless: "en-NL-u-ca-gregory-nu-latn",
+      dutch: "nl-BE-u-ca-gregory-nu-latn",
+      german: "de-AT-u-ca-gregory-nu-latn",
+      nothing: "fr-u-ca-gregory-nu-latn",
+      broken: "es-MX-u-ca-gregory-nu-latn",
     });
   });
+
+  it.each(calendars)(
+    "is Gregorian in Latin digits with %s first, and its example is read as the day it shows",
+    (first) => {
+      const read = languages.map((language) => {
+        const locale = dateLocale(language, [first, "en-US"]);
+        // Named in the locale itself: Node's own data writes "en-SA" in the Gregorian calendar, Safari's doesn't.
+        const { calendar, numberingSystem } = new Intl.Locale(locale);
+        const { example } = datePattern(locale);
+        return { calendar, numberingSystem, day: parseDate(example, locale) };
+      });
+      expect(read).toStrictEqual(
+        languages.map(() => ({
+          calendar: "gregory",
+          numberingSystem: "latn",
+          day: `${thisYear}-12-31`,
+        }))
+      );
+    }
+  );
 });
 
 // Each region's own order, day first or month first, as typed and as the field writes it back.
@@ -290,7 +345,7 @@ const regions = [
     dayFirst: "12/01/2027",
     monthFirst: "01/12/2027",
     reads: "dayFirst",
-    hint: "For example 31/12/2026",
+    hint: `For example 31/12/${thisYear}`,
     // As "What happens next" says it, in the page's language.
     said: "12 Jan 2027",
   },
@@ -300,7 +355,7 @@ const regions = [
     dayFirst: "12/01/2027",
     monthFirst: "01/12/2027",
     reads: "monthFirst",
-    hint: "For example 12/31/2026",
+    hint: `For example 12/31/${thisYear}`,
     // As "What happens next" says it, in the page's language.
     said: "12 Jan 2027",
   },
@@ -310,7 +365,7 @@ const regions = [
     dayFirst: "12-01-2027",
     monthFirst: "01-12-2027",
     reads: "dayFirst",
-    hint: "For example 31-12-2026",
+    hint: `For example 31-12-${thisYear}`,
     // As "What happens next" says it, in the page's language.
     said: "12 jan 2027",
   },
@@ -320,7 +375,7 @@ const regions = [
     dayFirst: "12.01.2027",
     monthFirst: "01.12.2027",
     reads: "dayFirst",
-    hint: "For example 31.12.2026",
+    hint: `For example 31.12.${thisYear}`,
     // As "What happens next" says it, in the page's language.
     said: "12. Jan. 2027",
   },
@@ -330,7 +385,7 @@ const regions = [
     dayFirst: "12/01/2027",
     monthFirst: "01/12/2027",
     reads: "dayFirst",
-    hint: "For example 31/12/2026",
+    hint: `For example 31/12/${thisYear}`,
     // As "What happens next" says it, in the page's language.
     said: "12 janv. 2027",
   },
@@ -340,7 +395,7 @@ const regions = [
     dayFirst: "12/01/2027",
     monthFirst: "01/12/2027",
     reads: "dayFirst",
-    hint: "For example 31/12/2026",
+    hint: `For example 31/12/${thisYear}`,
     // As "What happens next" says it, in the page's language.
     said: "12 ene 2027",
   },
@@ -404,8 +459,7 @@ describe("the team step's day, typed", () => {
       // What it would have said is still the day before, so it can't be sent with it.
       next: nextSaid().includes("on 24 Nov at 9:00"),
     }).toStrictEqual({
-      error:
-        "I can’t plan that day. Type one like 12/31/2026, 23 Nov or later.",
+      error: `I can’t plan that day. Type one like 12/31/${thisYear}, from 23 Nov to 23 Nov 2028.`,
       marked: "true",
       disabled: true,
       next: true,
@@ -431,6 +485,38 @@ describe("the team step's day, typed", () => {
     });
     await send();
     expect(saved.map((plan) => plan.start)).toStrictEqual(["2026-12-31"]);
+  });
+
+  it.each(calendars)(
+    "with %s first, shows an example that is taken as typed",
+    async (first) => {
+      const { saved } = await shown("en", [first]);
+      const hint = document
+        .querySelector('[data-slot="field-description"]')
+        ?.textContent?.replace(/^For example /u, "");
+      await typeDay(hint ?? "");
+      expect(error()).toBeUndefined();
+      await send();
+      expect(saved.map((plan) => plan.start)).toStrictEqual([
+        `${thisYear}-12-31`,
+      ]);
+    }
+  );
+
+  it("refuses a day more than two years ahead, and says which days it takes", async () => {
+    const { saved } = await shown("en", ["en-GB"]);
+    await typeDay("24/11/2028");
+    expect({
+      error: error(),
+      disabled: sendButton().disabled,
+    }).toStrictEqual({
+      error: `I can’t plan that day. Type one like 31/12/${thisYear}, from 23 Nov to 23 Nov 2028.`,
+      disabled: true,
+    });
+    await typeDay("23/11/2028");
+    expect(error()).toBeUndefined();
+    await send();
+    expect(saved.map((plan) => plan.start)).toStrictEqual(["2028-11-23"]);
   });
 
   it("refuses a day before today, and text that is no day at all", async () => {

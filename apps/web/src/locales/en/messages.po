@@ -6880,8 +6880,8 @@ msgid "https:// and a public host name, with nothing after it."
 msgstr "https:// and a public host name, with nothing after it."
 
 #: src/onboarding/send-plan-form.tsx
-msgid "I can’t plan that day. Type one like {example}, {earliest} or later."
-msgstr "I can’t plan that day. Type one like {example}, {earliest} or later."
+msgid "I can’t plan that day. Type one like {example}, from {earliest} to {latest}."
+msgstr "I can’t plan that day. Type one like {example}, from {earliest} to {latest}."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I can’t read {name}: it’s in an old format. As a PDF or a newer file, I can."

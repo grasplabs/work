@@ -23,6 +23,7 @@ import {
 } from "@grasp-os/ui/lib/tokens.stylex";
 import { Plural, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
+import { addYears, datePattern } from "@ui-sdk/react/date";
 import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
@@ -183,16 +184,10 @@ const useDateLocale = (): string => {
   );
 };
 
-/** The last day of `year` as it is typed in `locale`, so its order is plain: "31/12/2026", "12/31/2026". */
-const exampleDay = (year: number, locale: string): string =>
-  new Intl.DateTimeFormat(locale, {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(Date.UTC(year, 11, 31));
+/** How far ahead a plan can be: further is a slip of the keys ("2062" for "2026"). */
+const yearsAhead = 2;
 
-/** Where Damsko's DatePicker marks typed text it can't take, a day that is none or comes too early. */
+/** Where Damsko's DatePicker marks typed text it can't take, a day that is none or comes too early or too late. */
 const unreadable = '[data-slot="date-picker"][data-invalid]';
 
 /**
@@ -210,7 +205,7 @@ const DayField = ({
   onWrong,
 }: {
   label: string;
-  /** The first day that can be planned. */
+  /** The first day that can be planned; the last is two years from today. */
   min: string;
   value: string;
   today: string;
@@ -219,8 +214,11 @@ const DayField = ({
 }) => {
   const { t, i18n } = useLingui();
   const locale = useDateLocale();
-  const example = exampleDay(yearOf(today), locale);
+  // The picker's own example, the last day of this year, so typed as shown it is read as that day.
+  const { example } = datePattern(locale);
+  const max = addYears(today, yearsAhead);
   const earliest = formatDay(min, i18n.locale, yearOf(today));
+  const latest = formatDay(max, i18n.locale, yearOf(today));
   const box = useRef<HTMLDivElement>(null);
   const [wrong, setWrong] = useState(false);
   // At once: the press that left the field lands on a plan that waits.
@@ -256,6 +254,7 @@ const DayField = ({
         <DatePicker
           aria-label={label}
           locale={locale}
+          max={max}
           min={min}
           onValueChange={(day) => {
             if (typeof day === "string" && day !== "") {
@@ -266,7 +265,7 @@ const DayField = ({
           value={value}
         />
         <FieldDescription>{t`For example ${example}`}</FieldDescription>
-        <FieldError>{t`I can’t plan that day. Type one like ${example}, ${earliest} or later.`}</FieldError>
+        <FieldError>{t`I can’t plan that day. Type one like ${example}, from ${earliest} to ${latest}.`}</FieldError>
       </Field>
     </div>
   );

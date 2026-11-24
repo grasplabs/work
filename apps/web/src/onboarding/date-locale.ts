@@ -18,7 +18,10 @@ const localeOf = (tag: string): Intl.Locale | undefined => {
  * `language` in a browser that prefers `browser` (`navigator.languages`):
  * the browser's own choice of region for that language ("en-GB"), else
  * the region of its first language ("en" with "nl-NL" first: "en-NL",
- * day first), else the language's usual one ("en": the US).
+ * day first), else the language's usual one ("en": the US). Always in
+ * the Gregorian calendar and Latin digits, the days and digits the
+ * picker reads: Safari writes "en-SA" in the Islamic calendar, "en-TH"
+ * may count Buddhist years.
  */
 export const dateLocale = (
   language: string,
@@ -33,5 +36,9 @@ export const dateLocale = (
     (locale) => locale.language === base && locale.region !== undefined
   );
   const region = own?.region ?? preferred[0]?.maximize().region;
-  return region === undefined ? base : `${base}-${region}`;
+  return new Intl.Locale(base, {
+    ...(region === undefined ? {} : { region }),
+    calendar: "gregory",
+    numberingSystem: "latn",
+  }).toString();
 };
