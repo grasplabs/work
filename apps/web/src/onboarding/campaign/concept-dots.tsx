@@ -199,7 +199,7 @@ export const CampaignDots = ({ campaign }: { campaign: Campaign }) => {
               <span {...stylex.props(wide.only)}>
                 <Text color={first === undefined ? "muted" : "default"}>
                   {first === undefined
-                    ? "Nothing learned yet: the first findings come on day two."
+                    ? "Nothing learned yet. The first findings come on day two."
                     : findingSentence(first, each, {
                         named: false,
                         grouped: campaign.grouped,

@@ -63,10 +63,10 @@ export const CampaignMeadow = ({ campaign }: { campaign: Campaign }) => {
   const { lead, rest } = statementOf(campaign);
   const three = firstThree(campaign);
   const label = campaign.grouped
-    ? `A meadow of everyone invited: ${campaign.teams
+    ? `A meadow of everyone invited. ${campaign.teams
         .map((each) => `${each.name}, ${talkedWords(each, true)}`)
-        .join("; ")}.`
-    : `A meadow of everyone invited: ${rest}`;
+        .join(". ")}.`
+    : `A meadow of everyone invited. ${rest}`;
   return (
     <div {...stylex.props(styles.page)}>
       <MeadowField campaign={campaign} label={label} />

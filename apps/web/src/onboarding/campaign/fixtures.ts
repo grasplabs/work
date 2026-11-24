@@ -90,13 +90,13 @@ const planning = {
       id: "p1",
       topic: "Weekly planning",
       kind: "flow",
-      text: "A job is planned twice: on the whiteboard on Monday morning, then typed into the planning tool by Wednesday.",
+      text: "A job is planned twice. First on the whiteboard on Monday morning, then in the planning tool by Wednesday.",
     },
     {
       id: "p2",
       topic: "Urgent call-outs",
       kind: "difference",
-      text: "Two people said differently who decides on an urgent call-out: the duty planner, or whoever answers the phone.",
+      text: "Two people said differently who decides on an urgent call-out. One said the duty planner, the other whoever answers the phone.",
     },
     {
       id: "p3",
@@ -116,7 +116,7 @@ const field = {
       id: "f1",
       topic: "Work orders",
       kind: "flow",
-      text: "After a job the work order is photographed and sent on WhatsApp; the office types it over.",
+      text: "After a job, the work order is photographed and sent on WhatsApp. The office types it over.",
     },
     {
       id: "f2",
@@ -128,7 +128,7 @@ const field = {
       id: "f3",
       topic: "Closing a job",
       kind: "difference",
-      text: "Two people said differently when a job is closed: when the engineer leaves, or once the customer signs.",
+      text: "Two people said differently when a job is closed. One said when the engineer leaves, the other once the customer signs.",
     },
   ],
 } as const satisfies Omit<TeamPicture, "talked" | "leadTalked">;
@@ -148,7 +148,7 @@ const service = {
       id: "s2",
       topic: "Complaints",
       kind: "difference",
-      text: "Two people said differently where a complaint is kept: the shared mailbox, or the complaints spreadsheet.",
+      text: "Two people said differently where a complaint is kept. One said the shared mailbox, the other the complaints spreadsheet.",
     },
   ],
 } as const satisfies Omit<TeamPicture, "talked" | "leadTalked">;
@@ -168,7 +168,7 @@ const finance = {
       id: "n2",
       topic: "Credit checks",
       kind: "difference",
-      text: "Two people said differently when the credit check is done: before the quote, or after the first order.",
+      text: "Two people said differently when the credit check is done. One said before the quote, the other after the first order.",
     },
   ],
 } as const satisfies Omit<TeamPicture, "talked" | "leadTalked">;
@@ -182,7 +182,7 @@ const purchasing = {
       id: "u1",
       topic: "Ordering stock",
       kind: "flow",
-      text: "Stock is ordered when a shelf looks empty; no minimum is written down.",
+      text: "Stock is ordered when a shelf looks empty. No minimum is written down.",
     },
   ],
 } as const satisfies Omit<TeamPicture, "talked" | "leadTalked">;
@@ -356,7 +356,7 @@ export const campaigns: Record<CampaignState, Campaign> = {
             id: "l1",
             topic: "Starting a project",
             kind: "flow",
-            text: "A project starts with a call and a site visit; the brief is written only after the second meeting.",
+            text: "A project starts with a call and a site visit. The brief is written only after the second meeting.",
           },
           {
             id: "l2",
@@ -368,7 +368,7 @@ export const campaigns: Record<CampaignState, Campaign> = {
             id: "l3",
             topic: "Logging hours",
             kind: "difference",
-            text: "Two people said differently how hours are logged: daily in the timesheet, or at the end of each project.",
+            text: "Two people said differently how hours are logged. One said daily in the timesheet, the other at the end of each project.",
           },
         ],
       },
