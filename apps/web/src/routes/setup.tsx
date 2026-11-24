@@ -261,7 +261,7 @@ const Setup = () => {
     <CalmFrame
       userId={identity.userId}
       ways={waysOf(index, furthest, path, go)}
-      centred={step === "open"}
+      centred={step === "open" || step === "company"}
       language={step !== "welcome"}
       pose={poses[step]}
     >

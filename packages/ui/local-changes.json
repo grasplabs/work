@@ -12,7 +12,7 @@
   },
   {
     "path": "src/components/item.tsx",
-    "reason": "A one-line description is cut at the row's edge: in Connect API key a long region ran out of its tile.",
+    "reason": "A one-line description is cut at the row's edge: in Connect API key a long region ran out of its tile. And ItemGrid's columns, so many tiles a row from a small window up: seven places stand three, three and one.",
     "since": "2026-11-24"
   },
   {

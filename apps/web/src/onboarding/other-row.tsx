@@ -56,7 +56,7 @@ export const OtherRow = ({
         variant="outline"
       >
         {media === undefined ? null : (
-          <ItemMedia variant="image">{media}</ItemMedia>
+          <ItemMedia variant="icon">{media}</ItemMedia>
         )}
         <ItemContent>
           <ItemTitle>{label}</ItemTitle>
@@ -67,7 +67,7 @@ export const OtherRow = ({
   return (
     <Item variant="outline">
       {media === undefined ? null : (
-        <ItemMedia variant="image">{media}</ItemMedia>
+        <ItemMedia variant="icon">{media}</ItemMedia>
       )}
       <ItemContent>
         <Input

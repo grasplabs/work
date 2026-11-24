@@ -90,6 +90,13 @@ export interface ItemProps {
    * @default false
    */
   active?: boolean;
+  /**
+   * A choice taken, or a thing done: its edge in the success colour with a soft glow round it.
+   * Say what it means in its words too (a visually hidden "noted" in the title): the glow is
+   * not read out.
+   * @default false
+   */
+  done?: boolean;
   /** Where the whole row leads: it is one link, with a chevron at its end. */
   href?: string;
   /**
@@ -146,6 +153,11 @@ export interface ItemGridProps {
   "aria-label"?: string;
   /** The id of a heading that names it, in place of `aria-label`. */
   "aria-labelledby"?: string;
+  /**
+   * So many tiles in a row from a small window up, whatever their room ("3": seven places stand
+   * three, three and one); on a phone, as many as fit. Left out, as many as fit at every width.
+   */
+  columns?: 2 | 3 | 4;
   /** Layout only: margins, alignment and width. */
   style?: LayoutStyle;
 }
@@ -290,6 +302,13 @@ const styles = stylex.create({
     backgroundColor: colors.accentActive,
     outlineStyle: { default: "none", [FORCED]: "solid" },
     outlineWidth: { default: null, [FORCED]: sizes.hairline },
+  },
+  // A choice taken: the success edge, and its glow round it; a thicker edge in forced colours.
+  done: {
+    borderColor: colors.success,
+    boxShadow: `0 0 0 ${sizes.hairline} ${colors.success}, 0 0 ${space["4"]} ${colors.successGlow}`,
+    outlineStyle: { default: "none", [FORCED]: "solid" },
+    outlineWidth: { default: null, [FORCED]: sizes.ringWidth },
   },
   // A row that holds a stretched press: the press's target covers it.
   stretched: { position: "relative" },
@@ -626,6 +645,28 @@ const styles = stylex.create({
   },
 });
 
+// A fixed number of tiles a row from a small window up; on a phone the grid's own, as many as fit.
+const gridColumns = stylex.create({
+  2: {
+    gridTemplateColumns: {
+      default: `repeat(auto-fill, minmax(min(100%, ${sizes.itemGridTile}), 1fr))`,
+      [media.sm]: "repeat(2, minmax(0, 1fr))",
+    },
+  },
+  3: {
+    gridTemplateColumns: {
+      default: `repeat(auto-fill, minmax(min(100%, ${sizes.itemGridTile}), 1fr))`,
+      [media.sm]: "repeat(3, minmax(0, 1fr))",
+    },
+  },
+  4: {
+    gridTemplateColumns: {
+      default: `repeat(auto-fill, minmax(min(100%, ${sizes.itemGridTile}), 1fr))`,
+      [media.sm]: "repeat(4, minmax(0, 1fr))",
+    },
+  },
+});
+
 const waits = stylex.create({
   // The mark's square, at the row's size.
   // Each box clips its skeleton to its own size and corner.
@@ -957,6 +998,7 @@ const lookOf = (
     variant = "default",
     size = "default",
     active = false,
+    done = false,
     wraps,
     style,
   }: RowShape,
@@ -975,6 +1017,7 @@ const lookOf = (
     ],
     wraps && styles.wraps,
     active && styles.active,
+    done && styles.done,
     style
   );
 
@@ -1105,6 +1148,7 @@ export const ItemGrid = ({
   children,
   "aria-label": label,
   "aria-labelledby": labelledBy,
+  columns,
   style,
 }: ItemGridProps) => (
   <InList value>
@@ -1114,7 +1158,11 @@ export const ItemGrid = ({
       aria-label={label}
       aria-labelledby={labelledBy}
       data-slot="item-grid"
-      {...stylex.props(styles.grid, style)}
+      {...stylex.props(
+        styles.grid,
+        columns !== undefined && gridColumns[columns],
+        style
+      )}
     >
       {children}
     </ul>

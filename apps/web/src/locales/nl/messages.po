@@ -374,6 +374,15 @@ msgstr "{count, plural, one {# pagina} other {# pagina's}}"
 msgid "{count, plural, one {# part that works behind the pages} other {# parts that work behind the pages}}"
 msgstr "{count, plural, one {# onderdeel dat achter de pagina’s werkt} other {# onderdelen die achter de pagina’s werken}}"
 
+#: src/onboarding/company-rows.tsx
+msgid "{count, plural, one {# person, led by {lead}} other {# people, led by {lead}}}"
+msgstr "{count, plural, one {# persoon, geleid door {lead}} other {# mensen, geleid door {lead}}}"
+
+#: src/onboarding/company-dots.tsx
+#: src/onboarding/company-rows.tsx
+msgid "{count, plural, one {# person} other {# people}}"
+msgstr "{count, plural, one {# persoon} other {# mensen}}"
+
 #: src/brain/brain.ts
 msgid "{count, plural, one {# remark on tools} other {# remarks on tools}}"
 msgstr "{count, plural, one {# opmerking over tools} other {# opmerkingen over tools}}"
@@ -876,6 +885,10 @@ msgstr "{more, plural, one {{words}, en nog #} other {{words}, en nog #}}"
 #: src/drafts/draft-history.tsx
 msgid "{more, plural, one {# more file} other {# more files}}"
 msgstr "{more, plural, one {# ander bestand} other {# andere bestanden}}"
+
+#: src/onboarding/company-dots.tsx
+msgid "{more, plural, one {# other} other {# others}}"
+msgstr "{more, plural, one {# ander} other {# anderen}}"
 
 #: src/drafts/share-with-team.tsx
 msgid "{more, plural, one {and # more} other {and # more}}"
@@ -2648,6 +2661,7 @@ msgstr "Ook aan gewerkt"
 msgid "Also works on its own"
 msgstr "Werkt ook zelfstandig"
 
+#: src/onboarding/company-dots.tsx
 #: src/onboarding/company-step.tsx
 msgid "Among them {names}."
 msgstr "Onder hen {names}."
@@ -3363,9 +3377,12 @@ msgstr "Gevraagd door {requester} op {date}"
 msgid "Asked by a former member"
 msgstr "Aangevraagd door een voormalig lid"
 
+#: src/onboarding/sources-step.tsx
+msgid "asked for"
+msgstr "aangevraagd"
+
 #: src/agents/agent-apps-card.tsx
 #: src/apps/app-access-requests.tsx
-#: src/onboarding/sources-step.tsx
 msgid "Asked for"
 msgstr "Doorgegeven"
 
@@ -4640,8 +4657,8 @@ msgid "Connect your Microsoft or Google sign-in. I’ll only see names, teams an
 msgstr "Koppel je Microsoft- of Google-login. Ik zie alleen namen, teams en rollen. Geen lijst bij de hand? Sla dit over, dan regelen we het samen met je."
 
 #: src/onboarding/sources-step.tsx
-msgid "Connected"
-msgstr "Gekoppeld"
+msgid "connected"
+msgstr "verbonden"
 
 #: src/routes/_shell.integrations.index.tsx
 msgctxt "apps that are connected and that workflows use"
@@ -7877,6 +7894,10 @@ msgstr "Importeren of exporteren"
 msgid "In {name}, make a service user that may read people’s basic and work details, and paste its ID and token here."
 msgstr "Maak in {name} een service user aan die de basis- en werkgegevens van mensen mag lezen, en plak hier de ID en het token."
 
+#: src/onboarding/company-dots.tsx
+msgid "In {name}: {everyone}."
+msgstr "In {name}: {everyone}."
+
 #: src/settings/directory-placement.tsx
 msgid "In {team} from the directory."
 msgstr "In {team} via de directory."
@@ -10599,8 +10620,8 @@ msgid "Note not found"
 msgstr "Notitie niet gevonden"
 
 #: src/onboarding/sources-step.tsx
-msgid "Noted"
-msgstr "Genoteerd"
+msgid "noted"
+msgstr "genoteerd"
 
 #: src/activity/audit-words.ts
 msgid "Noted a question asked in a chat, to keep in its person's own Brain"
@@ -18947,6 +18968,8 @@ msgstr "Je team heeft deze"
 msgid "Your team uses it"
 msgstr "Je team gebruikt het"
 
+#: src/onboarding/company-dots.tsx
+#: src/onboarding/company-rows.tsx
 #: src/onboarding/leads-step.tsx
 msgid "Your teams"
 msgstr "Je teams"

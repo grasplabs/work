@@ -22,6 +22,7 @@ import { GraspLogo } from "../connections/brand-logos.ts";
 import { chooseLocale, isLocale, localeNames } from "../i18n.ts";
 import type { Locale } from "../i18n.ts";
 import type { Pose } from "../onboarding/field/engine.ts";
+import { aside } from "../onboarding/field/poses.ts";
 import { StephenField } from "../onboarding/field/stephen-field.tsx";
 import { useNarrow } from "../onboarding/use-narrow.ts";
 
@@ -165,7 +166,7 @@ export const Frame = ({
 }: {
   /** The texture behind the header. */
   strip?: boolean;
-  /** Stephen's field behind the whole screen, resting here; the header's texture gives way to it. */
+  /** Where Stephen's field rests behind the screen; left out, he keeps out of the way and the header has its texture. */
   pose?: Pose;
   /** More at the header's end, before the language. */
   actions?: ReactNode;
@@ -191,13 +192,11 @@ export const Frame = ({
       <main {...stylex.props(styles.main)}>{children}</main>
     </>
   );
+  // Always on his field, so a screen that changes to or from the conversation never takes the
+  // page out from under him (React lost track of it when it did).
   return (
     <div {...stylex.props(styles.frame)}>
-      {pose === undefined ? (
-        screen
-      ) : (
-        <StephenField pose={pose}>{screen}</StephenField>
-      )}
+      <StephenField pose={pose ?? aside}>{screen}</StephenField>
     </div>
   );
 };
