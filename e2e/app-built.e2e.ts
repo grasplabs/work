@@ -109,9 +109,17 @@ test("a builder makes an App from what they want done, shares it with their team
     .filter({ hasText: userIdEnd })
     .click(built);
   await sharing.getByRole("button", { name: "Add", exact: true }).click();
-  // The share held: Share lists them, its one Person. The bar folds as the
-  // chat takes its width again, Publish an icon of the same name: pressed
-  // once the bar has settled.
+  // The share held: Share lists them, its one Person.
+  await expect(
+    sharing
+      .getByRole("list", { name: "Shared with" })
+      .getByRole("listitem")
+      .filter({ hasText: "Person" })
+  ).toHaveCount(1, built);
+  await sharing.getByRole("button", { name: "Done", exact: true }).click();
+  await expect(sharing).toHaveCount(0);
+  // The bar folds as the chat takes its width again, Publish an icon of
+  // the same name: pressed once the bar has settled.
   const publishing = page.getByRole("dialog", {
     name: `Publish ${appPlanned}`,
   });
@@ -126,16 +134,6 @@ test("a builder makes an App from what they want done, shares it with their team
       await expect(publishing).toBeVisible({ timeout: 2000 });
     }).toPass(built);
   };
-  await openPublishing();
-  await publishing.getByRole("button", { name: "Manage" }).click();
-  await expect(
-    sharing
-      .getByRole("list", { name: "Shared with" })
-      .getByRole("listitem")
-      .filter({ hasText: "Person" })
-  ).toHaveCount(1, built);
-  await sharing.getByRole("button", { name: "Done", exact: true }).click();
-  await expect(sharing).toHaveCount(0);
   // Publish checks the draft and makes it the first version.
   await openPublishing();
   await publishing
