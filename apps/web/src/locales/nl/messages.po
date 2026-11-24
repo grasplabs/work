@@ -25,11 +25,6 @@ msgctxt "a number that changed: what it was before"
 msgid "(was {before})"
 msgstr "(was {before})"
 
-#. placeholder {0}: webhook.dropped
-#: src/apps/app-webhooks.tsx
-msgid "{0, plural, one {# event wasn't sent: too many were waiting for this address.} other {# events weren't sent: too many were waiting for this address.}}"
-msgstr "{0, plural, one {# gebeurtenis is niet verstuurd: er wachtten te veel voor dit adres.} other {# gebeurtenissen zijn niet verstuurd: er wachtten te veel voor dit adres.}}"
-
 #. placeholder {0}: out.length
 #: src/interview/read-back.tsx
 msgid "{0, plural, one {# line taken out.} other {# lines taken out.}}"
@@ -39,16 +34,6 @@ msgstr "{0, plural, one {# regel weggehaald.} other {# regels weggehaald.}}"
 #: src/onboarding/send-plan-form.tsx
 msgid "{0, plural, one {# person} other {# people}}"
 msgstr "{0, plural, one {# persoon} other {# personen}}"
-
-#. placeholder {0}: result.inserted
-#: src/apps/app-data.tsx
-msgid "{0, plural, one {# record added.} other {# records added.}}"
-msgstr "{0, plural, one {# record toegevoegd.} other {# records toegevoegd.}}"
-
-#. placeholder {0}: preview.rows
-#: src/apps/app-data.tsx
-msgid "{0, plural, one {# row to import.} other {# rows to import.}}"
-msgstr "{0, plural, one {# rij om te importeren.} other {# rijen om te importeren.}}"
 
 #. placeholder {0}: effect.statements
 #: src/brain/forget.tsx
@@ -178,6 +163,11 @@ msgstr "{at} van {whole}"
 #: src/workflows/workflow-diagram.tsx
 msgid "{attempts, plural, one {# attempt} other {# attempts}}"
 msgstr "{attempts, plural, one {# poging} other {# pogingen}}"
+
+#. A field's value before a change, then after it.
+#: src/apps/app-data.tsx
+msgid "{before} → {after}"
+msgstr "{before} → {after}"
 
 #: src/frame/ui-words.tsx
 msgid "{before} before, {after} after"
@@ -595,6 +585,10 @@ msgstr "{done} gedaan · {failed} mislukt · 30 dagen"
 msgid "{done} of {0}"
 msgstr "{done} van {0}"
 
+#: src/apps/app-webhooks.tsx
+msgid "{dropped, plural, one {# event wasn't sent: too many were waiting for this address.} other {# events weren't sent: too many were waiting for this address.}}"
+msgstr "{dropped, plural, one {# gebeurtenis is niet verstuurd: er wachtten te veel voor dit adres.} other {# gebeurtenissen zijn niet verstuurd: er wachtten te veel voor dit adres.}}"
+
 #: src/brain/thinking/work-hours.tsx
 msgid "{each, plural, one {# hour a week} other {# hours a week}}"
 msgstr "{each, plural, one {# uur per week} other {# uur per week}}"
@@ -714,6 +708,10 @@ msgstr "{hours, plural, one {# uur} other {# uur}}"
 msgid "{hours} of the {all} hours a week"
 msgstr "{hours} van de {all} uur per week"
 
+#: src/apps/app-data.tsx
+msgid "{inserted, plural, one {# record added.} other {# records added.}}"
+msgstr "{inserted, plural, one {# record toegevoegd.} other {# records toegevoegd.}}"
+
 #: src/brain/brain.ts
 msgid "{invited, plural, one {Stakeholders of {interviewed} of # invited team} other {Stakeholders of {interviewed} of # invited teams}}"
 msgstr "{invited, plural, one {Stakeholders van {interviewed} van # uitgenodigd team} other {Stakeholders van {interviewed} van # uitgenodigde teams}}"
@@ -806,8 +804,8 @@ msgid "{line}; {failed}"
 msgstr "{line}; {failed}"
 
 #: src/apps/app-code.tsx
-msgid "{lines, plural, one {# line} other {# lines}}"
-msgstr "{lines, plural, one {# regel} other {# regels}}"
+msgid "{lines, plural, one {# line, read only} other {# lines, read only}}"
+msgstr "{lines, plural, one {# regel, alleen lezen} other {# regels, alleen lezen}}"
 
 #: src/onboarding/setup-steps.tsx
 msgid "{mapped, plural, one {One piece of work is mapped and ready for you.} other {# pieces of work are mapped and ready for you.}}"
@@ -1310,6 +1308,10 @@ msgstr "{role}, uitgenodigd op {date}, nog niet geïnterviewd"
 #: src/brain/brain.ts
 msgid "{role}, not invited yet, not interviewed yet"
 msgstr "{role}, nog niet uitgenodigd, nog niet geïnterviewd"
+
+#: src/apps/app-data.tsx
+msgid "{rows, plural, one {# row to import.} other {# rows to import.}}"
+msgstr "{rows, plural, one {# rij om te importeren.} other {# rijen om te importeren.}}"
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "{runs, plural, one {# run} other {# runs}}"
@@ -2308,11 +2310,6 @@ msgctxt "a file"
 msgid "Added"
 msgstr "Toegevoegd"
 
-#: src/apps/draft-changes.tsx
-msgctxt "a file a change adds"
-msgid "Added"
-msgstr "Toegevoegd"
-
 #: src/apps/app-data.tsx
 msgctxt "a record was added"
 msgid "Added"
@@ -2377,6 +2374,10 @@ msgstr "Toegevoegd aan de skills van het team, en sindsdien niet meer in gebruik
 msgid "Added to the team's skills."
 msgstr "Toegevoegd aan de skills van het team."
 
+#: src/apps/app-webhooks.tsx
+msgid "Adding"
+msgstr "Wordt toegevoegd"
+
 #: src/projects/file-item-dialog.tsx
 msgid "Adding an app or workflow shares it with nobody. Only those it is shared with see it here."
 msgstr "Een app of workflow toevoegen deelt die met niemand. Alleen wie er toegang toe heeft, ziet die hier."
@@ -2389,6 +2390,10 @@ msgstr "Adres"
 #: src/workflows/workflow-triggers.tsx
 msgid "Address, the part before the @"
 msgstr "Adres, het deel vóór de @"
+
+#: src/apps/app-webhooks.tsx
+msgid "Addresses"
+msgstr "Adressen"
 
 #: src/apps/data-model-changes.tsx
 msgid "Adds {field} to {table}."
@@ -2928,10 +2933,6 @@ msgstr "App niet gevonden"
 msgid "App or workflow"
 msgstr "App of workflow"
 
-#: src/pages/page-frame.tsx
-msgid "App page"
-msgstr "App-pagina"
-
 #: src/routes/_shell.settings.models.tsx
 msgid "App spend"
 msgstr "Uitgaven per app"
@@ -3123,8 +3124,13 @@ msgstr "Apps die met je gedeeld zijn"
 msgid "Apps taken off"
 msgstr "Weggehaalde apps"
 
+#: src/apps/apps-overview.tsx
+msgid "Apps you build or answer for stand here."
+msgstr "Hier staan de apps die je bouwt of waarvoor je verantwoordelijk bent."
+
 #: src/apps/app-settings.tsx
 #: src/apps/app-status.tsx
+#: src/apps/apps-overview.tsx
 #: src/chat/chat-window.tsx
 msgid "Archive"
 msgstr "Archiveren"
@@ -3146,6 +3152,7 @@ msgstr "Archiveren en offline halen"
 msgid "Archived"
 msgstr "Gearchiveerd"
 
+#: src/apps/apps-overview.tsx
 #: src/drafts/status-badge.tsx
 msgctxt "an App put away"
 msgid "Archived"
@@ -3376,6 +3383,10 @@ msgstr "Vroeg je naar {list}"
 #: src/brain/brain-log.tsx
 msgid "Asked: {title}"
 msgstr "Gevraagd: {title}"
+
+#: src/apps/app-access-requests.tsx
+msgid "Asking"
+msgstr "Vragen"
 
 #: src/chat/thread.tsx
 msgid "Asking to connect {binding}"
@@ -3631,6 +3642,10 @@ msgstr "Apps en workflows bouwen, en de rechten vragen die ze nodig hebben"
 msgid "Build it"
 msgstr "Bouwen"
 
+#: src/apps/apps-overview.tsx
+msgid "Build new app"
+msgstr "Nieuwe app bouwen"
+
 #: src/labels.ts
 msgid "Builder"
 msgstr "Bouwer"
@@ -3640,7 +3655,6 @@ msgctxt "workflow phase"
 msgid "Building"
 msgstr "In aanbouw"
 
-#: src/apps/app-workspace.tsx
 #: src/chat/subject-bar.tsx
 msgid "Building…"
 msgstr "Wordt gebouwd…"
@@ -3744,15 +3758,15 @@ msgstr "Uitvoeren kan niet: {unread}"
 #: src/agents/agent-page.tsx
 #: src/apps/app-access-requests.tsx
 #: src/apps/app-data-model.tsx
-#: src/apps/app-remove.tsx
+#: src/apps/app-own-link.tsx
 #: src/apps/app-reset.tsx
 #: src/apps/app-status.tsx
+#: src/apps/app-webhooks.tsx
 #: src/apps/app-workflows.tsx
 #: src/apps/blueprints.tsx
 #: src/apps/data-model-changes.tsx
 #: src/apps/field-editor.tsx
 #: src/apps/release-controls.tsx
-#: src/apps/reset-test-data.tsx
 #: src/brain/gap-actions.tsx
 #: src/brain/goals-editor.tsx
 #: src/brain/memories-page.tsx
@@ -3959,11 +3973,6 @@ msgstr "Aanpassen: {text}"
 msgid "Changed"
 msgstr "Gewijzigd"
 
-#: src/apps/draft-changes.tsx
-msgctxt "a file a change changes"
-msgid "Changed"
-msgstr "Gewijzigd"
-
 #: src/apps/app-data.tsx
 msgctxt "a record's fields changed"
 msgid "Changed"
@@ -4082,6 +4091,10 @@ msgstr "Wijzigingen die alleen jij ziet"
 #: src/apps/data-model-changes.tsx
 msgid "Changes who can see and change the records of {table}."
 msgstr "Wijzigt wie de records van {table} kan zien en wijzigen."
+
+#: src/apps/app-workflows.tsx
+msgid "Changing"
+msgstr "Bezig met wijzigen"
 
 #: src/chat/thread.tsx
 msgid "Changing the App's definition"
@@ -4342,14 +4355,6 @@ msgstr "Gewist"
 msgid "Click or drop a picture."
 msgstr "Klik of sleep een afbeelding hierheen."
 
-#: src/apps/app-access-requests.tsx
-#: src/apps/app-data-model.tsx
-#: src/apps/app-data.tsx
-#: src/apps/app-workflows.tsx
-#: src/apps/blueprints.tsx
-#: src/apps/data-model-changes.tsx
-#: src/apps/release-controls.tsx
-#: src/apps/resource-bindings.tsx
 #: src/brain/forget.tsx
 #: src/brain/memories-page.tsx
 #: src/chat/chat-panel.tsx
@@ -4460,6 +4465,10 @@ msgstr "Verkoop"
 #: src/routes/_shell.settings.billing.tsx
 msgid "Company"
 msgstr "Bedrijf"
+
+#: src/apps/apps-overview.tsx
+msgid "Company apps"
+msgstr "Apps van het bedrijf"
 
 #: src/activity/pending.tsx
 msgid "Company Brain, read only. This can recall and look up what everyone in the company may read, its entities and their memories included, never a team's or anyone's own content. It can never write to the Brain. Every read is recorded"
@@ -4723,7 +4732,7 @@ msgctxt "a kind of thing the Brain remembers"
 msgid "Connections"
 msgstr "Verbindingen"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "Connections"
 msgstr "Verbindingen"
@@ -4819,7 +4828,6 @@ msgstr "Gesprekken"
 msgid "Copenhagen"
 msgstr "Kopenhagen"
 
-#: src/apps/app-code.tsx
 #: src/chat/chat-more.tsx
 #: src/frame/ui-words.tsx
 #: src/onboarding/setup-steps.tsx
@@ -4858,10 +4866,6 @@ msgstr "{label} kopiëren"
 #: src/chat/chat-more.tsx
 msgid "Copy as Markdown"
 msgstr "Kopiëren als Markdown"
-
-#: src/apps/app-code.tsx
-msgid "Copy code"
-msgstr "Code kopiëren"
 
 #: src/connections/sync-places.tsx
 msgid "Copy into the Brain from {label}"
@@ -4924,13 +4928,33 @@ msgctxt "what the Brain remembers about something"
 msgid "Cost"
 msgstr "Kosten"
 
+#: src/apps/app-webhooks.tsx
+msgid "Could not add"
+msgstr "Kon niet toevoegen"
+
 #: src/frame/ui-words.tsx
 msgid "Could not answer"
 msgstr "Kon niet antwoorden"
 
+#: src/apps/app-access-requests.tsx
+msgid "Could not ask"
+msgstr "Kon niet vragen"
+
 #: src/frame/ui-words.tsx
 msgid "Could not be opened"
 msgstr "Kon niet worden geopend"
+
+#: src/apps/app-workflows.tsx
+msgid "Could not change"
+msgstr "Kon niet worden gewijzigd"
+
+#: src/apps/app-remove.tsx
+msgid "Could not delete"
+msgstr "Verwijderen mislukt"
+
+#: src/apps/app-definition.tsx
+msgid "Could not export"
+msgstr "Exporteren mislukt"
 
 #: src/frame/ui-words.tsx
 msgid "Could not finish"
@@ -4944,6 +4968,12 @@ msgstr "Suggesties konden niet worden geladen"
 msgid "Could not play this file"
 msgstr "Dit bestand kon niet worden afgespeeld"
 
+#: src/apps/app-reset.tsx
+#: src/apps/reset-test-data.tsx
+msgid "Could not reset"
+msgstr "Niet teruggezet"
+
+#: src/apps/blueprints.tsx
 #: src/frame/ui-words.tsx
 msgid "Could not save"
 msgstr "Kon niet opslaan"
@@ -5088,6 +5118,11 @@ msgstr "Gegevens"
 msgctxt "an app's workspace view"
 msgid "Data"
 msgstr "Gegevens"
+
+#: src/apps/app-building/app-building.tsx
+msgctxt "who builds an app's data"
+msgid "Data"
+msgstr "Data"
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -5340,6 +5375,10 @@ msgstr "Verwijderd. Niets van wat je zei, wordt bewaard."
 msgid "Deleted. What the Brain kept of it is being removed."
 msgstr "Verwijderd. Wat het Brein ervan bewaarde, wordt nu verwijderd."
 
+#: src/apps/app-remove.tsx
+msgid "Deleting"
+msgstr "Bezig met verwijderen"
+
 #: src/frame/ui-words.tsx
 msgctxt "a tool's state"
 msgid "Denied"
@@ -5392,6 +5431,10 @@ msgstr "Ontwerp en media"
 msgctxt "workflow status"
 msgid "Designed"
 msgstr "Ontworpen"
+
+#: src/apps/preview-controls.tsx
+msgid "Desktop"
+msgstr "Desktop"
 
 #: src/activity/audit-log.tsx
 #: src/inbox/approval-request.tsx
@@ -5494,6 +5537,10 @@ msgstr "Niet uitgevoerd op {when}: deze persoon zit niet meer in het bedrijf"
 msgid "Didn't start a workflow from a webhook event"
 msgstr "Heeft geen workflow gestart vanuit een webhookgebeurtenis"
 
+#: src/apps/release-controls.tsx
+msgid "Didn't work"
+msgstr "Werkte niet"
+
 #: src/brain/brain-atlas.ts
 #: src/settings/directory-reads.tsx
 msgid "Directory"
@@ -5536,10 +5583,6 @@ msgstr "Afwijzen"
 msgctxt "close a notice"
 msgid "Dismiss"
 msgstr "Sluiten"
-
-#: src/apps/app-workspace.tsx
-msgid "Dismiss the tip"
-msgstr "Tip sluiten"
 
 #: src/activity/audit-words.ts
 msgid "Dismissed a knowledge signal"
@@ -5690,6 +5733,10 @@ msgstr "Tabel downloaden als CSV"
 #: src/chat/answer-table-actions.tsx
 msgid "Download table as Markdown"
 msgstr "Tabel downloaden als Markdown"
+
+#: src/apps/app-code.tsx
+msgid "Download the file"
+msgstr "Bestand downloaden"
 
 #: src/workflows/workflow-settings.tsx
 msgid "Draft"
@@ -6357,9 +6404,17 @@ msgstr "Exporteren wat alleen jij mag lezen"
 msgid "Export with archive"
 msgstr "Exporteren met archief"
 
+#: src/apps/app-definition.tsx
+msgid "Exported"
+msgstr "Geëxporteerd"
+
 #: src/activity/audit-words.ts
 msgid "Exported the audit trail"
 msgstr "Het auditlogboek geëxporteerd"
+
+#: src/apps/app-definition.tsx
+msgid "Exporting"
+msgstr "Wordt geëxporteerd"
 
 #: src/chat/composer.tsx
 msgctxt "thinking effort"
@@ -6384,12 +6439,12 @@ msgid "Failed"
 msgstr "Mislukt"
 
 #: src/frame/ui-words.tsx
-msgctxt "a menu item whose work failed"
+msgctxt "a list row's action"
 msgid "Failed"
 msgstr "Mislukt"
 
 #: src/frame/ui-words.tsx
-msgctxt "a search that failed"
+msgctxt "a menu item whose work failed"
 msgid "Failed"
 msgstr "Mislukt"
 
@@ -6919,7 +6974,7 @@ msgctxt "a workflow's settings section"
 msgid "General"
 msgstr "Algemeen"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "General"
 msgstr "Algemeen"
@@ -7234,6 +7289,10 @@ msgstr "Grasp-medewerkers hebben zich aangemeld"
 msgid "Grasp staff work from the admin dashboard"
 msgstr "Medewerkers van Grasp werken vanuit het admin-dashboard"
 
+#: src/apps/app-webhooks.tsx
+msgid "Grasp stops sending the App's events there. Its secret can't be used again."
+msgstr "Grasp stuurt de gebeurtenissen van de App daar niet meer heen. Het geheim kan niet opnieuw worden gebruikt."
+
 #: src/settings/ai-providers.tsx
 msgid "Grasp transcribes interviews with {whereItRuns}, using Grasp's own key."
 msgstr "Grasp schrijft interviews uit met {whereItRuns}, met de eigen sleutel van Grasp."
@@ -7261,6 +7320,10 @@ msgstr "Grasp onthoudt: {statement}"
 #: src/chat/saved-memory.tsx
 msgid "Grasp will remember: {statement} (value: {value})"
 msgstr "Grasp onthoudt: {statement} (waarde: {value})"
+
+#: src/apps/app-code.tsx
+msgid "Grasp writes the first version in the chat."
+msgstr "Grasp schrijft de eerste versie in de chat."
 
 #: src/drafts/draft-history.tsx
 msgid "Grasp, in {name}'s chat"
@@ -7467,7 +7530,7 @@ msgctxt "a workflow's settings section"
 msgid "History"
 msgstr "Geschiedenis"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "History"
 msgstr "Geschiedenis"
@@ -8099,10 +8162,6 @@ msgstr "Hij is definitief weg: zijn pagina’s, versies en leden, en wat hij moc
 msgid "It is kept as it was, and nobody works on it, until a builder restores it."
 msgstr "Ze blijft zoals ze was, en niemand werkt eraan, tot een bouwer haar herstelt."
 
-#: src/apps/app-workspace.tsx
-msgid "It is kept as it was, and nobody works on it. Restore it to change it again."
-msgstr "Ze blijft zoals ze was, en niemand werkt eraan. Herstel haar om haar weer te wijzigen."
-
 #: src/connections/request-app-dialog.tsx
 msgid "It is not one of these"
 msgstr "Het is geen van deze"
@@ -8370,10 +8429,6 @@ msgstr "Naam, taak en afbeelding zie je waar je een agent kiest. De instructies 
 #: src/workflows/files-and-apps.tsx
 msgid "Its next start is refused until an admin approves {alias} again, and runs already started fail at their next call through it."
 msgstr "De volgende start wordt geweigerd tot een beheerder {alias} opnieuw goedkeurt, en runs die al gestart zijn mislukken bij hun volgende aanroep erdoorheen."
-
-#: src/apps/app-settings.tsx
-msgid "Its own address, for whoever may use it while it is live."
-msgstr "Een eigen adres, voor wie hem mag gebruiken zolang hij live is."
 
 #: src/apps/draft-changes.tsx
 msgid "Its pages and server code may hand files people can read to the workflows it binds."
@@ -8662,6 +8717,11 @@ msgstr "Van links naar rechts schikken"
 msgid "Lay it out top to bottom"
 msgstr "Van boven naar beneden schikken"
 
+#: src/apps/app-building/app-building.tsx
+msgctxt "who builds an app's look"
+msgid "Layout"
+msgstr "Opmaak"
+
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Lead"
@@ -8834,10 +8894,9 @@ msgstr "regels {start} tot {end}"
 msgid "Link"
 msgstr "Link"
 
-#. placeholder {0}: app.name
 #: src/apps/app-own-link.tsx
-msgid "Link to {0}"
-msgstr "Link naar {0}"
+msgid "Link to {name}"
+msgstr "Link naar {name}"
 
 #: src/apps/field-kinds.tsx
 msgid "Link to {table}"
@@ -8986,10 +9045,6 @@ msgstr "Kleine letters en cijfers, met enkele streepjes ertussen; niet de naam v
 #: src/apps/field-editor.tsx
 msgid "Lowest"
 msgstr "Laagste"
-
-#: src/apps/apps-overview.tsx
-msgid "Made {made}"
-msgstr "Gemaakt {made}"
 
 #: src/activity/audit-words.ts
 msgid "Made a webhook source a new secret"
@@ -9286,9 +9341,25 @@ msgstr "Meer"
 msgid "More about {header}"
 msgstr "Meer over {header}"
 
+#: src/apps/app-settings.tsx
+msgid "More about copies"
+msgstr "Meer over kopieën"
+
+#: src/apps/app-settings.tsx
+msgid "More about its data"
+msgstr "Meer over de gegevens"
+
+#: src/apps/app-settings.tsx
+msgid "More about its instructions"
+msgstr "Meer over de instructies"
+
 #: src/onboarding/connect-steps.tsx
 msgid "More about Pulse"
 msgstr "Meer over Pulse"
+
+#: src/apps/app-settings.tsx
+msgid "More about putting it away"
+msgstr "Meer over wegzetten"
 
 #: src/onboarding/setup-steps.tsx
 msgid "More about the staff list"
@@ -9304,6 +9375,7 @@ msgstr "Meer over deze koppelingen"
 msgid "More about this connection"
 msgstr "Meer over deze koppeling"
 
+#: src/frame/info-tip.tsx
 #: src/workflows/info-tip.tsx
 msgid "More about this section"
 msgstr "Meer over dit onderdeel"
@@ -9377,6 +9449,10 @@ msgstr "Er is meer verstuurd dan hierboven staat. Lees precies wat is verstuurd.
 msgid "More will be sent than is shown above. Read exactly what will be sent before you confirm."
 msgstr "Er wordt meer verstuurd dan hierboven staat. Lees precies wat er wordt verstuurd voordat je bevestigt."
 
+#: src/apps/app-card/app-card.tsx
+msgid "More, {title}"
+msgstr "Meer, {title}"
+
 #: src/apps/field-editor.tsx
 msgid "Most characters"
 msgstr "Meeste tekens"
@@ -9386,20 +9462,22 @@ msgid "Most people can’t name every tool they use, so a small app on the work 
 msgstr "De meeste mensen kunnen niet elke tool noemen die ze gebruiken, dus een kleine app op de werklaptops vertelt het mij. We zetten hem op met jou of je IT, of je slaat het nu over."
 
 #: src/apps/field-editor.tsx
-msgid "Move {name}"
-msgstr "{name} verplaatsen"
-
 #: src/settings/ai-providers.tsx
 msgid "Move {name} down"
 msgstr "{name} omlaag zetten"
 
+#: src/apps/field-editor.tsx
 #: src/settings/ai-providers.tsx
 msgid "Move {name} up"
 msgstr "{name} omhoog zetten"
 
 #: src/apps/field-editor.tsx
-msgid "Move {value}"
-msgstr "{value} verplaatsen"
+msgid "Move {value} down"
+msgstr "{value} omlaag"
+
+#: src/apps/field-editor.tsx
+msgid "Move {value} up"
+msgstr "{value} omhoog"
 
 #: src/frame/ui-words.tsx
 msgid "Move earlier"
@@ -9421,6 +9499,10 @@ msgstr "Mutaties en acties van {app}"
 msgctxt "turn your microphone off for a moment"
 msgid "Mute"
 msgstr "Dempen"
+
+#: src/apps/apps-overview.tsx
+msgid "My apps"
+msgstr "Mijn apps"
 
 #: src/apps/app-workspace.tsx
 msgid "My version of the App didn't start. Find out why and fix it:"
@@ -9762,8 +9844,8 @@ msgid "No chats here yet."
 msgstr "Hier zijn nog geen chats."
 
 #: src/apps/app-code.tsx
-msgid "No code yet: Grasp writes the first version in the chat."
-msgstr "Nog geen code: Grasp schrijft de eerste versie in de chat."
+msgid "No code yet"
+msgstr "Nog geen code"
 
 #: src/brain/brain.ts
 msgid "No connector yet"
@@ -9793,9 +9875,17 @@ msgstr "Er passen geen gebeurtenissen in het laatste stuk van het log."
 msgid "No events match."
 msgstr "Geen gebeurtenissen gevonden."
 
+#: src/apps/app-data.tsx
+msgid "No example records"
+msgstr "Geen voorbeeldrecords"
+
 #: src/frame/ui-words.tsx
 msgid "No favourites yet"
 msgstr "Nog geen favorieten"
+
+#: src/apps/app-code.tsx
+msgid "No files"
+msgstr "Geen bestanden"
 
 #: src/frame/ui-words.tsx
 msgid "No files changed."
@@ -9892,6 +9982,10 @@ msgstr "Er past niets meer bij"
 msgid "No new app from its instructions."
 msgstr "Geen nieuwe app uit zijn instructies."
 
+#: src/apps/apps-overview.tsx
+msgid "No one has shared an App with you yet."
+msgstr "Nog niemand heeft een app met je gedeeld."
+
 #: src/brain/opportunities-page.tsx
 msgid "No opportunities yet"
 msgstr "Nog geen kansen"
@@ -9903,6 +9997,10 @@ msgstr "Nog geen eigenaar"
 #: src/apps/app-page.tsx
 msgid "No page yet"
 msgstr "Nog geen pagina"
+
+#: src/apps/app-card/app-card.tsx
+msgid "No preview yet"
+msgstr "Nog geen voorbeeld"
 
 #: src/routes/_shell.projects.index.tsx
 msgid "No projects yet"
@@ -9921,8 +10019,8 @@ msgid "No record of this table has that ID."
 msgstr "Geen record van deze tabel heeft die ID."
 
 #: src/apps/app-data.tsx
-msgid "No records"
-msgstr "Geen records"
+msgid "No records yet"
+msgstr "Nog geen herinneringen"
 
 #: src/frame/ui-words.tsx
 msgid "No results"
@@ -9992,6 +10090,10 @@ msgstr "Er zijn geen uploads gedeeld met een team of iedereen."
 #: src/workflows/workflow-triggers.tsx
 msgid "No webhook source yet: an admin adds one in Settings, with the URL and secret its sender uses."
 msgstr "Nog geen webhookbron: een beheerder voegt er een toe in Instellingen, met de URL en het geheim die de afzender gebruikt."
+
+#: src/apps/app-webhooks.tsx
+msgid "No webhooks yet."
+msgstr "Nog geen webhooks."
 
 #: src/routes/_shell.settings.spend.tsx
 msgid "No workflow has called a model this month."
@@ -10878,10 +10980,6 @@ msgstr "Alleen de bouwers openen het, en de triggers gaan niet af, tot het met h
 msgid "Only me"
 msgstr "Alleen ik"
 
-#: src/apps/app-own-link.tsx
-msgid "Only someone signed in to the workspace opens it."
-msgstr "Alleen wie in de workspace is ingelogd, opent hem."
-
 #: src/apps/access-view.tsx
 #: src/apps/app-data-model.tsx
 msgid "Only the App's builders"
@@ -10969,10 +11067,16 @@ msgstr "Alleen jij ziet ze en stelt ze vragen."
 msgid "Only you see it while you try it. You share it when it's right."
 msgstr "Alleen jij ziet het terwijl je het uitprobeert. Je deelt het als het goed is."
 
+#: src/apps/app-workspace.tsx
+msgid "Only you see it. Tell Grasp in the chat what to change, then share it with your team."
+msgstr "Alleen jij ziet hem. Vertel Grasp in de chat wat er moet veranderen en deel hem dan met je team."
+
+#: src/apps/apps-overview.tsx
 #: src/drafts/status-badge.tsx
 msgid "Only you see this"
 msgstr "Alleen jij ziet dit"
 
+#: src/apps/apps-overview.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/inbox/item-detail.tsx
 #: src/onboarding/setup-frame.tsx
@@ -11016,18 +11120,19 @@ msgstr "Gegevens openen"
 msgid "Open external link?"
 msgstr "Externe link openen?"
 
-#: src/apps/app-code.tsx
-msgid "Open file"
-msgstr "Geopend bestand"
-
 #: src/workflows/unapproved-start.tsx
 msgid "Open Files and apps"
 msgstr "Bestanden en apps openen"
 
 #: src/apps/app-page.tsx
 #: src/apps/app-workspace.tsx
+#: src/apps/apps-overview.tsx
 msgid "Open full page"
 msgstr "Volledige pagina openen"
+
+#: src/apps/preview-controls.tsx
+msgid "Open in a new tab"
+msgstr "Openen in een nieuw tabblad"
 
 #: src/chat/answer-words.tsx
 msgid "Open link"
@@ -11141,7 +11246,7 @@ msgstr "Optie {place}"
 msgid "Options"
 msgstr "Opties"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "the settings an app offers itself"
 msgid "Options"
 msgstr "Opties"
@@ -11270,6 +11375,7 @@ msgctxt "what the Brain remembers about something"
 msgid "Owner"
 msgstr "Eigenaar"
 
+#: src/apps/app-owner.tsx
 #: src/apps/app-settings.tsx
 msgctxt "who answers for an app"
 msgid "Owner"
@@ -11308,6 +11414,10 @@ msgstr "Pakketten"
 #: src/inbox/items.ts
 msgid "Packages of {name} were revoked as malware"
 msgstr "Pakketten van {name} zijn ingetrokken als malware"
+
+#: src/apps/preview-controls.tsx
+msgid "Page"
+msgstr "Pagina"
 
 #: src/frame/ui-words.tsx
 msgid "Page {current} of {count}"
@@ -11581,6 +11691,10 @@ msgstr "Persoonlijke koppelingen"
 msgid "Personal Knowledge and memories"
 msgstr "Persoonlijke Kennis en herinneringen"
 
+#: src/apps/preview-controls.tsx
+msgid "Phone"
+msgstr "Telefoon"
+
 #: src/apps/field-editor.tsx
 msgid "Pick a table"
 msgstr "Kies een tabel"
@@ -11588,10 +11702,6 @@ msgstr "Kies een tabel"
 #: src/apps/data-model-changes.tsx
 msgid "Pick one"
 msgstr "Kies er een"
-
-#: src/apps/field-editor.tsx
-msgid "Picked up {name}, at place {place}."
-msgstr "{name} opgepakt, op plek {place}."
 
 #: src/agents/agent-form.tsx
 msgid "Picture"
@@ -11705,6 +11815,10 @@ msgstr "Druk op Enter om het toe te voegen."
 #: src/frame/ui-words.tsx
 msgid "Presses \"{words}\""
 msgstr "Drukt op \"{words}\""
+
+#: src/apps/preview-controls.tsx
+msgid "Preview width"
+msgstr "Breedte van het voorbeeld"
 
 #: src/pages/page-frame.tsx
 msgid "Preview: changes nothing, reads no real data"
@@ -11828,14 +11942,6 @@ msgstr "Purchase-to-Pay"
 msgctxt "what the Brain remembers about something"
 msgid "Purpose"
 msgstr "Doel"
-
-#: src/apps/field-editor.tsx
-msgid "Put {name} back where it was."
-msgstr "{name} teruggezet waar het stond."
-
-#: src/apps/field-editor.tsx
-msgid "Put {name} down at place {place}."
-msgstr "{name} neergezet op plek {place}."
 
 #: src/interview/read-back.tsx
 msgid "Put back"
@@ -12117,12 +12223,12 @@ msgid "Recommended"
 msgstr "Aanbevolen"
 
 #: src/apps/app-data.tsx
-msgid "Record"
-msgstr "Record"
+msgid "record"
+msgstr "record"
 
 #: src/apps/app-data.tsx
-msgid "Record {id}"
-msgstr "Record {id}"
+msgid "Record"
+msgstr "Record"
 
 #: src/apps/access-view.tsx
 msgid "Record every time someone looks at these records, and keep no past values"
@@ -12132,6 +12238,10 @@ msgstr "Leg elke keer vast dat iemand deze records bekijkt, en bewaar geen eerde
 msgctxt "business process"
 msgid "Record-to-Report"
 msgstr "Record-to-Report"
+
+#: src/apps/app-data.tsx
+msgid "records"
+msgstr "records"
 
 #: src/apps/app-data-model.tsx
 msgctxt "a table's records"
@@ -12207,6 +12317,7 @@ msgid "Release address…"
 msgstr "Adres vrijgeven…"
 
 #: src/apps/app-data.tsx
+#: src/apps/preview-controls.tsx
 msgid "Reload"
 msgstr "Opnieuw laden"
 
@@ -12343,6 +12454,10 @@ msgstr "De index {indexName} verwijderen"
 msgid "Remove the search"
 msgstr "Het zoeken verwijderen"
 
+#: src/apps/app-webhooks.tsx
+msgid "Remove the webhook to {url}?"
+msgstr "De webhook naar {url} verwijderen?"
+
 #: src/brain/brain-article/kern.tsx
 msgid "Remove this from the brain"
 msgstr "Dit uit het brein verwijderen"
@@ -12366,11 +12481,6 @@ msgstr "Verwijderd"
 
 #: src/frame/ui-words.tsx
 msgctxt "a changed line"
-msgid "Removed"
-msgstr "Verwijderd"
-
-#: src/apps/draft-changes.tsx
-msgctxt "a file a change removes"
 msgid "Removed"
 msgstr "Verwijderd"
 
@@ -12489,7 +12599,6 @@ msgstr "Aangevraagd op {date}"
 msgid "Requests to a model"
 msgstr "Verzoeken aan een model"
 
-#: src/apps/app-data-model.tsx
 #: src/apps/field-editor.tsx
 msgid "Required"
 msgstr "Verplicht"
@@ -12499,6 +12608,7 @@ msgctxt "what the Brain remembers about something"
 msgid "Requirement"
 msgstr "Eis"
 
+#: src/apps/app-reset.tsx
 #: src/apps/reset-test-data.tsx
 #: src/workflows/kept-state.tsx
 msgid "Reset"
@@ -12524,6 +12634,14 @@ msgstr "Testgegevens resetten"
 msgid "Reset test data?"
 msgstr "Testgegevens resetten?"
 
+#: src/apps/app-workspace.tsx
+msgid "Reset the example data in Data to try the change. Your team's records aren't touched."
+msgstr "Zet de voorbeeldgegevens in Gegevens terug om de wijziging te proberen. De records van je team blijven onaangeroerd."
+
+#: src/apps/app-data.tsx
+msgid "Reset the example data to fill it."
+msgstr "Zet de voorbeeldgegevens terug om hem te vullen."
+
 #: src/workflows/kept-state.tsx
 msgid "Reset what it keeps"
 msgstr "Wat het bewaart resetten"
@@ -12531,6 +12649,11 @@ msgstr "Wat het bewaart resetten"
 #: src/workflows/kept-state.tsx
 msgid "Reset what it keeps?"
 msgstr "Wat het bewaart resetten?"
+
+#: src/apps/app-reset.tsx
+#: src/apps/reset-test-data.tsx
+msgid "Resetting"
+msgstr "Wordt teruggezet"
 
 #: src/frame/ui-words.tsx
 msgctxt "a drawer's handle"
@@ -12565,10 +12688,15 @@ msgstr "Verantwoordelijkheid"
 
 #: src/apps/app-settings.tsx
 #: src/apps/app-workspace.tsx
+#: src/apps/apps-overview.tsx
 #: src/chat/chat-window.tsx
 #: src/drafts/draft-history.tsx
 msgid "Restore"
 msgstr "Herstellen"
+
+#: src/apps/app-workspace.tsx
+msgid "Restore it to change it again."
+msgstr "Zet hem terug om hem weer te wijzigen."
 
 #: src/settings/member-suspension.tsx
 msgid "Restore the account in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
@@ -13098,6 +13226,7 @@ msgstr "Plekken opslaan"
 msgid "Save where they go"
 msgstr "Opslaan waar ze naartoe gaan"
 
+#: src/apps/blueprints.tsx
 #: src/frame/ui-words.tsx
 #: src/interview/composer.tsx
 #: src/interview/destination.tsx
@@ -13138,6 +13267,7 @@ msgstr "Bewaard, maar het doorstaat de controle nog niet: onder Definitie staat 
 msgid "Saved."
 msgstr "Opgeslagen."
 
+#: src/apps/blueprints.tsx
 #: src/frame/ui-words.tsx
 msgid "Saving"
 msgstr "Bezig met opslaan"
@@ -13204,12 +13334,7 @@ msgid "Search"
 msgstr "Zoeken"
 
 #: src/frame/ui-words.tsx
-msgctxt "a search field"
-msgid "Search"
-msgstr "Zoeken"
-
-#: src/frame/ui-words.tsx
-msgctxt "open the search"
+msgctxt "a command list's field"
 msgid "Search"
 msgstr "Zoeken"
 
@@ -13314,6 +13439,7 @@ msgid "Searched the docs for {query}"
 msgstr "In de docs gezocht naar {query}"
 
 #: src/frame/ui-words.tsx
+msgctxt "a list fetching results"
 msgid "Searching"
 msgstr "Zoeken"
 
@@ -13529,6 +13655,7 @@ msgid "Setting up {name}…"
 msgstr "{name} wordt opgezet…"
 
 #: src/apps/app-page.tsx
+#: src/apps/apps-overview.tsx
 #: src/frame/person-menu.tsx
 #: src/frame/settings-level.tsx
 #: src/routes/_shell.apps.$app_.settings.tsx
@@ -13631,6 +13758,10 @@ msgstr "Delen…"
 msgid "Shared {when}"
 msgstr "Gedeeld op {when}"
 
+#: src/apps/apps-overview.tsx
+msgid "Shared apps"
+msgstr "Gedeelde apps"
+
 #: src/interview/destination.tsx
 msgid "Shared as how your team works"
 msgstr "Gedeeld als hoe je team werkt"
@@ -13680,7 +13811,7 @@ msgctxt "a workflow's settings section"
 msgid "Sharing"
 msgstr "Delen"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "Sharing"
 msgstr "Delen"
@@ -14067,6 +14198,14 @@ msgstr "Iemand anders heeft zich aangemeld"
 #: src/pages/frame-failure.tsx
 msgid "Someone else signed in on this browser, so this page was stopped. Try again to open it as the person signed in now."
 msgstr "Iemand anders heeft zich in deze browser aangemeld, dus deze pagina is gestopt. Probeer het opnieuw om hem te openen als de persoon die nu is aangemeld."
+
+#: src/apps/app-data.tsx
+msgid "someone in the organization"
+msgstr "iemand in de organisatie"
+
+#: src/apps/app-data.tsx
+msgid "Someone in the organization"
+msgstr "Iemand in de organisatie"
 
 #: src/apps/field-kinds.tsx
 msgid "Someone in your organization"
@@ -14550,12 +14689,12 @@ msgid "Table {0}"
 msgstr "Tabel {0}"
 
 #: src/apps/app-data-model.tsx
-msgid "Table name"
-msgstr "Tabelnaam"
-
-#: src/apps/app-data-model.tsx
 msgid "Tables"
 msgstr "Tabellen"
+
+#: src/apps/preview-controls.tsx
+msgid "Tablet"
+msgstr "Tablet"
 
 #: src/agents/agent-apps-card.tsx
 msgid "Take {app} off"
@@ -15094,10 +15233,6 @@ msgstr "De apps die teams noemden, en de apps die in gebruik zijn maar door niem
 msgid "The Apps this chat builds didn't load."
 msgstr "De apps die deze chat bouwt, zijn niet geladen."
 
-#: src/apps/apps-overview.tsx
-msgid "The Apps your colleagues share with you show here."
-msgstr "De Apps die je collega's met je delen, verschijnen hier."
-
 #: src/routes/_shell.integrations.index.tsx
 msgid "The apps your workflows can work in. Grasp only does what you allow per app."
 msgstr "De apps waarin je workflows kunnen werken. Grasp doet alleen wat je per app toestaat."
@@ -15394,10 +15529,6 @@ msgstr "De invoervelden zijn geen JSON."
 msgid "The input isn't JSON."
 msgstr "De invoer is geen JSON."
 
-#: src/apps/app-settings.tsx
-msgid "The integrations, connections and resources the App uses, and asking for more."
-msgstr "De integraties, verbindingen en resources die de App gebruikt, en om meer vragen."
-
 #: src/interview/page.tsx
 msgid "The interviews are over."
 msgstr "De gesprekken zijn voorbij."
@@ -15600,10 +15731,6 @@ msgstr "De afzender stuurt elke gebeurtenis met POST als JSON, met het type en d
 msgid "The sender signs every event with it, so Grasp can tell an event is theirs."
 msgstr "De afzender ondertekent elke gebeurtenis ermee, zodat Grasp weet dat een gebeurtenis van hem komt."
 
-#: src/apps/app-settings.tsx
-msgid "The settings the App offers itself."
-msgstr "De instellingen die de App zelf aanbiedt."
-
 #: src/workflows/version-source.tsx
 msgid "The source files of version {sourceVersion}"
 msgstr "De bronbestanden van versie {sourceVersion}"
@@ -15627,6 +15754,10 @@ msgstr "het team in {field}"
 #: src/apps/access-view.tsx
 msgid "The team in {field}"
 msgstr "Het team in {field}"
+
+#: src/apps/reset-test-data.tsx
+msgid "The test data wasn't reset. Try again."
+msgstr "De testgegevens zijn niet teruggezet. Probeer het opnieuw."
 
 #: src/settings/ai-providers.tsx
 msgid "The test didn't work. {model} didn't answer: {why}"
@@ -15808,6 +15939,10 @@ msgstr "Ze kunnen alleen bij de onboarding."
 #: src/apps/app-workspace.tsx
 msgid "They see it once you share it with them."
 msgstr "Ze zien het zodra je het met hen deelt."
+
+#: src/apps/app-data.tsx
+msgid "They show here as people use the App."
+msgstr "Ze verschijnen hier zodra mensen de app gebruiken."
 
 #: src/brain/brain.ts
 #: src/routes/_shell.brain.$noteId.tsx
@@ -16106,10 +16241,6 @@ msgstr "Dit gebruikt iets wat alleen jij kunt lezen"
 msgid "This version can't open"
 msgstr "Deze versie kan niet openen"
 
-#: src/apps/app-code.tsx
-msgid "This version has no files."
-msgstr "Deze versie heeft geen bestanden."
-
 #: src/pages/frame-failure.tsx
 msgid "This version of the App hasn't been sealed, so it can't be opened. A builder can publish it again."
 msgstr "Deze versie van de app is niet verzegeld, dus hij kan niet worden geopend. Een bouwer kan hem opnieuw publiceren."
@@ -16221,10 +16352,6 @@ msgstr "Aan iedereen"
 #: src/onboarding/setup-steps.tsx
 msgid "To everyone at {company}"
 msgstr "Aan iedereen bij {company}"
-
-#: src/apps/field-editor.tsx
-msgid "To move an item, press space or enter, then the arrow keys. Press space or enter again to put it down, or escape to cancel."
-msgstr "Om een item te verplaatsen, druk op spatie of enter en dan op de pijltjestoetsen. Druk opnieuw op spatie of enter om het neer te zetten, of op escape om te annuleren."
 
 #: src/onboarding/send-plan-form.tsx
 msgid "To the team leads. Everyone else follows once their lead has talked."
@@ -16363,7 +16490,6 @@ msgstr "Geldt tot {until}"
 msgid "Try"
 msgstr "Proberen"
 
-#: src/apps/app-data.tsx
 #: src/apps/app-owner.tsx
 #: src/apps/app-settings.tsx
 #: src/brain/own-export.tsx
@@ -16387,10 +16513,6 @@ msgstr "Opnieuw proberen"
 #: src/frame/setting-up.tsx
 msgid "Try again to set up {name}."
 msgstr "Probeer {name} opnieuw op te zetten."
-
-#: src/apps/app-workspace.tsx
-msgid "Try it out: only you see it, and the example data is just for trying. To change anything, tell Grasp in the chat. When it's right, share it with your team."
-msgstr "Probeer het uit: alleen jij ziet het, en de voorbeeldgegevens zijn alleen om te proberen. Wil je iets veranderen, zeg het tegen Grasp in de chat. Klopt het, deel het dan met je team."
 
 #: src/chat/chat-window.tsx
 msgid "Try the search again"
@@ -17116,12 +17238,13 @@ msgstr "We willen minder tijd kwijt zijn aan herhaalwerk, zodat er meer tijd is 
 msgid "Webhook trigger"
 msgstr "Webhooktrigger"
 
+#: src/apps/app-webhooks.tsx
 #: src/settings/event-sources.tsx
 #: src/settings/sections.ts
 msgid "Webhooks"
 msgstr "Webhooks"
 
-#: src/apps/app-settings.tsx
+#: src/apps/settings-sections.ts
 msgctxt "an app's settings section"
 msgid "Webhooks"
 msgstr "Webhooks"
@@ -17178,10 +17301,6 @@ msgstr "Wat op elke factuur staat."
 msgctxt "the brainstem: every conversation, document and connection"
 msgid "What came in"
 msgstr "Wat binnenkwam"
-
-#: src/apps/app-settings.tsx
-msgid "What changed, unpublished and published, which version is live, and going back to one."
-msgstr "Wat er veranderde, ongepubliceerd en gepubliceerd, welke versie live is, en teruggaan naar een versie."
 
 #: src/drafts/share-with-team.tsx
 msgid "What changes"
@@ -17422,10 +17541,6 @@ msgstr "Waarmee het begint"
 #: src/routes/_shell.settings.billing.tsx
 msgid "What Stripe emails to the billing email."
 msgstr "Wat Stripe naar het factuuradres mailt."
-
-#: src/apps/app-settings.tsx
-msgid "What the App is called and what it is for."
-msgstr "Hoe de app heet en waarvoor hij is."
 
 #: src/apps/app-access-requests.tsx
 msgid "What the App may do with it"
@@ -17689,10 +17804,6 @@ msgstr "Waar wordt het werk vastgelegd?"
 msgid "Where everything came from: conversations, documents, Pulse and connections."
 msgstr "Waar alles vandaan komt: gesprekken, documenten, Pulse en koppelingen."
 
-#: src/apps/app-settings.tsx
-msgid "Where Grasp sends the App's events."
-msgstr "Waar Grasp de gebeurtenissen van de App naartoe stuurt."
-
 #: src/workflows/today-lanes.tsx
 msgctxt "the card that follows one item across workflows"
 msgid "Where is it"
@@ -17870,10 +17981,6 @@ msgstr "Wie {name} mag gebruiken en wat hij mag doen, kon niet worden gelezen. A
 msgid "Who may use it"
 msgstr "Wie hem mag gebruiken"
 
-#: src/apps/app-settings.tsx
-msgid "Who opens the App besides you, and as what."
-msgstr "Wie de App naast jou opent, en als wat."
-
 #: src/settings/stephen-settings.tsx
 msgid "Who reaches him here"
 msgstr "Wie hem hier bereikt"
@@ -18009,6 +18116,11 @@ msgstr "Een wachtende run gewekt waarvan de wekker niet was aangekomen"
 #: src/interview/words.ts
 msgid "Word"
 msgstr "Woord"
+
+#: src/apps/app-building/app-building.tsx
+msgctxt "who writes an app's words"
+msgid "Words"
+msgstr "Teksten"
 
 #: src/apps/field-kinds.tsx
 msgid "Words and sentences"
@@ -18458,10 +18570,6 @@ msgstr "Je browser laat Grasp de microfoon niet gebruiken. Sta het toe in de ins
 msgid "Your browser is not letting me use the microphone. Allow it next to the address, and try again."
 msgstr "Je browser laat me de microfoon niet gebruiken. Sta het toe naast het adres en probeer het opnieuw."
 
-#: src/apps/app-workspace.tsx
-msgid "Your change reshapes the App's data in a way the example records can't follow. Reset the example data in Data to try it. What your team entered isn't touched."
-msgstr "Je wijziging vormt de gegevens van de App zo om dat de voorbeeldrecords niet mee kunnen. Zet de voorbeeldgegevens terug in Gegevens om het uit te proberen. Wat je team heeft ingevoerd, blijft onaangeroerd."
-
 #: src/drafts/share-with-team.tsx
 msgid "Your changes are shared"
 msgstr "Je wijzigingen zijn gedeeld"
@@ -18481,6 +18589,10 @@ msgstr "Jouw keuze"
 #: src/routes/_shell.settings.security.tsx
 msgid "Your company account. Leaving the company stops new sign-ins; an admin can end a session sooner in Members and roles."
 msgstr "Je bedrijfsaccount. Na vertrek uit het bedrijf kun je niet opnieuw inloggen; een beheerder kan een sessie eerder beëindigen bij Leden en rollen."
+
+#: src/apps/apps-overview.tsx
+msgid "Your company has no other Apps yet."
+msgstr "Je bedrijf heeft nog geen andere apps."
 
 #: src/interview/before.tsx
 msgid "Your company wants to know how the work really goes. First I ask how you work with AI today. Then I ask about one piece of your work. You tell me how you do it. That takes 12 to 15 minutes. Talking is the fastest. You can also type."
@@ -18640,6 +18752,7 @@ msgstr "Je team heeft weer de versie van eerst"
 msgid "Your team has this one"
 msgstr "Je team heeft deze"
 
+#: src/apps/apps-overview.tsx
 #: src/drafts/status-badge.tsx
 msgid "Your team uses it"
 msgstr "Je team gebruikt het"

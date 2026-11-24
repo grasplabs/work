@@ -174,15 +174,15 @@ test("a builder finds an App in the list, opens it and uses its page with live d
   await page.goto("/");
   const nav = page.getByRole("navigation", { name: "Main" });
   await nav.getByRole("link", { name: "Apps" }).click();
-  const cards = page.getByRole("list", { name: "Apps" }).getByRole("listitem");
+  // The tab open lists its Apps, a card each: the builder's own first.
+  const cards = page.getByRole("tabpanel").getByRole("article");
   const search = page.getByRole("textbox", { name: "Search the Apps" });
 
   // A search by name finds this run's Apps, one card each whatever their
   // pages, each saying where it stands.
   await search.fill(run);
   await expect(cards).toHaveCount(7);
-  const marked = (status: string) =>
-    cards.filter({ has: page.getByText(status, { exact: true }) });
+  const marked = (status: string) => cards.filter({ hasText: status });
   await expect(marked("Your team uses it")).toHaveCount(5);
   await expect(marked("Only you see this")).toHaveCount(2);
 
@@ -422,4 +422,58 @@ test("loading a page again after a new version shows that version, and the App's
   const frame = page.frameLocator('iframe[title="App"]');
   await expect(frame.getByText("Not Found")).toBeVisible({ timeout: 20_000 });
   await expect(page).toHaveURL(new RegExp(`/apps/${swapped}/pages/home$`, "u"));
+});
+
+test("the Apps page sorts each App into its tab by how the person reaches it, and its builder archives and restores one from its card", async ({
+  pageOf,
+}) => {
+  // Two Apps of this run's own, their names its own: one shared with the
+  // user by name, one the builder keeps.
+  const run = crypto.randomUUID();
+  const shared = await newApp(builder, `Shared ${run}`);
+  await newApp(builder, `Kept ${run}`);
+  await withApi(builder, async (api) => {
+    await api.apps.members.add(shared, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+  });
+
+  // The user finds the one shared with them under Shared apps, not their own.
+  const theirs = await pageOf(user);
+  await theirs.goto("/apps");
+  const tabs = theirs.getByRole("tablist", { name: "Apps" });
+  await tabs.getByRole("tab", { name: "Shared apps" }).click();
+  await theirs.getByRole("textbox", { name: "Search the Apps" }).fill(run);
+  const sharedCards = theirs.getByRole("tabpanel").getByRole("article");
+  await expect(sharedCards).toHaveCount(1);
+  await expect(sharedCards).toContainText(`Shared ${run}`);
+  await tabs.getByRole("tab", { name: "My apps" }).click();
+  await expect(theirs.getByRole("tabpanel").getByRole("article")).toHaveCount(
+    0
+  );
+
+  // Its builder has both as their own, and puts one away from its "…",
+  // after saying so, then takes it back.
+  const page = await pageOf(builder);
+  await page.goto("/apps");
+  await page
+    .getByRole("tablist", { name: "Apps" })
+    .getByRole("tab", { name: "My apps" })
+    .click();
+  await page.getByRole("textbox", { name: "Search the Apps" }).fill(run);
+  const cards = page.getByRole("tabpanel").getByRole("article");
+  await expect(cards).toHaveCount(2);
+  const card = cards.filter({ hasText: `Kept ${run}` });
+  await card.getByRole("button", { name: `More, Kept ${run}` }).click();
+  await page.getByRole("menuitem", { name: "Archive" }).click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Archive" })
+    .click();
+  await expect(card).toContainText("Archived");
+  await card.getByRole("button", { name: `More, Kept ${run}` }).click();
+  await page.getByRole("menuitem", { name: "Restore" }).click();
+  await expect(card).not.toContainText("Archived");
 });

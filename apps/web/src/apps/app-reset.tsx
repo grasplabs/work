@@ -1,28 +1,31 @@
-import { Button } from "@grasp-os/app-kit/components/button";
+import type { App } from "@grasp-os/shared/apps";
+import { failureText } from "@grasp-os/shared/errors";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   Dialog,
+  DialogBody,
   DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
-  DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@grasp-os/app-kit/components/dialog";
+} from "@grasp-os/ui/components/dialog";
 import {
   Field,
   FieldDescription,
   FieldError,
   FieldLabel,
-} from "@grasp-os/app-kit/components/field";
-import { Input } from "@grasp-os/app-kit/components/input";
-import type { App } from "@grasp-os/shared/apps";
-import { Trans } from "@lingui/react/macro";
+} from "@grasp-os/ui/components/field";
+import { Form } from "@grasp-os/ui/components/form";
+import { Input } from "@grasp-os/ui/components/input";
+import { useAction } from "@grasp-os/ui/hooks/use-action";
+import { Icon, RefreshCwIcon } from "@grasp-os/ui/lib/icons";
+import { useLingui } from "@lingui/react/macro";
 import { useRouter } from "@tanstack/react-router";
-import { RotateCcwIcon } from "lucide-react";
 import { useId, useState } from "react";
 
-import { useCoreAction } from "../use-core-action.ts";
+import { useCore } from "../use-core.ts";
 
 // Resetting an App's data, in its settings: an admin of the organization
 // resets any App's data (`apps.resetData`), typing its name to confirm,
@@ -31,22 +34,29 @@ import { useCoreAction } from "../use-core-action.ts";
 
 /** An admin's reset of every record of `app`, its name typed to confirm. */
 export const ResetAppData = ({ app }: { app: App }) => {
+  const { t } = useLingui();
+  const core = useCore();
   const router = useRouter();
-  const { busy, failure, run } = useCoreAction();
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState("");
-  const nameId = useId();
+  const formId = useId();
   const { name } = app;
-  const reset = async (): Promise<void> => {
-    const done = await run(async (session) => {
-      await session.apps.resetData(app.id, typed);
-      return true;
-    });
-    if (done === true) {
+  const reset = useAction(
+    async () => {
+      await core.withSession(async (session) => {
+        await session.apps.resetData(app.id, typed);
+      });
       setOpen(false);
       await router.invalidate({ sync: true });
+    },
+    {
+      loadingText: t`Resetting`,
+      successText: t`Reset`,
+      errorText: t`Could not reset`,
     }
-  };
+  );
+  const failure =
+    reset.error === undefined ? undefined : failureText(reset.error);
   return (
     <Dialog
       onOpenChange={(next) => {
@@ -55,65 +65,57 @@ export const ResetAppData = ({ app }: { app: App }) => {
       }}
       open={open}
     >
-      <DialogTrigger disabled={busy} render={<Button variant="outline" />}>
-        <RotateCcwIcon data-icon="inline-start" />
-        <Trans>Reset data</Trans>
+      <DialogTrigger asChild>
+        <Button variant="outline">
+          <Icon icon={RefreshCwIcon} />
+          {t`Reset data`}
+        </Button>
       </DialogTrigger>
       <DialogContent>
-        <DialogHeader>
-          <DialogTitle>
-            <Trans>Reset {name}’s data?</Trans>
-          </DialogTitle>
-          <DialogDescription>
-            <Trans>
-              Every record it holds and every file in them is gone for good, and
-              its current version runs again with no records. Its pages,
-              versions, members and history stay.
-            </Trans>{" "}
-            <Trans>
-              What its code remembered in the Brain until now goes too; a call
-              already running may still remember what it read before.
-            </Trans>
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void reset();
-          }}
-        >
-          <Field data-invalid={failure === undefined ? undefined : true}>
-            <FieldLabel htmlFor={nameId}>
-              <Trans>Type {name} to confirm</Trans>
-            </FieldLabel>
-            <Input
-              aria-invalid={failure === undefined ? undefined : true}
-              autoComplete="off"
-              id={nameId}
-              onChange={(event) => {
-                setTyped(event.target.value);
-              }}
-              value={typed}
-            />
-            <FieldDescription>
-              <Trans>Exactly as it’s written here.</Trans>
-            </FieldDescription>
-            {failure === undefined ? null : <FieldError>{failure}</FieldError>}
-          </Field>
-          <DialogFooter>
-            <DialogClose render={<Button type="button" variant="outline" />}>
-              <Trans>Cancel</Trans>
-            </DialogClose>
-            <Button
-              disabled={busy || typed !== name}
-              type="submit"
-              variant="destructive"
-            >
-              <Trans>Reset for good</Trans>
-            </Button>
-          </DialogFooter>
-        </form>
+        <DialogTitle>{t`Reset ${name}’s data?`}</DialogTitle>
+        <DialogDescription>
+          {t`Every record it holds and every file in them is gone for good, and its current version runs again with no records. Its pages, versions, members and history stay.`}{" "}
+          {t`What its code remembered in the Brain until now goes too; a call already running may still remember what it read before.`}
+        </DialogDescription>
+        <DialogBody>
+          <Form
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (typed === name) {
+                void reset.run();
+              }
+            }}
+          >
+            <Field data-invalid={failure !== undefined}>
+              <FieldLabel>{t`Type ${name} to confirm`}</FieldLabel>
+              <Input
+                autoComplete="off"
+                onValueChange={setTyped}
+                value={typed}
+              />
+              <FieldDescription>{t`Exactly as it’s written here.`}</FieldDescription>
+              {failure === undefined ? null : (
+                <FieldError match>{failure}</FieldError>
+              )}
+            </Field>
+          </Form>
+        </DialogBody>
+        <DialogFooter>
+          <DialogClose>{t`Cancel`}</DialogClose>
+          <Button
+            disabled={typed !== name}
+            form={formId}
+            type="submit"
+            variant="destructive"
+            errorText={reset.labels.error}
+            loadingText={reset.labels.loading}
+            status={reset.status}
+            successText={reset.labels.success}
+          >
+            {t`Reset for good`}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

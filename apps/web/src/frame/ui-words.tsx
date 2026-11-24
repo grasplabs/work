@@ -169,13 +169,16 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
     },
     command: {
       dialogPlaceholder: t`Type a command or search`,
-      dialogTrigger: t({ message: "Search", context: "open the search" }),
+      dialogTrigger: t({
+        message: "Search",
+        context: "a command list's field",
+      }),
       empty: t`No results`,
-      error: t({ message: "Failed", context: "a search that failed" }),
+      error: t({ message: "Failed", context: "a list row's action" }),
       expand: (label) => t`More for ${label}`,
-      loading: t`Searching`,
+      loading: t({ message: "Searching", context: "a list fetching results" }),
       moreHint: t`Right arrow for more`,
-      placeholder: t({ message: "Search", context: "a search field" }),
+      placeholder: t({ message: "Search", context: "a command list's field" }),
     },
     confirmation: {
       approved: t`Approved`,

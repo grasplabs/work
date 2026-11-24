@@ -1,35 +1,3 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@grasp-os/app-kit/components/dialog";
-import {
-  Field,
-  FieldDescription,
-  FieldError,
-  FieldLabel,
-} from "@grasp-os/app-kit/components/field";
-import { Input } from "@grasp-os/app-kit/components/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/app-kit/components/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/app-kit/components/table";
 import type { ViewedApp } from "@grasp-os/shared/apps";
 import type { CatalogTool } from "@grasp-os/shared/connect";
 import {
@@ -42,16 +10,61 @@ import type {
   PermissionRequest,
 } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@grasp-os/ui/components/card";
+import { Checkbox, CheckboxGroup } from "@grasp-os/ui/components/checkbox";
+import {
+  Dialog,
+  DialogBody,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogTitle,
+} from "@grasp-os/ui/components/dialog";
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldError,
+  FieldLabel,
+} from "@grasp-os/ui/components/field";
+import { Form } from "@grasp-os/ui/components/form";
+import { Input } from "@grasp-os/ui/components/input";
+import { ScrollArea } from "@grasp-os/ui/components/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "@grasp-os/ui/components/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/ui/components/table";
+import { Text } from "@grasp-os/ui/components/text";
+import { Icon, KeyIcon } from "@grasp-os/ui/lib/icons";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useId, useState } from "react";
 
 import { integrationsOf } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
 import { formatDateTime, formatList } from "../format.ts";
-import { LoadingLines } from "../frame/page-states.tsx";
-import { loadFromCore, NotLoaded } from "../load-from-core.tsx";
+import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
@@ -126,19 +139,23 @@ const readAskable = async (session: Session): Promise<Askable> => {
   return { connections };
 };
 
+const styles = stylex.create({
+  // The tools of a connection scroll inside the dialog, so it keeps its
+  // size with a connection of sixty.
+  tools: { maxHeight: "15rem" },
+});
+
 /** How a request names what it asks for, by the names the person sees. */
-const ObjectName = ({
-  object,
-  read,
-}: {
-  object: PermissionObject;
-  read: Askable;
-}) => {
+const objectName = (
+  object: PermissionObject,
+  read: Askable,
+  words: { connection: string }
+): string => {
   if (object.type === "connection") {
     const found = read.connections.find(({ id }) => id === object.connectionId);
-    return found === undefined ? <Trans>A connection</Trans> : found.label;
+    return found === undefined ? words.connection : found.label;
   }
-  return <span className="font-mono text-xs">{object.type}</span>;
+  return object.type;
 };
 
 /** The tools of the connection chosen, to tick those the App may call. */
@@ -151,9 +168,11 @@ const ToolChoice = ({
   chosen: readonly string[];
   onChange: (tools: string[]) => void;
 }) => {
+  const { t } = useLingui();
   const core = useCore();
-  const ids = useId();
   const [tools, setTools] = useState<Loaded<CatalogTool[]>>();
+  // Counts the tries, so Try again reads them again.
+  const [tried, setTried] = useState(0);
   useEffect(() => {
     const left = new AbortController();
     const read = async (): Promise<void> => {
@@ -174,53 +193,52 @@ const ToolChoice = ({
     return () => {
       left.abort();
     };
-  }, [connection.provider, connection.source, core]);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `tried` says when to read again
+  }, [connection.provider, connection.source, core, tried]);
   if (tools === undefined) {
     return <LoadingLines lines={2} />;
   }
   if (tools.state !== "ready") {
-    return <NotLoaded page={tools} />;
+    return (
+      <NotLoadedState
+        again={() => {
+          setTried(tried + 1);
+        }}
+        heading="h3"
+        page={tools}
+      />
+    );
   }
   const { offered } = connection;
   const choices = tools.data.filter(
     ({ name }) => offered === undefined || offered.includes(name)
   );
+  const full = chosen.length >= permissionMaxActions;
   return (
-    <fieldset className="flex flex-col gap-2">
-      <legend className="pb-1 text-sm font-medium">
-        <Trans>What the App may do with it</Trans>
-      </legend>
-      <div className="flex max-h-60 flex-col gap-2 overflow-y-auto">
-        {choices.map((tool) => {
-          const id = `${ids}-${tool.name}`;
-          const ticked = chosen.includes(tool.name);
-          return (
-            <label className="flex items-start gap-2" key={id}>
+    <Field>
+      <FieldLabel>{t`What the App may do with it`}</FieldLabel>
+      <ScrollArea
+        aria-label={t`What the App may do with it`}
+        style={styles.tools}
+      >
+        <CheckboxGroup onValueChange={onChange} value={[...chosen]}>
+          {choices.map((tool) => (
+            <Field key={tool.name} orientation="horizontal">
               <Checkbox
-                checked={ticked}
-                disabled={!ticked && chosen.length >= permissionMaxActions}
-                id={id}
-                onCheckedChange={(checked) => {
-                  onChange(
-                    checked
-                      ? [...chosen, tool.name]
-                      : chosen.filter((each) => each !== tool.name)
-                  );
-                }}
+                disabled={full && !chosen.includes(tool.name)}
+                value={tool.name}
               />
-              <span className="flex flex-col">
-                <span className="font-mono text-xs">{tool.name}</span>
+              <FieldContent>
+                <FieldLabel>{tool.name}</FieldLabel>
                 {tool.description === null ? null : (
-                  <span className="text-muted-foreground text-xs">
-                    {tool.description}
-                  </span>
+                  <FieldDescription>{tool.description}</FieldDescription>
                 )}
-              </span>
-            </label>
-          );
-        })}
-      </div>
-    </fieldset>
+              </FieldContent>
+            </Field>
+          ))}
+        </CheckboxGroup>
+      </ScrollArea>
+    </Field>
   );
 };
 
@@ -237,12 +255,11 @@ const AskDialog = ({
   onAsked: () => void;
 }) => {
   const { t } = useLingui();
+  const formId = useId();
   const { busy, failure, run } = useCoreAction();
   const [target, setTarget] = useState<string | null>(null);
   const [tools, setTools] = useState<string[]>([]);
   const [binding, setBinding] = useState("");
-  const targetId = useId();
-  const bindingId = useId();
   const connection = askable.connections.find(({ id }) => id === target);
   const named = bindingNameSchema.safeParse(binding).success;
   const asked: AskedObject | undefined =
@@ -263,10 +280,12 @@ const AskDialog = ({
           binding,
         })
     );
-    if (permission !== undefined) {
-      onAsked();
-      onClose();
+    if (permission === undefined) {
+      // The dialog stays open, with core's reason in it.
+      throw new Error("Not asked");
     }
+    onAsked();
+    onClose();
   };
   const targets = askable.connections.map(({ id, label }) => ({
     value: id,
@@ -287,90 +306,77 @@ const AskDialog = ({
       }}
       open
     >
-      <DialogContent closeLabel={t`Close`}>
-        <DialogHeader>
-          <DialogTitle>
-            <Trans>Ask for access for this App</Trans>
-          </DialogTitle>
-          <DialogDescription>
-            <Trans>
-              The request allows nothing until an admin grants it. They see what
-              the app asks for and decide.
-            </Trans>
-          </DialogDescription>
-        </DialogHeader>
-        <Field>
-          <FieldLabel htmlFor={targetId}>
-            <Trans>Connection</Trans>
-          </FieldLabel>
-          <Select
-            items={targets}
-            onValueChange={(value: unknown) => {
-              if (typeof value === "string") {
-                choose(value);
-              }
+      <DialogContent>
+        <DialogTitle>{t`Ask for access for this App`}</DialogTitle>
+        <DialogDescription>
+          {t`The request allows nothing until an admin grants it. They see what the app asks for and decide.`}
+        </DialogDescription>
+        <DialogBody>
+          <Form
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault();
             }}
-            value={target}
           >
-            <SelectTrigger className="w-full" id={targetId}>
-              <SelectValue placeholder={t`Choose one`} />
-            </SelectTrigger>
-            <SelectContent>
-              {targets.map((item) => (
-                <SelectItem key={item.value} value={item.value}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-        {connection === undefined ? null : (
-          <ToolChoice
-            chosen={tools}
-            connection={connection}
-            onChange={setTools}
-          />
-        )}
-        <Field>
-          <FieldLabel htmlFor={bindingId}>
-            <Trans>Name in the App&apos;s code</Trans>
-          </FieldLabel>
-          <Input
-            id={bindingId}
-            maxLength={64}
-            onChange={(event) => {
-              setBinding(event.target.value);
-            }}
-            value={binding}
-          />
-          {binding === "" || named ? (
-            <FieldDescription>
-              <Trans>
-                Capital letters, digits and underscores, starting with a letter,
-                such as CRM.
-              </Trans>
-            </FieldDescription>
-          ) : (
-            <FieldError>
-              <Trans>
-                Use capital letters, digits and underscores, starting with a
-                letter, and not a name the platform uses itself.
-              </Trans>
-            </FieldError>
-          )}
-        </Field>
-        <ErrorText>{failure}</ErrorText>
+            <Field>
+              <FieldLabel>{t`Connection`}</FieldLabel>
+              <Select
+                items={targets}
+                onValueChange={(value) => {
+                  if (value !== null) {
+                    choose(value);
+                  }
+                }}
+                value={target}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={t`Choose one`} />
+                </SelectTrigger>
+                <SelectContent />
+              </Select>
+            </Field>
+            {connection === undefined ? null : (
+              <ToolChoice
+                chosen={tools}
+                connection={connection}
+                onChange={setTools}
+              />
+            )}
+            <Field data-invalid={binding !== "" && !named}>
+              <FieldLabel>{t`Name in the App's code`}</FieldLabel>
+              <Input
+                maxLength={64}
+                onValueChange={setBinding}
+                value={binding}
+              />
+              {binding === "" || named ? (
+                <FieldDescription>
+                  {t`Capital letters, digits and underscores, starting with a letter, such as CRM.`}
+                </FieldDescription>
+              ) : (
+                <FieldError match>
+                  {t`Use capital letters, digits and underscores, starting with a letter, and not a name the platform uses itself.`}
+                </FieldError>
+              )}
+            </Field>
+            {failure === undefined ? null : (
+              <Alert variant="destructive">
+                <AlertDescription>{failure}</AlertDescription>
+              </Alert>
+            )}
+          </Form>
+        </DialogBody>
         <DialogFooter>
-          <Button disabled={busy} onClick={onClose} variant="outline">
-            <Trans>Cancel</Trans>
-          </Button>
+          <DialogClose>{t`Cancel`}</DialogClose>
           <Button
             disabled={busy || !ready}
-            onClick={() => {
-              void ask();
-            }}
+            errorText={t`Could not ask`}
+            loadingText={t`Asking`}
+            onClick={ask}
+            size="sm"
+            variant="default"
           >
-            <Trans>Ask an admin</Trans>
+            {t`Ask an admin`}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -391,85 +397,77 @@ const RequestsView = ({
   asks: boolean;
   onAsked: () => void;
 }) => {
+  const { t } = useLingui();
   const [asking, setAsking] = useState(false);
   const { requested } = read;
+  const unnamed = { connection: t`A connection` };
   return (
-    <section className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-medium">
-          <Trans>Access waiting for an admin</Trans>
-        </h2>
-        {asks ? (
-          <Button
-            onClick={() => {
-              setAsking(true);
-            }}
-            size="sm"
-            variant="outline"
-          >
-            <Trans>Ask for access</Trans>
-          </Button>
-        ) : null}
-      </div>
-      {requested.length === 0 ? (
-        <p className="text-muted-foreground">
-          <Trans>Nothing this App asked for is waiting.</Trans>
-        </p>
-      ) : (
-        <div className="bg-card overflow-hidden rounded-xl border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead variant="card">
-                  <Trans>Asked for</Trans>
-                </TableHead>
-                <TableHead variant="card">
-                  <Trans>To</Trans>
-                </TableHead>
-                <TableHead variant="card">
-                  <Trans>Name in the App&apos;s code</Trans>
-                </TableHead>
-                <TableHead className="w-44" variant="card">
-                  <Trans>Asked</Trans>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {requested.map((permission) => (
-                <TableRow key={permission.id}>
-                  <TableCell variant="card">
-                    <ObjectName object={permission.object} read={read} />
-                  </TableCell>
-                  <TableCell className="whitespace-normal" variant="card">
-                    <span className="font-mono text-xs">
-                      {formatList(permission.actions)}
-                    </span>
-                  </TableCell>
-                  <TableCell variant="card">
-                    <span className="font-mono text-xs">
-                      {permission.binding}
-                    </span>
-                  </TableCell>
-                  <TableCell variant="card">
-                    {formatDateTime(permission.requestedAt)}
-                  </TableCell>
+    <Card size="sm" asChild>
+      <section aria-label={t`Access waiting for an admin`}>
+        <CardHeader>
+          <CardTitle level={3}>{t`Access waiting for an admin`}</CardTitle>
+          <CardAction>
+            {asks ? (
+              <Button
+                onClick={() => {
+                  setAsking(true);
+                }}
+                size="sm"
+                variant="outline"
+              >
+                <Icon icon={KeyIcon} />
+                {t`Ask for access`}
+              </Button>
+            ) : undefined}
+          </CardAction>
+        </CardHeader>
+        <CardContent flush={requested.length > 0}>
+          {requested.length === 0 ? (
+            <Text size="sm" color="muted">
+              {t`Nothing this App asked for is waiting.`}
+            </Text>
+          ) : (
+            <Table
+              aria-label={t`Access waiting for an admin`}
+              density="compact"
+            >
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t`Asked for`}</TableHead>
+                  <TableHead>{t`To`}</TableHead>
+                  <TableHead>{t`Name in the App's code`}</TableHead>
+                  <TableHead>{t`Asked`}</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      )}
-      {asking ? (
-        <AskDialog
-          app={app}
-          askable={read}
-          onAsked={onAsked}
-          onClose={() => {
-            setAsking(false);
-          }}
-        />
-      ) : null}
-    </section>
+              </TableHeader>
+              <TableBody>
+                {requested.map((permission) => (
+                  <TableRow key={permission.id}>
+                    <TableCell rowHeader>
+                      {objectName(permission.object, read, unnamed)}
+                    </TableCell>
+                    <TableCell wrap>{formatList(permission.actions)}</TableCell>
+                    <TableCell>{permission.binding}</TableCell>
+                    <TableCell>
+                      {formatDateTime(permission.requestedAt)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+          {asking ? (
+            <AskDialog
+              app={app}
+              askable={read}
+              onAsked={onAsked}
+              onClose={() => {
+                setAsking(false);
+              }}
+            />
+          ) : null}
+        </CardContent>
+      </section>
+    </Card>
   );
 };
 
@@ -526,7 +524,15 @@ export const AppAccessRequests = ({
     return <LoadingLines lines={2} />;
   }
   if (read.state !== "ready") {
-    return <NotLoaded page={read} />;
+    return (
+      <NotLoadedState
+        again={() => {
+          setAsked(asked + 1);
+        }}
+        heading="h3"
+        page={read}
+      />
+    );
   }
   return (
     <RequestsView

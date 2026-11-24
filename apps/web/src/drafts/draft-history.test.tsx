@@ -323,11 +323,21 @@ const press = async (element: Element | undefined) => {
   await settled();
 };
 
+/** What a button says, without the words it keeps hidden for while it works or failed. */
+const wordsOf = (element: Element): string => {
+  const copy = element.cloneNode(true);
+  if (!(copy instanceof Element)) {
+    return "";
+  }
+  for (const hidden of copy.querySelectorAll("[aria-hidden='true']")) {
+    hidden.remove();
+  }
+  return copy.textContent?.trim() ?? "";
+};
+
 const button = (name: string, within: ParentNode = document) =>
   [...within.querySelectorAll("button")].find(
-    (each) =>
-      each.textContent?.trim() === name ||
-      each.getAttribute("aria-label") === name
+    (each) => wordsOf(each) === name || each.getAttribute("aria-label") === name
   );
 
 const menuItem = (name: string) =>
