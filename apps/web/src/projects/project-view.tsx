@@ -1,3 +1,4 @@
+import type { AppOverview } from "@grasp-os/shared/apps";
 import type { ChatSummary } from "@grasp-os/shared/chat";
 import type {
   Project,
@@ -7,13 +8,14 @@ import type {
   ProjectRole,
 } from "@grasp-os/shared/projects";
 import { canBuild } from "@grasp-os/shared/roles";
-import type { Identity } from "@grasp-os/shared/rpc";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useNavigate, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
+import { OneApp } from "../apps/apps-overview.tsx";
+import type { Viewer } from "../apps/apps-overview.tsx";
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { brandOf } from "../connections/provider-mark.tsx";
 import { ErrorText } from "../error-text.tsx";
@@ -37,11 +39,11 @@ import {
   AlertDialogTrigger,
 } from "../grasp/alert-dialog/index.ts";
 import { Alert } from "../grasp/alert/index.ts";
+import { AppCardGrid } from "../grasp/app-card/index.ts";
 import { Avatar, AvatarFallback } from "../grasp/avatar/index.ts";
 import { Badge } from "../grasp/badge/index.ts";
 import { BrandIcon, brands } from "../grasp/brand-icon/index.ts";
 import { Button } from "../grasp/button/index.ts";
-import { CardLink, CardMedia, CardTitle } from "../grasp/card/index.ts";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -75,7 +77,7 @@ import { PageColumn } from "../grasp/page-column/index.ts";
 import { TabsLink, TabsNav } from "../grasp/tabs/index.ts";
 import { Tag } from "../grasp/tag/index.ts";
 import { Text } from "../grasp/text/index.ts";
-import { grasp, media } from "../grasp/tokens/tokens.stylex.ts";
+import { grasp } from "../grasp/tokens/tokens.stylex.ts";
 import { roleLabel } from "../labels.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { stateOf } from "../workflows/overview.ts";
@@ -85,7 +87,6 @@ import { EmptyLine } from "./empty-line.tsx";
 import { FileItemDialog } from "./file-item-dialog.tsx";
 import { AddChat, ProjectChatList } from "./project-chats.tsx";
 import { ProjectDialog } from "./project-dialog.tsx";
-import { AppPageDrawing } from "./project-drawings.tsx";
 import { usePages } from "./project-pages.ts";
 import { namesInProject } from "./project-people-names.ts";
 import { ProjectPeople } from "./project-people.tsx";
@@ -148,23 +149,6 @@ const styles = stylex.create({
     gap: grasp.space3,
     minHeight: grasp.avatarSm,
   },
-  // Three across; on a phone one card and the edge of the next, sideways,
-  // with room around so the cards' edges and focus ring aren't cut.
-  cards: {
-    display: "grid",
-    gridTemplateColumns: {
-      default: "repeat(3, minmax(0, 1fr))",
-      [media.belowPhone]: "none",
-    },
-    gridAutoFlow: { default: "row", [media.belowPhone]: "column" },
-    gridAutoColumns: { default: null, [media.belowPhone]: "78%" },
-    gap: grasp.space3,
-    overflowX: { default: "visible", [media.belowPhone]: "auto" },
-    scrollSnapType: { default: null, [media.belowPhone]: "x mandatory" },
-    padding: { default: 0, [media.belowPhone]: grasp.space1 },
-    scrollbarWidth: "none",
-  },
-  card: { display: "grid", minWidth: 0, scrollSnapAlign: "start" },
   // A row's figure keeps its line: the name gives way first.
   detail: { flexShrink: 0, whiteSpace: "nowrap" },
 });
@@ -656,21 +640,6 @@ const WorkflowRow = ({
   );
 };
 
-/** An App's card: a drawing of a page, and its name. */
-const AppCard = ({ item }: { item: ProjectItem }) => (
-  <li {...stylex.props(styles.card)}>
-    <CardLink
-      render={<Link params={{ app: item.id }} to="/apps/$app" />}
-      variant="soft"
-    >
-      <CardMedia>
-        <AppPageDrawing />
-      </CardMedia>
-      <CardTitle>{item.name}</CardTitle>
-    </CardLink>
-  </li>
-);
-
 /** A chat's row: its title, and when it last had a message. */
 const ChatRow = ({ chat }: { chat: ChatSummary }) => (
   <Item
@@ -737,9 +706,26 @@ const MakeButton = ({
 );
 
 /** The overview's Apps: three as cards, or its empty line. */
-const AppsPart = ({ project, makes }: { project: Project; makes: boolean }) => {
+const AppsPart = ({
+  project,
+  makes,
+  apps: listed,
+  viewer,
+}: {
+  project: Project;
+  makes: boolean;
+  /** The Apps the person can open, as the Apps page reads them. */
+  apps: readonly AppOverview[];
+  viewer: Viewer;
+}) => {
   const { t } = useLingui();
-  const apps = project.items.filter(({ type }) => type === "app");
+  const byId = new Map<string, AppOverview>(
+    listed.map((each) => [each.app.id, each])
+  );
+  const apps = project.items.flatMap(({ type, id }) => {
+    const overview = type === "app" ? byId.get(id) : undefined;
+    return overview === undefined ? [] : [overview];
+  });
   return (
     <section aria-labelledby="project-apps" {...stylex.props(styles.section)}>
       <SectionHead
@@ -767,11 +753,11 @@ const AppsPart = ({ project, makes }: { project: Project; makes: boolean }) => {
         </EmptyLine>
       ) : null}
       {apps.length === 0 ? null : (
-        <ul {...stylex.props(styles.cards)}>
-          {apps.slice(0, slice).map((item) => (
-            <AppCard item={item} key={item.id} />
+        <AppCardGrid density="dense">
+          {apps.slice(0, slice).map((overview) => (
+            <OneApp key={overview.app.id} overview={overview} viewer={viewer} />
           ))}
-        </ul>
+        </AppCardGrid>
       )}
     </section>
   );
@@ -783,14 +769,17 @@ const Overview = ({
   chats,
   workflows,
   makes,
-  userId,
+  viewer,
+  apps,
   askOwner,
 }: {
   project: Project;
   chats: readonly ChatSummary[];
   workflows: readonly OverviewRow[];
   makes: boolean;
-  userId: string;
+  viewer: Viewer;
+  /** The Apps the person can open, as the Apps page reads them. */
+  apps: readonly AppOverview[];
   /** The page asks the owner to set the project up: its empty Workflows and Apps say nothing more. */
   askOwner: boolean;
 }) => {
@@ -802,7 +791,7 @@ const Overview = ({
   );
   const owner = project.owner.name ?? t`the owner`;
   const people = project.members;
-  const ownerIsYou = project.owner.id === userId;
+  const ownerIsYou = project.owner.id === viewer.userId;
   return (
     <>
       {askOwner ? null : (
@@ -876,7 +865,9 @@ const Overview = ({
           </ItemGroup>
         )}
       </section>
-      {askOwner ? null : <AppsPart makes={makes} project={project} />}
+      {askOwner ? null : (
+        <AppsPart apps={apps} makes={makes} project={project} viewer={viewer} />
+      )}
       <section
         aria-labelledby="project-people"
         {...stylex.props(styles.section)}
@@ -1048,6 +1039,7 @@ export const ProjectView = ({
   connections,
   workflows,
   identity,
+  apps,
   tab = "overview",
 }: {
   project: Project;
@@ -1056,7 +1048,9 @@ export const ProjectView = ({
   connections: ProjectConnectionsList;
   /** The workflows the person has a role in, as the Workflows page reads them: how each stands. */
   workflows: readonly OverviewRow[];
-  identity: Pick<Identity, "role" | "userId">;
+  identity: Viewer;
+  /** The Apps the person can open, as the Apps page reads them. */
+  apps: readonly AppOverview[];
   tab?: ProjectTab;
 }) => {
   const { t } = useLingui();
@@ -1124,7 +1118,8 @@ export const ProjectView = ({
               chats={chats}
               makes={makes}
               project={project}
-              userId={identity.userId}
+              apps={apps}
+              viewer={identity}
               workflows={workflows}
             />
           ) : (

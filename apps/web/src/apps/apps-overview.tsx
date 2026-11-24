@@ -85,10 +85,10 @@ const styles = stylex.create({
 });
 
 /** Who looks at the Apps: what they may make and change follows from it. */
-type Viewer = Pick<Identity, "role" | "staff" | "userId">;
+export type Viewer = Pick<Identity, "role" | "staff" | "userId">;
 
-/** One App: its card. */
-const OneApp = ({
+/** One App: its card, wherever an App stands (the Apps page, a project's overview). */
+export const OneApp = ({
   overview: { app, contents },
   viewer,
 }: {

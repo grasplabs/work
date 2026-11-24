@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
+import type { AppOverview } from "@grasp-os/shared/apps";
 import type { ChatSummary } from "@grasp-os/shared/chat";
+import { appIdSchema } from "@grasp-os/shared/ids";
 import type {
   FileItem,
   NewProjectMember,
@@ -224,11 +226,13 @@ const shown = async (
     tab = "overview",
     connections = { connections: [], unseen: 0 },
     workflows = [],
+    apps = [],
   }: {
     chatsInIt?: ChatSummary[];
     tab?: ProjectTab;
     connections?: ProjectConnections;
     workflows?: OverviewRow[];
+    apps?: AppOverview[];
   } = {}
 ) => {
   const core = {
@@ -241,7 +245,8 @@ const shown = async (
       <ProjectView
         chats={chatsInIt}
         connections={connections}
-        identity={{ role: "builder", userId: "user-ada" }}
+        apps={apps}
+        identity={{ role: "builder", staff: false, userId: "user-ada" }}
         project={shownProject}
         tab={tab}
         workflows={workflows}
@@ -807,6 +812,50 @@ describe("A project's page", () => {
         addChat: true,
       },
       builder: false,
+    });
+  });
+
+  it("shows the project's Apps as the Apps page does, on their own cards that open them", async () => {
+    const { session } = fakeProjects();
+    const deskApp: AppOverview = {
+      app: {
+        id: appIdSchema.parse("app-desk"),
+        name: "Desk",
+        description: "Where the front desk works",
+        owner: "user-olga",
+        responsible: "user-olga",
+        audience: null,
+        blueprint: null,
+        currentVersion: 1,
+        liveLabel: null,
+        archived: false,
+        link: null,
+        process: null,
+        createdAt: "2026-11-01T10:00:00.000Z",
+        role: "user",
+      },
+      contents: { version: 1, pages: true },
+    };
+    await shown(
+      session,
+      {
+        ...project("user"),
+        items: [desk],
+        counts: { apps: 1, workflows: 0, connections: 0 },
+      },
+      { apps: [deskApp] }
+    );
+
+    expect({
+      opens: link("Desk")?.getAttribute("href"),
+      said: [
+        "Where the front desk works",
+        "Your team uses it",
+        "No preview yet",
+      ].map((said) => document.body.textContent?.includes(said)),
+    }).toStrictEqual({
+      opens: "/apps/app-desk",
+      said: [true, true, true],
     });
   });
 });
