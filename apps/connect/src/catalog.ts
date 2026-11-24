@@ -453,18 +453,16 @@ export const catalog = async (env: Env): Promise<Catalog> => {
 /**
  * Whether Composio marks a tool deprecated, on its way out: such a tool is
  * neither listed nor allowed. A mark connect can't read counts as none,
- * so the tool stays listed, and is logged.
+ * so the tool stays listed.
  */
-const isDeprecated = (
-  toolkit: string,
-  { slug, is_deprecated: deprecated }: z.infer<typeof toolSchema>
-): boolean => {
-  if (typeof deprecated !== "boolean") {
-    log.warn("catalog.tool_deprecation_unreadable", { toolkit, tool: slug });
-    return false;
-  }
-  return deprecated;
-};
+const isDeprecated = ({
+  is_deprecated: deprecated,
+}: z.infer<typeof toolSchema>): boolean => deprecated === true;
+
+/** Whether connect can read the tool's mark: a boolean, as Composio documents it. */
+const deprecationUnread = ({
+  is_deprecated: deprecated,
+}: z.infer<typeof toolSchema>): boolean => typeof deprecated !== "boolean";
 
 /**
  * A listed Composio toolkit's tools, by the names its MCP server gives
@@ -480,8 +478,17 @@ const toolsOf = async (
     toolSchema,
     toolPaging
   );
+  // Logged once per list, not per tool: a toolkit can hold a thousand.
+  const unread = tools.filter(deprecationUnread);
+  if (unread.length > 0) {
+    log.warn("catalog.tool_deprecation_unreadable", {
+      toolkit,
+      tools: unread.length,
+      first: unread[0]?.slug,
+    });
+  }
   return tools
-    .filter((tool) => !isDeprecated(toolkit, tool))
+    .filter((tool) => !isDeprecated(tool))
     .map(({ slug, description, input_parameters: input, tags }) => ({
       name: slug,
       description: description ?? null,
