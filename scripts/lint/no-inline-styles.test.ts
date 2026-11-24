@@ -708,6 +708,14 @@ describe("grasp/no-inline-styles under the repository's config", () => {
     await expect(lint("style-or-nothing.tsx")).resolves.toStrictEqual([]);
   }, 60_000);
 
+  it("takes nothing alone for no styles, on an element or another package's component, and refuses it beside StyleX styles there", async () => {
+    await expect(lint("nothing-alone.tsx")).resolves.toStrictEqual([]);
+  }, 60_000);
+
+  it("follows a const named twice in one style, in an array and a condition, each time", async () => {
+    await expect(lint("alias-twice.tsx")).resolves.toStrictEqual([]);
+  }, 60_000);
+
   it("refuses a member of the feature's own component that is the kit's, here or in another module, and allows one of its own", async () => {
     await expect(lint("member-of-own.tsx")).resolves.toStrictEqual([]);
   }, 60_000);

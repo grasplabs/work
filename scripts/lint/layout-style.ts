@@ -24,7 +24,8 @@
  *   (unlike `as`, which it does not);
  * - a `const` that holds one of these;
  * - an array of these, `cond && style`, `a ?? b`, `cond ? a : b`, a `!`,
- *   `as const`, and `undefined`, `null` or `false` among them.
+ *   `as const`, and `undefined`, `null` or `false` among them (alone,
+ *   they are no styles, which the component linter's rule lets through).
  *
  * Anything else, an object literal above all, is not. Such styles go only
  * to a component that takes them (`takesStylex`): Damsko's, the feature's
@@ -438,32 +439,24 @@ const isPlacementMember = (
 };
 
 /**
- * Whether a name is `undefined`, or a parameter declared `LayoutStyle`.
- * `undefined` is the global's, which a config's globals bind without a
- * declaration: not one the file declares itself.
+ * What a `style` value holds: StyleX styles (maybe beside nothing), nothing
+ * alone (`undefined`, `null`, `false`), which the component linter's rule
+ * passes, or anything else.
  */
-const isPlacementName = (value: StyleNode, context: StyleContext): boolean => {
-  const variable = variableOf(context, value);
-  if (value.name === "undefined") {
-    return variable === undefined || variable.defs.length === 0;
+type Holding = "styles" | "nothing" | "other";
+
+/** What parts hold together: anything else if one does, else styles if one does, else nothing. */
+const together = (parts: readonly Holding[]): Holding => {
+  if (parts.includes("other")) {
+    return "other";
   }
-  return (
-    variable !== undefined &&
-    isLayoutStyleType(parameterType(variable, context), context)
-  );
+  return parts.includes("styles") ? "styles" : "nothing";
 };
 
-/** What a `const` of that name holds, once, else undefined. */
-const constValue = (
-  value: StyleNode,
-  context: StyleContext,
-  seen: Set<Variable>
-): StyleNode | undefined => {
-  const variable = variableOf(context, value);
-  const [definition] = variable?.defs ?? [];
+/** What a `const` holds, else undefined. */
+const constValue = (variable: Variable): StyleNode | undefined => {
+  const [definition] = variable.defs;
   if (
-    variable === undefined ||
-    seen.has(variable) ||
     variable.defs.length !== 1 ||
     definition?.type !== "Variable" ||
     definition.parent?.kind !== "const" ||
@@ -471,8 +464,29 @@ const constValue = (
   ) {
     return undefined;
   }
-  seen.add(variable);
   return definition.node.init ?? undefined;
+};
+
+/**
+ * What a name holds, short of following a `const`: `undefined` nothing
+ * (the global's, which a config's globals bind without a declaration: not
+ * one the file declares itself), a parameter declared `LayoutStyle`
+ * styles. Undefined for any other name.
+ */
+const nameHolding = (
+  value: StyleNode,
+  variable: Variable | undefined,
+  context: StyleContext
+): Holding | undefined => {
+  if (value.name === "undefined") {
+    return variable === undefined || variable.defs.length === 0
+      ? "nothing"
+      : "other";
+  }
+  return variable !== undefined &&
+    isLayoutStyleType(parameterType(variable, context), context)
+    ? "styles"
+    : undefined;
 };
 
 /** The expressions that wrap a value without changing it: `layout?.wide`, `layout.wide!`. */
@@ -482,81 +496,100 @@ const transparent = new Set([
   "ParenthesizedExpression",
 ]);
 
-/** Whether it is nothing, or StyleX styles in an array or a condition, each held by `holds`. */
-const isPlacementCombination = (
+/** What nothing, or an array or a condition of parts, holds, each part's by `holds`. */
+const combinationHolding = (
   value: StyleNode,
-  holds: (part: StyleNode | null | undefined) => boolean
-): boolean => {
+  holds: (part: StyleNode | null | undefined) => Holding
+): Holding => {
   switch (value.type) {
     case "Literal": {
-      return value.value === null || value.value === false;
+      return value.value === null || value.value === false
+        ? "nothing"
+        : "other";
     }
     case "ArrayExpression": {
       const elements = value.elements ?? [];
-      return (
-        elements.length > 0 &&
-        elements.every(
-          (element) => element?.type !== "SpreadElement" && holds(element)
-        )
-      );
+      return elements.length > 0 &&
+        elements.every((element) => element?.type !== "SpreadElement")
+        ? together(elements.map(holds))
+        : "other";
     }
     case "ConditionalExpression": {
-      return holds(value.consequent) && holds(value.alternate);
+      return together([holds(value.consequent), holds(value.alternate)]);
     }
     case "LogicalExpression": {
       return value.operator === "&&"
         ? holds(value.right)
-        : holds(value.left) && holds(value.right);
+        : together([holds(value.left), holds(value.right)]);
     }
     default: {
-      return false;
+      return "other";
     }
   }
 };
 
-/** Whether `value`, given to a component's `style`, is StyleX styles alone (above). */
-export const isPlacement = (
-  value: StyleNode | undefined,
+/**
+ * What a `style` value holds (above). `seen` are the `const`s followed on
+ * the way to it, this chain's alone, which a loop comes back to: a name a
+ * sibling followed too (`[wide, active && wide]`) is no loop.
+ */
+const holding = (
+  value: StyleNode,
   context: StyleContext,
-  seen = new Set<Variable>()
-): boolean => {
-  const holds = (part: StyleNode | null | undefined): boolean =>
-    part !== null && part !== undefined && isPlacement(part, context, seen);
-  if (value === undefined) {
-    return false;
-  }
+  seen: ReadonlySet<Variable>
+): Holding => {
+  const holds = (part: StyleNode | null | undefined): Holding =>
+    part === null || part === undefined
+      ? "other"
+      : holding(part, context, seen);
   if (transparent.has(value.type)) {
     return holds(value.expression);
   }
   switch (value.type) {
     case "MemberExpression": {
-      return isPlacementMember(value, context);
+      return isPlacementMember(value, context) ? "styles" : "other";
     }
     // `as const` makes it read-only, no other type.
     case "TSAsExpression": {
-      return (
-        identifierName(value.typeAnnotation?.typeName) === "const" &&
-        holds(value.expression)
-      );
+      return identifierName(value.typeAnnotation?.typeName) === "const"
+        ? holds(value.expression)
+        : "other";
     }
     // The type checker holds what it satisfies, unlike a cast's.
     case "TSSatisfiesExpression": {
-      return (
-        isLayoutStyleType(value.typeAnnotation ?? undefined, context) ||
-        holds(value.expression)
-      );
+      const held = holds(value.expression);
+      return held === "other" &&
+        isLayoutStyleType(value.typeAnnotation ?? undefined, context)
+        ? "styles"
+        : held;
     }
     case "Identifier": {
-      return (
-        isPlacementName(value, context) ||
-        holds(constValue(value, context, seen))
-      );
+      const variable = variableOf(context, value);
+      const named = nameHolding(value, variable, context);
+      const init =
+        variable === undefined || seen.has(variable)
+          ? undefined
+          : constValue(variable);
+      if (named !== undefined || variable === undefined || init === undefined) {
+        return named ?? "other";
+      }
+      return holding(init, context, new Set(seen).add(variable));
     }
     default: {
-      return isPlacementCombination(value, holds);
+      return combinationHolding(value, holds);
     }
   }
 };
+
+/**
+ * Whether `value`, given to a component's `style`, is StyleX styles alone
+ * (above), with nothing among them or not; nothing alone is no styles.
+ */
+export const isPlacement = (
+  value: StyleNode | undefined,
+  context: StyleContext
+): boolean =>
+  value !== undefined && holding(value, context, new Set()) === "styles";
 
 /** The declarations a type-free export may make: types alone. */
 const typeDeclarations = new Set([
