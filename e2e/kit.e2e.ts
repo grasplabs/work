@@ -34,6 +34,27 @@ test("paints the system's scheme, dark from the start and following a change wit
 test("Damsko's tokens follow the scheme and a person's choice, and its fonts load from this origin", async ({
   page,
 }) => {
+  // Every font file the page asks for, with what came back: a test that
+  // fails says which file and why.
+  const fontFiles = new Map<string, string>();
+  page.on("response", (response) => {
+    const url = response.url();
+    if (url.endsWith(".woff2")) {
+      fontFiles.set(
+        url,
+        `${response.status()} ${response.headers()["content-type"] ?? "no type"}`
+      );
+    }
+  });
+  page.on("requestfailed", (request) => {
+    if (request.url().endsWith(".woff2")) {
+      fontFiles.set(
+        request.url(),
+        `failed: ${request.failure()?.errorText ?? "no reason"}`
+      );
+    }
+  });
+
   await page.emulateMedia({ colorScheme: "light" });
   await page.goto("/kit");
   await expect(page.getByRole("heading", { name: "UI kit" })).toBeVisible();
@@ -64,24 +85,42 @@ test("Damsko's tokens follow the scheme and a person's choice, and its fonts loa
   await expect.poll(primary).toBe(dark);
 
   // Damsko's own Geist, Geist Serif and Geist Mono, each the first family
-  // of its token, loaded from this origin.
+  // of its token, loaded from this origin. Only the first: the sans token's
+  // second, "Geist Fallback", is the host's Arial (`local()`), which a
+  // Linux runner lacks, and `document.fonts.load` of a list fails as a
+  // whole when one face in it can't load.
   const loaded = await page.evaluate(
     async () =>
       await Promise.all(
         ["sans", "serif", "mono"].map(async (token) => {
-          const family = getComputedStyle(document.documentElement)
+          const [family = ""] = getComputedStyle(document.documentElement)
             .getPropertyValue(`--damsko-font-${token}`)
-            .trim();
-          const faces = await document.fonts.load(`1em ${family}`);
-          return faces
-            .filter((face) => face.status === "loaded")
-            .map((face) => face.family.replaceAll('"', ""));
+            .split(",");
+          try {
+            const faces = await document.fonts.load(`1em ${family.trim()}`);
+            return faces
+              .filter((face) => face.status === "loaded")
+              .map((face) => face.family.replaceAll('"', ""));
+          } catch (error) {
+            return [`${family.trim()}: ${String(error)}`];
+          }
         })
       )
   );
-  expect(loaded[0]).toContain("Geist");
-  expect(loaded[1]).toContain("Geist Serif");
-  expect(loaded[2]).toContain("Geist Mono");
+  const files = [...fontFiles].map(([url, answer]) => `${url} ${answer}`);
+  const fileList = files.join("\n") || "none";
+  expect(loaded[0], fileList).toContain("Geist");
+  expect(loaded[1], fileList).toContain("Geist Serif");
+  expect(loaded[2], fileList).toContain("Geist Mono");
+  // Each from this origin, as a font.
+  expect(
+    files.filter(
+      (line) =>
+        !line.startsWith(new URL(page.url()).origin) ||
+        !line.endsWith(" 200 font/woff2")
+    ),
+    fileList
+  ).toEqual([]);
 });
 
 test("a page sidebar folds from the keyboard and stays folded over a reload", async ({
