@@ -262,8 +262,8 @@ const Sound = () => {
   const name = heard ? t`Turn my voice off` : t`Turn my voice on`;
   return (
     <Button
+      // Its name says on or off; marked as pressed, Damsko would fill it like a chosen tool.
       aria-label={name}
-      aria-pressed={heard}
       onClick={() => {
         if (on && blocked) {
           void allowSound();
