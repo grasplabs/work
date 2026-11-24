@@ -107,10 +107,10 @@ const Nudge = ({ ask }: { ask: Extract<Ask, { kind: "quiet" }> }) => {
     >
       <ConfirmationTitle>
         <ConfirmationRequest>
-          {`${ask.team} is quiet: ${ask.waiting} still to talk. Shall I nudge them in your name?`}
+          {`${ask.team} is quiet, with ${ask.waiting} still to talk. Shall I nudge them in your name?`}
         </ConfirmationRequest>
         <ConfirmationAccepted>
-          {`Done: ${ask.team} got a nudge from you.`}
+          {`${ask.team} got a nudge from you.`}
         </ConfirmationAccepted>
         <ConfirmationRejected>
           I’ll leave them be and remind them once myself.
