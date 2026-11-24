@@ -16,18 +16,12 @@ export type WorkflowView = "flow" | "runs" | "settings";
 
 /** What a link to a workflow's page may ask of it. */
 export interface WorkflowSearch {
-  /** The view it opens on: Flow for its builders, Runs for anyone else, by default. */
+  /** The view it opens on, for its builders (Settings for anyone); none for its page. */
   view?: WorkflowView;
   /** In Settings, the section open: General by default. */
   section?: WorkflowSettingsSection;
   /** The project it was started or opened from: the way back. */
   project?: string;
-  /**
-   * On Runs, the run open beside the list, by its ID. A run asked for
-   * with no view opens Runs with it; one asked for with another view is
-   * dropped: a run is open only where its list shows.
-   */
-  run?: string;
   /**
    * The chat the person came from, building it in Grasp's chat: the page
    * makes it the workflow's. Core checks it is theirs on each read.
@@ -44,22 +38,12 @@ const viewOf = (value: unknown): WorkflowView | undefined =>
 /** What the address asks of a workflow's page, as far as it is valid. */
 export const workflowSearchOf = (
   search: Record<string, unknown>
-): WorkflowSearch => {
-  const view = viewOf(search.view);
-  const run =
-    typeof search.run === "string" &&
-    search.run !== "" &&
-    (view === undefined || view === "runs")
-      ? search.run
-      : undefined;
-  return {
-    view: run === undefined ? view : "runs",
-    section: workflowSettingsSectionOf(search.section),
-    project: projectSearchOf(search),
-    run,
-    chat: typeof search.chat === "string" ? search.chat : undefined,
-  };
-};
+): WorkflowSearch => ({
+  view: viewOf(search.view),
+  section: workflowSettingsSectionOf(search.section),
+  project: projectSearchOf(search),
+  chat: typeof search.chat === "string" ? search.chat : undefined,
+});
 
 /** What Workflows › Runs' address filters its log by. */
 export interface RunsSearch {

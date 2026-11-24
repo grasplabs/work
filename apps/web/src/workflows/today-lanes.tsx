@@ -1,3 +1,4 @@
+import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 import type {
   DecisionAnswerInput,
   DecisionView,
@@ -48,8 +49,6 @@ import {
   placeOf,
 } from "./lanes.ts";
 import type { Lane, LaneDay, LaneRun } from "./lanes.ts";
-import { noWorkflows } from "./runs.tsx";
-import type { KnownWorkflows } from "./runs.tsx";
 
 // Runs › Today (prototype `components/workflows/today-lanes.tsx`): a lane
 // for every workflow that worked today, its runs as dots in time. A dot
@@ -97,6 +96,10 @@ const styles = stylex.create({
     display: "flex",
     flexDirection: "column",
     gap: space["3"],
+    // The text the reference's page gives what isn't sized itself (a
+    // lane's name), whatever the frame around it sets.
+    fontSize: font.textBase,
+    lineHeight: font.textBaseLine,
   },
   wide: { display: { default: "none", [WIDE]: "block" } },
   narrow: {
@@ -147,9 +150,6 @@ const styles = stylex.create({
     gap: space["2"],
     height: size.controlLg,
     minWidth: 0,
-    // The words' own size, not the page's: the frame around it may set
-    // another.
-    fontSize: font.textSm,
     lineHeight: 1.25,
     textWrap: "pretty",
   },
@@ -439,7 +439,7 @@ const useRunText = (run: LaneRun): string => {
     done: t({ message: "done by itself", context: "a run that ran alone" }),
     failed: t({ message: "failed", context: "a run that ended in failure" }),
     cancelled: t({
-      message: "cancelled",
+      message: "stopped",
       context: "a run someone stopped before its end",
     }),
   };
@@ -489,15 +489,27 @@ const Dot = ({
   );
 };
 
+/** The business process each lane's workflow serves, by its ID, for their marks. */
+export type LaneProcesses = ReadonlyMap<string, BusinessProcess | null>;
+
+/** None known: lanes without their marks. */
+const noProcesses: LaneProcesses = new Map();
+
+/** Each lane's workflow by the name people see (`workflowLabel`), by its ID. */
+export type LaneNames = ReadonlyMap<string, string>;
+
+/** None known: lanes by their workflows' own names. */
+const noNames: LaneNames = new Map();
+
 /** A lane's process, by its mark, before its name, as the prototype has it. */
 const LaneMark = ({
   lane,
-  workflows,
+  processes,
 }: {
   lane: Lane;
-  workflows: KnownWorkflows;
+  processes: LaneProcesses;
 }) => {
-  const process = workflows.get(lane.of.id)?.process;
+  const process = processes.get(lane.of.id);
   return process === undefined || process === null ? null : (
     <ProcessGlyph process={process} />
   );
@@ -581,9 +593,9 @@ const Lanes = ({
   lit,
   chosen,
   onChoose,
-  workflows,
+  processes,
 }: {
-  workflows: KnownWorkflows;
+  processes: LaneProcesses;
   day: LaneDay;
   lit: ReadonlySet<string>;
   chosen: string | null;
@@ -597,7 +609,7 @@ const Lanes = ({
       <ul {...stylex.props(styles.names)}>
         {day.lanes.map((lane) => (
           <li key={lane.key} {...stylex.props(styles.name)}>
-            <LaneMark lane={lane} workflows={workflows} />
+            <LaneMark lane={lane} processes={processes} />
             <LaneLink lane={lane} />
           </li>
         ))}
@@ -694,16 +706,16 @@ const ListLane = ({
   lane,
   chosen,
   onChoose,
-  workflows,
+  processes,
 }: {
-  workflows: KnownWorkflows;
+  processes: LaneProcesses;
   lane: Lane;
   chosen: string | null;
   onChoose: (id: string | null) => void;
 }) => (
   <li {...stylex.props(styles.narrowLane)}>
     <span {...stylex.props(styles.row)}>
-      <LaneMark lane={lane} workflows={workflows} />
+      <LaneMark lane={lane} processes={processes} />
       <span {...stylex.props(styles.truncate)}>
         <LaneLink lane={lane} />
       </span>
@@ -974,11 +986,14 @@ const useLatestToday = (loaded: WorkflowsToday): WorkflowsToday => {
 
 export const TodayLanes = ({
   today: loaded,
-  workflows = noWorkflows,
+  processes = noProcesses,
+  names = noNames,
 }: {
   today: WorkflowsToday;
-  /** The workflows the lanes are of: their names and processes' marks. */
-  workflows?: KnownWorkflows;
+  /** The process each lane's workflow serves, for its mark. */
+  processes?: LaneProcesses;
+  /** Each lane's workflow by the name people see. */
+  names?: LaneNames;
 }) => {
   const today = useLatestToday(loaded);
   const { t } = useLingui();
@@ -989,7 +1004,7 @@ export const TodayLanes = ({
     ...read,
     lanes: read.lanes.map((lane) => ({
       ...lane,
-      name: workflows.get(lane.of.id)?.label ?? lane.name,
+      name: names.get(lane.of.id) ?? lane.name,
     })),
   };
   const all = day.lanes.flatMap((lane) => lane.runs);
@@ -1018,7 +1033,7 @@ export const TodayLanes = ({
               day={day}
               lit={lit}
               onChoose={setChosen}
-              workflows={workflows}
+              processes={processes}
             />
           </div>
           <ul {...stylex.props(styles.narrow)}>
@@ -1028,7 +1043,7 @@ export const TodayLanes = ({
                 key={lane.key}
                 lane={lane}
                 onChoose={setChosen}
-                workflows={workflows}
+                processes={processes}
               />
             ))}
           </ul>

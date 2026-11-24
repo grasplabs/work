@@ -8,12 +8,12 @@ import {
   CardTitle,
 } from "@grasp-os/ui/components/card";
 import { Heading } from "@grasp-os/ui/components/heading";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { font, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { useId } from "react";
 import type { ReactNode } from "react";
 
-import { InfoTip } from "./info-tip.tsx";
+import { InfoTip } from "../frame/info-tip.tsx";
 
 // One part of a workflow's page on a dense card, a landmark of its own:
 // its title (with more about it behind an info mark, where it says more),
@@ -21,19 +21,59 @@ import { InfoTip } from "./info-tip.tsx";
 // old library's section card was a card of these parts.
 
 const styles = stylex.create({
-  // The title and its info mark on one line, the mark outside the heading
-  // so the card's name stays its title alone.
-  titled: { display: "flex", alignItems: "center", gap: space["1"] },
-  // A card that is its heading alone: the title and its actions on one row.
-  row: {
+  // The title and its info mark on one line, 8px apart, as the reference's
+  // section header has them, the mark under the title where they don't
+  // fit, in a box no taller than a line of the title.
+  titled: {
     display: "flex",
     flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["2"],
+    minWidth: 0,
+  },
+  mark: {
+    display: "inline-flex",
+    alignItems: "center",
+    height: font.textSmLine,
+  },
+  // A card that is its heading alone: the title and its actions on one
+  // row, as the reference's dense head draws it, 12px under the card's top
+  // and 28px over its foot (its head's 12px, then its empty body's 16px).
+  row: {
+    marginBlockStart: `calc(-1 * ${space["1"]})`,
+    marginBlockEnd: space["3"],
+    display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     gap: space["4"],
   },
-  actions: { display: "flex", alignItems: "center", gap: space["2"] },
+  // Beside the title, which gives way first.
+  actions: {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    gap: space["2"],
+  },
 });
+
+/** A title, with its info mark after it where it says more. */
+const Titled = ({
+  info,
+  children,
+}: {
+  info: string | undefined;
+  children: ReactNode;
+}): ReactNode =>
+  info === undefined ? (
+    children
+  ) : (
+    <div {...stylex.props(styles.titled)}>
+      {children}
+      <span {...stylex.props(styles.mark)}>
+        <InfoTip>{info}</InfoTip>
+      </span>
+    </div>
+  );
 
 export const SectionCard = ({
   title,
@@ -73,14 +113,11 @@ export const SectionCard = ({
         <section>
           <CardContent>
             <div {...stylex.props(styles.row)}>
-              <div {...stylex.props(styles.titled)}>
+              <Titled info={info}>
                 <Heading id={titleId} level={level} size="2xs">
                   {title}
                 </Heading>
-                {info === undefined ? null : (
-                  <InfoTip about="section">{info}</InfoTip>
-                )}
-              </div>
+              </Titled>
               {hasActions ? (
                 <div {...stylex.props(styles.actions)}>{actions}</div>
               ) : null}
@@ -100,12 +137,9 @@ export const SectionCard = ({
         {title === undefined && !hasActions ? null : (
           <CardHeader>
             {title === undefined ? null : (
-              <div {...stylex.props(styles.titled)}>
+              <Titled info={info}>
                 <CardTitle level={level}>{title}</CardTitle>
-                {info === undefined ? null : (
-                  <InfoTip about="section">{info}</InfoTip>
-                )}
-              </div>
+              </Titled>
             )}
             {description === undefined ? null : (
               <CardDescription>{description}</CardDescription>

@@ -11,7 +11,6 @@ import { peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
 import { toastSaying } from "./said.ts";
 import { origin } from "./stack.ts";
-import { goTo } from "./tabs-nav.ts";
 
 // An independent workflow, end to end, as its people make and use it: a
 // builder makes it from Make something, saying what they want done, and
@@ -101,7 +100,7 @@ const drawnAndPublished = async (
     .getByRole("region", { name: "Here's what Grasp will make" })
     .getByRole("button", { name: "Build it" })
     .click(agentTurn);
-  await expect(page).toHaveURL(/\/workflows\/[^/?]+$/u, agentTurn);
+  await expect(page).toHaveURL(/\/workflows\/[^/?]+\?view=flow$/u, agentTurn);
   await expect(
     page.getByRole("heading", { level: 1, name: planned, exact: true })
   ).toBeAttached(pageRead);
@@ -229,13 +228,16 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   await expect(async () => {
     await page.goto(`/workflows/${workflow}?view=runs`);
     await expect(run).toBeVisible(pageRead);
-    await expect(run).toContainText("Completed", { timeout: 1000 });
+    await expect(run).toContainText("Done", { timeout: 1000 });
   }).toPass(untilItHappens);
-  await run.getByRole("link").click();
-  const sheet = page.getByRole("dialog");
-  await expect(sheet).toContainText('"status": "approved"', pageRead);
-  await expect(sheet).toContainText('"comment": "Paid on time."');
-  await page.keyboard.press("Escape");
+  // Its own page, with what it returned folded under its updates.
+  await run.getByRole("button").first().click();
+  await expect(page).toHaveURL(/\/runs\/[^/?]+$/u, pageRead);
+  await page.getByRole("button", { name: "What it returned" }).click(pageRead);
+  const returned = page.locator("[data-slot=code-block]");
+  await expect(returned).toContainText('"status": "approved"', pageRead);
+  await expect(returned).toContainText('"comment": "Paid on time."');
+  await page.goBack();
 
   // A webhook: an admin adds a source, its secret shown once.
   const sourceName = `Invoices ${randomBytes(4).toString("hex")}`;
@@ -253,16 +255,12 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
     .getByRole("textbox", { name: `URL of ${sourceName}` })
     .inputValue(pageRead);
 
-  // The builder starts the workflow on its invoices, in its Settings'
-  // Triggers.
-  await goTo(
-    page.getByRole("navigation", { name: "Workflow views" }),
-    "Settings"
-  );
-  await goTo(
-    page.getByRole("navigation", { name: "Settings sections" }),
-    "Triggers"
-  );
+  // The builder starts the workflow on its invoices, from What starts it
+  // in the Workshop on its page: its Settings' Triggers.
+  await page.goto(`/workflows/${workflow}`);
+  await page
+    .getByRole("button", { name: "Open What starts it" })
+    .click(pageRead);
   await page.getByRole("button", { name: "Add a trigger" }).click();
   const adder = page.getByRole("dialog", { name: "Add a trigger" });
   await adder.getByRole("combobox", { name: "What starts it" }).click();

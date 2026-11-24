@@ -1,16 +1,15 @@
-import type { ListedConnection } from "@grasp-os/shared/connect";
 import { runIdSchema, workflowResourceIdSchema } from "@grasp-os/shared/ids";
 import { roleErrors } from "@grasp-os/shared/roles";
+import type { WorkflowTrigger } from "@grasp-os/shared/workflow-triggers";
 import type { WorkflowSummary } from "@grasp-os/shared/workflows";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { CoreConnection } from "../core-connection.ts";
-import { phaseOf, readOverview, readTools } from "./overview.ts";
+import { phaseOf, readOverview, workflowBlock } from "./overview.ts";
 
 // What the Workflows page reads, against core's API as the page reaches it
 // over RPC, faked: each workflow stands in the phase its live version and
-// its runs say, what needs the reader first; and the tools a workflow
-// reaches are the apps its connections belong to.
+// its runs say, what needs the reader first.
 
 /** A workflow that runs, ran this week and needs nobody, changed by `change`. */
 const workflow = (
@@ -85,6 +84,65 @@ describe(phaseOf, () => {
       phaseOf({ live: false, ...quiet, failed: 2 }),
     ]).toStrictEqual(["needsYou", "needsYou"]);
   });
+
+  it("never runs while paused or while nothing can start it, and needs only an admin where a trigger waits for one", () => {
+    expect([
+      phaseOf({ live: true, ...quiet, paused: true }),
+      phaseOf({ live: true, ...quiet, blocked: "waiting" }),
+      phaseOf({ live: true, ...quiet, blocked: "waiting", admin: true }),
+      phaseOf({ live: true, ...quiet, blocked: "refused", admin: true }),
+    ]).toStrictEqual(["building", "building", "needsYou", "building"]);
+  });
+});
+
+/** An enabled email trigger whose start an admin allowed, changed by `change`. */
+const trigger = (change: Partial<WorkflowTrigger> = {}): WorkflowTrigger => ({
+  id: "trigger",
+  kind: "email",
+  owner: "owner",
+  workflowId: "id-intake",
+  principal: "owner",
+  enabled: true,
+  createdAt: "2026-10-08T09:00:00.000Z",
+  config: null,
+  nextAt: null,
+  address: "intake@acme.test",
+  source: null,
+  stopped: false,
+  start: "active",
+  events: null,
+  ...change,
+});
+
+describe(workflowBlock, () => {
+  it("is nothing while one of its enabled triggers can start it, or it has none", () => {
+    expect([
+      workflowBlock([]),
+      workflowBlock([trigger()]),
+      workflowBlock([trigger({ start: "requested" }), trigger()]),
+      workflowBlock([trigger({ start: "requested", enabled: false })]),
+    ]).toStrictEqual([null, null, null, null]);
+  });
+
+  it("waits for an admin only where a request waits: refused where an admin took it back, it holds none, it stopped or its source is gone", () => {
+    expect(
+      [
+        trigger({ start: "requested" }),
+        trigger({ start: "revoked" }),
+        trigger({ start: null }),
+        trigger({ stopped: true }),
+      ].map((one) => workflowBlock([one])?.why)
+    ).toStrictEqual(["waiting", "refused", "refused", "refused"]);
+  });
+
+  it("names the trigger an admin could allow, before one refused", () => {
+    expect(
+      workflowBlock([
+        trigger({ start: "revoked" }),
+        trigger({ kind: "schedule", start: "requested" }),
+      ])
+    ).toStrictEqual({ kind: "schedule", why: "waiting" });
+  });
 });
 
 describe("the Workflows page's rows", () => {
@@ -107,7 +165,7 @@ describe("the Workflows page's rows", () => {
     ]);
   });
 
-  it("carries what core says of each: the name people see, its owner, its process, whether it is paused, and its runs this week once it ran", async () => {
+  it("carries what core says of each: the name people see, its owner, its process, whether it is paused (and so not running), and its runs this week once it ran", async () => {
     const read = await overviewOf({
       overview: async () =>
         await Promise.resolve([
@@ -129,8 +187,10 @@ describe("the Workflows page's rows", () => {
       {
         id: "id-intake",
         name: "Intake",
-        phase: "running",
+        phase: "building",
         paused: true,
+        blocked: null,
+        role: null,
         process: "o2c",
         owner: "Ada Lovelace",
         runs: 12,
@@ -144,6 +204,8 @@ describe("the Workflows page's rows", () => {
         name: "Planned",
         phase: "building",
         paused: false,
+        blocked: null,
+        role: null,
         process: null,
         owner: null,
         runs: null,
@@ -176,148 +238,5 @@ describe("the Workflows page's rows", () => {
     });
 
     expect(rows).toStrictEqual(["Intake: running"]);
-  });
-});
-
-const connection = (
-  id: string,
-  change: Partial<ListedConnection>
-): ListedConnection => ({
-  id,
-  source: "native",
-  provider: "microsoft",
-  scope: "shared",
-  status: "active",
-  ownerUserId: null,
-  connectedBy: "me",
-  connectedByName: "Me",
-  accountName: null,
-  createdAt: "2026-10-01T00:00:00.000Z",
-  ...change,
-});
-
-/** A catalog entry, as core lists an app. */
-const entry = (source: string, id: string, name: string) => ({
-  source,
-  id,
-  name,
-  categories: [],
-  toolCount: 1,
-  logo: null,
-  description: null,
-  group: "Other",
-  auth: "managed",
-  offered: true,
-});
-
-/** The tools read, as each workflow's names. */
-const toolsOf = async (session: object): Promise<Record<string, string[]>> => {
-  const tools = await readTools(connectionTo(session));
-  return Object.fromEntries(
-    [...tools].map(([id, list]) => [id, list.map(({ name }) => name)])
-  );
-};
-
-describe("the tools a workflow reaches", () => {
-  const uses = [
-    {
-      connectionId: "c-microsoft",
-      workflows: [
-        { id: "wf-1", name: "Intake" },
-        { id: "wf-2", name: "Billing" },
-      ],
-    },
-    {
-      connectionId: "c-microsoft-mine",
-      workflows: [{ id: "wf-1", name: "Intake" }],
-    },
-    { connectionId: "c-crm", workflows: [{ id: "wf-1", name: "Intake" }] },
-    { connectionId: "c-http", workflows: [{ id: "wf-2", name: "Billing" }] },
-  ];
-  const connections = [
-    connection("c-microsoft", {}),
-    connection("c-microsoft-mine", { scope: "personal", ownerUserId: "me" }),
-    connection("c-crm", { source: "composio", provider: "acme_crm" }),
-    connection("c-http", {
-      source: "http",
-      provider: "http",
-      http: {
-        name: "Ledger",
-        origin: "https://ledger.example",
-        pathPrefixes: ["/"],
-        methods: ["GET"],
-        credentialHeader: "authorization",
-      },
-    }),
-  ];
-
-  it("are the apps its connections belong to, each once by the catalog's name, and its HTTP connections by theirs", async () => {
-    const tools = await toolsOf({
-      workflows: { byConnection: async () => await Promise.resolve(uses) },
-      connections: {
-        list: async () => await Promise.resolve(connections),
-        catalog: async () =>
-          await Promise.resolve({
-            entries: [
-              entry("native", "microsoft", "Microsoft 365"),
-              entry("composio", "acme_crm", "Acme CRM"),
-            ],
-          }),
-      },
-    });
-
-    expect(tools).toStrictEqual({
-      "wf-1": ["Microsoft 365", "Acme CRM"],
-      "wf-2": ["Microsoft 365", "Ledger"],
-    });
-  });
-
-  it("take the product's own mark as ProviderMark does: by the exact id, where core serves no logo", async () => {
-    const brandsWith = async (microsoftLogo: string | null) => {
-      const tools = await readTools(
-        connectionTo({
-          workflows: { byConnection: async () => await Promise.resolve(uses) },
-          connections: {
-            list: async () => await Promise.resolve(connections),
-            catalog: async () =>
-              await Promise.resolve({
-                entries: [
-                  {
-                    ...entry("native", "microsoft", "Microsoft 365"),
-                    logo: microsoftLogo,
-                  },
-                  entry("composio", "acme_crm", "Acme CRM"),
-                ],
-              }),
-          },
-        })
-      );
-      return tools.get("wf-1")?.map(({ brand }) => brand);
-    };
-
-    expect({
-      noLogo: await brandsWith(null),
-      served: await brandsWith("https://logos.example/microsoft.svg"),
-    }).toStrictEqual({
-      noLogo: ["microsoft", undefined],
-      served: [undefined, undefined],
-    });
-  });
-
-  it("are left out, never failing the page, when core can't say which connections it uses", async () => {
-    const tools = await toolsOf({
-      workflows: {
-        byConnection: async () => {
-          await Promise.resolve();
-          throw new Error("Not now.");
-        },
-      },
-      connections: {
-        list: async () => await Promise.resolve(connections),
-        catalog: async () => await Promise.resolve({ entries: [] }),
-      },
-    });
-
-    expect(tools).toStrictEqual({});
   });
 });
