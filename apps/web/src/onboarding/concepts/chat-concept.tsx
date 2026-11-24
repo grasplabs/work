@@ -408,7 +408,7 @@ export const ChatConcept = ({
   go,
   onward,
   cards,
-}: Omit<ConceptProps, "foot">) => {
+}: ConceptProps) => {
   const { t, i18n } = useLingui();
   const [said, setSaid] = useState(readSaid);
   const replies = useReplies();

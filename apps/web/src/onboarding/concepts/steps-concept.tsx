@@ -1,6 +1,5 @@
 import { Button } from "@grasp-os/ui/components/button";
 import { Heading } from "@grasp-os/ui/components/heading";
-import { StepperNav } from "@grasp-os/ui/components/stepper";
 import { Text } from "@grasp-os/ui/components/text";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
@@ -24,9 +23,9 @@ import { interviewer, StephenFigure } from "./stephen.tsx";
 // topic a screen, a serif title, at most two sentences, the form, and one
 // real button that says what it does, with Back beside it; two text styles
 // a screen; the interviewer only in the welcome's title; no speech. The
-// welcome has no foot at all: a card press chooses and goes on. How far
-// along stands at the top, by `foot`: a thin Progress under the bar, or the
-// library's StepperNav bar with its count. C, "Steps, Stephen speaks": B's
+// welcome has no foot at all: a card press chooses and goes on. After it,
+// the library's StepperNav bar at the top carries Back, how far along and
+// Next, and the step ends in its own real button. C, "Steps, Stephen speaks": B's
 // screens, with each step's title and sentence said aloud as it arrives,
 // the sentence lighting up word by word as it is said, his figure small
 // above it, and the sound one toggle in the bar.
@@ -73,39 +72,13 @@ const StepHead = ({
   );
 };
 
-/**
- * The end of a later step, once it can go on: StepperNav's footer (Back,
- * how far, Next that works), with its count in `b`; with the bar at the
- * top (`c`), the step's own button, saying what it does.
- */
-const End = ({
-  foot,
-  at,
-  onBack,
-  onNext,
-}: {
-  foot: ConceptProps["foot"];
-  at: number;
-  onBack: () => void;
-  onNext: () => void;
-}) => {
+/** The end of a later step, once it can go on: its own button, saying what it does. */
+const End = ({ onNext }: { onNext: () => void }) => {
   const { t } = useLingui();
-  if (foot === "c") {
-    return (
-      <Button onClick={onNext} size="lg" style={styles.onward}>
-        {t`Continue`}
-      </Button>
-    );
-  }
   return (
-    <StepperNav
-      nextType="button"
-      onBack={onBack}
-      onNext={onNext}
-      showCount={foot === "b"}
-      step={at}
-      total={wholeSetup.length}
-    />
+    <Button onClick={onNext} size="lg" style={styles.onward}>
+      {t`Continue`}
+    </Button>
   );
 };
 
@@ -160,16 +133,14 @@ const Welcome = ({ admin, speaks, onNext, cards }: StepBodyProps) => {
   );
 };
 
-const Ai = ({ data, speaks, onNext, onBack, foot }: StepBodyProps) => {
+const Ai = ({ data, speaks, onNext }: StepBodyProps) => {
   const { t } = useLingui();
   const ready = data.ai === null || data.ai.ready;
   return (
     <Step
       nav={
         // Until a model answers, the choice above is the way on; then one Continue.
-        ready ? (
-          <End at={1} foot={foot} onBack={onBack} onNext={onNext} />
-        ) : null
+        ready ? <End onNext={onNext} /> : null
       }
       sentence={t`Everything I read and say runs on it. Grasp’s AI works right away, or you can use your own key.`}
       speaks={speaks}
@@ -180,11 +151,11 @@ const Ai = ({ data, speaks, onNext, onBack, foot }: StepBodyProps) => {
   );
 };
 
-const Plan = ({ speaks, onNext, onBack, today, foot }: StepBodyProps) => {
+const Plan = ({ speaks, onNext, today }: StepBodyProps) => {
   const { t } = useLingui();
   return (
     <Step
-      nav={<End at={2} foot={foot} onBack={onBack} onNext={onNext} />}
+      nav={<End onNext={onNext} />}
       sentence={t`I talk with your team for one week. Then you get what I learned, team by team.`}
       speaks={speaks}
       title={t`Here’s the plan`}
@@ -196,7 +167,6 @@ const Plan = ({ speaks, onNext, onBack, today, foot }: StepBodyProps) => {
 
 interface StepBodyProps {
   admin: string;
-  foot: ConceptProps["foot"];
   cards: ConceptProps["cards"];
   data: ConceptProps["data"];
   speaks: boolean;
@@ -215,7 +185,6 @@ export const StepsConcept = ({
   today,
   go,
   onward,
-  foot,
   cards,
 }: ConceptProps & { speaks: boolean }) => {
   const order: ConceptStep[] = ["welcome", "ai", "about"];
@@ -241,7 +210,7 @@ export const StepsConcept = ({
   return (
     <ConceptFrame
       along={
-        step === "welcome" || foot !== "c"
+        step === "welcome"
           ? undefined
           : {
               at: wholeSetup.indexOf(step),
@@ -258,7 +227,6 @@ export const StepsConcept = ({
         cards={cards}
         data={data}
         key={step}
-        foot={foot}
         onBack={onBack}
         onNext={onNext}
         speaks={speaks}
