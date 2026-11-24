@@ -1,9 +1,14 @@
 [
   {
     "path": "src/components/collapsible.tsx",
-    "reason": "A trigger takes Text's size and weight, so a page keeps one body style; with fitContent it no longer wraps in a box that shrinks to fit.",
+    "reason": "A plain variant with no fill, and a trigger that takes Text's size and weight, so a page keeps one body style; with fitContent it no longer wraps in a box that shrinks to fit.",
     "since": "2026-11-24",
     "pullRequest": "https://github.com/grasplabs/damsko/pull/66"
+  },
+  {
+    "path": "src/components/item.tsx",
+    "reason": "A one-line description is cut at the row's edge: in Connect API key a long region ran out of its tile.",
+    "since": "2026-11-24"
   },
   {
     "path": "src/lib/icons.ts",

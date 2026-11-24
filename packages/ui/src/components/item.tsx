@@ -312,6 +312,9 @@ const styles = stylex.create({
   // The words take the room, but never under 10rem: past that the actions wrap under them.
   content: {
     display: "grid",
+    // One column that may be narrower than its longest line: a line that is cut with an ellipsis
+    // (a `nowrap` description) is cut at the row's edge, where an `auto` column grew to hold it.
+    gridTemplateColumns: "minmax(0, 1fr)",
     flexGrow: 1,
     flexBasis: "10rem",
     minWidth: 0,
