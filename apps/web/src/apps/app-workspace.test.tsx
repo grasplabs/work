@@ -1162,12 +1162,12 @@ describe(AppWorkspace, () => {
       askedForApp,
       kept: activeChat(deskSlot),
       openInChat: document
-        .querySelector('[role="menuitem"][href^="/?chat="]')
+        .querySelector('[role="menuitem"][href^="/chats/"]')
         ?.getAttribute("href"),
     }).toStrictEqual({
       askedForApp: [],
       kept: "chat-built-in",
-      openInChat: "/?chat=chat-built-in",
+      openInChat: "/chats/chat-built-in",
     });
   });
 
@@ -1402,12 +1402,12 @@ describe(AppWorkspace, () => {
       askedForApp,
       says: said,
       openInChat: document
-        .querySelector('[role="menuitem"][href^="/?chat="]')
+        .querySelector('[role="menuitem"][href^="/chats/"]')
         ?.getAttribute("href"),
     }).toStrictEqual({
       askedForApp: [],
       says: true,
-      openInChat: "/?chat=chat-handed-over",
+      openInChat: "/chats/chat-handed-over",
     });
   });
 
