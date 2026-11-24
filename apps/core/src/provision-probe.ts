@@ -15,6 +15,7 @@ import { clock } from "./clock.ts";
 import { consoleSigned } from "./console-signed.ts";
 import { inJurisdiction } from "./durable-objects.ts";
 import { holdsModelFiles } from "./embedder.ts";
+import { startsClosed } from "./onboarding/gate.ts";
 import { callSandboxed } from "./sandboxed.ts";
 
 // The admin's provisioning probe (spec 40.2 step 7,
@@ -266,6 +267,7 @@ const probed = async (env: Env): Promise<ProvisionProbe> => {
       ),
       "connect.CLOCK": connect !== null,
     },
+    startsClosed: startsClosed(env),
     clocks: { core, connect },
   };
 };

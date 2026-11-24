@@ -154,6 +154,12 @@ export default defineConfig({
           ],
         },
       ],
+      // Refuses inline style objects as the rule it replaces did, and lets
+      // StyleX styles through to a component's `style`, whose type
+      // (Damsko's LayoutStyle) holds them to layout
+      // (scripts/lint/grasp-plugin.ts).
+      "shadcn/no-inline-styles": "off",
+      "grasp/no-inline-styles": "error",
       // Picked from Ultracite's anti-slop preset: the rules that stop agents
       // from silencing the type checker. The rest of that preset forces
       // workarounds (no options objects, no `unknown`).

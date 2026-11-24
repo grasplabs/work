@@ -1,8 +1,7 @@
-// Trace: a list of lines for the steps an assistant takes, from shadcn's (registry/bases/base/ui/
-// trace.tsx), converted from Tailwind to StyleX and built on UI SDK's Collapsible with the shared
-// disclosure styles, in the look Damsko's AI parts share: a step's mark in its seat, a quiet line of
-// fine pixels joining the marks, the title and a muted description, and a quiet trigger row that opens.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
+// Trace: a list of lines for the steps an assistant takes, in StyleX on UI SDK's Collapsible with
+// the shared disclosure styles, in the look Damsko's AI parts share: a step's mark in its seat, a
+// quiet line of fine pixels joining the marks, the title and a muted description, and a quiet
+// trigger row that opens.
 //
 //   <Trace>
 //     <TraceLine>
@@ -346,7 +345,7 @@ const styles = stylex.create({
     paddingBlock: `calc(${ROOM})`,
     columnGap: space["2"],
     // A row's corner, in a card too: a trigger there is still a row, as a Sources trigger is.
-    borderRadius: `min(${radius.row}, calc(${size.controlSm} / 2))`,
+    borderRadius: `min(${radius.lg}, calc(${size.controlSm} / 2))`,
     lineHeight: font.textSmLine,
     fontWeight: font.weightNormal,
     color: {

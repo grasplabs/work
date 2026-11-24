@@ -4,7 +4,6 @@
 // window is and its share ("8% context"); resting on it, or tabbing to it, opens a card with the
 // tokens used of the most, a bar of the same, and a row per kind of token, with what each cost when
 // the caller says.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Context usedTokens={10660} maxTokens={128000} usage={message.metadata.usage}>
 //     <ContextTrigger />
@@ -357,9 +356,8 @@ export const ContextContentHeader = ({
             </span>
           </div>
           <Progress
+            aria-label={words.progress}
             value={Math.min(share, 1) * 100}
-            label={words.progress}
-            showLabel={false}
           />
         </>
       )}

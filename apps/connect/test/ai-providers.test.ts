@@ -9,10 +9,10 @@
  * to another host, another path, in two headers, or after a redirect; a
  * credential of core's own; a custom endpoint aimed at a private,
  * internal or metadata address; a key read back, logged, or opened after
- * its row was tampered with; a realtime socket (Grasp's live listening)
- * opened without a platform grant, to another path, or on an
- * organization's key, or left open at one end; an on-prem relay set where
- * it can't be taken. Then what it is for.
+ * its row was tampered with; a realtime socket (Grasp's live listening,
+ * and the lines it says) opened without a platform grant, to another
+ * path, or on an organization's key, or left open at one end; an on-prem
+ * relay set where it can't be taken. Then what it is for.
  */
 import {
   aiCredentialPlaceholder,
@@ -147,6 +147,11 @@ const refusalOf = (response: Response): string =>
 const openAiUrl = "https://api.openai.com/v1/responses";
 /** Where Grasp's own key goes at OpenAI: its EU data residency host. */
 const openAiEuUrl = "https://eu.api.openai.com/v1/responses";
+
+/** Grasp's own key at KugelAudio, as a connect secret. */
+const kugelAudioKey = "test-platform-kugelaudio-key-0001";
+/** The one host Grasp's key goes to at KugelAudio: its EU endpoint. */
+const kugelAudioHost = "api.eu.kugelaudio.com";
 
 describe("AI providers in connect", () => {
   beforeEach(async () => {
@@ -633,86 +638,32 @@ describe("AI providers in connect", () => {
   });
 
   describe("Grasp's own speech and transcription", () => {
-    /** Grasp's own key at ElevenLabs, as a connect secret. */
-    const elevenLabsKey = "test-platform-elevenlabs-key-0001";
-    const speechQuery = "?enable_logging=false&output_format=mp3_44100_128";
-    const euHost = "api.eu.residency.elevenlabs.io";
-
-    /** A line to say, at `host`, as core's gateway sends it. */
-    const lineRequest = (
-      path: string,
-      {
-        host = euHost,
-        headers = { "xi-api-key": aiCredentialPlaceholder },
-      }: { host?: string; headers?: Record<string, string> } = {}
-    ): Request => modelRequest(`https://${host}${path}`, { headers });
-
-    const elevenLabsGrant = async (host = euHost) =>
-      await grantFor({ provider: "elevenlabs", host, credential: "platform" });
-
-    it("sends a line to ElevenLabs with Grasp's key in its one header, at its EU residency host only", async () => {
-      const path = `/v1/text-to-speech/s3TPKV1kjDlVtZbl4Ksh/with-timestamps${speechQuery}`;
-      const withKey = connect({ ELEVENLABS_API_KEY: elevenLabsKey });
-
-      const outcomes = [
-        refusalOf(
-          await withKey.modelFetch(lineRequest(path), await elevenLabsGrant())
-        ),
-        refusalOf(
-          await withKey.modelFetch(
-            lineRequest(path, { host: "api.elevenlabs.io" }),
-            await elevenLabsGrant("api.elevenlabs.io")
-          )
-        ),
-      ];
-
-      expect({
-        outcomes,
-        sent: sent.map(({ host, path: sentPath, headers }) => ({
-          host,
-          path: sentPath,
-          key: headers["xi-api-key"],
-          authorization: headers.authorization,
-        })),
-        routes: await withKey.aiProviderRoutes(),
-      }).toStrictEqual({
-        outcomes: ["sent", "endpoint"],
-        sent: [
-          { host: euHost, path, key: elevenLabsKey, authorization: undefined },
-        ],
-        routes: { organization: [], platform: ["openai", "elevenlabs"] },
-      });
-    });
-
-    it("sends a line to ElevenLabs's usual host only on a deployment set up to test there, and then to no other; a provider the setting doesn't name stays at its EU host", async () => {
-      const path = `/v1/text-to-speech/s3TPKV1kjDlVtZbl4Ksh/with-timestamps${speechQuery}`;
-      const usualHost = "api.elevenlabs.io";
+    it("sends Grasp's key for OpenAI to its usual host only on a deployment set up to test there, and then to no other; whatever else the setting names", async () => {
       const testing = connect({
-        ELEVENLABS_API_KEY: elevenLabsKey,
-        OPENAI_API_KEY: "test-platform-openai-key-0001",
-        PLATFORM_AI_USUAL_HOSTS: "elevenlabs, nonsense",
+        PLATFORM_AI_USUAL_HOSTS: "openai, anthropic, nonsense",
       });
+      const platformGrant = async (host: string) =>
+        await grantFor({ provider: "openai", host, credential: "platform" });
 
       const outcomes = [
         refusalOf(
           await testing.modelFetch(
-            lineRequest(path, { host: usualHost }),
-            await elevenLabsGrant(usualHost)
+            modelRequest(openAiUrl),
+            await platformGrant("api.openai.com")
           )
         ),
         // Its EU host is no longer where the key goes there.
         refusalOf(
-          await testing.modelFetch(lineRequest(path), await elevenLabsGrant())
-        ),
-        // OpenAI isn't named: its key still goes to its EU host alone.
-        refusalOf(
           await testing.modelFetch(
-            modelRequest("https://api.openai.com/v1/responses"),
-            await grantFor({
-              provider: "openai",
-              host: "api.openai.com",
-              credential: "platform",
-            })
+            modelRequest(openAiEuUrl),
+            await platformGrant("eu.api.openai.com")
+          )
+        ),
+        // Without the setting, the usual host is refused.
+        refusalOf(
+          await connect().modelFetch(
+            modelRequest(openAiUrl),
+            await platformGrant("api.openai.com")
           )
         ),
       ];
@@ -721,111 +672,53 @@ describe("AI providers in connect", () => {
         outcomes,
         sent: sent.map(({ host, headers }) => ({
           host,
-          key: headers["xi-api-key"],
+          key: headers.authorization,
         })),
       }).toStrictEqual({
         outcomes: ["sent", "endpoint", "endpoint"],
-        sent: [{ host: usualHost, key: elevenLabsKey }],
+        sent: [{ host: "api.openai.com", key: `Bearer ${platformKey}` }],
       });
     });
 
-    it("refuses anything else of ElevenLabs's: another path, voice or host, no query or another, the key in another header, an organization's key, or no key of Grasp's", async () => {
-      const voice = "s3TPKV1kjDlVtZbl4Ksh";
-      const line = `/v1/text-to-speech/${voice}/with-timestamps${speechQuery}`;
-      const withKey = connect({ ELEVENLABS_API_KEY: elevenLabsKey });
+    it("sends nothing to KugelAudio as a plain request, whatever its path: its speech is its socket alone", async () => {
+      const withKey = connect({ KUGELAUDIO_API_KEY: kugelAudioKey });
+      const grant = async () =>
+        await grantFor({
+          provider: "kugelaudio",
+          host: kugelAudioHost,
+          credential: "platform",
+        });
 
-      const outcomes = {
-        voices: refusalOf(
+      const refusals = [
+        refusalOf(
           await withKey.modelFetch(
-            lineRequest(`/v1/voices${speechQuery}`),
-            await elevenLabsGrant()
+            modelRequest(`https://${kugelAudioHost}/ws/tts`),
+            await grant()
           )
         ),
-        history: refusalOf(
+        refusalOf(
           await withKey.modelFetch(
-            lineRequest(`/v1/history${speechQuery}`),
-            await elevenLabsGrant()
+            modelRequest(`https://${kugelAudioHost}/v1/tts/generate`),
+            await grant()
           )
         ),
-        traversal: refusalOf(
+        refusalOf(
           await withKey.modelFetch(
-            lineRequest(
-              `/v1/text-to-speech/${voice}%2F..%2F..%2Fuser/with-timestamps${speechQuery}`
-            ),
-            await elevenLabsGrant()
+            modelRequest(`https://${kugelAudioHost}/v1/voices`),
+            await grant()
           )
         ),
-        logging: refusalOf(
-          await withKey.modelFetch(
-            lineRequest(
-              `/v1/text-to-speech/${voice}/with-timestamps?output_format=mp3_44100_128`
-            ),
-            await elevenLabsGrant()
-          )
-        ),
-        noQuery: refusalOf(
-          await withKey.modelFetch(
-            lineRequest(`/v1/text-to-speech/${voice}/with-timestamps`),
-            await elevenLabsGrant()
-          )
-        ),
-        otherQuery: refusalOf(
-          await withKey.modelFetch(
-            lineRequest(
-              `/v1/text-to-speech/${voice}/with-timestamps?enable_logging=true&output_format=mp3_44100_128`
-            ),
-            await elevenLabsGrant()
-          )
-        ),
-        host: refusalOf(
-          await withKey.modelFetch(
-            lineRequest(line, { host: "api.openai.com" }),
-            await elevenLabsGrant("api.openai.com")
-          )
-        ),
-        bearer: refusalOf(
-          await withKey.modelFetch(
-            lineRequest(line, {
-              headers: { authorization: `Bearer ${aiCredentialPlaceholder}` },
-            }),
-            await elevenLabsGrant()
-          )
-        ),
-        organization: refusalOf(
-          await withKey.modelFetch(
-            lineRequest(line),
-            await grantFor({ provider: "elevenlabs", host: euHost })
-          )
-        ),
-        noKey: refusalOf(
-          await connect().modelFetch(lineRequest(line), await elevenLabsGrant())
-        ),
-      };
+      ];
 
-      expect(outcomes).toStrictEqual({
-        voices: "path",
-        history: "path",
-        traversal: "path",
-        logging: "endpoint",
-        noQuery: "endpoint",
-        otherQuery: "endpoint",
-        host: "endpoint",
-        bearer: "credential_header",
-        organization: "no_credential",
-        noKey: "no_credential",
-      });
+      expect(refusals).not.toContain("sent");
       expect(sent).toStrictEqual([]);
-      await expect(connect().aiProviderRoutes()).resolves.toStrictEqual({
-        organization: [],
-        platform: ["openai"],
-      });
     });
 
-    it("takes no organization key for ElevenLabs, which only Grasp's speech uses", async () => {
+    it("takes no organization key for KugelAudio, which only Grasp's speech uses", async () => {
       await expect(
         outcome(
           connect().saveAiProviderKey(
-            { provider: "elevenlabs", key: newKey() },
+            { provider: "kugelaudio", key: newKey() },
             byAdmin
           )
         )
@@ -881,11 +774,13 @@ describe("AI providers in connect", () => {
     });
   });
 
-  describe("a realtime socket, for Grasp's live listening", () => {
+  describe("a realtime socket, for Grasp's live listening and the lines it says", () => {
     const realtimeUrl =
       "https://eu.api.openai.com/v1/realtime?intent=transcription";
+    /** Where a line is said: KugelAudio's speech socket, with no query. */
+    const speechUrl = `https://${kugelAudioHost}/ws/tts`;
 
-    /** OpenAI's end of each socket connect opens: what it got, and how it closed. */
+    /** The provider's end of each socket connect opens: what it got, and how it closed. */
     const upstreams: {
       socket: WebSocket;
       got: string[];
@@ -914,14 +809,19 @@ describe("AI providers in connect", () => {
     const upgrade = async (
       url = realtimeUrl,
       {
+        provider = "openai",
         grant,
         headers = { authorization: `Bearer ${aiCredentialPlaceholder}` },
-      }: { grant?: string | null; headers?: Record<string, string> } = {}
+      }: {
+        provider?: ModelGrantScope["provider"];
+        grant?: string | null;
+        headers?: Record<string, string>;
+      } = {}
     ): Promise<Request> => {
       const granted =
         grant === undefined
           ? await grantFor({
-              provider: "openai",
+              provider,
               host: new URL(url).hostname,
               credential: "platform",
             })
@@ -1066,6 +966,142 @@ describe("AI providers in connect", () => {
         closed: await closed.promise,
         refused: refusalOf(refused),
       }).toStrictEqual({ closed: 1011, refused: "upgrade" });
+    });
+
+    it("opens KugelAudio's speech socket at its EU host with Grasp's key alone, and passes each message on both ways", async () => {
+      const withKey = connect({ KUGELAUDIO_API_KEY: kugelAudioKey });
+      const response = await withKey.fetch(
+        await upgrade(speechUrl, { provider: "kugelaudio" })
+      );
+      const core = response.webSocket;
+      core?.accept();
+      const heard = Promise.withResolvers<string>();
+      core?.addEventListener("message", (event) => {
+        heard.resolve(String(event.data));
+      });
+
+      core?.send('{"text":"Good morning.","flush":true}');
+      const [upstream] = upstreams;
+      await vi.waitFor(() => {
+        expect(upstream?.got).toStrictEqual([
+          '{"text":"Good morning.","flush":true}',
+        ]);
+      });
+      upstream?.socket.send('{"audio":"AAAA"}');
+
+      expect({
+        status: response.status,
+        answered: await heard.promise,
+        // Grasp's key in its one header; never the grant or the placeholder.
+        sent: sent.map(({ host, path, headers }) => ({
+          host,
+          path,
+          headers: Object.keys(headers).toSorted(),
+          key: headers.authorization,
+        })),
+        routes: await withKey.aiProviderRoutes(),
+      }).toStrictEqual({
+        status: 101,
+        answered: '{"audio":"AAAA"}',
+        sent: [
+          {
+            host: kugelAudioHost,
+            path: "/ws/tts",
+            headers: ["authorization", "upgrade"],
+            key: `Bearer ${kugelAudioKey}`,
+          },
+        ],
+        routes: { organization: [], platform: ["openai", "kugelaudio"] },
+      });
+      core?.close(1000, "Done");
+      await expect(upstream?.closed).resolves.toBe(1000);
+    });
+
+    it("refuses anything else of KugelAudio's: another path, a query, another host whatever the deployment's setting, a key of core's own, an organization's key, or no key of Grasp's", async () => {
+      const withKey = connect({ KUGELAUDIO_API_KEY: kugelAudioKey });
+      const line = async (
+        url: string,
+        options: { grant?: string; headers?: Record<string, string> } = {}
+      ): Promise<Request> =>
+        await upgrade(url, { provider: "kugelaudio", ...options });
+
+      const refusals = {
+        voices: refusalOf(
+          await withKey.fetch(await line(`https://${kugelAudioHost}/v1/voices`))
+        ),
+        below: refusalOf(await withKey.fetch(await line(`${speechUrl}/multi`))),
+        traversal: refusalOf(
+          await withKey.fetch(
+            await line(`https://${kugelAudioHost}/ws/tts%2F..%2F..%2Fv1/voices`)
+          )
+        ),
+        query: refusalOf(
+          await withKey.fetch(await line(`${speechUrl}?voice_id=1`))
+        ),
+        usualHost: refusalOf(
+          await withKey.fetch(await line("https://api.kugelaudio.com/ws/tts"))
+        ),
+        // Naming it in the setting sends it nowhere else: it has no usual
+        // host to test at.
+        usualHostNamed: refusalOf(
+          await connect({
+            KUGELAUDIO_API_KEY: kugelAudioKey,
+            PLATFORM_AI_USUAL_HOSTS: "kugelaudio",
+          }).fetch(await line("https://api.kugelaudio.com/ws/tts"))
+        ),
+        otherProvider: refusalOf(
+          await withKey.fetch(await line("https://eu.api.openai.com/ws/tts"))
+        ),
+        ownKey: refusalOf(
+          await withKey.fetch(
+            await line(speechUrl, {
+              headers: { authorization: "Bearer ka-core-of-its-own" },
+            })
+          )
+        ),
+        organization: refusalOf(
+          await withKey.fetch(
+            await line(speechUrl, {
+              grant: await grantFor({
+                provider: "kugelaudio",
+                host: kugelAudioHost,
+              }),
+            })
+          )
+        ),
+        // A grant for OpenAI's listening opens nothing of KugelAudio's.
+        otherGrant: refusalOf(
+          await withKey.fetch(
+            await line(speechUrl, {
+              grant: await grantFor({
+                provider: "openai",
+                host: kugelAudioHost,
+                credential: "platform",
+              }),
+            })
+          )
+        ),
+        noKey: refusalOf(await connect().fetch(await line(speechUrl))),
+      };
+
+      expect(refusals).toStrictEqual({
+        voices: "path",
+        below: "path",
+        traversal: "path",
+        query: "path",
+        usualHost: "endpoint",
+        usualHostNamed: "endpoint",
+        otherProvider: "endpoint",
+        ownKey: "credential_header",
+        organization: "no_credential",
+        otherGrant: "endpoint",
+        noKey: "no_credential",
+      });
+      expect(sent).toStrictEqual([]);
+      await expect(connect().aiProviderRoutes()).resolves.toStrictEqual({
+        organization: [],
+        platform: ["openai"],
+      });
     });
   });
 

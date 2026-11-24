@@ -1,12 +1,9 @@
-// Confirmation: a step that waits for a person's yes, from shadcn's Confirmation pattern
-// (content/docs/ai-elements/base/confirmation.mdx), built as it builds it: an outlined small Item,
-// the title its ItemTitle, the answers its ItemActions and each answer a small Button. The title and
-// the answers share a row while there is room, the answers at its end; what the step touches
-// (ConfirmationDetails) takes a line of its own between them. It knows only the state it is given,
-// the AI SDK's tool state and its approval:
-// while approval is requested it says the request and offers the answers; once answered it says what
-// was decided, and the answers go.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
+// Confirmation: a step that waits for a person's yes. It is built from Item: an outlined small
+// Item, the title its ItemTitle, the answers its ItemActions and each answer a small Button. The
+// title and the answers share a row while there is room, the answers at its end; what the step
+// touches (ConfirmationDetails) takes a line of its own between them. It knows only the state it is
+// given, the AI SDK's tool state and its approval: while approval is requested it says the request
+// and offers the answers; once answered it says what was decided, and the answers go.
 //
 //   <Confirmation state={part.state} approval={part.approval}>
 //     <ConfirmationTitle>
@@ -135,7 +132,7 @@ export interface ConfirmationActionProps {
   variant?: ButtonVariant;
   /**
    * Gives the answer. Return a Promise and the button works until it settles; when it rejects, the
-   * button says `errorLabel` and can be pressed again.
+   * button says `errorText` and can be pressed again.
    */
   onClick?: () => unknown;
   /**
@@ -153,7 +150,7 @@ export interface ConfirmationActionProps {
    * The words on the button when the answer failed.
    * @default `confirmation.failed` ("Failed")
    */
-  errorLabel?: string;
+  errorText?: string;
   /**
    * What an agent's press is said to do as the person is asked first.
    * @default `Presses "<its words>"`
@@ -449,14 +446,14 @@ export const ConfirmationAction = ({
   onClick,
   hold = false,
   disabled = false,
-  errorLabel,
+  errorText,
   agentConfirm,
   style,
 }: ConfirmationActionProps) => {
   const { agentAsks, agentPresses } = useI18n().action;
   const words = useI18n().confirmation;
   const context = use(ConfirmationContext);
-  const failed = errorLabel ?? words.failed;
+  const failed = errorText ?? words.failed;
   const confirm = confirmOf(agentConfirm, children, {
     agentAsks,
     agentPresses,
@@ -474,7 +471,7 @@ export const ConfirmationAction = ({
         aria-describedby={context?.requestId}
         data-slot="confirmation-action"
         onConfirm={run}
-        errorLabel={failed}
+        errorText={failed}
         style={style}
       >
         {children}
@@ -487,7 +484,7 @@ export const ConfirmationAction = ({
       variant={variant}
       size="sm"
       onClick={run}
-      errorLabel={failed}
+      errorText={failed}
       agentConfirm={confirm}
       disabled={disabled}
       style={style}

@@ -809,6 +809,9 @@ importers:
       jose:
         specifier: 'catalog:'
         version: 6.2.12
+      parse5:
+        specifier: 'catalog:'
+        version: 8.1.0
       postal-mime:
         specifier: 'catalog:'
         version: 4.2.0
@@ -1010,6 +1013,9 @@ importers:
       '@pierre/diffs':
         specifier: 'catalog:'
         version: 1.6.2(@shikijs/themes@4.6.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@stylexjs/stylex':
+        specifier: 'catalog:'
+        version: 0.19.2
       '@tanstack/react-router':
         specifier: 'catalog:'
         version: 1.170.46(react-dom@19.3.0(react@19.3.0))(react@19.3.0)

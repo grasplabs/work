@@ -245,11 +245,21 @@ describe("adding a client", () => {
     expect({
       chosen: chosenRow?.startingFlow,
       whole: wholeRow?.startingFlow,
+      // With an onboarding, its deployment starts closed; without, open.
+      startsClosed: [
+        chosenRow?.closedFrom ?? null,
+        wholeRow?.closedFrom instanceof Date,
+      ],
       unknown: provisionInputSchema.safeParse({
         ...chosen,
         onboarding: "everything",
       }).success,
-    }).toStrictEqual({ chosen: "none", whole: null, unknown: false });
+    }).toStrictEqual({
+      chosen: "none",
+      whole: null,
+      startsClosed: [null, true],
+      unknown: false,
+    });
   });
 
   it("is placed and provisioned from there, in its stage's destination", async () => {

@@ -27,56 +27,54 @@ test("paints the system's scheme, dark from the start and following a change wit
   await expect.poll(async () => await bodyBackground(page)).not.toBe(light);
 });
 
-// Damsko's components (packages/ui) are StyleX: the build compiles their
-// styles from the package into the page's stylesheet, and their colours are
-// Damsko's tokens, which follow the scheme. Under the page's policy, as
-// every test here.
-test("a Damsko button is drawn by its own styles and font, in the tokens' colours, light and dark", async ({
+// Damsko's styles (packages/ui): its tokens, its modes and its fonts, in
+// the page's stylesheet. A colour token follows the scheme and a person's
+// own choice (the root's `data-mode`, public/theme.js), and its fonts load
+// from this origin under the page's policy, as every test here.
+test("Damsko's tokens follow the scheme and a person's choice, and its fonts load from this origin", async ({
   page,
 }) => {
+  // Every font file the page asks for, with what came back: a test that
+  // fails says which file and why.
+  const fontFiles = new Map<string, string>();
+  page.on("response", (response) => {
+    const url = response.url();
+    if (url.endsWith(".woff2")) {
+      fontFiles.set(
+        url,
+        `${response.status()} ${response.headers()["content-type"] ?? "no type"}`
+      );
+    }
+  });
+  page.on("requestfailed", (request) => {
+    if (request.url().endsWith(".woff2")) {
+      fontFiles.set(
+        request.url(),
+        `failed: ${request.failure()?.errorText ?? "no reason"}`
+      );
+    }
+  });
+
   await page.emulateMedia({ colorScheme: "light" });
   await page.goto("/kit");
-  const button = page.getByRole("button", { name: "Save changes" });
-  // The button's fill, and the fill its token gives an element of its own.
-  const fills = async (): Promise<{ button: string; token: string }> =>
-    await button.evaluate((element) => {
+  await expect(page.getByRole("heading", { name: "UI kit" })).toBeVisible();
+  // The colour a token gives an element of its own.
+  const primary = async (): Promise<string> =>
+    await page.evaluate(() => {
       const probe = document.createElement("span");
       probe.style.backgroundColor = "var(--damsko-primary)";
-      element.after(probe);
-      const read = {
-        button: getComputedStyle(element).backgroundColor,
-        token: getComputedStyle(probe).backgroundColor,
-      };
+      document.body.append(probe);
+      const colour = getComputedStyle(probe).backgroundColor;
       probe.remove();
-      return read;
+      return colour;
     });
 
-  const light = await fills();
-  expect(light.button).not.toBe("rgba(0, 0, 0, 0)");
-  expect(light.button).toBe(light.token);
+  const light = await primary();
+  expect(light).not.toBe("rgba(0, 0, 0, 0)");
 
-  // The fill glides to the other scheme's: once it is there, it is the
-  // token's again, and another colour.
   await page.emulateMedia({ colorScheme: "dark" });
-  await expect
-    .poll(async () => {
-      const dark = await fills();
-      return dark.button === dark.token && dark.token !== light.token;
-    })
-    .toBeTruthy();
-  const dark = await fills();
-
-  // In Damsko's own Geist, a file this origin serves.
-  await expect
-    .poll(
-      async () =>
-        await page.evaluate(() =>
-          [...document.fonts].some(
-            (face) => face.family === "Geist" && face.status === "loaded"
-          )
-        )
-    )
-    .toBeTruthy();
+  await expect.poll(primary).not.toBe(light);
+  const dark = await primary();
 
   // A person's own choice of dark, on a system that is light.
   await page.emulateMedia({ colorScheme: "light" });
@@ -84,12 +82,45 @@ test("a Damsko button is drawn by its own styles and font, in the tokens' colour
     localStorage.setItem("grasp-theme", "dark");
   });
   await page.reload();
-  await expect
-    .poll(async () => {
-      const chosen = await fills();
-      return chosen.button;
-    })
-    .toBe(dark.button);
+  await expect.poll(primary).toBe(dark);
+
+  // Damsko's own Geist, Geist Serif and Geist Mono, each the first family
+  // of its token, loaded from this origin. Only the first: the sans token's
+  // second, "Geist Fallback", is the host's Arial (`local()`), which a
+  // Linux runner lacks, and `document.fonts.load` of a list fails as a
+  // whole when one face in it can't load.
+  const loaded = await page.evaluate(
+    async () =>
+      await Promise.all(
+        ["sans", "serif", "mono"].map(async (token) => {
+          const [family = ""] = getComputedStyle(document.documentElement)
+            .getPropertyValue(`--damsko-font-${token}`)
+            .split(",");
+          try {
+            const faces = await document.fonts.load(`1em ${family.trim()}`);
+            return faces
+              .filter((face) => face.status === "loaded")
+              .map((face) => face.family.replaceAll('"', ""));
+          } catch (error) {
+            return [`${family.trim()}: ${String(error)}`];
+          }
+        })
+      )
+  );
+  const files = [...fontFiles].map(([url, answer]) => `${url} ${answer}`);
+  const fileList = files.join("\n") || "none";
+  expect(loaded[0], fileList).toContain("Geist");
+  expect(loaded[1], fileList).toContain("Geist Serif");
+  expect(loaded[2], fileList).toContain("Geist Mono");
+  // Each from this origin, as a font.
+  expect(
+    files.filter(
+      (line) =>
+        !line.startsWith(new URL(page.url()).origin) ||
+        !line.endsWith(" 200 font/woff2")
+    ),
+    fileList
+  ).toEqual([]);
 });
 
 test("a page sidebar folds from the keyboard and stays folded over a reload", async ({
