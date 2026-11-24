@@ -8,7 +8,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
-import { ChatToggle } from "../chat/chat-bar.tsx";
+import { ChatToggle } from "../chat/chat-toggle.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import { AiKeyBanner, providersOf } from "./ai-key-banner.tsx";
 import type { FailingProvider } from "./ai-key-banner.tsx";

@@ -1,36 +1,30 @@
-import { Button } from "@grasp-os/ui/components/button";
-import { Icon, PanelRightIcon } from "@grasp-os/ui/lib/icons";
 import { duration, media, space } from "@grasp-os/ui/lib/tokens.stylex";
-import type { LayoutStyle } from "@grasp-os/ui/lib/utils";
-import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 
-import { shortcutLabel } from "../shortcuts.ts";
-import { closeChat, useChatLayout } from "./chat-layout.ts";
-import { useChatPresence, useOpenChat } from "./chat-presence.ts";
+import { useOpenChat } from "./chat-presence.ts";
 import { Composer } from "./composer.tsx";
-import { chatKey, useGlobalChat } from "./global-chat.tsx";
+import { useGlobalChat } from "./global-chat.tsx";
 import { unavailableText } from "./models-unavailable.tsx";
 
 // Grasp's chat while it waits (global-chat.tsx): a bar at the foot of the
 // page, centred over it, as one row to ask in (Damsko's PromptInput,
-// compact: the add menu, the text, the microphone and Send, as on #2503,
-// the model too once something is typed), which
+// compact: the add menu, the text, the model, the microphone and Send, as
+// on #2503), which
 // sinks away as the chat opens and rises back once it has gone. It mentions with `@` as the chat's box does, and takes files
 // pasted or dropped on it; sending opens the chat where it last was, with
-// the answer coming in; the page's own bar has the button that opens it
-// without asking (`ChatToggle`), as on #2503. What
+// the answer coming in; the page's own bar opens it without asking
+// (chat-toggle.tsx). What
 // is typed here, mentions and files too, is the chat's own box's, so it is
 // all still there once the chat opens. Back, it takes the cursor if the
 // chat had it.
 
 const styles = stylex.create({
   bar: {
-    // The row's width, which its box answers to (composer.tsx).
-    containerType: "inline-size",
+    boxSizing: "border-box",
     width: "100%",
-    // The reference's dock: a 32rem box, over the middle of the page.
+    // #2503's dock: 32rem at most, the box as wide as the dock, its
+    // margins from a narrow window's edges round it.
     maxWidth: `calc(32rem + 2 * ${space["2"]})`,
     marginInline: "auto",
     paddingInline: space["2"],
@@ -60,9 +54,14 @@ export const ChatBar = () => {
   const openHere = useOpenChat();
   const bar = useRef<HTMLDivElement>(null);
   const open = stage.bar;
+  // Whether the bar was away (the chat open) before it came back: only
+  // then does it take the cursor the chat lost, never as a page opens.
+  const wasAway = useRef(!open);
   // Settled once it has risen or sunk: the chat's own moves wait for it.
   useEffect(() => {
     let current = true;
+    const back = open && wasAway.current;
+    wasAway.current = !open;
     const settle = async (): Promise<void> => {
       const element = bar.current;
       const moving = element === null ? [] : element.getAnimations();
@@ -77,7 +76,7 @@ export const ChatBar = () => {
         return;
       }
       // The chat closed with the cursor in it, which it lost as it went.
-      if (open && document.activeElement === document.body) {
+      if (back && document.activeElement === document.body) {
         element?.querySelector<HTMLElement>('[role="textbox"]')?.focus();
       }
       settled("bar");
@@ -141,37 +140,5 @@ export const ChatBar = () => {
             })}
       />
     </div>
-  );
-};
-
-/**
- * The chat's own button, at the end of the page's bar (frame/site-header.tsx),
- * on every page the chat may float over: it shows the chat, or hides it.
- */
-export const ChatToggle = ({ style }: { style?: LayoutStyle }) => {
-  const { t } = useLingui();
-  const presence = useChatPresence();
-  const { open } = useChatLayout();
-  const openHere = useOpenChat();
-  if (!presence.placements.includes("floating")) {
-    return null;
-  }
-  return (
-    <Button
-      aria-label={t`Show or hide the chat`}
-      onClick={() => {
-        if (open) {
-          closeChat();
-          return;
-        }
-        openHere();
-      }}
-      size="icon-xs"
-      style={style}
-      title={`${t`Show or hide the chat`} (${shortcutLabel(chatKey)})`}
-      variant="ghost"
-    >
-      <Icon icon={PanelRightIcon} />
-    </Button>
   );
 };

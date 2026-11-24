@@ -48,6 +48,7 @@ import { useEffect, useEffectEvent, useState } from "react";
 import type { ReactNode } from "react";
 
 import { makerMark } from "../frame/brands.ts";
+import { useNarrow } from "../onboarding/use-narrow.ts";
 import { useMemberAdmin } from "../use-member-admin.ts";
 import { FileCards } from "./chat-files.tsx";
 import type { CardFile } from "./chat-files.tsx";
@@ -70,9 +71,8 @@ import { isEffort } from "./model-choice.ts";
 // Model selector; by Send, the microphone (dictation.ts); then Send, which
 // is Stop while Grasp answers (its status from the chat: chat-states.ts),
 // and what the page adds. In one row (the chat's idle bar) the text stands
-// between the add menu and the rest, the model at its end before the
-// microphone, which gives way to the placeholder at rest in a narrow row,
-// as on #2503. `@` mentions the
+// between the add menu and the rest, the model only once something is
+// typed, so the placeholder keeps its room, as on #2503. `@` mentions the
 // agents, Apps, workflows and people (mentions.tsx). The text is the
 // page's (use-ask.ts): the box follows it, and tells it each change. Files
 // are the page's too: whatever is picked, pasted or dropped is handed to
@@ -93,12 +93,9 @@ const styles = stylex.create({
     gridArea: "end",
     justifySelf: "end",
   },
-  // In one row at rest, what answers gives way to the placeholder where
-  // the row is narrow (a phone's), as #2503's controls fold away.
-  answerer: { display: "contents" },
-  atRest: {
-    display: { default: "contents", "@container (width < 24rem)": "none" },
-  },
+  // At the row's end, #2503 sets its controls a space-2 apart, where
+  // Damsko's tools stand a space-1 apart: the rest after the first.
+  apart: { marginInlineStart: space["1"] },
   // The files take the header's whole line, their cards 16px from the
   // card's top and side and the text 12px under them, as #2503's and as
   // Damsko's own PromptInputAttachments (its `attachments` style), which
@@ -300,8 +297,9 @@ const AddMenu = () => {
 /**
  * The box's tools: at the start the add menu and what answers; at the end
  * the microphone, Send (or Stop) and what the page adds. In one row the
- * text stands between the two, and what answers at the end, before the
- * microphone; at rest in a narrow row it gives way to the placeholder.
+ * text stands between the two, and what answers stands at the end, before
+ * the microphone, as #2503's bar has it (on a phone once something is
+ * typed).
  */
 const BoxTools = ({
   attaches,
@@ -314,29 +312,40 @@ const BoxTools = ({
 }: {
   attaches: boolean;
   compact: boolean;
+  /** Something is typed: in one row on a phone, what answers shows only then. */
   typed: boolean;
   answerer: ReactNode;
   speech: PromptInputSpeechButtonProps | undefined;
   stop: (() => void) | undefined;
   children: ReactNode;
-}) => (
-  <>
-    <PromptInputTools>
-      {attaches ? <AddMenu /> : null}
-      {compact ? null : answerer}
-    </PromptInputTools>
-    <PromptInputTools style={styles.end}>
-      {compact ? (
-        <span {...stylex.props(styles.answerer, !typed && styles.atRest)}>
-          {answerer}
-        </span>
-      ) : null}
-      {speech === undefined ? null : <PromptInputSpeechButton {...speech} />}
-      <PromptInputSubmit {...(stop === undefined ? {} : { onStop: stop })} />
-      {children}
-    </PromptInputTools>
-  </>
-);
+}) => {
+  // In one row on a phone, what answers folds away at rest, so the
+  // placeholder keeps its room, as #2503's row does.
+  const phone = useNarrow();
+  const folded = compact && phone && !typed;
+  return (
+    <>
+      <PromptInputTools>
+        {attaches ? <AddMenu /> : null}
+        {compact ? null : answerer}
+      </PromptInputTools>
+      <PromptInputTools style={styles.end}>
+        {compact && !folded ? answerer : null}
+        {speech === undefined ? null : (
+          <PromptInputSpeechButton
+            {...speech}
+            {...(compact ? { style: styles.apart } : {})}
+          />
+        )}
+        <PromptInputSubmit
+          {...(stop === undefined ? {} : { onStop: stop })}
+          {...(compact || speech !== undefined ? { style: styles.apart } : {})}
+        />
+        {children}
+      </PromptInputTools>
+    </>
+  );
+};
 
 /** What answers: the agent, and the model it answers with, or the one to pick. */
 const Answerer = ({
@@ -805,10 +814,10 @@ export const Composer = ({
       <PromptInputFooter>
         <BoxTools
           answerer={answerer}
+          typed={text.trim() !== ""}
           attaches={onAttach !== undefined}
           compact={compact}
           speech={dictation.speech}
-          typed={text.trim() !== ""}
           // Stop lets a held question go; else it stops the answer, where one can be.
           stop={held ? letGo : onStop}
         >
