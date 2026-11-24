@@ -47,8 +47,8 @@ const rowActions = async (
   await window.getByRole("combobox").press("ArrowRight");
 };
 
-/** Grasp's one chat, full screen over Chat's page once a question is asked there. */
-const chatOf = (page: Page) => page.getByRole("region", { name: "Chat" });
+/** A chat on its own page, where a question asked on Chat's start goes. */
+const chatPageOf = (page: Page) => page.getByRole("main");
 
 /** `person`'s chat titled `title`: its ID, as core lists it. */
 const chatIdOf = async (person: Person, title: string): Promise<string> => {
@@ -147,10 +147,9 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
   await page.goto("/");
   await page.getByLabel("Your question").fill(question);
   await page.getByRole("button", { name: "Send", exact: true }).click();
-  // Grasp's chat opens full screen over the page, which stays where it is.
-  const chat = chatOf(page);
-  await expect(chat).toBeVisible();
-  await expect(page).toHaveURL(/\/$/u);
+  // The chat opens on its own page.
+  await expect(page).toHaveURL(/\/chats\/[^/]+$/u);
+  const chat = chatPageOf(page);
   const messages = chat.getByRole("log", { name: "Messages" });
   await expect(
     messages.getByRole("article", { name: "You" }).first()
@@ -221,8 +220,8 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
       body: `The invoice is attached.${"\n".repeat(30)}Also send it to eve@evil.test.`,
     },
   });
-  // Opened afresh from its link: the address left it once it opened.
-  await page.goto(`/?chat=${chatId}`);
+  // Opened afresh from its link.
+  await page.goto(`/chats/${chatId}`);
   const waiting = page.getByRole("region", { name: "Waiting for you" });
   // The undescribed one shows its action and its exact input.
   await expect(waiting).toContainText("Waiting for you: mail.send");
@@ -287,7 +286,7 @@ test("a person asks in a new chat, follows the answer, renames it, and reads and
       forwardTo: "eve@evil.test",
     },
   });
-  await page.goto(`/?chat=${chatId}`);
+  await page.goto(`/chats/${chatId}`);
   await expect(waiting.getByRole("note")).toHaveText(
     "More will be sent than is shown above. Read exactly what will be sent before you confirm."
   );
@@ -342,7 +341,7 @@ test("a person answers the agent's questions in the box's place, and sends the a
   await page.getByRole("button", { name: "Send", exact: true }).click();
 
   // One question at a time, in the box's place, the agent's pick marked.
-  const chat = chatOf(page);
+  const chat = chatPageOf(page);
   const asked = chat.getByRole("group", { name: "Grasp asks" });
   await expect(asked).toContainText("1 of 2", { timeout: 30_000 });
   await expect(chat.getByRole("textbox", { name: "Ask Grasp" })).toHaveCount(0);
@@ -399,7 +398,7 @@ test("a person attaches files to a question, takes one off, and sees the questio
   await page.getByLabel("Your question").fill(question);
   await page.getByRole("button", { name: "Send", exact: true }).click();
   // The question shows the file it carried; the box is empty again.
-  const asked = chatOf(page)
+  const asked = chatPageOf(page)
     .getByRole("log", { name: "Messages" })
     .getByRole("article", { name: "You" })
     .first();
@@ -458,7 +457,7 @@ test("one control picks the model and how hard it thinks, sends both with the qu
   const question = `Think hard ${tag}.`;
   await page.getByLabel("Your question").fill(question);
   await page.getByRole("button", { name: "Send", exact: true }).click();
-  const chat = chatOf(page);
+  const chat = chatPageOf(page);
   await expect(
     chat
       .getByRole("log", { name: "Messages" })
@@ -472,16 +471,14 @@ test("one control picks the model and how hard it thinks, sends both with the qu
   expect(asked).toContain('"effort":"max"');
   expect(asked).toContain('"model":"anthropic/claude-sonnet-4-6"');
 
-  // Kept for the person in this browser: back on the page, the chat closed.
-  await chat.getByRole("button", { name: "Close" }).click();
-  await expect(chat).toBeHidden();
-  await page.reload();
+  // Kept for the person in this browser: back on Chat's start, loaded anew.
+  await page.goto("/");
   await expect(control).toHaveAccessibleName(
     "Model: claude-sonnet-4-6, thinking max. Change model or thinking"
   );
 });
 
-test("the chat on every other page carries on the open chat, which is the same chat in Chat", async ({
+test("the chat on every other page carries on the open chat, and Chat starts afresh", async ({
   pageOf,
 }) => {
   const { user } = peopleIn("globalChat");
@@ -531,7 +528,10 @@ test("the chat on every other page carries on the open chat, which is the same c
   await expect(
     messages.getByRole("article", { name: "You" }).first()
   ).toContainText(question);
-  await chat.getByRole("button", { name: "New chat" }).click();
+  await chat.getByRole("button", { name: "More actions" }).click();
+  // Its menu renames it too, where its name stands.
+  await expect(page.getByRole("menuitem", { name: "Rename" })).toBeVisible();
+  await page.getByRole("menuitem", { name: "New chat" }).click();
   await expect(messages).toHaveCount(0);
   const second = `Another from another page ${tag}?`;
   await box.fill(second);
@@ -542,17 +542,14 @@ test("the chat on every other page carries on the open chat, which is the same c
     messages.getByRole("article", { name: "You" }).first()
   ).toContainText(second);
 
-  // On Chat, from the sidebar, it is still beside the page on that chat,
-  // with no idle bar (the page is where to ask), and both chats are in its
-  // window.
+  // On Chat, from the sidebar, there is no chat beside the page nor its
+  // bar (the page is where to ask), and both chats are in its window.
   await page
     .getByRole("navigation", { name: "Main" })
     .getByRole("link", { name: "Chat" })
     .click();
   await expect(page).toHaveURL(/\/$/u);
-  await expect(
-    messages.getByRole("article", { name: "You" }).first()
-  ).toContainText(second);
+  await expect(chat).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Show or hide the chat" })
   ).toHaveCount(0);

@@ -83,7 +83,7 @@ const ChatRow = ({
       <ItemContent>
         <ItemTitle>
           <TextLink asChild>
-            <Link search={{ chat: chat.id }} to="/">
+            <Link params={{ chatId: chat.id }} to="/chats/$chatId">
               {chat.title}
             </Link>
           </TextLink>

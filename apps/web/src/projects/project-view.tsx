@@ -745,7 +745,7 @@ const WorkflowRow = ({
 /** A chat's row: its title, and when it last had a message. */
 const ChatRow = ({ chat }: { chat: ChatSummary }) => (
   <Item asChild size="sm">
-    <Link search={{ chat: chat.id }} to="/">
+    <Link params={{ chatId: chat.id }} to="/chats/$chatId">
       <ItemMedia variant="default">
         <Icon icon={MessageCircleIcon} />
       </ItemMedia>
