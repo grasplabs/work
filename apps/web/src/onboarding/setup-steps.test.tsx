@@ -190,7 +190,7 @@ const drawn = (
   return page(
     <SetupStepBody
       data={data}
-      furthest={0}
+      askedFor={0}
       go={() => {}}
       message={null}
       onMessage={() => {}}

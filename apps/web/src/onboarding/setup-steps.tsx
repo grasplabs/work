@@ -90,14 +90,14 @@ const Welcome = ({ data, onward }: StepProps) => {
  * own where this deployment offers it. Until a model answers, the choice
  * itself is the way on; once one does, Continue.
  */
-const Ai = ({ data, furthest, path, go, onward }: StepProps) => {
+const Ai = ({ data, askedFor, path, go, onward }: StepProps) => {
   const { t } = useLingui();
   const { ai } = data;
   const ready = ai === null || ai.ready;
   const graspOffered = ai?.listing.grasp.available === true;
-  // Back to where they were, for an admin sent back here; else on.
+  // On to the step they asked for, for an admin the setup held here on the way; else the next.
   const onReady = () => {
-    const next = afterAi(furthest, path);
+    const next = afterAi(askedFor, path);
     if (next === undefined) {
       void onward();
     } else {

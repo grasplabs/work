@@ -76,8 +76,8 @@ export interface StepProps {
   onward: () => Promise<void>;
   /** The screens this company's admin goes through, in order. */
   path: SetupPath;
-  /** The furthest step they reached before, by its place on the path. */
-  furthest: number;
+  /** The step the admin asked for, by its place on the path: further on than this one when the setup held them here on the way. */
+  askedFor: number;
 }
 
 /** Whether the admin has Grasp's mail to let through: it sends, from a sender core names. */

@@ -1,7 +1,7 @@
 import { BAYER_MATRIX, DITHER_LEVELS } from "@grasp-os/ui/lib/utils";
 
 // What Stephen does with a component he holds: he takes its own picture,
-// the mark or icon it carries (a provider's logo, a source's brand), and
+// the brand logo it carries (a provider's, a source's), and
 // draws it large in his dither across the component's free side, as the
 // language cards draw their flags: whole at the far edge, thinning out
 // toward the words, building up while he is on it and fading where it is
@@ -35,13 +35,18 @@ interface Mark {
 /** What is known of each component's mark: being read, read, or none. */
 const marks = new WeakMap<Element, Mark | "reading" | null>();
 
-/** The component's own picture, if it has room for one: its first icon or logo. */
+/**
+ * The component's own picture, if it has room for one: its brand's logo.
+ * Only a logo (Damsko's BrandIcon): a control's icon, a select's chevron
+ * or a speaker, is how it works, not what it is, and drawn large it reads
+ * as a fault.
+ */
 const pictureOf = (element: Element): SVGSVGElement | null => {
   const { width, height } = element.getBoundingClientRect();
   if (width < height * ROOMY || element.querySelector("canvas") !== null) {
     return null;
   }
-  return element.querySelector("svg");
+  return element.querySelector("[data-slot=brand-icon] svg");
 };
 
 /** Reads `svg` at `size` cells high into which cells are lit. */

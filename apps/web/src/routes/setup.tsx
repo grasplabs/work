@@ -220,6 +220,11 @@ const Setup = () => {
     }
   }, [core, kept.reached, placed, path]);
   const furthest = reachedOf(kept.reached, { plan }, path);
+  // Where they were going: past this screen when the setup held them here on the way.
+  const askedFor = Math.max(
+    index,
+    asked === undefined ? -1 : stepIndex(asked, path)
+  );
   // Every screen settles into the next in one quiet fade; over once the screen is there.
   const turnTo = async (next: SetupStep): Promise<void> => {
     await smoothly(async () => {
@@ -270,7 +275,7 @@ const Setup = () => {
           suites: suitesFor(suites, data.view.context),
           identity,
         }}
-        furthest={furthest}
+        askedFor={askedFor}
         go={go}
         key={step}
         message={kept.message}

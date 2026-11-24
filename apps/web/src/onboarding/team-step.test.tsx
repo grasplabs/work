@@ -193,7 +193,7 @@ const shown = async (
       component: () => (
         <SetupStepBody
           data={given}
-          furthest={0}
+          askedFor={0}
           go={() => {}}
           message={null}
           onMessage={() => {}}
