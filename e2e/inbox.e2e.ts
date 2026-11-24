@@ -40,18 +40,26 @@ const lastId = async (page: Page): Promise<string | undefined> => {
 const openId = (page: Page): string =>
   new URL(page.url()).searchParams.get("item") ?? "";
 
-test("a person with nothing waiting finds their Inbox from the nav, with nothing in it and no weekly report", async ({
+test("a person with nothing waiting finds their Inbox from the sidebar's Inbox view, with nothing in it and no weekly report", async ({
   pageOf,
 }) => {
   const { user } = peopleIn("inboxEmpty");
   const page = await pageOf(user);
   await page.goto("/");
+  // The sidebar's switch: its Inbox view opens the inbox too.
   await page
-    .getByRole("navigation", { name: "Main" })
-    .getByRole("link", { name: "Inbox", exact: true })
+    .getByRole("tablist", { name: "Views" })
+    .getByRole("tab", { name: "Inbox", exact: true })
     .click();
   await expect(page).toHaveURL(/\/inbox$/u);
-  await expect(page.getByText("Nothing waits for you")).toBeVisible(pageRead);
+  await expect(
+    page.getByRole("main").getByText("Nothing waits for you")
+  ).toBeVisible(pageRead);
+  await expect(
+    page
+      .getByRole("navigation", { name: "Inbox", exact: true })
+      .getByText("Nothing waits for you.")
+  ).toBeVisible();
   // No plan for the interviews yet: no programme week, and no report (with
   // a plan, e2e/onboarding.e2e.ts, which runs after this file).
   await expect(
@@ -100,7 +108,7 @@ test("an admin walks through what waits: the next and the one before, Skip to th
   const at = order.indexOf(atlas);
   await expect(head).toHaveText(`${at + 1} of ${order.length}`);
   await expect(
-    page.getByRole("group", { name: new RegExp(`^Grant Atlas ${tag}`, "u") })
+    page.getByRole("region", { name: new RegExp(`^Grant Atlas ${tag}`, "u") })
   ).toBeVisible();
 
   // From the first, the next one by its button, then back with K and on
@@ -126,7 +134,7 @@ test("an admin walks through what waits: the next and the one before, Skip to th
 
   // A reload keeps the open item.
   await page.goto(`/inbox?item=${encodeURIComponent(beacon)}`);
-  const approval = page.getByRole("group", {
+  const approval = page.getByRole("region", {
     name: new RegExp(`^Grant Beacon ${tag}`, "u"),
   });
   await expect(approval).toBeVisible(pageRead);
@@ -141,7 +149,7 @@ test("an admin walks through what waits: the next and the one before, Skip to th
   await expect(rowOf(page, beacon)).toHaveCount(0);
   await expect(approval).toHaveCount(0);
   await expect(
-    page.getByRole("complementary").getByRole("group").first()
+    page.getByRole("complementary").getByRole("region").first()
   ).toBeVisible();
   await expectNoError(page);
 });

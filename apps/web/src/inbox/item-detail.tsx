@@ -15,7 +15,6 @@ import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Card,
-  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
@@ -56,6 +55,7 @@ import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { PendingBindingList } from "../workflows/binding-approvals.tsx";
 import { ApprovalRequest, useArmed } from "./approval-request.tsx";
+import { DecisionCard } from "./decision-card.tsx";
 import { kindLabel, kindMark } from "./inbox-kind.tsx";
 import type { InboxItem, InboxSource, Target } from "./items.ts";
 import { JsonBlock } from "./json-block.tsx";
@@ -73,11 +73,13 @@ import { TargetLink } from "./target-link.tsx";
 // it no more.
 
 const styles = stylex.create({
+  // Under the title, before the date: what kind it is, and whether it blocks work.
   marks: {
     display: "flex",
     flexWrap: "wrap",
     alignItems: "center",
     gap: space["1"],
+    paddingBlockStart: space["2"],
   },
   body: {
     display: "flex",
@@ -281,6 +283,23 @@ const answerThenRefresh = async ({
   landed();
 };
 
+/** The item's facts, with who it is for first when it is someone in particular: an admin's by default. */
+const useFacts = (item: InboxItem): KeyValueItem[] => {
+  const { t } = useLingui();
+  const facts: KeyValueItem[] = item.facts.map(({ label, value }) => ({
+    id: label,
+    label,
+    value,
+  }));
+  if (item.forWhom !== undefined && "role" in item.forWhom) {
+    const { role } = item.forWhom;
+    facts.unshift({ id: "for", label: t`For`, value: t`The ${role}` });
+  } else if (item.forWhom !== undefined) {
+    facts.unshift({ id: "for", label: t`For`, value: item.forWhom.person });
+  }
+  return facts;
+};
+
 /** The item as it is shown: what happened, what to read, its actions, and its facts. */
 const ItemFrame = ({
   frame,
@@ -313,18 +332,12 @@ const ItemFrame = ({
     !frame.gone &&
     (acts.length > 0 || renderAnswers !== undefined);
   const { item } = frame;
-  // Who it is for, when it is someone in particular: an admin's by default.
-  const facts: KeyValueItem[] = item.facts.map(({ label, value }) => ({
-    id: label,
-    label,
-    value,
-  }));
-  if (item.forWhom !== undefined && "role" in item.forWhom) {
-    const { role } = item.forWhom;
-    facts.unshift({ id: "for", label: t`For`, value: t`The ${role}` });
-  } else if (item.forWhom !== undefined) {
-    facts.unshift({ id: "for", label: t`For`, value: item.forWhom.person });
-  }
+  // With no action of its own, the item is dealt with where it lives.
+  const shown: Act[] =
+    acts.length === 0 && item.about !== undefined
+      ? [{ label: t`Open`, to: item.about }]
+      : acts;
+  const facts = useFacts(item);
   return (
     <Card asChild size="sm">
       <article aria-labelledby={titleId}>
@@ -338,23 +351,21 @@ const ItemFrame = ({
           >
             <CardTitle level={2}>{item.title}</CardTitle>
           </span>
+          <span {...stylex.props(styles.marks)}>
+            <Badge icon={kindMark[item.kind]} size="sm">
+              {i18n._(kindLabel[item.kind])}
+            </Badge>
+            {item.urgent ? (
+              <Badge size="sm" variant="warning">
+                <Trans context="inbox: something waits on this item">
+                  Blocks work
+                </Trans>
+              </Badge>
+            ) : null}
+          </span>
           {item.date === "" ? null : (
             <CardDescription>{formatDate(item.date)}</CardDescription>
           )}
-          <CardAction>
-            <span {...stylex.props(styles.marks)}>
-              <Badge icon={kindMark[item.kind]} size="sm" variant="secondary">
-                {i18n._(kindLabel[item.kind])}
-              </Badge>
-              {item.urgent ? (
-                <Badge size="sm" variant="warning">
-                  <Trans context="inbox: something waits on this item">
-                    Blocks work
-                  </Trans>
-                </Badge>
-              ) : null}
-            </span>
-          </CardAction>
         </CardHeader>
         <CardContent>
           <div {...stylex.props(styles.body)}>
@@ -365,9 +376,9 @@ const ItemFrame = ({
             ))}
             {extra}
             {renderAnswers?.(held)}
-            {acts.length === 0 ? null : (
+            {shown.length === 0 ? null : (
               <div {...stylex.props(styles.actions)}>
-                {acts.map((act, index) => (
+                {shown.map((act, index) => (
                   <ActButton
                     act={act}
                     busy={held}
@@ -388,9 +399,13 @@ const ItemFrame = ({
                 <AlertDescription>{failure}</AlertDescription>
               </Alert>
             )}
-            {facts.length === 0 ? null : (
+            {/* What the item shows to answer it says these already, in
+                its own words; the panel lists them under it. */}
+            {extra === undefined &&
+            renderAnswers === undefined &&
+            facts.length > 0 ? (
               <KeyValueList items={facts} orientation="horizontal" />
-            )}
+            ) : null}
           </div>
         </CardContent>
       </article>
@@ -714,10 +729,9 @@ const BindingsDetail = ({
       t`Approved: ${alias} of ${name}.`
     );
   };
-  const { about } = frame.item;
   return (
     <ItemFrame
-      acts={about === undefined ? [] : [{ label: t`Open`, to: about }]}
+      acts={[]}
       busy={busy}
       renderAnswers={(held) => (
         <PendingBindingList
@@ -816,13 +830,42 @@ const AskedItem = ({
   );
 };
 
+/**
+ * A decision a workflow's run waits for: answered here, on the card its
+ * own page shows (decision-card.tsx), which asks the person to confirm
+ * the answer; once it is recorded the inbox is read again, and the item
+ * goes.
+ */
+const DecisionItem = ({
+  frame,
+  source,
+}: {
+  frame: Frame;
+  source: Extract<InboxSource, { type: "decision" }>;
+}) => {
+  const router = useRouter();
+  const armed = useArmed(frame.arriving);
+  return (
+    <DecisionCard
+      decision={source.decision}
+      held={!armed || frame.gone}
+      onAnswered={(said) => {
+        frame.onSaid(said);
+        void (async () => {
+          await router.invalidate({ sync: true });
+          frame.onLanded();
+        })();
+      }}
+    />
+  );
+};
+
 /** What is done on its own page: its next step leads there. */
 const ElsewhereItem = ({ frame }: { frame: Frame }) => {
   const { t } = useLingui();
   const { item } = frame;
   const labels: Partial<Record<InboxSource["type"], string>> = {
     reconnect: t`Sign in again`,
-    decision: t`Review and answer`,
     stoppedEvents: t`Open the connection`,
     appMessage: t`Open the App`,
   };
@@ -857,6 +900,9 @@ export const ItemDetail = (frame: Frame) => {
   }
   if (source.type === "asked") {
     return <AskedItem frame={frame} source={source} />;
+  }
+  if (source.type === "decision") {
+    return <DecisionItem frame={frame} source={source} />;
   }
   return <ElsewhereItem frame={frame} />;
 };
