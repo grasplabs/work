@@ -1,5 +1,10 @@
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
+import {
+  frontendDirectives,
+  policy,
+} from "@grasp-os/shared/content-security-policy";
 import linguiMacro from "@lingui/babel-plugin-lingui-macro";
 import { getConfig } from "@lingui/conf";
 import { lingui } from "@lingui/vite-plugin";
@@ -10,6 +15,7 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { Features } from "lightningcss";
 import { defineConfig } from "vite-plus";
+import type { Plugin } from "vite-plus";
 
 import { localePreload } from "./locale-preload.ts";
 
@@ -26,6 +32,66 @@ const linguiConfig = getConfig({ configPath: linguiConfigPath });
 // ones, it leans on variables only a `color-scheme` rule in the same
 // stylesheet sets, and without one each colour is invalid.
 const keepLightDark = { exclude: Features.LightDark };
+
+/**
+ * Vite's dev server serves the app's code from paths of its own, not the
+ * build's `/assets/`: its client (HMR), React Refresh's runtime, the app's
+ * source, Damsko's and the kit's source outside this app (`/@fs/`),
+ * prebundled packages and virtual modules (StyleX's runtime). Not
+ * `/page-modules/`, which core still keeps out.
+ */
+const devScriptPaths = [
+  "/@vite/client",
+  "/@react-refresh",
+  "/@id/",
+  "/@fs/",
+  "/src/",
+  "/node_modules/",
+];
+
+/**
+ * Core's policy of the frontend (security-headers.ts), with what the dev
+ * server alone needs, so what production refuses is refused here too.
+ * Its HMR websocket is to this origin, which `connect-src 'self'`
+ * already allows. React Refresh's preamble is an inline script, let
+ * through by its hash alone: any other inline script is still refused.
+ * StyleX's stylesheet is a virtual module, outside `/assets/` too.
+ */
+// Worked out once, as the config loads: should plugin-react stop giving
+// its preamble, the dev server fails to start rather than on a request.
+const preamble = createHash("sha256")
+  .update(react.preambleCode.replace("__BASE__", "/"))
+  .digest("base64");
+
+const devPolicy = (origin: string): string => {
+  const production = frontendDirectives(origin);
+  const scripts = devScriptPaths.map((path) => `${origin}${path}`).join(" ");
+  return policy({
+    ...production,
+    "script-src": `${production["script-src"]} ${scripts} 'sha256-${preamble}'`,
+    "style-src": `${production["style-src"]} ${origin}/virtual:stylex.css`,
+  });
+};
+
+/**
+ * Sends the policy on everything the dev server answers, as core does in
+ * production. What it proxies to core comes with core's own, which
+ * replaces it. The origin is the one the browser asked for, as Vite may
+ * take another port than 5173.
+ */
+const devServerPolicy: Plugin = {
+  name: "grasp:dev-server-policy",
+  apply: "serve",
+  configureServer: (server) => {
+    server.middlewares.use((request, response, next) => {
+      response.setHeader(
+        "content-security-policy",
+        devPolicy(`http://${request.headers.host ?? "localhost:5173"}`)
+      );
+      next();
+    });
+  },
+};
 
 export default defineConfig(({ command }) => ({
   plugins: [
@@ -79,6 +145,7 @@ export default defineConfig(({ command }) => ({
     lingui({ configPath: linguiConfigPath }),
     localePreload(),
     tailwindcss(),
+    devServerPolicy,
   ],
   css: { lightningcss: keepLightDark },
   define: {
