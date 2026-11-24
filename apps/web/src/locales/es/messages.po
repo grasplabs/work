@@ -11026,6 +11026,12 @@ msgstr "Solo se usa para saber a quién preguntar"
 msgid "Only when asked"
 msgstr "Solo cuando se le pregunta"
 
+#: src/agents/agent-facts.tsx
+#: src/chat/agent-draft-card.tsx
+#: src/settings/stephen-audience.tsx
+msgid "Only whoever made it"
+msgstr "Solo quien lo creó"
+
 #: src/agents/agent-page.tsx
 #: src/agents/agents-overview.tsx
 msgid "Only you"

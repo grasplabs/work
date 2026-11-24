@@ -46,8 +46,8 @@ import { dollars } from "../settings/money.ts";
 import { SettingsBody, SettingsSection } from "../settings/settings-parts.tsx";
 import {
   AudienceControl,
+  agentAudienceOf,
   appAudienceOf,
-  audienceOf,
   chosenOf,
 } from "../settings/stephen-audience.tsx";
 import {
@@ -345,7 +345,7 @@ const Access = ({
               editable={can}
               key={JSON.stringify(settings.audience)}
               label={t`Who may use ${name}`}
-              offers={["everyone", "teams", "nobody"]}
+              offers={["everyone", "teams", "maker", "nobody"]}
               teams={teams}
               value={chosenOf(settings.audience)}
               onSave={async (chosen) => {
@@ -353,7 +353,7 @@ const Access = ({
                   await session.connections.setAgentReach(
                     agent.id,
                     settings.on,
-                    audienceOf(chosen)
+                    agentAudienceOf(chosen)
                   );
                 });
               }}

@@ -6,7 +6,7 @@ import { model, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { saveInstructions } from "./instruction-saves.ts";
 import { fakeProvider } from "./model-provider.ts";
-import { outcome, signedInApi } from "./sign-in.ts";
+import { outcome, signedInApi, signIn } from "./sign-in.ts";
 
 // Picking an agent for a chat in Grasp's own chat, over `/rpc`, as a
 // person's page reaches it. These start from the ways it can fail: an
@@ -14,7 +14,11 @@ import { outcome, signedInApi } from "./sign-in.ts";
 // an agent, with a paused one, or with an ID that names none; the refusal
 // telling an agent that exists from one that doesn't; an agent's
 // instructions handed to the page; a chat answered by another agent than
-// the one it was made with.
+// the one it was made with. And for an agent for its maker alone: anyone
+// but its maker reaching it, another admin included, by its ID or through
+// a chat made before; its maker named by whoever set it; the first
+// agent, which nobody made, set so; a person's own agent widened by it;
+// someone else answered once its maker is erased.
 
 const idp = mockIdp();
 
@@ -22,6 +26,15 @@ const idp = mockIdp();
 const setUpTime = { timeout: 60_000 };
 
 const everyone = { who: "everyone" } as const;
+const maker = { who: "maker" } as const;
+
+/** The IDs of the agents `person` may talk to, as their page lists them. */
+const listedFor = async (
+  person: Awaited<ReturnType<typeof signedInApi>>
+): Promise<string[]> => {
+  const listed = await person.api.chats.agents();
+  return listed.map(({ id }) => id);
+};
 
 /** What an admin says of an agent, with `over` its own. */
 const said = (over: Record<string, unknown> = {}) => ({
@@ -203,6 +216,123 @@ describe("picking an agent for a chat", setUpTime, () => {
     ).resolves.toBe("agent.not_for_you");
     expect(gateway.requests).toHaveLength(asked);
     await expect(person.api.chats.agents()).resolves.toHaveLength(1);
+  });
+
+  it("lists and answers an agent for its maker alone, never another admin or a member, by its ID or in a chat made before", async () => {
+    const made = await signedInApi(idp, "admin");
+    const admin = await signedInApi(idp, "admin");
+    const member = await signedInApi(idp, "user");
+    const claire = await made.api.connections.makeAgent(said());
+    await made.api.connections.setAgentReach(claire.id, true, everyone);
+    const before = {
+      made: await made.api.chats.create("Mine", claire.id),
+      admin: await admin.api.chats.create("Theirs", claire.id),
+      member: await member.api.chats.create("Hers", claire.id),
+    };
+    // Set by another admin, it is still for the one who made it.
+    await admin.api.connections.setAgentReach(claire.id, true, maker);
+
+    expect({
+      made: await listedFor(made),
+      admin: await listedFor(admin),
+      member: await listedFor(member),
+    }).toStrictEqual({
+      made: [chatAgentId, claire.id],
+      admin: [chatAgentId],
+      member: [chatAgentId],
+    });
+    const gateway = await fakeProvider(says("About invoices."));
+    const hi = { text: "Hi.", model };
+    // As any agent they may not reach: unknown by its ID, and no longer
+    // answering in a chat made with it.
+    await expect(
+      Promise.all([
+        outcome(admin.api.chats.create("Again", claire.id)),
+        outcome(member.api.chats.create("Again", claire.id)),
+        outcome(admin.api.chats.send(before.admin.id, hi)),
+        outcome(member.api.chats.send(before.member.id, hi)),
+      ])
+    ).resolves.toStrictEqual([
+      "agent.unknown",
+      "agent.unknown",
+      "agent.not_for_you",
+      "agent.not_for_you",
+    ]);
+    expect(gateway.requests).toHaveLength(0);
+    await expect(
+      Promise.all([
+        outcome(made.api.chats.send(before.made.id, hi)),
+        outcome(made.api.chats.create("Another", claire.id)),
+      ])
+    ).resolves.toStrictEqual(["ok", "ok"]);
+    await vi.waitFor(() => {
+      expect(gateway.requests.length).toBeGreaterThan(0);
+    });
+    // What an admin's page reads of it.
+    await expect(
+      admin.api.connections.agentSettings(claire.id)
+    ).resolves.toMatchObject({ on: true, audience: maker });
+  });
+
+  it("never makes the first agent, which nobody made, its maker's alone, nor changes whom a person's own agent reaches", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const other = await signedInApi(idp, "admin");
+    const { connections } = admin.api;
+    const own = await connections.makeOwnAgent(said({ name: "Mine" }));
+
+    await expect(
+      Promise.all([
+        outcome(connections.setAgentReach(chatAgentId, true, maker)),
+        outcome(
+          // @ts-expect-error -- not an audience Settings › Stephen has, as a page could send it
+          connections.setStephenReach(true, maker)
+        ),
+        // A person's own agent refuses it as any audience.
+        outcome(connections.setAgentReach(own.id, true, maker)),
+        outcome(connections.setAgentReach(own.id, true, everyone)),
+      ])
+    ).resolves.toStrictEqual([
+      "agent.record_invalid",
+      "connection.invalid",
+      "agent.unknown",
+      "agent.unknown",
+    ]);
+    expect({
+      owner: await listedFor(admin),
+      other: await listedFor(other),
+    }).toStrictEqual({
+      owner: [chatAgentId, own.id],
+      other: [chatAgentId],
+    });
+  });
+
+  it("answers nobody once its maker is erased, though it still names them", async () => {
+    const made = await signedInApi(idp, "admin");
+    const admin = await signedInApi(idp, "admin");
+    const claire = await made.api.connections.makeAgent(said());
+    await made.api.connections.setAgentReach(claire.id, true, maker);
+    await admin.api.members.remove(made.userId);
+    await admin.api.members.erase(made.userId, String(made.person.name));
+
+    // Whoever signs in now, under any ID but the erased one: the erased
+    // person themselves gets no session at all.
+    const again = await signIn(idp, "microsoft", made.person);
+    const newcomer = await signedInApi(idp, "admin");
+    const listed = await admin.api.connections.agents();
+    const settings = await admin.api.connections.agentSettings(claire.id);
+    expect({
+      again: again.session,
+      admin: await listedFor(admin),
+      newcomer: await listedFor(newcomer),
+      madeBy: listed.find(({ id }) => id === claire.id)?.madeBy,
+      audience: settings.audience,
+    }).toStrictEqual({
+      again: undefined,
+      admin: [chatAgentId],
+      newcomer: [chatAgentId],
+      madeBy: made.userId,
+      audience: maker,
+    });
   });
 
   it("makes no chat with the first agent while it is paused, and says it is paused", async () => {
