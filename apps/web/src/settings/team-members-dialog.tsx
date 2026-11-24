@@ -1,204 +1,342 @@
-import { Avatar, AvatarFallback } from "@grasp-os/app-kit/components/avatar";
-import { Button } from "@grasp-os/app-kit/components/button";
+import type { Member, OrganizationTeam } from "@grasp-os/shared/members";
+import { Alert } from "@grasp-os/ui/components/alert";
+import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
+import { Button } from "@grasp-os/ui/components/button";
+import { Checkbox } from "@grasp-os/ui/components/checkbox";
 import {
   Dialog,
+  DialogBody,
+  DialogClose,
   DialogContent,
-  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@grasp-os/app-kit/components/dialog";
-import { Field, FieldLabel } from "@grasp-os/app-kit/components/field";
+} from "@grasp-os/ui/components/dialog";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/app-kit/components/select";
-import type { Member, OrganizationTeam } from "@grasp-os/shared/members";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { UserMinusIcon } from "lucide-react";
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyTitle,
+} from "@grasp-os/ui/components/empty";
+import { Field, FieldError, FieldLabel } from "@grasp-os/ui/components/field";
+import { Input } from "@grasp-os/ui/components/input";
+import {
+  InputGroup,
+  InputGroupInput,
+  InputGroupAddon,
+} from "@grasp-os/ui/components/input-group";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { ScrollArea } from "@grasp-os/ui/components/scroll-area";
+import { Icon, SearchIcon } from "@grasp-os/ui/lib/icons";
+import { colors, font, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useId, useState } from "react";
 
-import { ErrorText } from "../error-text.tsx";
-import { initials } from "../frame/person-menu.tsx";
-import { addTeamMember, removeTeamMember } from "./team-changes.ts";
+import { addTeamMember, removeTeamMember, renameTeam } from "./team-changes.ts";
 import { useTeamChange } from "./use-team-change.ts";
 
-// Who is in a team, for admins: each of them, a way to take them off it,
-// and a way to put any other member of the organization on it.
+// A team's own dialog, as the library's Members pattern has it: its name,
+// renamed in a field, and one field to find the organization's members and
+// tick them; ticked means in the team. Who is in it stands first, ticked,
+// in the order set as the dialog opens, so ticking never moves a row. Save
+// changes renames it and puts on and takes off whoever changed, through
+// Better Auth's organization routes (team-changes.ts), then reads the
+// teams again; a refused change keeps the dialog open with what was asked.
 
-/** Someone in the team: a member, or only their ID if they aren't listed. */
-interface InTeam {
-  userId: string;
-  name: string;
-  email?: string;
-}
+const styles = stylex.create({
+  fields: { display: "grid", gap: space["4"] },
+  people: { display: "grid", gap: space["2"] },
+  // The list scrolls inside the field, so the dialog keeps its size with
+  // forty people. Its rows step out by Item's own inline room, so each
+  // checkbox stands on the fields' start edge.
+  list: {
+    height: "16rem",
+    marginInline: `calc(-1 * ${space.tableCellInline})`,
+  },
+  label: {
+    margin: 0,
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+    fontWeight: font.weightMedium,
+    color: colors.foreground,
+  },
+  rows: { display: "grid", margin: 0, padding: 0, listStyle: "none" },
+  // A hairline between rows, as the people's list has, the fields' width:
+  // the rows step out by Item's inline room, the line steps back in.
+  row: { position: "relative" },
+  line: {
+    "::before": {
+      content: "''",
+      position: "absolute",
+      top: 0,
+      insetInline: space.tableCellInline,
+      height: size.hairline,
+      backgroundColor: colors.border,
+    },
+  },
+  press: { display: "block", cursor: "pointer" },
+  who: { display: "inline-flex", alignItems: "center", gap: space["2"] },
+  count: {
+    margin: 0,
+    fontSize: font.textXs,
+    lineHeight: font.textXsLine,
+    color: colors.mutedForeground,
+  },
+});
 
-/** The team's people by name, as the organization's members name them. */
-const peopleIn = (
-  team: OrganizationTeam,
-  members: readonly Member[]
-): InTeam[] => {
-  const byId = new Map(members.map((member) => [member.userId, member]));
-  return team.memberIds
-    .map((userId) => byId.get(userId) ?? { userId, name: userId })
-    .toSorted((a, b) => a.name.localeCompare(b.name));
+/** One of the organization's members, to tick into the team: the whole row is the checkbox's label. */
+const PersonRow = ({
+  member,
+  chosen,
+  first,
+  onTick,
+}: {
+  member: Member;
+  chosen: boolean;
+  first: boolean;
+  onTick: (on: boolean) => void;
+}) => {
+  const id = useId();
+  return (
+    <li {...stylex.props(styles.row, !first && styles.line)}>
+      <label htmlFor={id} {...stylex.props(styles.press)}>
+        <Item size="xs">
+          <ItemMedia align="center">
+            <span {...stylex.props(styles.who)}>
+              <Checkbox
+                checked={chosen}
+                id={id}
+                onCheckedChange={(on) => {
+                  onTick(on === true);
+                }}
+              />
+              <Avatar decorative name={member.name} size="xs">
+                <AvatarFallback />
+              </Avatar>
+            </span>
+          </ItemMedia>
+          <ItemContent>
+            <ItemTitle>{member.name}</ItemTitle>
+            <ItemDescription>{member.email}</ItemDescription>
+          </ItemContent>
+        </Item>
+      </label>
+    </li>
+  );
 };
 
-/** The organization's members not in the team yet, by name. */
-const othersOf = (
-  team: OrganizationTeam,
-  members: readonly Member[]
-): { value: string; label: string }[] => {
-  const inTeam = new Set(team.memberIds);
-  return members
-    .filter((member) => !inTeam.has(member.userId))
-    .toSorted((a, b) => a.name.localeCompare(b.name))
-    .map((member) => ({
-      value: member.userId,
-      label: `${member.name} (${member.email})`,
-    }));
+/** Whether `name` is another team's already, whatever its case. */
+export const isTaken = (
+  name: string,
+  teams: readonly OrganizationTeam[],
+  except?: string
+): boolean => {
+  const wanted = name.trim().toLocaleLowerCase();
+  return teams.some(
+    (team) => team.id !== except && team.name.toLocaleLowerCase() === wanted
+  );
 };
 
-export const TeamMembersDialog = ({
+/** Whether `member` is who `query` names, by name or email. */
+const matches = (member: Member, query: string): boolean => {
+  const words = query.trim().toLocaleLowerCase();
+  return (
+    words === "" ||
+    `${member.name} ${member.email}`.toLocaleLowerCase().includes(words)
+  );
+};
+
+/** The members, the team's own first, each part by name. */
+const teamFirst = (
+  members: readonly Member[],
+  inTeam: readonly string[]
+): Member[] => {
+  const ours = new Set(inTeam);
+  const rank = (member: Member): number => (ours.has(member.userId) ? 0 : 1);
+  return members.toSorted(
+    (a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name)
+  );
+};
+
+/** Renames `team` to `name` if it changed, and puts on and takes off whoever changed. */
+const saveTeam = async (
+  team: OrganizationTeam,
+  name: string,
+  chosen: readonly string[]
+): Promise<void> => {
+  if (name !== team.name) {
+    await renameTeam(team.id, name);
+  }
+  const before = new Set(team.memberIds);
+  const after = new Set(chosen);
+  for (const userId of chosen) {
+    if (!before.has(userId)) {
+      // oxlint-disable-next-line no-await-in-loop -- one change at a time, so a refusal says where it stopped
+      await addTeamMember(team.id, userId);
+    }
+  }
+  for (const userId of team.memberIds) {
+    if (!after.has(userId)) {
+      // oxlint-disable-next-line no-await-in-loop -- one change at a time, as above
+      await removeTeamMember(team.id, userId);
+    }
+  }
+};
+
+/** The team's dialog: open while `team` is given. */
+export const TeamDialog = ({
   team,
+  teams,
   members,
-  open,
-  onOpenChange,
+  onClose,
   onChanged,
 }: {
-  team: OrganizationTeam;
+  team: OrganizationTeam | undefined;
+  teams: readonly OrganizationTeam[];
   members: readonly Member[];
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  onClose: () => void;
   onChanged: () => Promise<void>;
 }) => {
   const { t } = useLingui();
-  const pickId = useId();
-  const [chosen, setChosen] = useState<string | null>(null);
-  const { busy, failure, run } = useTeamChange(onChanged);
-  const { name } = team;
-  const people = peopleIn(team, members);
-  const others = othersOf(team, members);
-  // One that was added since, or left the organization, is no longer offered.
-  const picked = others.some((other) => other.value === chosen) ? chosen : null;
-  const add = async (userId: string): Promise<void> => {
+  const [name, setName] = useState(team?.name ?? "");
+  const [chosen, setChosen] = useState<string[]>(team?.memberIds ?? []);
+  const [query, setQuery] = useState("");
+  const [problem, setProblem] = useState<string>();
+  const { failure, run } = useTeamChange(onChanged);
+  // The order is set as the dialog opens: the team's people first.
+  // oxlint-disable-next-line react/hook-use-state -- fixed as the dialog opens, never set
+  const [order] = useState(() => teamFirst(members, team?.memberIds ?? []));
+  const found = order.filter((member) => matches(member, query));
+  const count = chosen.length;
+  const tick = (userId: string, on: boolean): void => {
+    setChosen((all) =>
+      on ? [...all, userId] : all.filter((each) => each !== userId)
+    );
+  };
+  const save = async (): Promise<void> => {
+    const trimmed = name.trim();
+    if (team === undefined) {
+      return;
+    }
+    if (trimmed === "") {
+      setProblem(t`Give the team a name.`);
+      throw new Error("The team needs a name.");
+    }
+    if (isTaken(trimmed, teams, team.id)) {
+      setProblem(t`There is a team with this name already.`);
+      throw new Error("The name is taken.");
+    }
+    const current = team.name;
+    // Core's refusal, in words: the staff list's, or that only admins change teams.
     const refused = await run(
       async () => {
-        await addTeamMember(team.id, userId);
+        await saveTeam(team, trimmed, chosen);
       },
-      t`They couldn't be added to ${name}. Try again.`
+      t`${current} couldn't be saved. Try again.`
     );
-    if (refused === undefined) {
-      setChosen(null);
+    if (refused !== undefined) {
+      throw new Error(refused);
     }
-  };
-  const remove = async (person: InTeam): Promise<void> => {
-    const who = person.name;
-    await run(
-      async () => {
-        await removeTeamMember(team.id, person.userId);
-      },
-      t`${who} couldn't be taken off ${name}. Try again.`
-    );
+    onClose();
   };
   return (
-    <Dialog onOpenChange={onOpenChange} open={open}>
+    <Dialog
+      onOpenChange={(open) => {
+        if (!open) {
+          onClose();
+        }
+      }}
+      open={team !== undefined}
+    >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>
-            <Trans>Members of {name}</Trans>
-          </DialogTitle>
-          <DialogDescription>
-            <Trans>
-              What is shared with {name} is shared with each of them.
-            </Trans>
-          </DialogDescription>
+          <DialogTitle>{team?.name ?? ""}</DialogTitle>
         </DialogHeader>
-        {others.length === 0 ? (
-          <p className="text-muted-foreground">
-            <Trans>Everyone in the organization is in this team.</Trans>
-          </p>
-        ) : (
-          <form
-            className="flex items-end gap-2"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (picked !== null) {
-                void add(picked);
-              }
-            }}
-          >
-            <Field className="min-w-0 flex-1">
-              <FieldLabel htmlFor={pickId}>
-                <Trans>Add a member</Trans>
-              </FieldLabel>
-              <Select
-                items={others}
-                onValueChange={(value: string | null) => {
-                  setChosen(value);
+        <DialogBody>
+          <div {...stylex.props(styles.fields)}>
+            <Field data-invalid={problem !== undefined} name="team-name">
+              <FieldLabel>{t`Name`}</FieldLabel>
+              <Input
+                onValueChange={(value) => {
+                  setName(value);
+                  setProblem(undefined);
                 }}
-                value={picked}
-              >
-                <SelectTrigger className="w-full" id={pickId}>
-                  <SelectValue placeholder={t`Choose someone`} />
-                </SelectTrigger>
-                <SelectContent>
-                  {others.map((other) => (
-                    <SelectItem key={other.value} value={other.value}>
-                      {other.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                value={name}
+              />
+              {problem === undefined ? null : (
+                <FieldError match>{problem}</FieldError>
+              )}
             </Field>
-            <Button disabled={busy || picked === null} type="submit">
-              <Trans>Add</Trans>
-            </Button>
-          </form>
-        )}
-        <ErrorText>{failure}</ErrorText>
-        {people.length === 0 ? (
-          <p className="text-muted-foreground">
-            <Trans>Nobody is in this team yet.</Trans>
-          </p>
-        ) : (
-          <ul aria-label={t`Members of ${name}`} className="flex flex-col">
-            {people.map((person) => {
-              const who = person.name;
-              return (
-                <li
-                  className="flex items-center gap-3 border-t py-2"
-                  key={person.userId}
-                >
-                  <Avatar className="size-8">
-                    <AvatarFallback>{initials(person.name)}</AvatarFallback>
-                  </Avatar>
-                  <div className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate">{person.name}</span>
-                    {person.email === undefined ? null : (
-                      <span className="text-muted-foreground truncate">
-                        {person.email}
-                      </span>
-                    )}
-                  </div>
-                  <Button
-                    aria-label={t`Take ${who} off ${name}`}
-                    disabled={busy}
-                    onClick={() => {
-                      void remove(person);
-                    }}
-                    size="icon-sm"
-                    variant="ghost"
-                  >
-                    <UserMinusIcon />
-                  </Button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+            <section aria-label={t`People`} {...stylex.props(styles.people)}>
+              <p {...stylex.props(styles.label)}>{t`People`}</p>
+              <InputGroup>
+                <InputGroupAddon>
+                  <Icon icon={SearchIcon} />
+                </InputGroupAddon>
+                <InputGroupInput
+                  aria-label={t`Find people`}
+                  onValueChange={setQuery}
+                  placeholder={t`Find people`}
+                  type="search"
+                  value={query}
+                />
+              </InputGroup>
+              {/* The list scrolls inside the field, so the dialog keeps its size with forty people. */}
+              <ScrollArea aria-label={t`People to tick`} style={styles.list}>
+                {found.length === 0 ? (
+                  <Empty size="sm">
+                    <EmptyHeader>
+                      <EmptyTitle>{t`No one by that name`}</EmptyTitle>
+                      <EmptyDescription>
+                        {t`Invite them from the people list first.`}
+                      </EmptyDescription>
+                    </EmptyHeader>
+                  </Empty>
+                ) : (
+                  <ul {...stylex.props(styles.rows)}>
+                    {found.map((member, index) => (
+                      <PersonRow
+                        chosen={chosen.includes(member.userId)}
+                        first={index === 0}
+                        key={member.userId}
+                        member={member}
+                        onTick={(on) => {
+                          tick(member.userId, on);
+                        }}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </ScrollArea>
+              {/* oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- not every screen reader treats <output> as a live region */}
+              <p role="status" {...stylex.props(styles.count)}>
+                {t`${plural(count, { one: "# person in the team", other: "# people in the team" })}`}
+              </p>
+            </section>
+            {failure === undefined ? null : (
+              <Alert variant="destructive">{failure}</Alert>
+            )}
+          </div>
+        </DialogBody>
+        <DialogFooter>
+          <DialogClose>{t`Cancel`}</DialogClose>
+          <Button
+            errorText={t`Not saved`}
+            loadingText={t`Saving`}
+            onClick={save}
+            size="sm"
+          >
+            {t`Save changes`}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

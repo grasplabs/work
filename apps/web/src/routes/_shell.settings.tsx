@@ -1,54 +1,60 @@
-import { isAdmin } from "@grasp-os/shared/roles";
-import type { MessageDescriptor } from "@lingui/core";
+import { Container } from "@grasp-os/ui/components/container";
+import { PageHeader } from "@grasp-os/ui/components/page-header";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, Outlet, useLocation } from "@tanstack/react-router";
 
-import { Page, PageHeading } from "../frame/page.tsx";
+import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
-import { groupsFor } from "../settings/sections.ts";
+import { sectionsFor } from "../settings/sections.ts";
 
-// Settings, as in the prototype (`routes/settings.tsx`): the workspace and
-// who may do what in it, then one's own account, one section at a time.
-// The workspace's sections are for admins (Members and roles, Webhooks and
-// calls of unknown outcome, never for Grasp staff); the account's for
-// everyone. The sidebar lists them while a Settings page is open, in its
-// sheet on a phone (frame/settings-level.tsx), so the page holds the
-// section alone.
-// Core checks the role on every call whatever is listed. Onboarding is the
-// company admin's own view of the interviews, as their onboarding shows
-// it; what only Grasp's staff do there is in Grasp's admin.
+// Settings: the workspace and who may do what in it, then one's own
+// account, one section at a time, each under its own name as the page's
+// one header. The sections, their groups and who sees each are data
+// (settings/sections.ts); the sidebar lists them while the person is in
+// Settings (frame/app-sidebar.tsx), on a phone in its sheet.
+//
+// A section stands in one column in the page's middle, Damsko's
+// settings column (Container `sm`, 40rem): a settings page needs no more, and its rows
+// read as one group. Its loading state stands in the same column. Only a
+// section that needs the room (the Audit trail's log beside its details)
+// says `wide` and keeps the page's whole width.
 
+/** Settings: the section the address names, under its name. */
 const SettingsLayout = () => {
   const { t, i18n } = useLingui();
   const { pathname } = useLocation();
   const { identity } = Route.useRouteContext();
-  const current = groupsFor({
-    admin: isAdmin(identity.role),
-    staff: identity.staff,
-  })
-    .flatMap((group) => group.items)
-    .find((item) => pathname.startsWith(item.to));
-  // Stephen is a name and stays as it is.
-  const nameOf = (label: MessageDescriptor | string): string =>
-    typeof label === "string" ? label : i18n._(label);
-  const section = current === undefined ? undefined : nameOf(current.label);
+  const current = sectionsFor(identity).find((section) =>
+    pathname.startsWith(section.href)
+  );
+  // One header: the section's own name; the crumbs above already say Settings.
+  const header = (
+    <PageHeader
+      size="sm"
+      title={current === undefined ? t`Settings` : i18n._(current.label)}
+    />
+  );
   return (
     <>
       <SiteHeader
         crumbs={
-          section === undefined
+          current === undefined
             ? [{ label: t`Settings` }]
-            : [{ label: t`Settings` }, { label: section }]
+            : [{ label: t`Settings` }, { label: i18n._(current.label) }]
         }
       />
       <Page>
-        <PageHeading
-          description={t`Your workspace, who may do what in it, and your own account.`}
-          title={t`Settings`}
-        />
-        <div className="flex max-w-5xl min-w-0 flex-col gap-6 text-sm">
-          <Outlet />
-        </div>
+        {current?.wide === true ? (
+          <>
+            {header}
+            <Outlet />
+          </>
+        ) : (
+          <Container size="sm">
+            {header}
+            <Outlet />
+          </Container>
+        )}
       </Page>
     </>
   );

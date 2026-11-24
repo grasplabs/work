@@ -24,8 +24,8 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
 const until = "2026-11-02T17:00:00.000Z";
 
-/** Core's gate, with the staff window `staff`, and each end asked. */
-const fakeGate = (staff: GateView["staff"]) => {
+/** Core's gate, with the staff window `staff`, and each end asked; refusing to end it when `refuses`. */
+const fakeGate = (staff: GateView["staff"], refuses = false) => {
   const asked: string[] = [];
   let current = staff;
   const onboardingGate = {
@@ -36,6 +36,11 @@ const fakeGate = (staff: GateView["staff"]) => {
     endStaffAccess: async (): Promise<void> => {
       await Promise.resolve();
       asked.push("end");
+      if (refuses) {
+        throw new Error(
+          "Grasp's staff access could not be ended. Reference: req-42"
+        );
+      }
       current = current === null ? null : { ...current, open: false };
     },
   };
@@ -92,9 +97,21 @@ const settled = async (): Promise<void> => {
   });
 };
 
+/** A button's words as people get them: not the ones it hides from them. */
+const nameOf = (each: HTMLButtonElement): string => {
+  const copy = each.cloneNode(true);
+  if (!(copy instanceof HTMLElement)) {
+    return "";
+  }
+  for (const hidden of copy.querySelectorAll("[aria-hidden='true']")) {
+    hidden.remove();
+  }
+  return copy.textContent.trim();
+};
+
 const button = (name: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll("button")].find(
-    (each) => each.textContent?.trim() === name
+    (each) => nameOf(each) === name
   );
 
 const press = async (name: string) => {
@@ -127,34 +144,52 @@ describe("Settings › Workspace › Grasp staff access", () => {
       until,
     });
     await shown(session);
-    expect(text()).toContain("They reach the onboarding alone.");
+    expect(text()).toContain("Onboarding only");
 
-    await press("End staff access now");
+    await press("End now");
     await press("Cancel");
     const afterCancel = [...asked];
-    await press("End staff access now");
+    await press("End now");
     await press("End access");
 
     expect({ afterCancel, asked }).toStrictEqual({
       afterCancel: [],
       asked: ["end"],
     });
-    expect(text()).toContain(
-      "Nobody from Grasp can sign in to this workspace now."
-    );
-    expect(button("End staff access now")).toBeUndefined();
+    // Ended, the card goes: nobody from Grasp can sign in.
+    expect({
+      card: text().includes("Grasp staff access"),
+      end: button("End now"),
+    }).toStrictEqual({ card: false, end: undefined });
   });
 
-  it("says nobody from Grasp can sign in when no window is open", async () => {
+  it("says why when core doesn't end staff access, and still shows it open", async () => {
+    const { session, asked } = fakeGate(
+      { open: true, scope: "full", until },
+      true
+    );
+    await shown(session);
+
+    await press("End now");
+    await press("End access");
+
+    expect({
+      asked,
+      reason: text().includes(
+        "Grasp's staff access could not be ended. Reference: req-42"
+      ),
+      stillOpen: text().includes("Full access"),
+    }).toStrictEqual({ asked: ["end"], reason: true, stillOpen: true });
+  });
+
+  it("shows nothing of staff access while no window is open", async () => {
     const { session } = fakeGate(null);
     await shown(session);
 
     expect({
-      none: text().includes(
-        "Nobody from Grasp can sign in to this workspace now."
-      ),
-      end: button("End staff access now"),
-    }).toStrictEqual({ none: true, end: undefined });
+      card: text().includes("Grasp staff access"),
+      end: button("End now"),
+    }).toStrictEqual({ card: false, end: undefined });
   });
 
   it("shows Grasp staff their own access, with no way to end it", async () => {
@@ -162,8 +197,8 @@ describe("Settings › Workspace › Grasp staff access", () => {
     await shown(session, false);
 
     expect({
-      reach: text().includes("They reach everything their role allows."),
-      end: button("End staff access now"),
+      reach: text().includes("Full access"),
+      end: button("End now"),
     }).toStrictEqual({ reach: true, end: undefined });
   });
 });

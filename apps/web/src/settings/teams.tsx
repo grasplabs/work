@@ -1,51 +1,71 @@
-import { Button } from "@grasp-os/app-kit/components/button";
+import type {
+  DirectoryPlacement,
+  Member,
+  OrganizationTeam,
+} from "@grasp-os/shared/members";
+import { Alert } from "@grasp-os/ui/components/alert";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@grasp-os/ui/components/alert-dialog";
+import { AvatarGroup } from "@grasp-os/ui/components/avatar";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   Dialog,
+  DialogBody,
   DialogClose,
   DialogContent,
-  DialogDescription,
-  DialogFooter,
   DialogHeader,
+  DialogFooter,
   DialogTitle,
-} from "@grasp-os/app-kit/components/dialog";
+} from "@grasp-os/ui/components/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@grasp-os/app-kit/components/dropdown-menu";
+} from "@grasp-os/ui/components/dropdown-menu";
+import { Field, FieldError, FieldLabel } from "@grasp-os/ui/components/field";
+import { Form } from "@grasp-os/ui/components/form";
+import { Input } from "@grasp-os/ui/components/input";
 import {
-  Field,
-  FieldError,
-  FieldLabel,
-} from "@grasp-os/app-kit/components/field";
-import { Input } from "@grasp-os/app-kit/components/input";
-import type {
-  DirectoryPlacement,
-  Member,
-  OrganizationTeam,
-} from "@grasp-os/shared/members";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { Text } from "@grasp-os/ui/components/text";
 import {
   EllipsisIcon,
+  Icon,
   PencilIcon,
   PlusIcon,
-  Trash2Icon,
-  UsersIcon,
-} from "lucide-react";
+  TrashIcon,
+} from "@grasp-os/ui/lib/icons";
+import { focusRingText } from "@grasp-os/ui/lib/styles";
+import { radius, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useId, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
-import { ErrorText } from "../error-text.tsx";
-import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
+import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
+import { SeparatedItems } from "../workflows/separated-items.tsx";
 import { DirectoryPlacementSections } from "./directory-placement.tsx";
-import { SettingsBody, SettingsSection } from "./settings-parts.tsx";
-import { createTeam, deleteTeam, renameTeam } from "./team-changes.ts";
-import { TeamMembersDialog } from "./team-members-dialog.tsx";
+import { LoadingLines, RowNote, SettingsGroup } from "./section.tsx";
+import { createTeam, deleteTeam } from "./team-changes.ts";
+import { isTaken, TeamDialog } from "./team-members-dialog.tsx";
 import { useTeamChange } from "./use-team-change.ts";
 
 // Teams, for admins (GRA-1296): the organization's teams, each with how
@@ -54,6 +74,25 @@ import { useTeamChange } from "./use-team-change.ts";
 // and so does the onboarding's staff list, which names these same teams
 // (GRA-2055). Better Auth checks the role on every
 // change and core on every read; only admins see this tab at all.
+
+const styles = stylex.create({
+  // The team's name opens it: a button that looks like the row's title.
+  open: {
+    margin: 0,
+    padding: 0,
+    appearance: "none",
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    color: "inherit",
+    font: "inherit",
+    textAlign: "start",
+    cursor: "pointer",
+    borderRadius: radius.sm,
+    textDecorationLine: { default: "none", ":hover": "underline" },
+    textUnderlineOffset: "0.2em",
+  },
+  ends: { display: "flex", alignItems: "center", gap: space["3"] },
+});
 
 /** What the tab shows: the teams, and the members to put in them. */
 interface TeamsData {
@@ -80,18 +119,6 @@ const readTeams = async (
     left
   );
 
-/** Whether `name` is another team's already, whatever its case. */
-const isTaken = (
-  name: string,
-  teams: readonly OrganizationTeam[],
-  except?: string
-): boolean => {
-  const wanted = name.trim().toLocaleLowerCase();
-  return teams.some(
-    (team) => team.id !== except && team.name.toLocaleLowerCase() === wanted
-  );
-};
-
 /** A team's name, asked for in a dialog: for a new team, or a new name. */
 const TeamNameDialog = ({
   open,
@@ -115,13 +142,16 @@ const TeamNameDialog = ({
   onSave: (name: string) => Promise<string | undefined>;
 }) => {
   const { t } = useLingui();
-  const nameId = useId();
+  const formId = useId();
   const [name, setName] = useState(initial);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
   const taken = isTaken(name, teams, except);
   const problem = taken ? t`There is a team with this name already.` : failure;
   const save = async (): Promise<void> => {
+    if (taken) {
+      return;
+    }
     setBusy(true);
     const refused = await onSave(name.trim());
     setBusy(false);
@@ -142,44 +172,42 @@ const TeamNameDialog = ({
       open={open}
     >
       <DialogContent>
-        <form
-          className="flex flex-col gap-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void save();
-          }}
-        >
-          <DialogHeader>
-            <DialogTitle>{title}</DialogTitle>
-          </DialogHeader>
-          <Field data-invalid={problem === undefined ? undefined : true}>
-            <FieldLabel htmlFor={nameId}>
-              <Trans>Name</Trans>
-            </FieldLabel>
-            <Input
-              aria-invalid={problem === undefined ? undefined : true}
-              autoComplete="off"
-              id={nameId}
-              onChange={(event) => {
-                setName(event.target.value);
-                setFailure(undefined);
-              }}
-              value={name}
-            />
-            {problem === undefined ? null : <FieldError>{problem}</FieldError>}
-          </Field>
-          <DialogFooter>
-            <DialogClose render={<Button type="button" variant="outline" />}>
-              <Trans>Cancel</Trans>
-            </DialogClose>
-            <Button
-              disabled={busy || taken || name.trim() === ""}
-              type="submit"
-            >
-              {submit}
-            </Button>
-          </DialogFooter>
-        </form>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          <Form
+            aria-label={title}
+            id={formId}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void save();
+            }}
+          >
+            <Field data-invalid={problem !== undefined}>
+              <FieldLabel>{t`Name`}</FieldLabel>
+              <Input
+                autoComplete="off"
+                onValueChange={(value) => {
+                  setName(value);
+                  setFailure(undefined);
+                }}
+                required
+                value={name}
+              />
+              <FieldError match="valueMissing">{t`Enter a name for the team.`}</FieldError>
+              {problem === undefined ? null : (
+                <FieldError match>{problem}</FieldError>
+              )}
+            </Field>
+          </Form>
+        </DialogBody>
+        <DialogFooter>
+          <DialogClose>{t`Cancel`}</DialogClose>
+          <Button disabled={busy} form={formId} type="submit">
+            {submit}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -203,9 +231,11 @@ const NewTeamButton = ({
           setOpen(true);
         }}
         size="sm"
+        // Quiet and at the fields' height, as Invite beside the people.
+        variant="outline"
       >
-        <PlusIcon data-icon="inline-start" />
-        <Trans>New team</Trans>
+        <Icon icon={PlusIcon} />
+        {t`New team`}
       </Button>
       <TeamNameDialog
         initial=""
@@ -227,25 +257,41 @@ const NewTeamButton = ({
   );
 };
 
-/** One team: its name, how many are in it, and what an admin does with it. */
+/** How many are in a team, said under its name. */
+const useCounted = (count: number): string => {
+  const { t } = useLingui();
+  return count === 0
+    ? t`No one yet: open it to add people`
+    : t`${plural(count, { one: "# person", other: "# people" })}`;
+};
+
+/**
+ * One team: its name, which opens its dialog; how many are in it; its
+ * people as a stack of faces; and a menu to rename it (in its dialog) or
+ * delete it, which asks first.
+ */
 const TeamRow = ({
   team,
-  teams,
   members,
+  onOpen,
   onChanged,
 }: {
   team: OrganizationTeam;
-  teams: readonly OrganizationTeam[];
   members: readonly Member[];
+  onOpen: () => void;
   onChanged: () => Promise<void>;
 }) => {
   const { t } = useLingui();
-  const [renaming, setRenaming] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [showing, setShowing] = useState(false);
   const { busy, failure, run } = useTeamChange(onChanged);
   const { name } = team;
-  const count = team.memberIds.length;
+  // Only the organization's members count: someone removed is no longer in it.
+  const byId = new Map(members.map((member) => [member.userId, member]));
+  const people = team.memberIds.flatMap((userId) => {
+    const member = byId.get(userId);
+    return member === undefined ? [] : [{ name: member.name }];
+  });
+  const counted = useCounted(people.length);
   const remove = async (): Promise<void> => {
     const refused = await run(
       async () => {
@@ -253,121 +299,95 @@ const TeamRow = ({
       },
       t`${name} couldn't be deleted. Try again.`
     );
-    if (refused === undefined) {
-      setDeleting(false);
+    if (refused !== undefined) {
+      throw new Error(refused);
     }
   };
   return (
-    <div className="flex items-center gap-3 border-t px-5 py-3">
-      <span
-        aria-hidden="true"
-        className="bg-muted flex size-8 flex-none items-center justify-center rounded-full"
-      >
-        <UsersIcon className="text-muted-foreground size-4" />
-      </span>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate">{name}</span>
-        <span className="text-muted-foreground">
-          <Plural one="# member" other="# members" value={count} />
+    <Item size="xs">
+      <ItemContent>
+        <ItemTitle>
+          {/* The name opens the team: the row holds a menu, so it can't be one link. */}
+          <button
+            onClick={onOpen}
+            type="button"
+            {...stylex.props(styles.open, focusRingText)}
+          >
+            {name}
+          </button>
+        </ItemTitle>
+        <ItemDescription>
+          <RowNote failure={deleting ? undefined : failure}>{counted}</RowNote>
+        </ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        <span {...stylex.props(styles.ends)}>
+          {people.length > 0 ? (
+            <AvatarGroup aria-label={t`People in ${name}`} items={people} />
+          ) : null}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                aria-label={t`Actions for ${name}`}
+                disabled={busy}
+                size="icon-sm"
+                variant="ghost"
+              >
+                <Icon icon={EllipsisIcon} />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem icon={PencilIcon} onSelect={onOpen}>
+                {t`Rename`}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                icon={TrashIcon}
+                onSelect={() => {
+                  setDeleting(true);
+                }}
+                variant="destructive"
+              >
+                {t`Delete`}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </span>
-        <ErrorText>{deleting ? undefined : failure}</ErrorText>
-      </div>
-      <Button
-        aria-label={t`Members of ${name}`}
-        onClick={() => {
-          setShowing(true);
-        }}
-        size="sm"
-        variant="outline"
-      >
-        <Trans>Members</Trans>
-      </Button>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          aria-label={t`Actions for ${name}`}
-          disabled={busy}
-          render={<Button size="icon-sm" variant="ghost" />}
-        >
-          <EllipsisIcon />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-48">
-          <DropdownMenuItem
-            onClick={() => {
-              setRenaming(true);
-            }}
-          >
-            <PencilIcon />
-            <Trans>Rename</Trans>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={() => {
-              setDeleting(true);
-            }}
-            variant="destructive"
-          >
-            <Trash2Icon />
-            <Trans>Delete</Trans>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <TeamNameDialog
-        except={team.id}
-        initial={name}
-        onOpenChange={setRenaming}
-        onSave={async (renamed) =>
-          await run(
-            async () => {
-              await renameTeam(team.id, renamed);
-            },
-            t`${name} couldn't be renamed. Try again.`
-          )
-        }
-        open={renaming}
-        submit={t`Rename`}
-        teams={teams}
-        title={t`Rename ${name}`}
-      />
-      <Dialog onOpenChange={setDeleting} open={deleting}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              <Trans>Delete {name}?</Trans>
-            </DialogTitle>
-            <DialogDescription>
-              <Trans>
-                What is shared with this team stops being shared with its
-                members through it, and the workflows it owns no longer have a
-                team. Its members stay in the organization.
-              </Trans>
-            </DialogDescription>
-          </DialogHeader>
-          <ErrorText>{failure}</ErrorText>
-          <DialogFooter showCloseButton>
-            <Button
-              disabled={busy}
-              onClick={() => {
-                void remove();
-              }}
-              variant="destructive"
-            >
-              <Trans>Delete</Trans>
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <TeamMembersDialog
-        members={members}
-        onChanged={onChanged}
-        onOpenChange={setShowing}
-        open={showing}
-        team={team}
-      />
-    </div>
+        <AlertDialog onOpenChange={setDeleting} open={deleting}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t`Delete ${name}?`}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t`What is shared with this team stops being shared with its members through it, and the workflows it owns no longer have a team. Its members stay in the organization.`}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            {/* Why core refused it, where the person is: the staff list's, or that only admins change teams. */}
+            {failure === undefined ? null : (
+              <Alert variant="destructive">{failure}</Alert>
+            )}
+            <AlertDialogFooter>
+              <AlertDialogCancel />
+              <Button
+                errorText={t`Not deleted`}
+                loadingText={t`Deleting`}
+                onClick={async () => {
+                  await remove();
+                  setDeleting(false);
+                }}
+                size="sm"
+                variant="destructive"
+              >
+                {t`Delete`}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </ItemActions>
+    </Item>
   );
 };
 
-/** The organization's teams, once read. */
+/** The organization's teams, once read: a second card under the people. */
 const TeamsList = ({
   data,
   onChanged,
@@ -377,39 +397,54 @@ const TeamsList = ({
 }) => {
   const { t } = useLingui();
   const { teams, members } = data;
+  const [opened, setOpened] = useState<string>();
+  const open = teams.find(({ id }) => id === opened);
   return (
-    <div className="flex flex-col gap-6">
-      <SettingsSection
-        action={<NewTeamButton onChanged={onChanged} teams={teams} />}
-        description={
-          <Trans>
-            Teams group the people who work together, so apps, skills and
-            workflows can be shared with a whole team at once.
-          </Trans>
-        }
+    <>
+      <SettingsGroup
+        actions={<NewTeamButton onChanged={onChanged} teams={teams} />}
+        flush={teams.length > 0}
         title={t`Teams`}
       >
         {teams.length === 0 ? (
-          <p className="text-muted-foreground border-t px-5 py-6 text-center">
-            <Trans>No teams yet.</Trans>
-          </p>
-        ) : null}
-        {teams.map((team) => (
-          <TeamRow
-            key={team.id}
-            members={members}
-            onChanged={onChanged}
-            team={team}
-            teams={teams}
+          <Text color="muted">{t`No teams yet.`}</Text>
+        ) : (
+          <SeparatedItems
+            aria-label={t`Teams`}
+            rows={teams.map((team) => ({
+              key: team.id,
+              row: (
+                <TeamRow
+                  members={members}
+                  onChanged={onChanged}
+                  onOpen={() => {
+                    setOpened(team.id);
+                  }}
+                  team={team}
+                />
+              ),
+            }))}
           />
-        ))}
-      </SettingsSection>
+        )}
+        {/* A new dialog for each team opened, so it starts from that team's name and people. */}
+        <TeamDialog
+          key={open?.id ?? "closed"}
+          members={members}
+          onChanged={onChanged}
+          onClose={() => {
+            setOpened(undefined);
+          }}
+          team={open}
+          teams={teams}
+        />
+      </SettingsGroup>
+      {/* Whom the directory leaves to place, and the hand pins: each only while it lists someone. */}
       <DirectoryPlacementSections
         onChanged={onChanged}
         placement={data.placement}
         teams={teams}
       />
-    </div>
+    </>
   );
 };
 
@@ -436,17 +471,15 @@ export const TeamsPanel = () => {
   };
   if (loaded === undefined) {
     return (
-      <SettingsSection title={t`Teams`}>
-        <SettingsBody>
-          <LoadingLines lines={3} />
-        </SettingsBody>
-      </SettingsSection>
+      <SettingsGroup title={t`Teams`}>
+        <LoadingLines lines={3} />
+      </SettingsGroup>
     );
   }
   return loaded.state === "ready" ? (
     <TeamsList data={loaded.data} onChanged={reload} />
   ) : (
-    <SettingsSection title={t`Teams`}>
+    <SettingsGroup title={t`Teams`}>
       <NotLoadedState
         again={() => {
           void reload();
@@ -454,6 +487,6 @@ export const TeamsPanel = () => {
         heading="h3"
         page={loaded}
       />
-    </SettingsSection>
+    </SettingsGroup>
   );
 };
