@@ -1,4 +1,5 @@
 import { agentAppOf } from "@grasp-os/shared/agents";
+import type { Agent } from "@grasp-os/shared/agents";
 import {
   instructionFileErrors,
   instructionsMaxLength,
@@ -34,6 +35,7 @@ import { AudienceStep } from "./setup/audience-step.tsx";
 import { InstructionsStep } from "./setup/instructions-step.tsx";
 import { JobStep } from "./setup/job-step.tsx";
 import {
+  abilities,
   audiences,
   blank,
   classesOf,
@@ -283,6 +285,8 @@ export const ManualAgent = ({
   const [at, setAt] = useState(0);
   // The setup, then the agent coming to life while core makes it, then made.
   const [phase, setPhase] = useState<"setup" | "making" | "made">("setup");
+  // The agent once made, while its other saves are still to go through.
+  const [created, setCreated] = useState<Agent>();
   // The column the backdrop keeps clear of, so the words read on it.
   const column = useRef<HTMLDivElement>(null);
   const step: Step = asked[at] ?? "review";
@@ -359,9 +363,14 @@ export const ManualAgent = ({
         model: setup.model,
         modelRole: null,
       };
-      const agent = mine
-        ? await session.connections.makeOwnAgent(input)
-        : await session.connections.makeAgent(input);
+      // Made once: a save after it that failed is tried again on the same
+      // agent, not by making another of the same name.
+      const agent =
+        created ??
+        (mine
+          ? await session.connections.makeOwnAgent(input)
+          : await session.connections.makeAgent(input));
+      setCreated(agent);
       // Its apps, as the catalog names each.
       await Promise.all(
         apps
@@ -380,17 +389,21 @@ export const ManualAgent = ({
       if (mine) {
         return { agent, told };
       }
-      // Its kinds of work: core makes it with none; each one on is as the
-      // company has it.
-      const classes = [...setup.abilities].flatMap(
-        (ability) => classesOf[ability] ?? []
-      );
+      // Its kinds of work, each as chosen: one on is as the company has it,
+      // one off is off, even where its instructions turned it on (working
+      // out its apps turns on the reading they need).
       await Promise.all(
-        classes.map(async (toolClass) => {
-          await session.connections.setAgentToolClass(agent.id, toolClass, {
-            who: "asClass",
-          });
-        })
+        abilities.flatMap((ability) =>
+          (classesOf[ability] ?? []).map(async (toolClass) => {
+            await session.connections.setAgentToolClass(
+              agent.id,
+              toolClass,
+              setup.abilities.has(ability)
+                ? { who: "asClass" }
+                : { who: "nobody" }
+            );
+          })
+        )
       );
       if (setup.audience === "everyone") {
         await session.connections.setAgentReach(agent.id, true, {

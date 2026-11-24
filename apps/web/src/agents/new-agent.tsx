@@ -1,3 +1,4 @@
+import type { Agent } from "@grasp-os/shared/agents";
 import {
   instructionFileErrors,
   instructionsMaxLength,
@@ -468,6 +469,8 @@ export const NewAgent = ({
     {}
   );
   const [reviewing, setReviewing] = useState(false);
+  // The agent once made, while its other saves are still to go through.
+  const [created, setCreated] = useState<Agent>();
   // Only one of the company's is asked who may ask it and when it works.
   const asked = steps.filter(
     (each) =>
@@ -737,9 +740,14 @@ export const NewAgent = ({
         model: null,
         modelRole: null,
       };
-      const agent = mine
-        ? await session.connections.makeOwnAgent(input)
-        : await session.connections.makeAgent(input);
+      // Made once: a save after it that failed is tried again on the same
+      // agent, not by making another of the same name.
+      const agent =
+        created ??
+        (mine
+          ? await session.connections.makeOwnAgent(input)
+          : await session.connections.makeAgent(input));
+      setCreated(agent);
       const told =
         instructions.trim() === "" ||
         (await saveFirstInstructions(session, agent.id, instructions));

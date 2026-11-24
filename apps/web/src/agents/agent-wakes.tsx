@@ -187,6 +187,8 @@ const removeWithUndo = async (
         void change(async (session) => {
           const made = await session.connections.makeAgentWake(wake.agentId, {
             cron: wake.cron,
+            // In the zone it was made in, not the company's as it is now.
+            timeZone: wake.timeZone,
             personId: wake.personId,
             opening: wake.opening,
           });

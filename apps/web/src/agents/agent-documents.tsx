@@ -35,6 +35,7 @@ import { Icon, FileIcon, TrashIcon } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
 
 import type { Session } from "../core.ts";
 import { formatBytes } from "../format.ts";
@@ -145,7 +146,9 @@ export const AgentDocuments = ({
 }) => {
   const { t, i18n } = useLingui();
   const { name } = agent;
-  const kept = documents?.length ?? 0;
+  // The files on their way or refused; one core kept leaves the list, as
+  // it is a document's row now, and the others keep theirs.
+  const [files, setFiles] = useState<File[]>([]);
   const added = (at: string): string =>
     new Intl.DateTimeFormat(i18n.locale, { dateStyle: "medium" }).format(
       new Date(at)
@@ -171,6 +174,7 @@ export const AgentDocuments = ({
     if (!sent) {
       throw new Error(t`Not added`);
     }
+    setFiles((current) => current.filter((each) => each !== file));
   };
   const editing = editable && documents !== undefined;
   return (
@@ -188,12 +192,12 @@ export const AgentDocuments = ({
           <FileUpload
             accept={accepted}
             disabled={!can}
-            // Each file a new list: those core kept are documents' rows.
-            key={kept}
             description={t`PDF, Word, Excel, Markdown, text, CSV or JSON, up to 10 MB each.`}
             maxFileSize={chatFileMaxBytes}
             multiple
             onUpload={send}
+            onValueChange={setFiles}
+            value={files}
             variant="dropzone"
           />
         </div>

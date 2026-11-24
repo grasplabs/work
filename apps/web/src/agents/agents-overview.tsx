@@ -157,11 +157,13 @@ const lastRunOf = (wakes: readonly AgentWake[]): AgentWake | undefined =>
     .toSorted((a, b) => (b.lastAt ?? "").localeCompare(a.lastAt ?? ""))
     .at(0);
 
-/** Whether a wake-up's last run didn't start. */
+/** Whether a wake-up's last run failed: a paused or busy agent's skip is no failure, as its page says. */
 const failed = (wake: AgentWake | undefined): boolean =>
   wake?.lastOutcome !== undefined &&
   wake.lastOutcome !== null &&
-  wake.lastOutcome !== "started";
+  wake.lastOutcome !== "started" &&
+  wake.lastOutcome !== "agent.paused" &&
+  wake.lastOutcome !== "agent.busy";
 
 /** What a card says of an agent beyond its name and job. */
 interface Facts {

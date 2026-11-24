@@ -142,15 +142,24 @@ export const foldOf = (
   source: string,
   kept: number
 ): { blocks: number; folded: string } => {
-  const blocks = parseMarkdown(source).children.filter(
-    ({ type }) => type !== "definition"
-  );
+  const nodes = parseMarkdown(source).children;
+  const blocks = nodes.filter(({ type }) => type !== "definition");
   const end = blocks.at(kept - 1)?.position?.end.offset;
+  if (blocks.length <= kept || end === undefined) {
+    return { blocks: blocks.length, folded: source };
+  }
+  // The link definitions after the cut go along, so a reference link in
+  // what is shown stays a link.
+  const definitions = nodes.flatMap(({ type, position }) =>
+    type === "definition" &&
+    position?.start.offset !== undefined &&
+    position.end.offset !== undefined &&
+    position.start.offset >= end
+      ? [source.slice(position.start.offset, position.end.offset)]
+      : []
+  );
   return {
     blocks: blocks.length,
-    folded:
-      blocks.length <= kept || end === undefined
-        ? source
-        : source.slice(0, end),
+    folded: [source.slice(0, end), ...definitions].join("\n\n"),
   };
 };

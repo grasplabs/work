@@ -50,4 +50,13 @@ describe("an agent's instructions as its page reads them", () => {
       { blocks: 1, folded: "Only." },
     ]);
   });
+
+  it("keeps the link definitions a folded part's reference links need", () => {
+    const source =
+      "See [the policy][p].\n\nSecond.\n\nThird.\n\n[p]: https://a.test";
+    expect(foldOf(source, 1)).toStrictEqual({
+      blocks: 3,
+      folded: "See [the policy][p].\n\n[p]: https://a.test",
+    });
+  });
 });

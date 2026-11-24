@@ -263,17 +263,24 @@ const mountPen = (canvas: HTMLCanvasElement): (() => void) => {
     play();
   });
   resized.observe(canvas);
-  // The theme's lights again when the scheme changes.
-  const scheme = matchMedia("(prefers-color-scheme: dark)");
+  // The theme's lights again when the scheme changes, or the person picks
+  // Light or Dark in the product, as the other figures watch it (live.ts).
   const rescheme = () => {
     colours = resolve(host);
     play();
   };
+  const themeWatch = new MutationObserver(rescheme);
+  themeWatch.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["data-theme", "class", "style"],
+  });
+  const scheme = matchMedia("(prefers-color-scheme: dark)");
   scheme.addEventListener("change", rescheme);
   return () => {
     cancelAnimationFrame(frame);
     seen.disconnect();
     resized.disconnect();
+    themeWatch.disconnect();
     scheme.removeEventListener("change", rescheme);
   };
 };
