@@ -62,9 +62,12 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       showPassword: t`Show password`,
     },
     keyValue: {
-      copy: (label) => {
-        const name = label.toLocaleLowerCase();
-        return t`Copy ${name}`;
+      // A fact's name inside the sentence, lower case, but for German, whose
+      // nouns keep their capital.
+      copy: (fact) => {
+        const label =
+          i18n.locale === "de" ? fact : fact.toLocaleLowerCase(i18n.locale);
+        return t`Copy ${label}`;
       },
       loading: t`Loading the value`,
     },
@@ -89,12 +92,6 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       },
     },
     switch: { error: t`Could not save` },
-    toast: {
-      close: t`Close`,
-      error: t`Could not finish`,
-      loading: t`Still working`,
-      name: t`Notifications`,
-    },
   };
   return (
     <I18nProvider catalog={catalog} locale={i18n.locale}>

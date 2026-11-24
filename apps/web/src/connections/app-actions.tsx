@@ -27,9 +27,8 @@ import {
   signInHostOf,
 } from "./connect-dialog.tsx";
 import { DisconnectDialog, mayDisconnect } from "./connection-list.tsx";
-import { fixOf } from "./fix.ts";
+import { connectsAgainBeside, lapsedOf } from "./fix.ts";
 import type { Integration } from "./integrations.ts";
-import { reliedOnLapsed } from "./integrations.ts";
 import { allowedOf, toolRules } from "./tool-choices.ts";
 
 // What can be done to an app from its panel and its page, as its app
@@ -192,23 +191,6 @@ const removableOf = (
 };
 
 /**
- * A toolkit's shared connections that stopped working, where an admin
- * connects it anew (`fixOf`) and the company relied on one of them; none
- * otherwise, or for anyone else.
- */
-const lapsedOf = (
-  integration: Integration,
-  identity: Identity
-): ListedConnection[] =>
-  integration.source === "composio" &&
-  fixOf(integration, identity) === "reconnect" &&
-  reliedOnLapsed(integration)
-    ? integration.connections.filter(
-        ({ status, scope }) => status === "needs_reauth" && scope === "shared"
-      )
-    : [];
-
-/**
  * Which dialog this person's Connect opens, when they may connect the app:
  * the app parts' for a native connector not yet connected, or for a toolkit
  * not yet connected (or stopped) once its tools are read; the steps dialog
@@ -280,11 +262,7 @@ export const useAppActions = ({
   };
   const actions: AppActions = {};
   const lapsed = lapsedOf(integration, identity);
-  // Connect keeps one key connection of a toolkit live, a stopped one
-  // included (`connection.already_connected`): its key is disconnected
-  // before another is added, so it isn't connected again beside it.
-  const keyed = integration.auth === "key";
-  const stopped = keyed ? [] : lapsed;
+  const stopped = connectsAgainBeside(integration, identity);
   const way = connectWayOf(integration, identity, tools, stopped);
   if (way === "native") {
     actions.connect = (
@@ -314,7 +292,7 @@ export const useAppActions = ({
   if (connectable && !none && integration.source === "native") {
     actions.onConnectAnother = openNative();
   }
-  if (connectable && keyed && lapsed.length > 0) {
+  if (connectable && integration.auth === "key" && lapsed.length > 0) {
     actions.whyNoConnect = t`The key that stopped working must be disconnected before a new one can be added.`;
   }
   const dialogs = (

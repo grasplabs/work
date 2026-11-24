@@ -373,7 +373,11 @@ test("an admin comes back from connecting a stopped toolkit again, finds the sto
 
     // Nothing went by itself: the stopped one is still on its row, which
     // says it can go now. The working one says nothing of the kind.
-    const stoppedRow = rowOf(page, stopped);
+    // It names no account: the row of the page's two that isn't the working one's.
+    const stoppedRow = page
+      .getByRole("list", { name: "Connection", exact: true })
+      .getByRole("listitem")
+      .filter({ hasNotText: toolkit.account });
     await expect(stoppedRow).toContainText(
       "A connection that works has taken its place, so this one can be disconnected now."
     );
@@ -395,7 +399,7 @@ test("an admin comes back from connecting a stopped toolkit again, finds the sto
     // Its notice opens the Disconnect question, which says what goes.
     await stoppedRow.getByRole("button", { name: "Disconnect it" }).click();
     const question = page.getByRole("alertdialog", {
-      name: `Disconnect hubspot (${stopped.account})?`,
+      name: "Disconnect hubspot?",
     });
     await expect(question).toContainText(
       "Its tokens are deleted, every App and agent loses it, and actions waiting on it are dropped."

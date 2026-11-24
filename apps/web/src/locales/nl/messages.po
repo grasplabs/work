@@ -4374,8 +4374,8 @@ msgid "Copy"
 msgstr "Kopiëren"
 
 #: src/frame/ui-words.tsx
-msgid "Copy {name}"
-msgstr "{name} kopiëren"
+msgid "Copy {label}"
+msgstr "{label} kopiëren"
 
 #: src/chat/chat-more.tsx
 msgid "Copy as Markdown"
@@ -7604,6 +7604,10 @@ msgid "Its access ran out, and it can't be reconnected here."
 msgstr "De toegang is verlopen en kan hier niet opnieuw worden gekoppeld."
 
 #: src/connections/connection-list.tsx
+msgid "Its access ran out, and it can't be signed in to again. Connecting again makes a new connection beside it."
+msgstr "De toegang is verlopen en opnieuw aanmelden kan niet. Opnieuw koppelen maakt een nieuwe koppeling naast deze."
+
+#: src/connections/connection-list.tsx
 msgid "Its access ran out. An admin must offer this connector again before it can be reconnected."
 msgstr "De toegang is verlopen. Een beheerder moet deze connector opnieuw aanbieden voordat hij opnieuw kan worden gekoppeld."
 
@@ -9746,10 +9750,6 @@ msgstr "Opgemerkt in"
 #: src/brain/brain.ts
 msgid "Noticed in {source}"
 msgstr "Opgemerkt in {source}"
-
-#: src/frame/ui-words.tsx
-msgid "Notifications"
-msgstr "Meldingen"
 
 #: src/workflows/today-lanes.tsx
 msgctxt "the end of a time line: this moment"
@@ -13361,10 +13361,6 @@ msgstr "Nog bezig · {tries} pogingen"
 #: src/brain/atlas-overlays.tsx
 msgid "Still waiting"
 msgstr "Wacht nog"
-
-#: src/frame/ui-words.tsx
-msgid "Still working"
-msgstr "Nog bezig"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx

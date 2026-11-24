@@ -49,7 +49,12 @@ import {
 import { KeyValueList } from "@grasp-os/ui/components/key-value";
 import { SectionHeader } from "@grasp-os/ui/components/section-header";
 import { Text } from "@grasp-os/ui/components/text";
-import { colors, size as sizes, space } from "@grasp-os/ui/lib/tokens.stylex";
+import {
+  colors,
+  font,
+  size as sizes,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
 import { i18n } from "@lingui/core";
 import { msg, ph } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -61,6 +66,7 @@ import { formatList } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
 import { BrainAudience, useBrainAudiences } from "./brain-audience.tsx";
 import { canReconnect, ConnectDialog } from "./connect-dialog.tsx";
+import { connectsAgainBeside } from "./fix.ts";
 import type { Integration } from "./integrations.ts";
 import { useChange } from "./use-change.ts";
 
@@ -98,11 +104,16 @@ const styles = stylex.create({
     borderInlineStartStyle: "solid",
     borderInlineStartColor: colors.border,
   },
-  // A stopped row's Disconnect it: after its sentence; in a column under 28rem (the app page's
-  // column is the container), on a line of its own under it, its word on the sentence's start
-  // edge, not on the button's own inset.
+  // A stopped row's Disconnect it: after its sentence, its line no taller than the sentence's
+  // (the button's box reaches past the line by its block padding); in a column under 28rem (the
+  // app page's column is the container), on a line of its own under it, its word on the
+  // sentence's start edge, not on the button's own inset.
   stoppedAction: {
     display: { default: null, "@container (width < 28rem)": "flex" },
+    marginBlock: {
+      default: `calc((${font.textSmLine} - ${sizes.controlXs}) / 2)`,
+      "@container (width < 28rem)": null,
+    },
     width: { default: null, "@container (width < 28rem)": "fit-content" },
     marginInlineStart: {
       default: null,
@@ -280,16 +291,23 @@ const ConsentRecord = ({ connection }: { connection: ListedConnection }) => {
 
 /**
  * What a connection whose access ran out says to someone who can't
- * reconnect it: why not, and who can, if anyone. `known` is whether its
- * provider is one this release starts a flow for, and `offered` whether
- * the organization offers it: core refuses to start a flow for one it
- * doesn't, whoever asks.
+ * reconnect it: why not, and who can, if anyone. `again` is whether the
+ * page offers this person to connect the app again beside it
+ * (`connectsAgainBeside`), `known` whether its provider is one this
+ * release starts a flow for, and `offered` whether the organization offers
+ * it: core refuses to start a flow for one it doesn't, whoever asks.
  */
 const ranOutText = (
+  again: boolean,
   known: boolean,
   offered: boolean,
   staff: boolean
 ): string => {
+  if (again) {
+    return i18n._(
+      msg`Its access ran out, and it can't be signed in to again. Connecting again makes a new connection beside it.`
+    );
+  }
   if (!known) {
     return i18n._(msg`Its access ran out, and it can't be reconnected here.`);
   }
@@ -490,10 +508,28 @@ export const mayDisconnect = (
   !identity.staff;
 
 /**
- * Whether `connection` stopped working beside a shared connection of its
- * app that works, and `identity` may disconnect it: its row then says it
- * can go now (`StoppedNotice`). Read from what the page lists, on every
- * load: never from the address, never from anything kept in the browser.
+ * Whether `other` is the same account as `connection`, as far as the page
+ * can tell: the same name where both name one. A Composio connection names
+ * none (Grasp never learns its account there), so one of a toolkit stands
+ * for another; a suite's (Microsoft's, Google's) always names its account.
+ */
+const sameAccount = (
+  other: ListedConnection,
+  connection: ListedConnection
+): boolean =>
+  other.accountName === null ||
+  connection.accountName === null ||
+  other.accountName === connection.accountName;
+
+/**
+ * Whether `connection` stopped working, can't be signed in to again, and a
+ * shared connection of its app that works has taken its place (the same
+ * account, `sameAccount`), and `identity` may disconnect it: its row then
+ * says it can go now (`StoppedNotice`). One that can be signed in to again
+ * offers that instead (its row's Sign in again), and a working connection
+ * of another account doesn't replace it. Read from what the page lists, on
+ * every load: never from the address, never from anything kept in the
+ * browser.
  */
 export const stoppedBesideWorking = (
   connection: ListedConnection,
@@ -503,9 +539,13 @@ export const stoppedBesideWorking = (
   connection.status === "needs_reauth" &&
   connection.scope === "shared" &&
   mayDisconnect(connection, identity) &&
+  !canReconnect(connection, integration.offered, identity) &&
   integration.connections.some(
-    ({ id, status, scope }) =>
-      id !== connection.id && status === "active" && scope === "shared"
+    (other) =>
+      other.id !== connection.id &&
+      other.status === "active" &&
+      other.scope === "shared" &&
+      sameAccount(other, connection)
   );
 
 /**
@@ -611,6 +651,9 @@ export const ConnectionsAccess = ({
   );
   const holders = held?.state === "ready" ? held.data : undefined;
   const several = integration.connections.length > 1;
+  const again = new Set(
+    connectsAgainBeside(integration, identity).map(({ id }) => id)
+  );
   return integration.connections.map((connection) => {
     const label = labelOf(connection, integration);
     const stuck =
@@ -635,6 +678,7 @@ export const ConnectionsAccess = ({
                 <Alert variant="warning">
                   <AlertDescription>
                     {ranOutText(
+                      again.has(connection.id),
                       connection.source === "native" &&
                         oauthProviderSchema.safeParse(connection.provider)
                           .success,

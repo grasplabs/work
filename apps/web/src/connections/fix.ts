@@ -1,7 +1,9 @@
+import type { ListedConnection } from "@grasp-os/shared/connect";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 
-import { canReconnect } from "./connect-dialog.tsx";
+import { canConnect, canReconnect } from "./connect-dialog.tsx";
+import { reliedOnLapsed } from "./integrations.ts";
 import type { Integration } from "./integrations.ts";
 
 /**
@@ -30,3 +32,36 @@ export const fixOf = (
   }
   return isAdmin(identity.role) && !identity.staff ? "reconnect" : "none";
 };
+
+/**
+ * A toolkit's shared connections that stopped working, where an admin
+ * connects it anew (`fixOf`) and the company relied on one of them; none
+ * otherwise, or for anyone else.
+ */
+export const lapsedOf = (
+  integration: Integration,
+  identity: Pick<Identity, "role" | "staff">
+): ListedConnection[] =>
+  integration.source === "composio" &&
+  fixOf(integration, identity) === "reconnect" &&
+  reliedOnLapsed(integration)
+    ? integration.connections.filter(
+        ({ status, scope }) => status === "needs_reauth" && scope === "shared"
+      )
+    : [];
+
+/**
+ * The stopped connections an app's panel and page offer to connect again
+ * beside, as a new connection (app-actions.tsx): those of `lapsedOf`, where
+ * this person may connect the app. None of a toolkit that takes a key:
+ * connect keeps one key connection of a toolkit live, a stopped one
+ * included (`connection.already_connected`), so its key is disconnected
+ * before another is added.
+ */
+export const connectsAgainBeside = (
+  integration: Integration,
+  identity: Identity
+): ListedConnection[] =>
+  integration.auth === "key" || !canConnect(integration, identity)
+    ? []
+    : lapsedOf(integration, identity);

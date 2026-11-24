@@ -111,7 +111,8 @@ const value = (text: string | null): string =>
   text === null ? "NULL" : quoted(text);
 
 interface Row {
-  connection: SeededConnection;
+  /** Its account's name: none where connect learns none (a Composio toolkit's, as Composio makes it). */
+  connection: { id: string; account: string | null };
   provider: string;
   scope: "personal" | "shared";
   owner: string | null;
@@ -137,7 +138,7 @@ const insert = (
     quoted(composio ? "composio" : "native"),
     quoted(server),
     quoted(`account-${connection.id}`),
-    quoted(connection.account),
+    value(connection.account),
     quoted(connectedBy),
     // Signed in with Composio's app: its consent is the sign-in's.
     value(composio ? "managed" : null),
@@ -219,16 +220,14 @@ export const seedConnections = async (
  * A shared HubSpot connection that stopped working (`needs_reauth`),
  * connected by `connectedBy`, beside the scene's working one: how an app's
  * page stands once the browser is back from connecting a stopped toolkit
- * again, as the stopped one stays until someone disconnects it. Written
- * for the one test that asks for it, which takes it away again
- * (`removeSeeded`).
+ * again, as the stopped one stays until someone disconnects it. It names
+ * no account, as connect writes a Composio connection. Written for the one
+ * test that asks for it, which takes it away again (`removeSeeded`).
  */
 export const seedStoppedToolkit = async (
   connectedBy: string
-): Promise<SeededConnection> => {
-  const stopped = newConnection(
-    `hubspot-stopped-${crypto.randomUUID().slice(0, 8)}`
-  );
+): Promise<Pick<SeededConnection, "id">> => {
+  const stopped = { id: crypto.randomUUID(), account: null };
   await execute(
     insert(
       {
@@ -242,11 +241,13 @@ export const seedStoppedToolkit = async (
       Date.now()
     )
   );
-  return stopped;
+  return { id: stopped.id };
 };
 
 /** Takes a seeded connection's row away, however far its test got. */
-export const removeSeeded = async ({ id }: SeededConnection): Promise<void> => {
+export const removeSeeded = async ({
+  id,
+}: Pick<SeededConnection, "id">): Promise<void> => {
   await execute(`DELETE FROM connections WHERE id = ${quoted(id)}`);
 };
 

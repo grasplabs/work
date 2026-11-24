@@ -61,7 +61,21 @@ const entry: OfferedCatalog["entries"][number] = {
   offered: true,
 };
 
-/** HubSpot's shared connection that stopped working. */
+/** Microsoft 365, Grasp's own connector: an admin signs in again to its shared mailboxes. */
+const microsoft: OfferedCatalog["entries"][number] = {
+  source: "native",
+  id: "microsoft",
+  name: "Microsoft 365",
+  categories: ["Productivity"],
+  toolCount: 0,
+  logo: null,
+  description: "Mail and files.",
+  group: "Other",
+  auth: "managed",
+  offered: true,
+};
+
+/** HubSpot's shared connection that stopped working: a Composio one names no account. */
 const stopped: ListedConnection = {
   id: "c-stopped",
   source: "composio",
@@ -71,7 +85,7 @@ const stopped: ListedConnection = {
   ownerUserId: null,
   connectedBy: "u1",
   connectedByName: "Ada",
-  accountName: "Old HubSpot",
+  accountName: null,
   createdAt: "2026-10-01T00:00:00.000Z",
   tools: ["HUBSPOT_LIST_CONTACTS"],
   readTools: ["HUBSPOT_LIST_CONTACTS"],
@@ -82,9 +96,25 @@ const made: ListedConnection = {
   ...stopped,
   id: "c-new",
   status: "active",
-  accountName: "New HubSpot",
   createdAt: "2026-11-23T00:00:00.000Z",
 };
+
+/** A shared Microsoft mailbox, `account`, as `status` says. */
+const mailbox = (
+  account: string,
+  status: ListedConnection["status"]
+): ListedConnection => ({
+  id: `c-${account}`,
+  source: "native",
+  provider: "microsoft",
+  scope: "shared",
+  status,
+  ownerUserId: null,
+  connectedBy: "u1",
+  connectedByName: "Ada",
+  accountName: account,
+  createdAt: "2026-10-01T00:00:00.000Z",
+});
 
 const person = (change: Partial<Identity> = {}): Identity => ({
   userId: "u1",
@@ -124,7 +154,10 @@ const coreOf = (connections: ListedConnection[], disconnected: string[]) => {
   const known = {
     connections: {
       catalog: async (): Promise<OfferedCatalog> =>
-        await Promise.resolve({ entries: [entry], composio: "listed" }),
+        await Promise.resolve({
+          entries: [entry, microsoft],
+          composio: "listed",
+        }),
       list: async (): Promise<ListedConnection[]> =>
         await Promise.resolve(connections),
       catalogTools: async () =>
@@ -282,7 +315,7 @@ describe("the Integrations pages, back from a sign-in", () => {
     const page = {
       title: document.querySelector('[role="dialog"] h2')?.textContent,
       stoppedRow: rows()
-        .find((each) => each.includes("Old HubSpot"))
+        .find((each) => each.includes("Stopped working"))
         ?.includes(notice),
     };
     unmounted();
@@ -406,11 +439,61 @@ describe("the Integrations pages, back from a sign-in", () => {
 
     expect({ asked, disconnected }).toStrictEqual({
       asked: {
-        title: "Disconnect HubSpot (Old HubSpot)?",
+        title: "Disconnect HubSpot?",
         says: true,
         before: [],
       },
       disconnected: ["c-stopped"],
+    });
+  });
+
+  it("says nothing of a stopped mailbox beside another account's that works: it is signed in to again", async () => {
+    const out = mailbox("sales@example.com", "needs_reauth");
+    const working = mailbox("support@example.com", "active");
+    await shown("/integrations/native:microsoft", [working, out]);
+    const row = rows().find((each) => each.includes("sales@example.com"));
+
+    expect({
+      notice: document.body.textContent.includes(notice),
+      disconnectIt: button("Disconnect it"),
+      signInAgain: row?.includes("Sign in again"),
+    }).toStrictEqual({
+      notice: false,
+      disconnectIt: undefined,
+      signInAgain: true,
+    });
+  });
+
+  it("says of a stopped toolkit what its page offers: Connect again to an admin, beside it, and to a member that it can't be reconnected here", async () => {
+    await shown("/integrations/composio:hubspot", [stopped]);
+    const admin = {
+      connectAgain: button("Connect again") !== undefined,
+      says: document.body.textContent.includes(
+        "Its access ran out, and it can't be signed in to again. Connecting again makes a new connection beside it."
+      ),
+      cantHere: document.body.textContent.includes(
+        "it can't be reconnected here"
+      ),
+    };
+    unmounted();
+    await shown(
+      "/integrations/composio:hubspot",
+      [stopped],
+      person({ role: "user" })
+    );
+    const member = {
+      connectAgain: button("Connect again") !== undefined,
+      says: document.body.textContent.includes(
+        "Connecting again makes a new connection beside it."
+      ),
+      cantHere: document.body.textContent.includes(
+        "Its access ran out, and it can't be reconnected here."
+      ),
+    };
+
+    expect({ admin, member }).toStrictEqual({
+      admin: { connectAgain: true, says: true, cantHere: false },
+      member: { connectAgain: false, says: false, cantHere: true },
     });
   });
 });
