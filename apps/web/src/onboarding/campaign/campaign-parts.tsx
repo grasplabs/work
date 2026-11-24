@@ -12,12 +12,6 @@ import {
 } from "@grasp-os/ui/components/empty";
 import { Heading } from "@grasp-os/ui/components/heading";
 import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemGroup,
-} from "@grasp-os/ui/components/item";
-import {
   Sheet,
   SheetBody,
   SheetContent,
@@ -37,6 +31,22 @@ import { findingsOf } from "./fixtures.ts";
 import type { Campaign } from "./fixtures.ts";
 
 const styles = stylex.create({
+  // The asks: each one sentence with its one button at the row's end, on the page's own edge.
+  asks: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space[4],
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  ask: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: space[4],
+  },
   teams: { display: "flex", flexDirection: "column", gap: space[6] },
   team: { display: "flex", flexDirection: "column", gap: space[3] },
   head: {
@@ -83,7 +93,7 @@ export const wide = stylex.create({
 export const OnYourComputer = () => (
   <p {...stylex.props(styles.desktop)}>
     <Icon icon={MonitorIcon} />
-    <Text as="span" color="muted">
+    <Text size="lg" as="span" color="muted">
       The whole picture is on your computer.
     </Text>
   </p>
@@ -96,31 +106,27 @@ export const AskList = ({ campaign }: { campaign: Campaign }) => {
     return null;
   }
   return (
-    <ItemGroup aria-label="For you">
+    <ul aria-label="For you" {...stylex.props(styles.asks)}>
       {campaign.asks.map((ask) => (
-        <Item key={ask.id} size="sm" variant="outline">
-          <ItemContent>
-            <Text>{askLine(ask, isDone(ask))}</Text>
-          </ItemContent>
-          <ItemActions>
-            <AskAction
-              ask={ask}
-              done={isDone(ask)}
-              onDone={() => {
-                markDone(ask);
-              }}
-            />
-          </ItemActions>
-        </Item>
+        <li key={ask.id} {...stylex.props(styles.ask)}>
+          <Text size="lg">{askLine(ask, isDone(ask))}</Text>
+          <AskAction
+            ask={ask}
+            done={isDone(ask)}
+            onDone={() => {
+              markDone(ask);
+            }}
+          />
+        </li>
       ))}
-    </ItemGroup>
+    </ul>
   );
 };
 
 /** Every finding, team by team, in a sheet; the button says how many. */
 export const AllFindings = ({
   campaign,
-  variant = "ghost",
+  variant = "outline",
 }: {
   campaign: Campaign;
   variant?: "ghost" | "outline";
@@ -133,7 +139,7 @@ export const AllFindings = ({
   return (
     <Sheet>
       <SheetTrigger asChild>
-        <Button size="sm" variant={variant}>
+        <Button variant={variant}>
           {count === 1 ? "The one finding" : `All ${count} findings`}
         </Button>
       </SheetTrigger>
@@ -205,12 +211,15 @@ export const RunningLine = ({
     <>
       <p {...stylex.props(styles.running)}>
         {running ? <AgentIndicator /> : null}
-        <Text as="span" color="muted">
+        <Text size="lg" as="span" color="muted">
           {words}
         </Text>
       </p>
       {declined.length === 0 ? null : (
-        <Text color="muted">{`${declined.join(", ")} declined the interview.`}</Text>
+        <Text
+          size="lg"
+          color="muted"
+        >{`${declined.join(", ")} declined the interview.`}</Text>
       )}
     </>
   );
