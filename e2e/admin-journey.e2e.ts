@@ -1,5 +1,6 @@
 import { noChoices } from "@grasp-os/shared/onboarding-choices";
 import { expect } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
 import { localAdmin } from "../apps/core/test/sign-in-config.ts";
 import { adminCommand, adminSnapshot } from "./admin-steering.ts";
@@ -20,11 +21,51 @@ import { origin } from "./stack.ts";
 // (playwright.config.ts): sending a link tells the team, and nothing
 // undoes that.
 
-// Today as the page and core read it alike: core plans in UTC.
-test.use({ timezoneId: "UTC" });
+// Today as the page and core read it alike: core plans in UTC. The admin
+// is in the UK: their browser reads a typed day day first, as their own
+// date fields do.
+test.use({ timezoneId: "UTC", locale: "en-GB" });
 
-/** Today, as core's plan reads it (UTC). */
-const today = (): string => new Date().toISOString().slice(0, 10);
+/**
+ * Today as the page reads it, on its own clock, in UTC as core plans
+ * (apps/web/src/onboarding/send-plan.ts's `todayInUtc`). Not the test's
+ * clock: the page's goes on faster while the test reads (speech.ts's
+ * `readUntil`), about 40 s by the plan, so in the minute before midnight
+ * it is the next day there already, and the field's first day with it.
+ */
+const pageToday = async (page: Page): Promise<string> =>
+  await page.evaluate(() => new Date().toISOString().slice(0, 10));
+
+/** How far the page's clock is ahead of core's, which runs on the test's. */
+const pageAhead = async (page: Page): Promise<number> =>
+  Math.max(0, (await page.evaluate(() => Date.now())) - Date.now());
+
+/** A day ("2026-11-23") as a person in the UK types it ("23/11/2026"). */
+const typed = (day: string): string => {
+  const [year, month, date] = day.split("-");
+  return `${date}/${month}/${year}`;
+};
+
+const months = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+/** A day of this year as the page's English says it ("23 Nov"). */
+const said = (day: string): string => {
+  const [, month = 1, date = 1] = day.split("-").map(Number);
+  return `${date} ${months[month - 1] ?? ""}`;
+};
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -203,13 +244,38 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
       name: "Before I reach out, let your team know",
     })
   ).toBeVisible();
-  await page.getByLabel("Another day").fill(today());
+  // Typed, the day counts once it is committed (Enter), as a person does:
+  // day first, as the field shows ("For example 31/12/…"). Month first is
+  // no day here, and the plan waits until it is put right. Whether the
+  // field refuses it is what it tells a screen reader on it: marked wrong,
+  // described by its error, and the error shown under it, in its own Field.
+  // Not the page's text: the page's one announcer says the error too, a
+  // moment after it shows, and keeps its words once the field takes a day,
+  // so on a slow runner a search of the page found it twice, or once after
+  // it was put right (merge queue, November 2026).
+  const day = page.getByLabel("Another day");
+  const dayField = page.locator('[data-slot="field"]', { has: day });
+  const refused = /I can’t plan that day\. Type one like 31\/12\//u;
+  await expect(page.getByText(/^For example 31\/12\/\d{4}$/u)).toBeVisible();
+  await day.fill("12/31/2026");
+  await day.press("Enter");
+  await expect(day).toHaveAttribute("aria-invalid", "true");
+  await expect(day).toHaveAccessibleDescription(refused);
+  await expect(dayField.getByText(refused)).toBeVisible();
+  await expect(page.getByRole("button", { name: "I sent it" })).toBeDisabled();
+  const today = await pageToday(page);
+  await day.fill(typed(today));
+  await day.press("Enter");
+  await expect(day).toHaveValue(typed(today));
+  await expect(day).not.toHaveAttribute("aria-invalid", "true");
+  await expect(day).not.toHaveAccessibleDescription(refused);
   await page.getByLabel("at", { exact: true }).fill("00:00");
+  // What it says is the day it saves: the links due today go out below.
   await expect(
     page
-      .getByRole("alert")
+      .getByRole("status")
       .filter({ hasText: "What happens next" })
-      .getByText(/^Leads get their link on \d+ \w+ at 0:00\./u)
+      .getByText(`Leads get their link on ${said(today)} at 0:00.`)
   ).toBeVisible();
   await readOn(page, page.getByRole("button", { name: "I sent it" }));
   await page.getByRole("button", { name: "I sent it" }).click();
@@ -221,9 +287,12 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
 
   // What went out: a link to each lead, once, with the link itself left
   // to be filled in as it is sent. Nothing to Sam, who waits for Lea, nor
-  // to Kai, whose team doesn't take part.
+  // to Kai, whose team doesn't take part. Just before midnight the page's
+  // today is core's tomorrow, and 0:00 comes for core as late as the
+  // page's clock is ahead.
   const ours = async () => await mailTo(`.${run}@acme.test`);
-  await expect.poll(ours, { timeout: 30_000 }).toStrictEqual([
+  const ahead = await pageAhead(page);
+  await expect.poll(ours, { timeout: 30_000 + ahead }).toStrictEqual([
     { kind: "link", to: email("lea"), slot: true },
     { kind: "link", to: email("ona"), slot: true },
   ]);
