@@ -610,7 +610,7 @@ const Concepts = ({ concept }: { concept: Concept }) => {
   const navigate = useNavigate();
   const { identity } = Route.useRouteContext();
   const loaded = Route.useLoaderData();
-  const { step: asked, foot, cards } = Route.useSearch();
+  const { step: asked, cards } = Route.useSearch();
   if (loaded.state !== "ready") {
     return <PageError reason={notLoadedText(loaded, i18n) ?? ""} />;
   }
@@ -625,14 +625,12 @@ const Concepts = ({ concept }: { concept: Concept }) => {
       concept={concept}
       data={{ ai: loaded.data.ai }}
       cards={cardLooks[cards ?? "a"]}
-      foot={foot ?? "a"}
       go={(next) => {
         void navigate({
           to: "/setup",
           search: {
             concept,
             step: next,
-            ...(foot && { foot }),
             ...(cards && { cards }),
           },
         });
@@ -719,16 +717,12 @@ export const Route = createFileRoute("/setup")({
     step?: SetupStep;
     connection?: string;
     concept?: Concept;
-    foot?: "a" | "b" | "c";
     cards?: "a" | "b" | "c";
     state?: CampaignState;
   } => ({
     ...(isStep(search.step) && { step: search.step }),
     ...(isConcept(search.concept) && { concept: search.concept }),
     ...(isCampaignState(search.state) && { state: search.state }),
-    ...((search.foot === "a" || search.foot === "b" || search.foot === "c") && {
-      foot: search.foot,
-    }),
     ...((search.cards === "a" ||
       search.cards === "b" ||
       search.cards === "c") && {
