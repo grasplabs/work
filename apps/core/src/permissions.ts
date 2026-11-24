@@ -1488,13 +1488,15 @@ export const allowingPermissionSql = (
 };
 
 /**
- * Revokes a permission, requested or active: the next call that needs it
- * is refused. Revoking one that is already revoked changes nothing.
+ * Ends permission `id` if it is in one of `from`: revoked, the next call
+ * that needs it is refused. One already revoked changes nothing; one in
+ * neither (granted meanwhile, for a decline) is refused, unchanged.
  */
-export const revokePermission = async (
+const endPermission = async (
   env: Env,
   by: Identity,
-  id: unknown
+  id: unknown,
+  from: readonly ("requested" | "active")[]
 ): Promise<Permission> => {
   requireMemberAdmin(by);
   const found = await findRow(env, parseId(id));
@@ -1511,7 +1513,7 @@ export const revokePermission = async (
       .where(
         and(
           eq(permissions.id, found.id),
-          inArray(permissions.status, ["requested", "active"]),
+          inArray(permissions.status, from),
           stillAdminSql(by)
         )
       )
@@ -1535,8 +1537,14 @@ export const revokePermission = async (
   ]);
   if (!revoked) {
     await requireStillAdmin(env, by);
+    const now = (await findRow(env, found.id)) ?? found;
+    // Granted since the request was read: a decline was of the request
+    // alone, so the grant stays, and the decline is refused.
+    if (now.status !== "revoked") {
+      throw permissionErrors.create("permission.not_requested");
+    }
     // Already revoked: nothing changed, and nothing is recorded.
-    return toPermission((await findRow(env, found.id)) ?? found);
+    return toPermission(now);
   }
   const permission = toPermission(revoked);
   await tellPolicyChanged(env, permission.subject);
@@ -1547,6 +1555,29 @@ export const revokePermission = async (
   }
   return permission;
 };
+
+/**
+ * Revokes a permission, requested or active: the next call that needs it
+ * is refused. Revoking one that is already revoked changes nothing.
+ */
+export const revokePermission = async (
+  env: Env,
+  by: Identity,
+  id: unknown
+): Promise<Permission> =>
+  await endPermission(env, by, id, ["requested", "active"]);
+
+/**
+ * Declines a requested permission: revoked, it can never be granted. Only
+ * while it is still requested, in the same conditional write: an answer
+ * read before someone granted it is refused (`permission.not_requested`)
+ * and the grant stays. Declining one already revoked changes nothing.
+ */
+export const declinePermission = async (
+  env: Env,
+  by: Identity,
+  id: unknown
+): Promise<Permission> => await endPermission(env, by, id, ["requested"]);
 
 /**
  * Every permission, or those of one App or agent, oldest first; only those

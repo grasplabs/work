@@ -30,6 +30,26 @@ export const formatSince = (
   ).format(at);
 };
 
+/**
+ * A time zone's name as the page's language says it ("Central European
+ * Time"), from its IANA name; the IANA name where the browser has none.
+ */
+export const formatZone = (timeZone: string): string => {
+  try {
+    return (
+      new Intl.DateTimeFormat(i18n.locale, {
+        timeZone,
+        timeZoneName: "longGeneric",
+      })
+        .formatToParts(new Date())
+        .find((part) => part.type === "timeZoneName")?.value ?? timeZone
+    );
+  } catch {
+    // A zone this browser doesn't know.
+    return timeZone;
+  }
+};
+
 /** A date as the page's language writes it, such as "3 Oct 2026". */
 export const formatDate = (value: string | number | Date): string =>
   new Intl.DateTimeFormat(i18n.locale, { dateStyle: "medium" }).format(

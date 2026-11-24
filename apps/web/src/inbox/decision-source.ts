@@ -1,6 +1,6 @@
 import type { DecisionView } from "@grasp-os/shared/decisions";
 
-import type { Crumb } from "./frame/site-header.tsx";
+import type { Crumb } from "../frame/site-header.tsx";
 
 /**
  * The crumb of the workflow whose run asks, linking its own page when core
