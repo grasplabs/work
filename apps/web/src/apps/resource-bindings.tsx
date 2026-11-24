@@ -23,7 +23,6 @@ import { Button } from "@grasp-os/ui/components/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@grasp-os/ui/components/card";
@@ -312,7 +311,7 @@ const BindForm = ({
         </Text>
       ) : null}
       <div>
-        <Button disabled={busy} size="sm" type="submit" variant="secondary">
+        <Button disabled={busy} size="sm" type="submit" variant="outline">
           {binding === null
             ? t`Bind ${alias}`
             : t`Replace the binding of ${alias}`}
@@ -342,7 +341,7 @@ const Revoke = ({
           aria-label={t`Revoke the binding of ${alias}`}
           disabled={busy}
           size="sm"
-          variant="secondary"
+          variant="outline"
         >
           {t`Revoke`}
         </Button>
@@ -583,12 +582,15 @@ export const ResourceBindings = ({
       <Card size="sm" asChild>
         <section aria-label={t`Resources`}>
           <CardHeader>
-            <CardTitle level={3}>{t`Resources`}</CardTitle>
-            <CardDescription>
-              {decides
-                ? t`The App's actions reach a model, an integration or knowledge only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it.`
-                : t`The App's actions reach a model, an integration or knowledge only through a binding an admin of your organization approves.`}
-            </CardDescription>
+            <WithInfo
+              info={
+                decides
+                  ? t`The App's actions reach a model, an integration or knowledge only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it.`
+                  : t`The App's actions reach a model, an integration or knowledge only through a binding an admin of your organization approves.`
+              }
+            >
+              <CardTitle level={3}>{t`Resources`}</CardTitle>
+            </WithInfo>
           </CardHeader>
           <CardContent>
             <div {...stylex.props(styles.body)}>

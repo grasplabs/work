@@ -16,6 +16,7 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@grasp-os/ui/components/input-group";
+import { PageHeader } from "@grasp-os/ui/components/page-header";
 import {
   Tabs,
   TabsContent,
@@ -40,7 +41,6 @@ import { Link, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
-import { Page, PageHeading } from "../frame/page.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { ProcessTile } from "../workflows/business-process.tsx";
 import { AppCard, AppCardGrid } from "./app-card/app-card.tsx";
@@ -75,6 +75,19 @@ const styles = stylex.create({
   // the page gap (24px), as the Apps page's skeleton lays it.
   barRoom: { marginBlockEnd: space[2] },
   search: { width: "100%", maxWidth: "18rem" },
+  // The page as wide as the pane, its sides and top the pane's room and its
+  // foot clear of the chat's bar, as the reference's app shell gives every
+  // page (one width through the product).
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space[6],
+    width: "100%",
+    boxSizing: "border-box",
+    paddingInline: space[6],
+    paddingTop: space[7],
+    paddingBottom: space[24],
+  },
 });
 
 /** Who looks at the Apps: what they may make and change follows from it. */
@@ -290,10 +303,10 @@ export const AppsOverview = ({
   };
   const build = <BuildNewApp />;
   return (
-    <Page>
-      <PageHeading
+    <div {...stylex.props(styles.page)}>
+      <PageHeader
         // One Build new app a page: with no Apps yet, the empty state's.
-        action={builds && apps.length > 0 ? build : undefined}
+        actions={builds && apps.length > 0 ? build : undefined}
         title={<Trans>Apps</Trans>}
       />
       {apps.length === 0 ? (
@@ -354,6 +367,6 @@ export const AppsOverview = ({
           ))}
         </Tabs>
       )}
-    </Page>
+    </div>
   );
 };

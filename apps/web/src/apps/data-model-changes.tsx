@@ -224,7 +224,7 @@ export const PlanList = ({
                 onAnswer(asks);
               }}
               size="xs"
-              variant="secondary"
+              variant="outline"
             >
               <Trans>Give a value</Trans>
             </Button>

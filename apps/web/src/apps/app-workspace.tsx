@@ -204,6 +204,15 @@ const styles = stylex.create({
     minWidth: 0,
   },
   hidden: { display: "none" },
+  // Code and Data stand in from the pane's edges as the reference's app
+  // shell sets every page in (28px under the bar, 24px at the sides, 32px
+  // at the foot), as Settings does itself; the preview runs edge to edge.
+  inset: {
+    boxSizing: "border-box",
+    paddingTop: space[7],
+    paddingInline: space[6],
+    paddingBottom: space[8],
+  },
   // Over the preview: the first build, or a write that broke it mid-turn.
   over: {
     position: "absolute",
@@ -1005,7 +1014,7 @@ const MainArea = ({
       {preview}
     </div>
     {view === "code" ? (
-      <div {...stylex.props(styles.column)}>
+      <div {...stylex.props(styles.column, styles.inset)}>
         <Suspense
           fallback={
             <div {...stylex.props(styles.padded)}>
@@ -1018,7 +1027,7 @@ const MainArea = ({
       </div>
     ) : null}
     {view === "data" ? (
-      <div {...stylex.props(styles.column)}>
+      <div {...stylex.props(styles.column, styles.inset)}>
         <DataArea app={app.id} env={env} modelDraft={modelDraft} />
       </div>
     ) : null}

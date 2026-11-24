@@ -9361,6 +9361,10 @@ msgstr "Mehr über Pulse"
 msgid "More about putting it away"
 msgstr "Mehr zum Weglegen"
 
+#: src/apps/app-settings.tsx
+msgid "More about the owner"
+msgstr "Mehr zum Eigentümer"
+
 #: src/onboarding/setup-steps.tsx
 msgid "More about the staff list"
 msgstr "Mehr über die Mitarbeiterliste"
@@ -9383,6 +9387,10 @@ msgstr "Mehr zu diesem Abschnitt"
 #: src/workflows/info-tip.tsx
 msgid "More about this setting"
 msgstr "Mehr zu dieser Einstellung"
+
+#: src/apps/app-settings.tsx
+msgid "More about who it’s for"
+msgstr "Mehr dazu, für wen sie gemacht ist"
 
 #: src/frame/ui-words.tsx
 msgid "More actions"

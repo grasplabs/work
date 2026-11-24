@@ -349,7 +349,7 @@ describe(AppSettings, () => {
     await opened(fakeCore("builder"));
 
     // A heading's or a label's name is every word in it: a mark inside
-    // would join it ("Copies More about copies").
+    // would join it ("Owner More about the owner").
     const marks = [...document.querySelectorAll("button")].filter((each) =>
       (each.getAttribute("aria-label") ?? "").startsWith("More about")
     );
