@@ -170,12 +170,22 @@ export const OrgCard = ({
   const domains = formatList(
     organization.signInDomains.map((domain) => `@${domain}`)
   );
+  const region = t`European Union`;
   const facts: IdentityFact[] = [];
-  // With the @ an address has, so a domain reads as where people sign in from.
+  // Each named for what it is: the domains people sign in with (with the
+  // @ an address has), and where the organization's data is kept.
   if (domains !== "") {
-    facts.push({ id: "domains", icon: MailIcon, label: domains });
+    facts.push({
+      id: "domains",
+      icon: MailIcon,
+      label: t`Sign-in domains: ${domains}`,
+    });
   }
-  facts.push({ id: "region", icon: GlobeIcon, label: t`European Union` });
+  facts.push({
+    id: "region",
+    icon: GlobeIcon,
+    label: t`Data location: ${region}`,
+  });
   return (
     <div {...stylex.props(styles.stack)}>
       <IdentityCard

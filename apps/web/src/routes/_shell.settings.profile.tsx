@@ -12,13 +12,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@grasp-os/ui/components/select";
+import { Text } from "@grasp-os/ui/components/text";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
+import { formatList } from "../format.ts";
 import { chooseLocale, isLocale, localeNames } from "../i18n.ts";
 import { roleLabel } from "../labels.ts";
 import { ProfileName } from "../settings/profile-name.tsx";
 import {
+  FactRow,
   SettingRow,
   SettingsCard,
   SettingsError,
@@ -30,8 +33,9 @@ import {
 // rows, every control on one edge and as wide as the others. Their name is
 // theirs to change; their email is their sign-in's, so it stands in a
 // field that only reads, with their role, an admin's to give, as a badge
-// at its end: one row for the facts of their sign-in. Their teams are
-// shown where they are managed.
+// at its end: one row for the facts of their sign-in. Then the teams they
+// are in, which their admins manage (Settings › Teams, theirs alone): here
+// is where a member sees them.
 
 /** The five languages, each by its own name, in the catalogs' order. */
 const languages = Object.entries(localeNames).map(([value, label]) => ({
@@ -91,6 +95,7 @@ const LanguageRow = () => {
 const Profile = () => {
   const { t } = useLingui();
   const { identity } = Route.useRouteContext();
+  const teams = identity.teams.map(({ name }) => name);
   return (
     // One topic: the page's title names it, so the card has none of its own.
     <SettingsCard aria-label={t`Profile`}>
@@ -107,6 +112,11 @@ const Profile = () => {
           <ProfileName name={identity.name} />
         )}
         <EmailRow email={identity.email} role={roleLabel(identity.role)} />
+        <FactRow help={t`Your admins manage them`} label={t`Teams`}>
+          <Text color="muted" size="sm">
+            {teams.length === 0 ? t`No teams` : formatList(teams)}
+          </Text>
+        </FactRow>
         <LanguageRow />
       </SettingsRows>
     </SettingsCard>

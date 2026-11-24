@@ -373,6 +373,11 @@ test("an admin signs someone out everywhere, then removes them, and is told what
       .getByRole("row")
       .filter({ hasText: leaving.email })
   ).toContainText("Removed");
+  // The menu that had the focus went with their membership: the focus
+  // goes on to the search, not to the page's start.
+  await expect(
+    page.getByRole("searchbox", { name: "Search members" })
+  ).toBeFocused();
 });
 
 test("lets an admin rename the workspace and set its time zone, and shows them to everyone", async ({

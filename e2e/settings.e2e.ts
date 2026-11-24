@@ -104,6 +104,8 @@ test("someone who isn't an admin opens Settings on their profile, with only thei
   const page = await pageOf(member);
   await page.goto("/settings");
   await expect(page).toHaveURL(/\/settings\/profile$/u);
+  // Their teams, which only admins manage, are read on their profile.
+  await expect(sectionOf(page, "Profile")).toContainText("Teams");
   // Their own instruction file too, which every member writes.
   await expect(
     page.getByRole("navigation", { name: "Settings" }).getByRole("link")
@@ -155,28 +157,50 @@ test("on a phone a group's buttons stand under its title, which stays on one lin
   const page = await pageOf(admin);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/settings/members");
-  const title = sectionOf(page, "Team members").getByRole("heading", {
-    name: "Team members",
+  const group = sectionOf(page, "Team members");
+  // The members read, not the placeholder that stands while they are.
+  await expect(
+    group.getByRole("button", { name: "Invite", exact: true })
+  ).toBeEnabled();
+  await page.evaluate(async () => {
+    await document.fonts.ready;
   });
-  const invite = sectionOf(page, "Team members").getByRole("button", {
-    name: "Invite",
-    exact: true,
-  });
-  await expect(invite).toBeVisible();
-  // The lines the title's words fill, and whether Invite starts under it.
-  const lines = await title.evaluate((heading) => {
-    const words = document.createRange();
-    words.selectNodeContents(heading);
-    return new Set(
-      [...words.getClientRects()].map((line) => Math.round(line.top))
-    ).size;
-  });
-  const titleBox = await title.boundingBox();
-  const inviteBox = await invite.boundingBox();
+  // The lines the title's words fill, and where Invite starts against the
+  // title's foot: both read in one call, so nothing moves between them.
+  const measure = async () =>
+    await group.evaluate((region) => {
+      const heading = region.querySelector("h1, h2, h3, h4");
+      const invite = [...region.querySelectorAll("button")].find(
+        (button) => button.textContent.trim() === "Invite"
+      );
+      const words = document.createRange();
+      if (heading !== null) {
+        words.selectNodeContents(heading);
+      }
+      return {
+        lines: new Set(
+          [...words.getClientRects()].map((line) => Math.round(line.top))
+        ).size,
+        titleFoot: heading?.getBoundingClientRect().bottom ?? 0,
+        inviteTop: invite?.getBoundingClientRect().top ?? 0,
+      };
+    });
+  // At rest: two readings, a poll's wait apart, alike.
+  let at = { lines: 0, titleFoot: 0, inviteTop: -1 };
+  await expect
+    .poll(async () => {
+      const before = JSON.stringify(at);
+      at = await measure();
+      return JSON.stringify(at) === before;
+    })
+    .toBe(true);
   expect({
-    lines,
-    under: (inviteBox?.y ?? 0) >= (titleBox?.y ?? 0) + (titleBox?.height ?? 0),
-  }).toStrictEqual({ lines: 1, under: true });
+    lines: at.lines,
+    under: at.inviteTop >= at.titleFoot,
+  }).toStrictEqual({
+    lines: 1,
+    under: true,
+  });
 });
 
 test("someone chooses dark in Appearance: the page turns dark at once, and stays so after a reload", async ({

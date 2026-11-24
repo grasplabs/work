@@ -1,5 +1,8 @@
 // @vitest-environment happy-dom
-import type { ModelMonthSpend } from "@grasp-os/shared/models";
+import type {
+  ModelBindingSpend,
+  ModelMonthSpend,
+} from "@grasp-os/shared/models";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -34,8 +37,11 @@ const monthOf = (
   return { month, total, days, chat: total, workflows: [], more: false };
 };
 
-/** The Spend card on `spend`, as the page draws it. */
-const shown = async (spend: ModelMonthSpend): Promise<void> => {
+/** The Spend card on `spend`, and these Apps' model bindings, as the page draws it. */
+const shown = async (
+  spend: ModelMonthSpend,
+  bindings: ModelBindingSpend[] = []
+): Promise<void> => {
   const rootRoute = createRootRoute({
     component: () => (
       <SpendCard
@@ -44,7 +50,7 @@ const shown = async (spend: ModelMonthSpend): Promise<void> => {
           data: {
             models: [],
             month: spend.month,
-            bindings: { listed: [], more: false },
+            bindings: { listed: bindings, more: false },
           },
         }}
         spend={{ state: "ready", data: spend }}
@@ -81,6 +87,22 @@ const chartDays = (): string[] =>
     .flatMap((table) => [...table.querySelectorAll("tbody tr")])
     .map((row) => row.querySelector("th")?.textContent ?? "");
 
+/** The card taken away, and the page emptied for the next one. */
+const closed = (): void => {
+  act(() => {
+    root?.unmount();
+  });
+  root = undefined;
+  document.body.replaceChildren();
+};
+
+/** Where it went, row by row: each row's name, and its amount as written. */
+const barRows = (): string[] =>
+  [...document.querySelectorAll("[data-slot=chart-bar-list] li")].map(
+    (row) =>
+      `${row.children[0]?.textContent ?? ""}: ${row.children[1]?.textContent ?? ""}`
+  );
+
 /** What React warned about while the card was drawn. */
 const warned = (): string[] => {
   const said: string[] = [];
@@ -92,11 +114,7 @@ const warned = (): string[] => {
 
 describe("Settings › AI and spend, Spend", () => {
   afterEach(() => {
-    act(() => {
-      root?.unmount();
-    });
-    root = undefined;
-    document.body.replaceChildren();
+    closed();
     vi.restoreAllMocks();
   });
 
@@ -158,15 +176,107 @@ describe("Settings › AI and spend, Spend", () => {
     }
   });
 
-  it("says the spend can't be read when its days come in another form", async () => {
-    // Days as plain amounts, the form before they carried their dates, as
-    // an older core would answer.
-    const spend = { ...monthOf("2026-11", []), total: 1.5 };
-    Reflect.set(spend, "days", [0.5, 1]);
-    await shown(spend);
-    expect(chartDays()).toStrictEqual([]);
+  it("names each row of where it went apart: an App's bindings by alias and model, and workflows of one name by their ID", async () => {
+    const said = warned();
+    const spend: ModelMonthSpend = {
+      month: "2026-11",
+      total: 10,
+      days: [{ date: "2026-11-01", amount: 10 }],
+      chat: 1,
+      workflows: [
+        {
+          appId: null,
+          appName: null,
+          workflowId: "report-a",
+          name: "Weekly report",
+          amount: 2,
+          runs: 3,
+        },
+        {
+          appId: null,
+          appName: null,
+          workflowId: "report-b",
+          name: "Weekly report",
+          amount: 1.5,
+          runs: 3,
+        },
+      ],
+      more: false,
+    };
+    await shown(spend, [
+      {
+        appId: "desk",
+        appName: "Support desk",
+        alias: "triage",
+        model: "mistral/mistral-large-latest",
+        thisMonth: 2.5,
+      },
+      {
+        appId: "desk",
+        appName: "Support desk",
+        alias: "reply",
+        model: "anthropic/claude-sonnet-4-6",
+        thisMonth: 1.25,
+      },
+      {
+        appId: "chat-app",
+        appName: "Chat",
+        alias: "answer",
+        model: null,
+        thisMonth: 0.75,
+      },
+    ]);
+    expect(barRows()).toStrictEqual([
+      "Support desk (triage, mistral/mistral-large-latest): $2.50",
+      "Weekly report (3 runs), ID report-a: $2.00",
+      "Weekly report (3 runs), ID report-b: $1.50",
+      "Support desk (reply, anthropic/claude-sonnet-4-6): $1.25",
+      "Chat: $1.00",
+      "Other: $1.00",
+      "Chat (answer): $0.75",
+    ]);
+    expect(said.filter((each) => each.includes("same key"))).toStrictEqual([]);
+  });
+
+  it("writes amounts under a cent as they are, in every language", async () => {
+    const tiny = {
+      ...monthOf("2026-11", [
+        { date: "2026-11-01", amount: 0.0004 },
+        { date: "2026-11-02", amount: 0.0008 },
+      ]),
+    };
+    const written: Record<string, string> = {};
+    await shown(tiny);
+    // The month's figure, and where it ends, too: never "$0.00".
+    expect(document.body.textContent).toMatch(
+      /Spent this month\$0\.0012(?<ending>About \$0\.\d+ by the end of the month)?/u
+    );
+    closed();
+    for (const locale of ["en", "de", "nl", "fr", "es"]) {
+      i18n.loadAndActivate({ locale, messages: {} });
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- one card at a time
+        await shown(tiny);
+        // Each language's own space before or after the sign, read as one.
+        written[locale] = (barRows()[0] ?? "").replaceAll(/\s/gu, " ");
+      } finally {
+        closed();
+        i18n.loadAndActivate({ locale: "en", messages: {} });
+      }
+    }
+    expect(written).toStrictEqual({
+      en: "Chat: $0.0012",
+      de: "Chat: 0,0012 $",
+      nl: "Chat: US$ 0,0012",
+      fr: "Chat: 0,0012 $US",
+      es: "Chat: 0,0012 US$",
+    });
+  });
+
+  it("says which month it counts: the UTC month", async () => {
+    await shown(monthOf("2026-11", [{ date: "2026-11-01", amount: 2 }]));
     expect(document.body.textContent).toContain(
-      "This month's spend came in a form this page can't read."
+      "Counted over November 2026 in UTC, in US dollars, as the models are priced."
     );
   });
 });

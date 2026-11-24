@@ -55,7 +55,7 @@ import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { useState, useSyncExternalStore } from "react";
+import { useId, useState, useSyncExternalStore } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
 import { formatDate } from "../format.ts";
@@ -239,8 +239,20 @@ const MemberRole = ({ member, say }: { member: Member; say: Say }) => {
   );
 };
 
-/** The menu of what else may be done to a member: copy, sign out, remove. */
-const MemberMenu = ({ member, say }: { member: Member; say: Say }) => {
+/**
+ * The menu of what else may be done to a member: copy, sign out, remove.
+ * Once they are removed their row is someone removed, without this menu
+ * that had the focus: `onRemoved` gives it a place to go on.
+ */
+const MemberMenu = ({
+  member,
+  say,
+  onRemoved,
+}: {
+  member: Member;
+  say: Say;
+  onRemoved: () => void;
+}) => {
   const { t } = useLingui();
   const core = useCore();
   const router = useRouter();
@@ -292,6 +304,7 @@ const MemberMenu = ({ member, say }: { member: Member; say: Say }) => {
       }
     }
     await refresh();
+    onRemoved();
   };
   return (
     <>
@@ -511,10 +524,13 @@ const peopleColumns = ({
   words,
   me,
   say,
+  searchId,
 }: {
   words: PeopleWords;
   me: string;
   say: Say;
+  /** The search, where the focus goes once someone is removed and their row's menu, which had it, is gone. */
+  searchId: string | undefined;
 }): DataTableColumn<PersonRow>[] => [
   {
     id: "name",
@@ -639,7 +655,19 @@ const peopleColumns = ({
       if (row.member === undefined || row.member.userId === me) {
         return null;
       }
-      return <MemberMenu member={row.member} say={say} />;
+      return (
+        <MemberMenu
+          member={row.member}
+          onRemoved={() => {
+            if (searchId !== undefined) {
+              document
+                .querySelector<HTMLElement>(`#${CSS.escape(searchId)}`)
+                ?.focus();
+            }
+          }}
+          say={say}
+        />
+      );
     },
   },
 ];
@@ -648,9 +676,11 @@ const peopleColumns = ({
 const PeopleSearch = ({
   value,
   onValueChange,
+  id,
 }: {
   value: string;
   onValueChange: (value: string) => void;
+  id: string;
 }) => {
   const { t } = useLingui();
   return (
@@ -662,6 +692,7 @@ const PeopleSearch = ({
         aria-label={t`Search members`}
         onValueChange={onValueChange}
         placeholder={t`Search members`}
+        id={id}
         type="search"
         value={value}
       />
@@ -691,6 +722,8 @@ const PeopleTable = ({
 }) => {
   const { t } = useLingui();
   const [search, setSearch] = useState("");
+  // Where the focus goes on once someone's row has lost the menu it was in.
+  const searchId = useId();
   const [notice, setNotice] = useState<PeopleNotice>();
   const gone = useRemovedPeople(removed);
   const words = usePeopleWords();
@@ -735,7 +768,11 @@ const PeopleTable = ({
       actions={
         <>
           <RolesButton />
-          <PeopleSearch onValueChange={setSearch} value={search} />
+          <PeopleSearch
+            onValueChange={setSearch}
+            id={searchId}
+            value={search}
+          />
           <InviteButton />
         </>
       }
@@ -772,7 +809,12 @@ const PeopleTable = ({
       )}
       <DataTable
         aria-label={t`Members`}
-        columns={peopleColumns({ words, me, say: setNotice })}
+        columns={peopleColumns({
+          words,
+          me,
+          say: setNotice,
+          searchId,
+        })}
         getRowId={(row) => row.key}
         // Someone invited is not here yet: their row fades toward its end.
         // Someone removed is greyed, their menu kept clear.
@@ -850,6 +892,8 @@ const MembersPending = () => {
           say: () => {
             // No rows yet, so nothing to say.
           },
+          // Nor anyone to remove.
+          searchId: undefined,
         })}
         getRowId={(row) => row.key}
         loading

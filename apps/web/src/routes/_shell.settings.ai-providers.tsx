@@ -29,17 +29,15 @@ const AiProvidersPage = () => {
       </SettingsGroup>
     );
   }
-  const { providers, source } = page.data;
-  // Nothing connected and not on Grasp's AI: nothing has been spent, and
-  // the page is only the way to connect a provider.
-  const unanswered = providers.length === 0 && source !== "grasp";
+  // The month's spend even with no provider connected now: one whose key
+  // was removed this month spent on it before.
   return (
     <SettingsStack>
       <AiProvidersSettings
         editable={isMemberAdmin(identity)}
         listing={page.data}
       />
-      {unanswered ? null : <SpendCard settings={settings} spend={spend} />}
+      <SpendCard settings={settings} spend={spend} />
     </SettingsStack>
   );
 };

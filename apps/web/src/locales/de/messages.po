@@ -97,6 +97,14 @@ msgstr "{ai, select, tool {Ein KI-Tool, laut Team} builtIn {Mit integrierter KI,
 msgid "{answered} of {questions} questions"
 msgstr "{answered} von {questions} Fragen"
 
+#: src/settings/ai-spend.tsx
+msgid "{app} ({alias}, {model})"
+msgstr "{app} ({alias}, {model})"
+
+#: src/settings/ai-spend.tsx
+msgid "{app} ({alias})"
+msgstr "{app} ({alias})"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} has no tools."
 msgstr "{app} hat keine Tools."
@@ -773,6 +781,10 @@ msgstr "{name} · mit {teams}"
 msgid "{name} ({apart})"
 msgstr "{name} ({apart})"
 
+#: src/settings/ai-spend.tsx
+msgid "{name} ({runs, plural, one {# run} other {# runs}})"
+msgstr "{name} ({runs, plural, one {# Lauf} other {# Läufe}})"
+
 #: src/activity/audit-log.tsx
 msgid "{name} (Grasp staff)"
 msgstr "{name} (Grasp-Team)"
@@ -932,6 +944,10 @@ msgstr "{name} nutzt nur diese Apps, soweit seine Arten von Arbeit es erlauben."
 #: src/apps/app-workspace.tsx
 msgid "{name}, as your team sees it"
 msgstr "{name}, wie Ihr Team es sieht"
+
+#: src/settings/ai-spend.tsx
+msgid "{name}, ID {id}"
+msgstr "{name}, ID {id}"
 
 #: src/activity/audit-log.tsx
 msgid "{name}, in {app}"
@@ -4508,6 +4524,10 @@ msgstr "Wer dafür verantwortlich sein darf, konnte nicht geladen werden."
 msgid "Couldn't refresh. This may be out of date."
 msgstr "Konnte nicht aktualisiert werden. Das ist vielleicht nicht mehr aktuell."
 
+#: src/settings/ai-spend.tsx
+msgid "Counted over {counted} in UTC, in US dollars, as the models are priced."
+msgstr "Gezählt über {counted} in UTC, in US-Dollar, wie die Modelle bepreist sind."
+
 #: src/workflows/figures.tsx
 msgid "Counted over the workflows of the Apps you can open; independent workflows aren't counted here."
 msgstr "Gezählt über die Workflows der Apps, die Sie öffnen können; eigenständige Workflows zählen hier nicht mit."
@@ -4611,6 +4631,10 @@ msgstr "Daten"
 msgctxt "kind of app"
 msgid "Data and analytics"
 msgstr "Daten und Analysen"
+
+#: src/settings/org-card.tsx
+msgid "Data location: {region}"
+msgstr "Speicherort der Daten: {region}"
 
 #: src/apps/app-data-model.tsx
 msgid "Data model"
@@ -9295,6 +9319,10 @@ msgstr "Noch keine Tabellen"
 msgid "No team has a skill of its own yet."
 msgstr "Noch kein Team hat eigene Skills."
 
+#: src/routes/_shell.settings.profile.tsx
+msgid "No teams"
+msgstr "Keine Teams"
+
 #: src/settings/teams.tsx
 msgid "No teams yet."
 msgstr "Noch keine Teams."
@@ -13135,6 +13163,10 @@ msgstr "Anmeldung"
 msgid "Sign-in didn't work. Try again, or ask an admin."
 msgstr "Die Anmeldung hat nicht funktioniert. Versuchen Sie es erneut oder fragen Sie einen Admin."
 
+#: src/settings/org-card.tsx
+msgid "Sign-in domains: {domains}"
+msgstr "Anmelde-Domains: {domains}"
+
 #: src/settings/sign-in-settings.tsx
 msgid "Sign-in isn’t set up for this workspace yet, so nobody can sign in. Grasp sets it up."
 msgstr "Die Anmeldung ist für diesen Workspace noch nicht eingerichtet, daher kann sich niemand anmelden. Grasp richtet sie ein."
@@ -13345,7 +13377,7 @@ msgstr "Sortieren"
 
 #: src/frame/ui-words.tsx
 msgid "Sort by this next"
-msgstr "Danach hiernach sortieren"
+msgstr "Als Nächstes danach sortieren"
 
 #: src/frame/ui-words.tsx
 msgid "Sort high to low"
@@ -13913,6 +13945,7 @@ msgstr "Teamgröße unbekannt."
 #: src/people/people-teams-picker.tsx
 #: src/people/share-picker.tsx
 #: src/routes/_shell.settings.brain.tsx
+#: src/routes/_shell.settings.profile.tsx
 #: src/settings/sections.ts
 #: src/settings/teams.tsx
 msgid "Teams"
@@ -15125,10 +15158,6 @@ msgstr "Das Monatslimit für die KI von Grasp ist erreicht. Ihr Admin kann unter
 #: src/settings/ai-providers.tsx
 msgid "This month’s limit of {limit} is reached: AI is stopped until next month, or until you switch to your own keys."
 msgstr "Das Monatslimit von {limit} ist erreicht: Die KI pausiert bis zum nächsten Monat oder bis Sie auf Ihre eigenen Schlüssel wechseln."
-
-#: src/settings/ai-spend.tsx
-msgid "This month's spend came in a form this page can't read."
-msgstr "Die Kosten dieses Monats kamen in einer Form, die diese Seite nicht lesen kann."
 
 #: src/brain/memories-page.tsx
 msgid "This one is right"
@@ -17387,6 +17416,10 @@ msgstr "Du bist als Gast mit {email} angemeldet. Was jemand mit dir teilt, ersch
 #: src/frame/person-menu.tsx
 msgid "You're still signed in. Try again in a moment."
 msgstr "Sie sind noch angemeldet. Versuchen Sie es gleich noch einmal."
+
+#: src/routes/_shell.settings.profile.tsx
+msgid "Your admins manage them"
+msgstr "Ihre Admins verwalten sie"
 
 #: src/agents/agents-overview.tsx
 msgid "Your agents"

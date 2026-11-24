@@ -57,9 +57,14 @@
    * the chat docked beside it, and round them at the window's edges.
    */
   --app-shell-gap: 0.25rem;
+  /*
+   * "Geist Fallback" is Arial sized to Geist, where the page loads Damsko's
+   * fonts (the frontend): until Geist arrives a line keeps its breaks, so
+   * nothing moves as it does. Where none is declared it is passed over.
+   */
   --font-sans:
-    "Geist Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-    sans-serif;
+    "Geist Variable", "Geist Fallback", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", sans-serif;
   /*
    * Where the page loads Newsreader (the frontend and the admin bundle it).
    * An App page's frame loads no fonts, so there the serif falls back to

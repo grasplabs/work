@@ -1,8 +1,10 @@
 import type {
+  ModelBindingSpend,
   ModelDaySpend,
   ModelMonthSpend,
   ModelSettings,
   SpendingWorkflow,
+  WorkflowMonthSpend,
 } from "@grasp-os/shared/models";
 import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
 import {
@@ -19,10 +21,9 @@ import { Text } from "@grasp-os/ui/components/text";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { i18n as active } from "@lingui/core";
 import type { I18n } from "@lingui/core";
-import { msg, ph } from "@lingui/core/macro";
+import { msg, ph, plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { z } from "zod";
 
 import { formatDollars } from "../format.ts";
 import { NotLoadedState } from "../frame/page-states.tsx";
@@ -34,8 +35,11 @@ import { SettingsGroup } from "./section.tsx";
 // on the organization's keys (core's `models.spend()` and the Apps' model
 // bindings from `models.settings()`), as Damsko's spend card draws it. The month's total as the key figure,
 // with where it ends at this pace; the month so far as one area, day by
-// day; then where it went, chat, each workflow and each App, as a list of bars. Read-only:
-// nothing in Grasp limits what an organization spends on its own keys.
+// day; then where it went, chat, each workflow with its runs and each
+// App's model binding with its alias and model, as a list of bars; under
+// them, which month is counted (the UTC month, which the company's days
+// are cut to). Read-only: nothing in Grasp limits what an organization
+// spends on its own keys.
 
 const styles = stylex.create({
   body: {
@@ -44,20 +48,44 @@ const styles = stylex.create({
   },
 });
 
-/** The value axis's width: room for its longest label, "$0.075" (Grasp UI's spend card). */
-const axisWidth = 56;
+/**
+ * The value axis's width: room for its longest label, "$0.075" (Grasp UI's
+ * spend card), and under a cent for one of five decimals, "0,00075 $".
+ */
+const axisWidth = (top: number): number => (top < 0.01 ? 80 : 56);
 
-/** Dollars short enough for the chart's value axis: cents under a dollar, then compact. */
+/**
+ * `amount` in dollars with as many decimals as its first `significant`
+ * digits need, two at least: "$0.0004", "$0.012", "$0.125". A model call
+ * costs fractions of a cent, so a month's first calls would read "$0.00".
+ */
+const exactDollars = (amount: number, significant: number): string =>
+  new Intl.NumberFormat(active.locale, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 20,
+  }).format(Number(amount.toPrecision(significant)));
+
+/** What was spent: to the cent, and under ten cents to its first two digits, so a small amount never reads as nothing. */
+const spentDollars = (amount: number): string =>
+  amount >= 0.1 ? formatDollars(amount) : exactDollars(amount, 2);
+
+/**
+ * Dollars short enough for the chart's value axis: under a dollar to
+ * their first three digits, so no two levels read alike ("$0.0005",
+ * "$0.001", "$0.0015"), then compact.
+ */
 const axisDollars = (value: string | number): string => {
   const amount = Number(value);
+  if (amount < 1) {
+    return exactDollars(amount, 3);
+  }
   return new Intl.NumberFormat(active.locale, {
     style: "currency",
     currency: "USD",
-    notation: amount < 1 ? "standard" : "compact",
-    // Under a dollar a quarter step keeps its third decimal ($0.025): the
-    // axis is wide enough for it (`axisWidth`).
-    minimumFractionDigits: amount < 1 ? 2 : 0,
-    maximumFractionDigits: amount < 1 ? 3 : 1,
+    notation: "compact",
+    maximumFractionDigits: 1,
   }).format(amount);
 };
 
@@ -71,13 +99,41 @@ const workflowName = (of: SpendingWorkflow, i18n: I18n): string => {
   return i18n._(msg`${workflow} in ${ph({ app })}`);
 };
 
+/** A workflow's row: its name, and how often it ran this month. */
+const workflowRow = (of: WorkflowMonthSpend, i18n: I18n): string => {
+  const name = workflowName(of, i18n);
+  const { runs } = of;
+  return i18n._(
+    msg`${name} (${plural(runs, { one: "# run", other: "# runs" })})`
+  );
+};
+
+/** An App's model binding's row: the App, the alias its code calls, and the model it is bound to. */
+const bindingRow = (of: ModelBindingSpend, i18n: I18n): string => {
+  const { appName: app, alias, model } = of;
+  return model === null
+    ? i18n._(msg`${app} (${alias})`)
+    : i18n._(msg`${app} (${alias}, ${model})`);
+};
+
 /** Less than this many dollars is nothing left over: sums of floats round. */
 const leftOverMin = 0.0001;
 
+/** One row of where it went, and what tells it from a row of the same name. */
+interface Spender {
+  name: string;
+  spend: number;
+  /** For a workflow its App's ID, or its own for one of no App; for a binding its App's ID. */
+  id?: string;
+}
+
 /**
- * Where the month's spend went: chat, each workflow, each App, and, where
- * those lists are whole, the rest under `names.other` (the Brain, whatever
- * else calls a model on the organization's key); none that spent nothing.
+ * Where the month's spend went: chat, each workflow, each App's model
+ * binding, and, where those lists are whole, the rest under `names.other`
+ * (the Brain, whatever else calls a model on the organization's key); none
+ * that spent nothing. Each row's name is its own, as the list is keyed by
+ * it: two that would read alike (two Apps or workflows of one name) are
+ * told apart by their ID.
  */
 const whereItWent = (
   spend: ModelMonthSpend,
@@ -85,38 +141,43 @@ const whereItWent = (
   i18n: I18n,
   names: { chat: string; other: string }
 ): { name: string; spend: number }[] => {
-  const rows = [
+  const rows: Spender[] = [
     { name: names.chat, spend: spend.chat },
     ...spend.workflows.map((workflow) => ({
-      name: workflowName(workflow, i18n),
+      name: workflowRow(workflow, i18n),
       spend: workflow.amount,
+      id: workflow.appId ?? workflow.workflowId,
     })),
     ...(settings?.bindings.listed ?? []).map((binding) => ({
-      name: binding.appName,
+      name: bindingRow(binding, i18n),
       spend: binding.thisMonth,
+      id: binding.appId,
     })),
   ];
   // Only from whole lists: with some left out, the rest isn't known.
   const whole =
     settings !== undefined && !spend.more && !settings.bindings.more;
   const left = spend.total - rows.reduce((sum, row) => sum + row.spend, 0);
-  return [
+  const shown = [
     ...rows,
     ...(whole && left > leftOverMin
       ? [{ name: names.other, spend: left }]
       : []),
-  ]
-    .filter((row) => row.spend > 0)
+  ].filter((row) => row.spend > 0);
+  const named = new Map<string, number>();
+  for (const { name } of shown) {
+    named.set(name, (named.get(name) ?? 0) + 1);
+  }
+  return shown
+    .map(({ name, spend: spent, id }) => ({
+      name:
+        id !== undefined && (named.get(name) ?? 0) > 1
+          ? i18n._(msg`${name}, ID ${id}`)
+          : name,
+      spend: spent,
+    }))
     .toSorted((a, b) => b.spend - a.spend);
 };
-
-/**
- * The days as core sends them (`ModelMonthSpend.days`): the company's date
- * and what it cost. Read at the boundary, so days in another form (the
- * plain amounts they were before they carried their dates) show the card's
- * error rather than throwing in the chart.
- */
-const monthDays = z.array(z.object({ date: z.iso.date(), amount: z.number() }));
 
 /**
  * A company's day (`2026-10-31`) as its day and month, "Oct 31": the month
@@ -133,6 +194,14 @@ const dayAndMonth = (date: string): string =>
     month: "short",
     timeZone: "UTC",
   }).format(new Date(`${date}T00:00:00Z`));
+
+/** A UTC month (`2026-11`) by its name and year, "November 2026". */
+const monthName = (month: string): string =>
+  new Intl.DateTimeFormat(active.locale, {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${month}-01T00:00:00Z`));
 
 /**
  * The month so far as a running total, day by day: one calm line that
@@ -158,8 +227,8 @@ const runningTotal = (
 const SpendSummary = ({ spend }: { spend: ModelMonthSpend }) => {
   const { t } = useLingui();
   const end = monthEnd(spend.total, spend.month, new Date());
-  const ending = end === null ? null : formatDollars(end);
-  const total = formatDollars(spend.total);
+  const ending = end === null ? null : spentDollars(end);
+  const total = spentDollars(spend.total);
   return (
     <>
       {/* Bare: the figure at the card's start edge, as Grasp UI's spend card. */}
@@ -183,9 +252,12 @@ const SpendSummary = ({ spend }: { spend: ModelMonthSpend }) => {
         >
           <ChartGrid />
           <ChartXAxis />
-          <ChartYAxis valueFormatter={axisDollars} width={axisWidth} />
+          <ChartYAxis
+            valueFormatter={axisDollars}
+            width={axisWidth(spend.total)}
+          />
           <ChartArea dataKey="spend" />
-          <ChartTooltip valueFormatter={formatDollars} />
+          <ChartTooltip valueFormatter={spentDollars} />
         </ChartContainer>
       )}
     </>
@@ -208,19 +280,6 @@ export const SpendCard = ({
       </SettingsGroup>
     );
   }
-  if (!monthDays.safeParse(spend.data.days).success) {
-    return (
-      <SettingsGroup flush={false} title={t`Spend`}>
-        <NotLoadedState
-          heading="h3"
-          page={{
-            state: "refused",
-            message: t`This month's spend came in a form this page can't read.`,
-          }}
-        />
-      </SettingsGroup>
-    );
-  }
   const month = spend.data;
   const bound = settings.state === "ready" ? settings.data : undefined;
   const rows = whereItWent(month, bound, i18n, {
@@ -228,6 +287,7 @@ export const SpendCard = ({
     other: t`Other`,
   });
   const top = rows[0]?.name ?? "";
+  const counted = monthName(month.month);
   // An App's binding whose target can't be read serves nothing: worth a look.
   const unreadable = (bound?.bindings.listed ?? []).filter(
     ({ model }) => model === null
@@ -244,7 +304,7 @@ export const SpendCard = ({
               data={rows}
               nameKey="name"
               summary={t`${top} spent the most this month.`}
-              valueFormatter={formatDollars}
+              valueFormatter={spentDollars}
             />
             {month.more ? (
               <Text color="muted" size="xs">
@@ -258,6 +318,9 @@ export const SpendCard = ({
             ) : null}
           </>
         )}
+        <Text color="muted" size="xs">
+          {t`Counted over ${counted} in UTC, in US dollars, as the models are priced.`}
+        </Text>
         {unreadable.map((binding) => {
           const app = binding.appName;
           return (

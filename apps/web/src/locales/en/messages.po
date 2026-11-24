@@ -97,6 +97,14 @@ msgstr "{ai, select, tool {An AI tool, as the team said it} builtIn {AI built in
 msgid "{answered} of {questions} questions"
 msgstr "{answered} of {questions} questions"
 
+#: src/settings/ai-spend.tsx
+msgid "{app} ({alias}, {model})"
+msgstr "{app} ({alias}, {model})"
+
+#: src/settings/ai-spend.tsx
+msgid "{app} ({alias})"
+msgstr "{app} ({alias})"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} has no tools."
 msgstr "{app} has no tools."
@@ -773,6 +781,10 @@ msgstr "{name} · with {teams}"
 msgid "{name} ({apart})"
 msgstr "{name} ({apart})"
 
+#: src/settings/ai-spend.tsx
+msgid "{name} ({runs, plural, one {# run} other {# runs}})"
+msgstr "{name} ({runs, plural, one {# run} other {# runs}})"
+
 #: src/activity/audit-log.tsx
 msgid "{name} (Grasp staff)"
 msgstr "{name} (Grasp staff)"
@@ -932,6 +944,10 @@ msgstr "{name} uses only these apps, as far as its kinds of work allow."
 #: src/apps/app-workspace.tsx
 msgid "{name}, as your team sees it"
 msgstr "{name}, as your team sees it"
+
+#: src/settings/ai-spend.tsx
+msgid "{name}, ID {id}"
+msgstr "{name}, ID {id}"
 
 #: src/activity/audit-log.tsx
 msgid "{name}, in {app}"
@@ -4508,6 +4524,10 @@ msgstr "Couldn't load who may answer for it."
 msgid "Couldn't refresh. This may be out of date."
 msgstr "Couldn't refresh. This may be out of date."
 
+#: src/settings/ai-spend.tsx
+msgid "Counted over {counted} in UTC, in US dollars, as the models are priced."
+msgstr "Counted over {counted} in UTC, in US dollars, as the models are priced."
+
 #: src/workflows/figures.tsx
 msgid "Counted over the workflows of the Apps you can open; independent workflows aren't counted here."
 msgstr "Counted over the workflows of the Apps you can open; independent workflows aren't counted here."
@@ -4611,6 +4631,10 @@ msgstr "Data"
 msgctxt "kind of app"
 msgid "Data and analytics"
 msgstr "Data and analytics"
+
+#: src/settings/org-card.tsx
+msgid "Data location: {region}"
+msgstr "Data location: {region}"
 
 #: src/apps/app-data-model.tsx
 msgid "Data model"
@@ -9295,6 +9319,10 @@ msgstr "No tables yet"
 msgid "No team has a skill of its own yet."
 msgstr "No team has a skill of its own yet."
 
+#: src/routes/_shell.settings.profile.tsx
+msgid "No teams"
+msgstr "No teams"
+
 #: src/settings/teams.tsx
 msgid "No teams yet."
 msgstr "No teams yet."
@@ -13135,6 +13163,10 @@ msgstr "Sign-in"
 msgid "Sign-in didn't work. Try again, or ask an admin."
 msgstr "Sign-in didn't work. Try again, or ask an admin."
 
+#: src/settings/org-card.tsx
+msgid "Sign-in domains: {domains}"
+msgstr "Sign-in domains: {domains}"
+
 #: src/settings/sign-in-settings.tsx
 msgid "Sign-in isn’t set up for this workspace yet, so nobody can sign in. Grasp sets it up."
 msgstr "Sign-in isn’t set up for this workspace yet, so nobody can sign in. Grasp sets it up."
@@ -13913,6 +13945,7 @@ msgstr "Team size unknown."
 #: src/people/people-teams-picker.tsx
 #: src/people/share-picker.tsx
 #: src/routes/_shell.settings.brain.tsx
+#: src/routes/_shell.settings.profile.tsx
 #: src/settings/sections.ts
 #: src/settings/teams.tsx
 msgid "Teams"
@@ -15125,10 +15158,6 @@ msgstr "This month's limit for Grasp's AI is reached. Your admin can switch to y
 #: src/settings/ai-providers.tsx
 msgid "This month’s limit of {limit} is reached: AI is stopped until next month, or until you switch to your own keys."
 msgstr "This month’s limit of {limit} is reached: AI is stopped until next month, or until you switch to your own keys."
-
-#: src/settings/ai-spend.tsx
-msgid "This month's spend came in a form this page can't read."
-msgstr "This month's spend came in a form this page can't read."
 
 #: src/brain/memories-page.tsx
 msgid "This one is right"
@@ -17387,6 +17416,10 @@ msgstr "You’re signed in as a guest with {email}. What someone shares with you
 #: src/frame/person-menu.tsx
 msgid "You're still signed in. Try again in a moment."
 msgstr "You're still signed in. Try again in a moment."
+
+#: src/routes/_shell.settings.profile.tsx
+msgid "Your admins manage them"
+msgstr "Your admins manage them"
 
 #: src/agents/agents-overview.tsx
 msgid "Your agents"

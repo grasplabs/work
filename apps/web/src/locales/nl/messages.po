@@ -97,6 +97,14 @@ msgstr "{ai, select, tool {Een AI-tool, volgens het team} builtIn {AI ingebouwd,
 msgid "{answered} of {questions} questions"
 msgstr "{answered} van {questions} vragen"
 
+#: src/settings/ai-spend.tsx
+msgid "{app} ({alias}, {model})"
+msgstr "{app} ({alias}, {model})"
+
+#: src/settings/ai-spend.tsx
+msgid "{app} ({alias})"
+msgstr "{app} ({alias})"
+
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "{app} has no tools."
 msgstr "{app} heeft geen tools."
@@ -773,6 +781,10 @@ msgstr "{name} · met {teams}"
 msgid "{name} ({apart})"
 msgstr "{name} ({apart})"
 
+#: src/settings/ai-spend.tsx
+msgid "{name} ({runs, plural, one {# run} other {# runs}})"
+msgstr "{name} ({runs, plural, one {# run} other {# runs}})"
+
 #: src/activity/audit-log.tsx
 msgid "{name} (Grasp staff)"
 msgstr "{name} (Grasp-medewerker)"
@@ -932,6 +944,10 @@ msgstr "{name} gebruikt alleen deze apps, voor zover zijn soorten werk dat toest
 #: src/apps/app-workspace.tsx
 msgid "{name}, as your team sees it"
 msgstr "{name}, zoals je team het ziet"
+
+#: src/settings/ai-spend.tsx
+msgid "{name}, ID {id}"
+msgstr "{name}, ID {id}"
 
 #: src/activity/audit-log.tsx
 msgid "{name}, in {app}"
@@ -4508,6 +4524,10 @@ msgstr "Kon niet laden wie ervoor verantwoordelijk mag zijn."
 msgid "Couldn't refresh. This may be out of date."
 msgstr "Kon niet vernieuwen. Dit is misschien niet meer actueel."
 
+#: src/settings/ai-spend.tsx
+msgid "Counted over {counted} in UTC, in US dollars, as the models are priced."
+msgstr "Geteld over {counted} in UTC, in Amerikaanse dollars, zoals de modellen geprijsd zijn."
+
 #: src/workflows/figures.tsx
 msgid "Counted over the workflows of the Apps you can open; independent workflows aren't counted here."
 msgstr "Geteld over de workflows van de apps die je kunt openen; zelfstandige workflows tellen hier niet mee."
@@ -4611,6 +4631,10 @@ msgstr "Gegevens"
 msgctxt "kind of app"
 msgid "Data and analytics"
 msgstr "Data en analyse"
+
+#: src/settings/org-card.tsx
+msgid "Data location: {region}"
+msgstr "Opslaglocatie van gegevens: {region}"
 
 #: src/apps/app-data-model.tsx
 msgid "Data model"
@@ -9295,6 +9319,10 @@ msgstr "Nog geen tabellen"
 msgid "No team has a skill of its own yet."
 msgstr "Nog geen enkel team heeft eigen skills."
 
+#: src/routes/_shell.settings.profile.tsx
+msgid "No teams"
+msgstr "Geen teams"
+
 #: src/settings/teams.tsx
 msgid "No teams yet."
 msgstr "Nog geen teams."
@@ -13135,6 +13163,10 @@ msgstr "Inloggen"
 msgid "Sign-in didn't work. Try again, or ask an admin."
 msgstr "Inloggen is niet gelukt. Probeer het opnieuw of vraag een beheerder."
 
+#: src/settings/org-card.tsx
+msgid "Sign-in domains: {domains}"
+msgstr "Inlogdomeinen: {domains}"
+
 #: src/settings/sign-in-settings.tsx
 msgid "Sign-in isn’t set up for this workspace yet, so nobody can sign in. Grasp sets it up."
 msgstr "Inloggen is nog niet ingesteld voor deze werkruimte, dus niemand kan inloggen. Grasp stelt het in."
@@ -13913,6 +13945,7 @@ msgstr "Teamomvang onbekend."
 #: src/people/people-teams-picker.tsx
 #: src/people/share-picker.tsx
 #: src/routes/_shell.settings.brain.tsx
+#: src/routes/_shell.settings.profile.tsx
 #: src/settings/sections.ts
 #: src/settings/teams.tsx
 msgid "Teams"
@@ -14424,7 +14457,7 @@ msgstr "De dag waarop de andere teams hun links krijgen"
 
 #: src/settings/ai-providers.tsx
 msgid "The default model's provider was removed. Choose a new default."
-msgstr "De provider van het standaardmodel is verwijderd. Kies een nieuw standaardmodel."
+msgstr "De aanbieder van het standaardmodel is verwijderd. Kies een nieuw standaardmodel."
 
 #: src/chat/composer.tsx
 msgid "The default, {each}"
@@ -15125,10 +15158,6 @@ msgstr "De limiet van deze maand voor de AI van Grasp is bereikt. Je beheerder k
 #: src/settings/ai-providers.tsx
 msgid "This month’s limit of {limit} is reached: AI is stopped until next month, or until you switch to your own keys."
 msgstr "De limiet van {limit} voor deze maand is bereikt: AI is gestopt tot volgende maand, of tot je overstapt op je eigen sleutels."
-
-#: src/settings/ai-spend.tsx
-msgid "This month's spend came in a form this page can't read."
-msgstr "De kosten van deze maand kwamen in een vorm die deze pagina niet kan lezen."
 
 #: src/brain/memories-page.tsx
 msgid "This one is right"
@@ -17387,6 +17416,10 @@ msgstr "Je bent als gast ingelogd met {email}. Wat iemand met je deelt, verschij
 #: src/frame/person-menu.tsx
 msgid "You're still signed in. Try again in a moment."
 msgstr "Je bent nog ingelogd. Probeer het zo opnieuw."
+
+#: src/routes/_shell.settings.profile.tsx
+msgid "Your admins manage them"
+msgstr "Je beheerders beheren ze"
 
 #: src/agents/agents-overview.tsx
 msgid "Your agents"
