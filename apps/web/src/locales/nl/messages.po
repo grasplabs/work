@@ -131,6 +131,10 @@ msgstr "{app}: run van {workflowId}"
 msgid "{apps, plural, one {# App} other {# Apps}}"
 msgstr "{apps, plural, one {# app} other {# apps}}"
 
+#: src/chat/chat-window.tsx
+msgid "{archivedCount, plural, one {# chat} other {# chats}}"
+msgstr "{archivedCount, plural, one {# chat} other {# chats}}"
+
 #: src/settings/stephen-card.tsx
 msgid "{asked} asked"
 msgstr "{asked} vroegen het"
@@ -408,10 +412,6 @@ msgstr "{count, plural, one {# regel} other {# regels}}"
 msgid "{count, plural, one {# run} other {# runs}}"
 msgstr "{count, plural, one {# run} other {# runs}}"
 
-#: src/chat/thread.tsx
-msgid "{count, plural, one {# step} other {# steps}}"
-msgstr "{count, plural, one {# stap} other {# stappen}}"
-
 #: src/brain/brain.ts
 msgid "{count, plural, one {# team, with its roles} other {# teams, with their roles}}"
 msgstr "{count, plural, one {# team, met de rollen} other {# teams, met hun rollen}}"
@@ -465,7 +465,7 @@ msgid "{count, plural, one {Back to the question} other {Back to the # questions
 msgstr "{count, plural, one {Terug naar de vraag} other {Terug naar de # vragen}}"
 
 #: src/chat/thread.tsx
-msgid "{count, plural, one {Changed # file} other {Changed # files}}"
+msgid "{count, plural, one {changed # file} other {changed # files}}"
 msgstr "{count, plural, one {# bestand gewijzigd} other {# bestanden gewijzigd}}"
 
 #: src/activity/pending.tsx
@@ -485,11 +485,11 @@ msgid "{count, plural, one {It started without # kept value: the run that kept i
 msgstr "{count, plural, one {Hij begon zonder # bewaarde waarde: de run die hem bewaarde, las iets wat niet meer te lezen is.} other {Hij begon zonder # bewaarde waarden: de runs die ze bewaarden, lazen iets wat niet meer te lezen is.}}"
 
 #: src/chat/thread.tsx
-msgid "{count, plural, one {Ran # tool} other {Ran # tools}}"
-msgstr "{count, plural, one {# hulpmiddel gebruikt} other {# hulpmiddelen gebruikt}}"
+msgid "{count, plural, one {ran # tool} other {ran # tools}}"
+msgstr "{count, plural, one {# tool gebruikt} other {# tools gebruikt}}"
 
 #: src/chat/thread.tsx
-msgid "{count, plural, one {Read # file} other {Read # files}}"
+msgid "{count, plural, one {read # file} other {read # files}}"
 msgstr "{count, plural, one {# bestand gelezen} other {# bestanden gelezen}}"
 
 #: src/brain/thinking/use-thinking.ts
@@ -497,8 +497,8 @@ msgid "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
 msgstr "{count, plural, one {# workflow lezen} other {# workflows lezen}}"
 
 #: src/chat/thread.tsx
-msgid "{count, plural, one {Searched once} other {Searched # times}}"
-msgstr "{count, plural, one {Eén keer gezocht} other {# keer gezocht}}"
+msgid "{count, plural, one {searched once} other {searched # times}}"
+msgstr "{count, plural, one {één keer gezocht} other {# keer gezocht}}"
 
 #: src/frame/ui-words.tsx
 msgid "{count, plural, one {Show # unchanged line} other {Show # unchanged lines}}"
@@ -2512,6 +2512,7 @@ msgctxt "inbox filter, short"
 msgid "All"
 msgstr "Alles"
 
+#: src/chat/chat-window.tsx
 #: src/chat/sidebar-chats.tsx
 msgid "All chats"
 msgstr "Alle chats"
@@ -3470,10 +3471,6 @@ msgstr "Terug naar {destination}"
 msgid "Back to reference {number}"
 msgstr "Terug naar verwijzing {number}"
 
-#: src/chat/chat-window.tsx
-msgid "Back to your chats"
-msgstr "Terug naar je chats"
-
 #: src/apps/app-workspace.tsx
 msgid "Back to your version"
 msgstr "Terug naar jouw versie"
@@ -4091,7 +4088,6 @@ msgstr "Grafiek"
 
 #: src/agents/agents-overview.tsx
 #: src/chat/chat-panel.tsx
-#: src/chat/chat-start.tsx
 #: src/frame/app-sidebar.tsx
 msgid "Chat"
 msgstr "Chat"
@@ -4128,7 +4124,6 @@ msgstr "Naam van de chat"
 msgid "Chat with {name}"
 msgstr "Chatten met {name}"
 
-#: src/chat/chat-switcher.tsx
 #: src/chat/chat-window.tsx
 #: src/chat/sidebar-chats.tsx
 msgid "Chats"
@@ -4860,22 +4855,6 @@ msgstr "Uit {label} naar het Brain kopiëren"
 #: src/shown-once.tsx
 msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgstr "Kopieer het nu: je ziet het niet nog eens. Kwijt, dan kan het alleen worden vervangen."
-
-#: src/chat/answer-table-actions.tsx
-msgid "Copy table"
-msgstr "Tabel kopiëren"
-
-#: src/chat/answer-table-actions.tsx
-msgid "Copy table as CSV"
-msgstr "Tabel kopiëren als CSV"
-
-#: src/chat/answer-table-actions.tsx
-msgid "Copy table as Markdown"
-msgstr "Tabel kopiëren als Markdown"
-
-#: src/chat/answer-table-actions.tsx
-msgid "Copy table as TSV"
-msgstr "Tabel kopiëren als TSV"
 
 #: src/chat/thread.tsx
 msgid "Copy the answer"
@@ -5716,18 +5695,6 @@ msgstr "{name} downloaden"
 #: src/workflows/version-source.tsx
 msgid "Download {path}"
 msgstr "{path} downloaden"
-
-#: src/chat/answer-table-actions.tsx
-msgid "Download table"
-msgstr "Tabel downloaden"
-
-#: src/chat/answer-table-actions.tsx
-msgid "Download table as CSV"
-msgstr "Tabel downloaden als CSV"
-
-#: src/chat/answer-table-actions.tsx
-msgid "Download table as Markdown"
-msgstr "Tabel downloaden als Markdown"
 
 #: src/apps/app-code.tsx
 msgid "Download the file"
@@ -7957,6 +7924,7 @@ msgctxt "a model's tokens"
 msgid "Input"
 msgstr "Invoer"
 
+#: src/chat/answer-steps.tsx
 #: src/frame/ui-words.tsx
 msgctxt "what a tool was given"
 msgid "Input"
@@ -10077,6 +10045,10 @@ msgstr "Geen stackframes"
 msgid "No stakeholder named yet"
 msgstr "Nog geen stakeholder genoemd"
 
+#: src/chat/thread.tsx
+msgid "No steps yet"
+msgstr "Nog geen stappen"
+
 #: src/apps/app-data.tsx
 msgid "No tables"
 msgstr "Geen tabellen"
@@ -10315,7 +10287,6 @@ msgstr "Nog niet bevestigd door het bestuur"
 msgid "Not connected"
 msgstr "Niet verbonden"
 
-#: src/chat/answer-table-actions.tsx
 #: src/frame/ui-words.tsx
 msgid "Not copied"
 msgstr "Niet gekopieerd"
@@ -11176,10 +11147,6 @@ msgstr "Stephen openen in {app}, in een nieuw tabblad"
 #: src/inbox/item-detail.tsx
 msgid "Open the App"
 msgstr "De App openen"
-
-#: src/chat/chat-bar.tsx
-msgid "Open the chat"
-msgstr "Chat openen"
 
 #: src/apps/app-workspace.tsx
 msgid "Open the chat in Chat"
@@ -12704,7 +12671,6 @@ msgstr "Verantwoordelijkheid"
 #: src/apps/app-settings.tsx
 #: src/apps/app-workspace.tsx
 #: src/apps/apps-overview.tsx
-#: src/chat/chat-window.tsx
 #: src/drafts/draft-history.tsx
 msgid "Restore"
 msgstr "Herstellen"
@@ -12741,6 +12707,11 @@ msgctxt "inbox item kind"
 msgid "Result"
 msgstr "Resultaat"
 
+#: src/chat/answer-steps.tsx
+msgctxt "what a tool gave back"
+msgid "Result"
+msgstr "Resultaat"
+
 #: src/brain/brain.ts
 msgid "Result: not measured yet"
 msgstr "Resultaat: nog niet gemeten"
@@ -12769,7 +12740,7 @@ msgstr "{name} voor {team} buiten gebruik stellen?"
 msgid "Retire {name}?"
 msgstr "{name} buiten gebruik stellen?"
 
-#: src/chat/thread.tsx
+#: src/chat/answer-steps.tsx
 msgid "Retried"
 msgstr "Opnieuw geprobeerd"
 
@@ -13880,6 +13851,7 @@ msgstr "Toon in het logboek"
 msgid "Show its definition"
 msgstr "Zijn definitie tonen"
 
+#: src/chat/answer-steps.tsx
 #: src/chat/held-writes.tsx
 #: src/frame/ui-words.tsx
 msgid "Show less"
@@ -13888,6 +13860,7 @@ msgstr "Minder tonen"
 #: src/brain/learned-section.tsx
 #: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
+#: src/chat/answer-steps.tsx
 #: src/frame/ui-words.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/onboarding/place-picker.tsx
@@ -13907,6 +13880,10 @@ msgstr "Oudere gebeurtenissen tonen"
 #: src/drafts/draft-history.tsx
 msgid "Show older versions"
 msgstr "Oudere versies tonen"
+
+#: src/chat/chat-toggle.tsx
+msgid "Show or hide the chat"
+msgstr "Chat tonen of verbergen"
 
 #: src/frame/app-sidebar.tsx
 #: src/frame/site-header.tsx
@@ -14595,7 +14572,7 @@ msgstr "Run stoppen"
 msgid "Stop this run?"
 msgstr "Deze run stoppen?"
 
-#: src/chat/thread.tsx
+#: src/chat/answer-steps.tsx
 #: src/inbox/items.ts
 #: src/workflows/workflow-triggers.tsx
 msgid "Stopped"
@@ -14609,10 +14586,6 @@ msgstr "Gestopt"
 #: src/activity/audit-words.ts
 msgid "Stopped a schedule that kept failing"
 msgstr "Een planning gestopt die bleef mislukken"
-
-#: src/chat/thread.tsx
-msgid "Stopped before it finished"
-msgstr "Gestopt voordat het klaar was"
 
 #: src/activity/audit-words.ts
 msgid "Stopped following what changes at a connection"
@@ -14699,11 +14672,6 @@ msgstr "Tabel"
 msgctxt "a table in a text"
 msgid "Table"
 msgstr "Tabel"
-
-#. placeholder {0}: index + 1
-#: src/chat/answer-table-actions.tsx
-msgid "Table {0}"
-msgstr "Tabel {0}"
 
 #: src/apps/app-data-model.tsx
 msgid "Tables"
@@ -16622,6 +16590,10 @@ msgstr "Typ wat er ontbreekt, of ja"
 msgid "Type your answer"
 msgstr "Typ je antwoord"
 
+#: src/chat/chat-window.tsx
+msgid "Unarchive"
+msgstr "Dearchiveren"
+
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind"
 msgid "Unconfirmed change"
@@ -17370,7 +17342,7 @@ msgstr "Wat in de weg zit"
 msgid "What Grasp could automate or improve, from how your teams describe their work and how five or more of a team were seen doing it, the largest first. One hidden comes back when its evidence changes."
 msgstr "Wat Grasp kan automatiseren of verbeteren, op basis van hoe je teams hun werk beschrijven en hoe vijf of meer mensen van een team het zijn zien doen, het grootste eerst. Een verborgen kans komt terug zodra het bewijs verandert."
 
-#: src/chat/thread.tsx
+#: src/chat/answer-steps.tsx
 msgid "What Grasp did"
 msgstr "Wat Grasp deed"
 
@@ -18041,6 +18013,7 @@ msgstr "Van wie het is"
 msgid "Why"
 msgstr "Waarom"
 
+#: src/chat/answer-steps.tsx
 #: src/workflows/run-detail.tsx
 msgid "Why it failed"
 msgstr "Waarom hij mislukte"
