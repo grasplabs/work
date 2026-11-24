@@ -66,7 +66,6 @@ const styles = stylex.create({
     justifyContent: "center",
     gap: space[3],
   },
-  end: { display: "flex", justifyContent: "center", width: "100%" },
   question: { display: "grid", gap: space[4] },
   options: { display: "flex", flexWrap: "wrap", gap: space[2] },
 });
@@ -261,19 +260,16 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
           ? t`Policies, procedures, work instructions. Drafts are fine too. Leave out anything about one person.`
           : t`${kinds}, and whatever explains how you work. Drafts are fine too. Leave out anything about one person.`
       }
-      centred
       end={
-        <div {...stylex.props(styles.end)}>
-          <Button
-            onClick={() => {
-              void onward();
-            }}
-            size="lg"
-          >
-            {t`Continue`}
-            <Icon icon={ArrowRightIcon} />
-          </Button>
-        </div>
+        <Button
+          onClick={() => {
+            void onward();
+          }}
+          size="lg"
+        >
+          {t`Continue`}
+          <Icon icon={ArrowRightIcon} />
+        </Button>
       }
       title={t`Do you have anything that explains how you work?`}
     >
