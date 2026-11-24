@@ -20,12 +20,11 @@ import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 
 const styles = stylex.create({
-  // A link's words on the page's start edge: its padding hangs outside it.
-  flush: { marginInlineStart: `calc(-1 * ${space[4]})` },
+  // On the column's middle, under the centred words.
   forget: {
     display: "flex",
     flexDirection: "column",
-    alignItems: "flex-start",
+    alignItems: "center",
     gap: space[2],
   },
 });
@@ -101,7 +100,6 @@ export const ForgetTeams = ({
           setOpen(true);
         }}
         size="lg"
-        style={styles.flush}
         variant="link"
       >
         {t`Erase your teams from your Brain`}
