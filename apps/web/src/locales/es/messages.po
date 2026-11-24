@@ -9109,7 +9109,6 @@ msgstr "En marcha, en medición"
 msgid "Load older"
 msgstr "Cargar anteriores"
 
-#: src/connections/part-not-loaded.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Loaded"
 msgstr "Cargado"
@@ -10563,7 +10562,6 @@ msgctxt "how a workflow stands"
 msgid "Not live yet"
 msgstr "Aún no activo"
 
-#: src/connections/part-not-loaded.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Not loaded"
 msgstr "No cargado"
@@ -16842,7 +16840,6 @@ msgid "Try the search again"
 msgstr "Volver a buscar"
 
 #: src/chat/builds.tsx
-#: src/connections/part-not-loaded.tsx
 #: src/frame/page-states.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Trying again…"
