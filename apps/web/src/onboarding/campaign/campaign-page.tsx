@@ -52,7 +52,7 @@ const styles = stylex.create({
 });
 
 /** Which width each concept reads at: the meadow and the week wide, the notes a reading column. */
-const widths = { a: "lg", b: "sm", c: "lg" } as const;
+const widths = { a: "lg", b: "lg", c: "lg" } as const;
 
 /** One concept in one state. */
 export const CampaignConcept = ({

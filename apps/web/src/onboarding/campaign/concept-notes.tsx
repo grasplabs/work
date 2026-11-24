@@ -25,9 +25,12 @@ import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
-import { AskAction } from "./campaign-asks.tsx";
+import { AgentFigure } from "../../agents/figure/agent-figure.tsx";
+import { stephensLook } from "../../agents/figure/look.ts";
+import { AskAction, asksInOrder } from "./campaign-asks.tsx";
 import {
   AllFindings,
+  AskList as MoreAsks,
   NothingYet,
   OnYourComputer,
   RunningLine,
@@ -35,14 +38,28 @@ import {
 } from "./campaign-parts.tsx";
 import { findingSentence, statementOf } from "./campaign-words.ts";
 import type { Ask, Campaign, Finding, TeamPicture } from "./fixtures.ts";
-import { ReadAloud } from "./read-aloud.tsx";
 
 const styles = stylex.create({
+  // Stephen in his own column beside his notes; above them on a phone.
   page: {
-    display: "flex",
-    flexDirection: "column",
+    display: "grid",
+    gridTemplateColumns: {
+      default: "14rem minmax(0, 1fr)",
+      [media.maxSm]: "minmax(0, 1fr)",
+    },
+    alignItems: "start",
+    columnGap: space[16],
     gap: { default: space[12], [media.maxSm]: space[8] },
     paddingBlockStart: { default: space[10], [media.maxSm]: space[4] },
+  },
+  stephen: { display: "flex" },
+  large: { display: { default: "flex", [media.maxSm]: "none" } },
+  small: { display: { default: "none", [media.maxSm]: "flex" } },
+  notes: {
+    display: "flex",
+    flexDirection: "column",
+    gap: { default: space[10], [media.maxSm]: space[8] },
+    minWidth: 0,
   },
   head: {
     display: "flex",
@@ -159,56 +176,82 @@ const Bounced = ({ ask }: { ask: Extract<Ask, { kind: "bounce" }> }) => {
   );
 };
 
-/** Concept B: the campaign page as Stephen's notes. */
+/** Concept B: the campaign page as Stephen's notes, beside Stephen himself. */
 export const CampaignNotes = ({ campaign }: { campaign: Campaign }) => {
   const { lead, rest } = statementOf(campaign);
   const lines = latest(campaign);
+  const [first, ...others] = asksInOrder(campaign.asks);
+  const pose = campaign.pace === "enough" ? "done" : "listening";
+  const said = pose === "done" ? "Stephen, done" : "Stephen, listening";
   return (
     <div {...stylex.props(styles.page)}>
-      <header {...stylex.props(styles.head)}>
-        <Heading level={1} size="xl">
-          {lead}
-        </Heading>
-        <Text size="lg">
-          <ReadAloud text={rest} />
-        </Text>
-      </header>
-      {lines.length === 0 ? (
-        <div {...stylex.props(wide.only)}>
-          <NothingYet />
-        </div>
-      ) : (
-        <MessageGroup>
-          <div {...stylex.props(styles.thread)}>
-            {lines.map(({ finding, team }, index) => (
-              <div
-                key={finding.id}
-                {...stylex.props(index < lines.length - 1 && styles.earlier)}
-              >
-                <Line
-                  finding={finding}
-                  grouped={campaign.grouped}
-                  team={team}
-                />
-              </div>
-            ))}
-            {campaign.asks.map((ask) => (
-              <div key={ask.id} {...stylex.props(wide.only)}>
-                {ask.kind === "quiet" ? (
-                  <Nudge ask={ask} />
-                ) : (
-                  <Bounced ask={ask} />
-                )}
-              </div>
-            ))}
+      {/* Stephen is the page's one picture and its one moving thing: large on a computer, smaller on a phone. */}
+      <div {...stylex.props(styles.stephen)}>
+        <span {...stylex.props(styles.large)}>
+          <AgentFigure
+            aria-label={said}
+            look={stephensLook}
+            size="xl"
+            state={pose}
+          />
+        </span>
+        <span {...stylex.props(styles.small)}>
+          <AgentFigure
+            aria-label={said}
+            look={stephensLook}
+            size="lg"
+            state={pose}
+          />
+        </span>
+      </div>
+      <div {...stylex.props(styles.notes)}>
+        <header {...stylex.props(styles.head)}>
+          <Heading level={1} size="xl">
+            {lead}
+          </Heading>
+          <Text size="lg">{rest}</Text>
+        </header>
+        {lines.length === 0 ? (
+          <div {...stylex.props(wide.only)}>
+            <NothingYet />
           </div>
-        </MessageGroup>
-      )}
-      <OnYourComputer />
-      <div {...stylex.props(wide.only)}>
-        <div {...stylex.props(styles.foot)}>
-          <RunningLine campaign={campaign} indicator={false} />
-          <AllFindings campaign={campaign} variant="outline" />
+        ) : (
+          <MessageGroup>
+            <div {...stylex.props(styles.thread)}>
+              {lines.map(({ finding, team }, index) => (
+                <div
+                  key={finding.id}
+                  {...stylex.props(index < lines.length - 1 && styles.earlier)}
+                >
+                  <Line
+                    finding={finding}
+                    grouped={campaign.grouped}
+                    team={team}
+                  />
+                </div>
+              ))}
+            </div>
+          </MessageGroup>
+        )}
+        {/* One ask at a time, the most important first, in his words; the rest in one line. */}
+        {first === undefined ? null : (
+          <div {...stylex.props(wide.only)}>
+            {first.kind === "quiet" ? (
+              <Nudge ask={first} />
+            ) : (
+              <Bounced ask={first} />
+            )}
+          </div>
+        )}
+        <OnYourComputer />
+        <div {...stylex.props(wide.only)}>
+          <div {...stylex.props(styles.foot)}>
+            {others.length === 0 ? null : (
+              <MoreAsks campaign={{ ...campaign, asks: others }} />
+            )}
+            <RunningLine campaign={campaign} indicator={false} />
+            <AllFindings campaign={campaign} variant="outline" />
+          </div>
         </div>
       </div>
     </div>

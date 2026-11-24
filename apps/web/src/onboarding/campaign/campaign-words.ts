@@ -138,7 +138,7 @@ export const statementOf = (
 /** When: the close, the one date that matters on this page. */
 export const whenWords = (campaign: Campaign): string =>
   campaign.pace === "enough"
-    ? "The interviews close tonight"
+    ? "The interviews close tonight. We’ll tell you when Grasp opens"
     : `The interviews close ${shortDay(campaign.closes)}, ${daysLeftWords(campaign)}`;
 
 /**
