@@ -46,14 +46,26 @@ const styles = stylex.create({
     marginInline: "auto",
   },
   // Inside a block: the smaller gap.
-  block: { display: "flex", flexDirection: "column", gap: space["3"] },
+  block: { display: "flex", flexDirection: "column", gap: space["4"] },
   // The two buttons: side by side, one height; stacked full width on a phone, the main one first.
   buttons: {
     display: "flex",
     flexDirection: { default: "column", [media.sm]: "row" },
     gap: space["3"],
   },
-  lines: { display: "flex", flexDirection: "column", gap: space["1"] },
+  // The three lines read as one block: no gap inside it, the block's gap before it.
+  lines: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 0,
+    margin: 0,
+    padding: 0,
+  },
+  // Each button takes half the row beside the other; on a phone, the whole width.
+  grow: { flexGrow: 1, flexBasis: 0 },
+  decline: { display: "flex", alignItems: "flex-start" },
+  // A large Button keeps its inset (space-4) as a link too: it stands out by as much, so its words start on the column's edge.
+  flushLink: { marginInlineStart: `calc(-1 * ${space["4"]})` },
 });
 
 /** Which of the three. */
@@ -74,24 +86,33 @@ const Choices = ({
 }) => (
   <div {...stylex.props(styles.block)}>
     <div {...stylex.props(styles.buttons)}>
-      <Button onClick={onAgree} size="lg">
+      <Button onClick={onAgree} size="lg" style={styles.grow}>
         I agree, let’s start
       </Button>
-      <Button onClick={onNotNow} size="lg" variant="outline">
+      <Button
+        onClick={onNotNow}
+        size="lg"
+        style={styles.grow}
+        variant="outline"
+      >
         Not now
       </Button>
     </div>
   </div>
 );
 
-/** The way to decline: one line of body text, ending in a link. */
+/** The way to decline: the whole line is the link, alone, on the left edge. */
 const Decline = ({ onRatherNot }: { onRatherNot: () => void }) => (
-  <Text size="lg">
-    Rather not take part?{" "}
-    <Button onClick={onRatherNot} size="lg" variant="link">
-      Tell us.
+  <div {...stylex.props(styles.decline)}>
+    <Button
+      onClick={onRatherNot}
+      size="lg"
+      style={styles.flushLink}
+      variant="link"
+    >
+      I’d rather not take part
     </Button>
-  </Text>
+  </div>
 );
 
 /** A's start, cleaned: `variant` 1, 2 or 3. */
@@ -135,7 +156,7 @@ export const ConsentClean = ({
     middle = (
       <div {...stylex.props(styles.block)}>
         <Body>{consent.whoShort}</Body>
-        <Collapsible fitContent>
+        <Collapsible>
           <CollapsibleTrigger>What happens with what I say</CollapsibleTrigger>
           <CollapsibleContent>{consent.promises.join(" ")}</CollapsibleContent>
         </Collapsible>
