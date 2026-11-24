@@ -23,14 +23,17 @@ import { describe, expect, it, onTestFinished } from "vite-plus/test";
 import {
   carry,
   damskoLicence,
+  damskoNotices,
   differences,
   expectedOf,
   fetchDamsko,
   fetchFor,
   localChangesSchema,
+  movedNotice,
   noticeDifference,
   overdue,
   parseRegistry,
+  pinSchema,
   proposal,
   readWithin,
   removeWithin,
@@ -178,6 +181,41 @@ describe("what packages/ui must hold", () => {
     ).toStrictEqual([
       `${font} is missing`,
       `${font}.base64 is no file of the installed items`,
+    ]);
+  });
+
+  it("names the packages an item builds with too, its dev dependencies", () => {
+    const withTypes = parseRegistry(
+      JSON.stringify({
+        items: [
+          {
+            name: "code-block",
+            dependencies: ["prismjs"],
+            devDependencies: ["@types/prismjs"],
+            files: [
+              {
+                path: "src/components/code-block.tsx",
+                target: "~/src/components/code-block.tsx",
+              },
+            ],
+          },
+        ],
+      })
+    );
+    const expected = expectedOf(withTypes, ["code-block"]);
+    expect([...expected.dependencies].toSorted()).toStrictEqual([
+      "@types/prismjs",
+      "prismjs",
+    ]);
+    const file = "src/components/code-block.tsx";
+    expect(
+      differences(
+        expected,
+        damsko,
+        installed({ [file]: file }, { prismjs: "catalog:" })
+      )
+    ).toStrictEqual([
+      'package.json: @types/prismjs must be a dependency at "catalog:", and is undefined',
     ]);
   });
 
@@ -885,13 +923,22 @@ const installs =
     await Promise.resolve();
   };
 
+const noticePin = "2d49f2dfd0fb6b86d78a224253bd788ec6fc9ba7";
+const earlierPin = "aba6f6e9327fdd78f9aee01c2f9dcf28593c4e74";
+const noticeAt = (at: string) =>
+  `Damsko's licence:\n${damskoLicence(at)}\nIts third-party notices:\n${damskoNotices(at)}\n`;
+
 describe("the update", () => {
   /** Damsko at a pin, from its files: one item, `kit`, with what it holds. */
-  const damskoWith = (files: Record<string, string>): DamskoAt => {
+  const damskoWith = (
+    files: Record<string, string>,
+    commit = "pinned"
+  ): DamskoAt => {
     const root = scratchFolder();
     plant(root, files);
     return {
       root,
+      commit,
       expected: expectedOf(
         parseRegistry(
           JSON.stringify({
@@ -963,6 +1010,28 @@ describe("the update", () => {
       "local-changes.json",
       "src",
     ]);
+  });
+
+  it("moves LICENSE's links to Damsko with the pin, and nothing else of it", async () => {
+    const { ui, local } = setUp();
+    plant(ui, { LICENSE: `${noticeAt(earlierPin)}Kept as it is.\n` });
+    const files = {
+      "src/components/button.tsx": "one\ntwo\nthree\nfour\nfive\n",
+      "src/lib/utils.ts": "utils\n",
+    };
+    const now = damskoWith(files, noticePin);
+    await updateTree({
+      ui,
+      install: installs(now),
+      was: damskoWith(files, earlierPin),
+      now,
+      local,
+      pin: `{ "commit": "${noticePin}" }\n`,
+      dependencies: { "@stylexjs/stylex": "catalog:" },
+    });
+    expect(readFileSync(nodePath.join(ui, "LICENSE"), "utf-8")).toBe(
+      `${noticeAt(noticePin)}Kept as it is.\n`
+    );
   });
 
   it("drops an entry once Damsko's file is the same", async () => {
@@ -1181,6 +1250,51 @@ describe("the update", () => {
     expect(message).not.toContain("git checkout");
   });
 
+  it("puts LICENSE back as it was when writing it fails half-way, and src/ and the pin with it", async () => {
+    const { ui, local } = setUp();
+    plant(ui, { LICENSE: `${noticeAt(earlierPin)}Kept as it is.\n` });
+    const before = snapshot(ui);
+    const files = {
+      "src/components/button.tsx": "one\ntwo\nthree\nfour\nfive\n",
+      "src/lib/utils.ts": "utils\n",
+    };
+    const now = damskoWith(
+      { ...files, "src/lib/new.ts": "new in Damsko\n" },
+      noticePin
+    );
+    let licenceWrites = 0;
+    await expect(
+      updateTree({
+        ui,
+        install: installs(now),
+        was: damskoWith(files, earlierPin),
+        now,
+        local,
+        pin: `{ "commit": "${noticePin}" }\n`,
+        dependencies: { "@stylexjs/stylex": "catalog:" },
+        files: {
+          rename: renameSync,
+          write: (root, relative, content) => {
+            // The moved notice, cut short as a full disk leaves it.
+            if (relative === "LICENSE" && (licenceWrites += 1) === 1) {
+              writeWithin(root, relative, content?.slice(0, 20));
+              throw ioError(relative);
+            }
+            writeWithin(root, relative, content);
+          },
+        },
+      })
+    ).rejects.toThrow("EIO: i/o error, LICENSE");
+    expect(licenceWrites).toBe(2);
+    expect(snapshot(ui)).toStrictEqual(before);
+    expect(readdirSync(ui).toSorted()).toStrictEqual([
+      "LICENSE",
+      "damsko.json",
+      "local-changes.json",
+      "src",
+    ]);
+  });
+
   const noDependencies: Record<string, string> = {};
   const newPin = {
     "src/components/button.tsx": "one\ntwo\nthree\nfour\nFIVE\n",
@@ -1262,19 +1376,44 @@ describe("the update", () => {
 });
 
 describe("the notice that src/ stays under Damsko's licence", () => {
-  it("links Damsko's licence at the pinned commit, and at no other", () => {
-    const commit = "2d49f2dfd0fb6b86d78a224253bd788ec6fc9ba7";
-    expect(
-      noticeDifference(`Damsko's licence:\n${damskoLicence(commit)}\n`, commit)
-    ).toBeUndefined();
+  it("links Damsko's licence and third-party notices at the pinned commit, and at no other", () => {
+    expect(noticeDifference(noticeAt(noticePin), noticePin)).toBeUndefined();
+    expect(noticeDifference(noticeAt(earlierPin), noticePin)).toBe(
+      `LICENSE must link Damsko's licence and third-party notices at the pin: ${damskoLicence(noticePin)}, ${damskoNotices(noticePin)}`
+    );
     expect(
       noticeDifference(
-        `Damsko's licence:\n${damskoLicence("aba6f6e9327fdd78f9aee01c2f9dcf28593c4e74")}\n`,
-        commit
+        `Damsko's licence:\n${damskoLicence(noticePin)}\n`,
+        noticePin
       )
     ).toBe(
-      `LICENSE must link Damsko's licence at the pin, ${damskoLicence(commit)}`
+      `LICENSE must link Damsko's licence and third-party notices at the pin: ${damskoNotices(noticePin)}`
     );
-    expect(noticeDifference(undefined, commit)).toMatch(/^LICENSE is missing/u);
+    expect(noticeDifference(undefined, noticePin)).toMatch(
+      /^LICENSE is missing/u
+    );
+  });
+
+  it("moves both links with the pin, and nothing else", () => {
+    const moved = movedNotice(
+      `${noticeAt(earlierPin)}Kept as it is.\n`,
+      earlierPin,
+      noticePin
+    );
+    expect(moved).toBe(`${noticeAt(noticePin)}Kept as it is.\n`);
+    expect(noticeDifference(moved, noticePin)).toBeUndefined();
+  });
+
+  it("holds this repository's own notice at its pin", () => {
+    const ui = nodePath.join(import.meta.dirname, "../packages/ui");
+    const pin = pinSchema.parse(
+      JSON.parse(readFileSync(nodePath.join(ui, "damsko.json"), "utf-8"))
+    );
+    expect(
+      noticeDifference(
+        readFileSync(nodePath.join(ui, "LICENSE"), "utf-8"),
+        pin.commit
+      )
+    ).toBeUndefined();
   });
 });
