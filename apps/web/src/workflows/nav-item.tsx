@@ -1,12 +1,14 @@
+import type { DecisionView } from "@grasp-os/shared/decisions";
 import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
-} from "@grasp-os/app-kit/components/sidebar";
-import type { DecisionView } from "@grasp-os/shared/decisions";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
+} from "@grasp-os/ui/components/sidebar";
+import { Icon, WorkflowIcon } from "@grasp-os/ui/lib/icons";
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { Plural, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link, useMatchRoute } from "@tanstack/react-router";
-import { WorkflowIcon } from "lucide-react";
 
 import { readWithin } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
@@ -50,29 +52,27 @@ export const WorkflowsItem = () => {
   const inWorkflows = matchRoute({ to: "/workflows", fuzzy: true }) !== false;
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton
-        isActive={inWorkflows}
-        render={<Link to="/workflows" />}
-        tooltip={t`Workflows`}
-      >
-        <WorkflowIcon />
-        <span>
-          <Trans>Workflows</Trans>
-        </span>
-        {/* Inside the link, so its name says how many need the person. */}
-        {shown ? (
-          <SidebarMenuBadge placement="inside">
-            <span aria-hidden="true">{waiting}</span>
-            <span className="sr-only">
+      <SidebarMenuButton asChild isActive={inWorkflows}>
+        <Link to="/workflows">
+          <Icon icon={WorkflowIcon} />
+          {t`Workflows`}
+          {/* Inside the link, so its name says how many wait. */}
+          {shown ? (
+            <span {...stylex.props(visuallyHidden)}>
               <Plural
                 one="# workflow needs you"
                 other="# workflows need you"
                 value={waiting}
               />
             </span>
-          </SidebarMenuBadge>
-        ) : null}
+          ) : null}
+        </Link>
       </SidebarMenuButton>
+      {shown ? (
+        <SidebarMenuBadge>
+          <span aria-hidden="true">{waiting}</span>
+        </SidebarMenuBadge>
+      ) : null}
     </SidebarMenuItem>
   );
 };

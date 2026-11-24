@@ -1,4 +1,6 @@
+import { colors, duration } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { useEffect } from "react";
 
@@ -8,6 +10,35 @@ import { useLessMotion } from "../brain/less-motion.ts";
 import { hold } from "../voice/voice.ts";
 import { currentReveal, setReveal, useReveal } from "./reveal-state.ts";
 import { readingSeconds } from "./setup.ts";
+
+const fadeOut = stylex.keyframes({
+  from: { opacity: 1 },
+  to: { opacity: 0 },
+});
+
+const styles = stylex.create({
+  // With less motion: the page's own background over everything, fading off the platform.
+  cover: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 100,
+    backgroundColor: colors.background,
+    animationName: fadeOut,
+    animationDuration: duration.open,
+    animationDelay: duration.mark,
+    animationTimingFunction: duration.ease,
+    animationFillMode: "forwards",
+  },
+  // Over the whole window, above everything, and never in the pointer's way.
+  layer: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 100,
+    width: "100%",
+    height: "100%",
+    pointerEvents: "none",
+  },
+});
 
 // The way into the platform at the end of the onboarding, told as one
 // piece across two pages, as in the prototype (grasplabs/prototype,
@@ -99,7 +130,7 @@ const endReveal = (): void => {
 
 /** The platform shows underneath once its frame has something in it. */
 const platformShows = (): boolean => {
-  const inset = document.querySelector('[data-slot="app-shell-content"]');
+  const inset = document.querySelector('[data-slot="app-shell-page"]');
   return inset !== null && inset.childElementCount > 0;
 };
 
@@ -123,14 +154,14 @@ export const PlatformReveal = () => {
     return (
       <div
         aria-hidden="true"
-        className="bg-background animate-out fade-out fill-mode-forwards fixed inset-0 z-100 delay-200 duration-500"
         onAnimationEnd={endReveal}
+        {...stylex.props(styles.cover)}
       />
     );
   }
   return (
     <DotsBuild
-      className="pointer-events-none fixed inset-0 z-100 size-full"
+      className={stylex.props(styles.layer).className ?? ""}
       from={from}
       label={t`Opening Grasp`}
       onEnd={endReveal}

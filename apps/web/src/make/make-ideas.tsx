@@ -1,11 +1,14 @@
+import type { Blueprint } from "@grasp-os/shared/apps";
 import {
   Item,
   ItemContent,
   ItemDescription,
   ItemGroup,
+  ItemMedia,
   ItemTitle,
-} from "@grasp-os/app-kit/components/item";
-import type { Blueprint } from "@grasp-os/shared/apps";
+} from "@grasp-os/ui/components/item";
+import { Icon, LayoutGridIcon, WorkflowIcon } from "@grasp-os/ui/lib/icons";
+import type { IconData } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
 
 import { processNames } from "../workflows/business-process.tsx";
@@ -27,39 +30,41 @@ interface Idea {
   fill: string;
 }
 
-/** The ideas, each a tile that fills the box (`onPick`). */
+/**
+ * The ideas, each a tile that fills the box (`onPick`), marked with the
+ * icon of what it makes (`icon`).
+ */
 const Ideas = ({
   ideas,
+  icon,
   onPick,
 }: {
   ideas: readonly Idea[];
+  icon: IconData;
   onPick: (text: string) => void;
 }) => {
   const { t } = useLingui();
   return (
-    <ItemGroup
-      aria-label={t`Ideas to start from`}
-      render={<ul />}
-      spacing="snug"
-    >
+    <ItemGroup aria-label={t`Ideas to start from`}>
       {ideas.map(({ key, title, description, fill }) => (
-        <li key={key}>
-          <Item
-            onClick={() => {
-              onPick(fill);
-            }}
-            render={<button aria-label={title} type="button" />}
-            size="sm"
-            variant="outline"
-          >
-            <ItemContent>
-              <ItemTitle>{title}</ItemTitle>
-              {description === "" ? null : (
-                <ItemDescription>{description}</ItemDescription>
-              )}
-            </ItemContent>
-          </Item>
-        </li>
+        <Item
+          key={key}
+          onClick={() => {
+            onPick(fill);
+          }}
+          size="sm"
+          variant="outline"
+        >
+          <ItemMedia variant="icon">
+            <Icon icon={icon} />
+          </ItemMedia>
+          <ItemContent>
+            <ItemTitle>{title}</ItemTitle>
+            {description === "" ? null : (
+              <ItemDescription>{description}</ItemDescription>
+            )}
+          </ItemContent>
+        </Item>
       ))}
     </ItemGroup>
   );
@@ -85,6 +90,7 @@ export const BlueprintIdeas = ({
             ? t`Make an App from the ${name} blueprint.`
             : t`Make an App from the ${name} blueprint: ${description}`,
       }))}
+      icon={LayoutGridIcon}
       onPick={onPick}
     />
   );
@@ -107,6 +113,7 @@ export const WorkflowIdeas = ({
         description: i18n._(processNames[process]),
         fill: i18n._(idea),
       }))}
+      icon={WorkflowIcon}
       onPick={onPick}
     />
   );

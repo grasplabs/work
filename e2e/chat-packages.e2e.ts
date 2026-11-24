@@ -6,6 +6,7 @@ import {
   seedDependencyRequest,
 } from "./dependency-request.ts";
 import { apiOf, peopleIn } from "./people.ts";
+import { expectNoError } from "./said.ts";
 
 // The npm packages the chat's agent asked for, on a card in that chat:
 // the App's builder approves them there, in their own session, and the
@@ -51,7 +52,7 @@ test("the App's builder approves the packages its chat's agent asked for, on the
         return approved?.id;
       })
       .toBe(request.id);
-    await expect(page.getByRole("alert")).toHaveCount(0);
+    await expectNoError(page);
   } finally {
     core[Symbol.dispose]();
   }

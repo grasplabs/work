@@ -1,6 +1,3 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
-import { cn } from "@grasp-os/app-kit/lib/utils";
 import type {
   DiagramNext,
   DiagramScope,
@@ -8,8 +5,26 @@ import type {
   TraceState,
   WorkflowDiagram,
 } from "@grasp-os/shared/workflow-diagrams";
-import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { PencilIcon } from "lucide-react";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+} from "@grasp-os/ui/components/empty";
+import { Icon, PencilIcon } from "@grasp-os/ui/lib/icons";
+import {
+  colors,
+  duration,
+  font,
+  radius,
+  shadow,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
+import { plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
 // A workflow's diagram as core drew it from a definition that passed the
@@ -20,7 +35,75 @@ import type { ReactNode } from "react";
 // Showing it runs nothing. Steps are named by their titles, so the
 // drawing has no parts of its own. On the Flow canvas (`workflow-flow.tsx`) the same drawing reads left to right or top
 // to bottom, its own tasks cards joined by dotted lines, and a builder
-// opens one of them to change it (`onStep`).
+// opens one of them to change it (`onStep`). Its marks, buttons and empty
+// state are Damsko's; its cards, lines and lists are laid out here.
+
+const styles = stylex.create({
+  line: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["2"],
+  },
+  muted: { color: colors.mutedForeground },
+  name: { fontWeight: font.weightMedium },
+  // An ID or a literal from the definition: the quiet mono look, so it reads as an ID.
+  code: {
+    fontFamily: font.mono,
+    fontSize: font.textXs,
+    color: colors.mutedForeground,
+  },
+  // The dotted line between two cards, in the page's quiet ink.
+  wire: {
+    flexShrink: 0,
+    borderStyle: "dotted",
+    borderWidth: 0,
+    borderColor: colors.subtleForeground,
+  },
+  wireSide: { width: space["10"], borderBlockStartWidth: "2px" },
+  wireStacked: { height: space["8"], borderInlineStartWidth: "2px" },
+  list: { display: "flex" },
+  listNested: { flexDirection: "column", gap: space["2"] },
+  listSide: { flexDirection: "row", alignItems: "center" },
+  listStacked: { flexDirection: "column", alignItems: "center" },
+  itemSide: { display: "flex", flexShrink: 0, alignItems: "center" },
+  itemStacked: {
+    display: "flex",
+    flexShrink: 0,
+    flexDirection: "column",
+    alignItems: "center",
+  },
+  card: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["2"],
+    padding: space["3"],
+    backgroundColor: colors.card,
+    borderRadius: radius.base,
+    cornerShape: radius.shape,
+    transitionProperty: "box-shadow",
+    transitionDuration: duration.hover,
+    transitionTimingFunction: duration.ease,
+  },
+  // On the canvas a card is a sheet lifted off the dotted ground; in a list, an edge.
+  cardCanvas: { boxShadow: shadow.sm },
+  cardFlat: { boxShadow: size.borderStrong },
+  cardRow: { width: "20rem" },
+  scopes: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["3"],
+    paddingInlineStart: space["3"],
+    borderInlineStartWidth: size.hairline,
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: colors.border,
+  },
+  scope: { display: "flex", flexDirection: "column", gap: space["2"] },
+  drawing: { display: "flex", width: "max-content", alignItems: "center" },
+  drawingSide: { flexDirection: "row" },
+  drawingStacked: { flexDirection: "column" },
+  view: { display: "flex", flexDirection: "column", gap: space["2"] },
+});
 
 /** Where a task or case goes once done, in words; nothing for "next". */
 const NextText = ({ next }: { next: DiagramNext | null }) => {
@@ -29,13 +112,13 @@ const NextText = ({ next }: { next: DiagramNext | null }) => {
     return null;
   }
   if (next.kind === "end") {
-    return <Badge variant="outline">{t`Ends the workflow`}</Badge>;
+    return <Badge size="sm">{t`Ends the workflow`}</Badge>;
   }
   if (next.kind === "exit") {
-    return <Badge variant="outline">{t`Leaves this list`}</Badge>;
+    return <Badge size="sm">{t`Leaves this list`}</Badge>;
   }
   const { task } = next;
-  return <Badge variant="outline">{t`Then ${task}`}</Badge>;
+  return <Badge size="sm">{t`Then ${task}`}</Badge>;
 };
 
 /** How a run's journal left a task, in words. */
@@ -51,7 +134,7 @@ const StateBadge = ({ state }: { state: TraceState | undefined }) => {
     failed: t`Failed`,
   }[state];
   return (
-    <Badge variant={state === "failed" ? "attention" : "secondary"}>
+    <Badge size="sm" variant={state === "failed" ? "warning" : "default"}>
       {label}
     </Badge>
   );
@@ -69,8 +152,8 @@ const ScopeHeading = ({ scope }: { scope: DiagramScope }) => {
   ]);
   const heading = headings.get(scope.kind);
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="text-muted-foreground">{heading}</span>
+    <div {...stylex.props(styles.line)}>
+      <span {...stylex.props(styles.muted)}>{heading}</span>
       <NextText next={scope.next} />
     </div>
   );
@@ -91,12 +174,12 @@ interface Marks {
 export type Layout = "stacked" | "side";
 
 /** The dotted line between two cards on the canvas, as the drawing reads. */
-export const Wire = ({ layout }: { layout: Layout }) => (
+const Wire = ({ layout }: { layout: Layout }) => (
   <span
     aria-hidden="true"
-    className={cn(
-      "border-muted-foreground/50 flex-none border-dotted",
-      layout === "side" ? "w-10 border-t-2" : "h-8 border-l-2"
+    {...stylex.props(
+      styles.wire,
+      layout === "side" ? styles.wireSide : styles.wireStacked
     )}
   />
 );
@@ -116,11 +199,11 @@ const TaskList = ({
   row?: Layout;
 }) => (
   <ol
-    className={cn(
-      "flex",
-      row === undefined && "flex-col gap-2",
-      row === "side" && "flex-row items-center",
-      row === "stacked" && "flex-col items-center"
+    {...stylex.props(
+      styles.list,
+      row === undefined && styles.listNested,
+      row === "side" && styles.listSide,
+      row === "stacked" && styles.listStacked
     )}
   >
     {tasks.map((task) => (
@@ -130,13 +213,23 @@ const TaskList = ({
   </ol>
 );
 
-/** Its ID; a button that opens it to change it, where it may be changed. */
+/**
+ * Its name: its title where the definition gives one, else its ID in the
+ * quiet mono look, so an ID reads as one; a button that opens it to change
+ * it, where it may be changed.
+ */
 const TaskId = ({ task, marks }: { task: DiagramTask; marks: Marks }) => {
   const { t } = useLingui();
   const { onStep } = marks;
-  const { id } = task;
+  const { id, label } = task;
+  const shown =
+    label === null ? (
+      <code {...stylex.props(styles.code)}>{id}</code>
+    ) : (
+      <span {...stylex.props(styles.name)}>{label}</span>
+    );
   if (onStep === undefined) {
-    return <code className="font-medium">{id}</code>;
+    return shown;
   }
   return (
     <Button
@@ -147,8 +240,8 @@ const TaskId = ({ task, marks }: { task: DiagramTask; marks: Marks }) => {
       size="xs"
       variant="ghost"
     >
-      <code>{id}</code>
-      <PencilIcon aria-hidden="true" data-icon="inline-end" />
+      {shown}
+      <Icon icon={PencilIcon} />
     </Button>
   );
 };
@@ -168,44 +261,43 @@ const TaskItem = ({
   return (
     <li
       aria-label={task.id}
-      className={cn(
-        row === "side" && "flex flex-none items-center",
-        row === "stacked" && "flex flex-none flex-col items-center"
+      {...stylex.props(
+        row === "side" && styles.itemSide,
+        row === "stacked" && styles.itemStacked
       )}
       data-pointer={task.pointer}
       data-state={state ?? "none"}
     >
       {row === undefined ? null : <Wire layout={row} />}
       <div
-        className={cn(
-          "bg-card flex flex-col gap-2 p-3 transition-shadow",
-          marks.canvas ? "node-sheet rounded-xl" : "rounded-lg border",
-          row !== undefined && "w-80"
+        {...stylex.props(
+          styles.card,
+          marks.canvas ? styles.cardCanvas : styles.cardFlat,
+          row !== undefined && styles.cardRow
         )}
       >
-        <div className="flex flex-wrap items-center gap-2">
+        <div {...stylex.props(styles.line)}>
           <TaskId marks={marks} task={task} />
-          <Badge variant="outline">{task.kind}</Badge>
-          {task.label === null ? null : <span>{task.label}</span>}
+          <Badge size="sm">{task.kind}</Badge>
           {task.detail === null ? null : (
-            <span className="text-muted-foreground">{task.detail}</span>
+            <code {...stylex.props(styles.code)}>{task.detail}</code>
           )}
           {task.guarded ? (
-            <Badge variant="outline">{t`Only if its condition holds`}</Badge>
+            <Badge size="sm">{t`Only if its condition holds`}</Badge>
           ) : null}
           <NextText next={task.next} />
           <StateBadge state={state} />
           {attempts > 1 ? (
-            <Badge variant="outline">
-              <Plural one="# attempt" other="# attempts" value={attempts} />
+            <Badge size="sm">
+              {t`${plural(attempts, { one: "# attempt", other: "# attempts" })}`}
             </Badge>
           ) : null}
         </div>
         {task.scopes.length === 0 ? null : (
-          <div className="flex flex-col gap-3 border-l pl-3">
+          <div {...stylex.props(styles.scopes)}>
             {task.scopes.map((scope) => (
               <div
-                className="flex flex-col gap-2"
+                {...stylex.props(styles.scope)}
                 key={`${scope.kind} ${scope.name ?? ""}`}
               >
                 <ScopeHeading scope={scope} />
@@ -226,7 +318,7 @@ const noStates: ReadonlyMap<string, TraceState> = new Map();
 const noAttempts: ReadonlyMap<string, number> = new Map();
 
 /** What the canvas sets of the drawing: how it reads, and what it adds. */
-export interface CanvasOptions {
+interface CanvasOptions {
   layout: Layout;
   /** Before the workflow's first task: where it starts. */
   start: ReactNode;
@@ -252,9 +344,9 @@ const CanvasDrawing = ({
   const { layout } = canvas;
   return (
     <div
-      className={cn(
-        "flex w-max",
-        layout === "side" ? "flex-row items-center" : "flex-col items-center"
+      {...stylex.props(
+        styles.drawing,
+        layout === "side" ? styles.drawingSide : styles.drawingStacked
       )}
     >
       {canvas.start}
@@ -283,6 +375,7 @@ export const WorkflowDiagramView = ({
   label: string;
   canvas?: CanvasOptions;
 }) => {
+  const { t } = useLingui();
   const marks: Marks = {
     states,
     attempts,
@@ -290,11 +383,13 @@ export const WorkflowDiagramView = ({
     onStep: canvas?.onStep,
   };
   return (
-    <section aria-label={label} className="flex flex-col gap-2">
+    <section aria-label={label} {...stylex.props(styles.view)}>
       {diagram.tasks.length === 0 ? (
-        <p className="text-muted-foreground">
-          <Trans>It declares no tasks.</Trans>
-        </p>
+        <Empty size="sm">
+          <EmptyHeader>
+            <EmptyDescription>{t`It declares no tasks.`}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : null}
       {diagram.tasks.length > 0 && canvas !== undefined ? (
         <CanvasDrawing canvas={canvas} diagram={diagram} marks={marks} />

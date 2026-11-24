@@ -42,6 +42,18 @@ const askOnceIdle = async (chat: Locator, text: string): Promise<void> => {
 };
 
 /**
+ * That the preview says its problem is being fixed, over its corner, in
+ * words on one line: a notice too narrow for them draws them a letter a
+ * line, which a person can't read.
+ */
+const expectFixing = async (preview: Locator): Promise<void> => {
+  const words = preview.getByText("Fixing a problem…");
+  await expect(words).toBeVisible();
+  const box = await words.boundingBox();
+  expect(box?.width ?? 0).toBeGreaterThan((box?.height ?? 0) * 4);
+};
+
+/**
  * The App's own tally page, released and live, once it shows its
  * count. Its first open builds it, which on a loaded machine takes longer
  * than the default 5 seconds.
@@ -124,9 +136,10 @@ test("a chat building an App offers its workspace, whose preview changes none of
     // It makes this chat the App's, beside the draft it builds, and the
     // address lets it go.
     await expect(page).toHaveURL(new RegExp(`/apps/${app.id}$`, "u"));
-    const chatName = page.getByRole("button", {
-      name: `Chat name: Build ${tag}`,
-    });
+    // The chat's name at its head, renamed where it stands.
+    const chatName = page
+      .getByRole("region", { name: "Chat" })
+      .getByRole("button", { name: `Build ${tag}`, exact: true });
     await expect(chatName).toBeVisible();
     // There, the draft this chat builds is the preview, not the live App.
     // Shared with nobody yet: Share with your team is on.
@@ -274,7 +287,7 @@ test("an App's own chat writes its page and server code, and its workspace previ
       "server code doesn't build",
       { timeout: 10_000 }
     );
-    await expect(preview.getByText("Fixing a problem…")).toBeVisible();
+    await expectFixing(preview);
     expect(await preview.locator("iframe").boundingBox()).toStrictEqual(
       shownAt
     );
@@ -299,24 +312,27 @@ test("an App's own chat writes its page and server code, and its workspace previ
       .getByRole("link", { name: "Code" })
       .click();
     // Its tree: folders first, each open, then the files, each by name.
-    const files = page.getByRole("navigation", { name: "Files" });
-    await expect(files.getByRole("button")).toHaveText([
-      "server",
-      "schema.ts",
-      "tally.ts",
-      "src",
-      "routes",
-      "index.tsx",
-      "grasp.config.ts",
-    ]);
-    await files.getByRole("button", { name: "index.tsx" }).click();
+    const files = page.getByRole("tree", { name: "Files" });
+    await expect(files).toMatchAriaSnapshot(`
+      - tree "Files":
+        - treeitem "server" [expanded]:
+          - group:
+            - treeitem "schema.ts"
+            - treeitem "tally.ts"
+        - treeitem "src" [expanded]:
+          - group:
+            - treeitem "routes" [expanded]:
+              - group:
+                - treeitem "index.tsx"
+        - treeitem "grasp.config.ts"
+    `);
+    await files.getByRole("treeitem", { name: "index.tsx" }).click();
+    // The open file, headed by its path.
     const code = page.getByRole("region", {
       name: "Code of src/routes/index.tsx",
     });
+    await expect(code).toContainText("src/routes/index.tsx");
     await expect(code).toContainText("Add more");
-    await expect(
-      page.getByRole("navigation", { name: "Open file" })
-    ).toHaveText(/src.*routes.*index\.tsx/u);
   } finally {
     core[Symbol.dispose]();
   }
@@ -410,7 +426,7 @@ test("a preview opened on a draft that doesn't build shows the App's latest vers
     await expect(frame.getByRole("status")).toHaveText("0 in the preview", {
       timeout: 30_000,
     });
-    await expect(preview.getByText("Fixing a problem…")).toBeVisible();
+    await expectFixing(preview);
 
     await askOnceIdle(chat, "Fix the page.");
     await expect(chat.getByText("The tally works now.")).toBeVisible({

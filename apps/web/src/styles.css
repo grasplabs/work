@@ -1,4 +1,68 @@
 @import "@grasp-os/app-kit/styles.css";
+/*
+ * Damsko's styles (packages/ui), for the components that are Damsko's,
+ * beside the kit's theme: its tokens under its own names (--damsko-*), its
+ * modes (the root's `data-mode`, which public/theme.js writes) and its
+ * fonts, served from this origin. Not its base.css: Tailwind's preflight is
+ * the reset here.
+ */
+@import "@grasp-os/ui/styles/tokens.css";
+@import "@grasp-os/ui/styles/themes.css";
+@import "@grasp-os/ui/styles/fonts.css";
+
+/*
+ * The token bridge: the kit's page colours, read from Damsko's tokens, so
+ * a page still on the kit stands on the same ground, ink and hairlines as
+ * the Damsko components beside it, in light and in dark (Damsko's follow
+ * the root's `data-mode`, which public/theme.js writes with the kit's
+ * `dark` class). So these colours change on the kit's pages too, a little:
+ * a page gets Damsko's own as its area moves onto Damsko. Only the
+ * meanings the two themes share one to one. The kit's sidebar, its
+ * buttons' fills and its fields keep the kit's own values: Damsko pairs
+ * those differently, and they change with the frame itself. For this app
+ * alone, never App pages. It goes when the kit leaves the frontend.
+ *
+ * The kit's muted fill (a view switch, a strip of tabs, a sticky header
+ * row) is opaque, as the kit's own was, so nothing shows through it: in
+ * light Damsko's muted; in dark Damsko's muted lies almost on the page's
+ * card (1.02:1), where the kit's stood out from its page (1.22:1), so it
+ * is the page's card with a little of the light that Damsko's dark
+ * control-hover lays over it (12% of it there): 9% of it stands out
+ * 1.25:1, and stays apart from the hairline, which is that light at 12%
+ * (e2e/frame.e2e.ts).
+ */
+:root,
+.dark {
+  --background: var(--damsko-background);
+  --foreground: var(--damsko-foreground);
+  --card: var(--damsko-card);
+  --card-foreground: var(--damsko-foreground);
+  --popover: var(--damsko-popover);
+  --popover-foreground: var(--damsko-foreground);
+  --muted: light-dark(
+    var(--damsko-muted),
+    color-mix(in srgb, var(--damsko-sidebar-card) 91%, oklch(0.96 0.02 150))
+  );
+  --muted-foreground: var(--damsko-muted-foreground);
+  --border: var(--damsko-border);
+  --destructive: var(--damsko-destructive);
+  --ring: var(--damsko-ring);
+  --status-agreed: var(--damsko-success);
+  --status-attention: var(--damsko-warning);
+}
+
+/*
+ * Paper is light, as the kit's theme has it (packages/app-kit/src/styles.css):
+ * in print every colour of Damsko's, and of the kit's read from them above,
+ * takes its light side, whatever the mode on screen, so a page printed from
+ * dark isn't light text on white.
+ */
+@media print {
+  :root,
+  :root[data-mode] {
+    color-scheme: light;
+  }
+}
 /* The theme's sans, bundled so it is served from this origin (the CSP's default-src). */
 @import "@fontsource-variable/geist";
 /*
@@ -31,86 +95,14 @@
   }
 }
 
-/* The frame's sizes: the app's sidebar and the bar above each page. */
+/*
+ * The height of the bar above each page, as the kit's page header
+ * (packages/app-kit's site-header.tsx) and the pages sized under it read it.
+ */
 @layer base {
   [data-slot="sidebar-wrapper"] {
-    --sidebar-width: calc(var(--spacing) * 60);
     --header-height: calc(var(--spacing) * 12);
   }
-}
-
-/*
- * From the prototype (packages/grasp/src/index.css), the chat's own motion.
- */
-/*
- * Grasp's line while it reads, before the answer starts: a light that runs
- * through the words (the prototype's Shimmer, without a script).
- */
-@keyframes shimmer-run {
-  from {
-    background-position: 100% center;
-  }
-  to {
-    background-position: 0% center;
-  }
-}
-@utility shimmer-text {
-  background-image:
-    linear-gradient(
-      90deg,
-      transparent calc(50% - 2.5rem),
-      var(--color-background),
-      transparent calc(50% + 2.5rem)
-    ),
-    linear-gradient(
-      var(--color-muted-foreground),
-      var(--color-muted-foreground)
-    );
-  background-size:
-    250% 100%,
-    auto;
-  background-repeat: no-repeat, padding-box;
-  background-clip: text;
-  color: transparent;
-  animation: shimmer-run 2s linear infinite;
-  @media (prefers-reduced-motion: reduce) {
-    animation: none;
-  }
-}
-
-/* A document added to the chat: a thin line fills once under it. */
-@keyframes upload-fill {
-  from {
-    transform: scaleX(0);
-  }
-  to {
-    transform: scaleX(1);
-  }
-}
-@utility animate-upload-fill {
-  transform-origin: left;
-  animation: upload-fill 300ms cubic-bezier(0.2, 0.7, 0.2, 1) forwards;
-}
-
-/* A document Grasp is reading: a soft light sweeps across it until the answer starts. */
-@keyframes read-sweep {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(100%);
-  }
-}
-@utility animate-read-sweep {
-  animation: read-sweep 1.6s ease-in-out infinite;
-}
-@utility read-light {
-  background-image: linear-gradient(
-    90deg,
-    transparent,
-    color-mix(in oklch, var(--foreground) 8%, transparent),
-    transparent
-  );
 }
 
 /**
@@ -305,17 +297,6 @@
     transform: scale(1.3);
     opacity: 1;
   }
-}
-
-/* The inbox fills the window under the site header, inside the inset frame's margins, so its
-   list and its item each scroll on their own. */
-@utility h-inbox {
-  height: calc(100svh - var(--header-height) - 1rem);
-}
-
-/* The inbox's columns: a wide list, the item beside it narrower. */
-@utility grid-cols-inbox {
-  grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
 }
 
 /* Room at the foot of whatever scrolls up and down into the bottom right corner, where the chat
@@ -967,62 +948,6 @@
 }
 
 /*
- * Code in the agent's answers (chat/answer-markdown.tsx), highlighted by
- * class (rehype-highlight): coloured from the theme's tokens, so it follows
- * light and dark, and set without any inline style (the `no-inline-styles`
- * lint rule).
- */
-@layer components {
-  .hljs-comment,
-  .hljs-quote {
-    color: var(--muted-foreground);
-    font-style: italic;
-  }
-
-  .hljs-keyword,
-  .hljs-selector-tag,
-  .hljs-built_in,
-  .hljs-doctag {
-    color: var(--syntax-keyword);
-  }
-
-  .hljs-string,
-  .hljs-regexp,
-  .hljs-symbol {
-    color: var(--syntax-string);
-  }
-
-  .hljs-number,
-  .hljs-literal,
-  .hljs-variable.constant_ {
-    color: var(--syntax-constant);
-  }
-
-  .hljs-title,
-  .hljs-type,
-  .hljs-section,
-  .hljs-attr,
-  .hljs-attribute,
-  .hljs-name,
-  .hljs-property {
-    color: var(--syntax-function);
-  }
-
-  .hljs-addition {
-    color: var(--status-agreed);
-  }
-
-  .hljs-deletion {
-    color: var(--destructive);
-  }
-
-  .hljs-meta,
-  .hljs-punctuation {
-    color: var(--muted-foreground);
-  }
-}
-
-/*
  * An App's Code view (apps/code-view.tsx): @pierre/diffs draws each
  * file and diff in a shadow root, coloured by its custom properties, which
  * reach in from here. Its theme ("grasp", a theme of CSS variables) names
@@ -1062,26 +987,5 @@
 
   .dark diffs-container {
     color-scheme: dark;
-  }
-}
-
-/*
- * A beat's thread in the small picture of Grasp's thinking in an answer
- * (chat/thinking-card.tsx): it grows from the one before to the one the
- * beat names.
- */
-@keyframes draw-thread {
-  from {
-    stroke-dashoffset: 1;
-  }
-  to {
-    stroke-dashoffset: 0;
-  }
-}
-
-@utility draw-thread {
-  animation: draw-thread 300ms ease-out both;
-  @media (prefers-reduced-motion: reduce) {
-    animation: none;
   }
 }

@@ -402,17 +402,26 @@ describe(inboxItems, () => {
 
     const titles = inboxItems(read, admin, readAt)
       .filter(({ kind }) => kind === "permissionRequest")
-      .map(({ context }) => context);
+      .map(({ title }) => title);
 
-    expect(titles.toSorted()).toStrictEqual(
-      [
-        "Schedule trigger (On the schedule 0 9 * * 1-5, in Europe/Berlin): start on Workflow workflow-1",
-        "Connection trigger (New mail in Microsoft 365, at connection-1): mail.list on Connection connection-1",
-        "Email trigger (When an email arrives at its own address): start on Workflow workflow-1",
-        "Webhook trigger (On order.paid events from Shop system): start on Workflow workflow-1",
-        "Trigger unknown-1: start on Workflow workflow-1",
-      ].toSorted()
+    // A schedule says what it is, never its cron.
+    const scheduled = titles.filter(
+      (title): boolean => title === "Grant Schedule for workflow-1?"
     );
+    expect({
+      scheduled: scheduled.length,
+      cron: scheduled.some((title) => title.includes("* *")),
+      others: titles.filter((title) => !scheduled.includes(title)).toSorted(),
+    }).toStrictEqual({
+      scheduled: 1,
+      cron: false,
+      others: [
+        "Grant Connection trigger (New mail in Microsoft 365, at connection-1): mail.list on Connection connection-1?",
+        "Grant Email trigger (When an email arrives at its own address): start on Workflow workflow-1?",
+        "Grant Webhook trigger (On order.paid events from Shop system): start on Workflow workflow-1?",
+        "Grant Trigger unknown-1: start on Workflow workflow-1?",
+      ].toSorted(),
+    });
   });
 
   it("puts what blocks something first, then the newest", () => {
@@ -456,27 +465,13 @@ describe(inboxItems, () => {
 describe(listed, () => {
   const items = inboxItems(waiting(), admin, readAt);
 
-  it("keeps the inbox's own order unless asked for another", () => {
-    expect(listed(items, "all", "urgent")).toStrictEqual(items);
-    const oldest = listed(items, "all", "oldest").map(({ date }) => date);
-    expect(oldest).toStrictEqual(oldest.toSorted());
-    const newest = listed(items, "all", "newest").map(({ date }) => date);
-    expect(newest).toStrictEqual(newest.toSorted().toReversed());
+  it("keeps the inbox's own order", () => {
+    expect(listed(items, "all")).toStrictEqual(items);
   });
 
-  it("shows one group of kinds when asked", () => {
+  it("shows one group of kinds when asked: what was asked of the person, or every approval", () => {
     expect(
-      listed(items, "workflows", "urgent").map(({ kind }) => kind)
-    ).toStrictEqual([
-      "decision",
-      "bindingApproval",
-      "stoppedEvents",
-      "heldStart",
-      "stoppedSchedule",
-      "workflowChanged",
-    ]);
-    expect(
-      listed(items, "brain", "urgent").map(({ kind, title, about }) => ({
+      listed(items, "asked").map(({ kind, title, about }) => ({
         kind,
         title,
         about,
@@ -508,7 +503,9 @@ describe(listed, () => {
         section: "triggers",
       },
     });
-    expect(listed(items, "apps", "urgent")).toHaveLength(items.length - 7);
+    // Workflows' and Apps' asks are one group: everything else.
+    expect(listed(items, "approvals")).toHaveLength(items.length - 1);
+    expect(listed(items, "brain")).toStrictEqual([]);
   });
 });
 

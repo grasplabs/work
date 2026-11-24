@@ -4,6 +4,7 @@ import type { WebSocketRoute } from "@playwright/test";
 import { test } from "./csp.ts";
 import { appPlanned, appReady, modelScripts } from "./model-scripts.ts";
 import { peopleIn } from "./people.ts";
+import { toastSaying } from "./said.ts";
 
 // An App, end to end, as a builder makes one: Make something, what they
 // want to get done, Grasp's plan, Build it, and the chat building it (the
@@ -100,12 +101,12 @@ test("a builder makes an App from what they want done, shares it with their team
     uncaught.push(error.message);
   });
 
-  // Make something: Chat's page, what they want done, and Grasp's plan
+  // Build new app: Chat's page, what they want done, and Grasp's plan
   // for it in the chat. Nothing is made until Build it; then Grasp builds
   // it in the chat, ticking off what it does, and offers to open the App,
   // where the same chat docks beside it.
   await page.goto("/apps");
-  await page.getByRole("link", { name: "Make something" }).click();
+  await page.getByRole("link", { name: "Build new app" }).click();
   await expect(page).toHaveURL(/\/\?make=app$/u);
   await expect(
     page.getByRole("heading", { name: "What do you want to get done?" })
@@ -131,10 +132,12 @@ test("a builder makes an App from what they want done, shares it with their team
 
   // The chat read how an App is written, wrote it, and said so.
   const chat = page.getByRole("region", { name: "Chat" });
-  await expect(chat.getByText("Read /guides/project in the docs")).toBeVisible(
-    agentTurn
-  );
   await expect(chat.getByText(appReady)).toBeVisible(agentTurn);
+  // What it did is folded into one line: open, it lists each step.
+  await chat.getByRole("button", { name: /\d+ steps/u }).click();
+  await expect(
+    chat.getByText("Read /guides/project in the docs")
+  ).toBeVisible();
   // Where it stands, in the bar: beside the docked chat it gives way to
   // the name and Share, so it is there, unseen.
   await expect(page.getByText("Only you see this")).toBeAttached();
@@ -164,7 +167,7 @@ test("a builder makes an App from what they want done, shares it with their team
     .check();
   blip.sharing = true;
   await sharing.getByRole("button", { name: "Share", exact: true }).click();
-  await expect(page.getByText("Shared with Person")).toBeVisible(built);
+  await expect(toastSaying(page, "Shared with Person")).toBeVisible(built);
   // Its read again after sharing lost its connection: Grasp can't be
   // reached, until a connection answers again, when the page reads the
   // App by itself, with no Try again.
@@ -212,8 +215,10 @@ test("a builder makes an App from what they want done, shares it with their team
     .getByRole("navigation", { name: "Workspace views" })
     .getByRole("link", { name: "Data" })
     .click();
-  await expect(page.getByRole("cell", { name: "Grace Hopper" })).toBeVisible(
-    built
-  );
-  await expect(page.getByRole("cell", { name: "Ada Lovelace" })).toHaveCount(0);
+  await expect(
+    page.getByRole("rowheader", { name: "Grace Hopper" })
+  ).toBeVisible(built);
+  await expect(
+    page.getByRole("rowheader", { name: "Ada Lovelace" })
+  ).toHaveCount(0);
 });

@@ -59,6 +59,7 @@ import { Route as ShellSettingsWebhooksRouteImport } from './routes/_shell.setti
 import { Route as ShellSettingsWorkspaceRouteImport } from './routes/_shell.settings.workspace'
 import { Route as ShellWorkflowsIndexRouteImport } from './routes/_shell.workflows.index'
 import { Route as ShellWorkflowsWorkflowRouteImport } from './routes/_shell.workflows.$workflow'
+import { Route as ShellWorkflowsRunsRouteImport } from './routes/_shell.workflows.runs'
 import { Route as AppsAppDraftRouteImport } from './routes/apps.$app.draft'
 import { Route as AppsAppFullRouteImport } from './routes/apps.$app.full'
 import { Route as KitComponentsNameRouteImport } from './routes/kit_.components.$name'
@@ -321,6 +322,11 @@ const ShellWorkflowsWorkflowRoute = ShellWorkflowsWorkflowRouteImport.update({
   path: '/workflows/$workflow',
   getParentRoute: () => ShellRoute,
 } as any)
+const ShellWorkflowsRunsRoute = ShellWorkflowsRunsRouteImport.update({
+  id: '/workflows/runs',
+  path: '/workflows/runs',
+  getParentRoute: () => ShellRoute,
+} as any)
 const AppsAppDraftRoute = AppsAppDraftRouteImport.update({
   id: '/apps/$app/draft',
   path: '/apps/$app/draft',
@@ -411,6 +417,7 @@ export interface FileRoutesByFullPath {
   '/settings/webhooks': typeof ShellSettingsWebhooksRoute
   '/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
+  '/workflows/runs': typeof ShellWorkflowsRunsRoute
   '/apps/$app/draft': typeof AppsAppDraftRouteWithChildren
   '/apps/$app/full': typeof AppsAppFullRouteWithChildren
   '/kit/components/$name': typeof KitComponentsNameRoute
@@ -469,6 +476,7 @@ export interface FileRoutesByTo {
   '/settings/webhooks': typeof ShellSettingsWebhooksRoute
   '/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
+  '/workflows/runs': typeof ShellWorkflowsRunsRoute
   '/apps/$app/draft': typeof AppsAppDraftRouteWithChildren
   '/apps/$app/full': typeof AppsAppFullRouteWithChildren
   '/kit/components/$name': typeof KitComponentsNameRoute
@@ -531,6 +539,7 @@ export interface FileRoutesById {
   '/_shell/settings/webhooks': typeof ShellSettingsWebhooksRoute
   '/_shell/settings/workspace': typeof ShellSettingsWorkspaceRoute
   '/_shell/workflows/$workflow': typeof ShellWorkflowsWorkflowRoute
+  '/_shell/workflows/runs': typeof ShellWorkflowsRunsRoute
   '/apps/$app/draft': typeof AppsAppDraftRouteWithChildren
   '/apps/$app/full': typeof AppsAppFullRouteWithChildren
   '/kit_/components/$name': typeof KitComponentsNameRoute
@@ -593,6 +602,7 @@ export interface FileRouteTypes {
     | '/settings/webhooks'
     | '/settings/workspace'
     | '/workflows/$workflow'
+    | '/workflows/runs'
     | '/apps/$app/draft'
     | '/apps/$app/full'
     | '/kit/components/$name'
@@ -651,6 +661,7 @@ export interface FileRouteTypes {
     | '/settings/webhooks'
     | '/settings/workspace'
     | '/workflows/$workflow'
+    | '/workflows/runs'
     | '/apps/$app/draft'
     | '/apps/$app/full'
     | '/kit/components/$name'
@@ -712,6 +723,7 @@ export interface FileRouteTypes {
     | '/_shell/settings/webhooks'
     | '/_shell/settings/workspace'
     | '/_shell/workflows/$workflow'
+    | '/_shell/workflows/runs'
     | '/apps/$app/draft'
     | '/apps/$app/full'
     | '/kit_/components/$name'
@@ -1099,6 +1111,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellWorkflowsWorkflowRouteImport
       parentRoute: typeof ShellRoute
     }
+    '/_shell/workflows/runs': {
+      id: '/_shell/workflows/runs'
+      path: '/workflows/runs'
+      fullPath: '/workflows/runs'
+      preLoaderRoute: typeof ShellWorkflowsRunsRouteImport
+      parentRoute: typeof ShellRoute
+    }
     '/apps/$app/draft': {
       id: '/apps/$app/draft'
       path: '/apps/$app/draft'
@@ -1258,6 +1277,7 @@ interface ShellRouteChildren {
   ShellIntegrationsIntegrationRoute: typeof ShellIntegrationsIntegrationRoute
   ShellProjectsProjectIdRoute: typeof ShellProjectsProjectIdRoute
   ShellWorkflowsWorkflowRoute: typeof ShellWorkflowsWorkflowRoute
+  ShellWorkflowsRunsRoute: typeof ShellWorkflowsRunsRoute
   ShellAgentsIndexRoute: typeof ShellAgentsIndexRoute
   ShellAppsIndexRoute: typeof ShellAppsIndexRoute
   ShellIntegrationsIndexRoute: typeof ShellIntegrationsIndexRoute
@@ -1279,6 +1299,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellIntegrationsIntegrationRoute: ShellIntegrationsIntegrationRoute,
   ShellProjectsProjectIdRoute: ShellProjectsProjectIdRoute,
   ShellWorkflowsWorkflowRoute: ShellWorkflowsWorkflowRoute,
+  ShellWorkflowsRunsRoute: ShellWorkflowsRunsRoute,
   ShellAgentsIndexRoute: ShellAgentsIndexRoute,
   ShellAppsIndexRoute: ShellAppsIndexRoute,
   ShellIntegrationsIndexRoute: ShellIntegrationsIndexRoute,

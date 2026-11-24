@@ -1,6 +1,6 @@
 import { decisionErrors } from "@grasp-os/shared/decisions";
 
-import type { PendingConfirmation } from "../decision-confirmation.tsx";
+import type { PendingConfirmation } from "../inbox/decision-confirmation.tsx";
 
 // The answers one frame's page asks the person to confirm, in Grasp's
 // own dialog outside the frame (decision-confirmation.tsx): pure logic,

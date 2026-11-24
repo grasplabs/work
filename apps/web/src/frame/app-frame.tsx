@@ -1,31 +1,141 @@
-import {
-  AppShell,
-  AppShellContent,
-  AppShellDock,
-  AppShellMain,
-} from "@grasp-os/app-kit/components/app-shell";
-import { Toaster } from "@grasp-os/app-kit/components/toast";
-import { TooltipProvider } from "@grasp-os/app-kit/components/tooltip";
+import { Toaster as KitToaster } from "@grasp-os/app-kit/components/toast";
+import { TooltipProvider as KitTooltipProvider } from "@grasp-os/app-kit/components/tooltip";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { useState } from "react";
+import { SidebarInset, SidebarProvider } from "@grasp-os/ui/components/sidebar";
+import { Toaster } from "@grasp-os/ui/components/toast";
+import { duration, space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
+import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
-import { keepFolded, readFolded } from "../fold.ts";
 import { AiKeyBanner, providersOf } from "./ai-key-banner.tsx";
 import type { FailingProvider } from "./ai-key-banner.tsx";
 import { AppSidebar } from "./app-sidebar.tsx";
 import { InFrame } from "./in-frame.ts";
+import { PageWithPanel } from "./page-panel.tsx";
 
 /**
- * The signed-in product's frame (the kit's AppShell): the app's sidebar
- * beside the page, which scrolls inside its card so its site header stays
- * in view; over the page, at its foot, what stays at hand on every page
- * (`dock`); and beside or over the page, its panels (`panels`): an App's
- * page opened beside it, and Grasp's chat. The shell's pages are in it,
- * with all of them, and a page
- * outside the shell for someone signed in, such as a decision opened from
- * a link, with none of them.
+ * Where the person's sidebar choices are kept in this browser: whether it
+ * is folded, and which of its groups (SidebarCollapsible) are.
+ */
+export const sidebarKey = "grasp.sidebar";
+
+const styles = stylex.create({
+  // What the card holds, laid over its box, as Damsko's app-shell-01 lays
+  // it: the card is as tall as the window, never as the page, so the page
+  // scrolls inside it and its bar (SiteHeader) stays.
+  frame: {
+    position: "absolute",
+    inset: 0,
+    display: "flex",
+    flexDirection: "column",
+    overflow: "clip",
+    borderRadius: "inherit",
+  },
+  // The page, under the banner: it scrolls up and down only, what is wider
+  // than the card is cut at its edge. Laid out down the card, at least as
+  // tall as it, as the pages expect (Chat's start fills it).
+  page: {
+    display: "flex",
+    flexDirection: "column",
+    boxSizing: "border-box",
+    height: "100%",
+    minHeight: 0,
+    overflowX: "clip",
+    overflowY: "auto",
+    scrollbarWidth: "none",
+    // A panel gone full screen lies over the card: the page fades out
+    // under it, and back a beat after the panel starts to leave.
+    transitionProperty: "opacity",
+    transitionDuration: duration.ui,
+    transitionTimingFunction: duration.ease,
+    transitionDelay: duration.press,
+  },
+  covered: { opacity: 0, transitionDelay: "0s" },
+  // Over the page, centred at the card's foot, clear of its edges: what
+  // stays at hand on every page. Not in the card's own box, which is the
+  // main landmark (SidebarInset), so it is no part of the page's content:
+  // over it, on the card's edges as the card publishes them. Presses go
+  // through where it has nothing.
+  dock: {
+    position: "fixed",
+    insetInlineStart: `calc(var(--app-shell-main-left, 0px) + ${space["4"]})`,
+    insetInlineEnd: `calc(var(--app-shell-main-right, 0px) + ${space["4"]})`,
+    insetBlockEnd: `calc(var(--app-shell-main-bottom, 0px) + ${space["4"]})`,
+    zIndex: 30,
+    display: "flex",
+    justifyContent: "center",
+    pointerEvents: "none",
+    transitionProperty: "opacity",
+    transitionDuration: duration.ui,
+    transitionTimingFunction: duration.ease,
+  },
+  // What it holds takes presses again: inherited, through a wrapper that
+  // draws no box of its own.
+  docked: { display: "contents", pointerEvents: "auto" },
+});
+
+/**
+ * Says where the page's column stands in the window, on the document, as
+ * the sidebar folds, a panel opens beside it and the window resizes: its
+ * start, the card's, for the chat gone full screen over it (the kit's
+ * DockablePanel reads `--app-shell-main-left`), and its end and foot for
+ * the dock, which so stands in the middle of the page and not of its panel.
+ */
+const usePublishedPage = () => {
+  const page = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = page.current;
+    if (element === null) {
+      return () => {
+        // Nothing was watched.
+      };
+    }
+    const root = document.documentElement;
+    const publish = () => {
+      const box = element.getBoundingClientRect();
+      root.style.setProperty("--app-shell-main-left", `${box.left}px`);
+      root.style.setProperty(
+        "--app-shell-main-right",
+        `${root.clientWidth - box.right}px`
+      );
+      root.style.setProperty(
+        "--app-shell-main-bottom",
+        `${root.clientHeight - box.bottom}px`
+      );
+    };
+    publish();
+    const observer = new ResizeObserver(publish);
+    observer.observe(element);
+    observer.observe(root);
+    return () => {
+      observer.disconnect();
+      for (const edge of ["left", "right", "bottom"]) {
+        root.style.removeProperty(`--app-shell-main-${edge}`);
+      }
+    };
+  }, []);
+  return page;
+};
+
+/**
+ * The signed-in product's frame, on Damsko: its Sidebar beside the page,
+ * or a sheet from the start on a narrow window, folded as the person left
+ * it (`storageKey`); the page as a card on the sidebar's ground
+ * (SidebarInset, the main landmark), the AI providers' banner across its
+ * top, the page under it with its own bar (SiteHeader) and, when the page
+ * has one, its side panel (page-panel.tsx), and over its foot what stays
+ * at hand on every page (`dock`); beside or over the page, its panels
+ * (`panels`), Grasp's chat. The shell's pages are in it, with all
+ * of them, and a page outside the shell for someone signed in, such as a
+ * decision opened from a link, with none of them.
+ *
+ * Composed from the parts Damsko's app-shell-01 composes, the way it lays
+ * them, not the block itself: the block keeps the fold to itself, draws the
+ * page's bar from props, and has one resizable panel and no dock, where
+ * here each page draws its bar and the chat docks, floats and covers the
+ * page. It moves onto the block once the block takes those.
  */
 export const AppFrame = ({
   core,
@@ -42,41 +152,57 @@ export const AppFrame = ({
   failing?: FailingProvider[];
   /** Over the page, centred at its foot: the chat's idle bar. */
   dock?: ReactNode;
-  /** Beside or over the page: an App's page opened beside it, and the chat. */
+  /** Beside or over the page: the chat. */
   panels?: ReactNode;
   /** A panel is full screen over the page, whose content fades out under it. */
   covered?: boolean;
   children: ReactNode;
 }) => {
-  // Folded as the person left it in this browser.
-  const [open, setOpen] = useState(() => readFolded("sidebar") !== true);
+  const page = usePublishedPage();
   return (
-    // What the frame says of an action outside any page, such as a
-    // sign-out from the person menu that core didn't carry out.
-    <Toaster>
-      <TooltipProvider>
-        <AppShell
-          onOpenChange={(next) => {
-            setOpen(next);
-            void keepFolded("sidebar", !next);
-          }}
-          open={open}
-        >
+    // Damsko's Toaster (below) is the app's one place for toasts: a page
+    // mounts none of its own and calls Damsko's `toast`. The kit's stays
+    // only for the four files that still call the kit's `toast.add`
+    // (copy.ts, chat/chat-more.tsx, drafts/share-with-team.tsx,
+    // brain/memories-page.tsx), each toast in the one region of the API it
+    // was given to; it goes with the last of them. The kit's tooltips are
+    // for the pages still on the kit.
+    <KitToaster>
+      <KitTooltipProvider>
+        <SidebarProvider storageKey={sidebarKey}>
           <AppSidebar core={core} identity={identity} />
-          <AppShellMain covered={covered}>
-            <AppShellContent>
+          <SidebarInset>
+            <div {...stylex.props(styles.frame)}>
               <AiKeyBanner
                 failing={failing}
                 identity={identity}
                 providers={providersOf(core)}
               />
-              <InFrame value>{children}</InFrame>
-            </AppShellContent>
-            {dock === undefined ? null : <AppShellDock>{dock}</AppShellDock>}
-          </AppShellMain>
+              <PageWithPanel>
+                <div
+                  data-slot="app-shell-page"
+                  inert={covered}
+                  ref={page}
+                  {...stylex.props(styles.page, covered && styles.covered)}
+                >
+                  <InFrame value>{children}</InFrame>
+                </div>
+              </PageWithPanel>
+            </div>
+          </SidebarInset>
+          {dock === undefined ? null : (
+            <div
+              data-slot="app-shell-dock"
+              inert={covered}
+              {...stylex.props(styles.dock, covered && styles.covered)}
+            >
+              <div {...stylex.props(styles.docked)}>{dock}</div>
+            </div>
+          )}
           {panels}
-        </AppShell>
-      </TooltipProvider>
-    </Toaster>
+        </SidebarProvider>
+        <Toaster />
+      </KitTooltipProvider>
+    </KitToaster>
   );
 };

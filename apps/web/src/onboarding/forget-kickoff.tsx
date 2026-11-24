@@ -1,3 +1,5 @@
+import { onboardingErrors } from "@grasp-os/shared/onboarding";
+import type { OnboardingView } from "@grasp-os/shared/onboarding";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -5,17 +7,26 @@ import {
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
-  AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/app-kit/components/alert-dialog";
-import { Button } from "@grasp-os/app-kit/components/button";
-import { onboardingErrors } from "@grasp-os/shared/onboarding";
-import type { OnboardingView } from "@grasp-os/shared/onboarding";
+} from "@grasp-os/ui/components/alert-dialog";
+import { Button } from "@grasp-os/ui/components/button";
+import { Text } from "@grasp-os/ui/components/text";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
+
+const styles = stylex.create({
+  forget: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: space[2],
+  },
+});
 
 // The admin deletes the kickoff, Grasp's first conversation with the
 // sponsor, for good (GRA-1897): its transcript and everything drawn from
@@ -60,15 +71,19 @@ export const ForgetKickoff = ({
   };
   if (forgotten) {
     return (
-      <output aria-live="polite" className="text-muted-foreground text-sm">
-        {t`Forgotten. Nothing of our first conversation is kept.`}
+      <output aria-live="polite">
+        <Text as="span" size="sm" color="muted">
+          {t`Forgotten. Nothing of our first conversation is kept.`}
+        </Text>
       </output>
     );
   }
   if (kickoff === "erasing") {
     return (
-      <output aria-live="polite" className="text-muted-foreground text-sm">
-        {t`Our first conversation is deleted. I’m still erasing what I took from it, and I finish that by myself.`}
+      <output aria-live="polite">
+        <Text as="span" size="sm" color="muted">
+          {t`Our first conversation is deleted. I’m still erasing what I took from it, and I finish that by myself.`}
+        </Text>
       </output>
     );
   }
@@ -76,7 +91,7 @@ export const ForgetKickoff = ({
     return null;
   }
   return (
-    <div className="flex flex-col items-center gap-2">
+    <div {...stylex.props(styles.forget)}>
       <Button
         disabled={busy}
         onClick={() => {
@@ -90,17 +105,14 @@ export const ForgetKickoff = ({
       <ErrorText>{failure}</ErrorText>
       <AlertDialog onOpenChange={setOpen} open={open}>
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t`Forget our first conversation?`}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t`I delete what was said and everything I took from it: what I know about your company from it, and what your Brain learned from it. I then know less about your company, which can put off the day your Grasp opens. This can’t be undone.`}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+          <AlertDialogTitle>{t`Forget our first conversation?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t`I delete what was said and everything I took from it: what I know about your company from it, and what your Brain learned from it. I then know less about your company, which can put off the day your Grasp opens. This can’t be undone.`}
+          </AlertDialogDescription>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t`Cancel`}</AlertDialogCancel>
+            <AlertDialogCancel />
             <AlertDialogAction
-              onClick={() => {
-                setOpen(false);
+              action={() => {
                 void forget();
               }}
               variant="destructive"

@@ -15,9 +15,16 @@ import {
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
-import { RunSheet } from "./run-detail.tsx";
+import { RunBeside } from "./run-detail.tsx";
 
 // What a reader can do with a run opened beside the page, against core's
 // workflowResources as the page reaches them over RPC, faked: a builder
@@ -80,7 +87,7 @@ const opened = async (role: MemberRole, files: RunFileListing[] | null) => {
     getParentRoute: () => rootRoute,
     path: "/",
     component: () => (
-      <RunSheet
+      <RunBeside
         admin={false}
         names={{ people: new Map(), me: "ada" }}
         onClose={() => {}}
@@ -112,10 +119,22 @@ const opened = async (role: MemberRole, files: RunFileListing[] | null) => {
   return { stopped };
 };
 
+/**
+ * A button's words, as shown: a Damsko Button that says how its press went
+ * stacks its words over the words for each state, in one cell, the words
+ * first; the others are what it keeps for its width.
+ */
+const shownWords = (each: Element): string =>
+  (
+    each.querySelector(
+      "[data-slot=button-content] > span:first-child:not(:only-child)"
+    ) ?? each
+  ).textContent.trim();
+
 /** The button whose text is `text`. */
 const button = (text: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll("button")].find(
-    (each) => each.textContent.trim() === text
+    (each) => shownWords(each) === text
   );
 
 /** Presses the button whose text is `text`, and lets what it does settle. */
@@ -127,7 +146,15 @@ const press = async (text: string): Promise<void> => {
 };
 
 describe("a run opened beside the page", () => {
+  // A phone's page: the run opens in a Sheet over its list.
+  beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ width: 390, height: 600 })
+    );
+  });
+
   afterEach(() => {
+    vi.restoreAllMocks();
     act(() => {
       root?.unmount();
     });

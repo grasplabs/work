@@ -141,7 +141,8 @@ describe("blueprints", () => {
     await click("Save as blueprint");
     const asked = document.querySelector("h2")?.textContent;
     const saveButtons = [...document.querySelectorAll("button")].filter(
-      (each) => each.textContent === "Save as blueprint"
+      // Its words come first; what it says once done or failed follows.
+      (each) => each.textContent?.startsWith("Save as blueprint")
     );
     await act(async () => {
       saveButtons.at(-1)?.click();

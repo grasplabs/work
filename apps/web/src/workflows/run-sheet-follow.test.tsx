@@ -12,9 +12,16 @@ import {
 import { act, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vite-plus/test";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vite-plus/test";
 
-import { RunSheet } from "./run-detail.tsx";
+import { RunBeside } from "./run-detail.tsx";
 import { followedState } from "./traces.tsx";
 
 // A builder's open run sheet, its facts following the run as its steps
@@ -105,7 +112,7 @@ const core = {
 const OpenSheet = () => {
   const status = useSyncExternalStore(subscribe, followedNow);
   return (
-    <RunSheet
+    <RunBeside
       admin={false}
       names={{ me: "ada", people: new Map() }}
       onClose={() => {
@@ -124,7 +131,15 @@ const sheetText = (): string => document.body.textContent ?? "";
 let root: Root | undefined;
 
 describe("an open run sheet, following its run", () => {
+  // A phone's page: the run opens in a Sheet over its list.
+  beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ width: 390, height: 600 })
+    );
+  });
+
   afterEach(() => {
+    vi.restoreAllMocks();
     act(() => {
       root?.unmount();
     });
@@ -149,7 +164,8 @@ describe("an open run sheet, following its run", () => {
       );
       await router.load();
     });
-    const waitingLine = "Waiting for Anthropic, which is refusing the key";
+    const waitingLine =
+      "Waiting for Anthropic, which is refusing the key, since";
     const before = sheetText().includes(waitingLine);
 
     now = { ...running, aiProvider: wait };

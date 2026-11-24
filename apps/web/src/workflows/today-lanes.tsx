@@ -1,26 +1,39 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { cssVars } from "@grasp-os/app-kit/lib/css-vars";
-import { cn } from "@grasp-os/app-kit/lib/utils";
-import type { BusinessProcess } from "@grasp-os/shared/business-processes";
 import type {
   DecisionAnswerInput,
   DecisionView,
 } from "@grasp-os/shared/decisions";
 import type { TodayWaitsOn, WorkflowsToday } from "@grasp-os/shared/workflows";
+import { Button } from "@grasp-os/ui/components/button";
+import { Card } from "@grasp-os/ui/components/card";
+import { Heading } from "@grasp-os/ui/components/heading";
+import { Link as TextLink } from "@grasp-os/ui/components/link";
+import { Text } from "@grasp-os/ui/components/text";
+import { fadeIn, focusRing, visuallyHidden } from "@grasp-os/ui/lib/styles";
+import {
+  colors,
+  duration,
+  font,
+  media,
+  radius,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
+import { motionVars } from "@grasp-os/ui/lib/vars.stylex";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link, useRouter } from "@tanstack/react-router";
 import { useEffect, useId, useRef, useState } from "react";
 
 import type { Session } from "../core.ts";
+import { ErrorText } from "../error-text.tsx";
+import { formatTime } from "../format.ts";
 import {
   confirmAndAnswer,
   DecisionConfirmDialog,
   WithheldAskNote,
-} from "../decision-confirmation.tsx";
-import type { PendingConfirmation } from "../decision-confirmation.tsx";
-import { ErrorText } from "../error-text.tsx";
-import { formatTime } from "../format.ts";
+} from "../inbox/decision-confirmation.tsx";
+import type { PendingConfirmation } from "../inbox/decision-confirmation.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { useGrace } from "../use-grace.ts";
@@ -35,6 +48,8 @@ import {
   placeOf,
 } from "./lanes.ts";
 import type { Lane, LaneDay, LaneRun } from "./lanes.ts";
+import { noWorkflows } from "./runs.tsx";
+import type { KnownWorkflows } from "./runs.tsx";
 
 // Runs › Today (prototype `components/workflows/today-lanes.tsx`): a lane
 // for every workflow that worked today, its runs as dots in time. A dot
@@ -49,7 +64,10 @@ import type { Lane, LaneDay, LaneRun } from "./lanes.ts";
 // (`useGrace`), as pausing a workflow does. Narrower than 42rem, the
 // lanes are a list.
 
-/** How tall a lane is, in pixels (`h-11`): its line runs through the middle. */
+/**
+ * How tall a lane is, in pixels: its line runs through the middle. The
+ * joins between lanes are drawn by it; `size.controlLg` is the same 44px.
+ */
 const laneHeight = 44;
 
 /** How long an answer can be taken back before it is given, in seconds. */
@@ -58,26 +76,295 @@ const graceSeconds = 5;
 /** How far along the day an hour may stand and still leave room for "now" at its end. */
 const nowRoom = 0.94;
 
-/** Sets the `--x` a dot, a trail or an hour is placed by: its share of the day. */
-const placedAt = (share: number) => cssVars({ "--x": `${share * 100}%` });
+/** From this width of the section, the lanes are drawn in time; under it, a list. */
+const WIDE = "@container (width >= 42rem)";
+
+/** Three dots' slow breath while Grasp works; still under reduced motion. */
+const pulse = stylex.keyframes({
+  "0%": { opacity: 1 },
+  "50%": { opacity: 0.5 },
+  "100%": { opacity: 1 },
+});
+
+/** A dot followed across the lanes, or the "now" mark, ahead of the rest. */
+const ahead = 1;
+
+const styles = stylex.create({
+  // A dot, a trail or an hour placed by its share of the day.
+  at: (share: number) => ({ insetInlineStart: `${share * 100}%` }),
+  section: {
+    containerType: "inline-size",
+    display: "flex",
+    flexDirection: "column",
+    gap: space["3"],
+  },
+  wide: { display: { default: "none", [WIDE]: "block" } },
+  narrow: {
+    display: { default: "flex", [WIDE]: "none" },
+    flexDirection: "column",
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  narrowLane: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["2"],
+    paddingBlock: space["3"],
+    borderTopWidth: { default: size.hairline, ":first-child": 0 },
+    borderTopStyle: "solid",
+    borderTopColor: colors.border,
+  },
+  row: { display: "flex", alignItems: "center", gap: space["2"] },
+  runs: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["1"],
+  },
+  truncate: {
+    flexGrow: 1,
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 12rem) minmax(0, 1fr)",
+    columnGap: space["6"],
+  },
+  names: {
+    display: "flex",
+    flexDirection: "column",
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  name: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["2"],
+    height: size.controlLg,
+    minWidth: 0,
+    // The words' own size, not the page's: the frame around it may set
+    // another.
+    fontSize: font.textSm,
+    lineHeight: 1.25,
+    textWrap: "pretty",
+  },
+  track: { position: "relative" },
+  lane: { position: "relative", height: size.controlLg },
+  laneLine: {
+    position: "absolute",
+    insetInline: 0,
+    top: "50%",
+    borderTopWidth: size.hairline,
+    borderTopStyle: "solid",
+    borderTopColor: colors.border,
+  },
+  trail: {
+    position: "absolute",
+    top: "50%",
+    insetInlineEnd: 0,
+    height: 0,
+    transform: "translateY(-1px)",
+    borderTopWidth: `calc(2 * ${size.hairline})`,
+    borderTopStyle: "dotted",
+    borderTopColor: `color-mix(in oklab, ${colors.warning} 60%, transparent)`,
+    transitionProperty: "opacity",
+    transitionDuration: motionVars.mark,
+    transitionTimingFunction: duration.ease,
+  },
+  faded: { opacity: 0.25 },
+  dot: {
+    position: "absolute",
+    top: "50%",
+    transform: "translate(-50%, -50%)",
+    transitionProperty: "opacity",
+    transitionDuration: motionVars.mark,
+    transitionTimingFunction: duration.ease,
+  },
+  hit: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: space["5"],
+    height: space["5"],
+    padding: 0,
+    borderWidth: 0,
+    borderRadius: radius.circle,
+    backgroundColor: "transparent",
+    cursor: "pointer",
+  },
+  ahead: { zIndex: ahead },
+  working: {
+    position: "absolute",
+    top: "50%",
+    insetInlineEnd: 0,
+    transform: "translate(50%, -50%)",
+  },
+  workingDots: {
+    display: "flex",
+    alignItems: "center",
+    gap: `calc(${space["1"]} / 2)`,
+    paddingInline: space["1"],
+    borderRadius: radius.full,
+    backgroundColor: colors.background,
+  },
+  workingDot: {
+    width: space["1"],
+    height: space["1"],
+    borderRadius: radius.circle,
+    backgroundColor: colors.foreground,
+    animationName: { default: pulse, [media.reducedMotion]: "none" },
+    animationDuration: "2s",
+    animationTimingFunction: "cubic-bezier(0.4, 0, 0.6, 1)",
+    animationIterationCount: "infinite",
+  },
+  second: { animationDelay: duration.stagger },
+  third: { animationDelay: `calc(2 * ${duration.stagger})` },
+  joins: {
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    overflow: "visible",
+    pointerEvents: "none",
+  },
+  join: {
+    stroke: colors.foreground,
+    opacity: 0.25,
+    transitionProperty: "opacity",
+    transitionDuration: motionVars.mark,
+    transitionTimingFunction: duration.ease,
+  },
+  joinLit: { opacity: 0.7 },
+  joinDimmed: { opacity: 0.1 },
+  hours: {
+    position: "relative",
+    height: space["5"],
+    fontSize: font.textXs,
+    lineHeight: font.textXsLine,
+    color: colors.mutedForeground,
+    fontVariantNumeric: "tabular-nums",
+  },
+  hour: {
+    position: "absolute",
+    transform: "translateX(-50%)",
+    whiteSpace: "nowrap",
+  },
+  now: {
+    position: "absolute",
+    insetInlineEnd: 0,
+    transform: "translateX(50%)",
+    whiteSpace: "nowrap",
+    color: colors.foreground,
+  },
+  mark: {
+    flexShrink: 0,
+    width: space["2"],
+    height: space["2"],
+    borderRadius: radius.circle,
+    transitionProperty: "transform",
+    transitionDuration: motionVars.mark,
+    transitionTimingFunction: duration.ease,
+  },
+  large: { transform: "scale(1.25)" },
+  // Filled: it went by itself.
+  ink: { backgroundColor: colors.foreground },
+  // Hollow: it went to people.
+  hollow: {
+    borderWidth: size.hairline,
+    borderStyle: "solid",
+    borderColor: colors.foreground,
+    backgroundColor: colors.background,
+  },
+  waits: { backgroundColor: colors.warning },
+  failed: { backgroundColor: colors.destructive },
+  failedHollow: {
+    borderWidth: size.hairline,
+    borderStyle: "solid",
+    borderColor: colors.destructive,
+    backgroundColor: colors.background,
+  },
+  cancelled: { backgroundColor: colors.mutedForeground },
+  cancelledHollow: {
+    borderWidth: size.hairline,
+    borderStyle: "solid",
+    borderColor: colors.mutedForeground,
+    backgroundColor: colors.background,
+  },
+  held: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["3"],
+    marginInlineStart: space["4"],
+  },
+  count: {
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+    color: colors.mutedForeground,
+    fontVariantNumeric: "tabular-nums",
+  },
+  asks: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["2"],
+    marginInlineStart: space["4"],
+    padding: space["3"],
+    borderWidth: size.hairline,
+    borderStyle: "solid",
+    borderColor: colors.border,
+    borderRadius: radius.base,
+  },
+  answers: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: space["2"],
+  },
+  comment: { marginInlineEnd: "auto" },
+  card: { display: "flex", flexDirection: "column", gap: space["3"] },
+  cardHead: {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: space["4"],
+  },
+  steps: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["2"],
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  step: { display: "flex", flexDirection: "column", gap: space["1"] },
+  stepName: { flexGrow: 1, minWidth: 0 },
+  time: {
+    fontSize: font.textXs,
+    lineHeight: font.textXsLine,
+    color: colors.mutedForeground,
+    fontVariantNumeric: "tabular-nums",
+  },
+});
 
 /** Grasp at work now: three ink dots. */
 const WorkingDots = () => {
   const { t } = useLingui();
   return (
-    <span className="bg-background flex items-center gap-0.5 rounded-full px-1">
-      <span className="sr-only">{t`Running now`}</span>
+    <span {...stylex.props(styles.workingDots)}>
+      <span {...stylex.props(visuallyHidden)}>{t`Running now`}</span>
+      <span aria-hidden="true" {...stylex.props(styles.workingDot)} />
       <span
         aria-hidden="true"
-        className="bg-foreground size-1 rounded-full motion-safe:animate-pulse"
+        {...stylex.props(styles.workingDot, styles.second)}
       />
       <span
         aria-hidden="true"
-        className="bg-foreground size-1 rounded-full delay-150 motion-safe:animate-pulse"
-      />
-      <span
-        aria-hidden="true"
-        className="bg-foreground size-1 rounded-full delay-300 motion-safe:animate-pulse"
+        {...stylex.props(styles.workingDot, styles.third)}
       />
     </span>
   );
@@ -88,40 +375,29 @@ const WorkingDots = () => {
  * by itself, hollow when it went to people, as any run; red when it
  * failed, grey when it was cancelled.
  */
-const unfinishedMarks: Readonly<
-  Record<"failed" | "cancelled", Record<"alone" | "people", string>>
-> = {
-  failed: {
-    alone: "bg-destructive",
-    people: "border-destructive bg-background border",
-  },
-  cancelled: {
-    alone: "bg-muted-foreground",
-    people: "border-muted-foreground bg-background border",
-  },
+const unfinishedMarks = {
+  failed: { alone: styles.failed, people: styles.failedHollow },
+  cancelled: { alone: styles.cancelled, people: styles.cancelledHollow },
+} as const;
+
+/** How a run is marked, by how it stands. */
+const markOf = (run: LaneRun) => {
+  if (run.state === "failed" || run.state === "cancelled") {
+    return unfinishedMarks[run.state][run.run.went];
+  }
+  if (run.state === "waits") {
+    return styles.waits;
+  }
+  if (run.state === "toPerson" || run.state === "waitsElsewhere") {
+    return styles.hollow;
+  }
+  return styles.ink;
 };
 
 /** The mark of a run: filled, hollow, orange, or red or grey when unfinished. */
-const Mark = ({ run, large }: { run: LaneRun; large: boolean }) => {
-  const size = cn(
-    "size-2 rounded-full transition-transform duration-200",
-    large && "scale-125"
-  );
-  if (run.state === "failed" || run.state === "cancelled") {
-    return (
-      <span className={cn(size, unfinishedMarks[run.state][run.run.went])} />
-    );
-  }
-  if (run.state === "waits") {
-    return <span className={cn(size, "bg-status-attention")} />;
-  }
-  if (run.state === "toPerson" || run.state === "waitsElsewhere") {
-    return (
-      <span className={cn(size, "border-foreground/70 bg-background border")} />
-    );
-  }
-  return <span className={cn(size, "bg-foreground")} />;
-};
+const Mark = ({ run, large }: { run: LaneRun; large: boolean }) => (
+  <span {...stylex.props(styles.mark, markOf(run), large && styles.large)} />
+);
 
 /** Whom a wait names, in words: you, your role, or your team. */
 const useWaitsOnText = (on: TodayWaitsOn): string => {
@@ -194,52 +470,46 @@ const Dot = ({
     <button
       aria-label={`${at} · ${said}`}
       aria-pressed={chosen}
-      className={cn(
-        "focus-visible:ring-ring/50 absolute top-1/2 left-(--x) flex size-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full transition-opacity duration-200 outline-none focus-visible:ring-3",
-        dimmed && "opacity-25",
-        (run.state === "waits" || chosen) && "z-10"
-      )}
       onClick={() => {
         onChoose(chosen ? null : run.id);
       }}
-      ref={placedAt(placeOf(run.at, day))}
       title={`${at} · ${said}`}
       type="button"
+      {...stylex.props(
+        styles.hit,
+        focusRing,
+        styles.dot,
+        styles.at(placeOf(run.at, day)),
+        dimmed && styles.faded,
+        (run.state === "waits" || chosen) && styles.ahead
+      )}
     >
       <Mark large={on} run={run} />
     </button>
   );
 };
 
-/** The business process each lane's workflow serves, by its ID, for their marks. */
-export type LaneProcesses = ReadonlyMap<string, BusinessProcess | null>;
-
-/** None known: lanes without their marks. */
-const noProcesses: LaneProcesses = new Map();
-
 /** A lane's process, by its mark, before its name, as the prototype has it. */
 const LaneMark = ({
   lane,
-  processes,
+  workflows,
 }: {
   lane: Lane;
-  processes: LaneProcesses;
+  workflows: KnownWorkflows;
 }) => {
-  const process = processes.get(lane.of.id);
+  const process = workflows.get(lane.of.id)?.process;
   return process === undefined || process === null ? null : (
     <ProcessGlyph process={process} />
   );
 };
 
 /** A lane's name, opening its workflow. */
-const LaneLink = ({ lane, className }: { lane: Lane; className: string }) => (
-  <Link
-    className={className}
-    params={{ workflow: lane.of.id }}
-    to="/workflows/$workflow"
-  >
-    {lane.name}
-  </Link>
+const LaneLink = ({ lane }: { lane: Lane }) => (
+  <TextLink asChild variant="plain">
+    <Link params={{ workflow: lane.of.id }} to="/workflows/$workflow">
+      {lane.name}
+    </Link>
+  </TextLink>
 );
 
 /** The width of `element`, as it changes. */
@@ -277,10 +547,7 @@ const Handovers = ({
   );
   const dimmed = lit.size > 0;
   return (
-    <svg
-      aria-hidden="true"
-      className="pointer-events-none absolute inset-0 size-full overflow-visible"
-    >
+    <svg aria-hidden="true" {...stylex.props(styles.joins)}>
       {handovers(day).map(({ from, to }) => {
         const x1 = placeOf(from.at, day) * width;
         const y1 = (rowOf.get(from.id) ?? 0) * laneHeight + laneHeight / 2;
@@ -288,17 +555,12 @@ const Handovers = ({
         const y2 = (rowOf.get(to.id) ?? 0) * laneHeight + laneHeight / 2;
         const bend = (y2 - y1) / 2;
         const on = lit.has(from.id) && lit.has(to.id);
-        let opacity = "opacity-25";
-        if (on) {
-          opacity = "opacity-70";
-        } else if (dimmed) {
-          opacity = "opacity-10";
-        }
         return (
           <path
-            className={cn(
-              "stroke-foreground transition-opacity duration-200",
-              opacity
+            {...stylex.props(
+              styles.join,
+              on && styles.joinLit,
+              !on && dimmed && styles.joinDimmed
             )}
             d={`M ${x1} ${y1} C ${x1 + bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`}
             fill="none"
@@ -319,9 +581,9 @@ const Lanes = ({
   lit,
   chosen,
   onChoose,
-  processes,
+  workflows,
 }: {
-  processes: LaneProcesses;
+  workflows: KnownWorkflows;
   day: LaneDay;
   lit: ReadonlySet<string>;
   chosen: string | null;
@@ -331,36 +593,30 @@ const Lanes = ({
   const { track, width } = useWidth();
   const dimmed = lit.size > 0;
   return (
-    <div className="grid grid-cols-[minmax(0,12rem)_minmax(0,1fr)] gap-x-6">
-      <ul className="flex flex-col">
+    <div {...stylex.props(styles.grid)}>
+      <ul {...stylex.props(styles.names)}>
         {day.lanes.map((lane) => (
-          <li className="flex h-11 items-center gap-2" key={lane.key}>
-            <LaneMark lane={lane} processes={processes} />
-            <LaneLink
-              className="min-w-0 leading-tight text-pretty hover:underline"
-              lane={lane}
-            />
+          <li key={lane.key} {...stylex.props(styles.name)}>
+            <LaneMark lane={lane} workflows={workflows} />
+            <LaneLink lane={lane} />
           </li>
         ))}
       </ul>
-      <div className="relative" ref={track}>
+      <div ref={track} {...stylex.props(styles.track)}>
         {width > 0 ? <Handovers day={day} lit={lit} width={width} /> : null}
         {day.lanes.map((lane) => (
-          <div className="relative h-11" key={lane.key}>
-            <span
-              aria-hidden="true"
-              className="absolute inset-x-0 top-1/2 border-t"
-            />
+          <div key={lane.key} {...stylex.props(styles.lane)}>
+            <span aria-hidden="true" {...stylex.props(styles.laneLine)} />
             {lane.runs.map((run) =>
               run.state === "waits" ? (
                 <span
                   aria-hidden="true"
-                  className={cn(
-                    "border-status-attention/60 absolute top-1/2 right-0 left-(--x) h-0 -translate-y-px border-t-2 border-dotted transition-opacity duration-200",
-                    dimmed && !lit.has(run.id) && "opacity-25"
-                  )}
                   key={`${run.id} trail`}
-                  ref={placedAt(placeOf(run.waitsSince ?? run.at, day))}
+                  {...stylex.props(
+                    styles.trail,
+                    styles.at(placeOf(run.waitsSince ?? run.at, day)),
+                    dimmed && !lit.has(run.id) && styles.faded
+                  )}
                 />
               ) : null
             )}
@@ -376,7 +632,7 @@ const Lanes = ({
               />
             ))}
             {lane.running ? (
-              <span className="absolute top-1/2 right-0 translate-x-1/2 -translate-y-1/2">
+              <span {...stylex.props(styles.working)}>
                 <WorkingDots />
               </span>
             ) : null}
@@ -384,20 +640,19 @@ const Lanes = ({
         ))}
       </div>
       <span />
-      <div className="text-muted-foreground relative h-5 text-xs tabular-nums">
+      <div {...stylex.props(styles.hours)}>
         {/* An hour as close to the end as "now" would sit on it: left out. */}
         {hoursOf(day)
           .filter((hour) => placeOf(hour, day) < nowRoom)
           .map((hour) => (
             <span
-              className="absolute left-(--x) -translate-x-1/2 whitespace-nowrap"
               key={hour}
-              ref={placedAt(placeOf(hour, day))}
+              {...stylex.props(styles.hour, styles.at(placeOf(hour, day)))}
             >
               {formatTime(hour)}
             </span>
           ))}
-        <span className="text-foreground absolute right-0 translate-x-1/2 whitespace-nowrap">
+        <span {...stylex.props(styles.now)}>
           {t({
             message: "now",
             context: "the end of a time line: this moment",
@@ -423,11 +678,11 @@ const ListDot = ({
     <button
       aria-label={`${at} · ${said}`}
       aria-pressed={chosen}
-      className="focus-visible:ring-ring/50 flex size-5 items-center justify-center rounded-full outline-none focus-visible:ring-3"
       onClick={() => {
         onChoose(chosen ? null : run.id);
       }}
       type="button"
+      {...stylex.props(styles.hit, focusRing)}
     >
       <Mark large={chosen} run={run} />
     </button>
@@ -439,23 +694,22 @@ const ListLane = ({
   lane,
   chosen,
   onChoose,
-  processes,
+  workflows,
 }: {
-  processes: LaneProcesses;
+  workflows: KnownWorkflows;
   lane: Lane;
   chosen: string | null;
   onChoose: (id: string | null) => void;
 }) => (
-  <li className="flex flex-col gap-1.5 py-3">
-    <span className="flex items-center gap-2">
-      <LaneMark lane={lane} processes={processes} />
-      <LaneLink
-        className="min-w-0 flex-1 truncate font-medium hover:underline"
-        lane={lane}
-      />
+  <li {...stylex.props(styles.narrowLane)}>
+    <span {...stylex.props(styles.row)}>
+      <LaneMark lane={lane} workflows={workflows} />
+      <span {...stylex.props(styles.truncate)}>
+        <LaneLink lane={lane} />
+      </span>
       {lane.running ? <WorkingDots /> : null}
     </span>
-    <span className="flex flex-wrap items-center gap-1">
+    <span {...stylex.props(styles.runs)}>
       {listedRuns(lane, 12).map((run) => (
         <ListDot
           chosen={chosen === run.id}
@@ -503,7 +757,7 @@ const WaitsOnYou = ({ run }: { run: LaneRun }) => {
         // Answered, or refused because the decision changed since Today
         // was read (what it asks withheld since): Today reads it again and
         // shows it as it is now, with why.
-        await router.invalidate();
+        await router.invalidate({ sync: true });
       })();
     },
     // Gone before the seconds were over: the answer was confirmed, so it
@@ -535,14 +789,14 @@ const WaitsOnYou = ({ run }: { run: LaneRun }) => {
       // Recorded already, or refused: the decision may have changed since
       // Today was read (what it asks withheld since), so Today reads it
       // again and shows it as it is now, with why.
-      await router.invalidate();
+      await router.invalidate({ sync: true });
     }
   };
   if (held !== null) {
     const { left } = held;
     return (
-      <span aria-live="polite" className="ml-4 flex items-center gap-3">
-        <span className="text-muted-foreground tabular-nums">
+      <span aria-live="polite" {...stylex.props(styles.held)}>
+        <span {...stylex.props(styles.count)}>
           {held.value.response.approved
             ? t`Approved in ${left} s`
             : t`Rejected in ${left} s`}
@@ -554,27 +808,34 @@ const WaitsOnYou = ({ run }: { run: LaneRun }) => {
     );
   }
   return (
-    <div className="ml-4 flex flex-col gap-2 rounded-lg border p-3">
-      <span className="font-medium">{waits.asks}</span>
-      <span className="text-muted-foreground text-xs">{waitsSince}</span>
+    <div {...stylex.props(styles.asks)}>
+      <Text as="span" size="sm" weight="medium">
+        {waits.asks}
+      </Text>
+      <Text as="span" color="muted" size="xs">
+        {waitsSince}
+      </Text>
       <ErrorText>{failure}</ErrorText>
       {waits.withheld === undefined ? null : (
-        <span className="text-muted-foreground text-xs">
+        <Text as="span" color="muted" size="xs">
           <WithheldAskNote withheld={waits.withheld} />
-        </span>
+        </Text>
       )}
       {/* Not shown for now: it takes no answer until a later read shows it. */}
       {waits.withheld === "unchecked" ? null : (
-        <span className="flex flex-wrap items-center justify-end gap-2">
+        <span {...stylex.props(styles.answers)}>
           {/* An answer with a comment, which a decision may require: on the
             decision's own page, which has the field. */}
-          <Link
-            className="text-muted-foreground mr-auto text-xs hover:underline"
-            params={{ decision: waits.decision }}
-            to="/decisions/$decision"
-          >
-            <Trans>Answer with a comment</Trans>
-          </Link>
+          <Text as="span" color="muted" size="xs" style={styles.comment}>
+            <TextLink asChild>
+              <Link
+                params={{ decision: waits.decision }}
+                to="/decisions/$decision"
+              >
+                <Trans>Answer with a comment</Trans>
+              </Link>
+            </TextLink>
+          </Text>
           <Button
             disabled={busy}
             onClick={() => {
@@ -627,41 +888,42 @@ const WhereItIs = ({
 }) => {
   const names = new Map(day.lanes.map(({ key, name }) => [key, name]));
   return (
-    <div
-      aria-live="polite"
-      className="bg-card animate-in fade-in flex flex-col gap-3 rounded-xl border p-4 duration-200"
-    >
-      <div className="flex items-start justify-between gap-4">
-        <h3 className="font-medium">
-          <Trans context="the card that follows one item across workflows">
-            Where is it
-          </Trans>
-        </h3>
-        <Button onClick={onClose} size="sm" variant="ghost">
-          <Trans context="put away the card of one item">Close</Trans>
-        </Button>
-      </div>
-      <ol className="flex flex-col gap-2">
-        {journey.map((step) => (
-          <li className="flex flex-col gap-1" key={step.id}>
-            <span className="flex items-center gap-2">
-              <Mark large={false} run={step} />
-              <span className="min-w-0 flex-1">
-                {names.get(step.lane)} · <RunText run={step} />
-              </span>
-              <span className="text-muted-foreground text-xs tabular-nums">
-                {formatTime(step.at)}
-              </span>
-            </span>
-            {step.state === "waits" ? <WaitsOnYou run={step} /> : null}
-          </li>
-        ))}
-      </ol>
-      {journey.length === 1 ? (
-        <p className="text-muted-foreground text-xs">
-          <Trans>It went through no other workflow today.</Trans>
-        </p>
-      ) : null}
+    <div aria-live="polite" {...stylex.props(fadeIn)}>
+      <Card>
+        <div {...stylex.props(styles.card)}>
+          <div {...stylex.props(styles.cardHead)}>
+            <Heading level={3} size="2xs">
+              <Trans context="the card that follows one item across workflows">
+                Where is it
+              </Trans>
+            </Heading>
+            <Button onClick={onClose} size="sm" variant="ghost">
+              <Trans context="put away the card of one item">Close</Trans>
+            </Button>
+          </div>
+          <ol {...stylex.props(styles.steps)}>
+            {journey.map((step) => (
+              <li key={step.id} {...stylex.props(styles.step)}>
+                <span {...stylex.props(styles.row)}>
+                  <Mark large={false} run={step} />
+                  <span {...stylex.props(styles.stepName)}>
+                    {names.get(step.lane)} · <RunText run={step} />
+                  </span>
+                  <span {...stylex.props(styles.time)}>
+                    {formatTime(step.at)}
+                  </span>
+                </span>
+                {step.state === "waits" ? <WaitsOnYou run={step} /> : null}
+              </li>
+            ))}
+          </ol>
+          {journey.length === 1 ? (
+            <Text color="muted" size="xs">
+              <Trans>It went through no other workflow today.</Trans>
+            </Text>
+          ) : null}
+        </div>
+      </Card>
     </div>
   );
 };
@@ -712,16 +974,24 @@ const useLatestToday = (loaded: WorkflowsToday): WorkflowsToday => {
 
 export const TodayLanes = ({
   today: loaded,
-  processes = noProcesses,
+  workflows = noWorkflows,
 }: {
   today: WorkflowsToday;
-  /** The process each lane's workflow serves, for its mark. */
-  processes?: LaneProcesses;
+  /** The workflows the lanes are of: their names and processes' marks. */
+  workflows?: KnownWorkflows;
 }) => {
   const today = useLatestToday(loaded);
   const { t } = useLingui();
   const [chosen, setChosen] = useState<string | null>(null);
-  const day = laneDay(today);
+  const read = laneDay(today);
+  // Each lane by the name people see its workflow by, where it is known.
+  const day = {
+    ...read,
+    lanes: read.lanes.map((lane) => ({
+      ...lane,
+      name: workflows.get(lane.of.id)?.label ?? lane.name,
+    })),
+  };
   const all = day.lanes.flatMap((lane) => lane.runs);
   const run = all.find(({ id }) => id === chosen);
   const journey = run === undefined ? [] : journeyOf(day, run.key);
@@ -734,54 +1004,51 @@ export const TodayLanes = ({
     return null;
   }
   return (
-    <section
-      aria-labelledby={headingId}
-      className="@container flex flex-col gap-3"
-    >
-      <h2 className="font-medium" id={headingId}>
+    <section aria-labelledby={headingId} {...stylex.props(styles.section)}>
+      <Heading id={headingId} level={2} size="xs">
         <Trans context="the workflows' runs of today, laid out in time">
           Today
         </Trans>
-      </h2>
+      </Heading>
       {day.lanes.length === 0 ? null : (
         <>
-          <div className="hidden @2xl:block">
+          <div {...stylex.props(styles.wide)}>
             <Lanes
               chosen={chosen}
               day={day}
               lit={lit}
               onChoose={setChosen}
-              processes={processes}
+              workflows={workflows}
             />
           </div>
-          <ul className="flex flex-col divide-y @2xl:hidden">
+          <ul {...stylex.props(styles.narrow)}>
             {day.lanes.map((lane) => (
               <ListLane
                 chosen={chosen}
                 key={lane.key}
                 lane={lane}
                 onChoose={setChosen}
-                processes={processes}
+                workflows={workflows}
               />
             ))}
           </ul>
         </>
       )}
       {cutOff > 0 ? (
-        <p className="text-muted-foreground text-xs">
+        <Text color="muted" size="xs">
           {t`${plural(cutOff, {
             one: "# earlier run today isn't shown: only the latest fit",
             other: "# earlier runs today aren't shown: only the latest fit",
           })}`}
-        </p>
+        </Text>
       ) : null}
       {unseen > 0 ? (
-        <p className="text-muted-foreground text-xs">
+        <Text color="muted" size="xs">
           {t`${plural(unseen, {
             one: "# more run today, of a workflow you can't see",
             other: "# more runs today, of workflows you can't see",
           })}`}
-        </p>
+        </Text>
       ) : null}
       {run === undefined ? null : (
         <WhereItIs

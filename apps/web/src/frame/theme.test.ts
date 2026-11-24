@@ -50,8 +50,10 @@ const browser = ({
   localStorage = storage(blocked),
 } = {}) => {
   const classes = new Set<string>();
+  const dataset: { mode?: string } = {};
   const document = Object.assign(new EventTarget(), {
     documentElement: {
+      dataset,
       classList: {
         toggle: (name: string, on: boolean) => {
           if (on) {
@@ -72,6 +74,8 @@ const browser = ({
   return {
     localStorage,
     isDark: () => classes.has("dark"),
+    /** What Damsko's components read the choice from: the root's `data-mode`. */
+    mode: () => dataset.mode,
     /** Loads the page: theme.js runs, as in <head>. */
     load: () => {
       runInNewContext(themeScript, {
@@ -127,9 +131,11 @@ describe("theme.js", () => {
     const light = browser();
     light.load();
     expect(light.isDark()).toBeFalsy();
+    expect(light.mode()).toBe("system");
     const dark = browser({ systemDark: true });
     dark.load();
     expect(dark.isDark()).toBeTruthy();
+    expect(dark.mode()).toBe("system");
   });
 
   it("paints the choice made last before the app runs, over the system's", () => {
@@ -141,6 +147,7 @@ describe("theme.js", () => {
     });
     reloaded.load();
     expect(reloaded.isDark()).toBeFalsy();
+    expect(reloaded.mode()).toBe("light");
   });
 
   it("applies a choice at once, without a reload", () => {
@@ -148,6 +155,7 @@ describe("theme.js", () => {
     tab.load();
     chooseTheme("ada", "dark");
     expect(tab.isDark()).toBeTruthy();
+    expect(tab.mode()).toBe("dark");
     chooseTheme("ada", "system");
     expect(tab.isDark()).toBeFalsy();
   });

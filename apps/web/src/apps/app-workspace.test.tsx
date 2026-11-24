@@ -1,8 +1,6 @@
 // @vitest-environment happy-dom
 
-import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
 import { Toaster } from "@grasp-os/app-kit/components/toast";
-import { typeInPrompt } from "@grasp-os/app-kit/testing";
 import type { AppReview } from "@grasp-os/shared/app-review";
 import type { App, ViewedApp } from "@grasp-os/shared/apps";
 import type {
@@ -24,6 +22,7 @@ import type {
   SubjectMember,
   SubjectMemberRef,
 } from "@grasp-os/shared/subject-members";
+import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -46,6 +45,7 @@ import { activeChat, setActiveChat } from "../chat/active-chat.ts";
 import { ChatPanel } from "../chat/chat-panel.tsx";
 import { slotOf } from "../chat/chat-subject.ts";
 import { GlobalChatProvider } from "../chat/global-chat.tsx";
+import { typeInPrompt } from "../chat/test-typing.ts";
 import { socketsTo } from "../pages/test-socket.ts";
 import { OpenedApp } from "./app-page.tsx";
 import { AppWorkspace } from "./app-workspace.tsx";
@@ -574,9 +574,10 @@ const off = (element: HTMLElement): boolean =>
   element.hasAttribute("disabled");
 
 /** What the box to ask in says while it is empty. */
-const placeholder = (): string | undefined =>
-  document.querySelector<HTMLElement>('[role="textbox"] p')?.dataset
-    .placeholder;
+const placeholder = (): string | null | undefined =>
+  document
+    .querySelector<HTMLElement>('[role="textbox"]')
+    ?.getAttribute("aria-placeholder");
 
 /** The line under the bar of changes only the builders see, if shown. */
 const changesLine = (): HTMLElement | null =>
@@ -799,7 +800,9 @@ describe(AppWorkspace, () => {
       async () => await Promise.withResolvers<never>().promise
     );
     const reading = {
-      loading: document.querySelector('[aria-label="Loading…"]') !== null,
+      loading: [...document.querySelectorAll('[role="status"]')].some(
+        (live) => live.textContent === "Loading…"
+      ),
       frame: document.querySelector("iframe"),
     };
 
@@ -1088,7 +1091,7 @@ describe(AppWorkspace, () => {
     );
     await settled();
     const bar = document.querySelector(
-      '[data-slot="prompt-input-subject-bar"]'
+      '[data-slot="prompt-input-header"]'
     )?.textContent;
     await typeAndSend("Add a due date column");
     await typeAndSend("What's a good name for it?");
@@ -2197,7 +2200,7 @@ describe(AppWorkspace, () => {
     });
   });
 
-  it("sets a new App up calmly while Grasp builds it: its name, Share off, nothing of the App or its tip until it works", async () => {
+  it("sets a new App up calmly while Grasp builds it: its name, Grasp building it in the preview's place, Share off, nothing of the App or its tip until it works", async () => {
     markMade("invoice-desk");
     const core = new PreviewingCore("page.build_failed");
     socketsTo(core);
@@ -2228,11 +2231,12 @@ describe(AppWorkspace, () => {
     const share = button("Share with your team");
 
     expect({
-      setting: says("Setting up Invoices…"),
-      calm: says("Grasp is building it. This takes a minute or two."),
+      building:
+        document.querySelector('[aria-label="Grasp is building"]') !== null,
+      calm: says("It shows here as soon as there is something to see."),
       state: says("Setting up"),
       shareOff: off(share),
-      views: document.querySelector('nav[aria-label="Workspace views"]'),
+      controls: document.querySelector('[aria-label="Reload"]'),
       // The preview that failed under it never shows, nor the tip.
       failure: [...document.querySelectorAll("body *")].some(
         (each) =>
@@ -2243,11 +2247,11 @@ describe(AppWorkspace, () => {
       fix: reachable("Fix with Grasp") !== undefined,
       tip: says("This is your new App, with example data."),
     }).toStrictEqual({
-      setting: true,
+      building: true,
       calm: true,
       state: true,
       shareOff: true,
-      views: null,
+      controls: null,
       failure: false,
       fix: false,
       tip: false,
@@ -2345,7 +2349,7 @@ describe(AppWorkspace, () => {
     await opened(fakeApps().apps);
     await settled();
     const first = says(tip);
-    await press(button("Dismiss the tip"));
+    await press(button("Dismiss"));
     const dismissed = says(tip);
     takenDown();
     await opened(fakeApps().apps);

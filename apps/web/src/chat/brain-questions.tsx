@@ -1,16 +1,20 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Textarea } from "@grasp-os/app-kit/components/textarea";
 import type { Gap } from "@grasp-os/shared/brain";
 import { brainGapTextMaxLength } from "@grasp-os/shared/brain-records";
 import { failureText } from "@grasp-os/shared/errors";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { Button } from "@grasp-os/ui/components/button";
+import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+import { Text } from "@grasp-os/ui/components/text";
+import { Textarea } from "@grasp-os/ui/components/textarea";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
+import { FailureLine } from "./failure-line.tsx";
 
 // The brain's open questions in the brain's chat (GRA-531, GRA-936), as
 // in the prototype (`knowledge/brain-chat.tsx`): each to answer there, in
@@ -23,6 +27,27 @@ import { useCore } from "../use-core.ts";
 // needs no answer (`brain.closeGap`). The buttons follow what core allows, but
 // core is what refuses. An answer is the person's own act here: the
 // chat's agent only reads the questions, never answers them.
+
+const styles = stylex.create({
+  section: {
+    display: "grid",
+    gap: space["2"],
+    flexShrink: 0,
+    maxHeight: "12rem",
+    overflowY: "auto",
+    paddingInline: space["4"],
+    paddingBlock: space["2"],
+  },
+  list: {
+    display: "grid",
+    gap: space["3"],
+    margin: 0,
+    paddingInlineStart: 0,
+    listStyleType: "none",
+  },
+  question: { display: "grid", gap: space["1"] },
+  presses: { display: "flex", flexWrap: "wrap", gap: space["1"] },
+});
 
 /** The questions nobody has answered or closed yet, in the order the brain keeps them. */
 export const openGaps = (gaps: Gap[]): Gap[] =>
@@ -58,28 +83,30 @@ const Question = ({
     }
   };
   return (
-    <li className="flex flex-col gap-1.5 py-2">
-      <p>{gap.question}</p>
-      <p className="text-muted-foreground text-xs">
+    <li {...stylex.props(styles.question)}>
+      <Text as="p" size="sm">
+        {gap.question}
+      </Text>
+      <Text as="p" color="muted" size="xs">
         {asked ? (
           <Trans>For {gap.owner}, who was asked</Trans>
         ) : (
           <Trans>For {gap.owner}</Trans>
         )}
-      </p>
+      </Text>
       {writing ? (
-        <div className="flex flex-col gap-1.5">
-          <Textarea
-            aria-label={t`Your answer`}
-            disabled={busy}
-            maxLength={brainGapTextMaxLength}
-            onChange={(event) => {
-              setDraft(event.target.value);
-            }}
-            rows={3}
-            value={draft}
-          />
-          <div className="flex gap-1.5">
+        <div {...stylex.props(styles.question)}>
+          <Field name={`answer-${gap.id}`}>
+            <FieldLabel>{t`Your answer`}</FieldLabel>
+            <Textarea
+              disabled={busy}
+              maxLength={brainGapTextMaxLength}
+              onValueChange={setDraft}
+              rows={3}
+              value={draft}
+            />
+          </Field>
+          <div {...stylex.props(styles.presses)}>
             <Button
               disabled={busy || draft.trim() === ""}
               onClick={() => {
@@ -102,7 +129,7 @@ const Question = ({
           </div>
         </div>
       ) : (
-        <div className="flex gap-1.5">
+        <div {...stylex.props(styles.presses)}>
           {canAnswer ? (
             <Button
               disabled={busy}
@@ -184,14 +211,11 @@ export const BrainQuestions = ({
     return true;
   };
   return (
-    <section
-      aria-label={t`Open questions`}
-      className="flex max-h-48 flex-none flex-col overflow-y-auto border-t px-4 py-2"
-    >
-      <h3 className="text-muted-foreground text-xs font-medium">
+    <section aria-label={t`Open questions`} {...stylex.props(styles.section)}>
+      <Text as="p" color="muted" size="xs" weight="medium">
         <Trans>Open questions</Trans>
-      </h3>
-      <ul className="divide-y">
+      </Text>
+      <ul {...stylex.props(styles.list)}>
         {open.map((gap) => (
           <Question
             busy={busy}
@@ -217,7 +241,7 @@ export const BrainQuestions = ({
           />
         ))}
       </ul>
-      <ErrorText>{failure}</ErrorText>
+      <FailureLine>{failure}</FailureLine>
     </section>
   );
 };

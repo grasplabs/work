@@ -1,26 +1,27 @@
+import { failureText } from "@grasp-os/shared/errors";
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/app-kit/components/alert-dialog";
-import { Button } from "@grasp-os/app-kit/components/button";
-import { failureText } from "@grasp-os/shared/errors";
-import { Trans } from "@lingui/react/macro";
-import { SquareIcon } from "lucide-react";
+  AlertDialogTrigger,
+} from "@grasp-os/ui/components/alert-dialog";
+import { Button } from "@grasp-os/ui/components/button";
+import { Icon, SquareIcon } from "@grasp-os/ui/lib/icons";
+import { useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
+import { useHeldDialog } from "./held-dialog.ts";
 
 // Stopping a run that hasn't ended, independent or in an App, asked again
 // before it happens: a stopped run never goes on. Offered only to whoever
 // core lets stop it (a workflow's or an App's builders), and core decides
 // again (`workflowResources.terminateRun`, `workflows.cancel`); what it
-// refuses is said under the button.
+// refuses is said in the question, which stays open.
 
 /** A Stop button that asks before it stops the run with `stop`. */
 export const StopRun = ({
@@ -29,64 +30,57 @@ export const StopRun = ({
   /** Stops the run; what it throws is shown. */
   stop: () => Promise<void>;
 }) => {
-  const [open, setOpen] = useState(false);
-  const [stopping, setStopping] = useState(false);
+  const { t } = useLingui();
   const [failure, setFailure] = useState<string>();
+  const dialog = useHeldDialog();
 
   const confirm = async (): Promise<void> => {
-    setStopping(true);
     setFailure(undefined);
-    try {
-      await stop();
-    } catch (error) {
-      setFailure(failureText(error));
-    }
-    setStopping(false);
-    setOpen(false);
+    await dialog.hold(async () => {
+      await stop().catch((error: unknown) => {
+        // The question stays open, saying why.
+        setFailure(failureText(error));
+        throw error;
+      });
+    });
   };
 
   return (
-    <div className="flex flex-col items-start gap-2">
-      <Button
-        onClick={() => {
-          setOpen(true);
-        }}
-        size="sm"
-        variant="outline"
-      >
-        <SquareIcon aria-hidden="true" />
-        <Trans context="stop a workflow's run">Stop</Trans>
-      </Button>
-      <ErrorText>{failure}</ErrorText>
-      <AlertDialog onOpenChange={setOpen} open={open}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              <Trans>Stop this run?</Trans>
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              <Trans>
-                It stops where it is and never goes on. What it already did
-                stays done. This can&apos;t be undone.
-              </Trans>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>
-              <Trans>Keep it running</Trans>
-            </AlertDialogCancel>
-            <AlertDialogAction
-              disabled={stopping}
-              onClick={() => {
-                void confirm();
-              }}
-              variant="destructive"
-            >
-              <Trans>Stop the run</Trans>
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
+    <AlertDialog
+      onOpenChange={(open, details) => {
+        if (open) {
+          setFailure(undefined);
+        }
+        dialog.handleOpenChange(open, details);
+      }}
+      open={dialog.open}
+    >
+      <AlertDialogTrigger asChild>
+        <Button size="sm" variant="outline">
+          <Icon icon={SquareIcon} />
+          {t({ message: "Stop", context: "stop a workflow's run" })}
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t`Stop this run?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t`It stops where it is and never goes on. What it already did stays done. This can't be undone.`}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <ErrorText>{failure}</ErrorText>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t`Keep it running`}</AlertDialogCancel>
+          <Button
+            errorText={t`Not stopped`}
+            onClick={confirm}
+            size="sm"
+            variant="destructive"
+          >
+            {t`Stop the run`}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 };

@@ -402,6 +402,7 @@ export const rpcParamNames: ParamNames = {
     "list": [],
   },
   "PermissionsRpc": {
+    "decline": ["id"],
     "grant": ["id","reviewed"],
     "list": ["subject","status"],
     "request": ["request"],
@@ -430,6 +431,7 @@ export const rpcParamNames: ParamNames = {
     "revoke": ["id"],
   },
   "SessionRpc": {
+    "dictationSetUp": [],
     "setName": ["name"],
     "whoami": [],
   },

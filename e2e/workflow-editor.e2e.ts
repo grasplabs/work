@@ -7,6 +7,8 @@ import { test } from "./csp.ts";
 import { modelScripts, workflowPlanned } from "./model-scripts.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
+import { toastSaying } from "./said.ts";
+import { goTo } from "./tabs-nav.ts";
 
 // A builder writes an independent workflow's definition in the editor:
 // core checks each save against grasp-workflow/2 and says what to fix at
@@ -69,19 +71,13 @@ const create = async (page: Page, person: Person): Promise<string> => {
 
 /** Opens view `name` of the workflow on `page`: Flow, Runs or Settings. */
 const view = async (page: Page, name: string): Promise<void> => {
-  await page
-    .getByRole("navigation", { name: "Workflow views" })
-    .getByRole("link", { name })
-    .click();
+  await goTo(page.getByRole("navigation", { name: "Workflow views" }), name);
 };
 
 /** Opens section `name` of the workflow's Settings on `page`. */
 const section = async (page: Page, name: string): Promise<void> => {
   await view(page, "Settings");
-  await page
-    .getByRole("navigation", { name: "Settings sections" })
-    .getByRole("link", { name })
-    .click();
+  await goTo(page.getByRole("navigation", { name: "Settings sections" }), name);
 };
 
 /** Shows the definition's JSON on `page`, in its Settings. */
@@ -132,7 +128,9 @@ const share = async (page: Page, label: string): Promise<void> => {
     .getByRole("dialog")
     .getByRole("button", { name: "Share", exact: true })
     .click();
-  await expect(page.getByText("Your changes are shared")).toBeVisible(pageRead);
+  await expect(toastSaying(page, "Your changes are shared")).toBeVisible(
+    pageRead
+  );
 };
 
 /** A version's label, `YY.MM.N`, as History names it. */
@@ -269,11 +267,11 @@ test("a builder sees every declared branch of the checked definition, a test run
   const start = page.getByRole("dialog", { name: "Start a run" });
   await start.getByLabel("who").fill("Ada");
   await start.getByRole("button", { name: "Start the run" }).click();
-  await expect(start.getByRole("status")).toHaveText(
-    "The run started. It is listed with the workflow's runs.",
-    pageRead
-  );
+  await expect(
+    start.getByText("The run started. It is listed with the workflow's runs.")
+  ).toBeVisible(pageRead);
   await start.getByRole("button", { name: "Close" }).first().click();
+  await expect(start).toHaveCount(0);
 
   // A second version, shared as the first was.
   await save(page, definition("done"));
@@ -285,14 +283,19 @@ test("a builder sees every declared branch of the checked definition, a test run
   // laid over its version's diagram, marking only the tasks it reached.
   await view(page, "Runs");
   await page
-    .getByRole("button", { name: /^Open the run started/u })
+    .getByRole("table", { name: "Runs" })
+    .getByRole("link")
     .last()
     .click();
   const steps = page.getByRole("dialog");
   await expect(steps.getByText("What it returned")).toBeVisible({
     timeout: 30_000,
   });
-  await expect(steps.getByText("Step by step")).toBeVisible(pageRead);
+  // Its steps' trace, folded under one line that opens it (and works,
+  // drawn twice for its shimmer, while the run goes on).
+  await expect(
+    steps.getByRole("button", { name: /^Step by step/u })
+  ).toBeVisible(pageRead);
   const ran = steps.getByRole("region", {
     name: "What the run of version 1 did",
   });
@@ -312,6 +315,10 @@ test("a builder sees every declared branch of the checked definition, a test run
     ran.getByRole("listitem", { name: "greetOther" })
   ).toHaveAttribute("data-state", "none");
   await page.keyboard.press("Escape");
+  // Gone, the sheet with it: a press meanwhile would close it.
+  await expect(
+    page.getByRole("dialog", { name: /^The run started/u })
+  ).toHaveCount(0);
 
   // Paused once the person says so and the moment to take it back has
   // passed: it says so, and Resume runs it again.

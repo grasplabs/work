@@ -55,9 +55,9 @@ test("an admin whose company's flow is the AI step alone makes that one choice a
     await expect(
       page.getByRole("heading", { name: "Which AI should I think with?" })
     ).toBeVisible();
-    await expect(page.getByRole("button", { name: /^Step \d+$/u })).toHaveCount(
-      1
-    );
+    await expect(
+      page.getByRole("list", { name: "Onboarding steps" }).getByRole("listitem")
+    ).toHaveCount(1);
     await page.getByRole("button", { name: "Continue" }).click();
 
     // The last screen of its flow: the admin is in the platform, and it opened.
@@ -151,10 +151,10 @@ test("an admin whose company has a shorter flow gets only its screens, in its or
     await expect(
       page.getByRole("heading", { name: "Which AI should I think with?" })
     ).toBeVisible();
-    // Five dots: the welcome, the AI, who's who, the team leads and telling the team.
-    await expect(page.getByRole("button", { name: /^Step \d+$/u })).toHaveCount(
-      5
-    );
+    // Five steps: the welcome, the AI, who's who, the team leads and telling the team.
+    await expect(
+      page.getByRole("list", { name: "Onboarding steps" }).getByRole("listitem")
+    ).toHaveCount(5);
     await page.getByRole("button", { name: "Continue" }).click();
 
     // Straight to who's who: this company's flow has no "How this works".
@@ -387,7 +387,6 @@ test("the admin settles what needs them, and once Grasp gives its go, goes in th
     timeout: 30_000,
   });
   await expect(page).toHaveURL(/\/inbox$/u, { timeout: 15_000 });
-  await expect(page.getByRole("tab", { name: /^To do/u })).toBeVisible();
   await expect(page.getByText("Opening Grasp")).toHaveCount(0, {
     timeout: 15_000,
   });

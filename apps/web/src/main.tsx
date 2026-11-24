@@ -10,6 +10,7 @@ import { createRoot } from "react-dom/client";
 import { CoreConnection } from "./core-connection.ts";
 import { reportError, reportUncaughtErrors } from "./error-reports.ts";
 import { NotFound } from "./frame/page-states.tsx";
+import { UiWords } from "./frame/ui-words.tsx";
 import { startI18n } from "./i18n.ts";
 import { RouteError } from "./route-error.tsx";
 import { routeTree } from "./routeTree.gen.ts";
@@ -34,7 +35,7 @@ const router = createRouter({
   context: { core },
   // The page's card scrolls on its own (frame/app-frame.tsx), so a new
   // page starts at the top of it, not only of the window.
-  scrollToTopSelectors: ['[data-slot="app-shell-content"]'],
+  scrollToTopSelectors: ['[data-slot="app-shell-page"]'],
   defaultErrorComponent: RouteError,
   defaultNotFoundComponent: () => <NotFound />,
 });
@@ -119,7 +120,9 @@ const start = async (): Promise<void> => {
         {/* Lingui draws nothing until a language is active. */}
         {worded ? (
           <I18nProvider i18n={i18n}>
-            <Routes />
+            <UiWords>
+              <Routes />
+            </UiWords>
           </I18nProvider>
         ) : (
           <NoWords />

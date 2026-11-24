@@ -1,7 +1,7 @@
-import { canBuild } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
+import { isMine, sharedWith } from "../apps/app-reach.ts";
 import { AppsOverview } from "../apps/apps-overview.tsx";
 import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
@@ -10,7 +10,8 @@ import { noneIfRefused } from "../workflows/reads.ts";
 
 // The Apps page (apps/apps-overview.tsx): the Apps the person can open,
 // one read (`apps.overview`) that has each App with what its current
-// version holds.
+// version holds, then whom each App not their own is shared with, read side
+// by side, for its tab: shared with them by name, or the company's.
 
 const AppsPage = () => {
   const { t } = useLingui();
@@ -22,7 +23,11 @@ const AppsPage = () => {
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Apps` }]} />
-      <AppsOverview builds={canBuild(identity.role)} listed={page.data} />
+      <AppsOverview
+        listed={page.data.listed}
+        shared={page.data.shared}
+        viewer={identity}
+      />
     </>
   );
 };
@@ -30,9 +35,18 @@ const AppsPage = () => {
 export const Route = createFileRoute("/_shell/apps/")({
   pendingComponent: PageLoading,
   component: AppsPage,
-  loader: async ({ context: { core } }) =>
-    await loadFromCore(
-      core,
-      async (session) => await noneIfRefused(session.apps.overview())
-    ),
+  loader: async ({ context: { core, identity } }) =>
+    await loadFromCore(core, async (session) => {
+      const listed = await noneIfRefused(session.apps.overview());
+      const others = listed.filter(({ app }) => !isMine(app, identity.userId));
+      const reached = await Promise.all(
+        others.map(async ({ app }) => {
+          const members = await noneIfRefused(
+            session.apps.members.list(app.id)
+          );
+          return sharedWith(members, identity.userId) ? [app.id] : [];
+        })
+      );
+      return { listed, shared: reached.flat() };
+    }),
 });
