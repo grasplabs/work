@@ -1,19 +1,84 @@
-import { Button } from "@grasp-os/app-kit/components/button";
+import type { Difference, SettleChoice } from "@grasp-os/shared/onboarding";
+import { Button } from "@grasp-os/ui/components/button";
+import { Snippet } from "@grasp-os/ui/components/snippet";
 import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-} from "@grasp-os/app-kit/components/tabs";
-import { cn } from "@grasp-os/app-kit/lib/utils";
-import type { Difference, SettleChoice } from "@grasp-os/shared/onboarding";
+} from "@grasp-os/ui/components/tabs";
+import { Text } from "@grasp-os/ui/components/text";
+import { CheckIcon, Icon } from "@grasp-os/ui/lib/icons";
+import {
+  colors,
+  media,
+  radius,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
-import { CheckIcon, CopyIcon } from "lucide-react";
-import { useState } from "react";
+import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
-import { copyText } from "../copy.ts";
-import { useEntrance } from "./setup-parts.tsx";
+import { comeIn, motion } from "./motion.ts";
+import { useArrives } from "./setup-parts.tsx";
+
+const styles = stylex.create({
+  // A row of the list of what needs the admin: a line over each, and one under the last.
+  row: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space[3],
+    paddingBlock: space[4],
+    textAlign: "start",
+    borderBlockStartWidth: size.hairline,
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: colors.border,
+    borderBlockEndWidth: { default: 0, ":last-child": size.hairline },
+    borderBlockEndStyle: "solid",
+    borderBlockEndColor: colors.border,
+  },
+  words: { display: "flex", flexDirection: "column" },
+  choices: { display: "flex", flexWrap: "wrap", gap: space[2] },
+  settled: {
+    display: "flex",
+    alignItems: "center",
+    gap: space[2],
+    color: colors.mutedForeground,
+  },
+  tick: { display: "flex", color: colors.success },
+  settledWords: { flexGrow: 1, minWidth: 0 },
+  ways: {
+    display: "grid",
+    gridTemplateColumns: { default: "1fr", [media.sm]: "1fr 1fr" },
+    gap: space[3],
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  way: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space[1],
+    paddingBlock: space[3],
+    paddingInline: space[4],
+    borderRadius: radius.base,
+    cornerShape: radius.shape,
+    backgroundColor: colors.card,
+    boxShadow: size.borderStrong,
+  },
+  steps: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space[2],
+    margin: 0,
+    paddingInlineStart: space[5],
+    listStyleType: "decimal",
+  },
+});
+
+/** A row of the list of what needs the admin, for an item kept elsewhere (no-sender.tsx). */
+export const reviewRow = stylex.props(styles.row, styles.words);
 
 // What only the admin can settle in their onboarding, one item each
 // (prototype `components/onboarding/review-parts.tsx`): a step people told
@@ -24,7 +89,7 @@ import { useEntrance } from "./setup-parts.tsx";
 // doesn't know in spam, and the interview links with it.
 
 /** A way to settle it: the first is the one Stephen would take. */
-export interface ReviewChoice {
+interface ReviewChoice {
   id: string;
   label: string;
 }
@@ -35,7 +100,7 @@ export interface ReviewChoice {
  * button of its own. Once settled it says which way they chose, and that
  * can still be changed.
  */
-export const ReviewItem = ({
+const ReviewItem = ({
   title,
   context,
   children,
@@ -56,21 +121,25 @@ export const ReviewItem = ({
   const { t } = useLingui();
   const settled = chosen !== null;
   const choice = chosen?.label ?? "";
-  const settledEntrance = useEntrance(
-    chosen?.id ?? "",
-    "animate-in fade-in duration-300"
-  );
+  const settledArrives = useArrives(chosen?.id ?? "");
   return (
-    <div className="flex flex-col gap-3 border-t py-4 text-left last:border-b">
-      <div className="flex flex-col">
-        <span className={settled ? "text-muted-foreground" : "font-medium"}>
+    <div {...stylex.props(styles.row)}>
+      <div {...stylex.props(styles.words)}>
+        <Text
+          as="span"
+          size="sm"
+          color={settled ? "muted" : "secondary"}
+          weight={settled ? "normal" : "medium"}
+        >
           {title}
-        </span>
-        <span className="text-muted-foreground">{context}</span>
+        </Text>
+        <Text as="span" size="sm" color="muted">
+          {context}
+        </Text>
       </div>
       {settled ? null : children}
       {chosen === null ? (
-        <div className="flex flex-wrap gap-2" key="choices">
+        <div key="choices" {...stylex.props(styles.choices)}>
           {choices.map((each, at) => (
             <Button
               key={each.id}
@@ -86,17 +155,15 @@ export const ReviewItem = ({
         </div>
       ) : (
         <div
-          className={cn(
-            "text-muted-foreground flex items-center gap-2",
-            settledEntrance
-          )}
           key="settled"
+          {...comeIn(settledArrives, motion.fade, styles.settled)}
         >
-          <CheckIcon
-            aria-hidden="true"
-            className="text-status-agreed size-4 flex-none"
-          />
-          <span className="min-w-0 flex-1">{t`Settled: ${choice}`}</span>
+          <span {...stylex.props(styles.tick)}>
+            <Icon icon={CheckIcon} />
+          </span>
+          <Text as="span" style={styles.settledWords} size="sm" color="muted">
+            {t`Settled: ${choice}`}
+          </Text>
           <Button onClick={onReopen} size="sm" variant="ghost">
             {t({ message: "Change", context: "change how it was settled" })}
           </Button>
@@ -111,9 +178,13 @@ const settleChoices: readonly SettleChoice[] = ["both", "first", "other"];
 
 /** One way a step is told, in a card: what is done, and how it was told, never by whom. */
 const Way = ({ text, told }: { text: string; told: string }) => (
-  <li className="bg-card flex flex-col gap-0.5 rounded-xl border px-3.5 py-3">
-    <span className="font-medium">{text}</span>
-    <span className="text-muted-foreground text-xs">{told}</span>
+  <li {...stylex.props(styles.way)}>
+    <Text as="span" size="sm" weight="medium">
+      {text}
+    </Text>
+    <Text as="span" size="xs" color="muted">
+      {told}
+    </Text>
   </li>
 );
 
@@ -158,7 +229,7 @@ export const DifferenceItem = ({
       onReopen={onReopen}
       title={t`People do “${name}” in two ways`}
     >
-      <ul className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+      <ul {...stylex.props(styles.ways)}>
         <Way text={way} told={t`The way most told it`} />
         <Way text={other} told={t`The way some told it`} />
       </ul>
@@ -169,33 +240,12 @@ export const DifferenceItem = ({
 /** The sending domain as the admin types it into their filter, with a way to copy it. */
 const DomainToCopy = ({ domain }: { domain: string }) => {
   const { t } = useLingui();
-  const [copied, setCopied] = useState(false);
-  return (
-    <div className="bg-muted/50 flex items-center gap-2 rounded-lg border py-1 pr-1 pl-3">
-      <code className="min-w-0 flex-1 truncate font-mono">{domain}</code>
-      <Button
-        onClick={() => {
-          void (async () => {
-            setCopied(await copyText(domain));
-          })();
-        }}
-        size="sm"
-        variant="ghost"
-      >
-        {copied ? (
-          <CheckIcon data-icon="inline-start" />
-        ) : (
-          <CopyIcon data-icon="inline-start" />
-        )}
-        {copied ? t`Copied` : t`Copy`}
-      </Button>
-    </div>
-  );
+  return <Snippet aria-label={t`Copy`} value={domain} />;
 };
 
 /** Numbered steps, short enough to follow in the other window. */
 const Steps = ({ steps }: { steps: string[] }) => (
-  <ol className="flex list-decimal flex-col gap-1.5 pl-5">
+  <ol {...stylex.props(styles.steps)}>
     {steps.map((step) => (
       <li key={step}>{step}</li>
     ))}
@@ -270,9 +320,13 @@ export const MailItem = ({
 export const NoMailItem = () => {
   const { t } = useLingui();
   return (
-    <div className="flex flex-col border-t py-4 text-left last:border-b">
-      <span className="font-medium">{t`Mail isn’t available on this hosting yet`}</span>
-      <span className="text-muted-foreground">{t`Grasp can’t email your people their interview links for now. Send each one their link by hand from Interviews.`}</span>
+    <div {...reviewRow}>
+      <Text as="span" size="sm" weight="medium">
+        {t`Mail isn’t available on this hosting yet`}
+      </Text>
+      <Text as="span" size="sm" color="muted">
+        {t`Grasp can’t email your people their interview links for now. Send each one their link by hand from Interviews.`}
+      </Text>
     </div>
   );
 };

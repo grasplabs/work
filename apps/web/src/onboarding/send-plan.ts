@@ -6,6 +6,13 @@ import type { PlanInput } from "@grasp-os/shared/onboarding";
 // send-plan-form.tsx, and what comes of it is the onboarding's plan, which
 // core sends by. From the prototype's `lib/send-plan.ts`.
 
+/**
+ * Today as core counts it, in UTC: the first day a plan can start, as core
+ * refuses one before it. Not the device's day: in a US evening that is
+ * still the day before, which core refuses.
+ */
+export const todayInUtc = (): string => new Date().toISOString().slice(0, 10);
+
 /** The ISO day `count` days after `day`. */
 export const addDays = (day: string, count: number): string => {
   const date = new Date(`${day.slice(0, 10)}T12:00:00Z`);
@@ -14,7 +21,7 @@ export const addDays = (day: string, count: number): string => {
 };
 
 /** The ISO day `count` working days after `day`: weekends do not count. */
-export const addWorkingDays = (day: string, count: number): string => {
+const addWorkingDays = (day: string, count: number): string => {
   let at = day.slice(0, 10);
   let left = count;
   while (left > 0) {
@@ -39,7 +46,7 @@ export interface SendChoice {
 }
 
 /** The usual hour: the start of a working day. */
-export const sendTime = "09:00";
+const sendTime = "09:00";
 
 const isoDay = /^\d{4}-\d{2}-\d{2}$/u;
 const clockTime = /^\d{2}:\d{2}$/u;
@@ -115,13 +122,13 @@ export const planOf = (choice: SendChoice, days: number): PlanInput => {
 };
 
 /** The hour of a moment on this device's own clock, as HH:MM. */
-export const clockOf = (moment: string): string => {
+const clockOf = (moment: string): string => {
   const at = new Date(moment);
   return `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
 };
 
 /** The day of a moment on this device's own clock, as an ISO day. */
-export const dayOnClock = (moment: string): string => {
+const dayOnClock = (moment: string): string => {
   const at = new Date(moment);
   return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
 };
