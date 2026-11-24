@@ -1,7 +1,7 @@
 import { announce } from "@grasp-os/ui/lib/utils";
 import { useEffect, useState } from "react";
 
-import { fixture } from "./fixture.ts";
+import { copy, fixture } from "./fixture.ts";
 
 // CONCEPT ONLY: the interview’s countdown. It runs from the first second of
 // the conversation over the one budget (20 minutes), shown as time USED,
@@ -41,13 +41,13 @@ export const useCountdown = (
   return left;
 };
 
-/** The minutes used, going forward: "12 of 20 minutes". */
+/** The minutes used, going forward: "12 / 20 min". */
 export const usedWords = (left: number): string => {
   const used = Math.min(
     fixture.minutes,
     Math.floor((budgetSeconds - left) / 60)
   );
-  return `${used} of ${fixture.minutes} minutes`;
+  return copy.clock.used(used);
 };
 
 /** Seconds used, for a Progress that only ever goes forward. */
@@ -58,9 +58,9 @@ export const nearEnd = (left: number): boolean => left <= wrapUpSeconds;
 
 /** The marks said aloud, and nothing in between. */
 const marks = [
-  { at: wrapUpSeconds, words: `${fixture.wrapUpMinutes} minutes left` },
-  { at: 60, words: "1 minute left" },
-  { at: 0, words: `The ${fixture.minutes} minutes are up` },
+  { at: wrapUpSeconds, words: copy.clock.mark5 },
+  { at: 60, words: copy.clock.mark1 },
+  { at: 0, words: copy.clock.mark0 },
 ] as const;
 
 /**

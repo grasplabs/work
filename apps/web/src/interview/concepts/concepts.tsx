@@ -18,6 +18,7 @@ import { Conversation, helloTalk, talkAt, Thread } from "./conversation.tsx";
 import type { Talk, Turn } from "./conversation.tsx";
 import {
   checkAsk,
+  copy,
   checkHeard,
   fixture,
   hello,
@@ -66,6 +67,8 @@ export interface ConceptSearch {
   fold: boolean;
   /** On a phone: the scene only behind the header, or a low band under it. */
   band: "header" | "low";
+  /** Ruben's alternative title on A's start (`&title=alt`). */
+  altTitle: boolean;
 }
 
 /** Reads the concept’s own part of the address; nothing when it names no concept. */
@@ -87,6 +90,7 @@ export const conceptSearch = (
     transcript: search.transcript !== undefined,
     fold: search.fold !== undefined,
     band: search.band === "header" ? "header" : "low",
+    altTitle: search.title === "alt",
   };
 };
 
@@ -286,7 +290,7 @@ const ConsentThread = ({
       turns.push({
         id: "reminded",
         from: "stephen",
-        text: `Done: I’ll remind you ${remindWhen}. Nothing was recorded. The interviews close ${fixture.closes}.`,
+        text: copy.c.remindDone(remindWhen),
       });
     }
   }
@@ -294,7 +298,7 @@ const ConsentThread = ({
     turns.push({
       id: "declined",
       from: "stephen",
-      text: `That’s fine, ${fixture.person}. ${fixture.sponsor.name} will see that you’re not taking part, never why. Nothing was recorded, and I won’t remind you. If you change your mind, this link works until ${fixture.closes}.`,
+      text: copy.c.declined,
     });
   }
   return (
@@ -310,16 +314,16 @@ const ConsentThread = ({
                 }}
                 variant="link"
               >
-                I’d rather not
+                {copy.c.decline}
               </Button>
               <Text color="muted" size="xs">
-                Your microphone stays off until you say yes.
+                {copy.c.micOff}
               </Text>
             </>
           ) : null}
           {answer === "rather-not" ? (
             <Button onClick={onUndo} variant="outline">
-              I changed my mind
+              {copy.c.undo}
             </Button>
           ) : null}
         </div>
@@ -343,11 +347,13 @@ const BeforeAB = ({
   concept,
   screen,
   live,
+  altTitle,
   go,
 }: {
   concept: Concept;
   screen: string;
   live: boolean;
+  altTitle: boolean;
   go: (screen: string) => void;
 }) => {
   const [when, setWhen] = useState<string>(fixture.remindAt[1].when);
@@ -400,6 +406,7 @@ const BeforeAB = ({
       if (concept === "a") {
         return (
           <ConsentClean
+            altTitle={altTitle}
             onAgree={() => {
               go("hello");
             }}
@@ -414,7 +421,7 @@ const BeforeAB = ({
       }
       return (
         <Consent
-          agree="I agree"
+          agree={copy.start.agree}
           onAgree={() => {
             go("check");
           }}
@@ -424,7 +431,7 @@ const BeforeAB = ({
           onRatherNot={() => {
             go("rather-not");
           }}
-          title={`${fixture.minutes} minutes with ${fixture.interviewer}`}
+          title={copy.start.title}
         />
       );
     }
@@ -523,7 +530,15 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
   } else if (concept === "c") {
     page = <BeforeC go={go} screen={screen} />;
   } else {
-    page = <BeforeAB concept={concept} go={go} live={live} screen={screen} />;
+    page = (
+      <BeforeAB
+        altTitle={search.altTitle}
+        concept={concept}
+        go={go}
+        live={live}
+        screen={screen}
+      />
+    );
   }
 
   return (
@@ -534,7 +549,7 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
             {concept === "c" ? null : (
               <Button
                 aria-expanded={transcript}
-                aria-label="Transcript"
+                aria-label={copy.talk.transcript}
                 onClick={() => {
                   setTranscript(!transcript);
                 }}
@@ -545,7 +560,7 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
               </Button>
             )}
             <Button
-              aria-label="Stop for now"
+              aria-label={copy.talk.stop}
               onClick={() => {
                 go("paused");
               }}
