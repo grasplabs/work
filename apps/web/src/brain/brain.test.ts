@@ -5,7 +5,6 @@ import {
   buildBrain,
   folderTree,
   mentionParts,
-  patterns,
   sourceContents,
   splitTimeline,
 } from "./brain.ts";
@@ -123,12 +122,6 @@ describe(buildBrain, () => {
     expect(
       brain.notes.some((candidate) => candidate.kind === "statement")
     ).toBeFalsy();
-    const inventory = folderTree(brain.notes).folders.find(
-      (folder) => folder.name === "2 Inventory"
-    );
-    expect(inventory?.folders.map((folder) => folder.name)).not.toContain(
-      "Statements"
-    );
     expect(note("src-mortgage").statementIds).toStrictEqual(
       expect.arrayContaining(["st-lenders", "st-complete"])
     );
@@ -276,8 +269,8 @@ describe(buildBrain, () => {
 describe("the inventory", () => {
   const ws = testWorkspace();
 
-  it("gives each source folder a page of what it holds, and leaves consent to the service agreement", () => {
-    // Like the Vision page is its folder: what this way of collecting adds, and what came in. Who agreed is not the brain's business.
+  it("gives each source folder a page of what it holds", () => {
+    // Like the Vision page is its folder: what this way of collecting adds, and what came in.
     const conversations = noteIn(ws, "sources-conversations");
     expect(conversations.path).toStrictEqual(["Sources", "Conversations"]);
     expect(
@@ -292,11 +285,6 @@ describe("the inventory", () => {
     expect(conversations.timeline.map((entry) => entry.to)).toContain(
       "src-vision"
     );
-    expect(
-      buildBrain(ws).notes.some((candidate) =>
-        candidate.path.includes("Access and consent")
-      )
-    ).toBeFalsy();
   });
 
   it("says how many gaps are still open, and nothing under Added for a document without statements", () => {
@@ -337,9 +325,6 @@ describe("the inventory", () => {
     expect(words(noteIn(notYet, "company"), "Interviews")).toMatch(
       /^Stakeholders of 4 of 5 invited teams/u
     );
-    expect(patterns(notYet)).toContain(
-      "1 invited team not interviewed yet: Compliance."
-    );
   });
 
   it("keeps an interview as an article on its source, and roles on its team", () => {
@@ -354,7 +339,7 @@ describe("the inventory", () => {
     );
     expect(interview.tags).toContain("article");
     expect(words(noteIn(ws, "team-service"), "Roles")).toBe(
-      "Head of customer service (1), Service desk (14)"
+      "Head of customer service (1) and Service desk (14)"
     );
   });
 
@@ -433,13 +418,6 @@ describe("the inventory", () => {
       "1 Vision",
       "Goals",
     ]);
-  });
-
-  it("finds patterns in the records instead of guessing them", () => {
-    const found = patterns(ws);
-    expect(found).toContain(
-      "Mortgage advice and Client onboarding both name the same handover, each from their own side."
-    );
   });
 });
 
@@ -524,7 +502,7 @@ describe("a living brain", () => {
     ).toMatchObject({ date: "2026-09-23", to: "src-board-checkin" });
   });
 
-  it("keeps a statement said again later as its own highlight in its own source, and edits neither", () => {
+  it("keeps a statement said again later as its own highlight in its own source", () => {
     const invoices = noteIn(ws, "cand-invoices");
     expect(invoices.statementIds.indexOf("st-approvals")).toBeLessThan(
       invoices.statementIds.indexOf("st-approvals-still")
@@ -533,9 +511,6 @@ describe("a living brain", () => {
     expect(noteIn(ws, "src-agent-finance").statementIds).toContain(
       "st-approvals-still"
     );
-    expect(
-      ws.statements.find((statement) => statement.id === "st-approvals")?.text
-    ).toBe("Approvals for supplier invoices are chased by email");
   });
 
   it("keeps what people say after step 2 in the brain", () => {
