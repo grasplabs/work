@@ -1,6 +1,8 @@
 import { agentDocumentsTextMaxBytes, ownAgentsMax } from "./agents.ts";
 import {
   chatFileMaxBytes,
+  chatPictureMaxBytes,
+  chatPictureMaxPixels,
   chatFilesMax,
   chatFilesPerQuestionMax,
 } from "./chat.ts";
@@ -75,8 +77,8 @@ export const agentErrors = defineErrorFamily({
   "agent.run_ended":
     "This code run has ended, so its APIs don't answer any more.",
   "agent.file_unsupported":
-    "Only PDF, Word (.docx), Excel (.xlsx), Markdown, text, CSV and JSON files can be attached, with a name that ends in .pdf, .docx, .xlsx, .md, .txt, .csv or .json.",
-  "agent.file_too_large": `A file attached to a question is at most ${chatFileMaxBytes / 1024 / 1024} MB, and its text at most 1 MB.`,
+    "Only PDF, Word (.docx), Excel (.xlsx), Markdown, text, CSV and JSON files can be attached, with a name that ends in .pdf, .docx, .xlsx, .md, .txt, .csv or .json, and PNG, JPEG, WebP and GIF pictures.",
+  "agent.file_too_large": `A file attached to a question is at most ${chatFileMaxBytes / 1024 / 1024} MB, and its text at most 1 MB. A picture is at most ${chatPictureMaxBytes / 1024 / 1024} MB and ${chatPictureMaxPixels} pixels a side.`,
   "agent.too_many_files": `A question carries at most ${chatFilesPerQuestionMax} files, and a chat keeps at most ${chatFilesMax}. Start a new chat to attach more.`,
   "agent.file_busy":
     "The file's text couldn't be read just now. Attach it again in a moment.",

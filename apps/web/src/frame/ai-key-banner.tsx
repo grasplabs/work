@@ -1,8 +1,3 @@
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/app-kit/components/alert";
 import { aiProviders } from "@grasp-os/shared/ai-providers";
 import type {
   AiProvidersListing,
@@ -10,9 +5,19 @@ import type {
 } from "@grasp-os/shared/ai-providers";
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import { Link } from "@grasp-os/ui/components/link";
+import { Icon, TriangleAlertIcon } from "@grasp-os/ui/lib/icons";
+import {
+  colors,
+  font,
+  media,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
+import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Link } from "@tanstack/react-router";
-import { KeyRoundIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
+import { Link as RouterLink } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
@@ -67,6 +72,57 @@ export const failingProviders = (
         ]
   );
 
+const styles = stylex.create({
+  // Across the top of the page's card, one under the other.
+  banners: { display: "flex", flexDirection: "column", flexShrink: 0 },
+  // A band, as the reference's banner in the shell's banner row (#2503's
+  // grasp/alert/banner.tsx): no corners of its own, so it takes the card's
+  // at its top and meets the bar under it square; 12px all round, the
+  // system's soft edge, the warning's tint. Damsko's Alert as a banner is
+  // a rounded card with more room at its sides (registry gap of 24 Nov
+  // 2026), so the band is drawn here on its tokens.
+  band: {
+    [iconVars.size]: size.iconSm,
+    [iconVars.stroke]: size.iconStroke,
+    display: "grid",
+    gridTemplateColumns: "auto minmax(0, 1fr)",
+    alignItems: "start",
+    boxSizing: "border-box",
+    width: "100%",
+    minWidth: 0,
+    padding: space["3"],
+    boxShadow: size.borderStrong,
+    borderWidth: { default: 0, [media.forcedColors]: 1 },
+    borderStyle: "solid",
+    borderColor: "CanvasText",
+    backgroundColor: colors.warningSubtle,
+    fontFamily: font.sans,
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+    color: colors.bodyForeground,
+    overflowWrap: "anywhere",
+  },
+  // Level with the title's line, however many lines the message takes.
+  icon: {
+    display: "inline-flex",
+    flexShrink: 0,
+    alignSelf: "flex-start",
+    marginInlineEnd: space["2"],
+    marginBlockStart: `calc(${space["1"]} + (${font.textSmLine} - ${size.iconSm}) / 2)`,
+    color: colors.warning,
+  },
+  // The title on the first line, the message under it.
+  words: {
+    display: "grid",
+    rowGap: space["1"],
+    minWidth: 0,
+    margin: 0,
+    paddingBlock: space["1"],
+    textWrap: "pretty",
+  },
+  title: { fontWeight: font.weightMedium, color: colors.foreground },
+});
+
 /** What to do about a provider that isn't answering. */
 const IfItLasts = ({ statusPage }: { statusPage: string | undefined }) => {
   if (statusPage === undefined) {
@@ -76,9 +132,9 @@ const IfItLasts = ({ statusPage }: { statusPage: string | undefined }) => {
   return (
     <Trans>
       If it lasts, check{" "}
-      <a href={statusPage} rel="noreferrer" target="_blank">
+      <Link external href={statusPage}>
         {page}
-      </a>{" "}
+      </Link>{" "}
       or switch provider.
     </Trans>
   );
@@ -94,8 +150,10 @@ const FailingLine = ({ failing }: { failing: FailingProvider }) => {
   if (failing.trouble === "refused") {
     title = t`${label} is refusing your key since ${since}.`;
     description = (
-      <Link to="/settings/ai-providers">
-        <Trans>Check or replace it in Settings › AI providers.</Trans>
+      <Link asChild>
+        <RouterLink to="/settings/ai-providers">
+          <Trans>Check or replace it in Settings › AI providers.</Trans>
+        </RouterLink>
       </Link>
     );
   } else if (failing.trouble === "not_answering") {
@@ -110,15 +168,15 @@ const FailingLine = ({ failing }: { failing: FailingProvider }) => {
     );
   }
   return (
-    <Alert live="polite" variant="attention">
-      <KeyRoundIcon aria-hidden="true" />
-      <AlertTitle>{title}</AlertTitle>
-      {description === null ? null : (
-        <AlertDescription>
-          <p>{description}</p>
-        </AlertDescription>
-      )}
-    </Alert>
+    <output data-slot="banner" {...stylex.props(styles.band)}>
+      <span aria-hidden="true" {...stylex.props(styles.icon)}>
+        <Icon icon={TriangleAlertIcon} />
+      </span>
+      <div {...stylex.props(styles.words)}>
+        <span {...stylex.props(styles.title)}>{title}</span>
+        {description === null ? null : <span>{description}</span>}
+      </div>
+    </output>
   );
 };
 
@@ -149,7 +207,8 @@ export const failingUpFront = async (
 };
 
 /**
- * A banner over the page for each AI provider whose calls fail,
+ * A banner across the top of the page's card (Damsko's Alert, as a
+ * banner), for each AI provider whose calls fail,
  * for the organization's own admins; nothing for anyone else, or while
  * every key works.
  */
@@ -206,7 +265,7 @@ export const AiKeyBanner = ({
     return null;
   }
   return (
-    <div className="flex flex-col gap-2 px-4 pt-4">
+    <div {...stylex.props(styles.banners)}>
       {failing.map((key) => (
         <FailingLine failing={key} key={key.label} />
       ))}

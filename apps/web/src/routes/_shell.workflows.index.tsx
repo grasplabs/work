@@ -1,50 +1,28 @@
-import { canBuild } from "@grasp-os/shared/roles";
+import { canBuild, isMemberAdmin } from "@grasp-os/shared/roles";
 import { Button } from "@grasp-os/ui/components/button";
+import { PageHeader } from "@grasp-os/ui/components/page-header";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
 
 import { LoadingLines, PageNotLoaded } from "../frame/page-states.tsx";
-import { Page, PageHeading } from "../frame/page.tsx";
+import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { MakeSomethingLink } from "../make/make-link.tsx";
 import {
   readOverview,
-  readTools,
   readTriggers,
+  withTriggers,
 } from "../workflows/overview.ts";
 import type { TriggersByWorkflow } from "../workflows/overview.ts";
 import { WorkflowRows } from "../workflows/workflow-rows.tsx";
 
 // Everything that runs on its own, in one place: every workflow the
-// person has a role in, as rows gathered by the phase each stands in
-// (workflows/workflow-rows.tsx), those that need the reader first. Their
-// runs are a page of their own (Workflows › Runs), a button away in the
-// heading, beside the page's action: a new workflow.
-
-/**
- * What stands beside the rows (the tools each workflow reaches, what
- * starts it), once its read answers. The loader starts these reads on
- * every run of it and never waits for them: a slow one keeps nobody from
- * their workflows.
- */
-const useLater = <T,>(later: Promise<T>): T | undefined => {
-  const [read, setRead] = useState<T>();
-  useEffect(() => {
-    let current = true;
-    const settle = async (): Promise<void> => {
-      const answered = await later;
-      if (current) {
-        setRead(answered);
-      }
-    };
-    void settle();
-    return () => {
-      current = false;
-    };
-  }, [later]);
-  return read;
-};
+// person has a role in, as one table, those that need the reader first
+// (workflows/workflow-rows.tsx). Their runs are a page of their own
+// (Workflows › Runs), a button away in the heading, beside the page's
+// action: a new workflow. What starts each workflow is read before the
+// rows show, as it decides how each stands: live only where something can
+// start it.
 
 /**
  * The heading's actions: the runs, and a new workflow for who builds.
@@ -59,7 +37,7 @@ const WorkflowsActions = () => {
         <Link to="/workflows/runs">{t`Runs`}</Link>
       </Button>
       {canBuild(identity.role) ? (
-        <MakeSomethingLink kind="workflow" size="sm" />
+        <MakeSomethingLink kind="workflow" size="sm" variant="outline" />
       ) : null}
     </>
   );
@@ -68,8 +46,7 @@ const WorkflowsActions = () => {
 const Workflows = () => {
   const { t } = useLingui();
   const page = Route.useLoaderData();
-  const tools = useLater(page.tools);
-  const triggers = useLater(page.triggers);
+  const { identity } = Route.useRouteContext();
   // The rows are the page: without them the failure stands for all of it,
   // under the bar, not as a box under a heading with nothing to head.
   if (page.overview.state !== "ready") {
@@ -80,12 +57,13 @@ const Workflows = () => {
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Workflows` }]} />
-      <Page wide>
-        <PageHeading action={<WorkflowsActions />} title={t`Workflows`} />
+      <Page>
+        <PageHeader actions={<WorkflowsActions />} title={t`Workflows`} />
         <WorkflowRows
+          admin={isMemberAdmin(identity)}
+          builds={canBuild(identity.role)}
           rows={page.overview.data}
-          tools={tools}
-          triggers={triggers}
+          triggers={page.triggers}
         />
       </Page>
     </>
@@ -102,8 +80,8 @@ const WorkflowsPending = () => {
   return (
     <>
       <SiteHeader crumbs={[{ label: t`Workflows` }]} />
-      <Page wide>
-        <PageHeading action={<WorkflowsActions />} title={t`Workflows`} />
+      <Page>
+        <PageHeader actions={<WorkflowsActions />} title={t`Workflows`} />
         <LoadingLines lines={6} />
       </Page>
     </>
@@ -114,19 +92,27 @@ const noTriggers: TriggersByWorkflow = new Map();
 
 export const Route = createFileRoute("/_shell/workflows/")({
   pendingComponent: WorkflowsPending,
-  loader: async ({ context: { core } }) => {
-    // Not awaited: the tools stand beside a workflow, and arrive after.
-    const tools = readTools(core);
-    const overview = await readOverview(core);
-    // Nor these: what starts each workflow, read once the rows name them.
-    const triggers =
-      overview.state === "ready"
-        ? readTriggers(
-            core,
-            overview.data.map(({ id }) => id)
-          )
-        : Promise.resolve(noTriggers);
-    return { overview, tools, triggers };
+  loader: async ({ context: { core, identity } }) => {
+    const read = await readOverview(core);
+    if (read.state !== "ready") {
+      return { overview: read, triggers: noTriggers };
+    }
+    // What starts each workflow, read once the rows name them: it decides
+    // how each stands, so the rows wait for it. Only where the reader
+    // manages its triggers: core lists anyone else their own alone, which
+    // would read as nothing starting it.
+    const admin = isMemberAdmin(identity);
+    const triggers = await readTriggers(
+      core,
+      read.data.flatMap(({ id, role }) =>
+        admin || role === "builder" ? [id] : []
+      )
+    );
+    const overview = {
+      ...read,
+      data: withTriggers(read.data, triggers, admin),
+    };
+    return { overview, triggers };
   },
   component: Workflows,
 });

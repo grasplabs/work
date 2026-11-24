@@ -45,7 +45,7 @@ import {
   unavailableText,
 } from "./models-unavailable.tsx";
 import { ChatSources } from "./sources.tsx";
-import { SubjectBarContent, subjectBarOf } from "./subject-bar.tsx";
+import { useSubjectBar } from "./subject-bar.tsx";
 
 // Grasp's chat open (global-chat.tsx): one panel, docked beside the page or
 // floating over it as a window the person moves by its header. A header with
@@ -67,9 +67,11 @@ const styles = stylex.create({
     flexDirection: "column",
     flexShrink: 0,
     gap: space["1"],
-    paddingInline: space["4"],
+    // As far in from the panel's sides and foot as #2503's (its page
+    // inset): the band above the box then lies as his does.
+    paddingInline: space["6"],
     paddingBlockStart: space["2"],
-    paddingBlockEnd: space["4"],
+    paddingBlockEnd: space["6"],
   },
   body: {
     display: "flex",
@@ -85,8 +87,9 @@ const styles = stylex.create({
     minHeight: 0,
     marginInline: "auto",
   },
-  // Full screen, the conversation and the box read as one column in the middle.
-  fullscreen: { maxWidth: "48rem" },
+  // Full screen, the conversation and the box read as one column in the
+  // middle, a step under the head, as #2503's chat page.
+  fullscreen: { maxWidth: "48rem", paddingBlockStart: space["2"] },
   // There the box is as far in as the thread's words, and as wide (#2503).
   footerFullscreen: { paddingInline: space["8"] },
   boxFullscreen: { maxWidth: "100%" },
@@ -296,6 +299,12 @@ const Footer = ({ open }: { open: boolean }) => {
     subject.about === undefined || subject.name === undefined
       ? undefined
       : { ...subject.about, name: subject.name };
+  const bar = useSubjectBar({
+    subject: worked,
+    work,
+    chatId,
+    since: turnSince,
+  });
   return (
     <div
       {...stylex.props(styles.footer, fullscreen && styles.footerFullscreen)}
@@ -311,16 +320,7 @@ const Footer = ({ open }: { open: boolean }) => {
           )
         }
         agentModel={agentModelOf(agents, summary?.agentId)}
-        subject={
-          subjectBarOf(worked, work) === undefined ? undefined : (
-            <SubjectBarContent
-              chatId={chatId}
-              work={work}
-              since={turnSince}
-              subject={worked}
-            />
-          )
-        }
+        {...(bar === undefined ? {} : { subject: bar })}
         asking={asking}
         // The panel stays while it is closed: nothing listens from it then.
         dictates={open}

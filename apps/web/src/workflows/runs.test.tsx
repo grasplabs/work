@@ -42,7 +42,13 @@ const shown = async (
   log: Pick<Parameters<typeof RunsLog>[0], "runs" | "workflows">
 ): Promise<void> => {
   const rootRoute = createRootRoute({
-    component: () => <RunsLog me="user-ada" more={false} {...log} />,
+    component: () => (
+      <RunsLog
+        more={false}
+        names={{ people: new Map(), me: "user-ada" }}
+        {...log}
+      />
+    ),
   });
   const router = createRouter({
     routeTree: rootRoute,
@@ -61,13 +67,11 @@ const shown = async (
   });
 };
 
-/** The words of the log's links to their workflows. */
-const workflowLinks = (): string[] =>
-  [...document.querySelectorAll("a")]
-    .filter(
-      (link) => link.getAttribute("href")?.startsWith("/workflows/") === true
-    )
-    .map((link) => link.textContent.trim());
+/** The words each row of the log opens its run by: its workflow's name. */
+const rowNames = (): string[] =>
+  [...document.querySelectorAll("[data-row-target]")].map((target) =>
+    target.textContent.trim()
+  );
 
 describe("the runs log", () => {
   afterEach(() => {
@@ -84,6 +88,7 @@ describe("the runs log", () => {
         runOf("run-waiting", { decision: "decision-7" }),
         runOf("run-going", {}),
       ],
+      workflows: new Map(),
     });
 
     expect(
@@ -102,14 +107,9 @@ describe("the runs log", () => {
           name: "review-56c5a0d9",
         }),
       ],
-      workflows: new Map([
-        ["workflow-quotes", { label: "Quote approval", process: null }],
-      ]),
+      workflows: new Map([["workflow-quotes", "Quote approval"]]),
     });
 
-    expect(workflowLinks()).toStrictEqual([
-      "Quote approval",
-      "review-56c5a0d9",
-    ]);
+    expect(rowNames()).toStrictEqual(["Quote approval", "review-56c5a0d9"]);
   });
 });

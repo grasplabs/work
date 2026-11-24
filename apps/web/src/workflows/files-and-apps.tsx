@@ -29,7 +29,6 @@ import {
   ItemDescription,
   ItemGroup,
   ItemMedia,
-  ItemSeparator,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import {
@@ -41,12 +40,12 @@ import {
   TableRow,
 } from "@grasp-os/ui/components/table";
 import { Text } from "@grasp-os/ui/components/text";
-import { Icon, LinkIcon } from "@grasp-os/ui/lib/icons";
+import { Icon } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useRef, useState, Fragment } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { integrationsOf, stateOf } from "../connections/integrations.ts";
@@ -60,14 +59,16 @@ import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import type { Names } from "./activity-bar.tsx";
+import type { Names } from "./activity-words.ts";
 import {
   BindingFrame,
   PendingBindingList,
   targetWords,
 } from "./binding-approvals.tsx";
 import { useHeldDialog } from "./held-dialog.ts";
+import { CableIcon } from "./icons.ts";
 import { SectionCard } from "./section-card.tsx";
+import { SeparatedItems } from "./separated-items.tsx";
 import { workflowAppsOf } from "./workflow-apps.ts";
 import type { WorkflowApps } from "./workflow-apps.ts";
 
@@ -157,54 +158,55 @@ const Apps = ({ apps }: { apps: WorkflowApps }) => {
     );
   }
   return (
-    <ItemGroup>
-      {apps.connected.map((integration, at) => (
-        <Fragment key={integration.key}>
-          {at === 0 ? null : <ItemSeparator />}
-          <Item asChild size="xs">
-            <Link
-              params={{ integration: integration.key }}
-              to="/integrations/$integration"
-            >
+    <SeparatedItems
+      rows={[
+        ...apps.connected.map((integration) => ({
+          key: integration.key,
+          row: (
+            <Item asChild size="xs">
+              <Link
+                params={{ integration: integration.key }}
+                to="/integrations/$integration"
+              >
+                <ItemMedia>
+                  {/* The app's own mark, as Integrations draws it. */}
+                  <ProviderMark
+                    id={integration.id}
+                    logo={integration.logo}
+                    name={integration.name}
+                  />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>{integration.name}</ItemTitle>
+                </ItemContent>
+                <ItemActions>
+                  <ConnectedState integration={integration} />
+                </ItemActions>
+              </Link>
+            </Item>
+          ),
+        })),
+        ...apps.unconnected.map(({ alias, contractId }) => ({
+          key: alias,
+          row: (
+            <Item size="xs">
               <ItemMedia>
-                {/* The app's own mark, as Integrations draws it. */}
-                <ProviderMark
-                  id={integration.id}
-                  logo={integration.logo}
-                  name={integration.name}
-                />
+                <Icon icon={CableIcon} />
               </ItemMedia>
               <ItemContent>
-                <ItemTitle>{integration.name}</ItemTitle>
+                <ItemTitle>
+                  <code>{alias}</code>
+                </ItemTitle>
+                <ItemDescription>{contractId}</ItemDescription>
               </ItemContent>
               <ItemActions>
-                <ConnectedState integration={integration} />
+                <Badge size="sm" variant="warning">{t`Not connected`}</Badge>
               </ItemActions>
-            </Link>
-          </Item>
-        </Fragment>
-      ))}
-      {apps.unconnected.map(({ alias, contractId }, at) => (
-        <Fragment key={alias}>
-          {at === 0 && apps.connected.length === 0 ? null : <ItemSeparator />}
-          <Item size="xs">
-            {/* Damsko's set has no cable yet (logged as a registry gap). */}
-            <ItemMedia>
-              <Icon icon={LinkIcon} />
-            </ItemMedia>
-            <ItemContent>
-              <ItemTitle>
-                <code>{alias}</code>
-              </ItemTitle>
-              <ItemDescription>{contractId}</ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <Badge size="sm" variant="warning">{t`Not connected`}</Badge>
-            </ItemActions>
-          </Item>
-        </Fragment>
-      ))}
-    </ItemGroup>
+            </Item>
+          ),
+        })),
+      ]}
+    />
   );
 };
 

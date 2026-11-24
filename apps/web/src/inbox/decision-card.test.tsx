@@ -27,7 +27,7 @@ import { DecisionCard } from "./decision-card.tsx";
 // (GRA-1988), against core's `decisions` faked as core answers: an
 // approval is refused (`decision.withheld`), and the decision read again,
 // or reviewed, is the withheld one. The card shows what core serves now:
-// the prompt it showed is gone, the note says why, and only Reject is left.
+// the prompt it showed is gone, the note says why, and only Decline is left.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -152,7 +152,7 @@ const waited = async (ms: number): Promise<void> => {
 const answerButtons = (): string[] =>
   [...document.querySelectorAll("button")]
     .map((button) => button.textContent.trim())
-    .filter((text) => text === "Approve" || text === "Reject");
+    .filter((text) => text === "Approve" || text === "Decline");
 
 /** Presses the button whose text is `label`. */
 const press = async (label: string): Promise<void> => {
@@ -177,7 +177,12 @@ const seen = () => {
     about: text.includes("Globex"),
     note: text.includes(note),
     uncheckedNote: text.includes(uncheckedNote),
-    comment: document.querySelector("textarea") !== null,
+    // A comment can be added: its box, or the button that opens it.
+    comment:
+      document.querySelector("textarea") !== null ||
+      [...document.querySelectorAll("button")].some(
+        (button) => button.textContent.trim() === "Add a comment"
+      ),
     buttons: answerButtons(),
   };
 };
@@ -191,7 +196,7 @@ describe("a decision's card, its ask withheld while it is open", () => {
     document.body.replaceChildren();
   });
 
-  it("shows the decision as core serves it now once an approval is refused: the prompt gone, the note, Reject alone", async () => {
+  it("shows the decision as core serves it now once an approval is refused: the prompt gone, the note, Decline alone", async () => {
     await shown({
       review: async (_id: string, answer: { approved: boolean }) => {
         if (answer.approved) {
@@ -216,16 +221,16 @@ describe("a decision's card, its ask withheld while it is open", () => {
         note: false,
         uncheckedNote: false,
         comment: true,
-        buttons: ["Approve", "Reject"],
+        buttons: ["Decline", "Approve"],
       },
-      // Its comment stays: a reason for rejecting goes with the rejection.
+      // Its comment stays: a reason for declining goes with the answer.
       after: {
         prompt: false,
         about: false,
         note: true,
         uncheckedNote: false,
         comment: true,
-        buttons: ["Reject"],
+        buttons: ["Decline"],
       },
     });
   });
@@ -241,7 +246,7 @@ describe("a decision's card, its ask withheld while it is open", () => {
       get: async () => await Promise.resolve(withheld),
     });
 
-    await press("Reject");
+    await press("Decline");
 
     expect(seen()).toStrictEqual({
       prompt: false,
@@ -249,7 +254,7 @@ describe("a decision's card, its ask withheld while it is open", () => {
       note: true,
       uncheckedNote: false,
       comment: true,
-      buttons: ["Reject"],
+      buttons: ["Decline"],
     });
   });
 
@@ -283,12 +288,12 @@ describe("a decision's card, its ask withheld while it is open", () => {
         note: false,
         uncheckedNote: false,
         comment: true,
-        buttons: ["Approve", "Reject"],
+        buttons: ["Decline", "Approve"],
       },
     });
   });
 
-  it("shows the decision as core serves it once a confirmed approval is refused: the prompt gone, the note, Reject alone", async () => {
+  it("shows the decision as core serves it once a confirmed approval is refused: the prompt gone, the note, Decline alone", async () => {
     await shown({
       review: async (_id: string, answer: { approved: boolean }) =>
         await Promise.resolve({
@@ -314,7 +319,7 @@ describe("a decision's card, its ask withheld while it is open", () => {
       note: true,
       uncheckedNote: false,
       comment: true,
-      buttons: ["Reject"],
+      buttons: ["Decline"],
     });
   });
 

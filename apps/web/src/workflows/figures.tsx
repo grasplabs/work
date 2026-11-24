@@ -6,21 +6,14 @@ import { useLingui } from "@lingui/react/macro";
 import { formatNumber, formatPercent } from "../format.ts";
 import type { RunFigures } from "./run-figures.ts";
 
-// The figures over the runs, as the library's Stats: what each is over its
-// figure. Those waiting are marked as needing someone while any do. A dash
-// where there is nothing to divide. Core counts no AI cost of runs yet, so
-// that figure of the prototype is left out.
+// The figures over every workflow's runs, as Damsko's Stats: what each
+// is over its figure. Those waiting are marked as needing someone while
+// any do. A dash where there is nothing to divide. A run that asked no one
+// for a decision ran without asking anyone, whoever started it. Core
+// counts no AI cost of runs yet, so that figure of the prototype is left
+// out.
 
-/** Which runs the figures count: every workflow's, or one's. */
-type Scope = "all" | "workflow";
-
-export const RunFiguresView = ({
-  figures,
-  scope,
-}: {
-  figures: RunFigures;
-  scope: Scope;
-}) => {
+export const RunFiguresView = ({ figures }: { figures: RunFigures }) => {
   const { t } = useLingui();
   const days = runActivityDefaultDays;
   const { runs, alone, waiting } = figures;
@@ -37,17 +30,11 @@ export const RunFiguresView = ({
           value: formatNumber(runs),
         },
         {
-          label:
-            scope === "all"
-              ? t`without a person`
-              : t`completed without a person`,
+          label: t`ran without asking anyone`,
           value: alone === null ? "–" : formatPercent(alone),
         },
         {
-          label:
-            scope === "all"
-              ? t`of them wait for a decision`
-              : t`wait for a decision now`,
+          label: t`of them wait for a decision`,
           value: formatNumber(waiting),
           ...(waiting > 0
             ? { change: t`Needs someone`, variant: "warning" as const }

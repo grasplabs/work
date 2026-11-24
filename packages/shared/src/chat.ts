@@ -197,6 +197,9 @@ export interface ChatSearchHit {
 // extractor, and the question that names it (`ChatQuestion.files`) carries
 // it. Its agent reads the text as data (`env.chat.readFile`), never as its
 // instructions. Only the text is kept, with the chat, and goes with it.
+// A picture (a pasted screenshot) is kept whole instead, told by its
+// bytes, never its name: the model sees it with the question, where it
+// takes pictures, and the page shows it again from `chatFilePath`.
 
 /**
  * The file types a chat file may be, by extension: what Knowledge reads
@@ -235,12 +238,55 @@ export const chatFileTypeOf = (name: string): ChatFileType | undefined => {
     : undefined;
 };
 
+/**
+ * The picture types a chat file may be, told by its first bytes, never by
+ * its name or a type anyone gives, with the type it is served as. No SVG:
+ * it can carry script.
+ */
+export const chatPictureTypes = {
+  png: "image/png",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+  gif: "image/gif",
+} as const;
+export type ChatPictureType = keyof typeof chatPictureTypes;
+
+/** Whether a chat file of `type` is a picture. */
+export const isChatPictureType = (type: string): type is ChatPictureType =>
+  Object.hasOwn(chatPictureTypes, type);
+
+/**
+ * Largest picture one attachment takes, in bytes: 5 MB, the most the
+ * model providers take of one image.
+ */
+export const chatPictureMaxBytes = 5 * 1024 * 1024;
+
+/** The most pixels a picture may be on either side, as the providers take them. */
+export const chatPictureMaxPixels = 8000;
+
+/** The path a chat's pictures are served under (`chatFilePath`). */
+export const chatFilesPrefix = "/api/chat-files/";
+
+/**
+ * Where the page reads picture `fileId` of chat `chatId` (`ChatFile`),
+ * as that chat's person alone, a signed-in member: an image of its type,
+ * never kept by the browser. Not found for anyone else, for any other file
+ * of the chat, and once the chat is gone.
+ */
+export const chatFilePath = (chatId: string, fileId: string): string =>
+  `${chatFilesPrefix}${encodeURIComponent(chatId)}/${encodeURIComponent(fileId)}`;
+
 /** A file attached to a chat, as its person sees it. */
 export interface ChatFile {
   id: string;
-  /** The file's name, as it was attached. */
+  /**
+   * The file's name, as it was attached. A question's text names a
+   * picture by its ID, as the composer wrote it
+   * (`@[Image 1](attachment:<id>)`), kept as it was asked.
+   */
   name: string;
-  type: ChatFileType;
+  /** Its type: one of {@link chatFileTypes}, or a picture's (`chatFilePath`). */
+  type: ChatFileType | ChatPictureType;
   /** The file's size, in bytes. */
   bytes: number;
   /** When it was attached (ISO 8601). */
@@ -669,10 +715,19 @@ export type ChatAsk = z.infer<typeof chatAskSchema>;
  * (`proposePlan`): a page the team opens (an App), something that runs on
  * its own (a workflow), or both, each with a name and one plain sentence,
  * the connections each needs, and who gets it. Nothing new is made until
- * the person says Build it (`ChatsApi.build`).
+ * the person says Build it (`ChatsApi.build`). A chat started to set up an
+ * agent (`kind: "agent"`) asks at most
+ * {@link chatMakeLimits.agentQuestions} and drafts it instead
+ * (`draftAgent`): nothing is made until they press Make it
+ * (`ChatsApi.makeDraftedAgent`).
  */
 export const chatMakeLimits = {
   questions: 2,
+  // An agent's setup has five choices that change what is made, which an
+  // App's or a workflow's plan doesn't: what it is for, the apps it uses,
+  // what it may do, who may ask it and when it works on its own. Its name
+  // and instructions the chat drafts from those answers, asking nothing.
+  agentQuestions: 5,
   nameLength: 100,
   sentenceLength: 300,
   whoLength: 100,
@@ -687,14 +742,27 @@ export const chatPlanKinds = ["app", "workflow"] as const;
 export type ChatPlanKind = (typeof chatPlanKinds)[number];
 
 /**
- * What "Make something" started a chat to make, which the chat keeps
- * (`ChatsApi.create`): an App or a workflow, and the project what Build it
- * makes goes in, shared with everyone in it.
+ * What a chat can be started to make: what a plan makes, or one of the
+ * company's agents, which the chat drafts (`draftAgent`) for its admin.
  */
-export const chatMakeSchema = z.strictObject({
-  kind: z.enum(chatPlanKinds),
-  project: z.string().min(1).max(256).optional(),
-});
+export const chatMakeKinds = [...chatPlanKinds, "agent"] as const;
+export type ChatMakeKind = (typeof chatMakeKinds)[number];
+
+/**
+ * What "Make something" (or New agent's "Set up through chat") started a
+ * chat to make, which the chat keeps (`ChatsApi.create`): an App, a
+ * workflow or an agent, and, for an App or a workflow, the project what
+ * Build it makes goes in, shared with everyone in it. An agent is the
+ * company's, in no project.
+ */
+export const chatMakeSchema = z
+  .strictObject({
+    kind: z.enum(chatMakeKinds),
+    project: z.string().min(1).max(256).optional(),
+  })
+  .refine(({ kind, project }) => kind !== "agent" || project === undefined, {
+    message: "An agent is made in no project",
+  });
 export type ChatMake = z.infer<typeof chatMakeSchema>;
 
 /**
@@ -1284,7 +1352,11 @@ export interface ChatsApi {
    * Makes a chat with the agent `agentId`, one of `agents()`, or with
    * the company's first agent when none is named. An agent the person may
    * not talk to is `agent.unknown`, as one the company doesn't have. From
-   * "Make something", with what to make (`make`), which it keeps. With
+   * "Make something", with what to make (`make`), which it keeps; from New
+   * agent's "Set up through chat", `{ kind: "agent" }`, only for the
+   * company's own admins (`role.forbidden` for anyone else, Grasp staff
+   * among them): the chat asks, drafts the agent, and makes it on Make it
+   * (`makeDraftedAgent`). With
    * `key`, a UUID the page makes for this chat, a repeat within a day
    * answers the chat the first call made and makes none.
    */
@@ -1330,8 +1402,11 @@ export interface ChatsApi {
   /**
    * Attaches a file to the chat, for its next question to carry: a file
    * of one of {@link chatFileTypes} of at most {@link chatFileMaxBytes},
-   * up to {@link chatFilesMax} a chat. Resolves once its text is read,
-   * and is refused with why when it can't be. Audited.
+   * or a picture of one of {@link chatPictureTypes}, by its bytes, of at
+   * most {@link chatPictureMaxBytes} and {@link chatPictureMaxPixels} a
+   * side, up to {@link chatFilesMax} a chat. Resolves once its text is
+   * read, or the picture kept, and is refused with why when it can't be.
+   * Audited.
    */
   attachFile: (chatId: string, file: ChatFileInput) => Promise<ChatFile>;
   /**

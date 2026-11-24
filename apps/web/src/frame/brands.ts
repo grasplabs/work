@@ -2,13 +2,14 @@ import type { OAuthProvider } from "@grasp-os/shared/connect";
 // The marks the product draws itself, other companies' own, in one module
 // for the whole app: Grasp's own connectors (`brands`: core serves no logo
 // for them, their `CatalogEntry.logo` is null, unlike a Composio
-// toolkit's) and the makers of the models a question names (`makerMarks`:
-// the model selector in the box to ask in, chat/composer.tsx). Each is
-// picked only by an id that is exactly its own: a connector's, or the
-// first part of a model's ID, its AI provider's (`anthropic/…`). Anything
-// else gets Damsko's first-letter mark. A name that starts like a brand's
-// is not that brand: `openai-compatible` is not OpenAI, and Gemini, which
-// only comes through OpenRouter (`openrouter/google/…`), is OpenRouter's.
+// toolkit's) and the makers of the models a question names that #2503
+// marks, Anthropic and OpenAI (`makerMarks`: the model selector in the box
+// to ask in, chat/composer.tsx). Each is picked only by an id that is
+// exactly its own: a connector's, or the first part of a model's ID, its
+// AI provider's (`anthropic/…`). Any other maker has no mark on the
+// model's chip and Damsko's first-letter mark in its list. A name that
+// starts like a brand's is not that brand: `openai-compatible` is not
+// OpenAI.
 // Each is filled and in the company's own colours, as the company
 // publishes it, never a line redraw (Damsko draws no brands: its
 // BrandIcon and ModelSelector take the product's, made with
@@ -84,22 +85,6 @@ const BrandClaude: IconData = brandMark("translate(0.48 0.48) scale(0.96)", [
   },
 ]);
 
-/** Mistral AI. */
-const BrandMistral: IconData = brandMark("", [
-  {
-    d: "M17.143 3.429v3.428h-3.429v3.429h-3.428V6.857H6.857V3.43H3.43v13.714H0v3.428h10.286v-3.428H6.857v-3.429h3.429v3.429h3.429v-3.429h3.428v3.429h-3.428v3.428H24v-3.428h-3.43V3.429z",
-    fill: "#FA520F",
-  },
-]);
-
-/** OpenRouter. */
-const BrandOpenRouter: IconData = brandMark("", [
-  {
-    d: "M16.778 1.844v1.919q-.569-.026-1.138-.032-.708-.008-1.415.037c-1.93.126-4.023.728-6.149 2.237-2.911 2.066-2.731 1.95-4.14 2.75-.396.223-1.342.574-2.185.798-.841.225-1.753.333-1.751.333v4.229s.768.108 1.61.333c.842.224 1.789.575 2.185.799 1.41.798 1.228.683 4.14 2.75 2.126 1.509 4.22 2.11 6.148 2.236.88.058 1.716.041 2.555.005v1.918l7.222-4.168-7.222-4.17v2.176c-.86.038-1.611.065-2.278.021-1.364-.09-2.417-.357-3.979-1.465-2.244-1.593-2.866-2.027-3.68-2.508.889-.518 1.449-.906 3.822-2.59 1.56-1.109 2.614-1.377 3.978-1.466.667-.044 1.418-.017 2.278.02v2.176L24 6.014Z",
-    fill: "#94A3B8",
-  },
-]);
-
 /** The mark of each of Grasp's own connectors, by its id, and the name its company goes by. */
 export const brands = {
   microsoft: { logo: BrandMicrosoft, name: "Microsoft" },
@@ -113,8 +98,6 @@ export type Brand = keyof typeof brands;
 const makerMarks: Readonly<Record<string, IconData>> = {
   anthropic: BrandClaude,
   openai: BrandChatGpt,
-  mistral: BrandMistral,
-  openrouter: BrandOpenRouter,
 };
 
 /** The product's own mark for the maker `id` (a model ID's first part), only when it is exactly one it has. */

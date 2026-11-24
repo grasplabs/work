@@ -2,6 +2,7 @@ import { recallBudgetMax } from "@grasp-os/brain-next/contract";
 import { appFilesPath } from "@grasp-os/shared/app-file-limits";
 import { appLinksPath } from "@grasp-os/shared/app-link-limits";
 import { auditExportPath } from "@grasp-os/shared/audit-log";
+import { chatFilePath } from "@grasp-os/shared/chat";
 import { errorReportPath } from "@grasp-os/shared/error-reports";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { organizationLogoPath } from "@grasp-os/shared/organization";
@@ -21,6 +22,7 @@ import { onLink, openedFor } from "./interview-link.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import {
   callAuth,
+  openRpc,
   outcome,
   routed,
   signIn,
@@ -140,6 +142,7 @@ const routeAnswers = async (cookie?: string) => ({
   auditExport: await got(`${auditExportPath}?format=csv`, cookie),
   brainExport: await got(brainOwnExportPath, cookie),
   organizationLogo: await got(organizationLogoPath("0".repeat(64)), cookie),
+  chatPicture: await got(chatFilePath("chat-none", "file-none"), cookie),
   errorReport: await posted(errorReportPath, cookie, {
     message: "Broken",
   }),
@@ -257,12 +260,31 @@ describe("a guest", { timeout: 60_000 }, () => {
   });
 
   it("reads nothing of the Brain", async () => {
-    const member = await signedInWithRole(idp, "user");
+    const member = await signedInApi(idp, "user");
     const guest = await signedInGuest();
+    const { core } = await openRpc(guest.session);
+    const guestApi = core.authenticate();
 
     await expect(
       Promise.all([recalled(member.userId), recalled(guest.userId)])
     ).resolves.toStrictEqual(["ok", "permission.person_inactive"]);
+    // Nor its workspace, or its tools alone, over /rpc.
+    expect({
+      member: {
+        read: await outcome(member.api.brain.read()),
+        tools: await outcome(member.api.brain.tools()),
+      },
+      guest: {
+        read: await outcome(guestApi.brain.read()),
+        tools: await outcome(guestApi.brain.tools()),
+      },
+    }).toStrictEqual({
+      member: { read: "ok", tools: "ok" },
+      guest: {
+        read: "auth.unauthenticated",
+        tools: "auth.unauthenticated",
+      },
+    });
   });
 
   it("opens no interview, even one whose link went to their address", async () => {

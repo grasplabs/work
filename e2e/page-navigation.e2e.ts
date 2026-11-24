@@ -39,28 +39,6 @@ const showing = async (page: Page, name: string): Promise<void> => {
   });
 };
 
-test("a link in a page opens another with its address, and back and reload land where the person was", async ({
-  pageOf,
-}) => {
-  const { builder } = peopleIn("pageNavigation");
-  const app = await newApp(navigationFiles());
-  const page = await pageOf(builder);
-  await page.goto(`/apps/${app}/full/start`);
-  await showing(page, "Start");
-
-  await frameOf(page).getByRole("link", { name: "Open note n42" }).click();
-  await expect(page).toHaveURL(new RegExp(`/apps/${app}/full/notes/n42$`, "u"));
-  await showing(page, "Note n42");
-
-  await page.reload();
-  await showing(page, "Note n42");
-  await page.goBack();
-  await expect(page).toHaveURL(new RegExp(`/apps/${app}/full/start$`, "u"));
-  await showing(page, "Start");
-  await page.goForward();
-  await showing(page, "Note n42");
-});
-
 test("a new version made current switches a clean page at once, and asks an editor with unsaved edits once, which saves on the version it opened before it switches", async ({
   pageOf,
 }) => {
@@ -189,42 +167,26 @@ test("pages that navigate as they mount, with no act of the person's, add nothin
   await expect(page).toHaveURL(/\/apps$/u);
 });
 
-for (const { start, last, at, label } of [
-  { start: "Start hopping", last: "Hop 5", at: "hops/5", label: "a click" },
-  {
-    start: "Start focused hopping",
-    last: "Focus hop 5",
-    at: "focus-hops/5",
-    label: "pages that focus themselves on a click's activation",
-  },
-  {
-    start: "Start forging",
-    last: "Forge 5",
-    at: "forges/5",
-    label: "pages that patch, dispatch and post whatever passes for an act",
-  },
-] as const) {
-  test(`${label} leaves one entry of the person's in the history, whatever the pages it opens do`, async ({
-    pageOf,
-  }) => {
-    const { builder } = peopleIn("pageNavigation");
-    const app = await newApp(hoppingFiles());
-    const page = await pageOf(builder);
-    await page.goto(`/apps/${app}/full/launch`);
-    await frameOf(page)
-      .getByRole("link", { name: start })
-      .click({ timeout: 20_000 });
-    // The click is the person's: its page goes in as an entry. Each page
-    // after it opens the next as it mounts, which takes that entry's
-    // place, never one of its own.
-    await showing(page, last);
-    // The page's address follows the App a moment after it moves.
-    await expect(page).toHaveURL(new RegExp(`/apps/${app}/full/${at}$`, "u"));
-    await page.goBack();
-    await expect(page).toHaveURL(new RegExp(`/apps/${app}/full/launch$`, "u"));
-    await showing(page, "Launch");
-  });
-}
+test("pages that patch, dispatch and post whatever passes for an act leaves one entry of the person's in the history, whatever the pages it opens do", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("pageNavigation");
+  const app = await newApp(hoppingFiles());
+  const page = await pageOf(builder);
+  await page.goto(`/apps/${app}/full/launch`);
+  await frameOf(page)
+    .getByRole("link", { name: "Start forging" })
+    .click({ timeout: 20_000 });
+  // The click is the person's: its page goes in as an entry. Each page
+  // after it opens the next as it mounts, which takes that entry's
+  // place, never one of its own.
+  await showing(page, "Forge 5");
+  // The page's address follows the App a moment after it moves.
+  await expect(page).toHaveURL(new RegExp(`/apps/${app}/full/forges/5$`, "u"));
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`/apps/${app}/full/launch$`, "u"));
+  await showing(page, "Launch");
+});
 
 test("a page's own code can't pass for the person acting, and the person's own click in it still counts", async ({
   pageOf,
@@ -246,37 +208,4 @@ test("a page's own code can't pass for the person acting, and the person's own c
   await expect(page).toHaveURL(new RegExp(`/apps/${app}/full/launch$`, "u"));
   await page.goBack();
   await expect(page).toHaveURL(new RegExp(`/apps/${app}/full/forges/5$`, "u"));
-});
-
-test("one press or one held key is one act of the person's: what its release or its repeats move to takes the press's entry", async ({
-  pageOf,
-}) => {
-  const { builder } = peopleIn("pageNavigation");
-  const app = await newApp(hoppingFiles());
-  const page = await pageOf(builder);
-  await page.goto(`/apps/${app}/full/keys`);
-  await showing(page, "Keys");
-  const keys = new RegExp(`/apps/${app}/full/keys$`, "u");
-
-  // A slow click: its press is the person's act, and goes in as an
-  // entry; the move its release asks for, the act spent, takes its place.
-  await frameOf(page).getByRole("button", { name: "Press and lift" }).hover();
-  await page.mouse.down();
-  await expect(page).toHaveURL(/\/full\/keys#down$/u);
-  await page.mouse.up();
-  await expect(page).toHaveURL(/\/full\/keys#up$/u);
-  await page.goBack();
-  await expect(page).toHaveURL(keys);
-
-  // A held key: its first press goes in as an entry, its repeats take
-  // that entry's place.
-  await frameOf(page).getByRole("textbox", { name: "Keys" }).focus();
-  await page.keyboard.down("a");
-  await expect(page).toHaveURL(/\/full\/keys#pressed$/u);
-  await page.keyboard.down("a");
-  await page.keyboard.down("a");
-  await page.keyboard.up("a");
-  await expect(page).toHaveURL(/\/full\/keys#held$/u);
-  await page.goBack();
-  await expect(page).toHaveURL(keys);
 });

@@ -2,6 +2,7 @@ import { addDays } from "@grasp-os/shared/admin/org-record";
 import type {
   BrainApi,
   BrainForgetPreview,
+  BrainTools,
   Company,
   Connection,
   Gap,
@@ -45,6 +46,7 @@ import {
   askAboutGap,
   closeGap,
   gapsWith,
+  openGaps,
   redactGapAnswer,
 } from "./brain-gaps.ts";
 import {
@@ -1206,6 +1208,30 @@ const recordSources = async (
   return [...sources, ...opinions, ...records.sources];
 };
 
+/**
+ * The brain's tools, from what `core` read: the shared documents' (an
+ * admin's alone) and the records', as `readBrain` gives them.
+ */
+const toolsIn = ({ facts, records, teams }: BrainCore): Tool[] =>
+  toolsOf(documentTools(facts, teamsByName(teams)), records.tools);
+
+/**
+ * The brain's tools and its teams' names, as `person` may read them, as
+ * `readBrain` reads them (`brain.tools`). Narrower than `readBrain`: no
+ * connections, so connect isn't asked, and a slow connect never holds
+ * Integrations' Recommended back.
+ */
+export const readBrainTools = async (
+  env: Env,
+  person: Pick<Identity, "role">
+): Promise<BrainTools> => {
+  const core = await readBrainCore(env, person);
+  return {
+    tools: toolsIn(core),
+    teams: core.teams.map(({ id, name }) => ({ id, name })),
+  };
+};
+
 /** The brain's workspace, as `person` may read it. */
 export const readBrain = async (
   env: Env,
@@ -1241,7 +1267,7 @@ export const readBrain = async (
       return teamIds.length === 0 ? [] : [{ ...group, teamIds }];
     }),
     interviewWeeks: weeks,
-    tools: toolsOf(documentTools(facts, teamsByName(teams)), records.tools),
+    tools: toolsIn(core),
     sources: sources.map((source) => witnessed(teams, source)),
     statements: records.statements,
     candidates: records.candidates,
@@ -1336,6 +1362,13 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
     );
   }
 
+  async tools(): Promise<BrainTools> {
+    return await withPerson(
+      this.#check,
+      async (person) => await readBrainTools(this.#env, person)
+    );
+  }
+
   async thinking(): Promise<ThinkingGround> {
     return await withPerson(
       this.#check,
@@ -1387,6 +1420,14 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
     return await withPerson(
       this.#check,
       async (person) => await askAboutGap(this.#env, person, gapId)
+    );
+  }
+
+  async openGaps(): Promise<Gap[]> {
+    return await withPerson(
+      this.#check,
+      async (person) =>
+        await openGaps(this.#env, person, await brainGaps(this.#env, person))
     );
   }
 

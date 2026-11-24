@@ -1,6 +1,5 @@
 // @vitest-environment happy-dom
 
-import { SidebarProvider } from "@grasp-os/app-kit/components/sidebar";
 import { Toaster } from "@grasp-os/app-kit/components/toast";
 import type { AppReview } from "@grasp-os/shared/app-review";
 import type { App, ViewedApp } from "@grasp-os/shared/apps";
@@ -23,6 +22,7 @@ import type {
   SubjectMember,
   SubjectMemberRef,
 } from "@grasp-os/shared/subject-members";
+import { SidebarProvider } from "@grasp-os/ui/components/sidebar";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -1083,7 +1083,7 @@ describe(AppWorkspace, () => {
     }).toStrictEqual({ shown: true, after: true, close: false });
   });
 
-  it("asks about the App: each question carries it, named in the bar on the box", async () => {
+  it("asks about the App: each question carries it, named on the band above the box", async () => {
     const { sent } = await opened(
       fakeApps().apps,
       identityOf(false),
@@ -1091,7 +1091,7 @@ describe(AppWorkspace, () => {
     );
     await settled();
     const bar = document.querySelector(
-      '[data-slot="prompt-input-header"]'
+      '[data-slot="prompt-input-banner"]'
     )?.textContent;
     await typeAndSend("Add a due date column");
     await typeAndSend("What's a good name for it?");

@@ -5,8 +5,8 @@ import type { CoreConnection } from "../core-connection.ts";
 import { useFrameRead } from "../frame/frame-read.ts";
 
 // How many workflows need the person, beside the sidebar's Workflows
-// (frame/app-sidebar.tsx): each workflow once, however many of its runs
-// ask.
+// (frame/app-sidebar.tsx): each workflow once, however many of its
+// runs ask.
 // What needs them today is a decision of a run waiting for their answer;
 // a change waiting for its test and approval, and a workflow in testing,
 // join it with the workflow lifecycle (GRA-512). Read again as the

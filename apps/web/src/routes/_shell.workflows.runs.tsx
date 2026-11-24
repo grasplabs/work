@@ -1,11 +1,11 @@
 import { runFilterStatuses } from "@grasp-os/shared/run-filter";
 import type { RunFilterStatus } from "@grasp-os/shared/run-filter";
-import { workflowLabel } from "@grasp-os/shared/workflow-resources";
 import type {
   RunActivity,
   RunFilter,
   RunsPage,
 } from "@grasp-os/shared/workflows";
+import { PageHeader } from "@grasp-os/ui/components/page-header";
 import {
   Select,
   SelectContent,
@@ -24,7 +24,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { CoreConnection } from "../core-connection.ts";
 import { LoadingLines, NotLoadedState } from "../frame/page-states.tsx";
-import { Page, PageHeading } from "../frame/page.tsx";
+import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -32,11 +32,15 @@ import { useCore } from "../use-core.ts";
 import { RunFiguresView } from "../workflows/figures.tsx";
 import { isRunFilterStatus, runsSearchOf } from "../workflows/page-search.ts";
 import type { RunsSearch } from "../workflows/page-search.ts";
-import { listRuns, readActivity } from "../workflows/reads.ts";
+import {
+  listRuns,
+  readActivity,
+  readWorkflowNames,
+} from "../workflows/reads.ts";
 import { runFiguresOf } from "../workflows/run-figures.ts";
 import { RunsLog } from "../workflows/runs.tsx";
-import type { KnownWorkflows } from "../workflows/runs.tsx";
 import { TodayLanes } from "../workflows/today-lanes.tsx";
+import type { LaneProcesses } from "../workflows/today-lanes.tsx";
 
 // Workflows › Runs: the runs of every workflow the person has a role in.
 // Today's runs in time, the figures core counted over the last days, and
@@ -135,7 +139,7 @@ const Figures = ({
     };
   }, [activity]);
   return read?.state === "ready" && read.data !== null ? (
-    <RunFiguresView figures={runFiguresOf(read.data)} scope="all" />
+    <RunFiguresView figures={runFiguresOf(read.data)} />
   ) : null;
 };
 
@@ -155,6 +159,14 @@ const readRuns = async (
 const filterOf = ({ status }: RunsSearch): RunFilter =>
   status === undefined ? {} : { status };
 
+/** Who and what the log names, by ID (`readWorkflowNames`). */
+type WorkflowNames = Awaited<ReturnType<typeof readWorkflowNames>>;
+
+const noNames: WorkflowNames = {
+  people: new Map(),
+  workflows: new Map(),
+};
+
 /** One read of the log: the filter it was read for, and what it answers. */
 interface LogRead {
   key: string;
@@ -171,10 +183,10 @@ interface LogRead {
  */
 const RunsLogRead = ({
   log,
-  workflows,
+  named,
 }: {
   log: LogRead;
-  workflows: KnownWorkflows;
+  named: WorkflowNames;
 }) => {
   const core = useCore();
   const { t } = useLingui();
@@ -221,10 +233,13 @@ const RunsLogRead = ({
           empty={
             status === undefined ? undefined : t`No runs match these filters.`
           }
-          me={identity.userId}
           more={read.runs.data.more}
+          names={{
+            people: named.people,
+            me: identity.userId,
+          }}
           runs={read.runs.data.runs}
-          workflows={workflows}
+          workflows={named.workflows}
         />
       ) : null}
       {current && read.runs.state !== "ready" ? (
@@ -243,15 +258,19 @@ const WorkflowRuns = () => {
       <SiteHeader
         crumbs={[{ label: t`Workflows`, to: "/workflows" }, { label: title }]}
       />
-      <Page wide>
-        <PageHeading title={title} />
+      <Page>
+        <PageHeader title={title} />
         {page.today.state === "ready" ? (
-          <TodayLanes today={page.today.data} workflows={page.workflows} />
+          <TodayLanes
+            names={page.named.workflows}
+            processes={page.processes}
+            today={page.today.data}
+          />
         ) : (
           <NotLoadedState page={page.today} />
         )}
         <Figures activity={page.activity} />
-        <RunsLogRead log={page.log} workflows={page.workflows} />
+        <RunsLogRead log={page.log} named={page.named} />
       </Page>
     </>
   );
@@ -269,8 +288,8 @@ const RunsPending = () => {
       <SiteHeader
         crumbs={[{ label: t`Workflows`, to: "/workflows" }, { label: title }]}
       />
-      <Page wide>
-        <PageHeading title={title} />
+      <Page>
+        <PageHeader title={title} />
         <LoadingLines lines={6} />
       </Page>
     </>
@@ -293,25 +312,29 @@ export const Route = createFileRoute("/_shell/workflows/runs")({
     };
     // The figures likewise: started now, taken by the page once.
     const activity = loadFromCore(core, readActivity);
-    const [today, resources] = await Promise.all([
+    const [today, resources, named] = await Promise.all([
       loadFromCore(core, async (session) => await session.workflows.today()),
-      // The name people see each workflow by, and the process it serves,
-      // for the lanes and the log: their own names and no marks where
-      // they can't be read.
+      // The process each workflow serves, for its lane's mark: none shown
+      // where they can't be read.
       loadFromCore(
         core,
         async (session) => await session.workflowResources.list()
       ),
+      // Who started each run and each workflow's name, for names only.
+      loadFromCore(core, readWorkflowNames),
     ]);
-    const workflows: KnownWorkflows = new Map(
+    const processes: LaneProcesses = new Map(
       resources.state === "ready"
-        ? resources.data.map((workflow) => [
-            workflow.id,
-            { label: workflowLabel(workflow), process: workflow.process },
-          ])
+        ? resources.data.map((workflow) => [workflow.id, workflow.process])
         : []
     );
-    return { today, workflows, log, activity };
+    return {
+      today,
+      processes,
+      log,
+      activity,
+      named: named.state === "ready" ? named.data : noNames,
+    };
   },
   component: WorkflowRuns,
 });

@@ -63,11 +63,17 @@ export const backCrumb = (
 export const ItemBar = ({
   back,
   name,
+  crumbs,
+  headed = false,
   state,
   actions,
 }: {
   back: Crumb;
   name: string;
+  /** The trail, where it goes past the item's name (a view of it): back, then the item, by default. */
+  crumbs?: readonly Crumb[];
+  /** Whether the page heads itself with its name: the bar's own heading then gives way. */
+  headed?: boolean;
   /** Where it stands: Draft, Live and its label, or its version. */
   state?: ReactNode;
   /** Its views, Share, then the page's one lime action, in that order. */
@@ -75,11 +81,10 @@ export const ItemBar = ({
 }) => (
   <>
     {/* The page's heading, which the trail shows as its last step. */}
-    <h1 className="sr-only">{name}</h1>
+    {headed ? null : <h1 className="sr-only">{name}</h1>}
     <SiteHeader
       actions={actions}
-      crumbs={[back, { label: name }]}
-      phoneCrumbs="last-two"
+      crumbs={crumbs ?? [back, { label: name }]}
       // Where it stands gives way to its actions where the bar is narrow.
       trailing={
         state === undefined ? undefined : (

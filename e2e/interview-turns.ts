@@ -49,7 +49,7 @@ export const speechSchema = z.object({ text: z.string(), speaker: z.string() });
 /** Today, as core's plan reads it (UTC). */
 export const today = (): string => new Date().toISOString().slice(0, 10);
 
-export const turnOf = (more: Partial<StephenTurn>): StephenTurn => ({
+const turnOf = (more: Partial<StephenTurn>): StephenTurn => ({
   say: "",
   tone: null,
   phase: "you",

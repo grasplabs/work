@@ -69,6 +69,7 @@ import { Route as ShellBrainSectionsSectionIdRouteImport } from './routes/_shell
 import { Route as AppsAppDraftSplatRouteImport } from './routes/apps.$app.draft.$'
 import { Route as AppsAppFullSplatRouteImport } from './routes/apps.$app.full.$'
 import { Route as ShellAppsAppPagesSplatRouteImport } from './routes/_shell.apps.$app.pages.$'
+import { Route as ShellWorkflowsWorkflowRunsRunRouteImport } from './routes/_shell.workflows.$workflow_.runs.$run'
 
 const ShellRoute = ShellRouteImport.update({
   id: '/_shell',
@@ -373,6 +374,12 @@ const ShellAppsAppPagesSplatRoute = ShellAppsAppPagesSplatRouteImport.update({
   path: '/pages/$',
   getParentRoute: () => ShellAppsAppRoute,
 } as any)
+const ShellWorkflowsWorkflowRunsRunRoute =
+  ShellWorkflowsWorkflowRunsRunRouteImport.update({
+    id: '/workflows/$workflow_/runs/$run',
+    path: '/workflows/$workflow/runs/$run',
+    getParentRoute: () => ShellRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof ShellIndexRoute
@@ -434,6 +441,7 @@ export interface FileRoutesByFullPath {
   '/apps/$app/draft/$': typeof AppsAppDraftSplatRoute
   '/apps/$app/full/$': typeof AppsAppFullSplatRoute
   '/apps/$app/pages/$': typeof ShellAppsAppPagesSplatRoute
+  '/workflows/$workflow/runs/$run': typeof ShellWorkflowsWorkflowRunsRunRoute
 }
 export interface FileRoutesByTo {
   '/chat-link': typeof ChatLinkRoute
@@ -493,6 +501,7 @@ export interface FileRoutesByTo {
   '/apps/$app/draft/$': typeof AppsAppDraftSplatRoute
   '/apps/$app/full/$': typeof AppsAppFullSplatRoute
   '/apps/$app/pages/$': typeof ShellAppsAppPagesSplatRoute
+  '/workflows/$workflow/runs/$run': typeof ShellWorkflowsWorkflowRunsRunRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -556,6 +565,7 @@ export interface FileRoutesById {
   '/apps/$app/draft/$': typeof AppsAppDraftSplatRoute
   '/apps/$app/full/$': typeof AppsAppFullSplatRoute
   '/_shell/apps/$app/pages/$': typeof ShellAppsAppPagesSplatRoute
+  '/_shell/workflows/$workflow_/runs/$run': typeof ShellWorkflowsWorkflowRunsRunRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -619,6 +629,7 @@ export interface FileRouteTypes {
     | '/apps/$app/draft/$'
     | '/apps/$app/full/$'
     | '/apps/$app/pages/$'
+    | '/workflows/$workflow/runs/$run'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/chat-link'
@@ -678,6 +689,7 @@ export interface FileRouteTypes {
     | '/apps/$app/draft/$'
     | '/apps/$app/full/$'
     | '/apps/$app/pages/$'
+    | '/workflows/$workflow/runs/$run'
   id:
     | '__root__'
     | '/_shell'
@@ -740,6 +752,7 @@ export interface FileRouteTypes {
     | '/apps/$app/draft/$'
     | '/apps/$app/full/$'
     | '/_shell/apps/$app/pages/$'
+    | '/_shell/workflows/$workflow_/runs/$run'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -1181,6 +1194,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellAppsAppPagesSplatRouteImport
       parentRoute: typeof ShellAppsAppRoute
     }
+    '/_shell/workflows/$workflow_/runs/$run': {
+      id: '/_shell/workflows/$workflow_/runs/$run'
+      path: '/workflows/$workflow/runs/$run'
+      fullPath: '/workflows/$workflow/runs/$run'
+      preLoaderRoute: typeof ShellWorkflowsWorkflowRunsRunRouteImport
+      parentRoute: typeof ShellRoute
+    }
   }
 }
 
@@ -1284,6 +1304,7 @@ interface ShellRouteChildren {
   ShellProjectsIndexRoute: typeof ShellProjectsIndexRoute
   ShellWorkflowsIndexRoute: typeof ShellWorkflowsIndexRoute
   ShellAppsAppSettingsRoute: typeof ShellAppsAppSettingsRoute
+  ShellWorkflowsWorkflowRunsRunRoute: typeof ShellWorkflowsWorkflowRunsRunRoute
 }
 
 const ShellRouteChildren: ShellRouteChildren = {
@@ -1306,6 +1327,7 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellProjectsIndexRoute: ShellProjectsIndexRoute,
   ShellWorkflowsIndexRoute: ShellWorkflowsIndexRoute,
   ShellAppsAppSettingsRoute: ShellAppsAppSettingsRoute,
+  ShellWorkflowsWorkflowRunsRunRoute: ShellWorkflowsWorkflowRunsRunRoute,
 }
 
 const ShellRouteWithChildren = ShellRoute._addFileChildren(ShellRouteChildren)

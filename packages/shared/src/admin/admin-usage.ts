@@ -39,7 +39,7 @@ export const MODEL_NAMES: Record<Model, string> = {
   opus: "Claude Opus 5.5",
   sonnet: "Claude Sonnet 5.5",
   haiku: "Claude Haiku 4.5",
-  voice: "KugelAudio Kugel 3.5",
+  voice: "Mistral Voxtral TTS 3",
   ears: "OpenAI GPT-4o Transcribe",
   other: "Other models (not priced)",
 };
@@ -55,8 +55,9 @@ export const PRICES: Record<
   opus: { tokensIn: 5, tokensOut: 25, minute: 0 },
   sonnet: { tokensIn: 3, tokensOut: 15, minute: 0 },
   haiku: { tokensIn: 1, tokensOut: 5, minute: 0 },
-  // KugelAudio's list price for kugel-3.5 (kugelaudio.com/en/pricing, November 2026).
-  voice: { tokensIn: 0, tokensOut: 0, minute: 0.0525 },
+  // Mistral's list price for Voxtral TTS 3 (docs.mistral.ai/models/voxtral-mini-tts-3-0, November
+  // 2026): $13 a million characters, about 900 characters a spoken minute.
+  voice: { tokensIn: 0, tokensOut: 0, minute: 0.012 },
   // OpenAI's list price (developers.openai.com/api/docs/pricing, October 2026). gpt-4o-transcribe:
   // $6 a million audio tokens in ($2.50 a million text tokens in), $10 a million text tokens out,
   // estimated on that page at $0.006 a minute.

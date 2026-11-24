@@ -17,8 +17,8 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import type { KnownWorkflows } from "./runs.tsx";
 import { TodayLanes } from "./today-lanes.tsx";
+import type { LaneNames } from "./today-lanes.tsx";
 
 // A run of Today that waits on the reader, as they open it: what its
 // decision asks and the answers it takes, as its decision's own page has
@@ -87,7 +87,7 @@ const settle = async (): Promise<void> => {
 const opened = async (
   read: () => WorkflowsToday,
   decisions: Readonly<Record<string, unknown>> = {},
-  workflows?: KnownWorkflows
+  names?: LaneNames
 ): Promise<void> => {
   const core = {
     withSession: async <T,>(
@@ -106,9 +106,7 @@ const opened = async (
     getParentRoute: () => rootRoute,
     path: "/",
     loader: () => read(),
-    component: () => (
-      <TodayLanes today={page.useLoaderData()} workflows={workflows} />
-    ),
+    component: () => <TodayLanes names={names} today={page.useLoaderData()} />,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
@@ -195,7 +193,7 @@ describe("a run of Today that waits on the reader", () => {
     await opened(
       () => todayWith(),
       {},
-      new Map([["wr-1", { label: "Invoice approval", process: null }]])
+      new Map([["wr-1", "Invoice approval"]])
     );
 
     expect(

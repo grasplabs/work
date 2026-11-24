@@ -554,7 +554,7 @@ describe(ChatThread, () => {
     ]);
   });
 
-  it("says no duration while a later round's thoughts are not yet saved, then all rounds' together", async () => {
+  it("says nothing of a thought it never saw until it is saved, then all rounds' time together", async () => {
     const first: ChatMessage = {
       id: 2,
       role: "assistant",
@@ -593,7 +593,8 @@ describe(ChatThread, () => {
     ]);
 
     expect({ writing, saved: firstStep().line }).toStrictEqual({
-      writing: "Thought",
+      // Not seen thinking here and not timed yet: no line of its thinking.
+      writing: undefined,
       saved: "Thought for 5 seconds",
     });
   });
@@ -652,11 +653,9 @@ describe(ChatThread, () => {
       lines,
       given: opened?.includes('"src/routes/index.tsx": "export default"'),
       came: opened?.includes('{"changed":["src/routes/index.tsx"]}'),
-      stopped: spoken(
-        document
-          .querySelectorAll('[role="listitem"]')[1]
-          ?.querySelector('[data-slot="trace-description"]')
-      ),
+      stopped: document
+        .querySelectorAll('[role="listitem"]')[1]
+        ?.textContent.includes(", Stopped"),
       code: document.body.textContent.includes("code step"),
     }).toStrictEqual({
       // The search has no result yet, and Grasp has stopped: it never ran.
@@ -666,12 +665,12 @@ describe(ChatThread, () => {
       ],
       given: true,
       came: true,
-      stopped: "Stopped",
+      stopped: true,
       code: false,
     });
   });
 
-  it("says a failed step under Error, its input as JSON, and counts it as failed, not as done", async () => {
+  it("says why a failed step failed, its input as JSON, and counts it as failed too", async () => {
     const at = "2026-10-27T09:00:05.000Z";
     await thread([
       asked,
@@ -735,24 +734,24 @@ describe(ChatThread, () => {
       failed?.querySelector<HTMLElement>("button[aria-expanded]")?.click();
       await Promise.resolve();
     });
-    await vi.waitFor(() => {
-      expect(
-        failed?.querySelector('[data-slot="tool-input"]')?.textContent
-      ).toContain("JSON");
-    });
+    const [input, error] = [...(failed?.querySelectorAll("pre") ?? [])].map(
+      (block) => ({
+        label: block.previousElementSibling?.textContent,
+        text: block.textContent,
+      })
+    );
 
-    expect({
-      line,
-      input: failed
-        ?.querySelector('[data-slot="tool-input"]')
-        ?.textContent.includes('"question": "expense policy"'),
-      error: failed
-        ?.querySelector('[data-slot="tool-output"][data-error]')
-        ?.textContent.includes("The brain could not be searched."),
-    }).toStrictEqual({
-      line: "Searched once; 1 step failed 5.0s",
-      input: true,
-      error: true,
+    expect({ line, input, error }).toStrictEqual({
+      // Both searches ran; the one that failed is counted again as failed.
+      line: "Searched 2 times; 1 step failed 5.0s",
+      input: {
+        label: "Input",
+        text: JSON.stringify({ question: "expense policy" }, null, 2),
+      },
+      error: {
+        label: "Why it failed",
+        text: "The brain could not be searched.",
+      },
     });
   });
 
@@ -865,11 +864,19 @@ describe(ChatThread, () => {
       end,
       at,
     });
-    /** What the stopped answer shows: its words, and each Stopped under them. */
+    /**
+     * What the stopped answer shows: its words, and each Stopped shown. Damsko
+     * draws Stopped on the actions' row when the answer has actions, and hides
+     * the one under its words then (by CSS, which this DOM does not apply).
+     */
     const shown = () => ({
       status: answer()?.dataset.status,
       notes: [
-        ...(answer()?.querySelectorAll('[data-slot="message-stopped"]') ?? []),
+        ...(answer()?.querySelectorAll(
+          answer()?.querySelector('[data-slot="message-actions"]')
+            ? '[data-slot="message-actions"] [data-slot="message-stopped"]'
+            : '[data-slot="message-stopped"]'
+        ) ?? []),
       ].map((note) => note.textContent),
       words: [
         ...(answer()?.querySelectorAll('[data-slot="message-response"]') ?? []),

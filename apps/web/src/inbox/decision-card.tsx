@@ -4,21 +4,20 @@ import { Button } from "@grasp-os/ui/components/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@grasp-os/ui/components/card";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
-import { KeyValueList } from "@grasp-os/ui/components/key-value";
-import type { KeyValueItem } from "@grasp-os/ui/components/key-value";
 import { Text } from "@grasp-os/ui/components/text";
 import { Textarea } from "@grasp-os/ui/components/textarea";
+import { ClockIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { i18n } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
+import type { ReactNode } from "react";
 
 import type { Session } from "../core.ts";
 import { formatDateTime } from "../format.ts";
@@ -29,20 +28,43 @@ import {
   WithheldAskNote,
 } from "./decision-confirmation.tsx";
 import type { PendingConfirmation } from "./decision-confirmation.tsx";
-import { JsonBlock } from "./json-block.tsx";
+import { JsonFields } from "./json-fields.tsx";
 
-// A decision as the person who answers it sees it on its own page
-// (routes/decisions.$decision.tsx): what is asked, where it comes from,
-// until when, and the answers core offers, or how it ended. It shows what
-// core serves, never more: once core refuses something because the
-// decision changed (an ask withheld since it was read, GRA-1988), it reads
-// the decision again and shows it as it is now.
+// A decision as the person who answers it sees it, in #2503's shape for
+// every approval: what is asked, where it comes from, what it is about,
+// until when, and the answers core offers, or how it ended. The same card
+// stands on its own page (routes/decisions.$decision.tsx) and in the
+// Inbox's panel. It shows what core serves, never more: once core refuses
+// something because the decision changed (an ask withheld since it was
+// read, GRA-1988), it reads the decision again and shows it as it is now.
 
 const styles = stylex.create({
   card: { width: "100%", maxWidth: "36rem" },
-  stack: { display: "flex", flexDirection: "column", gap: space["4"] },
-  answers: { display: "flex", gap: space["2"] },
+  stack: { display: "flex", flexDirection: "column", gap: space["3"] },
+  deadline: { display: "flex", alignItems: "center", gap: space["2"] },
+  answers: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["2"],
+  },
+  push: { flexGrow: 1 },
 });
+
+/** The answers' row: what stands apart at its start, then the answers at its end. */
+const Answers = ({
+  extra,
+  children,
+}: {
+  extra?: ReactNode;
+  children?: ReactNode;
+}) => (
+  <div {...stylex.props(styles.answers)}>
+    {extra}
+    <span {...stylex.props(styles.push)} />
+    {children}
+  </div>
+);
 
 /** Why something failed, said as it appears; nothing when it didn't. */
 const Failure = ({ children }: { children: string | undefined }) =>
@@ -51,52 +73,6 @@ const Failure = ({ children }: { children: string | undefined }) =>
       <AlertDescription>{children}</AlertDescription>
     </Alert>
   );
-
-/** What a decision says about itself: where from, which run, about what, until when. */
-const useFacts = (current: DecisionView, open: boolean): KeyValueItem[] => {
-  const { t } = useLingui();
-  return [
-    {
-      id: "from",
-      label: t({ message: "From", context: "where a decision comes from" }),
-      value: current.workflow,
-    },
-    {
-      id: "run",
-      label: t({
-        message: "Run",
-        context: "the run of a workflow a decision is for",
-      }),
-      value: current.run,
-      mono: true,
-    },
-    ...(current.input === undefined
-      ? []
-      : [
-          {
-            id: "about",
-            label: t({
-              message: "About",
-              context:
-                "what a decision is about, as its workflow run passed it",
-            }),
-            value: <JsonBlock value={current.input} />,
-          },
-        ]),
-    ...(open
-      ? [
-          {
-            id: "until",
-            label: t({
-              message: "Open until",
-              context: "until when a decision can be answered",
-            }),
-            value: formatDateTime(current.expiresAt),
-          },
-        ]
-      : []),
-  ];
-};
 
 /** How a decision that is no longer open ended. */
 const outcomeOf = (decision: DecisionView): string => {
@@ -117,14 +93,24 @@ const outcomeOf = (decision: DecisionView): string => {
   const date = formatDateTime(decided.at);
   return decision.status === "approved"
     ? i18n._(msg`Approved by ${name} on ${date}.`)
-    : i18n._(msg`Rejected by ${name} on ${date}.`);
+    : i18n._(msg`Declined by ${name} on ${date}.`);
 };
 
 /**
  * The decision, as the prototype's card: what is asked, where it comes
  * from, until when, and the answers core offers, or how it ended.
  */
-export const DecisionCard = ({ decision }: { decision: DecisionView }) => {
+export const DecisionCard = ({
+  decision,
+  held = false,
+  onAnswered,
+}: {
+  decision: DecisionView;
+  /** Its answers wait a moment: it opened in place of one just answered. */
+  held?: boolean;
+  /** Called once an answer is recorded, with how it ended: the Inbox lets the item go. */
+  onAnswered?: (said: string) => void;
+}) => {
   const { t } = useLingui();
   // What the card learned of the decision since it was given it, shown
   // only over the decision it learned it of: one given anew (a fresh load
@@ -141,7 +127,9 @@ export const DecisionCard = ({ decision }: { decision: DecisionView }) => {
   const [pending, setPending] = useState<PendingConfirmation>();
   const { busy, failure, run } = useCoreAction();
   const open = current.status === "open";
-  const facts = useFacts(current, open);
+  const [commenting, setCommenting] = useState(false);
+  const off = busy || held;
+  const date = formatDateTime(current.expiresAt);
   /**
    * Reads the decision again and shows it as core serves it now: after
    * core refused something of it (what is asked may have changed since the
@@ -195,6 +183,9 @@ export const DecisionCard = ({ decision }: { decision: DecisionView }) => {
     });
     if (review !== undefined) {
       setCurrent(review.decision);
+      if (review.decision.status !== "open") {
+        onAnswered?.(outcomeOf(review.decision));
+      }
     }
     if (review?.state === "review") {
       setPending(review);
@@ -220,6 +211,9 @@ export const DecisionCard = ({ decision }: { decision: DecisionView }) => {
     });
     if (answered !== undefined) {
       setCurrent(answered);
+      if (answered.status !== "open") {
+        onAnswered?.(outcomeOf(answered));
+      }
     }
   };
   return (
@@ -239,15 +233,23 @@ export const DecisionCard = ({ decision }: { decision: DecisionView }) => {
           <section>
             <CardHeader>
               <CardTitle level={2}>{current.description}</CardTitle>
-              <CardDescription>
-                {open
-                  ? t`A run of a workflow waits for this answer.`
-                  : t`A run of a workflow asked for this answer.`}
-              </CardDescription>
             </CardHeader>
             <CardContent>
               <div {...stylex.props(styles.stack)}>
-                <KeyValueList items={facts} orientation="horizontal" />
+                <Text as="span" color="muted" size="sm">
+                  {current.workflowResource.name}
+                </Text>
+                {current.input === undefined ? null : (
+                  <JsonFields value={current.input} />
+                )}
+                {open ? (
+                  <span {...stylex.props(styles.deadline)}>
+                    <Icon icon={ClockIcon} />
+                    <Text as="span" color="muted" size="sm">
+                      {t`No answer by ${date}: it closes.`}
+                    </Text>
+                  </span>
+                ) : null}
                 {open && current.withheld === "unchecked" ? (
                   <>
                     <Failure>{failure}</Failure>
@@ -256,31 +258,35 @@ export const DecisionCard = ({ decision }: { decision: DecisionView }) => {
                     <Text color="muted">
                       <WithheldAskNote withheld={current.withheld} />
                     </Text>
-                    <div {...stylex.props(styles.answers)}>
-                      <Button
-                        disabled={busy}
-                        onClick={() => {
-                          void run(readAgain);
-                        }}
-                        size="sm"
-                        variant="outline"
-                      >
-                        {t`Try again`}
-                      </Button>
-                    </div>
+                    <Answers
+                      extra={
+                        <Button
+                          disabled={off}
+                          onClick={() => {
+                            void run(readAgain);
+                          }}
+                          size="sm"
+                          variant="ghost"
+                        >
+                          {t`Try again`}
+                        </Button>
+                      }
+                    />
                   </>
                 ) : null}
                 {open && current.withheld !== "unchecked" ? (
                   <>
-                    <Field name="decision-comment">
-                      <FieldLabel>{t`Comment (optional)`}</FieldLabel>
-                      <Textarea
-                        disabled={busy}
-                        maxLength={2000}
-                        onValueChange={setComment}
-                        value={comment}
-                      />
-                    </Field>
+                    {commenting ? (
+                      <Field name="decision-comment">
+                        <FieldLabel>{t`Comment (optional)`}</FieldLabel>
+                        <Textarea
+                          disabled={busy}
+                          maxLength={2000}
+                          onValueChange={setComment}
+                          value={comment}
+                        />
+                      </Field>
+                    ) : null}
                     <Failure>{failure}</Failure>
                     {/* Nobody approves what they can't read: a withheld
                       decision takes a rejection alone. */}
@@ -289,14 +295,43 @@ export const DecisionCard = ({ decision }: { decision: DecisionView }) => {
                         <WithheldAskNote withheld={current.withheld} />
                       </Text>
                     ) : null}
-                    <div {...stylex.props(styles.answers)}>
+                    <Answers
+                      extra={
+                        commenting ? null : (
+                          <Button
+                            disabled={busy}
+                            onClick={() => {
+                              setCommenting(true);
+                            }}
+                            size="sm"
+                            variant="ghost"
+                          >
+                            {t`Add a comment`}
+                          </Button>
+                        )
+                      }
+                    >
+                      <Button
+                        disabled={off}
+                        onClick={() => {
+                          void answer(false);
+                        }}
+                        size="sm"
+                        variant="ghost"
+                      >
+                        {t({
+                          message: "Decline",
+                          context: "a workflow's decision",
+                        })}
+                      </Button>
                       {current.withheld === "revoked" ? null : (
                         <Button
-                          disabled={busy}
+                          disabled={off}
                           onClick={() => {
                             void answer(true);
                           }}
                           size="sm"
+                          variant="outline"
                         >
                           {t({
                             message: "Approve",
@@ -304,20 +339,7 @@ export const DecisionCard = ({ decision }: { decision: DecisionView }) => {
                           })}
                         </Button>
                       )}
-                      <Button
-                        disabled={busy}
-                        onClick={() => {
-                          void answer(false);
-                        }}
-                        size="sm"
-                        variant="outline"
-                      >
-                        {t({
-                          message: "Reject",
-                          context: "a workflow's decision",
-                        })}
-                      </Button>
-                    </div>
+                    </Answers>
                   </>
                 ) : null}
                 {open ? null : (

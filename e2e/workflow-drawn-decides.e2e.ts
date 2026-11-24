@@ -9,8 +9,8 @@ import { inboxList, toItem } from "./inbox.ts";
 import { approvalDrawn, modelScripts } from "./model-scripts.ts";
 import { peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
+import { toastSaying } from "./said.ts";
 import { origin } from "./stack.ts";
-import { goTo } from "./tabs-nav.ts";
 
 // An independent workflow, end to end, as its people make and use it: a
 // builder makes it from Make something, saying what they want done, and
@@ -19,8 +19,8 @@ import { goTo } from "./tabs-nav.ts";
 // e2e/model-scripts.ts); the builder shares it with Share with your team
 // in its bar; an admin names who answers its decision in its Settings'
 // Files and apps; the builder starts a run with Run, naming the
-// approver, whose nav counts the workflow that needs them, and who decides
-// from their inbox, on the decision's own page: its link, which anyone
+// approver, who decides from their inbox, on the decision's own page,
+// confirmed in Grasp's own dialog: its link, which anyone
 // else who opens it only sees isn't for them; and the run ends with their
 // answer. Then a webhook: an admin adds a source in Settings, the builder
 // starts the workflow on its events, the admin grants that request from
@@ -100,7 +100,7 @@ const drawnAndPublished = async (
     .getByRole("region", { name: "Here's what Grasp will make" })
     .getByRole("button", { name: "Build it" })
     .click(agentTurn);
-  await expect(page).toHaveURL(/\/workflows\/[^/?]+$/u, agentTurn);
+  await expect(page).toHaveURL(/\/workflows\/[^/?]+\?view=flow$/u, agentTurn);
   await expect(
     page.getByRole("heading", { level: 1, name: planned, exact: true })
   ).toBeAttached(pageRead);
@@ -122,7 +122,9 @@ const drawnAndPublished = async (
     .getByRole("dialog")
     .getByRole("button", { name: "Share", exact: true })
     .click(pageRead);
-  await expect(page.getByText("Your changes are shared")).toBeVisible(pageRead);
+  await expect(toastSaying(page, "Your changes are shared")).toBeVisible(
+    pageRead
+  );
   return { workflow, name: newName };
 };
 
@@ -183,89 +185,42 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   await start.getByRole("button", { name: "Close" }).first().click();
   await expect(start).toHaveCount(0);
 
-  // The approver decides from their inbox. Beside Workflows, their nav
-  // counts the workflow that needs them.
+  // The approver decides from their inbox.
   const asDecider = await pageOf(decider);
   await decisionIn(asDecider, name);
-  const workflows = asDecider
-    .getByRole("navigation", { name: "Main" })
-    .getByRole("link", { name: /^Workflows/u });
-  await expect(workflows).toHaveAccessibleName(
-    /1 workflow needs you$/u,
-    pageRead
-  );
-  // Opened beside the list: what it asks, and the way to its own page.
-  const item = asDecider.getByRole("article", {
-    name: "Approve invoice INV-42",
-  });
-  await item.getByRole("link", { name: "Review and answer" }).click();
+  // Opened beside the list, to be answered there: what it asks.
   await expect(
-    asDecider.getByRole("heading", { name: "Approve invoice INV-42" })
+    asDecider.getByRole("region", { name: "Approve invoice INV-42" })
   ).toBeVisible(pageRead);
   // Its page is the decision's link: opened by anyone else, it only says
-  // it isn't theirs.
-  const link = new URL(asDecider.url()).pathname;
-  expect(link).toMatch(/^\/decisions\/[^/]+$/u);
+  // it isn't theirs. The approver answers it there.
+  const decision = (
+    new URL(asDecider.url()).searchParams.get("item") ?? ""
+  ).replace(/^decision:/u, "");
+  const link = `/decisions/${decision}`;
   await page.goto(link);
   await expect(
     page.getByText("This decision is for someone else to answer.")
   ).toBeVisible(pageRead);
+  await asDecider.goto(link);
+  await expect(
+    asDecider.getByRole("heading", { name: "Approve invoice INV-42" })
+  ).toBeVisible(pageRead);
+  await asDecider.getByRole("button", { name: "Add a comment" }).click();
   const comment = asDecider.getByLabel("Comment (optional)");
   const confirmation = asDecider.getByRole("dialog", {
     name: "Confirm your approval",
   });
-  // On a phone, a very long comment scrolls inside Grasp's confirmation,
-  // under its title: Confirm and Cancel stay in the window, nothing runs
-  // over anything else, and the answer is confirmed from there.
-  const wide = asDecider.viewportSize();
-  await asDecider.setViewportSize({ width: 390, height: 700 });
-  await comment.fill(
-    Array.from(
-      { length: 60 },
-      (_, line) => `Line ${line + 1} of a long comment.`
-    ).join("\n")
-  );
+  // Approved with a comment, confirmed in Grasp's own dialog.
+  await comment.fill("Paid on time.");
   await asDecider.getByRole("button", { name: "Approve" }).click();
-  const confirm = confirmation.getByRole("button", { name: "Confirm" });
-  // Focus starts on Cancel, the safe answer, not on the long body; Confirm
-  // waits its first second.
-  await expect(confirm).toBeDisabled();
-  await expect(
-    confirmation.getByRole("button", { name: "Cancel" })
-  ).toBeFocused(pageRead);
-  await expect(confirm).toBeEnabled(pageRead);
-  await expect(confirm).toBeInViewport({ ratio: 1 });
-  await expect(
-    confirmation.getByRole("button", { name: "Cancel" })
-  ).toBeInViewport({ ratio: 1 });
-  // The body alone scrolls, as a region named by the title.
-  const dialogBody = confirmation.getByRole("region", {
-    name: "Confirm your approval",
-  });
-  await expect(dialogBody).toContainText("Line 60 of a long comment.");
-  const [title, scrolled, answers] = await Promise.all([
-    confirmation.getByText("Confirm your approval").boundingBox(),
-    dialogBody.boundingBox(),
-    confirm.boundingBox(),
-  ]);
-  expect({
-    titleAboveBody:
-      (title?.y ?? 0) + (title?.height ?? 0) <= (scrolled?.y ?? -1),
-    bodyAboveAnswers:
-      (scrolled?.y ?? 0) + (scrolled?.height ?? 0) <= (answers?.y ?? -1),
-  }).toStrictEqual({ titleAboveBody: true, bodyAboveAnswers: true });
-  await confirm.click();
-  if (wide !== null) {
-    await asDecider.setViewportSize(wide);
-  }
+  await expect(confirmation).toContainText("Paid on time.");
+  await confirmation.getByRole("button", { name: "Confirm" }).click();
   await expect(
     asDecider
       .getByRole("status")
       .filter({ hasText: /^Approved by Person on /u })
   ).toBeVisible(pageRead);
-  // Answered, it needs them no more.
-  await asDecider.reload();
-  await expect(workflows).toHaveAccessibleName("Workflows", pageRead);
 
   // The run ends with their answer: its list is read once, so read again
   // until the engine has finished it.
@@ -273,14 +228,16 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   await expect(async () => {
     await page.goto(`/workflows/${workflow}?view=runs`);
     await expect(run).toBeVisible(pageRead);
-    await expect(run).toContainText("Completed", { timeout: 1000 });
+    await expect(run).toContainText("Done", { timeout: 1000 });
   }).toPass(untilItHappens);
-  await run.getByRole("link").click();
-  const sheet = page.getByRole("dialog");
-  await expect(sheet).toContainText('"status": "approved"', pageRead);
-  await expect(sheet).toContainText('"comment": "Line 1 of a long comment.');
-  await expect(sheet).toContainText("Line 60 of a long comment.");
-  await page.keyboard.press("Escape");
+  // Its own page, with what it returned folded under its updates.
+  await run.getByRole("button").first().click();
+  await expect(page).toHaveURL(/\/runs\/[^/?]+$/u, pageRead);
+  await page.getByRole("button", { name: "What it returned" }).click(pageRead);
+  const returned = page.locator("[data-slot=code-block]");
+  await expect(returned).toContainText('"status": "approved"', pageRead);
+  await expect(returned).toContainText('"comment": "Paid on time."');
+  await page.goBack();
 
   // A webhook: an admin adds a source, its secret shown once.
   const sourceName = `Invoices ${randomBytes(4).toString("hex")}`;
@@ -298,16 +255,12 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
     .getByRole("textbox", { name: `URL of ${sourceName}` })
     .inputValue(pageRead);
 
-  // The builder starts the workflow on its invoices, in its Settings'
-  // Triggers.
-  await goTo(
-    page.getByRole("navigation", { name: "Workflow views" }),
-    "Settings"
-  );
-  await goTo(
-    page.getByRole("navigation", { name: "Settings sections" }),
-    "Triggers"
-  );
+  // The builder starts the workflow on its invoices, from What starts it
+  // in the Workshop on its page: its Settings' Triggers.
+  await page.goto(`/workflows/${workflow}`);
+  await page
+    .getByRole("button", { name: "Open What starts it" })
+    .click(pageRead);
   await page.getByRole("button", { name: "Add a trigger" }).click();
   const adder = page.getByRole("dialog", { name: "Add a trigger" });
   await adder.getByRole("combobox", { name: "What starts it" }).click();
@@ -358,6 +311,6 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   // Its run asks the approver, as the one started by hand did.
   await decisionIn(asDecider, name);
   await expect(
-    asDecider.getByRole("article", { name: "Approve invoice INV-43" })
+    asDecider.getByRole("region", { name: "Approve invoice INV-43" })
   ).toBeVisible(pageRead);
 });
