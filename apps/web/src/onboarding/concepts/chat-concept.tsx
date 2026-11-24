@@ -48,7 +48,8 @@ import { useSay, useVoice } from "../../voice/voice.ts";
 import { AiChoice } from "./ai-choice.tsx";
 import type { ConceptProps, ConceptStep } from "./concept-props.ts";
 import { ConceptFrame } from "./frame.tsx";
-import { CampaignPicture, CampaignTimeline, ExampleNote } from "./plan.tsx";
+import { LanguageCards } from "./language-cards.tsx";
+import { CampaignTimeline, ExampleNote } from "./plan.tsx";
 import { SoundToggle } from "./sound-toggle.tsx";
 import { interviewer, StephenFigure } from "./stephen.tsx";
 
@@ -171,10 +172,6 @@ const useReplies = () => {
   };
 };
 
-const languages = Object.entries(localeNames).flatMap(([code, name]) =>
-  isLocale(code) ? [{ code, name }] : []
-);
-
 /** Speaking instead of typing: the library's dictation button, its bar shown while it listens. */
 const DictateButton = () => {
   const [listening, setListening] = useState(false);
@@ -257,12 +254,7 @@ const useTurns = (
       id: "plan",
       from: "stephen",
       text: t`That works. Here’s the plan: one week of short talks with your team, then you get what I learned.`,
-      more: (
-        <>
-          <CampaignPicture />
-          <CampaignTimeline today={today} />
-        </>
-      ),
+      more: <CampaignTimeline today={today} />,
     },
     {
       id: "example",
@@ -281,35 +273,6 @@ const useTurns = (
     { id: `answer-${index}`, from: "stephen", text: each.answer },
   ]);
   return [...turns, ...asked];
-};
-
-/** Which language: the five, each in its own words. */
-const LanguageAnswer = ({ onPick }: { onPick: (code: Locale) => void }) => {
-  const { t } = useLingui();
-  return (
-    <Questionnaire
-      onSubmit={(answers) => {
-        const [code] = answers.language?.values ?? [];
-        if (isLocale(code)) {
-          onPick(code);
-        }
-      }}
-    >
-      <QuestionnaireItem name="language">
-        <QuestionnaireTitle>{t`Your language`}</QuestionnaireTitle>
-        <QuestionnaireChoices>
-          {languages.map(({ code, name }) => (
-            <QuestionnaireChoice key={code} value={code}>
-              <span lang={code}>{name}</span>
-            </QuestionnaireChoice>
-          ))}
-        </QuestionnaireChoices>
-      </QuestionnaireItem>
-      <QuestionnaireActions>
-        <QuestionnaireSubmit />
-      </QuestionnaireActions>
-    </Questionnaire>
-  );
 };
 
 /** Whose AI: Grasp's, or a key of their own. */
@@ -409,7 +372,7 @@ const Answer = ({
   const replies = useReplies();
   const { ai, ready, whose } = standing;
   if (step === "welcome") {
-    return <LanguageAnswer onPick={onLanguage} />;
+    return <LanguageCards chosen={null} onPick={onLanguage} />;
   }
   if (step === "about") {
     return (
