@@ -50,19 +50,20 @@ test("Back in Settings' level leads to the last page outside it, and to Chat aft
   await expect(main.getByRole("link", { name: "Chat" })).toBeVisible();
   await expect(main.getByRole("link", { name: "Projects" })).toHaveCount(0);
 
-  // The same page with only its query changed, in the page (as a Brain
-  // folder is opened), is the place to go back to.
-  await page.goto("/brain?group=one");
+  // The same page with only its query changed, in the page (as an Inbox
+  // item is opened), is the place to go back to. The Brain has a level
+  // of its own, as Settings has, so Back never leads there.
+  await page.goto("/inbox?item=one");
   await page.evaluate(() => {
-    history.pushState({}, "", "/brain?group=two");
+    history.pushState({}, "", "/inbox?item=two");
     dispatchEvent(new PopStateEvent("popstate"));
   });
-  await expect(page).toHaveURL(/\/brain\?group=two$/u);
+  await expect(page).toHaveURL(/\/inbox\?item=two$/u);
   await page.getByRole("button", { name: "Person", exact: true }).click();
   await page.getByRole("menuitem", { name: "Settings" }).click();
   await expect(page).toHaveURL(/\/settings/u);
   await sidebarOf(page).getByRole("link", { name: "Back" }).click();
-  await expect(page).toHaveURL(/\/brain\?group=two$/u);
+  await expect(page).toHaveURL(/\/inbox\?item=two$/u);
 
   // Straight into Settings, and the page read again: nothing to go back to
   // but Chat.
