@@ -185,7 +185,7 @@ const styles = stylex.create({
     minWidth: 0,
     paddingBlock: space[6],
     paddingInline: space[4],
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     backgroundColor: {
       default: colors.muted,
@@ -263,7 +263,7 @@ const styles = stylex.create({
     minWidth: 0,
     paddingBlock: space[2],
     paddingInline: space[3],
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     backgroundColor: colors.card,
     boxShadow: size.borderStrong,
@@ -524,10 +524,9 @@ const Row = ({
       {status === "uploading" ? (
         <span {...stylex.props(styles.progress)}>
           <Progress
-            label={words.uploadingName(file.name)}
+            aria-label={words.uploadingName(file.name)}
             value={Math.round((state?.progress ?? 0) * 100)}
             size="sm"
-            showLabel={false}
           />
         </span>
       ) : null}

@@ -26,7 +26,7 @@ import { bucketNames, databaseNames } from "../deploy/resources.ts";
 import { getProvisioning } from "../provision/queries.ts";
 import type { ProvisioningView } from "../provision/queries.ts";
 import { listReleases } from "../releases/queries.ts";
-import { targetReleaseOf } from "../rollout/targets.ts";
+import { isConfigPending, targetReleaseOf } from "../rollout/targets.ts";
 import { clientHistory, clientSettings } from "./queries.ts";
 import type { HistoryEntry } from "./queries.ts";
 import type { ClientSignInRecord } from "./sign-in-schema.ts";
@@ -177,6 +177,12 @@ export interface StaffWindowSetup {
   /** Whether it is open now: kept, and not yet past its end. */
   open: boolean;
   /**
+   * Whether its core has it: open, and its core went live with its
+   * settings as read after the window was opened. A later change of
+   * another setting that still waits for a deploy doesn't take it back.
+   */
+  live: boolean;
+  /**
    * Whether the admin knows Grasp's staff and Entra app, so the staff it
    * lists can also sign in to the company's site while it is open.
    */
@@ -195,9 +201,12 @@ const staffWindowSetupOf = async (
     .where(eq(clients.id, clientId));
   const window = staffWindowOf(row?.staffWindow ?? null);
   const apps = signInApps(env);
+  const open = window !== null && Date.parse(window.until) > Date.now();
   return {
     window,
-    open: window !== null && Date.parse(window.until) > Date.now(),
+    open,
+    live:
+      open && !(await isConfigPending(db, clientId, new Date(window.opened))),
     staffSignIn: apps.staff !== undefined && apps.entraClientId !== undefined,
   };
 };

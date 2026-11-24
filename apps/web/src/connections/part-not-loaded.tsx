@@ -41,8 +41,8 @@ export const PartNotLoaded = ({
       {router === null ? null : (
         <AlertAction>
           <Button
-            errorLabel={t`Not loaded`}
-            loadingLabel={t`Trying again…`}
+            errorText={t`Not loaded`}
+            loadingText={t`Trying again…`}
             onClick={async () => {
               await router.invalidate();
             }}

@@ -178,7 +178,7 @@ const styles = stylex.create({
     marginInlineStart: `calc(-1 * ${space["1"]})`,
     padding: space["1"],
     borderWidth: 0,
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     backgroundColor: "transparent",
     color: "inherit",
     fontFamily: "inherit",

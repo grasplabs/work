@@ -5,7 +5,6 @@
 // says the group's error. Each RadioGroupItem draws its circle only; its words are Field's parts,
 // on a row at least 44px tall that a press on the circle, its label or the space around them
 // chooses:
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Field>
 //     <FieldLabel>Summary email</FieldLabel>

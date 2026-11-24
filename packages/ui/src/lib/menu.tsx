@@ -135,11 +135,11 @@ const partsOf = (
 /** What stands at the end of an item: the spinner while it works, its failure, or its keys. */
 const End = ({
   state,
-  errorLabel,
+  errorText,
   keys,
 }: {
   state: MenuItemState;
-  errorLabel: string;
+  errorText: string;
   keys: ReactElement | undefined;
 }): ReactElement | null => {
   if (state.pending) {
@@ -155,7 +155,7 @@ const End = ({
   if (state.error !== undefined) {
     return (
       <span {...stylex.props(menuStyles.shortcut, menuStyles.error)}>
-        {errorLabel}
+        {errorText}
       </span>
     );
   }
@@ -169,14 +169,14 @@ const End = ({
 const settle = async (
   work: PromiseLike<unknown>,
   loading: { label: string; own: boolean },
-  errorLabel: string
+  errorText: string
 ) => {
   const over = announceWork(loading.label, loading.own);
   try {
     return await work;
   } catch (error) {
-    announce(errorLabel);
-    throw new Error(errorLabel, { cause: error });
+    announce(errorText);
+    throw new Error(errorText, { cause: error });
   } finally {
     over();
   }
@@ -198,9 +198,9 @@ interface ItemPartProps {
    * Said as work that returns a Promise starts; left out, the catalogue's menu.loading is said
    * once the work has run a second.
    */
-  loadingLabel?: string;
+  loadingText?: string;
   /** Said and shown when that work fails. @default the catalogue's menu.error */
-  errorLabel?: string;
+  errorText?: string;
   agentConfirm?: string;
   label?: string;
   style?: LayoutStyle;
@@ -209,14 +209,14 @@ interface ItemPartProps {
 /** An item's own props, its children read once (partsOf), and the keys it names. */
 type ItemProps = Omit<
   ItemPartProps,
-  "shortcut" | "children" | "asChild" | "loadingLabel" | "errorLabel"
+  "shortcut" | "children" | "asChild" | "loadingText" | "errorText"
 > &
   ReturnType<typeof partsOf> & {
     keysLabel?: string;
-    loadingLabel: string;
+    loadingText: string;
     /** The loading words are the caller's, not the catalogue's. */
     loadingOwn: boolean;
-    errorLabel: string;
+    errorText: string;
   };
 
 const Item = ({
@@ -230,9 +230,9 @@ const Item = ({
   disabled,
   onSelect,
   closeOnSelect,
-  loadingLabel,
+  loadingText,
   loadingOwn,
-  errorLabel,
+  errorText,
   agentConfirm,
   label,
   style,
@@ -248,11 +248,7 @@ const Item = ({
       if (!isThenable(result)) {
         return result;
       }
-      return settle(
-        result,
-        { label: loadingLabel, own: loadingOwn },
-        errorLabel
-      );
+      return settle(result, { label: loadingText, own: loadingOwn }, errorText);
     });
   return (
     <MenuItem
@@ -291,7 +287,7 @@ const Item = ({
           >
             {words}
           </span>
-          <End state={state} errorLabel={errorLabel} keys={keys} />
+          <End state={state} errorText={errorText} keys={keys} />
         </>
       )}
     </MenuItem>
@@ -312,16 +308,16 @@ export const MenuItemPart = ({
   shortcut,
   children,
   asChild,
-  loadingLabel,
-  errorLabel,
+  loadingText,
+  errorText,
   ...rest
 }: ItemPartProps) => {
   const { menu } = useI18n();
   const props = {
     ...rest,
-    loadingLabel: loadingLabel ?? menu.loading,
-    loadingOwn: loadingLabel !== undefined,
-    errorLabel: errorLabel ?? menu.error,
+    loadingText: loadingText ?? menu.loading,
+    loadingOwn: loadingText !== undefined,
+    errorText: errorText ?? menu.error,
   };
   const parts = partsOf(children, asChild, shortcut);
   return parts.keys === undefined ? (

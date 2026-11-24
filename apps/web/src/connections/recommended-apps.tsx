@@ -45,7 +45,7 @@ const Why = ({ reason, name }: { reason: Reason; name: string }) => {
     mark = (
       <BrandIcon
         decorative
-        label={brands[reason.suite].name}
+        name={brands[reason.suite].name}
         logo={brands[reason.suite].logo}
         size="xs"
         tile={false}

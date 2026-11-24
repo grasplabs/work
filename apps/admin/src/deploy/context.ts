@@ -40,6 +40,11 @@ const platformKeySecrets = [
   "ANTHROPIC_API_KEY",
   "MISTRAL_API_KEY",
   "OPENROUTER_API_KEY",
+  "KUGELAUDIO_API_KEY",
+  // ElevenLabs's, which said Grasp's lines before KugelAudio: a client on
+  // a release from before then, pinned or rolled back to it, still reads
+  // it, and every upload carries the shared secrets as they are now. To
+  // go once no client can be on such a release.
   "ELEVENLABS_API_KEY",
 ] as const;
 type PlatformKeySecret = (typeof platformKeySecrets)[number];

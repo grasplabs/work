@@ -358,7 +358,7 @@ const EraseAnswers = ({
       <AlertDialogFooter>
         <AlertDialogCancel />
         <Button
-          errorLabel={t`Couldn't erase`}
+          errorText={t`Couldn't erase`}
           onClick={async () => {
             let erased = false;
             await change(async (session) => {
@@ -450,9 +450,7 @@ export const BrainAudience = ({
   if (audiences.state === "refused") {
     return (
       <section>
-        <div {...stylex.props(styles.head)}>
-          <SectionHeader size="sm" title={title} />
-        </div>
+        <SectionHeader size="sm" style={styles.head} title={title} />
         <div {...stylex.props(styles.notes)}>
           <Alert variant="destructive">
             <AlertDescription>{audiences.message}</AlertDescription>
@@ -497,22 +495,21 @@ export const BrainAudience = ({
   ];
   return (
     <section>
-      <div {...stylex.props(styles.head)}>
-        <SectionHeader
-          actions={
-            !erasing &&
-            (audience.kind !== "nobody" || connection.keepsReads === true) ? (
-              <EraseKept
-                connection={connection}
-                label={label}
-                onErased={onChanged}
-              />
-            ) : null
-          }
-          size="sm"
-          title={title}
-        />
-      </div>
+      <SectionHeader
+        actions={
+          !erasing &&
+          (audience.kind !== "nobody" || connection.keepsReads === true) ? (
+            <EraseKept
+              connection={connection}
+              label={label}
+              onErased={onChanged}
+            />
+          ) : null
+        }
+        size="sm"
+        style={styles.head}
+        title={title}
+      />
       <FieldGroup>
         <Field
           orientation="responsive"

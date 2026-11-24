@@ -2,7 +2,6 @@
 // in StyleX, built on UI SDK's Textarea, with Input's fill, hairline,
 // focus edge and words, so a form's fields are one family. It grows with its text up to
 // textarea-height, then its text scrolls inside it.
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <Textarea aria-label="Notes" placeholder="What should the team know?" />
 //   <Textarea rows={6} autoResize={false} />                    a fixed height the person can drag
@@ -114,7 +113,7 @@ const styles = stylex.create({
     borderStyle: "solid",
     borderColor: "currentColor",
     // A default Input's corner, so a field and a textarea in one form are cut the same.
-    borderRadius: `min(${radius.base}, calc(${size.controlDefault} / 2))`,
+    borderRadius: `min(${radius.xl}, calc(${size.controlDefault} / 2))`,
     cornerShape: radius.shape,
     backgroundColor: colors.inputBg,
     boxShadow: {

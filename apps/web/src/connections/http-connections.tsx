@@ -421,7 +421,7 @@ const Revoke = ({
         <AlertDialogFooter>
           <AlertDialogCancel />
           <Button
-            errorLabel={t`Couldn't revoke`}
+            errorText={t`Couldn't revoke`}
             onClick={async () => {
               let revoked = false;
               await change(async (session) => {

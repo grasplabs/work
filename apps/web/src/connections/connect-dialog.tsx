@@ -177,9 +177,7 @@ const LoadingLines = () => {
     >
       <Skeleton />
       <Skeleton />
-      <div {...stylex.props(styles.lastLine)}>
-        <Skeleton />
-      </div>
+      <Skeleton style={styles.lastLine} />
     </output>
   );
 };

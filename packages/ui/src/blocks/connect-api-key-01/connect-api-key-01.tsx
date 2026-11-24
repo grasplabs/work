@@ -221,7 +221,7 @@ const styles = stylex.create({
 /** A provider's mark: its logo, or its first letter. */
 const Logo = ({ provider }: { provider: ConnectApiKeyProvider }) => (
   <ItemMedia align="center">
-    <BrandIcon logo={provider.logo} label={provider.name} decorative />
+    <BrandIcon logo={provider.logo} name={provider.name} decorative />
   </ItemMedia>
 );
 
@@ -240,9 +240,9 @@ const ConnectForm = ({
   const [refused, setRefused] = useState<string | null>(null);
   const form = useRef<HTMLFormElement>(null);
   const connect = useAction(onConnect, {
-    loadingLabel: words.connecting,
-    successLabel: words.connected,
-    errorLabel: words.notConnected,
+    loadingText: words.connecting,
+    successText: words.connected,
+    errorText: words.notConnected,
   });
   // Chosen: the focus goes to its first field.
   useEffect(() => {
@@ -337,8 +337,8 @@ const ConnectForm = ({
           <Button
             type="submit"
             status={connect.status}
-            successLabel={words.connected}
-            errorLabel={words.notConnected}
+            successText={words.connected}
+            errorText={words.notConnected}
           >
             {words.connect}
           </Button>
@@ -371,8 +371,8 @@ const Connected = ({
       setAsking(false);
     },
     {
-      loadingLabel: words.disconnecting,
-      errorLabel: words.notDisconnected,
+      loadingText: words.disconnecting,
+      errorText: words.notDisconnected,
     }
   );
   return (
@@ -433,8 +433,8 @@ const Connected = ({
               onClick={async () => {
                 await disconnect.run();
               }}
-              loadingLabel={words.disconnecting}
-              errorLabel={words.notDisconnected}
+              loadingText={words.disconnecting}
+              errorText={words.notDisconnected}
             >
               {words.disconnect}
             </Button>

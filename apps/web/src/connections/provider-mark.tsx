@@ -61,7 +61,7 @@ export const ProviderMark = ({
     return (
       <BrandIcon
         decorative
-        label={name}
+        name={name}
         logo={logo === null && isBrand(id) ? brands[id].logo : undefined}
         size={size}
       />

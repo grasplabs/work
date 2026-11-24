@@ -2,7 +2,6 @@
 // StyleX. Bars, an area and lines on a shared drawing, plus four figures of their own: bars across
 // (ChartBarList), parts of a whole (ChartPie), flows between stages (ChartSankey) and a trend beside
 // its number (ChartSparkline).
-// Adapted from shadcn/ui (MIT), see THIRD_PARTY_NOTICES.md.
 //
 //   <ChartContainer aria-label="Tickets solved" summary="Up from 40 in January to 72 in June."
 //     data={rows} xKey="month" config={{ solved: { label: "Solved" } }}>
@@ -1214,7 +1213,7 @@ const tooltipStyles = stylex.create({
     color: colors.tooltipForeground,
     backgroundColor: `oklch(from ${colors.tooltip} l c h / 1)`,
     boxShadow: shadow.sm,
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     fontFamily: font.sans,
     fontSize: font.textXs,
@@ -2182,7 +2181,7 @@ const pieStyles = stylex.create({
   swatch: {
     width: space[2],
     height: space[2],
-    borderRadius: radius.hairline,
+    borderRadius: radius.xs,
     alignSelf: "center",
   },
   swatchTone: (colour: string) => ({
@@ -3273,7 +3272,7 @@ const sparkStyles = stylex.create({
   // A control: more room round the drawing, so the keyboard's ring stands clear of the line.
   live: {
     position: "relative",
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     paddingInline: LIVE_PAD,
     paddingBlock: space[1],

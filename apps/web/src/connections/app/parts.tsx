@@ -195,7 +195,7 @@ const styles = stylex.create({
 /** The app's mark at a size: the host's, or its first letter on a tile. */
 export const AppMark = ({ app, size }: { app: App; size: MarkSize }) =>
   app.mark === undefined ? (
-    <BrandIcon label={app.name} size={size} decorative />
+    <BrandIcon name={app.name} size={size} decorative />
   ) : (
     <span aria-hidden="true" {...stylex.props(styles.mark)}>
       {app.mark}

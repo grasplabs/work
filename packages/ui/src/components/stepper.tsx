@@ -20,7 +20,7 @@
 // flow (`variant="bar"`) or as its foot with the step's one action (`variant="footer"`):
 //
 //   <StepperNav step={2} total={7} onBack={back} />                    Next submits its form
-//   <StepperNav variant="bar" step={6} total={7} onBack={back} finishLabel="Create agent" />
+//   <StepperNav variant="bar" step={6} total={7} onBack={back} finishText="Create agent" />
 //
 // Its keys: Enter is Next where focus is not in a field of several lines or on another button;
 // Mod+Enter is Next anywhere in the flow; Alt+← is Back (Alt+→ right to left). The flow is the form
@@ -48,7 +48,7 @@ import { announce } from "../lib/utils";
 import type { LayoutStyle, Orientation } from "../lib/utils";
 import { iconVars, motionVars } from "../lib/vars.stylex";
 import { Button } from "./button";
-import { Progress } from "./progress";
+import { Progress, ProgressLabel, ProgressValue } from "./progress";
 import { Spinner } from "./spinner";
 import { stepMarker } from "./stepper.stylex";
 import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip";
@@ -237,7 +237,7 @@ const styles = stylex.create({
     margin: 0,
     padding: 0,
     borderWidth: 0,
-    borderRadius: `calc(${radius.base} / 2)`,
+    borderRadius: `calc(${radius.xl} / 2)`,
     cornerShape: radius.shape,
     backgroundColor: "transparent",
     color: "inherit",
@@ -303,14 +303,25 @@ const styles = stylex.create({
   },
   // The line runs through the steps from mark to mark: a box round a whole step would be crossed by
   // it. The press shows on its mark instead, the node the line joins: the ring round the mark, a soft
-  // fill behind it under the pointer, and the name in ink.
+  // band round it under the pointer, and the name in ink.
   pressOnMark: {
     outline: "none",
     backgroundColor: "transparent",
   },
-  markPress: {
+  // What the press and focus are drawn on: a circle in the mark's middle, as wide as the mark and as
+  // tall as it is wide. Across with names the mark is the current dot's width and its ring's height,
+  // and drawn on that box a circle's corners would make an oval; this one is round in every layout,
+  // and its middle is the dot's: both are centred in the mark's one cell, a whole number of pixels
+  // in from its edges (the mark's sides and the dot's are all even). It takes no room: nothing in
+  // the row moves.
+  halo: {
+    gridArea: "1 / 1",
+    width: "100%",
+    aspectRatio: "1",
     borderRadius: radius.circle,
     cornerShape: "round",
+  },
+  markPress: {
     outline: {
       default: "none",
       [stylex.when.ancestor(":focus-visible", stepMarker)]: {
@@ -329,10 +340,8 @@ const styles = stylex.create({
     transitionTimingFunction: duration.ease,
   },
   // The marks alone: a step that is not a button still takes focus for its tooltip; its ring is on
-  // its mark, with no hover fill (nothing to press).
+  // its mark, with no hover band (nothing to press).
   markFocus: {
-    borderRadius: radius.circle,
-    cornerShape: "round",
     outline: {
       default: "none",
       [stylex.when.ancestor(":focus-visible", stepMarker)]: {
@@ -408,6 +417,8 @@ const styles = stylex.create({
   // marks keep their own system colours and their shapes (filled, open, ringed, square) tell the
   // states apart without colour.
   dot: {
+    // In the mark's one cell, over the circle the press is drawn on.
+    gridArea: "1 / 1",
     boxSizing: "border-box",
     width: size.stepperDot,
     height: size.stepperDot,
@@ -448,7 +459,7 @@ const styles = stylex.create({
   dotError: {
     width: size.stepperDotActive,
     height: size.stepperDotActive,
-    borderRadius: radius.hairline,
+    borderRadius: radius.xs,
     backgroundColor: { default: colors.destructive, [FORCED]: "CanvasText" },
     borderColor: { default: colors.destructive, [FORCED]: "CanvasText" },
   },
@@ -634,7 +645,8 @@ const ringOf = (ring: Ring) => {
   return ring === "focus" && styles.markFocus;
 };
 
-/** A step's mark: the dot, round the current one its ring while it is not at work. */
+/** A step's mark: the dot, round the current one its ring while it is not at work, and under it the
+ * circle a press or focus is drawn on. */
 const Mark = ({
   status,
   ring,
@@ -654,10 +666,12 @@ const Mark = ({
     {...stylex.props(
       styles.mark,
       across && styles.markAcross,
-      pitched && styles.markPitched,
-      ringOf(ring)
+      pitched && styles.markPitched
     )}
   >
+    {ring !== undefined && (
+      <span {...stylex.props(styles.halo, ringOf(ring))} />
+    )}
     <span
       {...stylex.props(
         styles.dot,
@@ -1103,7 +1117,7 @@ export interface StepperNavProps {
    */
   nextType?: "submit" | "button";
   /** What Next says on the last step, the words for what it does ("Create agent"), with no arrow. */
-  finishLabel?: string;
+  finishText?: string;
   /**
    * Next waits: for an answer, or a check. With `disabledReason` it keeps its place in the keys and
    * says why in its tooltip.
@@ -1322,7 +1336,7 @@ interface NextButtonProps {
   last: boolean;
   nextType: "submit" | "button" | undefined;
   onNext: (() => void) | undefined;
-  finishLabel: string | undefined;
+  finishText: string | undefined;
   disabled: boolean;
   disabledReason: string | undefined;
   loading: boolean;
@@ -1354,11 +1368,11 @@ const pressOf = (
 
 /** Next: a ghost arrow in the bar, its words on the last step; in the footer the step's one action. */
 const NextButton = (props: NextButtonProps) => {
-  const { bar, last, finishLabel, disabled, disabledReason, loading } = props;
+  const { bar, last, finishText, disabled, disabledReason, loading } = props;
   const { navNext } = useI18n().stepper;
-  const label = last ? (finishLabel ?? navNext) : navNext;
+  const label = last ? (finishText ?? navNext) : navNext;
   // The bar's last step is always words; the footer's only when it says what it does.
-  const finish = last && (bar || finishLabel !== undefined);
+  const finish = last && (bar || finishText !== undefined);
   const reason = reasonOf(disabled, disabledReason);
   const press = pressOf(props, reason);
   if (bar && !finish) {
@@ -1402,13 +1416,23 @@ const HowFar = ({
   return (
     <span {...stylex.props(navStyles.middle)}>
       <span {...stylex.props(navStyles.progress)}>
-        <Progress
-          label={said}
-          value={Math.round(((step + 1) / total) * 100)}
-          size="sm"
-          showLabel={!bar && showCount}
-          getAriaValueText={() => said}
-        />
+        {!bar && showCount ? (
+          <Progress
+            value={Math.round(((step + 1) / total) * 100)}
+            size="sm"
+            getAriaValueText={() => said}
+          >
+            <ProgressLabel>{said}</ProgressLabel>
+            <ProgressValue />
+          </Progress>
+        ) : (
+          <Progress
+            aria-label={said}
+            value={Math.round(((step + 1) / total) * 100)}
+            size="sm"
+            getAriaValueText={() => said}
+          />
+        )}
       </span>
       {bar && showCount ? (
         <span aria-hidden="true" {...stylex.props(navStyles.count)}>
@@ -1427,7 +1451,7 @@ export const StepperNav = ({
   onBack,
   onNext,
   nextType,
-  finishLabel,
+  finishText,
   disabled = false,
   disabledReason,
   loading = false,
@@ -1466,7 +1490,7 @@ export const StepperNav = ({
           last={step >= total - 1}
           nextType={nextType}
           onNext={onNext}
-          finishLabel={finishLabel}
+          finishText={finishText}
           disabled={disabled}
           disabledReason={disabledReason}
           loading={loading}

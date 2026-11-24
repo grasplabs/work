@@ -345,17 +345,15 @@ const Kinds = ({
           ))}
         </ItemGrid>
         {count > shown.length ? (
-          <div {...stylex.props(styles.more)}>
-            <Button asChild size="sm" variant="ghost">
-              <Link
-                from="/integrations/"
-                search={(last) => ({ ...last, group })}
-                to="."
-              >
-                {t`${plural(count, { one: `Show the # app in ${label}`, other: `Show all # in ${label}` })}`}
-              </Link>
-            </Button>
-          </div>
+          <Button asChild size="sm" style={styles.more} variant="ghost">
+            <Link
+              from="/integrations/"
+              search={(last) => ({ ...last, group })}
+              to="."
+            >
+              {t`${plural(count, { one: `Show the # app in ${label}`, other: `Show all # in ${label}` })}`}
+            </Link>
+          </Button>
         ) : null}
       </Tiles>
     );

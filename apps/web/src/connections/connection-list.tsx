@@ -191,9 +191,7 @@ const Holders = ({
   const title = t`Apps and agents with a permission`;
   return (
     <section>
-      <div {...stylex.props(styles.head)}>
-        <SectionHeader size="sm" title={title} />
-      </div>
+      <SectionHeader size="sm" style={styles.head} title={title} />
       <ItemGroup aria-label={title}>
         {holding.map((permission, index) => (
           <Fragment key={permission.id}>
@@ -369,7 +367,7 @@ const DisconnectContent = ({
       <AlertDialogFooter>
         <AlertDialogCancel>{t`Close`}</AlertDialogCancel>
         <Button
-          errorLabel={t`Couldn't disconnect`}
+          errorText={t`Couldn't disconnect`}
           onClick={async () => {
             let gone = false;
             await change(async (session) => {

@@ -499,13 +499,12 @@ export const SyncPlaces = ({
   };
   return (
     <section>
-      <div {...stylex.props(styles.head)}>
-        <SectionHeader
-          headingLevel={3}
-          size="sm"
-          title={t`Copy into the Brain from ${label}`}
-        />
-      </div>
+      <SectionHeader
+        headingLevel={3}
+        size="sm"
+        style={styles.head}
+        title={t`Copy into the Brain from ${label}`}
+      />
       <div {...stylex.props(styles.body)}>{body()}</div>
     </section>
   );

@@ -63,13 +63,8 @@ export const isThemeMode = (value: unknown): value is ThemeMode =>
 export const isThemeId = (value: unknown): value is ThemeId =>
   themeIds.some((id) => id === value);
 
-/** Every prop a ThemeToggle takes. */
-export interface ThemeToggleProps {
-  /**
-   * `segmented` for a header or a menu; `icon` where there is no room; `picker` on a settings page.
-   * @default "segmented"
-   */
-  variant?: "segmented" | "icon" | "picker";
+/** What every ThemeToggle takes, whatever its variant. */
+interface ThemeToggleBase {
   /**
    * The icon button's size.
    * @default "default"
@@ -102,14 +97,44 @@ export interface ThemeToggleProps {
    * @default "fill"
    */
   tileSize?: "fill" | "default";
-  /**
-   * Its name, said with the choice, and the picker's mode heading.
-   * @default "Theme" (I18nProvider themeToggle.label)
-   */
-  label?: string;
   /** Layout only: where it sits. */
   style?: LayoutStyle;
 }
+
+/**
+ * A segmented control or an icon button, named by its `aria-label`.
+ * @when segmented or icon
+ */
+interface ThemeToggleNamed extends ThemeToggleBase {
+  /**
+   * `segmented` for a header or a menu; `icon` where there is no room; `picker` on a settings page.
+   * @default "segmented"
+   */
+  variant?: "segmented" | "icon";
+  /**
+   * Its name, said with the choice: the name of the group of modes.
+   * @default "Theme" (I18nProvider themeToggle.label)
+   */
+  "aria-label"?: string;
+  heading?: never;
+}
+
+/**
+ * A picker: its heading over the modes names their group.
+ * @when picker
+ */
+interface ThemeTogglePicker extends ThemeToggleBase {
+  variant: "picker";
+  /**
+   * The heading over the modes, which names their group.
+   * @default "Theme" (I18nProvider themeToggle.label)
+   */
+  heading?: string;
+  "aria-label"?: never;
+}
+
+/** Every prop a ThemeToggle takes. */
+export type ThemeToggleProps = ThemeToggleNamed | ThemeTogglePicker;
 
 const REDUCED = media.reducedMotion;
 const FORCED = media.forcedColors;
@@ -117,7 +142,7 @@ const HOVER = media.hover;
 const COARSE = media.pointerCoarse;
 
 // A segment's corner nests inside the track's: the one corner less the track's padding.
-const SEGMENT_CORNER = `calc(${radius.base} - ${space.toggleTrackPadding})`;
+const SEGMENT_CORNER = `calc(${radius.xl} - ${space.toggleTrackPadding})`;
 
 const styles = stylex.create({
   root: {
@@ -157,12 +182,12 @@ const styles = stylex.create({
   iconSm: {
     width: size.controlXs,
     height: size.controlXs,
-    borderRadius: `min(${radius.base}, calc(${size.controlXs} / 2))`,
+    borderRadius: `min(${radius.xl}, calc(${size.controlXs} / 2))`,
   },
   iconDefault: {
     width: size.controlSm,
     height: size.controlSm,
-    borderRadius: `min(${radius.base}, calc(${size.controlSm} / 2))`,
+    borderRadius: `min(${radius.xl}, calc(${size.controlSm} / 2))`,
   },
   // A finger's 44px, unseen, on a touch screen, from the button's own size.
   target: {
@@ -294,7 +319,7 @@ const styles = stylex.create({
     paddingBlockEnd: space[2],
     borderWidth: 0,
     backgroundColor: "transparent",
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     textAlign: "start",
     fontFamily: font.sans,
@@ -316,7 +341,7 @@ const styles = stylex.create({
   ring: {
     position: "absolute",
     inset: space[1],
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     boxShadow: `0 0 0 2px ${colors.foreground}`,
   },
@@ -331,7 +356,7 @@ const styles = stylex.create({
     aspectRatio: "16 / 10",
     overflow: "hidden",
     backgroundColor: colors.background,
-    borderRadius: radius.base,
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     boxShadow: size.borderStrong,
     borderWidth: { default: 0, [FORCED]: 1 },
@@ -381,7 +406,7 @@ const styles = stylex.create({
     gap: space[1],
     padding: space[2],
     backgroundColor: colors.card,
-    borderRadius: radius.mark,
+    borderRadius: radius.sm,
     cornerShape: radius.shape,
     boxShadow: shadow.sm,
   },
@@ -817,13 +842,15 @@ const Picker = ({
 }) => {
   const modesName = useId();
   const themesName = useId();
+  const modesHeading = useId();
+  const themesHeading = useId();
   const modes = usePart(
     themeToggleAgent,
     "group",
     {},
     {
       role: "radiogroup",
-      "aria-label": modeLabel,
+      "aria-labelledby": modesHeading,
       ...stylex.props(
         styles.tiles,
         tileSize === "default" && styles.tilesDefault
@@ -875,15 +902,19 @@ const Picker = ({
   return (
     <>
       <div {...stylex.props(styles.group)}>
-        <p {...stylex.props(styles.groupLabel)}>{modeLabel}</p>
+        <p id={modesHeading} {...stylex.props(styles.groupLabel)}>
+          {modeLabel}
+        </p>
         {modes}
       </div>
       {themes.length > 0 && (
         <div {...stylex.props(styles.group)}>
-          <p {...stylex.props(styles.groupLabel)}>{themeLabel}</p>
+          <p id={themesHeading} {...stylex.props(styles.groupLabel)}>
+            {themeLabel}
+          </p>
           <div
             role="radiogroup"
-            aria-label={themeLabel}
+            aria-labelledby={themesHeading}
             {...stylex.props(
               styles.tiles,
               tileSize === "default" && styles.tilesDefault
@@ -926,11 +957,12 @@ export const ThemeToggle = ({
   themes = noThemes,
   showThemes = true,
   tileSize = "fill",
-  label: labelGiven,
+  "aria-label": labelGiven,
+  heading,
   style,
 }: ThemeToggleProps) => {
   const { themeToggle: words } = useI18n();
-  const label = labelGiven ?? words.label;
+  const label = heading ?? labelGiven ?? words.label;
   const wordsOf = (each: ThemeMode): ModeWords => words[each];
   const shownThemes = showThemes ? themes : [];
   const chooseTheme = (next: ThemeId) => {

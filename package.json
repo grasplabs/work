@@ -23,6 +23,7 @@
     "check:snowball": "node scripts/brain-snowball.ts --check",
     "check:ui": "node scripts/ui-sync.ts check",
     "ui:update": "node scripts/ui-sync.ts update",
+    "ui:propose": "node scripts/ui-sync.ts propose",
     "github:setup": "node scripts/github-setup.ts",
     "check:attribution": "node scripts/check-attribution.ts",
     "check:branch": "node scripts/check-branch-name.ts",
