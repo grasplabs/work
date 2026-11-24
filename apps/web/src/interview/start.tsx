@@ -23,7 +23,6 @@ import { ErrorText } from "../error-text.tsx";
 import { Actions, Page, Quiet, Words } from "./calm.tsx";
 import { budgetMinutes } from "./countdown.tsx";
 import { DitherOver } from "./frame.tsx";
-import { usePromise } from "./words.ts";
 
 // The start of the interview as someone meets it on their link: one
 // screen, one decision, agree and start. The title on two lines, one short
@@ -227,7 +226,6 @@ export const Consent = ({
 }) => {
   const { t } = useLingui();
   const title = useTitleSize();
-  const promise = usePromise();
   const minutes = budgetMinutes;
   // One sentence for translators; it stands on two lines where the window has room for both.
   const lines = t`Hi ${name}, got a few minutes
@@ -235,7 +233,6 @@ to talk about your work?`.split("\n");
   const promises = [
     t`Your voice isn’t saved, only your words.`,
     t`Nothing is shared until you review and approve it.`,
-    promise,
     t`You can change or delete it any time until ${closes}.`,
   ];
   return (
