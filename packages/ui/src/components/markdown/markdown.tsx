@@ -6,14 +6,21 @@
 //   <Markdown>{answer}</Markdown>
 //   <Markdown streaming>{partial}</Markdown>
 //   <Markdown renderLink={(link) => …}>{answer}</Markdown>     the host draws the links
+//   <Markdown components={{ code: MyCode }}>{answer}</Markdown>  the host draws elements, by name
 //
-// While it streams, what is half-written is made whole (parse.ts, repair): bold is bold from its
-// first letter, a table is a table from its first row, an open fence is code still being written,
-// and a link still being written keeps the room its arrow will take. Nothing flickers or re-flows
-// when a mark closes. The words come as they are given: pacing them is the message's job.
+// While it streams, what is half-written is made whole (repair.ts, repair): bold is bold from its
+// first letter, a table is a table from its row of dashes, an open fence is code still being written,
+// a link is its words until what follows can no longer make it anything else, then the link in
+// their place (handedOf), and a note's mark is its number from the start. Nothing shown is taken
+// back, but where a link's definition arrives (its references, shown as written, become the link)
+// and where an answer ends without a note it refers to (its mark is shown as written), and nothing
+// flickers or re-flows when a mark closes. The words come as they are
+// given: pacing them is the message's job.
 //
 // It knows no router and no citation: the host draws any link it wants to (`renderLink`, or a part
-// around it through MarkdownLinkProvider). Every value is a token. A caller sets layout only.
+// around it through MarkdownLinkProvider), and any element it wants to (`components`, keyed by HTML
+// element name), within the same safe defaults. Every value is a token. A
+// caller sets layout only.
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
@@ -26,7 +33,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { FC, ReactNode } from "react";
+import type { ComponentProps, ComponentType, FC, ReactNode } from "react";
 
 import { useI18n } from "../../lib/i18n";
 import { CheckIcon, ChevronRightIcon, Icon } from "../../lib/icons";
@@ -69,27 +76,26 @@ import {
 import { tableVars } from "../table.stylex";
 import {
   bounded,
+  encodedUrl,
   groupSections,
   NOTHING,
-  openFence,
-  parseMarkdown,
   readBlocks,
-  repair,
   schemeOf,
   sectionSaid,
-  tidy,
 } from "./parse";
 import type {
   FootnoteDefinition,
   Grouped,
   List,
   ListItem,
+  MarkdownNode,
   Paragraph,
   PhrasingContent,
   Placed,
   RootContent,
   TableNode,
 } from "./parse";
+import { openFence, repair, tidy } from "./repair";
 
 /** A link in the answer, as the host's renderer sees it. */
 export interface MarkdownLink {
@@ -108,6 +114,47 @@ export interface MarkdownLink {
 /** Draws a link in Markdown's place, or gives undefined to leave it to Markdown. */
 export type MarkdownLinkRenderer = (link: MarkdownLink) => ReactNode;
 
+/** The elements Markdown draws that a caller may draw instead, by their HTML names. */
+type MarkdownElement =
+  | "a"
+  | "blockquote"
+  | "code"
+  | "del"
+  | "em"
+  | "h1"
+  | "h2"
+  | "h3"
+  | "h4"
+  | "h5"
+  | "h6"
+  | "hr"
+  | "img"
+  | "li"
+  | "ol"
+  | "p"
+  | "pre"
+  | "strong"
+  | "table"
+  | "tbody"
+  | "td"
+  | "th"
+  | "thead"
+  | "tr"
+  | "ul";
+
+/**
+ * Elements drawn in Markdown's place, keyed by HTML element name (a map written for react-markdown
+ * or Streamdown carries over): each is given the element's own props (its `children`; `href` and `title` for
+ * `a`, `src`, `alt` and `title` for `img`, `className` `language-…` for fenced code, `start` for `ol`,
+ * `align` for a cell) and the syntax tree's `node` it draws, which is internal (MarkdownProps'
+ * `components`).
+ */
+export type MarkdownComponents = {
+  [Tag in MarkdownElement]?: ComponentType<
+    ComponentProps<Tag> & { node: MarkdownNode }
+  >;
+};
+
 /** How a single newline inside a paragraph is drawn: a space, a line break, or a break only in a paragraph of short lines. */
 export type MarkdownSoftBreaks = "space" | "line" | "auto";
 
@@ -116,15 +163,15 @@ export interface MarkdownProps {
   /** The Markdown: the agent's answer, or as much of it as has arrived. */
   children: string;
   /**
-   * The answer is still being written: what is half-written at its end is shown whole, and once it
-   * turns false the end is tidied (as `truncated`).
+   * The answer is still being written: what is half-written at its end is shown whole. Once it
+   * turns false the answer is drawn as written, the same as when the page is opened again.
    * @default false
    */
   streaming?: boolean;
   /**
    * The answer was cut off part way (stopped): a link still being written at its end goes, and
-   * bold or code left open is closed, so no raw mark shows. An answer streamed here gets it by
-   * itself when `streaming` turns false; set it for a cut answer drawn from history.
+   * bold or code left open is closed, so no raw mark shows. Set it when a stream is stopped, and
+   * for a cut answer drawn from history.
    * @default false
    */
   truncated?: boolean;
@@ -161,6 +208,8 @@ export interface MarkdownProps {
   softBreaks?: MarkdownSoftBreaks;
   /**
    * Fenced code past this many lines is folded under Show more, as CodeBlockContent's `maxLines`.
+   * `false` never folds; a block still draws at most its first 2,000 lines (a line says how many
+   * more, and Copy takes all), since the text comes from a model and has no bound.
    * @default 18
    */
   codeMaxLines?: number | false;
@@ -170,9 +219,26 @@ export interface MarkdownProps {
    * link through `<Link asChild>`, a button that asks before leaving, a citation). Return undefined
    * for Markdown's own: http, https and mailto as a Link, anything else as its words; a picture is
    * never loaded unless the host draws it. Footnote marks and their way back stay Markdown's own.
-   * While an answer streams, its last link's address can still grow: it is called again as it does.
+   * While an answer streams, it is never handed a link or a picture whose address can still grow:
+   * until the stream has proven it whole, it is its words, and then the host's link in their place.
    */
   renderLink?: MarkdownLinkRenderer;
+  /**
+   * Draws elements in Markdown's place, keyed by HTML element name (`{ code: MyCode, a: MyLink }`);
+   * any element left out is Markdown's own. The safe
+   * defaults hold: `a` is given only a link Markdown would draw (http, https or mailto, its address
+   * whole), its address encoded as CommonMark has it; any other link is its words. `img` draws a
+   * picture whose address is http or https, once that address is whole (while an answer is
+   * written, half of one is its words), which is never loaded otherwise: giving it is the
+   * choice to load pictures, and it checks the addresses it trusts. `code` draws code in a sentence
+   * and fenced code (its `node.type` is `code`, its `className` `language-…`), in CodeBlock's place;
+   * `pre`, when given, holds fenced code's `code`. Headings are named by the level they are drawn at
+   * (`headingLevel`). Task boxes and footnotes stay Markdown's own. `node` is internal: the
+   * parser's syntax tree node (mdast), to tell what is drawn by (`node.type`, a fence's
+   * `node.value`), shaped as the parser shapes it and holding the answer as written. Its `url` and
+   * raw HTML are unchecked, so draw from the checked `href` and `src`, never from `node.url`.
+   */
+  components?: MarkdownComponents;
   /** Layout only: where it sits and how much room it takes. */
   style?: LayoutStyle;
 }
@@ -198,10 +264,10 @@ const styles = stylex.create({
     whiteSpace: "normal",
     overflowWrap: "anywhere",
   },
-  // Inside a chat message: the message's words in its ink, as a message's plain words are, its
-  // tables at the same size; headings and gaps as the default's.
+  // Inside a chat message: at the message's words' size, its tables too, in the body's ink as
+  // any answer is (what is strong, a heading or a link stands out in ink); headings and gaps as
+  // the default's.
   message: {
-    color: colors.foreground,
     fontSize: size.messageText,
     lineHeight: size.messageTextLine,
     [tableVars.text]: size.messageText,
@@ -448,8 +514,8 @@ const ProvidedLinks = createContext<MarkdownLinkRenderer | null>(null);
 /**
  * Draws some of the links of every Markdown inside it, so no page writes a `renderLink` for them: a
  * product's citations, its own scheme. A Markdown asks its own `renderLink` first, then this; a link
- * neither draws is Markdown's own. While an answer streams, a link inside it is held back until its
- * address has arrived, so a citation never shows first as words.
+ * neither draws is Markdown's own. While an answer streams, a link inside it is its words until its
+ * address is whole, and only then handed here, so it is never handed half of one.
  */
 export const MarkdownLinkProvider = ({
   renderLink,
@@ -464,14 +530,23 @@ export const MarkdownLinkProvider = ({
 type Size = NonNullable<MarkdownProps["size"]>;
 
 interface Context {
-  /** Each link definition's target and title, by its identifier. */
-  definitions: Map<string, { url: string; title: string | undefined }>;
+  /** Each link definition's target and title, and where it ends in the source, by its identifier. */
+  definitions: Map<
+    string,
+    { url: string; title: string | undefined; end: number }
+  >;
   /** The page's own drawing of a link, when it has one. */
   renderLink: MarkdownLinkRenderer | undefined;
   /** The links a part around Markdown draws (MarkdownLinkProvider). */
   provided: MarkdownLinkRenderer | null;
   /** While written: how much of the source is the stream's own (repair closed the rest). */
   kept: number;
+  /**
+   * While written: the links and pictures whose source reaches past what is known complete, and
+   * the bare addresses in the word still being written (repair's `complete` and `word`): what
+   * follows may still make them something else, so none is handed on.
+   */
+  held: ReadonlySet<object>;
   /** Where the block being drawn starts in the source: its nodes' places count from there. */
   base: number;
   footnotes: Map<string, number>;
@@ -499,6 +574,8 @@ interface Context {
   references: Map<RootContent, number>;
   /** Each table's name: the words of the heading above it. */
   tableNames: Map<RootContent, string>;
+  /** The caller's elements, by name (`components`). */
+  components: MarkdownComponents;
   /** The parts that draw a phrase and a block, handed down so the parts above can draw them. */
   Inline: FC<{ node: PhrasingContent; context: Context }>;
   Block: FC<{ node: RootContent; context: Context }>;
@@ -514,6 +591,7 @@ interface Walked {
   type: string;
   value?: string;
   children?: readonly Walked[];
+  position?: { start: { offset?: number }; end: { offset?: number } };
 }
 
 /**
@@ -638,6 +716,22 @@ const inParagraph = (node: Paragraph, context: Context): Context => {
     : { ...context, lineBreaks };
 };
 
+/** The caller's element for `tag` (`components`), given its props and the node it draws, or Markdown's own. */
+const elementOf = <Tag extends MarkdownElement>(
+  context: Context,
+  tag: Tag,
+  node: MarkdownNode,
+  props: ComponentProps<Tag>,
+  own: ReactNode
+): ReactNode => {
+  // SAFETY: `components` maps each tag to a part that takes that tag's props and the node, which is
+  // what it is given here; TypeScript cannot follow a tag that is a type parameter through the map.
+  const Custom = context.components[tag] as
+    | ComponentType<ComponentProps<Tag> & { node: MarkdownNode }>
+    | undefined;
+  return Custom === undefined ? own : <Custom {...props} node={node} />;
+};
+
 const Phrasing = ({
   nodes,
   context,
@@ -649,25 +743,19 @@ const Phrasing = ({
     <context.Inline key={index} node={node} context={context} />
   ));
 
-/** The first letters of a web address, or a `#` repair put in: no address of the link's own yet. */
-const isPlaceholder = (url: string | undefined) =>
-  url === undefined ||
-  url === "#" ||
-  "https://".startsWith(url) ||
-  "http://".startsWith(url);
-
 /**
- * Whether a link still being written will get an arrow, as far as its address tells yet: none so
- * far, or a web address. One that starts any other way (mailto:) gets none, so no room is kept.
+ * Whether a link still being written will get Link's arrow, as far as its address tells yet: none
+ * so far (a reference whose definition is still to come, or the first letters of a web address),
+ * or a web address. One that starts any other way (mailto:) gets none, so no room is kept.
  */
 const isComing = (url: string | undefined) =>
-  isPlaceholder(url) || /^https?:\/\//u.test(url ?? "");
+  url === undefined ||
+  "https://".startsWith(url) ||
+  "http://".startsWith(url) ||
+  /^https?:\/\//u.test(url);
 
 /** A link node's address and title, from itself or the definition it refers to. */
-const targetOf = (
-  node: Linked | Pictured,
-  context: Context
-): { url: string | undefined; title: string | undefined } => {
+const targetOf = (node: Linked | Pictured, context: Context) => {
   if (node.type === "link" || node.type === "image") {
     return { url: node.url, title: node.title ?? undefined };
   }
@@ -676,8 +764,8 @@ const targetOf = (
 };
 
 /** A bare address the text linked by itself (`<https://…>`, `www.…`, `name@host`). */
-const isAutolink = (node: Linked) => {
-  if (node.type !== "link" || node.children.length !== 1) {
+const isAutolink = (node: Walked & { url?: string }) => {
+  if (node.type !== "link" || node.children?.length !== 1) {
     return false;
   }
   const [only] = node.children;
@@ -687,6 +775,35 @@ const isAutolink = (node: Linked) => {
       node.url
     )
   );
+};
+
+/**
+ * A link's or a picture's address and title, once the stream has proven the address whole, or
+ * null: the one place an address is handed on, to the host's `renderLink`, a provider,
+ * `components.a` or `components.img`, or Markdown's own Link. Half of one (`https://i`) is another
+ * site's, so nothing that loads or leads anywhere is drawn from it. Proven means the node stands
+ * wholly in what is known complete, whatever form it has (`held`: not in what is still open, a
+ * link, a bracket, a tag or code, which what follows may make something else; a bare address not in
+ * the word still being written, which it may run on into), and a reference's definition has its
+ * line's end. Once written, every address is whole.
+ */
+const handedOf = (
+  node: Linked | Pictured,
+  context: Context
+): { url: string; title: string | undefined } | null => {
+  const { url, title } = targetOf(node, context);
+  const target = url === undefined ? null : { url, title };
+  if (!context.streaming || target === null) {
+    return target;
+  }
+  if (context.held.has(node)) {
+    return null;
+  }
+  if (node.type === "linkReference" || node.type === "imageReference") {
+    const definition = context.definitions.get(node.identifier);
+    return (definition?.end ?? context.kept) < context.kept ? target : null;
+  }
+  return target;
 };
 
 /** What the host draws for a link: the page's own first, then the part around Markdown. */
@@ -707,6 +824,12 @@ const hosted = (
   return drawn === undefined ? context.provided?.(asked) : drawn;
 };
 
+/** Whether Markdown draws its links itself, with Link: no host and no `components.a` may. */
+const drawsOwnLinks = (context: Context) =>
+  context.renderLink === undefined &&
+  context.provided === null &&
+  context.components.a === undefined;
+
 const LinkInline = ({
   node,
   context,
@@ -714,37 +837,17 @@ const LinkInline = ({
   node: Linked;
   context: Context;
 }): ReactNode => {
-  // Still being written: its end was closed by repair, so its address may still grow.
-  const coming =
-    context.streaming &&
-    context.base + (node.position?.end.offset ?? 0) > context.kept;
-  // Where a part around Markdown draws links (MarkdownLinkProvider), such a link is held back,
-  // words and all, until its address has arrived: a citation's number never shows as words first,
-  // then turns into its mark.
-  if (coming && context.provided !== null) {
-    return null;
-  }
-  const { url, title } = targetOf(node, context);
   const words = (
     <Phrasing nodes={node.children} context={{ ...context, inLink: true }} />
   );
-  if (url !== undefined && !(context.streaming && isPlaceholder(url))) {
-    const drawn = hosted(context, {
-      href: url,
-      title,
-      children: words,
-      type: isAutolink(node) ? "autolink" : "link",
-    });
-    if (drawn !== undefined) {
-      return drawn;
-    }
-  }
-  // Markdown's own link waits for its whole address: half of one (`https://exa`) would lead to
-  // another site. Until then, its words, with the room its arrow will take, so the words after it
-  // never move when the address is whole.
-  const href = coming ? null : safeHref(url);
-  if (href === null || context.inLink) {
-    return context.streaming && !context.inLink && isComing(url) ? (
+  const handed = handedOf(node, context);
+  // Its address not yet whole: its words, and the link in their place once it is. Where Markdown
+  // draws the link itself, the room Link's arrow will take is kept, so nothing after it moves.
+  if (handed === null) {
+    return context.streaming &&
+      !context.inLink &&
+      drawsOwnLinks(context) &&
+      isComing(targetOf(node, context).url) ? (
       <>
         <span aria-hidden="true" {...stylex.props(styles.linkLead)} />
         {words}
@@ -754,15 +857,38 @@ const LinkInline = ({
       words
     );
   }
+  const { url, title } = handed;
+  const drawn = hosted(context, {
+    href: url,
+    title,
+    children: words,
+    type: isAutolink(node) ? "autolink" : "link",
+  });
+  if (drawn !== undefined) {
+    return drawn;
+  }
+  const href = safeHref(encodedUrl(url));
+  if (href === null || context.inLink) {
+    return words;
+  }
+  const Custom = context.components.a;
+  if (Custom !== undefined) {
+    return (
+      <Custom node={node} href={href} title={title}>
+        {words}
+      </Custom>
+    );
+  }
   return (
-    <Link href={href} external={!href.startsWith("mailto:")}>
+    <Link href={href} title={title} external={!href.startsWith("mailto:")}>
       {words}
     </Link>
   );
 };
 
-// A picture is never loaded (no request leaves for it): the host draws it (`renderLink`, type
-// `image`), or it is shown by its words and leads to the picture when it may.
+// A picture is never loaded (no request leaves for it) unless the host draws it (`renderLink`, type
+// `image`, or `components.img` for one at an http or https address); otherwise it is shown by its
+// words and leads to the picture when it may. Until its address is whole, it is its words.
 const PictureInline = ({
   node,
   context,
@@ -770,9 +896,13 @@ const PictureInline = ({
   node: Pictured;
   context: Context;
 }): ReactNode => {
-  const { url, title } = targetOf(node, context);
   const alt = node.alt ?? "";
-  if (url !== undefined && url !== "") {
+  const handed = handedOf(node, context);
+  if (handed === null) {
+    return alt;
+  }
+  const { url, title } = handed;
+  if (url !== "") {
     const drawn = hosted(context, {
       href: url,
       title,
@@ -783,13 +913,17 @@ const PictureInline = ({
       return drawn;
     }
   }
-  const href = safeHref(url);
+  const href = safeHref(encodedUrl(url));
+  const Picture = context.components.img;
+  if (Picture !== undefined && href !== null && /^https?:/u.test(href)) {
+    return <Picture node={node} src={href} alt={alt} title={title} />;
+  }
   const words = alt === "" ? (href ?? "") : alt;
   if (href === null || context.inLink) {
     return words;
   }
   return (
-    <Link href={href} external>
+    <Link href={href} title={title} external>
       {words}
     </Link>
   );
@@ -842,28 +976,41 @@ const Inline = ({
       return context.lineBreaks ? withBreaks(node.value) : node.value;
     }
     case "strong": {
-      return (
-        <strong {...stylex.props(styles.strong)}>
-          <Phrasing nodes={node.children} context={context} />
-        </strong>
+      const children = <Phrasing nodes={node.children} context={context} />;
+      return elementOf(
+        context,
+        "strong",
+        node,
+        { children },
+        <strong {...stylex.props(styles.strong)}>{children}</strong>
       );
     }
     case "emphasis": {
-      return (
-        <em {...stylex.props(styles.emphasis)}>
-          <Phrasing nodes={node.children} context={context} />
-        </em>
+      const children = <Phrasing nodes={node.children} context={context} />;
+      return elementOf(
+        context,
+        "em",
+        node,
+        { children },
+        <em {...stylex.props(styles.emphasis)}>{children}</em>
       );
     }
     case "delete": {
-      return (
-        <del {...stylex.props(styles.deleted)}>
-          <Phrasing nodes={node.children} context={context} />
-        </del>
+      const children = <Phrasing nodes={node.children} context={context} />;
+      return elementOf(
+        context,
+        "del",
+        node,
+        { children },
+        <del {...stylex.props(styles.deleted)}>{children}</del>
       );
     }
     case "inlineCode": {
-      return (
+      return elementOf(
+        context,
+        "code",
+        node,
+        { children: node.value },
         <code
           {...stylex.props(
             styles.inlineCode,
@@ -914,7 +1061,13 @@ const TaskBox = ({ done, said }: { done: boolean; said: string }) => (
   </>
 );
 
-const Item = ({ item, context }: { item: ListItem; context: Context }) => {
+const Item = ({
+  item,
+  context,
+}: {
+  item: ListItem;
+  context: Context;
+}): ReactNode => {
   const body = (
     <div {...stylex.props(styles.itemBody)}>
       {item.children.map((child, index) =>
@@ -933,44 +1086,74 @@ const Item = ({ item, context }: { item: ListItem; context: Context }) => {
     </div>
   );
   if (item.checked === null || item.checked === undefined) {
-    return <li {...stylex.props(styles.item)}>{body}</li>;
+    return elementOf(
+      context,
+      "li",
+      item,
+      { children: body },
+      <li {...stylex.props(styles.item)}>{body}</li>
+    );
   }
-  return (
-    <li {...stylex.props(styles.item, styles.task)}>
+  const children = (
+    <>
       <TaskBox
         done={item.checked}
         said={item.checked ? context.words.done : context.words.notDone}
       />
       {body}
-    </li>
+    </>
+  );
+  return elementOf(
+    context,
+    "li",
+    item,
+    { children },
+    <li {...stylex.props(styles.item, styles.task)}>{children}</li>
   );
 };
 
-const ListBlock = ({ node, context }: { node: List; context: Context }) => {
+const ListBlock = ({
+  node,
+  context,
+}: {
+  node: List;
+  context: Context;
+}): ReactNode => {
   const items = node.children.map((item, index) => (
     <Item key={index} item={item} context={context} />
   ));
-  return node.ordered === true ? (
-    <ol
-      start={node.start ?? undefined}
-      {...stylex.props(styles.list, styles.ordered)}
-    >
-      {items}
-    </ol>
-  ) : (
-    <ul {...stylex.props(styles.list, styles.unordered)}>{items}</ul>
-  );
+  const start = node.start ?? undefined;
+  return node.ordered === true
+    ? elementOf(
+        context,
+        "ol",
+        node,
+        { start, children: items },
+        <ol start={start} {...stylex.props(styles.list, styles.ordered)}>
+          {items}
+        </ol>
+      )
+    : elementOf(
+        context,
+        "ul",
+        node,
+        { children: items },
+        <ul {...stylex.props(styles.list, styles.unordered)}>{items}</ul>
+      );
 };
 
 // A table scrolls sideways inside its own box, with no bar (Table's), so a wide one never widens the
-// answer. A row arrives whole, when its line has ended (repair), so its cells come in together.
+// answer. A row arrives whole, when its line has ended (repair), so its cells come in together. A
+// row draws its own cells, as many as the head at most: a long one's extra cells go, as GitHub
+// draws it, and a short one is not filled out with empty ones, so what is drawn grows with what
+// was written, never with the head's width times the rows.
 const TableBlock = ({
   node,
   context,
 }: {
   node: TableNode;
   context: Context;
-}) => {
+}): ReactNode => {
   const [head, ...rows] = node.children;
   // A table that was written here keeps the even columns it had as its rows came, for as long as
   // it is on the page: its cells never move, not when a row comes and not when it is whole.
@@ -978,37 +1161,88 @@ const TableBlock = ({
   if (node === context.writing && !written) {
     setWritten(true);
   }
-  const align = (column: number) => {
+  const columns = Array.from(head?.children ?? [], (_, column) => {
     const side = node.align?.[column];
     return side === null || side === undefined ? "start" : sides[side];
+  });
+  const cellOf = (
+    cell: TableNode["children"][number]["children"][number],
+    tag: "th" | "td",
+    column: number
+  ): ReactNode => {
+    const align = columns[column];
+    const children = <Phrasing nodes={cell.children} context={context} />;
+    return (
+      <Fragment key={column}>
+        {elementOf(
+          context,
+          tag,
+          cell,
+          { align: node.align?.[column] ?? undefined, children },
+          tag === "th" ? (
+            <TableHead align={align}>{children}</TableHead>
+          ) : (
+            <TableCell align={align}>{children}</TableCell>
+          )
+        )}
+      </Fragment>
+    );
   };
-  return (
+  const rowOf = (
+    row: TableNode["children"][number],
+    tag: "th" | "td"
+  ): ReactNode => {
+    const cells = row.children
+      .slice(0, columns.length)
+      .map((cell, column): ReactNode => cellOf(cell, tag, column));
+    return elementOf(
+      context,
+      "tr",
+      row,
+      { children: cells },
+      <TableRow>{cells}</TableRow>
+    );
+  };
+  const headRow = head === undefined ? null : rowOf(head, "th");
+  const header =
+    headRow === null
+      ? null
+      : elementOf(
+          context,
+          "thead",
+          node,
+          { children: headRow },
+          <TableHeader>{headRow}</TableHeader>
+        );
+  const bodyRows = rows.map((row, index) => (
+    <Fragment key={index}>{rowOf(row, "td")}</Fragment>
+  ));
+  const body = elementOf(
+    context,
+    "tbody",
+    node,
+    { children: bodyRows },
+    <TableBody>{bodyRows}</TableBody>
+  );
+  return elementOf(
+    context,
+    "table",
+    node,
+    {
+      "aria-label": context.tableNames.get(node) ?? context.words.table,
+      children: (
+        <>
+          {header}
+          {body}
+        </>
+      ),
+    },
     <Table
       aria-label={context.tableNames.get(node) ?? context.words.table}
       streaming={written}
     >
-      {head !== undefined && (
-        <TableHeader>
-          <TableRow>
-            {head.children.map((cell, column) => (
-              <TableHead key={column} align={align(column)}>
-                <Phrasing nodes={cell.children} context={context} />
-              </TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-      )}
-      <TableBody>
-        {rows.map((row, index) => (
-          <TableRow key={index}>
-            {row.children.map((cell, column) => (
-              <TableCell key={column} align={align(column)}>
-                <Phrasing nodes={cell.children} context={context} />
-              </TableCell>
-            ))}
-          </TableRow>
-        ))}
-      </TableBody>
+      {header}
+      {body}
     </Table>
   );
 };
@@ -1033,12 +1267,17 @@ const Heading = ({
 }: {
   node: HeadingNode;
   context: Context;
-}) => {
+}): ReactNode => {
   // The fifth and sixth depths are drawn and placed as the fourth, from the caller's level on.
   const depth = Math.min(node.depth, 4);
   const Tag =
     headingTags[Math.min(context.headingLevel - 1 + depth, 6) - 1] ?? "h6";
-  return (
+  const children = <Phrasing nodes={node.children} context={context} />;
+  return elementOf(
+    context,
+    Tag,
+    node,
+    { children },
     <Tag
       {...stylex.props(
         styles.heading,
@@ -1046,7 +1285,7 @@ const Heading = ({
         context.greedy && styles.greedy
       )}
     >
-      <Phrasing nodes={node.children} context={context} />
+      {children}
     </Tag>
   );
 };
@@ -1062,12 +1301,16 @@ const Block = ({
 }): ReactNode => {
   switch (node.type) {
     case "paragraph": {
-      return (
+      const children = (
+        <Phrasing nodes={node.children} context={inParagraph(node, context)} />
+      );
+      return elementOf(
+        context,
+        "p",
+        node,
+        { children },
         <p {...stylex.props(styles.paragraph, context.greedy && styles.greedy)}>
-          <Phrasing
-            nodes={node.children}
-            context={inParagraph(node, context)}
-          />
+          {children}
         </p>
       );
     }
@@ -1078,18 +1321,37 @@ const Block = ({
       return <ListBlock node={node} context={context} />;
     }
     case "blockquote": {
-      return (
-        <blockquote {...stylex.props(styles.quote)}>
-          {node.children.map((child, index) => (
-            <Block key={index} node={child} context={context} />
-          ))}
-        </blockquote>
+      const children = node.children.map((child, index) => (
+        <Block key={index} node={child} context={context} />
+      ));
+      return elementOf(
+        context,
+        "blockquote",
+        node,
+        { children },
+        <blockquote {...stylex.props(styles.quote)}>{children}</blockquote>
       );
     }
     case "thematicBreak": {
-      return <Separator />;
+      return elementOf(context, "hr", node, {}, <Separator />);
     }
     case "code": {
+      const { code: Code, pre: Pre } = context.components;
+      if (Code !== undefined || Pre !== undefined) {
+        const className =
+          node.lang === null || node.lang === undefined
+            ? undefined
+            : `language-${node.lang}`;
+        const code =
+          Code === undefined ? (
+            <code className={className}>{node.value}</code>
+          ) : (
+            <Code node={node} className={className}>
+              {node.value}
+            </Code>
+          );
+        return Pre === undefined ? code : <Pre node={node}>{code}</Pre>;
+      }
       return (
         <CodeBlock
           language={node.lang ?? "text"}
@@ -1102,7 +1364,16 @@ const Block = ({
               <CodeBlockCopyButton value={node.value} />
             </CodeBlockActions>
           </CodeBlockHeader>
-          <CodeBlockContent lineNumbers maxLines={context.codeMaxLines}>
+          <CodeBlockContent
+            lineNumbers
+            // Model output is never drawn without a bound: `false` never folds, yet an open block
+            // still draws at most its first 2,000 lines, as every opened block does.
+            maxLines={
+              context.codeMaxLines === false
+                ? Number.POSITIVE_INFINITY
+                : context.codeMaxLines
+            }
+          >
             {node.value}
           </CodeBlockContent>
         </CodeBlock>
@@ -1123,36 +1394,41 @@ const Block = ({
 };
 
 /**
- * What the tree refers to from anywhere in it: link targets, the notes in reading order, and each
- * reference to a note counted in the order it is drawn (the answer, then the notes at its foot), so
- * each has its own id and drawing it twice (StrictMode) changes nothing.
+ * What the tree refers to from anywhere in it: link targets and where each definition ends, the
+ * notes in reading order, numbered by where each is first referred to (once written, only those
+ * defined; while written, every one, as its note is to come at the end: so a mark shows the number
+ * it will have), and each reference to a note counted in the order it is drawn (the answer, then
+ * the notes at its foot), so each has its own id and drawing it twice (StrictMode) changes nothing.
  */
-const gather = (nodes: RootContent[]) => {
-  const definitions = new Map<
-    string,
-    { url: string; title: string | undefined }
-  >();
+const gather = (placed: Placed[], streaming: boolean) => {
+  const definitions: Context["definitions"] = new Map();
   const found = new Map<string, FootnoteDefinition>();
-  const order: string[] = [];
-  eachNode(nodes, (node) => {
-    if (node.type === "definition") {
-      definitions.set(node.identifier, {
-        url: node.url,
-        title: node.title ?? undefined,
-      });
-    } else if (node.type === "footnoteDefinition") {
-      found.set(node.identifier, node);
-    } else if (
-      node.type === "footnoteReference" &&
-      !order.includes(node.identifier)
-    ) {
-      order.push(node.identifier);
-    }
-  });
-  const notes = order.flatMap((id) => {
+  const order = new Set<string>();
+  for (const { node: block, base } of placed) {
+    eachNode([block], (node) => {
+      // The first to define a name does (CommonMark).
+      if (node.type === "definition" && !definitions.has(node.identifier)) {
+        definitions.set(node.identifier, {
+          url: node.url,
+          title: node.title ?? undefined,
+          end: base + (node.position?.end.offset ?? 0),
+        });
+      } else if (node.type === "footnoteDefinition") {
+        found.set(node.identifier, node);
+      } else if (node.type === "footnoteReference") {
+        order.add(node.identifier);
+      }
+    });
+  }
+  const notes = [...order].flatMap((id) => {
     const note = found.get(id);
     return note === undefined ? [] : [note];
   });
+  const footnotes = new Map(
+    (streaming ? [...order] : notes.map((note) => note.identifier)).map(
+      (id, index) => [id, index + 1]
+    )
+  );
   // A reference inside a link is drawn as its number only, with no id: it is not counted.
   const references = new Map<RootContent, number>();
   const counted = new Map<string, number>();
@@ -1164,11 +1440,13 @@ const gather = (nodes: RootContent[]) => {
     }
   };
   eachNode(
-    nodes.filter((node) => node.type !== "footnoteDefinition"),
+    placed
+      .map(({ node }) => node)
+      .filter((node) => node.type !== "footnoteDefinition"),
     count
   );
   eachNode(notes, count);
-  return { definitions, notes, references };
+  return { definitions, notes, references, footnotes };
 };
 
 /** Each table's name: the words of the heading that stands above it. */
@@ -1195,28 +1473,79 @@ const Notes = ({
   context: Context;
 }) => (
   <ol {...stylex.props(styles.footnotes)}>
-    {notes.map((note, index) => (
-      <li key={note.identifier} id={`${context.prefix}-fn-${index + 1}`}>
-        {note.children.map((child, at) =>
-          child.type === "paragraph" ? (
-            <span key={at}>
-              <Phrasing nodes={child.children} context={context} />{" "}
-              <Link href={`#${context.prefix}-ref-${index + 1}-1`}>
-                {context.words.back(index + 1)}
-              </Link>
-            </span>
-          ) : (
-            <Block key={at} node={child} context={context} />
-          )
-        )}
-      </li>
-    ))}
+    {notes.map((note, index) => {
+      const number = context.footnotes.get(note.identifier) ?? index + 1;
+      return (
+        <li
+          key={note.identifier}
+          value={number}
+          id={`${context.prefix}-fn-${number}`}
+        >
+          {note.children.map((child, at) =>
+            child.type === "paragraph" ? (
+              <span key={at}>
+                <Phrasing nodes={child.children} context={context} />{" "}
+                <Link href={`#${context.prefix}-ref-${number}-1`}>
+                  {context.words.back(number)}
+                </Link>
+              </span>
+            ) : (
+              <Block key={at} node={child} context={context} />
+            )
+          )}
+        </li>
+      );
+    })}
   </ol>
 );
 
+/** A bare address, no mark round it (`www.…`, `https://…`, `name@host`; `<https://…>` has two). */
+const isBare = (node: Walked & { url?: string }) => {
+  const [words] = node.children ?? [];
+  const start = node.position?.start.offset;
+  return (
+    isAutolink(node) &&
+    (start === undefined || words?.position?.start.offset === start)
+  );
+};
+
+/** The nodes that hold an address. */
+const ADDRESSED = new Set(["link", "linkReference", "image", "imageReference"]);
+
 /**
- * What to draw of an answer: while it is written, made whole; once written, tidied if it may have
- * been cut off (it was streamed here, or the caller says so).
+ * The links and pictures of `placed`, the block still being written, whose source reaches past
+ * `complete`, and the bare addresses that reach past `word` (handedOf). A node the parser placed
+ * nowhere (a bare address found in words after the parse) ends at most where the node after it
+ * starts, less the words of those after it that have no place either, as no word is longer than
+ * its source. Walked with a stack of its own, and only into nodes that reach that far.
+ */
+const heldIn = (placed: Placed | undefined, complete: number, word: number) => {
+  const held = new Set<object>();
+  const stack: { node: Walked & { url?: string }; end: number }[] =
+    placed === undefined
+      ? []
+      : [{ node: placed.node, end: placed.node.position?.end.offset ?? 0 }];
+  for (let top = stack.pop(); top !== undefined; top = stack.pop()) {
+    const { node, end } = top;
+    const reach = (placed?.base ?? 0) + end;
+    if (reach > word) {
+      if (ADDRESSED.has(node.type) && (reach > complete || isBare(node))) {
+        held.add(node);
+      }
+      let next = end;
+      for (const child of (node.children ?? []).toReversed()) {
+        stack.push({ node: child, end: child.position?.end.offset ?? next });
+        next = child.position?.start.offset ?? next - spokenOf(child).length;
+      }
+    }
+  }
+  return held;
+};
+
+/**
+ * What to draw of an answer: while it is written, made whole; once written, as it is, so a stream
+ * that ends draws what the whole answer draws when the page is opened again. Tidied only when the
+ * caller says it was cut off (`truncated`): an answer that ended whole may end in a mark.
  */
 const useAnswer = (source: string, streaming: boolean, truncated: boolean) => {
   const [streamed, setStreamed] = useState(streaming);
@@ -1225,14 +1554,18 @@ const useAnswer = (source: string, streaming: boolean, truncated: boolean) => {
   }
   if (!streaming) {
     return {
-      shown: truncated || streamed ? tidy(source) : source,
+      shown: truncated ? tidy(source) : source,
       kept: Number.POSITIVE_INFINITY,
+      complete: Number.POSITIVE_INFINITY,
+      word: Number.POSITIVE_INFINITY,
       written: streamed,
+      tidied: truncated,
     };
   }
-  // `kept`: how much of it is the stream's own; past it, repair closed what was still open.
-  const { text, kept } = repair(source);
-  return { shown: text, kept, written: true };
+  // `kept`: how much of it is the stream's own; past it, repair closed what was still open. Before
+  // `complete`, it reads as the whole answer will; from `word`, a bare address may still grow.
+  const { text, ...made } = repair(source);
+  return { shown: text, ...made, written: true, tidied: true };
 };
 
 /**
@@ -1277,28 +1610,14 @@ const useSaidBlocks = (
   }, [blocks, finished, said, names, tableLabel]);
 };
 
-/** A line that defines a link's target or a note: `[name]: …` or `[^1]: …`. */
-const DEFINES = /^ {0,3}\[[^\]\n]+\]:/mu;
-
 /**
  * The answer's blocks. While it is written, only the block still being written is read again as
  * more of it comes (parse.ts, readBlocks): the blocks before it are finished and kept as they were
- * read, so a long answer costs no more to draw at its end than at its start. Once written, the kept
- * blocks stand and only the last is read again; it is read whole only when it defines a link or a
- * note further down, or is other words than were written.
+ * read, so a long answer costs no more to draw at its end than at its start.
  */
 const useBlocks = (shown: string, live: boolean): Placed[] => {
   const [kept, setKept] = useState(NOTHING);
-  if (
-    !live &&
-    (kept === NOTHING || DEFINES.test(shown) || !shown.startsWith(kept.text))
-  ) {
-    if (kept !== NOTHING) {
-      setKept(NOTHING);
-    }
-    return parseMarkdown(shown).children.map((node) => ({ node, base: 0 }));
-  }
-  const read = readBlocks(shown, kept);
+  const read = readBlocks(shown, kept, live);
   if (read.kept !== kept) {
     setKept(read.kept);
   }
@@ -1389,6 +1708,11 @@ const GroupedBlock = ({
   );
 };
 
+const NO_NODES: ReadonlySet<object> = new Set();
+
+/** No elements of the caller's: every one is Markdown's own. */
+const NO_COMPONENTS: MarkdownComponents = {};
+
 /** An answer drawn from Markdown, safe while it streams. */
 export const Markdown = ({
   children: source,
@@ -1400,20 +1724,19 @@ export const Markdown = ({
   softBreaks = "space",
   codeMaxLines = 18,
   renderLink,
+  components = NO_COMPONENTS,
   style,
 }: MarkdownProps) => {
   const words = useI18n().markdown;
   const prefix = useId().replaceAll(":", "");
-  const { shown, kept, written } = useAnswer(
+  const { shown, kept, complete, word, written, tidied } = useAnswer(
     bounded(source),
     streaming,
     truncated
   );
   const provided = use(ProvidedLinks);
   const all = useBlocks(shown, streaming);
-  const { definitions, notes, references } = gather(
-    all.map(({ node }) => node)
-  );
+  const { definitions, notes, references, footnotes } = gather(all, streaming);
   const placed = all.filter(
     ({ node }) =>
       node.type !== "definition" && node.type !== "footnoteDefinition"
@@ -1427,10 +1750,10 @@ export const Markdown = ({
     renderLink,
     provided,
     kept,
+    held: streaming ? heldIn(all.at(-1), complete, word) : NO_NODES,
     base: 0,
-    footnotes: new Map(
-      notes.map((note, index) => [note.identifier, index + 1])
-    ),
+    footnotes,
+    components,
     prefix,
     streaming,
     codeMaxLines,
@@ -1463,7 +1786,7 @@ export const Markdown = ({
         style
       )}
     >
-      {groupSections(placed).map((grouped, index) => (
+      {groupSections(placed, tidied).map((grouped, index) => (
         // A block keeps its place by its order, so one that is already shown never fades in again.
         <GroupedBlock key={index} grouped={grouped} context={context} />
       ))}
