@@ -262,6 +262,10 @@ msgstr "{count, plural, one {{names} arbeiten hier, an # Arbeit, die in dem, was
 msgid "{count, plural, one {# agent} other {# agents}}"
 msgstr "{count, plural, one {# Agent} other {# Agenten}}"
 
+#: src/chat/chat-window.tsx
+msgid "{count, plural, one {# archived chat} other {# archived chats}}"
+msgstr "{count, plural, one {# archivierter Chat} other {# archivierte Chats}}"
+
 #: src/inbox/items.ts
 msgid "{count, plural, one {# binding} other {# bindings}}"
 msgstr "{count, plural, one {# Bindung} other {# Bindungen}}"
@@ -410,6 +414,10 @@ msgstr "{count, plural, one {# Regel} other {# Regeln}}"
 msgid "{count, plural, one {# run} other {# runs}}"
 msgstr "{count, plural, one {# Lauf} other {# Läufe}}"
 
+#: src/chat/thread.tsx
+msgid "{count, plural, one {# step} other {# steps}}"
+msgstr "{count, plural, one {# Schritt} other {# Schritte}}"
+
 #: src/brain/brain.ts
 msgid "{count, plural, one {# team, with its roles} other {# teams, with their roles}}"
 msgstr "{count, plural, one {# Team, mit seinen Rollen} other {# Teams, mit ihren Rollen}}"
@@ -458,17 +466,17 @@ msgstr "{count, plural, one {# Dokument hinzufügen} other {# Dokumente hinzufü
 msgid "{count, plural, one {Adding up the hours of # workflow} other {Adding up the hours of # workflows}}"
 msgstr "{count, plural, one {Zähle die Stunden von # Workflow zusammen} other {Zähle die Stunden von # Workflows zusammen}}"
 
-#: src/chat/sources.tsx
-msgid "{count, plural, one {Answers draw on # source} other {Answers draw on # sources}}"
-msgstr "{count, plural, one {Antworten stützen sich auf # Quelle} other {Antworten stützen sich auf # Quellen}}"
-
-#: src/chat/asked-questions.tsx
+#: src/chat/thread.tsx
 msgid "{count, plural, one {Asked you a question} other {Asked you # questions}}"
 msgstr "{count, plural, one {Hat dir eine Frage gestellt} other {Hat dir # Fragen gestellt}}"
 
 #: src/chat/asked-questions.tsx
 msgid "{count, plural, one {Back to the question} other {Back to the # questions}}"
 msgstr "{count, plural, one {Zurück zur Frage} other {Zurück zu den # Fragen}}"
+
+#: src/chat/thread.tsx
+msgid "{count, plural, one {Changed # file} other {Changed # files}}"
+msgstr "{count, plural, one {# Datei geändert} other {# Dateien geändert}}"
 
 #: src/activity/pending.tsx
 msgid "{count, plural, one {Company Brain, read only. This App can recall what everyone in the company may read and what the team {teamNames} may read, as far as the person it works for is in that team, and look up the entities and memories everyone in the company may read. Only people in that team can use it, its owner and admins too. It can never write to the Brain. Every read is recorded} other {Company Brain, read only. This App can recall what everyone in the company may read and what the teams {teamNames} may read, as far as the person it works for is in them, and look up the entities and memories everyone in the company may read. Only people in all of them can use it, its owner and admins too. It can never write to the Brain. Every read is recorded}}"
@@ -486,9 +494,21 @@ msgstr "{count, plural, one {Es kann noch nicht geteilt werden: # Problem} other
 msgid "{count, plural, one {It started without # kept value: the run that kept it read something that is no longer there to read.} other {It started without # kept values: the runs that kept them read something that is no longer there to read.}}"
 msgstr "{count, plural, one {Er startete ohne # behaltenen Wert: Der Lauf, der ihn behalten hat, hat etwas gelesen, das nicht mehr zu lesen ist.} other {Er startete ohne # behaltene Werte: Die Läufe, die sie behalten haben, haben etwas gelesen, das nicht mehr zu lesen ist.}}"
 
+#: src/chat/thread.tsx
+msgid "{count, plural, one {Ran # tool} other {Ran # tools}}"
+msgstr "{count, plural, one {# Werkzeug genutzt} other {# Werkzeuge genutzt}}"
+
+#: src/chat/thread.tsx
+msgid "{count, plural, one {Read # file} other {Read # files}}"
+msgstr "{count, plural, one {# Datei gelesen} other {# Dateien gelesen}}"
+
 #: src/brain/thinking/use-thinking.ts
 msgid "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
 msgstr "{count, plural, one {Lese # Workflow} other {Lese # Workflows}}"
+
+#: src/chat/thread.tsx
+msgid "{count, plural, one {Searched once} other {Searched # times}}"
+msgstr "{count, plural, one {Einmal gesucht} other {# Mal gesucht}}"
 
 #: src/frame/ui-words.tsx
 msgid "{count, plural, one {Show # unchanged line} other {Show # unchanged lines}}"
@@ -590,6 +610,10 @@ msgstr "{failed, plural, one {# fehlgeschlagener Lauf} other {# fehlgeschlagene 
 #: src/frame/ui-words.tsx
 msgid "{failed} failed"
 msgstr "{failed} fehlgeschlagen"
+
+#: src/chat/thread.tsx
+msgid "{failedCount, plural, one {# step failed} other {# steps failed}}"
+msgstr "{failedCount, plural, one {# Schritt fehlgeschlagen} other {# Schritte fehlgeschlagen}}"
 
 #: src/apps/data-model-changes.tsx
 msgid "{field} in {table} needs a change in code before this can be published."
@@ -787,6 +811,11 @@ msgstr "{leadsHeard} von {leads}"
 msgid "{left, plural, one {# team here is not interviewed yet.} other {# teams here are not interviewed yet.}}"
 msgstr "{left, plural, one {# Team hier ist noch nicht interviewt.} other {# Teams hier sind noch nicht interviewt.}}"
 
+#. What an answer's steps came to, then how many failed: Read 2 files; 1 step failed.
+#: src/chat/thread.tsx
+msgid "{line}; {failed}"
+msgstr "{line}; {failed}"
+
 #: src/apps/app-code.tsx
 msgid "{lines, plural, one {# line} other {# lines}}"
 msgstr "{lines, plural, one {# Zeile} other {# Zeilen}}"
@@ -847,7 +876,7 @@ msgstr "{minutes, plural, one {# Minute} other {# Minuten}}"
 msgid "{minutes, plural, one {Saved # min ago} other {Saved # min ago}}"
 msgstr "{minutes, plural, one {Vor # Min. gespeichert} other {Vor # Min. gespeichert}}"
 
-#. A length of time, said short: 4 minutes and 21 seconds.
+#. A length of time, said short: 4 minutes and 05 seconds.
 #: src/chat/thread.tsx
 msgid "{minutes}m {rest}s"
 msgstr "{minutes} Min. {rest} Sek."
@@ -1118,10 +1147,6 @@ msgstr "{names} arbeiten hier. Von ihrer Arbeit kam noch nichts vor."
 msgid "{needs, plural, one {# needs you} other {# need you}}"
 msgstr "{needs, plural, one {# braucht dich} other {# brauchen dich}}"
 
-#: src/chat/asked-questions.tsx
-msgid "{number} of {total}"
-msgstr "{number} von {total}"
-
 #: src/brain/opportunity-drafts.ts
 msgid "{number}. {step} (a person approves this step)"
 msgstr "{number}. {step} (eine Person gibt diesen Schritt frei)"
@@ -1263,7 +1288,7 @@ msgstr "{rest, plural, one {# weitere Person} other {# weitere Personen}}"
 msgid "{rest, plural, one {# second} other {# seconds}}"
 msgstr "{rest, plural, one {# Sekunde} other {# Sekunden}}"
 
-#. A length of time, said short: 21 seconds.
+#. A length of time, said short: 21 seconds, or 5.0 seconds (to a tenth under ten).
 #: src/chat/thread.tsx
 msgid "{rest}s"
 msgstr "{rest} Sek."
@@ -1725,6 +1750,10 @@ msgctxt "what an opportunity could become"
 msgid "A change to an existing App"
 msgstr "Eine Änderung an einer bestehenden App"
 
+#: src/chat/chat-more.tsx
+msgid "A chat's name is at most {chatTitleMaxLength} characters."
+msgstr "Der Name eines Chats hat höchstens {chatTitleMaxLength} Zeichen."
+
 #: src/apps/app-access-requests.tsx
 #: src/apps/draft-changes.tsx
 msgid "A connection"
@@ -2132,8 +2161,7 @@ msgstr "Akteur-ID"
 
 #: src/agents/agent-apps-card.tsx
 #: src/apps/indexes-view.tsx
-#: src/chat/chat-bar.tsx
-#: src/chat/composer-menu.tsx
+#: src/chat/composer.tsx
 #: src/onboarding/connect-steps.tsx
 #: src/settings/ai-providers.tsx
 #: src/settings/directory-placement.tsx
@@ -2218,7 +2246,7 @@ msgstr "Feld hinzufügen"
 msgid "Add files"
 msgstr "Dateien hinzufügen"
 
-#: src/chat/composer-menu.tsx
+#: src/chat/composer.tsx
 msgid "Add files or photos"
 msgstr "Dateien oder Fotos hinzufügen"
 
@@ -2614,6 +2642,10 @@ msgstr "Ein Admin ändert sie, unter Mitglieder und Rollen."
 msgid "An admin connects this for everyone."
 msgstr "Ein Admin verbindet dies für alle."
 
+#: src/chat/connection-requests.tsx
+msgid "An admin decides. It holds in this chat only."
+msgstr "Ein Admin entscheidet. Es gilt nur in diesem Chat."
+
 #: src/settings/directory-placement.tsx
 msgid "An admin put them in a team, or took them off one, by hand, and the directory’s daily read leaves that as it is."
 msgstr "Ein Admin hat sie von Hand einem Team hinzugefügt oder aus einem entfernt, und der tägliche Abgleich des Verzeichnisses lässt das so."
@@ -2801,6 +2833,10 @@ msgstr "Seit diese Liste geladen wurde, ist eine andere Version dieser App verö
 msgid "Answer"
 msgstr "Antwort"
 
+#: src/chat/thread.tsx
+msgid "Answer actions"
+msgstr "Aktionen zur Antwort"
+
 #: src/inbox/items.ts
 msgid "Answer by"
 msgstr "Antworten bis"
@@ -2819,7 +2855,7 @@ msgstr "Antwort fertig"
 
 #: src/frame/ui-words.tsx
 msgid "Answer this question to go on"
-msgstr "Beantworten Sie diese Frage, um weiterzumachen"
+msgstr "Beantworten Sie diese Frage, um fortzufahren"
 
 #: src/workflows/today-lanes.tsx
 msgid "Answer with a comment"
@@ -3115,6 +3151,7 @@ msgstr "Weggenommene Apps"
 
 #: src/apps/app-settings.tsx
 #: src/apps/app-status.tsx
+#: src/chat/chat-window.tsx
 msgid "Archive"
 msgstr "Archivieren"
 
@@ -3131,10 +3168,18 @@ msgstr "{name} archivieren?"
 msgid "Archive and take offline"
 msgstr "Archivieren und offline nehmen"
 
+#: src/chat/chat-window.tsx
+msgid "Archived"
+msgstr "Archiviert"
+
 #: src/drafts/status-badge.tsx
 msgctxt "an App put away"
 msgid "Archived"
 msgstr "Archiviert"
+
+#: src/chat/chat-window.tsx
+msgid "Archived chats"
+msgstr "Archivierte Chats"
 
 #: src/settings/audit-archive.tsx
 msgid "Archived events"
@@ -3151,6 +3196,10 @@ msgstr "Bereiche abgeschlossen"
 #: src/brain/brain-markdown.ts
 msgid "Article"
 msgstr "Artikel"
+
+#: src/chat/connection-requests.tsx
+msgid "As"
+msgstr "Als"
 
 #: src/inbox/request-details.tsx
 msgid "as {binding}"
@@ -3214,8 +3263,7 @@ msgstr "Erneut fragen"
 msgid "Ask an admin"
 msgstr "Einen Admin fragen"
 
-#: src/chat/composer.tsx
-#: src/chat/global-chat.tsx
+#: src/chat/chat-start.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Etwas fragen oder einen Prozess beschreiben"
 
@@ -3261,13 +3309,9 @@ msgstr "Nachfragen bei: {role}"
 msgid "Ask what you're looking for"
 msgstr "Fragen Sie, wonach Sie suchen"
 
-#: src/frame/connect-ai-provider.tsx
+#: src/chat/connect-ai-provider.tsx
 msgid "Ask your admin to connect an AI provider."
 msgstr "Bitten Sie Ihren Admin, einen KI-Anbieter zu verbinden."
-
-#: src/frame/connect-ai-provider.tsx
-msgid "Ask your admin to connect one."
-msgstr "Bitte deinen Admin, einen zu verbinden."
 
 #: src/apps/app-access-requests.tsx
 #: src/inbox/items.ts
@@ -3341,7 +3385,7 @@ msgstr "Gebeten, ein entferntes Mitglied zu löschen"
 msgid "Asked to send, edit or delete a chat app message as the company's bot"
 msgstr "Das Senden, Bearbeiten oder Löschen einer Chat-App-Nachricht als Bot des Unternehmens angefragt"
 
-#: src/chat/asked-questions.tsx
+#: src/chat/thread.tsx
 msgid "Asked you about {list}"
 msgstr "Hat dich zu {list} gefragt"
 
@@ -3422,8 +3466,6 @@ msgstr "Wartet auf Freigabe"
 
 #: src/brain/atlas-overlays.tsx
 #: src/brain/back-button.tsx
-#: src/chat/asked-questions.tsx
-#: src/chat/composer-menu.tsx
 #: src/frame/settings-level.tsx
 #: src/frame/ui-words.tsx
 #: src/guest-sign-in.tsx
@@ -3450,6 +3492,10 @@ msgstr "Zurück zu Verweis {number}"
 #: src/inbox/item-detail.tsx
 msgid "Back to the list"
 msgstr "Zurück zur Liste"
+
+#: src/chat/chat-window.tsx
+msgid "Back to your chats"
+msgstr "Zurück zu Ihren Chats"
 
 #: src/apps/app-workspace.tsx
 msgid "Back to your version"
@@ -3724,8 +3770,10 @@ msgstr "Ausführen nicht möglich: {unread}"
 #: src/brain/goals-editor.tsx
 #: src/brain/memories-page.tsx
 #: src/brain/skills-page.tsx
-#: src/chat/answer-markdown.tsx
+#: src/chat/answer-words.tsx
 #: src/chat/brain-questions.tsx
+#: src/chat/chat-window.tsx
+#: src/chat/delete-chat-dialog.tsx
 #: src/confirmed.tsx
 #: src/connections/brain-audience.tsx
 #: src/connections/connect-dialog.tsx
@@ -4367,8 +4415,6 @@ msgstr "Endet am {closes}"
 msgid "Closing the books and producing the numbers leadership looks at."
 msgstr "Den Abschluss machen und die Zahlen erstellen, auf die die Geschäftsleitung schaut."
 
-#: src/chat/answer-markdown.tsx
-#: src/chat/thread.tsx
 #: src/guest-sign-in.tsx
 msgid "Code"
 msgstr "Code"
@@ -4381,10 +4427,6 @@ msgstr "Code"
 #: src/apps/app-code.tsx
 msgid "Code of {file}"
 msgstr "Code von {file}"
-
-#: src/chat/thread.tsx
-msgid "Code step"
-msgstr "Code-Schritt"
 
 #: src/projects/project-dialog.tsx
 msgid "Coins"
@@ -4405,11 +4447,6 @@ msgstr "Spalte: {header}"
 #: src/frame/ui-words.tsx
 msgid "Columns"
 msgstr "Spalten"
-
-#: src/chat/composer-menu.tsx
-#: src/chat/mentions.tsx
-msgid "Commands"
-msgstr "Befehle"
 
 #: src/decision-confirmation.tsx
 msgctxt "a comment on an answer to a decision"
@@ -4531,7 +4568,7 @@ msgstr "Von der Geschäftsführung bestätigt"
 msgid "Confirmed by you"
 msgstr "Von Ihnen bestätigt"
 
-#: src/chat/chat-panel.tsx
+#: src/chat/chat-body.tsx
 msgid "Confirmed. Carry on."
 msgstr "Bestätigt. Mach weiter."
 
@@ -4565,13 +4602,17 @@ msgstr "Eigene Konten verbinden"
 msgid "Connect again"
 msgstr "Erneut verbinden"
 
-#: src/frame/connect-ai-provider.tsx
+#: src/chat/connect-ai-provider.tsx
 msgid "Connect an AI provider"
 msgstr "KI-Anbieter verbinden"
 
-#: src/frame/connect-ai-provider.tsx
+#: src/chat/composer.tsx
 msgid "Connect an AI provider to start asking"
 msgstr "Verbinde einen KI-Anbieter, um Fragen zu stellen"
+
+#: src/chat/composer.tsx
+msgid "Connect an AI provider to start asking. Ask your admin to connect one."
+msgstr "Verbinden Sie einen KI-Anbieter, um Fragen zu stellen. Bitten Sie Ihren Admin, einen zu verbinden."
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Connect another account"
@@ -4657,6 +4698,7 @@ msgstr "Ihr Microsoft 365 wird verbunden"
 
 #: src/apps/app-access-requests.tsx
 #: src/apps/resource-bindings.tsx
+#: src/chat/sources.tsx
 #: src/inbox/items.ts
 #: src/routes/_shell.settings.outcomes.tsx
 #: src/workflows/workflow-triggers.tsx
@@ -4676,6 +4718,10 @@ msgstr "Verbindung {connectionId}"
 #: src/activity/pending.tsx
 msgid "Connection {connectionId}, {resource}"
 msgstr "Verbindung {connectionId}, {resource}"
+
+#: src/chat/connection-requests.tsx
+msgid "Connection requests"
+msgstr "Verbindungsanfragen"
 
 #: src/workflows/trigger-description.ts
 msgid "Connection trigger"
@@ -4792,9 +4838,7 @@ msgid "Copenhagen"
 msgstr "Kopenhagen"
 
 #: src/apps/app-code.tsx
-#: src/chat/answer-markdown.tsx
 #: src/chat/chat-more.tsx
-#: src/chat/thread.tsx
 #: src/frame/ui-words.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/shown-once.tsx
@@ -4834,7 +4878,6 @@ msgid "Copy as Markdown"
 msgstr "Als Markdown kopieren"
 
 #: src/apps/app-code.tsx
-#: src/chat/answer-markdown.tsx
 msgid "Copy code"
 msgstr "Code kopieren"
 
@@ -4846,19 +4889,19 @@ msgstr "Aus {label} ins Brain kopieren"
 msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgstr "Kopieren Sie es jetzt: Sie sehen es nicht noch einmal. Geht es verloren, kann es nur ersetzt werden."
 
-#: src/chat/answer-markdown.tsx
+#: src/chat/answer-table-actions.tsx
 msgid "Copy table"
 msgstr "Tabelle kopieren"
 
-#: src/chat/answer-markdown.tsx
+#: src/chat/answer-table-actions.tsx
 msgid "Copy table as CSV"
 msgstr "Tabelle als CSV kopieren"
 
-#: src/chat/answer-markdown.tsx
+#: src/chat/answer-table-actions.tsx
 msgid "Copy table as Markdown"
 msgstr "Tabelle als Markdown kopieren"
 
-#: src/chat/answer-markdown.tsx
+#: src/chat/answer-table-actions.tsx
 msgid "Copy table as TSV"
 msgstr "Tabelle als TSV kopieren"
 
@@ -4905,7 +4948,7 @@ msgstr "Konnte nicht antworten"
 
 #: src/frame/ui-words.tsx
 msgid "Could not be opened"
-msgstr "Konnte nicht geöffnet werden"
+msgstr "Ließ sich nicht öffnen"
 
 #: src/frame/ui-words.tsx
 msgid "Could not finish"
@@ -5184,8 +5227,8 @@ msgstr "Definition"
 #: src/apps/app-remove.tsx
 #: src/brain/skills-page.tsx
 #: src/brain/sources-page.tsx
-#: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
+#: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
 #: src/projects/project-view.tsx
 #: src/settings/chat-accounts.tsx
@@ -5331,9 +5374,14 @@ msgstr "Abgelehnt"
 msgid "Denied packages"
 msgstr "Pakete abgelehnt"
 
+#: src/chat/connection-requests.tsx
 #: src/chat/package-requests.tsx
 msgid "Deny"
 msgstr "Ablehnen"
+
+#: src/chat/connection-requests.tsx
+msgid "Deny {name}"
+msgstr "{name} ablehnen"
 
 #: src/chat/package-requests.tsx
 msgid "Deny the packages for {subject}"
@@ -5400,6 +5448,30 @@ msgstr "Diagramm"
 #: src/frame/ui-words.tsx
 msgid "Dictate"
 msgstr "Diktieren"
+
+#: src/chat/dictation.ts
+msgid "Dictation isn't set up here yet."
+msgstr "Diktieren ist hier noch nicht eingerichtet."
+
+#: src/chat/dictation.ts
+msgid "Dictation stopped as its box went out of sight. What was heard is kept."
+msgstr "Das Diktieren wurde beendet, weil sein Eingabefeld nicht mehr zu sehen war. Was gehört wurde, bleibt erhalten."
+
+#: src/chat/dictation.ts
+msgid "Dictation stopped as you left this tab. What was heard is kept."
+msgstr "Das Diktieren wurde beendet, weil Sie diesen Tab verlassen haben. Was gehört wurde, bleibt erhalten."
+
+#: src/chat/dictation.ts
+msgid "Dictation stopped as you went to another page. What was heard is kept."
+msgstr "Das Diktieren wurde beendet, weil Sie zu einer anderen Seite gegangen sind. Was gehört wurde, bleibt erhalten."
+
+#: src/chat/dictation.ts
+msgid "Dictation stopped: the microphone was lost. What was heard is kept."
+msgstr "Das Diktieren wurde beendet: Das Mikrofon ist weg. Was gehört wurde, bleibt erhalten."
+
+#: src/chat/dictation.ts
+msgid "Dictation stopped. What was heard is kept."
+msgstr "Das Diktieren wurde beendet. Was gehört wurde, bleibt erhalten."
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind: a change whose answer was lost"
@@ -5560,13 +5632,17 @@ msgid "done"
 msgstr "erledigt"
 
 #: src/apps/blueprints.tsx
-#: src/chat/thread.tsx
 #: src/frame/ui-words.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/shown-once.tsx
 msgid "Done"
 msgstr "Fertig"
+
+#: src/frame/ui-words.tsx
+msgctxt "a message sent"
+msgid "Done"
+msgstr "Erledigt"
 
 #: src/connections/connect-dialog.tsx
 msgctxt "a step that is finished"
@@ -5638,15 +5714,15 @@ msgstr "{path} herunterladen"
 msgid "Download Markdown"
 msgstr "Markdown herunterladen"
 
-#: src/chat/answer-markdown.tsx
+#: src/chat/answer-table-actions.tsx
 msgid "Download table"
 msgstr "Tabelle herunterladen"
 
-#: src/chat/answer-markdown.tsx
+#: src/chat/answer-table-actions.tsx
 msgid "Download table as CSV"
 msgstr "Tabelle als CSV herunterladen"
 
-#: src/chat/answer-markdown.tsx
+#: src/chat/answer-table-actions.tsx
 msgid "Download table as Markdown"
 msgstr "Tabelle als Markdown herunterladen"
 
@@ -5688,10 +5764,6 @@ msgstr "Ziehen oder doppelklicken zum Abdocken"
 #: src/chat/chat-panel.tsx
 msgid "Drag to move, or double-click to dock"
 msgstr "Ziehen zum Verschieben, Doppelklick zum Andocken"
-
-#: src/chat/suggestions.tsx
-msgid "Draw how supplier invoices are handled"
-msgstr "Zeichne, wie Lieferantenrechnungen bearbeitet werden"
 
 #: src/brain/brain.ts
 msgctxt "workflow status"
@@ -5988,10 +6060,6 @@ msgstr "Wird gelöscht, {done} von {total}"
 msgid "Erasing…"
 msgstr "Wird gelöscht…"
 
-#: src/chat/thread.tsx
-msgid "Error"
-msgstr "Fehler"
-
 #: src/frame/ui-words.tsx
 msgctxt "a program's error"
 msgid "Error"
@@ -6268,6 +6336,14 @@ msgstr "Exakter Treffer"
 msgid "Exactly as it’s written here."
 msgstr "Genau so, wie es hier steht."
 
+#: src/chat/held-writes.tsx
+msgid "Exactly what was sent"
+msgstr "Genau das, was gesendet wurde"
+
+#: src/chat/held-writes.tsx
+msgid "Exactly what will be sent"
+msgstr "Genau das, was gesendet wird"
+
 #: src/interview/words.ts
 msgid "Example"
 msgstr "Beispiel"
@@ -6352,7 +6428,6 @@ msgctxt "a step's state"
 msgid "failed"
 msgstr "fehlgeschlagen"
 
-#: src/chat/thread.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
 #: src/workflows/traces.tsx
@@ -6472,6 +6547,7 @@ msgid "File {where}: {message}"
 msgstr "Datei {where}: {message}"
 
 #: src/apps/app-code.tsx
+#: src/chat/chat-files.tsx
 #: src/frame/ui-words.tsx
 #: src/inbox/items.ts
 msgid "Files"
@@ -6978,7 +7054,8 @@ msgstr "Zu dieser Version zurückgehen?"
 msgid "Go on without sound"
 msgstr "Ohne Ton weiter"
 
-#: src/frame/connect-ai-provider.tsx
+#: src/chat/composer.tsx
+#: src/chat/connect-ai-provider.tsx
 msgid "Go to AI providers"
 msgstr "Zu den KI-Anbietern"
 
@@ -7011,6 +7088,14 @@ msgstr "Gut. Sagen Sie jetzt etwas, damit ich Sie auch hören kann."
 #: src/onboarding/setup-steps.tsx
 msgid "Got it."
 msgstr "Verstanden."
+
+#: src/chat/connection-requests.tsx
+msgid "Grant"
+msgstr "Erlauben"
+
+#: src/chat/connection-requests.tsx
+msgid "Grant {name}"
+msgstr "{name} erlauben"
 
 #: src/inbox/items.ts
 msgid "Grant {who}?"
@@ -7267,7 +7352,7 @@ msgstr "Die KI von Grasp oder Ihre eigenen Schlüssel"
 msgid "Grasp's AI uses the default model. When its provider refuses a call before anything was billed, the fallbacks are tried in order."
 msgstr "Die KI von Grasp nutzt das Standardmodell. Lehnt dessen Anbieter einen Aufruf ab, bevor etwas berechnet wurde, werden die Ausweichmodelle der Reihe nach versucht."
 
-#: src/frame/connect-ai-provider.tsx
+#: src/chat/connect-ai-provider.tsx
 msgid "Grasp's AI works with your organization's own AI provider key. Connect one and choose a model to start."
 msgstr "Die KI von Grasp arbeitet mit dem eigenen Schlüssel eines KI-Anbieters Ihrer Organisation. Verbinden Sie einen und wählen Sie ein Modell, um zu beginnen."
 
@@ -7786,10 +7871,6 @@ msgstr "Im Chat von Grasp"
 msgid "In Grasp's chat. Chat apps are under Access."
 msgstr "Im Chat von Grasp. Chat-Apps stehen unter Zugriff."
 
-#: src/chat/asked-questions.tsx
-msgid "In my own words"
-msgstr "In meinen eigenen Worten"
-
 #: src/inbox/request-details.tsx
 msgid "In one chat only, for {requester}"
 msgstr "Nur in einem Chat, für {requester}"
@@ -7813,6 +7894,10 @@ msgstr "Öffnen Sie im Exchange Admin Center „Nachrichtenfluss“ und dann „
 #: src/onboarding/review-parts.tsx
 msgid "In the Google Admin console, go to Apps, then Google Workspace, then Gmail, then Spam, phishing and malware."
 msgstr "Öffnen Sie in der Google Admin-Konsole „Apps“, dann „Google Workspace“, dann „Gmail“ und dann „Spam, Phishing und Malware“."
+
+#: src/chat/connection-requests.tsx
+msgid "In this chat only, until you delete it. Anything it sends or changes still waits for you to confirm."
+msgstr "Nur in diesem Chat, bis Sie ihn löschen. Was es sendet oder ändert, wartet weiterhin auf Ihre Bestätigung."
 
 #: src/brain/brain.ts
 msgctxt "note property: the drawn version of this workflow on the Workflows page"
@@ -7859,10 +7944,6 @@ msgstr "Info"
 msgctxt "how serious a badge is"
 msgid "Info"
 msgstr "Info"
-
-#: src/chat/thread.tsx
-msgid "Input"
-msgstr "Eingabe"
 
 #: src/frame/ui-words.tsx
 msgctxt "a model's tokens"
@@ -8126,6 +8207,10 @@ msgstr "Sie weiß, wer welches Team leitet, damit ich zuerst mit den Teamleitung
 #: src/brain/gap-actions.tsx
 msgid "It leaves the open questions, with no answer, and nobody is asked about it any more. It can't be opened again."
 msgstr "Sie verlässt die offenen Fragen, ohne Antwort, und niemand wird mehr danach gefragt. Sie lässt sich nicht wieder öffnen."
+
+#: src/chat/connection-requests.tsx
+msgid "It may"
+msgstr "Es darf"
 
 #: src/frame/page-states.tsx
 msgid "It may have been renamed or removed."
@@ -8416,10 +8501,6 @@ msgstr "Zum Neuesten"
 #: src/frame/ui-words.tsx
 msgid "Jump to start"
 msgstr "Zum Anfang"
-
-#: src/chat/thread.tsx
-msgid "Jump to the newest message"
-msgstr "Zur neuesten Nachricht springen"
 
 #: src/agents/new-agent.tsx
 msgid "Just for me"
@@ -8898,10 +8979,6 @@ msgstr "Der Wert wird geladen"
 
 #: src/activity/audit-log.tsx
 #: src/apps/app-workspace.tsx
-#: src/chat/chat-panel.tsx
-#: src/chat/composer-menu.tsx
-#: src/chat/mentions.tsx
-#: src/chat/thread.tsx
 #: src/drafts/share-with-team.tsx
 #: src/frame/page-states.tsx
 msgid "Loading…"
@@ -9068,7 +9145,7 @@ msgstr "Änderung vornehmen"
 
 #: src/frame/ui-words.tsx
 msgid "Makers"
-msgstr "Hersteller"
+msgstr "Anbieter"
 
 #: src/apps/data-model-changes.tsx
 msgid "Makes {table} sensitive: its history keeps no values, and every read is recorded."
@@ -9150,9 +9227,9 @@ msgctxt "the Brain's memories page"
 msgid "Memories"
 msgstr "Erinnerungen"
 
-#: src/chat/composer-menu.tsx
-msgid "Mention"
-msgstr "Erwähnen"
+#: src/chat/mentions.tsx
+msgid "mention"
+msgstr "Erwähnung"
 
 #: src/brain/brain.ts
 msgctxt "folder of the tools named in interviews"
@@ -9163,6 +9240,7 @@ msgstr "Genannt"
 msgid "Message actions"
 msgstr "Aktionen zur Nachricht"
 
+#: src/chat/chat-body.tsx
 #: src/chat/thread.tsx
 msgid "Messages"
 msgstr "Nachrichten"
@@ -9227,10 +9305,6 @@ msgstr "Modelle"
 msgid "Models aren't set up yet. Ask your admin to connect an AI provider in Settings › AI providers."
 msgstr "Es sind noch keine Modelle eingerichtet. Bitten Sie Ihre Administration, unter Einstellungen › KI-Anbieter einen KI-Anbieter zu verbinden."
 
-#: src/chat/composer.tsx
-msgid "Models for your organization"
-msgstr "Modelle für Ihre Organisation"
-
 #: src/chat/package-requests.tsx
 msgctxt "an advisory's severity"
 msgid "Moderate"
@@ -9287,15 +9361,11 @@ msgstr "Weitere Apps"
 
 #: src/frame/ui-words.tsx
 msgid "More for {label}"
-msgstr "Mehr zu {label}"
+msgstr "Mehr für {label}"
 
 #: src/apps/app-page.tsx
 msgid "More for {name}"
 msgstr "Mehr zu {name}"
-
-#: src/chat/chat-menus.tsx
-msgid "More for {title}"
-msgstr "Mehr zu {title}"
 
 #: src/chat/chat-more.tsx
 msgid "More for this chat"
@@ -9574,10 +9644,6 @@ msgstr "Neueste zuerst"
 msgid "Newest item first. Nothing was sent or changed: every call was answered from what you gave."
 msgstr "Neuestes Element zuerst. Nichts wurde gesendet oder geändert: Jeder Aufruf wurde mit deinen Angaben beantwortet."
 
-#: src/chat/asked-questions.tsx
-msgid "Next"
-msgstr "Weiter"
-
 #: src/frame/ui-words.tsx
 msgctxt "the next question"
 msgid "Next"
@@ -9702,6 +9768,10 @@ msgstr "Keine App heißt „{asked}“"
 msgid "No Apps yet"
 msgstr "Noch keine Apps"
 
+#: src/chat/chat-window.tsx
+msgid "No archived chats."
+msgstr "Keine archivierten Chats."
+
 #: src/workflows/business-process.tsx
 msgid "No business process"
 msgstr "Kein Geschäftsprozess"
@@ -9733,10 +9803,6 @@ msgstr "Hier gibt es noch keine Chats."
 #: src/apps/app-code.tsx
 msgid "No code yet: Grasp writes the first version in the chat."
 msgstr "Noch kein Code: Grasp schreibt die erste Version im Chat."
-
-#: src/chat/composer-menu.tsx
-msgid "No commands yet"
-msgstr "Noch keine Befehle"
 
 #: src/brain/brain.ts
 msgid "No connector yet"
@@ -9828,6 +9894,10 @@ msgstr "Nicht mehr dort, wo es war"
 #: src/frame/ui-words.tsx
 msgid "No matches"
 msgstr "Keine Treffer"
+
+#: src/chat/dictation.ts
+msgid "No microphone was found."
+msgstr "Es wurde kein Mikrofon gefunden."
 
 #: src/onboarding/setup-steps.tsx
 msgid "No Microsoft or Google? A staff list works too."
@@ -10165,6 +10235,7 @@ msgstr "Noch nicht von der Geschäftsleitung bestätigt"
 msgid "Not connected"
 msgstr "Nicht verbunden"
 
+#: src/chat/answer-table-actions.tsx
 #: src/frame/ui-words.tsx
 msgid "Not copied"
 msgstr "Nicht kopiert"
@@ -10392,8 +10463,6 @@ msgstr "Noch nichts verbunden."
 msgid "Nothing dealt with yet. What you decide here shows up in this list, and in the audit trail."
 msgstr "Noch nichts erledigt. Was Sie hier entscheiden, erscheint in dieser Liste und im Prüfprotokoll."
 
-#: src/chat/composer-menu.tsx
-#: src/chat/mentions.tsx
 #: src/onboarding/place-picker.tsx
 msgid "Nothing found"
 msgstr "Nichts gefunden"
@@ -10784,6 +10853,10 @@ msgstr "Einer der Agenten der Firma"
 msgid "One real case"
 msgstr "Ein echter Fall"
 
+#: src/chat/connection-requests.tsx
+msgid "Only"
+msgstr "Nur"
+
 #: src/settings/sign-in-settings.tsx
 msgid "Only accounts of the Google Workspace {hostedDomain}."
 msgstr "Nur Konten des Google Workspace {hostedDomain}."
@@ -10970,7 +11043,7 @@ msgstr "Chat öffnen"
 msgid "Open Data"
 msgstr "Daten öffnen"
 
-#: src/chat/answer-markdown.tsx
+#: src/chat/answer-words.tsx
 msgid "Open external link?"
 msgstr "Externen Link öffnen?"
 
@@ -10987,7 +11060,7 @@ msgstr "Dateien und Apps öffnen"
 msgid "Open full page"
 msgstr "Als ganze Seite öffnen"
 
-#: src/chat/answer-markdown.tsx
+#: src/chat/answer-words.tsx
 msgid "Open link"
 msgstr "Link öffnen"
 
@@ -11176,7 +11249,6 @@ msgid "Our first conversation is deleted. I’m still erasing what I took from i
 msgstr "Unser erstes Gespräch ist gelöscht. Ich lösche noch, was ich daraus entnommen habe, und schließe das von selbst ab."
 
 #: src/apps/resource-bindings.tsx
-#: src/chat/thread.tsx
 msgid "Output"
 msgstr "Ausgabe"
 
@@ -11836,13 +11908,13 @@ msgstr "Abfragen, Mutationen und Aktionen von {app}"
 msgid "Question {current} of {total}"
 msgstr "Frage {current} von {total}"
 
-#: src/chat/suggestions.tsx
-msgid "Questions to start with"
-msgstr "Fragen für den Anfang"
-
 #: src/workflows/runs.tsx
 msgid "Queued"
 msgstr "In der Warteschlange"
+
+#: src/chat/thread.tsx
+msgid "Ran a code step"
+msgstr "Codeschritt ausgeführt"
 
 #: src/activity/audit-words.ts
 msgid "Ran a step of a workflow"
@@ -12080,10 +12152,6 @@ msgstr "Bereit"
 msgid "Real run"
 msgstr "Echter Lauf"
 
-#: src/chat/thread.tsx
-msgid "Reasoning"
-msgstr "Überlegungen"
-
 #: src/frame/ui-words.tsx
 msgctxt "a model's tokens"
 msgid "Reasoning"
@@ -12097,20 +12165,7 @@ msgstr "Aus dem Gehirn abgerufen"
 msgid "Receipt"
 msgstr "Beleg"
 
-#: src/chat/recents.tsx
-msgid "Recent chats"
-msgstr "Letzte Chats"
-
-#: src/chat/recents.tsx
-msgid "Recents"
-msgstr "Zuletzt"
-
 #: src/frame/ui-words.tsx
-msgid "Recommended"
-msgstr "Empfohlen"
-
-#: src/chat/asked-questions.tsx
-msgctxt "the option the assistant would pick"
 msgid "Recommended"
 msgstr "Empfohlen"
 
@@ -12419,8 +12474,8 @@ msgstr "Entfernte Personen"
 msgid "Removed."
 msgstr "Entfernt."
 
-#: src/chat/chat-menus.tsx
 #: src/chat/chat-more.tsx
+#: src/chat/chat-window.tsx
 #: src/settings/teams.tsx
 msgid "Rename"
 msgstr "Umbenennen"
@@ -12428,6 +12483,10 @@ msgstr "Umbenennen"
 #: src/settings/teams.tsx
 msgid "Rename {name}"
 msgstr "{name} umbenennen"
+
+#: src/chat/chat-window.tsx
+msgid "Rename chat"
+msgstr "Chat umbenennen"
 
 #: src/apps/data-model-changes.tsx
 msgid "Renames the table {from} to {to}; its records go with it."
@@ -12569,6 +12628,7 @@ msgstr "Verantwortung"
 
 #: src/apps/app-settings.tsx
 #: src/apps/app-workspace.tsx
+#: src/chat/chat-window.tsx
 #: src/drafts/draft-history.tsx
 msgid "Restore"
 msgstr "Wiederherstellen"
@@ -12590,10 +12650,6 @@ msgstr "Eingeschränkt"
 msgctxt "what a piece of work's knowledge rests on: said, written, seen or done"
 msgid "Rests on"
 msgstr "Beruht auf"
-
-#: src/chat/thread.tsx
-msgid "Result"
-msgstr "Ergebnis"
 
 #: src/workflows/runs.tsx
 msgctxt "column: what happened in a run"
@@ -12873,7 +12929,6 @@ msgctxt "a run going on now"
 msgid "running"
 msgstr "läuft"
 
-#: src/chat/thread.tsx
 #: src/routes/_shell.workflows.index.tsx
 #: src/workflows/runs.tsx
 msgid "Running"
@@ -12899,6 +12954,10 @@ msgstr "Läuft"
 msgctxt "workflow status"
 msgid "Running"
 msgstr "Läuft"
+
+#: src/chat/thread.tsx
+msgid "Running a code step"
+msgstr "Führt einen Codeschritt aus"
 
 #: src/workflows/today-lanes.tsx
 msgid "Running now"
@@ -13172,10 +13231,6 @@ msgstr "Sagen, dass dies stimmt: {statement}"
 msgid "Say what should change"
 msgstr "Sagen Sie, was sich ändern soll"
 
-#: src/chat/chat-subject.ts
-msgid "Say what to change. Your team sees the changes once you share them."
-msgstr "Sagen Sie, was sich ändern soll. Ihr Team sieht die Änderungen, sobald Sie sie teilen."
-
 #: src/apps/apps-overview.tsx
 msgid "Say what you want to build, and Grasp builds it."
 msgstr "Sagen Sie, was Sie bauen möchten, und Grasp baut es."
@@ -13217,10 +13272,6 @@ msgstr "{many} durchsuchen"
 msgid "Search {name}"
 msgstr "{name} durchsuchen"
 
-#: src/chat/composer-menu.tsx
-msgid "Search Apps, people and workflows"
-msgstr "Apps, Personen und Workflows suchen"
-
 #: src/routes/_shell.integrations.index.tsx
 msgid "Search by name or kind"
 msgstr "Nach Name oder Art suchen"
@@ -13229,10 +13280,6 @@ msgstr "Nach Name oder Art suchen"
 #: src/frame/app-sidebar.tsx
 msgid "Search chats"
 msgstr "Chats durchsuchen"
-
-#: src/chat/composer-menu.tsx
-msgid "Search commands"
-msgstr "Befehle suchen"
 
 #: src/apps/indexes-view.tsx
 msgid "Search in {searched}"
@@ -13279,10 +13326,6 @@ msgstr "Archiv durchsuchen"
 #: src/brain/sources-page.tsx
 msgid "Search the Brain"
 msgstr "Das Gehirn durchsuchen"
-
-#: src/chat/chat-window.tsx
-msgid "Search your chats, and open one."
-msgstr "Durchsuchen Sie Ihre Chats und öffnen Sie einen."
 
 #: src/apps/indexes-view.tsx
 msgid "Search, to find records by the words in them"
@@ -13417,14 +13460,8 @@ msgstr "Gesehen, aber nicht beschrieben: {seenOnly}."
 msgid "Seen, never mentioned"
 msgstr "Erkannt, nie erwähnt"
 
-#: src/chat/asked-questions.tsx
-#: src/chat/chat-bar.tsx
 #: src/frame/ui-words.tsx
-msgid "Send"
-msgstr "Senden"
-
-#: src/chat/composer.tsx
-msgctxt "send the question"
+msgctxt "send a message"
 msgid "Send"
 msgstr "Senden"
 
@@ -14139,11 +14176,6 @@ msgstr "Etwas, das Sie korrigiert haben und nicht mehr lesen dürfen"
 msgid "Something your export held was erased since, so the export was deleted with it. Make a new one."
 msgstr "Etwas, das Ihr Export enthielt, wurde inzwischen gelöscht, daher wurde der Export mitgelöscht. Erstellen Sie einen neuen."
 
-#: src/chat/composer-menu.tsx
-msgctxt "a feature still to come"
-msgid "Soon"
-msgstr "Bald"
-
 #: src/inbox/inbox-page.tsx
 msgctxt "inbox: sort button"
 msgid "Sort"
@@ -14455,11 +14487,6 @@ msgctxt "stop an answer"
 msgid "Stop"
 msgstr "Stoppen"
 
-#: src/chat/composer.tsx
-msgctxt "stop the answer"
-msgid "Stop"
-msgstr "Stoppen"
-
 #: src/interview/words.ts
 msgid "Stop and ask"
 msgstr "Stoppen und fragen"
@@ -14503,6 +14530,10 @@ msgstr "Gestoppt"
 msgid "Stopped a schedule that kept failing"
 msgstr "Einen Zeitplan gestoppt, der wiederholt fehlschlug"
 
+#: src/chat/thread.tsx
+msgid "Stopped before it finished"
+msgstr "Angehalten, bevor es fertig war"
+
 #: src/activity/audit-words.ts
 msgid "Stopped following what changes at a connection"
 msgstr "Aufgehört zu verfolgen, was sich bei einer Verbindung ändert"
@@ -14517,7 +14548,6 @@ msgid "Stopped the Brain using someone's workflow results, as they lost the work
 msgstr "Die Workflow-Ergebnisse einer Person im Brain nicht mehr verwendet, da sie den Workflow verloren hat"
 
 #: src/chat/chat-markdown.ts
-#: src/chat/thread.tsx
 msgid "Stopped."
 msgstr "Gestoppt."
 
@@ -14581,6 +14611,11 @@ msgstr "Tabelle"
 msgctxt "a table in a text"
 msgid "Table"
 msgstr "Tabelle"
+
+#. placeholder {0}: index + 1
+#: src/chat/answer-table-actions.tsx
+msgid "Table {0}"
+msgstr "Tabelle {0}"
 
 #: src/apps/app-data-model.tsx
 msgid "Table name"
@@ -14691,7 +14726,6 @@ msgstr "Besprochen in {source}"
 msgid "Talking to your team"
 msgstr "Im Gespräch mit Ihrem Team"
 
-#: src/chat/composer-menu.tsx
 #: src/projects/project-dialog.tsx
 msgid "Target"
 msgstr "Ziel"
@@ -15001,6 +15035,10 @@ msgstr "Mit der Adresse kann man sich wieder anmelden."
 msgid "The address may be wrong, or the page was moved or removed."
 msgstr "Die Adresse ist vielleicht falsch, oder die Seite wurde verschoben oder entfernt."
 
+#: src/chat/connection-requests.tsx
+msgid "The agent asked an admin for {name}"
+msgstr "Der Agent hat einen Admin um {name} gebeten"
+
 #: src/chat/package-requests.tsx
 msgid "The agent asks for npm packages for {subject}"
 msgstr "Der Agent bittet um npm-Pakete für {subject}"
@@ -15260,7 +15298,6 @@ msgctxt "a source of the Brain"
 msgid "The company's teams"
 msgstr "Die Teams des Unternehmens"
 
-#: src/chat/agent-change-card.tsx
 #: src/chat/agent-draft-card.tsx
 msgid "the company's time zone"
 msgstr "Zeitzone der Firma"
@@ -15302,13 +15339,13 @@ msgstr "Übermorgen"
 msgid "The day the other teams get their links"
 msgstr "Der Tag, an dem die anderen Teams ihre Links erhalten"
 
+#: src/chat/composer.tsx
+msgid "The default"
+msgstr "Der Standard"
+
 #: src/settings/ai-providers.tsx
 msgid "The default model's provider was removed. Choose a new default model to change the fallbacks."
 msgstr "Der Anbieter des Standardmodells wurde entfernt. Wählen Sie ein neues Standardmodell, um die Ausweichmodelle zu ändern."
-
-#: src/chat/composer.tsx
-msgid "The default, {each}"
-msgstr "Standard, {each}"
 
 #: src/workflows/version-source.tsx
 msgid "The definition of version {shownVersion}"
@@ -15490,7 +15527,7 @@ msgstr "Das Modell, das die fragende Person wählt"
 msgid "The origin is https:// and a public host name, with nothing after it: https://api.example.com."
 msgstr "Der Origin ist https:// und ein öffentlicher Hostname, ohne etwas danach: https://api.example.com."
 
-#: src/chat/chat-panel.tsx
+#: src/chat/chat-body.tsx
 msgid "The packages are approved. Carry on."
 msgstr "Die Pakete sind freigegeben. Mach weiter."
 
@@ -15862,7 +15899,7 @@ msgstr "Denkt nach"
 #: src/frame/ui-words.tsx
 msgctxt "how hard a model thinks"
 msgid "Thinking"
-msgstr "Nachdenken"
+msgstr "Denken"
 
 #: src/apps/resource-bindings.tsx
 msgid "This App can save memories in the Brain in its own name, which everyone who uses the App reads through it, and only through it, and it can take its own back."
@@ -16165,8 +16202,9 @@ msgid "Thought"
 msgstr "Nachgedacht"
 
 #: src/chat/thread.tsx
-msgid "Thought for {time}"
-msgstr "Hat {time} nachgedacht"
+msgctxt "the model thought first"
+msgid "Thought"
+msgstr "Nachgedacht"
 
 #: src/connections/connect-dialog.tsx
 msgid "Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow."
@@ -16397,7 +16435,8 @@ msgstr "Versuchen"
 #: src/brain/own-export.tsx
 #: src/brain/skills-page.tsx
 #: src/chat/builds.tsx
-#: src/chat/chat-panel.tsx
+#: src/chat/chat-body.tsx
+#: src/chat/models-unavailable.tsx
 #: src/chat/thread.tsx
 #: src/connections/sync-places.tsx
 #: src/decision-card.tsx
@@ -16417,6 +16456,10 @@ msgstr "Versuche noch einmal, {name} einzurichten."
 #: src/apps/app-workspace.tsx
 msgid "Try it out: only you see it, and the example data is just for trying. To change anything, tell Grasp in the chat. When it's right, share it with your team."
 msgstr "Probier sie aus: Nur du siehst sie, und die Beispieldaten sind nur zum Ausprobieren. Um etwas zu ändern, sag es Grasp im Chat. Wenn alles passt, teile sie mit deinem Team."
+
+#: src/chat/chat-window.tsx
+msgid "Try the search again"
+msgstr "Suche erneut versuchen"
 
 #: src/chat/builds.tsx
 #: src/frame/page-states.tsx
@@ -16565,6 +16608,7 @@ msgid "Unfinished runs (stopped) and decision confirmations"
 msgstr "Unbeendete Ausführungen (gestoppt) und Entscheidungsbestätigungen"
 
 #: src/activity/pending.tsx
+#: src/chat/sources.tsx
 msgid "Unknown"
 msgstr "Unbekannt"
 
@@ -16700,6 +16744,10 @@ msgstr "Mit einem Team oder allen geteilte Uploads, auch die, die ihre hochladen
 #: src/settings/event-sources.tsx
 msgid "URL of {name}"
 msgstr "URL von {name}"
+
+#: src/chat/connection-requests.tsx
+msgid "Use {name} in this chat"
+msgstr "{name} in diesem Chat nutzen"
 
 #: src/onboarding/ai-step.tsx
 msgid "Use a different model"
@@ -17259,6 +17307,10 @@ msgstr "Was Grasp und seine Agenten selbst tun, steht unter Aktivität."
 msgid "What Grasp could automate or improve, from how your teams describe their work and how five or more of a team were seen doing it, the largest first. One hidden comes back when its evidence changes."
 msgstr "Was Grasp automatisieren oder verbessern könnte, danach, wie Ihre Teams ihre Arbeit beschreiben und wie fünf oder mehr Personen eines Teams sie tatsächlich erledigen, das Größte zuerst. Eine ausgeblendete kommt zurück, sobald sich ihre Grundlage ändert."
 
+#: src/chat/thread.tsx
+msgid "What Grasp did"
+msgstr "Was Grasp getan hat"
+
 #: src/brain/brain-sections.ts
 msgid "What Grasp does not know yet, and who can answer it."
 msgstr "Was Grasp noch nicht weiß, und wer es beantworten kann."
@@ -17569,10 +17621,6 @@ msgstr "Was zu beheben ist"
 msgid "What to show of the traces"
 msgstr "Was von den Abläufen gezeigt wird"
 
-#: src/chat/suggestions.tsx
-msgid "What waits on me today?"
-msgstr "Was wartet heute auf mich?"
-
 #: src/inbox/inbox-page.tsx
 msgid "What waits on you"
 msgstr "Was auf Sie wartet"
@@ -17705,10 +17753,6 @@ msgstr "Wann, als Cron-Ausdruck"
 msgid "Where"
 msgstr "Wo"
 
-#: src/chat/suggestions.tsx
-msgid "Where does the most time still go?"
-msgstr "Wohin geht noch die meiste Zeit?"
-
 #: src/onboarding/setup-steps.tsx
 msgid "Where does the work get written down?"
 msgstr "Wo wird die Arbeit festgehalten?"
@@ -17789,10 +17833,6 @@ msgstr "Welche KI"
 #: src/onboarding/setup-steps.tsx
 msgid "Which AI should I think with?"
 msgstr "Mit welcher KI soll ich denken?"
-
-#: src/chat/suggestions.tsx
-msgid "Which AI tools do people use?"
-msgstr "Welche KI-Tools nutzen die Leute?"
 
 #: src/routes/_shell.integrations.$integration.tsx
 msgid "Which Apps and agents hold permissions: {why}"
@@ -17997,9 +18037,14 @@ msgstr "Mit den ausgewählten {many}"
 msgid "With what they bring"
 msgstr "Mit allem, was sie mitbringen"
 
+#: src/chat/connection-requests.tsx
 #: src/settings/invitations.tsx
 msgid "Withdraw"
 msgstr "Zurückziehen"
+
+#: src/chat/connection-requests.tsx
+msgid "Withdraw {name}"
+msgstr "{name} zurückziehen"
 
 #: src/interview/closed.tsx
 msgid "Withdraw instead"
@@ -18048,10 +18093,6 @@ msgstr "Arbeit des Teams"
 #: src/agents/agent-apps-card.tsx
 msgid "Work out from its instructions"
 msgstr "Aus seinen Anweisungen ermitteln"
-
-#: src/chat/thread.tsx
-msgid "Worked for {time}"
-msgstr "Hat {time} gearbeitet"
 
 #: src/activity/audit-words.ts
 msgid "Worked out how knowledge is used"
@@ -18241,6 +18282,10 @@ msgstr "Wird geschrieben"
 msgid "Writing {file}"
 msgstr "{file} wird geschrieben"
 
+#: src/chat/thread.tsx
+msgid "Writing a code step"
+msgstr "Schreibt einen Codeschritt"
+
 #: src/frame/ui-words.tsx
 msgid "Writing it down"
 msgstr "Wird aufgeschrieben"
@@ -18367,7 +18412,7 @@ msgstr "Sie können diese Version nicht lesen."
 
 #: src/frame/ui-words.tsx
 msgid "You cannot open this"
-msgstr "Sie können dies nicht öffnen"
+msgstr "Das können Sie nicht öffnen"
 
 #: src/agents/new-agent.tsx
 msgid "You choose who may ask it and what it may do."
@@ -18426,7 +18471,7 @@ msgstr "Sie haben sich zurückgezogen. Nichts von dem, was Sie gesagt haben, wir
 msgid "You withdrew. What the Brain kept of it is being removed."
 msgstr "Sie haben sich zurückgezogen. Was das Gehirn davon behalten hat, wird gerade entfernt."
 
-#: src/chat/answer-markdown.tsx
+#: src/chat/answer-words.tsx
 msgid "You’re about to visit an external website."
 msgstr "Sie sind dabei, eine externe Website zu besuchen."
 
@@ -18441,6 +18486,10 @@ msgstr "Du bist als Gast mit {email} angemeldet. Was jemand mit dir teilt, ersch
 #: src/frame/person-menu.tsx
 msgid "You're still signed in. Try again in a moment."
 msgstr "Sie sind noch angemeldet. Versuchen Sie es gleich noch einmal."
+
+#: src/chat/dictation.ts
+msgid "You've dictated as much as you can today."
+msgstr "Sie haben heute so viel diktiert, wie möglich ist."
 
 #: src/settings/sections.ts
 msgid "Your account"
@@ -18474,7 +18523,6 @@ msgstr "Ihre KI läuft auf der KI von Grasp"
 msgid "Your AI runs on your own keys"
 msgstr "Ihre KI läuft mit Ihren eigenen Schlüsseln"
 
-#: src/chat/asked-questions.tsx
 #: src/chat/brain-questions.tsx
 #: src/interview/composer.tsx
 msgid "Your answer"
@@ -18484,6 +18532,10 @@ msgstr "Ihre Antwort"
 msgctxt "the answer a person gives a decision"
 msgid "Your answer"
 msgstr "Ihre Antwort"
+
+#: src/chat/dictation.ts
+msgid "Your browser doesn't let Grasp use the microphone. Allow it in the browser's settings to dictate."
+msgstr "Ihr Browser lässt Grasp das Mikrofon nicht nutzen. Erlauben Sie es in den Einstellungen des Browsers, um zu diktieren."
 
 #: src/interview/sound-check.tsx
 msgid "Your browser is not letting me use the microphone. Allow it next to the address, and try again."

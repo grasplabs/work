@@ -9,19 +9,23 @@ import { roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { asc, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
-import { appRequests, users } from "./db/core/schema.ts";
+import { appRequestAskers, appRequests, users } from "./db/core/schema.ts";
+import { inList } from "./db/d1.ts";
 
 // Apps people asked Grasp to add, as the catalog doesn't have them: for
 // Grasp to see what the client misses, and for the integrations page to
 // show what was asked for already. Anyone in the organization asks, and
-// sees what everyone asked; Grasp staff aren't in it, so they ask for
-// nothing. The same app asked for twice, by its name in any case, is one
-// request: the first. Asking is audited by the request's ID only, as the
-// name and the why are what someone typed.
+// sees what everyone asked, with who asked; Grasp staff aren't in it, so
+// they ask for nothing. The same app asked for twice, by its name in any
+// case, is one request: the first, as the first to ask wrote it. Whoever
+// asks for it after is added to it as an asker, once, and what they wrote
+// isn't kept. Asking is audited by the request's ID only, as the name and
+// the why are what someone typed.
 
-/** A request as the list reads it, with its asker's name. */
+/** A request as the list reads it, with its first asker's name. */
 const requestColumns = {
   id: appRequests.id,
   name: appRequests.name,
@@ -42,16 +46,49 @@ interface RequestRow {
   requestedAt: Date;
 }
 
-const requestOf = (row: RequestRow): AppRequest => ({
-  id: row.id,
-  name: row.name,
-  why: row.why,
-  url: row.url,
-  requestedBy: { userId: row.userId, name: row.userName },
-  requestedAt: row.requestedAt.toISOString(),
-});
+/**
+ * The requests of `rows` with their askers: the first, who is on the
+ * request itself, then those who asked after, in the order they asked.
+ */
+const withAskers = async (
+  db: DrizzleD1Database,
+  rows: readonly RequestRow[]
+): Promise<AppRequest[]> => {
+  const later = await db
+    .select()
+    .from(appRequestAskers)
+    // One bound value however many: D1 binds at most 100.
+    .where(
+      inList(
+        appRequestAskers.requestId,
+        rows.map(({ id }) => id)
+      )
+    )
+    .orderBy(asc(appRequestAskers.askedAt), asc(appRequestAskers.userId));
+  const askers = new Map<string, AppRequest["askers"]>(
+    rows.map((row) => [
+      row.id,
+      [{ userId: row.userId, askedAt: row.requestedAt.toISOString() }],
+    ])
+  );
+  for (const { requestId, userId, askedAt } of later) {
+    askers.get(requestId)?.push({ userId, askedAt: askedAt.toISOString() });
+  }
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    why: row.why,
+    url: row.url,
+    requestedBy: { userId: row.userId, name: row.userName },
+    requestedAt: row.requestedAt.toISOString(),
+    askers: askers.get(row.id) ?? [],
+  }));
+};
 
-/** Asks for the app `request` names as `by`; the first request for it if one was made. */
+/**
+ * Asks for the app `request` names as `by`: a new request, or the one
+ * made for it already, with `by` among its askers.
+ */
 export const requestApp = async (
   env: Env,
   by: Identity,
@@ -67,6 +104,7 @@ export const requestApp = async (
   );
   const nameKey = name.toLowerCase();
   const id = crypto.randomUUID();
+  const now = new Date();
   const db = drizzle(env.DB);
   await auditedBatch(env, db, [
     db
@@ -78,7 +116,7 @@ export const requestApp = async (
         why: why === undefined || why === "" ? null : why,
         url: url ?? null,
         requestedBy: by.userId,
-        requestedAt: new Date(),
+        requestedAt: now,
       })
       .onConflictDoNothing(),
     // Only a new request is recorded.
@@ -96,18 +134,38 @@ export const requestApp = async (
   if (row === undefined) {
     throw new Error("An app request was stored and is gone");
   }
-  return requestOf(row);
+  // Someone else's request for it: theirs stands, and `by` joins its
+  // askers. Recorded the first time only, as asking again changes nothing.
+  if (row.userId !== by.userId) {
+    await auditedBatch(env, db, [
+      db
+        .insert(appRequestAskers)
+        .values({ requestId: row.id, userId: by.userId, askedAt: now })
+        .onConflictDoNothing(),
+      outboxedIfChanged(db, {
+        actor: actorOf(by),
+        action: "connection.app_requested",
+        target: { type: "app_request", id: row.id },
+      }),
+    ]);
+  }
+  const [asked] = await withAskers(db, [row]);
+  if (asked === undefined) {
+    throw new Error("An app request was read and is gone");
+  }
+  return asked;
 };
 
 /** The apps people asked for, latest first. */
 export const listAppRequests = async (env: Env): Promise<AppRequest[]> => {
-  const rows = await drizzle(env.DB)
+  const db = drizzle(env.DB);
+  const rows = await db
     .select(requestColumns)
     .from(appRequests)
     .leftJoin(users, eq(users.id, appRequests.requestedBy))
     .orderBy(desc(appRequests.requestedAt), desc(appRequests.id))
     .limit(appRequestsListed);
-  return rows.map(requestOf);
+  return await withAskers(db, rows);
 };
 
 /**

@@ -149,9 +149,8 @@ const cleared = (): void => {
 const alertsFor = async (messages: ChatMessage[]): Promise<string[]> => {
   await showThread(messages);
   // What each alert says went wrong, apart from the way to ask again under it.
-  const said = [...document.querySelectorAll('[role="alert"]')].map(
-    (alert) =>
-      alert.querySelector('[data-slot="alert-title"]')?.textContent ?? ""
+  const said = [...document.querySelectorAll('[role="alert"]')].map((alert) =>
+    alert.textContent.trim()
   );
   cleared();
   return said;
@@ -168,10 +167,7 @@ const shownFor = async (
   await showThread(messages, identity);
   const alerts = [...document.querySelectorAll('[role="alert"]')];
   // What each alert says went wrong, apart from the way to ask again under it.
-  const said = alerts.map(
-    (alert) =>
-      alert.querySelector('[data-slot="alert-title"]')?.textContent ?? ""
-  );
+  const said = alerts.map((alert) => alert.textContent.trim());
   const links = alerts.flatMap((alert) =>
     [...alert.querySelectorAll("a")].map(
       (link) => link.getAttribute("href") ?? ""

@@ -1,17 +1,18 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  TraceDescription,
-  TraceIcon,
-  TraceLine,
-  TraceTitle,
-} from "@grasp-os/app-kit/components/trace";
 import type {
   BrainMemoryOutcome,
   ChatSavedMemory,
 } from "@grasp-os/shared/brain-memories";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  Trace,
+  TraceDescription,
+  TraceIcon,
+  TraceLine,
+  TraceTitle,
+} from "@grasp-os/ui/components/trace";
+import { BrainIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { Trans } from "@lingui/react/macro";
-import { BrainIcon } from "lucide-react";
 import { useState } from "react";
 
 import { formatList } from "../format.ts";
@@ -57,14 +58,14 @@ const ReplacedText = ({ statements }: { statements: readonly string[] }) => {
 const SavedKind = ({ type }: Pick<ChatSavedMemory, "type">) => {
   if (type === "instruction") {
     return (
-      <Badge variant="outline">
+      <Badge size="sm" variant="outline">
         <Trans>Instruction</Trans>
       </Badge>
     );
   }
   if (type === "preference") {
     return (
-      <Badge variant="outline">
+      <Badge size="sm" variant="outline">
         <Trans>Preference</Trans>
       </Badge>
     );
@@ -96,41 +97,38 @@ export const SavedMemoryLine = ({ saved }: { saved: ChatSavedMemory }) => {
     }
   };
   return (
-    <TraceLine wrap>
-      <TraceIcon>
-        <BrainIcon />
-      </TraceIcon>
-      <TraceTitle>
-        {outcome === "done" ? (
-          <Trans>Grasp no longer remembers this.</Trans>
+    <Trace>
+      <TraceLine status={failure === undefined ? undefined : "error"}>
+        <TraceIcon>
+          <Icon icon={BrainIcon} />
+        </TraceIcon>
+        <TraceTitle>
+          {outcome === "done" ? (
+            <Trans>Grasp no longer remembers this.</Trans>
+          ) : null}
+          {outcome === "nothing" ? (
+            <Trans>There was nothing to undo: Grasp no longer uses this.</Trans>
+          ) : null}
+          {outcome === undefined ? (
+            <>
+              <SavedKind type={saved.type} /> <SavedText saved={saved} />
+            </>
+          ) : null}
+        </TraceTitle>
+        {outcome === undefined && saved.replaced !== undefined ? (
+          <TraceDescription>
+            <ReplacedText statements={saved.replaced} />
+          </TraceDescription>
         ) : null}
-        {outcome === "nothing" ? (
-          <Trans>There was nothing to undo: Grasp no longer uses this.</Trans>
-        ) : null}
+        {failure === undefined ? null : (
+          <TraceDescription>{failure}</TraceDescription>
+        )}
         {outcome === undefined ? (
-          <>
-            <SavedKind type={saved.type} /> <SavedText saved={saved} />{" "}
-            <Button
-              disabled={busy}
-              onClick={() => {
-                void undo();
-              }}
-              size="xs"
-              variant="hint"
-            >
-              <Trans>Undo</Trans>
-            </Button>
-          </>
+          <Button disabled={busy} onClick={undo} size="xs" variant="ghost">
+            <Trans>Undo</Trans>
+          </Button>
         ) : null}
-      </TraceTitle>
-      {outcome === undefined && saved.replaced !== undefined ? (
-        <TraceDescription>
-          <ReplacedText statements={saved.replaced} />
-        </TraceDescription>
-      ) : null}
-      {failure === undefined ? null : (
-        <TraceDescription>{failure}</TraceDescription>
-      )}
-    </TraceLine>
+      </TraceLine>
+    </Trace>
   );
 };

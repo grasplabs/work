@@ -1,18 +1,41 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
 import type { ChatProvenance } from "@grasp-os/shared/chat";
-import { Plural, Trans } from "@lingui/react/macro";
-import { BookOpenIcon, CableIcon, ChevronDownIcon } from "lucide-react";
+import { Badge } from "@grasp-os/ui/components/badge";
+import {
+  Source,
+  SourceIcon,
+  Sources,
+  SourcesContent,
+  SourcesTrigger,
+} from "@grasp-os/ui/components/sources";
+import { Icon, LinkIcon } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useNavigate } from "@tanstack/react-router";
 
-// What the chat's answers may hold, in the prototype's sources look
-// (grasplabs/prototype `components/ai-elements/sources.tsx`): the
-// sources core says the chat read from, each by its name where the page
-// knows it (a connection), else by its ID. Only what core reports: the
-// page never guesses a source.
+// What the chat's answers drew on, on Damsko's Sources: the connections
+// core says the chat read from, as a pile that opens into their list,
+// each opening on the integrations page; whether the chat's agent was
+// restricted beside it. Only what core reports: the page never guesses a
+// source.
 
 /** A source the chat read, as the page names it. */
 export interface SourceName {
   name: string;
 }
+
+/** The pile's marks: a few, as Sources reads well. */
+const pileMarks = 3;
+
+const styles = stylex.create({
+  // What the chat read, under its last answer, before the box.
+  sources: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["2"],
+  },
+});
 
 export const ChatSources = ({
   provenance,
@@ -21,49 +44,52 @@ export const ChatSources = ({
   provenance: ChatProvenance;
   names: ReadonlyMap<string, SourceName>;
 }) => {
+  const { t } = useLingui();
+  const navigate = useNavigate();
   const { sources, restricted } = provenance;
-  const count = sources.length;
-  if (count === 0 && !restricted) {
+  if (sources.length === 0 && !restricted) {
     return null;
   }
   return (
-    <div className="flex flex-wrap items-start gap-2 text-xs">
-      {restricted ? (
-        <Badge variant="attention">
-          <Trans>Restricted</Trans>
-        </Badge>
-      ) : null}
-      {count === 0 ? null : (
-        <details className="group text-primary">
-          <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
-            <BookOpenIcon aria-hidden="true" className="size-3.5" />
-            <span className="font-medium">
-              <Plural
-                one="Answers draw on # source"
-                other="Answers draw on # sources"
-                value={count}
-              />
-            </span>
-            <ChevronDownIcon
-              aria-hidden="true"
-              className="size-3.5 transition-transform group-open:rotate-180"
-            />
-          </summary>
-
-          <ul className="mt-3 flex w-fit flex-col gap-2">
+    <div {...stylex.props(styles.sources)}>
+      {restricted ? <Badge variant="warning">{t`Restricted`}</Badge> : null}
+      {sources.length === 0 ? null : (
+        <Sources>
+          <SourcesTrigger count={sources.length}>
+            {sources.slice(0, pileMarks).map((id) => (
+              <SourceIcon key={id}>
+                <Icon icon={LinkIcon} />
+              </SourceIcon>
+            ))}
+          </SourcesTrigger>
+          <SourcesContent>
             {sources.map((id) => {
-              const name = names.get(id)?.name ?? id;
-              return (
-                <li key={id}>
-                  <span className="flex items-center gap-2 font-medium">
-                    <CableIcon aria-hidden="true" className="size-4" />
-                    {name}
-                  </span>
-                </li>
+              const name = names.get(id)?.name;
+              // One Grasp can't name (its list was refused, or it is gone
+              // since): said as it is, and nothing to open.
+              return name === undefined ? (
+                <Source access="locked" key={id} origin={t`Unknown`} title={id}>
+                  <SourceIcon>
+                    <Icon icon={LinkIcon} />
+                  </SourceIcon>
+                </Source>
+              ) : (
+                <Source
+                  key={id}
+                  onOpen={() => {
+                    void navigate({ to: "/integrations", search: {} });
+                  }}
+                  origin={t`Connection`}
+                  title={name}
+                >
+                  <SourceIcon>
+                    <Icon icon={LinkIcon} />
+                  </SourceIcon>
+                </Source>
               );
             })}
-          </ul>
-        </details>
+          </SourcesContent>
+        </Sources>
       )}
     </div>
   );

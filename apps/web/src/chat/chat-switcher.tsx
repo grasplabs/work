@@ -1,12 +1,6 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Kbd } from "@grasp-os/app-kit/components/kbd";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/app-kit/components/tooltip";
+import { Button } from "@grasp-os/ui/components/button";
+import { Icon, MessageSquareIcon } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
-import { MessagesSquareIcon } from "lucide-react";
 import {
   createContext,
   lazy,
@@ -32,41 +26,27 @@ const ChatWindow = lazy(async () => {
 /** The chats window's key: ⌘K, or Ctrl K off a Mac. */
 export const chatsKey = "k";
 
-/** A quiet icon in the page's header, named by its tooltip. */
+/** A quiet icon in the page's header, named by its tooltip, its key beside its name there. */
 export const HeaderIcon = ({
   label,
   shortcut,
-  render,
   onClick,
   children,
 }: {
   label: string;
   shortcut?: string;
-  /** What it is, when it is a link rather than a button. */
-  render?: React.ReactElement;
   onClick?: () => void;
   children: ReactNode;
 }) => (
-  <Tooltip>
-    <TooltipTrigger
-      render={
-        render ?? (
-          <Button
-            aria-label={label}
-            onClick={onClick}
-            size="icon-sm"
-            variant="ghost"
-          />
-        )
-      }
-    >
-      {children}
-    </TooltipTrigger>
-    <TooltipContent>
-      {label}
-      {shortcut === undefined ? null : <Kbd>{shortcut}</Kbd>}
-    </TooltipContent>
-  </Tooltip>
+  <Button
+    aria-label={label}
+    onClick={onClick}
+    size="icon-sm"
+    tooltip={shortcut === undefined ? label : `${label} (${shortcut})`}
+    variant="ghost"
+  >
+    {children}
+  </Button>
 );
 
 /** Opens (or closes) the frame's chats window. */
@@ -128,7 +108,7 @@ export const ChatSwitcherButton = () => {
       }}
       shortcut={shortcutLabel(chatsKey)}
     >
-      <MessagesSquareIcon />
+      <Icon icon={MessageSquareIcon} />
     </HeaderIcon>
   );
 };

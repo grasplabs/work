@@ -606,8 +606,8 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
         settling: t`Writing it down`,
       },
       stop: t({ message: "Stop", context: "stop an answer" }),
-      submit: t`Send`,
-      succeeded: t`Done`,
+      submit: t({ message: "Send", context: "send a message" }),
+      succeeded: t({ message: "Done", context: "a message sent" }),
       // Closing a spoken conversation gives the text back.
       voice: {
         close: t`Type instead`,

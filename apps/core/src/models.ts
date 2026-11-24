@@ -2624,6 +2624,30 @@ interface SpeechRoute {
 }
 
 /**
+ * Where Grasp's own key for `provider` goes, as `routes` and the
+ * deployment's hosts have it, or the code it is refused with: Grasp has no
+ * key for it here, or it has no fixed host. The one decision a call and
+ * `canListen` share, so neither says what the other doesn't.
+ */
+const platformTargetOf = (
+  env: Env,
+  routes: AiProviderRoutes,
+  provider: ConnectTarget["provider"]
+):
+  | (ConnectTarget & { platform: PlatformRoute })
+  | "model.not_allowed"
+  | "model.unconfigured" => {
+  if (!routes.platform.includes(provider)) {
+    return "model.not_allowed";
+  }
+  const platform = platformRouteOf(provider, usualHostsOf(env));
+  if (platform === undefined) {
+    return "model.unconfigured";
+  }
+  return { credential: "platform", provider, baseUrl: null, platform };
+};
+
+/**
  * Where a platform voice feature goes: Grasp's own key for `provider`,
  * through connect; refused, and audited, when Grasp has no key for it.
  */
@@ -2632,18 +2656,14 @@ const platformTarget = async (
   call: Session,
   provider: ConnectTarget["provider"]
 ): Promise<ConnectTarget & { platform: PlatformRoute }> => {
-  const routes = await routesOrFailed(env);
-  if (!routes.platform.includes(provider)) {
-    return await refuse(env, call, {
-      code: "model.not_allowed",
-      because: "platform",
-    });
+  const target = platformTargetOf(env, await routesOrFailed(env), provider);
+  if (target === "model.not_allowed") {
+    return await refuse(env, call, { code: target, because: "platform" });
   }
-  const platform = platformRouteOf(provider, usualHostsOf(env));
-  if (platform === undefined) {
-    throw modelErrors.create("model.unconfigured");
+  if (target === "model.unconfigured") {
+    throw modelErrors.create(target);
   }
-  return { credential: "platform", provider, baseUrl: null, platform };
+  return target;
 };
 
 /**
@@ -3206,6 +3226,22 @@ const listenThrough = async (
 };
 
 /**
+ * Whether `model` could be asked to listen here: a transcription model of
+ * the gateway's, whose provider Grasp has a key and a host for. What
+ * `listenThrough` refuses as not allowed or unconfigured, asked without a
+ * call: nothing is sent, charged or audited. The rules judge a call by
+ * where it works, which this has none of.
+ */
+const canListen = async (env: Env, model: string): Promise<boolean> => {
+  const ref = parseHearingRef(model);
+  if (ref === undefined) {
+    return false;
+  }
+  const routes = await routesOrFailed(env);
+  return typeof platformTargetOf(env, routes, ref.provider) !== "string";
+};
+
+/**
  * Says a line through the gateway: refused, audited, before anything is
  * sent when the rules or Grasp's keys don't let it through; otherwise
  * sent, and recorded with the seconds said, however it ended.
@@ -3351,4 +3387,10 @@ export const models = (env: Env) => ({
     await speakLine(env, call, signal),
   listen: async (call: ListeningCall): Promise<Listening> =>
     await listenThrough(env, call),
+  /**
+   * Whether `listen` would take `model` at all, by Grasp's keys and hosts
+   * as they stand: asked before a call, with nothing sent or audited.
+   */
+  canListen: async (model: string): Promise<boolean> =>
+    await canListen(env, model),
 });

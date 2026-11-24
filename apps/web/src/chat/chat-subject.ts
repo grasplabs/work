@@ -34,7 +34,6 @@ import type { ChatSlot } from "./active-chat.ts";
 export const subjectWords = {
   title: msg`Ask for a change`,
   placeholder: msg`Say what should change`,
-  empty: msg`Say what to change. Your team sees the changes once you share them.`,
 } satisfies Record<string, MessageDescriptor>;
 
 /** The tab's slot for `subject`'s chat. */
