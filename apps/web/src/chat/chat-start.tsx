@@ -1,26 +1,31 @@
 import type { Blueprint } from "@grasp-os/shared/apps";
 import type { ChatMake, ChatPlanKind } from "@grasp-os/shared/chat";
 import type { Opportunity } from "@grasp-os/shared/opportunities";
-import { canBuild } from "@grasp-os/shared/roles";
-import { Heading } from "@grasp-os/ui/components/heading";
+import { SidebarTrigger, useSidebar } from "@grasp-os/ui/components/sidebar";
 import { Text } from "@grasp-os/ui/components/text";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import {
+  colors,
+  font,
+  media,
+  radius,
+  shadow,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Await, useRouteContext } from "@tanstack/react-router";
+import { Await } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
 import { briefOf, useStartFrom } from "../brain/opportunity-drafts.ts";
 import type { Session } from "../core.ts";
-import { SiteHeader } from "../frame/site-header.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { examplesFor } from "../make/examples.ts";
 import type { MakeExample } from "../make/examples.ts";
 import { BlueprintIdeas, WorkflowIdeas } from "../make/make-ideas.tsx";
-import { MakeSomethingLink } from "../make/make-link.tsx";
 import { agentModelOf } from "./agent-choice.tsx";
+import { Backdrop } from "./backdrop/backdrop.tsx";
 import { openChat } from "./chat-layout.ts";
-import { ChatSwitcherButton } from "./chat-switcher.tsx";
 import { Composer } from "./composer.tsx";
 import { useGlobalChat } from "./global-chat.tsx";
 import {
@@ -30,8 +35,8 @@ import {
 import { useAsk } from "./use-ask.ts";
 
 // Chat's own page (routes/_shell.index.tsx): where to start. The question
-// "What should we look at today?", centred, with the box to ask in, and
-// Make something for who builds (as on #2503, without Grasp's buddy).
+// "What should we look at today?", centred, with the box to ask in, on
+// the sand (backdrop/), with no bar over the page, as on #2503.
 // Make something comes here too (`make`, from `?make=app` or
 // `?make=workflow` and `&project=`): what to get done, how to say it and
 // ideas to start from under the box (make/make-ideas.tsx), the blueprints for
@@ -43,45 +48,74 @@ import { useAsk } from "./use-ask.ts";
 // Grasp's one chat (global-chat.tsx), which opens full screen over the
 // page with the answer coming in, as on every other page.
 
+const NARROW = media.maxSm;
+
 const styles = stylex.create({
-  page: {
+  // The whole screen: as tall as the page, its column in the middle.
+  screen: {
+    flexGrow: 1,
+    minHeight: "inherit",
     display: "flex",
     flexDirection: "column",
-    flexGrow: 1,
-    minWidth: 0,
-    minHeight: 0,
-    overflowY: "auto",
-  },
-  centre: {
-    display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    minHeight: "100%",
-    // As far in as #2503's: 16px from the sides on a phone.
-    paddingInline: space["4"],
+    boxSizing: "border-box",
+    width: "100%",
+    paddingInline: { default: space["6"], [NARROW]: space["4"] },
     paddingBlock: space["12"],
   },
+  // A little above the middle: room under it, none over it.
   column: {
     display: "flex",
     flexDirection: "column",
+    alignItems: "center",
     gap: space["8"],
     width: "100%",
     maxWidth: "48rem",
-    paddingBlockEnd: space["10"],
+    paddingBottom: space["10"],
+    minWidth: 0,
+    fontFamily: font.sans,
   },
-  greeting: {
+  // With nothing under the box, #2503 keeps the room of the row under it
+  // all the same (one gap): the column stands as high as it does there.
+  bare: { paddingBottom: `calc(${space["10"]} + ${space["8"]})` },
+  title: {
+    margin: 0,
+    fontFamily: font.serif,
+    fontSize: { default: font.headingLg, [NARROW]: font.headingMd },
+    lineHeight: { default: font.headingLgLine, [NARROW]: font.headingMdLine },
+    fontWeight: font.weightNormal,
+    letterSpacing: font.trackingTitle,
+    textAlign: "center",
+    textWrap: "balance",
+    overflowWrap: "anywhere",
+    color: colors.foreground,
+  },
+  // The box, and under it why nothing can be asked yet, across the column.
+  ask: { display: "grid", gap: space["2"], width: "100%", minWidth: 0 },
+  box: { maxWidth: "100%" },
+  // Making something: how to say it, then the ideas, under the box.
+  below: {
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    gap: space["6"],
-    textAlign: "center",
+    gap: space["4"],
+    width: "100%",
+    minWidth: 0,
   },
-  words: { display: "grid", gap: space["4"] },
-  // The box takes the column's whole width, wider than its own at most, as
-  // on #2503: 48rem at most.
-  box: { maxWidth: "100%" },
-  // The box and, under it, why nothing can be asked yet.
-  ask: { display: "grid", gap: space["2"] },
+  // With no bar over the page: the sidebar's way back, floating at its
+  // top corner, raised: a control of its own that reads over the sand.
+  trigger: {
+    position: "absolute",
+    insetBlockStart: space["2"],
+    insetInlineStart: space["2"],
+    zIndex: 1,
+    display: "flex",
+    borderRadius: `min(${radius.base}, calc(${size.controlXs} / 2))`,
+    cornerShape: radius.shape,
+    backgroundColor: colors.card,
+    boxShadow: shadow.sm,
+  },
 });
 
 /** What Make something offers to start from: an App's blueprints, or a workflow's starting sentences. */
@@ -113,13 +147,13 @@ const Ideas = ({
 
 /** The page's question: what to look at, or, making something, what to get done. */
 const Greeting = ({ making }: { making: boolean }) => (
-  <Heading id="new-chat" level={1} size="lg">
+  <h1 id="new-chat" {...stylex.props(styles.title)}>
     {making ? (
       <Trans>What do you want to get done?</Trans>
     ) : (
       <Trans>What should we look at today?</Trans>
     )}
-  </Heading>
+  </h1>
 );
 
 /** Under the box, making something: how to say it, then the ideas to start from. */
@@ -130,7 +164,7 @@ const Making = ({
   ideas: Promise<Loaded<MakeIdeas>> | undefined;
   onPick: (text: string) => void;
 }) => (
-  <div {...stylex.props(styles.words)}>
+  <div {...stylex.props(styles.below)}>
     <Text as="p" color="muted" size="sm">
       <Trans>
         Say it like you&apos;d tell a colleague. Grasp works out what to make.
@@ -177,8 +211,12 @@ export const ChatStart = ({
 }) => {
   const { t, i18n } = useLingui();
   const { offered, modelsUnavailable, retry } = useGlobalChat();
+  // The column the sand keeps clear of.
+  const column = useRef<HTMLDivElement>(null);
+  // With no bar over the page, the sidebar's trigger where the sidebar is away.
+  const { state, isMobile } = useSidebar();
+  const away = isMobile || state === "collapsed";
   const unavailable = unavailableText(modelsUnavailable);
-  const { identity } = useRouteContext({ from: "/_shell" });
   const agents = offered?.agents ?? [];
   const named = agents.find(({ id }) => id === agent);
   const { composer } = useAsk(
@@ -219,49 +257,39 @@ export const ChatStart = ({
     }
   });
   return (
-    <>
-      <SiteHeader
-        actions={
-          <>
-            {canBuild(identity.role) ? (
-              <MakeSomethingLink kind="app" size="sm" />
-            ) : null}
-            <ChatSwitcherButton />
-          </>
-        }
-        crumbs={[{ label: t`Chat` }]}
-      />
-      <section aria-labelledby="new-chat" {...stylex.props(styles.page)}>
-        <div {...stylex.props(styles.centre)}>
-          <div {...stylex.props(styles.column)}>
-            <div {...stylex.props(styles.greeting)}>
-              <Greeting making={make !== undefined} />
-            </div>
-            <div {...stylex.props(styles.ask)}>
-              <Composer
-                placeholder={t`Ask anything, or describe a process`}
-                agentModel={agentModelOf(agents, answering)}
-                running={false}
-                style={styles.box}
-                {...(unavailable === undefined ? {} : { unavailable })}
-                {...composer}
-              />
-              <ModelsUnavailableNotice
-                onRetry={retry}
-                why={modelsUnavailable}
-              />
-            </div>
-            {make === undefined ? null : (
-              <Making
-                ideas={ideas}
-                onPick={(text) => {
-                  composer.onText(text);
-                }}
-              />
-            )}
+    <Backdrop clear={column}>
+      {away ? (
+        <span {...stylex.props(styles.trigger)}>
+          <SidebarTrigger />
+        </span>
+      ) : null}
+      <section aria-labelledby="new-chat" {...stylex.props(styles.screen)}>
+        <div
+          ref={column}
+          {...stylex.props(styles.column, make === undefined && styles.bare)}
+        >
+          <Greeting making={make !== undefined} />
+          <div {...stylex.props(styles.ask)}>
+            <Composer
+              placeholder={t`Ask anything, or describe a process`}
+              agentModel={agentModelOf(agents, answering)}
+              running={false}
+              style={styles.box}
+              {...(unavailable === undefined ? {} : { unavailable })}
+              {...composer}
+            />
+            <ModelsUnavailableNotice onRetry={retry} why={modelsUnavailable} />
           </div>
+          {make === undefined ? null : (
+            <Making
+              ideas={ideas}
+              onPick={(text) => {
+                composer.onText(text);
+              }}
+            />
+          )}
         </div>
       </section>
-    </>
+    </Backdrop>
   );
 };

@@ -2,6 +2,7 @@ import { recallBudgetMax } from "@grasp-os/brain-next/contract";
 import { appFilesPath } from "@grasp-os/shared/app-file-limits";
 import { appLinksPath } from "@grasp-os/shared/app-link-limits";
 import { auditExportPath } from "@grasp-os/shared/audit-log";
+import { chatFilePath } from "@grasp-os/shared/chat";
 import { errorReportPath } from "@grasp-os/shared/error-reports";
 import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { organizationLogoPath } from "@grasp-os/shared/organization";
@@ -141,6 +142,7 @@ const routeAnswers = async (cookie?: string) => ({
   auditExport: await got(`${auditExportPath}?format=csv`, cookie),
   brainExport: await got(brainOwnExportPath, cookie),
   organizationLogo: await got(organizationLogoPath("0".repeat(64)), cookie),
+  chatPicture: await got(chatFilePath("chat-none", "file-none"), cookie),
   errorReport: await posted(errorReportPath, cookie, {
     message: "Broken",
   }),

@@ -288,6 +288,13 @@
       "when": 1795260522850,
       "tag": "0040_chat_archived_project",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1795527228724,
+      "tag": "0041_chat_file_parts",
+      "breakpoints": true
     }
   ]
 }

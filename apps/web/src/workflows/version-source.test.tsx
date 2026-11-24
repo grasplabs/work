@@ -134,7 +134,7 @@ describe("a version's definition and source", () => {
     document.body.replaceChildren();
   });
 
-  it("names each version by its label, shows the definition of exactly the version picked, and lists its source files to download", async () => {
+  it("names each version as its page does, v2, shows the definition of exactly the version picked, and lists its source files to download", async () => {
     const asked = await shown(true);
     const choice = document.querySelector<HTMLElement>(
       '[role="combobox"][aria-label="Version"]'
@@ -150,7 +150,7 @@ describe("a version's definition and source", () => {
     // Each version by its label.
     const options = offered.map((each) => each.textContent.trim());
     await act(async () => {
-      offered.find((each) => each.textContent.trim() === "26.11.1")?.click();
+      offered.find((each) => each.textContent.trim() === "v1")?.click();
       await settled();
     });
     await press("Show its definition");
@@ -166,8 +166,8 @@ describe("a version's definition and source", () => {
         .filter((label) => label?.startsWith("Download") === true),
     }).toStrictEqual({
       // The latest, until another is picked.
-      latest: "26.11.2",
-      options: ["26.11.1", "26.11.2"],
+      latest: "v2",
+      options: ["v1", "v2"],
       asked: [
         { files: "workflow-1", version: 1 },
         { source: "workflow-1", version: 1 },

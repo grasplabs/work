@@ -24,7 +24,7 @@ const styles = stylex.create({
 });
 
 /** The info mark: `children` said on hover and focus; `label` names it for a screen reader. */
-const InfoTip = ({
+export const InfoTip = ({
   label,
   children,
 }: {
