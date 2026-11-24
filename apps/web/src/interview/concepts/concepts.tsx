@@ -32,6 +32,7 @@ import { Frame } from "./frame.tsx";
 import type { ClockPlace } from "./frame.tsx";
 import { ReadBackPlaceholder } from "./read-back.tsx";
 import { ConsentClean } from "./start-clean.tsx";
+import type { StartBody } from "./start-clean.tsx";
 import {
   Consent,
   consentTurn,
@@ -69,6 +70,10 @@ export interface ConceptSearch {
   band: "header" | "low";
   /** Ruben's alternative title on A's start (`&title=alt`). */
   altTitle: boolean;
+  /** The start's body (`&body=a|b`): A the short paragraph, B with the fold-out. */
+  body: StartBody;
+  /** The person's name, to try a long one (`&name=`). */
+  name: string;
   /** The countdown's look (`&count=a|b|c`): A small, B large, C minutes only. */
   countLook: CountdownLook;
   /** On a laptop: the pages before the conversation beside the dither, or centred in the whole window (`&layout=centre`). */
@@ -103,7 +108,13 @@ export const conceptSearch = (
     fold: search.fold !== undefined,
     band: search.band === "header" ? "header" : "low",
     altTitle: search.title === "alt",
-    centred: search.layout === "centre",
+    // Centred in the whole window by default (Ruben chose it); the split beside the dither with `&layout=split`.
+    centred: search.layout !== "split",
+    body: search.body === "a" ? "a" : "b",
+    name:
+      typeof search.name === "string" && search.name !== ""
+        ? search.name
+        : fixture.person,
     countLook: countLookOf(search.count),
   };
 };
@@ -360,12 +371,16 @@ const BeforeAB = ({
   screen,
   live,
   altTitle,
+  body,
+  name,
   go,
 }: {
   concept: Concept;
   screen: string;
   live: boolean;
   altTitle: boolean;
+  body: StartBody;
+  name: string;
   go: (screen: string) => void;
 }) => {
   const [when, setWhen] = useState<string>(fixture.remindAt[1].when);
@@ -419,6 +434,8 @@ const BeforeAB = ({
         return (
           <ConsentClean
             altTitle={altTitle}
+            body={body}
+            name={name}
             onAgree={() => {
               go("hello");
             }}
@@ -546,9 +563,11 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
     page = (
       <BeforeAB
         altTitle={search.altTitle}
+        body={search.body}
         concept={concept}
         go={go}
         live={live}
+        name={search.name}
         screen={screen}
       />
     );
