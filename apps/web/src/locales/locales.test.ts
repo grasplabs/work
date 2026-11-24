@@ -144,11 +144,13 @@ describe("translations", () => {
         // One word can sit inside another language's ("Diagram" in
         // "Diagramme", "Un admin" in "Un administrador"), and Spanish may only
         // add its "¿"; another language's sentence, as whole words, beside
-        // more words, cannot.
+        // more words, cannot. The plain substring test comes first: building
+        // a pattern for every message of every language took seconds.
         const holdsAnother = others.some((other) => {
           const theirs = other.get(entry.key)?.trim() ?? "";
           return (
             /\s/u.test(theirs) &&
+            entry.str.includes(theirs) &&
             wholeWords(theirs).test(entry.str) &&
             /\p{L}/u.test(entry.str.replace(theirs, ""))
           );
