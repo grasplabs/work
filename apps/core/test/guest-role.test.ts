@@ -21,6 +21,7 @@ import { onLink, openedFor } from "./interview-link.ts";
 import { clientOrigin } from "./sign-in-config.ts";
 import {
   callAuth,
+  openRpc,
   outcome,
   routed,
   signIn,
@@ -257,12 +258,31 @@ describe("a guest", { timeout: 60_000 }, () => {
   });
 
   it("reads nothing of the Brain", async () => {
-    const member = await signedInWithRole(idp, "user");
+    const member = await signedInApi(idp, "user");
     const guest = await signedInGuest();
+    const { core } = await openRpc(guest.session);
+    const guestApi = core.authenticate();
 
     await expect(
       Promise.all([recalled(member.userId), recalled(guest.userId)])
     ).resolves.toStrictEqual(["ok", "permission.person_inactive"]);
+    // Nor its workspace, or its tools alone, over /rpc.
+    expect({
+      member: {
+        read: await outcome(member.api.brain.read()),
+        tools: await outcome(member.api.brain.tools()),
+      },
+      guest: {
+        read: await outcome(guestApi.brain.read()),
+        tools: await outcome(guestApi.brain.tools()),
+      },
+    }).toStrictEqual({
+      member: { read: "ok", tools: "ok" },
+      guest: {
+        read: "auth.unauthenticated",
+        tools: "auth.unauthenticated",
+      },
+    });
   });
 
   it("opens no interview, even one whose link went to their address", async () => {
