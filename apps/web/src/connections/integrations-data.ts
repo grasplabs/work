@@ -1,11 +1,14 @@
-import { canBuild } from "@grasp-os/shared/roles";
+import type { AppRequest } from "@grasp-os/shared/connect";
+import { canBuild, isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { listedOrNone } from "../directory.ts";
 import { loadFromCore } from "../load-from-core.tsx";
+import type { Loaded } from "../load-from-core.tsx";
 import type { HeldPermissions } from "./connection-list.tsx";
+import type { Known } from "./recommended.ts";
 
 // What the Integrations pages read: the catalog, the connections this
 // person can see, which of the workflows they can open use each, and,
@@ -54,4 +57,31 @@ export const loadIntegrations = async (
       : undefined,
   ]);
   return { catalog, connections, uses, held: permissions };
+};
+
+/**
+ * What Recommended's reasons are read from: the brain's tools and teams,
+ * as far as the person may read them; for the company's admins, the
+ * suites the kickoff names (the onboarding is theirs); and the apps people
+ * asked for. A read that fails gives no reasons, never an error.
+ */
+export const knownOf = async (
+  core: CoreConnection,
+  identity: Identity,
+  requests: Promise<Loaded<AppRequest[]>>
+): Promise<Known> => {
+  const [brain, onboarding, asked] = await Promise.all([
+    loadFromCore(core, async (session) => await session.brain.read()),
+    isAdmin(identity.role)
+      ? loadFromCore(core, async (session) => await session.onboarding.view())
+      : undefined,
+    requests,
+  ]);
+  const workspace = brain.state === "ready" ? brain.data : undefined;
+  return {
+    suites: onboarding?.state === "ready" ? onboarding.data.context.suites : [],
+    tools: workspace?.tools ?? [],
+    teams: workspace?.teams ?? [],
+    requests: asked.state === "ready" ? asked.data : [],
+  };
 };

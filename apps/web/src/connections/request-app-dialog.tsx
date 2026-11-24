@@ -1,40 +1,60 @@
-import { Button } from "@grasp-os/app-kit/components/button";
+import type { AppRequest, AppRequestInput } from "@grasp-os/shared/connect";
+import { Alert, AlertTitle } from "@grasp-os/ui/components/alert";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   Dialog,
+  DialogBody,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@grasp-os/app-kit/components/dialog";
+} from "@grasp-os/ui/components/dialog";
 import {
   Field,
   FieldDescription,
   FieldError,
   FieldLabel,
-} from "@grasp-os/app-kit/components/field";
-import { Input } from "@grasp-os/app-kit/components/input";
-import { Textarea } from "@grasp-os/app-kit/components/textarea";
-import type { AppRequest, AppRequestInput } from "@grasp-os/shared/connect";
-import { Trans, useLingui } from "@lingui/react/macro";
+} from "@grasp-os/ui/components/field";
+import { Form } from "@grasp-os/ui/components/form";
+import { Input } from "@grasp-os/ui/components/input";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+  ItemMedia,
+  ItemSeparator,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { SectionHeader } from "@grasp-os/ui/components/section-header";
+import { Textarea } from "@grasp-os/ui/components/textarea";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link, useRouter } from "@tanstack/react-router";
-import { CircleCheckIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useId, useState } from "react";
 
 import { formatDate } from "../format.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { AppLogo } from "./app-logo.tsx";
 import { beyond, nearestApps, stateOf } from "./integrations.ts";
 import type { Integration } from "./integrations.ts";
+import { ProviderMark } from "./provider-mark.tsx";
 
 // Asking Grasp for an app it can't reach yet, as in the prototype
 // (`components/request-app-dialog.tsx`). While the name is typed the apps
 // that are already here show first, the company's own and then the
 // catalog's, so nobody asks for one that exists; "It is not one of these"
 // goes on to the link and the reason. Core keeps one request per name.
+
+const styles = stylex.create({
+  // The room #2503's separated list kept at its top and foot.
+  matches: { marginBlock: space["1"] },
+});
 
 const asName = (value: string): string => value.trim().toLocaleLowerCase();
 
@@ -54,25 +74,33 @@ const Match = ({
 }: {
   integration: Integration;
   own: boolean;
-}) => (
-  <li className="flex h-12 items-center gap-3">
-    <AppLogo logo={integration.logo} name={integration.name} size="sm" />
-    <span className="min-w-0 flex-1 truncate">{integration.name}</span>
-    <Button
-      nativeButton={false}
-      render={
-        <Link
-          params={{ integration: integration.key }}
-          to="/integrations/$integration"
+}) => {
+  const { t } = useLingui();
+  return (
+    <Item size="xs">
+      <ItemMedia align="center">
+        <ProviderMark
+          id={integration.id}
+          logo={integration.logo}
+          name={integration.name}
         />
-      }
-      size="sm"
-      variant="outline"
-    >
-      {own ? <Trans>Open</Trans> : <Trans>Connect</Trans>}
-    </Button>
-  </li>
-);
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle>{integration.name}</ItemTitle>
+      </ItemContent>
+      <ItemActions>
+        <Button asChild size="sm" variant="outline">
+          <Link
+            params={{ integration: integration.key }}
+            to="/integrations/$integration"
+          >
+            {own ? t`Open` : t`Connect`}
+          </Link>
+        </Button>
+      </ItemActions>
+    </Item>
+  );
+};
 
 /** The apps nearest to what is typed: the company's own, then the catalog's. */
 const Matches = ({
@@ -81,42 +109,46 @@ const Matches = ({
 }: {
   own: Integration[];
   others: Integration[];
-}) => (
-  <section aria-labelledby="request-here" className="flex flex-col gap-1">
-    <h3 className="text-muted-foreground" id="request-here">
-      <Trans>Already here, in case you mean one of these</Trans>
-    </h3>
-    <ul className="flex flex-col">
-      {own.map((integration) => (
-        <Match integration={integration} key={integration.key} own />
-      ))}
-      {others.map((integration) => (
-        <Match integration={integration} key={integration.key} own={false} />
-      ))}
-    </ul>
-  </section>
-);
+}) => {
+  const { t } = useLingui();
+  const title = t`Already here, in case you mean one of these`;
+  return (
+    <section>
+      <SectionHeader size="sm" title={title} />
+      <ItemGroup aria-label={title} style={styles.matches}>
+        {[...own, ...others].map((integration, index) => (
+          <Fragment key={integration.key}>
+            {index > 0 && <ItemSeparator />}
+            <Match integration={integration} own={own.includes(integration)} />
+          </Fragment>
+        ))}
+      </ItemGroup>
+    </section>
+  );
+};
 
-const Sent = ({ onClose }: { onClose: () => void }) => (
-  <>
-    <DialogHeader className="items-center text-center">
-      <CircleCheckIcon aria-hidden="true" className="size-8" />
-      <DialogTitle>
-        <Trans>Forwarded to our team</Trans>
-      </DialogTitle>
-      <DialogDescription>
-        <Trans context="“Requested” is the name of a section on the Integrations page.">
-          Grasp checks what it takes to connect it. You find it under Requested.
-        </Trans>
-      </DialogDescription>
-    </DialogHeader>
-    <DialogFooter>
-      <Button onClick={onClose} variant="outline">
-        <Trans>Close</Trans>
-      </Button>
-    </DialogFooter>
-  </>
-);
+/** The request went: where to find it now. */
+const Sent = () => {
+  const { t } = useLingui();
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>{t`Forwarded to our team`}</DialogTitle>
+        <DialogDescription>
+          {t({
+            message:
+              "Grasp checks what it takes to connect it. You find it under Requested.",
+            context:
+              "“Requested” is the name of a section on the Integrations page.",
+          })}
+        </DialogDescription>
+      </DialogHeader>
+      <DialogFooter>
+        <DialogClose>{t`Close`}</DialogClose>
+      </DialogFooter>
+    </>
+  );
+};
 
 /** The link and the reason, asked once none of the apps here is meant. */
 const Details = ({
@@ -136,37 +168,27 @@ const Details = ({
   return (
     <>
       <Field data-invalid={badUrl}>
-        <FieldLabel htmlFor="request-url">
-          <Trans>Its link</Trans>
-        </FieldLabel>
+        <FieldLabel>{t`Its link`}</FieldLabel>
         <Input
-          aria-invalid={badUrl}
           id="request-url"
-          inputMode="url"
           maxLength={2048}
-          onChange={(event) => {
-            onUrl(event.target.value);
-          }}
+          onValueChange={onUrl}
           placeholder="https://"
           type="url"
           value={url}
         />
         {badUrl ? (
-          <FieldError>
-            <Trans>Use an address that starts with http:// or https://.</Trans>
+          <FieldError match>
+            {t`Use an address that starts with http:// or https://.`}
           </FieldError>
         ) : null}
       </Field>
       <Field>
-        <FieldLabel htmlFor="request-why">
-          <Trans>What should Grasp do there?</Trans>
-        </FieldLabel>
+        <FieldLabel>{t`What should Grasp do there?`}</FieldLabel>
         <Textarea
           id="request-why"
           maxLength={2000}
-          onChange={(event) => {
-            onWhy(event.target.value);
-          }}
+          onValueChange={onWhy}
           placeholder={t`For example: read new hires and prepare their first day`}
           value={why}
         />
@@ -197,12 +219,11 @@ const askedBefore = (
 
 const RequestFlow = ({
   integrations,
-  onClose,
 }: {
   integrations: readonly Integration[];
-  onClose: () => void;
 }) => {
   const { t } = useLingui();
+  const formId = useId();
   const core = useCore();
   const { busy, failure, run } = useCoreAction();
   const router = useRouter();
@@ -260,93 +281,84 @@ const RequestFlow = ({
       setSent(true);
       // The page reads its requests again, so the new one shows under
       // Requested, where "Forwarded to our team" says to find it.
-      await router.invalidate();
+      await router.invalidate({ sync: true });
     }
   };
   if (sent) {
-    return <Sent onClose={onClose} />;
+    return <Sent />;
   }
   return (
-    <form
-      className="flex flex-col gap-5"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (details && !badUrl && before === undefined && !busy) {
-          void send();
-        }
-      }}
-    >
+    <>
       <DialogHeader>
-        <DialogTitle>
-          <Trans>Request an app</Trans>
-        </DialogTitle>
-        <DialogDescription>
-          <Trans>
-            A workflow needs an app that is not here yet? Tell Grasp which one,
-            and what it should do there.
-          </Trans>
-        </DialogDescription>
+        <DialogTitle>{t`Request an app`}</DialogTitle>
       </DialogHeader>
-      <Field>
-        <FieldLabel htmlFor="request-name">
-          <Trans>App</Trans>
-        </FieldLabel>
-        <Input
-          id="request-name"
-          maxLength={128}
-          onChange={(event) => {
-            setName(event.target.value);
-            setNone(false);
+      <DialogBody>
+        <Form
+          id={formId}
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (details && !badUrl && before === undefined && !busy) {
+              void send();
+            }
           }}
-          placeholder={t`For example Personio or Twinfield`}
-          value={name}
-        />
-        {before === undefined ? null : (
-          <FieldDescription>
-            <Trans>
-              {asker} already asked for it on {askedOn}.
-            </Trans>
-          </FieldDescription>
-        )}
-      </Field>
-      {hasMatches ? <Matches others={others} own={own} /> : null}
-      {hasMatches && !none && !exact ? (
-        <Button
-          className="self-start"
-          onClick={() => {
-            setNone(true);
-          }}
-          variant="outline"
         >
-          <Trans>It is not one of these</Trans>
-        </Button>
-      ) : null}
-      {details ? (
-        <Details
-          badUrl={badUrl}
-          onUrl={setUrl}
-          onWhy={setWhy}
-          url={url}
-          why={why}
-        />
-      ) : null}
-      {failure === undefined ? null : (
-        <p className="text-destructive text-sm" role="alert">
-          {failure}
-        </p>
-      )}
+          <Field>
+            <FieldLabel>{t`App`}</FieldLabel>
+            <Input
+              id="request-name"
+              maxLength={128}
+              onValueChange={(typed) => {
+                setName(typed);
+                setNone(false);
+              }}
+              placeholder={t`For example Personio or Twinfield`}
+              value={name}
+            />
+            {before === undefined ? null : (
+              <FieldDescription>
+                {t`${asker} already asked for it on ${askedOn}.`}
+              </FieldDescription>
+            )}
+          </Field>
+          {hasMatches ? <Matches others={others} own={own} /> : null}
+          {hasMatches && !none && !exact ? (
+            <Button
+              onClick={() => {
+                setNone(true);
+              }}
+              size="sm"
+              variant="outline"
+            >
+              {t`It is not one of these`}
+            </Button>
+          ) : null}
+          {details ? (
+            <Details
+              badUrl={badUrl}
+              onUrl={setUrl}
+              onWhy={setWhy}
+              url={url}
+              why={why}
+            />
+          ) : null}
+          {failure === undefined ? null : (
+            <Alert variant="destructive">
+              <AlertTitle>{failure}</AlertTitle>
+            </Alert>
+          )}
+        </Form>
+      </DialogBody>
       <DialogFooter>
-        <Button onClick={onClose} variant="outline">
-          <Trans>Cancel</Trans>
-        </Button>
+        <DialogClose>{t`Cancel`}</DialogClose>
         <Button
           disabled={!details || badUrl || before !== undefined || busy}
+          form={formId}
           type="submit"
         >
-          <Trans>Send request</Trans>
+          {t`Send request`}
         </Button>
       </DialogFooter>
-    </form>
+    </>
   );
 };
 
@@ -361,15 +373,9 @@ export const RequestAppDialog = ({
   open: boolean;
 }) => (
   <Dialog onOpenChange={onOpenChange} open={open}>
-    <DialogContent className="sm:max-w-md">
-      {open ? (
-        <RequestFlow
-          integrations={integrations}
-          onClose={() => {
-            onOpenChange(false);
-          }}
-        />
-      ) : null}
+    <DialogContent>
+      {/* Mounted only while open, so it starts empty each time. */}
+      {open ? <RequestFlow integrations={integrations} /> : null}
     </DialogContent>
   </Dialog>
 );
