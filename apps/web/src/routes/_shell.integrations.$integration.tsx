@@ -1,71 +1,40 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
-import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@grasp-os/app-kit/components/tabs";
-import type { CatalogTool, ListedConnection } from "@grasp-os/shared/connect";
-import { isAdmin } from "@grasp-os/shared/roles";
-import type { Identity } from "@grasp-os/shared/rpc";
-import type { MessageDescriptor } from "@lingui/core";
-import { msg, plural } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { Await, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { Alert, AlertTitle } from "@grasp-os/ui/components/alert";
+import { useLingui } from "@lingui/react/macro";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 
-import { AppLogo } from "../connections/app-logo.tsx";
+import { useSettled } from "../connections/app-of.tsx";
+import { IntegrationAppPage } from "../connections/app-page.tsx";
 import {
-  canConnect,
-  ConnectDialog,
-  signInAgainTarget,
-} from "../connections/connect-dialog.tsx";
-import { ConnectedDialog } from "../connections/connected-dialog.tsx";
-import { ConnectionList } from "../connections/connection-list.tsx";
+  ConnectedDialog,
+  returnedOf,
+} from "../connections/connected-dialog.tsx";
+import { ConnectionsAccess } from "../connections/connection-list.tsx";
 import type { HeldPermissions } from "../connections/connection-list.tsx";
+import { useWhyNoConnect } from "../connections/integration-facts.ts";
 import { loadIntegrations } from "../connections/integrations-data.ts";
+import { IntegrationSkeleton } from "../connections/integrations-skeleton.tsx";
 import {
   integrationsOf,
   parseIntegrationKey,
-  stateOf,
 } from "../connections/integrations.ts";
-import type {
-  Integration,
-  IntegrationState,
-} from "../connections/integrations.ts";
-import { OfferSwitch } from "../connections/offer-switch.tsx";
-import {
-  changeableConnectionOf,
-  ToolPermissions,
-} from "../connections/tool-permissions.tsx";
-import {
-  WorkflowsCount,
-  WorkflowsUsing,
-} from "../connections/workflows-using.tsx";
-import { ErrorText } from "../error-text.tsx";
-import { formatDate, formatDayMonth } from "../format.ts";
+import type { Integration } from "../connections/integrations.ts";
+import { PartNotLoaded } from "../connections/part-not-loaded.tsx";
 import { IntegrationsIcon } from "../frame/integrations-icon.tsx";
-import {
-  LoadingLines,
-  NotFound,
-  PageLoading,
-  PageNotLoaded,
-} from "../frame/page-states.tsx";
+import { NotFound, PageNotLoaded } from "../frame/page-states.tsx";
 import { Page } from "../frame/page.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
-import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
+import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 
-// One integration, as in the prototype (`routes/integrations/$integrationId.tsx`):
-// its tile, name and what it is for, then Overview (where it stands, what
-// its tools can do, and, for admins, whether it is offered), Workflows
-// (those the person can open that use it) and Account (each connection
-// made to it: who connected it, when, signing in again and
-// disconnecting). A flow comes back here from the provider, through
-// core's callback, with `connection=<id>` (and `again=1` when it signed in
-// again), and opens the success page.
+// One integration, on its app page (connections/app-page.tsx),
+// in one column: its head in the app's own colour, a row for each account,
+// the workflows that use it and what Grasp may do with its tools; then
+// why the page can't say all it would, and what each connection holds
+// besides (its consent, who may read in the Brain what agents read through
+// it, the Apps and agents holding a permission for it). A
+// flow comes back here from the provider, through core's callback, with
+// `connection=<id>` (and `again=1` when it signed in again), and opens the
+// success page.
 
 type Tab = "overview" | "workflows" | "account";
 
@@ -76,520 +45,82 @@ interface IntegrationSearch {
   again?: true;
 }
 
-const stateText: Record<
-  Exclude<IntegrationState, "not_connected">,
-  MessageDescriptor
-> = {
-  needs_reauth: msg`Needs someone to sign in again`,
-  shared: msg`Active, for the whole company`,
-  personal: msg`Active, only for you`,
-};
-
 /** Why the permissions Apps and agents hold can't be shown; nothing once they can. */
 const HeldNotLoaded = ({
   held,
 }: {
   held: Loaded<HeldPermissions> | undefined;
 }) => {
-  const { i18n, t } = useLingui();
-  const why = held === undefined ? undefined : notLoadedText(held, i18n);
-  if (why === undefined) {
-    return null;
-  }
-  return (
-    <ErrorText>{t`Which Apps and agents hold permissions: ${why}`}</ErrorText>
-  );
-};
-
-/** One tool: its name and what it does; marked where a connection doesn't allow it. */
-const ToolRow = ({
-  tool,
-  allowed,
-}: {
-  tool: CatalogTool;
-  allowed: boolean;
-}) => (
-  <li className="flex min-h-11 items-center gap-3 border-b px-4 py-3 last:border-b-0">
-    <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-      <span
-        className={
-          allowed
-            ? "truncate font-mono text-xs"
-            : "text-muted-foreground truncate font-mono text-xs"
-        }
-      >
-        {tool.name}
-      </span>
-      {tool.description === null ? null : (
-        <span className="text-muted-foreground line-clamp-2 text-xs">
-          {tool.description}
-        </span>
-      )}
-    </div>
-    {allowed ? null : (
-      <Badge variant="outline">
-        <Trans>Not allowed</Trans>
-      </Badge>
-    )}
-  </li>
-);
-
-// The prototype's groups: what only reads, then what creates or changes.
-const toolGroups = [
-  {
-    id: "read",
-    readOnly: true,
-    title: msg({ message: "Read", context: "permission group" }),
-  },
-  {
-    id: "change",
-    readOnly: false,
-    title: msg({ message: "Create and change", context: "permission group" }),
-  },
-] as const;
-
-/**
- * The tools a Composio connection allows, as the admin who connected it
- * chose them; none to go by for a native one, whose every tool is there.
- */
-const allowedToolsOf = (
-  integration: Integration
-): ReadonlySet<string> | undefined => {
-  const chosen = integration.connections.flatMap(({ tools }) => tools ?? []);
-  return integration.source === "composio" && integration.connections.length > 0
-    ? new Set(chosen)
-    : undefined;
-};
-
-/** The connection whose tools the person may change here, and whether they are staff. */
-interface Changeable {
-  connection: ListedConnection;
-  staff: boolean;
-}
-
-/**
- * What its tools can do, as its provider declares them, reads first: with
- * a switch each where the person may change which a connection allows.
- */
-const ToolList = ({
-  tools,
-  app,
-  allowed,
-  changeable,
-}: {
-  tools: Loaded<CatalogTool[]>;
-  app: string;
-  allowed: ReadonlySet<string> | undefined;
-  changeable: Changeable | undefined;
-}) => {
-  const { i18n } = useLingui();
-  if (tools.state !== "ready") {
-    return <ErrorText>{notLoadedText(tools, i18n)}</ErrorText>;
-  }
-  if (tools.data.length === 0) {
-    return (
-      <p className="text-muted-foreground">
-        <Trans>{app} has no tools.</Trans>
-      </p>
-    );
-  }
-  if (changeable !== undefined) {
-    return (
-      <ToolPermissions
-        connection={changeable.connection}
-        staff={changeable.staff}
-        tools={tools.data}
-      />
-    );
-  }
-  return (
-    <div className="flex flex-col gap-4">
-      {toolGroups.map((group) => {
-        const inGroup = tools.data.filter(
-          ({ readOnly }) => readOnly === group.readOnly
-        );
-        return inGroup.length === 0 ? null : (
-          <div className="flex flex-col gap-2" key={group.id}>
-            <h3 className="text-muted-foreground text-xs font-medium">
-              {i18n._(group.title)}
-            </h3>
-            <ul className="bg-card flex flex-col overflow-hidden rounded-xl border">
-              {inGroup.map((tool) => (
-                <ToolRow
-                  allowed={allowed?.has(tool.name) ?? true}
-                  key={tool.name}
-                  tool={tool}
-                />
-              ))}
-            </ul>
-          </div>
-        );
-      })}
-    </div>
-  );
-};
-
-/**
- * Its tools once their read comes (the rest of the page doesn't wait for
- * it), or why there are none to show: the catalog couldn't be read, or
- * doesn't list it.
- */
-const Tools = ({
-  tools,
-  catalog,
-  app,
-  allowed,
-  changeable,
-}: {
-  tools: Promise<Loaded<CatalogTool[]>> | undefined;
-  catalog: Loaded<unknown>;
-  app: string;
-  allowed: ReadonlySet<string> | undefined;
-  changeable: Changeable | undefined;
-}) => {
-  const { i18n } = useLingui();
-  if (tools === undefined && catalog.state !== "ready") {
-    return <ErrorText>{notLoadedText(catalog, i18n)}</ErrorText>;
-  }
-  if (tools === undefined) {
-    return (
-      <p className="text-muted-foreground">
-        <Trans>
-          The catalog doesn&apos;t list {app}, so its tools can&apos;t be shown.
-        </Trans>
-      </p>
-    );
-  }
-  return (
-    <Await fallback={<LoadingLines />} promise={tools}>
-      {(loaded) => (
-        <ToolList
-          allowed={allowed}
-          app={app}
-          changeable={changeable}
-          tools={loaded}
-        />
-      )}
-    </Await>
-  );
-};
-
-/**
- * What its connections reach: the tools a Composio connection's admin
- * allowed, or, for a native one, every tool, as Apps and agents are
- * granted them.
- */
-const Reaches = ({ integration }: { integration: Integration }) => {
   const { t } = useLingui();
-  const allowed = allowedToolsOf(integration);
-  if (allowed === undefined) {
-    return (
-      <Trans>
-        Every tool it has: Apps and agents use only what they are granted.
-      </Trans>
-    );
-  }
-  const total = integration.toolCount;
-  const count = allowed.size;
-  return total === undefined
-    ? t`${plural(count, { one: "# tool allowed", other: "# tools allowed" })}`
-    : t`${plural(total, { one: `${count} of its # tool allowed`, other: `${count} of its # tools allowed` })}`;
-};
-
-/**
- * Where its account stands, once it is connected: signing in again to the
- * first connection whose access ran out that this person may sign in to
- * again, who connected it, and what it reaches. An active connection has
- * nothing to sign in to again (connect refuses it as already connected).
- * Each connection's own card is on Account.
- */
-const AccountCard = ({
-  integration,
-  identity,
-}: {
-  integration: Integration;
-  identity: Identity;
-}) => {
-  const { i18n } = useLingui();
-  const [signingIn, setSigningIn] = useState(false);
-  const state = stateOf(integration);
-  const target = signInAgainTarget(integration, identity);
-  return (
-    <section
-      aria-labelledby="integration-status"
-      className="flex flex-col gap-3"
-    >
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="font-medium" id="integration-status">
-          <Trans>Account</Trans>
-        </h2>
-        {target === undefined ? null : (
-          <Button
-            onClick={() => {
-              setSigningIn(true);
-            }}
-            size="sm"
-          >
-            <Trans>Sign in again</Trans>
-          </Button>
-        )}
-      </div>
-      <dl className="bg-card grid grid-cols-[auto_minmax(0,1fr)] gap-x-8 gap-y-3 rounded-xl border p-4">
-        <dt className="text-muted-foreground">
-          <Trans>Status</Trans>
-        </dt>
-        <dd className="flex items-center gap-2">
-          <span
-            aria-hidden="true"
-            className={
-              state === "needs_reauth"
-                ? "bg-status-attention size-1.75 rounded-full"
-                : "bg-status-agreed size-1.75 rounded-full"
-            }
-          />
-          {state === "not_connected" ? null : i18n._(stateText[state])}
-        </dd>
-        <dt className="text-muted-foreground">
-          <Trans>Reaches</Trans>
-        </dt>
-        <dd>
-          <Reaches integration={integration} />
-        </dd>
-        <ConnectedBy integration={integration} />
-      </dl>
-      {target === undefined ? null : (
-        <ConnectDialog
-          again={target}
-          identity={identity}
-          integration={integration}
-          onOpenChange={setSigningIn}
-          open={signingIn}
-        />
-      )}
-    </section>
+  return held === undefined ? null : (
+    <PartNotLoaded
+      page={held}
+      what={t`Which Apps and agents hold permissions`}
+    />
   );
 };
 
-/** What `identity` may change of `integration`'s tools here, if anything. */
-const changeableOf = (
-  integration: Integration,
-  identity: Identity
-): Changeable | undefined => {
-  const connection = changeableConnectionOf(integration, identity);
-  return connection === undefined
-    ? undefined
-    : { connection, staff: identity.staff };
-};
-
-const Overview = ({
+/**
+ * Why the page can't say all it would: the catalog couldn't be read, it
+ * doesn't list the app, its tools couldn't be read, or this person can't
+ * connect it.
+ */
+const Notices = ({
   integration,
-  tools,
   catalog,
-  identity,
+  tools,
 }: {
   integration: Integration;
-  tools: Promise<Loaded<CatalogTool[]>> | undefined;
   catalog: Loaded<unknown>;
-  identity: Identity;
-}) => (
-  <div className="flex flex-col gap-8">
-    {integration.connections.length === 0 ? null : (
-      <AccountCard identity={identity} integration={integration} />
-    )}
-    <section
-      aria-labelledby="integration-tools"
-      className="flex flex-col gap-3"
-    >
-      <div className="flex flex-col gap-0.5">
-        <h2 className="font-medium" id="integration-tools">
-          <Trans>What Grasp may do</Trans>
-        </h2>
-        <p className="text-muted-foreground">
-          <Trans>
-            What its tools do, as its provider declares them. Apps and agents
-            use only what they are granted, and a tool that changes something
-            waits for its person to confirm it.
-          </Trans>
-        </p>
-      </div>
-      <Tools
-        allowed={allowedToolsOf(integration)}
-        app={integration.name}
-        catalog={catalog}
-        changeable={changeableOf(integration, identity)}
-        tools={tools}
-      />
-    </section>
-    {isAdmin(identity.role) && integration.listed ? (
-      <OfferSwitch integration={integration} staff={identity.staff} />
-    ) : null}
-  </div>
-);
-
-const Account = ({
-  integration,
-  held,
-  identity,
-  onConnect,
-}: {
-  integration: Integration;
-  held: Loaded<HeldPermissions> | undefined;
-  identity: Identity;
-  onConnect: (() => void) | undefined;
+  tools: Loaded<unknown> | undefined;
 }) => {
+  const { identity } = Route.useRouteContext();
+  const { t } = useLingui();
+  const whyNoConnectOf = useWhyNoConnect();
   const app = integration.name;
-  return (
-    <div className="flex flex-col gap-4">
-      <HeldNotLoaded held={held} />
-      {integration.connections.length === 0 ? (
-        <p className="text-muted-foreground">
-          <Trans>{app} isn&apos;t connected yet.</Trans>
-        </p>
-      ) : (
-        <ConnectionList
-          held={held}
-          identity={identity}
-          integration={integration}
-        />
-      )}
-      {onConnect === undefined ||
-      integration.connections.length === 0 ? null : (
-        <Button className="self-start" onClick={onConnect} variant="outline">
-          <Trans>Connect another account</Trans>
-        </Button>
-      )}
-    </div>
-  );
-};
-
-/** What the app is for, under its name: in a sentence where the catalog says, else its kind. */
-const aboutOf = (integration: Integration): string | undefined =>
-  integration.description ?? integration.categories[0];
-
-/** The connection that says who connected the app and when: its newest. */
-const newestOf = (integration: Integration) => integration.connections[0];
-
-/** Who connected the app, and on which day, as the prototype's account card says it. */
-const ConnectedBy = ({ integration }: { integration: Integration }) => {
-  const { t } = useLingui();
-  const newest = newestOf(integration);
-  if (newest === undefined) {
-    return null;
+  const notices: string[] = [];
+  if (catalog.state === "ready") {
+    const why = whyNoConnectOf(integration, identity);
+    if (why !== undefined) {
+      notices.push(why);
+    }
+    if (!integration.listed) {
+      notices.push(
+        t`The catalog doesn't list ${app}, so its tools can't be shown.`
+      );
+    }
+  } else {
+    notices.push(
+      t`The catalog of integrations couldn't be read, so this page shows only what your accounts say about it.`
+    );
   }
-  const date = formatDate(newest.createdAt);
-  const person = newest.connectedByName;
   return (
     <>
-      <dt className="text-muted-foreground">
-        <Trans>Connected by</Trans>
-      </dt>
-      <dd>
-        {person === null
-          ? date
-          : t({
-              message: `${person}, ${date}`,
-              comment: "Who connected the app, then the day they did.",
-            })}
-      </dd>
+      {notices.map((notice) => (
+        <Alert key={notice}>
+          <AlertTitle>{notice}</AlertTitle>
+        </Alert>
+      ))}
+      {tools === undefined ? null : (
+        <PartNotLoaded page={tools} what={t`${app}'s tools`} />
+      )}
     </>
   );
 };
 
-/** What the app is for and, once it is connected, since when: "Accounting · connected 3 Oct". */
-const Subtitle = ({ integration }: { integration: Integration }) => {
-  const { t } = useLingui();
-  const about = aboutOf(integration);
-  const newest = newestOf(integration);
-  if (newest === undefined) {
-    return about === undefined ? null : (
-      <p className="text-muted-foreground">{about}</p>
-    );
-  }
-  const date = formatDayMonth(newest.createdAt);
-  return (
-    <p className="text-muted-foreground">
-      {about === undefined
-        ? t`Connected ${date}`
-        : t({
-            message: `${about} · connected ${date}`,
-            comment:
-              "{about} is what the app is for, as the app list writes it, e.g. “Accounting”. {date} is a day and month.",
-          })}
-    </p>
-  );
-};
-
-/** Why this person can't connect it, where they can't: staff, an entry not offered, one that needs the organization's own sign-in app, or a toolkit only admins connect. */
-const WhyNoConnect = ({
-  integration,
-  identity,
-}: {
-  integration: Integration;
-  identity: Identity;
-}) => {
-  if (canConnect(integration, identity)) {
-    return null;
-  }
-  if (identity.staff) {
-    return (
-      <p className="text-muted-foreground">
-        <Trans>
-          Grasp staff can&apos;t connect accounts or change what is offered
-          here: that is for the organization&apos;s own people.
-        </Trans>
-      </p>
-    );
-  }
-  if (!integration.offered) {
-    return (
-      <p className="text-muted-foreground">
-        {isAdmin(identity.role) ? (
-          <Trans>
-            It isn&apos;t offered to your organization: offer it on its Overview
-            before connecting it.
-          </Trans>
-        ) : (
-          <Trans>It isn&apos;t offered to your organization.</Trans>
-        )}
-      </p>
-    );
-  }
-  if (integration.auth === "own") {
-    return (
-      <p className="text-muted-foreground">
-        <Trans>
-          Connecting it needs your organization&apos;s own sign-in app, which
-          Grasp can&apos;t use yet.
-        </Trans>
-      </p>
-    );
-  }
-  return integration.source === "composio" &&
-    integration.connections.length === 0 ? (
-    <p className="text-muted-foreground">
-      <Trans>An admin connects this for everyone.</Trans>
-    </p>
-  ) : null;
-};
-
+/** One app's page: the library's app page, with its notices and its connections' access in its column. */
 const IntegrationPage = ({ integration }: { integration: Integration }) => {
   const { held, tools, catalog, uses } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
-  const { tab = "overview", connection, again = false } = Route.useSearch();
+  const { connection, again = false } = Route.useSearch();
   const navigate = useNavigate({ from: Route.fullPath });
   const { t } = useLingui();
-  // One sign-in for the page, held here so it stays as the page changes.
-  const [connecting, setConnecting] = useState(false);
-  const connectable = canConnect(integration, identity);
-  const open = (): void => {
-    setConnecting(true);
-  };
-  // Only a connection the page lists: anyone can put an ID in a link.
-  const connected =
-    connection === undefined
-      ? undefined
-      : integration.connections.find(({ id }) => id === connection);
-  const count = integration.connections.length;
+  const read = useSettled(integration.listed ? tools : undefined);
+  const used = useSettled(uses);
+  // Only a connection the page lists, that works: anyone can put an ID in
+  // a link. "Again" where it signed in again (`again`), or took the place
+  // of one that stopped working (`returnedOf`).
+  const returned = returnedOf(integration.connections, connection);
   return (
     <>
       <SiteHeader
@@ -599,39 +130,10 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
         ]}
       />
       <Page>
-        <div className="flex items-center gap-4">
-          <AppLogo logo={integration.logo} name={integration.name} />
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <PageHeaderTitle>{integration.name}</PageHeaderTitle>
-              {integration.listed && !integration.offered ? (
-                <Badge variant="outline">
-                  <Trans>Not offered</Trans>
-                </Badge>
-              ) : null}
-            </div>
-            <Subtitle integration={integration} />
-          </div>
-          {connectable && count === 0 ? (
-            <Button onClick={open}>
-              <Trans>Connect</Trans>
-            </Button>
-          ) : null}
-        </div>
-        {catalog.state === "ready" ? (
-          <WhyNoConnect identity={identity} integration={integration} />
-        ) : (
-          <p className="text-muted-foreground">
-            <Trans>
-              The catalog of integrations couldn&apos;t be read, so this page
-              shows only what your accounts say about it.
-            </Trans>
-          </p>
-        )}
         <ConnectedDialog
-          again={again}
+          again={again || returned.again}
           app={integration.name}
-          connection={connected}
+          connection={returned.connection}
           onClose={() => {
             void navigate({
               replace: true,
@@ -643,70 +145,21 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
             });
           }}
         />
-        <Tabs
-          size="sm"
-          onValueChange={(next: Tab) => {
-            void navigate({
-              replace: true,
-              search: (last) => ({
-                ...last,
-                tab: next === "overview" ? undefined : next,
-              }),
-            });
-          }}
-          value={tab}
-        >
-          <TabsList variant="line">
-            <TabsTrigger value="overview">
-              <Trans>Overview</Trans>
-            </TabsTrigger>
-            <TabsTrigger value="workflows">
-              <Trans>Workflows</Trans>
-              <WorkflowsCount integration={integration} uses={uses} />
-            </TabsTrigger>
-            <TabsTrigger value="account">
-              <Trans>Account</Trans>
-              <span className="text-muted-foreground tabular-nums">
-                {count}
-              </span>
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="overview">
-            {/* With the tabs' own gap, the prototype's 24 pixels under the tab row. */}
-            <div className="pt-4">
-              <Overview
-                catalog={catalog}
-                identity={identity}
-                integration={integration}
-                tools={integration.listed ? tools : undefined}
-              />
-            </div>
-          </TabsContent>
-          <TabsContent value="workflows">
-            <div className="pt-4">
-              <WorkflowsUsing integration={integration} uses={uses} />
-            </div>
-          </TabsContent>
-          <TabsContent value="account">
-            <div className="pt-4">
-              <Account
-                held={held}
-                identity={identity}
-                integration={integration}
-                onConnect={connectable ? open : undefined}
-              />
-            </div>
-          </TabsContent>
-        </Tabs>
-      </Page>
-      {connectable ? (
-        <ConnectDialog
+        <IntegrationAppPage
           identity={identity}
           integration={integration}
-          onOpenChange={setConnecting}
-          open={connecting}
-        />
-      ) : null}
+          tools={read}
+          uses={used}
+        >
+          <Notices catalog={catalog} integration={integration} tools={read} />
+          <HeldNotLoaded held={held} />
+          <ConnectionsAccess
+            held={held}
+            identity={identity}
+            integration={integration}
+          />
+        </IntegrationAppPage>
+      </Page>
     </>
   );
 };
@@ -788,9 +241,9 @@ export const Route = createFileRoute("/_shell/integrations/$integration")({
     const read = await loadIntegrations(core, identity, { held: true });
     return { ...read, tools };
   },
-  // A tab, or a notice dropped, keeps what was read; a change reads it
-  // again (use-change.ts invalidates it).
-  shouldReload: false,
-  pendingComponent: PageLoading,
+  // No `shouldReload`: a tab, or a notice dropped (the search), keeps what
+  // was read; opening this app or another reads it again, as does a change
+  // (use-change.ts invalidates it).
+  pendingComponent: IntegrationSkeleton,
   component: IntegrationRoute,
 });
