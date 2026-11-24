@@ -29,7 +29,6 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
-  SidebarRail,
   SidebarTrigger,
   useSidebar,
 } from "@grasp-os/ui/components/sidebar";
@@ -182,8 +181,13 @@ const styles = stylex.create({
     minHeight: size.sidebarIconButton,
   },
   // In the phone's sheet the head stands nearer the sheet's top, as the
-  // reference's: the sheet's own inset less than the sidebar's room above.
-  headInSheet: { marginBlockStart: `calc(-1 * ${space["3"]})` },
+  // reference's: over the main list's switch its buttons in the middle of
+  // a row's height at the top; over a level's head 2px lower, the sheet's
+  // own inset less the sidebar's room above.
+  headInSheet: {
+    marginBlockStart: `calc((${size.sidebarMenuButtonHeight} - ${size.sidebarIconButton}) / 2 - ${space["4"]})`,
+  },
+  headInSheetLevel: { marginBlockStart: `calc(-1 * ${space["3"]})` },
   mark: {
     [iconVars.size]: size.appShellMark,
     display: "flex",
@@ -223,8 +227,14 @@ const styles = stylex.create({
     transitionDuration: duration.hover,
     transitionTimingFunction: duration.ease,
   },
-  // The rows of a group that folds stand in from its label, as a tree.
-  under: { marginInlineStart: space["3"] },
+  // The rows of a group that folds stand in from its label, as a tree:
+  // room inside its panel, which stays its group's width, so a row's end
+  // and its action stay inside the panel that folds it (which cuts off
+  // what stands past it). Inline only: nothing shows while it is folded.
+  under: { paddingInlineStart: space["3"] },
+  // A row's action stands space-1 in from the row's end, as the
+  // reference's dots do (Damsko's stands 2px in: registry gap of 24 Nov 2026).
+  action: { insetInlineEnd: space["1"] },
   quiet: { fontWeight: font.weightNormal },
   more: {
     fontWeight: font.weightNormal,
@@ -318,11 +328,15 @@ const RowMenu = ({
 }) => (
   <DropdownMenu>
     <DropdownMenuTrigger asChild>
-      <SidebarMenuAction aria-label={row.actionsLabel ?? row.label} showOnHover>
+      <SidebarMenuAction
+        aria-label={row.actionsLabel ?? row.label}
+        showOnHover
+        style={styles.action}
+      >
         <Icon icon={EllipsisIcon} />
       </SidebarMenuAction>
     </DropdownMenuTrigger>
-    <DropdownMenuContent align="start" side="right">
+    <DropdownMenuContent align="start">
       {(row.actions ?? []).map((action, index) =>
         action === "separator" ? (
           <DropdownMenuSeparator key={`separator-${index}`} />
@@ -347,45 +361,50 @@ const RowMenu = ({
   </DropdownMenu>
 );
 
-/** A row's own words and what stands with them: its icon, its name, a second line. */
-const RowWords = ({ row }: { row: SidebarRow }) => (
-  <>
-    {row.icon === undefined ? null : <Icon icon={row.icon} />}
-    {row.detail === undefined && row.quiet !== true ? row.label : null}
-    {row.detail === undefined && row.quiet === true ? (
-      <span {...stylex.props(styles.name, styles.quiet)}>{row.label}</span>
-    ) : null}
-    {row.detail === undefined ? null : (
-      <span {...stylex.props(styles.words)}>
-        <span
-          {...stylex.props(styles.name, row.quiet === true && styles.quiet)}
-        >
-          {row.label}
-        </span>
-        <span {...stylex.props(styles.detail)}>{row.detail}</span>
+/**
+ * A row's own words and what stands with them: its icon, its name, a second
+ * line. A list, not an element of its own, so a name given as bare words
+ * reaches the row as such: Damsko's row cuts it with an ellipsis before
+ * what stands at its end, and shows it whole in a tooltip while it is cut.
+ */
+const rowWords = (row: SidebarRow): ReactNode[] => [
+  row.icon === undefined ? null : <Icon icon={row.icon} key="icon" />,
+  row.detail === undefined && row.quiet !== true ? row.label : null,
+  row.detail === undefined && row.quiet === true ? (
+    <span key="name" {...stylex.props(styles.name, styles.quiet)}>
+      {row.label}
+    </span>
+  ) : null,
+  row.detail === undefined ? null : (
+    <span key="words" {...stylex.props(styles.words)}>
+      <span {...stylex.props(styles.name, row.quiet === true && styles.quiet)}>
+        {row.label}
       </span>
-    )}
-    {row.end === undefined ? null : (
-      <span {...stylex.props(styles.end)}>
-        <span aria-hidden="true">{row.end}</span>
-        <span {...stylex.props(visuallyHidden)}>{row.endLabel ?? row.end}</span>
-      </span>
-    )}
-    {row.count !== undefined &&
-    row.count > 0 &&
-    row.countLabel !== undefined ? (
-      <span {...stylex.props(visuallyHidden)}>{row.countLabel}</span>
-    ) : null}
-    {row.working === true && row.workingLabel !== undefined ? (
-      <span {...stylex.props(visuallyHidden)}>{row.workingLabel}</span>
-    ) : null}
-  </>
-);
+      <span {...stylex.props(styles.detail)}>{row.detail}</span>
+    </span>
+  ),
+  row.end === undefined ? null : (
+    <span key="end" {...stylex.props(styles.end)}>
+      <span aria-hidden="true">{row.end}</span>
+      <span {...stylex.props(visuallyHidden)}>{row.endLabel ?? row.end}</span>
+    </span>
+  ),
+  row.count !== undefined && row.count > 0 && row.countLabel !== undefined ? (
+    <span key="count" {...stylex.props(visuallyHidden)}>
+      {row.countLabel}
+    </span>
+  ) : null,
+  row.working === true && row.workingLabel !== undefined ? (
+    <span key="working" {...stylex.props(visuallyHidden)}>
+      {row.workingLabel}
+    </span>
+  ) : null,
+];
 
 const Row = ({ row }: { row: SidebarRow }) => {
   const [renaming, setRenaming] = useState(false);
   const tall = row.detail === undefined ? undefined : styles.tall;
-  const words = <RowWords row={row} />;
+  const words = rowWords(row);
   return (
     <SidebarMenuItem>
       {row.render === undefined ? (
@@ -480,17 +499,12 @@ const MoreRow = ({ more }: { more: SidebarMore }) => {
 const Rows = ({
   group,
   labelledBy,
-  under = false,
 }: {
   group: SidebarGroupEntry;
   labelledBy?: string;
-  under?: boolean;
 }) =>
   group.content ?? (
-    <SidebarMenu
-      aria-labelledby={labelledBy}
-      style={under ? styles.under : undefined}
-    >
+    <SidebarMenu aria-labelledby={labelledBy}>
       {group.rows.map((row) => (
         <Row key={row.id ?? row.label} row={row} />
       ))}
@@ -539,8 +553,11 @@ const Group = ({ group }: { group: SidebarGroupEntry }) => {
             </button>
           </SidebarGroupLabel>
         </CollapsibleTrigger>
-        <CollapsibleContent>
-          <Rows group={group} labelledBy={labelId} under />
+        {/* The panel alone, without the room above and below a panel's words: the rows follow their label at the rows' own gap. */}
+        <CollapsibleContent asChild>
+          <div {...stylex.props(group.content === undefined && styles.under)}>
+            <Rows group={group} labelledBy={labelId} />
+          </div>
         </CollapsibleContent>
       </SidebarGroup>
     </SidebarCollapsible>
@@ -659,7 +676,15 @@ export const FrameSidebar = ({
   return (
     <Sidebar aria-label={label} variant="inset">
       <SidebarHeader>
-        <div {...stylex.props(styles.head, isMobile && styles.headInSheet)}>
+        <div
+          {...stylex.props(
+            styles.head,
+            isMobile &&
+              (section === undefined
+                ? styles.headInSheet
+                : styles.headInSheetLevel)
+          )}
+        >
           <span {...stylex.props(styles.mark)}>{mark}</span>
           <div {...stylex.props(styles.tools)}>
             {search === undefined ? null : (
@@ -719,7 +744,6 @@ export const FrameSidebar = ({
           {profile}
         </div>
       </SidebarFooter>
-      <SidebarRail />
     </Sidebar>
   );
 };

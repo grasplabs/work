@@ -3,20 +3,21 @@ import {
   BuildingIcon,
   ClockIcon,
   CoinsIcon,
-  DollarSignIcon,
-  FileDocIcon,
   InfoIcon,
-  KeyIcon,
+  LinkIcon,
+  LockIcon,
   CircleUserIcon,
   RocketIcon,
   ServerIcon,
-  ShareIcon,
   SparklesIcon,
+  StickyNoteIcon,
   UsersIcon,
 } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
+
+import { InvoiceIcon } from "../frame/sidebar-icons.ts";
 
 // Settings' sections, in their groups: the account's for everyone, then
 // the workspace's for admins. The sidebar lists them as a level of its own
@@ -100,7 +101,7 @@ export const groupsFor = ({
               {
                 label: msg`Webhooks`,
                 to: "/settings/webhooks" as const,
-                icon: ShareIcon,
+                icon: LinkIcon,
               },
               {
                 label: msg`Unknown outcomes`,
@@ -108,7 +109,7 @@ export const groupsFor = ({
                 icon: InfoIcon,
               },
             ]),
-        { label: msg`Billing`, to: "/settings/billing", icon: DollarSignIcon },
+        { label: msg`Billing`, to: "/settings/billing", icon: InvoiceIcon },
       ]
     : [];
   // The person's own account first, the one group everyone has, as the
@@ -126,10 +127,10 @@ export const groupsFor = ({
               {
                 label: msg`Instructions`,
                 to: "/settings/instructions" as const,
-                icon: FileDocIcon,
+                icon: StickyNoteIcon,
               },
             ]),
-        { label: msg`Security`, to: "/settings/security", icon: KeyIcon },
+        { label: msg`Security`, to: "/settings/security", icon: LockIcon },
       ],
     },
     ...(workspace.length === 0
