@@ -14,7 +14,7 @@ import { AppCardGround } from "../../apps/app-card/ground.tsx";
 import type { Scene } from "../../apps/app-card/scenes.ts";
 import { GraspLogo } from "../../connections/brand-logos.ts";
 import { LanguageButton } from "../../frame/language-button.tsx";
-import { budgetSeconds, longLeft, shortLeft } from "./clock.ts";
+import { budgetSeconds, nearEnd, usedSeconds, usedWords } from "./clock.ts";
 import { fixture } from "./fixture.ts";
 
 // CONCEPT ONLY: the frame every concept stands in, full screen, outside the
@@ -123,13 +123,14 @@ export type ClockPlace = "title" | "bar" | "note";
 const TimeBar = ({ left }: { left: number }) => (
   <div {...stylex.props(styles.bar)}>
     <Progress
-      getAriaValueText={() => longLeft(left)}
+      getAriaValueText={() => usedWords(left)}
       max={budgetSeconds}
       size="sm"
-      value={budgetSeconds - left}
+      value={usedSeconds(left)}
+      variant={nearEnd(left) ? "warning" : "default"}
     >
-      <ProgressLabel>{`${fixture.minutes} minutes at most`}</ProgressLabel>
-      <ProgressValue>{() => shortLeft(left)}</ProgressValue>
+      <ProgressLabel>{fixture.interviewer}</ProgressLabel>
+      <ProgressValue>{() => usedWords(left)}</ProgressValue>
     </Progress>
   </div>
 );

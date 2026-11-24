@@ -8,7 +8,12 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 
 import type { Scene } from "../../apps/app-card/scenes.ts";
-import { budgetSeconds, useCountdown, wrapUpSeconds } from "./clock.ts";
+import {
+  budgetSeconds,
+  useCountdown,
+  useCountdownMarks,
+  wrapUpSeconds,
+} from "./clock.ts";
 import { Conversation, helloTalk, talkAt, Thread } from "./conversation.tsx";
 import type { Talk, Turn } from "./conversation.tsx";
 import {
@@ -57,6 +62,7 @@ export interface ConceptSearch {
   still: boolean;
   lang: "unknown" | undefined;
   transcript: boolean;
+  fold: boolean;
 }
 
 /** Reads the concept’s own part of the address; nothing when it names no concept. */
@@ -76,6 +82,7 @@ export const conceptSearch = (
     still: search.still !== undefined,
     lang: search.lang === "unknown" ? "unknown" : undefined,
     transcript: search.transcript !== undefined,
+    fold: search.fold !== undefined,
   };
 };
 
@@ -114,6 +121,7 @@ const clockOf: Record<Concept, ClockPlace> = {
 /** The screens of the conversation, as against the pages before it. */
 const talking = new Set([
   "hello",
+  "hello-heard",
   "talk",
   "b-talk",
   "listening",
@@ -127,6 +135,7 @@ const talking = new Set([
 /** Seconds left as each screen opens, unless the address says otherwise. */
 const leftAt: Record<string, number> = {
   hello: budgetSeconds,
+  "hello-heard": budgetSeconds - 12,
   talk: 18 * 60 + 50,
   "b-talk": 19 * 60 + 40,
   listening: 17 * 60 + 5,
@@ -161,6 +170,18 @@ const partly = (text: string, words: number): string =>
 const talkFor = (concept: Concept, at: string): Talk => {
   const before = beforeQuestions(concept);
   switch (at) {
+    case "hello-heard": {
+      const talk = helloTalk();
+      return {
+        ...talk,
+        fold: true,
+        doing: "heard",
+        turns: [
+          ...talk.turns,
+          { id: "hello-heard", from: "you", text: helloHeard },
+        ],
+      };
+    }
     case "hello": {
       return helloTalk(concept === "c" ? [consentTurn("yes", ignore)] : []);
     }
@@ -223,6 +244,10 @@ const withScene = (concept: Concept, screen: string): Scene | undefined => {
   return scenes[concept];
 };
 
+/** A's fold-in variant: B's "I can hear you clearly." moment, with `&fold`. */
+const talkFold = (search: ConceptSearch, screen: string): boolean =>
+  search.concept === "a" && (search.fold || screen === "hello-heard");
+
 /** The first screen of each concept. */
 const firstScreen = (search: ConceptSearch): string => {
   if (search.stage === "readback") {
@@ -279,7 +304,7 @@ const ConsentThread = ({
                 onClick={() => {
                   onAnswer("rather-not");
                 }}
-                variant="ghost"
+                variant="link"
               >
                 I’d rather not
               </Button>
@@ -448,6 +473,7 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
   const live = !search.still;
   const [transcript, setTranscript] = useState(search.transcript);
   const left = useCountdown(startLeft, live && inTalk);
+  useCountdownMarks(left, live && inTalk);
   const go = (next: string): void => {
     setScreen(next);
   };
@@ -467,7 +493,7 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
         onReadBack={() => {
           go("readback");
         }}
-        start={talkFor(concept, screen)}
+        start={{ ...talkFor(concept, screen), fold: talkFold(search, screen) }}
       />
     );
   } else if (screen === "paused") {

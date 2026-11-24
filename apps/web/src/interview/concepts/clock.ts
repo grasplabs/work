@@ -1,9 +1,12 @@
+import { announce } from "@grasp-os/ui/lib/utils";
 import { useEffect, useState } from "react";
 
 import { fixture } from "./fixture.ts";
 
 // CONCEPT ONLY: the interview’s countdown. It runs from the first second of
-// the conversation and counts down the one budget (20 minutes); a page
+// the conversation over the one budget (20 minutes), shown as time USED,
+// going forward ("12 of 20 minutes": a bar never goes backwards), said
+// aloud only at its marks; a page
 // opened with `&left=<minutes>` starts there, so the moments at 5 and at 0
 // can be seen without waiting. Frozen, it stands still for a screenshot.
 
@@ -38,22 +41,38 @@ export const useCountdown = (
   return left;
 };
 
-/** The minutes left, rounded up: "18 min left", "1 min left", "Time is up". */
-export const shortLeft = (seconds: number): string => {
-  if (seconds <= 0) {
-    return "Time is up";
-  }
-  const minutes = Math.ceil(seconds / 60);
-  return `${minutes} min left`;
+/** The minutes used, going forward: "12 of 20 minutes". */
+export const usedWords = (left: number): string => {
+  const used = Math.min(
+    fixture.minutes,
+    Math.floor((budgetSeconds - left) / 60)
+  );
+  return `${used} of ${fixture.minutes} minutes`;
 };
 
-/** The same in a whole sentence, for a screen reader and the bar’s words. */
-export const longLeft = (seconds: number): string => {
-  if (seconds <= 0) {
-    return "The 20 minutes are up";
-  }
-  const minutes = Math.ceil(seconds / 60);
-  return minutes === 1
-    ? "About 1 minute left"
-    : `About ${minutes} minutes left`;
+/** Seconds used, for a Progress that only ever goes forward. */
+export const usedSeconds = (left: number): number => budgetSeconds - left;
+
+/** Near the end: the interviewer wraps up, and the countdown shows it (`warning`). */
+export const nearEnd = (left: number): boolean => left <= wrapUpSeconds;
+
+/** The marks said aloud, and nothing in between. */
+const marks = [
+  { at: wrapUpSeconds, words: `${fixture.wrapUpMinutes} minutes left` },
+  { at: 60, words: "1 minute left" },
+  { at: 0, words: `The ${fixture.minutes} minutes are up` },
+] as const;
+
+/**
+ * Says the countdown at its marks only (5 minutes left, 1 minute left, the
+ * end), through the page's one live region, never every second.
+ */
+export const useCountdownMarks = (left: number, running: boolean): void => {
+  const mark = marks.find(({ at }) => left === at);
+  const words = running ? (mark?.words ?? "") : "";
+  useEffect(() => {
+    if (words !== "") {
+      announce(words);
+    }
+  }, [words]);
 };
