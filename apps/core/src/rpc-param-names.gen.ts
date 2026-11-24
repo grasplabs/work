@@ -429,6 +429,7 @@ export const rpcParamNames: ParamNames = {
     "revoke": ["id"],
   },
   "SessionRpc": {
+    "dictationSetUp": [],
     "setName": ["name"],
     "whoami": [],
   },

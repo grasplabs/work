@@ -1,4 +1,3 @@
-import { Button } from "@grasp-os/app-kit/components/button";
 import {
   DockablePanel,
   DockablePanelHandle,
@@ -6,34 +5,27 @@ import {
   useDockablePanel,
 } from "@grasp-os/app-kit/components/dockable-panel";
 import type { DockablePlacement } from "@grasp-os/app-kit/components/dockable-panel";
-import {
-  Empty,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from "@grasp-os/app-kit/components/empty";
-import { GraspMark } from "@grasp-os/app-kit/components/grasp-mark";
 import { Panel } from "@grasp-os/app-kit/components/panel";
-import { Spinner } from "@grasp-os/app-kit/components/spinner";
+import { Text } from "@grasp-os/ui/components/text";
+import { Icon, Maximize2Icon, PencilIcon, XIcon } from "@grasp-os/ui/lib/icons";
+import type { IconData } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+// Damsko's icon module has no "exit full screen": Hugeicons' own drawing,
+// Expand's pair (Maximize2Icon is ArrowExpand01Icon), through Damsko's Icon.
+import { ArrowShrink01Icon } from "@hugeicons/core-free-icons";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useMatch, useRouteContext, useRouter } from "@tanstack/react-router";
-import {
-  Maximize2Icon,
-  Minimize2Icon,
-  SquarePenIcon,
-  XIcon,
-} from "lucide-react";
-import { Suspense, lazy, useEffect, useEffectEvent, useRef } from "react";
-import type { ReactNode } from "react";
+import { bindLayer } from "@ui-sdk/core";
+import { useEffect, useEffectEvent, useRef } from "react";
 
-import { ErrorText } from "../error-text.tsx";
-import { NotLoaded } from "../load-from-core.tsx";
 import { shortcutLabel } from "../shortcuts.ts";
 import { setActiveChat, startAfresh } from "./active-chat.ts";
 import { AgentName, agentModelOf } from "./agent-choice.tsx";
 import { AskOrCompose } from "./asked-questions.tsx";
 import { BrainQuestions } from "./brain-questions.tsx";
 import { BuildsFailure, workOf } from "./builds.tsx";
+import { ChatConversation } from "./chat-body.tsx";
 import {
   chatWidth,
   closeChat,
@@ -46,13 +38,12 @@ import {
 import { ChatTitleMenu } from "./chat-more.tsx";
 import { allows } from "./chat-presence.ts";
 import { HeaderIcon } from "./chat-switcher.tsx";
-import { ConnectionRequests } from "./connection-requests.tsx";
 import { chatKey, useGlobalChat } from "./global-chat.tsx";
-import type { ModelsUnavailable } from "./global-chat.tsx";
-import { HeldWrites } from "./held-writes.tsx";
 import { pendingCard } from "./make-card.tsx";
-import { PackageRequests } from "./package-requests.tsx";
-import { RecentsButton } from "./recents.tsx";
+import {
+  ModelsUnavailableNotice,
+  unavailableText,
+} from "./models-unavailable.tsx";
 import { ChatSources } from "./sources.tsx";
 import { SubjectBarContent, subjectBarOf } from "./subject-bar.tsx";
 
@@ -63,11 +54,42 @@ import { SubjectBarContent, subjectBarOf } from "./subject-bar.tsx";
 // chat opens. Escape closes it to its idle bar, which takes the cursor back
 // (chat-bar.tsx).
 
-// The conversation, with its Markdown and code highlighting, loads once a
-// chat is open: most pages show the chat idle.
-const ChatThread = lazy(async () => {
-  const { ChatThread: thread } = await import("./thread.tsx");
-  return { default: thread };
+const styles = stylex.create({
+  newChat: { minWidth: 0, paddingInline: space["2"] },
+  actions: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["1"],
+    marginInlineStart: "auto",
+  },
+  footer: {
+    display: "flex",
+    flexDirection: "column",
+    flexShrink: 0,
+    gap: space["1"],
+    paddingInline: space["4"],
+    paddingBlockStart: space["2"],
+    paddingBlockEnd: space["4"],
+  },
+  body: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+  },
+  column: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    width: "100%",
+    minHeight: 0,
+    marginInline: "auto",
+  },
+  // Full screen, the conversation and the box read as one column in the middle.
+  fullscreen: { maxWidth: "48rem" },
+  // There the box is as far in as the thread's words, and as wide (#2503).
+  footerFullscreen: { paddingInline: space["8"] },
+  boxFullscreen: { maxWidth: "100%" },
 });
 
 /**
@@ -78,8 +100,10 @@ const ChatTitle = () => {
   const { summary, sourceNames, retitle } = useGlobalChat();
   if (summary === undefined) {
     return (
-      <span className="text-muted-foreground truncate px-2 text-sm font-medium">
-        <Trans>New chat</Trans>
+      <span {...stylex.props(styles.newChat)}>
+        <Text as="span" color="muted" size="sm" truncate weight="medium">
+          <Trans>New chat</Trans>
+        </Text>
       </span>
     );
   }
@@ -98,7 +122,7 @@ const ChatTitle = () => {
 interface Move {
   to: DockablePlacement;
   label: string;
-  icon: ReactNode;
+  icon: IconData;
 }
 
 /**
@@ -131,11 +155,9 @@ const MoveButtons = () => {
   const { presence } = useGlobalChat();
   const moves: Record<DockablePlacement, Move[]> = {
     // Undocking is the grip's: dragged out, or double-clicked (ChatGrip).
-    docked: [
-      { to: "fullscreen", label: t`Full screen`, icon: <Maximize2Icon /> },
-    ],
+    docked: [{ to: "fullscreen", label: t`Full screen`, icon: Maximize2Icon }],
     fullscreen: [
-      { to: "docked", label: t`Exit full screen`, icon: <Minimize2Icon /> },
+      { to: "docked", label: t`Exit full screen`, icon: ArrowShrink01Icon },
     ],
     // Docking is the grip's: pushed into the dock, or double-clicked.
     floating: [],
@@ -150,7 +172,7 @@ const MoveButtons = () => {
           openChat(to);
         }}
       >
-        {icon}
+        <Icon icon={icon} />
       </HeaderIcon>
     ));
 };
@@ -164,7 +186,7 @@ const HeaderActions = () => {
   const { t } = useLingui();
   const { chatId, slot, keptOpen } = useGlobalChat();
   return (
-    <div className="ml-auto flex items-center gap-0.5">
+    <div {...stylex.props(styles.actions)}>
       {chatId === undefined ? null : (
         <HeaderIcon
           label={t`New chat`}
@@ -178,7 +200,7 @@ const HeaderActions = () => {
             }
           }}
         >
-          <SquarePenIcon />
+          <Icon icon={PencilIcon} />
         </HeaderIcon>
       )}
       <MoveButtons />
@@ -189,145 +211,23 @@ const HeaderActions = () => {
           onClick={closeChat}
           shortcut={shortcutLabel(chatKey)}
         >
-          <XIcon />
+          <Icon icon={XIcon} />
         </HeaderIcon>
       )}
     </div>
   );
 };
 
-/** What the chat says before anything is asked in it. */
-const Welcome = ({ text }: { text: string }) => (
-  <div className="animate-in fade-in-0 flex flex-1 flex-col motion-reduce:animate-none">
-    <Empty className="flex-1">
-      <EmptyHeader>
-        <EmptyMedia variant="icon">
-          <GraspMark />
-        </EmptyMedia>
-        <EmptyTitle>{text}</EmptyTitle>
-      </EmptyHeader>
-    </Empty>
-  </div>
-);
-
 /** The conversation, or what to ask before there is one; `focusBox` takes the person to the box. */
 const Thread = ({ focusBox }: { focusBox: () => void }) => {
-  const { t } = useLingui();
-  const {
-    chatId,
-    finding,
-    view,
-    failure,
-    empty,
-    words,
-    ask,
-    composer,
-    offered,
-  } = useGlobalChat();
+  const chat = useGlobalChat();
   const { placement } = useDockablePanel();
-  // A subject's chat, while core finds it, or why it gave none.
-  if (finding.searching || finding.failure !== undefined) {
-    return finding.failure === undefined ? (
-      <div className="flex flex-1 justify-center py-8">
-        <Spinner aria-label={t`Loading…`} />
-      </div>
-    ) : (
-      <div className="flex flex-1 flex-col items-center gap-3 py-8">
-        <NotLoaded page={finding.failure} />
-        <Button
-          onClick={() => {
-            finding.retry();
-          }}
-          size="sm"
-          variant="outline"
-        >
-          <Trans>Try again</Trans>
-        </Button>
-      </div>
-    );
-  }
-  if (chatId === undefined || empty) {
-    return <Welcome text={words.empty} />;
-  }
-  const lastQuestion = view.messages.findLast(({ role }) => role === "user");
   return (
-    <Suspense
-      fallback={
-        <div className="flex flex-1 justify-center py-8">
-          <Spinner aria-label={t`Loading…`} />
-        </div>
-      }
-    >
-      <ChatThread
-        agents={offered?.agents}
-        chatId={chatId}
-        compact={placement !== "fullscreen"}
-        loaded={view.loaded || failure !== undefined}
-        messages={view.messages}
-        onRetry={() => {
-          if (lastQuestion !== undefined) {
-            void ask(lastQuestion.text);
-          }
-        }}
-        output={view.output}
-        partial={view.partial}
-        checking={view.checking}
-        running={view.running}
-        tools={view.tools}
-        build={{
-          model: composer.model,
-          effort: composer.effort,
-          onChangePlan: focusBox,
-        }}
-      >
-        {failure === undefined && view.stopped === null ? null : (
-          <div className="flex flex-col gap-2">
-            <ErrorText>{failure}</ErrorText>
-            <ErrorText>{view.stopped ?? undefined}</ErrorText>
-            {/* A question stopped before the agent answered (a deploy, say)
-              is asked again from here: it may be the chat's first. */}
-            {view.stopped !== null &&
-            !view.running &&
-            lastQuestion !== undefined ? (
-              <Button
-                className="self-start"
-                onClick={() => {
-                  void ask(lastQuestion.text);
-                }}
-                size="sm"
-                variant="outline"
-              >
-                <Trans>Try again</Trans>
-              </Button>
-            ) : null}
-          </div>
-        )}
-        <HeldWrites
-          chatId={chatId}
-          // Confirmed, the agent reads how it ended and goes on, in a turn
-          // the person's own message starts, as for approved packages
-          // below: the decision itself reaches it as a note (GRA-2224).
-          onConfirmed={() => {
-            if (!view.running) {
-              void ask(t`Confirmed. Carry on.`);
-            }
-          }}
-          version={view.held}
-        />
-        <ConnectionRequests chatId={chatId} version={view.held} />
-        <PackageRequests
-          chatId={chatId}
-          // Approved, the work the agent stopped for goes on, in a turn
-          // the person's own message starts: the thread says why it did.
-          onApproved={() => {
-            if (!view.running) {
-              void ask(t`The packages are approved. Carry on.`);
-            }
-          }}
-          version={view.held}
-        />
-      </ChatThread>
-    </Suspense>
+    <ChatConversation
+      chat={chat}
+      compact={placement !== "fullscreen"}
+      focusBox={focusBox}
+    />
   );
 };
 
@@ -355,33 +255,10 @@ const BrainGaps = () => {
   );
 };
 
-/** Why nothing can be asked yet, under the box, with the way out. */
-const ModelsUnavailableNotice = ({
-  why,
-  onRetry,
-}: {
-  why: ModelsUnavailable;
-  onRetry: (() => void) | undefined;
-}) => {
-  // No provider is the box's own to say: it is covered (composer.tsx).
-  if (why.why === "provider") {
-    return null;
-  }
-  return (
-    <p className="text-muted-foreground flex items-center gap-2 px-1 text-xs">
-      {why.text}
-      {onRetry === undefined ? null : (
-        <Button onClick={onRetry} size="xs" variant="link">
-          <Trans>Try again</Trans>
-        </Button>
-      )}
-    </p>
-  );
-};
-
-/** The box to ask in, or the agent's questions in its place. */
-const Footer = () => {
+/** The box to ask in, or the agent's questions in its place; dictating only while the chat is open. */
+const Footer = ({ open }: { open: boolean }) => {
   const { t } = useLingui();
+  const fullscreen = useDockablePanel().placement === "fullscreen";
   const {
     builds,
     subject,
@@ -398,6 +275,7 @@ const Footer = () => {
     offered,
   } = useGlobalChat();
   const work = workOf(builds);
+  const unavailable = unavailableText(modelsUnavailable);
   // Which of the company's agents answers here, where there are several.
   const agents = offered?.agents ?? [];
   // Under a card that waits for the person, the box is where to change it.
@@ -419,12 +297,14 @@ const Footer = () => {
       ? undefined
       : { ...subject.about, name: subject.name };
   return (
-    <div className="flex flex-none flex-col gap-1 px-4 pt-2 pb-4">
+    <div
+      {...stylex.props(styles.footer, fullscreen && styles.footerFullscreen)}
+    >
       <BuildsFailure read={builds} />
       <ChatSources names={sourceNames} provenance={view.provenance} />
       <AskOrCompose
         {...composer}
-        actions={<RecentsButton />}
+        {...(unavailable === undefined ? {} : { unavailable })}
         agent={
           summary === undefined ? undefined : (
             <AgentName agentId={summary.agentId} agents={agents} />
@@ -442,19 +322,18 @@ const Footer = () => {
           )
         }
         asking={asking}
+        // The panel stays while it is closed: nothing listens from it then.
+        dictates={open}
+        style={fullscreen ? styles.boxFullscreen : undefined}
         label={words.title}
-        onAnswer={(text) => {
-          void ask(text);
-        }}
+        onAnswer={async (text) => await ask(text)}
         // The box's editor takes its placeholder as it starts: another
         // starts it afresh, with the text it holds.
         key={placeholder}
         placeholder={placeholder}
         running={view.running}
       />
-      {modelsUnavailable === undefined ? null : (
-        <ModelsUnavailableNotice onRetry={retry} why={modelsUnavailable} />
-      )}
+      <ModelsUnavailableNotice onRetry={retry} why={modelsUnavailable} />
     </div>
   );
 };
@@ -481,33 +360,42 @@ const Body = ({ open }: { open: boolean }) => {
       body.current?.querySelector<HTMLElement>('[role="textbox"]')?.focus();
     }
   }, [open]);
+  // While open, the whole chat is a layer in UI SDK's stack, as Damsko's
+  // menus, pickers, popovers and dialogs are: Escape goes to the topmost
+  // layer alone, so whatever was opened in the chat closes first, and the
+  // chat only once nothing of its own is open on top. An Escape pressed
+  // outside it is not its own.
   useEffect(() => {
-    const element = body.current;
-    if (element === null) {
+    const chat =
+      body.current?.closest<HTMLElement>('[data-slot="dockable-panel-card"]') ??
+      null;
+    if (!open || chat === null) {
       return () => {
-        // Nothing was listened to.
+        // Nothing was bound.
       };
     }
-    const onKey = (event: KeyboardEvent) => {
-      // What has its own use for Escape (a menu, the questions) keeps it.
-      if (event.key === "Escape" && !event.defaultPrevented) {
-        event.preventDefault();
-        onEscape();
-      }
-    };
-    element.addEventListener("keydown", onKey);
-    return () => {
-      element.removeEventListener("keydown", onKey);
-    };
-  }, []);
+    return bindLayer(chat, {
+      onDismiss: (reason, event) => {
+        if (
+          reason === "escape-key" &&
+          event.target instanceof Node &&
+          chat.contains(event.target)
+        ) {
+          onEscape();
+        }
+      },
+    });
+  }, [open]);
   return (
-    <div className="flex min-h-0 flex-1 flex-col" ref={body}>
+    <div ref={body} {...stylex.props(styles.body)}>
       {/* Full screen, the conversation reads as a column in the middle,
         named by its chat. */}
       <section
         aria-label={summary?.title ?? words.title}
-        className="mx-auto flex min-h-0 w-full flex-1 flex-col data-[placement=fullscreen]:max-w-3xl"
-        data-placement={placement}
+        {...stylex.props(
+          styles.column,
+          placement === "fullscreen" && styles.fullscreen
+        )}
       >
         <Thread
           focusBox={() => {
@@ -517,7 +405,7 @@ const Body = ({ open }: { open: boolean }) => {
           }}
         />
         <BrainGaps />
-        <Footer />
+        <Footer open={open} />
       </section>
     </div>
   );
@@ -556,7 +444,6 @@ export const ChatPanel = () => {
       <DockablePanel
         defaultOffset={offset ?? undefined}
         delayed={delays.card}
-
         label={t`Chat`}
         onOffsetChange={moveChat}
         // Out of its dock, it floats, where this page allows that.

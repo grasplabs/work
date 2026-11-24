@@ -1,6 +1,18 @@
 import type { ChatAgent } from "@grasp-os/shared/chat";
+import { Text } from "@grasp-os/ui/components/text";
+import { Icon, UserSparklesIcon } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
-import { UsersRoundIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
+
+const styles = stylex.create({
+  agent: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: space["1"],
+    minWidth: 0,
+  },
+});
 
 // Which of the company's agents answers, in the box to ask in. A person
 // with one agent sees nothing here, as before there were more. With more,
@@ -31,13 +43,12 @@ export const AgentName = ({
   }
   const { name } = agent;
   return (
-    <span
-      aria-label={t`${name} answers in this chat`}
-      className="text-muted-foreground flex min-w-0 items-center gap-1.5 px-2 text-sm"
-    >
-      <UsersRoundIcon aria-hidden className="size-4 shrink-0" />
-      <span aria-hidden className="max-w-40 min-w-0 truncate">
-        {name}
+    <span {...stylex.props(styles.agent)}>
+      <Icon icon={UserSparklesIcon} label={t`${name} answers in this chat`} />
+      <span aria-hidden="true">
+        <Text as="span" color="muted" size="sm" truncate>
+          {name}
+        </Text>
       </span>
     </span>
   );

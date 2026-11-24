@@ -93,6 +93,18 @@ export interface SessionApi {
    */
   setName: (name: string) => Promise<void>;
   /**
+   * Whether live transcription is set up for this deployment right now, so
+   * a page offers dictation only where core would listen
+   * (`GET /api/transcription`, @grasp-os/shared/voice): `false` where a
+   * dictation would be refused as `transcription.unavailable`. Every
+   * member reads it; it names no provider, model or key. It says nothing
+   * of the person's own minutes a day, which a dictation still answers
+   * with `transcription.limited`. Refused with `model.failed` while core
+   * can't read how its AI is set up: that is not `false`, and a page that
+   * gets it leaves the microphone in.
+   */
+  dictationSetUp: () => Promise<boolean>;
+  /**
    * The person's chats with the organization's agent: their list, questions,
    * and each chat's messages as they stream in.
    */

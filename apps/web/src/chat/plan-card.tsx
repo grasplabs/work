@@ -1,5 +1,10 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { buttonVariants } from "@grasp-os/app-kit/components/button";
+import type {
+  ChatPlanKind,
+  ChatPlanned,
+  ChatPlanNeed,
+} from "@grasp-os/shared/chat";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   Item,
   ItemContent,
@@ -7,15 +12,18 @@ import {
   ItemGroup,
   ItemMedia,
   ItemTitle,
-} from "@grasp-os/app-kit/components/item";
-import type {
-  ChatPlanKind,
-  ChatPlanned,
-  ChatPlanNeed,
-} from "@grasp-os/shared/chat";
+} from "@grasp-os/ui/components/item";
+import {
+  Icon,
+  LayoutGridIcon,
+  RepeatIcon,
+  UsersIcon,
+} from "@grasp-os/ui/lib/icons";
+import type { IconData } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
-import { LayoutGridIcon, RepeatIcon, UsersIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { integrationKey } from "../connections/integrations.ts";
@@ -30,6 +38,15 @@ import { MakeCard } from "./make-card.tsx";
 // own page), so the plan never promises what can't be built. What it lists
 // is the model's plain text, shown as text. Build it and Change the plan
 // are the thread's (`actions`), only while the plan waits for the person.
+
+const styles = stylex.create({
+  need: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["2"],
+  },
+});
 
 /** No connections needed, or none missing. */
 const noNeeds: readonly ChatPlanNeed[] = [];
@@ -46,17 +63,18 @@ const KindWords = ({ kind }: { kind: ChatPlanKind }) =>
 const Need = ({ need }: { need: ChatPlanNeed }) => {
   const { name } = need;
   return (
-    <span className="flex flex-wrap items-center gap-2">
-      <Badge variant="attention">
+    <span {...stylex.props(styles.need)}>
+      <Badge variant="warning">
         <Trans>Needs {name} connected</Trans>
       </Badge>
-      <Link
-        className={buttonVariants({ size: "xs", variant: "outline" })}
-        params={{ integration: integrationKey(need.source, need.provider) }}
-        to="/integrations/$integration"
-      >
-        <Trans>Connect</Trans>
-      </Link>
+      <Button asChild size="xs" variant="outline">
+        <Link
+          params={{ integration: integrationKey(need.source, need.provider) }}
+          to="/integrations/$integration"
+        >
+          <Trans>Connect</Trans>
+        </Link>
+      </Button>
     </span>
   );
 };
@@ -69,14 +87,16 @@ const Part = ({
   does,
   needs = noNeeds,
 }: {
-  icon: ReactNode;
+  icon: IconData;
   kind: ReactNode;
   name: string;
   does: ReactNode;
   needs?: readonly ChatPlanNeed[];
 }) => (
-  <Item render={<li />} size="sm">
-    <ItemMedia variant="tile">{icon}</ItemMedia>
+  <Item size="sm">
+    <ItemMedia variant="icon">
+      <Icon icon={icon} />
+    </ItemMedia>
     <ItemContent>
       <ItemDescription>{kind}</ItemDescription>
       <ItemTitle>{name}</ItemTitle>
@@ -130,11 +150,11 @@ export const PlanCard = ({
       label={t`Here's what Grasp will make`}
       title={<Trans>Here&apos;s what Grasp will make</Trans>}
     >
-      <ItemGroup render={<ul />}>
+      <ItemGroup>
         {parts.map((part) => (
           <Part
             does={part.does}
-            icon={part.kind === "app" ? <LayoutGridIcon /> : <RepeatIcon />}
+            icon={part.kind === "app" ? LayoutGridIcon : RepeatIcon}
             key={part.kind}
             kind={<KindWords kind={part.kind} />}
             name={part.name}
@@ -148,7 +168,7 @@ export const PlanCard = ({
               right.
             </Trans>
           }
-          icon={<UsersIcon />}
+          icon={UsersIcon}
           kind={<Trans>Who gets it</Trans>}
           name={plan.who}
         />

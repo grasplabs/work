@@ -25,11 +25,14 @@ import { spentMicros } from "./model-usage.ts";
 import { closeWhenTestEnds } from "./open-sockets.ts";
 import {
   actOnRealtime,
+  connectWithoutGraspKeys,
   newestSocket,
   realtimeSockets,
 } from "./platform-providers.ts";
 import { clientOrigin, signInConfig } from "./sign-in-config.ts";
 import {
+  openRpc,
+  outcome,
   routed,
   signedIn,
   signedInWithRole,
@@ -70,6 +73,12 @@ import {
 // - Listening with a model the gateway or the rules don't let it use
 //   (GRA-1064). It is charged to Grasp's own key, never the
 //   deployment's.
+// - What a page is told up front of whether dictation is set up
+//   (`dictationSetUp`) saying something else than a dictation then does:
+//   offered where core refuses it, or hidden where core listens, for a
+//   member who isn't an admin too; a day's budget spent read as not set
+//   up; the question itself a model call, audited or charged; or answered
+//   to Grasp's staff, whose session reaches the onboarding alone.
 
 const idp = mockIdp();
 
@@ -327,6 +336,17 @@ const memberStart = {
   language: "en",
   sampleRate: 16_000,
 } as const;
+
+/** Whether dictation is set up, as the page behind `cookie` is told. */
+const dictationSetUp = async (cookie: string, coreEnv = env) => {
+  const { core } = await openRpc(cookie, { coreEnv });
+  try {
+    using session = core.authenticate();
+    return await session.dictationSetUp();
+  } finally {
+    core[Symbol.dispose]();
+  }
+};
 
 /** The purposes the gateway is told a live transcription is for. */
 const livePurposes: ReadonlySet<unknown> = new Set([
@@ -987,6 +1007,91 @@ describe("live transcription relayed through core", { timeout: 60_000 }, () => {
       calls: 3,
       spent: { errors: ["transcription.limited"], code: 1008 },
     });
+  });
+
+  it.each(["admin", "user"] as const)(
+    "tells a member signed in as %s that dictation is set up where core then listens, with no model call made to say so",
+    async (role) => {
+      const { session } = await signedInWithRole(idp, role);
+      const head = await logHead();
+
+      const asked = await relaying(async () => await dictationSetUp(session));
+      const events = await eventsAfter(head);
+      const modelEvents = events.filter(({ action }) =>
+        action.startsWith("model.")
+      );
+      const listened = await relaying(async () => {
+        const page = await listen({ cookie: session });
+        page.start(memberStart);
+        const ready = await page.next();
+        page.socket.close(1000, "Done");
+        await page.ended();
+        return ready?.type;
+      });
+
+      expect({
+        setUp: asked.result,
+        askedUpstream: asked.upstream.opened.length,
+        askedAudited: modelEvents.length,
+        heard: listened.result,
+      }).toStrictEqual({
+        setUp: true,
+        askedUpstream: 0,
+        askedAudited: 0,
+        heard: "ready",
+      });
+    }
+  );
+
+  it("tells a member dictation isn't set up where Grasp has no key to listen with, as a dictation there is refused", async () => {
+    const { session } = await signedInWithRole(idp, "user");
+    const coreEnv = { ...env, CONNECT: connectWithoutGraspKeys(env.CONNECT) };
+
+    const { upstream, result } = await relaying(async () => {
+      const setUp = await dictationSetUp(session, coreEnv);
+      const page = await listen({ cookie: session }, coreEnv);
+      page.start(memberStart);
+      return { setUp, ...(await refusalOf(page)) };
+    });
+
+    expect({ ...result, upstream: upstream.opened.length }).toStrictEqual({
+      setUp: false,
+      errors: ["transcription.unavailable"],
+      code: 1011,
+      upstream: 0,
+    });
+  });
+
+  it("still tells a member whose day is spent that dictation is set up", async () => {
+    const { session, userId } = await signedInWithRole(idp, "user");
+    await onboardingStore(env).transcriptionOpened({
+      who: `user:${userId}:heard`,
+      budget: 30 * 60,
+      most: 30 * 60,
+    });
+
+    const { result } = await relaying(async () => {
+      const page = await listen({ cookie: session });
+      page.start(memberStart);
+      return {
+        ...(await refusalOf(page)),
+        setUp: await dictationSetUp(session),
+      };
+    });
+
+    expect(result).toStrictEqual({
+      errors: ["transcription.limited"],
+      code: 1008,
+      setUp: true,
+    });
+  });
+
+  it("doesn't tell Grasp's staff whether dictation is set up", async () => {
+    const session = await signedIn(idp, "grasp-staff", staffPerson());
+
+    await expect(outcome(dictationSetUp(session))).resolves.toBe(
+      "role.forbidden"
+    );
   });
 
   it("goes on listening for a member whose role changes while the socket is open", async () => {

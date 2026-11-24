@@ -25,12 +25,11 @@ import { identify } from "../auth/identity.ts";
 import { errorResponse } from "../errors.ts";
 import { models } from "../models.ts";
 import type { Listening, ListeningCall, ListeningOutcome } from "../models.ts";
-import { platformAi } from "../platform-ai.ts";
 import { jsonOf } from "../request-body.ts";
 import { isOwnOrigin } from "../rpc.ts";
 import { reachesWorkspace, sessionRecheckMs } from "../session-check.ts";
 import { auditStaffRoute } from "../staff-audit.ts";
-import { platformTranscription } from "../transcription.ts";
+import { platformTranscription, transcriptionModel } from "../transcription.ts";
 import { interviewCaller } from "./interview-caller.ts";
 import { onboardingStore } from "./store.ts";
 import type { Took, TranscriptionSessionNote } from "./store.ts";
@@ -183,9 +182,6 @@ export const maxOpenMs = 2 * maxSessionSeconds * 1000;
  * half an hour of dictation.
  */
 export const heardBudgets = { link: 60 * 60, person: 30 * 60 } as const;
-
-/** The transcription model sockets and recordings are written down with, as the gateway names it. */
-export const transcriptionModel = `${platformAi.transcription.provider}/${platformAi.transcription.model}`;
 
 /**
  * What the gateway is told a socket is for, and where it works: the

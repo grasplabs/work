@@ -40,6 +40,7 @@ const programme: Programme = {
   inProgramme: true,
   nextReport: { inDays: 0, week: 6, through: 7 },
   reportWindow: { to: "2026-11-15", days: 7 },
+  suites: [],
 };
 
 const report: BoardReport = {

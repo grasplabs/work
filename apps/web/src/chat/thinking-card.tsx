@@ -1,9 +1,18 @@
-import { Spinner } from "@grasp-os/app-kit/components/spinner";
-import { cn } from "@grasp-os/app-kit/lib/utils";
 import type { ThinkingGround } from "@grasp-os/shared/brain";
+import { Spinner } from "@grasp-os/ui/components/spinner";
+import { ArrowRightIcon, BrainIcon, Icon } from "@grasp-os/ui/lib/icons";
+import { focusRing } from "@grasp-os/ui/lib/styles";
+import {
+  colors,
+  duration,
+  font,
+  media,
+  radius,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
-import { BrainIcon, ChevronRightIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ReactElement } from "react";
 
@@ -37,6 +46,102 @@ import { useWorkHoursText } from "../brain/thinking/work-hours.tsx";
 // are the brain's own dots under dotted dendrites, and the camera is
 // fitted to the shape and follows it. Once the thinking is done it shows
 // the finding; the whole card opens the brain, where it plays again.
+
+/** The brain's warmth, as the brain's own pages draw it, in light and in dark. */
+const heat = "light-dark(oklch(0.627 0.183 36.26), oklch(0.68 0.19 38))";
+
+const drawThread = stylex.keyframes({
+  from: { strokeDashoffset: 1 },
+  to: { strokeDashoffset: 0 },
+});
+
+const styles = stylex.create({
+  // The card around the drawing: a link to the brain.
+  card: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["2"],
+    boxSizing: "border-box",
+    width: "100%",
+    overflow: "hidden",
+    paddingInline: space["4"],
+    paddingBlockStart: space["3"],
+    paddingBlockEnd: space["2"],
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: { default: colors.border, ":hover": colors.borderStrongColor },
+    borderRadius: radius.xl,
+    cornerShape: radius.shape,
+    backgroundColor: colors.card,
+    color: colors.foreground,
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+    textDecorationLine: "none",
+    transitionProperty: "border-color",
+    transitionDuration: duration.hover,
+    transitionTimingFunction: duration.ease,
+  },
+  head: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: space["2"],
+    minHeight: space["10"],
+    textAlign: "center",
+    fontWeight: font.weightMedium,
+    textWrap: "balance",
+  },
+  // At most two lines of what it thinks about now.
+  line: {
+    display: "-webkit-box",
+    WebkitBoxOrient: "vertical",
+    WebkitLineClamp: 2,
+    overflow: "hidden",
+  },
+  foot: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["2"],
+    paddingBlockStart: space["2"],
+    borderBlockStartWidth: 1,
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: colors.border,
+    color: colors.mutedForeground,
+  },
+  grow: { flexGrow: 1 },
+  // The picture as wide as the card, its height from its view box.
+  picture: { display: "block", width: "100%", height: "auto" },
+  // A neuron's ink: plain, warm (the beat on it), or open (still being thought).
+  neuron: {
+    color: colors.foreground,
+    transitionProperty: { default: "opacity", [media.reducedMotion]: "none" },
+    transitionDuration: duration.ui,
+    transitionTimingFunction: duration.ease,
+  },
+  warm: { color: heat },
+  open: { color: colors.mutedForeground },
+  faint: { opacity: 0.3 },
+  // What moves as the shape moves on: the camera, a neuron growing where it stands.
+  moving: {
+    transitionProperty: {
+      default: "transform",
+      [media.reducedMotion]: "none",
+    },
+    transitionDuration: duration.ui,
+    transitionTimingFunction: duration.ease,
+  },
+  name: { fill: colors.foreground, fontWeight: font.weightMedium },
+  hours: { fill: colors.mutedForeground, fontWeight: font.weightNormal },
+  nerve: { fill: heat },
+  // The thread from one step to the next, drawn once.
+  thread: {
+    stroke: heat,
+    animationName: { default: drawThread, [media.reducedMotion]: "none" },
+    animationDuration: duration.ui,
+    animationTimingFunction: duration.ease,
+    animationFillMode: "both",
+  },
+});
 
 /**
  * A workflow's hours in the card, as text for its SVG: in full, or only
@@ -104,26 +209,21 @@ const ShapeNeuron = ({
   const onPage = Math.round((neuron.r * text) / 3) * 3;
   const dots = printed(neuron, onPage);
   const { hours } = neuron;
-  let tone = "text-foreground";
-  if (warm) {
-    tone = "text-brain-heat";
-  } else if (neuron.state === "open") {
-    tone = "text-muted-foreground";
-  }
   return (
     <g
-      className={cn(
-        tone,
-        "transition-opacity duration-300 motion-reduce:transition-none",
-        faint && "opacity-30"
+      {...stylex.props(
+        styles.neuron,
+        !warm && neuron.state === "open" && styles.open,
+        warm && styles.warm,
+        faint && styles.faint
       )}
     >
       <title>{neuron.label}</title>
       {/* Its soma and dendrites, in its own radius, so it grows where it stands when the shape moves on: the transform is an SVG attribute, which the class's transition eases as it changes. */}
       <g
-        className="transition-transform duration-300 ease-out motion-reduce:transition-none"
         fill="currentColor"
         transform={`translate(${neuron.x} ${-neuron.y}) scale(${neuron.r})`}
+        {...stylex.props(styles.moving)}
       >
         {dots.map((dot, at) => (
           <circle cx={dot.x} cy={dot.y} key={at} opacity={dot.a} r={dot.r} />
@@ -132,11 +232,11 @@ const ShapeNeuron = ({
       {named && neuron.bare !== true ? (
         // The words keep their size on screen however close the card looks.
         <text
-          className="fill-foreground font-medium"
           fontSize={12 / text}
           textAnchor="middle"
           x={neuron.x}
           y={-neuron.y + neuron.r + 15 / text}
+          {...stylex.props(styles.name)}
         >
           {letters > 0
             ? linesOf(neuron.label, letters).map((line, at) => (
@@ -147,9 +247,9 @@ const ShapeNeuron = ({
             : null}
           {hours === undefined ? null : (
             <tspan
-              className="fill-muted-foreground font-normal"
               dy={letters > 0 ? 15 / text : 0}
               x={neuron.x}
+              {...stylex.props(styles.hours)}
             >
               <CardHours hours={hours} short={letters === 0} />
             </tspan>
@@ -210,31 +310,25 @@ const Card = ({
   const [from, to] = (played.beat?.thread ?? []).map((id) => byId.get(id));
   return (
     <Link
-      className="group bg-card hover:border-foreground/30 focus-visible:ring-ring/50 flex w-full flex-col gap-2 overflow-hidden rounded-xl border px-4 pt-3 pb-2 text-sm transition-colors duration-200 outline-none focus-visible:ring-3"
       search={{ think: thinkAddress(chatId, thinking.questionId) }}
       to="/brain"
+      {...stylex.props(styles.card, focusRing)}
     >
-      <span className="flex min-h-10 items-center justify-center gap-2 text-center font-medium text-balance">
-        {played.going ? <Spinner className="size-3.5" /> : null}
-        <span
-          className="animate-in fade-in line-clamp-2 duration-200 motion-reduce:animate-none"
-          key={played.text}
-        >
+      <span {...stylex.props(styles.head)}>
+        {played.going ? <Spinner size="sm" /> : null}
+        <span key={played.text} {...stylex.props(styles.line)}>
           {played.text}
         </span>
       </span>
       <svg
         aria-hidden="true"
-        className="h-auto w-full"
         ref={setPicture}
         viewBox={`0 0 ${VIEW.width} ${VIEW.height}`}
+        {...stylex.props(styles.picture)}
       >
-        <g
-          className="transition-transform duration-300 ease-out motion-reduce:transition-none"
-          transform={view.camera}
-        >
+        <g transform={view.camera} {...stylex.props(styles.moving)}>
           {nervesOf(map, view.text).map(({ id, dots }) => (
-            <g className="fill-brain-heat" key={id}>
+            <g key={id} {...stylex.props(styles.nerve)}>
               {dots.map((dot, at) => (
                 <circle
                   cx={dot.x}
@@ -248,7 +342,6 @@ const Card = ({
           ))}
           {from === undefined || to === undefined ? null : (
             <path
-              className="draw-thread stroke-brain-heat"
               d={threadPath(from, to, SAG)}
               fill="none"
               key={`${played.beat?.since}:${from.id}`}
@@ -257,6 +350,7 @@ const Card = ({
               strokeLinecap="round"
               strokeWidth={1.5}
               vectorEffect="non-scaling-stroke"
+              {...stylex.props(styles.thread)}
             />
           )}
           {map.neurons.map((neuron) => (
@@ -272,12 +366,12 @@ const Card = ({
           ))}
         </g>
       </svg>
-      <span className="text-muted-foreground group-hover:text-foreground flex items-center gap-1.5 border-t pt-2">
-        <BrainIcon aria-hidden="true" className="size-4" />
-        <span className="flex-1">
+      <span {...stylex.props(styles.foot)}>
+        <Icon icon={BrainIcon} />
+        <span {...stylex.props(styles.grow)}>
           <Trans>See it in the brain</Trans>
         </span>
-        <ChevronRightIcon aria-hidden="true" className="size-4" />
+        <Icon icon={ArrowRightIcon} />
       </span>
     </Link>
   );
