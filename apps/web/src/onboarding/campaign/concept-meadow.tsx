@@ -1,8 +1,8 @@
 // Concept A, the meadow: the picture says how it goes before a word is
 // read. Each person invited is a seed in their team's ground; who has
 // talked has flowered; a quiet team is bare; the sky lightens as Grasp
-// learns. Under it, centred as the onboarding's steps were, one title and
-// one sentence that lights up as it is read; three things Grasp learned;
+// learns. Under it, in one column at its start, one title and one
+// sentence; three things Grasp learned, each one plain sentence;
 // what the admin must do only when there is something; one quiet line for
 // when. On a phone, the meadow and the sentence alone.
 import { Heading } from "@grasp-os/ui/components/heading";
@@ -18,45 +18,34 @@ import {
   RunningLine,
   wide,
 } from "./campaign-parts.tsx";
-import { statementOf, talkedWords } from "./campaign-words.ts";
+import { findingSentence, statementOf, talkedWords } from "./campaign-words.ts";
 import type { Campaign } from "./fixtures.ts";
 import { MeadowField } from "./meadow-field.tsx";
-import { ReadAloud } from "./read-aloud.tsx";
 
 const styles = stylex.create({
   page: {
     display: "flex",
     flexDirection: "column",
-    alignItems: "center",
-    gap: { default: space[12], [media.maxSm]: space[8] },
+    gap: { default: space[10], [media.maxSm]: space[8] },
   },
-  full: { alignSelf: "stretch" },
-  centre: {
+  // Everything under the picture reads in one column at its start.
+  column: {
     display: "flex",
     flexDirection: "column",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: space[3],
-    maxWidth: "36rem",
-    textAlign: "center",
-    textWrap: "balance",
+    maxWidth: "40rem",
   },
   three: {
-    display: "grid",
-    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-    gap: space[10],
-    alignSelf: "stretch",
+    display: "flex",
+    flexDirection: "column",
+    gap: space[3],
+    maxWidth: "40rem",
     margin: 0,
     padding: 0,
     listStyle: "none",
   },
-  finding: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: space[2],
-    textAlign: "center",
-  },
-  asks: { alignSelf: "stretch", maxWidth: "40rem", marginInline: "auto" },
+  asks: { maxWidth: "40rem" },
 });
 
 /** The first finding of each team, up to three: one look across the company. */
@@ -80,16 +69,12 @@ export const CampaignMeadow = ({ campaign }: { campaign: Campaign }) => {
     : `A meadow of everyone invited: ${rest}`;
   return (
     <div {...stylex.props(styles.page)}>
-      <div {...stylex.props(styles.full)}>
-        <MeadowField campaign={campaign} label={label} />
-      </div>
-      <header {...stylex.props(styles.centre)}>
+      <MeadowField campaign={campaign} label={label} />
+      <header {...stylex.props(styles.column)}>
         <Heading level={1} size="xl">
           {lead}
         </Heading>
-        <Text size="lg">
-          <ReadAloud text={rest} />
-        </Text>
+        <Text>{rest}</Text>
       </header>
       <OnYourComputer />
       {three.length === 0 ? (
@@ -100,12 +85,12 @@ export const CampaignMeadow = ({ campaign }: { campaign: Campaign }) => {
         <div {...stylex.props(wide.only)}>
           <ul aria-label="What we learned" {...stylex.props(styles.three)}>
             {three.map(({ finding, team }) => (
-              <li key={finding.id} {...stylex.props(styles.finding)}>
-                <Text as="span" size="xs" color="muted">
-                  {campaign.grouped ? team.name : finding.topic}
-                </Text>
-                <Text size="lg" variant="display">
-                  {finding.text}
+              <li key={finding.id}>
+                <Text>
+                  {findingSentence(finding, team, {
+                    named: true,
+                    grouped: campaign.grouped,
+                  })}
                 </Text>
               </li>
             ))}
@@ -120,7 +105,7 @@ export const CampaignMeadow = ({ campaign }: { campaign: Campaign }) => {
         </div>
       )}
       <div {...stylex.props(wide.only)}>
-        <div {...stylex.props(styles.centre)}>
+        <div {...stylex.props(styles.column)}>
           <RunningLine campaign={campaign} />
           <AllFindings campaign={campaign} variant="outline" />
         </div>
