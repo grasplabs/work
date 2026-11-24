@@ -61,7 +61,8 @@ const moods: Record<FigureState, Mood> = {
   idle: { glance: 0.07, every: [1, 2], blink: 0.22 },
   // Paying attention: it locks on and hardly wanders.
   listening: { glance: 0.02, every: [1.4, 2.4], blink: 0.2 },
-  // Looking away, up and to the side, searching in small quick glances; slower blinks.
+  // Looking away, up and to the side, searching in small quick glances; slower blinks. The main
+  // agent watches its thought go round instead (body.ts).
   thinking: {
     away: [0.62, 0.5],
     glance: 0.22,
@@ -106,18 +107,21 @@ export const stepEye = (
   state: FigureState,
   dt: number,
   look: { x: number; y: number },
-  since: number
+  since: number,
+  toward?: { x: number; y: number }
 ): void => {
   life.clock += dt;
   const mood = moods[state];
   if (life.clock >= life.nextGlance) {
-    life.sx = (draw(life) - 0.5) * 2 * mood.glance;
-    life.sy = (draw(life) - 0.5) * 1.4 * mood.glance;
+    // Following something (his thought going round) he hardly glances off it.
+    const glance = toward === undefined ? mood.glance : mood.glance * 0.25;
+    life.sx = (draw(life) - 0.5) * 2 * glance;
+    life.sy = (draw(life) - 0.5) * 1.4 * glance;
     life.nextGlance =
       life.clock + mood.every[0] + draw(life) * (mood.every[1] - mood.every[0]);
   }
-  const tx = (mood.away?.[0] ?? look.x) + life.sx;
-  const ty = (mood.away?.[1] ?? look.y) + life.sy;
+  const tx = (toward?.x ?? mood.away?.[0] ?? look.x) + life.sx;
+  const ty = (toward?.y ?? mood.away?.[1] ?? look.y) + life.sy;
   // The spring, in steps of at most 1/120s so a slow frame never throws it.
   for (let left = dt; left > 0; left -= 1 / 120) {
     const h = Math.min(left, 1 / 120);
