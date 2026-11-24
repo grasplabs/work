@@ -1297,10 +1297,6 @@ msgstr "{role} (onbekend)"
 msgid "{role} can answer it"
 msgstr "{role} kan het beantwoorden"
 
-#: src/frame/person-menu.tsx
-msgid "{role}, Grasp staff"
-msgstr "{role}, Grasp-medewerker"
-
 #: src/brain/brain.ts
 msgid "{role}, invited {date}, not interviewed yet"
 msgstr "{role}, uitgenodigd op {date}, nog niet geïnterviewd"
@@ -1608,7 +1604,8 @@ msgstr "{versions, plural, one {# versie} other {# versies}}"
 msgid "{waiting, plural, one {# person new on your list gets a link once you confirm your organization.} other {# people new on your list get their links once you confirm your organization.}}"
 msgstr "{waiting, plural, one {# nieuwe persoon op je lijst krijgt een link zodra je je organisatie bevestigt.} other {# nieuwe mensen op je lijst krijgen hun link zodra je je organisatie bevestigt.}}"
 
-#: src/inbox/nav-item.tsx
+#: src/frame/app-sidebar.tsx
+#: src/inbox/sidebar-inbox.tsx
 msgid "{waiting, plural, one {# thing waiting} other {# things waiting}}"
 msgstr "{waiting, plural, one {# ding wacht} other {# dingen wachten}}"
 
@@ -2524,6 +2521,10 @@ msgctxt "inbox filter, short"
 msgid "All"
 msgstr "Alles"
 
+#: src/chat/sidebar-chats.tsx
+msgid "All chats"
+msgstr "Alle chats"
+
 #: src/routes/_shell.settings.billing.tsx
 msgid "All invoices"
 msgstr "Alle facturen"
@@ -2868,6 +2869,10 @@ msgstr "Beantwoord: {question}"
 msgid "Answered: {title}"
 msgstr "Beantwoord: {title}"
 
+#: src/chat/sidebar-chats.tsx
+msgid "Answering"
+msgstr "Bezig met antwoorden"
+
 #: src/agents/agent-page.tsx
 msgid "Answers nobody anywhere"
 msgstr "Antwoordt nergens iemand"
@@ -2936,6 +2941,10 @@ msgstr "App of workflow"
 #: src/routes/_shell.settings.models.tsx
 msgid "App spend"
 msgstr "Uitgaven per app"
+
+#: src/frame/person-menu.tsx
+msgid "Appearance"
+msgstr "Weergave"
 
 #: src/brain/brain.ts
 msgid "Application"
@@ -4145,6 +4154,7 @@ msgstr "Chatten met {name}"
 
 #: src/chat/chat-switcher.tsx
 #: src/chat/chat-window.tsx
+#: src/chat/sidebar-chats.tsx
 msgid "Chats"
 msgstr "Chats"
 
@@ -7535,6 +7545,10 @@ msgctxt "an app's settings section"
 msgid "History"
 msgstr "Geschiedenis"
 
+#: src/frame/app-sidebar.tsx
+msgid "Home"
+msgstr "Start"
+
 #: src/brain/opportunities-page.tsx
 msgid "Hours a week"
 msgstr "Uren per week"
@@ -7905,7 +7919,8 @@ msgstr "In je documenten zag ik {tools}."
 msgid "In your own words, as you would tell a colleague."
 msgstr "In je eigen woorden, zoals je het een collega zou vertellen."
 
-#: src/inbox/nav-item.tsx
+#: src/frame/app-sidebar.tsx
+#: src/inbox/sidebar-inbox.tsx
 #: src/routes/_shell.inbox.tsx
 msgid "Inbox"
 msgstr "Inbox"
@@ -8640,7 +8655,6 @@ msgstr "Bekend"
 msgid "Known about your organization"
 msgstr "Bekend over je organisatie"
 
-#: src/frame/person-menu.tsx
 #: src/routes/_shell.settings.profile.tsx
 msgid "Language"
 msgstr "Taal"
@@ -10676,6 +10690,10 @@ msgstr "Niets gebruikt ze tot je ze goedkeurt. Bekende malware wordt altijd gewe
 msgid "Nothing waits for you"
 msgstr "Er wacht niets op je"
 
+#: src/inbox/sidebar-inbox.tsx
+msgid "Nothing waits for you."
+msgstr "Er wacht niets op je."
+
 #: src/apps/app-data.tsx
 msgid "Nothing was added. Fix these rows and try again."
 msgstr "Er is niets toegevoegd. Corrigeer deze rijen en probeer het opnieuw."
@@ -11873,7 +11891,6 @@ msgstr "Voortgang"
 msgid "Project"
 msgstr "Project"
 
-#: src/frame/app-sidebar.tsx
 #: src/people/share-picker.tsx
 #: src/projects/project-view.tsx
 #: src/routes/_shell.projects.$projectId.tsx
@@ -14644,6 +14661,10 @@ msgctxt "what the Brain remembers about something"
 msgid "Supplies"
 msgstr "Levert"
 
+#: src/frame/person-menu.tsx
+msgid "Support"
+msgstr "Ondersteuning"
+
 #: src/connections/groups.ts
 msgctxt "kind of app"
 msgid "Support"
@@ -14660,6 +14681,10 @@ msgstr "Zet een team uit en niemand erin krijgt een link."
 #: src/pages/page-frame.tsx
 msgid "Switch now"
 msgstr "Nu wisselen"
+
+#: src/frame/person-menu.tsx
+msgid "Switch organization"
+msgstr "Organisatie wisselen"
 
 #: src/settings/ai-providers.tsx
 msgid "Switch to Grasp’s AI"
@@ -15839,7 +15864,6 @@ msgstr "Hun eigen mail, agenda en bestanden. Gebeurt meteen."
 msgid "Their personal data goes for good. Their name stays on the company’s records, so what they did stays traceable."
 msgstr "Hun persoonlijke gegevens verdwijnen voorgoed. Hun naam blijft in de administratie van het bedrijf, zodat herleidbaar blijft wat ze deden."
 
-#: src/frame/person-menu.tsx
 #: src/frame/ui-words.tsx
 msgid "Theme"
 msgstr "Thema"
@@ -17025,6 +17049,10 @@ msgstr "Weergave"
 #: src/drafts/draft-history.tsx
 msgid "View changes"
 msgstr "Wijzigingen bekijken"
+
+#: src/frame/app-sidebar.tsx
+msgid "Views"
+msgstr "Weergaven"
 
 #: src/frame/ui-words.tsx
 msgctxt "a side panel's views"
@@ -18657,10 +18685,6 @@ msgstr "De bestanden van je export"
 #: src/routes/_shell.settings.instructions.tsx
 msgid "Your instructions"
 msgstr "Jouw instructies"
-
-#: src/frame/person-menu.tsx
-msgid "Your onboarding"
-msgstr "Jouw onboarding"
 
 #: src/routes/_shell.settings.models.tsx
 msgid "Your organization chooses these with its own AI provider keys."

@@ -397,7 +397,7 @@ test("a person attaches files to a question, takes one off, and sees the questio
   await expect(page.getByText(plan)).toBeVisible();
 
   await page.getByLabel("Your question").fill(question);
-  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
   // The question shows the file it carried; the box is empty again.
   const asked = chatOf(page)
     .getByRole("log", { name: "Messages" })
