@@ -30,6 +30,8 @@ import {
 import { Frame } from "./frame.tsx";
 import type { ClockPlace } from "./frame.tsx";
 import { ReadBackPlaceholder } from "./read-back.tsx";
+import { ConsentClean } from "./start-clean.tsx";
+import type { CleanStart } from "./start-clean.tsx";
 import {
   Consent,
   consentTurn,
@@ -63,7 +65,15 @@ export interface ConceptSearch {
   lang: "unknown" | undefined;
   transcript: boolean;
   fold: boolean;
+  /** A's cleaned start: 1, 2 or 3. */
+  start: CleanStart;
 }
+
+/** The router reads `start=2` as a number: either way, one of the three. */
+const cleanStartOf = (value: unknown): CleanStart => {
+  const given = String(value);
+  return given === "2" || given === "3" ? given : "1";
+};
 
 /** Reads the concept’s own part of the address; nothing when it names no concept. */
 export const conceptSearch = (
@@ -83,6 +93,7 @@ export const conceptSearch = (
     lang: search.lang === "unknown" ? "unknown" : undefined,
     transcript: search.transcript !== undefined,
     fold: search.fold !== undefined,
+    start: cleanStartOf(search.start),
   };
 };
 
@@ -339,11 +350,13 @@ const BeforeAB = ({
   concept,
   screen,
   live,
+  start,
   go,
 }: {
   concept: Concept;
   screen: string;
   live: boolean;
+  start: CleanStart;
   go: (screen: string) => void;
 }) => {
   const [when, setWhen] = useState<string>(fixture.remindAt[1].when);
@@ -393,11 +406,27 @@ const BeforeAB = ({
       return <Declined onUndo={toStart} />;
     }
     default: {
+      if (concept === "a") {
+        return (
+          <ConsentClean
+            onAgree={() => {
+              go("hello");
+            }}
+            onNotNow={() => {
+              go("not-now");
+            }}
+            onRatherNot={() => {
+              go("rather-not");
+            }}
+            variant={start}
+          />
+        );
+      }
       return (
         <Consent
-          agree={concept === "a" ? "I agree, let’s start" : "I agree"}
+          agree="I agree"
           onAgree={() => {
-            go(concept === "a" ? "hello" : "check");
+            go("check");
           }}
           onNotNow={() => {
             go("not-now");
@@ -405,11 +434,7 @@ const BeforeAB = ({
           onRatherNot={() => {
             go("rather-not");
           }}
-          title={
-            concept === "a"
-              ? `Tell ${fixture.interviewer} how your work really goes`
-              : `${fixture.minutes} minutes with ${fixture.interviewer}`
-          }
+          title={`${fixture.minutes} minutes with ${fixture.interviewer}`}
         />
       );
     }
@@ -508,7 +533,15 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
   } else if (concept === "c") {
     page = <BeforeC go={go} screen={screen} />;
   } else {
-    page = <BeforeAB concept={concept} go={go} live={live} screen={screen} />;
+    page = (
+      <BeforeAB
+        concept={concept}
+        go={go}
+        live={live}
+        screen={screen}
+        start={search.start}
+      />
+    );
   }
 
   return (

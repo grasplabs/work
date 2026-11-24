@@ -4,7 +4,6 @@ import { Button } from "@grasp-os/ui/components/button";
 import { Chat, ChatMessage, ChatMessages } from "@grasp-os/ui/components/chat";
 import { Heading } from "@grasp-os/ui/components/heading";
 import {
-  MessageAvatar,
   MessageContent,
   MessageResponse,
 } from "@grasp-os/ui/components/message";
@@ -48,7 +47,6 @@ import {
   wrapUp,
 } from "./fixture.ts";
 import type { ClockPlace } from "./frame.tsx";
-import { InterviewerAvatar } from "./frame.tsx";
 
 // CONCEPT ONLY: the conversation, as every concept reaches it: Damsko’s
 // Chat (the thread, Stephen’s turns at the start, the person’s at the end
@@ -457,9 +455,6 @@ export const Thread = ({ turns, doing }: { turns: Turn[]; doing: Doing }) => (
               : "done"
           }
         >
-          <MessageAvatar>
-            <InterviewerAvatar />
-          </MessageAvatar>
           <MessageContent>
             <MessageResponse>
               {turn.lead === undefined
@@ -630,9 +625,7 @@ const Stage = ({
               value={usedSeconds(left)}
               variant={nearEnd(left) ? "warning" : "default"}
             />
-          ) : (
-            <InterviewerAvatar />
-          )}
+          ) : null}
           <Text as="span" color="muted" size="sm">
             {over}
           </Text>
