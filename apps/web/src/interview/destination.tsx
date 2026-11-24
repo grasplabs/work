@@ -209,7 +209,7 @@ const SendFoot = ({
       ) : (
         <Button
           disabled={!canSave}
-          loadingLabel={t`Saving…`}
+          loadingText={t`Saving…`}
           onClick={onSave}
           status={saving ? "loading" : "idle"}
         >

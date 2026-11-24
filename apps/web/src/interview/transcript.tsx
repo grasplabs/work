@@ -159,7 +159,7 @@ const Line = ({
         {line.removed === true ? null : (
           <MessageActions>
             <MessageAction
-              label={
+              aria-label={
                 stephen
                   ? t`Remove ${who}’s line: ${words}`
                   : t`Remove your line: ${words}`
