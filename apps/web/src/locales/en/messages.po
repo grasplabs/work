@@ -12727,10 +12727,6 @@ msgstr "Resize"
 msgid "Resize the chat"
 msgstr "Resize the chat"
 
-#: src/frame/page-panel.tsx
-msgid "Resize the panel"
-msgstr "Resize the panel"
-
 #: src/apps/resource-bindings.tsx
 msgid "Resource"
 msgstr "Resource"

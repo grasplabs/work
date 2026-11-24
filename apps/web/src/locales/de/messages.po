@@ -12727,10 +12727,6 @@ msgstr "Größe ändern"
 msgid "Resize the chat"
 msgstr "Breite des Chats ändern"
 
-#: src/frame/page-panel.tsx
-msgid "Resize the panel"
-msgstr "Größe des Bereichs ändern"
-
 #: src/apps/resource-bindings.tsx
 msgid "Resource"
 msgstr "Ressource"
