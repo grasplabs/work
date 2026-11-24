@@ -20,16 +20,22 @@ export const fixture = {
   remindAt: [
     {
       id: "today",
+      day: "Later today",
+      time: "4:00 PM",
       label: "Later today, at 4:00 PM",
       when: "later today at 4:00 PM",
     },
     {
       id: "tomorrow",
+      day: "Tomorrow morning",
+      time: "9:00 AM",
       label: "Tomorrow morning, at 9:00 AM",
       when: "tomorrow morning at 9:00 AM",
     },
     {
       id: "monday",
+      day: "Monday morning",
+      time: "9:00 AM",
       label: "Monday morning, at 9:00 AM",
       when: "on Monday morning at 9:00 AM",
     },
@@ -86,6 +92,9 @@ export const copy = {
     ),
     back: "Back",
     doneTitle: (when: string) => `Got it. We’ll remind you ${when}.`,
+    /** The same, split as the hello: "Got it." as the title, the rest under it. */
+    doneHead: "Got it.",
+    doneRest: (when: string) => `We’ll remind you ${when}.`,
     doneLine: "Nothing was recorded.",
     doneStart: "Actually, let’s start now",
   },

@@ -74,6 +74,8 @@ export interface ConceptSearch {
   body: StartBody;
   /** The person's name, to try a long one (`&name=`). */
   name: string;
+  /** "Not right now"'s times (`&later=a|b`): A the time first, B the day first. */
+  laterLook: "a" | "b";
   /** The countdown's look (`&count=a|b|c`): A small, B large, C minutes only. */
   countLook: CountdownLook;
   /** On a laptop: the pages before the conversation beside the dither, or centred in the whole window (`&layout=centre`). */
@@ -111,6 +113,7 @@ export const conceptSearch = (
     // Centred in the whole window by default (Ruben chose it); the split beside the dither with `&layout=split`.
     centred: search.layout !== "split",
     body: search.body === "a" ? "a" : "b",
+    laterLook: search.later === "b" ? "b" : "a",
     name:
       typeof search.name === "string" && search.name !== ""
         ? search.name
@@ -373,6 +376,7 @@ const BeforeAB = ({
   altTitle,
   body,
   name,
+  laterLook,
   go,
 }: {
   concept: Concept;
@@ -381,6 +385,7 @@ const BeforeAB = ({
   altTitle: boolean;
   body: StartBody;
   name: string;
+  laterLook: "a" | "b";
   go: (screen: string) => void;
 }) => {
   const [when, setWhen] = useState<string>(fixture.remindAt[1].when);
@@ -405,6 +410,7 @@ const BeforeAB = ({
     case "not-now": {
       return (
         <NotNow
+          look={laterLook}
           onBack={toStart}
           onPick={(picked) => {
             setWhen(picked);
@@ -566,6 +572,7 @@ export const InterviewConcepts = ({ search }: { search: ConceptSearch }) => {
         body={search.body}
         concept={concept}
         go={go}
+        laterLook={search.laterLook}
         live={live}
         name={search.name}
         screen={screen}

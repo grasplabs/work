@@ -3,6 +3,13 @@ import {
   ProgressLabel,
   ProgressValue,
 } from "@grasp-os/ui/components/progress";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@grasp-os/ui/components/select";
 import { Icon } from "@grasp-os/ui/lib/icons";
 import {
   colors,
@@ -12,11 +19,14 @@ import {
   space,
 } from "@grasp-os/ui/lib/tokens.stylex";
 import { iconVars, pixel } from "@grasp-os/ui/lib/vars.stylex";
+import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
 import { GraspLogo } from "../../connections/brand-logos.ts";
-import { LanguageButton } from "../../frame/language-button.tsx";
+import { chooseLocale, isLocale, localeNames } from "../../i18n.ts";
+import type { Locale } from "../../i18n.ts";
+import { useNarrow } from "../../onboarding/use-narrow.ts";
 import { budgetSeconds, nearEnd, usedSeconds, usedWords } from "./clock.ts";
 import { fixture } from "./fixture.ts";
 
@@ -114,6 +124,8 @@ const styles = stylex.create({
     maskSize: "3px 3px",
     display: { default: "block", [media.forcedColors]: "none" },
   },
+  // Over a surface rather than behind it: above its fill, never catching a press.
+  over: { zIndex: 1 },
   // Beside the page: the light from the top end corner, falling across the half.
   lightBeside: {
     backgroundImage: `radial-gradient(140% 100% at 100% 0%, ${colors.mint}, transparent 75%)`,
@@ -140,6 +152,47 @@ const styles = stylex.create({
     gridRow: { default: "3", [media.lg]: "3" },
   },
 });
+
+const languages = Object.entries(localeNames).flatMap(([code, name]) =>
+  isLocale(code) ? [{ code, name }] : []
+);
+
+/**
+ * The language: the library's Select in its quiet form (ghost, small, no box), as the setup's bar
+ * has it (chore/concept-onboarding-setup, 8c71f5b), so both flows share one control. Closed, it
+ * says the language's own name; on a phone its short code ("EN"). Its list names each in its own
+ * words.
+ */
+const Language = () => {
+  const { t, i18n } = useLingui();
+  const narrow = useNarrow();
+  const locale: Locale = isLocale(i18n.locale) ? i18n.locale : "en";
+  return (
+    <Select
+      items={languages.map(({ code, name }) => ({
+        value: code,
+        label: narrow ? code.toUpperCase() : name,
+      }))}
+      onValueChange={(value) => {
+        if (isLocale(value)) {
+          void chooseLocale(value);
+        }
+      }}
+      value={locale}
+    >
+      <SelectTrigger aria-label={t`Language`} size="sm" variant="ghost">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {languages.map(({ code, name }) => (
+          <SelectItem key={code} label={name} value={code}>
+            <span lang={code}>{name}</span>
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+};
 
 /** Grasp's mark alone, top start (Ruben: "the logo is enough"); "Grasp" is its name. */
 const Brand = () => (
@@ -172,6 +225,14 @@ const TimeBar = ({ left }: { left: number }) => (
  * concept puts it there, a scene beside the page before the conversation,
  * and the page.
  */
+/** The calm dither laid over a surface (the suggested reminder time): the header's touch, nothing new. */
+export const DitherOver = () => (
+  <span
+    aria-hidden="true"
+    {...stylex.props(styles.texture, styles.over, styles.lightTop)}
+  />
+);
+
 /** Damsko's calm dither in a room of its own: beside the page, or falling from the top. */
 const Field = ({
   room,
@@ -222,7 +283,7 @@ export const Frame = ({
         <Brand />
         <div {...stylex.props(styles.end)}>
           {actions}
-          <LanguageButton quiet side="bottom" />
+          <Language />
         </div>
       </header>
       {beside ? <Field light="beside" room={[styles.beside]} /> : null}
