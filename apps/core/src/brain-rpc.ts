@@ -1394,7 +1394,8 @@ export class BrainRpc extends CoreRpcTarget implements BrainApi {
   async openGaps(): Promise<Gap[]> {
     return await withPerson(
       this.#check,
-      async (person) => await openGaps(this.#env, person)
+      async (person) =>
+        await openGaps(this.#env, person, await brainGaps(this.#env, person))
     );
   }
 

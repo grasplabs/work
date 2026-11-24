@@ -10,7 +10,7 @@ import {
 import { issuesOf } from "@grasp-os/shared/errors";
 import { isMemberAdmin, roleErrors } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
-import { and, asc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import {
@@ -179,16 +179,25 @@ const readGap = async (env: Env, gap: GapRecord): Promise<Gap> => {
 };
 
 /**
- * The brain's open gaps `person` may answer from their inbox
- * (`brain.openGaps`): every one for the company's own admins, asked of
- * someone or not; for anyone else, Grasp's staff too, only those asked of
- * them (a `gap_asked` notification of theirs), so nobody reads from here
- * what was asked of someone else. Neither retired nor taken out of the
- * brain, in the order the brain added them.
+ * Of `gaps`, the brain's gaps as every member reads them (`brainGaps`),
+ * the open ones `person` may answer from their inbox (`brain.openGaps`):
+ * every one for the company's own admins, asked of someone or not; for
+ * anyone else only those asked of them (a `gap_asked` notification of
+ * theirs), so nobody reads from here what was asked of someone else.
+ * Taken from what `brain.read` serves, not read again from the records,
+ * so a gap says here exactly what it says there: nothing an admin took
+ * out of the brain, and a kickoff's team by the team that followed it.
  */
-export const openGaps = async (env: Env, person: Identity): Promise<Gap[]> => {
-  const db = drizzle(env.DB);
-  const askedOfThem = db
+export const openGaps = async (
+  env: Env,
+  person: Identity,
+  gaps: readonly Gap[]
+): Promise<Gap[]> => {
+  const open = gaps.filter(({ closedAt }) => closedAt === undefined);
+  if (isMemberAdmin(person) || open.length === 0) {
+    return open;
+  }
+  const asked = await drizzle(env.DB)
     .select({ gap: notifications.gapId })
     .from(notifications)
     .where(
@@ -197,31 +206,8 @@ export const openGaps = async (env: Env, person: Identity): Promise<Gap[]> => {
         eq(notifications.type, "gap_asked")
       )
     );
-  const rows = await db
-    .select({ body: brainRecords.body })
-    .from(brainRecords)
-    .leftJoin(brainGapStates, eq(brainGapStates.gapId, brainRecords.id))
-    .where(
-      and(
-        eq(brainRecords.type, "gap"),
-        isNull(brainRecords.retiredAt),
-        isNull(brainRecords.forgottenAt),
-        isNull(brainGapStates.closedAt),
-        isMemberAdmin(person)
-          ? undefined
-          : inArray(brainRecords.id, askedOfThem)
-      )
-    )
-    .orderBy(asc(brainRecords.position));
-  const gaps = rows.flatMap(({ body }) => {
-    const record = brainRecordSchema.parse(JSON.parse(body));
-    if (record.type !== "gap") {
-      return [];
-    }
-    const { type: _gap, ...gap } = record;
-    return [gap];
-  });
-  return await gapsWith(env, gaps);
+  const ofThem = new Set(asked.map(({ gap }) => gap));
+  return open.filter(({ id }) => ofThem.has(id));
 };
 
 /** Refuses anyone but the company's own admins: never Grasp staff. */

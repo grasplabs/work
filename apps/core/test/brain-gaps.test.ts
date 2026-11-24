@@ -627,6 +627,14 @@ describe("the brain's teams and gaps", { timeout: 120_000 }, () => {
       owner: [{ id: asked.ids.gap, asked: true }],
       other: [],
     });
+    // A gap says in the inbox exactly what it says on the brain's page.
+    const [inbox, { gaps: onPage }] = await Promise.all([
+      owner.api.brain.openGaps(),
+      owner.api.brain.read(),
+    ]);
+    expect(inbox.filter(({ id }) => ours.has(id))).toStrictEqual(
+      onPage.filter(({ id }) => id === asked.ids.gap)
+    );
   });
 
   it("are asked again by an admin while open, of who holds the role by then: the newest ask kept, the owner's one notice unread again, each ask audited, and never once closed", async () => {
