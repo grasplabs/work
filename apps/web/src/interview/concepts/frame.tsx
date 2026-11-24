@@ -58,7 +58,8 @@ const styles = stylex.create({
     height: { default: "4rem", [media.sm]: "5rem" },
     paddingInline: { default: space["4"], [media.sm]: space["10"] },
   },
-  end: { display: "flex", alignItems: "center", gap: space["2"] },
+  // The header's controls: one quiet family, one gap.
+  end: { display: "flex", alignItems: "center", gap: space["1"] },
   // The website's mark beside its name, as the sign-in page has it.
   brand: {
     display: "inline-flex",
@@ -140,11 +141,10 @@ const styles = stylex.create({
   },
 });
 
-/** Grasp's mark and name, top start. */
+/** Grasp's mark alone, top start (Ruben: "the logo is enough"); "Grasp" is its name. */
 const Brand = () => (
   <span {...stylex.props(styles.brand)}>
-    <Icon icon={GraspLogo} />
-    Grasp
+    <Icon icon={GraspLogo} label="Grasp" />
   </span>
 );
 
@@ -222,7 +222,7 @@ export const Frame = ({
         <Brand />
         <div {...stylex.props(styles.end)}>
           {actions}
-          <LanguageButton side="bottom" />
+          <LanguageButton quiet side="bottom" />
         </div>
       </header>
       {beside ? <Field light="beside" room={[styles.beside]} /> : null}
