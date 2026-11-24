@@ -25,6 +25,13 @@ import { interviewLocaleSchema } from "./onboarding.ts";
 /** The longest line one request may have said, so no request runs up the bill. */
 export const maxSpeechChars = 600;
 
+/**
+ * The most a direction to the voice may add in front of a line, such as
+ * `[emotion=appreciative]`: sent with the line, never part of what the
+ * page may ask for.
+ */
+export const maxDirectionChars = 32;
+
 /** A line to say. */
 export interface SpeechRequest {
   /** The line as it is said, at most {@link maxSpeechChars} characters. */

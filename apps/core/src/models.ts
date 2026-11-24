@@ -60,7 +60,7 @@ import {
   workContextSchema,
 } from "@grasp-os/shared/permissions";
 import type { PlatformAiFeature } from "@grasp-os/shared/platform-ai";
-import { maxSpeechChars } from "@grasp-os/shared/voice";
+import { maxDirectionChars, maxSpeechChars } from "@grasp-os/shared/voice";
 import type { Speech } from "@grasp-os/shared/voice";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -2409,8 +2409,15 @@ const speechSchema = z.strictObject({
   provenance: sessionShape.provenance,
   work: sessionShape.work,
   requestId: sessionShape.requestId,
-  /** The line to say: at most `maxSpeechChars`, which bounds what it costs. */
-  text: z.string().trim().min(1).max(maxSpeechChars),
+  /**
+   * The line to say: at most `maxSpeechChars`, with the direction its
+   * caller may lead it with, which bounds what it costs.
+   */
+  text: z
+    .string()
+    .trim()
+    .min(1)
+    .max(maxSpeechChars + maxDirectionChars),
   voice: z.string().regex(voiceIdPattern),
   language: z.string().regex(languagePattern),
 });
@@ -2527,7 +2534,7 @@ const speechEntry = (
 
 /** The most a line can add to its audit event (`largestRecord`). */
 const largestSpeech: SpeechRecord = {
-  characters: maxSpeechChars,
+  characters: maxSpeechChars + maxDirectionChars,
   region: "custom",
   cost: Number.MAX_VALUE,
   logId: "x".repeat(auditIdentifierMaxLength),

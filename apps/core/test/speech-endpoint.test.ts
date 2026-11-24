@@ -253,6 +253,25 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     expect(said.map((words) => words[0]?.startMs)).toStrictEqual([0, 0]);
   });
 
+  it("says a line as long as one may be, with its tone in front", async () => {
+    const { link } = await opened();
+    const start = newLine();
+    const text = `${start}${"a".repeat(600 - start.length)}`;
+
+    const response = await speak({
+      text,
+      language: "en",
+      tone: "warm, grateful",
+      link,
+    });
+    await response.body?.cancel();
+
+    expect(response.status).toBe(200);
+    await expect(askedFor(start)).resolves.toMatchObject([
+      { input: `[emotion=grateful]${text}` },
+    ]);
+  });
+
   it.each([
     ["a direction of its own", { text: "[sad] I'm sorry to hear that." }],
     ["a tone Stephen may not use", { tone: "sad, quiet" }],

@@ -1,5 +1,5 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
-import { maxSpeechChars } from "@grasp-os/shared/voice";
+import { maxDirectionChars, maxSpeechChars } from "@grasp-os/shared/voice";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -337,7 +337,7 @@ describe("speech through the model gateway", { timeout: 30_000 }, () => {
 
   it("refuses a line longer than one request may have said", async () => {
     const { rulesEnv } = withRules();
-    const line = `${newLine()}${"a".repeat(maxSpeechChars)}`;
+    const line = `${newLine()}${"a".repeat(maxSpeechChars + maxDirectionChars)}`;
 
     await expect(
       outcome(
