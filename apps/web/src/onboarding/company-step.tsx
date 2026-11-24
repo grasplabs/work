@@ -25,6 +25,7 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { formatList } from "../format.ts";
@@ -46,7 +47,6 @@ import {
   useRefresh,
 } from "./step-parts.ts";
 import type { StepProps } from "./step-parts.ts";
-import { StepWays } from "./step-ways.tsx";
 import { SupportLink } from "./support-link.tsx";
 import { XlsxError, xlsxMost, xlsxRows } from "./xlsx.ts";
 
@@ -244,8 +244,12 @@ const useBody = ({
   return t`Share a staff list as a CSV or Excel file, a row per person. No list at hand? Skip this, and we’ll sort it out with you.`;
 };
 
-/** The step's end: Continue once there is a roster, a staff list instead of a sign-in, and more about it; without one, a way past it. */
-const CompanyEnd = ({
+/**
+ * The step's ways on: Continue once there is a roster, a staff list instead
+ * of a sign-in, and more about it; without one, a way past it. `end` holds
+ * the buttons, main first; `also` the link on its own line under them.
+ */
+const useCompanyWays = ({
   roster,
   another,
   signInsFirst,
@@ -259,39 +263,36 @@ const CompanyEnd = ({
   fromDirectory: DirectorySuite | null;
   onAnother: () => void;
   onward: () => Promise<void>;
-}) => {
+}): { end: ReactNode; also: ReactNode } => {
   const { t } = useLingui();
   if (roster) {
-    return (
-      <StepWays
-        buttons={
-          <>
-            {another ? null : (
-              <Button onClick={onAnother} size="lg" variant="outline">
-                {fromDirectory === null
-                  ? t`Use another list`
-                  : t`Use a staff list instead`}
-              </Button>
-            )}
-            <Button
-              onClick={() => {
-                void onward();
-              }}
-              size="lg"
-            >
-              {t`Continue`}
+    return {
+      end: (
+        <>
+          <Button
+            onClick={() => {
+              void onward();
+            }}
+            size="lg"
+          >
+            {t`Continue`}
+          </Button>
+          {another ? null : (
+            <Button onClick={onAnother} size="lg" variant="outline">
+              {fromDirectory === null
+                ? t`Use another list`
+                : t`Use a staff list instead`}
             </Button>
-          </>
-        }
-        link={
-          fromDirectory === null ? (
-            <SupportLink page="staffList">{t`More about the staff list`}</SupportLink>
-          ) : (
-            <SupportLink page="directory">{t`More about this connection`}</SupportLink>
-          )
-        }
-      />
-    );
+          )}
+        </>
+      ),
+      also:
+        fromDirectory === null ? (
+          <SupportLink page="staffList">{t`More about the staff list`}</SupportLink>
+        ) : (
+          <SupportLink page="directory">{t`More about this connection`}</SupportLink>
+        ),
+    };
   }
   // No list yet: never forced. Grasp's own people sort it out with them in their talks.
   const skip = (
@@ -306,32 +307,28 @@ const CompanyEnd = ({
     </Button>
   );
   if (signInsFirst) {
-    return (
-      <StepWays
-        buttons={
-          <Button onClick={onAnother} size="lg" variant="outline">
-            {t`Use a staff list instead`}
-          </Button>
-        }
-        link={skip}
-      />
-    );
-  }
-  return (
-    <StepWays
-      buttons={skip}
-      link={
-        <Button asChild size="lg" variant="link">
-          <a
-            download="staff-list-example.csv"
-            href={`data:text/csv;charset=utf-8,${encodeURIComponent(exampleList)}`}
-          >
-            {t`See an example`}
-          </a>
+    return {
+      end: (
+        <Button onClick={onAnother} size="lg" variant="outline">
+          {t`Use a staff list instead`}
         </Button>
-      }
-    />
-  );
+      ),
+      also: skip,
+    };
+  }
+  return {
+    end: skip,
+    also: (
+      <Button asChild size="lg" variant="link">
+        <a
+          download="staff-list-example.csv"
+          href={`data:text/csv;charset=utf-8,${encodeURIComponent(exampleList)}`}
+        >
+          {t`See an example`}
+        </a>
+      </Button>
+    ),
+  };
 };
 
 export const CompanyStep = (props: StepProps) => {
@@ -453,20 +450,23 @@ export const CompanyStep = (props: StepProps) => {
     people,
     teams,
   });
-  const end = (
-    <CompanyEnd
-      another={another}
-      fromDirectory={fromDirectory}
-      onAnother={() => {
-        setAnother(true);
-      }}
-      onward={props.onward}
-      roster={roster !== null}
-      signInsFirst={signInsFirst}
-    />
-  );
+  const { end, also } = useCompanyWays({
+    another,
+    fromDirectory,
+    onAnother: () => {
+      setAnother(true);
+    },
+    onward: props.onward,
+    roster: roster !== null,
+    signInsFirst,
+  });
   return (
-    <CalmStep body={body} centred title={t`Who’s who at your company?`}>
+    <CalmStep
+      also={also}
+      body={body}
+      end={end}
+      title={t`Who’s who at your company?`}
+    >
       {signInsFirst || listShown || problem !== null || waiting > 0 ? (
         <div {...stylex.props(styles.stack)}>
           {signInsFirst ? (
@@ -514,7 +514,6 @@ export const CompanyStep = (props: StepProps) => {
           <WaitingNote waiting={waiting} />
         </div>
       ) : null}
-      {end}
     </CalmStep>
   );
 };

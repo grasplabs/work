@@ -28,7 +28,6 @@ import { smoothly } from "./smoothly.ts";
 import { SourcesStep } from "./sources-step.tsx";
 import { mailToLetThrough, useRefresh } from "./step-parts.ts";
 import type { StepProps } from "./step-parts.ts";
-import { StepWays } from "./step-ways.tsx";
 import { TeamStep } from "./team-step.tsx";
 
 export type { SetupData, StepProps } from "./step-parts.ts";
@@ -138,22 +137,19 @@ const About = ({ onward, today }: StepProps) => {
   return (
     <CalmStep
       body={t`I talk with your team for one week. Then you get what I learned, team by team.`}
-      centred
+      end={
+        <Button
+          onClick={() => {
+            void onward();
+          }}
+          size="lg"
+        >
+          {t`Continue`}
+        </Button>
+      }
       title={t`Here’s the plan`}
     >
       <PlanBody today={today} />
-      <StepWays
-        buttons={
-          <Button
-            onClick={() => {
-              void onward();
-            }}
-            size="lg"
-          >
-            {t`Continue`}
-          </Button>
-        }
-      />
     </CalmStep>
   );
 };
