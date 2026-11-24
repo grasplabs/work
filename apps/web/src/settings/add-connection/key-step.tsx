@@ -288,7 +288,6 @@ export const StepFoot = ({
         <Button
           form={formId}
           loadingText={words.connecting}
-          size="sm"
           status={status === "working" ? "loading" : "idle"}
           type="submit"
         >

@@ -325,7 +325,6 @@ const MemberActions = ({
                     await setRole("admin");
                     setAsking(undefined);
                   }}
-                  size="sm"
                 >
                   {t`Make admin`}
                 </Button>
@@ -400,7 +399,6 @@ const MemberActions = ({
                   errorText={t`Not removed`}
                   loadingText={t`Removing`}
                   onClick={remove}
-                  size="sm"
                   variant="destructive"
                 >
                   {t`Remove`}

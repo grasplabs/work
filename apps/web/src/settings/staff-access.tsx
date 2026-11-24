@@ -91,7 +91,6 @@ const EndStaffAccess = ({
             onClick={async () => {
               await dialog.hold(end);
             }}
-            size="sm"
             variant="destructive"
           >
             {t`End access`}

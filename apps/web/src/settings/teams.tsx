@@ -374,7 +374,6 @@ const TeamRow = ({
                   await remove();
                   setDeleting(false);
                 }}
-                size="sm"
                 variant="destructive"
               >
                 {t`Delete`}

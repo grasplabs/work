@@ -166,7 +166,6 @@ const EditBilling = ({
             onClick={async () => {
               await dialog.hold(save);
             }}
-            size="sm"
           >
             {t`Save`}
           </Button>

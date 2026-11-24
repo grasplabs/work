@@ -268,7 +268,6 @@ export const InviteButton = () => {
               await dialog.hold(send);
               reset();
             }}
-            size="sm"
           >
             {t`Send invites`}
           </Button>

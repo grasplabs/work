@@ -156,7 +156,6 @@ const DeviceRow = ({ session }: { session: OwnSession }) => {
                   onClick={async () => {
                     await dialog.hold(signOut);
                   }}
-                  size="sm"
                   variant="destructive"
                 >
                   {t`Sign out`}

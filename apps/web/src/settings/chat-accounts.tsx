@@ -337,7 +337,6 @@ const ForgetConversations = () => {
                   setDeleted(await run(forgotten));
                 });
               }}
-              size="sm"
               variant="destructive"
             >
               {t`Delete for good`}

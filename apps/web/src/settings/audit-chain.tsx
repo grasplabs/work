@@ -270,7 +270,6 @@ export const IntegrityDialog = ({
             onClick={() => {
               void verify();
             }}
-            size="sm"
           >
             {t`Check now`}
           </Button>

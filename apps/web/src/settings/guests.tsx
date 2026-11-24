@@ -107,7 +107,6 @@ export const GuestActions = ({ guest }: { guest: Guest }) => {
                 await remove();
                 setAsking(false);
               }}
-              size="sm"
               variant="destructive"
             >
               {t`Remove`}

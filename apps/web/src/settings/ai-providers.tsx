@@ -472,7 +472,6 @@ const KeyDialog = ({
             onConfirm={async () => {
               await remove.run();
             }}
-            size="sm"
             successText={t`Deleted`}
             variant="destructive"
           >
@@ -481,7 +480,6 @@ const KeyDialog = ({
           <DialogClose>{t`Cancel`}</DialogClose>
           <Button
             form={formId}
-            size="sm"
             status={save.status}
             type="submit"
             errorText={save.labels.error}

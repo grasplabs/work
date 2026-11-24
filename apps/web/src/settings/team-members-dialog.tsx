@@ -332,7 +332,6 @@ export const TeamDialog = ({
             errorText={t`Not saved`}
             loadingText={t`Saving`}
             onClick={save}
-            size="sm"
           >
             {t`Save changes`}
           </Button>
