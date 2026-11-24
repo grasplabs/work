@@ -246,17 +246,25 @@ test("a builder finds an App in the list, opens it and uses its page with live d
 test("the sidebar shows everyone the sections, and, from the person's menu, Settings each person the sections they may open", async ({
   pageOf,
 }) => {
+  // The reference's sections, in its order: no Projects row.
   const everyone = [
     "Chat",
     "Brain",
-    "Projects",
     "Apps",
     "Workflows",
     // The company's agents: the ones a person may ask, and for admins all of them.
     "Agents",
     "Integrations",
   ];
-  const roleNames = { admin: "Admin", builder: "Builder", user: "User" };
+  // The person menu's entries, as the reference's: the theme under
+  // Appearance, the organization under Switch organization.
+  const menu = [
+    "Settings",
+    "Appearance",
+    "Support",
+    "Switch organization",
+    "Sign out",
+  ];
   const sidebarOf = async (person: Person) => {
     const page = await pageOf(person);
     // Not "/": an admin just signed in there, with the company's
@@ -267,26 +275,22 @@ test("the sidebar shows everyone the sections, and, from the person's menu, Sett
       .getByRole("link");
     // The nav shows once the person's identity is in.
     await expect(links.first()).toBeVisible();
-    await expect(links.filter({ hasText: /^Inbox/u })).toBeVisible();
     // The Apps' own entries, which come on their own read, aren't Grasp's
     // sections (app-surfaces.e2e.ts adds some on the shared deployment):
     // every link but theirs, in one read of the page.
     const texts = await links.evaluateAll((found) =>
       found
-        .filter((link) => link.closest("[aria-labelledby]") === null)
+        .filter((link) => link.closest("ul[aria-labelledby]") === null)
         .map((link) => link.textContent ?? "")
     );
-    // The person menu, at the sidebar's foot, by their name; their role is
-    // said inside it.
+    // The person menu, at the sidebar's foot, by their name.
     await page.getByRole("button", { name: "Person", exact: true }).click();
-    await expect(
-      page.getByRole("menu").getByText(roleNames[person.role], { exact: true })
-    ).toBeVisible();
     const items = page.getByRole("menuitem");
     await expect(items.filter({ hasText: "Sign out" })).toBeVisible();
-    const menuTexts = await items.allTextContents();
-    const menu = menuTexts.filter((text) =>
-      ["Settings", "Sign out"].includes(text)
+    // Each entry by its words, without the choice a submenu shows after them.
+    const words = await items.allTextContents();
+    const entries = words.map((text) =>
+      menu.find((entry) => text.startsWith(entry))
     );
     // Settings, in the person's menu: the sidebar then holds its sections.
     await items.filter({ hasText: "Settings" }).click();
@@ -300,13 +304,11 @@ test("the sidebar shows everyone the sections, and, from the person's menu, Sett
       nav: texts.map((text) =>
         text.replace(/\d+ (?:things? waiting|workflows? needs? you)$/u, "")
       ),
-      menu,
+      menu: entries,
       settings: await sections.allTextContents(),
     };
   };
-  const [chat, ...rest] = everyone;
-  const nav = [chat, "Inbox", ...rest];
-  const menu = ["Settings", "Sign out"];
+  const nav = everyone;
   // Each person's own instruction file is theirs to write, whatever their
   // role: in every person's Settings.
   const account = ["Profile", "Instructions", "Security"];
