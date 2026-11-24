@@ -96,7 +96,7 @@ const planning = {
       id: "p2",
       topic: "Urgent call-outs",
       kind: "difference",
-      text: "Who decides on an urgent call-out: the duty planner, or whoever answers the phone.",
+      text: "Two people said differently who decides on an urgent call-out: the duty planner, or whoever answers the phone.",
     },
     {
       id: "p3",
@@ -128,7 +128,7 @@ const field = {
       id: "f3",
       topic: "Closing a job",
       kind: "difference",
-      text: "When a job counts as closed: when the engineer leaves, or once the customer signs.",
+      text: "Two people said differently when a job is closed: when the engineer leaves, or once the customer signs.",
     },
   ],
 } as const satisfies Omit<TeamPicture, "talked" | "leadTalked">;
@@ -148,7 +148,7 @@ const service = {
       id: "s2",
       topic: "Complaints",
       kind: "difference",
-      text: "Where a complaint is kept: in the shared mailbox, or in the complaints spreadsheet.",
+      text: "Two people said differently where a complaint is kept: the shared mailbox, or the complaints spreadsheet.",
     },
   ],
 } as const satisfies Omit<TeamPicture, "talked" | "leadTalked">;
@@ -168,7 +168,7 @@ const finance = {
       id: "n2",
       topic: "Credit checks",
       kind: "difference",
-      text: "When the credit check is done: before the quote, or only after the first order.",
+      text: "Two people said differently when the credit check is done: before the quote, or after the first order.",
     },
   ],
 } as const satisfies Omit<TeamPicture, "talked" | "leadTalked">;
@@ -368,7 +368,7 @@ export const campaigns: Record<CampaignState, Campaign> = {
             id: "l3",
             topic: "Logging hours",
             kind: "difference",
-            text: "How hours are logged: daily in the timesheet, or at the end of each project.",
+            text: "Two people said differently how hours are logged: daily in the timesheet, or at the end of each project.",
           },
         ],
       },

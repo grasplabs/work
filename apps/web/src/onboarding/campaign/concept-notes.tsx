@@ -1,11 +1,10 @@
 // Concept B, Stephen's notes: the campaign page in the onboarding's own
-// voice. Centred, as the onboarding's steps were: Stephen at work, one
-// title, one sentence lighting up as it is read. Under it, what he learned
+// voice: one title, and one sentence lighting up as it is read, as his
+// lines did in the onboarding (the page's one moving thing). Under it, what he learned
 // as a short transcript, his lines at the start as in the interview's
 // transcript, newest last; and what the admin must do, he asks as a
 // question with one press to answer. On a phone, the title, the sentence
 // and his latest line alone.
-import { AgentIndicator } from "@grasp-os/ui/components/agent-indicator";
 import { Bubble, BubbleContent } from "@grasp-os/ui/components/bubble";
 import {
   Confirmation,
@@ -21,7 +20,6 @@ import {
   Message,
   MessageContent,
   MessageGroup,
-  MessageHeader,
 } from "@grasp-os/ui/components/message";
 import { Text } from "@grasp-os/ui/components/text";
 import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
@@ -36,7 +34,7 @@ import {
   RunningLine,
   wide,
 } from "./campaign-parts.tsx";
-import { statementOf } from "./campaign-words.ts";
+import { findingSentence, statementOf } from "./campaign-words.ts";
 import type { Ask, Campaign, Finding, TeamPicture } from "./fixtures.ts";
 import { ReadAloud } from "./read-aloud.tsx";
 
@@ -44,18 +42,13 @@ const styles = stylex.create({
   page: {
     display: "flex",
     flexDirection: "column",
-    alignItems: "center",
     gap: { default: space[12], [media.maxSm]: space[8] },
     paddingBlockStart: { default: space[10], [media.maxSm]: space[4] },
   },
-  centre: {
+  head: {
     display: "flex",
     flexDirection: "column",
-    alignItems: "center",
-    gap: space[4],
-    maxWidth: "34rem",
-    textAlign: "center",
-    textWrap: "balance",
+    gap: space[3],
   },
   thread: {
     display: "flex",
@@ -64,15 +57,13 @@ const styles = stylex.create({
     alignSelf: "stretch",
   },
   press: { display: "flex" },
-  who: { display: "flex", alignItems: "center", gap: space[2] },
   // On a phone only his latest line stands.
   earlier: { display: { default: null, [media.maxSm]: "none" } },
   foot: {
     display: "flex",
     flexDirection: "column",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: space[3],
-    textAlign: "center",
   },
 });
 
@@ -97,16 +88,10 @@ const Line = ({
 }) => (
   <Message aria-label="Stephen">
     <MessageContent>
-      <MessageHeader>
-        {[
-          grouped ? team.name : finding.topic,
-          finding.kind === "difference" ? "told two ways" : "",
-        ]
-          .filter((part) => part !== "")
-          .join(" · ")}
-      </MessageHeader>
       <Bubble variant="ghost">
-        <BubbleContent>{finding.text}</BubbleContent>
+        <BubbleContent>
+          {findingSentence(finding, team, { named: true, grouped })}
+        </BubbleContent>
       </Bubble>
     </MessageContent>
   </Message>
@@ -182,23 +167,14 @@ const Bounced = ({ ask }: { ask: Extract<Ask, { kind: "bounce" }> }) => {
 /** Concept B: the campaign page as Stephen's notes. */
 export const CampaignNotes = ({ campaign }: { campaign: Campaign }) => {
   const { lead, rest } = statementOf(campaign);
-  const enough = campaign.pace === "enough";
   const lines = latest(campaign);
   return (
     <div {...stylex.props(styles.page)}>
-      <header {...stylex.props(styles.centre)}>
-        {enough ? null : (
-          <span {...stylex.props(styles.who)}>
-            <AgentIndicator />
-            <Text as="span" size="sm" color="muted">
-              Stephen is listening
-            </Text>
-          </span>
-        )}
+      <header {...stylex.props(styles.head)}>
         <Heading level={1} size="xl">
           {lead}
         </Heading>
-        <Text size="lg">
+        <Text>
           <ReadAloud text={rest} />
         </Text>
       </header>
