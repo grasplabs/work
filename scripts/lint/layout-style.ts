@@ -24,14 +24,18 @@
  *   (unlike `as`, which it does not);
  * - a `const` that holds one of these;
  * - an array of these, `cond && style`, `a ?? b`, `cond ? a : b`, a `!`,
- *   `as const`, and `undefined`, `null` or `false` among them.
+ *   `as const`, and `undefined`, `null` or `false` among them (alone,
+ *   they are no styles, which the component linter's rule lets through).
  *
  * Anything else, an object literal above all, is not. Such styles go only
  * to a component that takes them (`takesStylex`): Damsko's, the feature's
- * own (by a relative path, from a module that declares it or passes it on
- * from Damsko) or one the file declares; never an element of the page, a
- * component of another package (the kit's, the router's `Link`, also when
- * a relative module passes it on) or a name holding an element's.
+ * own (by a relative path, from a module that declares it as a function or
+ * a class, or passes it on from Damsko) or one the file declares, and a
+ * member of such a component (`Menu.Item`) only where its module assigns
+ * it one of these; never a module that can't be found, an element of the
+ * page, a component of another package (the kit's, the router's `Link`,
+ * also when a relative module passes it on, by name, as a namespace's
+ * member or destructured) or a name holding an element's.
  */
 import { readFileSync, statSync } from "node:fs";
 import nodePath from "node:path";
@@ -55,6 +59,7 @@ export interface StyleNode {
   consequent?: StyleNode;
   alternate?: StyleNode;
   elements?: (StyleNode | null)[];
+  properties?: StyleNode[];
   arguments?: StyleNode[];
   typeAnnotation?: StyleNode | null;
   typeName?: StyleNode;
@@ -434,32 +439,24 @@ const isPlacementMember = (
 };
 
 /**
- * Whether a name is `undefined`, or a parameter declared `LayoutStyle`.
- * `undefined` is the global's, which a config's globals bind without a
- * declaration: not one the file declares itself.
+ * What a `style` value holds: StyleX styles (maybe beside nothing), nothing
+ * alone (`undefined`, `null`, `false`), which the component linter's rule
+ * passes, or anything else.
  */
-const isPlacementName = (value: StyleNode, context: StyleContext): boolean => {
-  const variable = variableOf(context, value);
-  if (value.name === "undefined") {
-    return variable === undefined || variable.defs.length === 0;
+type Holding = "styles" | "nothing" | "other";
+
+/** What parts hold together: anything else if one does, else styles if one does, else nothing. */
+const together = (parts: readonly Holding[]): Holding => {
+  if (parts.includes("other")) {
+    return "other";
   }
-  return (
-    variable !== undefined &&
-    isLayoutStyleType(parameterType(variable, context), context)
-  );
+  return parts.includes("styles") ? "styles" : "nothing";
 };
 
-/** What a `const` of that name holds, once, else undefined. */
-const constValue = (
-  value: StyleNode,
-  context: StyleContext,
-  seen: Set<Variable>
-): StyleNode | undefined => {
-  const variable = variableOf(context, value);
-  const [definition] = variable?.defs ?? [];
+/** What a `const` holds, else undefined. */
+const constValue = (variable: Variable): StyleNode | undefined => {
+  const [definition] = variable.defs;
   if (
-    variable === undefined ||
-    seen.has(variable) ||
     variable.defs.length !== 1 ||
     definition?.type !== "Variable" ||
     definition.parent?.kind !== "const" ||
@@ -467,8 +464,29 @@ const constValue = (
   ) {
     return undefined;
   }
-  seen.add(variable);
   return definition.node.init ?? undefined;
+};
+
+/**
+ * What a name holds, short of following a `const`: `undefined` nothing
+ * (the global's, which a config's globals bind without a declaration: not
+ * one the file declares itself), a parameter declared `LayoutStyle`
+ * styles. Undefined for any other name.
+ */
+const nameHolding = (
+  value: StyleNode,
+  variable: Variable | undefined,
+  context: StyleContext
+): Holding | undefined => {
+  if (value.name === "undefined") {
+    return variable === undefined || variable.defs.length === 0
+      ? "nothing"
+      : "other";
+  }
+  return variable !== undefined &&
+    isLayoutStyleType(parameterType(variable, context), context)
+    ? "styles"
+    : undefined;
 };
 
 /** The expressions that wrap a value without changing it: `layout?.wide`, `layout.wide!`. */
@@ -478,81 +496,100 @@ const transparent = new Set([
   "ParenthesizedExpression",
 ]);
 
-/** Whether it is nothing, or StyleX styles in an array or a condition, each held by `holds`. */
-const isPlacementCombination = (
+/** What nothing, or an array or a condition of parts, holds, each part's by `holds`. */
+const combinationHolding = (
   value: StyleNode,
-  holds: (part: StyleNode | null | undefined) => boolean
-): boolean => {
+  holds: (part: StyleNode | null | undefined) => Holding
+): Holding => {
   switch (value.type) {
     case "Literal": {
-      return value.value === null || value.value === false;
+      return value.value === null || value.value === false
+        ? "nothing"
+        : "other";
     }
     case "ArrayExpression": {
       const elements = value.elements ?? [];
-      return (
-        elements.length > 0 &&
-        elements.every(
-          (element) => element?.type !== "SpreadElement" && holds(element)
-        )
-      );
+      return elements.length > 0 &&
+        elements.every((element) => element?.type !== "SpreadElement")
+        ? together(elements.map(holds))
+        : "other";
     }
     case "ConditionalExpression": {
-      return holds(value.consequent) && holds(value.alternate);
+      return together([holds(value.consequent), holds(value.alternate)]);
     }
     case "LogicalExpression": {
       return value.operator === "&&"
         ? holds(value.right)
-        : holds(value.left) && holds(value.right);
+        : together([holds(value.left), holds(value.right)]);
     }
     default: {
-      return false;
+      return "other";
     }
   }
 };
 
-/** Whether `value`, given to a component's `style`, is StyleX styles alone (above). */
-export const isPlacement = (
-  value: StyleNode | undefined,
+/**
+ * What a `style` value holds (above). `seen` are the `const`s followed on
+ * the way to it, this chain's alone, which a loop comes back to: a name a
+ * sibling followed too (`[wide, active && wide]`) is no loop.
+ */
+const holding = (
+  value: StyleNode,
   context: StyleContext,
-  seen = new Set<Variable>()
-): boolean => {
-  const holds = (part: StyleNode | null | undefined): boolean =>
-    part !== null && part !== undefined && isPlacement(part, context, seen);
-  if (value === undefined) {
-    return false;
-  }
+  seen: ReadonlySet<Variable>
+): Holding => {
+  const holds = (part: StyleNode | null | undefined): Holding =>
+    part === null || part === undefined
+      ? "other"
+      : holding(part, context, seen);
   if (transparent.has(value.type)) {
     return holds(value.expression);
   }
   switch (value.type) {
     case "MemberExpression": {
-      return isPlacementMember(value, context);
+      return isPlacementMember(value, context) ? "styles" : "other";
     }
     // `as const` makes it read-only, no other type.
     case "TSAsExpression": {
-      return (
-        identifierName(value.typeAnnotation?.typeName) === "const" &&
-        holds(value.expression)
-      );
+      return identifierName(value.typeAnnotation?.typeName) === "const"
+        ? holds(value.expression)
+        : "other";
     }
     // The type checker holds what it satisfies, unlike a cast's.
     case "TSSatisfiesExpression": {
-      return (
-        isLayoutStyleType(value.typeAnnotation ?? undefined, context) ||
-        holds(value.expression)
-      );
+      const held = holds(value.expression);
+      return held === "other" &&
+        isLayoutStyleType(value.typeAnnotation ?? undefined, context)
+        ? "styles"
+        : held;
     }
     case "Identifier": {
-      return (
-        isPlacementName(value, context) ||
-        holds(constValue(value, context, seen))
-      );
+      const variable = variableOf(context, value);
+      const named = nameHolding(value, variable, context);
+      const init =
+        variable === undefined || seen.has(variable)
+          ? undefined
+          : constValue(variable);
+      if (named !== undefined || variable === undefined || init === undefined) {
+        return named ?? "other";
+      }
+      return holding(init, context, new Set(seen).add(variable));
     }
     default: {
-      return isPlacementCombination(value, holds);
+      return combinationHolding(value, holds);
     }
   }
 };
+
+/**
+ * Whether `value`, given to a component's `style`, is StyleX styles alone
+ * (above), with nothing among them or not; nothing alone is no styles.
+ */
+export const isPlacement = (
+  value: StyleNode | undefined,
+  context: StyleContext
+): boolean =>
+  value !== undefined && holding(value, context, new Set()) === "styles";
 
 /** The declarations a type-free export may make: types alone. */
 const typeDeclarations = new Set([
@@ -631,6 +668,33 @@ export const stylesModuleExports = (
 const componentWrappers = new Set(["memo", "forwardRef"]);
 
 /**
+ * The value a component is made from: itself, or what `memo` or
+ * `forwardRef` wraps. Undefined for a call of anything else.
+ */
+const unwrapped = (value: StyleNode | undefined): StyleNode | undefined => {
+  if (value?.type !== "CallExpression") {
+    return value;
+  }
+  const { callee } = value;
+  const name =
+    callee?.type === "MemberExpression"
+      ? identifierName(callee.property)
+      : identifierName(callee);
+  return componentWrappers.has(name ?? "")
+    ? unwrapped(value.arguments?.[0])
+    : undefined;
+};
+
+/** The nodes that are a function or a class, a component's own body. */
+const functionTypes = new Set([
+  "ArrowFunctionExpression",
+  "FunctionExpression",
+  "FunctionDeclaration",
+  "ClassExpression",
+  "ClassDeclaration",
+]);
+
+/**
  * Whether the file declares it as a component: a function or class, or a
  * `const` holding one, maybe through `memo` or `forwardRef`. Not a `const`
  * holding anything else, an element's name above all
@@ -640,28 +704,11 @@ const isDeclaredComponent = (definition: Variable["defs"][number]): boolean => {
   if (definition.type === "FunctionName" || definition.type === "ClassName") {
     return true;
   }
-  let init = definition.node.init ?? undefined;
-  if (
-    definition.type !== "Variable" ||
-    definition.parent?.kind !== "const" ||
-    init === undefined
-  ) {
+  if (definition.type !== "Variable" || definition.parent?.kind !== "const") {
     return false;
   }
-  if (init.type === "CallExpression") {
-    const { callee } = init;
-    const name =
-      callee?.type === "MemberExpression"
-        ? identifierName(callee.property)
-        : identifierName(callee);
-    init = componentWrappers.has(name ?? "")
-      ? (init.arguments?.[0] ?? undefined)
-      : undefined;
-  }
-  return (
-    init?.type === "ArrowFunctionExpression" ||
-    init?.type === "FunctionExpression" ||
-    init?.type === "ClassExpression"
+  return functionTypes.has(
+    unwrapped(definition.node.init ?? undefined)?.type ?? ""
   );
 };
 
@@ -675,13 +722,29 @@ const isNode = (value: unknown): value is StyleNode =>
 /** The modules parsed so far, by file, as of when they last changed. */
 const parsed = new Map<string, { mtimeMs: number; body: StyleNode[] }>();
 
+/** The TypeScript files a JavaScript extension of an import stands for. */
+const typedExtensions: Record<string, readonly string[]> = {
+  ".js": [".ts", ".tsx"],
+  ".jsx": [".tsx"],
+  ".mjs": [".mts"],
+  ".cjs": [".cts"],
+};
+
 /**
- * The file a relative import names, as TypeScript finds it: as written, or
- * with `.tsx` or `.ts`, or its folder's `index`. Undefined if none is.
+ * The file a relative import names, as TypeScript finds it: a `.js` path
+ * as `.ts` or `.tsx` (`.jsx` as `.tsx`, `.mjs` as `.mts`, `.cjs` as
+ * `.cts`), as written, or with `.tsx` or `.ts`, or its folder's `index`.
+ * Undefined if none is.
  */
 const moduleFile = (from: string, specifier: string): string | undefined => {
   const base = nodePath.resolve(nodePath.dirname(from), specifier);
+  const extension = nodePath.extname(base);
+  const stem = base.slice(0, base.length - extension.length);
+  const typed = (typedExtensions[extension] ?? []).map(
+    (typedExtension) => `${stem}${typedExtension}`
+  );
   return [
+    ...typed,
     base,
     `${base}.tsx`,
     `${base}.ts`,
@@ -711,11 +774,19 @@ const specifierName = (node: StyleNode | undefined): string | undefined =>
   identifierName(node) ??
   (typeof node?.value === "string" ? node.value : undefined);
 
-/** Where a module's export of a name comes from: its own, another module's (by which name), or neither. */
+/**
+ * Where a module's export of a name comes from: a function or class of its
+ * own, another module's (by which name), something else of its own (a
+ * member of an object, a destructured name, a call), or neither.
+ */
 type Origin =
   | { readonly kind: "own" }
+  | { readonly kind: "other" }
   | { readonly kind: "module"; readonly source: string; readonly name: string }
   | { readonly kind: "absent"; readonly everything: readonly string[] };
+
+const own: Origin = { kind: "own" };
+const other: Origin = { kind: "other" };
 
 /** The import a module-level name is bound to, if one is. */
 const importOfName = (
@@ -737,17 +808,141 @@ const importOfName = (
   return undefined;
 };
 
-/** What a module's declaration of `name` is: an import passed on, or its own. */
+/** Whether a pattern binds `name` (`{ Badge }`, `[First]`, `{ a: { Badge } }`). */
+const patternBinds = (
+  pattern: StyleNode | null | undefined,
+  name: string
+): boolean => {
+  if (pattern === null || pattern === undefined) {
+    return false;
+  }
+  switch (pattern.type) {
+    case "Identifier": {
+      return identifierName(pattern) === name;
+    }
+    case "ObjectPattern": {
+      // A property's pattern is its value; a rest element is its own.
+      return (pattern.properties ?? []).some((property) =>
+        patternBinds(isNode(property.value) ? property.value : property, name)
+      );
+    }
+    case "ArrayPattern": {
+      return (pattern.elements ?? []).some((element) =>
+        patternBinds(element, name)
+      );
+    }
+    case "AssignmentPattern": {
+      return patternBinds(pattern.left, name);
+    }
+    case "RestElement": {
+      // Read as a node only if it is one: `argument` is no field of every node.
+      const argument: unknown = Reflect.get(pattern, "argument");
+      return patternBinds(isNode(argument) ? argument : undefined, name);
+    }
+    default: {
+      return false;
+    }
+  }
+};
+
+/**
+ * What a module-level value is, as a component: a function or class of the
+ * module's own (an arrow or a function expression too, maybe through `memo`
+ * or `forwardRef`), a namespace's member passed on (`Kit.Button`, followed
+ * to its module), the name of another to follow, or something else, which
+ * is not the module's own.
+ */
+const valueOrigin = (
+  statements: readonly StyleNode[],
+  value: StyleNode | null | undefined
+): Origin | string => {
+  const component = unwrapped(value ?? undefined);
+  if (functionTypes.has(component?.type ?? "")) {
+    return own;
+  }
+  if (component?.type === "MemberExpression" && component.computed !== true) {
+    const namespace = identifierName(component.object);
+    const member = identifierName(component.property);
+    const origin =
+      namespace === undefined ? undefined : importOfName(statements, namespace);
+    return origin?.kind === "module" &&
+      origin.name === "*" &&
+      member !== undefined
+      ? { kind: "module", source: origin.source, name: member }
+      : other;
+  }
+  return identifierName(component) ?? other;
+};
+
+/**
+ * How the module declares a name of its own: as a function or class, or a
+ * `const` holding a value (`init`). A destructured name, a `let` and a name
+ * the module doesn't declare are something else.
+ */
+const declarationOf = (
+  statements: readonly StyleNode[],
+  name: string
+): Origin | { readonly init: StyleNode | null | undefined } => {
+  for (const statement of statements) {
+    const declaration = statement.type.startsWith("Export")
+      ? statement.declaration
+      : statement;
+    if (
+      functionTypes.has(declaration?.type ?? "") &&
+      identifierName(declaration?.id ?? undefined) === name
+    ) {
+      return own;
+    }
+    const declarators =
+      declaration?.type === "VariableDeclaration"
+        ? (declaration.declarations ?? [])
+        : [];
+    for (const declarator of declarators) {
+      if (identifierName(declarator.id ?? undefined) === name) {
+        return declaration?.kind === "const"
+          ? { init: declarator.init }
+          : other;
+      }
+      if (patternBinds(declarator.id, name)) {
+        return other;
+      }
+    }
+  }
+  return other;
+};
+
+/** What a module-level name is bound to, followed through the `const`s that hold it: an import, the module's own, or something else. */
+const localOrigin = (
+  statements: readonly StyleNode[],
+  local: string
+): Origin => {
+  const seen = new Set<string>();
+  let found: Origin | string = local;
+  while (typeof found === "string") {
+    if (seen.has(found)) {
+      return other;
+    }
+    seen.add(found);
+    const imported = importOfName(statements, found);
+    if (imported !== undefined) {
+      return imported;
+    }
+    const declaration = declarationOf(statements, found);
+    found =
+      "kind" in declaration
+        ? declaration
+        : valueOrigin(statements, declaration.init);
+  }
+  return found;
+};
+
+/** What a module-level value is, as a component, a name it holds followed. */
 const declared = (
   statements: readonly StyleNode[],
   value: StyleNode | null | undefined
 ): Origin => {
-  const local = identifierName(value ?? undefined);
-  return (
-    (local === undefined ? undefined : importOfName(statements, local)) ?? {
-      kind: "own",
-    }
-  );
+  const origin = valueOrigin(statements, value);
+  return typeof origin === "string" ? localOrigin(statements, origin) : origin;
 };
 
 /** Where an `export { … }` or `export const …` gives `name` from, if it does. */
@@ -765,18 +960,15 @@ const namedExportOrigin = (
     if (typeof source === "string") {
       return { kind: "module", source, name: local };
     }
-    return importOfName(statements, local) ?? { kind: "own" };
+    return localOrigin(statements, local);
   }
   const { declaration } = statement;
-  const declarator = declaration?.declarations?.find(
-    (candidate) => identifierName(candidate.id ?? undefined) === name
-  );
-  if (declarator !== undefined) {
-    return declared(statements, declarator.init);
-  }
-  return identifierName(declaration?.id ?? undefined) === name
-    ? { kind: "own" }
-    : undefined;
+  const declares =
+    identifierName(declaration?.id ?? undefined) === name ||
+    (declaration?.declarations ?? []).some((declarator) =>
+      patternBinds(declarator.id, name)
+    );
+  return declares ? localOrigin(statements, name) : undefined;
 };
 
 /** Where a module's export of `name` comes from, one step: `export { A as B } from`, an import exported, or declared there. */
@@ -807,21 +999,88 @@ const exportOrigin = (
   return { kind: "absent", everything };
 };
 
+/**
+ * The name a module declares its export `name` by: `A` of `export { A as
+ * B }`, a default's own (`export default function A`), else `name`.
+ */
+const localNameOf = (
+  statements: readonly StyleNode[],
+  name: string
+): string | undefined => {
+  for (const statement of statements) {
+    if (statement.type === "ExportDefaultDeclaration" && name === "default") {
+      const { declaration } = statement;
+      return (
+        identifierName(declaration?.id ?? undefined) ??
+        identifierName(declaration ?? undefined)
+      );
+    }
+    const specifier =
+      statement.type === "ExportNamedDeclaration" && !statement.source
+        ? statement.specifiers?.find(
+            (candidate) =>
+              specifierName(candidate.exported ?? undefined) === name
+          )
+        : undefined;
+    if (specifier !== undefined) {
+      return specifierName(specifier.local);
+    }
+  }
+  return name;
+};
+
+/**
+ * What a member of a component of the module's own (`Menu.Item`) is, as a
+ * component: what the module assigns it once at its top level
+ * (`Menu.Item = MenuItem`), as `declared` reads a value. A member the
+ * module doesn't assign, assigns more than once, or one of the module's
+ * own with members still to follow (`Menu.Item.Icon`) is something else.
+ */
+const memberOrigin = (
+  statements: readonly StyleNode[],
+  object: string | undefined,
+  members: readonly string[]
+): Origin => {
+  const values = statements.flatMap((statement) => {
+    const assignment =
+      statement.type === "ExpressionStatement"
+        ? statement.expression
+        : undefined;
+    const target =
+      assignment?.type === "AssignmentExpression" ? assignment.left : undefined;
+    return target?.type === "MemberExpression" &&
+      target.computed !== true &&
+      identifierName(target.object) === object &&
+      identifierName(target.property) === members[0] &&
+      assignment?.right !== undefined
+      ? [assignment.right]
+      : [];
+  });
+  const [value] = values;
+  if (object === undefined || values.length !== 1 || value === undefined) {
+    return other;
+  }
+  const origin = declared(statements, value);
+  return origin.kind === "own" && members.length > 1 ? other : origin;
+};
+
 /** Whether a module is named by a relative path. */
 const isRelative = (source: string): boolean => source.startsWith(".");
 
 /**
- * Whether what `source`, imported from `file`, exports as `name` may be
- * given StyleX styles: Damsko's may; another package's may not; a
- * relative module's may if it declares it, or passes it on from one that
- * may, followed to where it is declared (`export { Button } from
- * "@grasp-os/app-kit/…"` is the kit's). Undefined where the files don't
- * tell: no such module or export, or a loop.
+ * Whether what `source`, imported from `file`, exports as `name` (or its
+ * `members`, `Menu.Item`: `memberOrigin`) may be given StyleX styles:
+ * Damsko's may; another package's may not; a relative module's may if it
+ * declares it, or passes it on from one that may, followed to where it is
+ * declared (`export { Button } from "@grasp-os/app-kit/…"` is the kit's).
+ * Undefined where the files don't tell: no such module or export, or a
+ * loop; the caller refuses those.
  */
 const moduleTakesStylex = (
   file: string,
   source: string,
   name: string,
+  members: readonly string[],
   seen: Set<string>
 ): boolean | undefined => {
   if (source.startsWith(damskoModule)) {
@@ -835,17 +1094,31 @@ const moduleTakesStylex = (
     return undefined;
   }
   seen.add(`${next}#${name}`);
-  const origin = exportOrigin(statementsOf(next), name);
-  if (origin.kind === "own") {
-    return true;
+  const statements = statementsOf(next);
+  const exported = exportOrigin(statements, name);
+  const origin =
+    exported.kind === "own" && members.length > 0
+      ? memberOrigin(statements, localNameOf(statements, name), members)
+      : exported;
+  if (origin !== exported && origin.kind === "module") {
+    return moduleTakesStylex(
+      next,
+      origin.source,
+      origin.name,
+      members.slice(1),
+      seen
+    );
+  }
+  if (origin.kind === "own" || origin.kind === "other") {
+    return origin.kind === "own";
   }
   if (origin.kind === "module") {
-    return moduleTakesStylex(next, origin.source, origin.name, seen);
+    return moduleTakesStylex(next, origin.source, origin.name, members, seen);
   }
   // `export *`: a relative module that has it decides; else any package
   // it passes everything on from may, so each must be Damsko.
   for (const from of origin.everything.filter(isRelative)) {
-    const found = moduleTakesStylex(next, from, name, seen);
+    const found = moduleTakesStylex(next, from, name, members, seen);
     if (found !== undefined) {
       return found;
     }
@@ -857,20 +1130,43 @@ const moduleTakesStylex = (
 };
 
 /**
- * The name a component is imported by: its import's, or for a namespace's
- * (`Parts.Save`), the member's.
+ * Whether a component the file declares (`isDeclaredComponent`), or a
+ * member of one (`Local.Item`: `memberOrigin`), may be given StyleX styles.
  */
-const importedComponent = (
-  specifier: StyleNode,
-  member: StyleNode | undefined
-): string => {
-  const imported = importedName(specifier);
-  if (imported !== "*") {
-    return imported;
+const declaredTakesStylex = (
+  definition: Variable["defs"][number],
+  context: StyleContext,
+  name: string,
+  members: readonly string[]
+): boolean => {
+  if (!isDeclaredComponent(definition) || members.length === 0) {
+    return isDeclaredComponent(definition);
   }
-  return member?.type === "JSXIdentifier" && typeof member.name === "string"
-    ? member.name
-    : "";
+  const { body } = context.sourceCode.ast;
+  const origin = memberOrigin(Array.isArray(body) ? body : [], name, members);
+  return origin.kind === "module"
+    ? moduleTakesStylex(
+        context.filename,
+        origin.source,
+        origin.name,
+        members.slice(1),
+        new Set()
+      ) === true
+    : origin.kind === "own";
+};
+
+/** A component's name (`Menu` of `Menu.Item`), and its members in order. */
+const componentPath = (
+  name: StyleNode | undefined
+): { root: StyleNode | undefined; members: string[] } => {
+  let root = name;
+  const members: string[] = [];
+  while (root?.type === "JSXMemberExpression") {
+    const member = root.property?.name;
+    members.unshift(typeof member === "string" ? member : "");
+    root = root.object;
+  }
+  return { root, members };
 };
 
 /**
@@ -887,12 +1183,7 @@ export const takesStylex = (
   name: StyleNode | undefined,
   context: StyleContext
 ): boolean => {
-  let root = name;
-  let member: StyleNode | undefined;
-  while (root?.type === "JSXMemberExpression") {
-    member = root.property;
-    root = root.object;
-  }
+  const { root, members } = componentPath(name);
   if (root?.type !== "JSXIdentifier" || typeof root.name !== "string") {
     return false;
   }
@@ -902,7 +1193,7 @@ export const takesStylex = (
     return false;
   }
   if (definition.type !== "ImportBinding") {
-    return isDeclaredComponent(definition);
+    return declaredTakesStylex(definition, context, root.name, members);
   }
   const source = definition.parent?.source?.value;
   if (
@@ -912,12 +1203,13 @@ export const takesStylex = (
   ) {
     return false;
   }
+  // A namespace's member (`Parts.Save`) is the export; a member of a
+  // component (`Menu.Item`) must be one its module assigns.
+  const imported = importedName(definition.node);
+  const [exported = "", ...rest] =
+    imported === "*" ? members : [imported, ...members];
   return (
-    moduleTakesStylex(
-      context.filename,
-      source,
-      importedComponent(definition.node, member),
-      new Set()
-    ) !== false
+    moduleTakesStylex(context.filename, source, exported, rest, new Set()) ===
+    true
   );
 };
