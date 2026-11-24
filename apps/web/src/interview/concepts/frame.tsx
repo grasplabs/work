@@ -67,27 +67,40 @@ const styles = stylex.create({
     fontSize: font.headingSm,
     lineHeight: font.headingSmLine,
   },
+  // A scene's room: its ground fills it, behind what stands on it.
   scene: {
     position: "relative",
     isolation: "isolate",
     overflow: "hidden",
-    gridColumn: { default: "1", [media.lg]: "2" },
-    // On a phone the scene runs up behind the header (Ruben: no white bar over the artwork) and
-    // stays quiet: only as tall as the header ("header"), or a low band under it ("low").
-    gridRow: { default: "1", [media.lg]: "1 / 3" },
-    height: { default: "4rem", [media.sm]: "5rem", [media.lg]: "auto" },
   },
-  sceneLow: {
-    height: { default: "7rem", [media.sm]: "8rem", [media.lg]: "auto" },
+  // Beside the page, from a laptop: the window's other half, top to bottom.
+  beside: {
+    display: { default: "none", [media.lg]: "block" },
+    gridColumn: "2",
+    gridRow: "1 / 3",
   },
-  // The header stands at the top of the scene's room on a phone.
+  // On a phone (Ruben: no white bar over the artwork, and quiet): the scene runs up behind the
+  // header and a little under it ("low"), or only behind it ("header").
+  band: {
+    display: { default: "block", [media.lg]: "none" },
+    gridColumn: "1 / -1",
+    gridRow: "1",
+    height: { default: "7rem", [media.sm]: "8rem" },
+  },
+  bandHeader: { height: { default: "4rem", [media.sm]: "5rem" } },
+  // In the conversation: the scene only behind the header, across the window, at every width.
+  strip: {
+    gridColumn: "1 / -1",
+    gridRow: "1",
+    height: { default: "4rem", [media.sm]: "5rem" },
+  },
+  // The header stands at the top of the band's room.
   headerOnScene: { alignSelf: "start" },
-  // On the scene the mark is light on dark; beside it, on the page, as the page's text.
-  brandOnScene: {
+  // On the scene the mark is light on dark: on a phone's band, or on the strip at every width.
+  brandOnBand: {
     color: { default: colors.brandPaper, [media.lg]: colors.foreground },
   },
-  // Beside the page only: a phone keeps its whole height for the thread.
-  wideOnly: { display: { default: "none", [media.lg]: "block" } },
+  brandOnStrip: { color: colors.brandPaper },
   bar: {
     gridColumn: "1 / -1",
     gridRow: "2",
@@ -108,8 +121,14 @@ const styles = stylex.create({
 });
 
 /** Grasp's mark and name, top start. */
-const Brand = ({ onScene }: { onScene: boolean }) => (
-  <span {...stylex.props(styles.brand, onScene && styles.brandOnScene)}>
+const Brand = ({ on }: { on: "page" | "band" | "strip" }) => (
+  <span
+    {...stylex.props(
+      styles.brand,
+      on === "band" && styles.brandOnBand,
+      on === "strip" && styles.brandOnStrip
+    )}
+  >
     <Icon icon={GraspLogo} />
     Grasp
   </span>
@@ -145,6 +164,8 @@ export const Frame = ({
   scene,
   sceneOnPhone = true,
   band = "low",
+  strip = false,
+  phoneScene = "aurora",
   actions,
   children,
 }: {
@@ -153,35 +174,55 @@ export const Frame = ({
   clock: ClockPlace;
   /** The scene beside the page, before the conversation. */
   scene?: Scene;
-  /** On a phone too, behind the header; else beside the page only. */
+  /** On a phone too, as a band behind the header; else beside the page only. */
   sceneOnPhone?: boolean;
-  /** On a phone: the scene only behind the header, or a low band under it too. */
+  /** The phone's band: low under the header, or only behind it. */
   band?: "header" | "low";
+  /** The conversation: the scene only behind the header, at every width. */
+  strip?: boolean;
+  /** The scene behind the mark on a phone and on the strip: the darkest, so "Grasp" always reads. */
+  phoneScene?: Scene;
   /** More at the header’s end, before the language: the way out for now. */
   actions?: ReactNode;
   children: ReactNode;
 }) => {
-  const onScene = scene !== undefined && sceneOnPhone;
+  const onBand = scene !== undefined && sceneOnPhone;
+  let brandOn: "page" | "band" | "strip" = "page";
+  if (strip) {
+    brandOn = "strip";
+  } else if (onBand) {
+    brandOn = "band";
+  }
   return (
     <div {...stylex.props(styles.frame, scene === undefined && styles.plain)}>
-      <header {...stylex.props(styles.header, onScene && styles.headerOnScene)}>
-        <Brand onScene={onScene} />
+      <header {...stylex.props(styles.header, onBand && styles.headerOnScene)}>
+        <Brand on={brandOn} />
         <div {...stylex.props(styles.end)}>
           {actions}
           <LanguageButton side="bottom" />
         </div>
       </header>
       {scene === undefined ? null : (
-        <div
-          {...stylex.props(
-            styles.scene,
-            band === "low" && styles.sceneLow,
-            !sceneOnPhone && styles.wideOnly
-          )}
-        >
+        <div {...stylex.props(styles.scene, styles.beside)}>
           <AppCardGround hue={undefined} scene={scene} />
         </div>
       )}
+      {onBand ? (
+        <div
+          {...stylex.props(
+            styles.scene,
+            styles.band,
+            band === "header" && styles.bandHeader
+          )}
+        >
+          <AppCardGround hue={undefined} scene={phoneScene} />
+        </div>
+      ) : null}
+      {strip ? (
+        <div {...stylex.props(styles.scene, styles.strip)}>
+          <AppCardGround hue={undefined} scene={phoneScene} />
+        </div>
+      ) : null}
       {left !== null && clock === "bar" && scene === undefined ? (
         <TimeBar left={left} />
       ) : null}
