@@ -101,10 +101,14 @@ const styles = stylex.create({
   head: { display: "grid", gap: space[4] },
   // A welcome: its title and line on the column's middle, what it asks below at full width.
   headCentred: { justifyItems: "center", textAlign: "center" },
+  // A step's way on stands at the column's end edge, always: its main button furthest along, the
+  // lesser ways before it (the step names them main first, so the row runs from the end).
   end: {
     display: "flex",
+    flexDirection: "row-reverse",
     flexWrap: "wrap",
     alignItems: "center",
+    justifyContent: "flex-start",
     gap: space[3],
   },
 });
