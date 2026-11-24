@@ -243,3 +243,38 @@ test("an App's own chat writes its page and server code, and its workspace previ
     core[Symbol.dispose]();
   }
 });
+
+test("an App's chat closes where the window has no room for it beside the App, which it would cover", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("chatPreview");
+  const { core, api } = apiOf(builder);
+  const name = `Narrow ${crypto.randomUUID().slice(0, 8)}`;
+  let appId = "";
+  try {
+    ({ id: appId } = await api.apps.create({ name }));
+  } finally {
+    core[Symbol.dispose]();
+  }
+  const page = await pageOf(builder);
+  // Wider than a phone, too narrow for the App and its chat side by side.
+  await page.setViewportSize({ width: 700, height: 800 });
+  await page.goto(`/apps/${appId}`);
+  const app = page.getByRole("heading", { name: "What should this App do?" });
+  await expect(app).toBeVisible();
+
+  // Opened by the card's own button, it lies over the App; its Close and
+  // Escape each take it away again.
+  const chat = page.getByRole("region", { name: "Chat" });
+  const toggle = page.getByRole("button", { name: "Show or hide the chat" });
+  await toggle.click();
+  await expect(chat).toBeVisible();
+  await chat.getByRole("button", { name: "Close" }).click();
+  await expect(chat).toBeHidden();
+  await expect(app).toBeVisible();
+  await toggle.click();
+  await expect(chat).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(chat).toBeHidden();
+  await expect(app).toBeVisible();
+});

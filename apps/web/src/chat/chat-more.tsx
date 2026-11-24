@@ -18,7 +18,6 @@ import type { ReactNode } from "react";
 import { copyText } from "../copy.ts";
 import { exportAs } from "../export/export-file.tsx";
 import type { ExportFormat } from "../export/export-file.tsx";
-import { PanelTitle } from "../frame/panels/head.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { chatMarkdown } from "./chat-markdown.ts";
 import { useFollowedChat } from "./chat-watch.ts";
@@ -71,18 +70,6 @@ export const useRenameChat = (
   return (name) => {
     void rename(name);
   };
-};
-
-/** The open chat's name at the head of its panel, renamed where it stands. */
-export const ChatPanelTitle = ({
-  chat,
-  onRenamed,
-}: {
-  chat: ChatSummary;
-  onRenamed?: (title: string) => void;
-}) => {
-  const rename = useRenameChat(chat.id, onRenamed);
-  return <PanelTitle onRename={rename}>{chat.title}</PanelTitle>;
 };
 
 /**

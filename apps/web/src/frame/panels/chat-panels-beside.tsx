@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import type { ChatPanels } from "../../chat/chat-panel.tsx";
+import { setNoRoomBeside } from "../../chat/room-beside.ts";
 import { Panels } from "./panels.tsx";
 
 // The page's card with Grasp's chat beside it (app-frame.tsx), as #2503's
@@ -83,12 +84,16 @@ export const ChatPanelsBeside = ({
       <Panels
         aside={false}
         card={card}
-        covered={cover.place.covered}
+        // Full screen by the chat's word only: covering for want of room
+        // is the panels' own to say (crowded), and a crowded chat may
+        // still float.
+        covered={panels.covered}
         keep={keep}
         max={panels.maxWidth}
         min={panels.minWidth}
         narrow={cover.narrow}
         onCrowdedChange={cover.handleCrowdedChange}
+        onTightChange={setNoRoomBeside}
         onNarrowChange={cover.handleNarrowChange}
         open={panels.open}
         panels={panels.panels}

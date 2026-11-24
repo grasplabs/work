@@ -373,6 +373,9 @@ interface PanelsProps {
   /** Says whether the column is too crowded for the page beside the panels, each time that changes;
    * undefined until the column is measured. */
   onCrowdedChange: (crowded: boolean | undefined) => void;
+  /** Says whether the column is too narrow for the page beside the panels docked, open or not, each
+   * time that changes once it is measured. */
+  onTightChange?: (tight: boolean) => void;
   /** A line at the foot of the panels' head row (AppShell's `panelsHeadLine`). */
   headLine?: boolean;
 }
@@ -885,6 +888,7 @@ export const Panels = ({
   onWidthChange,
   onNarrowChange,
   onCrowdedChange,
+  onTightChange,
   onClose,
   keep,
   headLine = true,
@@ -929,6 +933,12 @@ export const Panels = ({
   useEffect(() => {
     onCrowdedChange(measured ? crowded : undefined);
   }, [measured, crowded, onCrowdedChange]);
+
+  useEffect(() => {
+    if (measured) {
+      onTightChange?.(tight);
+    }
+  }, [measured, tight, onTightChange]);
 
   // While they cover the page, the panels hold the focus the page had, Escape closes them, and once
   // they stand beside it again focus goes back where it was.

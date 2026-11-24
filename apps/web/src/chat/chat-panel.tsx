@@ -30,7 +30,7 @@ import {
   useChatLayout,
 } from "./chat-layout.ts";
 import { chatLink } from "./chat-link.ts";
-import { ChatPanelTitle, useChatMenu } from "./chat-more.tsx";
+import { useChatMenu, useRenameChat } from "./chat-more.tsx";
 import { allows, useOpenChat } from "./chat-presence.ts";
 import { useGlobalChat } from "./global-chat.tsx";
 import { reading } from "./reading.stylex.ts";
@@ -77,18 +77,6 @@ const panelStyles = stylex.create({
   },
 });
 
-/** The open chat's name; a chat not made yet is a new chat. */
-const ChatTitle = () => {
-  const { t } = useLingui();
-  const { summary, retitle } = useGlobalChat();
-  return summary === undefined ? (
-    <PanelTitle>{t`New chat`}</PanelTitle>
-  ) : (
-    // Its own for each chat: one being renamed is never another.
-    <ChatPanelTitle chat={summary} key={summary.id} onRenamed={retitle} />
-  );
-};
-
 /** "New chat" as an item of the head's menu, once a chat is open. */
 const useFreshItem = (): DropdownMenuMoreItem[] => {
   const { t } = useLingui();
@@ -116,6 +104,11 @@ const useFreshItem = (): DropdownMenuMoreItem[] => {
 interface HeadProps {
   expanded: boolean;
   menu: readonly DropdownMenuMoreItem[];
+  /**
+   * The chat's name, a PanelTitle itself, so the head offers Rename in
+   * its menu where the title takes `onRename`.
+   */
+  title: ReactNode;
 }
 
 /**
@@ -124,7 +117,7 @@ interface HeadProps {
  * page's subject the chat stays open, so it has no close
  * (chat-subject.ts).
  */
-const Head = ({ expanded, menu }: HeadProps) => {
+const Head = ({ expanded, menu, title }: HeadProps) => {
   const { chatId, keptOpen } = useGlobalChat();
   return (
     <PanelHead
@@ -137,7 +130,7 @@ const Head = ({ expanded, menu }: HeadProps) => {
       {...(chatId === undefined
         ? {}
         : { pageRender: <Link {...chatLink(chatId)} /> })}
-      title={<ChatTitle />}
+      title={title}
     />
   );
 };
@@ -152,11 +145,16 @@ const OpenChatHead = ({
   expanded: boolean;
   fresh: readonly DropdownMenuMoreItem[];
 }) => {
-  const { sourceNames } = useGlobalChat();
+  const { sourceNames, retitle } = useGlobalChat();
   const { actions, dialog } = useChatMenu({ chat, sourceNames });
+  const rename = useRenameChat(chat.id, retitle);
   return (
     <>
-      <Head expanded={expanded} menu={[...fresh, ...actions]} />
+      <Head
+        expanded={expanded}
+        menu={[...fresh, ...actions]}
+        title={<PanelTitle onRename={rename}>{chat.title}</PanelTitle>}
+      />
       {dialog}
     </>
   );
@@ -164,10 +162,15 @@ const OpenChatHead = ({
 
 /** The panel's head, for a chat not made yet or the open one. */
 const PanelHeadOfChat = ({ expanded }: { expanded: boolean }) => {
+  const { t } = useLingui();
   const { summary } = useGlobalChat();
   const fresh = useFreshItem();
   return summary === undefined ? (
-    <Head expanded={expanded} menu={fresh} />
+    <Head
+      expanded={expanded}
+      menu={fresh}
+      title={<PanelTitle>{t`New chat`}</PanelTitle>}
+    />
   ) : (
     // Its own for each chat: a delete opened for one is never another's.
     <OpenChatHead

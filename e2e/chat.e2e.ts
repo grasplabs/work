@@ -529,6 +529,8 @@ test("the chat on every other page carries on the open chat, and Chat starts afr
     messages.getByRole("article", { name: "You" }).first()
   ).toContainText(question);
   await chat.getByRole("button", { name: "More actions" }).click();
+  // Its menu renames it too, where its name stands.
+  await expect(page.getByRole("menuitem", { name: "Rename" })).toBeVisible();
   await page.getByRole("menuitem", { name: "New chat" }).click();
   await expect(messages).toHaveCount(0);
   const second = `Another from another page ${tag}?`;

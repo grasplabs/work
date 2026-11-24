@@ -15,8 +15,9 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { PanelTitle } from "../frame/panels/head.tsx";
 import { activeChat, setActiveChat } from "./active-chat.ts";
-import { ChatMoreMenu, ChatPanelTitle } from "./chat-more.tsx";
+import { ChatMoreMenu, useRenameChat } from "./chat-more.tsx";
 
 // The open chat's name at the head of its panel and its menu, against
 // core's chats as the page reaches them over RPC, faked: the menu copies
@@ -74,6 +75,12 @@ const settled = async (): Promise<void> => {
   });
 };
 
+/** The chat's name, renamed where it stands, as the chat panel's head draws it. */
+const Title = ({ of }: { of: ChatSummary }) => {
+  const rename = useRenameChat(of.id);
+  return <PanelTitle onRename={rename}>{of.title}</PanelTitle>;
+};
+
 /**
  * The menu over the chat the address names (`?chat=`), `chat` first and
  * `others` to go to, against a core that records its writes; with `slow`,
@@ -126,7 +133,7 @@ const opened = async (
     // Its own for each chat, as the chat's head keys it.
     return (
       <>
-        <ChatPanelTitle chat={shown} key={`title-${shown.id}`} />
+        <Title key={`title-${shown.id}`} of={shown} />
         <ChatMoreMenu
           chat={shown}
           key={`menu-${shown.id}`}

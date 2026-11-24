@@ -47,6 +47,7 @@ import {
   useSubjectChat,
 } from "./chat-subject.ts";
 import { useFollowedChat } from "./chat-watch.ts";
+import { useNoRoomBeside } from "./room-beside.ts";
 import type { SourceName } from "./sources.tsx";
 import { useAsk } from "./use-ask.ts";
 
@@ -258,6 +259,7 @@ const useGlobalChatValue = () => {
   }, [chatId, gone, slot]);
   const layout = useChatLayout();
   const roomBeside = !useMatches(narrowQuery);
+  const noRoomBeside = useNoRoomBeside();
   // About the page's subject, it stays open (chat-subject.ts), where the
   // page has it: that page is where its subject is made. On a phone, where
   // it would cover that page, the page shows first and the chat opens as
@@ -265,7 +267,9 @@ const useGlobalChatValue = () => {
   // where this page allows it there; elsewhere it stays open, and shows
   // again on a page that does.
   const about = subjectOf(slot) !== undefined;
-  const keptOpen = about && !phone;
+  // Nor where the page has no room beside it docked (room-beside.ts): it
+  // would lie over the page with no way back to it.
+  const keptOpen = about && !phone && !noRoomBeside;
   // A subject's page has it docked, wherever it was put elsewhere.
   const placement = about
     ? (placementOn(presence, layout.placement) ?? layout.placement)
