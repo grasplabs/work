@@ -514,7 +514,6 @@ export const ChatConcept = ({
     <ConceptFrame
       fill
       language={step !== "welcome"}
-      step={step}
       tools={<SoundToggle />}
       wide
     >

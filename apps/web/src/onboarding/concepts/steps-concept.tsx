@@ -139,7 +139,7 @@ const Welcome = ({ admin, speaks, onNext, cards }: StepBodyProps) => {
   return (
     <Step
       nav={null}
-      sentence={t`I’ll set up Grasp with you, one step at a time. Which language would you like to work in?`}
+      sentence={t`I’ll set up Grasp with you, one step at a time. Which language would you like?`}
       speaks={speaks}
       title={admin === "" ? t`Hi, I’m Stephen` : t`Hi ${admin}, I’m Stephen`}
     >
@@ -250,9 +250,8 @@ export const StepsConcept = ({
             }
       }
       language={step !== "welcome"}
-      step={step}
       tools={speaks ? <SoundToggle /> : null}
-      wide={step === "welcome" && cards === "scene"}
+      wide={step === "welcome" ? "widest" : false}
     >
       <Body
         admin={admin}

@@ -2,7 +2,6 @@ import {
   Item,
   ItemContent,
   ItemGrid,
-  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -10,7 +9,6 @@ import { CheckIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import type { ReactNode } from "react";
 
 import { AppCardGround } from "../../apps/app-card/ground.tsx";
 import type { AppCardGroundHue } from "../../apps/app-card/ground.tsx";
@@ -40,7 +38,7 @@ export const isCardLook = (value: unknown): value is CardLook =>
 
 const styles = stylex.create({
   // Tall enough for the flag to read; the flag lies over the whole card.
-  card: { position: "relative", minHeight: "5.5rem" },
+  card: { position: "relative", minHeight: "4rem" },
   // The scene's room: the ground fills the positioned box it stands in.
   scene: {
     position: "relative",
@@ -96,22 +94,6 @@ const Picture = ({ code, look }: { code: Locale; look: CardLook }) => {
   );
 };
 
-/** The cards' list: one a row for the flags, tiles for the scenes. */
-const Group = ({
-  look,
-  children,
-  "aria-label": label,
-}: {
-  look: CardLook;
-  children: ReactNode;
-  "aria-label": string;
-}) =>
-  look === "scene" ? (
-    <ItemGrid aria-label={label}>{children}</ItemGrid>
-  ) : (
-    <ItemGroup aria-label={label}>{children}</ItemGroup>
-  );
-
 export const LanguageCards = ({
   chosen,
   onPick,
@@ -124,8 +106,7 @@ export const LanguageCards = ({
 }) => {
   const { t } = useLingui();
   return (
-    // A flag over a card wants the card's width: one a row, a banner each.
-    <Group aria-label={t`Your language`} look={look}>
+    <ItemGrid aria-label={t`Your language`}>
       {languages.map(({ code, name }) => (
         <Item
           active={chosen === code}
@@ -161,6 +142,6 @@ export const LanguageCards = ({
           </ItemContent>
         </Item>
       ))}
-    </Group>
+    </ItemGrid>
   );
 };
