@@ -4,10 +4,11 @@ import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
+import type { ReactNode } from "react";
 
-import { formatDayMonth, formatNumber, formatSince } from "../format.ts";
+import { formatNumber } from "../format.ts";
 import { Badge } from "../grasp/badge/index.ts";
-import { BrandIconGroup } from "../grasp/brand-icon/index.ts";
+import type { BadgeTone } from "../grasp/badge/index.ts";
 import { Button } from "../grasp/button/index.ts";
 import {
   Empty,
@@ -17,314 +18,350 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "../grasp/empty/index.ts";
-import {
-  Clock,
-  Globe,
-  Link as LinkIcon,
-  Mail,
-  Workflow,
-} from "../grasp/icons/index.ts";
-import type { IconData } from "../grasp/icons/index.ts";
+import { Workflow } from "../grasp/icons/index.ts";
 import {
   Item,
   ItemContent,
-  ItemDescription,
   ItemGroup,
-  ItemMedia,
   ItemTitle,
 } from "../grasp/item/index.ts";
-import { SectionCard } from "../grasp/section-card/index.ts";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../grasp/table/index.ts";
 import { grasp } from "../grasp/tokens/tokens.stylex.ts";
-import { phases, stateOf } from "./overview.ts";
+import { stateOf } from "./overview.ts";
 import type {
   OverviewRow,
-  Phase,
   RowTrigger,
-  Tool,
-  ToolsByWorkflow,
   TriggersByWorkflow,
   WorkflowState,
 } from "./overview.ts";
-import { WorkflowStateIcon } from "./state-icon.tsx";
 import { triggerBlockText } from "./trigger-block.ts";
 
-// The Workflows page's rows (Ruben's pick of 21 November, the study's
-// direction E, "Route"): one row a workflow, gathered by the phase it
-// stands in, what needs the reader first. A row begins with the mark of
-// how it stands and its name; then its route, what starts it and the tools
-// it works in; then how its week went. The route never draws a workflow's
-// steps, only where the work goes, so a workflow of fifty steps reads as
-// calmly as one of two: its tools stand four at most, then how many more.
-// Each row opens its workflow.
+// The Workflows page (direction C, Ruben's pick of 23 November): one
+// table across the page, a row a workflow, what needs the reader first.
+// Each row says, in words anyone reads, how the workflow stands now, whose
+// it is, how its last 7 days went, when it last ran and what starts it
+// next. Below 1344 px the columns no longer fit, so each workflow stacks
+// as a card with the same facts. Each row and card opens its workflow.
 
-const phaseNames: Readonly<Record<Phase, MessageDescriptor>> = {
-  needsYou: msg({ message: "Needs you", context: "workflow phase" }),
-  running: msg({ message: "Running", context: "workflow phase" }),
-  building: msg({ message: "Not running", context: "workflow phase" }),
-};
-
-const stateNames: Readonly<Record<WorkflowState, MessageDescriptor>> = {
-  failing: msg({ message: "Failing", context: "how a workflow stands" }),
-  waiting: msg({ message: "Waiting on you", context: "how a workflow stands" }),
+/** How a workflow stands, in the word its Now column leads with. */
+const nowWords: Readonly<Record<WorkflowState, MessageDescriptor>> = {
+  failing: msg({ message: "Needs a fix", context: "how a workflow stands" }),
+  waiting: msg({ message: "Needs you", context: "how a workflow stands" }),
   paused: msg({ message: "Paused", context: "a workflow someone paused" }),
   blocked: msg({
     message: "Not starting",
     context: "how a workflow stands: nothing can start it yet",
   }),
-  live: msg({ message: "Live", context: "how a workflow stands" }),
+  live: msg({ message: "On", context: "how a workflow stands: it runs" }),
   building: msg({ message: "Not live yet", context: "how a workflow stands" }),
 };
 
-/** What starts a workflow, short enough for its route's first mark. */
-const triggerNames: Readonly<Record<TriggerKind, MessageDescriptor>> = {
+const nowTones: Readonly<Record<WorkflowState, BadgeTone>> = {
+  failing: "danger",
+  waiting: "attention",
+  paused: "neutral",
+  blocked: "neutral",
+  live: "success",
+  building: "neutral",
+};
+
+/** What starts a workflow, for its Next column, where no time or address says it. */
+const startWords: Readonly<Record<TriggerKind, MessageDescriptor>> = {
   schedule: msg({
     message: "On a schedule",
     context: "what starts a workflow",
   }),
   connector: msg({
-    message: "On an event",
+    message: "On each event",
     context: "what starts a workflow",
   }),
-  email: msg({ message: "On an email", context: "what starts a workflow" }),
-  webhook: msg({ message: "On a webhook", context: "what starts a workflow" }),
-};
-
-const triggerIcons: Readonly<Record<TriggerKind, IconData>> = {
-  schedule: Clock,
-  connector: Globe,
-  email: Mail,
-  webhook: LinkIcon,
+  email: msg({ message: "On each email", context: "what starts a workflow" }),
+  webhook: msg({
+    message: "On each webhook call",
+    context: "what starts a workflow",
+  }),
 };
 
 /**
- * What starts a workflow, in the few words its route has room for: the
- * address an email trigger receives mail at, when it was given a name
- * ("Mail to invoices"), and when a schedule next starts a run ("Next Mon
- * 07:00"); otherwise only its kind (`kind`, in words).
+ * When something happened or happens, as the overview says it: "Today
+ * 11:20", else the day, its date and the time ("Mon 30 Nov, 07:00").
  */
-const startWords = (trigger: RowTrigger, kind: string, i18n: I18n): string => {
-  const { address, nextAt } = trigger;
-  // One core made up (`trigger-` and random bits) says nothing to a reader.
-  if (address !== null && !address.startsWith("trigger-")) {
-    return i18n._(msg`Mail to ${address}`);
+const whenOf = (at: string, i18n: I18n): string => {
+  const date = new Date(at);
+  if (date.toDateString() === new Date().toDateString()) {
+    const time = new Intl.DateTimeFormat(i18n.locale, {
+      timeStyle: "short",
+    }).format(date);
+    return i18n._(msg`Today ${time}`);
   }
-  if (nextAt !== null) {
-    const when = new Intl.DateTimeFormat(i18n.locale, {
-      weekday: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(new Date(nextAt));
-    return i18n._(msg`Next ${when}`);
-  }
-  return kind;
+  return new Intl.DateTimeFormat(i18n.locale, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
 };
 
-/** The tools a route shows before it says how many more. */
-const toolsShown = 4;
+/** What starts a trigger's run: its next time, the address it reads, or its kind. */
+const triggerWords = (trigger: RowTrigger, i18n: I18n): string => {
+  const { address, nextAt } = trigger;
+  if (nextAt !== null) {
+    return whenOf(nextAt, i18n);
+  }
+  // One core made up (`trigger-` and random bits) says nothing to a reader.
+  if (address !== null && !address.startsWith("trigger-")) {
+    return i18n._(msg`On each email to ${address}`);
+  }
+  return i18n._(startWords[trigger.kind]);
+};
 
-const PHONE = "@media (width < 40rem)";
+/**
+ * What starts a workflow next (its Next column): its resume while paused,
+ * an admin while its trigger waits for one, else its first trigger, or
+ * someone by hand when it has none. Undefined before a version is live,
+ * and while its triggers aren't read (core lists a user only their own).
+ */
+const nextOf = (
+  row: OverviewRow,
+  triggers: readonly RowTrigger[] | undefined,
+  admin: boolean,
+  i18n: I18n
+): string | undefined => {
+  if (row.paused) {
+    return i18n._(msg`When resumed`);
+  }
+  if (row.version === null || triggers === undefined) {
+    return undefined;
+  }
+  if (row.blocked?.why === "waiting") {
+    return admin
+      ? i18n._(msg`When you allow it`)
+      : i18n._(msg`When an admin allows it`);
+  }
+  const [first] = triggers;
+  if (first === undefined) {
+    return i18n._(
+      msg({ message: "By hand", context: "what starts a workflow" })
+    );
+  }
+  const words = triggerWords(first, i18n);
+  const more = formatNumber(triggers.length - 1);
+  return triggers.length > 1 ? i18n._(msg`${words}, and ${more} more`) : words;
+};
+
+/** A workflow's facts, worded once for its row and its card alike. */
+interface Facts {
+  state: WorkflowState;
+  now: string;
+  /** What it asks of the reader, under how it stands: its runs that wait on them. */
+  asks: string | undefined;
+  runs: string;
+  failed: string | undefined;
+  last: string;
+  next: string | undefined;
+}
+
+const useFacts = (
+  row: OverviewRow,
+  triggers: readonly RowTrigger[] | undefined,
+  admin: boolean
+): Facts => {
+  const { t, i18n } = useLingui();
+  const state = stateOf(row);
+  let now = i18n._(nowWords[state]);
+  if (state === "blocked" && row.blocked !== null) {
+    now = triggerBlockText(row.blocked, i18n);
+  } else if (state === "live" && row.lastRun === null) {
+    now = t({
+      message: "On, not used yet",
+      context: "how a workflow stands: live, never run",
+    });
+  }
+  const runs = formatNumber(row.runs ?? 0);
+  const waiting = formatNumber(row.waiting);
+  const failed = formatNumber(row.failed);
+  // A user of it sees their own runs alone, so its figures are theirs.
+  const own = row.role === "user";
+  return {
+    state,
+    now,
+    asks: row.waiting > 0 ? t`${waiting} waiting for a decision` : undefined,
+    runs: own ? t`${runs} of yours done` : t`${runs} done`,
+    failed: row.failed > 0 ? t`${failed} failed` : undefined,
+    last: row.lastRun === null ? t`No runs yet` : whenOf(row.lastRun, i18n),
+    next: nextOf(row, triggers, admin, i18n),
+  };
+};
+
+const STACKED = "@media (width < 84rem)";
 
 const styles = stylex.create({
-  groups: { display: "grid", rowGap: grasp.sectionGap, minWidth: 0 },
-  // The route: at one line down the page in every row, as wide as its
-  // marks need and no wider, so no hairline is stretched across a wide
-  // screen. On a phone it leaves the row to the name and the week.
-  route: {
-    display: { default: "flex", [PHONE]: "none" },
-    flexShrink: 0,
-    alignItems: "center",
-    width: "19rem",
-    minWidth: 0,
+  table: { display: { default: "block", [STACKED]: "none" } },
+  cards: { display: { default: "none", [STACKED]: "block" } },
+  // The workflow's name: a link whose press area stretches over its row.
+  name: {
+    color: "inherit",
+    textDecoration: "none",
+    outline: "none",
+    "::after": { content: '""', position: "absolute", inset: 0 },
   },
-  join: {
-    flexShrink: 0,
-    width: grasp.space4,
-    height: grasp.hairline,
-    backgroundColor: grasp.line,
+  now: { display: "grid", justifyItems: "start", rowGap: grasp.space1 },
+  asks: {
+    color: grasp.muted,
+    fontSize: grasp.textSm,
+    lineHeight: grasp.textSmLine,
   },
-  // How the week went, at the row's end: the figure over the last run.
-  end: {
+  failed: { color: grasp.danger },
+  card: {
     display: "grid",
-    flexShrink: 0,
-    justifyItems: "end",
-    rowGap: grasp.space1,
-    width: { default: "13rem", [PHONE]: "auto" },
-    marginInlineStart: "auto",
-    textAlign: "end",
+    justifyItems: "start",
+    rowGap: grasp.space2,
+    marginBlockStart: grasp.space1,
   },
-  figure: {
+  facts: {
     display: "flex",
-    alignItems: "center",
-    gap: grasp.space2,
+    flexWrap: "wrap",
+    columnGap: grasp.space4,
+    rowGap: grasp.space1,
     color: grasp.ink,
     fontSize: grasp.textSm,
     lineHeight: grasp.textSmLine,
-    whiteSpace: "nowrap",
   },
-  wide: { display: { default: "inline", [PHONE]: "none" } },
-  last: {
-    display: { default: "block", [PHONE]: "none" },
-    color: grasp.muted,
-    fontSize: grasp.textXs,
-    lineHeight: grasp.textXsLine,
-    whiteSpace: "nowrap",
-  },
+  label: { color: grasp.muted },
 });
 
-const noTools: readonly Tool[] = [];
-const noTriggers: readonly RowTrigger[] = [];
+/** How a workflow stands now: a toned dot and its word, over what it asks. */
+const Now = ({ facts }: { facts: Facts }) => (
+  <span {...stylex.props(styles.now)}>
+    <Badge tone={nowTones[facts.state]} variant="dot">
+      {facts.now}
+    </Badge>
+    {facts.asks === undefined ? null : (
+      <span {...stylex.props(styles.asks)}>{facts.asks}</span>
+    )}
+  </span>
+);
 
-/** Where a workflow's work goes: what starts it, then the tools it works in. */
-const Route = ({
-  triggers,
-  tools,
-}: {
-  /** Undefined until their read answers: the route then begins at its tools. */
-  triggers: readonly RowTrigger[] | undefined;
-  tools: readonly Tool[];
-}) => {
-  const { t, i18n } = useLingui();
-  const [first] = triggers ?? noTriggers;
-  const more = (triggers?.length ?? 0) - 1;
-  const start =
-    first === undefined
-      ? t({ message: "By hand", context: "what starts a workflow" })
-      : startWords(first, i18n._(triggerNames[first.kind]), i18n);
-  return (
-    <span {...stylex.props(styles.route)}>
-      {triggers === undefined ? null : (
-        <Badge
-          icon={first === undefined ? undefined : triggerIcons[first.kind]}
-          size="sm"
-        >
-          {more > 0 ? t`${start}, and ${more} more` : start}
-        </Badge>
-      )}
-      {triggers === undefined || tools.length === 0 ? null : (
-        <span aria-hidden="true" {...stylex.props(styles.join)} />
-      )}
-      {tools.length === 0 ? null : (
-        <BrandIconGroup
-          brands={tools.map(({ name, brand }) => brand ?? { name })}
-          max={toolsShown}
-        />
-      )}
-    </span>
-  );
-};
+/** Its last 7 days: what it got done, then what failed, in red. */
+const Week = ({ facts }: { facts: Facts }) => (
+  <>
+    {facts.runs}
+    {facts.failed === undefined ? null : (
+      <>
+        {" · "}
+        <span {...stylex.props(styles.failed)}>{facts.failed}</span>
+      </>
+    )}
+  </>
+);
 
-/** When a run began, short: the time alone today, the day before that. */
-const whenOf = (at: string): string =>
-  new Date(at).toDateString() === new Date().toDateString()
-    ? formatSince(at)
-    : formatDayMonth(at);
+/** One fact on a card: its quiet label, then its value. */
+const Fact = ({ label, children }: { label: string; children: ReactNode }) => (
+  <span>
+    <span {...stylex.props(styles.label)}>{label}</span> {children}
+  </span>
+);
 
-/** How a workflow's week went: what it needs, then its runs, over its last run. */
-const Week = ({ row, state }: { row: OverviewRow; state: WorkflowState }) => {
-  const { t } = useLingui();
-  const failed = formatNumber(row.failed);
-  const waiting = formatNumber(row.waiting);
-  const runs = formatNumber(row.runs ?? 0);
-  const since = row.lastRun === null ? "" : whenOf(row.lastRun);
-  const needs = state === "failing" || state === "waiting";
-  // A user of it sees their own runs alone, so its figures are theirs.
-  const own = row.role === "user";
-  let last = row.lastRun === null ? t`No runs yet` : t`Last run ${since}`;
-  if (own) {
-    last =
-      row.lastRun === null
-        ? t`You haven't run it yet`
-        : t`Your last run ${since}`;
-  }
-  return (
-    <span {...stylex.props(styles.end)}>
-      <span {...stylex.props(styles.figure)}>
-        {state === "failing" ? (
-          <Badge size="sm" tone="danger">{t`${failed} failed`}</Badge>
-        ) : null}
-        {state === "waiting" ? (
-          <Badge size="sm" tone="attention">{t`${waiting} waiting`}</Badge>
-        ) : null}
-        {row.runs === null ? null : (
-          // On a phone a row that needs the reader says only that: its
-          // name keeps the room.
-          <span {...stylex.props(needs && styles.wide)}>
-            {own
-              ? t`${runs} of yours done this week`
-              : t`${runs} done this week`}
-          </span>
-        )}
-      </span>
-      <span {...stylex.props(styles.last)}>{last}</span>
-    </span>
-  );
-};
-
-/** One workflow: how it stands, its name, its route and its week. */
-const WorkflowRow = ({
-  row,
-  tools,
-  triggers,
-}: {
+interface RowProps {
   row: OverviewRow;
-  tools: readonly Tool[];
   triggers: readonly RowTrigger[] | undefined;
-}) => {
-  const { t, i18n } = useLingui();
-  const state = stateOf(row);
-  const stands = i18n._(stateNames[state]);
-  const { version } = row;
-  // Whose it is, its version and how it stands, as one quiet line. Where
-  // it needs the reader, the row's end says so with its count ("3 failed"),
-  // so the line leaves it out: said once.
-  const needs = state === "failing" || state === "waiting";
-  // Where its triggers can't start it, why, in place of how it stands.
-  const standing =
-    state === "blocked" && row.blocked !== null
-      ? triggerBlockText(row.blocked, i18n)
-      : stands;
-  const line = [
-    row.owner,
-    version === null ? null : t`v${version}`,
-    needs ? null : standing,
-  ].filter((part): part is string => part !== null);
+  admin: boolean;
+}
+
+/** One workflow as a row of the table. */
+const WorkflowRow = ({ row, triggers, admin }: RowProps) => {
+  const facts = useFacts(row, triggers, admin);
+  return (
+    <TableRow opens>
+      <TableCell lead wrap>
+        <Link
+          data-row-target=""
+          params={{ workflow: row.id }}
+          to="/workflows/$workflow"
+          {...stylex.props(styles.name)}
+        >
+          {row.name}
+        </Link>
+      </TableCell>
+      <TableCell>
+        <Now facts={facts} />
+      </TableCell>
+      <TableCell>{row.owner}</TableCell>
+      <TableCell>
+        <Week facts={facts} />
+      </TableCell>
+      <TableCell>{facts.last}</TableCell>
+      <TableCell>{facts.next}</TableCell>
+    </TableRow>
+  );
+};
+
+/** One workflow as a card, below 1344 px: its name, how it stands, then its facts. */
+const WorkflowCard = ({ row, triggers, admin }: RowProps) => {
+  const { t } = useLingui();
+  const facts = useFacts(row, triggers, admin);
   return (
     <Item
       render={<Link params={{ workflow: row.id }} to="/workflows/$workflow" />}
-      size="sm"
     >
-      <ItemMedia>
-        <WorkflowStateIcon state={state} />
-      </ItemMedia>
       <ItemContent>
         <ItemTitle>{row.name}</ItemTitle>
-        <ItemDescription>{line.join(" · ")}</ItemDescription>
+        <span {...stylex.props(styles.card)}>
+          <Now facts={facts} />
+          <span {...stylex.props(styles.facts)}>
+            {row.owner === null ? null : (
+              <Fact label={t`Owner`}>{row.owner}</Fact>
+            )}
+            <Fact label={t`Last 7 days`}>
+              <Week facts={facts} />
+            </Fact>
+            <Fact label={t({ message: "Last run", context: "a workflow's" })}>
+              {facts.last}
+            </Fact>
+            {facts.next === undefined ? null : (
+              <Fact
+                label={t({
+                  message: "Next",
+                  context: "what starts a workflow next",
+                })}
+              >
+                {facts.next}
+              </Fact>
+            )}
+          </span>
+        </span>
       </ItemContent>
-      <Route tools={tools} triggers={triggers} />
-      <Week row={row} state={state} />
     </Item>
   );
 };
 
 /**
- * Every workflow the person can open, gathered by phase. `tools` and
- * `triggers` come after the rows (their own reads): until then a route
- * shows what has arrived.
+ * Every workflow the person can open, what needs them first, each with
+ * what starts it (`triggers`): a workflow absent from it shows nothing next.
  */
 export const WorkflowRows = ({
   rows,
-  tools,
   triggers,
   builds,
+  admin,
 }: {
   /** Whether the reader may make a workflow; else they are told who does. */
   builds: boolean;
+  /** Whether the reader is an admin, who allows a trigger. */
+  admin: boolean;
   /** In the order of their phases (overview.ts). */
   rows: readonly OverviewRow[];
-  tools: ToolsByWorkflow | undefined;
-  triggers: TriggersByWorkflow | undefined;
+  triggers: TriggersByWorkflow;
 }) => {
-  const { t, i18n } = useLingui();
+  const { t } = useLingui();
   if (rows.length === 0) {
     return (
       <Empty>
@@ -345,36 +382,51 @@ export const WorkflowRows = ({
       </Empty>
     );
   }
+  const label = t`Workflows`;
   return (
-    <div {...stylex.props(styles.groups)}>
-      {phases.map((phase) => {
-        const inPhase = rows.filter((row) => row.phase === phase);
-        if (inPhase.length === 0) {
-          return null;
-        }
-        const name = i18n._(phaseNames[phase]);
-        return (
-          <SectionCard
-            aside={formatNumber(inPhase.length)}
-            density="compact"
-            flush
-            key={phase}
-            title={name}
-            variant="grouped"
-          >
-            <ItemGroup aria-label={name} separated>
-              {inPhase.map((row) => (
-                <WorkflowRow
-                  key={row.id}
-                  row={row}
-                  tools={tools?.get(row.id) ?? noTools}
-                  triggers={triggers?.get(row.id)}
-                />
-              ))}
-            </ItemGroup>
-          </SectionCard>
-        );
-      })}
-    </div>
+    <>
+      <div {...stylex.props(styles.table)}>
+        <Table aria-label={label} density="roomy">
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t`Workflow`}</TableHead>
+              <TableHead>
+                {t({ message: "Now", context: "how a workflow stands now" })}
+              </TableHead>
+              <TableHead>{t`Owner`}</TableHead>
+              <TableHead>{t`Last 7 days`}</TableHead>
+              <TableHead>
+                {t({ message: "Last run", context: "a workflow's" })}
+              </TableHead>
+              <TableHead>
+                {t({ message: "Next", context: "what starts a workflow next" })}
+              </TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <WorkflowRow
+                admin={admin}
+                key={row.id}
+                row={row}
+                triggers={triggers.get(row.id)}
+              />
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      <div {...stylex.props(styles.cards)}>
+        <ItemGroup aria-label={label} separated>
+          {rows.map((row) => (
+            <WorkflowCard
+              admin={admin}
+              key={row.id}
+              row={row}
+              triggers={triggers.get(row.id)}
+            />
+          ))}
+        </ItemGroup>
+      </div>
+    </>
   );
 };
