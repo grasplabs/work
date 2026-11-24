@@ -48,7 +48,6 @@ import { menuStyles, scrollbarHidden } from "../lib/styles";
 import { popup } from "../lib/tokens.values";
 import { slotProps, slotted } from "../lib/utils";
 import type { LayoutStyle } from "../lib/utils";
-import { menuMarker } from "../lib/vars.stylex";
 import { Button } from "./button";
 
 type OpenChange = ComponentProps<typeof Menu>["onOpenChange"];
@@ -415,7 +414,6 @@ export const DropdownMenuContent = ({
     collisionPadding={popup.gutter}
     render={slotted("div", "dropdown-menu-content")}
     {...stylex.props(
-      menuMarker,
       menuStyles.panel,
       menuStyles.motion,
       scrollbarHidden,

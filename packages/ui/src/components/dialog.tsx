@@ -14,7 +14,7 @@
 //       <DialogBody>…</DialogBody>
 //       <DialogFooter>
 //         <DialogClose>Cancel</DialogClose>
-//         <Button size="sm" {...rename.props}>Rename</Button>
+//         <Button {...rename.props}>Rename</Button>
 //       </DialogFooter>
 //     </DialogContent>
 //   </Dialog>
@@ -452,7 +452,11 @@ export interface DialogFooterProps extends PartProps {
   children: ReactNode;
 }
 
-/** The actions, at the end of the line. On a phone every Button in it takes an equal part of its width. */
+/**
+ * The actions, at the end of the line. A Button directly in it that names no size is small, as
+ * DialogClose is, so its actions stand one height. On a phone every Button in it takes an equal
+ * part of its width.
+ */
 export const DialogFooter = ({ children, style }: DialogFooterProps) => (
   // The marker a Button reads to take its share of the line on a phone.
   <div

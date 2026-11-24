@@ -28,7 +28,7 @@ import type { ReactElement, ReactNode } from "react";
 import { useI18n } from "../lib/i18n";
 import { EllipsisIcon, Icon, LoaderIcon } from "../lib/icons";
 import type { IconData } from "../lib/icons";
-import { fadeIn } from "../lib/styles";
+import { fadeIn, texture } from "../lib/styles";
 import {
   colors,
   duration,
@@ -39,7 +39,6 @@ import {
 } from "../lib/tokens.stylex";
 import { isBlank } from "../lib/utils";
 import type { LayoutStyle } from "../lib/utils";
-import { pixel } from "../lib/vars.stylex";
 import { Button } from "./button";
 import type { ButtonProps, ButtonSize } from "./button";
 import {
@@ -343,25 +342,8 @@ const styles = stylex.create({
   descriptionWaitLines: { display: "grid", minWidth: 0 },
 
   // ---- The banner's texture ----
-  // A very faint dither of the light behind the title: mint light from the top corner at the
-  // start, seen through the system's dither of pixels. Decoration: hidden from assistive tech, takes
-  // no pointer, never moves. In right to left the light comes from the start there, the right. In
-  // forced colours it is not drawn.
-  texture: {
-    position: "absolute",
-    inset: 0,
-    zIndex: -1,
-    pointerEvents: "none",
-    opacity: sizes.pageHeaderDitherStrength,
-    backgroundImage: {
-      default: `radial-gradient(120% 90% at 0% 0%, ${colors.mint}, transparent 70%)`,
-      ":dir(rtl)": `radial-gradient(120% 90% at 100% 0%, ${colors.mint}, transparent 70%)`,
-    },
-    // The dither: lib's one pixel, a 2px square in every 3px.
-    maskImage: pixel.mask,
-    maskSize: "3px 3px",
-    display: { default: "block", [media.forcedColors]: "none" },
-  },
+  // The shared texture (lib's `texture`), under the banner's words.
+  textureBehind: { zIndex: -1 },
   // In the object's own colour: from the top, down, the same in either direction. In the dark the
   // colour's own hue and strength at a lightness that shows on a dark ground.
   tinted: (tint: string) => ({
@@ -451,7 +433,11 @@ const Texture = ({ tint }: { tint: string | undefined }) => (
     aria-hidden="true"
     data-slot="page-header-texture"
     data-tinted={tint === undefined ? undefined : ""}
-    {...stylex.props(styles.texture, tint !== undefined && styles.tinted(tint))}
+    {...stylex.props(
+      texture,
+      styles.textureBehind,
+      tint !== undefined && styles.tinted(tint)
+    )}
   />
 );
 
