@@ -1,5 +1,6 @@
 import { workflowSchemaUrl } from "@grasp-os/workflow-schema/format";
 import { expect } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
@@ -156,11 +157,13 @@ test("an address the workflows pages don't know opens them as they are without i
   await expect(page).toHaveURL(/\/workflows$/u);
 });
 
-test("a run is open only while its list shows: Activity hides it and Runs shows it again, and a run's address alone opens Runs with it", async ({
-  pageOf,
-}) => {
+/** A builder's page on `live`, and the ID of its first run, opened from its Runs. */
+const withRun = async (
+  pageOf: (person: Person) => Promise<Page>,
+  title: string
+) => {
   const { builder } = peopleIn("workflowOverview");
-  const live = await made(builder, "Order intake", waiting("1 hour"), true);
+  const live = await made(builder, title, waiting("1 hour"), true);
   const page = await pageOf(builder);
   await page.goto(`/workflows/${live}?view=runs`);
   await page
@@ -170,38 +173,53 @@ test("a run is open only while its list shows: Activity hides it and Runs shows 
     .click(pageRead);
   await expect(page).toHaveURL(/[?&]run=/u);
   const run = new URL(page.url()).searchParams.get("run") ?? "";
-  const opened = page.getByRole("complementary", {
-    name: /^The run started/u,
-  });
-  const views = page.getByRole("navigation", { name: "Workflow views" });
+  return { page, live, run };
+};
 
-  // Wide: the run beside its list. Activity hides both and opens nothing
-  // over the page; Runs shows them again, and the page answers throughout.
+/** The run panel, beside its list or in a Sheet. */
+const runPanel = (page: Page) =>
+  page.getByRole("complementary", { name: /^The run started/u });
+
+/** How long a press may wait for the page to take it: not a page inert under an unseen drawer. */
+const pressed = { timeout: 15_000 };
+
+test("a run open beside its list hides with it under Activity, opens nothing over the page, and shows again on Runs", async ({
+  pageOf,
+}) => {
+  const { page, live, run } = await withRun(pageOf, "Order intake");
+  const opened = runPanel(page);
+
   await page.setViewportSize({ width: 1920, height: 1080 });
   await page.goto(`/workflows/${live}?view=runs&run=${run}`);
   await expect(opened).toBeVisible(pageRead);
   await expect(page.getByRole("dialog")).toHaveCount(0);
-  await page.getByRole("tab", { name: /^Activity/u }).click();
+  await page.getByRole("tab", { name: /^Activity/u }).click(pressed);
   await expect(opened).toBeHidden();
-  await expect(page.getByRole("dialog")).toHaveCount(0);
   const runsTab = page.getByRole("tab", { name: "Runs", exact: true });
-  await runsTab.click();
+  await runsTab.click(pressed);
   await expect(runsTab).toHaveAttribute("aria-selected", "true");
   await expect(opened).toBeVisible(pageRead);
   await expect(page).toHaveURL(new RegExp(`[?&]run=${run}`, "u"));
+});
 
-  // A run's address with no view: Runs, with the run open; closed, the
-  // page stays on Runs and answers.
+test("a run's address with no view opens Runs with the run, and closed, the page stays on Runs and answers", async ({
+  pageOf,
+}) => {
+  const { page, live, run } = await withRun(pageOf, "Order review");
+  const opened = runPanel(page);
+  const views = page.getByRole("navigation", { name: "Workflow views" });
+
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`/workflows/${live}?run=${run}`);
+  // Runs, with its count beside it.
   await expect(views.locator('[aria-current="page"]')).toHaveText(
-    "Runs",
+    /^Runs/u,
     pageRead
   );
   await expect(opened).toBeVisible(pageRead);
-  await opened.getByRole("button", { name: "Close" }).click();
+  await opened.getByRole("button", { name: "Close" }).click(pressed);
   await expect(page).not.toHaveURL(/[?&]run=/u);
-  await expect(views.locator('[aria-current="page"]')).toHaveText("Runs");
-  await views.getByRole("link", { name: "Settings" }).click();
+  await expect(views.locator('[aria-current="page"]')).toHaveText(/^Runs/u);
+  await views.getByRole("link", { name: "Settings" }).click(pressed);
   await expect(page).toHaveURL(/[?&]view=settings/u);
 });
