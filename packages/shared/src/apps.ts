@@ -308,8 +308,8 @@ export const appPicturesPrefix = "/api/app-pictures/";
 
 /**
  * Where the page reads the picture of `version` of App `app`, as a
- * signed-in member who may open the App: an image of its type, which the
- * browser asks again for each time (access can be taken away). Not found
+ * signed-in member who may open the App: an image of its type, never kept
+ * by the browser (access can be taken away). Not found
  * for anyone else, and for a version without one.
  */
 export const appPicturePath = (app: string, version: number): string =>

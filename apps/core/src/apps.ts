@@ -51,6 +51,7 @@ import { versionMadeCurrent } from "./access-revocations.ts";
 import {
   appsBuiltBy,
   appsFoundBy,
+  appsReadableBy,
   requireAppRole,
   requireNotArchived,
   stillBuiltBy,
@@ -150,9 +151,15 @@ const treeKey = (app: AppId, tree: string): string =>
 /** Where every picture of App `app`'s versions is kept (app-pictures.ts). */
 export const picturesPrefix = (app: AppId): string => `apps/${app}/pictures/`;
 
-/** Where the picture of `version` of App `app` is kept (app-pictures.ts). */
-export const pictureKey = (app: AppId, version: number): string =>
-  `${picturesPrefix(app)}${version}`;
+/**
+ * Where picture `picture` of `version` of App `app` is kept: one object
+ * each time one is set (app-pictures.ts).
+ */
+export const pictureKey = (
+  app: AppId,
+  version: number,
+  picture: string
+): string => `${picturesPrefix(app)}${version}/${picture}`;
 
 /** A built-in blueprint's code (app-blueprints.ts), stored as a version's is. */
 const blueprintTreeKey = (blueprint: BlueprintId, tree: string): string =>
@@ -1014,6 +1021,13 @@ export const listAppOverviews = async (
     by,
     found.map(({ app }) => app.id)
   );
+  // A picture shows what the App showed: only to whoever may read what it
+  // read, as its route asks (app-pictures.ts). Asked only of those with one.
+  const readable = await appsReadableBy(
+    env,
+    by,
+    found.filter(({ picture }) => picture !== null).map(({ app }) => app.id)
+  );
   return found.map(({ app, pages, picture }) => ({
     app: { ...app, role: builds.has(app.id) ? "builder" : "user" },
     // None without a current version, whose row the join doesn't find.
@@ -1022,7 +1036,7 @@ export const listAppOverviews = async (
       pages: pages ?? false,
     },
     picture:
-      picture === null || app.currentVersion === null
+      picture === null || app.currentVersion === null || !readable.has(app.id)
         ? null
         : appPicturePath(app.id, app.currentVersion),
   }));

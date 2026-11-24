@@ -1,6 +1,5 @@
 import { appWebhookEvents } from "@grasp-os/shared/app-webhooks";
 import type { AppWebhookEvent } from "@grasp-os/shared/app-webhooks";
-import { appPictureTypes } from "@grasp-os/shared/apps";
 import type { AgentProposer } from "@grasp-os/shared/apps";
 import { auditRejectReasons } from "@grasp-os/shared/audit";
 import type { ChatFileType } from "@grasp-os/shared/chat";
@@ -1461,12 +1460,12 @@ export const appVersions = sqliteTable(
      */
     publishedManifestHash: text("published_manifest_hash"),
     /**
-     * The type of the version's picture, as its bytes told it, once one
-     * was set (src/app-pictures.ts): kept in the files bucket under the
-     * App (src/apps.ts, `pictureKey`). Null while it has none; set again,
-     * it is replaced.
+     * The ID of the version's picture (src/app-pictures.ts): each set
+     * keeps its own object in the files bucket under the App (src/apps.ts,
+     * `pictureKey`), with the type its bytes told, and names it here once
+     * its write commits. Null while it has none.
      */
-    picture: text({ enum: appPictureTypes }),
+    picture: text(),
   },
   (table) => [
     primaryKey({ columns: [table.appId, table.version] }),

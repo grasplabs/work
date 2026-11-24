@@ -3,9 +3,17 @@ import {
   appPictureMaxPixels,
   appPicturePath,
 } from "@grasp-os/shared/apps";
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { commitApp, published } from "./apps.ts";
+import { setVersionPicture } from "../src/app-pictures.ts";
+import {
+  commitApp,
+  outlook,
+  published,
+  racingDb,
+  requestGranted,
+} from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import {
   auditedDuring,
@@ -15,7 +23,9 @@ import {
   signedIn,
   signedInApi,
   staffPerson,
+  unique,
 } from "./sign-in.ts";
+import { connectDb } from "./test-env.ts";
 
 // A picture of each published App version, for the Apps overview's cards
 // (app-pictures.ts). From its threat model: someone who may not publish
@@ -24,7 +34,10 @@ import {
 // file a browser would run (HTML or an SVG posing as a PNG), one too
 // large, with no pixels or cut short, is kept; anyone who may not open the
 // App (a member without a role in it, a builder of another App, staff,
-// nobody signed in) reads it; the overview shows an older version's
+// nobody signed in, someone whose share was taken away or who can't read
+// what the App read), or anyone at all once it is removed, reads it; a set
+// refused as it is written, or two at once, leave the row, the audit and
+// the bytes served disagreeing; the overview shows an older version's
 // picture for the current one; a set goes unrecorded. A guest reading it
 // is in guest-role.test.ts, with every other route; its removal with its
 // App in app-removal.test.ts.
@@ -79,6 +92,15 @@ const png = ({ width = 64, height = 64, size = 88 } = {}): Uint8Array => {
   return bytes;
 };
 
+/**
+ * A JPEG's start of image, a baseline frame header of three components,
+ * 3 by 2 pixels, and its end of image: what core reads of one.
+ */
+const jpeg = new Uint8Array([
+  0xff, 0xd8, 0xff, 0xc0, 0, 17, 8, 0, 2, 0, 3, 3, 1, 0x11, 0, 2, 0x11, 1, 3,
+  0x11, 1, 0xff, 0xd9,
+]);
+
 /** A GIF's header and logical screen, 2 by 1 pixels. */
 const gif = new Uint8Array([...utf8("GIF89a"), 2, 0, 1, 0, 0, 0, 0, 0x3b]);
 
@@ -114,7 +136,7 @@ const guardedAnswer = (status: number) => ({
 const pictureAnswer = (type: string, bytes: Uint8Array) => ({
   status: 200,
   type,
-  cache: "private, no-cache",
+  cache: "private, no-store",
   nosniff: "nosniff",
   policy: "default-src 'none'; sandbox",
   bytes: [...bytes],
@@ -138,6 +160,34 @@ const liveApp = async (builder: Person, user?: Person): Promise<string> => {
     });
   }
   await published(id);
+  return id;
+};
+
+/** The objects kept for the pictures of App `app`'s versions. */
+const keptPictures = async (app: string): Promise<number> => {
+  const listed = await env.FILES.list({ prefix: `apps/${app}/pictures/` });
+  return listed.objects.length;
+};
+
+/**
+ * Core's environment, with `first` run just before the batch that names a
+ * set's picture lands: another writer getting there first.
+ */
+const racing = (first: () => Promise<unknown>): Env => ({
+  ...env,
+  DB: racingDb(first, /"app_versions" set "picture"/u),
+});
+
+/** A personal connection of `owner`'s, such as their mailbox. */
+const mailboxOf = async (owner: Person): Promise<string> => {
+  const id = `connection-mailbox-${unique()}`;
+  const now = Date.now();
+  await connectDb()
+    .prepare(
+      "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, 'microsoft', 'personal', ?, 'active', 'native', 'microsoft-365', ?, ?)"
+    )
+    .bind(id, owner.userId, now, now)
+    .run();
   return id;
 };
 
@@ -206,6 +256,7 @@ describe("an App version's picture", slow, () => {
       // Nothing refused was kept.
       overview: await overviewPicture(owner, app),
       read: await served(appPicturePath(app, 1), owner.session),
+      jpeg: await set(owner.api, 1, jpeg),
       // At the limits, it is taken.
       atLimits: await set(
         owner.api,
@@ -232,6 +283,7 @@ describe("an App version's picture", slow, () => {
       cutShort: "app.picture_invalid",
       overview: null,
       read: guardedAnswer(404),
+      jpeg: "ok",
       atLimits: "ok",
     });
   });
@@ -320,5 +372,167 @@ describe("an App version's picture", slow, () => {
     await expect(
       served(appPicturePath(app, 1), user.session)
     ).resolves.toStrictEqual(pictureAnswer("image/png", realPng));
+  });
+
+  it("goes on being served only to whoever may open the App: not once a share is taken away, the App is archived for its users, or removed, nor to someone who can't read what it read", async () => {
+    const [owner, user, colleague, admin] = await Promise.all([
+      signedInApi(idp, "builder"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "user"),
+      signedInApi(idp, "admin"),
+    ]);
+    const app = await liveApp(owner, user);
+    await owner.api.apps.members.add(app, {
+      type: "person",
+      id: colleague.userId,
+      role: "user",
+    });
+    await owner.api.apps.setVersionPicture(app, 1, realPng);
+    const path = appPicturePath(app, 1);
+    const shown = pictureAnswer("image/png", realPng);
+    const before = await served(path, user.session);
+    await owner.api.apps.members.remove(app, {
+      type: "person",
+      id: user.userId,
+    });
+    const unshared = await served(path, user.session);
+    await owner.api.apps.members.add(app, {
+      type: "person",
+      id: user.userId,
+      role: "user",
+    });
+    await owner.api.apps.archive(app);
+    const archived = {
+      set: await outcome(owner.api.apps.setVersionPicture(app, 1, realWebp)),
+      user: await served(path, user.session),
+      // Its builders still see it, as they see the App on the overview.
+      owner: await served(path, owner.session),
+    };
+    await owner.api.apps.restore(app);
+    // The App reads the owner's mailbox, which the colleague can't.
+    await requestGranted(idp, owner, {
+      ...outlook(app, `MAIL_${unique().toUpperCase()}`),
+      object: { type: "connection", connectionId: await mailboxOf(owner) },
+    });
+    const unreadable = {
+      get: await outcome(colleague.api.apps.get(app)),
+      read: await served(path, colleague.session),
+      overview: await overviewPicture(colleague, app),
+      owners: await overviewPicture(owner, app),
+    };
+    await owner.api.apps.archive(app);
+    await owner.api.apps.remove(app);
+    const removed = {
+      owner: await served(path, owner.session),
+      admin: await served(path, admin.session),
+    };
+
+    expect({ before, unreadable, unshared, archived, removed }).toStrictEqual({
+      before: shown,
+      unreadable: {
+        get: "app.unreadable",
+        read: guardedAnswer(404),
+        overview: null,
+        owners: path,
+      },
+      unshared: guardedAnswer(404),
+      archived: {
+        set: "app.archived",
+        user: guardedAnswer(404),
+        owner: shown,
+      },
+      removed: { owner: guardedAnswer(404), admin: guardedAnswer(404) },
+    });
+  });
+
+  it("is left as it was when a set is refused between its check and its write", async () => {
+    const [owner, builder] = await Promise.all([
+      signedInApi(idp, "builder"),
+      signedInApi(idp, "builder"),
+    ]);
+    const app = await liveApp(owner);
+    await owner.api.apps.members.add(app, {
+      type: "person",
+      id: builder.userId,
+      role: "builder",
+    });
+    await builder.api.apps.setVersionPicture(app, 1, realPng);
+    const by = await builder.api.whoami();
+
+    let refused = "";
+    const events = await auditedDuring(async () => {
+      refused = await outcome(
+        setVersionPicture(
+          // Their share taken away after the call let them in.
+          racing(async () => {
+            await owner.api.apps.members.remove(app, {
+              type: "person",
+              id: builder.userId,
+            });
+          }),
+          by,
+          app,
+          1,
+          realWebp
+        )
+      );
+    });
+
+    expect({
+      refused,
+      audited: events.filter(
+        ({ action }) => action === "app.version.picture_set"
+      ).length,
+      served: await served(appPicturePath(app, 1), owner.session),
+      // Its own object went; the one the row names stayed.
+      kept: await keptPictures(app),
+    }).toStrictEqual({
+      refused: "app.not_found",
+      audited: 0,
+      served: pictureAnswer("image/png", realPng),
+      kept: 1,
+    });
+  });
+
+  it("is the last set's to commit when two land at once: the row, the audit and the bytes served agree", async () => {
+    const owner = await signedInApi(idp, "builder");
+    const app = await liveApp(owner);
+    await owner.api.apps.setVersionPicture(app, 1, realPng);
+    const by = await owner.api.whoami();
+
+    const events = await auditedDuring(async () => {
+      // The WebP is put first; the JPEG is put and committed before the
+      // WebP's write lands.
+      await setVersionPicture(
+        racing(
+          async () => await owner.api.apps.setVersionPicture(app, 1, jpeg)
+        ),
+        by,
+        app,
+        1,
+        realWebp
+      );
+    });
+    const named = await env.DB.prepare(
+      "SELECT picture FROM app_versions WHERE app_id = ? AND version = 1"
+    )
+      .bind(app)
+      .first<string>("picture");
+    const sets = events.filter(
+      ({ action }) => action === "app.version.picture_set"
+    );
+
+    expect({
+      audited: sets.map(({ detail }) => detail.type),
+      lastNamesTheRow: sets.at(-1)?.detail.picture === named,
+      served: await served(appPicturePath(app, 1), owner.session),
+      // Every replaced picture went.
+      kept: await keptPictures(app),
+    }).toStrictEqual({
+      audited: ["image/jpeg", "image/webp"],
+      lastNamesTheRow: true,
+      served: pictureAnswer("image/webp", realWebp),
+      kept: 1,
+    });
   });
 });

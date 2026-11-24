@@ -159,7 +159,10 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   "core.project_members": { company: "who is in a project" },
   "core.project_items": { company: "what they filed in a project" },
   "core.blueprints": { company: "blueprints they marked" },
-  // A version's picture is the company's, as its code is (app-pictures.ts).
+  // A version's picture (app-pictures.ts) is the company's, as its code is:
+  // a screenshot of what the preview showed, which can hold people's names.
+  // It is kept as company content, like the App's data shown in it, until
+  // the App is removed.
   "core.app_versions": { company: "versions they wrote or published" },
   "core.app_drafts": { company: "drafts of Apps they wrote" },
   "core.app_draft_files": { company: "drafts of Apps they wrote" },

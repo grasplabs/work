@@ -32,7 +32,7 @@ import {
 } from "./apps.ts";
 import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { identify } from "./auth/identity.ts";
-import { appVersions, apps } from "./db/core/schema.ts";
+import { appVersions } from "./db/core/schema.ts";
 import { errorResponse } from "./errors.ts";
 import { imageEnded, imageHeaderOf } from "./files/image-header.ts";
 import { routeMember } from "./staff-audit.ts";
@@ -40,9 +40,10 @@ import { routeMember } from "./staff-audit.ts";
 // A picture of each published App version, for the Apps overview's cards
 // (GRA-1994): the builder's browser takes it from the preview as they
 // publish, and hands core its bytes (`setVersionPicture`). Core renders
-// nothing. It is kept in the files bucket (EU), one object a version
-// (apps.ts, `pictureKey`), and the version's row names its type
-// (`app_versions.picture`).
+// nothing. Each set is an object of its own in the files bucket (EU),
+// under a new ID (apps.ts, `pictureKey`), with the type its bytes told;
+// the version's row names the one it has now (`app_versions.picture`),
+// and only that one is ever served.
 //
 // How it can go wrong, and what stops it:
 // - Someone who may not publish the App sets one: a builder of another
@@ -50,7 +51,14 @@ import { routeMember } from "./staff-audit.ts";
 //   Grasp staff (refused on every App call, session-check.ts). Only whoever
 //   publishing lets in (`appKind.editable`, as publish.ts asks), and the
 //   write lands only while that still holds and the App isn't archived
-//   (`appKind.stillEditable`), as a draft's does.
+//   (`appKind.stillEditable`), as a draft's does. Its bytes are their own
+//   object, served only once that write named it: a set refused between
+//   the check and the write changes nothing anyone sees.
+// - Two sets at once: each puts its own object, and the row ends naming
+//   the one whose write committed last, which the last audit event names
+//   too. Each deletes, once its write committed, the object the row named
+//   just before it, read in the same batch; a refused or failed set
+//   deletes only its own.
 // - A picture for a version that never went out, or of another App: the
 //   version is looked up under the App the call names, and must be
 //   published, when it is checked and again in the write
@@ -63,17 +71,18 @@ import { routeMember } from "./staff-audit.ts";
 // - One large enough to hurt, or broken: refused past 2 MB, past 4000
 //   pixels a side, with no pixels, or cut short (`imageEnded`).
 // - Someone who may not open the App reading it: the route serves only a
-//   signed-in member with a role in it (`appFor`, as `apps.get` asks), and
-//   anyone else, or any version without one, is not found. Guests and
-//   staff are nobody to it (`routeMember`), staff's asking audited. The
-//   browser asks again each time: a role taken away applies at once.
+//   signed-in member who may open it (`appFor`, as `apps.get` asks: a
+//   role in it, and able to read what it read), and anyone else, or any
+//   version without one, is not found; the overview names it only to them
+//   too (apps.ts, `listAppOverviews`). Guests and staff are nobody to it
+//   (`routeMember`), staff's asking audited. The browser keeps no copy:
+//   access taken away applies at once.
 // - It outliving its App: removing the App deletes every picture under it
-//   (app-removal.ts). A set refused as it is written deletes what it put
-//   unless the version names a picture still; one that replaced a picture
-//   and was refused (its builder's role taken away in that very moment)
-//   leaves its own in its place, an image all the same.
-// - Going unrecorded: each set is one audit event, with the version, type
-//   and size, in the batch that names it.
+//   (app-removal.ts). A replaced picture's object goes once the write
+//   that replaced it committed; should that delete fail, it is left,
+//   named by nothing and served to nobody, until the App is removed.
+// - Going unrecorded: each set is one audit event, with the version, the
+//   picture's ID, type and size, in the batch that names it.
 
 /** Whether `type` is one an App's picture may be: never a GIF. */
 const isPictureType = (type: string): type is AppPictureType =>
@@ -102,33 +111,15 @@ const checkedPicture = (
 };
 
 /**
- * Deletes the picture of `version` of App `app` that a refused set put,
- * unless the version names one still and its App isn't removed. It never
- * fails: should the database or the bucket fail, the object is left.
+ * Deletes the object at `key`, a picture nothing names (any more). It
+ * never fails: should the bucket fail, the object is left, served to
+ * nobody.
  */
-const forgetRefused = async (
-  env: Env,
-  app: AppId,
-  version: number
-): Promise<void> => {
+const forget = async (env: Env, key: string): Promise<void> => {
   try {
-    const row = await drizzle(env.DB)
-      .select({ picture: appVersions.picture, removedAt: apps.removedAt })
-      .from(appVersions)
-      .innerJoin(apps, eq(apps.id, appVersions.appId))
-      .where(and(eq(appVersions.appId, app), eq(appVersions.version, version)))
-      .get();
-    const named =
-      row !== undefined && row.picture !== null && row.removedAt === null;
-    if (!named) {
-      await env.FILES.delete(pictureKey(app, version));
-    }
+    await env.FILES.delete(key);
   } catch (error) {
-    log.warn("app.picture_forget_failed", {
-      app,
-      version,
-      ...errorFields(error),
-    });
+    log.warn("app.picture_forget_failed", { key, ...errorFields(error) });
   }
 };
 
@@ -151,20 +142,29 @@ export const setVersionPicture = async (
     throw versionErrors.create("version.unpublished");
   }
   const { bytes, type } = checkedPicture(image);
-  await env.FILES.put(pictureKey(app, version), bytes, {
-    httpMetadata: { contentType: type },
-  });
+  const picture = crypto.randomUUID();
+  const key = pictureKey(app, version, picture);
+  await env.FILES.put(key, bytes, { httpMetadata: { contentType: type } });
   const db = drizzle(env.DB);
+  const ofVersion = and(
+    eq(appVersions.appId, app),
+    eq(appVersions.version, version)
+  );
+  let before: { picture: string | null }[];
   let changed: { version: number }[];
   try {
-    [changed] = await auditedBatch(env, db, [
+    [before, changed] = await auditedBatch(env, db, [
+      // The picture it replaces, read in the batch that replaces it.
+      db
+        .select({ picture: appVersions.picture })
+        .from(appVersions)
+        .where(ofVersion),
       db
         .update(appVersions)
-        .set({ picture: type })
+        .set({ picture })
         .where(
           and(
-            eq(appVersions.appId, app),
-            eq(appVersions.version, version),
+            ofVersion,
             publishedSql(app, version),
             appKind.stillEditable(app, by)
           )
@@ -174,23 +174,28 @@ export const setVersionPicture = async (
         db,
         changeEntry(by, "app.version.picture_set", app, {
           version,
+          picture,
           type,
           bytes: bytes.byteLength,
         })
       ),
     ]);
   } catch (error) {
-    await forgetRefused(env, app, version);
+    await forget(env, key);
     throw error;
   }
   if (changed.length === 0) {
-    await forgetRefused(env, app, version);
+    await forget(env, key);
     // Taken away since it was checked: refused as such.
     await appKind.editable(env, by, app);
     if (!(await isPublished(env, app, version))) {
       throw versionErrors.create("version.unpublished");
     }
     throw appErrors.create("app.conflict");
+  }
+  const replaced = before[0]?.picture;
+  if (replaced !== null && replaced !== undefined) {
+    await forget(env, pictureKey(app, version, replaced));
   }
   return appPicturePath(app, version);
 };
@@ -252,7 +257,7 @@ const mayOpen = async (
 
 /**
  * The picture of an App version, to a signed-in member who may open the
- * App, as the type core found, asked again for each time. Anyone not
+ * App, as the type core found, never kept by the browser. Anyone not
  * signed in is told to; anyone else, and any version without one, is not
  * found. Undefined for any other path.
  */
@@ -295,10 +300,11 @@ export const appPictureResponse = async (
     .from(appVersions)
     .where(and(eq(appVersions.appId, id), eq(appVersions.version, version)))
     .get();
+  // The one the row names now, never another set's.
   const kept =
     row?.picture === null || row?.picture === undefined
       ? null
-      : await env.FILES.get(pictureKey(id, version));
+      : await env.FILES.get(pictureKey(id, version, row.picture));
   // Its type as it was found, kept with these very bytes.
   const type = kept?.httpMetadata?.contentType;
   if (kept === null || type === undefined || !isPictureType(type)) {
@@ -311,7 +317,7 @@ export const appPictureResponse = async (
     headers: {
       "content-type": type,
       "content-length": String(kept.size),
-      "cache-control": "private, no-cache",
+      "cache-control": "private, no-store",
     },
   });
 };
