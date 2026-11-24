@@ -4148,6 +4148,7 @@ msgid "Chart"
 msgstr "Gráfico"
 
 #: src/agents/agents-overview.tsx
+#: src/chat/chat-panel.tsx
 #: src/frame/app-sidebar.tsx
 msgid "Chat"
 msgstr "Chat"
@@ -11324,6 +11325,10 @@ msgstr "Abrir a Stephen en {app}, en una pestaña nueva"
 msgid "Open the App"
 msgstr "Abrir la aplicación"
 
+#: src/chat/chat-bar.tsx
+msgid "Open the chat ({shortcut})"
+msgstr "Abrir el chat ({shortcut})"
+
 #: src/apps/app-workspace.tsx
 msgid "Open the chat in Chat"
 msgstr "Abrir el chat en Chat"
@@ -14084,6 +14089,7 @@ msgstr "Mostrar versiones anteriores"
 msgid "Show or hide the chat"
 msgstr "Mostrar u ocultar el chat"
 
+#: src/frame/app-frame.tsx
 #: src/frame/app-sidebar.tsx
 #: src/frame/site-header.tsx
 #: src/frame/ui-words.tsx

@@ -11,7 +11,7 @@ import { Toaster } from "@grasp-os/ui/components/toast";
 import { duration, media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import type { ChatPanels } from "../chat/chat-panel.tsx";
@@ -120,6 +120,13 @@ const styles = stylex.create({
   // (#2503's shell, frame/panels/panels.tsx), which is the card's end
   // margin when no panel stands there.
   card: { marginInlineEnd: 0 },
+  // Room under a page that fills the card while the dock stands over its
+  // foot: as tall as the dock, its inset from the card's foot and the gap
+  // above it, so the page ends above the bar, as #2503's shell keeps it
+  // (its `roomForDock`).
+  roomForDock: (height: number) => ({
+    paddingBlockEnd: `calc(${height}px + ${space["4"]} + ${space["6"]})`,
+  }),
   // Under the chat lying over it (full screen, or for want of room), the
   // card spans the room beside the sidebar, its margins in, edge to edge on
   // a phone: the ground the chat stands on (#2503's `cardCovered`).
@@ -174,6 +181,34 @@ const usePublishedPage = () => {
 };
 
 /**
+ * How tall the dock's bar is while `on`, followed as it changes (a box
+ * that grows with what is typed); null while off or not yet measured.
+ */
+const useDockHeight = (on: boolean): number | null => {
+  const [height, setHeight] = useState<number | null>(null);
+  useEffect(() => {
+    const held = on
+      ? document.querySelector<HTMLElement>(
+          "[data-slot=app-shell-dock] > * > *"
+        )
+      : null;
+    if (held === null) {
+      return () => {
+        // Nothing was watched.
+      };
+    }
+    const observer = new ResizeObserver(() => {
+      setHeight(Math.ceil(held.getBoundingClientRect().height));
+    });
+    observer.observe(held);
+    return () => {
+      observer.disconnect();
+    };
+  }, [on]);
+  return on ? height : null;
+};
+
+/**
  * The signed-in product's frame, on Damsko: its Sidebar beside the page,
  * or a sheet from the start on a narrow window, folded as the person left
  * it (`storageKey`); the page as a card on the sidebar's ground
@@ -196,6 +231,7 @@ export const AppFrame = ({
   identity,
   failing,
   dock,
+  dockRoom = false,
   panels,
 
   children,
@@ -206,12 +242,15 @@ export const AppFrame = ({
   failing?: FailingProvider[];
   /** Over the page, centred at its foot: the chat's idle bar. */
   dock?: ReactNode;
+  /** The page fills the card and the dock stands over its foot: the page keeps room for it. */
+  dockRoom?: boolean;
   /** Beside the page, floating over it, or over it full screen: Grasp's chat. */
   panels?: ChatPanels;
   children: ReactNode;
 }) => {
   const { t } = useLingui();
   const page = usePublishedPage();
+  const dockHeight = useDockHeight(dockRoom);
   const cover = useChatCover(panels);
   const { covered, phone } = cover.place;
   const card = (
@@ -230,7 +269,11 @@ export const AppFrame = ({
               data-slot="app-shell-page"
               inert={covered}
               ref={page}
-              {...stylex.props(styles.page, covered && styles.covered)}
+              {...stylex.props(
+                styles.page,
+                covered && styles.covered,
+                dockHeight !== null && styles.roomForDock(dockHeight)
+              )}
             >
               <InFrame value>{children}</InFrame>
             </div>

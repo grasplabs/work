@@ -15,7 +15,7 @@ import { Fragment, useLayoutEffect, useRef } from "react";
 import type { ReactNode } from "react";
 
 import type { RegionId } from "../brain/brain-atlas.ts";
-import { useChatPresence } from "../chat/chat-presence.ts";
+import { useShownPresence } from "../chat/global-chat.tsx";
 import { RenamableName } from "./panels/rename.tsx";
 
 /** A step on the way to the page; the last one is the page itself. */
@@ -223,7 +223,12 @@ export const SiteHeader = ({
 }) => {
   const { t } = useLingui();
   const { state, isMobile } = useSidebar();
-  const chatFloats = useChatPresence().placements.includes("floating");
+  // Room for the chat's button wherever the chat stands beside the page,
+  // docked about its subject too, as #2503's bar keeps it (app-shell's
+  // `data-shell-panels`).
+  const { placements } = useShownPresence();
+  const chatFloats =
+    placements.includes("floating") || placements.includes("docked");
   const away = isMobile || state === "collapsed";
   const last = crumbs.length - 1;
   const bar = useRef<HTMLElement>(null);

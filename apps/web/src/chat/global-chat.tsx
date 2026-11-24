@@ -344,6 +344,27 @@ export const useGlobalChat = (): GlobalChat => {
 };
 
 /**
+ * Where the chat stands on this page: the chat's own, about the page's
+ * subject too; the page's alone outside the chat's provider (a page that
+ * couldn't load).
+ */
+export const useShownPresence = (): ChatPresence => {
+  const chat = use(GlobalChatContext);
+  const presence = useChatPresence();
+  return chat?.presence ?? presence;
+};
+
+/**
+ * Whether the card's own button may open and close the chat here: where
+ * the chat is, and doesn't stay open about the page's subject (on a phone
+ * it never does); none outside the chat's provider.
+ */
+export const useChatToggles = (): boolean => {
+  const chat = use(GlobalChatContext);
+  return chat !== null && chat.available && !chat.keptOpen;
+};
+
+/**
  * Has Grasp's chat be about `subject`, called `name`, while the calling
  * page is open: that subject's chat, in its slot (chat-subject.ts); the
  * person's own again after. None for a page about something the person

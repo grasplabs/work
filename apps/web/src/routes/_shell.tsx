@@ -5,7 +5,7 @@ import type { ErrorComponentProps } from "@tanstack/react-router";
 import { ChatBar } from "../chat/chat-bar.tsx";
 import { useChatPanels } from "../chat/chat-panel.tsx";
 import { ChatSwitcherProvider } from "../chat/chat-switcher.tsx";
-import { GlobalChatProvider } from "../chat/global-chat.tsx";
+import { GlobalChatProvider, useGlobalChat } from "../chat/global-chat.tsx";
 import { shellStatus } from "../core-connection.ts";
 import { failingUpFront, providersOf } from "../frame/ai-key-banner.tsx";
 import { AppFrame } from "../frame/app-frame.tsx";
@@ -25,11 +25,15 @@ import { signInErrorSearch } from "../sign-in-errors.ts";
 const ShellFrame = () => {
   const { core, identity } = Route.useRouteContext();
   const panels = useChatPanels();
+  // A page about the chat's subject fills the card (an App's workspace):
+  // on a phone, where its chat is a bar to open, it ends above the bar.
+  const { stage, subject } = useGlobalChat();
   const { failing } = Route.useLoaderData();
   return (
     <AppFrame
       core={core}
       dock={<ChatBar />}
+      dockRoom={stage.bar && subject.about !== undefined}
       failing={failing}
       identity={identity}
       panels={panels}

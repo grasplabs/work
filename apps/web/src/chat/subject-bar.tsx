@@ -10,10 +10,6 @@ import {
 } from "@grasp-os/ui/components/dropdown-menu";
 import { Link } from "@grasp-os/ui/components/link";
 import { Shimmer } from "@grasp-os/ui/components/shimmer";
-import type { IconData } from "@grasp-os/ui/lib/icons";
-// Damsko's icon module has no window: Hugeicons' own, as #2503's strip
-// draws an App (its `AppWindow`).
-import { AppWindowIcon } from "@hugeicons/core-free-icons";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Link as RouterLink } from "@tanstack/react-router";
@@ -97,12 +93,6 @@ const WorkedLink = ({
     />
   );
 
-/** What stands for a subject on the strip: an App as a window, as #2503's; anything else as a mention does. */
-const iconOf = (
-  kind: SubjectKind,
-  kinds: ReturnType<typeof useMentionKinds>
-): IconData => (kind === "app" ? AppWindowIcon : kinds[kind].icon);
-
 /**
  * The band's line and its "+N": `subject`, the page's, or else the latest
  * of `work`, and the rest behind "+N"; each building where the running
@@ -140,7 +130,7 @@ export const useSubjectBar = ({
     written.has(`${worked.kind}:${worked.id}`);
   const count = others.length;
   return {
-    icon: iconOf(lead.kind, kinds),
+    icon: kinds[lead.kind].icon,
     line: (
       <>
         {subject === undefined ? (
@@ -183,7 +173,7 @@ export const useSubjectBar = ({
               {others.map((worked) => (
                 <DropdownMenuItem
                   asChild
-                  icon={iconOf(worked.kind, kinds)}
+                  icon={kinds[worked.kind].icon}
                   key={`${worked.kind}:${worked.id}`}
                 >
                   <WorkedLink chatId={chatId} worked={worked}>

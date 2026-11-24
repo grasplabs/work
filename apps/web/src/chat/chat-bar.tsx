@@ -1,10 +1,20 @@
-import { duration, media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { PromptInputButton } from "@grasp-os/ui/components/prompt-input";
+import { Icon, PanelRightIcon } from "@grasp-os/ui/lib/icons";
+import {
+  colors,
+  duration,
+  media,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 
+import { shortcutLabel } from "../shortcuts.ts";
 import { useOpenChat } from "./chat-presence.ts";
 import { Composer } from "./composer.tsx";
-import { useGlobalChat } from "./global-chat.tsx";
+import { chatKey, useGlobalChat } from "./global-chat.tsx";
 import { unavailableText } from "./models-unavailable.tsx";
 
 // Grasp's chat while it waits (global-chat.tsx): a bar at the foot of the
@@ -43,23 +53,45 @@ const styles = stylex.create({
     opacity: 0,
     transform: "translateY(0.5rem)",
   },
+  // After Send, behind a short hairline: the way to open the chat, where
+  // the page has no button of its own for it (#2503's composer `after`).
+  after: { display: "flex", alignItems: "center", gap: space["2"] },
+  afterLine: {
+    flexShrink: 0,
+    width: size.hairline,
+    height: size.iconSm,
+    backgroundColor: {
+      default: colors.border,
+      [media.forcedColors]: "CanvasText",
+    },
+  },
 });
 
 /** The chat's idle bar: on every page the chat shows on, while it is closed. */
 export const ChatBar = () => {
-  const { stage, composer, words, modelsUnavailable } = useGlobalChat();
+  const { t } = useLingui();
+  const { stage, presence, composer, words, modelsUnavailable } =
+    useGlobalChat();
   const unavailable = unavailableText(modelsUnavailable);
   const openHere = useOpenChat();
   const bar = useRef<HTMLDivElement>(null);
   const open = stage.bar;
-  // Whether the bar was away (the chat open) before it came back: only
-  // then does it take the cursor the chat lost, never as a page opens.
-  const wasAway = useRef(!open);
+  // Whether the chat was open since the bar was last here: only then does
+  // it take the cursor the chat lost as it closed, never as a page opens
+  // or a page's own bar first comes (#2503's).
+  const chatWasOpen = useRef(false);
+  useEffect(() => {
+    if (stage.card) {
+      chatWasOpen.current = true;
+    }
+  }, [stage.card]);
   // Once it has risen back, it takes the cursor the chat had.
   useEffect(() => {
     let current = true;
-    const back = open && wasAway.current;
-    wasAway.current = !open;
+    const back = open && chatWasOpen.current;
+    if (open) {
+      chatWasOpen.current = false;
+    }
     const settle = async (): Promise<void> => {
       const element = bar.current;
       const moving = element === null ? [] : element.getAnimations();
@@ -84,6 +116,12 @@ export const ChatBar = () => {
     };
   }, [open]);
   const { onAttach } = composer;
+  // The page's own bar has the button that opens the chat without asking;
+  // only a page whose chat is part of it (an App's workspace on a phone)
+  // has none, so there the bar keeps one, or the chat's history could not
+  // be reached without asking.
+  const ownChat = !presence.placements.includes("floating");
+  const shortcut = shortcutLabel(chatKey);
   return (
     <div
       inert={!open}
@@ -131,7 +169,21 @@ export const ChatBar = () => {
                 openHere();
               },
             })}
-      />
+      >
+        {ownChat ? (
+          <div {...stylex.props(styles.after)}>
+            <span aria-hidden="true" {...stylex.props(styles.afterLine)} />
+            <PromptInputButton
+              aria-label={t`Open the chat (${shortcut})`}
+              onClick={() => {
+                openHere();
+              }}
+            >
+              <Icon icon={PanelRightIcon} />
+            </PromptInputButton>
+          </div>
+        ) : null}
+      </Composer>
     </div>
   );
 };
