@@ -1,4 +1,5 @@
 import { expect } from "@playwright/test";
+import type { Locator } from "@playwright/test";
 
 import { test } from "./csp.ts";
 import { apiOf, peopleIn } from "./people.ts";
@@ -11,6 +12,188 @@ import { apiOf, peopleIn } from "./people.ts";
 
 /** How long a page may take to show what core said. */
 const pageRead = { timeout: 20_000 };
+
+/** A side of a box on the page, in pixels. */
+interface Edges {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+/** A line of words or a control, as `layoutFaults` finds it. */
+interface Measured {
+  what: string;
+  /** Which word or control it is; the lines of one run of words share it. */
+  id: number;
+  /** The controls around it or in it, by `id`. */
+  around: number[];
+  /** Its group of things that overlap by design, or -1. */
+  group: number;
+  rect: Edges;
+  /** The nearest box that clips it, if any; with an ellipsis, a deliberate cut. */
+  clip: (Edges & { ellipsis: boolean }) | null;
+  window: number;
+}
+
+/**
+ * The words and controls in `root` once what moves has come to rest (a
+ * dialog sliding in, a list closing): each line of words, and each
+ * control, button and link, with where they lie.
+ */
+const measure = async (root: Locator): Promise<Measured[]> =>
+  await root.evaluate(async (element) => {
+    await Promise.all(
+      document
+        .getAnimations()
+        .filter(
+          (each) =>
+            each.playState === "running" &&
+            each.timeline === document.timeline &&
+            each.effect?.getTiming().iterations !== Infinity
+        )
+        .map(async (each) => await each.finished.catch(() => each))
+    );
+    const controls = [...element.querySelectorAll("button, a, input, img")];
+    // Faces in a group overlap by design, as a field and its own button.
+    const groups = [
+      ...element.querySelectorAll(
+        "[data-slot=avatar-group], [data-slot=combobox]"
+      ),
+    ];
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    const words: Node[] = [];
+    for (
+      let node = walker.nextNode();
+      node !== null;
+      node = walker.nextNode()
+    ) {
+      words.push(node);
+    }
+    return [...controls, ...words].flatMap((node, id) => {
+      const control = node instanceof Element;
+      const at = control ? node : node.parentElement;
+      const text = node.textContent?.trim() ?? "";
+      if (
+        at === null ||
+        (!control && text === "") ||
+        !at.checkVisibility({ opacityProperty: true, visibilityProperty: true })
+      ) {
+        return [];
+      }
+      let clipper: Element | null = at;
+      while (
+        clipper !== null &&
+        clipper !== element.parentElement &&
+        getComputedStyle(clipper).overflowX === "visible"
+      ) {
+        clipper = clipper.parentElement;
+      }
+      const cut =
+        clipper === null || clipper === element.parentElement
+          ? null
+          : clipper.getBoundingClientRect();
+      const clip =
+        clipper === null || cut === null
+          ? null
+          : {
+              left: cut.left,
+              right: cut.right,
+              top: cut.top,
+              bottom: cut.bottom,
+              ellipsis: getComputedStyle(clipper).textOverflow === "ellipsis",
+            };
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const rects = control
+        ? [node.getBoundingClientRect()]
+        : [...range.getClientRects()];
+      return rects.map((rect) => ({
+        what: control
+          ? (node.getAttribute("aria-label") ?? (text || node.tagName))
+          : `"${text}"`,
+        id,
+        around: controls.flatMap((each, index) =>
+          each !== node && (each.contains(node) || node.contains(each))
+            ? [index]
+            : []
+        ),
+        group: groups.findIndex((each) => each.contains(node)),
+        rect: {
+          left: rect.left,
+          right: rect.right,
+          top: rect.top,
+          bottom: rect.bottom,
+        },
+        clip,
+        window: document.documentElement.clientWidth,
+      }));
+    });
+  });
+
+/** Where `box` shows: within its clip where an ellipsis ends it. */
+const shownPart = ({ rect, clip }: Measured): Edges =>
+  clip?.ellipsis === true
+    ? {
+        ...rect,
+        left: Math.max(rect.left, clip.left),
+        right: Math.min(rect.right, clip.right),
+      }
+    : rect;
+
+/** Whether `box` reaches past the window or the box that clips it. */
+const cutOff = (box: Measured): boolean => {
+  const { left, right } = shownPart(box);
+  const { clip } = box;
+  return (
+    right > box.window + 0.5 ||
+    left < -0.5 ||
+    (clip !== null && (right > clip.right + 0.5 || left < clip.left - 0.5))
+  );
+};
+
+/** Whether `one` and `other` lie over each other where neither holds the other. */
+const overlap = (one: Measured, other: Measured): boolean => {
+  if (
+    one.id === other.id ||
+    one.around.includes(other.id) ||
+    other.around.includes(one.id) ||
+    (one.group !== -1 && one.group === other.group)
+  ) {
+    return false;
+  }
+  const a = shownPart(one);
+  const b = shownPart(other);
+  return (
+    Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 &&
+    Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1
+  );
+};
+
+/**
+ * What is wrong with how `root` is laid out now: words or controls that
+ * lie over one another, and words or controls cut off at the window's
+ * edge or by a box that clips them without an ellipsis. Empty when it
+ * reads well.
+ */
+const layoutFaults = async (root: Locator): Promise<string[]> => {
+  // A box of a pixel or less holds words for a screen reader alone.
+  const measured = await measure(root);
+  const boxes = measured.filter(
+    ({ rect, clip }) =>
+      rect.right - rect.left > 1 &&
+      (clip === null || clip.right - clip.left > 1)
+  );
+  const faults = boxes.filter(cutOff).map(({ what }) => `${what} is cut off`);
+  for (const [index, one] of boxes.entries()) {
+    for (const other of boxes.slice(index + 1)) {
+      if (overlap(one, other)) {
+        faults.push(`${one.what} lies over ${other.what}`);
+      }
+    }
+  }
+  return [...new Set(faults)];
+};
 
 test("a builder makes a project, files an App and a chat of theirs in it, and adds a colleague who only uses it", async ({
   pageOf,
@@ -131,4 +314,70 @@ test("a builder makes a project, files an App and a chat of theirs in it, and ad
   await expect(
     page.getByText("None of your chats are in it.", { exact: false })
   ).toBeVisible();
+});
+
+test("long names break inside their word, over nothing and cut off nowhere, on a laptop and a phone", async ({
+  pageOf,
+}) => {
+  const { builder, colleague } = peopleIn("projectNames");
+  const tag = crypto.randomUUID().slice(0, 8);
+  // No space to break at, as a name copied from a file or a system is.
+  const name = `customer_onboarding_pipeline_review_2026_${tag}`;
+  const theirName = `colleague_with_a_very_long_name_from_the_directory_${tag}`;
+  const ownName = `builder_with_a_very_long_name_from_the_directory_${tag}`;
+  const theirs = apiOf(colleague);
+  const own = apiOf(builder);
+  let projectId: string;
+  try {
+    await theirs.api.setName(theirName);
+    await own.api.setName(ownName);
+    ({ id: projectId } = await own.api.projects.create({ name }));
+    await own.api.projects.addMember(projectId, {
+      type: "person",
+      id: colleague.userId,
+      role: "user",
+    });
+  } finally {
+    theirs.core[Symbol.dispose]();
+    own.core[Symbol.dispose]();
+  }
+
+  const page = await pageOf(builder);
+  /** The page, the people and Add to it at `size`, each laid out well. */
+  const readsWell = async (size: { width: number; height: number }) => {
+    await page.setViewportSize(size);
+    await page.goto(`/projects/${projectId}`);
+    const heading = page.getByRole("heading", { level: 1, name });
+    await expect(heading).toBeVisible(pageRead);
+    const head = page.locator("header", { has: heading });
+    expect({ size, faults: await layoutFaults(head) }).toStrictEqual({
+      size,
+      faults: [],
+    });
+
+    await page.getByRole("button", { name: "Add people" }).click();
+    const people = page.getByRole("dialog", { name: "People" });
+    await expect(people.getByText(theirName)).toBeVisible();
+    expect({ size, faults: await layoutFaults(people) }).toStrictEqual({
+      size,
+      faults: [],
+    });
+    await people.getByRole("button", { name: "Close" }).last().click();
+    await expect(people).toHaveCount(0);
+
+    await page
+      .getByRole("button", { name: "Add", exact: true })
+      .first()
+      .click();
+    const adding = page.getByRole("dialog", { name: `Add to ${name}` });
+    await expect(adding).toBeVisible();
+    expect({ size, faults: await layoutFaults(adding) }).toStrictEqual({
+      size,
+      faults: [],
+    });
+    await page.keyboard.press("Escape");
+    await expect(adding).toHaveCount(0);
+  };
+  await readsWell({ width: 1024, height: 768 });
+  await readsWell({ width: 390, height: 844 });
 });

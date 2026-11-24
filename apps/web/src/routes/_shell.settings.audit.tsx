@@ -37,9 +37,10 @@ import { SettingsError } from "../settings/settings-parts.tsx";
 // the events card stands under the page's title, with the integrity check,
 // the archive and how long events are kept behind one quiet button in its
 // head. Over the table, a search, Filters and Export (activity/
-// audit-log.tsx); an event's details open beside the table, in Damsko's
-// Inspector, or in a Sheet where the page is narrow. Core checks the role
-// on every call; every search of the log is itself recorded in it.
+// audit-log.tsx); an event's details, in Damsko's Inspector, open in a
+// Sheet, and beside the table only where the page's own box is `WIDE` or
+// more, which the settings layout's column never is today. Core checks
+// the role on every call; every search of the log is itself recorded in it.
 
 /**
  * How wide the page's own box must be for the details beside the table:

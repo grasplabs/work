@@ -94,8 +94,10 @@ import { ProjectPeopleStack } from "./project-people-stack.tsx";
 // each step that takes access away first names who loses it.
 
 const styles = stylex.create({
-  // The icon and the name on one line, centred on each other.
-  named: { display: "inline-flex", alignItems: "center", gap: space["3"] },
+  // The icon and the name on one line, centred on each other. The name
+  // takes what the actions leave and breaks inside a word that is longer.
+  named: { display: "flex", alignItems: "center", gap: space["3"] },
+  name: { minWidth: 0, overflowWrap: "anywhere" },
   // The page's actions, in a row that wraps on a phone.
   actions: {
     display: "flex",
@@ -586,7 +588,7 @@ export const ProjectView = ({
                 icon={projectIconShapes[project.icon]}
                 variant="tinted"
               />
-              {project.name}
+              <span {...stylex.props(styles.name)}>{project.name}</span>
             </span>
           }
         />

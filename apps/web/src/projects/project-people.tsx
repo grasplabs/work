@@ -91,6 +91,15 @@ const styles = stylex.create({
   owner: { paddingInlineEnd: space["2"] },
 });
 
+/**
+ * A change to the project's people, then the page read again: whether it
+ * went through. Core's reason goes to `report`, or under the list.
+ */
+type Change = (
+  action: (session: Session) => Promise<unknown>,
+  report?: (reason: string) => void
+) => Promise<boolean>;
+
 /** The roles to give, from least to most. */
 const roles: readonly ProjectRole[] = ["user", "builder"];
 
@@ -148,19 +157,25 @@ const Face = ({ name, team }: { name: string; team: boolean }) =>
     </Avatar>
   );
 
-/** Someone in the project: their face, their name, and their role or what a builder does with it. */
+/**
+ * Someone in the project: their face, their name, and their role or what a
+ * builder does with it. `face` is their plain name, so a namesake's face
+ * shows their initials, not the words that tell them apart.
+ */
 const MemberRow = ({
   name,
+  face,
   team,
   children,
 }: {
   name: string;
+  face: string;
   team: boolean;
   children: ReactNode;
 }) => (
   <Item size="xs">
     <ItemMedia align="center">
-      <Face name={name} team={team} />
+      <Face name={face} team={team} />
     </ItemMedia>
     <ItemContent>
       <ItemTitle>{name}</ItemTitle>
@@ -190,7 +205,7 @@ const AddRow = ({
 }: {
   project: Project;
   known: readonly Named[];
-  change: (action: (session: Session) => Promise<unknown>) => Promise<boolean>;
+  change: Change;
 }) => {
   const { t } = useLingui();
   // Read again whenever the project is (after an add, a change or a
@@ -217,69 +232,65 @@ const AddRow = ({
   };
   return (
     <div {...stylex.props(styles.add)}>
-      <div {...stylex.props(styles.who)}>
-        <Combobox
-          aria-label={t`Search people and teams`}
-          disabled={offered === undefined}
-          items={[
-            ...people.map((person) => {
-              const note = apart.hint(person);
-              return {
-                value: keyOf({ type: "person", id: person.id }),
-                label: person.name,
-                ...(note === undefined ? {} : { description: note }),
-                media: (
-                  <Avatar decorative name={person.name} size="xs">
-                    <AvatarFallback />
-                  </Avatar>
-                ),
-              };
-            }),
-            ...teams.map((team) => {
-              const { name } = team;
-              return {
-                value: keyOf({ type: "team", id: team.id }),
-                label: t`${name} (team)`,
-                media: <Icon icon={UsersIcon} />,
-              };
-            }),
-          ]}
-          onValueChange={setPicked}
-          placeholder={t`Search people and teams`}
-          value={picked}
-        >
-          <ComboboxEmpty>
-            <Trans>Nobody else to add.</Trans>
-          </ComboboxEmpty>
-        </Combobox>
-      </div>
-      <div {...stylex.props(styles.role)}>
-        <Select
-          items={roles.map((each) => ({ value: each, label: roleLabel(each) }))}
-          onValueChange={(value) => {
-            const chosen = roles.find((each) => each === value);
-            if (chosen !== undefined) {
-              setRole(chosen);
-            }
-          }}
-          value={role}
-        >
-          <SelectTrigger aria-label={t`Role in the project`}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent />
-        </Select>
-      </div>
-      <div {...stylex.props(styles.go)}>
-        <Button
-          disabled={picked === null}
-          errorText={t`Not added`}
-          loadingText={t`Adding`}
-          onClick={add}
-        >
-          <Trans context="put in a project">Add</Trans>
-        </Button>
-      </div>
+      <Combobox
+        aria-label={t`Search people and teams`}
+        disabled={offered === undefined}
+        items={[
+          ...people.map((person) => {
+            const note = apart.hint(person);
+            return {
+              value: keyOf({ type: "person", id: person.id }),
+              label: person.name,
+              ...(note === undefined ? {} : { description: note }),
+              media: (
+                <Avatar decorative name={person.name} size="xs">
+                  <AvatarFallback />
+                </Avatar>
+              ),
+            };
+          }),
+          ...teams.map((team) => {
+            const { name } = team;
+            return {
+              value: keyOf({ type: "team", id: team.id }),
+              label: t`${name} (team)`,
+              media: <Icon icon={UsersIcon} />,
+            };
+          }),
+        ]}
+        onValueChange={setPicked}
+        placeholder={t`Search people and teams`}
+        style={styles.who}
+        value={picked}
+      >
+        <ComboboxEmpty>
+          <Trans>Nobody else to add.</Trans>
+        </ComboboxEmpty>
+      </Combobox>
+      <Select
+        items={roles.map((each) => ({ value: each, label: roleLabel(each) }))}
+        onValueChange={(value) => {
+          const chosen = roles.find((each) => each === value);
+          if (chosen !== undefined) {
+            setRole(chosen);
+          }
+        }}
+        value={role}
+      >
+        <SelectTrigger aria-label={t`Role in the project`} style={styles.role}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent />
+      </Select>
+      <Button
+        disabled={picked === null}
+        errorText={t`Not added`}
+        loadingText={t`Adding`}
+        onClick={add}
+        style={styles.go}
+      >
+        <Trans context="put in a project">Add</Trans>
+      </Button>
       {offered !== undefined && offered.state !== "ready" ? (
         <ErrorText>{t`Who to add couldn't be read. Try again in a moment.`}</ErrorText>
       ) : null}
@@ -302,27 +313,33 @@ const RemoveDialog = ({
   removing: ProjectMember | undefined;
   name: string;
   onClose: () => void;
-  change: (action: (session: Session) => Promise<unknown>) => Promise<boolean>;
+  change: Change;
 }) => {
   const { t } = useLingui();
   const [working, setWorking] = useState(false);
+  const [refused, setRefused] = useState<string>();
   const projectName = project.name;
+  const close = () => {
+    setRefused(undefined);
+    onClose();
+  };
   const takeOut = async (): Promise<void> => {
     if (removing === undefined) {
       return;
     }
     const ref: ProjectMemberRef = { type: removing.type, id: removing.id };
     setWorking(true);
+    setRefused(undefined);
     const done = await change(async (session) => {
       await session.projects.removeMember(project.id, ref);
-    }).finally(() => {
+    }, setRefused).finally(() => {
       setWorking(false);
     });
     if (!done) {
-      // The dialog stays open, and core's reason shows under the list.
+      // The dialog stays open, with core's reason in it.
       throw new Error("They weren't taken out.");
     }
-    onClose();
+    close();
   };
   return (
     <AlertDialog
@@ -332,7 +349,7 @@ const RemoveDialog = ({
           return;
         }
         if (!open) {
-          onClose();
+          close();
         }
       }}
       open={removing !== undefined}
@@ -357,6 +374,7 @@ const RemoveDialog = ({
               </Trans>
             )}
           </AlertDialogDescription>
+          <ErrorText>{refused}</ErrorText>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel />
@@ -399,9 +417,7 @@ export const ProjectPeople = ({ project }: { project: Project }) => {
     name: project.owner.name ?? project.owner.id,
   });
   const ownerWord = t({ message: "Owner", context: "a project's owner" });
-  const change = async (
-    action: (session: Session) => Promise<unknown>
-  ): Promise<boolean> => {
+  const change: Change = async (action, report) => {
     let done = false;
     await run(async (session) => {
       await changeThenRefresh(
@@ -413,7 +429,7 @@ export const ProjectPeople = ({ project }: { project: Project }) => {
           await router.invalidate({ sync: true });
         }
       );
-    });
+    }, report);
     return done;
   };
   const choices: SelectItems = [
@@ -431,13 +447,18 @@ export const ProjectPeople = ({ project }: { project: Project }) => {
       ) : null}
       <div {...stylex.props(styles.list)}>
         <ItemGroup aria-label={t`People in the project`}>
-          <MemberRow name={owner} team={false}>
+          <MemberRow
+            face={project.owner.name ?? project.owner.id}
+            name={owner}
+            team={false}
+          >
             <RoleWords>{ownerWord}</RoleWords>
           </MemberRow>
           {pages.all.map((member) => {
             const name = nameOf(member);
             return (
               <MemberRow
+                face={member.name ?? member.id}
                 key={keyOf(member)}
                 name={name}
                 team={member.type === "team"}

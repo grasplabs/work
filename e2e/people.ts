@@ -578,6 +578,7 @@ const cast = {
   activity: { admin: "admin", builder: "builder" },
   activityAgain: { admin: "admin", builder: "builder" },
   projects: { builder: "builder", colleague: "user" },
+  projectNames: { builder: "builder", colleague: "user" },
   chat: { user: "user" },
   globalChat: { user: "user" },
   exports: { admin: "admin" },

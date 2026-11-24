@@ -528,25 +528,23 @@ const LogExport = ({ search }: { search: LogSearch }) => {
     window.location.assign(exportHref(search, format, archive));
   };
   return (
-    <span {...stylex.props(styles.end)}>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button size="sm" variant="outline">
-            <Icon icon={DownloadIcon} />
-            <Trans>Export</Trans>
-            <Icon icon={ChevronDownIcon} />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={download("csv")}>
-            {archive ? t`CSV, with the archive` : t`CSV`}
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={download("json")}>
-            {archive ? t`JSON, with the archive` : t`JSON`}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </span>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button size="sm" style={styles.end} variant="outline">
+          <Icon icon={DownloadIcon} />
+          <Trans>Export</Trans>
+          <Icon icon={ChevronDownIcon} />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={download("csv")}>
+          {archive ? t`CSV, with the archive` : t`CSV`}
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={download("json")}>
+          {archive ? t`JSON, with the archive` : t`JSON`}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 };
 

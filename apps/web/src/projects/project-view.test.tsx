@@ -547,11 +547,20 @@ describe("A project's page", () => {
       members: [ada, { ...ada, id: "user-ada-222222" }],
     });
     await press(peopleButton());
+    const faces = [
+      ...document.querySelectorAll(
+        "[aria-label='People in the project'] [data-slot=item]"
+      ),
+    ].map((row) => row.querySelector("[data-slot=item-media]")?.textContent);
 
-    expect([
-      button("Role of Ada (ID …er-ada)") !== undefined,
-      button("Role of Ada (ID …222222)") !== undefined,
-    ]).toStrictEqual([true, true]);
+    expect({
+      named: [
+        button("Role of Ada (ID …er-ada)") !== undefined,
+        button("Role of Ada (ID …222222)") !== undefined,
+      ],
+      // Each face from the plain name, not the words that tell them apart.
+      faces,
+    }).toStrictEqual({ named: [true, true], faces: ["O", "A", "A"] });
   });
 
   it("changes someone's role, and takes them out only once they confirm, naming what they lose", async () => {
@@ -588,6 +597,47 @@ describe("A project's page", () => {
         ["removeMember", "person", "user-ada"],
       ],
     });
+  });
+
+  it("says why someone wasn't taken out in the dialog that asked, which stays open", async () => {
+    const { session } = fakeProjects();
+    session.projects.removeMember = async (): Promise<void> => {
+      await Promise.resolve();
+      throw new Error("Ada owns an App in it.");
+    };
+    await shown(session, project("builder"));
+    await press(peopleButton());
+
+    await choose("Role of Ada", "Remove");
+    await press(
+      [...document.querySelectorAll('[role="alertdialog"] button')].find(
+        (each) => words(each) === "Take out"
+      )
+    );
+    const asking = document.querySelector('[role="alertdialog"]');
+    const reasons = [...document.querySelectorAll('[role="alert"]')].filter(
+      (each) => each.textContent === "Ada owns an App in it."
+    );
+
+    expect({
+      open: asking !== null,
+      // Once, and in the dialog, not under the list behind it.
+      reasons: reasons.map((each) => asking?.contains(each) === true),
+    }).toStrictEqual({ open: true, reasons: [true] });
+  });
+
+  it("puts a long name in a box of its own beside the icon, so it can break", async () => {
+    const { session } = fakeProjects();
+    const name = "customer_onboarding_pipeline_review_2026";
+    await shown(session, { ...project("builder"), name });
+    const heading = document.querySelector("h1");
+    const named = heading?.firstElementChild;
+
+    expect({
+      heading: heading?.textContent,
+      // The icon tile, then the name alone in its own element.
+      parts: [...(named?.children ?? [])].map((each) => each.textContent),
+    }).toStrictEqual({ heading: name, parts: ["", name] });
   });
 
   it("names who loses access before taking a shared workflow out", async () => {
