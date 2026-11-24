@@ -29,7 +29,6 @@ import {
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
-  SidebarRail,
   SidebarTrigger,
   useSidebar,
 } from "@grasp-os/ui/components/sidebar";
@@ -719,7 +718,6 @@ export const FrameSidebar = ({
           {profile}
         </div>
       </SidebarFooter>
-      <SidebarRail />
     </Sidebar>
   );
 };
