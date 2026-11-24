@@ -5,6 +5,7 @@ import type { IconData } from "@grasp-os/ui/lib/icons";
 import {
   AnthropicLogo,
   GoogleLogo,
+  HubSpotLogo,
   MicrosoftLogo,
   MistralLogo,
   OpenAiLogo,
@@ -18,10 +19,20 @@ import {
 // reason. The marks are the ones sign-in draws (brand-logos.ts).
 
 /** The mark of each of Grasp's own connectors, by its id, and the name its company goes by. */
-export const brands = {
+const suites = {
   microsoft: { logo: MicrosoftLogo, name: "Microsoft" },
   google: { logo: GoogleLogo, name: "Google" },
 } as const satisfies Record<OAuthProvider, { logo: IconData; name: string }>;
+
+/**
+ * Each mark the product draws, by the connector's or toolkit's id exactly:
+ * the suites', and HubSpot's for a HubSpot connection the catalog doesn't
+ * list (core serves its logo only with the catalog), as #2503 draws it.
+ */
+export const brands = {
+  ...suites,
+  hubspot: { logo: HubSpotLogo, name: "HubSpot" },
+} as const;
 
 /** A connector with a mark of its own. */
 export type Brand = keyof typeof brands;

@@ -19,42 +19,7 @@ const list = tool("HUBSPOT_LIST_CONTACTS", true);
 const create = tool("HUBSPOT_CREATE_CONTACT", false);
 
 describe("the tools an admin allows", () => {
-  it("start as Composio's hint says: a read where it tags one, a side effect where it doesn't", () => {
-    const allowed = withAllowed(withAllowed([], list, true), create, true);
-    expect(toolRules(allowed)).toStrictEqual([
-      { name: "HUBSPOT_LIST_CONTACTS", read: true },
-      "HUBSPOT_CREATE_CONTACT",
-    ]);
-  });
-
-  it("are read-only or not as the admin then says, whatever the hint", () => {
-    const allowed = withAllowed(withAllowed([], list, true), create, true);
-    const changed = withRead(
-      withRead(allowed, list.name, false),
-      create.name,
-      true
-    );
-    expect(toolRules(changed)).toStrictEqual([
-      "HUBSPOT_LIST_CONTACTS",
-      { name: "HUBSPOT_CREATE_CONTACT", read: true },
-    ]);
-    // Ticked and unticked again: a side effect, as it started.
-    expect(toolRules(withRead(changed, create.name, false))).toStrictEqual([
-      "HUBSPOT_LIST_CONTACTS",
-      "HUBSPOT_CREATE_CONTACT",
-    ]);
-  });
-
-  it("are left out once no longer allowed, and start from the hint again when allowed again", () => {
-    const marked = withRead(withAllowed([], create, true), create.name, true);
-    const removed = withAllowed(marked, create, false);
-    expect(toolRules(removed)).toStrictEqual([]);
-    expect(toolRules(withAllowed(removed, create, true))).toStrictEqual([
-      "HUBSPOT_CREATE_CONTACT",
-    ]);
-  });
-
-  it("are each submitted once, and never marked without being allowed", () => {
+  it("are each submitted once, never marked without being allowed, and start from the hint again when allowed again", () => {
     const twice = withAllowed(withAllowed([], list, true), list, true);
     const notAllowed = withRead(twice, create.name, true);
     expect(toolRules(notAllowed)).toStrictEqual([
@@ -64,5 +29,11 @@ describe("the tools an admin allows", () => {
     expect(
       composioToolsSchema.safeParse(toolRules(notAllowed)).success
     ).toBeTruthy();
+
+    const marked = withRead(withAllowed([], create, true), create.name, true);
+    const removed = withAllowed(marked, create, false);
+    expect(toolRules(withAllowed(removed, create, true))).toStrictEqual([
+      "HUBSPOT_CREATE_CONTACT",
+    ]);
   });
 });

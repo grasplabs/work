@@ -7,7 +7,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { ConnectedDialog } from "./connected-dialog.tsx";
+import { ConnectedDialog, returnedOf } from "./connected-dialog.tsx";
 
 // The success page a flow ends on, once the provider sent the person
 // back: what was connected, whether again, what was chosen, and Close.
@@ -110,9 +110,9 @@ describe("the page a connection ends on", () => {
       }),
       { app: "HubSpot" }
     );
-    const items = [...(dialog()?.querySelectorAll("li") ?? [])].map(
-      (each) => each.textContent
-    );
+    const items = [
+      ...(dialog()?.querySelectorAll('[data-slot="item"]') ?? []),
+    ].map((each) => each.textContent);
     expect(items).toStrictEqual([
       expect.stringContaining("For everyone"),
       "HUBSPOT_LIST_CONTACTS",
@@ -135,5 +135,60 @@ describe("the page a connection ends on", () => {
   it("shows nothing without a connection the page lists", async () => {
     await opened();
     expect(dialog()).toBeNull();
+  });
+});
+
+describe("whether a connection connected its app again", () => {
+  const shared = (
+    id: string,
+    status: ListedConnection["status"],
+    accountName: string | null,
+    change: Partial<ListedConnection> = {}
+  ): ListedConnection =>
+    connection({
+      id,
+      status,
+      accountName,
+      scope: "shared",
+      ownerUserId: null,
+      ...change,
+    });
+
+  it("is again only beside a stopped connection of the same account, or of a toolkit that names none", () => {
+    const made = shared("new", "active", "ada@example.com");
+    const toolkit = { source: "composio", provider: "hubspot" } as const;
+    expect({
+      sameAccount: returnedOf(
+        [made, shared("old", "needs_reauth", "ada@example.com")],
+        "new"
+      ).again,
+      anotherAccount: returnedOf(
+        [made, shared("old", "needs_reauth", "bob@example.com")],
+        "new"
+      ).again,
+      personalStopped: returnedOf(
+        [
+          made,
+          connection({
+            id: "old",
+            status: "needs_reauth",
+            accountName: "ada@example.com",
+          }),
+        ],
+        "new"
+      ).again,
+      toolkit: returnedOf(
+        [
+          shared("new", "active", null, toolkit),
+          shared("old", "needs_reauth", null, toolkit),
+        ],
+        "new"
+      ).again,
+    }).toStrictEqual({
+      sameAccount: true,
+      anotherAccount: false,
+      personalStopped: false,
+      toolkit: true,
+    });
   });
 });
