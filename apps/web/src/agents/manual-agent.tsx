@@ -29,6 +29,7 @@ import { agentTemplates } from "./agent-templates.ts";
 import type { AgentTemplate } from "./agent-templates.ts";
 import { AgentFigure, AgentFigureAura } from "./figure/agent-figure.tsx";
 import { faceOf, lookFromName } from "./figure/look.ts";
+import { makeSetupAgent } from "./setup-agent.ts";
 import { AbilitiesStep } from "./setup/abilities-step.tsx";
 import { AppsStep } from "./setup/apps-step.tsx";
 import { AudienceStep } from "./setup/audience-step.tsx";
@@ -363,13 +364,17 @@ export const ManualAgent = ({
         model: setup.model,
         modelRole: null,
       };
-      // Made once: a save after it that failed is tried again on the same
-      // agent, not by making another of the same name.
-      const agent =
-        created ??
-        (mine
-          ? await session.connections.makeOwnAgent(input)
-          : await session.connections.makeAgent(input));
+      // Made anew from the answers as they are now, the one an earlier try
+      // made deleted first (setup-agent.ts).
+      const agent = await makeSetupAgent(
+        session.connections,
+        input,
+        mine,
+        created,
+        () => {
+          setCreated(undefined);
+        }
+      );
       setCreated(agent);
       // Its apps, as the catalog names each.
       await Promise.all(
@@ -383,9 +388,14 @@ export const ManualAgent = ({
             );
           })
       );
+      // Its apps are the ones chosen, never more: Grasp works them out from
+      // its instructions only when none were chosen, which narrows an agent
+      // with no apps, that may use any, to the ones its job needs.
       const told =
         instructions.trim() === "" ||
-        (await saveFirstInstructions(session, agent.id, instructions));
+        (await saveFirstInstructions(session, agent.id, instructions, {
+          workOut: setup.apps.size === 0,
+        }));
       if (mine) {
         return { agent, told };
       }

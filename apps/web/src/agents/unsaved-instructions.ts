@@ -39,13 +39,15 @@ const takeUnsaved = (agentId: string): UnsavedInstructions | undefined => {
 
 /**
  * Saves `instructions` as the new agent `agentId`'s instruction file, and
- * then works out the apps they call for: whether they were saved. Not
- * saved, they are kept for its page with why (`keepUnsaved`).
+ * then, unless `workOut` is false (its maker chose its apps), works out
+ * the apps they call for: whether they were saved. Not saved, they are
+ * kept for its page with why (`keepUnsaved`).
  */
 export const saveFirstInstructions = async (
   session: Session,
   agentId: string,
-  instructions: string
+  instructions: string,
+  { workOut = true }: { workOut?: boolean } = {}
 ): Promise<boolean> => {
   const change = crypto.randomUUID();
   try {
@@ -63,7 +65,9 @@ export const saveFirstInstructions = async (
     });
     return false;
   }
-  await workOutQuietly(session, agentId);
+  if (workOut) {
+    await workOutQuietly(session, agentId);
+  }
   return true;
 };
 

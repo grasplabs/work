@@ -22,6 +22,7 @@ import type {
 } from "@grasp-os/shared/instruction-files";
 import type { Member } from "@grasp-os/shared/members";
 import type { AppClassAudience } from "@grasp-os/shared/stephen-reach";
+import { durations } from "@grasp-os/ui/lib/tokens.values";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -44,6 +45,7 @@ import type { FirstAgentAccess } from "./agent-page.tsx";
 import { faceOf, lookOf } from "./figure/look.ts";
 import { ManualAgent } from "./manual-agent.tsx";
 import { NewAgent } from "./new-agent.tsx";
+import type { CatalogApp } from "./setup/model.ts";
 import { agentTabOf } from "./tabs.tsx";
 import type { AgentTab } from "./tabs.tsx";
 import { agentInstructionsFor } from "./unsaved-instructions.ts";
@@ -127,8 +129,9 @@ const fakeConnections = () => {
   // Each agent's instruction file, by its ID, as core's
   // `session.instructions` keeps it.
   const files = new Map<string, InstructionFileText>();
-  // Saves and reads to refuse, as a Brain out of reach would.
-  const outOfReach = { saves: 0, reads: 0 };
+  // Saves and reads to refuse, as a Brain out of reach would; and whom
+  // an agent reaches, to refuse that many times.
+  const outOfReach = { saves: 0, reads: 0, reach: 0 };
   const instructions: InstructionsApi = {
     read: async (file) => {
       await Promise.resolve();
@@ -233,6 +236,12 @@ const fakeConnections = () => {
       asked.push(["change", id, input]);
       changed(id, input);
     },
+    deleteAgent: async (id: string) => {
+      await Promise.resolve();
+      asked.push(["deleted", id]);
+      // As core frees a deleted agent's name.
+      agents = agents.filter((agent) => agent.id !== id);
+    },
     setAgentPaused: async (id: string, paused: boolean) => {
       await Promise.resolve();
       asked.push(["paused", id, paused]);
@@ -323,6 +332,10 @@ const fakeConnections = () => {
     ) => {
       await Promise.resolve();
       asked.push(["reach", id, on, audience]);
+      if (outOfReach.reach > 0) {
+        outOfReach.reach -= 1;
+        throw new Error("Grasp can't be reached. Try again.");
+      }
       const found = settings.get(id);
       if (found !== undefined) {
         settings.set(id, { ...found, on, audience });
@@ -402,6 +415,21 @@ type Connections = Fake["connections"];
 
 let root: Root | undefined;
 
+/** The company's catalog of apps, as the guided setup offers it. */
+let catalog: CatalogApp[] = [];
+
+/** Gmail, as the catalog has it, connected for nobody yet. */
+const gmail: CatalogApp = {
+  id: "gmail",
+  source: "composio",
+  name: "Gmail",
+  logo: null,
+  description: null,
+  categories: ["Email"],
+  connected: false,
+  account: null,
+};
+
 /** What the page's route read. */
 interface Shown {
   agents: Agent[];
@@ -438,7 +466,7 @@ const Page = ({
   if (open === "new-guided") {
     return (
       <ManualAgent
-        apps={[]}
+        apps={catalog}
         company={editable}
         models={models}
         own
@@ -1003,7 +1031,10 @@ const radio = (words: string): HTMLElement => {
  */
 const setUpByHand = async (
   name: string,
-  before: readonly string[] = []
+  before: readonly string[] = [],
+  atApps: () => Promise<void> = async () => {
+    // As offered.
+  }
 ): Promise<string[]> => {
   const question = document.querySelector("h1")?.textContent ?? "";
   const questions = [...before, question];
@@ -1017,8 +1048,11 @@ const setUpByHand = async (
   if (question === `What should ${name} do?`) {
     await set(field("What it is for"), "Chases unpaid invoices.", "input");
   }
+  if (question === `Which apps can ${name} use?`) {
+    await atApps();
+  }
   await press(button("Next"));
-  return await setUpByHand(name, questions);
+  return await setUpByHand(name, questions, atApps);
 };
 
 describe("an agent's page", () => {
@@ -1027,6 +1061,7 @@ describe("an agent's page", () => {
       root?.unmount();
     });
     root = undefined;
+    catalog = [];
     document.body.replaceChildren();
   });
 
@@ -1691,6 +1726,68 @@ describe("an agent's page", () => {
     expect(
       asked.some(([what]) => what === "reach" || what === "wake")
     ).toBeFalsy();
+  });
+
+  it("gives an agent set up by hand only the apps chosen, never more worked out from its instructions", async () => {
+    catalog = [gmail];
+    const fake = fakeConnections();
+    const { asked } = fake;
+    await shown(fake, "new-guided");
+    await setUpByHand("Claire", [], async () => {
+      await press(button("Add connector"));
+      await press(dialogButton("Add Gmail"));
+      await press(button("Close"));
+    });
+    await press(button("Make agent"));
+    expect(asked).toContainEqual(["app", "agent-1", "composio:gmail", true]);
+    expect(asked.some(([what]) => what === "work out")).toBeFalsy();
+  });
+
+  it("works out the apps of an agent set up by hand with none chosen, which may use any", async () => {
+    const fake = fakeConnections();
+    const { asked } = fake;
+    await shown(fake, "new-guided");
+    await setUpByHand("Claire");
+    await press(button("Make agent"));
+    expect(asked).toContainEqual(["work out", "agent-1"]);
+  });
+
+  it("makes an agent set up by hand anew from the answers changed after a save failed, never keeping the first try's", async () => {
+    const fake = fakeConnections();
+    const { asked, outOfReach } = fake;
+    await shown(fake, "new-guided");
+    await setUpByHand("Claire");
+    outOfReach.reach = 1;
+    await press(button("Make agent"));
+    expect(asked).toContainEqual([
+      "make",
+      expect.objectContaining({ name: "Claire" }),
+    ]);
+    // Back to whom it is for, and made just for its maker this time.
+    const backToStart = async (): Promise<void> => {
+      if (document.querySelector("h1")?.textContent !== "Who can use it?") {
+        await press(button("Back"));
+        await backToStart();
+      }
+    };
+    await backToStart();
+    await press(radio("Just me"));
+    await setUpByHand("Claire");
+    // Once the button has said it wasn't made, it takes a press again.
+    await act(async () => {
+      const { promise, resolve } = Promise.withResolvers<boolean>();
+      setTimeout(() => {
+        resolve(true);
+      }, durations.hold);
+      await promise;
+    });
+    asked.length = 0;
+    await press(button("Make agent"));
+    expect(asked.slice(0, 2)).toStrictEqual([
+      ["deleted", "agent-1"],
+      ["make own", expect.objectContaining({ name: "Claire" })],
+    ]);
+    expect(asked.some(([what]) => what === "reach")).toBeFalsy();
   });
 
   it("never asks someone who isn't an admin who can use an agent they set up by hand", async () => {

@@ -65,6 +65,7 @@ import type { FigureShape as AgentFigureShape } from "./figure/body.ts";
 import { faceOf, lookFromName } from "./figure/look.ts";
 import { agentFigurePalettes } from "./figure/palettes.ts";
 import type { AgentFigureLook, AgentFigurePalette } from "./figure/palettes.ts";
+import { makeSetupAgent } from "./setup-agent.ts";
 import { saveFirstInstructions } from "./unsaved-instructions.ts";
 
 /** The shapes the shape question offers: the library's lit bodies a person can tell apart. */
@@ -740,13 +741,17 @@ export const NewAgent = ({
         model: null,
         modelRole: null,
       };
-      // Made once: a save after it that failed is tried again on the same
-      // agent, not by making another of the same name.
-      const agent =
-        created ??
-        (mine
-          ? await session.connections.makeOwnAgent(input)
-          : await session.connections.makeAgent(input));
+      // Made anew from the answers as they are now, the one an earlier try
+      // made deleted first (setup-agent.ts).
+      const agent = await makeSetupAgent(
+        session.connections,
+        input,
+        mine,
+        created,
+        () => {
+          setCreated(undefined);
+        }
+      );
       setCreated(agent);
       const told =
         instructions.trim() === "" ||
