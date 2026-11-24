@@ -9,7 +9,6 @@ import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 
-import { AgentAvatar } from "../../agents/agent-avatar.tsx";
 import { AppCardGround } from "../../apps/app-card/ground.tsx";
 import type { Scene } from "../../apps/app-card/scenes.ts";
 import { GraspLogo } from "../../connections/brand-logos.ts";
@@ -101,11 +100,6 @@ const styles = stylex.create({
     gridRow: { default: "3", [media.lg]: "3" },
   },
 });
-
-/** The interviewer's face: the Stephen the product already has, still (the agents' avatar), given, never chosen. */
-export const InterviewerAvatar = () => (
-  <AgentAvatar face="stephen" size="default" />
-);
 
 /** Grasp's mark and name, top start. */
 const Brand = () => (

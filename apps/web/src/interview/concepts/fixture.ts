@@ -28,78 +28,29 @@ export const fixture = {
 export const closesOn = "2026-12-01";
 
 /**
- * RECORDED TEXT: the consent's wording, kept with the yes as what the person
- * agreed to (Ruben, 24 November). One fixed wording per language and
- * version, read in the person's own language, outside Lingui, never
- * reworded on the fly; core stores which version and language they agreed
- * to. `{close}` is the campaign's close date, written in that language.
- * Everything else on the screens (titles, buttons) is translated as usual.
+ * The consent's words. Translated as every other word on the page (through
+ * Lingui in the real build; this concept is English only); what core
+ * records with the yes is the notice's VERSION (`participationNotice` in
+ * packages/shared/src/interview-links.ts), raised whenever these words
+ * change. The close date is the one date on every screen: changes and
+ * deletion end then.
  */
-export const recordedConsents = {
-  en: {
-    version: "en-1",
-    line: "A spoken conversation, 20 minutes at most.",
-    yours: "Your voice isn’t kept",
-    choose: "You choose what’s shared",
-    until: "Change or delete it until {close}",
-  },
-  de: {
-    version: "de-1",
-    line: "Ein Gespräch, höchstens 20 Minuten.",
-    yours: "Ihre Stimme wird nicht gespeichert",
-    choose: "Sie bestimmen, was geteilt wird",
-    until: "Ändern oder löschen bis {close}",
-  },
-  nl: {
-    version: "nl-1",
-    line: "Een gesprek, hooguit 20 minuten.",
-    yours: "Je stem wordt niet bewaard",
-    choose: "Jij kiest wat er gedeeld wordt",
-    until: "Wijzigen of verwijderen kan tot {close}",
-  },
-  es: {
-    version: "es-1",
-    line: "Una conversación hablada, 20 minutos como máximo.",
-    yours: "Tu voz no se guarda",
-    choose: "Tú eliges qué se comparte",
-    until: "Puedes cambiarlo o borrarlo hasta el {close}",
-  },
-  fr: {
-    version: "fr-1",
-    line: "Une conversation orale, 20 minutes au plus.",
-    yours: "Votre voix n’est pas conservée",
-    choose: "Vous choisissez ce qui est partagé",
-    until: "Modifiable ou supprimable jusqu’au {close}",
-  },
+export const consent = {
+  version: 2,
+  who: `${fixture.sponsor.name} asked everyone at ${fixture.company}. It is a spoken conversation of ${fixture.minutes} minutes at most.`,
+  whoShort: `${fixture.sponsor.name} asked everyone at ${fixture.company}: a spoken conversation, ${fixture.minutes} minutes at most.`,
+  line: `A spoken conversation, ${fixture.minutes} minutes at most.`,
+  promises: [
+    "Your voice isn’t kept, only your words.",
+    "You choose what is shared.",
+    `You can change or delete it until ${fixture.closes}.`,
+  ],
+  labels: [
+    { id: "yours", label: "Your voice isn’t kept" },
+    { id: "choose", label: "You choose what’s shared" },
+    { id: "until", label: `Change or delete it until ${fixture.closes}` },
+  ],
 } as const;
-
-/** The recorded consent in `locale`, its close date written in that language; English where there is none. */
-export const consentIn = (locale: string) => {
-  const language =
-    locale === "de" || locale === "nl" || locale === "es" || locale === "fr"
-      ? locale
-      : "en";
-  const text = recordedConsents[language];
-  // British English writes the day before the month, as the rest of the product does.
-  const close = new Intl.DateTimeFormat(
-    language === "en" ? "en-GB" : language,
-    {
-      weekday: "long",
-      day: "numeric",
-      month: "long",
-    }
-  ).format(new Date(`${closesOn}T12:00:00`));
-  return {
-    language,
-    version: text.version,
-    line: text.line,
-    promises: [
-      { id: "yours", label: text.yours },
-      { id: "choose", label: text.choose },
-      { id: "until", label: text.until.replace("{close}", close) },
-    ],
-  } as const;
-};
 
 /** The languages the interview speaks, each in its own words. */
 export const languages = [

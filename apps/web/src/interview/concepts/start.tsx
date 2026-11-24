@@ -47,7 +47,6 @@ import {
   TrashIcon,
 } from "@grasp-os/ui/lib/icons";
 import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
-import { useLingui } from "@lingui/react";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
@@ -60,7 +59,7 @@ import {
   fixture,
   ignore,
   languages,
-  consentIn,
+  consent,
 } from "./fixture.ts";
 import type { LanguageId } from "./fixture.ts";
 
@@ -109,21 +108,18 @@ const styles = stylex.create({
   flush: { marginInline: `calc(-1 * ${space["3"]})` },
 });
 
-/** The three promises, the same RECORDED words in every concept (fixture.ts `recordedConsents`), each with its mark. */
+/** The three promises' marks (B and C as first built; A's cleaned start has none). */
 const marks = { yours: LockIcon, choose: EyeIcon, until: TrashIcon } as const;
 
-/** The recorded consent in the language on screen, each promise with its mark. */
-const useConsent = () => {
-  const { i18n } = useLingui();
-  const consent = consentIn(i18n.locale);
-  return {
-    ...consent,
-    promises: consent.promises.map((promise) => ({
-      ...promise,
-      icon: marks[promise.id],
-    })),
-  };
-};
+/** The consent's promises, each with its mark (B and C, as first built). */
+const useConsent = () => ({
+  ...consent,
+  language: "en",
+  promises: consent.labels.map((promise) => ({
+    ...promise,
+    icon: marks[promise.id],
+  })),
+});
 
 /** The consent's line, as recorded, in the language on screen. */
 const ConsentLine = () => <Text size="lg">{useConsent().line}</Text>;
