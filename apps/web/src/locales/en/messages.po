@@ -1482,6 +1482,10 @@ msgstr "{table} already holds records. What should the ones without {missing} ge
 msgid "{table} needs a change in code before this can be published."
 msgstr "{table} needs a change in code before this can be published."
 
+#: src/interview/read-back-story.tsx
+msgid "{taken, plural, one {Put back the line taken out} other {Put back the # lines taken out}}"
+msgstr "{taken, plural, one {Put back the line taken out} other {Put back the # lines taken out}}"
+
 #: src/onboarding/setup-steps.tsx
 msgid "{talked, plural, one {I talked with # person.} other {I talked with # people.}}"
 msgstr "{talked, plural, one {I talked with # person.} other {I talked with # people.}}"
@@ -2856,6 +2860,10 @@ msgstr "And more."
 msgid "And the rest."
 msgstr "And the rest."
 
+#: src/interview/read-back-story.tsx
+msgid "Anonymous"
+msgstr "Anonymous"
+
 #: src/apps/draft-changes.tsx
 msgid "Another App"
 msgstr "Another App"
@@ -2998,6 +3006,7 @@ msgid "App spend"
 msgstr "App spend"
 
 #: src/frame/person-menu.tsx
+#: src/interview/frame.tsx
 #: src/onboarding/calm-frame.tsx
 msgid "Appearance"
 msgstr "Appearance"
@@ -3997,10 +4006,15 @@ msgstr "Change the plan"
 msgid "Change their own"
 msgstr "Change their own"
 
+#: src/interview/read-back-story.tsx
+msgid "Change this line"
+msgstr "Change this line"
+
 #: src/apps/app-workflows.tsx
 msgid "Change what {alias} starts"
 msgstr "Change what {alias} starts"
 
+#: src/interview/read-back-story.tsx
 #: src/interview/read-back.tsx
 msgid "Change: {text}"
 msgstr "Change: {text}"
@@ -8716,6 +8730,7 @@ msgctxt "what the Brain remembers about something"
 msgid "Language"
 msgstr "Language"
 
+#: src/interview/frame.tsx
 #: src/onboarding/calm-frame.tsx
 msgid "Language: {language}"
 msgstr "Language: {language}"
@@ -8918,6 +8933,7 @@ msgstr "Lift the legal hold {hold} from version {label}?"
 msgid "Light"
 msgstr "Light"
 
+#: src/interview/frame.tsx
 #: src/onboarding/calm-frame.tsx
 msgid "Light or dark"
 msgstr "Light or dark"
@@ -10337,6 +10353,7 @@ msgstr "None live"
 msgid "None of the App's integration permissions serves {contract} with every action it declares. Grant one first."
 msgstr "None of the App's integration permissions serves {contract} with every action it declares. Grant one first."
 
+#: src/interview/read-back-story.tsx
 #: src/interview/read-back.tsx
 msgid "None of this is right"
 msgstr "None of this is right"
@@ -10432,11 +10449,6 @@ msgstr "Not found"
 #: src/load-from-core.tsx
 msgid "Not found. It may have been renamed or removed."
 msgstr "Not found. It may have been renamed or removed."
-
-#: src/interview/closed.tsx
-msgctxt "lowest end of a rating of the interview"
-msgid "Not good"
-msgstr "Not good"
 
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind: a mailbox or drive connect stopped hearing"
@@ -10884,6 +10896,10 @@ msgstr "Off, he answers nobody here. A place only ever narrows who he reaches."
 msgid "Off, he only answers here: he holds no change for people to confirm."
 msgstr "Off, he only answers here: he holds no change for people to confirm."
 
+#: src/interview/read-back-story.tsx
+msgid "Off, it is only counted anonymously."
+msgstr "Off, it is only counted anonymously."
+
 #: src/connections/offer-switch.tsx
 msgid "Off, nobody can connect it, admins included. Connections already made go on."
 msgstr "Off, nobody can connect it, admins included. Connections already made go on."
@@ -11091,6 +11107,7 @@ msgid "Only builders see this."
 msgstr "Only builders see this."
 
 #: src/interview/destination.tsx
+#: src/interview/read-back-story.tsx
 msgid "Only counted anonymously"
 msgstr "Only counted anonymously"
 
@@ -11157,6 +11174,7 @@ msgid "Only the workflow's builders can change these."
 msgstr "Only the workflow's builders can change these."
 
 #: src/interview/destination.tsx
+#: src/interview/read-back-story.tsx
 msgid "Only used to know whom to ask"
 msgstr "Only used to know whom to ask"
 
@@ -11594,6 +11612,7 @@ msgstr "Parameters"
 msgid "Paris"
 msgstr "Paris"
 
+#: src/interview/read-back-story.tsx
 #: src/interview/read-back.tsx
 msgid "Part {n} of {count}"
 msgstr "Part {n} of {count}"
@@ -12081,9 +12100,14 @@ msgctxt "what the Brain remembers about something"
 msgid "Purpose"
 msgstr "Purpose"
 
+#: src/interview/read-back-story.tsx
 #: src/interview/read-back.tsx
 msgid "Put back"
 msgstr "Put back"
+
+#: src/interview/read-back-story.tsx
+msgid "Put back: {words}"
+msgstr "Put back: {words}"
 
 #: src/settings/instruction-file.tsx
 msgid "Put my changes aside"
@@ -13289,6 +13313,7 @@ msgstr "Sam, like everyone who uses the App, sees every record in {table}."
 #: src/apps/field-editor.tsx
 #: src/brain/goals-editor.tsx
 #: src/brain/skills-page.tsx
+#: src/interview/read-back-story.tsx
 #: src/projects/project-dialog.tsx
 #: src/settings/instruction-file.tsx
 #: src/workflows/resource-params.tsx
@@ -13827,6 +13852,10 @@ msgstr "Share a staff list as a CSV or Excel file, a row per person. No list at 
 msgid "Share another staff list as a CSV or Excel file, a row per person. It replaces the one I have now."
 msgstr "Share another staff list as a CSV or Excel file, a row per person. It replaces the one I have now."
 
+#: src/interview/read-back-story.tsx
+msgid "Share as how your team works"
+msgstr "Share as how your team works"
+
 #: src/frame/setting-up.tsx
 msgid "Share once it's ready"
 msgstr "Share once it's ready"
@@ -13869,6 +13898,7 @@ msgid "Shared apps"
 msgstr "Shared apps"
 
 #: src/interview/destination.tsx
+#: src/interview/read-back-story.tsx
 msgid "Shared as how your team works"
 msgstr "Shared as how your team works"
 
@@ -13899,6 +13929,10 @@ msgstr "Shared with everyone."
 #: src/brain/memories-page.tsx
 msgid "Shared with team {team}."
 msgstr "Shared with team {team}."
+
+#: src/interview/read-back-story.tsx
+msgid "Shared with your team"
+msgstr "Shared with your team"
 
 #: src/brain/memories-page.tsx
 msgid "Shared. It shows under the same name for those you shared it with."
@@ -14848,6 +14882,7 @@ msgstr "Take off {name}"
 msgid "Take on"
 msgstr "Take on"
 
+#: src/interview/read-back-story.tsx
 #: src/projects/project-people.tsx
 #: src/projects/project-view.tsx
 msgid "Take out"
@@ -15783,6 +15818,7 @@ msgstr "The request allows nothing until an admin grants it. They see what the a
 msgid "The request failed."
 msgstr "The request failed."
 
+#: src/interview/read-back-story.tsx
 #: src/interview/read-back.tsx
 msgid "The rest is correct"
 msgstr "The rest is correct"
@@ -17130,11 +17166,6 @@ msgstr "Versions"
 msgctxt "a workflow's published versions"
 msgid "Versions"
 msgstr "Versions"
-
-#: src/interview/closed.tsx
-msgctxt "highest end of a rating of the interview"
-msgid "Very good"
-msgstr "Very good"
 
 #: src/connections/source-badge.tsx
 msgid "Via Composio"
@@ -18575,6 +18606,7 @@ msgstr "Yes or no"
 msgid "Yes, skip it"
 msgstr "Yes, skip it"
 
+#: src/interview/read-back-story.tsx
 #: src/interview/read-back.tsx
 msgid "Yes, that’s correct"
 msgstr "Yes, that’s correct"

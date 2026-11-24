@@ -5,6 +5,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@grasp-os/ui/components/select";
+import { isThemeMode, ThemeToggle } from "@grasp-os/ui/components/theme-toggle";
 import { Icon } from "@grasp-os/ui/lib/icons";
 import {
   colors,
@@ -16,9 +17,16 @@ import {
 import { iconVars, pixel } from "@grasp-os/ui/lib/vars.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
+import { useEffect, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 
 import { GraspLogo } from "../connections/brand-logos.ts";
+import {
+  applyTheme,
+  chooseTheme,
+  onThemeChange,
+  readTheme,
+} from "../frame/theme.ts";
 import { chooseLocale, isLocale, localeNames } from "../i18n.ts";
 import type { Locale } from "../i18n.ts";
 import type { Pose } from "../onboarding/field/engine.ts";
@@ -28,8 +36,8 @@ import { useNarrow } from "../onboarding/use-narrow.ts";
 
 // The frame every screen of someone's interview link stands in, full
 // screen, outside the app, as the sign-in page before it: Grasp's mark at
-// the window's top start, the language at its top end with what the screen
-// adds before it, Damsko's calm dither behind the header, and the page.
+// the window's top start, at its top end the language, light or dark and what the
+// screen adds (as the setup's bar has them), Damsko's calm dither behind the header, and the page.
 // A calm screen with nothing of its own to draw (the sign-in, a notice)
 // stands on Stephen's living field instead, as the setup's screens do.
 
@@ -107,6 +115,25 @@ const styles = stylex.create({
   },
 });
 
+/**
+ * The size of every tool in the header, all Damsko's `sm` (32), as the
+ * setup's bar has them (onboarding/calm-frame.tsx): the language, light or
+ * dark, and what a screen adds (`actions`). Every tool takes its size from
+ * here, never its own, so they can't drift apart.
+ */
+export const tool = {
+  button: "icon-sm",
+  select: "sm",
+  toggle: "sm",
+} as const;
+
+/**
+ * Whose light or dark the header keeps: the link opens outside the app,
+ * before and after signing in, without the account's id, so the choice
+ * made here is this browser's for the interview.
+ */
+const themeOwner = "interview";
+
 const languages = Object.entries(localeNames).flatMap(([code, name]) =>
   isLocale(code) ? [{ code, name }] : []
 );
@@ -121,6 +148,7 @@ const Language = () => {
   const { t, i18n } = useLingui();
   const narrow = useNarrow();
   const locale: Locale = isLocale(i18n.locale) ? i18n.locale : "en";
+  const language = localeNames[locale];
   return (
     <Select
       items={languages.map(({ code, name }) => ({
@@ -134,7 +162,13 @@ const Language = () => {
       }}
       value={locale}
     >
-      <SelectTrigger aria-label={t`Language`} size="sm" variant="ghost">
+      <SelectTrigger
+        aria-label={t`Language: ${language}`}
+        size={tool.select}
+        // Named on a pause, as the header's other tools are.
+        tooltip={t`Language`}
+        variant="ghost"
+      >
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -145,6 +179,30 @@ const Language = () => {
         ))}
       </SelectContent>
     </Select>
+  );
+};
+
+/** Light, dark or the system's, as one quiet icon that steps through them, as the setup's bar has it. */
+const Appearance = () => {
+  const { t } = useLingui();
+  // Read where it is kept, so a choice made in another tab shows here too.
+  const mode = useSyncExternalStore(onThemeChange, () => readTheme(themeOwner));
+  useEffect(() => {
+    applyTheme(readTheme(themeOwner));
+  }, []);
+  return (
+    <ThemeToggle
+      aria-label={t`Appearance`}
+      mode={mode}
+      onModeChange={(next) => {
+        if (isThemeMode(next)) {
+          chooseTheme(themeOwner, next);
+        }
+      }}
+      size={tool.toggle}
+      tooltip={t`Light or dark`}
+      variant="icon"
+    />
   );
 };
 
@@ -168,7 +226,7 @@ export const Frame = ({
   strip?: boolean;
   /** Where Stephen's field rests behind the screen; left out, he keeps out of the way and the header has its texture. */
   pose?: Pose;
-  /** More at the header's end, before the language. */
+  /** More at the header's end, after the language and light or dark, as the setup's bar ends with its way out. */
   actions?: ReactNode;
   children: ReactNode;
 }) => {
@@ -180,8 +238,9 @@ export const Frame = ({
           <Icon icon={GraspLogo} label="Grasp" />
         </span>
         <div {...stylex.props(styles.end)}>
-          {actions}
           <Language />
+          <Appearance />
+          {actions}
         </div>
       </header>
       {strip && pose === undefined ? (

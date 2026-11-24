@@ -23,8 +23,13 @@ import { voice } from "./interview.stylex.ts";
 import { update, useProgress } from "./kept.ts";
 import { fullWidth, looks } from "./looks.ts";
 import { agreeToPart, changeLine, useLoop } from "./loop.ts";
-import type { LoopState } from "./loop.ts";
 import { partAt, withFactsBack, withFactToggled } from "./progress.ts";
+import {
+  StoryReadBack,
+  toldOf,
+  useReadBackConcept,
+} from "./read-back-story.tsx";
+import type { Told } from "./read-back-story.tsx";
 import { useSaidIn } from "./speech.ts";
 import { SpokenText } from "./spoken.tsx";
 import { usePromise } from "./words.ts";
@@ -121,20 +126,7 @@ const toldLooks = {
   said: styles.said,
   saying: styles.saying,
   waiting: styles.waiting,
-} as const;
-
-const toldOf = (
-  telling: LoopState["telling"],
-  id: string
-): keyof typeof toldLooks | null => {
-  if (telling === null) {
-    return null;
-  }
-  if (telling.now.includes(id)) {
-    return "saying";
-  }
-  return telling.told.includes(id) ? "said" : "waiting";
-};
+} as const satisfies Record<Told, unknown>;
 
 /**
  * A line that can be put right where it is: a press turns it into a field
@@ -148,7 +140,7 @@ const ReadBackLine = ({
   share,
   told,
 }: Pick<InterviewFact, "id" | "text" | "tag" | "share"> & {
-  told: keyof typeof toldLooks | null;
+  told: Told | null;
 }) => {
   const { t } = useLingui();
   const words = useId();
@@ -236,7 +228,8 @@ const ReadBackLine = ({
   );
 };
 
-export const ReadBack = () => {
+/** The read-back as a list of lines, one under another. */
+const ListReadBack = () => {
   const { t } = useLingui();
   const promise = usePromise();
   const loop = useLoop();
@@ -331,5 +324,15 @@ export const ReadBack = () => {
         </div>
       </div>
     </div>
+  );
+};
+
+/** The read-back: the list, or a story while its concepts are compared (`?readback=a|b`). */
+export const ReadBack = () => {
+  const concept = useReadBackConcept();
+  return concept === null ? (
+    <ListReadBack />
+  ) : (
+    <StoryReadBack concept={concept} />
   );
 };

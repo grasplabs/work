@@ -13,12 +13,16 @@ import { Button } from "@grasp-os/ui/components/button";
 import { Heading } from "@grasp-os/ui/components/heading";
 import { HoldButton } from "@grasp-os/ui/components/hold-button";
 import { Text } from "@grasp-os/ui/components/text";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@grasp-os/ui/components/tooltip";
 import { Icon, PlusIcon, TrashIcon } from "@grasp-os/ui/lib/icons";
 import { focusRing, visuallyHidden } from "@grasp-os/ui/lib/styles";
 import {
   colors,
   duration,
-  font,
   media,
   radius,
   size as sizes,
@@ -30,10 +34,10 @@ import { useEffect, useState } from "react";
 
 import { SaveTrouble } from "./composer.tsx";
 import { WhereLinesGo } from "./destination.tsx";
+import { tool } from "./frame.tsx";
 import { useInterviewer, useProgress } from "./kept.ts";
 import { sayingMs } from "./loop.ts";
 import { SpokenText, useSaid } from "./spoken.tsx";
-import { usePromise } from "./words.ts";
 
 // The end of an interview (prototype `interview-view.tsx`, `Closed`,
 // `Rating` and `DeleteInterview`): his thanks, and how long the link still
@@ -48,43 +52,30 @@ const styles = stylex.create({
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    gap: space["6"],
+    gap: space["8"],
     width: "100%",
     maxWidth: "28rem",
     textAlign: "center",
   },
-  body: {
+  words: { display: "flex", flexDirection: "column", gap: space["3"] },
+  // The one thing to do, and the quiet way to where the lines go under it.
+  ways: {
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    gap: space["6"],
-    width: "100%",
+    gap: space["2"],
   },
-  words: { display: "flex", flexDirection: "column", gap: space["2"] },
-  // What he says under the title, as the muted body text, in balanced lines.
-  message: {
-    margin: 0,
-    color: colors.mutedForeground,
-    fontSize: font.textBase,
-    lineHeight: font.textBaseLine,
-    textWrap: "balance",
-  },
-  add: { display: "grid", width: "100%", maxWidth: "24rem" },
-  // The rating: the question over a row of five dots, named at both ends.
+  // The rating, quiet and on one line where it fits: the question, then five dots.
   rating: {
     display: "flex",
-    flexDirection: "column",
+    flexWrap: "wrap",
     alignItems: "center",
-    gap: space["1"],
+    justifyContent: "center",
+    columnGap: space["2"],
     margin: 0,
     padding: 0,
     borderWidth: 0,
-    color: colors.mutedForeground,
-    fontSize: font.textSm,
-    lineHeight: font.textSmLine,
   },
-  scale: { display: "flex", alignItems: "center", gap: space["2"] },
-  end: { fontSize: font.textXs, lineHeight: font.textXsLine },
   dots: { display: "flex", alignItems: "center" },
   dotButton: {
     display: "flex",
@@ -120,7 +111,8 @@ const styles = stylex.create({
 
 /**
  * How it was to talk to Stephen, as five dots to press: theirs to say or
- * to leave, and to change while the link works.
+ * to leave, and to change while the link works. Quiet: the question in
+ * the body's muted words, the dots after it; each dot names itself.
  */
 const Rating = ({
   value,
@@ -135,47 +127,33 @@ const Rating = ({
   return (
     <fieldset {...stylex.props(styles.rating)}>
       <legend {...stylex.props(visuallyHidden)}>{question}</legend>
-      <span aria-live="polite">
+      <Text aria-live="polite" as="span" color="muted">
         {value === undefined ? question : t`Thank you for telling me.`}
+      </Text>
+      <span {...stylex.props(styles.dots)}>
+        {ratings.map((rating) => {
+          const on = value !== undefined && rating <= value;
+          return (
+            <button
+              aria-label={t`${rating} of 5`}
+              aria-pressed={value === rating}
+              key={rating}
+              onClick={() => {
+                onRate(rating);
+              }}
+              type="button"
+              {...stylex.props(styles.dotButton, focusRing)}
+            >
+              <span {...stylex.props(styles.dot, on && styles.dotOn)} />
+            </button>
+          );
+        })}
       </span>
-      <div {...stylex.props(styles.scale)}>
-        <span aria-hidden="true" {...stylex.props(styles.end)}>
-          {t({
-            message: "Not good",
-            context: "lowest end of a rating of the interview",
-          })}
-        </span>
-        <span {...stylex.props(styles.dots)}>
-          {ratings.map((rating) => {
-            const on = value !== undefined && rating <= value;
-            return (
-              <button
-                aria-label={t`${rating} of 5`}
-                aria-pressed={value === rating}
-                key={rating}
-                onClick={() => {
-                  onRate(rating);
-                }}
-                type="button"
-                {...stylex.props(styles.dotButton, focusRing)}
-              >
-                <span {...stylex.props(styles.dot, on && styles.dotOn)} />
-              </button>
-            );
-          })}
-        </span>
-        <span aria-hidden="true" {...stylex.props(styles.end)}>
-          {t({
-            message: "Very good",
-            context: "highest end of a rating of the interview",
-          })}
-        </span>
-      </div>
     </fieldset>
   );
 };
 
-/** His thanks, and what they can still do: add something, and say how it was. */
+/** His thanks, and what they can still do: add something, see where their lines go, and say how it was. */
 export const Closed = ({
   name,
   closes,
@@ -191,7 +169,6 @@ export const Closed = ({
   onAdd: () => void;
 }) => {
   const { t } = useLingui();
-  const promise = usePromise();
   // Lines agreed under what this interview said before can only be moved
   // once they read what it says now: "Add something" takes them there.
   const { told } = useProgress();
@@ -211,29 +188,24 @@ export const Closed = ({
   const said = useSaid({ line, saying: 1, from: 0, speaking: saying });
   return (
     <div {...stylex.props(styles.page)}>
-      <div {...stylex.props(styles.body)}>
-        <div {...stylex.props(styles.words)}>
-          <Heading level={1} size="xl">
-            <SpokenText said={said} text={title} />
-          </Heading>
-          <p aria-live="polite" {...stylex.props(styles.message)}>
-            <SpokenText from={title.length + 1} said={said} text={message} />
-          </p>
-        </div>
-        <div {...stylex.props(styles.add)}>
-          <Button onClick={onAdd} size="lg">
-            <Icon icon={PlusIcon} />
-            {t`Add something`}
-          </Button>
-        </div>
-        {told ? <WhereLinesGo /> : null}
-        {/* A change of where a line goes not kept yet, or refused, shows here too once the sheet is closed. */}
-        <SaveTrouble />
-        <Rating onRate={onRate} value={rating} />
-        <Text color="muted" size="xs">
-          {promise}
+      <div {...stylex.props(styles.words)}>
+        <Heading level={1} size="xl">
+          <SpokenText said={said} text={title} />
+        </Heading>
+        <Text aria-live="polite" color="muted">
+          <SpokenText from={title.length + 1} said={said} text={message} />
         </Text>
       </div>
+      <div {...stylex.props(styles.ways)}>
+        <Button onClick={onAdd} size="lg">
+          <Icon icon={PlusIcon} />
+          {t`Add something`}
+        </Button>
+        {told ? <WhereLinesGo /> : null}
+      </div>
+      {/* A change of where a line goes not kept yet, or refused, shows here too once the sheet is closed. */}
+      <SaveTrouble />
+      <Rating onRate={onRate} value={rating} />
     </div>
   );
 };
@@ -259,16 +231,23 @@ export const DeleteInterview = ({
   const [asking, setAsking] = useState(false);
   return (
     <>
-      <HoldButton
-        duration={holdMs}
-        onConfirm={() => {
-          setAsking(true);
-        }}
-        size="xs"
-        variant="ghost"
-      >
-        {t`Delete my interview`}
-      </HoldButton>
+      {/* One of the header's tools, as quiet as the rest: an icon, named on a pause. */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <HoldButton
+            aria-label={t`Delete my interview`}
+            duration={holdMs}
+            onConfirm={() => {
+              setAsking(true);
+            }}
+            size={tool.button}
+            variant="ghost"
+          >
+            <Icon icon={TrashIcon} />
+          </HoldButton>
+        </TooltipTrigger>
+        <TooltipContent>{t`Delete my interview`}</TooltipContent>
+      </Tooltip>
       <AlertDialog onOpenChange={setAsking} open={asking}>
         <AlertDialogContent>
           <AlertDialogHeader>

@@ -30,6 +30,7 @@ import {
 } from "./kept.ts";
 import type { SaveState } from "./kept.ts";
 import { withShares } from "./progress.ts";
+import { usePromise } from "./words.ts";
 
 // Where each line of an interview goes (GRA-1987), the person's to choose:
 // shared in their company as how their team works (every member reads a
@@ -61,7 +62,6 @@ const styles = stylex.create({
     textWrap: "balance",
   },
   trouble: { color: colors.warning },
-  wide: { display: "grid", width: "100%", maxWidth: "24rem" },
 });
 
 /** The other place a line can go. */
@@ -233,6 +233,7 @@ export const WhereLinesGo = () => {
   const { t } = useLingui();
   const held = useHeld();
   const save = useSaveState();
+  const promise = usePromise();
   const [open, setOpen] = useState(false);
   const [shares, setShares] = useState(
     new Map<string, InterviewFact["share"]>()
@@ -257,15 +258,15 @@ export const WhereLinesGo = () => {
       }}
       open={open}
     >
-      <div {...stylex.props(styles.wide)}>
-        <SheetTrigger asChild>
-          <Button variant="outline">{t`Where your lines go`}</Button>
-        </SheetTrigger>
-      </div>
+      <SheetTrigger asChild>
+        <Button variant="link">{t`Where your lines go`}</Button>
+      </SheetTrigger>
       <SheetContent>
         <SheetHeader>
           <SheetTitle>{t`Where your lines go`}</SheetTitle>
           <SheetDescription>{t`Choose where each line goes. A line you move counts again once you save.`}</SheetDescription>
+          {/* The promise about their words, here where they choose, not on the thanks under it. */}
+          <SheetDescription>{promise}</SheetDescription>
         </SheetHeader>
         <SheetBody>
           <ol {...stylex.props(styles.lines)}>

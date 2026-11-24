@@ -1,11 +1,7 @@
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
-import {
-  Icon,
-  MessageSquareFilledIcon,
-  PauseFilledIcon,
-} from "@grasp-os/ui/lib/icons";
+import { Icon, MessageSquareIcon, PauseIcon } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
 import {
   isValidElement,
@@ -31,7 +27,7 @@ import { Page, Words } from "./calm.tsx";
 import { Closed, DeleteInterview } from "./closed.tsx";
 import { besideQuery, Conversation, TimeUp } from "./conversation.tsx";
 import { secondsLeft, useCountdownMarks, useNow } from "./countdown.tsx";
-import { Frame } from "./frame.tsx";
+import { Frame, tool } from "./frame.tsx";
 import {
   forgetInterview,
   keepNow,
@@ -54,6 +50,7 @@ import {
   steered,
   ticked,
 } from "./progress.ts";
+import { readingPose, useReadBackConcept } from "./read-back-story.tsx";
 import { setSound } from "./speech.ts";
 import {
   Consent,
@@ -233,18 +230,20 @@ const TalkActions = ({
         aria-expanded={transcript}
         aria-label={t`Transcript`}
         onClick={onTranscript}
-        size="icon-sm"
+        size={tool.button}
+        tooltip={t`Transcript`}
         variant={transcript ? "secondary" : "ghost"}
       >
-        <Icon icon={MessageSquareFilledIcon} />
+        <Icon icon={MessageSquareIcon} />
       </Button>
       <Button
         aria-label={t`Pause`}
         onClick={onPause}
-        size="icon-sm"
+        size={tool.button}
+        tooltip={t`Pause`}
         variant="ghost"
       >
-        <Icon icon={PauseFilledIcon} />
+        <Icon icon={PauseIcon} />
       </Button>
     </>
   );
@@ -523,9 +522,21 @@ const Talking = ({
     />
   );
 
-/** Every screen but the conversation stands on Stephen's field; the conversation keeps its own room. */
-const poseOf = (stage: ReactNode): Pose | undefined =>
-  isValidElement(stage) && stage.type === Talking ? undefined : beside;
+/** Whether the read-back is on screen, told as a story (a concept, `?readback=a|b`). */
+const useStoryRead = (reading: boolean): boolean =>
+  useReadBackConcept() !== null && reading;
+
+/**
+ * Every screen but the conversation stands on Stephen's field; the
+ * conversation keeps its own room. The read-back told as a story stands
+ * in his light, softly from the top.
+ */
+const poseOf = (stage: ReactNode, story: boolean): Pose | undefined => {
+  if (story) {
+    return readingPose;
+  }
+  return isValidElement(stage) && stage.type === Talking ? undefined : beside;
+};
 
 /** The interview on the link, held on this device. */
 export const InterviewPage = ({ session }: { session: OpenSession }) => {
@@ -540,6 +551,7 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
     !(stopped || withdrawn || session.closed) &&
     deleted === "no";
   const reading = talking && isReading(progress);
+  const story = useStoryRead(reading);
   const { left, timeUp } = useClock(progress, talking && !reading);
 
   useWordsOnScreen();
@@ -618,7 +630,7 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
   }
 
   return (
-    <Frame actions={actions} pose={poseOf(stage)} strip={!reading}>
+    <Frame actions={actions} pose={poseOf(stage, story)} strip={!reading}>
       {stage}
       <Failed message={deleteFailed ?? withdrawFailed} />
     </Frame>
