@@ -2,7 +2,6 @@ import {
   Item,
   ItemContent,
   ItemDescription,
-  ItemDetail,
   ItemGroup,
   ItemMedia,
   ItemSeparator,
@@ -10,7 +9,7 @@ import {
 } from "@grasp-os/ui/components/item";
 import { PageHeader } from "@grasp-os/ui/components/page-header";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
-import { size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { colors, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { Fragment } from "react";
 import type { ReactNode } from "react";
@@ -23,17 +22,27 @@ import type { ReactNode } from "react";
 
 const styles = stylex.create({
   page: { display: "grid", gap: space["6"], minWidth: 0 },
-  lead: {
+  // A one-line row, as the reference's row list draws one: 44px, the
+  // panel's inset, a hairline over every row but the first.
+  rows: { display: "grid", margin: 0, padding: 0, listStyle: "none" },
+  row: {
     display: "flex",
     alignItems: "center",
     gap: space["2"],
+    boxSizing: "border-box",
+    height: size.tapTarget,
+    minWidth: 0,
+    paddingInline: space.sidePanelPadding,
+    borderBlockStartWidth: { default: 0, ":not(:first-child)": size.hairline },
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: colors.border,
   },
   icon: { flexShrink: 0, width: size.iconSm, height: size.iconSm },
   w40: { width: "6rem" },
   w48: { width: "8rem" },
   w56: { width: "10rem" },
   w64: { width: "7rem" },
-  detail: { width: "4rem" },
+  detail: { width: "4rem", marginInlineStart: "auto" },
 });
 
 /** A row's name while it waits: its width by its place, so the rows don't line up as one block. */
@@ -91,11 +100,11 @@ export const PageSkeletonList = ({
     ) : null}
     {toolbar}
     <div aria-hidden="true">
-      <ItemGroup>
-        {Array.from({ length: rows }, (_, index) => (
-          <Fragment key={index}>
-            {index > 0 ? <ItemSeparator /> : null}
-            {variant === "items" ? (
+      {variant === "items" ? (
+        <ItemGroup>
+          {Array.from({ length: rows }, (_, index) => (
+            <Fragment key={index}>
+              {index > 0 ? <ItemSeparator /> : null}
               <Item loading>
                 <ItemMedia variant="icon" />
                 <ItemContent>
@@ -103,24 +112,20 @@ export const PageSkeletonList = ({
                   <ItemDescription />
                 </ItemContent>
               </Item>
-            ) : (
-              <Item size="xs">
-                <ItemContent>
-                  <ItemTitle>
-                    <span {...stylex.props(styles.lead)}>
-                      <Skeleton style={styles.icon} variant="rectangular" />
-                      <NameLine index={index} />
-                    </span>
-                    <ItemDetail>
-                      <Skeleton size="sm" style={styles.detail} />
-                    </ItemDetail>
-                  </ItemTitle>
-                </ItemContent>
-              </Item>
-            )}
-          </Fragment>
-        ))}
-      </ItemGroup>
+            </Fragment>
+          ))}
+        </ItemGroup>
+      ) : (
+        <ul {...stylex.props(styles.rows)}>
+          {Array.from({ length: rows }, (_, index) => (
+            <li key={index} {...stylex.props(styles.row)}>
+              <Skeleton style={styles.icon} variant="rectangular" />
+              <NameLine index={index} />
+              <Skeleton size="sm" style={styles.detail} />
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   </div>
 );
