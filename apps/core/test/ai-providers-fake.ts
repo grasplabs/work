@@ -382,14 +382,42 @@ export const aiProvidersFake = () => {
     view.setUint16(34, 16, true);
     name(36, "data");
     view.setUint32(40, samples, true);
-    let binary = "";
-    for (let at = 0; at < file.length; at += 8192) {
-      binary += String.fromCodePoint(...file.subarray(at, at + 8192));
+    /** The file's bytes from `from` up to `to`, base64. */
+    const base64Of = (from: number, to: number): string => {
+      let binary = "";
+      for (let at = from; at < to; at += 8192) {
+        binary += String.fromCodePoint(
+          ...file.subarray(at, Math.min(at + 8192, to))
+        );
+      }
+      return btoa(binary);
+    };
+    const headers = { "x-request-id": `req-speech-${seen.length}` };
+    if (isRecord(asked) && asked.stream === true) {
+      // Streamed, as Mistral does: the same file in pieces, one event
+      // each, the first of them cut inside the file's header, then that
+      // it is done.
+      const cuts = [0, 20, 44 + Math.floor(samples / 2), file.length];
+      const events = cuts.slice(1).map((end, at) => {
+        const data = JSON.stringify({
+          type: "speech.audio.delta",
+          audio_data: base64Of(cuts[at] ?? 0, end),
+        });
+        return `event: speech.audio.delta${String.fromCodePoint(10)}data: ${
+          data
+        }`;
+      });
+      events.push(
+        `event: speech.audio.done${String.fromCodePoint(
+          10
+        )}data: ${JSON.stringify({ type: "speech.audio.done", usage: {} })}`
+      );
+      const end = String.fromCodePoint(10, 10);
+      return new Response(events.join(end) + end, {
+        headers: { ...headers, "content-type": "text/event-stream" },
+      });
     }
-    return Response.json(
-      { audio_data: btoa(binary) },
-      { headers: { "x-request-id": `req-speech-${seen.length}` } }
-    );
+    return Response.json({ audio_data: base64Of(0, file.length) }, { headers });
   };
   /** How Mistral's speech and OpenAI's audio endpoints answer when nothing is planned. */
   const audioAnswer = (
@@ -757,7 +785,10 @@ export const aiProvidersFake = () => {
         key,
       };
       seen.push(seenAs);
-      if (key !== null && bridged.has(key)) {
+      // A bridged key's speech and transcription answer as the provider
+      // does: only its text requests wait for the test.
+      const voiced = /^[/]v1[/](?:audio[/]|realtime$)/u.test(url.pathname);
+      if (key !== null && bridged.has(key) && !voiced) {
         return await answerBridged(request, url, key, body);
       }
       const reply = key === null ? undefined : plans.get(key)?.shift();

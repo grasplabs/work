@@ -26,7 +26,9 @@ import {
   answering,
   approveAgreed,
   countedFor,
+  careful,
   holdAlarm,
+  interviewModels,
   modelOf,
   onLink,
   openLinkAs,
@@ -44,6 +46,9 @@ import {
   staffPerson,
   unique,
 } from "./sign-in.ts";
+
+/** The organization's default model: what the lab's own calls are sent to, whatever their role. */
+const [chosen] = interviewModels;
 
 // The Stephen Lab's way into a local core (src/onboarding/lab.ts): its
 // model calls through the gateway, and the practice people's links. The
@@ -273,10 +278,10 @@ describe("the Stephen Lab's way into a local core", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       // Both roles resolve to the organization's default.
       output: { say: "by email" },
-      model: quick,
+      model: chosen,
       sentTo: [
-        quick.slice(quick.indexOf("/") + 1),
-        quick.slice(quick.indexOf("/") + 1),
+        chosen.slice(chosen.indexOf("/") + 1),
+        chosen.slice(chosen.indexOf("/") + 1),
       ],
       calls: [
         { actor: "staff", purpose: "onboarding.lab" },
@@ -307,7 +312,7 @@ describe("the Stephen Lab's way into a local core", { timeout: 60_000 }, () => {
       labViaSchema.parse(await answerTo({ action: "via" }, { session }))
     );
     // Both roles resolve to the organization's default.
-    expect(result).toStrictEqual({ quick, careful: quick });
+    expect(result).toStrictEqual({ quick: chosen, careful: chosen });
   });
 
   it("gives the practice people's links, which open their interviews", async () => {
@@ -441,10 +446,11 @@ describe("the Stephen Lab's way into a local core", { timeout: 60_000 }, () => {
       say: "Who releases it?",
       facts: ["The order gets released."],
       lineFirst: true,
-      // His line and what he wrote down: both from the organization's default.
+      // His line and what he wrote down: from the interview's own models,
+      // as on a link, whatever the organization chose.
       models: [
         quick.slice(quick.indexOf("/") + 1),
-        quick.slice(quick.indexOf("/") + 1),
+        careful.slice(careful.indexOf("/") + 1),
       ],
       told: [true, true, true, true],
       counted: 0,

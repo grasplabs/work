@@ -65,8 +65,16 @@ export interface Speech {
 
 /** Says lines in a voice. */
 export interface SpeechSynthesis {
-  /** Says `request`'s line; `signal` cancels it. */
-  speak: (request: SpeechRequest, signal?: AbortSignal) => Promise<Speech>;
+  /**
+   * Says `request`'s line; `signal` cancels it. With `onAudio`, each piece
+   * of the audio is handed over as it is made, in order, before the whole
+   * line comes back: together the pieces are `Speech.audio`.
+   */
+  speak: (
+    request: SpeechRequest,
+    signal?: AbortSignal,
+    onAudio?: (piece: Uint8Array) => void
+  ) => Promise<Speech>;
 }
 
 /** What a live transcription is opened with. */
@@ -155,6 +163,12 @@ export const speechRequestSchema = z.strictObject({
   tone: z.enum(voiceTags).optional(),
   /** Someone's interview link: its secret (the session says whose it is). */
   link: z.strictObject({ secret: interviewSecretSchema }).optional(),
+  /**
+   * Answered as the line is made ({@link SpeechStreamEvent}), so the page
+   * plays its start while the rest is still coming: for a line someone
+   * waits to hear, as in an interview.
+   */
+  stream: z.boolean().default(false),
 });
 export type SpeechRequestBody = z.input<typeof speechRequestSchema>;
 
@@ -167,6 +181,21 @@ export interface SpeechAnswer {
   /** The words of the line as written, and when each is said. */
   words: SpokenWord[];
 }
+
+/** The media type of a line answered as it is made: a line of JSON for each {@link SpeechStreamEvent}. */
+export const speechStreamMime = "application/x-ndjson";
+
+/**
+ * A line as `POST /api/speech` answers it with `stream`, an event at a
+ * time: each piece of its audio as it is made, base64, in order (together
+ * they are one file, a WAV of plain samples whose header says how they are
+ * written); then the words of the line and when each is said, once the
+ * whole of it is known; or that it broke off, after which nothing comes.
+ */
+export type SpeechStreamEvent =
+  | { audio: string }
+  | { words: SpokenWord[] }
+  | { failed: true };
 
 /** Why a line wasn't said. */
 export const speechErrors = defineErrorFamily({

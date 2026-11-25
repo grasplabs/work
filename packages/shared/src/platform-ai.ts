@@ -13,6 +13,8 @@ export const platformAiFeatures = [
   "conversion",
   "transcription",
   "speech",
+  /** The onboarding interview's own turns: its lines, and what it writes down. */
+  "interview",
   /**
    * Not a feature of Grasp's: the organization's own AI, where it runs on
    * Grasp's key (`graspAi`, @grasp-os/shared/ai-providers). Grasp pays the

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   breathMs,
+  echoes,
   ended,
   hanging,
   holdMs,
@@ -336,14 +337,15 @@ describe("the read-back", () => {
 });
 
 describe("his own line", () => {
-  it("closes the ear while he says it, and what he answers is his", () => {
+  it("listens afresh while he says it, and what he answers is his", () => {
     const { floor, acts } = play([
       ...talking,
       ...stretch(1, "Yes.", 2000, 3000),
       { type: "speak", at: 4000, answers: true },
     ]);
     expect({
-      deaf: acts.some(({ type }) => type === "deaf"),
+      // What was being said counts for nothing, and he hears from now.
+      afresh: acts.slice(-2).map(({ type }) => type),
       floor: {
         doing: floor.doing,
         hearing: floor.hearing,
@@ -351,9 +353,93 @@ describe("his own line", () => {
         asking: floor.asking,
       },
     }).toStrictEqual({
-      deaf: true,
-      floor: { doing: "speaking", hearing: false, parts: [], asking: null },
+      afresh: ["deaf", "hear"],
+      floor: { doing: "speaking", hearing: true, parts: [], asking: null },
     });
+  });
+
+  it("stops at once when they talk over him, and answers what they said", () => {
+    const { floor, acts } = play([
+      ...talking,
+      ...stretch(1, "Yes.", 2000, 3000),
+      { type: "speak", at: 4000, answers: true },
+      ...stretch(2, "Wait, that is not my work.", 4500, 6000),
+    ]);
+    expect({
+      hushed: acts.filter(({ type }) => type === "hush").length,
+      asked: asks(acts).map(({ text }) => text),
+      doing: floor.doing,
+      cut: floor.cut,
+    }).toStrictEqual({
+      hushed: 1,
+      asked: ["Yes.", "Wait, that is not my work."],
+      doing: "listening",
+      cut: false,
+    });
+  });
+
+  it("says his line again when what cut him off was no words", () => {
+    const { floor, acts } = play([
+      ...talking,
+      { type: "speak", at: 4000, answers: true },
+      ...stretch(1, "", 4500, 5000),
+    ]);
+    expect({
+      did: acts.flatMap(({ type }) =>
+        type === "hush" || type === "resume" ? [type] : []
+      ),
+      asked: asks(acts),
+      cut: floor.cut,
+      interrupts: floor.interrupts,
+    }).toStrictEqual({
+      did: ["hush", "resume"],
+      asked: [],
+      cut: false,
+      interrupts: true,
+    });
+  });
+
+  it("never answers his own voice, says his line again, and stops listening while he speaks", () => {
+    const cutOff = play([
+      ...talking,
+      { type: "speak", at: 4000, answers: true },
+      { type: "stretch-start", at: 4500, stretch: 1 },
+      { type: "stretch-end", at: 5000, stretch: 1 },
+      { type: "echo", at: 5100, stretch: 1 },
+    ]);
+    const again = play(
+      [
+        { type: "speak", at: 5200 },
+        { type: "stretch-start", at: 5600, stretch: 2 },
+      ],
+      cutOff.floor
+    );
+    expect({
+      did: cutOff.acts.flatMap(({ type }) =>
+        type === "hush" || type === "resume" ? [type] : []
+      ),
+      asked: asks([...cutOff.acts, ...again.acts]),
+      hearing: again.floor.hearing,
+      doing: again.floor.doing,
+    }).toStrictEqual({
+      did: ["hush", "resume"],
+      asked: [],
+      hearing: false,
+      doing: "speaking",
+    });
+  });
+
+  it("doesn't listen while he says a line that leads to the read-back", () => {
+    const { floor, acts } = play([
+      ...talking,
+      { type: "speak", at: 4000, readsBack: true },
+      ...stretch(1, "Hold on.", 4500, 5000),
+    ]);
+    expect({
+      hearing: floor.hearing,
+      doing: floor.doing,
+      hushed: acts.some(({ type }) => type === "hush"),
+    }).toStrictEqual({ hearing: false, doing: "speaking", hushed: false });
   });
 
   it("is held while they may be starting to talk, for a moment at most", () => {
@@ -447,4 +533,19 @@ describe("when something fails", () => {
       expect(troubleOf({ tried, status, online })).toStrictEqual(expected);
     }
   );
+});
+
+describe("his own voice in the microphone", () => {
+  const line = "First a few questions about you and AI, then your work.";
+
+  it.each([
+    ["first a few", true],
+    ["Questions about you and AI.", true],
+    ["you", true],
+    ["No, wait.", false],
+    ["a few first", false],
+    ["", false],
+  ])("takes %j heard over his line for his own: %s", (heard, own) => {
+    expect(echoes(heard, line)).toBe(own);
+  });
 });
