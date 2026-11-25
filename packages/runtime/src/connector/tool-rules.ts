@@ -602,9 +602,35 @@ const allProperties = (schema: Json): Property[] => {
   return found;
 };
 
-/** A reference to one of the root's own definitions (`#/$defs/x`). */
-const localDefinitionPattern =
-  /^#\/(?<keyword>\$defs|definitions)\/(?<name>[^/]+)$/u;
+/**
+ * What a schema's `$ref` names within `root`, the input's schema: a
+ * JSON Pointer in the root's own document (`#/$defs/x`,
+ * `#/properties/status`, RFC 6901, percent-decoded as a URI fragment), or
+ * undefined for any other, an anchor (`#Flag`) included.
+ */
+const referenced = (root: Json, ref: Json | undefined): Json | undefined => {
+  if (typeof ref !== "string" || !(ref === "#" || ref.startsWith("#/"))) {
+    return undefined;
+  }
+  let tokens: string[];
+  try {
+    tokens = decodeURIComponent(ref.slice(1)).split("/").slice(1);
+  } catch {
+    return undefined;
+  }
+  let at: Json | undefined = root;
+  for (const token of tokens) {
+    const key = token.replaceAll("~1", "/").replaceAll("~0", "~");
+    if (isJsonArray(at)) {
+      at = /^(?:0|[1-9]\d*)$/u.test(key) ? at[Number(key)] : undefined;
+    } else if (isRecord(at) && Object.hasOwn(at, key)) {
+      at = at[key];
+    } else {
+      return undefined;
+    }
+  }
+  return at;
+};
 
 /**
  * The names of the input's own properties: at its top, at the top
@@ -628,26 +654,14 @@ export const topNames = (schema: Json): string[] => {
         pending.push(...members);
       }
     }
-    const ref =
-      typeof next.$ref === "string"
-        ? localDefinitionPattern.exec(next.$ref)?.groups
-        : undefined;
-    const definitions =
-      ref?.keyword === undefined || !isRecord(schema)
-        ? undefined
-        : schema[ref.keyword];
-    const name = ref?.name?.replaceAll("~1", "/").replaceAll("~0", "~");
+    const definition = referenced(schema, next.$ref);
     if (
-      name !== undefined &&
-      isRecord(definitions) &&
-      Object.hasOwn(definitions, name) &&
-      !followed.has(name)
+      typeof next.$ref === "string" &&
+      definition !== undefined &&
+      !followed.has(next.$ref)
     ) {
-      followed.add(name);
-      const definition = definitions[name];
-      if (definition !== undefined) {
-        pending.push(definition);
-      }
+      followed.add(next.$ref);
+      pending.push(definition);
     }
   }
   return found;
@@ -665,6 +679,95 @@ const namesNobody = (schema: Json | undefined): boolean =>
     typeof schema.format === "string" &&
     timeFormats.has(schema.format)) ||
     schema.type === "boolean");
+
+/** The values of an `enum` or a `const` that hold a flag, in any case. */
+const flagValues: ReadonlySet<Json> = new Set([
+  true,
+  false,
+  null,
+  0,
+  1,
+  "0",
+  "1",
+  "true",
+  "false",
+  "yes",
+  "no",
+  "on",
+  "off",
+]);
+
+/** Whether `value` is one of `flagValues`. */
+const isFlagValue = (value: Json): boolean =>
+  flagValues.has(typeof value === "string" ? value.toLowerCase() : value);
+
+/**
+ * Whether a schema's own `type`, `enum` and `const` let its value be a
+ * flag: its `type` holds `boolean`, or its `enum` or `const` holds only
+ * flag values (`"true"`, `"yes"`, `0`), or it says neither.
+ */
+const holdsFlag = (
+  schema: Readonly<Record<string, Json | undefined>>
+): boolean => {
+  const { type, const: only } = schema;
+  const values = schema.enum;
+  if (isJsonArray(values) || only !== undefined) {
+    return (
+      (!isJsonArray(values) || values.every(isFlagValue)) &&
+      (only === undefined || isFlagValue(only))
+    );
+  }
+  return (
+    type === undefined ||
+    type === "boolean" ||
+    (isJsonArray(type) && type.includes("boolean"))
+  );
+};
+
+/**
+ * How deep `mayBeFlag` reads a schema, `$ref`s followed: they chain past
+ * the depth a listed schema may nest, and the stack is finite.
+ */
+const maxFlagDepth = 64;
+
+/**
+ * Whether a property's `schema`, within the input's `root`, lets its value
+ * be a flag: every constraint it has allows one. Its own allow one
+ * (`holdsFlag`); every member of its `allOf` and some of its `anyOf` or
+ * `oneOf` allows one; and what its `$ref` names does. Text and numbers it
+ * types (`delivery_status`, an enum of states) aren't flags. A schema with
+ * none of them may hold anything, and so may a `$ref` that names nothing
+ * in the root, one still being read (a loop) and one past `maxFlagDepth`:
+ * each answer only ever raises a class. `known` holds each schema's
+ * answer, so one named many times, by any spelling of its `$ref`, is read
+ * once.
+ */
+const mayBeFlag = (
+  schema: Json | undefined,
+  root: Json,
+  known: Map<Json, boolean>,
+  depth = 0
+): boolean => {
+  if (!isRecord(schema) || depth > maxFlagDepth) {
+    return true;
+  }
+  const answer = known.get(schema);
+  if (answer !== undefined) {
+    return answer;
+  }
+  known.set(schema, true);
+  const allows = (each: Json) => mayBeFlag(each, root, known, depth + 1);
+  const { allOf, anyOf, oneOf, $ref } = schema;
+  const union = [anyOf, oneOf].filter(isJsonArray).flat();
+  const named = referenced(root, $ref);
+  const result =
+    holdsFlag(schema) &&
+    (!isJsonArray(allOf) || allOf.every(allows)) &&
+    (union.length === 0 || union.some(allows)) &&
+    (named === undefined || allows(named));
+  known.set(schema, result);
+  return result;
+};
 
 /**
  * Whether a property names people by its words: one starting with one of
@@ -744,6 +847,7 @@ const findingsOf = (name: string, inputSchema: Json): Findings => {
     properties.some((property) => namesPeople(property, starts, to));
   const sends = ([property]: Property) =>
     sendingStems.some((stem) => property.toLowerCase().includes(stem));
+  const known = new Map<Json, boolean>();
   return {
     reads:
       readVerbs.has(words[0] ?? "") ||
@@ -754,9 +858,7 @@ const findingsOf = (name: string, inputSchema: Json): Findings => {
       names(addressWords, "none") ||
       properties.some(
         (property) =>
-          sends(property) &&
-          isRecord(property[1]) &&
-          property[1].type === "boolean"
+          sends(property) && mayBeFlag(property[1], inputSchema, known)
       ),
     targets:
       names(targetWords, draft ? "none" : "either") ||

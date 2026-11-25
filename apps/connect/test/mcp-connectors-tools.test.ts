@@ -613,7 +613,76 @@ describe("a connector's tools", () => {
         takes({ id: text, shouldnotify: { type: "boolean" } })
       ),
       tool("fetch_report", takes({ id: text, sendNow: { type: "boolean" } })),
+      tool(
+        "get_digest",
+        takes({
+          id: text,
+          send_now: { anyOf: [{ type: "boolean" }, { type: "null" }] },
+          notify: { type: ["boolean", "null"] },
+        })
+      ),
+      tool(
+        "read_summary",
+        takes({
+          id: text,
+          autosend: { type: "string", enum: ["true", "false"] },
+        })
+      ),
       tool("list_deliveries", takes({ delivery_status: text })),
+      tool("list_notifications", {
+        inputSchema: {
+          type: "object",
+          properties: {
+            notification_type: { $ref: "#/$defs/Kind" },
+            delivery_status: { allOf: [{ $ref: "#/$defs/Kind" }] },
+          },
+          $defs: { Kind: { type: "string", enum: ["sent", "failed"] } },
+        },
+      }),
+      // Each definition names the next twice: read once each, not 2^40 times.
+      tool("get_fanout", {
+        inputSchema: {
+          type: "object",
+          properties: { send_now: { $ref: "#/$defs/A0" } },
+          $defs: Object.fromEntries(
+            Array.from({ length: 40 }, (_, index) => [
+              `A${index}`,
+              index === 39
+                ? { type: "boolean" }
+                : {
+                    anyOf: [
+                      { $ref: `#/$defs/A${index + 1}` },
+                      { $ref: `#/$defs/A${index + 1}` },
+                    ],
+                  },
+            ])
+          ),
+        },
+      }),
+      // A chain of $refs deeper than any schema nests: no stack overflow.
+      tool("get_chained", {
+        inputSchema: {
+          type: "object",
+          properties: { send_now: { $ref: "#/hops/0" } },
+          hops: Array.from({ length: 2000 }, (_, index) => ({
+            $ref: `#/hops/${index + 1}`,
+          })),
+        },
+      }),
+      tool("get_anchored", {
+        inputSchema: {
+          type: "object",
+          properties: { send_now: { $ref: "#Flag" } },
+          $defs: { Flag: { $anchor: "Flag", type: "boolean" } },
+        },
+      }),
+      tool("get_brief", {
+        inputSchema: {
+          type: "object",
+          properties: { notify: { $ref: "#/$defs/Flag" } },
+          $defs: { Flag: { anyOf: [{ type: "boolean" }, { type: "null" }] } },
+        },
+      }),
     ];
     const { connectionId } = await connected();
     const classes = await classesOf(connectionId);
@@ -654,7 +723,14 @@ describe("a connector's tools", () => {
       save_draft_for: classes.save_draft_for,
       update_ticket: classes.update_ticket,
       fetch_report: classes.fetch_report,
+      get_digest: classes.get_digest,
+      read_summary: classes.read_summary,
       list_deliveries: classes.list_deliveries,
+      list_notifications: classes.list_notifications,
+      get_brief: classes.get_brief,
+      get_fanout: classes.get_fanout,
+      get_anchored: classes.get_anchored,
+      get_chained: classes.get_chained,
     }).toStrictEqual({
       post_to_channel: "reach-others",
       save_note: "reach-others",
@@ -691,7 +767,14 @@ describe("a connector's tools", () => {
       save_draft_for: "reach-others",
       update_ticket: "reach-others",
       fetch_report: "reach-others",
+      get_digest: "reach-others",
+      read_summary: "reach-others",
       list_deliveries: "read-own",
+      list_notifications: "read-own",
+      get_brief: "reach-others",
+      get_fanout: "reach-others",
+      get_anchored: "reach-others",
+      get_chained: "reach-others",
     });
   });
 
