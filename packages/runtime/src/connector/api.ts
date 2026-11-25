@@ -205,20 +205,36 @@ const answerOf = <Returns extends AnySchema | undefined>(
 };
 
 /**
+ * How a vendor's error answers read, where they differ from the default:
+ * the code an answer names (`{ error: { code } }`, or `{ code }`), whether
+ * an answer other than a 429 is a rate limit, and the statuses it refuses
+ * a request as not valid with (400 and 422).
+ */
+export interface VendorErrors {
+  code?: (body: unknown) => string | undefined;
+  isThrottled?: (status: number, code: string | undefined) => boolean;
+  invalid?: readonly number[];
+}
+
+/**
  * The API one call of a tool may use: its `routes` on the connector's
  * `hosts` under its `base`, at the vendor called `name` in the errors a
- * caller sees.
+ * caller sees, its error answers read as `errors` says.
  */
 export const apiFor = (
   name: string,
   hosts: readonly string[],
   routes: readonly Route[],
-  base = ""
+  base = "",
+  errors: VendorErrors = {}
 ): { api: Api; wrote: () => boolean } => {
   const vendor = providerFetch({
     name,
-    errorCodeOf,
-    invalidStatuses: [400, 422],
+    errorCodeOf: errors.code ?? errorCodeOf,
+    ...(errors.isThrottled === undefined
+      ? {}
+      : { isThrottled: errors.isThrottled }),
+    invalidStatuses: errors.invalid ?? [400, 422],
   });
   let wrote = false;
   /** Whether the write's own answer says it did nothing. */
