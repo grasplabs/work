@@ -41,6 +41,7 @@ import {
 } from "@grasp-os/app-kit/components/tooltip";
 import { Link, Outlet, useMatchRoute, useRouter } from "@tanstack/react-router";
 import {
+  AudioLinesIcon,
   BuildingIcon,
   FlaskConicalIcon,
   HourglassIcon,
@@ -65,7 +66,7 @@ import type { Organization } from "./views.ts";
 
 /** One of the admin's own places, down the top of its sidebar. */
 interface Place {
-  to: "/" | "/connectors" | "/platform" | "/ask" | "/lab";
+  to: "/" | "/connectors" | "/platform" | "/ask" | "/lab" | "/voice-lab";
   label: string;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
 }
@@ -80,6 +81,7 @@ const places: readonly Place[] = [
   { to: "/platform", label: "Platform", icon: ServerIcon },
   { to: "/ask", label: "Ask Grasp", icon: SparklesIcon },
   { to: "/lab", label: "Stephen Lab", icon: FlaskConicalIcon },
+  { to: "/voice-lab", label: "Voice Lab", icon: AudioLinesIcon },
 ];
 
 /**

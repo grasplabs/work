@@ -1,3 +1,4 @@
+import { NAMED } from "@grasp-os/shared/interviewers/stephen";
 import type { KickoffView, VisionField } from "@grasp-os/shared/kickoff";
 import { interviewLocales } from "@grasp-os/shared/onboarding";
 import type {
@@ -6,7 +7,6 @@ import type {
 } from "@grasp-os/shared/onboarding-staff";
 
 import { kickoffBrief } from "./kickoff.ts";
-import { NAMED } from "./stephen.ts";
 
 // How Stephen is set up for one deployment (GRA-320), as in the
 // prototype's "How he is set up" (`components/admin/org-stephen.tsx`,

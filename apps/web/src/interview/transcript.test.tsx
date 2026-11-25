@@ -30,6 +30,9 @@ const shown = async (alone: boolean, lines: InterviewLine[]) => {
         <Transcript
           alone={alone}
           lines={lines}
+          onEdit={() => {
+            // Not changed here.
+          }}
           onRemove={() => {
             // Not removed here.
           }}

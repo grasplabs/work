@@ -15,8 +15,6 @@ export interface DrawOptions {
   clear: () => DOMRect | undefined;
   /** Reduced motion: one settled picture, no loop. */
   still: boolean;
-  /** How far the page has gone, 0 to 1, read at each picture (Backdrop's `progress`; 0 without it). */
-  progress: () => number;
 }
 
 /** Counts a picture drawn on `canvas`, as `data-drawn`, so a check can see it draw and stop. */
