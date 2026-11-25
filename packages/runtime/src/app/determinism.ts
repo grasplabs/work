@@ -3,8 +3,8 @@ import {
   descriptorOf,
   isInPlace,
   withoutPrototype,
-} from "../common/clock-and-randomness.ts";
-import { refusals } from "../common/lockdown.ts";
+} from "./clock-and-randomness.ts";
+import { refusals } from "./lockdown.ts";
 import { impureMessage } from "./migration.ts";
 
 // What a migration's transform must not reach while it runs: the clock

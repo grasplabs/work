@@ -1,7 +1,7 @@
 import type { HttpContract } from "@grasp-os/shared/http-contract";
 
+import type { JsonValue } from "../common/value-descriptor.ts";
 import type { ConnectorCatalog } from "./connector-catalog.gen.ts";
-import type { JsonValue } from "./value-descriptor.ts";
 
 /**
  * A Composio connection's generated contract, `composio.<toolkit>@1`: the

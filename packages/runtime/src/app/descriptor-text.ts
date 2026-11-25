@@ -2,8 +2,8 @@ import type {
   ValueDescriptor,
   ValueSchema,
 } from "../common/value-descriptor.ts";
-import { readDescriptor, refuseDescriptor } from "../common/value-read.ts";
 import { schemaOf } from "../common/value-schema.ts";
+import { readDescriptor, refuseDescriptor } from "./value-read.ts";
 
 /** The descriptor `text` holds, its structure checked (`readDescriptor`). */
 const descriptorRead = (text: string): ValueDescriptor => {

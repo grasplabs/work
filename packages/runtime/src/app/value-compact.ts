@@ -1,17 +1,17 @@
 import { canonicalText, isPlainObject } from "@grasp-os/shared/json";
 
-import { seal } from "./descriptor-seal.ts";
+import { seal } from "../common/descriptor-seal.ts";
 import {
   descriptorVersion,
   unsafeKeys,
   ValueDefinitionError,
   valueLimits,
-} from "./value-descriptor.ts";
+} from "../common/value-descriptor.ts";
 import type {
   JsonValue,
   SemanticKind,
   ValueDescriptor,
-} from "./value-descriptor.ts";
+} from "../common/value-descriptor.ts";
 
 // A value descriptor's compact form: what a person or an agent writes by
 // hand where a descriptor is stored as text (a workflow's JSON, an App's

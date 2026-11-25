@@ -3,7 +3,6 @@ import { isEventType } from "@grasp-os/shared/sealed-builds";
 
 import { namePattern } from "../common/declaration.ts";
 import type { ValueDescriptor } from "../common/value-descriptor.ts";
-import { readDescriptor } from "../common/value-read.ts";
 import type { FunctionManifest } from "./app-types.ts";
 import type {
   BoundWorkflow,
@@ -11,6 +10,7 @@ import type {
   BoundWorkflowEvent,
 } from "./bound-workflows.ts";
 import type { ReferenceKind } from "./function-references.ts";
+import { readDescriptor } from "./value-read.ts";
 import { workflowReferenceLimits } from "./workflow-references.ts";
 
 // What a page knows of its App's public functions beyond their names:

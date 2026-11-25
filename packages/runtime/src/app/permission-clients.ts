@@ -11,14 +11,11 @@ import type {
   BrainSkill,
   BrainSkillText,
 } from "../common/brain-recall.ts";
-import type {
-  ContractAction,
-  HttpRequestInit,
-} from "../common/connector-contracts.ts";
 import type { MemberName } from "../common/member-names.ts";
 import type { ValueSchema } from "../common/value-descriptor.ts";
 import type { AnySchema } from "../common/value-schema.ts";
 import type { Infer, ObjectInput } from "../common/value-types.ts";
+import type { ContractAction, HttpRequestInit } from "./connector-contracts.ts";
 import type { GraspFunctions } from "./grasp-functions.ts";
 import type {
   BrainOperation,

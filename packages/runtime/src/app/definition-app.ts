@@ -3,7 +3,6 @@ import { defineSchema } from "../common/define-schema.ts";
 import { defineTable } from "../common/define-table.ts";
 import type { AnyTable, SchemaDefinition } from "../common/schema-types.ts";
 import type { RowRule, TableAccess } from "../common/table-access.ts";
-import { readDescriptor } from "../common/value-read.ts";
 import { schemaOf } from "../common/value-schema.ts";
 import type { AnySchema } from "../common/value-schema.ts";
 import { AppDefinitionError } from "./app-definition-error.ts";
@@ -18,6 +17,7 @@ import type {
   DefinedTable,
 } from "./definition-types.ts";
 import { readPermissionDeclaration } from "./permission-read.ts";
+import { readDescriptor } from "./value-read.ts";
 
 // A definition is checked whole, by declaring it as code would
 // (`definitionApp`): the builders check every name, type, index, rule and

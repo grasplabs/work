@@ -9,7 +9,6 @@ import type { SchemaDefinitionCode } from "../common/schema-error.ts";
 import { managedFields, schemaLimits } from "../common/schema-limits.ts";
 import type { AnyTable, SchemaDefinition } from "../common/schema-types.ts";
 import { descriptorVersion } from "../common/value-descriptor.ts";
-import { readDescriptor } from "../common/value-read.ts";
 import { schemaOf } from "../common/value-schema.ts";
 import type { AnySchema } from "../common/value-schema.ts";
 import {
@@ -19,6 +18,7 @@ import {
   schemaManifest,
 } from "./schema-manifest.ts";
 import type { SchemaManifest } from "./schema-manifest.ts";
+import { readDescriptor } from "./value-read.ts";
 
 const refuse: (code: SchemaDefinitionCode, message: string) => never = refuser(
   SchemaDefinitionError

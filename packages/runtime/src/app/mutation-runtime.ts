@@ -1,7 +1,7 @@
 import { rngChacha20 } from "@noble/ciphers/chacha.js";
 import { hexToBytes } from "@noble/ciphers/utils.js";
 
-import { replaceClockAndRandomness } from "../common/clock-and-randomness.ts";
+import { replaceClockAndRandomness } from "./clock-and-randomness.ts";
 
 // A mutation's time and randomness, as Convex's: inside a mutation
 // `Date.now()` and `new Date()` answer the time it started, and

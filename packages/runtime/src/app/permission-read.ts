@@ -1,11 +1,11 @@
 import { canonicalText, isPlainObject } from "@grasp-os/shared/json";
 
-import { readDescriptor } from "../common/value-read.ts";
 import { schemaOf } from "../common/value-schema.ts";
 import { refuse } from "./permission-checks.ts";
 import { peopleDeclaration, permissionAliases } from "./permission-types.ts";
 import type { AnyPermission, AppPermission } from "./permission-types.ts";
 import { permission } from "./permission.ts";
+import { readDescriptor } from "./value-read.ts";
 
 /** `descriptor`, data a manifest holds, as the schema it describes. */
 const schemaFrom = (descriptor: unknown) =>

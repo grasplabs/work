@@ -1,13 +1,13 @@
-import type {
-  ConnectorAction,
-  ConnectorContract,
-} from "../common/connector-contracts.ts";
 import type { ValueDescriptor } from "../common/value-descriptor.ts";
 import type { AnySchema } from "../common/value-schema.ts";
 import type {
   BoundWorkflowDecision,
   BoundWorkflowEvent,
 } from "./bound-workflows.ts";
+import type {
+  ConnectorAction,
+  ConnectorContract,
+} from "./connector-contracts.ts";
 import type { FilesOperation } from "./file-link-references.ts";
 
 /** The kinds of permission an action reaches through `ctx`. */

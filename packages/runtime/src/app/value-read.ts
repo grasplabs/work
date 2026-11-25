@@ -1,8 +1,11 @@
 import { isPlainObject } from "@grasp-os/shared/json";
 
-import { seal } from "./descriptor-seal.ts";
-import { ValueDefinitionError, valueLimits } from "./value-descriptor.ts";
-import type { ValueDescriptor } from "./value-descriptor.ts";
+import { seal } from "../common/descriptor-seal.ts";
+import {
+  ValueDefinitionError,
+  valueLimits,
+} from "../common/value-descriptor.ts";
+import type { ValueDescriptor } from "../common/value-descriptor.ts";
 
 // Reading a descriptor of unknown origin back into a sealed one: a stored
 // manifest's, a browser's, another version's. Only the host does this

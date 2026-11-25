@@ -69,8 +69,8 @@ export {
   CompactDescriptorError,
   compactDescriptorSchema,
   descriptorFromCompact,
-} from "../common/value-compact.ts";
-export type { CompactDescriptor } from "../common/value-compact.ts";
+} from "./value-compact.ts";
+export type { CompactDescriptor } from "./value-compact.ts";
 
 // An App's manifest as the host reads it back from what inspection or a
 // release answered, and the modules and references it generates from it.

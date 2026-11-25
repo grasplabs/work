@@ -26,7 +26,7 @@ export type {
   ConnectorContract,
   HttpAnswer,
   HttpRequestInit,
-} from "../common/connector-contracts.ts";
+} from "./connector-contracts.ts";
 export type { HttpContract } from "@grasp-os/shared/http-contract";
 export type { GraspFunctions } from "./grasp-functions.ts";
 export type {

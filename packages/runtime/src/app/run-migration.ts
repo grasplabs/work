@@ -1,6 +1,6 @@
-import { isThenable } from "../common/lockdown.ts";
 import { inspectApp } from "./app.ts";
 import { deterministically } from "./determinism.ts";
+import { isThenable } from "./lockdown.ts";
 import { migrationHandler, promiseMessage } from "./migration.ts";
 import type { MigrationContext } from "./migration.ts";
 

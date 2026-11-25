@@ -8,10 +8,6 @@ import { stableIdPattern } from "@grasp-os/shared/store-limits";
 import { z } from "zod";
 
 import { isOverBytes, refuser } from "../common/declaration.ts";
-import {
-  compactDescriptor,
-  descriptorFromCompact,
-} from "../common/value-compact.ts";
 import { ValueDefinitionError } from "../common/value-descriptor.ts";
 import type {
   FrozenJson,
@@ -19,6 +15,7 @@ import type {
 } from "../common/value-descriptor.ts";
 import { AppDefinitionError } from "./app-definition-error.ts";
 import type { AppDefinition, DefinedPermission } from "./definition-types.ts";
+import { compactDescriptor, descriptorFromCompact } from "./value-compact.ts";
 
 // An App's definition as JSON: the structure its text holds, every
 // descriptor in its compact form (value-compact.ts), and its one text,

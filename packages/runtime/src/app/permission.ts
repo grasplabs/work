@@ -1,10 +1,6 @@
 import { isPlainObject } from "@grasp-os/shared/json";
 import { isEventType, sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 
-import type {
-  ConnectorAction,
-  ConnectorContract,
-} from "../common/connector-contracts.ts";
 import { namePattern } from "../common/declaration.ts";
 import { descriptorOf } from "../common/sealed-descriptors.ts";
 import type { AnySchema } from "../common/value-schema.ts";
@@ -14,6 +10,10 @@ import type {
   BoundWorkflowDecision,
   BoundWorkflowEvent,
 } from "./bound-workflows.ts";
+import type {
+  ConnectorAction,
+  ConnectorContract,
+} from "./connector-contracts.ts";
 import type { FilesOperation } from "./file-link-references.ts";
 import { graspFunctions } from "./grasp-functions.ts";
 import {

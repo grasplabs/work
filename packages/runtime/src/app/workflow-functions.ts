@@ -3,7 +3,6 @@ import { errorCategories } from "@grasp-os/shared/error-categories";
 import { descriptorOf } from "../common/sealed-descriptors.ts";
 import { ValueDefinitionError } from "../common/value-descriptor.ts";
 import type { ValueDescriptor } from "../common/value-descriptor.ts";
-import { readDescriptor } from "../common/value-read.ts";
 import { schemaOf } from "../common/value-schema.ts";
 import type { AnySchema } from "../common/value-schema.ts";
 import {
@@ -13,6 +12,7 @@ import {
 } from "../common/values.ts";
 import type { FunctionManifest } from "./app-types.ts";
 import type { BoundWorkflow } from "./bound-workflows.ts";
+import { readDescriptor } from "./value-read.ts";
 import { workflowReferenceLimits } from "./workflow-references.ts";
 
 // The ordinary functions a generated workflow reference exposes, as

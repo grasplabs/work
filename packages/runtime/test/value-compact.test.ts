@@ -4,7 +4,7 @@ import {
   compactDescriptor,
   CompactDescriptorError,
   descriptorFromCompact,
-} from "../src/common/value-compact.ts";
+} from "../src/app/value-compact.ts";
 import { v } from "../src/common/values.ts";
 
 // A descriptor's compact form (pure logic, from its threat model): it is

@@ -3,7 +3,6 @@ import { appMaxFunctions } from "@grasp-os/shared/function-limits";
 import { canonicalText, isPlainObject } from "@grasp-os/shared/json";
 
 import { hasExactly, isOverBytes, refuser } from "../common/declaration.ts";
-import { readDescriptor } from "../common/value-read.ts";
 import { schemaOf } from "../common/value-schema.ts";
 import type { AnySchema } from "../common/value-schema.ts";
 import { AppDefinitionError } from "./app-definition-error.ts";
@@ -17,6 +16,7 @@ import { readSchemaManifest } from "./schema-manifest-read.ts";
 import type { FunctionKind, Visibility } from "./server-function.ts";
 import { builderNames } from "./server-modules.ts";
 import { serverModule } from "./server.ts";
+import { readDescriptor } from "./value-read.ts";
 
 // Reading an App's manifest of unknown origin: what inspecting its code
 // in a sandbox answered, or what a sealed release stored. The
