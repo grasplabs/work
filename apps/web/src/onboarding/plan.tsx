@@ -49,9 +49,9 @@ const styles = stylex.create({
 });
 
 /** The moments of the campaign, by how many days after today: until core plans one. */
-const after = { first: 2, everyone: 6, close: 9, findings: 13 } as const;
+export const after = { first: 2, everyone: 6, close: 9, findings: 13 } as const;
 
-type Moment = keyof typeof after;
+export type Moment = keyof typeof after;
 
 /** The days each moment stands for in the drawing: from it to the next. */
 const spans: Record<Moment, readonly [number, number]> = {
@@ -73,7 +73,7 @@ const talkersOn = (day: number): number => {
 };
 
 /** What each day from today to the findings holds. */
-const planDays = (today: Date): PlanDay[] =>
+export const planDays = (today: Date): PlanDay[] =>
   Array.from({ length: after.findings + 1 }, (_, day) => {
     const date = new Date(today);
     date.setUTCDate(today.getUTCDate() + day);
@@ -90,21 +90,31 @@ const planDays = (today: Date): PlanDay[] =>
     return { kind: "reads", count: 0 };
   });
 
-export const PlanBody = ({ today }: { today: string }) => {
-  const { t, i18n } = useLingui();
-  const [lit, setLit] = useState<Moment | null>(null);
-  const start = new Date(`${today}T12:00:00Z`);
-  const dateOf = (moment: Moment) => {
-    const date = new Date(start);
-    date.setUTCDate(start.getUTCDate() + after[moment]);
-    return date;
-  };
-  const format = new Intl.DateTimeFormat(i18n.locale, {
+/** Today, as the day the plan counts from: at noon, so no time zone moves it. */
+export const planStart = (today: string): Date =>
+  new Date(`${today}T12:00:00Z`);
+
+/** The day of a moment of the plan. */
+export const dateOf = (start: Date, moment: Moment): Date => {
+  const date = new Date(start);
+  date.setUTCDate(start.getUTCDate() + after[moment]);
+  return date;
+};
+
+/** A day of the plan as the admin reads it: "Fri, Nov 27" in their language. */
+export const planDateFormat = (locale: string): Intl.DateTimeFormat =>
+  new Intl.DateTimeFormat(locale, {
     weekday: "short",
     day: "numeric",
     month: "short",
     timeZone: "UTC",
   });
+
+export const PlanBody = ({ today }: { today: string }) => {
+  const { t, i18n } = useLingui();
+  const [lit, setLit] = useState<Moment | null>(null);
+  const start = planStart(today);
+  const format = planDateFormat(i18n.locale);
   const moments: { id: Moment; what: string }[] = [
     { id: "first", what: t`The people who know the work best go first` },
     { id: "everyone", what: t`Everyone else gets their own link` },
@@ -120,7 +130,7 @@ export const PlanBody = ({ today }: { today: string }) => {
         />
         <ol aria-label={t`Your campaign`} {...stylex.props(styles.rows)}>
           {moments.map(({ id, what }) => {
-            const day = dateOf(id);
+            const day = dateOf(start, id);
             return (
               <li
                 key={id}

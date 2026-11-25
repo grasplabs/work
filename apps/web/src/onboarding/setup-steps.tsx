@@ -20,7 +20,7 @@ import { ForgetKickoff } from "./forget-kickoff.tsx";
 import { handOver } from "./hand-over.ts";
 import { LanguageCards } from "./language-cards.tsx";
 import { LeadsStep } from "./leads-step.tsx";
-import { PlanBody } from "./plan.tsx";
+import { PlanStory } from "./plan-story.tsx";
 import { DifferenceItem, MailToLetThrough } from "./review-parts.tsx";
 import { afterAi, openItems } from "./setup.ts";
 import type { SetupStep } from "./setup.ts";
@@ -131,28 +131,10 @@ const Ai = ({ data, askedFor, path, go, onward }: StepProps) => {
   );
 };
 
-/** The plan: their campaign as plain rows, and what a finding looks like. */
-const About = ({ onward, today }: StepProps) => {
-  const { t } = useLingui();
-  return (
-    <CalmStep
-      body={t`I talk with your team for one week. Then you get what I learned, team by team.`}
-      end={
-        <Button
-          onClick={() => {
-            void onward();
-          }}
-          size="lg"
-        >
-          {t`Continue`}
-        </Button>
-      }
-      title={t`Here’s the plan`}
-    >
-      <PlanBody today={today} />
-    </CalmStep>
-  );
-};
+/** The plan: told as a small story, then their campaign as plain rows (plan-story.tsx). */
+const About = ({ onward, today }: StepProps) => (
+  <PlanStory onward={onward} today={today} />
+);
 
 /** The steps people told two ways and nobody could explain, each settled in core. `changing` are the settled ones decided again. */
 const Differences = ({
