@@ -26,7 +26,6 @@ import {
 } from "@grasp-os/ui/components/dialog";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
-import { Text } from "@grasp-os/ui/components/text";
 import {
   ArchiveIcon,
   ArrowLeftIcon,
@@ -36,9 +35,11 @@ import {
   TrashIcon,
   UndoIcon,
 } from "@grasp-os/ui/lib/icons";
+import { colors, font } from "@grasp-os/ui/lib/tokens.stylex";
 import type { I18n, MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
 import {
   useCallback,
@@ -309,17 +310,26 @@ const RenameChatDialog = ({
   );
 };
 
+const styles = stylex.create({
+  // When a chat was last used, at its row's end, as #2503's: quiet, its
+  // figures each as wide, so the times stand in one column.
+  time: {
+    color: colors.mutedForeground,
+    fontSize: font.textXs,
+    lineHeight: font.textXsLine,
+    fontVariantNumeric: "tabular-nums",
+  },
+});
+
 /** A row's end: the working mark while its agent answers, else when it was last used. */
 const RowEnd = ({ chat, now }: { chat: ChatSummary; now: Date }) => {
   const { i18n } = useLingui();
   return chat.running ? (
     <AgentIndicator />
   ) : (
-    <Text as="span" color="muted" size="xs">
-      <time dateTime={chat.lastAt}>
-        {whenShort(chat.lastAt, now, i18n.locale)}
-      </time>
-    </Text>
+    <time dateTime={chat.lastAt} {...stylex.props(styles.time)}>
+      {whenShort(chat.lastAt, now, i18n.locale)}
+    </time>
   );
 };
 
