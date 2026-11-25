@@ -43,13 +43,8 @@ const styles = stylex.create({
     transitionTimingFunction: duration.ease,
   },
   // Before the way to open the chat, after Send: a line as tall as an
-  // icon, a space-2 from each (the tools' own space-1 and one more), as
-  // #2503's bar draws it.
-  line: {
-    alignSelf: "center",
-    height: size.iconSm,
-    marginInline: space["1"],
-  },
+  // icon, the tools' own gap from each, as #2503's bar draws it.
+  line: { alignSelf: "center", height: size.iconSm },
   // Away while the chat is open: sunk a little and out of reach.
   closed: {
     visibility: "hidden",
