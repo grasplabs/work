@@ -5,6 +5,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
+import { outbound } from "../src/company-network.ts";
 import { connections } from "../src/db/schema.ts";
 import { addConnector } from "../src/mcp-connectors.ts";
 import { connectWithKey } from "../src/oauth.ts";
@@ -378,8 +379,22 @@ describe("a shared connection reached through the company network", () => {
   it("CN-E: is refused where the deployment has no route, and nothing is sent", async () => {
     const hosted = { ...env, COMPANY_NETWORK: undefined };
     const person = admin();
+    // A connection made where there was a route, called where there's none
+    // now (the binding removed, or a rollback): never sent to the internet.
+    const called = await outbound(
+      hosted,
+      address
+    )(
+      new Request(`https://${sampleErpHost}/api/orders`, {
+        headers: { "x-api-key": companyNetworkKey },
+      })
+    ).then(
+      () => "sent",
+      () => "refused"
+    );
 
     expect({
+      called,
       app: await outcome(
         connectWithKey(hosted, {
           person,
@@ -402,6 +417,7 @@ describe("a shared connection reached through the company network", () => {
       company: await companySent(),
       internet: internet.sent,
     }).toStrictEqual({
+      called: "refused",
       app: "connection.company_network_unavailable",
       server: "connection.company_network_unavailable",
       company: [],

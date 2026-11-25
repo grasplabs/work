@@ -1443,7 +1443,7 @@ const keyCompanyNetwork = async (
     await refuse("connection.invalid");
     throw connectionErrors.create("connection.invalid");
   }
-  if (companyRoute(env, companyNetwork) === undefined) {
+  if (companyRoute(env) === undefined) {
     await refuse("connection.company_network_unavailable");
     throw connectionErrors.create("connection.company_network_unavailable");
   }

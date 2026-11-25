@@ -173,7 +173,7 @@ export const addConnector = async (
     if (address === undefined || auth.kind !== "header") {
       throw connectionErrors.create("connection.invalid");
     }
-    if (companyRoute(env, address) === undefined) {
+    if (companyRoute(env) === undefined) {
       throw connectionErrors.create("connection.company_network_unavailable");
     }
   } else if (!(await isPublicName(server))) {
@@ -351,7 +351,7 @@ const serverFor = async (
   allows: (method: string, name: string | null) => boolean
 ) => {
   const row = await drizzle(env.DB)
-    .select({ url: connectors.url })
+    .select({ url: connectors.url, companyNetwork: connectors.companyNetwork })
     .from(connectors)
     .where(eq(connectors.id, connection.server))
     .get();
@@ -362,6 +362,10 @@ const serverFor = async (
     env,
     connection.id
   );
+  // A server inside the network is never sent to over the internet.
+  if (row.companyNetwork === true && companyNetwork === undefined) {
+    throw connectErrors.create("connect.server_unavailable");
+  }
   const send = outbound(env, companyNetwork);
   return modernMcpServer(row.url, async (request) => {
     if (

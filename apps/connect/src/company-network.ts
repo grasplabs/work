@@ -23,28 +23,22 @@
 //   bound as `COMPANY_NETWORK`, that allows only the approved addresses:
 //   apart from connect's public-only network, which every other request
 //   goes through, and from the network the AI endpoints use (GRA-1481).
-//   A name that resolves to another internal address is refused there
-//   (CN5). Hosted, the route is a Workers VPC Service binding for the
+//   A name that resolves to an address that isn't approved is refused
+//   there (CN5); one the client's DNS points at another approved address
+//   reaches that system instead, so an IP address is the safer setting.
+//   Hosted, the route is a Workers VPC Service binding for the
 //   address, through the client's tunnel (Grasp Link): not built yet
 //   (GRA-2315, GRA-2317), so a hosted deployment has none and refuses.
 
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
 
 /**
- * A way into the company network: a workerd network service on-prem, a
- * Workers VPC Service binding hosted.
+ * The deployment's way into the company network, or none where it has
+ * none: on-prem, one workerd network that allows only the approved
+ * addresses. Hosted, GRA-2315 plugs in the Workers VPC Service binding.
  */
-export type CompanyRoute = Pick<Fetcher, "fetch">;
-
-/**
- * The deployment's route to `address`, or none where it has none. On-prem,
- * one workerd network for every approved address, which allows only
- * them. Hosted (GRA-2315), the address's own VPC Service binding.
- */
-export const companyRoute = (
-  env: Env,
-  _address: string
-): CompanyRoute | undefined => env.COMPANY_NETWORK;
+export const companyRoute = (env: Env): Fetcher | undefined =>
+  env.COMPANY_NETWORK;
 
 /**
  * `value` as an approved address: an http or https origin and nothing
@@ -81,7 +75,7 @@ export const outbound = (env: Env, address: string | undefined): Outbound => {
     return publicOutbound;
   }
   return async (request) => {
-    const route = companyRoute(env, address);
+    const route = companyRoute(env);
     if (route === undefined) {
       throw new Error("This deployment has no route into the company network");
     }

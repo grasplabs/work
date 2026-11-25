@@ -114,8 +114,9 @@ interface __BaseEnv_Env {
    * each host `AI_PRIVATE_HOSTS` names, and nothing else private:
    * `allow = ["public", "10.0.0.8/32"]`, never `"private"`, which would
    * let any name that resolves to a private address through
-   * (scripts/workerd-connect-networks.ts). Unset (hosted), they go through
-   * connect's own fetch.
+   * (scripts/workerd-connect-networks.ts). `AI_PROVIDER_ORIGIN` at a
+   * private address is one of those hosts, so its address is opened here
+   * too. Unset (hosted), they go through connect's own fetch.
    */
   AI_NETWORK?: Fetcher;
   /**

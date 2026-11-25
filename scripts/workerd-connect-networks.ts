@@ -17,7 +17,9 @@
  *
  * Never `"private"` on any of them, which would let any name that resolves
  * to a private address through. Workerd checks each address a name
- * resolves to against the network's list, so DNS can't lead elsewhere.
+ * resolves to against the network's list, so DNS can't lead outside it;
+ * within the company network it can lead to another approved address,
+ * which is why an IP address is the safer setting there.
  */
 
 /** The workerd services of connect's networks. */
