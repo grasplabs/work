@@ -27,9 +27,6 @@ interface __BaseEnv_Env {
    */
   MICROSOFT_DOCUMENTS_CLIENT_ID?: string;
   MICROSOFT_DOCUMENTS_CLIENT_SECRET?: string;
-  /** Grasp's Google OAuth client for connections (src/providers.ts). */
-  GOOGLE_CLIENT_ID?: string;
-  GOOGLE_CLIENT_SECRET?: string;
   /**
    * Grasp's Google OAuth client for the directory's read-only admin
    * connection (src/providers.ts), apart from the one above so that

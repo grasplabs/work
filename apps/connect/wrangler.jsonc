@@ -29,7 +29,7 @@
   //
   // Connecting accounts needs more, set by the admin, but connect takes
   // calls without them, so they aren't required: each provider's app credentials,
-  // MICROSOFT_CLIENT_ID and _SECRET, GOOGLE_CLIENT_ID and _SECRET,
+  // MICROSOFT_CLIENT_ID and _SECRET,
   // MICROSOFT_DIRECTORY_CLIENT_ID and _SECRET
   // and GOOGLE_DIRECTORY_CLIENT_ID and _SECRET for the directory's own apps,
   // MICROSOFT_DOCUMENTS_CLIENT_ID and _SECRET and GOOGLE_DOCUMENTS_CLIENT_ID

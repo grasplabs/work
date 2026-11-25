@@ -22,11 +22,11 @@ import {
   idTokenClaims,
   lookupAccount,
   maxAccountField,
+  readCapped,
 } from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
 import {
   classesOnByDefault,
-  googleRights,
   microsoftRights,
   rightKey,
   rightsFor,
@@ -212,6 +212,17 @@ export interface OAuthProviderConfig {
     clientId: string,
     accountId: string
   ) => Promise<string | null>;
+  /**
+   * The address the provider's userinfo endpoint confirms for
+   * `accessToken` now, for the account `accountId` in `tenant`, by the same
+   * rules; `null` when it confirms none. Set with `confirmAddress`, which
+   * falls back to it where a renewal brings no ID token.
+   */
+  userinfo?: (
+    accessToken: string,
+    tenant: string,
+    accountId: string
+  ) => Promise<string | null>;
 }
 
 /** An app people connect with an API key they give. */
@@ -242,7 +253,6 @@ const credentials = (
 
 /** Just the subject of an ID token, however the rest of it looks. */
 const oidOnly = z.object({ oid: z.string().min(1) });
-const subOnly = z.object({ sub: z.string().min(1) });
 
 const microsoftClaims = z.object({
   iss: z.string(),
@@ -254,20 +264,6 @@ const microsoftClaims = z.object({
   email: z.string().optional(),
   preferred_username: z.string().optional(),
 });
-
-const googleClaims = z.object({
-  iss: z.string(),
-  aud: z.string(),
-  sub: z.string().min(1),
-  hd: z.string().optional(),
-  email: z.string().optional(),
-  email_verified: z.boolean().optional(),
-});
-
-const googleIssuers = new Set([
-  "https://accounts.google.com",
-  "accounts.google.com",
-]);
 
 const microsoftLogin = "https://login.microsoftonline.com";
 
@@ -339,121 +335,6 @@ const microsoft: OAuthProviderConfig = {
   account: entraAccount,
 };
 
-/** Google's userinfo endpoint, as its discovery document names it. */
-const googleUserinfo = "https://openidconnect.googleapis.com/v1/userinfo";
-
-/** What a userinfo answer must hold for its address to count, as an ID token's would. */
-const googleUserinfoSchema = z.object({
-  sub: z.string().min(1),
-  email: z.string().min(1),
-  email_verified: z.literal(true),
-  hd: z.string(),
-});
-
-/** How long a userinfo read may take before its address counts as unconfirmed. */
-const userinfoTimeoutMs = 10_000;
-
-/**
- * The address Google's userinfo endpoint confirms for `accessToken`: only
- * for the account `accountId` under the hosted domain `tenant`, marked
- * verified; `null` for anything else, an error included.
- */
-export const googleUserinfoAddress = async (
-  accessToken: string,
-  tenant: string,
-  accountId: string
-): Promise<string | null> => {
-  try {
-    const response = await fetch(googleUserinfo, {
-      headers: { authorization: `Bearer ${accessToken}` },
-      redirect: "manual",
-      signal: AbortSignal.timeout(userinfoTimeoutMs),
-    });
-    if (!response.ok) {
-      await response.body?.cancel();
-      return null;
-    }
-    const info = googleUserinfoSchema.safeParse(await response.json());
-    return info.success &&
-      info.data.sub === accountId &&
-      info.data.hd.toLowerCase() === tenant
-      ? info.data.email.toLowerCase()
-      : null;
-  } catch {
-    return null;
-  }
-};
-
-/** The account Google's ID token names, if it is for Grasp's app in `tenant`. */
-// oxlint-disable-next-line require-await -- an app's lookup is async
-const googleAccount = async (
-  { idToken }: TokenSet,
-  tenant: string,
-  clientId: string
-): Promise<ProviderAccount | null> => {
-  const parsed = googleClaims.safeParse(idTokenClaims(idToken));
-  if (!parsed.success) {
-    return null;
-  }
-  const { iss, aud, sub, hd, email, email_verified: verified } = parsed.data;
-  const inTenant =
-    googleIssuers.has(iss) &&
-    aud === clientId &&
-    hd?.toLowerCase() === tenant &&
-    verified === true;
-  return inTenant
-    ? { id: sub, name: email ?? null, email: email ?? null }
-    : null;
-};
-
-/**
- * Google Workspace. Google can only hint at the domain (`hd`), so the ID
- * token's `hd` is what counts. `access_type=offline` with `prompt=consent`
- * is how Google gives a refresh token every time.
- */
-const google: OAuthProviderConfig = {
-  kind: "oauth",
-  id: "google",
-  server: "google-workspace",
-  pinned: true,
-  isTenant: (tenant) => tenantKinds.domain.test(tenant),
-  authorizationEndpoint: () => "https://accounts.google.com/o/oauth2/v2/auth",
-  tokenEndpoint: () => "https://oauth2.googleapis.com/token",
-  revocationEndpoint: "https://oauth2.googleapis.com/revoke",
-  // Google revokes the account's whole grant with this client.
-  accountWideGrant: "google",
-  // Those of the classes on by default; a consent asks those of the classes
-  // the company turned on (`rightsFor`, GRA-756). A connection granted
-  // before the connector wrote events is marked for reconnecting on its
-  // first refused write (tokens.ts `markIfGrantLacks`).
-  scopes: googleRights(classesOnByDefault),
-  scopeSeparator: " ",
-  grantListed: true,
-  authorizationParams: (tenant) => ({
-    access_type: "offline",
-    prompt: "consent",
-    hd: tenant,
-  }),
-  clientAuthentication: "client_secret_post",
-  client: (env) => credentials(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET),
-  subject: ({ idToken }) => subOnly.safeParse(idTokenClaims(idToken)).data?.sub,
-  account: googleAccount,
-  confirmAddress: async (tokens, tenant, clientId, accountId) => {
-    // The renewal's ID token, which Google returns from a refresh
-    // (https://developers.google.com/identity/openid-connect/openid-connect,
-    // "an ID token is returned from a token refresh"), checked as at
-    // connecting; else the userinfo endpoint of Google's discovery document,
-    // for the token just renewed, with the same checks.
-    const fromToken = await googleAccount(tokens, tenant, clientId);
-    if (fromToken !== null) {
-      return fromToken.id === accountId
-        ? (fromToken.email?.toLowerCase() ?? null)
-        : null;
-    }
-    return await googleUserinfoAddress(tokens.accessToken, tenant, accountId);
-  },
-};
-
 /** What the directory's Microsoft connection reads Graph with, and only that. */
 const microsoftDirectoryScopes = [
   "openid",
@@ -501,53 +382,6 @@ const microsoftDirectory: OAuthProviderConfig = {
       env.MICROSOFT_DIRECTORY_CLIENT_ID,
       env.MICROSOFT_DIRECTORY_CLIENT_SECRET
     ),
-};
-
-/** Google's directory, read-only: its users, and nothing of Gmail or Drive. */
-const googleDirectoryScope =
-  "https://www.googleapis.com/auth/admin.directory.user.readonly";
-
-/**
- * The directory's read-only admin connection to Google's directory
- * (GRA-369), through the Admin SDK, which only a Workspace admin's account
- * reads. It has an OAuth client of its own (`GOOGLE_DIRECTORY_CLIENT_*`):
- * Google revokes the whole grant of an account and client whichever of
- * its tokens is revoked, so disconnecting it can never disconnect the
- * same admin's Gmail. Google names the sign-in scopes by their full URIs
- * in its answer.
- */
-const googleDirectory: OAuthProviderConfig = {
-  ...google,
-  id: "google-directory",
-  // A client of its own (below), so a grant of its own.
-  accountWideGrant: "google-directory",
-  server: "google-directory",
-  scopes: ["openid", "email", "profile", googleDirectoryScope],
-  granted: {
-    allowed: new Set([
-      "openid",
-      "email",
-      "profile",
-      "https://www.googleapis.com/auth/userinfo.email",
-      "https://www.googleapis.com/auth/userinfo.profile",
-      googleDirectoryScope,
-    ]),
-    required: [googleDirectoryScope],
-  },
-  sharedOnly: true,
-  client: (env) =>
-    credentials(
-      env.GOOGLE_DIRECTORY_CLIENT_ID,
-      env.GOOGLE_DIRECTORY_CLIENT_SECRET
-    ),
-};
-
-/** The directory's connections, by provider. */
-const directoryProviders: Readonly<
-  Record<DirectoryProvider, OAuthProviderConfig>
-> = {
-  "microsoft-directory": microsoftDirectory,
-  "google-directory": googleDirectory,
 };
 
 /**
@@ -622,55 +456,14 @@ const microsoftDocuments: OAuthProviderConfig = {
     ),
 };
 
-/** Google Drive, read-only: its files, and nothing of Gmail or the calendar. */
-const googleDocumentsScope = "https://www.googleapis.com/auth/drive.readonly";
-
 /**
- * The documents' read-only admin connection to Google Drive (GRA-370). It
- * has an OAuth client of its own (`GOOGLE_DOCUMENTS_CLIENT_*`), for the
- * directory's reason: Google revokes the whole grant of an account and
- * client whichever of its tokens is revoked, so disconnecting it never
- * disconnects the same admin's Gmail. Google's Picker, which grants only
- * the files picked (`drive.file`), would need the token in the browser,
- * and tokens stay in connect; so the folders are listed here, read-only.
+ * The suites connect configures itself, by provider: Microsoft 365, until
+ * its connector declares its sign-in. Google Workspace's connector declares
+ * its own (packages/connectors/google-workspace).
  */
-const googleDocuments: OAuthProviderConfig = {
-  ...google,
-  id: "google-documents",
-  // A client of its own (below), so a grant of its own.
-  accountWideGrant: "google-documents",
-  server: "google-documents",
-  scopes: ["openid", "email", "profile", googleDocumentsScope],
-  granted: {
-    allowed: new Set([
-      "openid",
-      "email",
-      "profile",
-      "https://www.googleapis.com/auth/userinfo.email",
-      "https://www.googleapis.com/auth/userinfo.profile",
-      googleDocumentsScope,
-    ]),
-    required: [googleDocumentsScope],
-  },
-  sharedOnly: true,
-  client: (env) =>
-    credentials(
-      env.GOOGLE_DOCUMENTS_CLIENT_ID,
-      env.GOOGLE_DOCUMENTS_CLIENT_SECRET
-    ),
-};
-
-/** The documents' connections, by provider. */
-const placesProviders: Readonly<Record<PlacesProvider, OAuthProviderConfig>> = {
-  "microsoft-documents": microsoftDocuments,
-  "google-documents": googleDocuments,
-};
-
-/** The suites, by provider. */
-export const providers: Readonly<Record<OAuthProvider, OAuthProviderConfig>> = {
-  microsoft,
-  google,
-};
+export const providers: Readonly<
+  Partial<Record<OAuthProvider, OAuthProviderConfig>>
+> = { microsoft };
 
 /**
  * Grasp's OAuth apps at the apps, by provider: one Worker secret, JSON,
@@ -729,6 +522,23 @@ const claimOf = (claims: Record<string, unknown>, name: string): unknown =>
   Object.hasOwn(claims, name) ? claims[name] : undefined;
 
 /**
+ * Whether `claims` hold every claim `check` names as it says: a string,
+ * `{tenant}` filled and compared without case, or `true`.
+ */
+const claimsHold = (
+  check: IdTokenCheck,
+  claims: Record<string, unknown>,
+  tenant: string
+): boolean =>
+  Object.entries(check.claims ?? {}).every(([name, wanted]) => {
+    const value = claimOf(claims, name);
+    return wanted === true
+      ? value === true
+      : typeof value === "string" &&
+          value.toLowerCase() === withTenant(wanted, tenant).toLowerCase();
+  });
+
+/**
  * The account an ID token names as `check` says (`IdTokenCheck`), if it
  * comes from its issuer for the client `clientId` and holds its claims,
  * `{tenant}` filled with `tenant`; `null` otherwise. A claim it reads
@@ -770,13 +580,7 @@ const idTokenAccount = (
         value === undefined ||
         (typeof value === "string" && value.length <= maxAccountField)
     );
-  const holds = Object.entries(check.claims ?? {}).every(([name, wanted]) => {
-    const value = claimOf(claims, name);
-    return wanted === true
-      ? value === true
-      : typeof value === "string" &&
-          value.toLowerCase() === withTenant(wanted, tenant).toLowerCase();
-  });
+  const holds = claimsHold(check, claims, tenant);
   // Entra's B2B guest is signed in by another tenant's issuer (`idp`).
   const ownIssuer = (check.sameIssuer ?? []).every((name) => {
     const value = claimOf(claims, name);
@@ -785,6 +589,57 @@ const idTokenAccount = (
   return issued && holds && ownIssuer
     ? { id, name: firstOf(check.name), email: firstOf(check.email) }
     : null;
+};
+
+/** How long a userinfo read may take before its address counts as unconfirmed. */
+const userinfoTimeoutMs = 10_000;
+
+/**
+ * The address the OpenID userinfo endpoint `url` (OpenID Connect Core
+ * §5.3) confirms for `accessToken`, as `check` reads an ID token: only for
+ * the account `accountId`, with every claim `check` names as it says
+ * (`{tenant}` filled with `tenant`); `null` for anything else, an error
+ * included. Its answer has no issuer or audience to check: the token it
+ * was sent with is what it answers for.
+ */
+const userinfoAddress = async (
+  check: IdTokenCheck,
+  url: string,
+  accessToken: string,
+  tenant: string,
+  accountId: string
+): Promise<string | null> => {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${accessToken}`,
+      },
+      // A redirect would take the token along.
+      redirect: "manual",
+      signal: AbortSignal.timeout(userinfoTimeoutMs),
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      return null;
+    }
+    const claims: unknown = JSON.parse(await readCapped(response));
+    if (
+      !isRecord(claims) ||
+      claimOf(claims, check.subject) !== accountId ||
+      !claimsHold(check, claims, tenant)
+    ) {
+      return null;
+    }
+    const email = (check.email ?? [])
+      .map((name) => claimOf(claims, name))
+      .find((value) => value !== undefined);
+    return typeof email === "string" && email.length <= maxAccountField
+      ? email.toLowerCase()
+      : null;
+  } catch {
+    return null;
+  }
 };
 
 /** An app, as its record describes it. */
@@ -808,6 +663,18 @@ export const appProvider = ({
     };
   }
   const { account, idToken, tenant } = signIn;
+  const userinfoUrl = idToken?.userinfo;
+  const userinfo =
+    idToken === undefined || userinfoUrl === undefined
+      ? undefined
+      : async (accessToken: string, each: string, accountId: string) =>
+          await userinfoAddress(
+            idToken,
+            userinfoUrl,
+            accessToken,
+            each,
+            accountId
+          );
   return {
     kind: "oauth",
     id: provider,
@@ -864,8 +731,140 @@ export const appProvider = ({
             await Promise.resolve(
               idTokenAccount(idToken, token, each, clientId)
             ),
+          ...(userinfo === undefined
+            ? {}
+            : {
+                userinfo,
+                confirmAddress: async (
+                  tokens: TokenSet,
+                  each: string,
+                  clientId: string,
+                  accountId: string
+                ) => {
+                  // The renewal's ID token, checked as at connecting, where
+                  // the provider returns one from a refresh; else its
+                  // userinfo endpoint, for the token just renewed.
+                  const renewed = idTokenAccount(
+                    idToken,
+                    tokens.idToken,
+                    each,
+                    clientId
+                  );
+                  if (renewed !== null) {
+                    return renewed.id === accountId
+                      ? (renewed.email?.toLowerCase() ?? null)
+                      : null;
+                  }
+                  return await userinfo(tokens.accessToken, each, accountId);
+                },
+              }),
         }),
   };
+};
+
+/**
+ * Google Workspace's sign-in, as its connector declares it: the
+ * directory's and the documents' Google connections sign in the same way,
+ * each with a client of its own, so a grant of its own. None while the
+ * release has no such connector, and then neither of them.
+ */
+const googleWorkspace = ((): OAuthProviderConfig | undefined => {
+  const record = appRecord("google");
+  const config = record === undefined ? undefined : appProvider(record);
+  return config?.kind === "oauth" ? config : undefined;
+})();
+
+/** Google's directory, read-only: its users, and nothing of Gmail or Drive. */
+const googleDirectoryScope =
+  "https://www.googleapis.com/auth/admin.directory.user.readonly";
+
+/**
+ * The directory's read-only admin connection to Google's directory
+ * (GRA-369), through the Admin SDK, which only a Workspace admin's account
+ * reads. It has an OAuth client of its own (`GOOGLE_DIRECTORY_CLIENT_*`):
+ * Google revokes the whole grant of an account and client whichever of
+ * its tokens is revoked, so disconnecting it can never disconnect the
+ * same admin's Gmail. Google names the sign-in scopes by their full URIs
+ * in its answer.
+ */
+const googleDirectory: OAuthProviderConfig | undefined = googleWorkspace && {
+  ...googleWorkspace,
+  id: "google-directory",
+  // A client of its own (below), so a grant of its own.
+  accountWideGrant: "google-directory",
+  server: "google-directory",
+  scopes: ["openid", "email", "profile", googleDirectoryScope],
+  granted: {
+    allowed: new Set([
+      "openid",
+      "email",
+      "profile",
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile",
+      googleDirectoryScope,
+    ]),
+    required: [googleDirectoryScope],
+  },
+  sharedOnly: true,
+  client: (env) =>
+    credentials(
+      env.GOOGLE_DIRECTORY_CLIENT_ID,
+      env.GOOGLE_DIRECTORY_CLIENT_SECRET
+    ),
+};
+
+/** The directory's connections, by provider. */
+const directoryProviders: Readonly<
+  Partial<Record<DirectoryProvider, OAuthProviderConfig>>
+> = {
+  "microsoft-directory": microsoftDirectory,
+  "google-directory": googleDirectory,
+};
+
+/** Google Drive, read-only: its files, and nothing of Gmail or the calendar. */
+const googleDocumentsScope = "https://www.googleapis.com/auth/drive.readonly";
+
+/**
+ * The documents' read-only admin connection to Google Drive (GRA-370). It
+ * has an OAuth client of its own (`GOOGLE_DOCUMENTS_CLIENT_*`), for the
+ * directory's reason: Google revokes the whole grant of an account and
+ * client whichever of its tokens is revoked, so disconnecting it never
+ * disconnects the same admin's Gmail. Google's Picker, which grants only
+ * the files picked (`drive.file`), would need the token in the browser,
+ * and tokens stay in connect; so the folders are listed here, read-only.
+ */
+const googleDocuments: OAuthProviderConfig | undefined = googleWorkspace && {
+  ...googleWorkspace,
+  id: "google-documents",
+  // A client of its own (below), so a grant of its own.
+  accountWideGrant: "google-documents",
+  server: "google-documents",
+  scopes: ["openid", "email", "profile", googleDocumentsScope],
+  granted: {
+    allowed: new Set([
+      "openid",
+      "email",
+      "profile",
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/userinfo.profile",
+      googleDocumentsScope,
+    ]),
+    required: [googleDocumentsScope],
+  },
+  sharedOnly: true,
+  client: (env) =>
+    credentials(
+      env.GOOGLE_DOCUMENTS_CLIENT_ID,
+      env.GOOGLE_DOCUMENTS_CLIENT_SECRET
+    ),
+};
+
+/** The documents' connections, by provider. */
+const placesProviders: Readonly<
+  Partial<Record<PlacesProvider, OAuthProviderConfig>>
+> = {
+  "microsoft-documents": microsoftDocuments,
+  "google-documents": googleDocuments,
 };
 
 /**
@@ -874,8 +873,9 @@ export const appProvider = ({
  */
 export const providerFor = (id: string): ProviderConfig | undefined => {
   const suite = oauthProviderSchema.safeParse(id);
-  if (suite.success) {
-    return providers[suite.data];
+  const configured = suite.success ? providers[suite.data] : undefined;
+  if (configured !== undefined) {
+    return configured;
   }
   const directory = directoryProviderSchema.safeParse(id);
   if (directory.success) {

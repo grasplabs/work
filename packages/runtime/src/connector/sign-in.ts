@@ -259,6 +259,14 @@ const claimNameSchema = z
  * each of `sameIssuer` absent or the issuer itself. `subject` names the
  * account's stable ID; `name` and `email` the claims its name and its
  * address are read from, the first that is there.
+ *
+ * With `userinfo`, the address counts as the account's only while each
+ * renewal confirms it again: the renewal's ID token, checked as at
+ * connecting, or else the OpenID userinfo endpoint (OpenID Connect Core
+ * §5.3) for the token just renewed, whose answer must name the same
+ * subject and hold the same `claims`. Core counts a connection's address
+ * as proved only while the last renewal confirmed it, which matters where
+ * people are named by address rather than by a stable ID.
  */
 const idTokenSchema = z.strictObject({
   issuer: z.union([issuerSchema, z.array(issuerSchema).min(1).max(8)]),
@@ -272,6 +280,7 @@ const idTokenSchema = z.strictObject({
     )
     .optional(),
   sameIssuer: z.array(claimNameSchema).min(1).max(4).optional(),
+  userinfo: plainEndpointSchema.optional(),
 });
 export type IdTokenCheck = z.infer<typeof idTokenSchema>;
 
@@ -388,6 +397,12 @@ const oauth2SignInSchema = z
     ({ account, idToken }) =>
       (account === undefined) !== (idToken === undefined),
     "An account lookup or an ID token, one of them"
+  )
+  .refine(
+    ({ idToken }) =>
+      idToken?.userinfo === undefined || idToken.email !== undefined,
+    // Else there is no address to confirm.
+    "A userinfo endpoint confirms an address the ID token names"
   )
   .refine(
     ({ scopes }) =>

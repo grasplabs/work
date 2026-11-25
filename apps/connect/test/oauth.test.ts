@@ -29,6 +29,7 @@ import type { Account } from "./oauth-provider.ts";
 import {
   acmeDomain,
   acmeTenant,
+  appClients,
   clients,
   otherTenant,
 } from "./provider-config.ts";
@@ -147,9 +148,16 @@ describe("starting a connection", () => {
       tenant: acmeDomain,
       returnTo: "/",
     };
+    const { google, ...others } = appClients;
     const unset = [
-      { ...env, GOOGLE_CLIENT_SECRET: undefined },
-      { ...env, GOOGLE_CLIENT_ID: "" },
+      { ...env, APP_OAUTH_CLIENTS: JSON.stringify(others) },
+      {
+        ...env,
+        APP_OAUTH_CLIENTS: JSON.stringify({
+          ...others,
+          google: { ...google, id: "" },
+        }),
+      },
       { ...env, TOKEN_ENCRYPTION_KEY: undefined },
       { ...env, TOKEN_ENCRYPTION_KEY: "too-short" },
     ];

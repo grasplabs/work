@@ -22,7 +22,8 @@ import { emailOf } from "./directory.ts";
 import { ownerErased } from "./erased-people.ts";
 import { SourceError, readFromProvider, requestBudget } from "./event-kinds.ts";
 import type { ProviderAccess, RequestBudget } from "./event-kinds.ts";
-import { googleUserinfoAddress } from "./providers.ts";
+import { providerFor } from "./providers.ts";
+import type { OAuthProviderConfig } from "./providers.ts";
 import { accessTokenFor } from "./tokens.ts";
 
 // The groups each person's own suite account is in, nested ones included
@@ -372,18 +373,19 @@ const countedDatabase = (
 };
 
 /**
- * Whether Google says, for `token`, that `address` is still the address of
- * the account `accountId` under `tenant`: the token's own userinfo, so an
- * address given to someone else since the turn's address was confirmed
- * keeps nothing of what was asked about it.
+ * Whether the provider `userinfo` reads says, for `token`, that `address`
+ * is still the address of the account `accountId` under `tenant`: the
+ * token's own userinfo, so an address given to someone else since the
+ * turn's address was confirmed keeps nothing of what was asked about it.
  */
 const proved = async (
+  userinfo: NonNullable<OAuthProviderConfig["userinfo"]>,
   token: string,
   tenant: string,
   accountId: string,
   address: string | null
 ): Promise<boolean> => {
-  const now = await googleUserinfoAddress(token, tenant, accountId);
+  const now = await userinfo(token, tenant, accountId);
   return now !== null && address !== null && keyOf(now) === keyOf(address);
 };
 
@@ -486,14 +488,18 @@ export const readReaderGroups = async (
       const token = await accessTokenFor(counted, id);
       // oxlint-disable-next-line no-await-in-loop -- one connection at a time, in one budget
       const turn = await goOn(provider, { token, budget }, reading);
-      // Google is asked about an address: nothing it said is kept unless
-      // Google says, for the same token, the address is still this
-      // account's. Microsoft is asked about the token's own account (`/me`),
-      // which no one else's can become.
+      // A provider whose addresses are confirmed again (Google's) is asked
+      // about an address: nothing it said is kept unless it says, for the
+      // same token, the address is still this account's. One asked about
+      // the token's own account (Microsoft's `/me`) has nothing to prove:
+      // no one else's can become it.
+      const confirming = providerFor(provider);
+      const userinfo =
+        confirming?.kind === "oauth" ? confirming.userinfo : undefined;
       if (
-        provider === "google" &&
+        userinfo !== undefined &&
         // oxlint-disable-next-line no-await-in-loop -- one connection at a time
-        !(await proved(token, tenant, accountId, reading.address))
+        !(await proved(userinfo, token, tenant, accountId, reading.address))
       ) {
         throw new SourceError("The address asked about isn't the account's");
       }
