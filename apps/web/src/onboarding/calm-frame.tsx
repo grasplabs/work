@@ -1,6 +1,5 @@
 import { Button } from "@grasp-os/ui/components/button";
 import { Heading } from "@grasp-os/ui/components/heading";
-import { Kbd } from "@grasp-os/ui/components/kbd";
 import { Text } from "@grasp-os/ui/components/text";
 import { isThemeMode, ThemeToggle } from "@grasp-os/ui/components/theme-toggle";
 import {
@@ -122,16 +121,9 @@ const styles = stylex.create({
     justifyContent: "center",
     gap: space[3],
   },
-  // Continue as a "Continue ↵" pair on the column's end edge, right after what the step asks
-  // (`?continue=inline`): no slab under the middle, the hint saying Enter does it too.
-  endInline: { justifyContent: "flex-start" },
-  enter: {
-    display: { default: "flex", [media.maxSm]: "none" },
-    alignItems: "center",
-    gap: space[2],
-  },
-  // `?continue=bar`: one bar along the page's foot, the way back at its start, how far along in
-  // the middle, the step's way on at its end. It stays in sight while the step scrolls under it.
+  // Three designs of one bar along the page's foot (`?continue=bar1|bar2|bar3`): the way back
+  // at its start, the step's way on at its end. It stays in sight while the step scrolls under it.
+  // bar1, the ledge: the page's whole width, frosted, a hairline over it, how far along in the middle.
   foot: {
     position: "sticky",
     insetBlockEnd: 0,
@@ -172,26 +164,81 @@ const styles = stylex.create({
     transitionDuration: "300ms",
   },
   dotDone: { backgroundColor: colors.foreground },
-  // `?continue=corner`: the way on joins the back arrow in the bottom corner, where the eye ends.
-  corner: {
-    position: { default: "fixed", [media.maxSm]: "sticky" },
-    insetBlockEnd: { default: space[6], [media.maxSm]: 0 },
-    insetInlineEnd: space[8],
-    alignSelf: "flex-end",
+  // bar2, the dock: a floating capsule on the column's width, lifted off the page by a shadow,
+  // "4 / 8" in it between back and on.
+  dockRoom: {
+    position: "sticky",
+    insetBlockEnd: 0,
     zIndex: 1,
+    display: "flex",
+    justifyContent: "center",
+    paddingInline: space[4],
+    paddingBlockEnd: { default: space[6], [media.maxSm]: space[3] },
+    pointerEvents: "none",
+  },
+  dock: {
+    pointerEvents: "auto",
+    display: "flex",
+    alignItems: "center",
+    gap: space[3],
+    width: "100%",
+    maxWidth: "40rem",
+    padding: space[2],
+    paddingInlineStart: space[2],
+    borderRadius: "999px",
+    borderWidth: "1px",
+    borderStyle: "solid",
+    borderColor: colors.border,
+    backgroundColor: `color-mix(in oklab, ${colors.background} 88%, transparent)`,
+    backdropFilter: "blur(16px)",
+    boxShadow: "0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px -6px rgb(0 0 0 / 0.12)",
+  },
+  dockCount: {
+    flexGrow: 1,
+    visibility: { default: "visible", [media.maxSm]: "hidden" },
+    fontVariantNumeric: "tabular-nums",
+    whiteSpace: "nowrap",
+  },
+  // bar3, the track: no ground at all, the page fading out under the buttons, and how far along
+  // as one line filling along the window's bottom edge, the step named beside back.
+  trackRoom: {
+    position: "sticky",
+    insetBlockEnd: 0,
+    zIndex: 1,
+    display: "grid",
+    gridTemplateColumns: "1fr auto",
+    alignItems: "center",
+    gap: space[3],
+    paddingBlockStart: space[10],
+    paddingBlockEnd: { default: space[6], [media.maxSm]: space[4] },
+    paddingInline: { default: space[8], [media.maxSm]: space[4] },
+    backgroundImage: `linear-gradient(to top, ${colors.background} 55%, transparent)`,
+  },
+  trackStart: {
     display: "flex",
     alignItems: "center",
     gap: space[2],
-    justifyContent: "flex-end",
-    paddingInline: { default: 0, [media.maxSm]: space[4] },
-    paddingBlock: { default: 0, [media.maxSm]: space[3] },
-    // On a phone it lies over the page's end, so it takes the page's ground there.
-    backgroundColor: {
-      default: null,
-      [media.maxSm]: `color-mix(in oklab, ${colors.background} 82%, transparent)`,
-    },
-    backdropFilter: { default: null, [media.maxSm]: "blur(12px)" },
+    whiteSpace: "nowrap",
   },
+  // On a phone the line along the edge says how far along alone.
+  trackWords: { display: { default: "inline", [media.maxSm]: "none" } },
+  track: {
+    display: "block",
+    position: "absolute",
+    insetInline: 0,
+    insetBlockEnd: 0,
+    height: "3px",
+    backgroundColor: colors.border,
+  },
+  trackFill: {
+    display: "block",
+    height: "100%",
+    backgroundColor: colors.mintDeep,
+    transitionProperty: "width",
+    transitionDuration: "600ms",
+    transitionTimingFunction: "cubic-bezier(0.2, 0.8, 0.2, 1)",
+  },
+  trackWidth: (share: string) => ({ width: share }),
   slot: {
     display: "flex",
     flexDirection: "row-reverse",
@@ -340,16 +387,16 @@ const Leave = () => {
 
 /**
  * Where a step's way on stands, tried out in development only with
- * `?continue=`: `bar` (a bar along the page's foot, back, how far, on),
- * `corner` (in the bottom corner beside the back arrow), `inline` (right
- * after what the step asks, on the column’s end edge, "Enter" beside it); without
- * it, centred under the step as before. The three new ones go on with Enter.
+ * `?continue=`: one bar along the page's foot with back, how far along and
+ * the step's buttons, in three designs: `bar1` the frosted ledge, `bar2`
+ * the floating dock, `bar3` the track along the window's edge. Without it,
+ * centred under the step as before. All three go on with Enter.
  */
-export type ContinuePlace = "centre" | "bar" | "corner" | "inline";
+export type ContinuePlace = "centre" | "bar1" | "bar2" | "bar3";
 
 /** Whether a search names one of the new places, as `/setup` keeps it from step to step. */
 export const isNewPlace = (written: unknown): written is ContinuePlace =>
-  written === "bar" || written === "corner" || written === "inline";
+  written === "bar1" || written === "bar2" || written === "bar3";
 
 const useContinuePlace = (): ContinuePlace => {
   const written = useLocation({ select: (location) => location.searchStr });
@@ -446,6 +493,77 @@ const BackArrow = ({ onBack }: { onBack: (() => void) | undefined }) => {
   );
 };
 
+/** The page's foot: the bar in one of its designs, or the two quiet arrows. */
+const Foot = ({
+  place,
+  progress,
+  setSlot,
+  ways,
+}: {
+  place: ContinuePlace;
+  progress: { at: number; of: number } | undefined;
+  setSlot: (slot: HTMLElement | null) => void;
+  ways: Ways | undefined;
+}) => {
+  const { t } = useLingui();
+  if (place === "bar1") {
+    return (
+      <footer {...stylex.props(styles.foot)}>
+        <span {...stylex.props(styles.footStart)}>
+          <BackArrow onBack={ways?.onBack} />
+        </span>
+        {progress === undefined ? <span /> : <Progress {...progress} />}
+        <div ref={setSlot} {...stylex.props(styles.footEnd)} />
+      </footer>
+    );
+  }
+  if (place === "bar2") {
+    return (
+      <footer {...stylex.props(styles.dockRoom)}>
+        <div {...stylex.props(styles.dock)}>
+          <BackArrow onBack={ways?.onBack} />
+          <span {...stylex.props(styles.dockCount)}>
+            {progress === undefined ? null : (
+              <Text as="span" color="muted" size="sm">
+                {`${progress.at + 1} / ${progress.of}`}
+              </Text>
+            )}
+          </span>
+          <div ref={setSlot} {...stylex.props(styles.footEnd)} />
+        </div>
+      </footer>
+    );
+  }
+  if (place === "bar3") {
+    const step = (progress?.at ?? 0) + 1;
+    const total = progress?.of ?? 1;
+    return (
+      <footer {...stylex.props(styles.trackRoom)}>
+        <span {...stylex.props(styles.trackStart)}>
+          <BackArrow onBack={ways?.onBack} />
+          {progress === undefined ? null : (
+            <span {...stylex.props(styles.trackWords)}>
+              <Text as="span" color="muted" size="sm">
+                {t`Step ${step} of ${total}`}
+              </Text>
+            </span>
+          )}
+        </span>
+        <div ref={setSlot} {...stylex.props(styles.footEnd)} />
+        <span aria-hidden="true" {...stylex.props(styles.track)}>
+          <span
+            {...stylex.props(
+              styles.trackFill,
+              styles.trackWidth(`${(step / total) * 100}%`)
+            )}
+          />
+        </span>
+      </footer>
+    );
+  }
+  return ways === undefined ? null : <WayArrows ways={ways} />;
+};
+
 export const CalmFrame = ({
   userId,
   ways,
@@ -473,32 +591,11 @@ export const CalmFrame = ({
   // A page without steps (the waiting page) keeps its buttons where they are.
   const place = ways === undefined && progress === undefined ? "centre" : asked;
   const [slot, setSlot] = useState<HTMLElement | null>(null);
-  const outside = place === "bar" || place === "corner";
+  const outside = place !== "centre";
   const kept = useMemo(
     () => ({ place, slot: outside ? slot : null }),
     [place, slot, outside]
   );
-  let foot: ReactNode = null;
-  if (place === "bar") {
-    foot = (
-      <footer {...stylex.props(styles.foot)}>
-        <span {...stylex.props(styles.footStart)}>
-          <BackArrow onBack={ways?.onBack} />
-        </span>
-        {progress === undefined ? <span /> : <Progress {...progress} />}
-        <div ref={setSlot} {...stylex.props(styles.footEnd)} />
-      </footer>
-    );
-  } else if (place === "corner") {
-    foot = (
-      <nav {...stylex.props(styles.corner)}>
-        <BackArrow onBack={ways?.onBack} />
-        <div ref={setSlot} {...stylex.props(styles.slot)} />
-      </nav>
-    );
-  } else if (ways !== undefined) {
-    foot = <WayArrows ways={ways} />;
-  }
   return (
     <EndPlace.Provider value={kept}>
       <div {...stylex.props(styles.window)}>
@@ -520,7 +617,12 @@ export const CalmFrame = ({
               {children}
             </div>
           </main>
-          {foot}
+          <Foot
+            place={place}
+            progress={progress}
+            setSlot={setSlot}
+            ways={ways}
+          />
         </StephenField>
       </div>
     </EndPlace.Provider>
@@ -529,36 +631,20 @@ export const CalmFrame = ({
 
 /** A step's way on, where the frame keeps it; it fades in as it arrives. */
 const StepEnd = ({ end }: { end: ReactNode }) => {
-  const { t } = useLingui();
   const { place, slot } = useContext(EndPlace);
   const ref = useEnterGoesOn(place !== "centre");
-  if (place === "bar" || place === "corner") {
-    if (slot === null) {
-      return null;
-    }
-    return createPortal(
-      <div ref={ref} {...stylex.props(styles.slot, fadeIn)}>
-        {end}
-      </div>,
-      slot
-    );
+  if (place === "centre") {
+    return <div {...stylex.props(styles.end)}>{end}</div>;
   }
-  if (place === "inline") {
-    return (
-      <div {...stylex.props(styles.end, styles.endInline, fadeIn)}>
-        <div ref={ref} {...stylex.props(styles.slot)}>
-          {end}
-        </div>
-        <span aria-hidden="true" {...stylex.props(styles.enter)}>
-          <Text as="span" color="muted" size="sm">
-            {t`or press`}
-          </Text>
-          <Kbd>Enter ↵</Kbd>
-        </span>
-      </div>
-    );
+  if (slot === null) {
+    return null;
   }
-  return <div {...stylex.props(styles.end)}>{end}</div>;
+  return createPortal(
+    <div ref={ref} {...stylex.props(styles.slot, fadeIn)}>
+      {end}
+    </div>,
+    slot
+  );
 };
 
 /** A sentence ends before the next is said: a title without its own stop gets one. */
