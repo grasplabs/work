@@ -4,8 +4,12 @@ import type {
   StephenTurn,
   TurnEvent,
 } from "@grasp-os/shared/interview-turn";
+import { runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { labMarks } from "../src/onboarding/lab-marks.ts";
+import { onboardingStore } from "../src/onboarding/store.ts";
 import {
   answering,
   codeOf,
@@ -34,6 +38,8 @@ import { unique } from "./sign-in.ts";
 //   such field, and the brief holds what the store knows.
 // - A line out that breaks his rules, or a fact whose words weren't said.
 // - A turn given up halfway going uncounted, or still running.
+// - A page that names another interviewer getting one: another text, or
+//   another name on record for who held it.
 // - A link that isn't open, nobody signed in, or someone else signed in,
 //   getting a turn.
 
@@ -56,6 +62,17 @@ const line = (say: string, more = "no", part = "you"): ProviderReply => ({
   inputTokens: 1500,
   outputTokens: 40,
 });
+
+/** What the store keeps of the text `person`'s last turn ran on, and who held it. */
+const ranFor = async (person: string) =>
+  await runInDurableObject(onboardingStore(env), (_instance, state) =>
+    state.storage.sql
+      .exec<{ mark: string; interviewer: string }>(
+        "SELECT mark, interviewer FROM interview_settings WHERE person = ?",
+        person
+      )
+      .toArray()
+  );
 
 /** What the notes' model answers. */
 const notes = (body: unknown): ProviderReply => ({
@@ -235,6 +252,39 @@ describe("an interview turn", { timeout: 60_000 }, () => {
       say: "Which part of it takes longest?",
       models: ["claude-sonnet-4-5", "claude-sonnet-4-5", "claude-sonnet-4-5"],
     });
+  });
+
+  it("holds a turn that names Claire as Stephen: his text, his name, and him on record", async () => {
+    const { link, person } = await openedFor();
+    const { requests } = await answering(
+      [line("", "yes", "steps")],
+      async () =>
+        await eventsOf(
+          await ask(link, {
+            event: "answer",
+            locale: "en",
+            interviewer: "claire",
+            lines: [
+              { from: "stephen", text: "Which system do you open first?" },
+              { from: "person", text: "And then I", typed: true },
+            ],
+            facts: [],
+            phase: "steps",
+            minutes: 5,
+          })
+        )
+    );
+    const told = JSON.stringify(requests[0]?.body);
+    expect({
+      his: told.includes(
+        "You are Stephen, an AI interviewer who works for Grasp."
+      ),
+      hisLine: told.includes("Stephen: Which system do you open first?"),
+      hers: told.includes("Claire"),
+    }).toStrictEqual({ his: true, hisLine: true, hers: false });
+    await expect
+      .poll(async () => await ranFor(person))
+      .toStrictEqual([{ mark: labMarks.own.en, interviewer: "stephen" }]);
   });
 
   it("writes nothing down while he waits for the rest of what they say", async () => {

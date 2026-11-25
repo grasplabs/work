@@ -56,7 +56,7 @@ describe("an organization's interviews", () => {
     return { html: opened.html() };
   };
 
-  it("shows every team, everyone by name with their interview’s numbers, and how Stephen and Claire did, in numbers only", async () => {
+  it("shows every team, everyone by name with their interview’s numbers, and how Stephen did, in numbers only", async () => {
     const acme = await liveClient();
     const snapshot = interviewingSnapshot();
     acme.core.admin = snapshot;
@@ -107,9 +107,9 @@ describe("an organization's interviews", () => {
           "1 of 3",
         ]),
         setup: missingIn(setup.html, [
-          "How Stephen and Claire are set up here",
+          "How Stephen is set up here",
           "None named yet: the company’s own Grasp doesn’t say which.",
-          "What they know before they say hello",
+          "What he knows before he says hello",
         ]),
       },
       // Nothing anyone said, and no link's code, on any tab.
@@ -173,7 +173,7 @@ describe("an organization's interviews", () => {
     expect(figureOf("Finished")).toContain(">0 of 2<");
   });
 
-  it("measures Stephen across every organization in the Lab, each opening its interviewers, never with what anyone said", async () => {
+  it("measures Stephen across every organization in the Lab, each opening how he did there, never with what anyone said", async () => {
     const interviewing = await liveClient();
     interviewing.core.admin = interviewingSnapshot();
     const quiet = await liveClient();
@@ -196,10 +196,12 @@ describe("an organization's interviews", () => {
       ].map((label) => html.includes(`>${label}<`)),
       // Core here doesn't say which Stephen held an interview.
       inUse: html.includes("No interview says which Stephen held it yet."),
-      // No lab run is kept in this checkout, and Ben and Dan, Stephen's two, didn't finish.
+      // No lab run is kept in this checkout. Of the three who started only Ana finished, and gave
+      // it a 5: her interview is kept as held by Claire, and counts as any other.
       noRun: html.includes("No lab run is kept yet"),
-      finished: html.includes(">0 of 2<"),
-      // One row a company whose interviews started, opening its interviewers.
+      finished: html.includes(">1 of 3<"),
+      rated: rowOf(html).includes("5.0 (1)"),
+      // One row a company whose interviews started, opening how Stephen did there.
       opens: html.includes(
         `href="/organizations/${interviewing.clientId}/interviews?tab=interviewers"`
       ),
@@ -211,19 +213,12 @@ describe("an organization's interviews", () => {
       inUse: true,
       noRun: true,
       finished: true,
+      rated: true,
       opens: true,
       quietListed: false,
       quietCounted: true,
       leaked: 3,
     });
-
-    // Claire is a switch for the whole page: Ana talked with her, finished, and gave her a 5.
-    const claire = await page("/lab?who=claire");
-    expect({
-      finished: claire.html.includes(">1 of 1<"),
-      rated: rowOf(claire.html).includes("5.0 (1)"),
-      leaked: missingIn(claire.html, [said, fact, linkCode]).length,
-    }).toStrictEqual({ finished: true, rated: true, leaked: 3 });
 
     // Every organization follows Stable here: on Edge there is no one to count.
     const edge = await page("/lab?where=edge");

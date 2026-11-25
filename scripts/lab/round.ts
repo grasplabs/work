@@ -15,7 +15,6 @@ import { compare, noiseOf, shown } from "@grasp-os/shared/lab-compare";
 import type { CaseScore } from "@grasp-os/shared/lab-compare";
 import { markOf } from "@grasp-os/shared/lab-runs";
 import type { Bench, Result } from "@grasp-os/shared/lab-runs";
-import type { Interviewer } from "@grasp-os/shared/onboarding";
 
 import {
   benchAsk,
@@ -85,7 +84,6 @@ export interface RoundArgs {
   label: string | undefined;
   only: readonly string[] | null;
   hidden: boolean;
-  interviewer: Interviewer;
   practice: string | undefined;
   check: boolean;
   answers: string | undefined;
@@ -230,11 +228,10 @@ export const runBenches = async (args: RoundArgs): Promise<void> => {
       const at = new Date().toISOString();
       const details = `${at.slice(0, 16).replace(stamp, "")}-${label.replace(idPart, "-").toLowerCase()}`;
       // oxlint-disable-next-line no-await-in-loop -- the mark before the run, to hold the one after to
-      const before = await stephenVersion(args.interviewer, "en");
+      const before = await stephenVersion("en");
       // oxlint-disable-next-line no-await-in-loop -- one bench at a time
       const cases = await runBench(bench, stand, core, args, {
         set,
-        interviewer: args.interviewer,
         keep: (id, value) => {
           keepJson(
             path.join(detailsFolder(details, bench), `${id}.json`),
@@ -247,7 +244,7 @@ export const runBenches = async (args: RoundArgs): Promise<void> => {
         continue;
       }
       // oxlint-disable-next-line no-await-in-loop -- the mark after the run
-      const after = await stephenVersion(args.interviewer, "en");
+      const after = await stephenVersion("en");
       if (
         markOf({ bench, stephen: after }) !== markOf({ bench, stephen: before })
       ) {
@@ -299,9 +296,6 @@ const mindsOf = (before: Result, after: Result): string[] => [
     : [
         "Mind: the two runs reached other models. What they differ by is also that.",
       ]),
-  ...(before.stephen.interviewer === after.stephen.interviewer
-    ? []
-    : ["Mind: one run is Stephen's and the other Claire's."]),
 ];
 
 /**
@@ -495,7 +489,7 @@ export const checkJudge = (args: RoundArgs): void => {
 export const report = async (args: RoundArgs): Promise<void> => {
   const at = new Date().toISOString();
   const page = reportPage(
-    reportInputOf(at, await stephenVersion(args.interviewer, "en"), results())
+    reportInputOf(at, await stephenVersion("en"), results())
   );
   args.log(
     `The report: ${keepText(path.join(openFolder("out"), "report.html"), page)}`

@@ -666,6 +666,8 @@ export const voiceUse = sqliteTable(
 export const interviewSettings = sqliteTable("interview_settings", {
   person: text().primaryKey(),
   mark: text().notNull(),
+  // Stephen holds every interview now: no new row says Claire, and the
+  // rows of the interviews she held still do.
   interviewer: text({ enum: ["stephen", "claire"] }).notNull(),
   locale: text().notNull(),
   /**

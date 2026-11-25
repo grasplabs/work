@@ -67,7 +67,7 @@ export const interviewTurnRequestSchema = z.strictObject({
   secret: interviewSecretSchema,
   event: z.enum(interviewEvents),
   locale: interviewLocaleSchema,
-  /** Who holds the interview: the one they chose on the way in. */
+  /** The one they chose on the way in; core holds the turn as Stephen whoever it names. */
   interviewer: interviewerSchema.default("stephen"),
   /** The conversation so far, oldest first; the last line is what they just said. */
   lines: z

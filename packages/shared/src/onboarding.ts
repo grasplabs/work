@@ -14,9 +14,8 @@ import type {
 } from "./onboarding-flow.ts";
 import type { onboardingStages } from "./onboarding-summary.ts";
 
-// The onboarding's interviews: Stephen, or Claire if the person prefers,
-// talks with every team lead and then with everyone else, in the language
-// they choose. Shared by core, which holds the interviews, and the web
+// The onboarding's interviews: Stephen talks with every team lead and
+// then with everyone else, in the language they choose. Shared by core, which holds the interviews, and the web
 // app, which shows them.
 
 /** The languages an interview is held in: the ones the frontend speaks. */
@@ -25,17 +24,14 @@ export const interviewLocaleSchema = z.enum(interviewLocales);
 export type InterviewLocale = z.infer<typeof interviewLocaleSchema>;
 
 /**
- * Who holds an interview. It is one interview either way: the same
- * questions in the same order under the same rules, so what two people
- * told two interviewers can be laid side by side. What differs is the
- * person: the voice, the face, and how they react.
+ * Who an interview names as holding it. Stephen holds every one: core
+ * says his text in his voice whoever is named. Claire stays here because
+ * the onboarding's pages still offer and send her until they drop the
+ * choice, and interviews kept from when she held them still name her.
  */
 export const interviewers = ["stephen", "claire"] as const;
 export const interviewerSchema = z.enum(interviewers);
 export type Interviewer = z.infer<typeof interviewerSchema>;
-
-/** Who holds an interview when nobody chose. */
-export const firstInterviewer: Interviewer = "stephen";
 
 /** What each is called: a name, the same in every language. */
 export const interviewerNames: Record<Interviewer, string> = {
