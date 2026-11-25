@@ -14,6 +14,7 @@ import {
   signedInApi,
   staffPerson,
 } from "./sign-in.ts";
+import { connectDb } from "./test-env.ts";
 
 // Company apps through Composio, by class (GRA-725): the chat's agent
 // reads in an app only where an admin pointed it, for its person, within
@@ -181,6 +182,39 @@ describe("a company app", setUpTime, () => {
         send: message("connect.class_off"),
       })
     );
+  });
+
+  it("is pointed at as a whole app when it is a connector made from a URL", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const connectionId = `connection-${crypto.randomUUID()}`;
+    const now = Date.now();
+    await connectDb()
+      .prepare(
+        "INSERT INTO connections (id, provider, scope, status, server_kind, server, created_at, updated_at) VALUES (?, ?, 'shared', 'active', 'connector', ?, ?, ?)"
+      )
+      .bind(
+        connectionId,
+        "mcp_0123456789abcdef",
+        "mcp_0123456789abcdef",
+        now,
+        now
+      )
+      .run();
+    const pointer = async (resources: string[]) => {
+      await admin.api.connections.pointApp({
+        connectionId,
+        resources,
+        audience: { who: "everyone" },
+      });
+    };
+
+    expect({
+      withinResources: await outcome(pointer(["project-1"])),
+      wholeApp: await outcome(pointer([])),
+    }).toStrictEqual({
+      withinResources: "connection.invalid",
+      wholeApp: "ok",
+    });
   });
 
   it("is pointed at by the company's admins only, never by Grasp staff, and only a company app's connection", async () => {

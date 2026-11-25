@@ -13,7 +13,7 @@ import { connectionIdSchema } from "@grasp-os/shared/ids";
 import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { recordEvents } from "./audit.ts";
@@ -25,6 +25,7 @@ import {
 import type { Connection } from "./connections.ts";
 import { maxListedTools, secretContext } from "./connector-providers.ts";
 import { connections, connectionTools, connectors } from "./db/schema.ts";
+import { ownerErased } from "./erased-people.ts";
 import { clientFor, discoverSignIn, isPublicName } from "./mcp-discovery.ts";
 import { McpError, mcpHeaderValue, modernMcpServer } from "./mcp.ts";
 import type { ListedServerTool, McpServer, McpTool } from "./mcp.ts";
@@ -81,9 +82,9 @@ const defaultListTtlMs = 5 * 60 * 1000;
 
 /**
  * Most tools one statement keeps: D1 binds at most 100 parameters a
- * statement, and a kept tool takes six.
+ * statement, a kept tool takes six, and the condition it is kept on a few.
  */
-const toolsPerInsert = 16;
+const toolsPerInsert = 14;
 
 /**
  * A tool name connect sends: MCP's own rule for names (1 to 128 of
@@ -414,6 +415,11 @@ export const currentTools = async (
     return tool === undefined ? [] : [tool];
   });
   const db = drizzle(env.DB);
+  // Kept only for the connection as it was when the list was asked for:
+  // still active, not changed since (signed in again, disconnected), and
+  // its person not being erased. A list that comes back after that is
+  // used for this call alone.
+  const asAsked = sql`EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'active' AND ${connections.updatedAt} = ${connection.updatedAt.getTime()} AND NOT ${ownerErased(connection.id)})`;
   const read = db
     .update(connections)
     .set({
@@ -422,7 +428,7 @@ export const currentTools = async (
         now + Math.min(listed.ttlMs ?? defaultListTtlMs, maxListTtlMs)
       ),
     })
-    .where(eq(connections.id, connection.id));
+    .where(and(eq(connections.id, connection.id), asAsked));
   // An unchanged list is kept as it is: only its freshness moves.
   const kept = await keptTools(env.DB, connection.id);
   if (
@@ -432,29 +438,24 @@ export const currentTools = async (
     await read;
     return tools;
   }
-  const rows = tools.map((tool) => ({
-    connectionId: connection.id,
-    name: tool.name,
-    description: tool.description,
-    inputSchema: JSON.stringify(tool.inputSchema),
-    outputSchema:
-      tool.outputSchema === undefined
-        ? null
-        : JSON.stringify(tool.outputSchema),
-    annotations: tool.annotations,
-  }));
+  const rows = tools.map(
+    (tool) =>
+      sql`(${connection.id}, ${tool.name}, ${tool.description}, ${JSON.stringify(tool.inputSchema)}, ${tool.outputSchema === undefined ? null : JSON.stringify(tool.outputSchema)}, ${JSON.stringify(tool.annotations)})`
+  );
   const inserts = [];
   for (let start = 0; start < rows.length; start += toolsPerInsert) {
     inserts.push(
       db
         .insert(connectionTools)
-        .values(rows.slice(start, start + toolsPerInsert))
+        .select(
+          sql`SELECT * FROM (VALUES ${sql.join(rows.slice(start, start + toolsPerInsert), sql`, `)}) WHERE ${asAsked}`
+        )
     );
   }
   await db.batch([
     db
       .delete(connectionTools)
-      .where(eq(connectionTools.connectionId, connection.id)),
+      .where(and(eq(connectionTools.connectionId, connection.id), asAsked)),
     ...inserts,
     read,
   ]);

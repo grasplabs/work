@@ -179,12 +179,34 @@ const propertyNames = (schema: Json): string[] => {
   return names;
 };
 
+/**
+ * The names of the input's own properties: at its top, and at the top of
+ * every schema it is composed of (`anyOf`, `oneOf`, `allOf`).
+ */
+const topNames = (schema: Json): string[] => {
+  const names: string[] = [];
+  const pending: Json[] = [schema];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    if (!isRecord(next)) {
+      continue;
+    }
+    if (isRecord(next.properties)) {
+      names.push(...Object.keys(next.properties));
+    }
+    for (const members of [next.anyOf, next.oneOf, next.allOf]) {
+      if (isJsonArray(members)) {
+        pending.push(...members);
+      }
+    }
+  }
+  return names;
+};
+
 /** Whether the tool's input names people a call of it reaches. */
 const takesRecipients = (inputSchema: Json): boolean =>
-  (isRecord(inputSchema) && isRecord(inputSchema.properties)
-    ? Object.keys(inputSchema.properties)
-    : []
-  ).some((name) => recipientNames.has(name.toLowerCase())) ||
+  topNames(inputSchema).some((name) =>
+    recipientNames.has(name.toLowerCase())
+  ) ||
   propertyNames(inputSchema).some((name) =>
     wordsOf(name).some((word) => recipientWords.has(word))
   );

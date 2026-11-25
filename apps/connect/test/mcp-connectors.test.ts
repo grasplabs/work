@@ -109,8 +109,11 @@ describe("a connector made from Linear's MCP server URL", () => {
         "DELETE FROM connection_tokens WHERE connection_id = ?"
       ).bind(connectionId),
     ]);
+    // What the account signed in to now lists, while the old list is fresh.
+    linear.tools = linear.tools.filter(({ name }) => name !== "list_teams");
 
     const again = await connectLinear(connector, anna);
+    const classes = await exports.default.connectorToolClasses(connectionId);
     const read = await callAs(agent, {
       connectionId,
       action: "list_issues",
@@ -126,14 +129,41 @@ describe("a connector made from Linear's MCP server URL", () => {
     expect({
       twice,
       sameConnection: again === connectionId,
+      listedNow: Object.hasOwn(classes, "list_teams"),
       read: read.output.includes("ENG-1"),
       toolsAfterDisconnect: tools?.kept,
     }).toStrictEqual({
       twice: "connection.already_connected",
       sameConnection: true,
+      listedNow: false,
       read: true,
       toolsAfterDisconnect: 0,
     });
+  });
+
+  it("keeps no tool list that comes back after its connection was disconnected", async () => {
+    const connector = await addLinear();
+    const anna = someone();
+    const connectionId = await connectLinear(connector, anna);
+    // The server answers at once; its answer reaches connect only after
+    // the person disconnected.
+    linear.next = async (request) => {
+      const answered = await linear.handle(request);
+      await exports.default.disconnect({ person: anna, connectionId });
+      return answered;
+    };
+
+    const classes = await exports.default.connectorToolClasses(connectionId);
+    const kept = await env.DB.prepare(
+      "SELECT count(*) AS kept FROM connection_tools WHERE connection_id = ?"
+    )
+      .bind(connectionId)
+      .first<{ kept: number }>();
+
+    expect({
+      readForTheCall: Object.keys(classes).length > 0,
+      kept: kept?.kept,
+    }).toStrictEqual({ readForTheCall: true, kept: 0 });
   });
 
   it("keeps none of an erased person's tool lists, once their grant is revoked", async () => {

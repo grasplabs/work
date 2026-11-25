@@ -573,6 +573,9 @@ const signedInAgain = (
         accountAddresses: addresses.receives,
         accountSenders: addresses.sends,
       }),
+  // Read again, for the account it holds now (mcp-connectors.ts).
+  toolListReadAt: null,
+  toolListFreshUntil: null,
   updatedAt: now,
 });
 
@@ -628,6 +631,12 @@ const reconnect = async (
           .from(connections)
           .where(stillWaiting)
       ),
+      // Its server's tool list was read for the account it held before.
+      db
+        .delete(connectionTools)
+        .where(
+          sql`${connectionTools.connectionId} = ${held.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${stillWaiting})`
+        ),
       db
         .update(connections)
         .set({
@@ -686,6 +695,12 @@ const renewInPlace = async (
         })
         .where(
           sql`${connectionTokens.connectionId} = ${held.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${stillActive})`
+        ),
+      // Its server's tool list was read for the account it held before.
+      db
+        .delete(connectionTools)
+        .where(
+          sql`${connectionTools.connectionId} = ${held.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${stillActive})`
         ),
       db
         .update(connections)
@@ -1338,9 +1353,17 @@ const replaceKey = async (
         .where(
           sql`${connectionTokens.connectionId} = ${held.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${stillActive})`
         ),
+      // Its server's tool list was read for the account it held before.
+      db
+        .delete(connectionTools)
+        .where(
+          sql`${connectionTools.connectionId} = ${held.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${stillActive})`
+        ),
       db
         .update(connections)
         .set({
+          toolListReadAt: null,
+          toolListFreshUntil: null,
           accountName: account.name,
           accountEmail: account.email?.toLowerCase() ?? null,
           pastVerifiedEmails: pastAddressesAfter(

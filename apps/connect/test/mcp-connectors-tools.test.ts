@@ -302,6 +302,12 @@ describe("a connector's tools", () => {
       tool("search", {
         inputSchema: { type: "object", properties: { to: { type: "string" } } },
       }),
+      tool("search_notes", {
+        inputSchema: {
+          type: "object",
+          anyOf: [{ type: "object", properties: { to: { type: "string" } } }],
+        },
+      }),
       tool("find_and_send"),
       tool("read_messages"),
       tool("delete_issue"),
@@ -315,6 +321,7 @@ describe("a connector's tools", () => {
       getAndUpdateIssue: classes.getAndUpdateIssue,
       list_and_archive: classes.list_and_archive,
       search: classes.search,
+      search_notes: classes.search_notes,
       find_and_send: classes.find_and_send,
       read_messages: classes.read_messages,
       delete_issue: await outcome(
@@ -329,6 +336,7 @@ describe("a connector's tools", () => {
       getAndUpdateIssue: "change-own",
       list_and_archive: "change-own",
       search: "reach-others",
+      search_notes: "reach-others",
       find_and_send: "change-own",
       read_messages: "read-others",
       delete_issue: "connect.never",
