@@ -512,6 +512,8 @@ add(
       "https://@example.com",
       "https://goo\u200Bgle.com",
       "https://ex\u00ADample.com",
+      "https://goo%E2%80%8Bgle.com",
+      "https://goo%E2gle.com",
       "https://example.com/\uD800",
       " https://example.com",
       "https://example.com\n",
@@ -528,7 +530,7 @@ add(
     { value: "https://münchen.example/straße" },
     { value: "HTTPS://Example.com" },
     { value: "https://example.com/?q=\u2764\uFE0F" },
-    ...Array.from({ length: 20 }, () => ({ issues: [["value.invalid_url"]] })),
+    ...Array.from({ length: 22 }, () => ({ issues: [["value.invalid_url"]] })),
   ]
 );
 add(

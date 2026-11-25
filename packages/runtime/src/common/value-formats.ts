@@ -69,7 +69,8 @@ const webUrlStart = /^https?:\/\/[^/]/iu;
 
 // What IDNA drops from a host without a word (a zero-width space, a soft
 // hyphen), so the text would name another host than the one it reads as.
-// Elsewhere the parser percent-encodes them, as it does an emoji's selector.
+// Written percent-encoded, the host parser decodes them first. Elsewhere the
+// parser percent-encodes them, as it does an emoji's selector.
 const invisible = /\p{Default_Ignorable_Code_Point}/u;
 
 /**
@@ -91,10 +92,16 @@ export const isWebUrl = (text: string): boolean => {
     }
   }
   const [authority = ""] = text.slice(text.indexOf("//") + 2).split(/[/?#]/u);
+  let host: string;
+  try {
+    host = decodeURIComponent(authority);
+  } catch {
+    return false;
+  }
   return (
     webUrlStart.test(text) &&
     !authority.includes("@") &&
-    !invisible.test(authority) &&
+    !invisible.test(host) &&
     text.isWellFormed() &&
     URL.canParse(text)
   );
