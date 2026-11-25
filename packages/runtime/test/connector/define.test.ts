@@ -411,6 +411,23 @@ describe("a connector's definition", () => {
     ]) {
       expect(at(template)).toThrow("Not a host, or a host template");
     }
+    const twice = ["{company}.stock.test", "{company}.other.test"];
+    expect(() =>
+      defineConnector({
+        name: "stock",
+        title: "Stock",
+        hosts: twice,
+        auth: auth.apiKey({
+          hosts: twice,
+          header: "x-api-key",
+          account: {
+            url: "https://{company}.stock.test/v1/account",
+            id: "/id",
+          },
+        }),
+        tools: {},
+      })
+    ).toThrow("Each host template has a name of its own");
   });
 
   it("fills an OAuth sign-in's template under a fixed name from the token response with a lookup there, and refuses any other hostsFrom", () => {

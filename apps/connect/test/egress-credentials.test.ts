@@ -59,7 +59,9 @@ const items = [{ id: "item-1", title: "First" }];
 
 /** The hosts an app of each client runs on, each with the key it takes. */
 const erpKey = "erp-key-1";
-const erpHosts = new Set([sampleHostFilled, "erp-2.acme.test"]);
+/** A host as long as DNS allows: 253 characters. */
+const longErpHost = `${["a", "b", "c"].map((label) => label.repeat(63)).join(".")}.${"d".repeat(56)}.test`;
+const erpHosts = new Set([sampleHostFilled, "erp-2.acme.test", longErpHost]);
 
 const internet = fakeInternet((request, url) => {
   if (url.hostname === sampleKeyApiHost) {
@@ -181,9 +183,20 @@ describe("a host set per connection", () => {
     expect(connected?.detail).toMatchObject({
       provider: "sample-host",
       scope: "shared",
-      hosts: "{host}=erp.acme.test",
+      "hosts.host": "erp.acme.test",
     });
     expect(connected?.actor).toMatchObject({ userId: admin.userId });
+  });
+
+  it("connects a host as long as DNS allows, and audits it whole", async () => {
+    const admin = someone("admin");
+    expect(longErpHost).toHaveLength(253);
+    const { connectionId } = await connectErp(admin, { "{host}": longErpHost });
+    expect(connectionId).toStrictEqual(expect.any(String));
+    const events = await audit.events();
+    expect(
+      events.find(({ action }) => action === "connection.connect")?.detail
+    ).toMatchObject({ "hosts.host": longErpHost });
   });
 
   it("is never a member's to set: not on a shared connection, nor on their own (CH3)", async () => {

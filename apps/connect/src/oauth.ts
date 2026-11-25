@@ -1,4 +1,8 @@
-import { fitsTemplate, hostOf } from "@grasp-os/runtime/connector";
+import {
+  fitsTemplate,
+  hostOf,
+  hostTemplateOf,
+} from "@grasp-os/runtime/connector";
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import {
   connectErrors,
@@ -495,16 +499,18 @@ interface Keeping {
   vault: Vault;
 }
 
-/** The hosts a connection signed in with, as its events record them. */
-const hostsDetail = ({ hosts }: Kept): { hosts?: string } =>
-  hosts === undefined
-    ? {}
-    : {
-        hosts: Object.entries(hosts)
-          .toSorted(([one], [other]) => one.localeCompare(other))
-          .map(([template, host]) => `${template}=${host}`)
-          .join(" "),
-      };
+/**
+ * The hosts a connection signed in with, as its events record them: one
+ * member a template, `hosts.<name>` (a connector's template names are its
+ * own), each a host short enough for an audit value.
+ */
+const hostsDetail = ({ hosts = {} }: Kept): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(hosts).map(([template, host]) => [
+      `hosts.${hostTemplateOf(template)?.name ?? ""}`,
+      host,
+    ])
+  );
 
 /** Stores a new connection with its tokens and its event, all or nothing. */
 const storeConnection = async (

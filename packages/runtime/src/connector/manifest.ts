@@ -545,6 +545,14 @@ export const connectorManifestSchema = z
     "A host template is filled by an API key's sign-in, or by the token response (hostsFrom) under a fixed name"
   )
   .refine(
+    ({ hosts }) => {
+      const names = hosts.flatMap((host) => hostTemplateOf(host)?.name ?? []);
+      return new Set(names).size === names.length;
+    },
+    // A connection's hosts are told apart, and audited, by name.
+    "Each host template has a name of its own"
+  )
+  .refine(
     ({ signIn, hosts }) =>
       signIn?.kind !== "oauth2" ||
       Object.keys(signIn.hostsFrom ?? {}).every(
