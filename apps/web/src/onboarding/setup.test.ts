@@ -2,6 +2,7 @@ import type { OnboardingProgress, Roster } from "@grasp-os/shared/onboarding";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  partOf,
   afterAi,
   closesOn,
   finishedAt,
@@ -384,5 +385,29 @@ describe("a team's numbers", () => {
     expect(teamNumbersOf({ asked: null, talked: null })).toStrictEqual({
       shown: "none",
     });
+  });
+});
+
+describe("the parts the setup is told in", () => {
+  it("counts parts, not screens, and fills the line within one", () => {
+    expect(partOf("welcome")).toStrictEqual({ at: 0, of: 3, part: 0, share: 1 / 9 });
+    expect(partOf("documents")).toMatchObject({ at: 1, of: 3, part: 1 });
+    expect(partOf("team")).toStrictEqual({ at: 2, of: 3, part: 2, share: 1 });
+  });
+
+  it("leaves out a part the company's path has none of", () => {
+    const path: SetupPath = ["company", "documents", "team"];
+    expect(partOf("company", path)).toStrictEqual({
+      at: 0,
+      of: 2,
+      part: 1,
+      share: 1 / 4,
+    });
+    expect(partOf("team", path)).toStrictEqual({ at: 1, of: 2, part: 2, share: 1 });
+  });
+
+  it("puts the screens after the interviews in no part", () => {
+    expect(partOf("review")).toBeNull();
+    expect(partOf("open")).toBeNull();
   });
 });

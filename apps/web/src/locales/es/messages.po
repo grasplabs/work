@@ -7856,6 +7856,10 @@ msgstr "General"
 msgid "Get a key from {name}"
 msgstr "Consigue una clave de {name}"
 
+#: src/routes/setup.tsx
+msgid "Getting started"
+msgstr "Conocernos"
+
 #: src/agents/agent-apps-card.tsx
 msgid "Give {app} back"
 msgstr "Devolver {app}"
@@ -11111,7 +11115,6 @@ msgid "Newer"
 msgstr "Más recientes"
 
 #: src/agents/manual-agent.tsx
-#: src/onboarding/calm-frame.tsx
 #: src/settings/event-sources.tsx
 msgid "Next"
 msgstr "Siguiente"
@@ -16655,7 +16658,6 @@ msgid "Stephen outside Grasp"
 msgstr "Stephen fuera de Grasp"
 
 #: src/agents/agent-brief.ts
-#: src/onboarding/calm-frame.tsx
 msgid "Steps"
 msgstr "Pasos"
 
@@ -21152,6 +21154,10 @@ msgstr "El agente de tu chat pidió iniciar este flujo por ti. Nada se ejecuta h
 msgid "Your chats"
 msgstr "Tus chats"
 
+#: src/routes/setup.tsx
+msgid "Your company"
+msgstr "Tu empresa"
+
 #: src/interview/start.tsx
 msgid "Your company asked everyone to have a short chat with {who}, our AI interviewer. It takes {minutes} minutes at most, and you decide <0>what happens to your answers</0>."
 msgstr "Tu empresa ha pedido a todos una breve charla con {who}, nuestro entrevistador de IA. Dura {minutes} minutos como mucho, y tú decides <0>qué pasa con tus respuestas</0>."
@@ -21293,6 +21299,10 @@ msgstr "Tus skills"
 #: src/interview/words.ts
 msgid "Your story"
 msgstr "Tu relato"
+
+#: src/routes/setup.tsx
+msgid "Your team"
+msgstr "Tu equipo"
 
 #: src/apps/app-workspace.tsx
 msgid "Your team has nothing yet"

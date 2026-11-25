@@ -4,23 +4,20 @@ import { Text } from "@grasp-os/ui/components/text";
 import { isThemeMode, ThemeToggle } from "@grasp-os/ui/components/theme-toggle";
 import {
   ArrowLeftIcon,
-  ArrowRightIcon,
   Icon,
   LogOutIcon,
   VolumeIcon,
   VolumeOffIcon,
 } from "@grasp-os/ui/lib/icons";
-import { fadeIn, visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { fadeIn } from "@grasp-os/ui/lib/styles";
 import { colors, media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useLocation } from "@tanstack/react-router";
 import {
   createContext,
   useContext,
   useEffect,
-  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -70,19 +67,6 @@ const styles = stylex.create({
     paddingInline: { default: space[8], [media.maxSm]: space[4] },
   },
   mark: { display: "flex", [iconVars.size]: size.iconDefault },
-  // Back and on, two quiet arrows at the bottom corner, out of the step's way. On a phone there is no
-  // room beside the step, so they follow it at the page's end instead of lying over its buttons.
-  ways: {
-    position: { default: "fixed", [media.maxSm]: "static" },
-    insetBlockEnd: space[6],
-    insetInlineEnd: space[8],
-    alignSelf: "flex-end",
-    zIndex: 1,
-    display: "flex",
-    gap: space[1],
-    paddingInline: { default: 0, [media.maxSm]: space[4] },
-    paddingBlockEnd: { default: 0, [media.maxSm]: space[6] },
-  },
   tools: { display: "flex", alignItems: "center", gap: space[1] },
   // No line in the setup ends on a word or two alone: every paragraph wraps so its last line has company.
   main: {
@@ -121,87 +105,10 @@ const styles = stylex.create({
     justifyContent: "center",
     gap: space[3],
   },
-  // Three designs of one bar along the page's foot (`?continue=bar1|bar2|bar3`): the way back
-  // at its start, the step's way on at its end. It stays in sight while the step scrolls under it.
-  // bar1, the ledge: the page's whole width, frosted, a hairline over it, how far along in the middle.
+  // The track: the page's foot, kept in sight while the step scrolls under it. No ground of its
+  // own, the page fading out under it: back and the part they're in at its start, the step's way
+  // on at its end, and how far along as one line filling along the window's bottom edge.
   foot: {
-    position: "sticky",
-    insetBlockEnd: 0,
-    zIndex: 1,
-    display: "grid",
-    gridTemplateColumns: {
-      default: "1fr auto 1fr",
-      [media.maxSm]: "auto 1fr",
-    },
-    alignItems: "center",
-    gap: space[3],
-    paddingBlock: space[3],
-    paddingInline: { default: space[8], [media.maxSm]: space[4] },
-    borderBlockStartWidth: "1px",
-    borderBlockStartStyle: "solid",
-    borderBlockStartColor: colors.border,
-    backgroundColor: `color-mix(in oklab, ${colors.background} 82%, transparent)`,
-    backdropFilter: "blur(12px)",
-  },
-  footStart: { display: "flex", justifySelf: "start" },
-  footEnd: {
-    display: "flex",
-    flexDirection: "row-reverse",
-    alignItems: "center",
-    justifySelf: "end",
-    gap: space[3],
-    whiteSpace: "nowrap",
-  },
-  // How far along: one short line per screen, the ones done and this one filled.
-  // On a phone the bar has room for back and on alone.
-  dots: { display: { default: "flex", [media.maxSm]: "none" }, gap: space[1] },
-  dot: {
-    width: space[4],
-    height: "3px",
-    borderRadius: "2px",
-    backgroundColor: colors.border,
-    transitionProperty: "background-color",
-    transitionDuration: "300ms",
-  },
-  dotDone: { backgroundColor: colors.foreground },
-  // bar2, the dock: a floating capsule on the column's width, lifted off the page by a shadow,
-  // "4 / 8" in it between back and on.
-  dockRoom: {
-    position: "sticky",
-    insetBlockEnd: 0,
-    zIndex: 1,
-    display: "flex",
-    justifyContent: "center",
-    paddingInline: space[4],
-    paddingBlockEnd: { default: space[6], [media.maxSm]: space[3] },
-    pointerEvents: "none",
-  },
-  dock: {
-    pointerEvents: "auto",
-    display: "flex",
-    alignItems: "center",
-    gap: space[3],
-    width: "100%",
-    maxWidth: "40rem",
-    padding: space[2],
-    paddingInlineStart: space[2],
-    borderRadius: "999px",
-    borderWidth: "1px",
-    borderStyle: "solid",
-    borderColor: colors.border,
-    backgroundColor: `color-mix(in oklab, ${colors.background} 88%, transparent)`,
-    backdropFilter: "blur(16px)",
-    boxShadow: "0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px -6px rgb(0 0 0 / 0.12)",
-  },
-  dockCount: {
-    flexGrow: 1,
-    visibility: { default: "visible", [media.maxSm]: "hidden" },
-    fontVariantNumeric: "tabular-nums",
-    whiteSpace: "nowrap",
-  },
-  // bar3, the track: no ground at all, the page fading out under the buttons, and how far along
-  // as one line filling along the window's bottom edge, the step named beside back.
-  trackRoom: {
     position: "sticky",
     insetBlockEnd: 0,
     zIndex: 1,
@@ -214,14 +121,22 @@ const styles = stylex.create({
     paddingInline: { default: space[8], [media.maxSm]: space[4] },
     backgroundImage: `linear-gradient(to top, ${colors.background} 55%, transparent)`,
   },
-  trackStart: {
+  footStart: {
     display: "flex",
     alignItems: "center",
     gap: space[2],
     whiteSpace: "nowrap",
   },
+  footEnd: {
+    display: "flex",
+    flexDirection: "row-reverse",
+    alignItems: "center",
+    justifySelf: "end",
+    gap: space[3],
+    whiteSpace: "nowrap",
+  },
   // On a phone the line along the edge says how far along alone.
-  trackWords: { display: { default: "inline", [media.maxSm]: "none" } },
+  part: { display: { default: "inline", [media.maxSm]: "none" } },
   track: {
     display: "block",
     position: "absolute",
@@ -295,41 +210,6 @@ export interface Ways {
   onNext?: (() => void) | undefined;
 }
 
-/** Back and on, two quiet arrows; one that leads nowhere is not there. */
-const WayArrows = ({ ways }: { ways: Ways }) => {
-  const { t } = useLingui();
-  const { onBack, onNext } = ways;
-  if (onBack === undefined && onNext === undefined) {
-    return null;
-  }
-  return (
-    <nav aria-label={t`Steps`} {...stylex.props(styles.ways)}>
-      {onBack === undefined ? null : (
-        <Button
-          aria-label={t`Back`}
-          onClick={onBack}
-          size={tool.button}
-          tooltip={t`Back`}
-          variant="ghost"
-        >
-          <Icon icon={ArrowLeftIcon} />
-        </Button>
-      )}
-      {onNext === undefined ? null : (
-        <Button
-          aria-label={t`Next`}
-          onClick={onNext}
-          size={tool.button}
-          tooltip={t`Next`}
-          variant="ghost"
-        >
-          <Icon icon={ArrowRightIcon} />
-        </Button>
-      )}
-    </nav>
-  );
-};
-
 /**
  * Stephen's voice, on or off, remembered in this browser. While the browser
  * still holds sound back (until the page is first pressed), a press lets
@@ -385,30 +265,8 @@ const Leave = () => {
   );
 };
 
-/**
- * Where a step's way on stands, tried out in development only with
- * `?continue=`: one bar along the page's foot with back, how far along and
- * the step's buttons, in three designs: `bar1` the frosted ledge, `bar2`
- * the floating dock, `bar3` the track along the window's edge. Without it,
- * centred under the step as before. All three go on with Enter.
- */
-export type ContinuePlace = "centre" | "bar1" | "bar2" | "bar3";
-
-/** Whether a search names one of the new places, as `/setup` keeps it from step to step. */
-export const isNewPlace = (written: unknown): written is ContinuePlace =>
-  written === "bar1" || written === "bar2" || written === "bar3";
-
-const useContinuePlace = (): ContinuePlace => {
-  const written = useLocation({ select: (location) => location.searchStr });
-  const asked = new URLSearchParams(written).get("continue");
-  return import.meta.env.DEV && isNewPlace(asked) ? asked : "centre";
-};
-
-/** Where the frame keeps a step's way on, when it keeps it outside the step. */
-const EndPlace = createContext<{
-  place: ContinuePlace;
-  slot: HTMLElement | null;
-}>({ place: "centre", slot: null });
+/** Where the frame keeps a step's way on: the track's end, on a page with steps. */
+const EndPlace = createContext<HTMLElement | null>(null);
 
 /** A key typed into a field, or pressed on a control, is that control's own. */
 const ownsEnter = (target: EventTarget | null): boolean =>
@@ -421,12 +279,11 @@ const ownsEnter = (target: EventTarget | null): boolean =>
  * Enter goes on: it presses the step's main button (the first it names),
  * unless a field or a control has the key, or a dialog is open over the step.
  */
-const useEnterGoesOn = (on: boolean): RefObject<HTMLDivElement | null> => {
+const useEnterGoesOn = (): RefObject<HTMLDivElement | null> => {
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const press = (event: KeyboardEvent) => {
       if (
-        !on ||
         event.key !== "Enter" ||
         event.isComposing ||
         event.metaKey ||
@@ -449,119 +306,72 @@ const useEnterGoesOn = (on: boolean): RefObject<HTMLDivElement | null> => {
     return () => {
       document.removeEventListener("keydown", press);
     };
-  }, [on]);
+  }, []);
   return ref;
 };
 
-/** How far along: a short line per screen, those done and this one filled. */
-const Progress = ({ at, of }: { at: number; of: number }) => {
-  const { t } = useLingui();
-  const step = at + 1;
-  const total = of;
-  return (
-    <div {...stylex.props(styles.dots)}>
-      <span
-        {...stylex.props(visuallyHidden)}
-      >{t`Step ${step} of ${total}`}</span>
-      {Array.from({ length: of }, (_, index) => (
-        <span
-          aria-hidden="true"
-          key={index}
-          {...stylex.props(styles.dot, index <= at && styles.dotDone)}
-        />
-      ))}
-    </div>
-  );
-};
+/**
+ * How far along, in the few parts the setup is told in (setup.ts
+ * `setupParts`): which part of how many, its name, and how much of the
+ * whole is behind them, the screens within a part filling the line too.
+ */
+export interface SetupProgress {
+  at: number;
+  of: number;
+  name: string;
+  /** How much of the whole is done, from 0 to 1. */
+  share: number;
+}
 
-/** The back arrow alone, as the bar and the corner keep it. */
-const BackArrow = ({ onBack }: { onBack: (() => void) | undefined }) => {
-  const { t } = useLingui();
-  if (onBack === undefined) {
-    return null;
-  }
-  return (
-    <Button
-      aria-label={t`Back`}
-      onClick={onBack}
-      size={tool.button}
-      tooltip={t`Back`}
-      variant="ghost"
-    >
-      <Icon icon={ArrowLeftIcon} />
-    </Button>
-  );
-};
-
-/** The page's foot: the bar in one of its designs, or the two quiet arrows. */
-const Foot = ({
-  place,
+/** The track along the page's foot: back and the part they're in, the step's way on, the line. */
+const Track = ({
+  onBack,
   progress,
   setSlot,
-  ways,
 }: {
-  place: ContinuePlace;
-  progress: { at: number; of: number } | undefined;
+  onBack: (() => void) | undefined;
+  progress: SetupProgress | undefined;
   setSlot: (slot: HTMLElement | null) => void;
-  ways: Ways | undefined;
 }) => {
   const { t } = useLingui();
-  if (place === "bar1") {
-    return (
-      <footer {...stylex.props(styles.foot)}>
-        <span {...stylex.props(styles.footStart)}>
-          <BackArrow onBack={ways?.onBack} />
-        </span>
-        {progress === undefined ? <span /> : <Progress {...progress} />}
-        <div ref={setSlot} {...stylex.props(styles.footEnd)} />
-      </footer>
-    );
-  }
-  if (place === "bar2") {
-    return (
-      <footer {...stylex.props(styles.dockRoom)}>
-        <div {...stylex.props(styles.dock)}>
-          <BackArrow onBack={ways?.onBack} />
-          <span {...stylex.props(styles.dockCount)}>
-            {progress === undefined ? null : (
-              <Text as="span" color="muted" size="sm">
-                {`${progress.at + 1} / ${progress.of}`}
-              </Text>
-            )}
+  const part = progress?.at ?? 0;
+  const step = part + 1;
+  const total = progress?.of ?? 0;
+  return (
+    <footer {...stylex.props(styles.foot)}>
+      <span {...stylex.props(styles.footStart)}>
+        {onBack === undefined ? null : (
+          <Button
+            aria-label={t`Back`}
+            onClick={onBack}
+            size={tool.button}
+            tooltip={t`Back`}
+            variant="ghost"
+          >
+            <Icon icon={ArrowLeftIcon} />
+          </Button>
+        )}
+        {progress === undefined ? null : (
+          <span {...stylex.props(styles.part)}>
+            <Text as="span" color="muted" size="sm">
+              {t`Step ${step} of ${total}`} · {progress.name}
+            </Text>
           </span>
-          <div ref={setSlot} {...stylex.props(styles.footEnd)} />
-        </div>
-      </footer>
-    );
-  }
-  if (place === "bar3") {
-    const step = (progress?.at ?? 0) + 1;
-    const total = progress?.of ?? 1;
-    return (
-      <footer {...stylex.props(styles.trackRoom)}>
-        <span {...stylex.props(styles.trackStart)}>
-          <BackArrow onBack={ways?.onBack} />
-          {progress === undefined ? null : (
-            <span {...stylex.props(styles.trackWords)}>
-              <Text as="span" color="muted" size="sm">
-                {t`Step ${step} of ${total}`}
-              </Text>
-            </span>
-          )}
-        </span>
-        <div ref={setSlot} {...stylex.props(styles.footEnd)} />
+        )}
+      </span>
+      <div ref={setSlot} {...stylex.props(styles.footEnd)} />
+      {progress === undefined ? null : (
         <span aria-hidden="true" {...stylex.props(styles.track)}>
           <span
             {...stylex.props(
               styles.trackFill,
-              styles.trackWidth(`${(step / total) * 100}%`)
+              styles.trackWidth(`${Math.round(progress.share * 100)}%`)
             )}
           />
         </span>
-      </footer>
-    );
-  }
-  return ways === undefined ? null : <WayArrows ways={ways} />;
+      )}
+    </footer>
+  );
 };
 
 export const CalmFrame = ({
@@ -575,10 +385,10 @@ export const CalmFrame = ({
 }: {
   /** Whose light or dark the bar's icon keeps. */
   userId: string;
-  /** Back and on, as two arrows at the bottom corner; none on a page that has no steps. */
+  /** Back, at the start of the track along the page's foot; no track on a page that has no steps. */
   ways?: Ways;
-  /** Which screen of how many, where the frame shows how far along. */
-  progress?: { at: number; of: number };
+  /** How far along, as the track shows it. */
+  progress?: SetupProgress;
   /** Little on it: the column in the middle of the room, not at its top. */
   centred?: boolean;
   /** The language in the bar: not on the step that asks for it. */
@@ -587,17 +397,11 @@ export const CalmFrame = ({
   pose?: Pose;
   children: ReactNode;
 }) => {
-  const asked = useContinuePlace();
-  // A page without steps (the waiting page) keeps its buttons where they are.
-  const place = ways === undefined && progress === undefined ? "centre" : asked;
   const [slot, setSlot] = useState<HTMLElement | null>(null);
-  const outside = place !== "centre";
-  const kept = useMemo(
-    () => ({ place, slot: outside ? slot : null }),
-    [place, slot, outside]
-  );
+  // A page without steps (the waiting page) keeps its buttons where they are.
+  const tracked = ways !== undefined || progress !== undefined;
   return (
-    <EndPlace.Provider value={kept}>
+    <EndPlace.Provider value={tracked ? slot : null}>
       <div {...stylex.props(styles.window)}>
         <StephenField pose={pose}>
           <header {...stylex.props(styles.bar)}>
@@ -617,27 +421,25 @@ export const CalmFrame = ({
               {children}
             </div>
           </main>
-          <Foot
-            place={place}
-            progress={progress}
-            setSlot={setSlot}
-            ways={ways}
-          />
+          {tracked ? (
+            <Track
+              onBack={ways?.onBack}
+              progress={progress}
+              setSlot={setSlot}
+            />
+          ) : null}
         </StephenField>
       </div>
     </EndPlace.Provider>
   );
 };
 
-/** A step's way on, where the frame keeps it; it fades in as it arrives. */
+/** A step's way on, at the track's end; it fades in as it arrives (the plan's, once the story ends). */
 const StepEnd = ({ end }: { end: ReactNode }) => {
-  const { place, slot } = useContext(EndPlace);
-  const ref = useEnterGoesOn(place !== "centre");
-  if (place === "centre") {
-    return <div {...stylex.props(styles.end)}>{end}</div>;
-  }
+  const slot = useContext(EndPlace);
+  const ref = useEnterGoesOn();
   if (slot === null) {
-    return null;
+    return <div {...stylex.props(styles.end)}>{end}</div>;
   }
   return createPortal(
     <div ref={ref} {...stylex.props(styles.slot, fadeIn)}>
