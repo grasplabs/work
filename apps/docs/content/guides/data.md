@@ -35,7 +35,7 @@ export default defineSchema({
 });
 ```
 
-`v` has the types you'd expect (`string`, `number`, `boolean`, `literal`, `enum`, `array`, `object`, `record`, `union`, `null`) and some that mean something to Grasp: `id` for a record of a table, `timestamp`, `duration`, `money`, `person`, `file` and `schedule`. Constraints such as `.min()`, `.max()` and `.trim()` are checked on every write, `.nullable()` allows `null`, and `.default()` fills in a value a write leaves out.
+`v` has the types you'd expect (`string`, `number`, `boolean`, `literal`, `enum`, `array`, `object`, `record`, `union`, `null`, and `json` for any JSON value) and some that mean something to Grasp: `id` for a record of a table, `timestamp`, `duration`, `money`, `person`, `file` and `schedule`. Constraints such as `.min()`, `.max()` and `.trim()`, and a string's format (`.email()`, `.date()`, `.datetime()`, `.url()`), are checked on every write, `.nullable()` allows `null`, and `.default()` fills in a value a write leaves out.
 
 To share constants with your server code, such as a field's type, put them in a module of your own (`values.ts`, say): the generated schema is never edited.
 

@@ -41,6 +41,10 @@ const schemas = {
   amount: v.money().default({ minorUnits: 500, currency: "EUR" }),
   when: v.timestamp().optional(),
   who: v.person(),
+  updated: v.string().datetime().optional(),
+  day: v.string().date(),
+  link: v.string().trim().url().nullable(),
+  custom: v.json().optional(),
 };
 
 /** A refusal's code and path. */

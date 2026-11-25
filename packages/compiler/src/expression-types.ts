@@ -115,6 +115,7 @@ const sdkValueTypes = `type Id<TableName extends string = string> = string & { r
 interface FileValue { readonly id: string }
 interface MoneyValue { readonly currency: string; readonly minorUnits: number }
 interface ScheduleValue { readonly cron: string; readonly timeZone: string }
+type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 `;
 
 /** Type text on lines of its own, so nothing in it reaches past its parentheses. */

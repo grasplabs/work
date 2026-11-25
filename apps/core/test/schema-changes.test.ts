@@ -140,6 +140,10 @@ const fieldsOf = async (store: OpenStore): Promise<StoreFields[]> => {
 };
 
 /** What `store` holds: its schema in force and its notes. */
+/** A person's link to a note, beside any JSON and a label of `max` characters. */
+const noteBeside = (note: ValueShape[string], max: number) =>
+  v.object({ note, extra: v.json(), label: v.string().max(max) });
+
 const heldBy = async (store: OpenStore) => ({
   schema: await schemaHashOf(store),
   notes: await fieldsOf(store),
@@ -351,6 +355,45 @@ describe("a schema change by stable ID", { timeout: 120_000 }, () => {
         ])
       )
     ).resolves.toBe("data.referenced");
+  });
+
+  it("widens a field beside its reference and any JSON, but refuses the reference made any JSON", async () => {
+    const store = await newStore();
+    const access = { read: "appMembers", write: "appMembers" } as const;
+    const schema = (note: ValueShape[string]) =>
+      manifestText(
+        schemaManifest(
+          defineSchema({
+            notes: defineTable({ title }).access(access),
+            people: defineTable({ note }).access(access),
+          })
+        )
+      );
+    const ids: SchemaIds = {
+      notes: { id: notesId, fields: { title: "field:title" } },
+      people: { id: peopleId, fields: { note: "field:note" } },
+    };
+    const cascade = v.id("notes", { onDelete: "cascade" });
+    await store.applySchema(change(schema(noteBeside(cascade, 100)), ids));
+
+    const widened = await store.applySchema(
+      change(schema(noteBeside(cascade, 200)), ids)
+    );
+    const refused = await store
+      .applySchema(change(schema(noteBeside(v.json(), 200)), ids))
+      .catch((error: unknown) => error);
+
+    expect({ widened: widened.changes.widenedFields, refused }).toMatchObject({
+      widened: [{ table: "people", field: "note" }],
+      refused: {
+        code: "migration.required",
+        details: {
+          refused: [
+            { table: "people", field: "note", reason: "field_changed" },
+          ],
+        },
+      },
+    });
   });
 
   it("renames a field and fills in another in one change", async () => {
@@ -597,6 +640,16 @@ describe(
       );
       expect(widened.changes.widenedFields).toStrictEqual([
         { table: "notes", field: "title" },
+      ]);
+    });
+
+    it("applies a field made any JSON as widened, since it takes every value", async () => {
+      const { store } = await storeWith({ title: "Launch", category: "news" });
+      const widened = await store.applySchema(
+        change(notesText({ title, category: v.json().optional() }), v1Ids)
+      );
+      expect(widened.changes.widenedFields).toStrictEqual([
+        { table: "notes", field: "category" },
       ]);
     });
 
