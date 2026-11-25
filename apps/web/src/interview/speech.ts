@@ -724,12 +724,24 @@ const playHeard = (
       })();
       return;
     }
+    const startedAt = performance.now();
     sounding = playSound(own.audio, made, out, (mine) => {
-      if (sounding === mine) {
-        sounding = null;
-        // oxlint-disable-next-line no-use-before-define -- a piece ends, and the next begins
-        void onward(at + 1);
+      if (sounding !== mine) {
+        return;
       }
+      sounding = null;
+      void (async () => {
+        // Its sound broke off before the end: the words it didn't say
+        // still light up at the pace of speech before the next begins.
+        const left = own.length - (performance.now() - startedAt);
+        if (!(await own.whole) && left > 0) {
+          await wait(left);
+        }
+        if (id === lineId) {
+          // oxlint-disable-next-line no-use-before-define -- a piece ends, and the next begins
+          await onward(at + 1);
+        }
+      })();
     });
     if (at === 0) {
       const heardAt = performance.now();
