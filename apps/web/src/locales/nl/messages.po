@@ -9221,8 +9221,7 @@ msgstr "De toegang is verlopen. Grasp-medewerkers kunnen hem niet opnieuw koppel
 msgid "Its account is out of credit."
 msgstr "Het tegoed van het account is op."
 
-#: src/inbox/approval-request.tsx
-#: src/inbox/item-detail.tsx
+#: src/answer-pause.tsx
 msgid "Its answers can be used in a moment, so a press meant for the one before doesn't answer it."
 msgstr "De antwoorden zijn zo te gebruiken, zodat een klik die voor de vorige bedoeld was deze niet beantwoordt."
 
@@ -16043,6 +16042,10 @@ msgstr "Iemand die er niet meer is"
 #: src/agents/own-agents-admin.tsx
 msgid "Someone no longer in the company"
 msgstr "Iemand die niet meer in het bedrijf zit"
+
+#: src/settings/ai-providers.tsx
+msgid "Someone saved a new {label} key since you opened it, so nothing was deleted."
+msgstr "Iemand heeft een nieuwe {label}-sleutel opgeslagen sinds je deze opende, dus er is niets verwijderd."
 
 #: src/settings/instruction-file.tsx
 msgid "Someone saved this file since you started. Put your changes aside to see their version, then make yours again."
