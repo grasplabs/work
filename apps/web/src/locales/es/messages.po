@@ -3498,7 +3498,6 @@ msgid "Ask for access for this App"
 msgstr "Pedir acceso para esta aplicación"
 
 #: src/agents/agent-apps-card.tsx
-#: src/onboarding/other-row.tsx
 msgid "Ask for it"
 msgstr "Solicitar"
 
@@ -10801,10 +10800,6 @@ msgstr "Nombre no mostrado"
 msgid "Name of the hold, such as a case reference"
 msgstr "Nombre de la retención, como una referencia del caso"
 
-#: src/onboarding/leads-step.tsx
-msgid "Name of your HR platform"
-msgstr "Nombre de tu plataforma de RR. HH."
-
 #: src/agents/agent-templates.ts
 msgid "Name people only for what they did, never to blame."
 msgstr "Nombra a las personas solo por lo que hicieron, nunca para culpar."
@@ -15126,7 +15121,7 @@ msgstr "Buscar en {name}"
 msgid "Search apps"
 msgstr "Buscar apps"
 
-#: src/onboarding/connector-search.tsx
+#: src/onboarding/sources-step.tsx
 msgid "Search apps, for example Dropbox"
 msgstr "Buscar apps, por ejemplo Dropbox"
 
@@ -15138,6 +15133,10 @@ msgstr "Buscar chats"
 #: src/activity/audit-log.tsx
 msgid "Search events by person or ID"
 msgstr "Buscar eventos por persona o ID"
+
+#: src/onboarding/leads-step.tsx
+msgid "Search HR platforms, for example Workday"
+msgstr "Buscar plataformas de RR. HH., por ejemplo Workday"
 
 #: src/apps/indexes-view.tsx
 msgid "Search in {searched}"

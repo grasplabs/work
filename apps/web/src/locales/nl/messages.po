@@ -3498,7 +3498,6 @@ msgid "Ask for access for this App"
 msgstr "Toegang vragen voor deze app"
 
 #: src/agents/agent-apps-card.tsx
-#: src/onboarding/other-row.tsx
 msgid "Ask for it"
 msgstr "Doorgeven"
 
@@ -10801,10 +10800,6 @@ msgstr "Naam niet getoond"
 msgid "Name of the hold, such as a case reference"
 msgstr "Naam van de bewaarplicht, zoals een zaaknummer"
 
-#: src/onboarding/leads-step.tsx
-msgid "Name of your HR platform"
-msgstr "Naam van je hr-platform"
-
 #: src/agents/agent-templates.ts
 msgid "Name people only for what they did, never to blame."
 msgstr "Noem mensen alleen om wat ze deden, nooit om ze iets te verwijten."
@@ -15126,7 +15121,7 @@ msgstr "{name} doorzoeken"
 msgid "Search apps"
 msgstr "Apps zoeken"
 
-#: src/onboarding/connector-search.tsx
+#: src/onboarding/sources-step.tsx
 msgid "Search apps, for example Dropbox"
 msgstr "Apps zoeken, bijvoorbeeld Dropbox"
 
@@ -15138,6 +15133,10 @@ msgstr "Chats doorzoeken"
 #: src/activity/audit-log.tsx
 msgid "Search events by person or ID"
 msgstr "Gebeurtenissen zoeken op persoon of ID"
+
+#: src/onboarding/leads-step.tsx
+msgid "Search HR platforms, for example Workday"
+msgstr "HR-platforms zoeken, bijvoorbeeld Workday"
 
 #: src/apps/indexes-view.tsx
 msgid "Search in {searched}"

@@ -8,11 +8,12 @@ import {
   Item,
   ItemContent,
   ItemGroup,
+  ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import { Switch } from "@grasp-os/ui/components/switch";
 import { Text } from "@grasp-os/ui/components/text";
-import { ArrowRightIcon, Icon } from "@grasp-os/ui/lib/icons";
+import { ArrowRightIcon, Icon, PlusIcon } from "@grasp-os/ui/lib/icons";
 import { colors, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -23,10 +24,10 @@ import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { CalmStep } from "./calm-frame.tsx";
 import { WaitingNote } from "./company-step.tsx";
+import { ConnectorSearch } from "./connector-search.tsx";
 import { ForgetTeams } from "./forget-teams.tsx";
 import { HrLeads } from "./hr-leads.tsx";
-import { OtherRow } from "./other-row.tsx";
-import { useSaveChoices } from "./sources-step.tsx";
+import { useIntegrations, useSaveChoices } from "./sources-step.tsx";
 import { useRefresh } from "./step-parts.ts";
 import type { StepProps } from "./step-parts.ts";
 import { SupportLink } from "./support-link.tsx";
@@ -75,6 +76,8 @@ const HrPlatformChoice = ({
 }) => {
   const { t } = useLingui();
   const { save, busy, failure } = useSaveChoices();
+  const integrations = useIntegrations();
+  const [searching, setSearching] = useState(false);
   const { hr } = choices;
   const choose = async (next: SetupChoices["hr"]) => {
     if (!busy) {
@@ -149,18 +152,43 @@ const HrPlatformChoice = ({
                 </ItemContent>
               </Item>
             ))}
-            <OtherRow
-              disabled={busy}
-              label={t`Another platform`}
-              onAdd={(name) => {
-                void choose({ kind: "asked", name });
+            <Item
+              onClick={() => {
+                setSearching(true);
               }}
-              placeholder={t`Name of your HR platform`}
-            />
+              variant="outline"
+            >
+              <ItemMedia variant="icon">
+                <Icon icon={PlusIcon} />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>{t`Another platform`}</ItemTitle>
+              </ItemContent>
+            </Item>
           </ItemGroup>
           <ErrorText>{failure}</ErrorText>
         </div>
       )}
+      {/* The catalog's HR apps; one offered as a row is chosen as that platform, any other asked for. */}
+      <ConnectorSearch
+        integrations={integrations.filter(({ group }) => group === "HR")}
+        onAsk={async (name) => {
+          await choose({ kind: "asked", name });
+        }}
+        onOpenChange={setSearching}
+        onPick={async ({ name }) => {
+          const offered = hrPlatforms.find(
+            (each) => each.toLocaleLowerCase() === name.toLocaleLowerCase()
+          );
+          await choose(
+            offered === undefined
+              ? { kind: "asked", name }
+              : { kind: "platform", name: offered }
+          );
+        }}
+        open={searching}
+        placeholder={t`Search HR platforms, for example Workday`}
+      />
     </CalmStep>
   );
 };

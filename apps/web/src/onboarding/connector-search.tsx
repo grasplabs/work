@@ -13,12 +13,12 @@ import { AppLogo } from "../connections/app-logo.tsx";
 import { find } from "../connections/integrations.ts";
 import type { Integration } from "../connections/integrations.ts";
 
-// "Something else" on the documents step: a search over every app Grasp
-// connects through Integrations (Composio's toolkits and Grasp's own), over
-// the page, instead of a field that opened in its tile and pushed the grid
-// about (Ruben: "it should just open a search modal from all our composio
-// connectors"). A name the catalog doesn't hold is still asked for, as the
-// last row, as typed.
+// "Something else" on the documents step, and "Another platform" on the HR
+// step: a search over the apps Grasp connects through Integrations
+// (Composio's toolkits and Grasp's own), over the page, instead of a field
+// that opened in its tile and pushed the grid about (Ruben: "it should just
+// open a search modal from all our composio connectors"). A name the
+// catalog doesn't hold is still asked for, as the last row, as typed.
 
 /** The value of the row that asks for what was typed. */
 const askValue = "ask";
@@ -29,7 +29,10 @@ export const ConnectorSearch = ({
   integrations,
   onPick,
   onAsk,
+  placeholder,
 }: {
+  /** The search field's words, with an example of what to look for. */
+  placeholder: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   integrations: readonly Integration[];
@@ -90,10 +93,7 @@ export const ConnectorSearch = ({
       shortcut={null}
       trigger={null}
     >
-      <CommandInput
-        aria-label={t`Search apps`}
-        placeholder={t`Search apps, for example Dropbox`}
-      />
+      <CommandInput aria-label={t`Search apps`} placeholder={placeholder} />
       <CommandEmpty>{t`Nothing matches. Type its name to ask for it.`}</CommandEmpty>
       <CommandList />
     </CommandDialog>
