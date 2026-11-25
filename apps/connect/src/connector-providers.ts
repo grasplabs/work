@@ -42,16 +42,21 @@ export const secretContext = (id: string, issuer: string | null): string =>
   `connector:${id}\n${issuer ?? ""}`;
 
 /**
- * An account for a connection to a connector: an MCP server's sign-in
- * names none connect can check, so each connection is its own. Nothing
- * reads a reader list by it (core's `personalAccounts` counts only the
- * suites').
+ * The account of a connection to a connector: an MCP server's sign-in
+ * names none connect can check, so it is the connection's owner's
+ * (`ownerOf`). One person's own connection to a connector, or the
+ * company's shared one, is then always the same account, and connecting
+ * again reconnects it in place (oauth.ts `reconnect`). Nothing reads a
+ * reader list by it (core's `personalAccounts` counts only the suites').
  */
-const ownAccount = (): ProviderAccount => ({
-  id: crypto.randomUUID(),
+const ownAccount = (owner: string): ProviderAccount => ({
+  id: owner,
   name: null,
   email: null,
 });
+
+/** Most tools a server may list for connect to read the list at all. */
+export const maxListedTools = 500;
 
 /** Whether the server at `url` lists its tools for `key` in `header`. */
 const keyWorks = async (
@@ -65,7 +70,7 @@ const keyWorks = async (
     return await fetch(new Request(request, { headers }));
   });
   try {
-    await server.list(1000);
+    await server.list(maxListedTools);
     return true;
   } catch (error) {
     if (error instanceof McpError) {
@@ -90,8 +95,8 @@ const providerOf = async (
       id: row.id,
       server: row.id,
       credential: (key) => ({ header, value: key }),
-      account: async (key) =>
-        (await keyWorks(row.url, header, key)) ? ownAccount() : null,
+      account: async (key, owner) =>
+        (await keyWorks(row.url, header, key)) ? ownAccount(owner) : null,
     };
   }
   const {
@@ -139,12 +144,13 @@ const providerOf = async (
     scopes: row.scopes?.split(" ") ?? [],
     scopeSeparator: " ",
     // RFC 8707: every token is asked for this server alone.
-    authorizationParams: () => ({ resource: row.url }),
-    tokenParams: { resource: row.url },
+    authorizationParams: () => ({ resource: row.resource ?? row.url }),
+    tokenParams: { resource: row.resource ?? row.url },
     issuer: { id: issuer, inAnswers: row.issParameter === true },
     clientAuthentication,
     client: () => client,
-    account: async () => await Promise.resolve(ownAccount()),
+    account: async (_tokens, _tenant, _client, owner) =>
+      await Promise.resolve(ownAccount(owner)),
   };
 };
 

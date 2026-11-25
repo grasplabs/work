@@ -24,6 +24,9 @@ const maxSchemaDepth = 32;
 const maxJsonDepth = 2 * maxSchemaDepth;
 
 /** What a tool without an output schema answers: its text. */
+/** A name an App can declare as an action (the SDK's own rule). */
+export const actionNamePattern = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/u;
+
 export const textAnswer = JSON.stringify({ type: "string" });
 
 /**

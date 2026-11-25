@@ -6,6 +6,7 @@ import {
 import { isRecord } from "@grasp-os/shared/json";
 import { z } from "zod";
 
+import { resolvedPublic } from "./http-connections.ts";
 import { modernProtocolVersion } from "./mcp.ts";
 import { readCapped } from "./oauth-client.ts";
 
@@ -192,6 +193,18 @@ const challengeOf = async (
   return bearerChallenge(response.headers.get("www-authenticate") ?? "") ?? {};
 };
 
+/**
+ * Whether `url`'s host is a name, not an address, that resolves to public
+ * addresses only: what connect asks of every host a server's metadata
+ * sends it or the person to, as of the server's own (mcp-connectors.ts).
+ * The URL parser writes IPv4 in any spelling as dotted decimal, and IPv6
+ * in brackets.
+ */
+export const isPublicName = async (url: URL): Promise<boolean> =>
+  !/^[\d.]+$/u.test(url.hostname) &&
+  !url.hostname.startsWith("[") &&
+  (await resolvedPublic(url.hostname)) === "public";
+
 /** Where the protected-resource metadata of `server` may be (RFC 9728 §3). */
 const resourceMetadataUrls = (server: URL): string[] => {
   const path = server.pathname === "/" ? "" : server.pathname;
@@ -291,7 +304,9 @@ export const discoverSignIn = async (server: URL): Promise<SignIn> => {
   const [issuer] = resource.authorization_servers;
   const issuerUrl = issuer === undefined ? null : URL.parse(issuer);
   const found =
-    issuer === undefined || issuerUrl === null
+    issuer === undefined ||
+    issuerUrl === null ||
+    !(await isPublicName(issuerUrl))
       ? undefined
       : await firstOf(issuerMetadataUrls(issuerUrl), issuerMetadataSchema);
   if (
@@ -300,6 +315,16 @@ export const discoverSignIn = async (server: URL): Promise<SignIn> => {
     found.issuer !== issuer ||
     !found.code_challenge_methods_supported.includes("S256")
   ) {
+    throw unsupported();
+  }
+  const endpoints = [
+    found.authorization_endpoint,
+    found.token_endpoint,
+    found.revocation_endpoint,
+    found.registration_endpoint,
+  ].flatMap((each) => (each === undefined ? [] : [new URL(each)]));
+  const reaches = await Promise.all(endpoints.map(isPublicName));
+  if (reaches.includes(false)) {
     throw unsupported();
   }
   const scopes =

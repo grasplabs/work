@@ -230,6 +230,69 @@ describe("a connector's tools", () => {
     expect(row?.fresh).toBe(60 * 60 * 1000);
   });
 
+  it("keep a list fresh for five minutes when the server doesn't say", async () => {
+    linear.ttlMs = undefined;
+    const { connectionId } = await connected();
+    const row = await env.DB.prepare(
+      "SELECT tool_list_fresh_until - tool_list_read_at AS fresh FROM connections WHERE id = ?"
+    )
+      .bind(connectionId)
+      .first<{ fresh: number }>();
+
+    expect(row?.fresh).toBe(5 * 60 * 1000);
+  });
+
+  it("are classed for core from the list as it is now, and a call core checked as another class isn't sent", async () => {
+    const anna = someone();
+    const connectionId = await connectLinear(await addLinear(), anna);
+    const agent = chatAgent(anna);
+    // Before any call: the list is read for core's class gate.
+    const first = await exports.default.connectorToolClasses(connectionId);
+    const read = await callAs(
+      agent,
+      { connectionId, action: "list_issues", input: {} },
+      { toolClass: first.list_issues }
+    );
+    linear.tools = [
+      ...linear.tools.filter(({ name }) => name !== "list_issues"),
+      tool("list_issues", {
+        inputSchema: {
+          type: "object",
+          properties: { to: { type: "string" } },
+        },
+      }),
+    ];
+    await listExpires(connectionId);
+    const callsBefore = linear.calls.filter(
+      ({ method }) => method === "tools/call"
+    ).length;
+
+    const changed = await outcome(
+      callAs(
+        agent,
+        { connectionId, action: "list_issues", input: {} },
+        { toolClass: first.list_issues }
+      )
+    );
+    const now = await exports.default.connectorToolClasses(connectionId);
+
+    expect({
+      first: first.list_issues,
+      read: read.pending === undefined ? "ran" : "held",
+      changed,
+      sent:
+        linear.calls.filter(({ method }) => method === "tools/call").length -
+        callsBefore,
+      now: now.list_issues,
+    }).toStrictEqual({
+      first: "read-own",
+      read: "ran",
+      changed: "connect.class_changed",
+      sent: 0,
+      now: "reach-others",
+    });
+  });
+
   it("are reads only when everything agrees, and never run what Grasp never does", async () => {
     linear.tools = [
       ...linear.tools,

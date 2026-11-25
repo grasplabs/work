@@ -164,11 +164,14 @@ export interface OAuthProviderConfig {
   /**
    * The account the tokens are for, if they come from this provider for
    * Grasp's app and the account is in `tenant`; `null` otherwise.
+   * `owner` is who the connection is for (`ownerOf`), for a provider
+   * whose sign-in names no account.
    */
   account: (
     tokens: TokenSet,
     tenant: string,
-    clientId: string
+    clientId: string,
+    owner: string
   ) => Promise<ProviderAccount | null>;
   /**
    * For a provider whose reader lists name accounts by address (Google's),
@@ -194,8 +197,11 @@ export interface ApiKeyProviderConfig {
   server: string;
   /** The key, as a call's requests carry it. */
   credential: (key: string) => Credential;
-  /** The account the key is for, as the app says; `null` if it refused it. */
-  account: (key: string) => Promise<ProviderAccount | null>;
+  /**
+   * The account the key is for, as the app says; `null` if it refused it.
+   * `owner` as for an OAuth provider's `account`.
+   */
+  account: (key: string, owner: string) => Promise<ProviderAccount | null>;
   /** Only shared connections, never a person's own (the HR platform's). */
   sharedOnly?: boolean;
 }
@@ -353,6 +359,28 @@ export const googleUserinfoAddress = async (
   }
 };
 
+/** The account Google's ID token names, if it is for Grasp's app in `tenant`. */
+// oxlint-disable-next-line require-await -- an app's lookup is async
+const googleAccount = async (
+  { idToken }: TokenSet,
+  tenant: string,
+  clientId: string
+): Promise<ProviderAccount | null> => {
+  const parsed = googleClaims.safeParse(idTokenClaims(idToken));
+  if (!parsed.success) {
+    return null;
+  }
+  const { iss, aud, sub, hd, email, email_verified: verified } = parsed.data;
+  const inTenant =
+    googleIssuers.has(iss) &&
+    aud === clientId &&
+    hd?.toLowerCase() === tenant &&
+    verified === true;
+  return inTenant
+    ? { id: sub, name: email ?? null, email: email ?? null }
+    : null;
+};
+
 /**
  * Google Workspace. Google can only hint at the domain (`hd`), so the ID
  * token's `hd` is what counts. `access_type=offline` with `prompt=consent`
@@ -383,29 +411,14 @@ const google: OAuthProviderConfig = {
   clientAuthentication: "client_secret_post",
   client: (env) => credentials(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET),
   subject: ({ idToken }) => subOnly.safeParse(idTokenClaims(idToken)).data?.sub,
-  // oxlint-disable-next-line require-await -- an app's lookup is async
-  account: async ({ idToken }, tenant, clientId) => {
-    const parsed = googleClaims.safeParse(idTokenClaims(idToken));
-    if (!parsed.success) {
-      return null;
-    }
-    const { iss, aud, sub, hd, email, email_verified: verified } = parsed.data;
-    const inTenant =
-      googleIssuers.has(iss) &&
-      aud === clientId &&
-      hd?.toLowerCase() === tenant &&
-      verified === true;
-    return inTenant
-      ? { id: sub, name: email ?? null, email: email ?? null }
-      : null;
-  },
+  account: googleAccount,
   confirmAddress: async (tokens, tenant, clientId, accountId) => {
     // The renewal's ID token, which Google returns from a refresh
     // (https://developers.google.com/identity/openid-connect/openid-connect,
     // "an ID token is returned from a token refresh"), checked as at
     // connecting; else the userinfo endpoint of Google's discovery document,
     // for the token just renewed, with the same checks.
-    const fromToken = await google.account(tokens, tenant, clientId);
+    const fromToken = await googleAccount(tokens, tenant, clientId);
     if (fromToken !== null) {
       return fromToken.id === accountId
         ? (fromToken.email?.toLowerCase() ?? null)

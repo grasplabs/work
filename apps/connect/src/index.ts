@@ -49,6 +49,7 @@ import type {
   StartConnection,
   ConnectWithKey,
   StartToolkitConnection,
+  ToolClass,
   ToolkitKeyField,
   ToolkitKeyFieldsRequest,
   ConnectToolkitWithKey,
@@ -150,7 +151,7 @@ import {
 import { hrConnections, readHr } from "./hr.ts";
 import { createHttpConnection } from "./http-connections.ts";
 import { catalogLogo } from "./logos.ts";
-import { addConnector } from "./mcp-connectors.ts";
+import { addConnector, connectorToolClasses } from "./mcp-connectors.ts";
 import {
   npmAdvisories,
   npmMalwareReports,
@@ -434,6 +435,12 @@ export default class Connect
     connectionIds: readonly string[]
   ): Promise<ConnectionOwner[]> {
     return await connectionOwners(this.env.DB, connectionIds);
+  }
+
+  async connectorToolClasses(
+    connectionId: unknown
+  ): Promise<Record<string, Exclude<ToolClass, "never">>> {
+    return await connectorToolClasses(this.env, connectionId);
   }
 
   async personalAccounts(userId: unknown): Promise<PersonalAccount[]> {

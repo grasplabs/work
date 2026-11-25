@@ -9,6 +9,7 @@ import { recordEventsIf } from "./audit.ts";
 import { connections, connectionTokens } from "./db/schema.ts";
 import { oweRevoke, revocable } from "./owed-revokes.ts";
 import { classRightsProviders, holdsClassRights } from "./provider-rights.ts";
+import { providerFor } from "./providers.ts";
 
 // Turning a class on (core's tool-classes.ts) reaches the grants already
 // given: a suite's connection (Microsoft 365's, Google Workspace's) whose
@@ -82,7 +83,7 @@ export const requireClassRights = async (
             // Its grant is still valid: revoked as owed, with a copy of
             // the tokens, so it doesn't stay live with nothing to revoke
             // it should the person never connect again (GRA-1196).
-            ...(revocable(provider)
+            ...(revocable(providerFor(provider))
               ? [
                   oweRevoke(
                     db,

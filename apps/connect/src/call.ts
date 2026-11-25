@@ -363,7 +363,12 @@ const actionFor = async (
   }
   if (connection.serverKind === "connector") {
     // A tool its server lists now, taken to be what the rules make of it.
-    const { tool, open } = await connectorAction(env, connection, action);
+    const { tool, open } = await connectorAction(
+      env,
+      connection,
+      action,
+      claims.toolClass
+    );
     // A remote server's call of unknown outcome is never recovered.
     return {
       tool,

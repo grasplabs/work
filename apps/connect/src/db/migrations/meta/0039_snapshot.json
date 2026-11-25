@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "1e2c231d-96f8-4c97-b3db-f4ddca31b78c",
+  "id": "683d1519-e605-41a3-8338-83bd3a6b3df0",
   "prevId": "334a29b2-824a-436f-a4d4-235e6c0ecc6d",
   "tables": {
     "ai_provider_keys": {
@@ -1021,6 +1021,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "resource": {
+          "name": "resource",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "auth": {

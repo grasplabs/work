@@ -237,6 +237,22 @@ export const storedSchema = (text: string): Json => {
 };
 
 /**
+ * The class of each of `tools` by the rules, by name, for a connection of
+ * `scope`; tools Grasp never runs are left out. Built as own properties
+ * whatever a name is (`__proto__` too).
+ */
+export const classesOf = (
+  tools: readonly RuledTool[],
+  scope: ConnectionScope
+): Record<string, Exclude<ToolClass, "never">> =>
+  Object.fromEntries(
+    tools.flatMap((tool) => {
+      const toolClass = classByRules(tool, scope);
+      return toolClass === "never" ? [] : [[tool.name, toolClass]];
+    })
+  );
+
+/**
  * The class of each tool kept for each of `rows`, connections to
  * connectors, by the rules, as their lists were last read: nothing is
  * asked of a server here. Tools Grasp never runs are left out.
@@ -245,36 +261,31 @@ export const keptToolClasses = async (
   db: D1Database,
   rows: readonly { id: string; scope: ConnectionScope }[]
 ): Promise<Map<string, Record<string, Exclude<ToolClass, "never">>>> => {
-  const classes = new Map<
-    string,
-    Record<string, Exclude<ToolClass, "never">>
-  >();
   if (rows.length === 0) {
-    return classes;
+    return new Map();
   }
-  const scopes = new Map(rows.map(({ id, scope }) => [id, scope]));
   const kept = await drizzle(db)
     .select()
     .from(connectionTools)
-    .where(inArray(connectionTools.connectionId, [...scopes.keys()]));
-  for (const row of kept) {
-    const scope = scopes.get(row.connectionId);
-    const toolClass =
-      scope === undefined
-        ? "never"
-        : classByRules(
-            {
-              name: row.name,
-              inputSchema: storedSchema(row.inputSchema),
-              annotations: row.annotations,
-            },
-            scope
-          );
-    if (toolClass !== "never") {
-      const each = classes.get(row.connectionId) ?? {};
-      each[row.name] = toolClass;
-      classes.set(row.connectionId, each);
-    }
-  }
-  return classes;
+    .where(
+      inArray(
+        connectionTools.connectionId,
+        rows.map(({ id }) => id)
+      )
+    );
+  return new Map(
+    rows.map(({ id, scope }) => [
+      id,
+      classesOf(
+        kept
+          .filter(({ connectionId }) => connectionId === id)
+          .map((row) => ({
+            name: row.name,
+            inputSchema: storedSchema(row.inputSchema),
+            annotations: row.annotations,
+          })),
+        scope
+      ),
+    ])
+  );
 };

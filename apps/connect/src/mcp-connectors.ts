@@ -9,6 +9,7 @@ import type {
   ConnectorContractAction,
   ToolClass,
 } from "@grasp-os/shared/connect";
+import { connectionIdSchema } from "@grasp-os/shared/ids";
 import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
@@ -22,20 +23,25 @@ import {
   refuseStaff,
 } from "./connection-audit.ts";
 import type { Connection } from "./connections.ts";
-import { secretContext } from "./connector-providers.ts";
+import { maxListedTools, secretContext } from "./connector-providers.ts";
 import { connections, connectionTools, connectors } from "./db/schema.ts";
-import { resolvedPublic } from "./http-connections.ts";
-import { clientFor, discoverSignIn } from "./mcp-discovery.ts";
+import { clientFor, discoverSignIn, isPublicName } from "./mcp-discovery.ts";
 import { McpError, mcpHeaderValue, modernMcpServer } from "./mcp.ts";
 import type { ListedServerTool, McpServer, McpTool } from "./mcp.ts";
 import {
+  actionNamePattern,
   isShallowJson,
   maxSchemaBytes,
   servedSchema,
   textAnswer,
 } from "./served-schemas.ts";
 import { credentialFor } from "./tokens.ts";
-import { classByRules, isJsonArray, storedSchema } from "./tool-rules.ts";
+import {
+  classByRules,
+  classesOf,
+  isJsonArray,
+  storedSchema,
+} from "./tool-rules.ts";
 import type { ToolHints } from "./tool-rules.ts";
 import { vaultFor } from "./vault.ts";
 
@@ -64,14 +70,20 @@ import { vaultFor } from "./vault.ts";
 //   nothing, what it changed) isn't taken: a remote write that failed is
 //   of unknown outcome (policy.ts).
 
-/** Most tools a server may list for connect to read the list at all. */
-const maxListedTools = 500;
-
 /** Longest description kept, in characters: the rest is cut off. */
 const maxDescriptionLength = 4096;
 
 /** Longest a tool list is fresh, whatever the server says. */
 const maxListTtlMs = 60 * 60 * 1000;
+
+/** How long a tool list is fresh when the server doesn't say. */
+const defaultListTtlMs = 5 * 60 * 1000;
+
+/**
+ * Most tools one statement keeps: D1 binds at most 100 parameters a
+ * statement, and a kept tool takes six.
+ */
+const toolsPerInsert = 16;
 
 /**
  * A tool name connect sends: MCP's own rule for names (1 to 128 of
@@ -101,17 +113,12 @@ export interface ConnectorTool {
 /** The server's URL an admin entered, if connect would ever call it. */
 const serverUrlOf = (url: string): URL => {
   const parsed = URL.parse(url);
-  const { hostname } = parsed ?? { hostname: "" };
   if (
     parsed?.protocol !== "https:" ||
     parsed.username !== "" ||
     parsed.password !== "" ||
     parsed.hash !== "" ||
-    parsed.search !== "" ||
-    // An address, not a name: the URL parser writes IPv4 in any spelling
-    // as dotted decimal, and IPv6 in brackets.
-    /^[\d.]+$/u.test(hostname) ||
-    hostname.startsWith("[")
+    parsed.search !== ""
   ) {
     throw connectionErrors.create("connection.server_refused");
   }
@@ -151,7 +158,7 @@ export const addConnector = async (
     });
     throw roleErrors.create("role.forbidden");
   }
-  if ((await resolvedPublic(server.hostname)) !== "public") {
+  if (!(await isPublicName(server))) {
     throw connectionErrors.create("connection.server_refused");
   }
   const vault = await vaultFor(env);
@@ -169,7 +176,8 @@ export const addConnector = async (
     const client = await clientFor(signIn, new URL(origin).origin, auth.client);
     row = {
       ...common,
-      url: signIn.resource,
+      url: server.href,
+      resource: signIn.resource,
       auth: "oauth",
       issuer: signIn.issuer,
       authorizationEndpoint: signIn.authorizationEndpoint,
@@ -344,6 +352,10 @@ const serverFor = async (
   });
 };
 
+/** Orders tools by name, which a list holds each of once. */
+const byName = (a: ConnectorTool, b: ConnectorTool): number =>
+  a.name < b.name ? -1 : 1;
+
 /** A kept row as the tool it is. */
 const keptTool = (row: typeof connectionTools.$inferSelect): ConnectorTool => ({
   name: row.name,
@@ -402,34 +414,78 @@ export const currentTools = async (
     return tool === undefined ? [] : [tool];
   });
   const db = drizzle(env.DB);
+  const read = db
+    .update(connections)
+    .set({
+      toolListReadAt: new Date(now),
+      toolListFreshUntil: new Date(
+        now + Math.min(listed.ttlMs ?? defaultListTtlMs, maxListTtlMs)
+      ),
+    })
+    .where(eq(connections.id, connection.id));
+  // An unchanged list is kept as it is: only its freshness moves.
+  const kept = await keptTools(env.DB, connection.id);
+  if (
+    JSON.stringify(kept.toSorted(byName)) ===
+    JSON.stringify(tools.toSorted(byName))
+  ) {
+    await read;
+    return tools;
+  }
+  const rows = tools.map((tool) => ({
+    connectionId: connection.id,
+    name: tool.name,
+    description: tool.description,
+    inputSchema: JSON.stringify(tool.inputSchema),
+    outputSchema:
+      tool.outputSchema === undefined
+        ? null
+        : JSON.stringify(tool.outputSchema),
+    annotations: tool.annotations,
+  }));
+  const inserts = [];
+  for (let start = 0; start < rows.length; start += toolsPerInsert) {
+    inserts.push(
+      db
+        .insert(connectionTools)
+        .values(rows.slice(start, start + toolsPerInsert))
+    );
+  }
   await db.batch([
     db
       .delete(connectionTools)
       .where(eq(connectionTools.connectionId, connection.id)),
-    ...tools.map((tool) =>
-      db.insert(connectionTools).values({
-        connectionId: connection.id,
-        name: tool.name,
-        description: tool.description,
-        inputSchema: JSON.stringify(tool.inputSchema),
-        outputSchema:
-          tool.outputSchema === undefined
-            ? null
-            : JSON.stringify(tool.outputSchema),
-        annotations: tool.annotations,
-      })
-    ),
-    db
-      .update(connections)
-      .set({
-        toolListReadAt: new Date(now),
-        toolListFreshUntil: new Date(
-          now + Math.min(listed.ttlMs ?? 0, maxListTtlMs)
-        ),
-      })
-      .where(eq(connections.id, connection.id)),
+    ...inserts,
+    read,
   ]);
   return tools;
+};
+
+/**
+ * The classes of connection `connectionId`'s tools by the rules, from its
+ * server's list as it is now: none for a connection that isn't an active
+ * one to a connector. Throws `connect.server_unavailable` when the list
+ * can't be read.
+ */
+export const connectorToolClasses = async (
+  env: Env,
+  connectionId: unknown
+): Promise<Record<string, Exclude<ToolClass, "never">>> => {
+  const id = connectionIdSchema.safeParse(connectionId);
+  const connection = id.success
+    ? await drizzle(env.DB)
+        .select()
+        .from(connections)
+        .where(eq(connections.id, id.data))
+        .get()
+    : undefined;
+  if (
+    connection?.serverKind !== "connector" ||
+    connection.status !== "active"
+  ) {
+    return {};
+  }
+  return classesOf(await currentTools(env, connection), connection.scope);
 };
 
 /** Whether `toolClass` only reads. */
@@ -454,13 +510,16 @@ const named = (
  * The tool a call of `action` on `connection` names, as connect takes it
  * now, and how to reach it: a server that sends nothing but that tool's
  * call. Throws `connect.never` for a tool Grasp never runs,
- * `connect.action_not_found` for one the server doesn't list now, and
+ * `connect.action_not_found` for one the server doesn't list now,
+ * `connect.class_changed` when core let the call through as `checked`
+ * (`CapabilityClaims.toolClass`) and the rules class it otherwise now, and
  * `connect.server_unavailable` when its list can't be read.
  */
 export const connectorAction = async (
   env: Env,
   connection: Connection,
-  action: string
+  action: string,
+  checked: ToolClass | undefined
 ): Promise<{ tool: McpTool; open: () => Promise<Pick<McpServer, "call">> }> => {
   const listed = named(await currentTools(env, connection), action);
   if (listed === undefined) {
@@ -469,6 +528,9 @@ export const connectorAction = async (
   const toolClass = classByRules(listed, connection.scope);
   if (toolClass === "never") {
     throw connectErrors.create("connect.never");
+  }
+  if (checked !== undefined && checked !== toolClass) {
+    throw connectErrors.create("connect.class_changed");
   }
   const headers =
     paramHeadersOf(listed.inputSchema) ?? new Map<string, string>();
@@ -529,24 +591,34 @@ export const connectorContract = async (
   env: Env,
   connection: Connection
 ): Promise<ConnectorContract> => {
-  const actions: Record<string, ConnectorContractAction> = {};
-  for (const tool of await currentTools(env, connection)) {
-    const toolClass = classByRules(tool, connection.scope);
-    const input = servedSchema(tool.inputSchema);
-    const output =
-      tool.outputSchema === undefined
-        ? textAnswer
-        : servedSchema(tool.outputSchema);
-    if (toolClass !== "never" && input !== undefined && output !== undefined) {
-      actions[tool.name] = {
-        tool: tool.name,
-        readOnly: reads(toolClass),
-        class: toolClass,
-        input,
-        output,
-      };
-    }
-  }
+  const tools = await currentTools(env, connection);
+  const actions: Record<string, ConnectorContractAction> = Object.fromEntries(
+    tools.flatMap((tool) => {
+      const toolClass = classByRules(tool, connection.scope);
+      const input = servedSchema(tool.inputSchema);
+      const output =
+        tool.outputSchema === undefined
+          ? textAnswer
+          : servedSchema(tool.outputSchema);
+      return toolClass === "never" ||
+        !actionNamePattern.test(tool.name) ||
+        input === undefined ||
+        output === undefined
+        ? []
+        : [
+            [
+              tool.name,
+              {
+                tool: tool.name,
+                readOnly: reads(toolClass),
+                class: toolClass,
+                input,
+                output,
+              },
+            ],
+          ];
+    })
+  );
   if (Object.keys(actions).length === 0) {
     throw connectErrors.create("connect.contract_not_found");
   }

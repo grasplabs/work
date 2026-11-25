@@ -60,6 +60,7 @@ const signInServer = (
     resource?: string;
     issuer?: string;
     challengeMethods?: string[];
+    tokenEndpoint?: string;
   } = {}
 ) => {
   dns.set(new URL(origin).hostname, ["34.120.10.2"]);
@@ -83,7 +84,7 @@ const signInServer = (
       return Response.json({
         issuer: changes.issuer ?? origin,
         authorization_endpoint: `${origin}/authorize`,
-        token_endpoint: `${origin}/token`,
+        token_endpoint: changes.tokenEndpoint ?? `${origin}/token`,
         registration_endpoint: `${origin}/register`,
         code_challenge_methods_supported: changes.challengeMethods ?? ["S256"],
         token_endpoint_auth_methods_supported: ["none"],
@@ -391,6 +392,13 @@ describe("a connector's server", () => {
     const plainPkce = signInServer("https://mcp.four.example", {
       challengeMethods: ["plain"],
     });
+    dns.set("inside.example", ["10.0.0.7"]);
+    const insideToken = signInServer("https://mcp.six.example", {
+      tokenEndpoint: "https://inside.example/token",
+    });
+    const addressToken = signInServer("https://mcp.seven.example", {
+      tokenEndpoint: "https://10.0.0.7/token",
+    });
     const fine = signInServer("https://mcp.five.example");
 
     expect({
@@ -398,6 +406,8 @@ describe("a connector's server", () => {
       otherResource: await outcome(addServer(otherResource)),
       otherIssuer: await outcome(addServer(otherIssuer)),
       plainPkce: await outcome(addServer(plainPkce)),
+      insideToken: await outcome(addServer(insideToken)),
+      addressToken: await outcome(addServer(addressToken)),
       fine: await outcome(addServer(fine)),
       fetchedElsewhere: sent.some(({ url }) => url.includes("other.example")),
     }).toStrictEqual({
@@ -405,6 +415,8 @@ describe("a connector's server", () => {
       otherResource: "connection.sign_in_unsupported",
       otherIssuer: "connection.sign_in_unsupported",
       plainPkce: "connection.sign_in_unsupported",
+      insideToken: "connection.sign_in_unsupported",
+      addressToken: "connection.sign_in_unsupported",
       fine: "ok",
       fetchedElsewhere: false,
     });
@@ -552,6 +564,22 @@ describe("a connector's server", () => {
       tokenAtNotes: false,
       member: "role.forbidden",
       staff: "connection.staff_not_allowed",
+    });
+  });
+
+  it("is one connector however its URL is spelled, signing in for the resource as the server names it", async () => {
+    const url = signInServer("https://mcp.spelled.example", {
+      resource: "https://MCP.Spelled.example:443/mcp",
+    });
+    const { id } = await addServer(url);
+    const signIn = new URL(await startLinear(id, someone()));
+
+    expect({
+      resource: signIn.searchParams.get("resource"),
+      again: await outcome(addServer("https://mcp.spelled.example:443/mcp")),
+    }).toStrictEqual({
+      resource: "https://MCP.Spelled.example:443/mcp",
+      again: "connection.connector_exists",
     });
   });
 

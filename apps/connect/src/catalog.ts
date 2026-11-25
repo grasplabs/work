@@ -67,7 +67,7 @@ export const providerName = ({
   serverKind,
   provider,
 }: {
-  serverKind: string;
+  serverKind: "native" | "composio" | "http" | "connector";
   provider: string;
 }): string => {
   const native = oauthProviderSchema.safeParse(provider);

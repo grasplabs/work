@@ -94,6 +94,48 @@ describe("a connector made from Linear's MCP server URL", () => {
     ]);
   });
 
+  it("connects again in place once it needs signing in again, and keeps no tool list once disconnected", async () => {
+    const connector = await addLinear();
+    const anna = someone();
+    const agent = chatAgent(anna);
+    const connectionId = await connectLinear(connector, anna);
+    await callAs(agent, { connectionId, action: "list_issues", input: {} });
+    const twice = await outcome(connectLinear(connector, anna));
+    await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE connections SET status = 'needs_reauth' WHERE id = ?"
+      ).bind(connectionId),
+      env.DB.prepare(
+        "DELETE FROM connection_tokens WHERE connection_id = ?"
+      ).bind(connectionId),
+    ]);
+
+    const again = await connectLinear(connector, anna);
+    const read = await callAs(agent, {
+      connectionId,
+      action: "list_issues",
+      input: {},
+    });
+    await exports.default.disconnect({ person: anna, connectionId });
+    const tools = await env.DB.prepare(
+      "SELECT count(*) AS kept FROM connection_tools WHERE connection_id = ?"
+    )
+      .bind(connectionId)
+      .first<{ kept: number }>();
+
+    expect({
+      twice,
+      sameConnection: again === connectionId,
+      read: read.output.includes("ENG-1"),
+      toolsAfterDisconnect: tools?.kept,
+    }).toStrictEqual({
+      twice: "connection.already_connected",
+      sameConnection: true,
+      read: true,
+      toolsAfterDisconnect: 0,
+    });
+  });
+
   it("keeps none of an erased person's tool lists, once their grant is revoked", async () => {
     const connector = await addLinear();
     const anna = someone();

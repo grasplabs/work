@@ -244,7 +244,14 @@ export const connectors = sqliteTable(
   {
     id: text().primaryKey(),
     name: text().notNull(),
+    /** The server's URL, as the URL parser writes it. */
     url: text().notNull(),
+    /**
+     * The `resource` its metadata names (RFC 9728), the same URL as the
+     * server's spelled as the server spells it: what its sign-in asks
+     * tokens for (RFC 8707). None for a key.
+     */
+    resource: text(),
     auth: text({ enum: ["oauth", "header"] }).notNull(),
     /** The header a key goes in, in lower case. */
     header: text(),

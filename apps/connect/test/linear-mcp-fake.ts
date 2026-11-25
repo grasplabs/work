@@ -178,8 +178,11 @@ export interface Workspace {
 export interface LinearMcpFake {
   /** What `tools/list` lists, in order; a call runs only a listed tool. */
   tools: LinearTool[];
-  /** The `ttlMs` caching hint on `tools/list` and `server/discover`. */
-  ttlMs: number;
+  /**
+   * The `ttlMs` caching hint on `tools/list` and `server/discover`;
+   * none when undefined.
+   */
+  ttlMs: number | undefined;
   /** Tools per `tools/list` page; all on one page when undefined. */
   pageSize: number | undefined;
   /** Results as one JSON body, or as an event stream of one event. */

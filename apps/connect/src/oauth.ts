@@ -61,6 +61,7 @@ import { isConnectorId, providerConfigFor } from "./connector-providers.ts";
 import {
   connections,
   connectionTokens,
+  connectionTools,
   httpConnections,
   oauthFlows,
   pendingActions,
@@ -147,6 +148,15 @@ type ConnectionRow = typeof connections.$inferSelect;
 type FlowRow = typeof oauthFlows.$inferSelect;
 
 /** The live connection that already holds `accountId`, if any. */
+/**
+ * Who a connection is for: the person, for their own connection; the
+ * company, for a shared one.
+ */
+const ownerOf = (
+  flow: Pick<FlowRow, "scope">,
+  person: ConnectionPerson
+): string => (flow.scope === "shared" ? "company" : `person:${person.userId}`);
+
 const connectionHolding = async (
   env: Env,
   provider: string,
@@ -845,7 +855,12 @@ const keepTokens = async (
   refuse: Refuse
 ): Promise<string> => {
   const { provider, client } = setUp;
-  const account = await provider.account(tokens, flow.tenant, client.id);
+  const account = await provider.account(
+    tokens,
+    flow.tenant,
+    client.id,
+    ownerOf(flow, person)
+  );
   const drop = async (accountId: string | undefined): Promise<void> => {
     await dropMint(env, setUp, tokens, accountId);
   };
@@ -988,11 +1003,17 @@ const stop = async (
               ),
           ]
         : []),
-      // After the status: only a stopped connection's tokens go.
+      // After the status: only a stopped connection's tokens go, and the
+      // tool list its connector's server gave it.
       db
         .delete(connectionTokens)
         .where(
           sql`${connectionTokens.connectionId} = ${connection.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
+        ),
+      db
+        .delete(connectionTools)
+        .where(
+          sql`${connectionTools.connectionId} = ${connection.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
         ),
     ]
   );
@@ -1389,7 +1410,7 @@ export const connectWithKey = async (
       connectionId
     );
   };
-  const account = await provider.account(key);
+  const account = await provider.account(key, ownerOf({ scope }, person));
   if (account === null) {
     await refuse("connection.provider_refused", { outcome: "failed" });
     throw connectionErrors.create("connection.provider_refused");

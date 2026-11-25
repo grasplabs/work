@@ -2241,6 +2241,16 @@ export interface ConnectApi
     connectionIds: readonly string[]
   ) => Promise<ConnectionOwner[]>;
   /**
+   * The classes of the tools of a connection to a connector made from a
+   * URL, by the rules, from its server's tool list as it is now (read
+   * again once the last read is stale): what core's class gate checks a
+   * chat agent's call by. Empty for any other connection;
+   * `connect.server_unavailable` when the list can't be read.
+   */
+  connectorToolClasses: (
+    connectionId: string
+  ) => Promise<Record<string, Exclude<ToolClass, "never">>>;
+  /**
    * The suite accounts the person `userId` connected as their own,
    * disconnected ones too, as connect verified them (`PersonalAccount`):
    * what core counts them as a reader of where it copies who may read an
@@ -2813,6 +2823,8 @@ export const connectErrors = defineErrorFamily({
     "Your company hasn't turned this kind of action on for you, so it wasn't done. An admin can turn it on.",
   "connect.class_unknown":
     "It isn't known what kind of action this is, so it wasn't done.",
+  "connect.class_changed":
+    "The app now describes this action as another kind than when it was checked, so it wasn't done. Try again.",
   "connect.never":
     "Grasp never deletes, shares, forwards, sets rules or settings, or pays, whatever is allowed, so it wasn't done.",
   "connect.app_not_pointed":

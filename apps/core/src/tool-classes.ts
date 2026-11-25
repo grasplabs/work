@@ -387,10 +387,12 @@ const requireAgentHasClass = async (
 
 /**
  * What core signs into the capability of a call it let through: for a read
- * in a company app pointed at within some resources, those resources.
+ * in a company app pointed at within some resources, those resources; for
+ * a company app's tool, the class it let the call through as.
  */
 export interface ClassedCall {
   resources?: string[];
+  toolClass?: ToolClass;
 }
 
 /**
@@ -472,15 +474,15 @@ const requireAppClassOn = async (
       throw connectErrors.create("connect.app_not_pointed");
     }
     return pointer.resources.length === 0
-      ? {}
-      : { resources: pointer.resources };
+      ? { toolClass }
+      : { toolClass, resources: pointer.resources };
   }
   const audience = await audienceNow(env, toolClass);
   if (!(await takesIn(env, audience, authority.onBehalfOf))) {
     throw connectErrors.create("connect.class_off");
   }
   await requireAgentHasClass(env, authority, toolClass);
-  return {};
+  return { toolClass };
 };
 
 /** A mail tool's class in its person's own mailbox. */
@@ -550,8 +552,20 @@ export const requireToolClassOn = async (
     authority,
     agentAppOf(owner.source, owner.provider)
   );
-  if (owner.source === "composio" || owner.source === "connector") {
+  if (owner.source === "composio") {
     return await requireAppClassOn(env, authority, owner, action, unattended);
+  }
+  // A connector's tools are classed from its server's list as it is now,
+  // not as it was last kept: a new connection has none kept yet.
+  if (owner.source === "connector") {
+    const classesNow = await env.CONNECT.connectorToolClasses(owner.id);
+    return await requireAppClassOn(
+      env,
+      authority,
+      { ...owner, toolClasses: classesNow },
+      action,
+      unattended
+    );
   }
   const toolClass = nativeClasses.get(owner.provider)?.get(action);
   if (toolClass === undefined) {

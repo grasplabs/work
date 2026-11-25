@@ -8,7 +8,11 @@ import { allowedTool, composioServer } from "./connections.ts";
 import type { Connection } from "./connections.ts";
 import { McpError } from "./mcp.ts";
 import type { McpListedTool } from "./mcp.ts";
-import { servedSchema, textAnswer } from "./served-schemas.ts";
+import {
+  actionNamePattern,
+  servedSchema,
+  textAnswer,
+} from "./served-schemas.ts";
 
 // A Composio connection's generated contract, `composio.<toolkit>@1`: the
 // tools its admin allowed, each an action named by its tool, with the
@@ -58,9 +62,6 @@ export const composioContractPrefix = "composio";
  * as an admin may allow, so a list that big isn't one Composio makes.
  */
 const maxListedTools = 2 * composioToolsMax;
-
-/** A name an App can declare as an action (the SDK's own rule). */
-const actionNamePattern = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/u;
 
 /**
  * The tools the server lists, each named once; a name listed twice is left

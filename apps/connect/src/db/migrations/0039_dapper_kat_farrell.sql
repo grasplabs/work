@@ -13,6 +13,7 @@ CREATE TABLE `connectors` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
 	`url` text NOT NULL,
+	`resource` text,
 	`auth` text NOT NULL,
 	`header` text,
 	`issuer` text,
