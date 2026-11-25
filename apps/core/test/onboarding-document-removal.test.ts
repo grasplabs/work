@@ -37,7 +37,7 @@ import { wordFile } from "./word-file.ts";
 // removes it or its file is deleted from the Brain (GRA-970, GRA-1889,
 // the store's `forgetDocuments`). The onboarding keeps only the reading,
 // never the file. Each document here holds a word nobody else says (a
-// sentinel), which its reading, the admin's answer and a drawing take up,
+// sentinel), which its reading and a drawing take up,
 // and the tests look for it everywhere it could be left: the store's
 // tables, both D1 databases, the audit log, and what an interview turn
 // knows. The model provider is the outside system, faked behind connect.
@@ -75,14 +75,12 @@ const readingWith = (word: string): ProviderReply => ({
     tools: [word, "Zendesk"],
     teams: ["Ops"],
     unclear: [`Who checks what ${word} holds?`],
-    question: `Is the ${word} procedure still current?`,
-    options: ["Yes", "No"],
   }),
   inputTokens: 1200,
   outputTokens: 150,
 });
 
-/** Shares a document named `name` holding `word`, as `admin`, and answers its question: its ID. */
+/** Shares a document named `name` holding `word`, as `admin`: its ID. */
 const share = async (
   admin: SessionApi,
   name: string,
@@ -97,7 +95,6 @@ const share = async (
         bytes: documentWith(word),
       })
   );
-  await admin.onboarding.answerDocument(shared.id, `Only in ${word} now.`);
   return shared.id;
 };
 
@@ -459,7 +456,7 @@ describe(
         },
       },
     ])(
-      "takes its reading, the answer and every drawing made with it out of the store, both databases, the audit log and the turns when $how, and draws the work again",
+      "takes its reading and every drawing made with it out of the store, both databases, the audit log and the turns when $how, and draws the work again",
       async ({ go }) => {
         const { api: admin } = await signedInApi(idp, "admin");
         const word = sentinelOf();

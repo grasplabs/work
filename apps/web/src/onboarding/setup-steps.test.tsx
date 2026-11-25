@@ -465,9 +465,7 @@ describe("the documents and places the admin comes back to", () => {
         tools: [],
         teams: [],
         unclear: [],
-        ask: null,
       },
-      answer: null,
     };
     const again = drawn("documents", { documents: [handbook] });
     expect({

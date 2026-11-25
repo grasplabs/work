@@ -328,7 +328,6 @@ export const rpcParamNames: ParamNames = {
     "view": [],
   },
   "OnboardingRpc": {
-    "answerDocument": ["id","answer"],
     "behind": [],
     "choices": [],
     "confirmRoster": ["roster"],

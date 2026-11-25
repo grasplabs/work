@@ -66,8 +66,6 @@ const reading = {
   tools: ["ClaimsPro"],
   teams: ["Ops"],
   unclear: ["How long a claim waits for a manager."],
-  question: "Is this 2019 draft still how claims go today?",
-  options: ["Yes, still current", "No, it changed"],
 };
 
 const answer: ProviderReply = {

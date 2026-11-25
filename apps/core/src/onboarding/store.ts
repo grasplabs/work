@@ -1138,13 +1138,11 @@ const documentOf = (row: {
   name: string;
   at: string;
   reading: string;
-  answer: string | null;
 }): OnboardingDocument => ({
   id: row.id,
   name: row.name,
   at: row.at,
   reading: storedDocumentReadingSchema.parse(JSON.parse(row.reading)),
-  answer: row.answer,
 });
 
 /** How the log names someone who did something on their own interview link. */
@@ -4690,50 +4688,21 @@ export class Onboarding extends DurableObject<Env> {
       at: new Date().toISOString(),
       by: whoIs(by),
       reading: JSON.stringify(kept.reading),
-      answer: null,
     };
     this.ctx.storage.transactionSync(() => {
       this.#db.insert(documents).values(row).run();
       this.#changed(by, "onboarding.document.read", {
         document: kept.id,
-        asks: kept.reading.ask !== null,
       });
     });
     this.#deliverAudit();
     return documentOf(row);
   }
 
-  /** Keeps the admin's answer to a document's question; null for no such document. */
-  answerDocument(
-    id: string,
-    answer: string,
-    by: AuditActor
-  ): OnboardingDocument | null {
-    const [row] = this.#db
-      .select()
-      .from(documents)
-      .where(eq(documents.id, id))
-      .all();
-    if (row === undefined) {
-      return null;
-    }
-    this.ctx.storage.transactionSync(() => {
-      this.#db
-        .update(documents)
-        .set({ answer })
-        .where(eq(documents.id, id))
-        .run();
-      this.#changed(by, "onboarding.document.answered", { document: id });
-    });
-    this.#deliverAudit();
-    return documentOf({ ...row, answer });
-  }
-
   /**
    * Forgets shared documents' readings for good, as removing them does
-   * (documents.ts): each reading,
-   * its question and the admin's answer, so neither Stephen's context nor
-   * the brain's sources and tools (brain-rpc.ts) show them again; every
+   * (documents.ts): each reading, so neither Stephen's context nor the
+   * brain's sources and tools (brain-rpc.ts) show them again; every
    * drawing made since the first of them was shared, which may have had
    * it for context, to be drawn again without it; and every drawing the
    * Brain and its page were given since, each of which is given again once
@@ -4890,7 +4859,7 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * What the documents give Stephen's context for an interview with
    * `team` (by its name): each document about it, or about no team in
-   * particular, with what it leaves open and the admin's answer.
+   * particular, with what it leaves open.
    */
   documentsBrief(team: string): string {
     const about = this.documents().filter(
@@ -4901,7 +4870,7 @@ export class Onboarding extends DurableObject<Env> {
     if (about.length === 0) {
       return "";
     }
-    const parts = about.map(({ name, reading, answer }) =>
+    const parts = about.map(({ name, reading }) =>
       [
         `## ${name}`,
         reading.about,
@@ -4914,9 +4883,6 @@ export class Onboarding extends DurableObject<Env> {
               "What it leaves open, to ask the people who do the work:",
               ...reading.unclear.map((each) => `- ${each}`),
             ]),
-        ...(answer === null || reading.ask === null
-          ? []
-          : [`Asked "${reading.ask.question}", the admin said: ${answer}`]),
       ].join("\n")
     );
     return `# Documents the company shared\n\n${parts.join("\n\n")}`;

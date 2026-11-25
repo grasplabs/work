@@ -429,12 +429,8 @@ const partsIn = (element: Element): Parts | null => {
   return { visitor, arrow, bubble, line, typed, page, arts, bits };
 };
 
-/** Lets the visitors in `element` come and go, asking from `asks()`, resting while `paused()`, until the returned controller aborts. */
-const welcome = (
-  element: HTMLElement,
-  asks: () => Ask[],
-  paused: () => boolean
-): AbortController => {
+/** Lets the visitors in `element` come and go, asking from `asks()`, until the returned controller aborts. */
+const welcome = (element: HTMLElement, asks: () => Ask[]): AbortController => {
   const leaving = new AbortController();
   const { signal } = leaving;
   let next = Math.floor(Math.random() * asks().length);
@@ -458,11 +454,9 @@ const welcome = (
     }
     await wait(first, signal);
     while (!signal.aborted) {
-      if (!paused()) {
-        const { ask, colour } = taken();
-        // oxlint-disable-next-line no-await-in-loop -- one visit after the other, by design
-        await visit(parts, ask, side, colour, signal);
-      }
+      const { ask, colour } = taken();
+      // oxlint-disable-next-line no-await-in-loop -- one visit after the other, by design
+      await visit(parts, ask, side, colour, signal);
       // oxlint-disable-next-line no-await-in-loop -- a pause between visits
       await wait(between(3500, 6500), signal);
     }
@@ -479,18 +473,13 @@ const welcome = (
   return leaving;
 };
 
-/**
- * The visitors, over the step while it is open; resting while `paused`
- * (a question or the picker is open), and none under reduced motion.
- */
-export const DocumentVisitors = ({ paused }: { paused: boolean }) => {
+/** The visitors, over the step while it is open; none under reduced motion. */
+export const DocumentVisitors = () => {
   const still = useStill();
   const asks = useAsks();
   const asksNow = useRef(asks);
-  const pausedNow = useRef(paused);
   useEffect(() => {
     asksNow.current = asks;
-    pausedNow.current = paused;
   });
   const layer = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -500,11 +489,7 @@ export const DocumentVisitors = ({ paused }: { paused: boolean }) => {
         // Nobody visits.
       };
     }
-    const leaving = welcome(
-      element,
-      () => asksNow.current,
-      () => pausedNow.current
-    );
+    const leaving = welcome(element, () => asksNow.current);
     return () => {
       leaving.abort();
     };

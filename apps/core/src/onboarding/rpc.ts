@@ -43,7 +43,6 @@ import type {
   SetupChoicesInput,
 } from "@grasp-os/shared/onboarding-choices";
 import {
-  documentAnswerMaxLength,
   documentErrors,
   shareDocumentSchema,
 } from "@grasp-os/shared/onboarding-documents";
@@ -121,12 +120,6 @@ import { summaryOf } from "./summary.ts";
 // browser to make the roster of (directory.ts); documents from where
 // they live, picked in the admin's browser (document-places.ts); and who
 // leads which team from its HR platform, the same way (hr.ts).
-
-/** The admin's answer to a document's question. */
-const answerSchema = z.strictObject({
-  id: z.string().min(1).max(64),
-  answer: z.string().trim().min(1).max(documentAnswerMaxLength),
-});
 
 /** The onboarding, for the client's admin. */
 export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
@@ -506,28 +499,6 @@ export class OnboardingRpc extends CoreRpcTarget implements OnboardingApi {
       requireAdmin(person);
       const parsed = documentErrors.parse("document.invalid", z.string(), id);
       await removeDocument(this.#env, person, parsed);
-    });
-  }
-
-  async answerDocument(
-    id: string,
-    answer: string
-  ): Promise<OnboardingDocument> {
-    return await withPerson(this.#check, async (person) => {
-      requireAdmin(person);
-      const parsed = documentErrors.parse("document.invalid", answerSchema, {
-        id,
-        answer,
-      });
-      const answered = await onboardingStore(this.#env).answerDocument(
-        parsed.id,
-        parsed.answer,
-        actorOf(person)
-      );
-      if (answered === null) {
-        throw documentErrors.create("document.not_found");
-      }
-      return answered;
     });
   }
 }

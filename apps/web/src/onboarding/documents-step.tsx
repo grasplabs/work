@@ -1,9 +1,7 @@
 import type { InterviewLocale } from "@grasp-os/shared/onboarding";
 import { documentErrors } from "@grasp-os/shared/onboarding-documents";
 import { Button } from "@grasp-os/ui/components/button";
-import { Card } from "@grasp-os/ui/components/card";
 import { FileUpload } from "@grasp-os/ui/components/file-upload";
-import { Text } from "@grasp-os/ui/components/text";
 import { ArrowRightIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
@@ -32,8 +30,7 @@ import type { StepProps } from "./step-parts.ts";
 // visit or an earlier one (document-shelf.tsx): a small chip each, its own
 // pixel page filling in as it is sent, then ticked, with Remove; a refusal
 // said on its chip with Try again. The step's words and the way on stand centred.
-// What only the one who shared it can say, Stephen asks at once, with
-// the answers to pick from. The zone is the step's one way in and takes
+// The zone is the step's one way in and takes
 // the room: where documents live (SharePoint and OneDrive) is connected
 // on the step before, so it is not offered again here.
 // Now and then a visitor's cursor drifts in beside the zone, asks for a
@@ -43,8 +40,6 @@ const styles = stylex.create({
   stack: { display: "grid", gap: space[4] },
   // The drop zone, tall: the step's one place to act.
   zone: { minHeight: { default: "18rem", [media.maxSm]: "12rem" } },
-  question: { display: "grid", gap: space[4] },
-  options: { display: "flex", flexWrap: "wrap", gap: space[2] },
 });
 
 /** Every kind of file core reads, as the upload takes them. */
@@ -79,7 +74,7 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
   const { t, i18n } = useLingui();
   const core = useCore();
   const refresh = useRefresh();
-  const { run, busy, failure } = useCoreAction();
+  const { run, busy } = useCoreAction();
   const problemOf = useProblemOf();
   const kinds = kindsOf(useContextWords(data));
   const locale: InterviewLocale = isLocale(i18n.locale) ? i18n.locale : "en";
@@ -138,22 +133,6 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
       await refresh();
     }
   };
-  // The one question about a document while it waits for an answer; the first shared is asked first (core lists the newest first).
-  const open = kept.findLast(
-    (each) => each.reading.ask !== null && each.answer === null
-  );
-  const ask = open?.reading.ask ?? null;
-  const answer = async (option: string) => {
-    if (open !== undefined) {
-      const saved = await run(
-        async (session) =>
-          await session.onboarding.answerDocument(open.id, option)
-      );
-      if (saved !== undefined) {
-        await refresh();
-      }
-    }
-  };
   return (
     <CalmStep
       body={
@@ -176,29 +155,6 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
     >
       <div {...stylex.props(styles.stack)}>
         <ErrorText>{removeProblem}</ErrorText>
-        {open === undefined || ask === null ? null : (
-          <Card padding="lg">
-            <div {...stylex.props(styles.question)}>
-              <Text>{`${open.reading.about} ${ask.question}`}</Text>
-              <div {...stylex.props(styles.options)}>
-                {ask.options.map((option) => (
-                  <Button
-                    disabled={busy}
-                    key={option}
-                    onClick={() => {
-                      void answer(option);
-                    }}
-                    size="lg"
-                    variant="outline"
-                  >
-                    {option}
-                  </Button>
-                ))}
-              </div>
-              <ErrorText>{failure}</ErrorText>
-            </div>
-          </Card>
-        )}
         <DocumentShelf
           busy={busy}
           coming={coming}
@@ -225,7 +181,7 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
           />
         </DocumentPages>
       </div>
-      <DocumentVisitors paused={ask !== null} />
+      <DocumentVisitors />
     </CalmStep>
   );
 };
