@@ -25,8 +25,8 @@ import { useState } from "react";
 // their role at the row's end, a quiet Select whose last choice takes them
 // away. Damsko's own share dialog (blocks/share-dialog-01) is a whole
 // Dialog: this is the list it holds, for Sharing's settings and Share's
-// dialog alike (sharing.tsx). Damsko's Combobox takes one value, so one is
-// added at a time (registry gap of 24 Nov 2026: several, as chips).
+// dialog alike (sharing.tsx). Several can be picked at once, each a chip
+// in the field, and Add gives them all the level chosen.
 
 /** Someone, or something, who can be given access. */
 export interface ShareCandidate {
@@ -155,6 +155,20 @@ const Face = ({ kind, name }: { kind: ShareMember["kind"]; name: string }) =>
     </span>
   );
 
+/**
+ * A candidate's face in the list and in its chip: an Avatar, which the
+ * chip draws at its own line's size; a team's or a project's icon in it.
+ */
+const choiceFace = (candidate: ShareCandidate) => (
+  <Avatar decorative name={candidate.name} size="xs">
+    <AvatarFallback>
+      {candidate.kind === "person" ? undefined : (
+        <Icon icon={candidate.kind === "team" ? UsersIcon : FolderIcon} />
+      )}
+    </AvatarFallback>
+  </Avatar>
+);
+
 /** An option's line under its name, when it has one. */
 const describedBy = (line: string | undefined) =>
   line === undefined ? {} : { description: line };
@@ -186,7 +200,7 @@ const AddRow = ({
   onAdd: (ids: string[], level: string) => unknown;
 }) => {
   const { t } = useLingui();
-  const [picked, setPicked] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string[]>([]);
   const [level, setLevel] = useState(levels[0]?.value ?? "");
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -194,32 +208,25 @@ const AddRow = ({
   const find = findLabel ?? t`Add people, teams or projects`;
   const hasAccess = t`Has access`;
   const add = async (): Promise<void> => {
-    if (picked === null) {
-      return;
-    }
     setBusy(true);
     setFailed(false);
-    const ok = await settles(() => onAdd([picked], level));
+    const ok = await settles(() => onAdd(picked, level));
     setBusy(false);
     setFailed(!ok);
     if (ok) {
-      setPicked(null);
+      setPicked([]);
     }
   };
   return (
     <div {...stylex.props(styles.add)}>
       <Combobox
         aria-label={find}
+        multiple
         items={candidates.map((candidate) => ({
           value: candidate.id,
           label: candidate.name,
           disabled: has.has(candidate.id),
-          media: (
-            <Face
-              kind={candidate.kind === "team" ? "group" : candidate.kind}
-              name={candidate.name}
-            />
-          ),
+          media: choiceFace(candidate),
           // Who has it already is marked, not offered again.
           ...describedBy(has.has(candidate.id) ? hasAccess : candidate.note),
           ...(candidate.note === undefined
@@ -251,7 +258,7 @@ const AddRow = ({
         <SelectContent />
       </Select>
       <Button
-        disabled={picked === null || busy}
+        disabled={picked.length === 0 || busy}
         onClick={() => {
           void add();
         }}
