@@ -30,6 +30,7 @@ import {
   ItemContent,
   ItemDescription,
   ItemDetail,
+  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -55,7 +56,6 @@ import { useId, useState } from "react";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatZone } from "../format.ts";
-import { SeparatedItems } from "../workflows/separated-items.tsx";
 import { SectionCard } from "./section-card.tsx";
 
 // An agent's wake-ups, on its page's Schedule tab (agent-page.tsx): when it takes a
@@ -409,69 +409,66 @@ export const AgentWakes = ({
           </EmptyHeader>
         </Empty>
       ) : (
-        <SeparatedItems
-          rows={wakes.map((wake) => {
+        <ItemGroup separated>
+          {wakes.map((wake) => {
             const when = whenOf(wake);
             const person = nameOf(wake.personId);
             const last = lastOf(wake);
             const { opening } = wake;
-            return {
-              key: wake.id,
-              row: (
-                <Item key={wake.id} size="sm">
-                  <ItemMedia variant="default">
-                    <Icon icon={CalendarIcon} />
-                  </ItemMedia>
-                  <ItemContent>
-                    <ItemTitle>
-                      {when}
-                      {/* With the zone it was made in: the company's then,
+            return (
+              <Item key={wake.id} size="sm">
+                <ItemMedia variant="default">
+                  <Icon icon={CalendarIcon} />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>
+                    {when}
+                    {/* With the zone it was made in: the company's then,
                         which it keeps if the company's changes. */}
-                      <ItemDetail>{formatZone(wake.timeZone)}</ItemDetail>
-                    </ItemTitle>
-                    <ItemDescription>
-                      {last === undefined
-                        ? t`For ${person}: ${opening}`
-                        : t`For ${person}: ${opening} · ${last}`}
-                    </ItemDescription>
-                  </ItemContent>
-                  <ItemActions>
-                    <Field orientation="horizontal" disabled={!can}>
-                      <FieldLabel>{t`On`}</FieldLabel>
-                      <Switch
-                        checked={wake.state === "on"}
-                        onCheckedChange={(next) => {
-                          void change(async (session) => {
-                            await session.connections.setAgentWakePaused(
-                              wake.id,
-                              !next
-                            );
-                          });
-                        }}
-                      />
-                    </Field>
-                    {editable ? (
-                      <Button
-                        aria-label={t`Remove ${when}, for ${person}`}
-                        disabled={!can}
-                        onClick={() => {
-                          void removeWithUndo(wake, change, {
-                            done: t`Time removed`,
-                            undo: t`Undo`,
-                          });
-                        }}
-                        size="icon-sm"
-                        variant="ghost"
-                      >
-                        <Icon icon={TrashIcon} />
-                      </Button>
-                    ) : null}
-                  </ItemActions>
-                </Item>
-              ),
-            };
+                    <ItemDetail>{formatZone(wake.timeZone)}</ItemDetail>
+                  </ItemTitle>
+                  <ItemDescription>
+                    {last === undefined
+                      ? t`For ${person}: ${opening}`
+                      : t`For ${person}: ${opening} · ${last}`}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <Field orientation="horizontal" disabled={!can}>
+                    <FieldLabel>{t`On`}</FieldLabel>
+                    <Switch
+                      checked={wake.state === "on"}
+                      onCheckedChange={(next) => {
+                        void change(async (session) => {
+                          await session.connections.setAgentWakePaused(
+                            wake.id,
+                            !next
+                          );
+                        });
+                      }}
+                    />
+                  </Field>
+                  {editable ? (
+                    <Button
+                      aria-label={t`Remove ${when}, for ${person}`}
+                      disabled={!can}
+                      onClick={() => {
+                        void removeWithUndo(wake, change, {
+                          done: t`Time removed`,
+                          undo: t`Undo`,
+                        });
+                      }}
+                      size="icon-sm"
+                      variant="ghost"
+                    >
+                      <Icon icon={TrashIcon} />
+                    </Button>
+                  ) : null}
+                </ItemActions>
+              </Item>
+            );
           })}
-        />
+        </ItemGroup>
       )}
     </SectionCard>
   );

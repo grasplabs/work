@@ -258,9 +258,9 @@ const linkIn = (item: HTMLElement): HTMLElement => {
 const fieldIn = (item: HTMLElement): HTMLInputElement | null =>
   item.querySelector<HTMLInputElement>("input[data-row-rename]");
 
-/** What the page's live regions have said, as Damsko's `announce` says it. */
+/** What the page's live regions have said: UI SDK's pair, which Damsko's `announce` speaks through. */
 const said = (): string[] =>
-  [...document.querySelectorAll("[data-slot=live-region]")].map((region) =>
+  [...document.querySelectorAll("[data-ui-sdk-announcer]")].map((region) =>
     region.textContent.trim()
   );
 

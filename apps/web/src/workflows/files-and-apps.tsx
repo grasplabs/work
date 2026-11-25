@@ -67,7 +67,6 @@ import {
 } from "./binding-approvals.tsx";
 import { useHeldDialog } from "./held-dialog.ts";
 import { SectionCard } from "./section-card.tsx";
-import { SeparatedItems } from "./separated-items.tsx";
 import { workflowAppsOf } from "./workflow-apps.ts";
 import type { WorkflowApps } from "./workflow-apps.ts";
 
@@ -157,55 +156,47 @@ const Apps = ({ apps }: { apps: WorkflowApps }) => {
     );
   }
   return (
-    <SeparatedItems
-      rows={[
-        ...apps.connected.map((integration) => ({
-          key: integration.key,
-          row: (
-            <Item asChild size="xs">
-              <Link
-                params={{ integration: integration.key }}
-                to="/connectors/$integration"
-              >
-                <ItemMedia>
-                  {/* The app's own mark, as Integrations draws it. */}
-                  <ProviderMark
-                    id={integration.id}
-                    logo={integration.logo}
-                    name={integration.name}
-                  />
-                </ItemMedia>
-                <ItemContent>
-                  <ItemTitle>{integration.name}</ItemTitle>
-                </ItemContent>
-                <ItemActions>
-                  <ConnectedState integration={integration} />
-                </ItemActions>
-              </Link>
-            </Item>
-          ),
-        })),
-        ...apps.unconnected.map(({ alias, contractId }) => ({
-          key: alias,
-          row: (
-            <Item size="xs">
-              <ItemMedia>
-                <Icon icon={CableIcon} />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>
-                  <code>{alias}</code>
-                </ItemTitle>
-                <ItemDescription>{contractId}</ItemDescription>
-              </ItemContent>
-              <ItemActions>
-                <Badge size="sm" variant="warning">{t`Not connected`}</Badge>
-              </ItemActions>
-            </Item>
-          ),
-        })),
-      ]}
-    />
+    <ItemGroup separated>
+      {apps.connected.map((integration) => (
+        <Item asChild key={integration.key} size="xs">
+          <Link
+            params={{ integration: integration.key }}
+            to="/connectors/$integration"
+          >
+            <ItemMedia>
+              {/* The app's own mark, as Integrations draws it. */}
+              <ProviderMark
+                id={integration.id}
+                logo={integration.logo}
+                name={integration.name}
+              />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>{integration.name}</ItemTitle>
+            </ItemContent>
+            <ItemActions>
+              <ConnectedState integration={integration} />
+            </ItemActions>
+          </Link>
+        </Item>
+      ))}
+      {apps.unconnected.map(({ alias, contractId }) => (
+        <Item key={alias} size="xs">
+          <ItemMedia>
+            <Icon icon={CableIcon} />
+          </ItemMedia>
+          <ItemContent>
+            <ItemTitle>
+              <code>{alias}</code>
+            </ItemTitle>
+            <ItemDescription>{contractId}</ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <Badge size="sm" variant="warning">{t`Not connected`}</Badge>
+          </ItemActions>
+        </Item>
+      ))}
+    </ItemGroup>
   );
 };
 

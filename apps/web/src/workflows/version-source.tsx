@@ -8,6 +8,7 @@ import {
   Item,
   ItemActions,
   ItemContent,
+  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -27,7 +28,6 @@ import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { Code } from "./code.tsx";
 import { SectionCard } from "./section-card.tsx";
-import { SeparatedItems } from "./separated-items.tsx";
 
 // Any published version of an independent workflow, as its builders read
 // it (GRA-1329), by its label: its definition exactly as published
@@ -164,38 +164,36 @@ export const VersionSource = ({
           />
         )}
         {source === undefined ? null : (
-          <SeparatedItems
+          <ItemGroup
+            separated
             aria-label={t`The source files of version ${sourceVersion}`}
-
-            rows={Object.entries(source.files).map(([path, text]) => ({
-              key: path,
-              row: (
-                <Item size="xs">
-                  <ItemMedia>
-                    <Icon icon={FileIcon} />
-                  </ItemMedia>
-                  <ItemContent>
-                    <ItemTitle>
-                      <code>{path}</code>
-                    </ItemTitle>
-                  </ItemContent>
-                  <ItemActions>
-                    <Button
-                      aria-label={t`Download ${path}`}
-                      onClick={() => {
-                        save(path, text);
-                      }}
-                      size="sm"
-                      variant="ghost"
-                    >
-                      <Icon icon={DownloadIcon} />
-                      {t({ message: "Download", context: "download a file" })}
-                    </Button>
-                  </ItemActions>
-                </Item>
-              ),
-            }))}
-          />
+          >
+            {Object.entries(source.files).map(([path, text]) => (
+              <Item key={path} size="xs">
+                <ItemMedia>
+                  <Icon icon={FileIcon} />
+                </ItemMedia>
+                <ItemContent>
+                  <ItemTitle>
+                    <code>{path}</code>
+                  </ItemTitle>
+                </ItemContent>
+                <ItemActions>
+                  <Button
+                    aria-label={t`Download ${path}`}
+                    onClick={() => {
+                      save(path, text);
+                    }}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    <Icon icon={DownloadIcon} />
+                    {t({ message: "Download", context: "download a file" })}
+                  </Button>
+                </ItemActions>
+              </Item>
+            ))}
+          </ItemGroup>
         )}
       </div>
     </SectionCard>
