@@ -31,9 +31,10 @@ import type {
 // by the one interpreter behind `schema["~standard"].validate`.
 //
 // Values are JSON and nothing else. There is deliberately no `any` (only
-// `v.json()`, any JSON value), no bytes, vector or BigInt, no coercion, and no callback to transform or
-// refine a value: a schema is data (its descriptor), so the browser and the
-// Worker check the same thing. A business rule belongs in the handler.
+// `v.json()`, any JSON value), no bytes, vector or BigInt, no coercion,
+// and no callback to transform or refine a value: a schema is data (its
+// descriptor), so the browser and the Worker check the same thing. A
+// business rule belongs in the handler.
 
 export { defineSchema } from "./define-schema.ts";
 export { defineTable } from "./define-table.ts";
@@ -131,7 +132,8 @@ export const v = Object.freeze({
   /**
    * Any JSON value, for what has no fixed shape, such as a vendor's custom
    * fields. Declare the shape wherever it is known: nothing inside is
-   * checked but that it is JSON.
+   * checked but that it is JSON, its keys held to a record's rules (none
+   * longer than 256 code units, none a prototype key).
    */
   json: (): SimpleSchema<JsonValue, JsonValue> =>
     schema({ ...required, kind: "json" }),

@@ -218,6 +218,7 @@ const showers: Readonly<
   },
   literal: (value, { text }) => shownUndeclared(value, text),
   union: (value, { text }) => shownUndeclared(value, text),
+  json: (value, { text }) => shownUndeclared(value, text),
 };
 
 /** A field's value as a cell shows it, by what the query declares of the field. */

@@ -431,11 +431,11 @@ const workflowBuildDeclaration = `/**
  * whatever is false: \`v.string().max(200)\` is \`{ "kind": "string", "max": 200 }\`,
  * \`v.object({ total: v.number().integer(), note: v.string().optional() })\` is
  * \`{ "kind": "object", "fields": { "total": { "kind": "number", "integer": true }, "note": { "kind":
- * "string", "optional": true } } }\`. Kinds: \`string\` (\`trim\`, \`email\`, \`min\`, \`max\`), \`number\`
+ * "string", "optional": true } } }\`. Kinds: \`string\` (\`trim\`, \`min\`, \`max\`, and one format at most: \`email\`, \`date\`, \`datetime\` with its offset, or \`url\`), \`number\`
  * (\`integer\`, \`min\`, \`max\`), \`boolean\`, \`null\`, \`literal\` (\`value\`), \`enum\` (\`values\`), \`id\`
  * (\`tableName\`), \`object\` (\`fields\`), \`array\` (\`item\`, \`min\`, \`max\`), \`union\` (\`members\`),
  * \`record\` (\`value\`), \`timestamp\`, \`duration\`, \`file\`, \`money\` (\`{ minorUnits, currency }\`),
- * \`person\`, \`model\`, \`template\` and \`schedule\` (\`{ cron, timeZone }\`); any of them takes
+ * \`person\`, \`model\`, \`template\`, \`schedule\` (\`{ cron, timeZone }\`) and \`json\` (any JSON, only where no shape is known); any of them takes
  * \`"nullable": true\`, and \`"optional": true\` or \`"default": <value>\`. \`params\` are values people set
  * without editing the workflow: \`{ [name]: { label, type, sensitive?: false } }\`, sensitive (never
  * shown or read by code, its type without a default, literal or enum anywhere) unless \`sensitive: false\`, when its type has a

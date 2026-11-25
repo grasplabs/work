@@ -64,17 +64,19 @@ export const isDateTime = (text: string): boolean => {
   return (utcMinute + minutesInDay) % minutesInDay === minutesInDay - 1;
 };
 
+const webUrlStart = /^https?:\/\//iu;
+
 /**
- * An absolute `http` or `https` URL, as written: the parser would drop
- * spaces and control characters around and inside it, so they are refused
- * instead.
+ * An absolute `http` or `https` URL that the WHATWG parser reads as
+ * written. What it would mend is refused, so another parser of the kept
+ * text reads the same address: spaces and control characters, which it
+ * drops; a backslash, which it reads as `/`; and a scheme without `//`.
  */
 export const isWebUrl = (text: string): boolean => {
   for (const char of text) {
-    if (char <= " " || char === "\u007F") {
+    if (char <= " " || char === "\u007F" || char === "\\") {
       return false;
     }
   }
-  const url = URL.parse(text);
-  return url?.protocol === "http:" || url?.protocol === "https:";
+  return webUrlStart.test(text) && URL.canParse(text);
 };

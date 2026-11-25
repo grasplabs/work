@@ -65,8 +65,10 @@ const scalarSchema = (descriptor: ValueDescriptor): JsonSchema | undefined => {
       ...(descriptor.email ? { format: "email" } : {}),
       ...(descriptor.datetime === true ? { format: "date-time" } : {}),
       ...(descriptor.date === true ? { format: "date" } : {}),
-      // Looser than the descriptor, which takes only http and https.
-      ...(descriptor.url === true ? { format: "uri" } : {}),
+      // An IRI, since the descriptor takes international addresses. It
+      // narrows to http and https, and takes the few characters the WHATWG
+      // parser allows where RFC 3987 doesn't (`|`, an unpaired `%`).
+      ...(descriptor.url === true ? { format: "iri" } : {}),
     };
   }
   if (descriptor.kind === "number") {

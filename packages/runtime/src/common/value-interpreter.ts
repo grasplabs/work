@@ -346,6 +346,9 @@ export interface ValueCheckOptions {
    * ever. How an answer from outside is read against what it should
    * return, so a field the vendor adds never breaks a call. Arguments, and
    * what Apps and workflows pass and return, keep `refuse`, the default.
+   * A union still takes the first member that fits, which an object with
+   * fewer fields now does too: put the member with more fields first, or
+   * tell members apart by a literal.
    */
   readonly unknownFields?: "refuse" | "drop";
 }

@@ -85,7 +85,7 @@ describe("a descriptor as JSON Schema", () => {
       properties: {
         at: { type: "string", format: "date-time" },
         day: { type: "string", format: "date" },
-        link: { anyOf: [{ type: "string", format: "uri" }, { type: "null" }] },
+        link: { anyOf: [{ type: "string", format: "iri" }, { type: "null" }] },
         custom: {},
       },
       required: ["at", "link", "custom"],
