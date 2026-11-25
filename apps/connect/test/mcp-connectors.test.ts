@@ -95,7 +95,7 @@ describe("a connector made from Linear's MCP server URL", () => {
     ]);
   });
 
-  it("lists its connections under the name its admin gave it, which the catalog alone may not show", async () => {
+  it("lists its connections under the name its admin gave it", async () => {
     const connector = await addLinear();
     const anna = someone();
     const connectionId = await connectLinear(connector, anna);

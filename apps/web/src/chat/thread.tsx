@@ -1081,8 +1081,8 @@ const AnswerBody = ({
       {text === "" && status !== "stopped" ? null : (
         <MessageResponse streaming={partial !== null}>{text}</MessageResponse>
       )}
-      {context.sources}
       <AnswerEnding ending={ending} retry={context.onRetry} />
+      {context.sources}
       {replies.map((reply) => (
         <AnswerAfter context={context} key={reply.id} reply={reply} />
       ))}

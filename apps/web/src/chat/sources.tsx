@@ -8,16 +8,14 @@ import {
   SourcesTrigger,
 } from "@grasp-os/ui/components/sources";
 import { Icon, LinkIcon } from "@grasp-os/ui/lib/icons";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
-import * as stylex from "@stylexjs/stylex";
 import { useNavigate } from "@tanstack/react-router";
 
 // What the chat's answers drew on, on Damsko's Sources, under the last
 // answer's words (thread.tsx): the connections core says the chat read
 // from, each by the name the Connectors page gives it, as a pile that
 // opens into their list, each opening on the Connectors page; whether the
-// chat's agent was restricted beside it. Only what core reports: the page
+// chat's agent was restricted over it. Only what core reports: the page
 // never guesses a source, and never shows one's ID.
 
 /** A source the chat read, as the page names it. */
@@ -27,16 +25,6 @@ export interface SourceName {
 
 /** The pile's marks: a few, as Sources reads well. */
 const pileMarks = 3;
-
-const styles = stylex.create({
-  // The Restricted badge beside the pile.
-  sources: {
-    display: "flex",
-    flexWrap: "wrap",
-    alignItems: "center",
-    gap: space["2"],
-  },
-});
 
 export const ChatSources = ({
   provenance,
@@ -51,9 +39,16 @@ export const ChatSources = ({
   if (sources.length === 0 && !restricted) {
     return null;
   }
+  // Each stands in the answer's column on its own line, as Damsko lays
+  // Sources out: a row beside the badge would size the pile to its words'
+  // narrowest and break its count under its marks.
   return (
-    <div {...stylex.props(styles.sources)}>
-      {restricted ? <Badge variant="warning">{t`Restricted`}</Badge> : null}
+    <>
+      {restricted ? (
+        <div>
+          <Badge variant="warning">{t`Restricted`}</Badge>
+        </div>
+      ) : null}
       {sources.length === 0 ? null : (
         <Sources>
           <SourcesTrigger count={sources.length}>
@@ -97,6 +92,6 @@ export const ChatSources = ({
           </SourcesContent>
         </Sources>
       )}
-    </div>
+    </>
   );
 };

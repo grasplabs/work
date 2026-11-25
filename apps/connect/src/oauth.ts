@@ -1507,8 +1507,8 @@ export const listConnections = async (
     ]),
   ]);
   return rows.map((row) => {
-    // Only a connector's ID is in `named`: a provider name takes no underscore.
-    const connectorName = named.get(row.provider);
+    const connectorName =
+      row.serverKind === "connector" ? named.get(row.provider) : undefined;
     return {
       id: row.id,
       source: row.serverKind,

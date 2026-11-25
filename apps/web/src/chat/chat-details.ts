@@ -19,21 +19,31 @@ export interface ChatNames {
   sourceNames: ReadonlyMap<string, SourceName>;
 }
 
+/** The catalog's entries, or none where core refused them. */
+const catalogEntries = async (session: Session) => {
+  try {
+    const { entries } = await session.connections.catalog();
+    return entries;
+  } catch {
+    return [];
+  }
+};
+
 /**
  * The names of the connections the person can see, by ID, as the
  * Connectors page names them: a list refused only leaves those IDs
- * unnamed.
+ * unnamed, a catalog refused names each by what the list says alone.
  */
 const readSourceNames = async (
   session: Session
 ): Promise<ReadonlyMap<string, SourceName>> => {
   const names = new Map<string, SourceName>();
   try {
-    const [listed, catalog] = await Promise.all([
+    const [listed, entries] = await Promise.all([
       session.connections.list(),
-      session.connections.catalog(),
+      catalogEntries(session),
     ]);
-    for (const [id, name] of connectionNames(catalog.entries, listed)) {
+    for (const [id, name] of connectionNames(entries, listed)) {
       names.set(id, { name });
     }
   } catch {
