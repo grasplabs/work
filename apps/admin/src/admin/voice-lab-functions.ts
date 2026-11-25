@@ -13,7 +13,7 @@ import {
   voiceLabInputSchema,
   voiceSessionIdSchema,
 } from "./voice-lab.ts";
-import type { VoiceLabSession } from "./voice-lab.ts";
+import type { CallRecord, VoiceLabSession } from "./voice-lab.ts";
 
 export const openVoiceSessionFn = createServerFn({ method: "POST" })
   .validator(voiceLabInputSchema)
@@ -24,6 +24,7 @@ export const openVoiceSessionFn = createServerFn({ method: "POST" })
 
 export const closeVoiceSessionFn = createServerFn({ method: "POST" })
   .validator(z.object({ sessionId: voiceSessionIdSchema }))
-  .handler(async ({ data }): Promise<void> => {
-    await closeVoiceSession(env, data.sessionId);
-  });
+  .handler(
+    async ({ data }): Promise<CallRecord | null> =>
+      await closeVoiceSession(env, data.sessionId)
+  );
