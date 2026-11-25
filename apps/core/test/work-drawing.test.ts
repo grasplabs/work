@@ -4,7 +4,6 @@ import type {
   InterviewProgress,
   InterviewSaved,
 } from "@grasp-os/shared/interview-links";
-import { interviewTurnPath } from "@grasp-os/shared/interview-turn";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import type { Roster, SettleChoice } from "@grasp-os/shared/onboarding";
 import { runInDurableObject } from "cloudflare:test";
@@ -23,7 +22,6 @@ import {
   onLink,
   openLinkAs,
   participate,
-  postedOnLink,
   quick,
   signedInAs,
 } from "./interview-link.ts";
@@ -41,8 +39,8 @@ import { unique } from "./sign-in.ts";
 //
 // - People's numbers averaged into one, or made up where nobody gave any.
 // - What the lead said about the whole team told as if it were the work.
-// - What earlier interviews told and left open never reaching the next
-//   interview about the work, or reaching it with a colleague's name.
+// - What earlier interviews left open never reaching the next interview,
+//   or the drawing as its model wrote it reaching it.
 // - A drawing that keeps failing being tried for good, or never again.
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -248,28 +246,7 @@ const ticketsReply = (ids: Ids): ProviderReply => ({
     open: [
       "Why do some look the customer up in Salesforce?",
       "How many tickets come in a busy week for the whole team?",
-      // A model that named a colleague after all.
-      "Why does Mo skip the client sheet?",
     ],
-  }),
-  inputTokens: 4000,
-  outputTokens: 900,
-});
-
-/** What the model answers for tickets when Max alone told anything of them. */
-const maxAloneReply = (ids: Ids): ProviderReply => ({
-  text: JSON.stringify({
-    starts: "A customer email arrives as a ticket in Zendesk.",
-    starts_by: [ids.max],
-    steps: [
-      {
-        text: "Open the ticket.",
-        who: "Agent",
-        tool: "Zendesk",
-        by: [ids.max],
-      },
-    ],
-    open: ["Who answers the difficult ones?"],
   }),
   inputTokens: 4000,
   outputTokens: 900,
@@ -303,7 +280,7 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
   // store's own alarm, set whenever a team falls due, would try first.
   beforeEach(aloneInTheStore);
 
-  it("is drawn from three agreed interviews, keeps each person's numbers apart, and tells the next interview what the team told and left open, never who told it", async () => {
+  it("is drawn from three agreed interviews, keeps each person's numbers apart, and tells the next interview only what its routine lacks, never the drawing as its model wrote it", async () => {
     const store = onboardingStore(env);
     const ids = await team();
     const { tickets } = await mapped(ids);
@@ -348,34 +325,6 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
     const due = await store.drawsDue();
     const usage = await store.usage();
     const after = await contextOf();
-    // Noor's next turn, over the endpoint: what her interviewer is told.
-    const turn = await answering(
-      [
-        {
-          text: "TONE: none\nSAY: Then?\nPART: anchor\nWANTS: answer\nMORE: no\nAGREED: no\n",
-          inputTokens: 1500,
-          outputTokens: 40,
-        },
-        {
-          text: JSON.stringify({ facts: [], changes: [] }),
-          inputTokens: 1600,
-          outputTokens: 120,
-        },
-      ],
-      async () => {
-        const response = await postedOnLink(interviewTurnPath, {
-          ...noor,
-          event: "answer",
-          locale: "en",
-          lines: [{ from: "person", text: "I answer tickets.", typed: true }],
-          facts: [],
-          phase: "week",
-          minutes: 1,
-        });
-        return await response.text();
-      }
-    );
-    const brief = sentOf(turn.requests[0]?.body);
     expect({
       drew: drew[1],
       models: requests.map(modelOf),
@@ -417,25 +366,15 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
       after: after
         .split("\n")
         .find((line) => line.startsWith("Nobody has said yet")),
-      // What the team told of the work reaches her interviewer, and what
-      // its drawing left open: never a line that names a colleague, and
-      // never who told a step, their numbers or how some do it otherwise.
-      told: after
-        .split("\n")
-        .filter((line) => line.startsWith("- ") || line.startsWith("What the")),
+      // Nothing of the drawing as its model wrote it reaches another
+      // interview: not its steps, its open questions or how some do it
+      // otherwise. What is told on is the Brain's checked drawing, once it
+      // stands (brain-intake-drawings.test.ts).
+      told: after.includes("What the team already told"),
       openQuestions: work?.drawn?.open.filter((question) =>
         after.includes(question)
       ),
-      named: ["Lea", "Max", "Mia", "Mo", "Noor", "Agent"].filter((name) =>
-        new RegExp(String.raw`\b${name}\b`, "u").test(after)
-      ),
-      inTurn: {
-        told: brief.includes("- Open the ticket. (Zendesk)"),
-        open: brief.includes(
-          "Still open about it: Why do some look the customer up in Salesforce?"
-        ),
-        named: brief.includes("Why does Mo skip"),
-      },
+      saidByMo: after.includes("Salesforce"),
       due: [ids.max, ids.mia, ids.mo].filter((id) => due.includes(id)),
       counted: usage.some(
         ({ purpose, model }) => purpose === "drawing" && model === quick
@@ -479,76 +418,11 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
       // shows only the whole team's, so it is still asked (GRA-1749).
       after:
         "Nobody has said yet, so ask when it comes up: how many the whole team does, in a week or a month; where it waits, and for what; what they look at to decide; who gets it after them.",
-      told: [
-        "What the team already told about nieuwe tickets afhandelen (how it goes, no names):",
-        "- A customer email arrives as a ticket in Zendesk.",
-        "- Open the ticket. (Zendesk)",
-        "- Look up the customer in the client sheet. (Excel)",
-        "- When the customer number is missing: Email the customer for it.",
-      ],
-      openQuestions: [
-        "Why do some look the customer up in Salesforce?",
-        "How many tickets come in a busy week for the whole team?",
-      ],
-      named: [],
-      inTurn: { told: true, open: true, named: false },
+      told: false,
+      openQuestions: [],
+      saidByMo: false,
       due: [],
       counted: true,
-    });
-  });
-
-  it("tells the next interview what the team told only once two others told it: never one colleague's account, their own, or anything to the lead", async () => {
-    const store = onboardingStore(env);
-    const ids = await team();
-    await mapped(ids);
-    const rotaReply: ProviderReply = {
-      text: JSON.stringify({ steps: [], open: [] }),
-      inputTokens: 100,
-      outputTokens: 10,
-    };
-    /** Who is told what the team told, and who what the drawing left open. */
-    const toldTo = async () => {
-      const known = await Promise.all(
-        (["lea", "max", "mia", "noor"] as const).map(async (key) => {
-          const context = await store.contextOf(ids[key]);
-          return [key, context?.known ?? ""] as const;
-        })
-      );
-      return {
-        told: known
-          .filter(([, text]) => text.includes("What the team already told"))
-          .map(([key]) => key),
-        open: known
-          .filter(([, text]) => text.includes("Still open about"))
-          .map(([key]) => key),
-      };
-    };
-    await agree(await openLink(ids.max), 0, [
-      fact("m1", "step", "Max opens the ticket and looks the customer up."),
-    ]);
-    await answering([rotaReply, ticketsReply(ids)], async () => [
-      await store.drawNext(),
-      await store.drawNext(),
-    ]);
-    // Max alone told it: to Noor every line would be his, and he knows his own.
-    const one = await toldTo();
-    // Mia agrees to an interview that says nothing of the tickets: the
-    // drawing is made with her, and every line of it is still Max's.
-    await agree(await openLink(ids.mia), 0, [
-      fact("i1", "wish", "Mia would like fewer meetings."),
-    ]);
-    await answering([maxAloneReply(ids)], async () => await store.drawNext());
-    const quiet = await toldTo();
-    await agree(await openLink(ids.mo), 0, [
-      fact("o1", "step", "Mo opens the ticket."),
-    ]);
-    await answering([ticketsReply(ids)], async () => await store.drawNext());
-    // All three told it: two others for each of them, and three for Noor.
-    const all = await toldTo();
-    expect({ one, quiet, all }).toStrictEqual({
-      one: { told: [], open: [] },
-      quiet: { told: [], open: [] },
-      all: { told: ["max", "mia", "noor"], open: ["max", "mia", "noor"] },
     });
   });
 

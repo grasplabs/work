@@ -248,7 +248,7 @@ import { interviewBrief, setupView } from "./stephen-setup.ts";
 import { onboardingStoreName } from "./store-name.ts";
 import { checksFor, teamClaims } from "./team-claims.ts";
 import { assignWork, companyName, drawTeamMap } from "./team-map.ts";
-import { toldAbout, toldByEnough, toldSomething } from "./told-work.ts";
+import { tellsHowItGoes, toldAbout, toldByEnough } from "./told-work.ts";
 import { drawWork, knownOf } from "./work-drawing.ts";
 import type { WorkBrief, WorkKnown } from "./work-drawing.ts";
 
@@ -934,14 +934,15 @@ const drawingOf = (stored: string | null): DrawnWork | null =>
  * answer in words of the store's own (GRA-330): what its routine lacks,
  * as a drawing shows a part from the first person who told it (GRA-1749,
  * GRA-1987). The next interview asks
- * about these when they come up. Beside it the interviewer is told what
- * the team already said of the work and what its drawing left open
- * (told-work.ts `toldAbout`), once two people besides the listener told
- * it: he started every interview blind and asked each person the same
- * things again. The interviewer knows what was said, never who said it:
- * no line is one known colleague's, no name goes with it, and he is told
- * never to hint at one. To anyone but him, what fewer than five people
- * said still reaches nobody but them.
+ * about these when they come up. Never the drawing's own open questions,
+ * which its model writes from what as few as one colleague said. Beside it
+ * the interviewer is told what the team already said of the work
+ * (told-work.ts `toldAbout`): the Brain's standing drawing, which the team
+ * reads already, once two people besides the listener told how it goes.
+ * He started every interview blind and asked each person the same things
+ * again. The interviewer knows what was said, never who said it: no line
+ * is one known colleague's, no name goes with it, and he is told never to
+ * hint at one.
  */
 const unknownAnswers: readonly {
   missing: (told: Told[], routine: RoutineShows) => boolean;
@@ -2645,10 +2646,11 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * What the standing drawing of the piece of work `routine` shows: none
-   * standing shows nothing. Only that drawing is read, by its work's id.
+   * The standing drawing of the piece of work `routine`, as its team reads
+   * it in the Brain: none when none stands. Only that drawing is read, by
+   * its work's id.
    */
-  #routineShows(routine: string | null): RoutineShows {
+  #standingRoutine(routine: string | null): WorkflowVersionRecord | null {
     const [row] =
       routine === null
         ? []
@@ -2658,10 +2660,65 @@ export class Onboarding extends DurableObject<Env> {
             .where(and(eq(brainDrawings.workflow, routine), standingDrawing))
             .limit(1)
             .all();
-    const drawing = row === undefined ? null : brainDrawingOf(row.drawing);
-    return {
-      teamCount: drawing?.volumes.some(({ of }) => of === "team") ?? false,
-    };
+    return row === undefined ? null : brainDrawingOf(row.drawing);
+  }
+
+  /**
+   * What the team already told about the work `listener` is asked about,
+   * for their interviewer (told-work.ts). Only of work that is named to
+   * them (`#workOf`), and only once two people besides them told how it
+   * goes: with one, every line would be that one colleague's, and their
+   * teammate would know whose. What is told is the Brain's standing
+   * drawing, the parts a check backed and their team reads already, never
+   * the drawing as its model wrote it.
+   */
+  #toldTo(
+    listener: string,
+    roster: Roster,
+    {
+      work,
+      drawn,
+      standing,
+    }: {
+      work: string;
+      drawn: DrawnWork | null;
+      standing: WorkflowVersionRecord | null;
+    }
+  ): string {
+    return work !== "" &&
+      drawn !== null &&
+      standing !== null &&
+      this.#toldByOthers(drawn, listener)
+      ? toldAbout(
+          work,
+          standing,
+          roster.people.map(({ name }) => name)
+        )
+      : "";
+  }
+
+  /**
+   * Whether enough people besides `listener` told how the work of `drawn`
+   * goes for it to be told on (`toldByEnough`): counted by the host from
+   * each one's own agreed, shared lines (`drawInput`), among those it was
+   * drawn from. Never from who the drawing's model says told a part
+   * (`told`): a line someone approved can steer it into naming everyone.
+   * It stops reading at the second.
+   */
+  #toldByOthers(drawn: DrawnWork, listener: string): boolean {
+    let tellers = 0;
+    for (const teller of drawn.from) {
+      if (
+        teller !== listener &&
+        tellsHowItGoes(this.drawInput(teller)?.facts ?? [])
+      ) {
+        tellers += 1;
+        if (tellers >= toldByEnough) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   #contextOf(
@@ -2685,33 +2742,16 @@ export class Onboarding extends DurableObject<Env> {
     const teamName = team?.name ?? "";
     const work = kind === "lead" ? "" : this.#workOf(person.id);
     const drawn = kind === "lead" ? null : this.#drawingAskedOf(person.id);
-    // Only of work that is named to them (`#workOf`), and only once two
-    // people besides them told it: with one, every line would be that one
-    // colleague's, and their teammate would know whose. Who told is read
-    // from what each said of this work (`told`), not from whom it was
-    // drawn with (`from`): that is everyone who agreed to an interview,
-    // also who said nothing of it. Their own words they know already. What
-    // the drawing left open goes by the same rule.
-    const toldByOthers =
-      work !== "" &&
-      drawn !== null &&
-      Object.entries(drawn.told).filter(
-        ([teller, told]) => teller !== person.id && toldSomething(told)
-      ).length >= toldByEnough;
+    const standing = kind === "lead" ? null : this.#standingRoutine(routine);
     const known = [
       ...(kind === "lead" ? teamKnown(person.name, teamName, members) : []),
-      ...(drawn !== null && toldByOthers
-        ? [
-            toldAbout(
-              work,
-              drawn,
-              roster.people.map(({ name }) => name)
-            ),
-          ]
-        : []),
+      this.#toldTo(person.id, roster, { work, drawn, standing }),
       ...(kind === "lead"
         ? []
-        : stillUnknown(drawn, this.#routineShows(routine))),
+        : stillUnknown(drawn, {
+            teamCount:
+              standing?.volumes.some(({ of }) => of === "team") ?? false,
+          })),
       ...(kind === "lead" ? [] : this.#insteadKnown(person)),
       this.interviewBrief(),
       this.documentsBrief(teamName),

@@ -288,7 +288,7 @@ describe("a turn from the model", () => {
 
   it("takes a spoken answer with the spaces, hyphens and punctuation it was heard with, and never a word that was not said", () => {
     const answers = [
-      "I open the file, and then... I book about 14 a week in exact on line.",
+      "I open the file, and then... I book about 14 a week in exact on line. One takes 2,5 minutes.",
       "Nobody checks it. I send an email to the supplier with the invoice",
     ];
     const keptOf = (quote: string, typed: boolean) =>
@@ -307,6 +307,7 @@ describe("a turn from the model", () => {
       // A word that was not said, however close.
       "I delete the file",
       "about 40 a week",
+      "takes 25 minutes",
       "Somebody checks it",
       "the supplier without the invoice",
       // The same words in another order.

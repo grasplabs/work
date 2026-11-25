@@ -12246,10 +12246,6 @@ msgid "Now"
 msgstr "Jetzt"
 
 #: src/interview/words.ts
-msgid "Now, the steps."
-msgstr "Nun die Schritte."
-
-#: src/interview/words.ts
 msgid "Number"
 msgstr "Zahl"
 
@@ -17913,6 +17909,10 @@ msgstr "Die Quelldateien von Version {sourceVersion}"
 #: src/workflows/workflow-flow.tsx
 msgid "The step, as JSON"
 msgstr "Der Schritt als JSON"
+
+#: src/interview/words.ts
+msgid "The steps."
+msgstr "Die Schritte."
 
 #: src/settings/teams.tsx
 msgid "The team couldn't be created. Try again."

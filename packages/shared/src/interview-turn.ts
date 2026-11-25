@@ -425,7 +425,11 @@ const saidIn = (answer: string, quote: string): boolean => {
   return wanted.length >= 3 && plainWords(answer).includes(wanted);
 };
 
-const notLetters = /[^\p{L}\p{N}]+/gu;
+/**
+ * Everything that is no letter or digit, but for the point or comma inside
+ * a number: "2,5" is not 25.
+ */
+const notLetters = /(?<!\p{N})[.,]|[.,](?!\p{N})|[^\p{L}\p{N}.,]+/gu;
 
 /**
  * Whether a quote was said in an answer given out loud. Speech recognition

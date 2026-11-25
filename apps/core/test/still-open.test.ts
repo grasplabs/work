@@ -1,11 +1,11 @@
-import type { DrawnWork } from "@grasp-os/shared/admin/org-record";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import { describe, expect, it } from "vite-plus/test";
 
 import { withoutNames } from "../src/onboarding/brain-intake.ts";
 import { namedIn } from "../src/onboarding/names.ts";
 import { stillOpen } from "../src/onboarding/still-open.ts";
-import { toldAbout } from "../src/onboarding/told-work.ts";
+import { tellsHowItGoes, toldAbout } from "../src/onboarding/told-work.ts";
+import type { ToldParts } from "../src/onboarding/told-work.ts";
 
 // What an interview still misses (src/onboarding/still-open.ts) and what
 // the team already told about a piece of work (src/onboarding/told-work.ts),
@@ -136,32 +136,22 @@ describe("what a lead's interview still misses", () => {
   });
 });
 
-const drawn = (parts: Partial<DrawnWork>): DrawnWork => ({
-  at: "2026-11-25T10:00:00.000Z",
-  from: ["p1"],
+const drawing = (parts: Partial<ToldParts>): ToldParts => ({
   starts: "",
   steps: [],
   waits: [],
   differently: [],
   decides: "",
-  own: "",
-  ai: "",
+  next: "",
   right: "",
   ask: "",
-  next: "",
-  term: null,
-  differs: null,
-  per: "week",
-  unit: "minutes",
-  told: {},
-  open: [],
   ...parts,
 });
 
-const step = (text: string, who = "Clerk", tool = "") => ({
+const step = (text: string): ToldParts["steps"][number] => ({
   text,
-  who,
-  tool,
+  who: "",
+  tool: "",
   minutes: null,
   documented: false,
 });
@@ -216,25 +206,32 @@ describe("a statement the Brain keeps", () => {
 });
 
 describe("what the team already told about a piece of work", () => {
-  it("tells how the work goes and what is still open, without who does a step, anyone's own list or what they use AI for", () => {
+  it("counts as told by someone only what says how the work goes", () => {
+    expect({
+      wish: tellsHowItGoes(facts("wish", "ai", "workaround", "number", "task")),
+      step: tellsHowItGoes(facts("wish", "step")),
+      none: tellsHowItGoes([]),
+    }).toStrictEqual({ wish: false, step: true, none: false });
+  });
+
+  it("tells how the work goes, in the order of the drawing", () => {
     expect(
       toldAbout(
         "incoming invoices",
-        drawn({
+        drawing({
           starts: "An invoice arrives by email.",
-          steps: [
-            step("Open the invoice.", "Inge", "Exact"),
-            step("Match it to the order."),
-          ],
+          steps: [step("Open the invoice."), step("Match it to the order.")],
           waits: ["For the budget holder's approval."],
           differently: [
-            { when: "the order is missing", does: "", outOfTen: 2, after: 1 },
+            {
+              when: "the order is missing",
+              does: "",
+              outOfTen: null,
+              after: 1,
+            },
           ],
           decides: "The amount against the order.",
-          own: "A sheet of late suppliers.",
-          ai: "ChatGPT for reminder emails.",
           next: "Finance, which pays it.",
-          open: ["Who approves above the limit?"],
         }),
         ["Inge de Vries", "Mo Mertens"]
       )
@@ -242,38 +239,33 @@ describe("what the team already told about a piece of work", () => {
       [
         "What the team already told about incoming invoices (how it goes, no names):",
         "- An invoice arrives by email.",
-        "- Open the invoice. (Exact)",
+        "- Open the invoice.",
         "- Match it to the order.",
         "- It waits: For the budget holder's approval.",
         "- Sometimes the order is missing.",
         "- They decide by: The amount against the order.",
         "- After them: Finance, which pays it.",
-        "Still open about it: Who approves above the limit?",
       ].join("\n")
     );
   });
 
-  it("leaves out every line that holds a name from the staff list, and names the work when only what is open is left", () => {
+  it("leaves out every line that holds a name from the staff list, and tells nothing when none is left", () => {
     expect({
       lines: toldAbout(
         "incoming invoices",
-        drawn({
+        drawing({
           steps: [
             step("Open the invoice."),
             step("Ask Jose when the number is missing."),
             step("Put it on Inges list."),
             step("Send it to Mo."),
           ],
-          open: ["Why does De Vries check each one?", "What does Li do then?"],
         }),
         staff
       ),
-      open: toldAbout(
+      nothing: toldAbout(
         "incoming invoices",
-        drawn({
-          steps: [step("Inge books it.")],
-          open: ["Who approves above the limit?"],
-        }),
+        drawing({ steps: [step("Inge books it.")] }),
         staff
       ),
     }).toStrictEqual({
@@ -281,33 +273,27 @@ describe("what the team already told about a piece of work", () => {
         "What the team already told about incoming invoices (how it goes, no names):",
         "- Open the invoice.",
       ].join("\n"),
-      open: "Still open about incoming invoices: Who approves above the limit?",
+      nothing: "",
     });
   });
 
-  it("tells nothing when nothing may be told, and no more than a brief should carry", () => {
+  it("tells no more than a brief should carry, in whole lines", () => {
     const long = toldAbout(
       "incoming invoices",
-      drawn({
+      drawing({
         steps: Array.from({ length: 30 }, (_, index) =>
           step(`Step ${index + 1} ${"of the same work ".repeat(8)}`.trim())
         ),
-        open: ["What comes after?"],
       }),
       staff
     );
     expect({
-      nothing: toldAbout(
-        "incoming invoices",
-        drawn({ steps: [step("Inge books it.")], own: "A sheet." }),
-        staff
-      ),
-      lines: long.split("\n").length <= 14,
+      lines: long.split("\n").length <= 13,
       letters: long.length <= 1200,
       whole: long
         .split("\n")
         .slice(1)
         .every((line) => line.endsWith("work")),
-    }).toStrictEqual({ nothing: "", lines: true, letters: true, whole: true });
+    }).toStrictEqual({ lines: true, letters: true, whole: true });
   });
 });

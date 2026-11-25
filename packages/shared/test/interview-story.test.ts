@@ -228,7 +228,7 @@ describe("the read-back", () => {
       fact("k", "number"),
       fact("l", "done"),
     ]);
-    expect(parts.map(({ facts }) => facts.length)).toStrictEqual([6, 6]);
+    expect(parts.map(({ facts }) => facts.length)).toStrictEqual([7, 5]);
   });
 
   it("has nothing to read when nothing was written down", () => {
