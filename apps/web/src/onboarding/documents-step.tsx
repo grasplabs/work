@@ -151,6 +151,7 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
           <Icon icon={ArrowRightIcon} />
         </Button>
       }
+      spoken={t`And if you have files lying around that explain how you work, you can drop them in here. Rough drafts are just as welcome. One thing though: leave out anything about a single person, that’s not what I’m here for.`}
       title={t`Do you have anything that explains how you work?`}
     >
       <div {...stylex.props(styles.stack)}>

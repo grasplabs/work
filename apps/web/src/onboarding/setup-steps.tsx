@@ -63,6 +63,11 @@ const Welcome = ({ data, onward }: StepProps) => {
     <CalmStep
       body={t`I’ll set up Grasp with you, one step at a time. Which language would you like?`}
       centred
+      spoken={
+        admin === ""
+          ? t`Hi, I’m Stephen. Over the next few minutes we’ll set up Grasp together, and I’ll walk you through every part as we go. First things first: which language shall we talk in?`
+          : t`Hi ${admin}, I’m Stephen. Over the next few minutes we’ll set up Grasp together, and I’ll walk you through every part as we go. First things first: which language shall we talk in?`
+      }
       title={admin === "" ? t`Hi, I’m Stephen` : t`Hi ${admin}, I’m Stephen`}
     >
       <div {...stylex.props(styles.stack)}>
@@ -104,15 +109,22 @@ const Ai = ({ data, askedFor, path, go, onward }: StepProps) => {
     }
   };
   let body = t`Everything I read and say runs on it. Paste a key from your provider, and you pay them directly.`;
+  // What Stephen tells about it, as a tutor would: why it's asked, then where it stands.
+  const why = t`Good, that’s settled. Now, before I can do anything, I need something to think with. That’s the AI on this screen: everything I read and everything I say runs on it.`;
+  let spoken = `${why} ${t`If your company works with a provider of its own, paste its key here, and you pay them directly.`}`;
   if (ready && ai?.listing.source === "grasp") {
     body = t`Everything I read and say runs on it. You use Grasp’s AI, and it’s ready.`;
+    spoken = `${why} ${t`You’re on Grasp’s own, and it’s ready, so we can carry on.`}`;
   } else if (ready && ai !== null) {
     body = t`Everything I read and say runs on it. Your own key works, and it’s ready.`;
+    spoken = `${why} ${t`Your own key works, so we can carry on.`}`;
   } else if (graspOffered) {
     body = t`Everything I read and say runs on it. Grasp’s AI works right away, or you can use your own key.`;
+    spoken = `${why} ${t`The easiest is Grasp’s own, it works straight away. If your company would rather use its own provider, you can paste a key instead.`}`;
   } else if (ai === null) {
     // Core couldn't say: no providers are shown, so nothing is asked of them here.
     body = t`Everything I read and say runs on it. You can set it up later in Settings.`;
+    spoken = `${why} ${t`Don’t let it hold you up, you can set it up later in Settings.`}`;
   }
   return (
     <CalmStep
@@ -124,6 +136,7 @@ const Ai = ({ data, askedFor, path, go, onward }: StepProps) => {
           </Button>
         ) : null
       }
+      spoken={spoken}
       title={t`Which AI should I use?`}
     >
       <AiChoice ai={ai} onReady={onReady} />
@@ -212,6 +225,12 @@ const Review = (props: StepProps) => {
           </Button>
         ) : null
       }
+      spoken={plural(open, {
+        0: "I’ve been through all the conversations now, and I’ve handled everything I could. Nothing needs you here.",
+        1: "I’ve been through all the conversations now, and I’ve handled almost everything myself. There’s just one thing I’d like you to decide.",
+        other:
+          "I’ve been through all the conversations now, and I’ve handled most of it myself. There are # things I’d like you to decide.",
+      })}
       title={plural(open, {
         0: "Nothing needs you",
         1: "Just one thing for you",
@@ -297,6 +316,16 @@ const Open = ({ data, onward }: StepProps) => {
           </Button>
         ) : null
       }
+      spoken={[
+        t`That’s it from me. Thank you, ${admin}.`,
+        said,
+        ready,
+        open
+          ? t`Your Grasp is ready whenever you are.`
+          : t`Before we open it, we check everything with you once more. You’ll hear from us.`,
+      ]
+        .filter((each) => each !== "")
+        .join(" ")}
       title={t`Thank you, ${admin}`}
     />
   );

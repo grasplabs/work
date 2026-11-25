@@ -133,6 +133,7 @@ const HrPlatformChoice = ({
       also={
         <SupportLink page="hr">{t`More about this connection`}</SupportLink>
       }
+      spoken={t`Now, about the people I’ll be talking to. I like to start with the team leads, so they hear from me before their team does. Your HR platform knows who leads which team, so tell me which one you use, and we’ll connect it together.`}
       title={t`Which HR platform do you use?`}
     >
       <div {...stylex.props(styles.stack)}>
@@ -308,6 +309,7 @@ const ConfirmOrg = ({
           </Button>
         )
       }
+      spoken={t`This is how I understand your organization. I’ll talk to each team lead first, so nobody is caught off guard. Have a quick look whether the right people lead the right teams, and which teams should take part.`}
       title={t`Is this your organization?`}
     >
       <div {...stylex.props(styles.stack)}>
@@ -417,6 +419,7 @@ export const LeadsStep = (props: StepProps) => {
             </Button>
           </>
         }
+        spoken={t`Since I don’t have a staff list yet, I don’t know your teams. That’s perfectly fine. Here’s how we’ll do it instead.`}
         title={t`We’ll set up your teams together`}
       >
         {/* What happens without a list, so the step isn't left empty under its line. */}
