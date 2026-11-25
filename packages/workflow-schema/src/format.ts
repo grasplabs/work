@@ -899,8 +899,12 @@ export const guardNamesOf = (
     ];
   });
 
-/** A connector contract's group: `mail` of `google-workspace.mail@1`. */
-const contractGroup = /\.(?<group>[^.@]+)@[^@]*$/u;
+/**
+ * A connector contract's group, all of it between the connector's name,
+ * which has no dot, and the major: `gmail.users.messages` of
+ * `google-workspace.gmail.users.messages@1`.
+ */
+const contractGroup = /^[^.@]+\.(?<group>[^@]+)@[^@]*$/u;
 
 /** A dotted action as a path of members (`memberName` of each part). */
 const memberPath = (action: string): string =>
@@ -913,7 +917,8 @@ const memberPath = (action: string): string =>
  * Each connection's actions, by alias, each by the member path a call
  * reads it by (`memberName` of each dotted part): the action as its
  * contract names it, without the group every operation of the contract
- * starts with (`mail.send` of `google-workspace.mail@1` is `send`), as an
+ * starts with (`gmail.users.messages.send` of
+ * `google-workspace.gmail.users.messages@1` is `send`), as an
  * App's connection lists it, so `ctx.connections.mail.send` reads as an
  * App's call does. Where two of a connection's actions would read alike
  * so (`mail.readX` and `read-x`), each keeps its whole name, a path of

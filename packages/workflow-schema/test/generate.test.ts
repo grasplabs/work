@@ -329,6 +329,28 @@ describe("generating a workflow", () => {
     );
   });
 
+  it("reads an action of a contract whose group has several parts by what follows the group", () => {
+    expect(
+      generated({
+        ...followedBy({
+          id: "listed",
+          type: "call",
+          connection: "gmail",
+          action: "gmail.users.messages.list",
+        }),
+        permissions: {
+          ...everyStep().permissions,
+          connections: {
+            ...everyStep().permissions.connections,
+            gmail: { contract: "google-workspace.gmail.users.messages@1" },
+          },
+        },
+      }).source
+    ).toContain(
+      'const listed = await ctx.connections.gmail.list({}, { step: "listed" });'
+    );
+  });
+
   it("names a hyphenated action's member as an App does, and sends the action's own name", () => {
     const { source, tasks } = generated({
       ...followedBy({
