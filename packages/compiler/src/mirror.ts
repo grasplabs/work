@@ -7,6 +7,7 @@ import {
   nameMaxLength,
   pathSegments,
   readRoute,
+  isVersion,
   routeName,
   standardActions,
 } from "./tool-names.ts";
@@ -270,7 +271,9 @@ const againstUnreadable = (
     if (!isNamePart(part)) {
       break;
     }
-    family.push(part);
+    if (!isVersion(part)) {
+      family.push(part);
+    }
   }
   if (family.length === 0) {
     return [`${path} names no collection.`];

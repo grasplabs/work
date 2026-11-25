@@ -9,7 +9,9 @@ import { httpMethods } from "@grasp-os/runtime/connector";
 //   dots (`GET /deals/{id}/followers` is the family `deals.followers`). A
 //   route is a path under the API's base path (`/api/v2`), which the
 //   connector declares once and its HTTP client puts in front of every
-//   route, so a version or an `/api` prefix never names a tool.
+//   route, so a version or an `/api` prefix never names a tool. A version
+//   segment left in a path (`/gmail/v1/users`, where one connector reaches
+//   several APIs, each with its own version) names none either.
 // - The action is `list` for GET on a collection that answers a page, `get`
 //   for GET on an item, `create` for POST on a collection, `update` for
 //   PATCH or PUT on an item and `delete` for DELETE on an item. A route ends
@@ -72,6 +74,17 @@ const methods: ReadonlySet<string> = new Set(httpMethods);
 
 export const isRouteMethod = (text: string): text is HttpMethod =>
   methods.has(text);
+
+/**
+ * A version segment, which never names a tool: `v` and a major, maybe a
+ * dotted minor, maybe an alpha or beta with its number (`v1`, `v1.0`,
+ * `v2beta1`), and nothing else, so a collection that only starts with a
+ * `v` (`views`, `v1users`, `vbeta`) still names one.
+ */
+const versionSegment = /^v\d+(?:\.\d+)?(?:(?:alpha|beta)\d+)?$/u;
+
+/** Whether a literal segment is an API version (`versionSegment`). */
+export const isVersion = (text: string): boolean => versionSegment.test(text);
 
 /** The action each method takes on an item. */
 const itemActions: Partial<Readonly<Record<HttpMethod, string>>> = {
@@ -157,7 +170,7 @@ export type RouteName =
  */
 export const routeName = (route: Route, pages: boolean): RouteName => {
   const family = route.segments.flatMap((segment) =>
-    segment.kind === "literal" ? [segment.text] : []
+    segment.kind === "literal" && !isVersion(segment.text) ? [segment.text] : []
   );
   const rest = route.segments;
   if (family.length === 0) {

@@ -365,7 +365,7 @@ describe("a tool with no spec to hold it to", () => {
           tool("deals.list", "GET /deals"),
           tool("deals.products.delete", "DELETE /deals/{id}/products"),
           tool("deals.change", "PATCH /deals/{id}"),
-          tool("deals.get", "GET /v1/deals/{id}"),
+          tool("deals.get", "GET /v1users/deals/{id}"),
           {
             name: "deals.get",
             routes: [],
@@ -384,9 +384,36 @@ describe("a tool with no spec to hold it to", () => {
       "deals.list: A list answers page(item): { items, next }.",
       "deals.products.delete: DELETE /deals/{id}/products is named deals.products.<the vendor's operation name>.",
       "deals.change: PATCH /deals/{id} is named deals.update.",
-      "deals.get: GET /v1/deals/{id} is named v1.deals.get.",
+      "deals.get: GET /v1users/deals/{id} is named v1users.deals.get.",
       "deals.get: It declares no route it is named from.",
     ]);
+  });
+
+  it("is never named by a version in its path", () => {
+    const listed = page(v.object({ id: v.number() }));
+    expect(
+      messages(
+        [
+          tool(
+            "gmail.users.messages.list",
+            "GET /gmail/v1/users/{mailbox}/messages",
+            listed
+          ),
+          tool(
+            "calendar.calendars.events.get",
+            "GET /calendar/v3/calendars/{calendar}/events/{event}"
+          ),
+          tool("spreadsheets.get", "GET /v4/spreadsheets/{spreadsheet}"),
+          tool("deals.get", "GET /v1.0/deals/{id}"),
+          tool("deals.create", "POST /v2beta1/deals"),
+          tool("views.get", "GET /views/{id}"),
+          tool("vbeta.get", "GET /vbeta/{id}"),
+          tool("v2alpha.get", "GET /v2alpha/{id}"),
+          tool("drive.getContent", "GET /drive/v3/root:/{name}:/content"),
+        ],
+        false
+      )
+    ).toStrictEqual([]);
   });
 
   it("is named from its one write, read before it of any family on the connector's hosts", () => {
@@ -441,7 +468,7 @@ describe("a tool with no spec to hold it to", () => {
             ],
           },
           tool("deals.getDeal", "GET /deals/{id}"),
-          tool("deals.get", "GET /v2.0/deals/{id}"),
+          tool("deals.get", "GET /2.0/deals/{id}"),
           tool("deals.delete", "DELETE /{collection}/{id}"),
           tool("drive.get", "DELETE /drive/root:/{name}:"),
           tool("content", "GET /drive/root:/{name}:/content"),
@@ -462,7 +489,7 @@ describe("a tool with no spec to hold it to", () => {
       )
     ).toStrictEqual([
       "deals.getDeal: GET /deals/{id} is named deals.get.",
-      "deals.get: The segment \"v2.0\" of /v2.0/deals/{id} can't be part of a tool's name.",
+      "deals.get: The segment \"2.0\" of /2.0/deals/{id} can't be part of a tool's name.",
       "deals.delete: /{collection}/{id} names no collection.",
       "drive.get: DELETE /drive/root:/{name}: is named drive.<the vendor's operation name>.",
       "content: GET /drive/root:/{name}:/content is named drive.<the vendor's operation name>.",
