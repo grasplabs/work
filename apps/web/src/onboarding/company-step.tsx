@@ -227,7 +227,7 @@ const useWords = ({
   suites: DirectorySuite[];
   people: number;
   teams: number;
-}): { title: string; body: string } => {
+}): { title: string; body: string | null } => {
   const { t } = useLingui();
   if (roster !== null && another) {
     return {
@@ -249,13 +249,13 @@ const useWords = ({
     const among = t`Among them ${names}.`;
     return { title: t`Here’s your company`, body: `${seen} ${among}` };
   }
-  const reads = t`So I can see your teams, roles and directory. I only read names, email addresses, teams and jobs, nothing else.`;
+  // Just the ask, no line under it (Ruben: what matters is that they connect their account).
   if (suites.length > 1) {
-    return { title: t`Connect your work account`, body: reads };
+    return { title: t`Connect your work account`, body: null };
   }
   if (suites[0] !== undefined) {
     const signIn = suiteNames[suites[0]];
-    return { title: t`Connect your ${signIn} account`, body: reads };
+    return { title: t`Connect your ${signIn} account`, body: null };
   }
   return {
     title: t`Share your staff list`,
@@ -312,20 +312,21 @@ const useCompanyWays = ({
         ),
     };
   }
-  // No list yet: never forced. Grasp's own people sort it out with them in their talks.
+  // No list yet: never forced. Grasp's own people sort it out with them in their talks. The way past
+  // stands in the bottom bar, so the middle holds only the sign-in and the list.
   return {
-    end: null,
-    also: (
+    end: (
       <Button
         onClick={() => {
           void onward();
         }}
         size="lg"
-        variant="link"
+        variant="outline"
       >
         {t`Skip for now`}
       </Button>
     ),
+    also: null,
   };
 };
 

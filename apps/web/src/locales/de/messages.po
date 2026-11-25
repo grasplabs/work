@@ -16413,10 +16413,6 @@ msgstr "Bisher: {works, plural, one {# Arbeitsablauf} other {# Arbeitsabläufe}}
 msgid "So far: {works, plural, one {# piece of work} other {# pieces of work}}, {tools, plural, one {# tool} other {# tools}} and {handoffs, plural, one {# hand-over between teams} other {# hand-overs between teams}}."
 msgstr "Bisher: {works, plural, one {# Arbeitsablauf} other {# Arbeitsabläufe}}, {tools, plural, one {# Werkzeug} other {# Werkzeuge}} und {handoffs, plural, one {# Übergabe zwischen Teams} other {# Übergaben zwischen Teams}}."
 
-#: src/onboarding/company-step.tsx
-msgid "So I can see your teams, roles and directory. I only read names, email addresses, teams and jobs, nothing else."
-msgstr "So sehe ich Ihre Teams, Rollen und Ihr Verzeichnis. Ich lese nur Namen, E-Mail-Adressen, Teams und Funktionen, sonst nichts."
-
 #: src/agents/setup/words.ts
 msgid "Some teams"
 msgstr "Einige Teams"
