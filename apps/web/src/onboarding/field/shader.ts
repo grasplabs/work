@@ -29,7 +29,7 @@ uniform vec3 u_mood;
 uniform vec3 u_pointer;
 // What he holds: up to four elements at once, each its own light that builds up while he is on it
 // and fades where it is when he leaves. Each one's box (x, y, width, height), and how it looks:
-// how much of it there is, (unused), and its corner.
+// how much of it there is, whether it paints its own ground (1) or not (0), and its corner.
 uniform vec4 u_holds[4];
 uniform vec3 u_holdLooks[4];
 float hash(vec2 p) {
@@ -109,6 +109,9 @@ vec4 ambient(vec2 p, vec2 cellAt, vec2 window, float b, float seed, float t) {
       vec3 look = u_holdLooks[i];
       if (look.x < 0.004) continue;
       // As much clearing as there is of his light round it: it comes and goes with it, never after it.
+      // One that paints its own ground needs no clearing: its own smooth corner covers his cells,
+      // where cleared cells would stand in steps round the curve.
+      if (look.y > 0.5) continue;
       clear = min(clear, mix(1.0, step(0.0, roundBox(p, u_holds[i], look.z)), look.x));
     }
     level *= clear;
@@ -120,7 +123,8 @@ vec4 ambient(vec2 p, vec2 cellAt, vec2 window, float b, float seed, float t) {
       float d = roundBox(p, u_holds[i], look.z);
       // No line of his own on the edge: his light runs straight up to it, from the first cell
       // whose middle lies outside, so no band of blank cells stands between them.
-      float halo = exp(-max(d, 0.0) / (6.0 + 22.0 * look.x)) * step(0.0, d) * (0.06 + 0.5 * round_);
+      // Under a solid one it runs on beneath the edge, so the edge is the element's own.
+      float halo = exp(-max(d, 0.0) / (6.0 + 22.0 * look.x)) * max(step(0.0, d), look.y) * (0.06 + 0.5 * round_);
       level += look.x * halo;
     }
 
