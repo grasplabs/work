@@ -19,7 +19,7 @@ import {
 } from "@grasp-os/ui/components/dropdown-menu";
 import { Icon, WrenchIcon } from "@grasp-os/ui/lib/icons";
 import { i18n } from "@lingui/core";
-import { Fragment, useEffect } from "react";
+import { Fragment } from "react";
 
 import { isRefused, participate } from "./api.ts";
 import { tool } from "./frame.tsx";
@@ -336,54 +336,68 @@ const jumpTo = async (jump: Jump, onJumped?: () => void): Promise<void> => {
 const isJump = (value: string | null): value is Jump =>
   jumps.some((jump) => jump === value);
 
-/** `?jump=` in the address, once, as the page opens; taken out of it after. */
-const useJumpFromAddress = (): void => {
-  useEffect(() => {
-    const url = new URL(window.location.href);
-    const asked = url.searchParams.get("jump");
-    if (!isJump(asked)) {
-      return;
+/**
+ * `?jump=` in the address, applied as the link opens, before the page and
+ * its conversation start (routes/interview.tsx): nothing runs yet that could
+ * talk over it, whatever the microphone does. Taken out of the address
+ * after, so a reload carries on from there.
+ */
+export const jumpOnOpen = async (secret: string): Promise<void> => {
+  if (!import.meta.env.DEV) {
+    return;
+  }
+  const url = new URL(window.location.href);
+  const asked = url.searchParams.get("jump");
+  if (!isJump(asked)) {
+    return;
+  }
+  url.searchParams.delete("jump");
+  window.history.replaceState(window.history.state, "", url);
+  if (asked !== "start") {
+    const answer = await participate(secret);
+    if (isRefused(answer)) {
+      console.warn(`Jumping in the interview: ${answer.message}`);
     }
-    url.searchParams.delete("jump");
-    window.history.replaceState(window.history.state, "", url);
-    // The page has only just opened: nothing to put away.
-    void jumpTo(asked);
-  }, []);
+  }
+  const was = progressNow();
+  update(() =>
+    asked === "start"
+      ? { ...freshProgress, interviewer: was.interviewer }
+      : progressAt(asked, was)
+  );
+  keepNow();
 };
 
 const label = "Jump through the interview (local only)";
 
-const Menu = ({ onJumped }: { onJumped: () => void }) => {
-  useJumpFromAddress();
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button aria-label={label} size={tool.button} variant="ghost">
-          <Icon icon={WrenchIcon} />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuGroup>
-          <DropdownMenuLabel>Jump to (local only)</DropdownMenuLabel>
-          {jumps.map((jump) => (
-            <Fragment key={jump}>
-              {jump === "you" || jump === "readback" ? (
-                <DropdownMenuSeparator />
-              ) : null}
-              <DropdownMenuItem
-                onSelect={() => {
-                  void jumpTo(jump, onJumped);
-                }}
-              >
-                {jumpNames[jump]}
-              </DropdownMenuItem>
-            </Fragment>
-          ))}
-        </DropdownMenuGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-};
+const Menu = ({ onJumped }: { onJumped: () => void }) => (
+  <DropdownMenu>
+    <DropdownMenuTrigger asChild>
+      <Button aria-label={label} size={tool.button} variant="ghost">
+        <Icon icon={WrenchIcon} />
+      </Button>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="end">
+      <DropdownMenuGroup>
+        <DropdownMenuLabel>Jump to (local only)</DropdownMenuLabel>
+        {jumps.map((jump) => (
+          <Fragment key={jump}>
+            {jump === "you" || jump === "readback" ? (
+              <DropdownMenuSeparator />
+            ) : null}
+            <DropdownMenuItem
+              onSelect={() => {
+                void jumpTo(jump, onJumped);
+              }}
+            >
+              {jumpNames[jump]}
+            </DropdownMenuItem>
+          </Fragment>
+        ))}
+      </DropdownMenuGroup>
+    </DropdownMenuContent>
+  </DropdownMenu>
+);
 
 /** The jump menu in the interview's header: on a local stack only. */
 export const DevJump = ({ onJumped }: { onJumped: () => void }) =>
