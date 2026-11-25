@@ -35,6 +35,7 @@
     "@grasp-os/runtime": "workspace:*",
     "@grasp-os/sdk": "workspace:*",
     "@grasp-os/shared": "workspace:*",
+    "@scalar/openapi-parser": "catalog:",
     "@tanstack/react-router": "catalog:",
     "@tanstack/router-generator": "catalog:",
     "@tsrs/wasm": "catalog:",
