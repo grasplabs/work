@@ -95,13 +95,15 @@ import type { ProviderNote, UsageRecord } from "./model-usage.ts";
 import { usualHostsOf } from "./platform-hosts.ts";
 import {
   charactersOf,
+  conversationCostOf,
   hearingCostOf,
+  parseConversingRef,
   parseHearingRef,
   parseVoiceRef,
   speechCostOf,
   wordsOf,
 } from "./voice-models.ts";
-import type { HearingRef, VoiceRef } from "./voice-models.ts";
+import type { ConversingRef, HearingRef, VoiceRef } from "./voice-models.ts";
 
 // The model gateway: every model call in a deployment goes through here,
 // and from here through a model transport (model-transport.ts), never
@@ -3103,6 +3105,220 @@ const canListen = async (env: Env, model: string): Promise<boolean> => {
   return typeof platformTargetOf(env, routes, ref.provider) !== "string";
 };
 
+// A live voice session (Mistral's voice agents: listening, the model and
+// the voice in one session, which the browser joins itself): admitted,
+// judged and refused like a listening; once open, recorded as one model
+// call, with what the session is expected to last and cost, estimated, as
+// its length is known only to Mistral. Its audio never passes core or
+// connect; what core sends is the session's set-up, and later its reads
+// and its close (`voiceSessions`), never anything said.
+
+/** The longest a voice session's cost is estimated at. */
+const maxConversationSeconds = 60 * 60;
+
+/** Where Mistral opens its voice sessions, and reads and closes each by its ID. */
+const voiceSessionsPath = "/v1/audio/sessions";
+
+/** How long opening, reading or closing a voice session may take. */
+const voiceSessionRequestMs = 20_000;
+
+const conversingSchema = z.strictObject({
+  model: sessionShape.model,
+  purpose: sessionShape.purpose,
+  trigger: sessionShape.trigger,
+  provenance: sessionShape.provenance,
+  work: sessionShape.work,
+  requestId: sessionShape.requestId,
+  /** How long the session is expected to last: what its cost is estimated at. */
+  seconds: z.int().positive().max(maxConversationSeconds),
+  /**
+   * The session as its provider's API takes it, but for its model, which
+   * the gateway names from `model`: its instructions, voices, turns.
+   */
+  session: z.record(z.string(), z.unknown()),
+});
+type ConversingSession = z.output<typeof conversingSchema>;
+
+/** A voice session asked to open. */
+export type ConversingCall = z.input<typeof conversingSchema> & {
+  /** Where the call works: required, so no caller can leave it out. */
+  work: NonNullable<z.input<typeof conversingSchema>["work"]>;
+};
+
+/** What the audit log records of one voice session as it opened. */
+interface ConversedRecord {
+  /** The seconds its cost is estimated at. */
+  seconds: number;
+  region: Way["region"];
+  cost: number;
+  outcome: Outcome;
+  status: number | undefined;
+}
+
+/** A voice session's audit entry: a `model.call`, as any model call's. */
+const conversingEntry = (
+  call: ConversingSession,
+  ref: ConversingRef,
+  recorded: ConversedRecord
+): AuditEntry =>
+  keepingProvenance(call.provenance, (provenance, dropped) => ({
+    actor: call.trigger,
+    action: "model.call",
+    requestId: call.requestId,
+    provenance,
+    // A voice session is billed by the minute, not by tokens (`seconds`).
+    model: {
+      provider: ref.provider,
+      model: ref.id,
+      inputTokens: 0,
+      outputTokens: 0,
+    },
+    cost: { amount: recorded.cost, currency: "USD" },
+    detail: {
+      purpose: call.purpose,
+      outcome: recorded.outcome,
+      attempt: 1,
+      status: recorded.status ?? null,
+      seconds: recorded.seconds,
+      transport: "connect",
+      region: recorded.region,
+      credential: "platform",
+      provenanceDropped: dropped,
+      chat: chatOf(call),
+      ...workflowRunOf(call),
+      ...platformOf(call),
+    },
+  }));
+
+/** The most a voice session can add to its audit event (`largestRecord`). */
+const largestConversed: ConversedRecord = {
+  seconds: maxConversationSeconds,
+  region: "custom",
+  cost: Number.MAX_VALUE,
+  outcome: "invalid_output",
+  status: 599,
+};
+
+/**
+ * Opens a voice session through the gateway: refused, and audited, before
+ * anything is sent when the rules or Grasp's keys don't let it through, as
+ * a listening is; otherwise asked of the provider once, and recorded as
+ * one model call whatever came of it. Answers the provider's response,
+ * which the caller reads; throws when none came.
+ */
+const openConversation = async (
+  env: Env,
+  fields: ConversingCall,
+  signal?: AbortSignal
+): Promise<Response> => {
+  const call = parseCall(conversingSchema, fields);
+  const ref = parseConversingRef(call.model);
+  if (ref === undefined) {
+    return await refuse(env, call, { code: "model.not_allowed" });
+  }
+  try {
+    createAuditEvent(conversingEntry(call, ref, largestConversed), "core");
+  } catch {
+    // Never expected, as for a text model's call (`admit`).
+    throw modelErrors.create("model.invalid_call");
+  }
+  const target = await platformTarget(env, call, ref.provider);
+  const verdict = await judgeCall(env, call);
+  if (!verdict.ok) {
+    return await refuse(env, call, verdict);
+  }
+  const id = crypto.randomUUID();
+  let answered: Response | undefined = undefined;
+  try {
+    answered = await connectRequest(
+      env,
+      target,
+      voiceSessionsPath,
+      {
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json",
+        },
+        body: JSON.stringify({
+          ...call.session,
+          llm: { model: ref.id },
+        }),
+      },
+      {
+        providerRequest: id,
+        endsAt: Date.now() + voiceSessionRequestMs,
+        ...(signal === undefined ? {} : { signal }),
+      }
+    );
+    return answered;
+  } finally {
+    const opened = answered?.ok === true;
+    const cost = opened ? conversationCostOf(ref, call.seconds) : 0;
+    await recordResponse(
+      env,
+      {
+        entry: conversingEntry(call, ref, {
+          seconds: opened ? call.seconds : 0,
+          region: target.platform.region,
+          cost,
+          outcome: opened ? "answered" : "failed",
+          status: answered?.status,
+        }),
+        at: Date.now(),
+        spend: call,
+        usage: {
+          id,
+          model: call.model,
+          purpose: call.purpose,
+          credential: "platform",
+          feature: "conversation",
+          inputTokens: opened ? call.seconds : 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          cost,
+          // Its length is Mistral's to know: the cost is what it is expected to last.
+          estimated: true,
+        },
+        ...(opened
+          ? { health: { provider: ref.provider, credential: "platform" } }
+          : {}),
+      },
+      { awaited: true }
+    );
+  }
+};
+
+/**
+ * A voice session the gateway opened, read or closed by its ID, with
+ * Grasp's key for `provider`, through connect: what Mistral kept of it
+ * (its transcript), or its end. Nothing billed and nothing new decided,
+ * so neither is judged nor audited; the session's ID is the caller's to
+ * have checked as one it opened for whoever asks.
+ */
+const sessionRequest = async (
+  env: Env,
+  method: "GET" | "DELETE",
+  sessionId: string,
+  signal?: AbortSignal
+): Promise<Response> => {
+  const target = platformTargetOf(env, await routesOrFailed(env), "mistral");
+  if (typeof target === "string") {
+    throw modelErrors.create(target);
+  }
+  return await connectRequest(
+    env,
+    target,
+    `${voiceSessionsPath}/${encodeURIComponent(sessionId)}`,
+    { method, headers: { accept: "application/json" } },
+    {
+      providerRequest: crypto.randomUUID(),
+      endsAt: Date.now() + voiceSessionRequestMs,
+      ...(signal === undefined ? {} : { signal }),
+    }
+  );
+};
+
 /**
  * Says a line through the gateway: refused, audited, before anything is
  * sent when the rules or Grasp's keys don't let it through; otherwise
@@ -3258,4 +3474,23 @@ export const models = (env: Env) => ({
    */
   canListen: async (model: string): Promise<boolean> =>
     await canListen(env, model),
+  /**
+   * Opens a live voice session (`openConversation`): judged, refused and
+   * audited like a listening; answers the provider's response.
+   */
+  converse: async (
+    call: ConversingCall,
+    signal?: AbortSignal
+  ): Promise<Response> => await openConversation(env, call, signal),
+  /** Reads what the provider kept of a voice session it opened (`sessionRequest`). */
+  readConversation: async (
+    sessionId: string,
+    signal?: AbortSignal
+  ): Promise<Response> => await sessionRequest(env, "GET", sessionId, signal),
+  /** Closes a voice session it opened (`sessionRequest`). */
+  closeConversation: async (
+    sessionId: string,
+    signal?: AbortSignal
+  ): Promise<Response> =>
+    await sessionRequest(env, "DELETE", sessionId, signal),
 });
