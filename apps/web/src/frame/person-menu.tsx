@@ -12,7 +12,10 @@ import {
 import { isThemeMode } from "@grasp-os/ui/components/theme-toggle";
 import { toast } from "@grasp-os/ui/components/toast";
 import {
+  ArrowLeftRightIcon,
   ChevronsUpDownIcon,
+  CircleHelpIcon,
+  ContrastIcon,
   Icon,
   LogOutIcon,
   MonitorIcon,
@@ -29,11 +32,6 @@ import { useEffect, useSyncExternalStore } from "react";
 import { signOut } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { OrganizationName, useOrganizationName } from "./organization-name.tsx";
-import {
-  ArrowLeftRightIcon,
-  CircleHelpIcon,
-  ContrastIcon,
-} from "./sidebar-icons.ts";
 import { ProfileMenu } from "./sidebar-profile.tsx";
 import {
   applyTheme,

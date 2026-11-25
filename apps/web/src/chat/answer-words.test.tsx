@@ -156,9 +156,33 @@ describe(AnswerLinks, () => {
 
     expect({
       mail: mail?.includes("mailto:ann@acme.test"),
-      form: asked()?.includes("HTTPS://Forms.Example/leave"),
+      // Named as the browser will go there.
+      form: asked()?.includes("https://forms.example/leave"),
       opened,
     }).toStrictEqual({ mail: true, form: true, opened: [] });
+  });
+
+  it("names where a link leads as the browser will go there, a look-alike host as its punycode, and opens that", async () => {
+    // "paypal.com" with a Cyrillic a and y (U+0430, U+0443): another host.
+    await shown("Log in at [PayPal](https://p\u0430\u0443pal.com/login).");
+    await press(button("PayPal"));
+    const question = asked() ?? "";
+    await press(button("Open link"));
+
+    expect({
+      named: question.includes("https://xn--ppal-53d8i.com/login"),
+      asWritten: question.includes("p\u0430\u0443pal.com"),
+      opened,
+    }).toStrictEqual({
+      named: true,
+      asWritten: false,
+      opened: [
+        {
+          url: "https://xn--ppal-53d8i.com/login",
+          features: "noopener,noreferrer",
+        },
+      ],
+    });
   });
 
   it("asks before following a link to another host without a protocol", async () => {
@@ -169,7 +193,7 @@ describe(AnswerLinks, () => {
     expect({
       addressed,
       opened,
-      asked: asked()?.includes("//forms.example/leave"),
+      asked: asked()?.includes("://forms.example/leave"),
     }).toStrictEqual({ addressed: null, opened: [], asked: true });
   });
 

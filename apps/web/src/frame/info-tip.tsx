@@ -1,4 +1,9 @@
 import { Button } from "@grasp-os/ui/components/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@grasp-os/ui/components/tooltip";
 import { Icon, InfoIcon } from "@grasp-os/ui/lib/icons";
 import { font, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
@@ -7,13 +12,13 @@ import type { ReactNode } from "react";
 
 // More about a part of a page behind an info mark beside its title or a
 // setting's label: what it shows, who can see it, why. An icon-only ghost
-// Button named by `aria-label`, its words in the Button's own tooltip, said
-// on hover and focus. The mark stands after the title, never inside it: a
-// heading's or a label's name is all the words in it, so a mark inside would
-// join the card's heading ("Owner More about the owner") or the control's
-// name ("Made for More about this section"). Damsko has no info mark (its
-// old setting row's `info` left for the product); the Apps, workflows and
-// Integrations pages share this one.
+// Button named by `aria-label`, its words in a Tooltip that opens on hover,
+// focus and a press (`toggleable`), so a tap on a phone shows them too, as
+// Damsko's Tooltip docs compose an info mark. The mark stands after the
+// title, never inside it: a heading's or a label's name is all the words in
+// it, so a mark inside would join the card's heading ("Owner More about the
+// owner") or the control's name ("Made for More about this section"). The
+// Apps, workflows, settings, agents and Integrations pages share this one.
 
 const styles = stylex.create({
   // The title and its mark on one line, centred on each other; where the
@@ -42,7 +47,7 @@ const styles = stylex.create({
   },
 });
 
-/** The info mark: `children` said on hover and focus; `label` names it for a screen reader. */
+/** The info mark: `children` said on hover, focus and a press; `label` names it for a screen reader. */
 export const InfoTip = ({
   label,
   children,
@@ -52,14 +57,18 @@ export const InfoTip = ({
 }) => {
   const { t } = useLingui();
   return (
-    <Button
-      aria-label={label ?? t`More about this section`}
-      size="icon-xs"
-      tooltip={children}
-      variant="ghost"
-    >
-      <Icon icon={InfoIcon} />
-    </Button>
+    <Tooltip toggleable>
+      <TooltipTrigger asChild>
+        <Button
+          aria-label={label ?? t`More about this section`}
+          size="icon-xs"
+          variant="ghost"
+        >
+          <Icon icon={InfoIcon} />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{children}</TooltipContent>
+    </Tooltip>
   );
 };
 

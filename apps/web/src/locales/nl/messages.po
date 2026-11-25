@@ -6229,6 +6229,7 @@ msgstr "Gedaan in een run"
 msgid "Done right"
 msgstr "Wanneer het goed is"
 
+#: src/chat/sidebar-chats.tsx
 #: src/frame/panels/rename.tsx
 msgid "Double-click or press F2 to rename"
 msgstr "Dubbelklik of druk op F2 om de naam te wijzigen"
@@ -9252,8 +9253,7 @@ msgstr "De toegang is verlopen. Grasp-medewerkers kunnen hem niet opnieuw koppel
 msgid "Its account is out of credit."
 msgstr "Het tegoed van het account is op."
 
-#: src/inbox/approval-request.tsx
-#: src/inbox/item-detail.tsx
+#: src/answer-pause.tsx
 msgid "Its answers can be used in a moment, so a press meant for the one before doesn't answer it."
 msgstr "De antwoorden zijn zo te gebruiken, zodat een klik die voor de vorige bedoeld was deze niet beantwoordt."
 
@@ -12655,6 +12655,10 @@ msgstr "Openstaande taken en hun deadlines."
 msgid "Open the App"
 msgstr "De App openen"
 
+#: src/chat/chat-bar.tsx
+msgid "Open the chat"
+msgstr "De chat openen"
+
 #: src/apps/app-workspace.tsx
 msgid "Open the chat in Chat"
 msgstr "De chat openen in Chat"
@@ -14268,6 +14272,10 @@ msgstr "Chat hernoemen"
 #: src/activity/audit-words.ts
 msgid "Renamed the organization"
 msgstr "Heeft de organisatie hernoemd"
+
+#: src/chat/sidebar-chats.tsx
+msgid "Renamed to {name}"
+msgstr "Hernoemd tot {name}"
 
 #: src/apps/data-model-changes.tsx
 msgid "Renames the table {from} to {to}; its records go with it."
@@ -16128,6 +16136,10 @@ msgstr "Iemand die er niet meer is"
 #: src/agents/own-agents-admin.tsx
 msgid "Someone no longer in the company"
 msgstr "Iemand die niet meer in het bedrijf zit"
+
+#: src/settings/ai-providers.tsx
+msgid "Someone saved a new {label} key since you opened it, so nothing was deleted."
+msgstr "Iemand heeft een nieuwe {label}-sleutel opgeslagen sinds je deze opende, dus er is niets verwijderd."
 
 #: src/settings/instruction-file.tsx
 msgid "Someone saved this file since you started. Put your changes aside to see their version, then make yours again."
@@ -18539,7 +18551,6 @@ msgstr "Proberen"
 #: src/inbox/inbox-page.tsx
 #: src/interview/destination.tsx
 #: src/interview/sound-check.tsx
-#: src/pages/frame-failure.tsx
 #: src/settings/sign-in-settings.tsx
 msgid "Try again"
 msgstr "Opnieuw proberen"

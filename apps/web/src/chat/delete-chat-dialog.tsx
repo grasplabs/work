@@ -72,12 +72,7 @@ export const DeleteChatDialog = ({
             <Trans>Cancel</Trans>
           </AlertDialogCancel>
           {/* Not a closing answer: the dialog stays to say why it failed. */}
-          <Button
-            disabled={busy}
-            onClick={remove}
-            size="sm"
-            variant="destructive"
-          >
+          <Button disabled={busy} onClick={remove} variant="destructive">
             <Trans>Delete</Trans>
           </Button>
         </AlertDialogFooter>

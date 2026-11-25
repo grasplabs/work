@@ -826,6 +826,29 @@ describe("Settings › AI providers", () => {
     expect(text()).toContain("Use an OpenAI-compatible endpoint");
   });
 
+  it("deletes only the key its dialog shows: one someone saved since stays, and the page says nothing was deleted", async () => {
+    const { api } = fakeAiProviders({ connected: [{ provider: "openai" }] });
+    await shown(api);
+    // The admin opens Manage on the key ending 0000 ...
+    await manage("OpenAI");
+    // ... while another admin replaces it (another tab, another person).
+    await api.add({
+      provider: "openai",
+      key: "sk-another-admins-new-key-b7c9",
+    });
+    await press(dialogButton("Delete key"));
+    await press(await confirmation());
+
+    const { providers } = await api.list();
+    expect({
+      kept: providers.map(({ mask }) => mask),
+      shown: text().includes("•••• b7c9"),
+      said: text().includes(
+        "Someone saved a new OpenAI key since you opened it, so nothing was deleted."
+      ),
+    }).toStrictEqual({ kept: ["…b7c9"], shown: true, said: true });
+  });
+
   it("offers none of a removed provider's models, and asks for a new default before the fallbacks change when its was the default", async () => {
     const { api, asked } = fakeAiProviders({
       connected: [

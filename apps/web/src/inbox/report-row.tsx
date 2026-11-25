@@ -366,7 +366,6 @@ const ReportSheetBody = ({
               print(html);
             }
           }}
-          size="sm"
         >
           <Icon icon={FilePdfIcon} />
           {t`Save as PDF`}

@@ -335,7 +335,6 @@ const styles = stylex.create({
     color: colors.sidebarForeground,
     fontWeight: font.weightMedium,
   },
-  trailing: { display: "flex", flexShrink: 0, alignItems: "center" },
   actions: {
     display: "flex",
     flexShrink: 0,
@@ -447,6 +446,11 @@ export const SiteHeader = ({
 }: {
   crumbs: readonly Crumb[];
   actions?: ReactNode;
+  /**
+   * Where its subject stands, an item of the row after the crumbs: one
+   * that gives way where the bar is narrow takes no room, nor the gap
+   * before it, once it has (`display: none`), so the crumbs keep it.
+   */
   trailing?: ReactNode;
 }) => {
   const { t } = useLingui();
@@ -557,9 +561,7 @@ export const SiteHeader = ({
             </BreadcrumbList>
           </Breadcrumb>
         )}
-        {trailing === undefined ? null : (
-          <div {...stylex.props(styles.trailing)}>{trailing}</div>
-        )}
+        {trailing}
       </div>
       {actions === undefined ? null : (
         <div {...stylex.props(styles.actions)}>{actions}</div>

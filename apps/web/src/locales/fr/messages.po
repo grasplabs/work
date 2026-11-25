@@ -6229,6 +6229,7 @@ msgstr "Fait lors d’une exécution"
 msgid "Done right"
 msgstr "Travail bien fait"
 
+#: src/chat/sidebar-chats.tsx
 #: src/frame/panels/rename.tsx
 msgid "Double-click or press F2 to rename"
 msgstr "Double-cliquez ou appuyez sur F2 pour renommer"
@@ -9252,8 +9253,7 @@ msgstr "Son accès a expiré. L’équipe Grasp ne peut pas la reconnecter : un 
 msgid "Its account is out of credit."
 msgstr "Le compte n’a plus de crédit."
 
-#: src/inbox/approval-request.tsx
-#: src/inbox/item-detail.tsx
+#: src/answer-pause.tsx
 msgid "Its answers can be used in a moment, so a press meant for the one before doesn't answer it."
 msgstr "Ses réponses seront utilisables dans un instant, pour qu'un clic destiné au précédent n'y réponde pas."
 
@@ -12598,7 +12598,7 @@ msgstr "Ouvrir en page"
 
 #: src/workflows/workflow-rows.tsx
 msgid "Open Chat"
-msgstr "Ouvrir le chat"
+msgstr "Ouvrir la conversation"
 
 #: src/apps/app-workspace.tsx
 msgid "Open Data"
@@ -12654,6 +12654,10 @@ msgstr "Les tâches en cours et leurs échéances."
 #: src/inbox/item-detail.tsx
 msgid "Open the App"
 msgstr "Ouvrir l’application"
+
+#: src/chat/chat-bar.tsx
+msgid "Open the chat"
+msgstr "Ouvrir la conversation"
 
 #: src/apps/app-workspace.tsx
 msgid "Open the chat in Chat"
@@ -14268,6 +14272,10 @@ msgstr "Renommer le chat"
 #: src/activity/audit-words.ts
 msgid "Renamed the organization"
 msgstr "A renommé l’organisation"
+
+#: src/chat/sidebar-chats.tsx
+msgid "Renamed to {name}"
+msgstr "Renommé en {name}"
 
 #: src/apps/data-model-changes.tsx
 msgid "Renames the table {from} to {to}; its records go with it."
@@ -16128,6 +16136,10 @@ msgstr "Quelqu’un qui n’est plus là"
 #: src/agents/own-agents-admin.tsx
 msgid "Someone no longer in the company"
 msgstr "Une personne qui ne fait plus partie de l’entreprise"
+
+#: src/settings/ai-providers.tsx
+msgid "Someone saved a new {label} key since you opened it, so nothing was deleted."
+msgstr "Quelqu’un a enregistré une nouvelle clé {label} depuis que vous l’avez ouverte : rien n’a donc été supprimé."
 
 #: src/settings/instruction-file.tsx
 msgid "Someone saved this file since you started. Put your changes aside to see their version, then make yours again."
@@ -18539,7 +18551,6 @@ msgstr "Essayer"
 #: src/inbox/inbox-page.tsx
 #: src/interview/destination.tsx
 #: src/interview/sound-check.tsx
-#: src/pages/frame-failure.tsx
 #: src/settings/sign-in-settings.tsx
 msgid "Try again"
 msgstr "Réessayer"

@@ -6229,6 +6229,7 @@ msgstr "Hecho en una ejecución"
 msgid "Done right"
 msgstr "Hacerlo bien"
 
+#: src/chat/sidebar-chats.tsx
 #: src/frame/panels/rename.tsx
 msgid "Double-click or press F2 to rename"
 msgstr "Haz doble clic o pulsa F2 para cambiar el nombre"
@@ -9252,8 +9253,7 @@ msgstr "Su acceso caducó. El personal de Grasp no puede reconectarla: un admini
 msgid "Its account is out of credit."
 msgstr "La cuenta se ha quedado sin crédito."
 
-#: src/inbox/approval-request.tsx
-#: src/inbox/item-detail.tsx
+#: src/answer-pause.tsx
 msgid "Its answers can be used in a moment, so a press meant for the one before doesn't answer it."
 msgstr "Sus respuestas se podrán usar en un momento, para que una pulsación pensada para el anterior no lo responda."
 
@@ -12655,6 +12655,10 @@ msgstr "Tareas pendientes y sus fechas de vencimiento."
 msgid "Open the App"
 msgstr "Abrir la aplicación"
 
+#: src/chat/chat-bar.tsx
+msgid "Open the chat"
+msgstr "Abrir el chat"
+
 #: src/apps/app-workspace.tsx
 msgid "Open the chat in Chat"
 msgstr "Abrir el chat en Chat"
@@ -14268,6 +14272,10 @@ msgstr "Cambiar el nombre del chat"
 #: src/activity/audit-words.ts
 msgid "Renamed the organization"
 msgstr "Cambió el nombre de la organización"
+
+#: src/chat/sidebar-chats.tsx
+msgid "Renamed to {name}"
+msgstr "Nombre cambiado a {name}"
 
 #: src/apps/data-model-changes.tsx
 msgid "Renames the table {from} to {to}; its records go with it."
@@ -16128,6 +16136,10 @@ msgstr "Alguien que ya no está"
 #: src/agents/own-agents-admin.tsx
 msgid "Someone no longer in the company"
 msgstr "Alguien que ya no está en la empresa"
+
+#: src/settings/ai-providers.tsx
+msgid "Someone saved a new {label} key since you opened it, so nothing was deleted."
+msgstr "Alguien guardó una nueva clave de {label} desde que la abriste, así que no se eliminó nada."
 
 #: src/settings/instruction-file.tsx
 msgid "Someone saved this file since you started. Put your changes aside to see their version, then make yours again."
@@ -18539,7 +18551,6 @@ msgstr "Intentar"
 #: src/inbox/inbox-page.tsx
 #: src/interview/destination.tsx
 #: src/interview/sound-check.tsx
-#: src/pages/frame-failure.tsx
 #: src/settings/sign-in-settings.tsx
 msgid "Try again"
 msgstr "Reintentar"

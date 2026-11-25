@@ -11,6 +11,19 @@ import type { DrawOptions, Drawing } from "./drawing.ts";
 /** The dithers #2503 draws, each a field of its own. */
 export type DitherKind = "dusk" | "dots" | "door";
 
+/**
+ * A dither's ink, as #2503's tones number them in the shader: `mint`, one
+ * flat colour, the canvas's own, faint; `aurora`, a run of the light's
+ * greens by the field's own light, pine where it is fullest to lime at
+ * its fringes, as a page that failed stands on.
+ */
+export type DitherTone = "mint" | "aurora";
+
+const toneNumbers: Readonly<Record<DitherTone, number>> = {
+  mint: 2,
+  aurora: 7,
+};
+
 const VERTEX = `
 attribute vec2 a_pos;
 varying vec2 v_uv;
@@ -334,7 +347,8 @@ const rgbaOf = (() => {
 export const startDither = (
   element: HTMLCanvasElement,
   kind: DitherKind,
-  options: DrawOptions
+  options: DrawOptions,
+  tone: DitherTone = "mint"
 ): Drawing => {
   // Kept between frames: it is drawn only every other frame or so, and a frame it isn't drawn on
   // would otherwise show nothing.
@@ -409,9 +423,9 @@ export const startDither = (
     gl.uniform1f(hasClearAt, 0);
     gl.uniform2f(res, element.width, element.height);
     gl.uniform1f(cellAt, 1);
-    // Bayer's pattern (the shader's first) in the flat tone (below its runs).
+    // Bayer's pattern (the shader's first) in its tone.
     gl.uniform1f(patternAt, 1);
-    gl.uniform1f(toneAt, 2);
+    gl.uniform1f(toneAt, toneNumbers[tone]);
     gl.uniform1f(progressAt, 0);
     // With reduced motion the silk stands at one moment: the same picture however often it is drawn.
     const elapsed = still ? 0 : (now - begun) / 1000;

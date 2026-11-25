@@ -1,13 +1,13 @@
 import {
+  ArrowLeftRightIcon,
   BellIcon,
   CalendarIcon,
   CircleCheckIcon,
-  GitCompareIcon,
+  CircleHelpIcon,
   GlobeIcon,
   ListChecksIcon,
   LockIcon,
   MailIcon,
-  MessageCircleIcon,
   PencilIcon,
   PlayIcon,
   TriangleAlertIcon,
@@ -85,26 +85,25 @@ export const kindLabel: Record<InboxKind, MessageDescriptor> = {
 };
 
 /**
- * Each kind's icon from Damsko's set, for the list's rows. Where the set
- * has no exact one (a question mark, a key, a scale, a shield), the
- * nearest that says the same.
+ * Each kind's icon from Damsko's set, for the list's rows: the reference's,
+ * or the nearest that says the same.
  */
 export const kindMark: Record<InboxKind, IconData> = {
   checkDrawing: WorkflowIcon,
-  checkProposal: GitCompareIcon,
+  checkProposal: ArrowLeftRightIcon,
   approveChange: PencilIcon,
   confirmResult: CircleCheckIcon,
-  conflict: GitCompareIcon,
-  openQuestion: MessageCircleIcon,
+  conflict: ArrowLeftRightIcon,
+  openQuestion: CircleHelpIcon,
   unknownAiTool: UserSparklesIcon,
   signInAgain: LockIcon,
   externalDomain: GlobeIcon,
   heldWrite: PencilIcon,
   heldStart: PlayIcon,
-  unknownOutcome: MessageCircleIcon,
+  unknownOutcome: CircleHelpIcon,
   permissionRequest: LockIcon,
   stoppedSchedule: CalendarIcon,
-  workflowChanged: GitCompareIcon,
+  workflowChanged: ArrowLeftRightIcon,
   packageNotice: TriangleAlertIcon,
   stoppedEvents: MailIcon,
   appMessage: BellIcon,

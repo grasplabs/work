@@ -11,6 +11,7 @@ import {
   CircleUserIcon,
   CodeIcon,
   FileIcon,
+  FileInvoiceIcon,
   Globe2Icon,
   Icon,
   MicIcon,
@@ -20,8 +21,6 @@ import {
 } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
 import { Link } from "@tanstack/react-router";
-
-import { InvoiceIcon } from "../frame/sidebar-icons.ts";
 
 // One source of the Brain as a row, from the reference's library (#2503's
 // `sources/item.tsx`, SourceItem and SourceItemParts): its kind's mark bare
@@ -59,8 +58,8 @@ export interface Source {
 const kindIcons: Record<SourceKind, IconData> = {
   file: FileIcon,
   web: Globe2Icon,
-  record: InvoiceIcon,
-  message: InvoiceIcon,
+  record: FileInvoiceIcon,
+  message: FileInvoiceIcon,
   meeting: MicIcon,
   person: CircleUserIcon,
   agent: WandSparklesIcon,

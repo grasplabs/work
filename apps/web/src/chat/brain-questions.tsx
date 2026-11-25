@@ -10,8 +10,9 @@ import { Textarea } from "@grasp-os/ui/components/textarea";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useState } from "react";
+import { useId, useState } from "react";
 
+import { PauseNote, useAnswersPause } from "../answer-pause.tsx";
 import type { Session } from "../core.ts";
 import { useCore } from "../use-core.ts";
 import { FailureLine } from "./failure-line.tsx";
@@ -59,6 +60,7 @@ const Question = ({
   canAnswer,
   canAsk,
   busy,
+  pausedBy,
   onAnswer,
   onAsk,
   onClose,
@@ -68,6 +70,11 @@ const Question = ({
   /** Asking its owner, and closing it without an answer: the company's admins. */
   canAsk: boolean;
   busy: boolean;
+  /**
+   * The line that says Ask and Close wait a moment, while they do: one
+   * question was just dealt with, and this one may have moved into its place.
+   */
+  pausedBy: string | undefined;
   onAnswer: (answer: string) => Promise<boolean>;
   onAsk: () => Promise<void>;
   onClose: () => Promise<void>;
@@ -144,7 +151,9 @@ const Question = ({
           ) : null}
           {canAsk && !asked ? (
             <Button
-              disabled={busy}
+              aria-describedby={pausedBy}
+              disabled={busy || pausedBy !== undefined}
+              focusableWhenDisabled={pausedBy !== undefined}
               onClick={() => {
                 void onAsk();
               }}
@@ -156,7 +165,9 @@ const Question = ({
           ) : null}
           {canAsk ? (
             <Button
-              disabled={busy}
+              aria-describedby={pausedBy}
+              disabled={busy || pausedBy !== undefined}
+              focusableWhenDisabled={pausedBy !== undefined}
               onClick={() => {
                 void onClose();
               }}
@@ -190,6 +201,12 @@ export const BrainQuestions = ({
   const { t } = useLingui();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
+  // Once one is asked about or closed, the questions under it move up:
+  // Ask and Close hold a moment, so the second press of a double click
+  // never deals with the question that took its place (answer-pause.tsx).
+  const pause = useAnswersPause();
+  const pauseId = useId();
+  const pausedBy = pause.held ? pauseId : undefined;
   const open = openGaps(gaps);
   if (open.length === 0) {
     return null;
@@ -207,6 +224,7 @@ export const BrainQuestions = ({
       return false;
     }
     setBusy(false);
+    pause.hold();
     onChanged();
     return true;
   };
@@ -223,6 +241,7 @@ export const BrainQuestions = ({
             canAsk={isMemberAdmin(identity)}
             gap={gap}
             key={gap.id}
+            pausedBy={pausedBy}
             onAnswer={async (answer) =>
               await change(
                 async (session) => await session.brain.answerGap(gap.id, answer)
@@ -241,6 +260,7 @@ export const BrainQuestions = ({
           />
         ))}
       </ul>
+      {pause.held ? <PauseNote id={pauseId} /> : null}
       <FailureLine>{failure}</FailureLine>
     </section>
   );

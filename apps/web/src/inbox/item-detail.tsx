@@ -34,7 +34,7 @@ import {
 import type { QuestionnaireAnswer } from "@grasp-os/ui/components/questionnaire";
 import { Text } from "@grasp-os/ui/components/text";
 import { ArrowUpRightIcon, Icon } from "@grasp-os/ui/lib/icons";
-import { focusRingText, visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { focusRingText } from "@grasp-os/ui/lib/styles";
 import { size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -47,6 +47,7 @@ import {
   reviewedVersion,
   triggerStartOf,
 } from "../activity/pending.tsx";
+import { PauseNote, useArmed } from "../answer-pause.tsx";
 import {
   confirmHeld,
   declineHeld,
@@ -58,7 +59,7 @@ import { formatDate } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { PendingBindingList } from "../workflows/binding-approvals.tsx";
-import { ApprovalRequest, useArmed } from "./approval-request.tsx";
+import { ApprovalRequest } from "./approval-request.tsx";
 import { DecisionCard } from "./decision-card.tsx";
 import { kindLabel, kindMark } from "./inbox-kind.tsx";
 import type { InboxItem, InboxSource, Target } from "./items.ts";
@@ -179,7 +180,6 @@ const ConfirmedAct = ({
               await act.onPress?.();
               setOpen(false);
             }}
-            size="sm"
             variant={confirm.variant ?? "destructive"}
           >
             {act.label}
@@ -336,7 +336,7 @@ const ItemFrame = ({
   const { t, i18n } = useLingui();
   const titleId = useId();
   const pauseId = useId();
-  const armed = useArmed(frame.arriving);
+  const [armed] = useArmed(frame.arriving);
   // No action while the item has only just come, or waits no more.
   const held = busy || !armed || frame.gone;
   // The pause after an answer, said to a screen reader: on each action,
@@ -406,11 +406,7 @@ const ItemFrame = ({
                 ))}
               </div>
             )}
-            {paused ? (
-              <span id={pauseId} {...stylex.props(visuallyHidden)}>
-                {t`Its answers can be used in a moment, so a press meant for the one before doesn't answer it.`}
-              </span>
-            ) : null}
+            {paused ? <PauseNote id={pauseId} /> : null}
             {failure === undefined ? null : (
               <Alert variant="destructive">
                 <AlertDescription>{failure}</AlertDescription>
@@ -617,7 +613,7 @@ const WorkflowAsk = ({
   const titleId = useId();
   const pauseId = useId();
   const { busy, failure, decide } = useDecide(frame);
-  const armed = useArmed(frame.arriving);
+  const [armed] = useArmed(frame.arriving);
   const off = busy || !armed || frame.gone;
   // The pause after an answer, said to a screen reader on each answer.
   const paused = !armed && !busy && !frame.gone;
@@ -676,11 +672,7 @@ const WorkflowAsk = ({
                 {yes}
               </Button>
             </div>
-            {paused ? (
-              <span id={pauseId} {...stylex.props(visuallyHidden)}>
-                {t`Its answers can be used in a moment, so a press meant for the one before doesn't answer it.`}
-              </span>
-            ) : null}
+            {paused ? <PauseNote id={pauseId} /> : null}
           </div>
         </CardContent>
       </section>
@@ -984,7 +976,7 @@ const DecisionItem = ({
   source: Extract<InboxSource, { type: "decision" }>;
 }) => {
   const router = useRouter();
-  const armed = useArmed(frame.arriving);
+  const [armed] = useArmed(frame.arriving);
   return (
     <DecisionCard
       decision={source.decision}

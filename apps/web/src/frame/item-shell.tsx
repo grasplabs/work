@@ -38,6 +38,8 @@ const styles = stylex.create({
   // Where it stands gives way to its actions where the bar is narrow.
   state: {
     display: { default: "inline-flex", [`${BAR} (width < 48rem)`]: "none" },
+    flexShrink: 0,
+    alignItems: "center",
   },
   // Named for a screen reader, which the trail shows as its last step.
   unseen: {

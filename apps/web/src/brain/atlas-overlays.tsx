@@ -10,13 +10,12 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@grasp-os/ui/components/toggle-group";
-import { Icon, MinusIcon, PlusIcon } from "@grasp-os/ui/lib/icons";
+import { Icon, MinusIcon, PlusIcon, ScanIcon } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
-import { FitToScreenIcon } from "../workflows/icons.ts";
 import type { RegionGroup } from "./atlas-map.ts";
 import { Mark } from "./region-marks.tsx";
 
@@ -200,7 +199,7 @@ export const AtlasToolbar = ({
             size="icon-sm"
             variant="ghost"
           >
-            <Icon icon={FitToScreenIcon} />
+            <Icon icon={ScanIcon} />
           </Button>
         </ButtonGroup>
       </div>

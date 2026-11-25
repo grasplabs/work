@@ -904,7 +904,6 @@ export const NewAgent = ({
               errorText={t`Couldn't make it`}
               loadingText={t`Making`}
               onClick={make}
-              size="sm"
             >
               {t`Make agent`}
             </Button>

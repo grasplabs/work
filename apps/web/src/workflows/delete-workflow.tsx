@@ -119,7 +119,6 @@ export const DeleteWorkflow = ({
               <Button
                 errorText={t`Not deleted`}
                 onClick={remove}
-                size="sm"
                 variant="destructive"
               >
                 {t`Delete the workflow`}

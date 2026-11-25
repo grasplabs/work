@@ -98,7 +98,7 @@ import {
 } from "@grasp-os/ui/components/side-panel";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { Text } from "@grasp-os/ui/components/text";
-import { Icon, SearchIcon, TrashIcon } from "@grasp-os/ui/lib/icons";
+import { CableIcon, Icon, SearchIcon, TrashIcon } from "@grasp-os/ui/lib/icons";
 import {
   colors,
   media,
@@ -117,7 +117,6 @@ import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatBytes, formatDate, formatDay, formatList } from "../format.ts";
-import { CableIcon } from "../frame/sidebar-icons.ts";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { given } from "./brain.ts";
