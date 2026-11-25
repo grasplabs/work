@@ -1922,6 +1922,10 @@ msgstr "un número"
 msgid "A file is downloaded only when you ask for it, with a click."
 msgstr "Un archivo solo se descarga cuando lo pides, con un clic."
 
+#: src/onboarding/plan-story.tsx
+msgid "A finding"
+msgstr "Un hallazgo"
+
 #: src/onboarding/plan.tsx
 msgid "A finding reads like this: new people wait two to three days for a laptop from IT."
 msgstr "Un hallazgo se lee así: las personas nuevas esperan dos o tres días a que IT les dé un portátil."
@@ -5146,6 +5150,7 @@ msgstr "Contexto usado"
 #: src/onboarding/company-step.tsx
 #: src/onboarding/documents-step.tsx
 #: src/onboarding/leads-step.tsx
+#: src/onboarding/plan-story.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/onboarding/sources-step.tsx
 msgid "Continue"
@@ -7409,6 +7414,10 @@ msgstr "Busca lo último que se acordó con ellos y lo que sigue pendiente."
 msgid "Finds overdue invoices and drafts friendly reminders."
 msgstr "Busca facturas vencidas y redacta recordatorios amables."
 
+#: src/onboarding/plan-story.tsx
+msgid "First I talk with the people who know the work best."
+msgstr "Primero hablo con las personas que mejor conocen el trabajo."
+
 #: src/agents/agent-overview.tsx
 msgid "First run {when}"
 msgstr "Primera ejecución: {when}"
@@ -8222,7 +8231,7 @@ msgstr "Mesa de ayuda"
 msgid "Helsinki"
 msgstr "Helsinki"
 
-#: src/onboarding/setup-steps.tsx
+#: src/onboarding/plan-story.tsx
 msgid "Here’s the plan"
 msgstr "Este es el plan"
 
@@ -8567,6 +8576,10 @@ msgstr "No encontré a nadie en {signIn}."
 msgid "I lost the connection. Please check your internet. I have kept what you said, and I keep trying."
 msgstr "He perdido la conexión. Comprueba tu internet. He guardado lo que has dicho y sigo intentándolo."
 
+#: src/onboarding/plan-story.tsx
+msgid "I read every conversation, and you get what I learned, team by team."
+msgstr "Leo cada conversación y recibes lo que he aprendido, equipo por equipo."
+
 #: src/onboarding/team-step.tsx
 msgid "I sent it"
 msgstr "Ya lo envié"
@@ -8575,7 +8588,7 @@ msgstr "Ya lo envié"
 msgid "I talk to each team lead first, so they hear about me before their team does. Check who leads which team, and which teams take part."
 msgstr "Hablo primero con cada responsable de equipo, para que sepa de mí antes que su equipo. Comprueba quién dirige cada equipo y qué equipos participan."
 
-#: src/onboarding/setup-steps.tsx
+#: src/onboarding/plan-story.tsx
 msgid "I talk with your team for one week. Then you get what I learned, team by team."
 msgstr "Hablo con tu equipo durante una semana. Después recibes lo que aprendí, equipo por equipo."
 
@@ -9142,6 +9155,10 @@ msgstr "Se abre para el miembro que lo creó, los administradores y quienes teng
 #: src/workflows/definition-editor.tsx
 msgid "It passes its checks."
 msgstr "Pasa sus comprobaciones."
+
+#: src/onboarding/plan-story.tsx
+msgid "It reads like this: new people wait two to three days for a laptop from IT."
+msgstr "Se lee así: las personas nuevas esperan dos o tres días a que IT les dé un portátil."
 
 #: src/agents/new-agent.tsx
 msgid "It reads, and what it wants to change waits for you"
@@ -9840,6 +9857,10 @@ msgstr "Deja pasar el correo de Grasp."
 #: src/settings/erasures.tsx
 msgid "Let it in"
 msgstr "Admitir"
+
+#: src/onboarding/plan-story.tsx
+msgid "Let me walk you through the next two weeks."
+msgstr "Te cuento cómo van a ser las próximas dos semanas."
 
 #: src/workflows/ask-stephen.tsx
 msgid "Let people ask Stephen to start it"
@@ -12390,6 +12411,10 @@ msgstr "Un caso real"
 msgid "One short message: what you found first, then what you suggest."
 msgstr "Un mensaje breve: primero lo que encontraste y luego lo que propones."
 
+#: src/onboarding/plan-story.tsx
+msgid "One week in, the interviews close."
+msgstr "Una semana después, las entrevistas se cierran."
+
 #: src/chat/connection-requests.tsx
 msgid "Only"
 msgstr "Solo"
@@ -14600,6 +14625,10 @@ msgstr "Reformular el objetivo"
 msgid "Right arrow for more"
 msgstr "Flecha derecha para más"
 
+#: src/onboarding/plan-story.tsx
+msgid "Right now it’s just you and me, getting ready."
+msgstr "Ahora mismo estamos solo tú y yo, preparándolo todo."
+
 #: src/workflows/business-process.tsx
 msgctxt "business process"
 msgid "Risk-to-Compliance"
@@ -15809,6 +15838,10 @@ msgstr "Mostrar la vista previa"
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Show the time zones"
 msgstr "Mostrar las zonas horarias"
+
+#: src/onboarding/plan-story.tsx
+msgid "Show the whole plan"
+msgstr "Ver el plan completo"
 
 #: src/brain/sources-page.tsx
 msgid "Show the whole text"
@@ -17840,6 +17873,10 @@ msgstr "Tema"
 msgid "Then {task}"
 msgstr "Después {task}"
 
+#: src/onboarding/plan-story.tsx
+msgid "Then everyone else gets their own link, and we talk when it suits them."
+msgstr "Después, todos los demás reciben su propio enlace y hablamos cuando les venga bien."
+
 #: src/interview/words.ts
 msgid "Then, when it goes differently."
 msgstr "Después, cuando va de otra manera."
@@ -18357,6 +18394,10 @@ msgstr "Para actuar en este espacio de trabajo, pide a su administrador que te a
 #: src/settings/add-connection/words.ts
 msgid "To tell this key from others."
 msgstr "Para distinguir esta clave de otras."
+
+#: src/onboarding/plan-story.tsx
+msgid "Today"
+msgstr "Hoy"
 
 #: src/frame/ui-words.tsx
 msgctxt "a date to pick"
@@ -19294,6 +19335,10 @@ msgstr "Espera hasta"
 #: src/agents/agent-templates.ts
 msgid "Walk into every meeting knowing who is coming and what is still open."
 msgstr "Haz que la persona llegue a cada reunión sabiendo quién viene y qué sigue pendiente."
+
+#: src/onboarding/plan-story.tsx
+msgid "Walk me through it again"
+msgstr "Contármelo otra vez"
 
 #: src/frame/ui-words.tsx
 msgctxt "a badge's dot"
