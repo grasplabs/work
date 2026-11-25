@@ -140,6 +140,10 @@ const fieldsOf = async (store: OpenStore): Promise<StoreFields[]> => {
 };
 
 /** What `store` holds: its schema in force and its notes. */
+/** A person's link to a note, beside any JSON and a label of `max` characters. */
+const noteBeside = (note: ValueShape[string], max: number) =>
+  v.object({ note, extra: v.json(), label: v.string().max(max) });
+
 const heldBy = async (store: OpenStore) => ({
   schema: await schemaHashOf(store),
   notes: await fieldsOf(store),
@@ -353,7 +357,7 @@ describe("a schema change by stable ID", { timeout: 120_000 }, () => {
     ).resolves.toBe("data.referenced");
   });
 
-  it("refuses a reference made any JSON without a migration, which would leave it indexed", async () => {
+  it("widens a field beside its reference and any JSON, but refuses the reference made any JSON", async () => {
     const store = await newStore();
     const access = { read: "appMembers", write: "appMembers" } as const;
     const schema = (note: ValueShape[string]) =>
@@ -369,18 +373,25 @@ describe("a schema change by stable ID", { timeout: 120_000 }, () => {
       notes: { id: notesId, fields: { title: "field:title" } },
       people: { id: peopleId, fields: { note: "field:note" } },
     };
-    await store.applySchema(
-      change(schema(v.id("notes", { onDelete: "cascade" })), ids)
-    );
+    const cascade = v.id("notes", { onDelete: "cascade" });
+    await store.applySchema(change(schema(noteBeside(cascade, 100)), ids));
 
+    const widened = await store.applySchema(
+      change(schema(noteBeside(cascade, 200)), ids)
+    );
     const refused = await store
-      .applySchema(change(schema(v.json()), ids))
+      .applySchema(change(schema(noteBeside(v.json(), 200)), ids))
       .catch((error: unknown) => error);
 
-    expect(refused).toMatchObject({
-      code: "migration.required",
-      details: {
-        refused: [{ table: "people", field: "note", reason: "field_changed" }],
+    expect({ widened: widened.changes.widenedFields, refused }).toMatchObject({
+      widened: [{ table: "people", field: "note" }],
+      refused: {
+        code: "migration.required",
+        details: {
+          refused: [
+            { table: "people", field: "note", reason: "field_changed" },
+          ],
+        },
       },
     });
   });
