@@ -85,7 +85,7 @@ describe("connecting an account", () => {
     const { url } = await anna.connections.start({
       provider: "microsoft",
       scope: "personal",
-      returnTo: "/integrations?tab=mine",
+      returnTo: "/connectors?tab=mine",
     });
     const authorization = new URL(url);
     const response = await backFromProvider(anna.session, {
@@ -95,7 +95,7 @@ describe("connecting an account", () => {
     const [connection] = await anna.connections.list();
     expect(response.status).toBe(303);
     expect(response.headers.get("location")).toBe(
-      `${clientOrigin}/integrations?tab=mine&connection=${connection?.id}`
+      `${clientOrigin}/connectors?tab=mine&connection=${connection?.id}`
     );
     expect({
       cache: response.headers.get("cache-control"),
@@ -167,12 +167,12 @@ describe("connecting an account", () => {
     };
     const response = await backFromProvider(anna.session, query);
     expect(response.headers.get("location")).toBe(
-      `${clientOrigin}/integrations?connectionError=connection.flow_invalid`
+      `${clientOrigin}/connectors?connectionError=connection.flow_invalid`
     );
     // The flow is spent: Mallory can't finish it either.
     const again = await backFromProvider(mallory.session, query);
     expect(again.headers.get("location")).toBe(
-      `${clientOrigin}/integrations?connectionError=connection.flow_invalid`
+      `${clientOrigin}/connectors?connectionError=connection.flow_invalid`
     );
     await expect(
       Promise.all([anna.connections.list(), mallory.connections.list()])
@@ -199,12 +199,12 @@ describe("connecting an account", () => {
     };
     const response = await backFromProvider(undefined, query);
     expect(response.headers.get("location")).toBe(
-      `${clientOrigin}/integrations?connectionError=auth.unauthenticated`
+      `${clientOrigin}/connectors?connectionError=auth.unauthenticated`
     );
     // The same URL, brought back later with a session, finishes nothing.
     const later = await backFromProvider(anna.session, query);
     expect(later.headers.get("location")).toBe(
-      `${clientOrigin}/integrations?connectionError=connection.flow_invalid`
+      `${clientOrigin}/connectors?connectionError=connection.flow_invalid`
     );
     await expect(anna.connections.list()).resolves.toStrictEqual([]);
   });
@@ -221,7 +221,7 @@ describe("connecting an account", () => {
       state: authorization.searchParams.get("state") ?? "",
     });
     expect(response.headers.get("location")).toBe(
-      `${clientOrigin}/integrations?connectionError=connection.wrong_account`
+      `${clientOrigin}/connectors?connectionError=connection.wrong_account`
     );
   });
 
@@ -234,7 +234,7 @@ describe("connecting an account", () => {
       "/\t/evil.test",
       "https://evil.test/",
       "mailto:someone@evil.test",
-      "/integrations#fragment",
+      "/connectors#fragment",
       `/${"a".repeat(600)}`,
     ];
     const refused = await Promise.all(
@@ -264,7 +264,7 @@ describe("connecting an account", () => {
       state: authorization.searchParams.get("state") ?? "",
     });
     expect(response.headers.get("location")).toBe(
-      `${clientOrigin}/integrations?connectionError=connection.not_own_account`
+      `${clientOrigin}/connectors?connectionError=connection.not_own_account`
     );
   });
 
@@ -334,7 +334,7 @@ describe("connecting an account in relay mode", () => {
     const { url } = await core.authenticate().connections.start({
       provider: "microsoft",
       scope: "personal",
-      returnTo: "/integrations",
+      returnTo: "/connectors",
     });
     const authorization = new URL(url);
     // The provider sends the browser to the relay, with the code for the
@@ -374,7 +374,7 @@ describe("connecting an account in relay mode", () => {
       signed: true,
       onward: `${hostedOrigin}/api/connections/callback`,
       status: 303,
-      location: `${hostedOrigin}/integrations?connection=${listed[0]?.id}`,
+      location: `${hostedOrigin}/connectors?connection=${listed[0]?.id}`,
       connection: "active",
     });
   });
@@ -503,7 +503,7 @@ describe("connecting a Composio toolkit", () => {
       "HUBSPOT_CREATE_CONTACT",
     ],
     consent: composioConsentText,
-    returnTo: "/integrations?tab=shared",
+    returnTo: "/connectors?tab=shared",
   };
 
   it("goes from the admin's consent through Composio and back, to one shared connection", async () => {
@@ -519,7 +519,7 @@ describe("connecting a Composio toolkit", () => {
     const listed = await admin.connections.list();
     const connection = listed.find(({ provider }) => provider === "hubspot");
     expect(response.headers.get("location")).toBe(
-      `${clientOrigin}/integrations?tab=shared&connection=${connection?.id}`
+      `${clientOrigin}/connectors?tab=shared&connection=${connection?.id}`
     );
     // What the admin consented to: by them, for exactly these tools.
     expect(connection).toMatchObject({
@@ -572,7 +572,7 @@ describe("connecting a Composio toolkit", () => {
         tools: ["ACME_CRM_LIST_DEALS"],
         consent: composioKeyConsentText,
         values: { generic_api_key: "not-the-key" },
-        returnTo: "/integrations/composio:acme_crm",
+        returnTo: "/connectors/composio:acme_crm",
       })
     );
     const { url } = await admin.connections.connectToolkitWithKey({
@@ -580,13 +580,13 @@ describe("connecting a Composio toolkit", () => {
       tools: ["ACME_CRM_LIST_DEALS"],
       consent: composioKeyConsentText,
       values: { generic_api_key: acmeCrmKey },
-      returnTo: "/integrations/composio:acme_crm",
+      returnTo: "/connectors/composio:acme_crm",
     });
     const listed = await admin.connections.list();
     const connection = listed.find(({ provider }) => provider === "acme_crm");
     expect({ wrong, url, connection }).toMatchObject({
       wrong: "connection.key_rejected",
-      url: `${clientOrigin}/integrations/composio:acme_crm?connection=${connection?.id}`,
+      url: `${clientOrigin}/connectors/composio:acme_crm?connection=${connection?.id}`,
       connection: {
         source: "composio",
         scope: "shared",

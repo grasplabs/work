@@ -165,7 +165,7 @@ const Apps = ({ apps }: { apps: WorkflowApps }) => {
             <Item asChild size="xs">
               <Link
                 params={{ integration: integration.key }}
-                to="/integrations/$integration"
+                to="/connectors/$integration"
               >
                 <ItemMedia>
                   {/* The app's own mark, as Integrations draws it. */}

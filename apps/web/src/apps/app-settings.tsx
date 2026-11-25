@@ -891,7 +891,7 @@ const Connections = ({
       </Read>
       <section aria-labelledby="app-used" {...stylex.props(styles.section)}>
         <Heading id="app-used" level={3} size="xs">
-          <Trans>Connections in use</Trans>
+          <Trans>Connected accounts in use</Trans>
         </Heading>
         <Read notedAbove read={used}>
           {({ integrations, http }) =>

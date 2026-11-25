@@ -41,7 +41,7 @@ export const Route = createFileRoute("/_shell/connect-microsoft")({
         await session.connections.start({
           provider: "microsoft",
           scope: "personal",
-          returnTo: "/integrations",
+          returnTo: "/connectors",
         })
     );
     if (page.state === "ready") {

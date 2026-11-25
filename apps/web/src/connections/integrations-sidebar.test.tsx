@@ -25,7 +25,7 @@ import type { Outside } from "../frame/way-out.tsx";
 import { useIntegrationsSection } from "./integrations-sidebar.tsx";
 
 // The sidebar's kinds of app while Integrations is open: each counts as
-// many apps as its own page (`/integrations?group=`) lists, the connected
+// many apps as its own page (`/connectors?group=`) lists, the connected
 // ones too, so a kind stays while all its apps are connected.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
@@ -91,7 +91,7 @@ const shown = async (
   const shell = createRoute({ getParentRoute: () => rootRoute, id: "_shell" });
   const integrations = createRoute({
     getParentRoute: () => shell,
-    path: "integrations",
+    path: "connectors",
   });
   const overview = createRoute({
     getParentRoute: () => integrations,
@@ -106,7 +106,7 @@ const shown = async (
     routeTree: rootRoute.addChildren([
       shell.addChildren([integrations.addChildren([overview])]),
     ]),
-    history: createMemoryHistory({ initialEntries: ["/integrations"] }),
+    history: createMemoryHistory({ initialEntries: ["/connectors"] }),
   });
   const host = document.createElement("div");
   document.body.append(host);

@@ -157,11 +157,11 @@ export const reservedAppLinks: ReadonlySet<string> = new Set([
   "chats",
   "connect-microsoft",
   "connections",
+  "connectors",
   "decisions",
   // A guest's home (apps/web/src/routes/guest.tsx).
   "guest",
   "inbox",
-  "integrations",
   "interview",
   "kit",
   "knowledge",
@@ -765,7 +765,7 @@ export const appErrors = defineErrorFamily({
     "Only a member of the organization who can open the App can answer for it.",
   "app.audience_invalid":
     "The App can only be made for a member or a team of the organization.",
-  "app.integrations_full": "The App has as many integrations added as it may.",
+  "app.integrations_full": "The App has as many connectors added as it may.",
   "app.share_unreadable":
     "This App has read data they can't read where it comes from, such as someone else's mailbox, so it can't be shared with them.",
   "app.guest_sources":
