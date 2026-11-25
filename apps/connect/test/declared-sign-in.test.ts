@@ -154,6 +154,7 @@ const declared = (
       ...auth.oauth2(declaration).signIn,
       name: provider,
     }),
+    hosts: [],
   });
   if (config.kind !== "oauth") {
     throw new Error("An OAuth provider");
@@ -599,6 +600,7 @@ describe("threat model", () => {
         ...sampleTenant.manifest.signIn,
         scopeSeparator: ",",
       }),
+      hosts: sampleTenant.manifest.hosts,
     });
     if (provider.kind !== "oauth") {
       throw new Error("An OAuth provider");
