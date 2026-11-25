@@ -6,7 +6,7 @@ import type { PlanDay } from "./plan.ts";
 // the brand's greens. Each is composed over the window's upper part, so the
 // words below it stand on its dark ground.
 //
-// A picture is alive: its lights (a window, a screen, a row of mail) come
+// A picture is alive: its lights (a window, a screen, a line of a report) come
 // on one after another while its part of the story is told. So a picture
 // is three layers in one image: red is the picture with every light off,
 // green when each light comes on (0 for none, else 1 to 255 in its order),
@@ -21,29 +21,14 @@ import type { PlanDay } from "./plan.ts";
 //   coming on one by one as more people talk, until every one is lit;
 // report (learned): the conversations lighting up as he reads them, then
 //   the report, theme by theme, each bar filling;
-// inbox (finding): morning through the window, someone at their desk, the
-//   mail filling their screen row by row and still coming;
 // gathering (rest): small lights rising out of the dark and gathering
 //   into one.
 
 /** The parts of the story, in its order. */
-export type Scene =
-  | "you"
-  | "first"
-  | "everyone"
-  | "close"
-  | "learned"
-  | "finding"
-  | "rest";
+export type Scene = "you" | "first" | "everyone" | "close" | "learned" | "rest";
 
 /** The pictures the story is told over. */
-export type Picture =
-  | "road"
-  | "office"
-  | "city"
-  | "report"
-  | "inbox"
-  | "gathering";
+export type Picture = "road" | "office" | "city" | "report" | "gathering";
 
 /** What a part of the story is told over: its picture, and how far its lights come on, from and to. */
 export interface Look {
@@ -59,7 +44,6 @@ export const looks: Record<Scene, Look> = {
   everyone: { picture: "city", from: 0, to: 0.55 },
   close: { picture: "city", from: 0.55, to: 1 },
   learned: { picture: "report", from: 0, to: 1 },
-  finding: { picture: "inbox", from: 0, to: 1 },
   rest: { picture: "gathering", from: 0, to: 1 },
 };
 
@@ -621,135 +605,6 @@ const drawReport = (layers: Layers): void => {
   }
 };
 
-// inbox: the first hours of a day, lost to email: morning coming up in the window, and someone at
-// their desk in front of it, the mail filling their screen row by row and still coming in.
-const drawInbox = (layers: Layers): void => {
-  const { base, lit } = layers;
-  base.fillStyle = grey(0.03);
-  base.fillRect(0, 0, W, H);
-  const desk = H * 0.6;
-  // The window, the sun just up in it.
-  const pane = { x: W * 0.04, y: H * 0.07, w: W * 0.24, h: H * 0.44 };
-  soft(base, 2, (c) => {
-    c.save();
-    c.beginPath();
-    c.rect(pane.x, pane.y, pane.w, pane.h);
-    c.clip();
-    const morning = c.createLinearGradient(0, pane.y, 0, pane.y + pane.h);
-    morning.addColorStop(0, grey(0.14));
-    morning.addColorStop(1, grey(0.5));
-    c.fillStyle = morning;
-    c.fillRect(pane.x, pane.y, pane.w, pane.h);
-    const sx = pane.x + pane.w * 0.58;
-    const sy = pane.y + pane.h * 0.86;
-    const sun = c.createRadialGradient(sx, sy, 0, sx, sy, pane.w * 0.7);
-    sun.addColorStop(0, grey(1));
-    sun.addColorStop(0.12, grey(0.95));
-    sun.addColorStop(0.3, grey(0.45));
-    sun.addColorStop(1, grey(0, 0));
-    c.fillStyle = sun;
-    c.fillRect(pane.x, pane.y, pane.w, pane.h);
-    c.restore();
-    c.fillStyle = grey(0.04);
-    c.fillRect(pane.x + pane.w / 2 - 5, pane.y, 10, pane.h);
-    c.fillRect(pane.x, pane.y + pane.h * 0.42, pane.w, 10);
-  });
-  glow(base, pane.x + pane.w * 0.55, pane.y + pane.h * 0.8, W * 0.3, 0.16);
-  // The desk, and on it a cup going cold.
-  base.fillStyle = grey(0.09);
-  base.fillRect(0, desk, W, H * 0.025);
-  base.fillStyle = grey(0.04);
-  base.fillRect(0, desk + H * 0.025, W, H);
-  soft(base, 1, (c) => {
-    c.fillStyle = grey(0.16);
-    c.beginPath();
-    c.roundRect(W * 0.86, desk - 52, 40, 52, 5);
-    c.fill();
-    c.strokeStyle = grey(0.16);
-    c.lineWidth = 6;
-    c.beginPath();
-    c.arc(W * 0.86 + 44, desk - 30, 11, -Math.PI / 2, Math.PI / 2);
-    c.stroke();
-  });
-  // The screen: on, dark, its inbox filling row by row, the newest still coming.
-  const left = W * 0.38;
-  const right = W * 0.8;
-  const top = H * 0.17;
-  const bottom = H * 0.53;
-  glow(base, (left + right) / 2, (top + bottom) / 2, W * 0.3, 0.18);
-  base.fillStyle = grey(0.12);
-  base.fillRect(left - 9, top - 9, right - left + 18, bottom - top + 18);
-  base.fillStyle = grey(0.26);
-  base.fillRect(left, top, right - left, bottom - top);
-  base.fillStyle = grey(0.38);
-  base.fillRect(left, top, right - left, 20);
-  base.fillStyle = grey(0.12);
-  base.fillRect((left + right) / 2 - 8, bottom + 9, 16, desk - bottom - 9);
-  const rows = 9;
-  const rowHeight = (bottom - top - 26) / rows;
-  for (let row = 0; row < rows; row += 1) {
-    const y = top + 24 + row * rowHeight;
-    const at = 0.04 + (row / rows) * 0.7;
-    lamp(layers, at, 0.52, (c) => {
-      c.fillRect(left + 4, y, right - left - 8, rowHeight - 3);
-    });
-    lit.fillStyle = grey(1);
-    lit.beginPath();
-    lit.arc(left + 18, y + rowHeight / 2, 4.5, 0, Math.PI * 2);
-    lit.fill();
-    lit.fillStyle = grey(0.95);
-    lit.fillRect(left + 32, y + rowHeight * 0.24, 60 + hash(row) * 46, 6);
-    lit.fillStyle = grey(0.32);
-    lit.fillRect(
-      left + 32,
-      y + rowHeight * 0.58,
-      (right - left) * (0.42 + hash(row * 2.1) * 0.36),
-      4
-    );
-  }
-  // The mail still coming: envelopes rising out of the screen, one after another.
-  for (let i = 0; i < 7; i += 1) {
-    const t = (i + 0.5) / 7;
-    const x = right - 150 + t * 250 + (hash(i * 3.7) - 0.5) * 30;
-    const y = top - 24 - t * H * 0.08 + (hash(i * 5.3) - 0.5) * 18;
-    const w = 50 * (1 - t * 0.45);
-    const h = w * 0.64;
-    const tilt = (hash(i * 9.1) - 0.5) * 0.6;
-    const envelope = (c: Ctx): void => {
-      c.save();
-      c.translate(x, y);
-      c.rotate(tilt);
-      c.fillRect(-w / 2, -h / 2, w, h);
-      c.restore();
-    };
-    lamp(layers, 0.3 + t * 0.66, 0.95 - t * 0.35, envelope);
-    lit.save();
-    lit.translate(x, y);
-    lit.rotate(tilt);
-    lit.strokeStyle = grey(0.3);
-    lit.lineWidth = Math.max(2, w * 0.05);
-    lit.beginPath();
-    lit.moveTo(-w / 2, -h / 2);
-    lit.lineTo(0, h * 0.08);
-    lit.lineTo(w / 2, -h / 2);
-    lit.stroke();
-    lit.restore();
-  }
-  // Them, at the desk in front of it.
-  const headY = H * 0.45;
-  const r = 44;
-  const x = W * 0.56;
-  lamp(layers, 0.04, 0.5, (c) => {
-    c.beginPath();
-    c.rect(0, 0, W, desk);
-    c.clip();
-    c.lineWidth = 5;
-    seatedShape(c, x, headY, r);
-    c.stroke();
-  });
-  seated(layers, x, headY, r);
-};
-
 // gathering: small things, many small lights, rising out of the dark one after another and
 // gathering into one bright one, last.
 const drawGathering = (layers: Layers): void => {
@@ -834,9 +689,6 @@ export const drawPicture = (
     },
     report: () => {
       drawReport(layers);
-    },
-    inbox: () => {
-      drawInbox(layers);
     },
     gathering: () => {
       drawGathering(layers);
