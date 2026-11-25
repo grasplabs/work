@@ -21,8 +21,18 @@
     "since": "2026-11-24"
   },
   {
+    "path": "src/components/prompt-input-voice-field.ts",
+    "reason": "Its grade and the other voice's are exported: the voice's hill is drawn in the same light.",
+    "since": "2026-11-25"
+  },
+  {
+    "path": "src/components/prompt-input-voice-hill.ts",
+    "reason": "New: the voice drawn as the system's dither rising from the card's foot, a hill with drifting humps, in the field's place.",
+    "since": "2026-11-25"
+  },
+  {
     "path": "src/components/prompt-input.tsx",
-    "reason": "In a compact card, a spoken conversation is one slim row: the time, the voice's field and its tools in the row, and the words over it only once there are any, so no empty room and no lone caret stand before the first word.",
+    "reason": "In a compact card, a spoken conversation is one slim row: the time, the voice's field and its tools in the row, and the words over it only once there are any, so no empty room and no lone caret stand before the first word. And a voice is drawn as the hill (prompt-input-voice-hill.ts) in the field's place, on a canvas that reaches from the bar's foot to its top.",
     "since": "2026-11-25"
   },
   {
