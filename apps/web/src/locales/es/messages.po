@@ -1415,6 +1415,10 @@ msgstr "{shown, plural, one {Se muestra # integración} other {Se muestran # int
 msgid "{shown} entries or more"
 msgstr "{shown} entradas o más"
 
+#: src/inbox/report-viewer.tsx
+msgid "{shown} of {count}"
+msgstr "{shown} de {count}"
+
 #: src/workflows/listed-count.tsx
 msgid "{shown} runs or more"
 msgstr "{shown} ejecuciones o más"
@@ -2690,6 +2694,11 @@ msgstr "Todos los pasos hechos"
 #: src/connections/app/words.ts
 msgid "All tools"
 msgstr "Todas las herramientas"
+
+#: src/inbox/item-detail.tsx
+msgctxt "let a workflow's trigger start it"
+msgid "Allow"
+msgstr "Permitir"
 
 #: src/connections/http-connections.tsx
 msgid "Allow at least one method."
@@ -4688,6 +4697,10 @@ msgstr "Cerrar"
 msgid "Close {name}"
 msgstr "Cerrar {name}"
 
+#: src/inbox/report-viewer.tsx
+msgid "Close find"
+msgstr "Cerrar la búsqueda"
+
 #: src/brain/gap-actions.tsx
 msgid "Close it"
 msgstr "Cerrarla"
@@ -4719,6 +4732,7 @@ msgstr "Cerrar las cuentas y preparar las cifras que mira la dirección."
 
 #: src/brain/sources-page.tsx
 #: src/guest-sign-in.tsx
+#: src/inbox/report-viewer.tsx
 msgid "Code"
 msgstr "Código"
 
@@ -4730,6 +4744,10 @@ msgstr "Código"
 #: src/apps/app-code.tsx
 msgid "Code of {file}"
 msgstr "Código de {file}"
+
+#: src/inbox/report-viewer.tsx
+msgid "Code of {name}"
+msgstr "Código de {name}"
 
 #: src/projects/project-dialog.tsx
 msgid "Coins"
@@ -5035,6 +5053,10 @@ msgstr "Solicitudes de conexión"
 #: src/workflows/trigger-description.ts
 msgid "Connection trigger"
 msgstr "Disparador de conexión"
+
+#: src/activity/pending.tsx
+msgid "Connection trigger for {workflow}"
+msgstr "Disparador de conexión de {workflow}"
 
 #: src/brain/brain.ts
 #: src/projects/project-view.tsx
@@ -5601,6 +5623,7 @@ msgid "Decline"
 msgstr "Rechazar"
 
 #: src/inbox/decision-card.tsx
+#: src/inbox/item-detail.tsx
 msgctxt "a workflow's decision"
 msgid "Decline"
 msgstr "Rechazar"
@@ -6211,16 +6234,13 @@ msgstr "Hacerlo bien"
 msgid "Double-click or press F2 to rename"
 msgstr "Haz doble clic o pulsa F2 para cambiar el nombre"
 
-#: src/inbox/report-row.tsx
-msgid "Download"
-msgstr "Descargar"
-
 #: src/workflows/run-files.tsx
 #: src/workflows/version-source.tsx
 msgctxt "download a file"
 msgid "Download"
 msgstr "Descargar"
 
+#: src/inbox/report-viewer.tsx
 #: src/workflows/run-files.tsx
 msgid "Download {name}"
 msgstr "Descargar {name}"
@@ -6507,6 +6527,10 @@ msgstr "Recibos de pago por correo"
 #: src/workflows/trigger-description.ts
 msgid "Email trigger"
 msgstr "Disparador de correo"
+
+#: src/activity/pending.tsx
+msgid "Email trigger for {workflow}"
+msgstr "Disparador de correo de {workflow}"
 
 #: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
@@ -7312,6 +7336,10 @@ msgstr "Buscar una app o un flujo de trabajo"
 msgid "Find every invoice more than 14 days past its due date."
 msgstr "Busca todas las facturas que lleven más de 14 días vencidas."
 
+#: src/inbox/report-viewer.tsx
+msgid "Find in the file"
+msgstr "Buscar en el archivo"
+
 #: src/agents/agent-templates.ts
 msgid "Find leads with no contact in the last 7 days."
 msgstr "Busca los leads sin contacto en los últimos 7 días."
@@ -7351,6 +7379,10 @@ msgstr "Primera ejecución: {when}"
 #: src/interview/words.ts
 msgid "First, the steps."
 msgstr "Primero, los pasos."
+
+#: src/inbox/report-viewer.tsx
+msgid "Fit"
+msgstr "Ajustar"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Fit and center"
@@ -7824,7 +7856,7 @@ msgstr "Conceder"
 msgid "Grant {name}"
 msgstr "Conceder {name}"
 
-#: src/inbox/items.ts
+#: src/activity/pending.tsx
 msgid "Grant {who}?"
 msgstr "¿Conceder {who}?"
 
@@ -9539,6 +9571,10 @@ msgstr "Clave …{last}"
 msgid "Key …{last} · {region}"
 msgstr "Clave …{last} · {region}"
 
+#: src/inbox/report-viewer.tsx
+msgid "Keyboard shortcuts"
+msgstr "Atajos de teclado"
+
 #: src/apps/resource-bindings.tsx
 #: src/brain/memories-page.tsx
 #: src/routes/_shell.brain.$noteId.tsx
@@ -9744,6 +9780,22 @@ msgstr "Retención legal: {hold}"
 #: src/settings/erasures.tsx
 msgid "Let {name}’s old address in again?"
 msgstr "¿Volver a admitir la antigua dirección de {name}?"
+
+#: src/activity/pending.tsx
+msgid "Let {workflow} start on events from its connection?"
+msgstr "¿Dejar que {workflow} se inicie con eventos de su conexión?"
+
+#: src/activity/pending.tsx
+msgid "Let {workflow} start on its schedule?"
+msgstr "¿Dejar que {workflow} se inicie según su horario?"
+
+#: src/activity/pending.tsx
+msgid "Let {workflow} start when an email arrives?"
+msgstr "¿Dejar que {workflow} se inicie cuando llegue un correo?"
+
+#: src/activity/pending.tsx
+msgid "Let {workflow} start when its webhook is called?"
+msgstr "¿Dejar que {workflow} se inicie cuando se llame a su webhook?"
 
 #: src/activity/audit-words.ts
 msgid "Let an App's data go to a webhook"
@@ -9993,6 +10045,10 @@ msgstr "Cargando más {many}"
 #: src/connections/integrations-skeleton.tsx
 msgid "Loading the app"
 msgstr "Cargando la app"
+
+#: src/inbox/report-viewer.tsx
+msgid "Loading the code"
+msgstr "Cargando el código"
 
 #: src/frame/ui-words.tsx
 msgid "Loading the conversation"
@@ -10477,6 +10533,7 @@ msgid "Moon"
 msgstr "Luna"
 
 #: src/apps/app-workspace.tsx
+#: src/inbox/report-viewer.tsx
 msgid "More"
 msgstr "Más"
 
@@ -10937,6 +10994,10 @@ msgctxt "what starts a workflow next"
 msgid "Next"
 msgstr "Siguiente"
 
+#: src/inbox/report-viewer.tsx
+msgid "Next match"
+msgstr "Siguiente coincidencia"
+
 #: src/frame/ui-words.tsx
 msgid "Next month"
 msgstr "Mes siguiente"
@@ -11181,6 +11242,7 @@ msgid "No longer where it was"
 msgstr "Ya no está donde estaba"
 
 #: src/frame/ui-words.tsx
+#: src/inbox/report-viewer.tsx
 msgid "No matches"
 msgstr "Sin coincidencias"
 
@@ -13375,6 +13437,18 @@ msgstr "Pulsa o pulsa F2 para cambiar el nombre"
 msgid "Presses \"{words}\""
 msgstr "Pulsa «{words}»"
 
+#: src/inbox/report-viewer.tsx
+msgid "Preview"
+msgstr "Vista previa"
+
+#: src/inbox/report-viewer.tsx
+msgid "Preview of {name}"
+msgstr "Vista previa de {name}"
+
+#: src/inbox/report-viewer.tsx
+msgid "Preview or code"
+msgstr "Vista previa o código"
+
 #: src/apps/app-section.tsx
 msgid "Preview width"
 msgstr "Ancho de la vista previa"
@@ -13400,6 +13474,10 @@ msgstr "Anterior"
 #: src/activity/audit-event.tsx
 msgid "Previous hash"
 msgstr "Hash anterior"
+
+#: src/inbox/report-viewer.tsx
+msgid "Previous match"
+msgstr "Coincidencia anterior"
 
 #: src/frame/ui-words.tsx
 msgid "Previous month"
@@ -15704,9 +15782,17 @@ msgstr "Mostrar contenido"
 msgid "Show the choices"
 msgstr "Mostrar las opciones"
 
+#: src/inbox/report-viewer.tsx
+msgid "Show the code"
+msgstr "Mostrar el código"
+
 #: src/settings/event-source-activity.tsx
 msgid "Show the payload of {type}"
 msgstr "Mostrar el contenido de {type}"
+
+#: src/inbox/report-viewer.tsx
+msgid "Show the preview"
+msgstr "Mostrar la vista previa"
 
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Show the time zones"
@@ -15715,6 +15801,10 @@ msgstr "Mostrar las zonas horarias"
 #: src/brain/sources-page.tsx
 msgid "Show the whole text"
 msgstr "Mostrar todo el texto"
+
+#: src/inbox/report-viewer.tsx
+msgid "Show these shortcuts"
+msgstr "Mostrar estos atajos"
 
 #: src/settings/event-source-activity.tsx
 msgid "Show what {name} received"
@@ -16355,6 +16445,10 @@ msgctxt "what the Brain remembers about something"
 msgid "Step"
 msgstr "Paso"
 
+#: src/onboarding/setup-frame.tsx
+msgid "Step {step}"
+msgstr "Paso {step}"
+
 #: src/frame/ui-words.tsx
 msgid "Step {step} of {total}"
 msgstr "Paso {step} de {total}"
@@ -16578,6 +16672,10 @@ msgstr "Enjambre"
 #: src/onboarding/setup-steps.tsx
 msgid "Switch a team off and nobody in it gets a link."
 msgstr "Desactiva un equipo y nadie en él recibe un enlace."
+
+#: src/inbox/report-viewer.tsx
+msgid "Switch between preview and code"
+msgstr "Cambiar entre vista previa y código"
 
 #: src/pages/page-frame.tsx
 msgid "Switch now"
@@ -18266,6 +18364,11 @@ msgctxt "a date to pick"
 msgid "Today"
 msgstr "Hoy"
 
+#: src/chat/thread.tsx
+msgctxt "a day line in a chat"
+msgid "Today"
+msgstr "Hoy"
+
 #: src/chat/chat-window.tsx
 msgctxt "chats from today"
 msgid "Today"
@@ -19291,6 +19394,10 @@ msgstr "Páginas web"
 #: src/workflows/trigger-description.ts
 msgid "Webhook trigger"
 msgstr "Disparador de webhook"
+
+#: src/activity/pending.tsx
+msgid "Webhook trigger for {workflow} ({what})"
+msgstr "Disparador de webhook de {workflow} ({what})"
 
 #: src/apps/app-webhooks.tsx
 msgid "Webhooks"
@@ -20531,6 +20638,11 @@ msgstr "Sí, es correcto."
 msgid "Yes: it is unchanged and links to the event before it."
 msgstr "Sí: no ha cambiado y enlaza con el evento anterior."
 
+#: src/chat/thread.tsx
+msgctxt "a day line in a chat"
+msgid "Yesterday"
+msgstr "Ayer"
+
 #: src/workflows/workflow-rows.tsx
 msgid "Yesterday {time}"
 msgstr "Ayer {time}"
@@ -20980,14 +21092,20 @@ msgid "Zoom"
 msgstr "Zoom"
 
 #: src/brain/atlas-overlays.tsx
+#: src/inbox/report-viewer.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom in"
 msgstr "Acercar"
 
 #: src/brain/atlas-overlays.tsx
+#: src/inbox/report-viewer.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom out"
 msgstr "Alejar"
+
+#: src/inbox/report-viewer.tsx
+msgid "Zoom to fit"
+msgstr "Ajustar al tamaño"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx

@@ -14,7 +14,7 @@ import type {
 } from "@grasp-os/shared/waiting";
 import { plural, t } from "@lingui/core/macro";
 
-import { requestAsker, requestWords } from "../activity/pending.tsx";
+import { requestAsker, requestQuestion } from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
 import { integrationKey } from "../connections/integrations.ts";
 import { formatDateTime } from "../format.ts";
@@ -245,14 +245,13 @@ const outcomeItems = (
 const requestItems = (pending: PendingRequests): InboxItem[] =>
   pending.requests.map((request) => {
     const { directory } = pending;
-    const who = requestWords(request, directory);
     const asker = requestAsker(request, directory);
     return {
       asker,
       id: `request:${request.id}`,
       kind: "permissionRequest",
-      title: t`Grant ${who}?`,
-      // The row says who asks; the approval's title says what.
+      title: requestQuestion(request, directory),
+      // The row says who asks and, where the request says it plainly, what.
       context: asker,
       body: [],
       // Who asked and when stand under the approval's Details.

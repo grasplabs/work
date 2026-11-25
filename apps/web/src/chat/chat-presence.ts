@@ -38,6 +38,11 @@ export const chatPresence = {
    */
   docked: { placements: ["docked"], bar: false },
   /**
+   * A page that takes someone through a task of its own (New agent): no
+   * chat box at its foot, the chat a press away in the page's bar.
+   */
+  barless: { placements: ["docked", "floating"], bar: false },
+  /**
    * A page where Grasp's chat has no place: none of it, nor its bar. Chat's
    * start and a chat's own page, which are where to ask already.
    */
