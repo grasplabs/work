@@ -119,10 +119,12 @@ const Rows = ({
   look,
   lines,
   onRemove,
+  onEdit,
 }: {
   look: TranscriptLook;
   lines: InterviewLine[];
   onRemove: (place: number) => void;
+  onEdit: (place: number, text: string) => void;
 }) => {
   const who = interviewerNames[useInterviewer()];
   const placed = placedOf(lines);
@@ -148,6 +150,9 @@ const Rows = ({
     <MessageScrollerItem key={one.place} messageId={String(one.place)}>
       <div {...stylex.props(one.place > 0 && one.starts && styles.turn)}>
         <Line
+          onEdit={(text) => {
+            onEdit(one.place, text);
+          }}
           onRemove={() => {
             onRemove(one.place);
           }}
@@ -186,6 +191,7 @@ export const Transcript = ({
   alone,
   lines,
   onRemove,
+  onEdit,
 }: {
   open: boolean;
   /** The stage made way for it: it is what a screen reader hears the conversation from. */
@@ -193,6 +199,8 @@ export const Transcript = ({
   lines: InterviewLine[];
   /** Removes the line at its place, for good. */
   onRemove: (at: number) => void;
+  /** Puts their own line at its place right, in their words. */
+  onEdit: (at: number, text: string) => void;
 }) => {
   const { t } = useLingui();
   const [removing, setRemoving] = useState<number | null>(null);
@@ -230,6 +238,7 @@ export const Transcript = ({
                   <Rows
                     lines={lines}
                     look={look}
+                    onEdit={onEdit}
                     onRemove={(place) => {
                       setRemoving(place);
                     }}
