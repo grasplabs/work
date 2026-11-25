@@ -7,6 +7,44 @@ import { validateValue } from "../common/value-interpreter.ts";
 // through. What it proves, it proves structurally, from the descriptors
 // alone, without running anything.
 
+/** Whether `descriptor` holds a value of one of `kinds`, at any depth. */
+const holdsKind = (
+  descriptor: ValueDescriptor,
+  kinds: ReadonlySet<ValueDescriptor["kind"]>
+): boolean => {
+  if (kinds.has(descriptor.kind)) {
+    return true;
+  }
+  if (descriptor.kind === "object") {
+    return Object.values(descriptor.fields).some((field) =>
+      holdsKind(field, kinds)
+    );
+  }
+  if (descriptor.kind === "array") {
+    return holdsKind(descriptor.item, kinds);
+  }
+  if (descriptor.kind === "union") {
+    return descriptor.members.some((member) => holdsKind(member, kinds));
+  }
+  if (descriptor.kind === "record") {
+    return holdsKind(descriptor.value, kinds);
+  }
+  return false;
+};
+
+const referenceKinds: ReadonlySet<ValueDescriptor["kind"]> = new Set([
+  "id",
+  "file",
+]);
+
+/**
+ * Whether `descriptor` can hold a record ID or a file, at any depth: what
+ * a store's reference and file indexes read a record by, so only a write
+ * the store checks may change it.
+ */
+export const holdsReference = (descriptor: ValueDescriptor): boolean =>
+  holdsKind(descriptor, referenceKinds);
+
 /** The check itself, handed to each kind's rule for what it holds. */
 type Check = (from: ValueDescriptor, to: ValueDescriptor) => boolean;
 
@@ -123,8 +161,10 @@ const scalarAssignable = (
 export const assignable: Check = (from, to) => {
   // Any JSON takes every value a descriptor normalizes to, null included:
   // their keys and depth are held to the same rules.
+  // A record ID or a file in it is no longer one, though: a store would
+  // keep indexing and cascading what the field no longer declares.
   if (to.kind === "json") {
-    return true;
+    return !holdsReference(from);
   }
   if (from.nullable && !to.nullable) {
     return false;

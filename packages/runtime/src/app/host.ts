@@ -47,7 +47,8 @@ export type { MigrationManifest } from "./migration.ts";
 
 // A schema as a store's host reads, hashes and compares it.
 export { referencesRenamed } from "./descriptor-references.ts";
-export { fieldWidens, holdsReference } from "./field-change.ts";
+export { holdsReference } from "./descriptor-assignable.ts";
+export { fieldWidens } from "./field-change.ts";
 export type { SchemaAnswer } from "./schema-answer.ts";
 export {
   manifestMaxBytes,

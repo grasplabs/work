@@ -353,6 +353,38 @@ describe("a schema change by stable ID", { timeout: 120_000 }, () => {
     ).resolves.toBe("data.referenced");
   });
 
+  it("refuses a reference made any JSON without a migration, which would leave it indexed", async () => {
+    const store = await newStore();
+    const access = { read: "appMembers", write: "appMembers" } as const;
+    const schema = (note: ValueShape[string]) =>
+      manifestText(
+        schemaManifest(
+          defineSchema({
+            notes: defineTable({ title }).access(access),
+            people: defineTable({ note }).access(access),
+          })
+        )
+      );
+    const ids: SchemaIds = {
+      notes: { id: notesId, fields: { title: "field:title" } },
+      people: { id: peopleId, fields: { note: "field:note" } },
+    };
+    await store.applySchema(
+      change(schema(v.id("notes", { onDelete: "cascade" })), ids)
+    );
+
+    const refused = await store
+      .applySchema(change(schema(v.json()), ids))
+      .catch((error: unknown) => error);
+
+    expect(refused).toMatchObject({
+      code: "migration.required",
+      details: {
+        refused: [{ table: "people", field: "note", reason: "field_changed" }],
+      },
+    });
+  });
+
   it("renames a field and fills in another in one change", async () => {
     const { store } = await storeWith({ title: "Launch", category: "news" });
     const v2 = notesText({

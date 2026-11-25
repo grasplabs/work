@@ -73,11 +73,16 @@ const webUrlStart = /^https?:\/\/[^/]/iu;
 // parser percent-encodes them, as it does an emoji's selector.
 const invisible = /\p{Default_Ignorable_Code_Point}/u;
 
+// Half of a surrogate pair alone, which the parser replaces. Checked so, not
+// with `isWellFormed` (nor the URL with `URL.canParse`), because pages run
+// it too, in browsers older than those.
+const loneSurrogate = /\p{Cs}/u;
+
 /**
  * An absolute `http` or `https` URL, read as the WHATWG URL parser reads
  * it: as an App's `new URL` and connect's fetch do, a host included
- * (percent-decoded, IDNA-mapped, IPv4 in its short forms). What that parser
- * would quietly mend in how the address is written is refused instead:
+ * (percent-decoded, IDNA-mapped, IPv4 in its short forms). Of what that
+ * parser would quietly mend in how the address is written, this is refused:
  * spaces and control characters, which it drops; a backslash, which it
  * reads as `/`; a character IDNA drops unseen from the host; a lone
  * surrogate, which it replaces; and a scheme without `//`
@@ -92,17 +97,15 @@ export const isWebUrl = (text: string): boolean => {
     }
   }
   const [authority = ""] = text.slice(text.indexOf("//") + 2).split(/[/?#]/u);
-  let host: string;
   try {
-    host = decodeURIComponent(authority);
+    return (
+      webUrlStart.test(text) &&
+      !authority.includes("@") &&
+      !invisible.test(decodeURIComponent(authority)) &&
+      !loneSurrogate.test(text) &&
+      new URL(text).host !== ""
+    );
   } catch {
     return false;
   }
-  return (
-    webUrlStart.test(text) &&
-    !authority.includes("@") &&
-    !invisible.test(host) &&
-    text.isWellFormed() &&
-    URL.canParse(text)
-  );
 };

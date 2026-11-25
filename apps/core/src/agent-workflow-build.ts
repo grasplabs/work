@@ -436,7 +436,7 @@ const workflowBuildDeclaration = `/**
  * (\`tableName\`), \`object\` (\`fields\`), \`array\` (\`item\`, \`min\`, \`max\`), \`union\` (\`members\`),
  * \`record\` (\`value\`), \`timestamp\`, \`duration\`, \`file\`, \`money\` (\`{ minorUnits, currency }\`),
  * \`person\`, \`model\`, \`template\`, \`schedule\` (\`{ cron, timeZone }\`) and \`json\` (any JSON, only where no shape is known); any of them takes
- * \`"nullable": true\`, and \`"optional": true\` or \`"default": <value>\`. \`params\` are values people set
+ * \`"nullable": true\` (but \`null\` and \`json\`, which take null already), and \`"optional": true\` or \`"default": <value>\`. \`params\` are values people set
  * without editing the workflow: \`{ [name]: { label, type, sensitive?: false } }\`, sensitive (never
  * shown or read by code, its type without a default, literal or enum anywhere) unless \`sensitive: false\`, when its type has a
  * \`default\`: \`{ "label": "Review above", "type": { "kind": "money", "default": { "minorUnits":

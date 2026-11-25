@@ -7,44 +7,6 @@ import { assignable } from "./descriptor-assignable.ts";
 // Decided from the descriptors alone (descriptor-assignable.ts proves
 // conservatively: what it can't prove isn't a widening).
 
-/** Whether `descriptor` holds a value of one of `kinds`, at any depth. */
-const holdsKind = (
-  descriptor: ValueDescriptor,
-  kinds: ReadonlySet<ValueDescriptor["kind"]>
-): boolean => {
-  if (kinds.has(descriptor.kind)) {
-    return true;
-  }
-  if (descriptor.kind === "object") {
-    return Object.values(descriptor.fields).some((field) =>
-      holdsKind(field, kinds)
-    );
-  }
-  if (descriptor.kind === "array") {
-    return holdsKind(descriptor.item, kinds);
-  }
-  if (descriptor.kind === "union") {
-    return descriptor.members.some((member) => holdsKind(member, kinds));
-  }
-  if (descriptor.kind === "record") {
-    return holdsKind(descriptor.value, kinds);
-  }
-  return false;
-};
-
-const referenceKinds: ReadonlySet<ValueDescriptor["kind"]> = new Set([
-  "id",
-  "file",
-]);
-
-/**
- * Whether `descriptor` can hold a record ID or a file, at any depth: what
- * a store's reference and file indexes read a record by, so only a write
- * the store checks may change it.
- */
-export const holdsReference = (descriptor: ValueDescriptor): boolean =>
-  holdsKind(descriptor, referenceKinds);
-
 /** Whether `descriptor` has a defaulted field nested in it, at any depth. */
 const holdsNestedDefault = (descriptor: ValueDescriptor): boolean => {
   if (descriptor.kind === "object") {

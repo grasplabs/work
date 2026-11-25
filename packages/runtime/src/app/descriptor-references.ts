@@ -10,7 +10,7 @@ export const referencesRenamed = (
   descriptor: ValueDescriptor,
   names: ReadonlyMap<string, string>
 ): ValueDescriptor => {
-  // Walked by kind, as field-change.ts `holdsKind` walks: only these hold
+  // Walked by kind, as descriptor-assignable.ts `holdsKind` walks: only these hold
   // a reference.
   if (descriptor.kind === "id") {
     return {
