@@ -39,6 +39,7 @@ import {
   ReasoningContent,
   ReasoningTrigger,
 } from "@grasp-os/ui/components/reasoning";
+import { Separator } from "@grasp-os/ui/components/separator";
 import { Shimmer } from "@grasp-os/ui/components/shimmer";
 import { Text } from "@grasp-os/ui/components/text";
 import {
@@ -145,6 +146,9 @@ const styles = stylex.create({
     gap: space["1"],
   },
   flat: { margin: 0 },
+  // A day line, as #2503's thread draws it: the day between two hairlines.
+  dayLine: { display: "flex", alignItems: "center", gap: space["3"] },
+  dayRule: { flexGrow: 1, flexBasis: 0, alignSelf: "center" },
   // A loading pair: the person's question over Grasp's answer.
   pair: { display: "grid", gap: space["6"] },
   // An answer's foot, as #2503's: its actions, then when it was given, on one line.
@@ -537,7 +541,81 @@ type Row =
       asked: Answer["asked"];
     }
   | AnswerTurn
-  | { kind: "after"; id: string; at?: undefined; children: ReactNode };
+  | { kind: "after"; id: string; at?: undefined; children: ReactNode }
+  | {
+      kind: "day";
+      id: string;
+      at?: undefined;
+      /** When the day began, where the reader is. */
+      day: number;
+      /** How many days before today it is: 0 today, 1 yesterday. */
+      ago: number;
+      sameYear: boolean;
+    };
+
+/** When the day `date` falls on began, where the reader is. */
+const dayOf = (date: Date): Date =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+const msPerDay = 24 * 60 * 60 * 1000;
+
+/**
+ * The rows with a day line where the day changes, as #2503's thread draws
+ * them: none over a thread that starts today, so its first line stands
+ * only for an earlier day.
+ */
+const withDayLines = (rows: readonly Row[], now = new Date()): Row[] => {
+  const today = dayOf(now).getTime();
+  const lined: Row[] = [];
+  let last: number | undefined;
+  for (const row of rows) {
+    const time =
+      row.at === undefined ? Number.NaN : dayOf(new Date(row.at)).getTime();
+    if (!Number.isNaN(time) && time !== last) {
+      if (last !== undefined || time !== today) {
+        lined.push({
+          kind: "day",
+          id: `day-${time}`,
+          day: time,
+          ago: Math.round((today - time) / msPerDay),
+          sameYear: new Date(time).getFullYear() === now.getFullYear(),
+        });
+      }
+      last = time;
+    }
+    lined.push(row);
+  }
+  return lined;
+};
+
+/** A day line: the day in the middle, a hairline each side; today, yesterday, or the day as the page's language writes it. */
+const DayLine = ({
+  day,
+  ago,
+  sameYear,
+}: Pick<Extract<Row, { kind: "day" }>, "day" | "ago" | "sameYear">) => {
+  const { t, i18n } = useLingui();
+  let words = new Intl.DateTimeFormat(
+    i18n.locale,
+    sameYear
+      ? { weekday: "long", day: "numeric", month: "long" }
+      : { day: "numeric", month: "long", year: "numeric" }
+  ).format(day);
+  if (ago === 0) {
+    words = t({ message: "Today", context: "a day line in a chat" });
+  } else if (ago === 1) {
+    words = t({ message: "Yesterday", context: "a day line in a chat" });
+  }
+  return (
+    <div {...stylex.props(styles.dayLine)}>
+      <Separator decorative style={styles.dayRule} />
+      <Text as="span" color="muted" size="xs" weight="medium">
+        {words}
+      </Text>
+      <Separator decorative style={styles.dayRule} />
+    </div>
+  );
+};
 
 /**
  * Whether a reply by `agentId` goes on `answer`: given by the same agent as
@@ -1358,10 +1436,11 @@ export const ChatThread = ({
       agentName: agentNameOf(turn),
     };
   };
+  const lined = withDayLines(rows);
   const items: Row[] =
     children === undefined || children === null
-      ? rows
-      : [...rows, { kind: "after", id: "after", children }];
+      ? lined
+      : [...lined, { kind: "after", id: "after", children }];
   const column: { style?: LayoutStyle } = compact
     ? {}
     : { style: styles.column };
@@ -1387,6 +1466,13 @@ export const ChatThread = ({
                           <AnswerRow context={contextOf(row)} turn={row} />
                         ) : null}
                         {row.kind === "after" ? row.children : null}
+                        {row.kind === "day" ? (
+                          <DayLine
+                            ago={row.ago}
+                            day={row.day}
+                            sameYear={row.sameYear}
+                          />
+                        ) : null}
                       </MessageScrollerItem>
                     ))
                   : loadingPairs.map((key) => (

@@ -14,14 +14,13 @@ import { peopleIn } from "./people.ts";
 
 const pageRead = { timeout: 15_000 };
 
-/** Chooses `format` from the export menu named `label`. */
-const choose = async (
+/** Downloads the brain page open as `format`, from its "…" menu. */
+const downloadNote = async (
   page: Page,
-  label: string,
-  format: "Markdown (.md)" | "PDF"
+  format: "Markdown" | "PDF"
 ): Promise<void> => {
-  await page.getByRole("button", { name: label, exact: true }).click();
-  await page.getByRole("menuitem", { name: format }).click();
+  await page.getByRole("button", { name: "More for this page" }).click();
+  await page.getByRole("menuitem", { name: `Download as ${format}` }).click();
 };
 
 /** Chooses `format` from Download in the open chat's menu, in its header. */
@@ -30,14 +29,11 @@ const downloadChat = async (
   format: "Markdown (.md)" | "PDF"
 ): Promise<void> => {
   await page.getByRole("button", { name: "More for this chat" }).click();
-  // By the keyboard: the submenu also opens as the pointer rests on its
-  // item, so a click there may close it again, and the test would race.
-  await page.getByRole("menuitem", { name: "Download" }).focus();
-  await page.keyboard.press("ArrowRight");
-  const item = page.getByRole("menuitem", { name: format });
-  await item.focus();
-  await expect(item).toBeFocused();
-  await page.keyboard.press("Enter");
+  await page
+    .getByRole("menuitem", {
+      name: format === "PDF" ? "Download as PDF" : "Download as Markdown",
+    })
+    .click();
 };
 
 const textOf = async (download: Download): Promise<string> =>
@@ -111,7 +107,7 @@ test("a brain note and a chat each export as Markdown and as a page to print", a
     page.getByRole("heading", { level: 1, name: "Vision page" })
   ).toBeVisible(pageRead);
   const note = page.waitForEvent("download");
-  await choose(page, "Export", "Markdown (.md)");
+  await downloadNote(page, "Markdown");
   const file = await note;
   expect(file.suggestedFilename()).toBe("vision-page.md");
   const exported = await textOf(file);
@@ -122,7 +118,7 @@ test("a brain note and a chat each export as Markdown and as a page to print", a
   // this origin that keeps its policy. The file's frontmatter is the
   // file's alone: the page leaves it out.
   await countPrints(page);
-  await choose(page, "Export", "PDF");
+  await downloadNote(page, "PDF");
   await expect
     .poll(async () => await page.evaluate(() => window.printed))
     .toBe(1);
@@ -140,8 +136,8 @@ test("a brain note and a chat each export as Markdown and as a page to print", a
   await page.goto("/");
   await page.getByLabel("Your question").fill(question);
   await page.getByRole("button", { name: "Send", exact: true }).click();
-  // It opens full screen in Grasp's chat, named once core has said its
-  // title, which the export is named after.
+  // It opens on its own page, named once core has said its title, which
+  // the export is named after.
   const messages = page
     .getByRole("region", { name: question })
     .getByRole("log", { name: "Messages" });

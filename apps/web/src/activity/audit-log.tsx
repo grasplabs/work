@@ -1,24 +1,3 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@grasp-os/app-kit/components/dropdown-menu";
-import { Input } from "@grasp-os/app-kit/components/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/app-kit/components/select";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/app-kit/components/tooltip";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import {
   auditExportPath,
@@ -32,27 +11,88 @@ import type {
 } from "@grasp-os/shared/audit-log";
 import { chatPlatformName } from "@grasp-os/shared/chat";
 import { identifierMaxLength } from "@grasp-os/shared/ids";
+import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import { DataTable } from "@grasp-os/ui/components/data-table";
+import type { DataTableColumn } from "@grasp-os/ui/components/data-table";
+import { DatePicker } from "@grasp-os/ui/components/date-picker";
+import {
+  DropdownMenu,
+  DropdownMenuItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@grasp-os/ui/components/dropdown-menu";
+import { Field, FieldLabel } from "@grasp-os/ui/components/field";
+import { Input } from "@grasp-os/ui/components/input";
+import {
+  InputGroup,
+  InputGroupClear,
+  InputGroupInput,
+  InputGroupAddon,
+} from "@grasp-os/ui/components/input-group";
+import {
+  Popover,
+  PopoverClose,
+  PopoverContent,
+  PopoverFooter,
+  PopoverTrigger,
+} from "@grasp-os/ui/components/popover";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+} from "@grasp-os/ui/components/select";
+import { Switch } from "@grasp-os/ui/components/switch";
+import { Text } from "@grasp-os/ui/components/text";
+import {
+  AppWindowIcon,
+  ChevronDownIcon,
+  ChevronRightIcon,
+  CircleUserIcon,
+  DownloadIcon,
+  Icon,
+  SearchIcon,
+  ServerIcon,
+  SlidersHorizontalIcon,
+  WandSparklesIcon,
+  WorkflowIcon,
+} from "@grasp-os/ui/lib/icons";
+import type { IconData } from "@grasp-os/ui/lib/icons";
+import { colors, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
 import { i18n } from "@lingui/core";
-import { msg, ph } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { Link, useNavigate } from "@tanstack/react-router";
-import { BracesIcon, DownloadIcon, SheetIcon } from "lucide-react";
+import { msg, ph, plural } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
+import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
 import type { Session } from "../core.ts";
-import { appName, personName, readDirectory } from "../directory.ts";
+import {
+  agentName,
+  appName,
+  listedOrNone,
+  personName,
+  readDirectory,
+} from "../directory.ts";
 import type { Directory } from "../directory.ts";
-import { ErrorText } from "../error-text.tsx";
+import { RowAlert } from "../settings/section.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { actionWords } from "./audit-words.ts";
 import { logSearchOf } from "./log-search.ts";
 import type { LogSearch } from "./log-search.ts";
 import { typeLabels } from "./type-labels.ts";
 
-// The audit log, for admins: its events newest first, narrowed by the
-// filters in the page's address, a page at a time, each with its details
-// and whether it verified, and an export of everything the filters match.
-// Core records every search and export in the log itself.
+// The audit log, for admins, on Grasp UI: its events newest first in a
+// Data table, 25 a page, narrowed by the filters in the page's address.
+// Over the table, the Data table's own kind of bar: one search (a person
+// by name, or any ID), one Filters control that holds the rest (type,
+// dates, action, what it was about, and the archive in place of the log),
+// and Export at the end. Each event's details open beside the table
+// (audit-event.tsx). Core records every search and export in the log
+// itself.
 
 /** Midnight starting `day`, `days` later, in the viewer's time zone. */
 const midnight = (day: string, days = 0): string => {
@@ -79,130 +119,39 @@ export const auditFilterOf = ({
 });
 
 /** The first page of events that match, with the names to show. */
-export interface LogPage {
+interface LogPage {
   page: AuditPage;
   directory: Directory;
 }
 
+/** The first page of what `search` matches: in the log, or in the archive where it asks for that. */
 export const readLog = async (
   session: Session,
   search: LogSearch
 ): Promise<LogPage> => {
-  const [page, directory] = await Promise.all([
-    session.audit.search(auditFilterOf(search)),
+  const filter = auditFilterOf(search);
+  const [page, directory, agents] = await Promise.all([
+    search.archive === true
+      ? session.audit.searchArchive(filter)
+      : session.audit.search(filter),
     readDirectory(session),
+    // Agents by name, for names only: the trail is for admins, who may list them.
+    listedOrNone(session.connections.agents()),
   ]);
-  return { page, directory };
-};
-
-const anyType = "any";
-
-/** The types to filter by, in the page's language. */
-const typeItems = (): { label: string; value: string }[] => [
-  { label: i18n._(msg`Any type`), value: anyType },
-  ...auditEventTypeSchema.options.map((type) => ({
-    label: i18n._(typeLabels[type]),
-    value: type,
-  })),
-];
-
-/** A labelled text or date input of the filter form. */
-const Field = ({
-  label,
-  name,
-  type = "text",
-  defaultValue,
-}: {
-  label: string;
-  name: keyof LogSearch;
-  type?: "text" | "date";
-  defaultValue: string | undefined;
-}) => (
-  <label className="flex flex-col gap-1 text-sm">
-    {label}
-    <Input
-      defaultValue={defaultValue}
-      maxLength={identifierMaxLength}
-      name={name}
-      type={type}
-    />
-  </label>
-);
-
-/**
- * The filters, as the address has them. Applying them puts them in the
- * address, which reads the log again.
- */
-export const LogFilters = ({ search }: { search: LogSearch }) => {
-  const navigate = useNavigate();
-  const { t } = useLingui();
-  const [type, setType] = useState<string>(search.type ?? anyType);
-  const types = typeItems();
-  return (
-    <form
-      aria-label={t`Filters`}
-      className="flex flex-wrap items-end gap-3"
-      onSubmit={(event) => {
-        event.preventDefault();
-        const form = new FormData(event.currentTarget);
-        void navigate({
-          to: "/settings/audit",
-          search: logSearchOf({ ...Object.fromEntries(form), type }),
-        });
-      }}
-    >
-      <div className="flex flex-col gap-1 text-sm">
-        <span aria-hidden>
-          <Trans>Type</Trans>
-        </span>
-        <Select
-          items={types}
-          value={type}
-          onValueChange={(value: string | null) => {
-            setType(value ?? anyType);
-          }}
-        >
-          <SelectTrigger aria-label={t`Type`}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {types.map((item) => (
-              <SelectItem key={item.value} value={item.value}>
-                {item.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <Field defaultValue={search.action} label={t`Action`} name="action" />
-      <Field defaultValue={search.actor} label={t`Actor ID`} name="actor" />
-      <Field defaultValue={search.target} label={t`Target ID`} name="target" />
-      <Field
-        defaultValue={search.from}
-        label={t`From`}
-        name="from"
-        type="date"
-      />
-      <Field defaultValue={search.to} label={t`To`} name="to" type="date" />
-      <Button type="submit">
-        <Trans>Filter</Trans>
-      </Button>
-      <Button
-        nativeButton={false}
-        render={<Link search={{}} to="/settings/audit" />}
-        variant="ghost"
-      >
-        <Trans>Clear</Trans>
-      </Button>
-    </form>
-  );
+  return {
+    page,
+    directory: {
+      ...directory,
+      agents: new Map(agents.map(({ id, name }) => [id, name])),
+    },
+  };
 };
 
 /**
  * Where the browser downloads what `search` matches as `format`: core's
  * export route, which it writes to disk as it arrives, however long.
  */
-export const exportHref = (
+const exportHref = (
   search: LogSearch,
   format: AuditExportFormat,
   archive = false
@@ -221,57 +170,377 @@ export const exportHref = (
   return `${auditExportPath}?${params.toString()}`;
 };
 
+const anyType = "any";
+
+/** The types to filter by, in the page's language. */
+const typeItems = (): { label: string; value: string }[] => [
+  { label: i18n._(msg`Any type`), value: anyType },
+  ...auditEventTypeSchema.options.map((type) => ({
+    label: i18n._(typeLabels[type]),
+    value: type,
+  })),
+];
+
+const styles = stylex.create({
+  // The bar over the table, as the Data table's own: the search, then
+  // Filters, then Export at the end; it wraps on a phone.
+  bar: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["3"],
+    paddingInline: space.tableCellInline,
+    paddingBlock: space["3"],
+  },
+  search: { flexGrow: 1, maxWidth: "20rem", minWidth: "12rem" },
+  end: { marginInlineStart: "auto" },
+  filters: { display: "grid", gap: space["4"] },
+  pager: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: space["2"],
+    paddingInline: space.tableCellInline,
+    paddingBlock: space["2"],
+    borderTopStyle: "solid",
+    borderTopWidth: size.hairline,
+    borderTopColor: colors.border,
+  },
+  empty: {
+    paddingInline: space.tableCellInline,
+    paddingBlock: space["4"],
+  },
+  // What the event did, and its mark where it didn't verify, on one line.
+  event: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: space["2"],
+  },
+  // Who did it: a face (or what kind of actor it is) before the name.
+  who: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: space["2"],
+    minWidth: 0,
+  },
+  // The kind's icon, in the room a face takes.
+  kind: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    width: size.avatarXs,
+    height: size.avatarXs,
+    color: colors.mutedForeground,
+    [iconVars.size]: size.iconSm,
+  },
+});
+
+/** The filters as the Filters control holds them while they are set. */
+interface Shown {
+  type: string;
+  action: string;
+  target: string;
+  from: string | undefined;
+  to: string | undefined;
+  archive: boolean;
+}
+
+/** The filters as the address has them, ready to set. */
+const shownOf = (search: LogSearch): Shown => ({
+  type: search.type ?? anyType,
+  action: search.action ?? "",
+  target: search.target ?? "",
+  from: search.from,
+  to: search.to,
+  archive: search.archive === true,
+});
+
+/** How many of the Filters control's filters the address sets. */
+const filtersSet = (search: LogSearch): number =>
+  [
+    search.type,
+    search.from ?? search.to,
+    search.action,
+    search.target,
+    search.archive,
+  ].filter((value) => value !== undefined).length;
+
 /**
- * Everything the filters match, oldest first, as a download. Core records
- * the export before it sends anything, and checks the session again as it
- * reads each page.
+ * The person `text` names, by their whole name or the one name it is part
+ * of; otherwise the text itself, as an ID (a person's, an agent's, an
+ * App's or a run's), which is what core filters by.
  */
+const actorFor = (text: string, directory: Directory): string | undefined => {
+  const wanted = text.trim().toLocaleLowerCase(i18n.locale);
+  if (wanted === "") {
+    return undefined;
+  }
+  const people = [...directory.people];
+  const named = (part: boolean) =>
+    people.filter(([, name]) => {
+      const own = name.toLocaleLowerCase(i18n.locale);
+      return part ? own.includes(wanted) : own === wanted;
+    });
+  const [whole] = named(false);
+  if (whole !== undefined) {
+    return whole[0];
+  }
+  const parts = named(true);
+  const [only] = parts;
+  return parts.length === 1 && only !== undefined ? only[0] : text.trim();
+};
+
 /**
- * The log as core exports it, filtered as shown: CSV or JSON, the formats
- * core writes it in. A ghost button that is its icon alone, named in its
- * tooltip, as every export in Grasp is.
+ * The search: who did it, by a person's name or any ID. Enter searches;
+ * clearing it shows everyone's events again.
  */
-export const LogExport = ({ search }: { search: LogSearch }) => {
+const LogSearchField = ({
+  search,
+  directory,
+}: {
+  search: LogSearch;
+  directory: Directory;
+}) => {
   const { t } = useLingui();
-  const name = t`Export the audit trail`;
+  const navigate = useNavigate();
+  const known =
+    search.actor === undefined ? undefined : directory.people.get(search.actor);
+  const [text, setText] = useState(known ?? search.actor ?? "");
+  const go = (next: string): void => {
+    void navigate({
+      to: "/settings/audit",
+      search: logSearchOf({ ...search, actor: actorFor(next, directory) }),
+    });
+  };
   return (
-    <DropdownMenu>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <DropdownMenuTrigger
-              render={
-                <Button aria-label={name} size="icon-sm" variant="ghost" />
-              }
-            />
-          }
-        >
-          <DownloadIcon />
-        </TooltipTrigger>
-        <TooltipContent>{name}</TooltipContent>
-      </Tooltip>
-      <DropdownMenuContent align="end" className="w-44">
-        <DropdownMenuItem
-          onClick={() => {
-            // Core sends it as a file to save: the page stays.
-            window.location.assign(exportHref(search, "csv"));
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        go(text);
+      }}
+      {...stylex.props(styles.search)}
+    >
+      <InputGroup size="sm">
+        <InputGroupAddon>
+          <Icon icon={SearchIcon} />
+        </InputGroupAddon>
+        <InputGroupInput
+          aria-label={t`Search events by person or ID`}
+          maxLength={identifierMaxLength}
+          onValueChange={(value: string) => {
+            setText(value);
+            // Cleared: everyone's events again.
+            if (value === "" && search.actor !== undefined) {
+              go("");
+            }
           }}
-        >
-          <SheetIcon />
-          <Trans>Export CSV</Trans>
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={() => {
-            window.location.assign(exportHref(search, "json"));
-          }}
-        >
-          <BracesIcon />
-          <Trans>Export JSON</Trans>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+          placeholder={t`Person or ID`}
+          type="search"
+          value={text}
+        />
+        <InputGroupClear aria-label={t`Clear the search`} />
+      </InputGroup>
+    </form>
   );
 };
+
+/**
+ * Filters: the type, the dates and the archive in place of the log, set
+ * together and shown at once; its trigger counts those set. The action
+ * and what an event was about are set from an event's details, and show
+ * here while they are set, to change or clear.
+ */
+const LogFiltersControl = ({ search }: { search: LogSearch }) => {
+  const { t } = useLingui();
+  const navigate = useNavigate();
+  const [shown, setShown] = useState<Shown>(() => shownOf(search));
+  const set = filtersSet(search);
+  const period: [string, string] | null =
+    shown.from === undefined || shown.to === undefined
+      ? null
+      : [shown.from, shown.to];
+  const show = (next?: Shown): void => {
+    void navigate({
+      to: "/settings/audit",
+      search: logSearchOf(
+        next === undefined
+          ? { actor: search.actor }
+          : {
+              actor: search.actor,
+              type: next.type === anyType ? undefined : next.type,
+              action: next.action,
+              target: next.target,
+              from: next.from,
+              to: next.to,
+              archive: next.archive ? true : undefined,
+            }
+      ),
+    });
+  };
+  return (
+    <Popover
+      onOpenChange={(open) => {
+        if (open) {
+          setShown(shownOf(search));
+        }
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button size="sm" variant="outline">
+          <Icon icon={SlidersHorizontalIcon} />
+          {set === 0
+            ? t`Filters`
+            : t`${plural(set, { one: "Filters, # set", other: "Filters, # set" })}`}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start">
+        <div {...stylex.props(styles.filters)}>
+          <Field name="type">
+            <FieldLabel>{t`Type`}</FieldLabel>
+            <Select
+              items={typeItems()}
+              onValueChange={(type) => {
+                setShown({ ...shown, type: type ?? anyType });
+              }}
+              value={shown.type}
+            >
+              <SelectTrigger size="sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent />
+            </Select>
+          </Field>
+          <Field name="when">
+            <FieldLabel>{t`When`}</FieldLabel>
+            <DatePicker
+              mode="range"
+              numberOfMonths={2}
+              presets
+              onValueChange={(range) => {
+                setShown({ ...shown, from: range?.[0], to: range?.[1] });
+              }}
+              size="sm"
+              triggerLabel={t`Choose dates`}
+              value={period}
+            />
+          </Field>
+          {/* Set from an event's details ("Find similar"): shown only while set. */}
+          {search.action === undefined ? null : (
+            <Field name="action">
+              <FieldLabel>{t`Action`}</FieldLabel>
+              <Input
+                maxLength={identifierMaxLength}
+                onValueChange={(action: string) => {
+                  setShown({ ...shown, action });
+                }}
+                size="sm"
+                value={shown.action}
+              />
+            </Field>
+          )}
+          {/* Set from an event's details ("Events about this"): shown only while set. */}
+          {search.target === undefined ? null : (
+            <Field name="target">
+              <FieldLabel>{t`About, by ID`}</FieldLabel>
+              <Input
+                maxLength={identifierMaxLength}
+                onValueChange={(target: string) => {
+                  setShown({ ...shown, target });
+                }}
+                size="sm"
+                value={shown.target}
+              />
+            </Field>
+          )}
+          <Field orientation="horizontal">
+            <FieldLabel>{t`Search the archive`}</FieldLabel>
+            <Switch
+              checked={shown.archive}
+              onCheckedChange={(archive: boolean) => {
+                setShown({ ...shown, archive });
+              }}
+            />
+          </Field>
+        </div>
+        <PopoverFooter>
+          <PopoverClose asChild>
+            <Button
+              onClick={() => {
+                show();
+              }}
+              size="sm"
+              variant="ghost"
+            >
+              {t`Clear`}
+            </Button>
+          </PopoverClose>
+          <PopoverClose asChild>
+            <Button
+              onClick={() => {
+                show(shown);
+              }}
+              size="sm"
+            >
+              {t`Show events`}
+            </Button>
+          </PopoverClose>
+        </PopoverFooter>
+      </PopoverContent>
+    </Popover>
+  );
+};
+
+/**
+ * Everything the filters match, oldest first, as a download: CSV or JSON,
+ * the formats core writes it in, with the archive where the filters search
+ * it. Core records the export before it sends anything, and checks the
+ * session again as it reads each page.
+ */
+const LogExport = ({ search }: { search: LogSearch }) => {
+  const { t } = useLingui();
+  const archive = search.archive === true;
+  const download = (format: AuditExportFormat) => () => {
+    // Core sends it as a file to save: the page stays.
+    window.location.assign(exportHref(search, format, archive));
+  };
+  return (
+    <span {...stylex.props(styles.end)}>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button size="sm" variant="outline">
+            <Icon icon={DownloadIcon} />
+            {t`Export`}
+            <Icon icon={ChevronDownIcon} />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={download("csv")}>
+            {archive ? t`CSV, with the archive` : t`CSV`}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={download("json")}>
+            {archive ? t`JSON, with the archive` : t`JSON`}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </span>
+  );
+};
+
+/** The bar over the events: the search, Filters, and Export at the end. */
+export const LogBar = ({
+  search,
+  directory,
+}: {
+  search: LogSearch;
+  directory: Directory;
+}) => (
+  <div {...stylex.props(styles.bar)}>
+    <LogSearchField directory={directory} search={search} />
+    <LogFiltersControl search={search} />
+    <LogExport search={search} />
+  </div>
+);
 
 /** Who did it, by name where the page knows it, and the ID to filter by. */
 export const actorOf = (
@@ -292,17 +561,22 @@ export const actorOf = (
   }
   if (actor.type === "agent") {
     const { agentId } = actor;
+    // Its name where the page read it; "Agent <id>" where it didn't.
+    const agent =
+      directory.agents?.has(agentId) === true
+        ? agentName(directory, agentId)
+        : i18n._(msg`Agent ${agentId}`);
     const person = personName(directory, actor.onBehalfOf);
     if (actor.via !== undefined) {
       const app = chatPlatformName(actor.via);
       return {
-        label: i18n._(msg`Agent ${agentId} for ${person}, in ${app}`),
-        id: actor.agentId,
+        label: i18n._(msg`${agent} for ${person}, in ${app}`),
+        id: agentId,
       };
     }
     return {
-      label: i18n._(msg`Agent ${agentId} for ${person}`),
-      id: actor.agentId,
+      label: i18n._(msg`${agent} for ${person}`),
+      id: agentId,
     };
   }
   if (actor.type === "app") {
@@ -323,94 +597,58 @@ export const actorOf = (
   return { label: "Grasp" };
 };
 
-/** The event as stored, laid out to read; the stored text if it isn't JSON. */
-const readable = (json: string): string => {
-  try {
-    return JSON.stringify(JSON.parse(json), null, 2);
-  } catch {
-    return json;
-  }
-};
-
-/** When an entry was received, short, as the page's language writes it: "3 Oct, 14:05". */
-const entryTime = (iso: string): string =>
-  new Intl.DateTimeFormat(i18n.locale, {
+/**
+ * When an entry was received, short, as the page's language writes it:
+ * "3 Oct, 14:05", with its year where it isn't this one.
+ */
+const entryTime = (iso: string): string => {
+  const at = new Date(iso);
+  return new Intl.DateTimeFormat(i18n.locale, {
     day: "numeric",
     month: "short",
+    ...(at.getFullYear() === new Date().getFullYear()
+      ? {}
+      : { year: "numeric" }),
     hour: "2-digit",
     minute: "2-digit",
-  }).format(new Date(iso));
-
-/** The month an entry falls in, in the viewer's time zone, as a key: `2026-10`. */
-const monthOf = (iso: string): string => {
-  const at = new Date(iso);
-  return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}`;
-};
-
-/** A month's name and year, as the page's language writes them: "October 2026". */
-const monthName = (iso: string): string =>
-  new Intl.DateTimeFormat(i18n.locale, {
-    month: "long",
-    year: "numeric",
-  }).format(new Date(iso));
-
-/** An entry's position, check and event as stored, for whoever needs more than its sentence. */
-const RecordDetails = ({ record, id }: { record: AuditRecord; id: string }) => {
-  const { t } = useLingui();
-  return (
-    <div className="flex flex-col gap-2 pt-2" id={id}>
-      <dl className="flex flex-col gap-1">
-        <div className="flex gap-2">
-          <dt className="text-muted-foreground">
-            <Trans>Action</Trans>
-          </dt>
-          <dd className="font-mono break-all">{record.event?.action ?? "–"}</dd>
-        </div>
-        <div className="flex gap-2">
-          <dt className="text-muted-foreground">
-            <Trans>Position</Trans>
-          </dt>
-          <dd>{record.seq}</dd>
-        </div>
-        <div className="flex gap-2">
-          <dt className="text-muted-foreground">
-            <Trans>Verified</Trans>
-          </dt>
-          <dd>
-            {record.verified
-              ? t`Yes: its hash matches, and it links to the event before it.`
-              : t`No: its hash or its link to the event before it doesn't match.`}
-          </dd>
-        </div>
-        <div className="flex gap-2">
-          <dt className="text-muted-foreground">
-            <Trans>Hash</Trans>
-          </dt>
-          <dd className="font-mono break-all">{record.hash}</dd>
-        </div>
-      </dl>
-      <pre className="bg-muted overflow-x-auto rounded-md p-3 text-xs">
-        {readable(record.eventJson)}
-      </pre>
-    </div>
-  );
+  }).format(at);
 };
 
 /** What the entry did, in words; the action as recorded where there are none. */
-const EntryText = ({ action }: { action: string | undefined }) => {
-  const { t } = useLingui();
+export const entryWords = (action: string | undefined): string => {
   if (action === undefined) {
-    return <span>{t`Unreadable event`}</span>;
+    return i18n._(msg`Unreadable event`);
   }
   const text = actionWords(action);
-  return text === undefined ? (
-    <span className="font-mono">{action}</span>
-  ) : (
-    <span>{i18n._(text)}</span>
-  );
+  return text === undefined ? action : i18n._(text);
 };
 
-/** Who did it, and to what, each a link to the entries of the same. */
+/** The icon for who did it, where they have no face: an agent, an App, a run, Grasp. */
+export const actorIcon = (actor: AuditActor): IconData => {
+  switch (actor.type) {
+    case "agent": {
+      return WandSparklesIcon;
+    }
+    case "app": {
+      return AppWindowIcon;
+    }
+    case "workflow": {
+      return WorkflowIcon;
+    }
+    case "system": {
+      return ServerIcon;
+    }
+    case "person":
+    case "staff": {
+      return CircleUserIcon;
+    }
+    default: {
+      return actor satisfies never;
+    }
+  }
+};
+
+/** Who did it: a person's face, or their kind's icon, before the name. */
 const EntryWho = ({
   record,
   directory,
@@ -419,179 +657,265 @@ const EntryWho = ({
   directory: Directory;
 }) => {
   const { event } = record;
-  const actor = event === null ? undefined : actorOf(event.actor, directory);
-  const target = event?.target;
+  if (event === null) {
+    return <span>–</span>;
+  }
+  const { actor } = event;
+  const { label } = actorOf(actor, directory);
+  const face =
+    actor.type === "person" || actor.type === "staff"
+      ? personName(directory, actor.userId)
+      : undefined;
   return (
-    <span className="text-muted-foreground flex flex-wrap gap-x-1.5">
-      {actor?.id === undefined ? (
-        <span>{actor?.label ?? "–"}</span>
+    <span {...stylex.props(styles.who)}>
+      {face === undefined ? (
+        <span {...stylex.props(styles.kind)}>
+          <Icon icon={actorIcon(actor)} />
+        </span>
       ) : (
-        <Link
-          className="underline"
-          search={{ actor: actor.id }}
-          to="/settings/audit"
-        >
-          {actor.label}
-        </Link>
+        <Avatar name={face} size="xs">
+          <AvatarFallback />
+        </Avatar>
       )}
-      {target === undefined ? null : (
-        <>
-          <span aria-hidden="true">·</span>
-          <Link
-            className="break-all underline"
-            search={{ target: target.id }}
-            to="/settings/audit"
-          >
-            {target.type} {target.id}
-          </Link>
-        </>
-      )}
+      <span>{label}</span>
     </span>
   );
 };
 
-/** One entry, as the prototype lists them: when, what in words, who and to what, and its type. */
-const RecordRow = ({
-  record,
-  directory,
-}: {
-  record: AuditRecord;
-  directory: Directory;
-}) => {
-  const [open, setOpen] = useState(false);
-  const { t } = useLingui();
-  const { seq } = record;
-  const detailsId = `audit-${record.seq}`;
-  return (
-    <li className="flex flex-col gap-1.5 border-t px-5 py-3 sm:flex-row sm:items-start sm:gap-4">
-      <span className="text-muted-foreground flex-none pt-0.5 text-xs tabular-nums sm:w-28">
-        {entryTime(record.receivedAt)}
-      </span>
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <EntryText action={record.event?.action} />
-        <EntryWho directory={directory} record={record} />
-        {open ? <RecordDetails id={detailsId} record={record} /> : null}
-      </div>
-      <div className="flex flex-none flex-wrap items-center gap-2">
-        {record.verified ? null : (
-          <Badge variant="attention">
-            <Trans>Not verified</Trans>
-          </Badge>
-        )}
-        {record.type === null ? null : (
-          <Badge variant="outline">{i18n._(typeLabels[record.type])}</Badge>
-        )}
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-controls={open ? detailsId : undefined}
-          aria-expanded={open}
-          aria-label={t`Details of event ${seq}`}
-          onClick={() => {
-            setOpen(!open);
-          }}
-        >
-          {open ? t`Hide` : t`Details`}
-        </Button>
-      </div>
-    </li>
-  );
-};
+/** How many events a page shows. */
+const pageSize = 25;
 
-/** The records by the month they fall in, newest first, as they come. */
-const byMonth = (
-  records: readonly AuditRecord[]
-): { month: string; records: AuditRecord[] }[] => {
-  const months: { month: string; records: AuditRecord[] }[] = [];
-  for (const record of records) {
-    const month = monthOf(record.receivedAt);
-    const last = months.at(-1);
-    if (last?.month === month) {
-      last.records.push(record);
-    } else {
-      months.push({ month, records: [record] });
-    }
-  }
-  return months;
-};
+/** The words the columns say, translated where they are made. */
+interface EventColumnWords {
+  when: string;
+  event: string;
+  by: string;
+  type: string;
+  details: string;
+  notVerified: string;
+  detailsOf: (seq: number) => string;
+}
+
+/** What kind of event it is (a read, an action, a decision…): words, not a badge, so nothing in the row looks pressable but its button. */
+const typeColumn = (header: string): DataTableColumn<AuditRecord> => ({
+  id: "type",
+  header,
+  value: (record) => record.type ?? "",
+  cell: (record) =>
+    record.type === null ? (
+      "–"
+    ) : (
+      <Text as="span" color="muted" size="sm">
+        {i18n._(typeLabels[record.type])}
+      </Text>
+    ),
+});
 
 /**
- * The events that match, newest first and by month: the first page as the
- * page read it, then each older page asked for. Keyed by the filters and
- * the first page where it's used, so every new read starts from its own
- * first page. Rows of a settings section, each with its top border.
+ * The events table's columns, as Data table takes them: when, what (with
+ * a mark where it didn't verify), by whom, its type, and a way to its
+ * details.
+ */
+const columns = ({
+  directory,
+  onDetails,
+  withType,
+  words,
+}: {
+  directory: Directory;
+  onDetails: (record: AuditRecord) => void;
+  /** Without it while the details stand beside the table, which say the type. */
+  withType: boolean;
+  words: EventColumnWords;
+}): DataTableColumn<AuditRecord>[] => [
+  {
+    id: "when",
+    header: words.when,
+    value: (record) => record.receivedAt,
+    cell: (record) => entryTime(record.receivedAt),
+  },
+  {
+    id: "event",
+    header: words.event,
+    value: (record) => record.event?.action ?? "",
+    cell: (record) => (
+      <span {...stylex.props(styles.event)}>
+        {entryWords(record.event?.action)}
+        {record.verified ? null : (
+          <Badge size="sm" variant="warning">
+            {words.notVerified}
+          </Badge>
+        )}
+      </span>
+    ),
+  },
+  {
+    id: "by",
+    header: words.by,
+    value: (record) => record.event?.actor.type ?? "",
+    cell: (record) => <EntryWho directory={directory} record={record} />,
+  },
+  ...(withType ? [typeColumn(words.type)] : []),
+  {
+    id: "details",
+    header: words.details,
+    align: "end",
+    control: true,
+    value: () => "",
+    cell: (record) => (
+      <Button
+        aria-label={words.detailsOf(record.seq)}
+        onClick={() => {
+          onDetails(record);
+        }}
+        size="icon-xs"
+        variant="ghost"
+      >
+        <Icon icon={ChevronRightIcon} />
+      </Button>
+    ),
+  },
+];
+
+/**
+ * The events that match, newest first, 25 a page with Newer and Older:
+ * the first of core's pages as the page read it, then each older one asked
+ * for once Older reaches past what is here. Keyed by the filters and the
+ * first page where it's used, so every new read starts from its own first
+ * page. An event's details open beside the table (`onDetails`).
  */
 export const LogRecords = ({
   first,
   search,
   directory,
-  archive = false,
+  onDetails,
+  beside = false,
 }: {
   first: AuditPage;
   search: LogSearch;
   directory: Directory;
-  /** Pages of the archive, where retention moved older events, not of the log. */
-  archive?: boolean;
+  onDetails: (record: AuditRecord) => void;
+  /** The details stand beside the table, so it leaves out what they say. */
+  beside?: boolean;
 }) => {
   const [older, setOlder] = useState<AuditRecord[]>([]);
   const [next, setNext] = useState(first.next);
+  const [at, setAt] = useState(0);
   const { busy, failure, run } = useCoreAction();
   const { t } = useLingui();
   const records = [...first.records, ...older];
-  const loadOlder = async (before: number): Promise<void> => {
-    const page = await run(async ({ audit }) =>
-      archive
-        ? await audit.searchArchive(auditFilterOf(search), before)
-        : await audit.search(auditFilterOf(search), before)
-    );
-    if (page !== undefined) {
-      setOlder((shown) => [...shown, ...page.records]);
-      setNext(page.next);
+  const shown = records.slice(at * pageSize, (at + 1) * pageSize);
+  // Whether a page lies past this one: one here already, or more in core.
+  const hasOlder = records.length > (at + 1) * pageSize || next !== null;
+  const archive = search.archive === true;
+  const goOlder = async (): Promise<void> => {
+    // Core's pages hold what it holds (fewer than 25 may match): read on
+    // until there is a page past this one, or core has no more. What comes
+    // meanwhile fills this page.
+    let count = records.length;
+    let cursor = next;
+    const read: AuditRecord[] = [];
+    while (count <= (at + 1) * pageSize && cursor !== null) {
+      const before = cursor;
+      // oxlint-disable-next-line no-await-in-loop -- one page after the other, by design
+      const page = await run(async ({ audit }) =>
+        archive
+          ? await audit.searchArchive(auditFilterOf(search), before)
+          : await audit.search(auditFilterOf(search), before)
+      );
+      if (page === undefined) {
+        break;
+      }
+      read.push(...page.records);
+      count += page.records.length;
+      cursor = page.next;
+    }
+    setOlder((kept) => [...kept, ...read]);
+    setNext(cursor);
+    if (count > (at + 1) * pageSize) {
+      setAt(at + 1);
     }
   };
-  return (
-    <>
-      {records.length === 0 ? (
-        <p className="text-muted-foreground border-t px-5 py-4">
+  if (records.length === 0) {
+    return (
+      <div {...stylex.props(styles.empty)}>
+        <Text color="muted" size="sm">
           {next === null
             ? t`No events match.`
             : t`No events match in the latest stretch of the log.`}
-        </p>
-      ) : null}
-      {byMonth(records).map(({ month, records: inMonth }) => (
-        <section
-          aria-label={monthName(inMonth[0]?.receivedAt ?? "")}
-          key={month}
+        </Text>
+        {/* Each read searches one stretch: older ones may still match. */}
+        {next === null ? null : (
+          <Button
+            disabled={busy}
+            onClick={() => {
+              void goOlder();
+            }}
+            size="sm"
+            variant="ghost"
+          >
+            {busy ? t`Loading…` : t`Older`}
+          </Button>
+        )}
+        {failure === undefined ? null : (
+          <RowAlert variant="destructive">{failure}</RowAlert>
+        )}
+      </div>
+    );
+  }
+  const eventColumns = columns({
+    directory,
+    onDetails,
+    withType: !beside,
+    words: {
+      when: t`When`,
+      event: t`Event`,
+      by: t`By`,
+      type: t`Type`,
+      details: t`Details`,
+      notVerified: t`Not verified`,
+      detailsOf: (seq) => t`Details of event ${seq}`,
+    },
+  });
+  const firstShown = at * pageSize + 1;
+  const lastShown = at * pageSize + shown.length;
+  return (
+    <>
+      {/* One page of the log at a time: Newer and Older below page through core's. */}
+      <DataTable
+        aria-label={archive ? t`Archived events` : t`Events`}
+        columns={eventColumns}
+        density="compact"
+        getRowId={(record) => String(record.seq)}
+        rows={shown}
+      />
+      <nav aria-label={t`Pages of events`} {...stylex.props(styles.pager)}>
+        <Text color="muted" size="sm">
+          {t`${firstShown}–${lastShown}`}
+        </Text>
+        <Button
+          disabled={at === 0}
+          onClick={() => {
+            setAt(at - 1);
+          }}
+          size="sm"
+          variant="ghost"
         >
-          <h3 className="bg-row-group text-muted-foreground border-t px-5 py-2">
-            {monthName(inMonth[0]?.receivedAt ?? "")}
-          </h3>
-          <ul aria-label={t`Entries`}>
-            {inMonth.map((record) => (
-              <RecordRow
-                directory={directory}
-                key={record.seq}
-                record={record}
-              />
-            ))}
-          </ul>
-        </section>
-      ))}
-      {next === null && failure === undefined ? null : (
-        <div className="flex flex-col items-start gap-2 border-t px-5 py-3">
-          {next === null ? null : (
-            <Button
-              variant="outline"
-              disabled={busy}
-              onClick={() => {
-                void loadOlder(next);
-              }}
-            >
-              {busy ? t`Loading…` : t`Load older`}
-            </Button>
-          )}
-          <ErrorText>{failure}</ErrorText>
-        </div>
+          {t`Newer`}
+        </Button>
+        <Button
+          disabled={!hasOlder || busy}
+          onClick={() => {
+            void goOlder();
+          }}
+          size="sm"
+          variant="ghost"
+        >
+          {busy ? t`Loading…` : t`Older`}
+        </Button>
+      </nav>
+      {failure === undefined ? null : (
+        <RowAlert variant="destructive">{failure}</RowAlert>
       )}
     </>
   );

@@ -1,6 +1,6 @@
 // Sidebar: an app's main places down one side: a provider that holds whether it is open, the
-// sidebar with its header, its content in groups of menus and its footer, a trigger and a rail that
-// fold it, and the page beside it (SidebarInset).
+// sidebar with its header, its content in groups of menus and its footer, a trigger that folds it
+// (and the keys), and the page beside it (SidebarInset).
 //
 //   <SidebarProvider>
 //     <Sidebar>
@@ -19,7 +19,6 @@
 //         </SidebarGroup>
 //       </SidebarContent>
 //       <SidebarFooter>…</SidebarFooter>
-//       <SidebarRail />
 //     </Sidebar>
 //     <SidebarInset>
 //       <SidebarTrigger />
@@ -31,13 +30,14 @@
 // named by the I18nProvider's `sidebar.name`, its content a navigation named `sidebar.main`.
 // It folds away whole, off the canvas; `collapsible="icon"` folds it down to its icons instead,
 // where each row's words show in a tooltip. A row's words longer than the row end in an ellipsis,
-// and its tooltip shows them whole. Under the lg breakpoint it is a Sheet from its side, which holds Tab inside
-// and gives focus back to the trigger. Cmd+B on a Mac, Ctrl+B elsewhere, folds and opens it from
-// anywhere on the page (`keyboardShortcut`); where a page holds several, the one holding focus
-// answers, else the first. `storageKey` keeps the person's choice in localStorage, and
-// `sidebarStateScript` draws it before the page wakes. A group that folds is a SidebarCollapsible,
-// a Collapsible by a `name`, whose fold is kept and drawn the same way. Nothing here knows a
-// product: a profile, a theme control or a working mark is the caller's, composed into the parts.
+// and its tooltip shows them whole. Under the lg breakpoint it is a Sheet from its side, which
+// holds Tab inside and gives focus back to the trigger. Cmd+B on a Mac, Ctrl+B elsewhere, folds and
+// opens it, or the sheet, from anywhere on the page (`keyboardShortcut`); where a page holds
+// several, the one holding focus answers, else the first. `storageKey` keeps the person's choice
+// in localStorage, and `sidebarStateScript` draws it before the page wakes. A group that folds is a
+// SidebarCollapsible, a Collapsible by a `name`, whose fold is kept and drawn the same way. Nothing
+// here knows a product: a profile, a theme control or a working mark is the caller's, composed
+// into the parts.
 //
 // The provider's row is the window's height unless its `style` gives the frame's, and under lg
 // (the window's width) the sidebar is a Sheet fixed to the window. In a box of its own, such as a
@@ -132,6 +132,49 @@ const BADGE = `calc(${font.textXsLine} + 2 * ${size.hairline})`;
 // Folded to its icons, a row is a square the row's height, in the middle of the rail.
 const SQUARE_MARGIN = `calc((${size.sidebarRailWidth} - 2 * ${space["2"]} - ${ROW}) / 2)`;
 const SQUARE_PADDING = `calc((${ROW} - ${ICON}) / 2)`;
+// The sidebar's state as its parts read it: one that folds to its icons, folded off the canvas,
+// and folded to its icons. Each a function the compiler calls, as it reads the styles: a call of
+// `stylex.when` itself has no value when the page runs.
+const iconSidebar = () =>
+  stylex.when.ancestor('[data-collapsible="icon"]', sidebarMarker);
+const folded = () =>
+  stylex.when.ancestor('[data-state="collapsed"]', sidebarMarker);
+// A row with an action of its own (SidebarMenuAction): while the pointer is anywhere on it, and
+// while the action's menu is open, the row keeps its hover and the action takes the ink, as the
+// original's row and its dots. A row holding a nested list does not light up from a nested row.
+const rowWithAction = () =>
+  stylex.when.ancestor(
+    ':hover:has(> [data-slot="sidebar-menu-action"])',
+    sidebarMenuItemMarker
+  );
+const rowMenuOpen = () =>
+  stylex.when.ancestor(
+    ':has(> [data-slot="sidebar-menu-action"][aria-expanded="true"])',
+    sidebarMenuItemMarker
+  );
+// In the sheet on a narrow window.
+const inSheet = () => stylex.when.ancestor("[data-mobile]", sidebarMarker);
+const onRail = () =>
+  stylex.when.ancestor(
+    '[data-state="collapsed"][data-collapsible="icon"]',
+    sidebarMarker
+  );
+// The aside's width: the sidebar's, none folded off the canvas, `rail` folded to its icons.
+const asideWidth = (rail: string) => ({
+  default: size.sidebarWidth,
+  ':is([data-state="collapsed"][data-collapsible="offcanvas"])': 0,
+  ':is([data-state="collapsed"][data-collapsible="icon"])': rail,
+});
+// A row's room at its end, for an action or a badge beside it while its words show; on the rail,
+// `railed`.
+const endRoom = (railed: string | number) => ({
+  default: size.sidebarRowInline,
+  ":has(~ [data-slot=sidebar-menu-action], ~ [data-slot=sidebar-menu-badge])": {
+    default: `calc(${ACTION} + ${space["2"]})`,
+    [onRail()]: railed,
+  },
+  [onRail()]: railed,
+});
 
 // How far a level travels as it moves in.
 const fromEnd = stylex.keyframes({
@@ -163,12 +206,7 @@ const styles = stylex.create({
     display: { default: "flex", [BELOW]: "none" },
     flexShrink: 0,
     alignSelf: "stretch",
-    width: {
-      default: size.sidebarWidth,
-      ':is([data-state="collapsed"][data-collapsible="offcanvas"])': 0,
-      ':is([data-state="collapsed"][data-collapsible="icon"])':
-        size.sidebarRailWidth,
-    },
+    width: asideWidth(size.sidebarRailWidth),
     color: colors.sidebarForeground,
     transitionProperty: "width",
     transitionDuration: motionVars.ui,
@@ -176,11 +214,7 @@ const styles = stylex.create({
   },
   // Floating, the panel stands in by space-2: the rail grows by as much on each side.
   asideFloating: {
-    width: {
-      default: size.sidebarWidth,
-      ':is([data-state="collapsed"][data-collapsible="offcanvas"])': 0,
-      ':is([data-state="collapsed"][data-collapsible="icon"])': `calc(${size.sidebarRailWidth} + 2 * ${space["2"]})`,
-    },
+    width: asideWidth(`calc(${size.sidebarRailWidth} + 2 * ${space["2"]})`),
   },
   // Never folding: as wide as the sidebar, on a phone too, beside what it stands with.
   asideFixed: {
@@ -188,8 +222,8 @@ const styles = stylex.create({
     width: size.sidebarWidth,
   },
 
-  // The panel: as tall as the window at most, held in view while the page scrolls past. A layer
-  // above the page, so its rail takes the pointer on both sides of its edge.
+  // The panel: as tall as the window at most, held in view while the page scrolls past, a layer
+  // above the page.
   container: {
     position: "sticky",
     insetBlockStart: 0,
@@ -200,7 +234,12 @@ const styles = stylex.create({
     height: "100%",
     maxHeight: "100svh",
     transitionProperty: "translate, visibility",
-    transitionDuration: motionVars.ui,
+    // Hidden only once it has slid away, and shown as it starts to slide in: focus can go to it
+    // as soon as it opens.
+    transitionDuration: {
+      default: `${motionVars.ui}, 0s`,
+      [folded()]: motionVars.ui,
+    },
     transitionTimingFunction: duration.ease,
   },
   // Off the canvas it keeps its width and slides out past its side, and once gone it is out of
@@ -210,14 +249,13 @@ const styles = stylex.create({
     width: size.sidebarWidth,
     visibility: {
       default: null,
-      [stylex.when.ancestor('[data-state="collapsed"]', sidebarMarker)]:
-        "hidden",
+      [folded()]: "hidden",
     },
   },
   offcanvasStart: {
     translate: {
       default: null,
-      [stylex.when.ancestor('[data-state="collapsed"]', sidebarMarker)]: {
+      [folded()]: {
         default: "-100% 0",
         ":dir(rtl)": "100% 0",
       },
@@ -239,19 +277,23 @@ const styles = stylex.create({
   roomy: { padding: space["2"] },
 
   // What it holds: the header, the content and the footer, top to bottom.
-  inner: {
+  // On the sidebar's ground, in an aside or a sheet.
+  ground: {
     [iconVars.size]: ICON,
     [iconVars.stroke]: size.iconStroke,
     display: "flex",
     flexDirection: "column",
-    boxSizing: "border-box",
-    width: "100%",
-    height: "100%",
     minHeight: 0,
     backgroundColor: colors.sidebar,
+    color: colors.sidebarForeground,
     fontFamily: font.sans,
     fontSize: font.textSm,
     lineHeight: font.textSmLine,
+  },
+  inner: {
+    boxSizing: "border-box",
+    width: "100%",
+    height: "100%",
   },
   floating: {
     borderRadius: radius["2xl"],
@@ -263,41 +305,10 @@ const styles = stylex.create({
   },
   // In a sheet, on a narrow window: it fills the sheet, on its own ground from edge to edge.
   sheet: {
-    [iconVars.size]: ICON,
-    [iconVars.stroke]: size.iconStroke,
-    display: "flex",
-    flexDirection: "column",
     flexGrow: 1,
-    minHeight: 0,
     borderRadius: "inherit",
     cornerShape: "inherit",
-    backgroundColor: colors.sidebar,
-    color: colors.sidebarForeground,
-    fontFamily: font.sans,
-    fontSize: font.textSm,
-    lineHeight: font.textSmLine,
   },
-
-  // The rail along its inner edge: pressed, it folds or opens the sidebar. A line shows under the
-  // pointer. It stays in reach while the sidebar is off the canvas, at the window's edge.
-  rail: {
-    position: "absolute",
-    insetBlock: 0,
-    zIndex: 1,
-    width: space["4"],
-    padding: 0,
-    borderWidth: 0,
-    visibility: "visible",
-    cursor: "ew-resize",
-    backgroundColor: "transparent",
-    backgroundImage: {
-      default: null,
-      ":hover": `linear-gradient(to right, transparent calc(50% - ${size.hairline}), ${colors.border} calc(50% - ${size.hairline}), ${colors.border} calc(50% + ${size.hairline}), transparent calc(50% + ${size.hairline}))`,
-    },
-    display: { default: "block", [BELOW]: "none" },
-  },
-  railStart: { insetInlineEnd: `calc(-1 * ${space["2"]})` },
-  railEnd: { insetInlineStart: `calc(-1 * ${space["2"]})` },
 
   // The page beside it.
   inset: {
@@ -355,7 +366,12 @@ const styles = stylex.create({
     display: "flex",
     flexDirection: "column",
     gap: space["2"],
-    paddingBlockStart: space["4"],
+    // In the sheet, the sheet's own inset is taken from its room above, so the head stands as high
+    // in the window as beside the page, as the original's phone menu stood its head on the bar's row.
+    paddingBlockStart: {
+      default: space["4"],
+      [inSheet()]: `calc(${space["4"]} - ${size.sheetPadding})`,
+    },
     paddingBlockEnd: space["1"],
     paddingInline: space["2"],
   },
@@ -375,10 +391,7 @@ const styles = stylex.create({
     paddingBlock: space["2"],
     overflow: {
       default: "auto",
-      [stylex.when.ancestor(
-        '[data-state="collapsed"][data-collapsible="icon"]',
-        sidebarMarker
-      )]: "hidden",
+      [onRail()]: "hidden",
     },
     overscrollBehavior: "contain",
   },
@@ -416,8 +429,7 @@ const styles = stylex.create({
     paddingBlockEnd: space["1"],
     paddingInline: size.sidebarRowInline,
     borderWidth: 0,
-    borderRadius: radius.lg,
-    cornerShape: radius.shape,
+    borderRadius: radius.sidebarRowRadius,
     backgroundColor: "transparent",
     // Drawn as a button or a link (`asChild`), it answers the pointer as a row's words do.
     color: {
@@ -438,17 +450,11 @@ const styles = stylex.create({
     textDecoration: "none",
     opacity: {
       default: 1,
-      [stylex.when.ancestor(
-        '[data-state="collapsed"][data-collapsible="icon"]',
-        sidebarMarker
-      )]: 0,
+      [onRail()]: 0,
     },
     marginBlockStart: {
       default: 0,
-      [stylex.when.ancestor(
-        '[data-state="collapsed"][data-collapsible="icon"]',
-        sidebarMarker
-      )]: `calc(-1 * ${ROW})`,
+      [onRail()]: `calc(-1 * ${ROW})`,
     },
     transitionProperty: "margin-block-start, opacity",
     transitionDuration: motionVars.ui,
@@ -461,10 +467,7 @@ const styles = stylex.create({
     position: "absolute",
     display: {
       default: "flex",
-      [stylex.when.ancestor(
-        '[data-state="collapsed"][data-collapsible="icon"]',
-        sidebarMarker
-      )]: "none",
+      [onRail()]: "none",
     },
     alignItems: "center",
     justifyContent: "center",
@@ -475,7 +478,9 @@ const styles = stylex.create({
     borderWidth: { default: 0, [FORCED]: size.hairline },
     borderStyle: "solid",
     borderColor: "ButtonText",
-    borderRadius: radius.lg,
+    // A small icon Button's corner, capped at half its height, as the original drew its row's
+    // action: not the row's own.
+    borderRadius: `min(${radius.xl}, calc(${ACTION} / 2))`,
     cornerShape: radius.shape,
     color: {
       default: colors.sidebarSecondaryForeground,
@@ -494,12 +499,29 @@ const styles = stylex.create({
     insetBlockStart: `calc((${ROW} - ${ACTION}) / 2)`,
     insetInlineEnd: `calc(${space["2"]} + (${ROW} - ${ACTION}) / 2)`,
   },
+  // A row's action: a space-1 from the row's end; in the ink while its row is pointed at or holds
+  // focus, or its menu is open; filled only under the pointer itself, as the original's dots.
   menuAction: {
     insetBlockStart: {
       default: `calc((${ROW} - ${ACTION}) / 2)`,
       [COARSE]: `calc((${size.tapTarget} - ${ACTION}) / 2)`,
     },
-    insetInlineEnd: `calc((${ROW} - ${ACTION}) / 2)`,
+    insetInlineEnd: space["1"],
+    color: {
+      default: colors.sidebarSecondaryForeground,
+      [HOVER]: { default: null, ":hover": colors.foreground },
+      [stylex.when.ancestor(":hover", sidebarMenuItemMarker)]: {
+        default: null,
+        [HOVER]: colors.foreground,
+      },
+      [stylex.when.ancestor(":focus-within", sidebarMenuItemMarker)]:
+        colors.foreground,
+      ":is([aria-expanded=true])": colors.foreground,
+    },
+    backgroundColor: {
+      default: "transparent",
+      [HOVER]: { default: null, ":hover": colors.accent },
+    },
   },
   // Shown while the pointer is on its row, focus is in the row or its menu is open; on a touch
   // screen, always.
@@ -536,64 +558,40 @@ const styles = stylex.create({
     // Folded to its icons: a square the row's height, in the middle of the rail, its words cut away.
     width: {
       default: "100%",
-      [stylex.when.ancestor(
-        '[data-state="collapsed"][data-collapsible="icon"]',
-        sidebarMarker
-      )]: ROW,
+      [onRail()]: ROW,
     },
     height: {
       default: ROW,
       [COARSE]: size.tapTarget,
-      [stylex.when.ancestor(
-        '[data-state="collapsed"][data-collapsible="icon"]',
-        sidebarMarker
-      )]: ROW,
+      [onRail()]: ROW,
     },
     marginBlock: 0,
     marginInline: {
       default: 0,
-      [stylex.when.ancestor(
-        '[data-state="collapsed"][data-collapsible="icon"]',
-        sidebarMarker
-      )]: SQUARE_MARGIN,
+      [onRail()]: SQUARE_MARGIN,
     },
     paddingBlock: 0,
     paddingInlineStart: {
       default: size.sidebarRowInline,
-      [stylex.when.ancestor(
-        '[data-state="collapsed"][data-collapsible="icon"]',
-        sidebarMarker
-      )]: SQUARE_PADDING,
+      [onRail()]: SQUARE_PADDING,
     },
-    // Room at its end for an action or a badge beside it, while its words show.
-    paddingInlineEnd: {
-      default: size.sidebarRowInline,
-      ":has(~ [data-slot=sidebar-menu-action], ~ [data-slot=sidebar-menu-badge])":
-        {
-          default: `calc(${ACTION} + ${space["2"]})`,
-          [stylex.when.ancestor(
-            '[data-state="collapsed"][data-collapsible="icon"]',
-            sidebarMarker
-          )]: SQUARE_PADDING,
-        },
-      [stylex.when.ancestor(
-        '[data-state="collapsed"][data-collapsible="icon"]',
-        sidebarMarker
-      )]: SQUARE_PADDING,
-    },
+    paddingInlineEnd: endRoom(SQUARE_PADDING),
     borderWidth: { default: 0, [FORCED]: size.hairline },
     borderStyle: "solid",
     borderColor: "transparent",
-    borderRadius: radius.lg,
-    cornerShape: radius.shape,
+    borderRadius: radius.sidebarRowRadius,
     overflow: "hidden",
     color: {
       default: colors.sidebarSecondaryForeground,
       [HOVER]: { default: null, ":hover": colors.sidebarForeground },
+      [rowWithAction()]: { default: null, [HOVER]: colors.sidebarForeground },
+      [rowMenuOpen()]: colors.sidebarForeground,
     },
     backgroundColor: {
       default: "transparent",
       [HOVER]: { default: null, ":hover": colors.sidebarHover },
+      [rowWithAction()]: { default: null, [HOVER]: colors.sidebarHover },
+      [rowMenuOpen()]: colors.sidebarHover,
     },
     fontFamily: font.sans,
     fontSize: font.textSm,
@@ -615,8 +613,12 @@ const styles = stylex.create({
       default: null,
       ':is(:disabled, [aria-disabled="true"])': "none",
     },
-    transitionProperty:
-      "color, background-color, width, height, padding, margin",
+    // Its box moves only in a sidebar that folds to its icons, as it folds and opens.
+    transitionProperty: {
+      default: "color, background-color",
+      [iconSidebar()]:
+        "color, background-color, width, height, padding, margin",
+    },
     transitionDuration: duration.hover,
   },
   // A row's own words: longer than the row, they end in an ellipsis before its end, its action or
@@ -631,46 +633,23 @@ const styles = stylex.create({
     height: {
       default: size.controlXs,
       [COARSE]: size.tapTarget,
-      [stylex.when.ancestor(
-        '[data-state="collapsed"][data-collapsible="icon"]',
-        sidebarMarker
-      )]: ROW,
+      [onRail()]: ROW,
     },
     fontSize: font.textXs,
   },
   // A large row (a person, a workspace), in the words read first; it folds to its picture alone.
   lg: {
-    borderRadius: radius.lg,
+    borderRadius: radius.sidebarRowRadiusLg,
     color: colors.sidebarForeground,
     height: {
       default: size.sidebarMenuButtonHeightLg,
-      [stylex.when.ancestor(
-        '[data-state="collapsed"][data-collapsible="icon"]',
-        sidebarMarker
-      )]: ROW,
+      [onRail()]: ROW,
     },
     paddingInlineStart: {
       default: size.sidebarRowInline,
-      [stylex.when.ancestor(
-        '[data-state="collapsed"][data-collapsible="icon"]',
-        sidebarMarker
-      )]: 0,
+      [onRail()]: 0,
     },
-    paddingInlineEnd: {
-      default: size.sidebarRowInline,
-      ":has(~ [data-slot=sidebar-menu-action], ~ [data-slot=sidebar-menu-badge])":
-        {
-          default: `calc(${ACTION} + ${space["2"]})`,
-          [stylex.when.ancestor(
-            '[data-state="collapsed"][data-collapsible="icon"]',
-            sidebarMarker
-          )]: 0,
-        },
-      [stylex.when.ancestor(
-        '[data-state="collapsed"][data-collapsible="icon"]',
-        sidebarMarker
-      )]: 0,
-    },
+    paddingInlineEnd: endRoom(0),
   },
   outline: {
     backgroundColor: {
@@ -679,6 +658,20 @@ const styles = stylex.create({
     },
     boxShadow: `inset 0 0 0 ${size.hairline} ${colors.border}`,
   },
+  // The trigger: on the page (a page's bar) in the page's ink, as the original's Menu button; in the
+  // sidebar itself (its head, by its place in the page, so a dialog opened from the sidebar is the
+  // page again) the sidebar's quiet ink, the ink under a pointer.
+  trigger: {
+    color: {
+      default: colors.foreground,
+      ":is([data-sidebar=sidebar] *)": colors.sidebarSecondaryForeground,
+      [HOVER]: {
+        default: null,
+        ":is([data-sidebar=sidebar] *):hover": colors.sidebarForeground,
+      },
+    },
+  },
+  quiet: { fontWeight: font.weightNormal },
   // A button that is only its icon (a search in the head, the trigger): round, the icon button's
   // size, a finger's on a touch screen.
   icon: {
@@ -711,10 +704,7 @@ const styles = stylex.create({
     insetInlineEnd: space["2"],
     display: {
       default: "flex",
-      [stylex.when.ancestor(
-        '[data-state="collapsed"][data-collapsible="icon"]',
-        sidebarMarker
-      )]: "none",
+      [onRail()]: "none",
     },
     alignItems: "center",
     justifyContent: "center",
@@ -760,10 +750,7 @@ const styles = stylex.create({
   sub: {
     display: {
       default: "flex",
-      [stylex.when.ancestor(
-        '[data-state="collapsed"][data-collapsible="icon"]',
-        sidebarMarker
-      )]: "none",
+      [onRail()]: "none",
     },
     flexDirection: "column",
     gap: size.sidebarRowGap,
@@ -967,6 +954,61 @@ const applied = (
   now: boolean
 ) => (typeof value === "function" ? value(now) : value);
 
+/**
+ * A state the caller may keep (`given`, with its `onChange`) or leave to the provider, else
+ * `fallback`; kept by the caller, the caller's is the only copy. An updater builds on the call
+ * before it in the same task (two in one event apply twice, as React's setState): what was set is
+ * held until the task ends, whether or not the caller took it.
+ */
+const useHeld = (
+  given: boolean | undefined,
+  fallback: boolean,
+  onChange: ((now: boolean) => void) | undefined
+) => {
+  const [own, setOwn] = useState<boolean>();
+  const value = given ?? own ?? fallback;
+  const unseen = useRef<boolean | null>(null);
+  const set = (next: boolean | ((now: boolean) => boolean)) => {
+    const now = applied(next, unseen.current ?? value);
+    if (unseen.current === null) {
+      queueMicrotask(() => {
+        unseen.current = null;
+      });
+    }
+    unseen.current = now;
+    if (given === undefined) {
+      setOwn(now);
+    }
+    onChange?.(now);
+  };
+  return [value, set] as const;
+};
+
+/**
+ * Whether focus can be on an element now: in the page, drawn (not in a folded group, not a nested
+ * row or an action the rail hides), not out of reach (`inert`, as a level not shown is), and not in
+ * a sidebar folded off the canvas. Its `visibility` is not read: a sidebar sliding in is hidden
+ * until its slide has begun, and one sliding away is drawn until it ends.
+ */
+const inReach = (element: Element) =>
+  element.isConnected &&
+  element.checkVisibility() &&
+  element.closest(
+    '[inert], [data-slot="sidebar"][data-collapsible="offcanvas"][data-state="collapsed"]'
+  ) === null;
+
+/**
+ * Where focus lands in a level it is moved into, or in a sidebar that opened while what held it went:
+ * what held it there before, on the way back to a level; else the page you are on; else its first
+ * stop. One that cannot take focus now (its group folded, its row gone) is passed over.
+ */
+const landingIn = (level: HTMLElement, opener?: HTMLElement) =>
+  [
+    opener !== undefined && level.contains(opener) ? opener : null,
+    level.querySelector<HTMLElement>('[aria-current="page"]'),
+    ...level.querySelectorAll<HTMLElement>("a[href], button:not(:disabled)"),
+  ].find((stop) => stop !== null && inReach(stop));
+
 /** Every prop a SidebarProvider takes. */
 export interface SidebarProviderProps {
   /** The Sidebar and the SidebarInset beside it. */
@@ -978,8 +1020,15 @@ export interface SidebarProviderProps {
    * @default true
    */
   defaultOpen?: boolean;
-  /** Runs with the new state when the trigger, the rail or the keys fold or open it. */
+  /** Runs with the new state when the trigger or the keys fold or open it. */
   onOpenChange?: (open: boolean) => void;
+  /**
+   * The sheet is open now, on a narrow window. Pass it with `onOpenMobileChange` to keep the state
+   * yourself (a store that outlives the frame, a sign-out that closes it).
+   */
+  openMobile?: boolean;
+  /** Runs with the new state when the trigger, the keys or the sheet itself open or close the sheet. */
+  onOpenMobileChange?: (open: boolean) => void;
   /**
    * Where the person's choices are kept in localStorage, so they stay as they left them: whether
    * it is open, and which SidebarCollapsible groups are folded (each under `storageKey:name`). Put
@@ -1003,67 +1052,61 @@ export const SidebarProvider = ({
   open: given,
   defaultOpen = true,
   onOpenChange,
+  openMobile: givenMobile,
+  onOpenMobileChange,
   storageKey,
   keyboardShortcut = SIDEBAR_KEYBOARD_SHORTCUT,
   style,
 }: SidebarProviderProps) => {
   const { toggle } = useI18n().sidebar;
-  const [own, setOwn] = useState<boolean>();
-  const [openMobile, setOpenMobile] = useState(false);
   const kept = useSyncExternalStore(
     watchKept,
     () => readKept(storageKey),
     nothingKept
   );
   const isMobile = useSyncExternalStore(watchMobile, onMobile, notOnMobile);
-  const open = given ?? own ?? kept ?? defaultOpen;
+  const [open, setOpen] = useHeld(given, kept ?? defaultOpen, (now) => {
+    keep(storageKey, now);
+    onOpenChange?.(now);
+  });
+  const [openMobile, setOpenMobile] = useHeld(
+    givenMobile,
+    false,
+    onOpenMobileChange
+  );
   const id = useId();
   const element = useRef<HTMLDivElement | null>(null);
 
-  // The state set in this event and not drawn yet, so an updater builds on the call before it
-  // (two in one event apply twice, as React's setState); cleared once the change is drawn.
-  const unseen = useRef<boolean | null>(null);
-  // Folded off the canvas while focus was inside it: once the fold is drawn, focus goes to the
-  // trigger that is still in reach (the page's, which may only show while the sidebar is away).
-  const stranded = useRef(false);
+  // What held focus as the trigger or the keys folded or opened it. Once the change is
+  // drawn, if that went out of reach (folded away with it, hidden on the rail, or a trigger in the
+  // page that shows only while the sidebar is away), focus goes to a trigger still in reach, else
+  // to the open sidebar's current row.
+  const held = useRef<Element | null>(null);
   useEffect(() => {
-    unseen.current = null;
-    if (stranded.current) {
-      stranded.current = false;
-      const wrapper = element.current;
-      const triggers =
-        wrapper?.querySelectorAll<HTMLElement>(
-          '[data-slot="sidebar-trigger"]'
-        ) ?? [];
-      [...triggers]
-        .find(
-          (trigger) =>
-            trigger.closest(
-              '[data-slot="sidebar"][data-collapsible="offcanvas"]'
-            ) === null
-        )
-        ?.focus();
+    const before = held.current;
+    held.current = null;
+    if (before === null || inReach(before)) {
+      return;
     }
+    const wrapper = element.current;
+    const trigger = [
+      ...(wrapper?.querySelectorAll<HTMLElement>(
+        '[data-slot="sidebar-trigger"]'
+      ) ?? []),
+    ].find(inReach);
+    const sidebar = wrapper?.querySelector<HTMLElement>(
+      '[data-slot="sidebar"]'
+    );
+    (trigger ?? (open && sidebar ? landingIn(sidebar) : undefined))?.focus();
   });
-  const setOpen = (value: boolean | ((now: boolean) => boolean)) => {
-    const now = applied(value, unseen.current ?? open);
-    unseen.current = now;
-    keep(storageKey, now);
-    setOwn(now);
-    onOpenChange?.(now);
-  };
 
   const toggleSidebar = () => {
     if (isMobile) {
       setOpenMobile((now) => !now);
       return;
     }
-    // Folded off the canvas, what holds focus inside goes out of reach.
-    const away = element.current?.querySelector(
-      '[data-slot="sidebar"][data-collapsible="offcanvas"]'
-    );
-    stranded.current = open && away?.contains(document.activeElement) === true;
-    setOpen(!open);
+    held.current = document.activeElement;
+    setOpen((now) => !now);
   };
 
   const shortcut = keyboardShortcut === false ? "" : keyboardShortcut;
@@ -1073,6 +1116,11 @@ export const SidebarProvider = ({
   );
   useShortcut(shortcut === "" ? null : shortcut, toggleSidebar, {
     when: () => answers(element.current),
+    // The sidebar's own layer: on a narrow window its sheet, so the keys close it as they opened it.
+    // The id is escaped: React builds it from the app's identifierPrefix, and a colon or a dot in
+    // that would make a bare "#id" an invalid selector, throwing inside the keys' handler.
+    layer: () =>
+      document.querySelector(`#${CSS.escape(id)}`) ?? element.current,
     description: toggle,
   });
 
@@ -1157,7 +1205,7 @@ export const sidebarStateScript = (storageKey: string): string =>
 
 /** Every prop a Sidebar takes. */
 export interface SidebarProps {
-  /** Its SidebarHeader, SidebarContent, SidebarFooter and SidebarRail, top to bottom. */
+  /** Its SidebarHeader, SidebarContent and SidebarFooter, top to bottom. */
   children: ReactNode;
   /**
    * The side it stands on. Both follow the reading direction: `start` is the left in English.
@@ -1200,60 +1248,49 @@ export const Sidebar = ({
     useSidebarState("Sidebar");
   const label = named ?? name;
   const floating = variant === "floating";
+  // Its ground parts it from the page; in forced colours a line does, on the page's side.
+  const edge =
+    variant === "sidebar" &&
+    (side === "start" ? styles.edgeStart : styles.edgeEnd);
 
+  let sidebar: ReactNode;
   if (collapsible === "none") {
-    return (
-      <SideContext value={side}>
-        <aside
-          aria-label={label}
-          data-slot="sidebar"
-          data-side={side}
-          data-variant={variant}
-          data-collapsible="none"
-          {...stylex.props(styles.aside, styles.asideFixed, style)}
+    sidebar = (
+      <aside
+        aria-label={label}
+        data-slot="sidebar"
+        data-side={side}
+        data-variant={variant}
+        data-collapsible="none"
+        {...stylex.props(styles.aside, styles.asideFixed, style)}
+      >
+        <div
+          data-sidebar="sidebar"
+          {...stylex.props(styles.ground, styles.inner, edge)}
         >
+          {children}
+        </div>
+      </aside>
+    );
+  } else if (isMobile) {
+    sidebar = (
+      <Sheet open={openMobile} onOpenChange={setOpenMobile}>
+        <SheetContent side={side} showCloseButton={false} aria-label={label}>
           <div
+            id={id}
+            data-slot="sidebar"
             data-sidebar="sidebar"
-            {...stylex.props(
-              styles.inner,
-              variant === "sidebar" &&
-                (side === "start" ? styles.edgeStart : styles.edgeEnd)
-            )}
+            data-mobile="true"
+            data-side={side}
+            {...stylex.props(sidebarMarker, styles.ground, styles.sheet)}
           >
             {children}
           </div>
-        </aside>
-      </SideContext>
+        </SheetContent>
+      </Sheet>
     );
-  }
-
-  if (isMobile) {
-    return (
-      <SideContext value={side}>
-        <Sheet
-          open={openMobile}
-          onOpenChange={(open) => {
-            setOpenMobile(open);
-          }}
-        >
-          <SheetContent side={side} showCloseButton={false} aria-label={label}>
-            <div
-              data-slot="sidebar"
-              data-sidebar="sidebar"
-              data-mobile="true"
-              data-side={side}
-              {...stylex.props(styles.sheet)}
-            >
-              {children}
-            </div>
-          </SheetContent>
-        </Sheet>
-      </SideContext>
-    );
-  }
-
-  return (
-    <SideContext value={side}>
+  } else {
+    sidebar = (
       <aside
         aria-label={label}
         data-slot="sidebar"
@@ -1280,21 +1317,29 @@ export const Sidebar = ({
               side === "start" &&
               styles.offcanvasStart,
             floating && styles.roomy,
-            variant === "sidebar" &&
-              (side === "start" ? styles.edgeStart : styles.edgeEnd)
+            edge
           )}
         >
           <div
             data-sidebar="sidebar"
-            {...stylex.props(styles.inner, floating && styles.floating)}
+            {...stylex.props(
+              styles.ground,
+              styles.inner,
+              floating && styles.floating
+            )}
           >
             {children}
           </div>
         </div>
       </aside>
-    </SideContext>
-  );
+    );
+  }
+  return <SideContext value={side}>{sidebar}</SideContext>;
 };
+
+/** A button's title: its name, and its keys when it has them. */
+const titled = (label: string, keys: SidebarState["keys"]) =>
+  keys === undefined ? label : `${label} (${keys.text})`;
 
 /** Every prop a SidebarTrigger takes. */
 export interface SidebarTriggerProps {
@@ -1332,49 +1377,21 @@ export const SidebarTrigger = ({
       aria-expanded={isMobile ? openMobile : open}
       aria-controls={isMobile ? undefined : id}
       aria-keyshortcuts={keys?.aria}
-      title={keys === undefined ? label : `${label} (${keys.text})`}
+      title={titled(label, keys)}
       onClick={(event) => {
         onClick?.(event);
         toggleSidebar();
       }}
-      {...stylex.props(styles.button, styles.icon, focusRingInset, style)}
+      {...stylex.props(
+        styles.button,
+        styles.icon,
+        styles.trigger,
+        focusRingInset,
+        style
+      )}
     >
       <Icon icon={PanelLeftIcon} />
     </button>
-  );
-};
-
-/** Every prop a SidebarRail takes. */
-export interface SidebarRailProps {
-  /** Layout only. */
-  style?: LayoutStyle;
-}
-
-/**
- * The thin rail along the sidebar's inner edge: a press folds or opens it. For a pointer: the
- * keyboard has the trigger and the keys, so it is no tab stop.
- */
-export const SidebarRail = ({ style }: SidebarRailProps) => {
-  const { toggle } = useI18n().sidebar;
-  const { open, toggleSidebar, id, keys } = useSidebarState("SidebarRail");
-  const side = use(SideContext);
-  return (
-    <button
-      type="button"
-      data-slot="sidebar-rail"
-      aria-label={toggle}
-      aria-expanded={open}
-      aria-controls={id}
-      aria-keyshortcuts={keys?.aria}
-      tabIndex={-1}
-      title={keys === undefined ? toggle : `${toggle} (${keys.text})`}
-      onClick={toggleSidebar}
-      {...stylex.props(
-        styles.rail,
-        side === "start" ? styles.railStart : styles.railEnd,
-        style
-      )}
-    />
   );
 };
 
@@ -1515,6 +1532,12 @@ interface SlotPartProps extends PartProps {
   asChild?: boolean;
 }
 
+/** A part's props, with `type="button"` when it draws its own button rather than the caller's. */
+const asButton = <Rest extends object>(
+  asChild: boolean | undefined,
+  rest: Rest
+) => (asChild === true ? rest : { type: "button", ...rest });
+
 /** A part's own element, or with `asChild` the caller's, with the part's props merged onto it. */
 const drawn = (
   tag: string,
@@ -1570,14 +1593,8 @@ const withLabel = (children: ReactNode) => {
 
 /** Whether a row's own words run past their box. */
 const isCut = (row: HTMLElement | null) => {
-  const label = row?.querySelector<HTMLElement>(
-    ':scope > [data-slot="sidebar-menu-label"]'
-  );
-  return (
-    label !== null &&
-    label !== undefined &&
-    label.scrollWidth > label.clientWidth
-  );
+  const label = row?.querySelector(':scope > [data-slot="sidebar-menu-label"]');
+  return (label?.scrollWidth ?? 0) > (label?.clientWidth ?? 0);
 };
 
 interface RowElementProps {
@@ -1591,7 +1608,10 @@ interface RowElementProps {
   children: ReactNode;
 }
 
-/** A row's element as its tooltip's trigger: the trigger's props arrive here, merged onto the row. */
+/**
+ * A row's element as its tooltip's trigger: the trigger's props arrive here, merged onto the row,
+ * which keeps its own slot.
+ */
 const RowElement = ({
   tag,
   render,
@@ -1600,7 +1620,11 @@ const RowElement = ({
   children,
   ...trigger
 }: RowElementProps & Record<string, unknown>) => {
-  const { "aria-describedby": description, ...plain } = trigger;
+  const {
+    "aria-describedby": description,
+    "data-slot": _slot,
+    ...plain
+  } = trigger;
   return renderElement(
     tag,
     mergeProps(
@@ -1695,9 +1719,6 @@ export interface SidebarCollapsibleProps {
   onOpenChange?: (open: boolean) => void;
 }
 
-const awake = () => true;
-const asleep = () => false;
-
 /** What takes focus inside an element, in the page's order. */
 const stopsIn = (element: HTMLElement | null): HTMLElement[] => [
   ...(element?.querySelectorAll<HTMLElement>(
@@ -1724,14 +1745,17 @@ export const SidebarCollapsible = ({
     () => readKept(key),
     nothingKept
   );
-  const isAwake = useSyncExternalStore(watchKept, awake, asleep);
   const [own, setOwn] = useState<boolean>();
   // Whether the fold kept differed from the one first drawn, said once, as the page wakes: the
-  // Collapsible is then a new one (its key), which starts as kept with nothing to move.
+  // Collapsible is then a new one (its key), which starts as kept with nothing to move. Said in a
+  // layout effect, so the new one is drawn before the first paint after waking: never a frame of
+  // the first one folded where the head script had opened it.
   const [start, setStart] = useState<"first" | "same" | "kept">("first");
-  if (isAwake && start === "first") {
-    setStart(kept !== undefined && kept !== defaultOpen ? "kept" : "same");
-  }
+  useLayoutEffect(() => {
+    const now = readKept(key);
+    // oxlint-disable-next-line react/set-state-in-effect -- what the head script drew is known only once the page runs, and must be drawn before it paints
+    setStart(now !== undefined && now !== defaultOpen ? "kept" : "same");
+  }, [key, defaultOpen]);
   // Drawn anew, the group's elements are new ones: focus that stood in it before the page woke
   // (on its label, most often) is put back on the same stop, or on the first when that one is
   // now folded away.
@@ -1814,17 +1838,11 @@ export const SidebarGroupAction = ({
   style,
   ...rest
 }: SidebarGroupActionProps) =>
-  drawn(
-    "button",
-    asChild,
-    children,
-    asChild === true ? rest : { type: "button", ...rest },
-    {
-      "data-slot": "sidebar-group-action",
-      "data-sidebar": "group-action",
-      ...stylex.props(styles.action, styles.groupAction, focusRingInset, style),
-    }
-  );
+  drawn("button", asChild, children, asButton(asChild, rest), {
+    "data-slot": "sidebar-group-action",
+    "data-sidebar": "group-action",
+    ...stylex.props(styles.action, styles.groupAction, focusRingInset, style),
+  });
 
 /** Every prop a SidebarGroupContent takes. */
 export interface SidebarGroupContentProps extends PartProps, Own<"div"> {
@@ -1884,10 +1902,12 @@ export interface SidebarMenuButtonProps extends SlotPartProps, Own<"button"> {
    */
   size?: "default" | "sm" | "lg" | "icon";
   /**
-   * `default` lies on the sidebar's ground; `outline` stands on the page's ground with a hairline.
+   * `default` lies on the sidebar's ground, a place's words in the medium weight; `quiet`, a thing
+   * in a list of them (a chat, a file), its words in the regular weight, cut and shown whole in a
+   * tooltip as any row's; `outline` stands on the page's ground with a hairline.
    * @default "default"
    */
-  variant?: "default" | "outline";
+  variant?: "default" | "quiet" | "outline";
 }
 
 /** A place: a link (with `asChild`) or a button, with its icon and its words. */
@@ -1913,6 +1933,7 @@ export const SidebarMenuButton = ({
       sized === "lg" && styles.lg,
       sized === "icon" && styles.icon,
       variant === "outline" && styles.outline,
+      variant === "quiet" && styles.quiet,
       isActive && styles.active,
       focusRingInset,
       style
@@ -1922,10 +1943,7 @@ export const SidebarMenuButton = ({
     <Row
       tag="button"
       asChild={asChild}
-      base={mergeProps(
-        asChild === true ? rest : { type: "button", ...rest },
-        own
-      )}
+      base={mergeProps(asButton(asChild, rest), own)}
       tooltip={tooltip}
     >
       {children}
@@ -1953,23 +1971,17 @@ export const SidebarMenuAction = ({
   style,
   ...rest
 }: SidebarMenuActionProps) =>
-  drawn(
-    "button",
-    asChild,
-    children,
-    asChild === true ? rest : { type: "button", ...rest },
-    {
-      "data-slot": "sidebar-menu-action",
-      "data-sidebar": "menu-action",
-      ...stylex.props(
-        styles.action,
-        styles.menuAction,
-        showOnHover && styles.showOnHover,
-        focusRingInset,
-        style
-      ),
-    }
-  );
+  drawn("button", asChild, children, asButton(asChild, rest), {
+    "data-slot": "sidebar-menu-action",
+    "data-sidebar": "menu-action",
+    ...stylex.props(
+      styles.action,
+      styles.menuAction,
+      showOnHover && styles.showOnHover,
+      focusRingInset,
+      style
+    ),
+  });
 
 /** Every prop a SidebarMenuBadge takes. */
 export interface SidebarMenuBadgeProps extends PartProps, Own<"div"> {
@@ -2128,24 +2140,6 @@ const useLevels = (name: string): LevelsState => {
   }
   return levels;
 };
-
-/** Whether focus can go to it now: drawn (not in a folded group), and not out of reach. */
-const inReach = (element: HTMLElement) =>
-  element.isConnected &&
-  element.checkVisibility({ visibilityProperty: true }) &&
-  element.closest("[inert]") === null;
-
-/**
- * Where focus lands in a level it is moved into: what held it there before, on the way back; else
- * the page you are on; else its first stop. One that cannot take focus now (its group folded,
- * its row gone) is passed over.
- */
-const landingIn = (level: HTMLElement, opener: HTMLElement | undefined) =>
-  [
-    opener !== undefined && level.contains(opener) ? opener : null,
-    level.querySelector<HTMLElement>('[aria-current="page"]'),
-    ...level.querySelectorAll<HTMLElement>("a[href], button:not(:disabled)"),
-  ].find((stop) => stop !== null && inReach(stop));
 
 /** Every prop a SidebarLevels takes. */
 export interface SidebarLevelsProps {

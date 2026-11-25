@@ -308,16 +308,17 @@ const styles = stylex.create({
     transitionTimingFunction: duration.ease,
   },
   // The bar's own height (its row: a control and space-1 round it), so failing never shrinks it.
-  // As tall as the bar, its line in the middle; on a narrow bar the words wrap and the mark stays
-  // on their first line.
+  // Its line in the middle of the bar; on a narrow bar the words wrap within that height first,
+  // and the mark stays on their first line.
   error: {
-    display: "flex",
-    alignItems: "flex-start",
-    gap: space["2"],
+    display: "grid",
+    gridTemplateColumns: "auto minmax(0, 1fr)",
+    alignContent: "center",
+    alignItems: "start",
+    columnGap: space["2"],
     boxSizing: "border-box",
     minHeight: `calc(${size.controlSm} + 2 * ${space["1"]})`,
     margin: 0,
-    paddingBlock: `calc((${size.controlSm} + 2 * ${space["1"]} - ${font.textSmLine}) / 2)`,
     paddingInline: space["3"],
     color: colors.destructive,
     fontSize: font.textSm,

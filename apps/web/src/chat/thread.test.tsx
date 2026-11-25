@@ -864,11 +864,19 @@ describe(ChatThread, () => {
       end,
       at,
     });
-    /** What the stopped answer shows: its words, and each Stopped under them. */
+    /**
+     * What the stopped answer shows: its words, and each Stopped shown. Damsko
+     * draws Stopped on the actions' row when the answer has actions, and hides
+     * the one under its words then (by CSS, which this DOM does not apply).
+     */
     const shown = () => ({
       status: answer()?.dataset.status,
       notes: [
-        ...(answer()?.querySelectorAll('[data-slot="message-stopped"]') ?? []),
+        ...(answer()?.querySelectorAll(
+          answer()?.querySelector('[data-slot="message-actions"]')
+            ? '[data-slot="message-actions"] [data-slot="message-stopped"]'
+            : '[data-slot="message-stopped"]'
+        ) ?? []),
       ].map((note) => note.textContent),
       words: [
         ...(answer()?.querySelectorAll('[data-slot="message-response"]') ?? []),
@@ -1078,5 +1086,55 @@ describe("answers given by the agents a question addressed", () => {
       claire: text.indexOf("Claire") < text.indexOf("Claire here"),
       gone: text.includes("An agent you can no longer ask"),
     }).toStrictEqual({ claire: true, gone: true });
+  });
+});
+
+/** The words of the thread's day lines, in order. */
+const dayLines = (): string[] =>
+  [...document.querySelectorAll("[role='log'] [data-slot='separator']")]
+    .map((line) => line.parentElement?.textContent ?? "")
+    .filter((words, at, all) => words !== "" && all.indexOf(words) === at);
+
+describe("a thread's day lines", () => {
+  afterEach(() => {
+    act(() => {
+      root?.unmount();
+    });
+    root = undefined;
+    document.body.replaceChildren();
+    vi.useRealTimers();
+  });
+
+  it("opens a thread from an earlier day with its day, and draws a line where the day changes, none over today's", async () => {
+    vi.useFakeTimers({ now: new Date(2026, 9, 28, 12), toFake: ["Date"] });
+    await thread([
+      {
+        ...questionOf(1, "Before"),
+        at: new Date(2026, 9, 26, 9).toISOString(),
+      },
+      { ...answerBy(2, "Then"), at: new Date(2026, 9, 26, 9, 1).toISOString() },
+      {
+        ...questionOf(3, "And now?"),
+        at: new Date(2026, 9, 27, 9).toISOString(),
+      },
+      { ...answerBy(4, "Yes"), at: new Date(2026, 9, 28, 9).toISOString() },
+    ]);
+    const earlier = dayLines();
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    await thread([
+      { ...questionOf(1, "Hi"), at: new Date(2026, 9, 28, 9).toISOString() },
+      {
+        ...answerBy(2, "Hello"),
+        at: new Date(2026, 9, 28, 9, 1).toISOString(),
+      },
+    ]);
+
+    expect({ earlier, today: dayLines() }).toStrictEqual({
+      earlier: ["Monday, October 26", "Yesterday", "Today"],
+      today: [],
+    });
   });
 });

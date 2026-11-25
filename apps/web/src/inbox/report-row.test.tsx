@@ -22,9 +22,10 @@ import type { Loaded } from "../load-from-core.tsx";
 import { ReportItem } from "./report-row.tsx";
 
 // The weekly report on the day it is ready, as the Inbox's row: pressed,
-// it opens in a sheet, and Download saves it as one HTML file, named by the
-// week it is on, that says what the report says and follows the colour
-// scheme of whatever opens it. Core is faked as the page reaches it over RPC.
+// it opens in a sheet, in the file viewer, and its Download saves it as one
+// HTML file, named by the week it is on, that says what the report says and
+// follows the colour scheme of whatever opens it. Core is faked as the page
+// reaches it over RPC.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -126,15 +127,32 @@ const settle = async () => {
   });
 };
 
-/** Presses the button whose words start with `words`. */
+/** The button whose words, or name where it shows only an icon, start with `words`. */
+const buttonOf = (words: string): HTMLButtonElement | undefined =>
+  [...document.querySelectorAll("button")].find(
+    (each) =>
+      each.textContent.trim().startsWith(words) ||
+      (each.getAttribute("aria-label") ?? "").startsWith(words)
+  );
+
+/** Presses the button whose words, or name, start with `words`. */
 const press = async (words: string) => {
   await act(async () => {
-    [...document.querySelectorAll("button")]
-      .find((each) => each.textContent.trim().startsWith(words))
-      ?.click();
+    buttonOf(words)?.click();
     await Promise.resolve();
   });
   await settle();
+};
+
+/** Waits until the viewer's Download can be pressed: the company's name is in. */
+const downloadReady = async () => {
+  await vi.waitFor(
+    async () => {
+      await settle();
+      expect(buttonOf("Download")?.disabled).toBeFalsy();
+    },
+    { timeout: 3000 }
+  );
 };
 
 describe("the weekly report in the inbox", () => {
@@ -147,7 +165,7 @@ describe("the weekly report in the inbox", () => {
     vi.restoreAllMocks();
   });
 
-  it("opens in a sheet, and Download saves it as one HTML file, named by its week, the company's name in it as text", async () => {
+  it("opens in the file viewer, whose Download saves it as one HTML file, named by its week, the company's name in it as text", async () => {
     const saved: { name: string; href: string }[] = [];
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(
       function save(this: HTMLAnchorElement) {
@@ -156,18 +174,7 @@ describe("the weekly report in the inbox", () => {
     );
     await shown(programme, "R&D <Labs>");
     await press("Your report on week 6 is ready");
-    await vi.waitFor(
-      async () => {
-        await settle();
-        expect(
-          [...document.querySelectorAll("button")].some(
-            (each) =>
-              each.textContent.trim().startsWith("Download") && !each.disabled
-          )
-        ).toBeTruthy();
-      },
-      { timeout: 3000 }
-    );
+    await downloadReady();
     await press("Download");
     await vi.waitFor(() => {
       expect(saved).toHaveLength(1);
@@ -214,18 +221,7 @@ describe("the weekly report in the inbox", () => {
     try {
       await shown();
       await press("Your report on week 6 is ready");
-      await vi.waitFor(
-        async () => {
-          await settle();
-          expect(
-            [...document.querySelectorAll("button")].some(
-              (each) =>
-                each.textContent.trim().startsWith("Download") && !each.disabled
-            )
-          ).toBeTruthy();
-        },
-        { timeout: 3000 }
-      );
+      await downloadReady();
       await press("Download");
       // The frame it prints from, caught on its way into the page.
       vi.spyOn(document.body, "append").mockImplementation((...nodes) => {
@@ -253,6 +249,58 @@ describe("the weekly report in the inbox", () => {
     } finally {
       font.remove();
     }
+  });
+
+  it("shows its file's name and kind, its code under Code, and finds its words", async () => {
+    await shown();
+    await press("Your report on week 6 is ready");
+    await downloadReady();
+    const viewer = document.querySelector(
+      'section[aria-label="weekly-report-week-06.html"]'
+    );
+    const bar = viewer?.textContent ?? "";
+    await press("Find in the file");
+    const field = document.querySelector<HTMLInputElement>(
+      'input[aria-label="Find in the file"]'
+    );
+    await act(async () => {
+      if (field !== null) {
+        Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          "value"
+        )?.set?.call(field, "Needed NOBODY");
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      await Promise.resolve();
+    });
+    await settle();
+    const found = viewer?.querySelector("output")?.textContent;
+    await press("Close find");
+    await press("Code");
+    await vi.waitFor(
+      async () => {
+        await settle();
+        expect(
+          viewer?.querySelector(
+            '[aria-label="Code of weekly-report-week-06.html"]'
+          )?.textContent
+        ).toContain("<!doctype html>");
+      },
+      { timeout: 3000 }
+    );
+    expect({
+      name: bar.includes("weekly-report-week-06.html"),
+      kind: bar.includes("HTML"),
+      found,
+      preview: viewer
+        ?.querySelector('[aria-label="Preview of weekly-report-week-06.html"]')
+        ?.hasAttribute("hidden"),
+    }).toStrictEqual({
+      name: true,
+      kind: true,
+      found: "1 of 1",
+      preview: true,
+    });
   });
 
   it("dates the week's runs by their calendar days, wherever the reader is", async () => {

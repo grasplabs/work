@@ -14,7 +14,7 @@
 //       <SheetBody>…</SheetBody>
 //       <SheetFooter>
 //         <SheetClose>Cancel</SheetClose>
-//         <Button size="sm" {...save.props}>Save</Button>
+//         <Button {...save.props}>Save</Button>
 //       </SheetFooter>
 //     </SheetContent>
 //   </Sheet>
@@ -214,7 +214,16 @@ const styles = stylex.create({
     height: `calc(100% - 2 * ${INSET})`,
     marginBlock: INSET,
     marginInline: INSET,
-    borderRadius: radius.xl,
+    // Holding a sidebar (on a narrow window), the page card's plain round corner, as the original's
+    // frame drew its menu.
+    borderRadius: {
+      default: radius.xl,
+      ":has(> [data-slot=sidebar])": radius.md,
+    },
+    cornerShape: {
+      default: radius.shape,
+      ":has(> [data-slot=sidebar])": "round",
+    },
     // It slides in from its side and back out to it (UI SDK marks the first and last frame), in
     // the library's open time; with reduced motion it is there and gone at once.
     translate: {
@@ -306,6 +315,11 @@ export interface SheetContentProps extends Omit<
    * @default true
    */
   showCloseButton?: boolean;
+  /**
+   * Its name, for a screen reader and an agent, when it shows no SheetTitle: a sheet whose own
+   * content heads it (a picture, a sidebar). With a SheetTitle, the title names it.
+   */
+  "aria-label"?: string;
   /** Layout only. */
   style?: LayoutStyle;
 }
@@ -453,7 +467,11 @@ export interface SheetFooterProps extends PartProps {
   children: ReactNode;
 }
 
-/** The actions, at the end of the line, at the sheet's foot. On a phone every Button in it takes an equal part of its width. */
+/**
+ * The actions, at the end of the line, at the sheet's foot. A Button directly in it that names no
+ * size is small, as SheetClose is, so its actions stand one height. On a phone every Button in it
+ * takes an equal part of its width.
+ */
 export const SheetFooter = ({ children, style }: SheetFooterProps) => (
   <div
     data-slot="sheet-footer"

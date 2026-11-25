@@ -1,43 +1,44 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Input } from "@grasp-os/app-kit/components/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/app-kit/components/select";
 import type { GateView } from "@grasp-os/shared/onboarding-gate";
 import type { Organization } from "@grasp-os/shared/organization";
 import { isAdmin, isMemberAdmin } from "@grasp-os/shared/roles";
+import { Combobox, ComboboxEmpty } from "@grasp-os/ui/components/combobox";
+import { FieldGroup } from "@grasp-os/ui/components/field";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { useLingui } from "@lingui/react/macro";
+import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 
-import { changeThenRefresh } from "../change-then-refresh.ts";
-import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
-import { formatList } from "../format.ts";
+import {
+  OwnAgentsCard,
+  readOwnAgentsAdmin,
+} from "../agents/own-agents-admin.tsx";
+import type { OwnAgentsAdmin } from "../agents/own-agents-admin.tsx";
 import { NotLoadedState } from "../frame/page-states.tsx";
+import { PageSkeletonSettings } from "../frame/skeletons/settings.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { OrgCard, OrgCardLoading } from "../settings/org-card.tsx";
 import {
+  SettingRow,
   SettingsError,
-  SettingsLoading,
-  SettingsRow,
-  SettingsSection,
-} from "../settings/settings-parts.tsx";
-import { SignInSection } from "../settings/sign-in-settings.tsx";
+  SettingsGroup,
+} from "../settings/section.tsx";
+import { SignInRow } from "../settings/sign-in-settings.tsx";
 import { StaffAccessSection } from "../settings/staff-access.tsx";
-import { useCoreAction } from "../use-core-action.ts";
+import { controlStyles } from "../settings/styles.ts";
+import {
+  useOrganizationChange,
+  useSaveWords,
+} from "../settings/workspace-name.tsx";
 
-// Settings → Workspace, as in the prototype (`routes/settings/workspace.tsx`):
-// the organization's name and the time zone it works in, which its admins
-// change, and where its data lives, which the deployment decides. Everyone
-// sees them; core refuses a change from anyone but the organization's own
-// admins. Then, for admins, Grasp's staff access (settings/staff-access.tsx).
+// Settings → Workspace: the organization's card at its head (its logo,
+// its name, and what the deployment decides: settings/org-card.tsx), then
+// the time zone it works in, which its admins change. Everyone sees them; core refuses a change from
+// anyone but the organization's own admins, and everyone else sees the
+// values read-only; for admins, how people sign in, as one of its rows
+// (settings/sign-in-settings.tsx). Then, for admins, Grasp's staff access
+// (settings/staff-access.tsx).
 
 /** The time zones to pick from, each by a city in the reader's language. */
 const zones: { value: string; label: MessageDescriptor }[] = [
@@ -115,52 +116,85 @@ const zones: { value: string; label: MessageDescriptor }[] = [
     label: msg({ message: "Athens", comment: "A time zone, by its city" }),
   },
 ];
-
 /** `timeZone`'s offset from UTC now, such as "GMT+2", in the reader's language. */
 const offsetOf = (timeZone: string, locale: string): string =>
   new Intl.DateTimeFormat(locale, { timeZone, timeZoneName: "shortOffset" })
     .formatToParts(new Date())
     .find((part) => part.type === "timeZoneName")?.value ?? "";
 
-type Change = (organization: Session["organization"]) => Promise<unknown>;
-
-/** The organization's name: saved when the field is left, or on Enter. */
-const NameField = ({
-  name,
-  disabled,
-  onSave,
+/** The time zone Grasp works in, saved as it is chosen, and free to change again at once. */
+const TimeZoneField = ({
+  timeZone,
+  canChange,
 }: {
-  name: string;
-  disabled: boolean;
-  onSave: (name: string) => void;
+  timeZone: string;
+  canChange: boolean;
 }) => {
-  const [draft, setDraft] = useState<string | null>(null);
-  const save = (): void => {
-    const next = draft?.trim();
-    setDraft(null);
-    if (next !== undefined && next !== "" && next !== name) {
-      onSave(next);
-    }
+  const { t, i18n } = useLingui();
+  const words = useSaveWords();
+  const { busy, failure, status, change, idle } = useOrganizationChange();
+  // What core last took: the page's read catches up behind it.
+  const [saved, setSaved] = useState(timeZone);
+  // The zone a failed save tried, kept for Try again.
+  const [tried, setTried] = useState<string>();
+  const send = (value: string): void => {
+    setTried(value);
+    change(
+      async (api) => await api.update({ timeZone: value }),
+      (organization) => {
+        setSaved(organization.timeZone);
+        setTried(undefined);
+      }
+    );
   };
+  const known = zones.some((zone) => zone.value === saved);
+  const items = [
+    ...zones.map((zone) => {
+      const offset = offsetOf(zone.value, i18n.locale);
+      return {
+        value: zone.value,
+        label:
+          zone.value === "UTC"
+            ? i18n._(zone.label)
+            : `${i18n._(zone.label)} (${offset})`,
+        keywords: [zone.value, offset],
+      };
+    }),
+    // A zone set some other way is shown as it is named.
+    ...(known ? [] : [{ value: saved, label: saved, keywords: [] }]),
+  ];
   return (
-    <Input
-      disabled={disabled}
-      id="workspace-name"
-      maxLength={80}
-      onBlur={save}
-      onChange={(event) => {
-        setDraft(event.target.value);
-      }}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") {
-          event.currentTarget.blur();
-        }
-        if (event.key === "Escape") {
-          setDraft(null);
+    <SettingRow
+      {...words}
+      {...(failure === undefined ? {} : { error: failure })}
+      help={t`For schedules and the times Grasp shows`}
+      label={t`Time zone`}
+      onRetry={() => {
+        if (tried !== undefined) {
+          send(tried);
         }
       }}
-      value={draft ?? name}
-    />
+      status={status}
+    >
+      <Combobox
+        items={items}
+        style={controlStyles.fill}
+        onValueChange={(value) => {
+          idle();
+          if (value !== null && value !== saved) {
+            send(value);
+          }
+        }}
+        placeholder={t`Search time zones`}
+        // Read-only while its own save runs, not disabled: a disabled field drops the keyboard's focus.
+        readOnly={!canChange || busy}
+        size="sm"
+        triggerLabel={t`Show the time zones`}
+        value={saved}
+      >
+        <ComboboxEmpty>{t`No time zone by that name`}</ComboboxEmpty>
+      </Combobox>
+    </SettingRow>
   );
 };
 
@@ -171,113 +205,19 @@ const WorkspaceSettings = ({
   organization: Organization;
   canChange: boolean;
 }) => {
-  const { t, i18n } = useLingui();
-  const router = useRouter();
-  const { busy, failure, run } = useCoreAction();
-  const change = (update: Change): void => {
-    void run(async (session) => {
-      await changeThenRefresh(
-        async () => await update(session.organization),
-        async () => {
-          await router.invalidate({ sync: true });
-        }
-      );
-    });
-  };
-  const known = zones.some((zone) => zone.value === organization.timeZone);
-  const timeZones = [
-    ...zones.map((zone) => ({
-      value: zone.value,
-      label:
-        zone.value === "UTC"
-          ? i18n._(zone.label)
-          : `${i18n._(zone.label)} (${offsetOf(zone.value, i18n.locale)})`,
-    })),
-    // A zone set some other way is shown as it is named.
-    ...(known
-      ? []
-      : [{ value: organization.timeZone, label: organization.timeZone }]),
-  ];
-  const domains = organization.signInDomains;
+  const { t } = useLingui();
   return (
     <>
-      <SettingsSection
-        description={t`How your organization is named in Grasp.`}
-        title={t({ message: "Workspace", context: "settings section" })}
-      >
-        <SettingsRow
-          description={
-            canChange
-              ? t`Your company’s name in Grasp.`
-              : t`Your company’s name in Grasp. An admin changes it.`
-          }
-          htmlFor="workspace-name"
-          label={t`Name`}
-        >
-          <NameField
-            disabled={!canChange || busy}
-            name={organization.name}
-            onSave={(name) => {
-              change(async (api) => await api.update({ name }));
-            }}
+      <OrgCard canChange={canChange} organization={organization} />
+      <SettingsGroup flush title={t`Settings`}>
+        <FieldGroup>
+          <TimeZoneField
+            canChange={canChange}
+            timeZone={organization.timeZone}
           />
-        </SettingsRow>
-        <SettingsRow
-          description={t`People sign in with an address in these domains, through your organization’s account.`}
-          label={t`Sign-in domains`}
-        >
-          <span className="text-muted-foreground">{formatList(domains)}</span>
-        </SettingsRow>
-      </SettingsSection>
-      <SignInSection />
-      <SettingsSection
-        description={t`Where your data lives, and the time Grasp uses.`}
-        title={t`Region`}
-      >
-        <SettingsRow
-          description={t`Everything Grasp stores for your organization stays here.`}
-          label={t`Data location`}
-        >
-          <Badge variant="outline">
-            <Trans>European Union</Trans>
-          </Badge>
-        </SettingsRow>
-        <SettingsRow
-          description={t`For schedules and the times Grasp shows.`}
-          htmlFor="workspace-time-zone"
-          label={t`Time zone`}
-        >
-          <Select
-            disabled={!canChange || busy}
-            items={timeZones}
-            onValueChange={(value: unknown) => {
-              if (
-                typeof value === "string" &&
-                value !== organization.timeZone
-              ) {
-                change(async (api) => await api.update({ timeZone: value }));
-              }
-            }}
-            value={organization.timeZone}
-          >
-            <SelectTrigger className="w-full" id="workspace-time-zone">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {timeZones.map((zone) => (
-                <SelectItem key={zone.value} value={zone.value}>
-                  {zone.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </SettingsRow>
-        {failure === undefined ? null : (
-          <div className="border-t px-5 py-3">
-            <ErrorText>{failure}</ErrorText>
-          </div>
-        )}
-      </SettingsSection>
+          <SignInRow />
+        </FieldGroup>
+      </SettingsGroup>
     </>
   );
 };
@@ -295,15 +235,34 @@ const StaffAccess = ({
     return <StaffAccessSection editable={editable} staff={read.data} />;
   }
   return (
-    <SettingsSection title={t`Grasp staff access`}>
+    <SettingsGroup title={t`Grasp staff access`}>
       <NotLoadedState heading="h3" page={read} />
-    </SettingsSection>
+    </SettingsGroup>
+  );
+};
+
+/** People's own agents, as core answered an admin. */
+const OwnAgents = ({
+  read,
+  editable,
+}: {
+  read: Loaded<OwnAgentsAdmin>;
+  editable: boolean;
+}) => {
+  const { t } = useLingui();
+  if (read.state === "ready") {
+    return <OwnAgentsCard admin={read.data} editable={editable} />;
+  }
+  return (
+    <SettingsGroup title={t`People's own agents`}>
+      <NotLoadedState heading="h3" page={read} />
+    </SettingsGroup>
   );
 };
 
 const Workspace = () => {
   const { t } = useLingui();
-  const { page, staff } = Route.useLoaderData();
+  const { page, staff, ownAgents } = Route.useLoaderData();
   const { identity } = Route.useRouteContext();
   const editable = isMemberAdmin(identity);
   return (
@@ -311,11 +270,12 @@ const Workspace = () => {
       {page.state === "ready" ? (
         <WorkspaceSettings canChange={editable} organization={page.data} />
       ) : (
-        <SettingsSection
-          title={t({ message: "Workspace", context: "settings section" })}
-        >
+        <SettingsGroup title={t`Organization`}>
           <NotLoadedState heading="h3" page={page} />
-        </SettingsSection>
+        </SettingsGroup>
+      )}
+      {ownAgents === undefined ? null : (
+        <OwnAgents editable={editable} read={ownAgents} />
       )}
       {staff === undefined ? null : (
         <StaffAccess editable={editable} read={staff} />
@@ -324,21 +284,40 @@ const Workspace = () => {
   );
 };
 
+/** The organization's card, the time zone and sign-in, people's own agents, then staff access. */
+const WorkspacePending = () => {
+  const { identity } = Route.useRouteContext();
+  return (
+    <>
+      <OrgCardLoading canChange={isMemberAdmin(identity)} />
+      <PageSkeletonSettings sections={[2, 2, 1]} />
+    </>
+  );
+};
+
 export const Route = createFileRoute("/_shell/settings/workspace")({
-  pendingComponent: SettingsLoading,
+  pendingComponent: WorkspacePending,
   errorComponent: SettingsError,
   component: Workspace,
   loader: async ({ context: { core, identity } }) => {
-    // Staff access is for admins only: nobody else is asked.
-    const [page, staff] = await Promise.all([
+    // Staff access and people's own agents are for admins only: nobody
+    // else is asked.
+    const admin = isAdmin(identity.role);
+    const [page, staff, ownAgents] = await Promise.all([
       loadFromCore(core, async (session) => await session.organization.get()),
-      isAdmin(identity.role)
+      admin
         ? loadFromCore(core, async (session) => {
             const gate = await session.onboardingGate.view();
             return gate.staff;
           })
         : undefined,
+      admin
+        ? loadFromCore(
+            core,
+            async (session) => await readOwnAgentsAdmin(session)
+          )
+        : undefined,
     ]);
-    return { page, staff };
+    return { page, staff, ownAgents };
   },
 });

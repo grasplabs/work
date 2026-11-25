@@ -18,6 +18,12 @@
   --damsko-brand-ink: oklch(0.267 0.048 169.88);
   /* The last stop: the dark at the centre of the glass. */
   --damsko-brand-night: oklch(0.173 0.028 169.36);
+  /* How strongly the light shows as a faint dither behind the head of the one thing a page is about (a banner, a side panel's cover): a texture you find, not a pattern you see. */
+  --damsko-texture-strength: 0.3;
+  /* One dot of that dither: the light shows through a fine grid of these, the original's. */
+  --damsko-texture-dot: 0.75px;
+  /* How far apart the dither's dots stand, each way. */
+  --damsko-texture-pitch: 3px;
   /* Colour: grounds. */
   /* The page: the ground most things stand on. */
   --damsko-background: light-dark(oklch(0.992 0.002 165.08), var(--damsko-brand-night));
@@ -173,7 +179,7 @@
   --damsko-radius-sm: 6px;
   /* The page's card beside an inset sidebar: a plain round corner, as the app's main surface was drawn. */
   --damsko-radius-md: 12px;
-  /* A row: a menu or list item, a tree or sidebar row, a trigger that runs the width. The base less the 4px a container keeps round its rows, capped at half the row's height. */
+  /* A row: a menu or list item, a tree row, a trigger that runs the width. The base less the 4px a container keeps round its rows, capped at half the row's height. */
   --damsko-radius-lg: calc(var(--damsko-radius) - 4px);
   /* Controls and containers: buttons, fields, cards, menus, panels. Capped at half the height. */
   --damsko-radius-xl: var(--damsko-radius);
@@ -277,8 +283,12 @@
   --damsko-success-light-rest: 0 0;
   /* Where the approve light moves under a pointer: a step deeper. */
   --damsko-success-light-lean: 0 50%;
+  /* Where the approve light moves while pressed: its deepest part. */
+  --damsko-success-light-press: 0 100%;
   /* The mint an approving action casts under itself at rest: its light spilling onto the ground. */
   --damsko-success-glow: light-dark(oklch(0.8005 0.1625 165.25 / 0.5), oklch(0.85 0.15 150 / 0.36));
+  /* success-glow under a pointer: one step stronger. */
+  --damsko-success-glow-hover: light-dark(oklch(0.8005 0.1625 165.25 / 0.7), oklch(0.85 0.15 150 / 0.52));
   /* The light over a filled control: white at the top edge, fading to nothing at the foot. */
   --damsko-button-sheen: oklch(1 0 0 / 0.1);
   /* How far a control gives under a press. */
@@ -314,6 +324,10 @@
   --damsko-bevel-success-face: inset 0 0.75px 0 light-dark(oklch(1 0 0 / 0.18), oklch(1 0 0 / 0.22)), inset 0 -0.75px 0 oklch(1 0 0 / 0.06), inset 0 0 0 1px oklch(0.36 0.07 173 / 0.7), inset 0 -6px 12px oklch(0.3 0.06 173 / 0.3);
   /* The bevelled edge of an approving action at rest, with its glow: held inside the field's lift under it, so beside another button it draws no taller (tests/button.spec.ts, its test of one height per size). */
   --damsko-bevel-success: var(--damsko-bevel-success-face), 0 1px 3px -3px var(--damsko-success-glow), var(--damsko-input-shadow);
+  /* bevel-success under a pointer: the drop grows and the glow comes up. */
+  --damsko-bevel-success-hover: var(--damsko-bevel-success-face), 0 4px 12px -7px var(--damsko-success-glow-hover), var(--damsko-button-shadow-hover);
+  /* bevel-success while pressed: the drop and the glow tighten. */
+  --damsko-bevel-success-press: var(--damsko-bevel-success-face), 0 2px 6px -6px var(--damsko-success-glow), var(--damsko-button-shadow-active);
   /* Controls: pressed and failed. */
   /* action-fill while pressed: one step deeper than rest, so a press shows in the fill too. */
   --damsko-primary-active: light-dark(oklch(0.27 0.05 168), oklch(0.88 0.02 152));
@@ -476,6 +490,8 @@
   --damsko-tooltip: light-dark(oklch(0.173 0.028 169.36 / 0.9), oklch(0.37 0.03 168 / 0.9));
   /* The words on a tooltip. */
   --damsko-tooltip-foreground: oklch(0.965 0.014 150);
+  /* The quiet words on a tooltip: the keys of its shortcut, at the end of its line. */
+  --damsko-tooltip-muted-foreground: oklch(0.78 0.025 158);
   /* How long the pointer rests on a control before its tooltip opens. The next one opens at once. */
   --damsko-tooltip-delay: 300ms;
   /* How far a tooltip stands off its trigger: clear of the pointer resting on it. */
@@ -879,6 +895,8 @@
   --damsko-prompt-input-mention-width: 18rem;
   /* The least width of a one-row prompt input's text: with less room beside the tools, the text takes the row and the tools go under it. The text never gives. */
   --damsko-prompt-input-field-min: 8rem;
+  /* The least width of a one-row prompt input's placeholder at rest: with less room, its model chip's level folds to the maker's mark, then the chip folds away until something is typed. Only then is the placeholder cut. */
+  --damsko-prompt-input-placeholder-min: 6rem;
   /* The working light over a prompt input's top edge: lime, sea and mint in beams with gaps between, ending as it starts so it loops without a seam. */
   --damsko-prompt-input-light: linear-gradient(90deg, var(--damsko-brand-mint) 0%, var(--damsko-brand-sea) 12%, transparent 22%, var(--damsko-brand-lime) 34%, var(--damsko-brand-mint) 44%, transparent 54%, var(--damsko-brand-sea) 64%, var(--damsko-brand-lime) 76%, transparent 88%, var(--damsko-brand-mint) 100%);
   /* The working light in one accent colour, the colour set on the light's layer. */
@@ -944,6 +962,10 @@
   --damsko-sidebar-row-gap: 2px;
   /* A row's padding at its sides. */
   --damsko-sidebar-row-inline: 8px;
+  /* A row's corner, and a group's label's: a plain round corner, as the original's frame drew its rows. Its own token, not the row corner: the frame's rows are tighter than a list's. */
+  --damsko-sidebar-row-radius: 6px;
+  /* A large row's corner (the person at the sidebar's foot): the page card's corner and the rows' inset less the gutter, so it nests in the sidebar's foot. */
+  --damsko-sidebar-row-radius-lg: 10px;
   /* The room between a row's icon and its words. */
   --damsko-sidebar-icon-gap: 10px;
   /* A row's icon. */
@@ -1118,8 +1140,6 @@
   /* Page header: page header. */
   /* The width of a page title's placeholder while the page loads. */
   --damsko-page-title-wait: 280px;
-  /* How strongly the dither shows behind an inspector's head: a texture you find, not a pattern you see. */
-  --damsko-page-header-dither-strength: 0.3;
   /* Stepper: stepper. */
   /* The circle that marks a step in a stepper: a chip's height. */
   --damsko-stepper-mark: var(--damsko-chip);

@@ -4,10 +4,11 @@ import { useLingui } from "@lingui/react/macro";
 import { Link, useMatch } from "@tanstack/react-router";
 
 import type { SidebarRow, SidebarSection } from "../frame/sidebar.tsx";
-import { AgentFigure } from "./agent-avatar.tsx";
 import { wakesOn } from "./agent-facts.tsx";
-import { agentTabOf } from "./agent-page.tsx";
-import type { AgentTab } from "./agent-page.tsx";
+import { AgentFigure } from "./figure/agent-figure.tsx";
+import { lookOf } from "./figure/look.ts";
+import { agentTabOf } from "./tabs.tsx";
+import type { AgentTab } from "./tabs.tsx";
 
 // One agent as a level of the sidebar while its page is open, as the
 // reference's (#2503's agents/agent-section.tsx): the agent's figure and
@@ -59,7 +60,7 @@ export const useAgentSection = (): SidebarSection | undefined => {
   return {
     id: `agent/${agent.id}`,
     title: name,
-    mark: <AgentFigure face={agent.face} />,
+    mark: <AgentFigure look={lookOf(agent)} size="icon" />,
     navLabel: t`${name}'s pages`,
     // Its name opens its overview: no Overview row of its own.
     home: (look) => (

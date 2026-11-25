@@ -26,7 +26,6 @@ import {
 } from "@grasp-os/ui/components/dialog";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
 import { Input } from "@grasp-os/ui/components/input";
-import { Text } from "@grasp-os/ui/components/text";
 import {
   ArchiveIcon,
   ArrowLeftIcon,
@@ -36,9 +35,11 @@ import {
   TrashIcon,
   UndoIcon,
 } from "@grasp-os/ui/lib/icons";
+import { colors, font } from "@grasp-os/ui/lib/tokens.stylex";
 import type { I18n, MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
 import {
   useCallback,
@@ -52,10 +53,10 @@ import type { ReactNode } from "react";
 
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
-import { setActiveChat, useActiveChat } from "./active-chat.ts";
+import { useActiveChat } from "./active-chat.ts";
 import { groupChats, whenShort } from "./chat-history.ts";
 import type { ChatPeriod } from "./chat-history.ts";
-import { useOpenChat } from "./chat-presence.ts";
+import { useGoToChat } from "./chat-link.ts";
 import { DeleteChatDialog } from "./delete-chat-dialog.tsx";
 import { FailureLine } from "./failure-line.tsx";
 
@@ -298,7 +299,6 @@ const RenameChatDialog = ({
           <Button
             disabled={!valid || trimmed === chat.title || busy}
             form={formId}
-            size="sm"
             type="submit"
           >
             <Trans>Rename</Trans>
@@ -309,17 +309,26 @@ const RenameChatDialog = ({
   );
 };
 
+const styles = stylex.create({
+  // When a chat was last used, at its row's end, as #2503's: quiet, its
+  // figures each as wide, so the times stand in one column.
+  time: {
+    color: colors.mutedForeground,
+    fontSize: font.textXs,
+    lineHeight: font.textXsLine,
+    fontVariantNumeric: "tabular-nums",
+  },
+});
+
 /** A row's end: the working mark while its agent answers, else when it was last used. */
 const RowEnd = ({ chat, now }: { chat: ChatSummary; now: Date }) => {
   const { i18n } = useLingui();
   return chat.running ? (
     <AgentIndicator />
   ) : (
-    <Text as="span" color="muted" size="xs">
-      <time dateTime={chat.lastAt}>
-        {whenShort(chat.lastAt, now, i18n.locale)}
-      </time>
-    </Text>
+    <time dateTime={chat.lastAt} {...stylex.props(styles.time)}>
+      {whenShort(chat.lastAt, now, i18n.locale)}
+    </time>
   );
 };
 
@@ -611,19 +620,6 @@ const useChatItems = ({
   };
 };
 
-/**
- * Opens chat `chatId`, or a new one, in Grasp's chat (global-chat.tsx),
- * where this page allows it (chat-presence.ts), so the person stays where
- * they are.
- */
-export const useSelectChat = () => {
-  const openHere = useOpenChat();
-  return (chatId?: string): void => {
-    setActiveChat(chatId);
-    openHere();
-  };
-};
-
 /** How many frames the window may take to list a chat it comes back to. */
 const rowWaitFrames = 120;
 
@@ -683,18 +679,19 @@ export const ChatWindow = ({
   onOpenChange: (open: boolean) => void;
 }) => {
   const { t } = useLingui();
-  const selectChat = useSelectChat();
+  // A chat opens on its own page, a new one on Chat's start (chat-link.ts).
+  const goToChat = useGoToChat();
   // The chat a Rename dialog was for, while the window comes back to it.
   const [backTo, setBackTo] = useState<string>();
   const { command, empty, failure, dialogs, label } = useChatItems({
     shown: open,
     onNew: () => {
       onOpenChange(false);
-      selectChat();
+      goToChat();
     },
     onOpen: (chatId) => {
       onOpenChange(false);
-      selectChat(chatId);
+      goToChat(chatId);
     },
     onDialog: () => {
       onOpenChange(false);

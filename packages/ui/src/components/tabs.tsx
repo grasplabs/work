@@ -132,6 +132,13 @@ export interface TabsListProps extends Omit<
    * @default "default"
    */
   variant?: TabsVariant;
+  /**
+   * A `default` track takes the whole width of the box it stands in (across a sidebar or a
+   * panel), and its tabs share it equally, each at least as wide as its words. Otherwise the track
+   * is as wide as its tabs.
+   * @default false
+   */
+  fullWidth?: boolean;
   /** Layout only. */
   style?: LayoutStyle;
 }
@@ -143,6 +150,8 @@ export interface TabsTriggerProps extends Omit<
 > {
   /** Its words: a short noun for its view ("Activity"). */
   children: ReactNode;
+  /** An icon before the words, a step off them. */
+  icon?: IconData;
   /** Pairs the tab with the TabsContent of the same `value`. */
   value: string;
   /**
@@ -277,9 +286,9 @@ const styles = stylex.create({
   // The track's room above and below holds each tab's 44px target on a touch screen, so the row's scrolling never cuts it.
   listDefault: {
     gap: space["1"],
-    // Written as the two long forms: the base list's own inline padding is a long form, which a
-    // short `padding` here would not replace, and the track would be wider at its sides.
-    paddingInline: space["1"],
+    // Half a tab gap at its sides, as the original's track: more than above and below, so the
+    // first and last tab stand clear of the track's rounded ends. Long forms, as the base list's.
+    paddingInline: `calc(${space.tabGap} / 2)`,
     paddingBlock: {
       default: space["1"],
       [COARSE]: `calc((${size.tapTarget} - ${size.controlSm}) / 2)`,
@@ -290,6 +299,10 @@ const styles = stylex.create({
     width: "fit-content",
     maxWidth: "100%",
   },
+  // A track across its box (fullWidth): its tabs share it equally, halves or thirds, each at least
+  // as wide as its words, which stand in the middle of their share.
+  listFull: { width: "100%" },
+  shared: { flexGrow: 1, flexBasis: 0, justifyContent: "center" },
   tab: {
     position: "relative",
     display: "inline-flex",
@@ -536,6 +549,10 @@ const navStyles = stylex.create({
   // After an icon, the words stand a step off it; the step goes with them when they go.
   wordsAfterIcon: {
     paddingInlineStart: space["2"],
+  },
+  // A tab's words stand a little further off its icon: 10px, as the original's switch.
+  wordsAfterTabIcon: {
+    paddingInlineStart: `calc(${space["2"]} + ${space["1"]} / 2)`,
   },
   // The words of every link, unseen and with no height: they give the nav its natural width, which
   // the box (a container) cannot give.
@@ -796,6 +813,8 @@ const watchSegmentRow = watchRow(false);
 // ---- Tabs --------------------------------------------------------------------------------------------
 
 const Variant = createContext<TabsVariant>("default");
+// Whether the tabs share a track across its box (fullWidth).
+const Shared = createContext(false);
 const KeepMounted = createContext(false);
 
 /** The root: a TabsList and a TabsContent for each tab. */
@@ -819,10 +838,12 @@ export const Tabs = ({
 export const TabsList = ({
   children,
   variant = "default",
+  fullWidth = false,
   style,
   ...rest
 }: TabsListProps) => {
   const line = variant === "line";
+  const full = fullWidth && !line;
   return (
     <TabsListPrimitive
       {...rest}
@@ -833,10 +854,13 @@ export const TabsList = ({
         styles.list,
         !line && segmentedStyles.track,
         !line && styles.listDefault,
+        full && styles.listFull,
         style
       )}
     >
-      <Variant value={variant}>{children}</Variant>
+      <Variant value={variant}>
+        <Shared value={full}>{children}</Shared>
+      </Variant>
       {line && (
         <span
           aria-hidden="true"
@@ -879,10 +903,12 @@ const closeTab = (tab: HTMLElement | null, onClose: () => void) => {
 };
 
 const tabClass =
-  (segmented: boolean, closable: boolean) => (state: TabsTabState) =>
+  (segmented: boolean, closable: boolean, shared: boolean) =>
+  (state: TabsTabState) =>
     className(
       styles.tab,
       segmented && styles.segment,
+      shared && styles.shared,
       !state.disabled && !state.selected && styles.live,
       segmented && !state.disabled && !state.selected && styles.segmentLive,
       state.selected && (segmented ? segmentedStyles.chosen : styles.chosen),
@@ -894,14 +920,59 @@ const tabClass =
       segmented ? focusRingInset : [focusMarker, focusCarrier]
     );
 
+/**
+ * A view's icon and words, a link's or a tab's (`tab`); with `away`, the words gone to the icon
+ * alone.
+ */
+const Inside = ({
+  icon,
+  away,
+  tab = false,
+  children,
+}: {
+  icon: IconData;
+  away: boolean;
+  tab?: boolean;
+  children: ReactNode;
+}) => (
+  <>
+    <span aria-hidden="true" {...stylex.props(navStyles.icon)}>
+      <Icon icon={icon} />
+    </span>
+    <span {...stylex.props(navStyles.words, away && navStyles.wordsAway)}>
+      <span {...stylex.props(navStyles.wordsInner)}>
+        <span
+          {...stylex.props(
+            navStyles.inside,
+            navStyles.wordsAfterIcon,
+            tab && navStyles.wordsAfterTabIcon
+          )}
+        >
+          {children}
+        </span>
+      </span>
+    </span>
+  </>
+);
+
 /** One tab: a short noun for its view ("Activity"). */
 export const TabsTrigger = ({
   children,
+  icon,
   onClose,
   ...rest
 }: TabsTriggerProps) => {
   const segmented = use(Variant) === "default";
+  const shared = use(Shared);
   const { tabs: words } = useI18n();
+  const shown =
+    icon === undefined ? (
+      children
+    ) : (
+      <Inside icon={icon} away={false} tab>
+        {children}
+      </Inside>
+    );
   const inside = (
     <>
       <span
@@ -909,9 +980,17 @@ export const TabsTrigger = ({
         {...stylex.props(styles.target, segmented && styles.targetSegment)}
       />
       {segmented ? (
-        children
+        shown
       ) : (
-        <span {...stylex.props(focusLabel, styles.label)}>{children}</span>
+        <span
+          {...stylex.props(
+            focusLabel,
+            styles.label,
+            icon !== undefined && navStyles.inside
+          )}
+        >
+          {shown}
+        </span>
       )}
     </>
   );
@@ -922,7 +1001,7 @@ export const TabsTrigger = ({
         render={(props: Record<string, unknown>) =>
           renderElement("button", { ...props, "data-slot": "tabs-trigger" })
         }
-        className={tabClass(segmented, false)}
+        className={tabClass(segmented, false, shared)}
       >
         {inside}
       </TabsTabPrimitive>
@@ -933,7 +1012,7 @@ export const TabsTrigger = ({
   return (
     <TabsTabPrimitive
       {...rest}
-      className={tabClass(segmented, true)}
+      className={tabClass(segmented, true, shared)}
       onKeyDown={(event: KeyboardEvent<HTMLButtonElement>) => {
         rest.onKeyDown?.(event);
         if (event.key === "Delete" && !event.defaultPrevented) {
@@ -1178,30 +1257,6 @@ const slotOf = (
   const { children: words, ...own } = children.props;
   return { words, element: createElement(children.type, own) };
 };
-
-/** A link's icon and words; with `away`, the words gone to the icon alone. */
-const Inside = ({
-  icon,
-  away,
-  children,
-}: {
-  icon: IconData;
-  away: boolean;
-  children: ReactNode;
-}) => (
-  <>
-    <span aria-hidden="true" {...stylex.props(navStyles.icon)}>
-      <Icon icon={icon} />
-    </span>
-    <span {...stylex.props(navStyles.words, away && navStyles.wordsAway)}>
-      <span {...stylex.props(navStyles.wordsInner)}>
-        <span {...stylex.props(navStyles.inside, navStyles.wordsAfterIcon)}>
-          {children}
-        </span>
-      </span>
-    </span>
-  </>
-);
 
 /** A view as an item of the fold's menu: still a link, with the dot when current. */
 const MenuLink = ({

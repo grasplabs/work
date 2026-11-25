@@ -62,13 +62,13 @@ const proposed = (
 });
 
 /** Shows the page on a faked core listing `listed`; the calls it gets. */
-const shown = async (listed: Opportunity[]) => {
+const shown = async (listed: Opportunity[] | Promise<Opportunity[]>) => {
   const calls: string[] = [];
   const opportunities = {
     list: async () => {
       await Promise.resolve();
       calls.push("list");
-      return listed;
+      return await listed;
     },
   };
   const core = {
@@ -119,6 +119,12 @@ const drafts = (): Record<string, string | null> =>
     })
   );
 
+/** Whether the page stands busy, and whether it says it has nothing yet. */
+const emptyState = () => ({
+  busy: document.querySelector('[aria-busy="true"]') !== null,
+  empty: document.body.textContent.includes("Nothing to automate yet"),
+});
+
 describe("Opportunities", () => {
   afterEach(() => {
     act(() => {
@@ -126,6 +132,19 @@ describe("Opportunities", () => {
     });
     root = undefined;
     document.body.replaceChildren();
+  });
+
+  it("stands busy until core answers, then says there is nothing to automate yet", async () => {
+    const { promise, resolve } = Promise.withResolvers<Opportunity[]>();
+    await shown(promise);
+    const waiting = emptyState();
+    resolve([]);
+    await settle();
+
+    expect({ waiting, answered: emptyState() }).toStrictEqual({
+      waiting: { busy: true, empty: false },
+      answered: { busy: false, empty: true },
+    });
   });
 
   it("drafts a workflow or an App in Make something's chat and a skill on Skills, and nothing else", async () => {

@@ -1,13 +1,22 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
 import type { AppRequest } from "@grasp-os/shared/connect";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Badge } from "@grasp-os/ui/components/badge";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemSeparator,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { useLingui } from "@lingui/react/macro";
 import { Await } from "@tanstack/react-router";
-import { ClockIcon } from "lucide-react";
+import { Fragment } from "react";
 
 import { formatDate, formatDayMonth } from "../format.ts";
 import type { Loaded } from "../load-from-core.tsx";
-import { AppLogo } from "./app-logo.tsx";
 import { IntegrationsSection } from "./integrations-section.tsx";
+import { ProviderMark } from "./provider-mark.tsx";
 
 // The apps people asked Grasp to add, until Grasp adds them, as in the
 // prototype (`routes/integrations/index.tsx`, `Requested`): who asked,
@@ -27,17 +36,18 @@ const RequestedRow = ({ request }: { request: AppRequest }) => {
     asker === null ? t`Asked by a former member` : t`Asked by ${asker}`;
   const about = request.why ?? askedBy;
   return (
-    <li className="flex h-14 items-center gap-3">
-      <AppLogo logo={null} name={request.name} />
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="truncate font-medium">{request.name}</span>
-        <span className="text-muted-foreground truncate">{about}</span>
-      </div>
-      <Badge variant="outline">
-        <ClockIcon data-icon="inline-start" />
-        <Trans>Requested {date}</Trans>
-      </Badge>
-    </li>
+    <Item size="sm">
+      <ItemMedia align="center">
+        <ProviderMark id={request.name} logo={null} name={request.name} />
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle>{request.name}</ItemTitle>
+        <ItemDescription>{about}</ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        <Badge>{t`Requested ${date}`}</Badge>
+      </ItemActions>
+    </Item>
   );
 };
 
@@ -59,11 +69,13 @@ const RequestedList = ({
   return (
     <IntegrationsSection
       count={shown.length}
-      id="requested"
       title={t({ message: "Requested", context: "apps someone asked for" })}
     >
-      {shown.map((request) => (
-        <RequestedRow key={request.id} request={request} />
+      {shown.map((request, index) => (
+        <Fragment key={request.id}>
+          {index > 0 && <ItemSeparator />}
+          <RequestedRow request={request} />
+        </Fragment>
       ))}
     </IntegrationsSection>
   );

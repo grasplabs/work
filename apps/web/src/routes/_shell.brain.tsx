@@ -1,28 +1,31 @@
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import {
   createFileRoute,
   Outlet,
   useMatchRoute,
   useParams,
-  useSearch,
 } from "@tanstack/react-router";
 
 import { atlasOf, TEAM_FOLDER } from "../brain/brain-atlas.ts";
-import type { Atlas, RegionId } from "../brain/brain-atlas.ts";
+import type { Atlas } from "../brain/brain-atlas.ts";
 import type { BrainData } from "../brain/brain-data.ts";
-import { BrainNav } from "../brain/brain-nav.tsx";
+import { BrainPending } from "../brain/brain-pending.tsx";
 import { brainSections } from "../brain/brain-sections.ts";
+import { brainStyles } from "../brain/brain-styles.ts";
 import {
   buildBrain,
   folderName,
   folderTree,
   groupLabel,
 } from "../brain/brain.ts";
-import type { Brain, Folder, Note } from "../brain/brain.ts";
+import type { Folder, Note } from "../brain/brain.ts";
+import { NoteActions } from "../brain/note-actions.tsx";
+import { onArticle } from "../brain/note-page.tsx";
 import { NoteReveal } from "../brain/note-reveal.tsx";
 import { readBrain } from "../brain/read-brain.ts";
-import { isRegion } from "../brain/region-id.ts";
-import { PageLoading, PageNotLoaded } from "../frame/page-states.tsx";
+import { useChatBarShown } from "../chat/global-chat.tsx";
+import { PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
 import type { Loaded } from "../load-from-core.tsx";
@@ -100,32 +103,11 @@ const crumbsTo = (
   return crumbs;
 };
 
-/**
- * The part of the atlas open at this address, if any: as asked, or the one
- * the note in hand sits in. Its navigation opens to it; the way back through
- * it stands on the canvas (`AtlasTrail`), not in the header: one trail, not
- * two, as the prototype has it.
- */
-const atlasRegion = (
-  search: { region?: unknown; note?: unknown },
-  brain: Brain,
-  atlas: Atlas
-): RegionId | undefined => {
-  const inHand =
-    typeof search.note === "string"
-      ? brain.notes.find((candidate) => candidate.id === search.note)
-      : undefined;
-  const regionId = isRegion(search.region)
-    ? search.region
-    : inHand && atlas.home.get(inHand.id);
-  return atlas.regions.find((each) => each.id === regionId)?.id;
-};
-
 const BrainLayout = () => {
   const { t, i18n } = useLingui();
+  const chatBar = useChatBarShown();
   const loaded = Route.useLoaderData();
   const { noteId, sectionId } = useParams({ strict: false });
-  const search = useSearch({ strict: false });
   const matchRoute = useMatchRoute();
   // The brain's log and its sources, each a page of its own beside the brain.
   const activity = Boolean(matchRoute({ to: "/brain/activity" }));
@@ -144,10 +126,6 @@ const BrainLayout = () => {
   const section = brainSections.find(
     (candidate) => candidate.slug === sectionId
   );
-  const region =
-    noteId === undefined && !section
-      ? atlasRegion(search, brain, atlas)
-      : undefined;
   let crumbs: Crumb[] = [{ label: brainLabel }];
   if (note) {
     crumbs = crumbsTo(note, folderTree(brain.notes), atlas, brainLabel);
@@ -179,11 +157,20 @@ const BrainLayout = () => {
   }
   return (
     <>
-      <SiteHeader crumbs={crumbs} />
-      <div className="flex min-h-0 flex-1">
-        <BrainNav atlas={atlas} brain={brain} note={note} region={region} />
+      <SiteHeader
+        actions={
+          // A Brain page's actions; a team's or a subject's article keeps its own.
+          note === undefined || onArticle(note) ? undefined : (
+            <NoteActions note={note} workspace={workspace} />
+          )
+        }
+        crumbs={crumbs}
+      />
+      <div
+        {...stylex.props(brainStyles.body, chatBar && brainStyles.underChatBar)}
+      >
         {/* The brain, a part or a note; and over them, the layer that carries the brain's dots into a note's page. */}
-        <div className="relative flex min-w-0 flex-1 flex-col">
+        <div {...stylex.props(brainStyles.page)}>
           <Outlet />
           <NoteReveal />
         </div>
@@ -206,9 +193,12 @@ export const Route = createFileRoute("/_shell/brain")({
       data: { workspace: read.data, brain: buildBrain(read.data) },
     };
   },
-  // Going from note to note keeps what was read: each read is a page of
-  // the brain's records per type, every one in the audit log.
-  shouldReload: false,
-  pendingComponent: PageLoading,
+  // No `shouldReload`: going from note to note keeps what was read (each
+  // read is a page of the brain's records per type, every one in the audit
+  // log), as the router reads a layout again only when it is entered; so
+  // coming back to the Brain shows what the chat saved meanwhile.
+  // Every page of the brain waits for this read on the way in: the
+  // skeleton is the page the address names, under its bar.
+  pendingComponent: BrainPending,
   component: BrainLayout,
 });

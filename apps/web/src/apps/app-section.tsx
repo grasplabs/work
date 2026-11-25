@@ -1,24 +1,22 @@
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
+  AppWindowIcon,
+  CableIcon,
   ClockIcon,
   CodeIcon,
   DatabaseIcon,
+  LaptopIcon,
   LinkIcon,
   SettingsIcon,
-  ShareIcon,
   SlidersHorizontalIcon,
+  SmartphoneIcon,
+  TabletIcon,
   UsersIcon,
 } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
 import { Link, useMatch, useNavigate } from "@tanstack/react-router";
 
-import {
-  AppWindowIcon,
-  LaptopIcon,
-  SmartphoneIcon,
-  TabletIcon,
-} from "../frame/sidebar-icons.ts";
 import type {
   SidebarRow,
   SidebarSection,
@@ -52,8 +50,8 @@ const sectionIcons: Readonly<Record<AppSettingsSection, IconData>> = {
   general: SettingsIcon,
   sharing: UsersIcon,
   history: ClockIcon,
-  connections: LinkIcon,
-  webhooks: ShareIcon,
+  connections: CableIcon,
+  webhooks: LinkIcon,
   options: SlidersHorizontalIcon,
 };
 

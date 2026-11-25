@@ -27,9 +27,10 @@
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
-import { useState } from "react";
+import { Fragment, isValidElement, useState } from "react";
 import type { ReactNode } from "react";
 
+import { alertVars } from "../../components/alert.stylex";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -37,6 +38,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "../../components/breadcrumb";
+import { breadcrumbVars } from "../../components/breadcrumb.stylex";
 import { Button } from "../../components/button";
 import { InlineEdit } from "../../components/inline-edit";
 import { pageBandVars } from "../../components/page-header.stylex";
@@ -51,12 +53,12 @@ import {
   Sidebar,
   SidebarInset,
   SidebarProvider,
-  SidebarRail,
   SidebarTrigger,
   useSidebar,
 } from "../../components/sidebar";
 import { Icon, PanelRightIcon } from "../../lib/icons";
-import { colors, size, space } from "../../lib/tokens.stylex";
+import { colors, font, media, size, space } from "../../lib/tokens.stylex";
+import { isBlank, listOf } from "../../lib/utils";
 import type { LayoutStyle } from "../../lib/utils";
 
 /** The words an AppShell says, for a screen reader: English here; pass the product's as `labels`. */
@@ -81,6 +83,14 @@ const LABELS: AppShellLabels = {
   togglePanel: "Show or hide the panel",
 };
 
+/** The steps a caller wrote, one by one: lists and fragments of BreadcrumbItems opened up. */
+const stepsOf = (steps: ReactNode): ReactNode[] =>
+  listOf(steps).flatMap((step) =>
+    isValidElement<{ children?: ReactNode }>(step) && step.type === Fragment
+      ? stepsOf(step.props.children)
+      : [step]
+  );
+
 /** Every prop an AppShell takes. */
 export interface AppShellProps {
   /** The product's sidebar: its SidebarHeader, SidebarContent and SidebarFooter. */
@@ -88,9 +98,9 @@ export interface AppShellProps {
   /** The page. It scrolls under the header. */
   children: ReactNode;
   /**
-   * Where the page is, at the header's start: the steps before it, as BreadcrumbItems with a
-   * BreadcrumbSeparator between each two. The shell draws the Breadcrumb round them, and the page
-   * itself (`title`) after them.
+   * Where the page is, at the header's start: the steps before it, as BreadcrumbItems and nothing
+   * between them. The shell draws the Breadcrumb round them, the page itself (`title`) after them,
+   * and every separator: a slash between each two steps.
    */
   breadcrumb?: ReactNode;
   /** The page's name: the breadcrumb's last step. */
@@ -129,12 +139,14 @@ const styles = stylex.create({
   // What the page holds, laid over the SidebarInset's box: the inset is as tall as the shell (the
   // window's height, or the frame's), never as tall as the page, so the header stays and the page
   // scrolls under it.
+  // The card's own ground at every width: beside the sidebar, and filling the window on a phone.
   frame: {
     position: "absolute",
     inset: 0,
     display: "flex",
     flexDirection: "column",
     overflow: "clip",
+    backgroundColor: colors.sidebarCard,
     borderRadius: "inherit",
     cornerShape: "inherit",
   },
@@ -146,6 +158,27 @@ const styles = stylex.create({
     minWidth: 0,
     height: size.appShellBar,
     paddingInline: space["3"],
+    // The bar is the frame's, as the sidebar is: its path in the sidebar's neutral ink.
+    [breadcrumbVars.foreground]: colors.sidebarForeground,
+    [breadcrumbVars.mutedForeground]: colors.sidebarSecondaryForeground,
+    [breadcrumbVars.subtleForeground]: colors.sidebarTertiaryForeground,
+    // Its slash stands as far from each step as the steps' words are from a chevron's box.
+    [breadcrumbVars.separatorInset]: space["1"],
+    // Its foot a hairline across the card, in the card's own line, so it reads as a bar. Inside
+    // the bar's row, which keeps its height. In forced colours the system's ink.
+    position: "relative",
+    "::after": {
+      content: '""',
+      position: "absolute",
+      insetInline: 0,
+      insetBlockEnd: 0,
+      height: size.hairline,
+      backgroundColor: {
+        default: colors.sidebarCardBorder,
+        [media.forcedColors]: "CanvasText",
+      },
+      pointerEvents: "none",
+    },
   },
   where: {
     display: "flex",
@@ -155,7 +188,9 @@ const styles = stylex.create({
     // Room at the end for the renamable name's own padding, which reaches a step past its words:
     // clipped, the keyboard's ring lost its end.
     paddingInlineEnd: space["1"],
-    overflow: "hidden",
+    // A long path is cut along the bar, never across it: a link's 44px reach on a touch screen
+    // stands past the words' line, and stays a finger's.
+    overflowX: "clip",
   },
   actions: {
     display: "flex",
@@ -165,6 +200,8 @@ const styles = stylex.create({
     marginInlineStart: "auto",
   },
   body: { flexGrow: 1, minHeight: 0 },
+  // Across the card's top a banner Alert is a band: no corner of its own (alertVars).
+  banner: { flexShrink: 0, [alertVars.bannerCorner]: "0px" },
   // The page's room, told to a banner PageHeader (pageBandVars), which takes it back to stand flush.
   page: {
     boxSizing: "border-box",
@@ -180,8 +217,12 @@ const styles = stylex.create({
   },
   panel: { height: "100%", minHeight: 0 },
   contents: { display: "contents" },
-  // The renamable name in the page's ink, as BreadcrumbPage draws it.
-  rename: { minWidth: 0, color: colors.foreground },
+  // The renamable name in the page's ink and weight, as BreadcrumbPage draws it.
+  rename: {
+    minWidth: 0,
+    color: breadcrumbVars.foreground,
+    fontWeight: font.weightMedium,
+  },
 });
 
 /** Whether a press follows a link to its page here: not a new tab, a new window or a download. */
@@ -219,7 +260,6 @@ const ShellSidebar = ({ children }: { children: ReactNode }) => {
       <div ref={watch} {...stylex.props(styles.contents)}>
         {children}
       </div>
-      <SidebarRail />
     </Sidebar>
   );
 };
@@ -249,37 +289,45 @@ const ShellPage = ({
     setOwn(next);
     onPanelOpenChange?.(next);
   };
-  // Where the page is: the steps before it, then the page itself, renamable in place.
-  const where = (breadcrumb !== undefined || title !== undefined) && (
+  // Where the page is: the steps before it, then the page itself, renamable in place, a slash
+  // between each two. The shell writes every separator, so each is the same.
+  const page = title !== undefined && (
+    <BreadcrumbItem>
+      {/* BreadcrumbPage repeats its words in a tooltip when cut: a field is never repeated. */}
+      {onRename === undefined ? (
+        <BreadcrumbPage>{title}</BreadcrumbPage>
+      ) : (
+        <span aria-current="page" {...stylex.props(styles.rename)}>
+          <InlineEdit
+            aria-label={words.rename}
+            value={title}
+            onSubmit={onRename}
+          />
+        </span>
+      )}
+    </BreadcrumbItem>
+  );
+  const steps = [...stepsOf(breadcrumb), page].filter((step) => step !== false);
+  const where = steps.length > 0 && (
     <Breadcrumb aria-label={words.breadcrumb}>
       <BreadcrumbList>
-        {breadcrumb}
-        {breadcrumb !== undefined && title !== undefined && (
-          <BreadcrumbSeparator />
-        )}
-        {title !== undefined && (
-          <BreadcrumbItem>
-            {/* BreadcrumbPage repeats its words in a tooltip when cut: a field is never repeated. */}
-            {onRename === undefined ? (
-              <BreadcrumbPage>{title}</BreadcrumbPage>
-            ) : (
-              <span aria-current="page" {...stylex.props(styles.rename)}>
-                <InlineEdit
-                  aria-label={words.rename}
-                  value={title}
-                  onSubmit={onRename}
-                />
-              </span>
-            )}
-          </BreadcrumbItem>
-        )}
+        {steps.map((step, at) => (
+          <Fragment key={at}>
+            {at > 0 && <BreadcrumbSeparator>/</BreadcrumbSeparator>}
+            {step}
+          </Fragment>
+        ))}
       </BreadcrumbList>
     </Breadcrumb>
   );
   return (
     <SidebarInset>
       <div {...stylex.props(styles.frame)}>
-        {banner}
+        {isBlank(banner) ? null : (
+          <div data-slot="app-shell-banner" {...stylex.props(styles.banner)}>
+            {banner}
+          </div>
+        )}
         <header data-slot="app-shell-header" {...stylex.props(styles.header)}>
           <SidebarTrigger />
           <div {...stylex.props(styles.where)}>{where}</div>

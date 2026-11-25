@@ -6,8 +6,8 @@ import type {
   PromptInputProps,
 } from "@grasp-os/ui/components/prompt-input";
 import {
+  AppWindowIcon,
   CircleUserIcon,
-  LayoutGridIcon,
   UserSparklesIcon,
   WorkflowIcon,
 } from "@grasp-os/ui/lib/icons";
@@ -56,7 +56,7 @@ export const useMentionKinds = (): Record<
   const { t } = useLingui();
   return {
     agent: { label: t`Agents`, icon: UserSparklesIcon },
-    app: { label: t`Apps`, icon: LayoutGridIcon },
+    app: { label: t`Apps`, icon: AppWindowIcon },
     workflow: { label: t`Workflows`, icon: WorkflowIcon },
     person: { label: t`People`, icon: CircleUserIcon },
   };

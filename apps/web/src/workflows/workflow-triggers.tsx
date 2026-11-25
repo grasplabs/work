@@ -63,8 +63,8 @@ import {
 import { Text } from "@grasp-os/ui/components/text";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import {
+  CableIcon,
   CalendarIcon,
-  GlobeIcon,
   Icon,
   LinkIcon,
   MailIcon,
@@ -187,7 +187,7 @@ const kindIcons: Record<WorkflowTrigger["kind"], IconData> = {
   schedule: CalendarIcon,
   email: MailIcon,
   webhook: LinkIcon,
-  connector: GlobeIcon,
+  connector: CableIcon,
 };
 
 /** A trigger's mark: its kind's icon. */
@@ -527,7 +527,6 @@ const TriggerRow = ({
                     onClick={async () => {
                       await deleting.hold(deleted);
                     }}
-                    size="sm"
                     variant="destructive"
                   >
                     {t`Delete the trigger`}
@@ -967,7 +966,7 @@ const AddTrigger = ({
             </Form>
           </DialogBody>
           <DialogFooter>
-            <DialogClose size="default">{t`Cancel`}</DialogClose>
+            <DialogClose>{t`Cancel`}</DialogClose>
             <Button disabled={busy} form={formId} type="submit">
               {t`Add the trigger`}
             </Button>

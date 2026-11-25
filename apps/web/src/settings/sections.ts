@@ -1,145 +1,239 @@
+import { isAdmin } from "@grasp-os/shared/roles";
+import type { Role } from "@grasp-os/shared/roles";
 import {
   BrainIcon,
   BuildingIcon,
-  ClockIcon,
-  CoinsIcon,
-  DollarSignIcon,
-  FileDocIcon,
-  InfoIcon,
-  KeyIcon,
+  CableIcon,
   CircleUserIcon,
-  RocketIcon,
-  ServerIcon,
-  ShareIcon,
-  SparklesIcon,
+  ClockIcon,
+  ContrastIcon,
+  FileInvoiceIcon,
+  InfoIcon,
+  LinkIcon,
+  LockIcon,
+  StickyNoteIcon,
   UsersIcon,
+  WorkflowIcon,
 } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 
-// Settings' sections, in their groups: the account's for everyone, then
-// the workspace's for admins. The sidebar lists them as a level of its own
-// while a Settings page is open, in its sheet on a phone
-// (frame/settings-level.tsx); the Settings pages name the one that is open
-// (routes/_shell.settings.tsx). Core checks the role on every call
-// whatever is listed: this only keeps out of sight what someone can't use.
+// Settings' sections as data, in the order they are listed: the sidebar
+// lists them as a level of its own while a Settings page is open
+// (frame/app-sidebar.tsx), and the Settings layout names the one that is
+// open (routes/_shell.settings.tsx). Who may see a section is part of its data, and `sectionsFor`
+// filters by it alone. Core checks the role on every call whatever is
+// listed: this only keeps out of sight what someone can't use.
 
-export type SettingsPath =
+/** Where a section lives. */
+type SettingsHref =
   | "/settings/workspace"
   | "/settings/members"
+  | "/settings/teams"
   | "/settings/ai-providers"
-  | "/settings/models"
-  | "/settings/spend"
-  | "/settings/onboarding"
-  | "/settings/brain"
   | "/settings/audit"
   | "/settings/webhooks"
-  | "/settings/outcomes"
   | "/settings/billing"
+  | "/settings/brain"
+  | "/settings/outcomes"
   | "/settings/profile"
+  | "/settings/appearance"
   | "/settings/instructions"
   | "/settings/security";
 
-export interface SettingsItem {
-  /** Stephen is a name and stays as it is; the other labels are translated. */
-  label: MessageDescriptor | string;
-  to: SettingsPath;
-  icon: IconData;
-}
+/**
+ * Who may see a section: everyone; the organization's own people, never
+ * Grasp staff (what their chats start with); the organization's admins,
+ * Grasp staff signed in as one included; or its admins who are its own
+ * people, never Grasp staff (its members and the outside systems that
+ * call in).
+ */
+type SettingsAudience = "everyone" | "own" | "admins" | "own-admins";
 
-export interface SettingsGroup {
-  id: string;
+type SettingsGroupId = "workspace" | "account";
+
+interface SettingsGroup {
+  id: SettingsGroupId;
   title: MessageDescriptor;
-  items: SettingsItem[];
 }
 
-/** The sections this person may open, in their groups. */
-export const groupsFor = ({
-  admin,
-  staff,
-}: {
-  admin: boolean;
+interface SettingsSection {
+  /** Stable: a rename changes only the label. */
+  id: string;
+  label: MessageDescriptor;
+  href: SettingsHref;
+  group: SettingsGroupId;
+  icon: IconData;
+  audience: SettingsAudience;
+  /**
+   * The page runs the page's whole width (a log beside its details);
+   * every other section stands in one centred column.
+   */
+  wide?: true;
+}
+
+const settingsGroups: readonly SettingsGroup[] = [
+  // The person's own account first: the one group everyone has.
+  {
+    id: "account",
+    title: msg({ message: "Account", context: "settings group" }),
+  },
+  {
+    id: "workspace",
+    title: msg({ message: "Workspace", context: "settings group" }),
+  },
+];
+
+const settingsSections: readonly SettingsSection[] = [
+  {
+    id: "profile",
+    label: msg`Profile`,
+    href: "/settings/profile",
+    group: "account",
+    icon: CircleUserIcon,
+    audience: "everyone",
+  },
+  {
+    id: "appearance",
+    label: msg`Appearance`,
+    href: "/settings/appearance",
+    group: "account",
+    icon: ContrastIcon,
+    audience: "everyone",
+  },
+  {
+    // What their chats start with: Grasp's staff have no chats here.
+    id: "instructions",
+    label: msg`Instructions`,
+    href: "/settings/instructions",
+    group: "account",
+    icon: StickyNoteIcon,
+    audience: "own",
+  },
+  {
+    id: "security",
+    label: msg`Security`,
+    href: "/settings/security",
+    group: "account",
+    icon: LockIcon,
+    audience: "everyone",
+  },
+  {
+    id: "workspace",
+    label: msg`Workspace`,
+    href: "/settings/workspace",
+    group: "workspace",
+    icon: BuildingIcon,
+    audience: "admins",
+  },
+  {
+    id: "members",
+    label: msg`Members and roles`,
+    href: "/settings/members",
+    group: "workspace",
+    icon: UsersIcon,
+    audience: "own-admins",
+  },
+  {
+    id: "teams",
+    label: msg`Teams`,
+    href: "/settings/teams",
+    group: "workspace",
+    icon: WorkflowIcon,
+    audience: "own-admins",
+  },
+  {
+    id: "ai-providers",
+    label: msg`AI and spend`,
+    href: "/settings/ai-providers",
+    group: "workspace",
+    icon: CableIcon,
+    audience: "admins",
+  },
+  {
+    id: "audit",
+    label: msg`Audit trail`,
+    href: "/settings/audit",
+    group: "workspace",
+    icon: ClockIcon,
+    audience: "admins",
+    wide: true,
+  },
+  {
+    // The event sources outside systems send events to.
+    id: "webhooks",
+    // Where outside systems send events in (settings/event-sources.tsx).
+    label: msg`Incoming events`,
+    href: "/settings/webhooks",
+    group: "workspace",
+    icon: LinkIcon,
+    audience: "own-admins",
+  },
+  {
+    id: "billing",
+    label: msg`Billing`,
+    href: "/settings/billing",
+    group: "workspace",
+    icon: FileInvoiceIcon,
+    audience: "admins",
+  },
+  // Not in the reference, which dropped both: no other page lets an admin
+  // rename the brain's groups of teams or move a team between them, or see
+  // everyone's calls of unknown outcome (the reference shows those in an
+  // admin's inbox, which on `main` shows only the person's own). Last, so
+  // the reference's sections keep their places.
+  {
+    // Its groups of teams, the brain's regions.
+    id: "brain",
+    label: msg`Brain`,
+    href: "/settings/brain",
+    group: "workspace",
+    icon: BrainIcon,
+    audience: "admins",
+  },
+  {
+    id: "outcomes",
+    label: msg`Unknown outcomes`,
+    href: "/settings/outcomes",
+    group: "workspace",
+    icon: InfoIcon,
+    audience: "own-admins",
+  },
+];
+
+/** Who is looking: their role, and whether they are Grasp staff. */
+interface SettingsViewer {
+  role: Role;
   staff: boolean;
-}): SettingsGroup[] => {
-  const workspace: SettingsItem[] = admin
-    ? [
-        {
-          label: msg`Workspace`,
-          to: "/settings/workspace",
-          icon: BuildingIcon,
-        },
-        ...(staff
-          ? []
-          : [
-              {
-                label: msg`Members and roles`,
-                to: "/settings/members" as const,
-                icon: UsersIcon,
-              },
-            ]),
-        {
-          label: msg`AI providers`,
-          to: "/settings/ai-providers",
-          icon: ServerIcon,
-        },
-        { label: msg`Models`, to: "/settings/models", icon: SparklesIcon },
-        { label: msg`AI spend`, to: "/settings/spend", icon: CoinsIcon },
-        // Its groups of teams, the brain's regions.
-        { label: msg`Brain`, to: "/settings/brain", icon: BrainIcon },
-        {
-          label: msg`Onboarding`,
-          to: "/settings/onboarding",
-          icon: RocketIcon,
-        },
-        { label: msg`Audit trail`, to: "/settings/audit", icon: ClockIcon },
-        ...(staff
-          ? []
-          : [
-              // The event sources outside systems send events to.
-              {
-                label: msg`Webhooks`,
-                to: "/settings/webhooks" as const,
-                icon: ShareIcon,
-              },
-              {
-                label: msg`Unknown outcomes`,
-                to: "/settings/outcomes" as const,
-                icon: InfoIcon,
-              },
-            ]),
-        { label: msg`Billing`, to: "/settings/billing", icon: DollarSignIcon },
-      ]
-    : [];
-  // The person's own account first, the one group everyone has, as the
-  // reference orders them.
-  return [
-    {
-      id: "account",
-      title: msg({ message: "Account", context: "settings group" }),
-      items: [
-        { label: msg`Profile`, to: "/settings/profile", icon: CircleUserIcon },
-        // What their chats start with: Grasp's staff have no chats here.
-        ...(staff
-          ? []
-          : [
-              {
-                label: msg`Instructions`,
-                to: "/settings/instructions" as const,
-                icon: FileDocIcon,
-              },
-            ]),
-        { label: msg`Security`, to: "/settings/security", icon: KeyIcon },
-      ],
-    },
-    ...(workspace.length === 0
-      ? []
-      : [
-          {
-            id: "workspace",
-            title: msg({ message: "Workspace", context: "settings group" }),
-            items: workspace,
-          },
-        ]),
-  ];
+}
+
+const maySee = (
+  audience: SettingsAudience,
+  viewer: SettingsViewer
+): boolean => {
+  if (audience === "everyone") {
+    return true;
+  }
+  if (audience === "own") {
+    return !viewer.staff;
+  }
+  return isAdmin(viewer.role) && (audience === "admins" || !viewer.staff);
+};
+
+/** The sections `viewer` may see, in their order. */
+export const sectionsFor = (viewer: SettingsViewer): SettingsSection[] =>
+  settingsSections.filter((section) => maySee(section.audience, viewer));
+
+/** The groups `viewer` sees, each with its sections; a group with none is left out. */
+export const groupedSectionsFor = (
+  viewer: SettingsViewer
+): { group: SettingsGroup; sections: SettingsSection[] }[] => {
+  const visible = sectionsFor(viewer);
+  return settingsGroups
+    .map((group) => ({
+      group,
+      sections: visible.filter((section) => section.group === group.id),
+    }))
+    .filter(({ sections }) => sections.length > 0);
 };

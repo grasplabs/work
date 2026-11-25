@@ -1,14 +1,26 @@
-import { Badge } from "@grasp-os/app-kit/components/badge";
 import { revokeByHandAt } from "@grasp-os/shared/connect";
 import type { RevocationToDo } from "@grasp-os/shared/connect";
-import { Trans } from "@lingui/react/macro";
+import { Badge } from "@grasp-os/ui/components/badge";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemMedia,
+  ItemSeparator,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { Link as TextLink } from "@grasp-os/ui/components/link";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { Await } from "@tanstack/react-router";
-import { TriangleAlertIcon } from "lucide-react";
+import { Fragment } from "react";
 
 import { formatDate } from "../format.ts";
-import { NotLoaded } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
-import { AppLogo } from "./app-logo.tsx";
+import { PartNotLoaded } from "./part-not-loaded.tsx";
+import { ProviderMark } from "./provider-mark.tsx";
+import { SectionCard } from "./section-card.tsx";
 
 // Access at an app Grasp couldn't remove itself (GRA-1197): when a
 // connection was disconnected, or asked to connect again, connect revokes
@@ -31,14 +43,9 @@ const WhereToRemove = ({
   const account = toDo.accountName ?? "";
   const link =
     at === undefined ? null : (
-      <a
-        className="underline"
-        href={at}
-        rel="noopener noreferrer"
-        target="_blank"
-      >
+      <TextLink external href={at}>
         {new URL(at).host + new URL(at).pathname}
-      </a>
+      </TextLink>
     );
   if (toDo.scope === "shared") {
     return link === null ? (
@@ -77,7 +84,7 @@ const Standing = ({ toDo }: { toDo: RevocationToDo }) => {
   if (toDo.givenUpAt === null) {
     const tries = toDo.attempts;
     return (
-      <Badge variant="outline">
+      <Badge variant="warning">
         <Trans>Still trying · {tries} tries</Trans>
       </Badge>
     );
@@ -102,10 +109,12 @@ const ToDoRow = ({
   const whose =
     toDo.scope === "shared" ? (toDo.accountName ?? "") : (toDo.ownerName ?? "");
   return (
-    <li className="flex items-start gap-3 py-2">
-      <AppLogo logo={null} name={app} />
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="font-medium">
+    <Item size="sm">
+      <ItemMedia align="center">
+        <ProviderMark id={toDo.provider} logo={null} name={app} />
+      </ItemMedia>
+      <ItemContent>
+        <ItemTitle>
           {toDo.scope === "shared" ? (
             <Trans>
               {app}, shared: {whose}
@@ -115,18 +124,20 @@ const ToDoRow = ({
               {app}, {whose}&apos;s own
             </Trans>
           )}
-        </span>
-        <span className="text-muted-foreground">
+        </ItemTitle>
+        <ItemDescription>
           {toDo.owedFor === "disconnected" ? (
             <Trans>Disconnected on {since}.</Trans>
           ) : (
             <Trans>Asked to connect again on {since}.</Trans>
           )}{" "}
           <WhereToRemove app={app} toDo={toDo} />
-        </span>
-      </div>
-      <Standing toDo={toDo} />
-    </li>
+        </ItemDescription>
+      </ItemContent>
+      <ItemActions>
+        <Standing toDo={toDo} />
+      </ItemActions>
+    </Item>
   );
 };
 
@@ -137,40 +148,31 @@ const ToDoList = ({
   toDos: Loaded<RevocationToDo[]>;
   nameOf: (provider: string) => string;
 }) => {
+  const { t } = useLingui();
   if (toDos.state === "ready" && toDos.data.length === 0) {
     return null;
   }
   return (
-    <section
-      aria-labelledby="integrations-revoke-by-hand"
-      className="flex flex-col gap-2"
+    <SectionCard
+      flush
+      // Why, behind the info mark: the title says what to do.
+      info={t`Grasp couldn't remove its own access at these apps. Until someone removes it there, it may still work.`}
+      title={t`Access to remove by hand`}
     >
-      <h2
-        className="flex items-center gap-2 font-medium"
-        id="integrations-revoke-by-hand"
-      >
-        <TriangleAlertIcon className="text-destructive size-4" />
-        <Trans>Access to remove by hand</Trans>
-      </h2>
       {toDos.state === "ready" ? (
-        <>
-          <p className="text-muted-foreground">
-            <Trans>
-              Grasp couldn&apos;t remove its own access at these apps. Until
-              someone removes it there, it may still work.
-            </Trans>
-          </p>
-          <ul className="flex flex-col divide-y">
-            {toDos.data.map((toDo) => (
-              <ToDoRow key={toDo.id} nameOf={nameOf} toDo={toDo} />
-            ))}
-          </ul>
-        </>
+        <ItemGroup aria-label={t`Access to remove by hand`}>
+          {toDos.data.map((toDo, index) => (
+            <Fragment key={toDo.id}>
+              {index > 0 && <ItemSeparator />}
+              <ToDoRow nameOf={nameOf} toDo={toDo} />
+            </Fragment>
+          ))}
+        </ItemGroup>
       ) : (
         // A failed read is said, never taken for nothing to remove.
-        <NotLoaded page={toDos} />
+        <PartNotLoaded page={toDos} />
       )}
-    </section>
+    </SectionCard>
   );
 };
 

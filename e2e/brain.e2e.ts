@@ -29,14 +29,9 @@ test("a person opens the brain on its atlas, goes into a part of it, opens a not
   const board = main.getByRole("button", { name: /^Board/u });
   await expect(board).toBeVisible(brainRead);
 
-  // A region of the brain, up close: its notes as neurons, and the way back
-  // on the canvas, the one trail there is.
+  // A region of the brain, up close: its notes as neurons.
   await board.click();
   await expect(page).toHaveURL(/\/brain\?region=frontal$/u);
-  const trail = main.getByRole("navigation", {
-    name: "Where you are in the brain",
-  });
-  await expect(trail).toContainText("Board");
 
   // The note opens on its own page, its dots building the page.
   await main.getByRole("button", { name: "Vision page" }).click();
@@ -46,7 +41,13 @@ test("a person opens the brain on its atlas, goes into a part of it, opens a not
   ).toBeVisible();
 
   // And back on the atlas where it sits, in hand.
-  await page.getByRole("button", { name: "Show in the brain" }).click();
+  await page.getByRole("button", { name: "More for this page" }).click();
+  await page.getByRole("menuitem", { name: "View in map" }).click();
   await expect(page).toHaveURL(/\/brain\?note=vision$/u);
-  await expect(trail).toContainText("Vision page");
+
+  // Escape steps out: from the note to its region, from the region to the whole brain.
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(/\/brain\?region=frontal$/u);
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(/\/brain$/u);
 });

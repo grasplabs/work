@@ -1,3 +1,4 @@
+import { AppWindowIcon } from "@grasp-os/ui/lib/icons";
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -25,6 +26,7 @@ const AppSettingsPage = () => {
     return (
       <PageNotLoaded
         crumbs={[{ label: t`Apps`, to: "/apps" }, { label: t`App` }]}
+        icon={AppWindowIcon}
         notFound={t`App not found`}
         page={page}
       />

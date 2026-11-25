@@ -11,9 +11,7 @@ describe(placementOn, () => {
   });
 
   it("opens where the page allows first, where it doesn't allow that", () => {
-    expect(placementOn(chatPresence.fullscreenOnly, "docked")).toBe(
-      "fullscreen"
-    );
+    expect(placementOn(chatPresence.docked, "floating")).toBe("docked");
   });
 
   it("opens nowhere on a page that allows it nowhere", () => {

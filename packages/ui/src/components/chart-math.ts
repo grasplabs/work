@@ -145,6 +145,21 @@ export const valueOf = (row: Row, key: string): number => {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 };
 
+/**
+ * Each row's key: its label and how many earlier rows share it (`Mon#0`, `Mon#1`), so a row keeps
+ * its element (its grow, hover and focus) as rows come, go and move, and two rows with one label
+ * stay two.
+ */
+export const rowKeys = (rows: readonly Row[], key: string): string[] => {
+  const seen = new Map<string, number>();
+  return rows.map((row) => {
+    const label = String(ownValue(row, key));
+    const before = seen.get(label) ?? 0;
+    seen.set(label, before + 1);
+    return `${label}#${before}`;
+  });
+};
+
 /** The rows, largest first by the first series (`descending`), or as given (`none`). A copy: the data is not changed. */
 export const orderRows = <T extends Row>(
   rows: readonly T[],

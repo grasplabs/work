@@ -89,8 +89,22 @@ export const listMarker = stylex.defineMarker();
  */
 export const sidePanelCardMarker = stylex.defineMarker();
 
-/** The marker of a menu's panel, so an item can answer what the panel holds (`menuStyles`). */
-export const menuMarker = stylex.defineMarker();
+/**
+ * The marker of a one-row prompt input's card, so a model chip in it answers what the row decides
+ * about its room: `data-fold`, its level folds to the maker's mark; `data-away`, it is away until
+ * something is typed (prompt-input.tsx, `useRowFit`).
+ */
+export const promptInputRowMarker = stylex.defineMarker();
+
+/**
+ * The room a menu's words keep at their start for an icon (`menuStyles.inset`). Each menu panel
+ * sets it for its own rows (`menuStyles.panel`): an icon and its gap when one of them has an icon,
+ * none when none has. A submenu stands inside its parent's panel and sets its own, so the parent's
+ * icons never push in the words of a submenu that has none.
+ */
+export const menuVars = stylex.defineVars({
+  lead: "0px",
+});
 
 /**
  * On every Field: its label shows the required mark when the field holds a required control, and a
@@ -110,6 +124,14 @@ export const toastRegionMarker = stylex.defineMarker();
  * every Button in it takes an equal part of the line (button.tsx).
  */
 export const layerFooterMarker = stylex.defineMarker();
+
+/**
+ * How tall a rectangular Skeleton stands: a default control, or what the box that holds it says (an
+ * icon's 16px box sets `100%`, so its placeholder is the box's size in every engine).
+ */
+export const skeletonVars = stylex.defineVars({
+  block: "var(--damsko-control-default)",
+});
 
 /** What a pixel grid reads from the part that draws it. */
 export const pixelVars = stylex.defineVars({

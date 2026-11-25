@@ -21,7 +21,7 @@ import {
   QuestionnaireTitle,
 } from "@grasp-os/ui/components/questionnaire";
 import type { QuestionnaireAnswer } from "@grasp-os/ui/components/questionnaire";
-import { Icon, MessageCircleIcon } from "@grasp-os/ui/lib/icons";
+import { CircleHelpIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
@@ -266,7 +266,7 @@ const BackToQuestions = ({
   return (
     <div>
       <Button onClick={onBack} size="sm" variant="outline">
-        <Icon icon={MessageCircleIcon} />
+        <Icon icon={CircleHelpIcon} />
         {t`${plural(count, { one: "Back to the question", other: "Back to the # questions" })}`}
       </Button>
     </div>

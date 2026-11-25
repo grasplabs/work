@@ -52,7 +52,7 @@ export const thinkingIn = (messages: readonly ChatMessage[]): ThinkingOf[] => {
 };
 
 /** The thinking the brain plays now, as Grasp answers. */
-export interface LiveThinking extends ThinkingOf {
+interface LiveThinking extends ThinkingOf {
   /** When each step reached this tab, by its call; none for one that came before. */
   arrivals: (number | undefined)[];
   /** Grasp is still answering. */

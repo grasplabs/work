@@ -1,8 +1,3 @@
-import { Checkbox } from "@grasp-os/app-kit/components/checkbox";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/app-kit/components/native-select";
 import type { AgentAudience } from "@grasp-os/shared/agents";
 import type { ToolClassAudience } from "@grasp-os/shared/connect";
 import type {
@@ -10,10 +5,20 @@ import type {
   PlaceAudience,
   StephenReach,
 } from "@grasp-os/shared/stephen-reach";
+import { Checkbox } from "@grasp-os/ui/components/checkbox";
+import { Field, FieldContent, FieldLabel } from "@grasp-os/ui/components/field";
+import {
+  Select,
+  SelectContent,
+  SelectTrigger,
+  SelectValue,
+} from "@grasp-os/ui/components/select";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
-import { useId, useState } from "react";
+import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
 
 // Who a setting of Settings › Stephen reaches (stephen-settings.tsx,
 // stephen-card.tsx): as the layer above, everyone, some teams, or nobody.
@@ -23,10 +28,10 @@ import { useId, useState } from "react";
  * Who a control may choose: as the layer above, everyone, some teams, or
  * nobody; for one of the company's agents, its maker alone too.
  */
-export type Who = "same" | "everyone" | "teams" | "nobody" | "maker";
+type Who = "same" | "everyone" | "teams" | "nobody" | "maker";
 
 /** An audience of any layer, as a control holds it. */
-export interface Chosen {
+interface Chosen {
   who: Who;
   teams: string[];
 }
@@ -42,6 +47,29 @@ export const chosenOf = (
   }
   return { who: audience.who, teams: [] };
 };
+
+const styles = stylex.create({
+  // The choice, then its teams under it, both on the row's control edge.
+  control: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["2"],
+    minWidth: 0,
+    width: "100%",
+    // Its own width where a narrow row lays its name and control side by
+    // side (a flex row, FieldGroup `fit`), as the old setting row held its
+    // control; the whole control column elsewhere (a sheet's rows).
+    flexBasis: "content",
+  },
+  fill: { width: "100%" },
+  teams: {
+    display: "flex",
+    flexDirection: "column",
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+});
 
 const whoLabels = {
   everyone: msg`Everyone`,
@@ -74,7 +102,6 @@ export const AudienceControl = ({
   onSave: (chosen: Chosen) => Promise<void>;
 }) => {
   const { t, i18n } = useLingui();
-  const id = useId();
   const [who, setWho] = useState<Who>(value.who);
   const save = async (chosen: Chosen): Promise<void> => {
     await onSave(
@@ -83,16 +110,17 @@ export const AudienceControl = ({
         : chosen
     );
   };
+  const items = offers.map((one) => ({
+    value: one,
+    label: one === "same" ? (same ?? "") : i18n._(whoLabels[one]),
+  }));
   return (
-    <div className="flex flex-col gap-2 sm:items-end">
-      <NativeSelect
-        aria-label={label}
+    <div {...stylex.props(styles.control)}>
+      <Select
         disabled={!editable}
-        id={id}
-        size="sm"
-        value={who}
-        onChange={(event) => {
-          const next = offers.find((one) => one === event.target.value);
+        items={items}
+        onValueChange={(chosen) => {
+          const next = offers.find((one) => one === chosen);
           if (next === undefined) {
             return;
           }
@@ -101,18 +129,18 @@ export const AudienceControl = ({
             void save({ who: next, teams: [] });
           }
         }}
+        value={who}
       >
-        {offers.map((one) => (
-          <NativeSelectOption key={one} value={one}>
-            {one === "same" ? same : i18n._(whoLabels[one])}
-          </NativeSelectOption>
-        ))}
-      </NativeSelect>
+        <SelectTrigger aria-label={label} style={styles.fill} size="sm">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent />
+      </Select>
       {who === "teams" ? (
-        <ul aria-label={t`Teams for ${label}`} className="flex flex-col gap-1">
+        <ul aria-label={t`Teams for ${label}`} {...stylex.props(styles.teams)}>
           {teams.map(({ teamId, name }) => (
             <li key={teamId}>
-              <label className="flex items-center gap-2">
+              <Field orientation="horizontal">
                 <Checkbox
                   checked={value.teams.includes(teamId)}
                   disabled={!editable}
@@ -120,12 +148,14 @@ export const AudienceControl = ({
                     const rest = value.teams.filter((one) => one !== teamId);
                     void save({
                       who: "teams",
-                      teams: checked ? [...rest, teamId] : rest,
+                      teams: checked === true ? [...rest, teamId] : rest,
                     });
                   }}
                 />
-                {name}
-              </label>
+                <FieldContent>
+                  <FieldLabel>{name}</FieldLabel>
+                </FieldContent>
+              </Field>
             </li>
           ))}
         </ul>

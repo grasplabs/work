@@ -1,10 +1,11 @@
 import type { SidebarApp } from "@grasp-os/shared/pages";
-import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { useSidebar } from "@grasp-os/ui/components/sidebar";
 import {
+  AppWindowIcon,
   BellIcon,
   BrainIcon,
+  CableIcon,
   HouseIcon,
   Icon,
   LayoutDashboardIcon,
@@ -22,7 +23,7 @@ import {
   useNavigate,
   useRouter,
 } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useAgentSection } from "../agents/agent-section.tsx";
 import { useAppSection } from "../apps/app-section.tsx";
@@ -34,12 +35,11 @@ import type { CoreConnection } from "../core-connection.ts";
 import type { InboxItem } from "../inbox/items.ts";
 import { useInboxGroups, useWaitingItems } from "../inbox/sidebar-inbox.tsx";
 import { appSplat } from "../pages/app-address.ts";
-import { groupsFor } from "../settings/sections.ts";
+import { groupedSectionsFor } from "../settings/sections.ts";
 import { shortcutLabel } from "../shortcuts.ts";
 import { useWorkflowsWaiting } from "../workflows/nav-item.tsx";
 import { GraspMark } from "./grasp-mark.ts";
 import { PersonMenu } from "./person-menu.tsx";
-import { AppWindowIcon, CableIcon } from "./sidebar-icons.ts";
 import { FrameSidebar } from "./sidebar.tsx";
 import type { SidebarGroupEntry, SidebarSection } from "./sidebar.tsx";
 import { useSidebarApps } from "./surface-nav.tsx";
@@ -244,19 +244,15 @@ const useSettingsSection = (
       label: t`Back`,
       render: (look) => <WayOut {...look} outside={outside} />,
     },
-    groups: groupsFor({
-      admin: isAdmin(identity.role),
-      staff: identity.staff,
-    }).map((group) => ({
+    groups: groupedSectionsFor(identity).map(({ group, sections }) => ({
       id: group.id,
       label: i18n._(group.title),
-      rows: group.items.map(({ label, to, icon }) => ({
-        id: to,
-        // Stephen is a name and stays as it is.
-        label: typeof label === "string" ? label : i18n._(label),
+      rows: sections.map(({ label, href, icon }) => ({
+        id: href,
+        label: i18n._(label),
         icon,
-        render: (look) => <Link {...look} to={to} />,
-        current: pathname.startsWith(to),
+        render: (look) => <Link {...look} to={href} />,
+        current: pathname.startsWith(href),
       })),
     })),
   };
@@ -303,10 +299,23 @@ export const AppSidebar = ({
     appSection ??
     integrationsSection;
   // On a phone the sidebar is a sheet over the page: going anywhere from it
-  // closes it, so the page it went to is in view.
+  // closes it, so the page it went to is in view. Not the Inbox switch,
+  // which opens the inbox under the sheet and shows its view in it, as the
+  // reference's sheet stays for a press that follows no link.
+  const keepSheet = useRef(false);
+  const openInbox = async () => {
+    keepSheet.current = true;
+    await navigate({ to: "/inbox" });
+    // Already on the inbox, nothing navigated to take the flag down.
+    keepSheet.current = false;
+  };
   useEffect(
     () =>
       router.subscribe("onBeforeNavigate", () => {
+        if (keepSheet.current) {
+          keepSheet.current = false;
+          return;
+        }
         setOpenMobile(false);
       }),
     [router, setOpenMobile]
@@ -352,7 +361,7 @@ export const AppSidebar = ({
                 }
                 setView(next);
                 if (next === "inbox") {
-                  void navigate({ to: "/inbox" });
+                  void openInbox();
                 }
               },
               tabsLabel: t`Views`,

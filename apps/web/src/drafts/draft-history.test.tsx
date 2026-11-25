@@ -349,10 +349,15 @@ const menuItem = (name: string) =>
 const section = (id: "draft-unpublished" | "draft-published") =>
   document.querySelector(`section[aria-labelledby="${id}"]`);
 
-/** What each line of a section says first: its title. */
+/** What each line of a section says first: its title, then what it is marked. */
 const titles = (id: "draft-unpublished" | "draft-published"): string[] =>
-  [...(section(id)?.querySelectorAll('[data-slot="item-title"]') ?? [])].map(
-    (title) => title.textContent?.trim() ?? ""
+  [...(section(id)?.querySelectorAll('[data-slot="item"]') ?? [])].map((line) =>
+    [
+      line.querySelector('[data-slot="item-title"]'),
+      ...line.querySelectorAll('[data-slot="badge"]'),
+    ]
+      .map((part) => part?.textContent?.trim() ?? "")
+      .join("")
   );
 
 /** A published version's label, before what it is marked. */
@@ -498,7 +503,7 @@ describe("An App's History", () => {
     expect({
       asked,
       shown: document
-        .querySelector('[data-slot="sheet-content"]')
+        .querySelector('[data-slot="sheet-body"]')
         ?.textContent.includes("src/routes/index.tsx"),
     }).toStrictEqual({ asked: [["diff", appId, 2, 3]], shown: true });
   });

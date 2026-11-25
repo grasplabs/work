@@ -12,7 +12,10 @@ import {
 import { isThemeMode } from "@grasp-os/ui/components/theme-toggle";
 import { toast } from "@grasp-os/ui/components/toast";
 import {
+  ArrowLeftRightIcon,
   ChevronsUpDownIcon,
+  CircleHelpIcon,
+  ContrastIcon,
   Icon,
   LogOutIcon,
   MonitorIcon,
@@ -29,13 +32,15 @@ import { useEffect, useSyncExternalStore } from "react";
 import { signOut } from "../core-connection.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import { OrganizationName, useOrganizationName } from "./organization-name.tsx";
-import {
-  ArrowLeftRightIcon,
-  CircleHelpIcon,
-  ContrastIcon,
-} from "./sidebar-icons.ts";
 import { ProfileMenu } from "./sidebar-profile.tsx";
-import { applyTheme, chooseTheme, onThemeChange, readTheme } from "./theme.ts";
+import {
+  applyTheme,
+  applyThemeId,
+  chooseTheme,
+  onThemeChange,
+  readTheme,
+  readThemeId,
+} from "./theme.ts";
 
 // The person signed in, at the foot of the sidebar: their initials, their
 // name and their organization's, and their menu, as the reference's:
@@ -115,6 +120,7 @@ export const PersonMenu = ({
   // Here, not in the theme menu, which mounts only once the menu opens.
   useEffect(() => {
     applyTheme(readTheme(identity.userId));
+    applyThemeId(readThemeId(identity.userId));
   }, [identity.userId]);
   // The menu is gone once pressed: a sign-out core didn't carry out is
   // said in a toast, and the page stays.

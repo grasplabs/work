@@ -49,7 +49,7 @@ export const REST: Pose = {
 };
 
 /** The atlas's own measures the dive keeps to: a map's room in steps, the room under the top, and how much the chat's drawer must leave. */
-export const ROOM = { step: 16, under: 16, besideDrawer: 300 };
+const ROOM = { step: 16, under: 16, besideDrawer: 300 };
 
 const add = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];

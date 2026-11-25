@@ -4,6 +4,7 @@ import type { ListedConnection } from "@grasp-os/shared/connect";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { SubjectMember } from "@grasp-os/shared/subject-members";
+import { Button } from "@grasp-os/ui/components/button";
 import { i18n } from "@lingui/core";
 import { I18nProvider } from "@lingui/react";
 import {
@@ -348,7 +349,7 @@ describe(AppSettings, () => {
     await opened(fakeCore("builder"));
 
     // A heading's or a label's name is every word in it: a mark inside
-    // would join it ("Copies More about copies").
+    // would join it ("Owner More about the owner").
     const marks = [...document.querySelectorAll("button")].filter((each) =>
       (each.getAttribute("aria-label") ?? "").startsWith("More about")
     );
@@ -399,13 +400,100 @@ describe(AppSettings, () => {
     }).toStrictEqual({ afterCancel: [], calls: ["archive"], restore: true });
   });
 
+  it("sets the App's link in a dialog drawn by Damsko's own parts: its title over the field, the address before it, its actions one height, the design system's default for a footer", async () => {
+    await opened(fakeCore("builder"));
+    await press("Set the link");
+
+    // Each part takes its look from the part round it: the title's and the
+    // description's inset (clear of the close button) from the header, the
+    // address's padding and single line from the addon. Outside them they
+    // ran under the close button and broke the address over two lines.
+    const dialog = document.querySelector("[role=dialog]");
+    const header = dialog?.querySelector("[data-slot=dialog-header]");
+    const addon = dialog?.querySelector("[data-slot=input-group-addon]");
+    // A footer's actions stand the same height: each the design system's
+    // default for a footer, none sized by hand. Damsko draws a Button that
+    // names no size as `sm` there, as its DialogClose is by default. An
+    // action's height is the size whose own classes it carries, read from
+    // Buttons drawn beside the dialog, one of each size and one of none.
+    const host = document.createElement("div");
+    document.body.append(host);
+    const sample = createRoot(host);
+    const sizes = [undefined, "xs", "sm", "default", "lg"] as const;
+    act(() => {
+      sample.render(
+        <>
+          {sizes.map((size) => (
+            <Button key={size ?? "none"} size={size}>
+              {size ?? "none"}
+            </Button>
+          ))}
+        </>
+      );
+    });
+    const drawn = [...host.querySelectorAll("button")].map(
+      (each) => new Set(each.classList)
+    );
+    // The classes only a Button of each size, or of none, has.
+    const own = drawn.map((classes, index) =>
+      [...classes].filter((name) =>
+        drawn.every((other, at) => at === index || !other.has(name))
+      )
+    );
+    act(() => {
+      sample.unmount();
+    });
+    // Named none, a footer's own action is `sm`.
+    const heightOf = (action: HTMLElement) => {
+      const index = own.findIndex(
+        (classes) =>
+          classes.length > 0 &&
+          classes.every((name) => action.classList.contains(name))
+      );
+      return index === -1 ? undefined : (sizes[index] ?? "sm");
+    };
+    const actions = [
+      ...(dialog?.querySelectorAll<HTMLElement>(
+        "[data-slot=dialog-footer] > button"
+      ) ?? []),
+    ];
+    const heights = actions.map(heightOf);
+    expect({
+      header: [
+        header?.querySelector("h2")?.textContent,
+        header?.querySelector("p")?.textContent,
+      ],
+      address: addon?.textContent,
+      actions: actions.map(nameOf),
+      oneHeight: new Set(heights).size === 1 && !heights.includes(undefined),
+    }).toStrictEqual({
+      header: [
+        "Link to Invoices",
+        "Opens the App for the workspace's members who may use it, while it is published.",
+      ],
+      address: `${window.location.host}/`,
+      actions: ["Cancel", "Save link"],
+      oneHeight: true,
+    });
+  });
+
   it("shows a change made in a section, read again with the page", async () => {
     const fake = fakeCore("builder");
     await opened(fake, "page", "sharing");
     const before = document.body.textContent.includes("Ann");
 
-    // Sharing is the drafts' own (drafts/sharing.tsx), as it stands on main.
-    await press("Stop sharing with Ann");
+    // Taking Ann off, from the role at her row's end, asks first.
+    await press("Access for Ann");
+    const remove = [...document.querySelectorAll("[role=option]")].find(
+      (each) => each.textContent.trim() === "Remove"
+    );
+    await act(async () => {
+      if (remove instanceof HTMLElement) {
+        remove.click();
+      }
+      await Promise.resolve();
+    });
+    await settled();
     await press("Stop sharing");
 
     expect({

@@ -16,6 +16,7 @@ import {
   DialogClose,
   DialogContent,
   DialogFooter,
+  DialogHeader,
   DialogTitle,
 } from "@grasp-os/ui/components/dialog";
 import {
@@ -54,6 +55,7 @@ import {
   Sheet,
   SheetBody,
   SheetContent,
+  SheetHeader,
   SheetTitle,
 } from "@grasp-os/ui/components/sheet";
 import {
@@ -64,6 +66,7 @@ import {
   ArrowUpDownIcon,
   DatabaseIcon,
   EllipsisIcon,
+  FileInvoiceIcon,
   Icon,
   ListIcon,
   LockIcon,
@@ -248,7 +251,7 @@ const TableView = ({
             value={[showing]}
           >
             <ToggleGroupItem value="records">
-              <Icon icon={TableIcon} />
+              <Icon icon={FileInvoiceIcon} />
               {t({ message: "Records", context: "a table's records" })}
             </ToggleGroupItem>
             <ToggleGroupItem value="fields">
@@ -321,7 +324,9 @@ const NewTableDialog = ({
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent>
-        <DialogTitle>{t`New table`}</DialogTitle>
+        <DialogHeader>
+          <DialogTitle>{t`New table`}</DialogTitle>
+        </DialogHeader>
         <DialogBody>
           <form
             id={formId}
@@ -433,7 +438,9 @@ const PublishPlan = ({
       )}
       <Sheet onOpenChange={setOpen} open={open}>
         <SheetContent>
-          <SheetTitle>{t`When you publish`}</SheetTitle>
+          <SheetHeader>
+            <SheetTitle>{t`When you publish`}</SheetTitle>
+          </SheetHeader>
           <SheetBody>
             <PlanList
               lines={lines}

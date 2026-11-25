@@ -84,6 +84,13 @@ export interface TooltipProps extends Omit<
 > {
   /** The trigger and the content. */
   children: ReactNode;
+  /**
+   * A press on the trigger opens and closes it too, so a tap on a touch screen shows it: for an
+   * info mark (a small button that is only there to say more), never for a control that does
+   * something of its own. What it says is announced as a press opens it.
+   * @default false
+   */
+  toggleable?: boolean;
   /** Open now. Pass it with `onOpenChange` to open and close the tooltip yourself. */
   open?: boolean;
   /**
@@ -307,7 +314,8 @@ const styles = stylex.create({
     transitionTimingFunction: duration.ease,
   },
   // The words. With a shortcut (a Kbd) they are a wrapping row: the words keep their line whole and
-  // the keys stand at its end, or under the words when both do not fit.
+  // the keys stand at its end, quiet (Kbd draws itself so here), or at the end of a line of their
+  // own under the words when both do not fit.
   words: {
     display: { default: "block", ":has([data-slot=kbd])": "flex" },
     flexWrap: "wrap",

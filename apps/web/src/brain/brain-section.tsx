@@ -1,8 +1,6 @@
 import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { Badge } from "@grasp-os/ui/components/badge";
-import { TreeView } from "@grasp-os/ui/components/tree-view";
-import type { TreeNode } from "@grasp-os/ui/components/tree-view";
 import {
   BrainIcon,
   BuildingIcon,
@@ -13,12 +11,12 @@ import {
   SparklesIcon,
   StickyNoteIcon,
   UsersIcon,
+  ZapIcon,
 } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
 import { Link, useLocation, useMatch } from "@tanstack/react-router";
 
-import { ZapIcon } from "../frame/sidebar-icons.ts";
 import type {
   LinkLook,
   SidebarRow,
@@ -29,14 +27,16 @@ import type { Outside } from "../frame/way-out.tsx";
 import { atlasOf, TEAM_FOLDER } from "./brain-atlas.ts";
 import type { AtlasRegion, RegionId } from "./brain-atlas.ts";
 import { findFolder } from "./brain-sections.ts";
+import { BrainTree } from "./brain-tree.tsx";
+import type { TreeNode } from "./brain-tree.tsx";
 import { folderTree } from "./brain.ts";
 import type { Folder, Note } from "./brain.ts";
 
 // The Brain as the sidebar's section while the person is in it, as Settings
 // and an agent are (frame/app-sidebar.tsx): its name first, a press
 // of its own that opens the Brain's overview, then Back to the page they
-// came from, the Brain's own pages, and each part of the brain as Damsko's
-// TreeView, what it holds a branch under it. The sidebar
+// came from, the Brain's own pages, and each part of the brain as the
+// reference's sidebar tree (brain-tree.tsx), what it holds a branch under it. The sidebar
 // draws it, in place of a second column of the Brain's own. An admin
 // renames a part and moves a team on the map. What it shows is what the
 // brain's layout read: no read of its own.
@@ -125,7 +125,7 @@ export const useBrainSection = (
         render: <Link search={{ region: region.id }} to="/brain" />,
         ...(open > 0
           ? {
-              badge: (
+              end: (
                 <Badge aria-label={t`${open} still open`} size="sm">
                   {open}
                 </Badge>
@@ -209,13 +209,11 @@ export const useBrainSection = (
         label: t`In the brain`,
         rows: [],
         content: (
-          <TreeView
+          <BrainTree
             aria-label={t`In the brain`}
             current={noteId ?? regionShown ?? null}
-            defaultExpandedValue={parts.map((part) => part.value)}
-            expandOnPress={false}
+            defaultExpanded={parts.map((part) => part.value)}
             items={parts}
-            showIndentGuides
           />
         ),
       },

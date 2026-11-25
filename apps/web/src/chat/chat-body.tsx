@@ -8,23 +8,33 @@ import {
   MessageScrollerViewport,
 } from "@grasp-os/ui/components/message-scroller";
 import { Icon, RefreshCwIcon } from "@grasp-os/ui/lib/icons";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { lazy, Suspense } from "react";
 
 import { notLoadedText } from "../load-from-core.tsx";
-import { ConnectionRequests } from "./connection-requests.tsx";
+import { AgentName, agentModelOf } from "./agent-choice.tsx";
+import { AskOrCompose } from "./asked-questions.tsx";
+import { BuildsFailure, workOf } from "./builds.tsx";
 import { FailureLine } from "./failure-line.tsx";
 import type { GlobalChat } from "./global-chat.tsx";
-import { HeldWrites } from "./held-writes.tsx";
-import { PackageRequests } from "./package-requests.tsx";
+import { pendingCard } from "./make-card.tsx";
+import {
+  ModelsUnavailableNotice,
+  unavailableText,
+} from "./models-unavailable.tsx";
+import { ChatSources } from "./sources.tsx";
+import { useSubjectBar } from "./subject-bar.tsx";
 import type { ChatThread as ChatThreadType } from "./thread.tsx";
+import { WaitingForYou } from "./waiting-for-you.tsx";
 
-// One chat's conversation, as the chat beside a page and full screen show
-// it: the thread, with what waits on the person under its last answer
-// (the writes held for them, the connections and packages asked for), or
-// nothing before anything is asked: the box at its foot is enough.
+// One chat's conversation and the box to ask in under it, as the chat
+// beside a page (chat-panel.tsx) and a chat's own page (chat-page.tsx)
+// both show it: the thread, with what waits on the person under its last
+// answer (the writes held for them, the connections and packages asked
+// for), or nothing before anything is asked; and the box, or the agent's
+// questions in its place.
 
 const styles = stylex.create({
   grow: {
@@ -42,6 +52,23 @@ const styles = stylex.create({
     paddingBlock: space["8"],
   },
   stack: { display: "grid", gap: space["2"] },
+  // The box at the chat's foot, and what stands with it: as far in from
+  // the panel's sides and foot as the page's words are (#2503's).
+  footer: {
+    display: "flex",
+    flexDirection: "column",
+    flexShrink: 0,
+    gap: space["1"],
+    paddingInline: size.appShellPageInline,
+    paddingBlockStart: space["2"],
+    paddingBlockEnd: size.appShellPageInline,
+  },
+  // On a chat's page the column is already in from the card's sides: the
+  // box in as far as the thread's rows are, so it is as wide as the thread.
+  footerInColumn: { paddingInline: space["4"] },
+  // The box as wide as the foot it stands in, as #2503's: full screen and
+  // on a chat's page, its column's width, never the box's own most.
+  box: { maxWidth: "none" },
 });
 
 // The conversation, with its Markdown and code highlighting, loads once a
@@ -168,26 +195,23 @@ export const ChatConversation = ({
             ) : null}
           </div>
         )}
-        <HeldWrites
+        <WaitingForYou
           chatId={chatId}
-          // Confirmed, the agent reads how it ended and goes on, in a turn
-          // the person's own message starts, as for approved packages
-          // below: the decision itself reaches it as a note (GRA-2224).
-          onConfirmed={() => {
-            if (!view.running) {
-              void ask(t`Confirmed. Carry on.`);
-            }
-          }}
-          version={view.held}
-        />
-        <ConnectionRequests chatId={chatId} version={view.held} />
-        <PackageRequests
-          chatId={chatId}
+          // One pause per chat: what is answered in one never holds another's.
+          key={chatId}
           // Approved, the work the agent stopped for goes on, in a turn
           // the person's own message starts: the thread says why it did.
           onApproved={() => {
             if (!view.running) {
               void ask(t`The packages are approved. Carry on.`);
+            }
+          }}
+          // Confirmed, the agent reads how it ended and goes on, in a turn
+          // the person's own message starts, as for approved packages:
+          // the decision itself reaches it as a note (GRA-2224).
+          onConfirmed={() => {
+            if (!view.running) {
+              void ask(t`Confirmed. Carry on.`);
             }
           }}
           version={view.held}
@@ -196,3 +220,97 @@ export const ChatConversation = ({
     </Suspense>
   );
 };
+
+/**
+ * The box to ask in, or the agent's questions in its place; dictating only
+ * while the chat is seen (`listening`); `inColumn` on a chat's page, as
+ * wide as its thread.
+ */
+export const ChatFooter = ({
+  chat,
+  listening,
+  inColumn = false,
+}: {
+  chat: GlobalChat;
+  listening: boolean;
+  inColumn?: boolean;
+}) => {
+  const { t } = useLingui();
+  const {
+    builds,
+    subject,
+    chatId,
+    composer,
+    words,
+    view,
+    asking,
+    ask,
+    modelsUnavailable,
+    retry,
+    sourceNames,
+    summary,
+    offered,
+  } = chat;
+  const work = workOf(builds);
+  const unavailable = unavailableText(modelsUnavailable);
+  // Which of the company's agents answers here, where there are several.
+  const agents = offered?.agents ?? [];
+  // Under a card that waits for the person, the box is where to change it.
+  const waiting = pendingCard(view.messages, view.running)?.kind;
+  const changeWords = {
+    planned: t`Change something about the plan`,
+    agentDraft: t`Change something about the agent`,
+    agentChange: t`Change something about the change`,
+  };
+  const placeholder =
+    waiting === undefined ? words.placeholder : changeWords[waiting];
+  // When the running turn began: its question's time.
+  const turnSince = view.running
+    ? view.messages.findLast(({ role }) => role === "user")?.at
+    : undefined;
+  // The page's subject, by name once it is known.
+  const worked =
+    subject.about === undefined || subject.name === undefined
+      ? undefined
+      : { ...subject.about, name: subject.name };
+  const bar = useSubjectBar({
+    subject: worked,
+    work,
+    chatId,
+    since: turnSince,
+  });
+  return (
+    <div {...stylex.props(styles.footer, inColumn && styles.footerInColumn)}>
+      <BuildsFailure read={builds} />
+      <ChatSources names={sourceNames} provenance={view.provenance} />
+      <AskOrCompose
+        {...composer}
+        {...(unavailable === undefined ? {} : { unavailable })}
+        agent={
+          summary === undefined ? undefined : (
+            <AgentName agentId={summary.agentId} agents={agents} />
+          )
+        }
+        agentModel={agentModelOf(agents, summary?.agentId)}
+        {...(bar === undefined ? {} : { subject: bar })}
+        asking={asking}
+        dictates={listening}
+        style={styles.box}
+        label={words.title}
+        onAnswer={async (text) => await ask(text)}
+        // The box's editor takes its placeholder as it starts: another
+        // starts it afresh, with the text it holds.
+        key={placeholder}
+        placeholder={placeholder}
+        running={view.running}
+      />
+      <ModelsUnavailableNotice onRetry={retry} why={modelsUnavailable} />
+    </div>
+  );
+};
+
+/** Where the cursor goes in the chat: its box's text. */
+export const boxOf = (
+  body: HTMLElement | null
+): HTMLElement | null | undefined =>
+  body?.querySelector<HTMLElement>('[role="textbox"]');

@@ -15,12 +15,12 @@ import { seeded } from "../reveal-motion.ts";
 /* oxlint-disable no-bitwise, unicorn/prefer-code-point -- a string hash is 32-bit arithmetic on UTF-16 units, as the prototype's: codePointAt would change its numbers */
 
 /** How many designs there are of each kind. */
-export const DESIGNS = 30;
+const DESIGNS = 30;
 
-export type NeuronKind = "cell" | "small" | "crowned";
+type NeuronKind = "cell" | "small" | "crowned";
 
 /** One line of dots along a curve from one point, bowing through another, to a third, tapering from `from` to `to`. */
-export interface Curve {
+interface Curve {
   x1: number;
   y1: number;
   cx: number;
@@ -32,7 +32,7 @@ export interface Curve {
 }
 
 /** A design: how its soma's outline swells and dips, and its dendrites, in its own radius from its middle, y up. */
-export interface NeuronDesign {
+interface NeuronDesign {
   kind: NeuronKind;
   index: number;
   lean: number;
@@ -188,7 +188,7 @@ const kindSeed: Record<NeuronKind, number> = {
 };
 
 /** The designs of a kind: the first `DESIGNS` grown that are well made, the same every time. */
-export const designsOf = (kind: NeuronKind): NeuronDesign[] => {
+const designsOf = (kind: NeuronKind): NeuronDesign[] => {
   const known = library.get(kind);
   if (known !== undefined) {
     return known;
@@ -314,7 +314,7 @@ export const curveDots = (
 };
 
 /** What a printed dot is, for how it looks. */
-export type PrintRole = "soma" | "strand";
+type PrintRole = "soma" | "strand";
 
 /** How bold a printed dot is, for its ink, as the atlas prints a region; still waiting, fainter. */
 export const printAlpha = (
@@ -356,7 +356,7 @@ export const NERVE = {
 };
 
 /** A nerve at a moment: how far it has grown, how fresh it still is, where a signal runs (-1 none), and whether it is a thread tried. */
-export interface NerveNow {
+interface NerveNow {
   reach: number;
   fresh: number;
   signal: number;
@@ -413,7 +413,7 @@ export const nerveNow = (
 };
 
 /** A nerve's curve between two somas: from one's edge to the other's, bowing by `bow` of its length. */
-export interface NerveCurve {
+interface NerveCurve {
   x1: number;
   y1: number;
   cx: number;

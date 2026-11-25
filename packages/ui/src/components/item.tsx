@@ -54,8 +54,12 @@ import {
 } from "../lib/tokens.stylex";
 import { isBlank, listOf } from "../lib/utils";
 import type { LayoutStyle } from "../lib/utils";
-import { iconVars, sidePanelCardMarker } from "../lib/vars.stylex";
-import { itemMarker } from "./item.stylex";
+import {
+  iconVars,
+  sidePanelCardMarker,
+  skeletonVars,
+} from "../lib/vars.stylex";
+import { itemMarker, itemVars } from "./item.stylex";
 import { Separator } from "./separator";
 import { Skeleton } from "./skeleton";
 
@@ -124,6 +128,16 @@ export interface ItemGroupProps {
   "aria-label"?: string;
   /** The id of a heading that names it, in place of `aria-label`. */
   "aria-labelledby"?: string;
+  /**
+   * Narrower than 30rem of the list's own width (a phone, a narrow panel), each row's ItemDetail
+   * goes on a line under its name, at every row size; an `xs` row's name then wraps whole, where
+   * otherwise its detail stands at the row's end and the name is cut short. The list lays out by
+   * its own width (a size container, as the original's row list did), so it takes none from its
+   * rows: in a box that sizes to its content (a shrink-wrapped flex item, an inline-block), give
+   * the list or the box a width.
+   * @default false
+   */
+  stack?: boolean;
   /** Layout only: margins, alignment and width. */
   style?: LayoutStyle;
 }
@@ -163,7 +177,7 @@ export interface ItemMediaProps {
    * Where it stands. `start` on the title's line (and in the middle of a row with no
    * description); `center` in the middle of its row, on all the words however many lines they
    * take, as a logo, a tile or a face stands.
-   * @default "start"
+   * @default "start" for a bare mark, "center" for an icon in its square or a picture
    */
   align?: "start" | "center";
   /** Layout only: margins. */
@@ -200,6 +214,9 @@ export interface ItemActionsProps {
 
 const HOVER = media.hover;
 const FORCED = media.forcedColors;
+// A list that stacks (ItemGroup's `stack`), narrower than this: an xs row's detail goes on a line
+// under its name, and the name wraps, as the original's row list stacked them.
+const STACK = "@container item-group-stack (width < 30rem)";
 
 const styles = stylex.create({
   // A row whose whole width is one press: the keyboard's ring round the row when the press inside
@@ -220,7 +237,8 @@ const styles = stylex.create({
     width: "100%",
     minWidth: 0,
     margin: 0,
-    borderRadius: radius.lg,
+    // The system's corner, as the original's Item: the card's.
+    borderRadius: radius.xl,
     cornerShape: radius.shape,
     color: colors.foreground,
     fontFamily: font.sans,
@@ -236,8 +254,9 @@ const styles = stylex.create({
     paddingInline: space["4"],
   },
   // The setting rows' rhythm: 8px above and below, a table cell's inset, a field row at least.
-  // In a side panel's card: a finger's 44px, the panel's inset, and at the row's end the room of
-  // an action (a 28px button and its gap) on a row that has none, so every detail ends on one line.
+  // In a side panel's card: a finger's 44px, the panel's inset, and at the row's end, in a list
+  // where some row has an action, the room of one (a 28px button and its gap) on a row that has
+  // none, so every detail ends on one line; in a list with none, every detail ends at the inset.
   xs: {
     gap: {
       default: space["3"],
@@ -246,6 +265,7 @@ const styles = stylex.create({
     paddingBlock: {
       default: space["2"],
       [stylex.when.ancestor(":is(*)", sidePanelCardMarker)]: 0,
+      [STACK]: space["2"],
     },
     paddingInlineStart: {
       default: space.tableCellInline,
@@ -256,13 +276,22 @@ const styles = stylex.create({
       default: space.tableCellInline,
       [stylex.when.ancestor(":is(*)", sidePanelCardMarker)]: {
         default: space.sidePanelPadding,
-        ":not(:has([data-slot=item-actions]))": `calc(${space.sidePanelPadding} + ${sizes.controlXs} + ${space["2"]})`,
+        ":not(:has([data-slot=item-actions]))": `calc(${space.sidePanelPadding} + ${itemVars.actionRoom})`,
       },
     },
     minHeight: {
       default: space.fieldRow,
       [stylex.when.ancestor(":is(*)", sidePanelCardMarker)]: sizes.tapTarget,
     },
+    // In a side panel's card the hairline before a row is that row's own top, as the original's
+    // row list drew it: the separator lies over this edge, so a row taller than a finger's 44px
+    // (a detail on its own line) is one hairline taller, and a short row stays 44px.
+    borderBlockStartWidth: {
+      default: null,
+      [stylex.when.ancestor(":is(*)", sidePanelCardMarker)]: itemVars.lineAbove,
+    },
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: "transparent",
   },
   plain: { backgroundColor: "transparent" },
   outline: {
@@ -380,11 +409,13 @@ const styles = stylex.create({
     overflowWrap: "anywhere",
     hyphens: "manual",
   },
-  // In a side panel's card: the panel's smaller words, the name and what follows it in one row.
+  // In a side panel's card: the panel's smaller words, the name and what follows it in one row;
+  // in a narrow list that stacks, the name and under it its detail.
   titleXs: {
     display: {
       default: null,
       [stylex.when.ancestor(":is(*)", sidePanelCardMarker)]: "flex",
+      [STACK]: "block",
     },
     alignItems: {
       default: null,
@@ -409,7 +440,8 @@ const styles = stylex.create({
         sizes.sidePanelTextLine,
     },
   },
-  // In a side panel's card: the name on one line, cut with an ellipsis so its detail stays whole.
+  // In a side panel's card: the name on one line, cut with an ellipsis so its detail stays whole;
+  // in a narrow list that stacks it wraps, whole.
   nameXs: {
     minWidth: {
       default: null,
@@ -426,19 +458,27 @@ const styles = stylex.create({
     whiteSpace: {
       default: null,
       [stylex.when.ancestor(":is(*)", sidePanelCardMarker)]: "nowrap",
+      [STACK]: "normal",
     },
   },
-  // On the title's line, after a space and a little more room: quieter, not bolder.
+  // On the title's line, after a space and a little more room: quieter, not bolder. In a narrow
+  // list that stacks, on a line of its own under the name, at every row size.
   detail: {
-    marginInlineStart: space["1"],
+    display: { default: null, [STACK]: "block" },
+    marginInlineStart: { default: space["1"], [STACK]: 0 },
     fontWeight: font.weightNormal,
     color: colors.mutedForeground,
   },
-  // In a side panel's card: at the row's end, whole and on one line; the name gives way to it.
+  // In a side panel's card: at the row's end, whole and on one line; the name gives way to it. In a
+  // narrow list that stacks, on a line of its own under the name, cut with an ellipsis at the row's
+  // width.
   detailXs: {
+    overflow: { default: null, [STACK]: "hidden" },
+    textOverflow: { default: null, [STACK]: "ellipsis" },
     marginInlineStart: {
       default: space["1"],
       [stylex.when.ancestor(":is(*)", sidePanelCardMarker)]: "auto",
+      [STACK]: 0,
     },
     flexShrink: {
       default: null,
@@ -524,6 +564,7 @@ const styles = stylex.create({
     display: {
       default: null,
       [stylex.when.ancestor(":is(*)", sidePanelCardMarker)]: "flex",
+      [STACK]: "block",
     },
     flexGrow: {
       default: null,
@@ -542,8 +583,15 @@ const styles = stylex.create({
       [stylex.when.ancestor(":is(*)", sidePanelCardMarker)]: 0,
     },
   },
+  // A list that stacks: its rows lay out by its own width.
+  stack: { containerType: "inline-size", containerName: "item-group-stack" },
   // Lists: a real list, the rows one under another, 8px apart, or 4px either side of a hairline.
   group: {
+    // The room a row keeps for an action it lacks: only where some row holds one.
+    [itemVars.actionRoom]: {
+      default: "0px",
+      ":has([data-slot=item-actions])": `calc(${sizes.controlXs} + ${space["2"]})`,
+    },
     display: "grid",
     width: "100%",
     margin: 0,
@@ -571,7 +619,15 @@ const styles = stylex.create({
       },
     },
   },
-  row: { display: "grid", minWidth: 0 },
+  // A list's row: after a hairline, it tells its Item so (itemVars.lineAbove).
+  row: {
+    [itemVars.lineAbove]: {
+      default: "0px",
+      ":is([data-slot=item-separator] + *)": sizes.hairline,
+    },
+    display: "grid",
+    minWidth: 0,
+  },
   // In a side panel's card the hairline is the top of the row after it, and takes no height.
   separator: {
     display: "grid",
@@ -612,14 +668,17 @@ const waits = stylex.create({
     height: sizes.controlSm,
     borderRadius: `min(${radius.xl}, calc(${sizes.controlSm} / 2))`,
   },
-  // The bare icon's box, in line with the title.
+  // The bare icon's box, in line with the title: a block the icon's size, with the one corner
+  // capped at half of it, as the original's.
+  // Its placeholder is its own size (skeletonVars), never a control's height cut at its foot.
   icon: {
+    [skeletonVars.block]: "100%",
     display: "flex",
     flexShrink: 0,
     width: sizes.iconSm,
     height: sizes.iconSm,
     overflow: "hidden",
-    borderRadius: radius.sm,
+    borderRadius: `min(${radius.xl}, calc(${sizes.iconSm} / 2))`,
     cornerShape: radius.shape,
   },
   // The title's and the description's lines, as long as a short name and a short line.
@@ -673,9 +732,12 @@ const holds = (children: ReactNode, parts: readonly unknown[]) =>
 export const ItemMedia = ({
   children,
   variant = "default",
-  align = "start",
+  align: given,
   style,
 }: ItemMediaProps) => {
+  // A square or a picture stands in the middle of its row, on all the words; a bare icon on the
+  // title's line.
+  const align = given ?? (variant === "default" ? "start" : "center");
   const sized = use(RowSize);
   const small = sized !== "default";
   if (use(RowLoading) && isBlank(children)) {
@@ -831,6 +893,7 @@ export const ItemTitle = ({ children, style }: ItemTitleProps) => {
  * A quieter word or two on the title's line, after the name: a role, "you", a count ("Admin"). In
  * the muted ink at the regular weight; it wraps with the title, never cut off. Put it in the
  * ItemTitle. On an `xs` row in a side panel's card it stands at the row's end instead, on one line.
+ * In an ItemGroup that stacks, narrower than 30rem, it stands on a line of its own under the name.
  */
 export const ItemDetail = ({ children, style }: ItemDetailProps) => {
   const dense = use(RowSize) === "xs";
@@ -1032,6 +1095,7 @@ export const ItemGroup = ({
   children,
   "aria-label": label,
   "aria-labelledby": labelledBy,
+  stack = false,
   style,
 }: ItemGroupProps) => (
   <InList value>
@@ -1041,7 +1105,7 @@ export const ItemGroup = ({
       aria-label={label}
       aria-labelledby={labelledBy}
       data-slot="item-group"
-      {...stylex.props(styles.group, style)}
+      {...stylex.props(styles.group, stack && styles.stack, style)}
     >
       {children}
     </ul>

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
   brainCloud,
@@ -387,5 +387,25 @@ describe("the atlas brain", () => {
       lowest = Math.min(lowest, at(cloud.y, index));
     }
     expect(lowest).toBeGreaterThan(-1.15);
+  });
+
+  it("makes the same brain between frames as at once", async () => {
+    vi.resetModules();
+    const sliced = await import("./dot-shapes.ts");
+    const made = await sliced.brainCloudReady();
+    const atOnce = brainCloud();
+    expect(made.count).toBe(atOnce.count);
+    expect(made.body).toBe(atOnce.body);
+    expect(made.x).toStrictEqual(atOnce.x);
+    expect(made.region).toStrictEqual(atOnce.region);
+  });
+
+  it("makes one brain when a page asks for it at once while it is being made between frames", async () => {
+    vi.resetModules();
+    const raced = await import("./dot-shapes.ts");
+    const ready = raced.brainCloudReady();
+    const asked = raced.brainCloud();
+    await expect(ready).resolves.toBe(asked);
+    expect(raced.brainCloud()).toBe(asked);
   });
 });

@@ -10,13 +10,14 @@ import {
 import { Heading } from "@grasp-os/ui/components/heading";
 import { Link } from "@grasp-os/ui/components/link";
 import { Text } from "@grasp-os/ui/components/text";
-import { focusRingText, visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { focusRingText } from "@grasp-os/ui/lib/styles";
 import { colors, radius, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useId, useState } from "react";
+import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
+import { PauseNote, useArmed } from "../answer-pause.tsx";
 import { useNarrow } from "../onboarding/use-narrow.ts";
 
 // An ask for the person's yes in the Inbox (a held change, a start an
@@ -111,32 +112,6 @@ const settled = async (
   } finally {
     settle();
   }
-};
-
-/**
- * How long the answers of an item that opened in place of one just
- * answered stay out of use: longer than a double click, so a second press
- * meant for the item before never answers this one.
- */
-const arrivalPauseMs = 1000;
-
-/**
- * Whether an item's answers may be used: at once, or, for one `arriving`
- * in place of an item just answered, after `arrivalPauseMs`.
- */
-export const useArmed = (arriving: boolean): boolean => {
-  const [armed, setArmed] = useState(!arriving);
-  useEffect(() => {
-    const timer = armed
-      ? undefined
-      : setTimeout(() => {
-          setArmed(true);
-        }, arrivalPauseMs);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [armed]);
-  return armed;
 };
 
 /** The ask on its dither, a focus target, and the quiet line of who asks and since when. */
@@ -258,6 +233,7 @@ const AnswerRow = ({
             })}
             focusableWhenDisabled={approveWhy.length > 0}
             onClick={onApprove}
+            variant="success"
           >
             {approveLabel ?? t`Approve`}
           </Button>
@@ -312,7 +288,7 @@ export const ApprovalRequest = ({
   const [answer, setAnswer] = useState<Answer>({ state: "waiting" });
   const [giving, setGiving] = useState<boolean>();
   const [failure, setFailure] = useState<string>();
-  const armed = useArmed(arriving);
+  const [armed] = useArmed(arriving);
   const off = !armed || gone;
   const waiting = answer.state === "waiting";
   const give = (approved: boolean) => async () => {
@@ -353,11 +329,7 @@ export const ApprovalRequest = ({
         titleId={titleId}
       />
       {/* The pause, said, for the answers that wait it out. */}
-      {paused ? (
-        <span id={pauseId} {...stylex.props(visuallyHidden)}>
-          {t`Its answers can be used in a moment, so a press meant for the one before doesn't answer it.`}
-        </span>
-      ) : null}
+      {paused ? <PauseNote id={pauseId} /> : null}
       {waiting ? (
         <AnswerRow
           approveHeldBy={approveHeld === undefined ? undefined : heldId}

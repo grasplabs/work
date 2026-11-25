@@ -53,6 +53,7 @@ import { useMemberAdmin } from "../use-member-admin.ts";
 import { FileCards } from "./chat-files.tsx";
 import type { CardFile } from "./chat-files.tsx";
 import { promptStatusOf } from "./chat-states.ts";
+import { useOwnComposerLook } from "./composer-look.ts";
 import { ConnectAiProvider } from "./connect-ai-provider.tsx";
 import { useDictation } from "./dictation.ts";
 import type { StopNote } from "./dictation.ts";
@@ -85,17 +86,6 @@ import { isEffort } from "./model-choice.ts";
 
 const styles = stylex.create({
   agentModel: { display: "inline-flex", alignItems: "center", minWidth: 0 },
-  // The microphone, Send and what the page adds, at the row's end: in the
-  // footer pushed to its end, in one row the card's own end column.
-  end: {
-    flexShrink: 0,
-    marginInlineStart: "auto",
-    gridArea: "end",
-    justifySelf: "end",
-  },
-  // At the row's end, #2503 sets its controls a space-2 apart, where
-  // Damsko's tools stand a space-1 apart: the rest after the first.
-  apart: { marginInlineStart: space["1"] },
   // The files take the header's whole line, their cards 16px from the
   // card's top and side and the text 12px under them, as #2503's and as
   // Damsko's own PromptInputAttachments (its `attachments` style), which
@@ -162,7 +152,6 @@ const ModelPicker = ({
   const name = modelName(model);
   const thinks = efforts.length > 0 && onEffort !== undefined;
   const makers = [...new Set(models.map(makerOf))];
-  const chosenMark = makerMark(makerOf(model));
   const level =
     thinks && effort !== undefined ? t(effortNames[effort]) : undefined;
   return (
@@ -193,9 +182,8 @@ const ModelPicker = ({
             : t`Model: ${name}. Change model`
         }
       >
-        {chosenMark === undefined ? null : (
-          <ModelSelectorLogo logo={chosenMark} />
-        )}
+        {/* The chosen model by its name alone, as #2503's chip: the makers'
+            marks stand in the list. */}
         <ModelSelectorName>
           {level === undefined ? name : `${name} · ${level}`}
         </ModelSelectorName>
@@ -329,18 +317,10 @@ const BoxTools = ({
         {attaches ? <AddMenu /> : null}
         {compact ? null : answerer}
       </PromptInputTools>
-      <PromptInputTools style={styles.end}>
+      <PromptInputTools align="end">
         {compact && !folded ? answerer : null}
-        {speech === undefined ? null : (
-          <PromptInputSpeechButton
-            {...speech}
-            {...(compact ? { style: styles.apart } : {})}
-          />
-        )}
-        <PromptInputSubmit
-          {...(stop === undefined ? {} : { onStop: stop })}
-          {...(compact || speech !== undefined ? { style: styles.apart } : {})}
-        />
+        {speech === undefined ? null : <PromptInputSpeechButton {...speech} />}
+        <PromptInputSubmit {...(stop === undefined ? {} : { onStop: stop })} />
         {children}
       </PromptInputTools>
     </>
@@ -742,6 +722,8 @@ export const Composer = ({
   // No AI provider to call yet: the box takes nothing. Not while the models
   // are still being read, so what is typed then stays.
   const noProvider = offered !== undefined && lacksModel(model);
+  // The person's own look at work (Settings › Appearance).
+  const look = useOwnComposerLook();
   const dictation = useDictation(text, onText, {
     off: !dictates,
     note: stopNote,
@@ -773,8 +755,10 @@ export const Composer = ({
 
   return (
     <PromptInput
+      accent={look.accent}
       compact={compact}
       disabled={noProvider}
+      edge={look.edge}
       maxLength={maxQuestionLength}
       onSubmit={() => {
         // What this send meets is newer than why dictating stopped before it.

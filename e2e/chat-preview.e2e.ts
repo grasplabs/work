@@ -74,7 +74,7 @@ test("a chat building an App offers its workspace, whose preview changes none of
     await expect(own.getByRole("status")).toHaveText("1 in the App");
 
     // Nothing built yet: the conversation alone.
-    await page.goto(`/?chat=${chat.id}`);
+    await page.goto(`/chats/${chat.id}`);
     const thread = page.getByRole("region", {
       name: `Build ${tag}`,
       exact: true,
@@ -90,7 +90,7 @@ test("a chat building an App offers its workspace, whose preview changes none of
         tallyFiles("in the preview").files["server/tally.ts"] ?? "",
     });
     // Opened afresh from its link: the address left it once it opened.
-    await page.goto(`/?chat=${chat.id}`);
+    await page.goto(`/chats/${chat.id}`);
 
     // The App's workspace is the bar's link away.
     await building.click();
@@ -103,9 +103,9 @@ test("a chat building an App offers its workspace, whose preview changes none of
       .getByRole("button", { name: `Build ${tag}`, exact: true });
     await expect(chatName).toBeVisible();
     // There, the draft this chat builds is the preview, not the live App.
-    // Shared with nobody yet: Share with your team is on.
+    // Shared with nobody yet: Publish is on.
     await expect(
-      page.getByRole("button", { name: "Share with your team" })
+      page.getByRole("button", { name: "Publish", exact: true })
     ).toBeEnabled();
     const preview = page.getByRole("region", { name: `${name}, your version` });
     // Its own store: none of the App's tally, then only what it added,
@@ -160,10 +160,10 @@ test("an App's own chat writes its page and server code, and its workspace previ
 
     // The page the agent wrote runs in the preview, on a store of its own.
     const preview = page.getByRole("region", { name: `${name}, your version` });
-    // Only its builder sees it: Share with your team is on, once the
+    // Only its builder sees it: Publish is on, once the
     // turn's check of the draft is done.
     await expect(
-      page.getByRole("button", { name: "Share with your team" })
+      page.getByRole("button", { name: "Publish", exact: true })
     ).toBeEnabled(afterTurnCheck);
     const frame = preview.frameLocator("iframe");
     await expect(frame.getByRole("status")).toHaveText("0 in the preview", {
@@ -228,7 +228,7 @@ test("an App's own chat writes its page and server code, and its workspace previ
     // published: the App's project as the agent wrote it, its last write
     // too.
     await page
-      .getByRole("navigation", { name: "Workspace views" })
+      .getByRole("navigation", { name: /s workspace$/u })
       .getByRole("link", { name: "Code" })
       .click();
     await page
@@ -242,4 +242,39 @@ test("an App's own chat writes its page and server code, and its workspace previ
   } finally {
     core[Symbol.dispose]();
   }
+});
+
+test("an App's chat closes where the window has no room for it beside the App, which it would cover", async ({
+  pageOf,
+}) => {
+  const { builder } = peopleIn("chatPreview");
+  const { core, api } = apiOf(builder);
+  const name = `Narrow ${crypto.randomUUID().slice(0, 8)}`;
+  let appId = "";
+  try {
+    ({ id: appId } = await api.apps.create({ name }));
+  } finally {
+    core[Symbol.dispose]();
+  }
+  const page = await pageOf(builder);
+  // Wider than a phone, too narrow for the App and its chat side by side.
+  await page.setViewportSize({ width: 700, height: 800 });
+  await page.goto(`/apps/${appId}`);
+  const app = page.getByRole("heading", { name: "What should this App do?" });
+  await expect(app).toBeVisible();
+
+  // Opened by the card's own button, it lies over the App; its Close and
+  // Escape each take it away again.
+  const chat = page.getByRole("region", { name: "Chat" });
+  const toggle = page.getByRole("button", { name: "Show or hide the chat" });
+  await toggle.click();
+  await expect(chat).toBeVisible();
+  await chat.getByRole("button", { name: "Close" }).click();
+  await expect(chat).toBeHidden();
+  await expect(app).toBeVisible();
+  await toggle.click();
+  await expect(chat).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(chat).toBeHidden();
+  await expect(app).toBeVisible();
 });

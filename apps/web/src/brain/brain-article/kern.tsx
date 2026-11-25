@@ -1,24 +1,34 @@
-import { Button } from "@grasp-os/app-kit/components/button";
+import type { Statement } from "@grasp-os/shared/brain";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from "@grasp-os/app-kit/components/collapsible";
-import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
+} from "@grasp-os/ui/components/collapsible";
+import { Heading } from "@grasp-os/ui/components/heading";
+import { Text } from "@grasp-os/ui/components/text";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
-} from "@grasp-os/app-kit/components/tooltip";
-import type { Statement } from "@grasp-os/shared/brain";
+} from "@grasp-os/ui/components/tooltip";
+import { Icon, TrashIcon } from "@grasp-os/ui/lib/icons";
+import { focusRingText } from "@grasp-os/ui/lib/styles";
+import {
+  colors,
+  font,
+  radius,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
-import { ChevronRightIcon, Trash2Icon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { formatDay, isoWeek } from "../../format.ts";
 import { ClaimBasis } from "../aggregate.tsx";
-import type { Interviewee, Kern, StatementRow } from "../article-kern.ts";
+import type { Kern, StatementRow } from "../article-kern.ts";
 import { Drawing, Panel } from "../brain-home.tsx";
 import { given, groupOf, isTeamClaim, statementWords } from "../brain.ts";
 import type { Note } from "../brain.ts";
@@ -27,64 +37,116 @@ import { KindLabel } from "../statement-kind.tsx";
 // The pieces of a note's article, as the prototype has them
 // (`components/brain-article/kern.tsx`).
 
+const styles = stylex.create({
+  lastHeard: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: space["2"],
+    marginInlineStart: space["2"],
+    fontSize: font.textXs,
+    lineHeight: font.textXsLine,
+    color: colors.success,
+    whiteSpace: "nowrap",
+  },
+  heardDot: {
+    width: size.severityDot,
+    height: size.severityDot,
+    borderRadius: radius.circle,
+    backgroundColor: colors.success,
+  },
+  header: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["4"],
+  },
+  sticker: {
+    position: "absolute",
+    insetBlockEnd: space["4"],
+    insetInlineStart: space["5"],
+  },
+  titles: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: space["1"],
+    minWidth: 0,
+  },
+  line: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
+    alignItems: "baseline",
+    gap: space["4"],
+    paddingBlock: space["3"],
+    borderTopWidth: { default: size.hairline, ":first-child": 0 },
+    borderTopStyle: "solid",
+    borderTopColor: colors.border,
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+    color: colors.bodyForeground,
+  },
+  lineRemovable: {
+    gridTemplateColumns: "minmax(0, 1fr) auto auto",
+  },
+  said: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: space["1"],
+    minWidth: 0,
+  },
+  words: {
+    color: "inherit",
+    textDecorationLine: { default: "none", ":hover": "underline" },
+  },
+  kind: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: space["2"],
+    fontSize: font.textXs,
+    lineHeight: font.textXsLine,
+    color: colors.mutedForeground,
+  },
+  where: {
+    maxWidth: `calc(4 * ${space["16"]})`,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    textAlign: "end",
+    fontSize: font.textXs,
+    lineHeight: font.textXsLine,
+    color: { default: colors.mutedForeground, ":hover": colors.foreground },
+    textDecorationLine: { default: "none", ":hover": "underline" },
+  },
+  remove: { alignSelf: "center" },
+  partHeading: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space["3"],
+  },
+  count: {
+    marginInlineStart: space["2"],
+    fontWeight: font.weightNormal,
+    color: colors.mutedForeground,
+  },
+  fold: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["5"],
+    paddingTop: space["2"],
+    paddingBottom: space["4"],
+  },
+});
+
 /** When the team was last heard: the date of the newest conversation, so the reader knows how fresh it is. */
-export const LastHeard = ({ date }: { date: string }) => {
+const LastHeard = ({ date }: { date: string }) => {
   const day = formatDay(date);
   return (
-    <span className="text-status-agreed inline-flex items-center gap-1.5 text-xs whitespace-nowrap">
-      <span className="bg-status-agreed size-1.5 rounded-full" />
+    <span {...stylex.props(styles.lastHeard)}>
+      <span aria-hidden="true" {...stylex.props(styles.heardDot)} />
       <Trans>Last heard {day}</Trans>
     </span>
-  );
-};
-
-/**
- * Everyone the team was heard through in an interview, as initials on the banner. Pointing at one
- * says who it is as the source names them (Grasp keeps no names), their role, and how and when they
- * were interviewed; a click opens the interview.
- */
-export const Interviewed = ({ people }: { people: Interviewee[] }) => {
-  const { t } = useLingui();
-  return (
-    <div className="flex -space-x-2">
-      {people.map((person) => {
-        const day = formatDay(person.date);
-        const who = person.label;
-        return (
-          <Tooltip key={person.sourceId}>
-            <TooltipTrigger
-              render={
-                <Link
-                  aria-label={t`${who}, interviewed ${day}`}
-                  className="border-graph-teams bg-background text-graph-teams focus-visible:ring-ring/50 flex size-10 items-center justify-center rounded-full border-2 text-xs font-medium transition-transform outline-none hover:z-10 hover:-translate-y-0.5 focus-visible:z-10 focus-visible:ring-3"
-                  params={{ noteId: person.sourceId }}
-                  to="/brain/$noteId"
-                />
-              }
-            >
-              {person.initials}
-            </TooltipTrigger>
-            <TooltipContent>
-              <span className="flex flex-col gap-0.5">
-                <span className="font-medium">{person.label}</span>
-                {person.label === person.role ? null : (
-                  <span>{person.role}</span>
-                )}
-                <span className="opacity-70">
-                  {[
-                    person.stakeholder ? t`Stakeholder` : t`Employee`,
-                    person.how,
-                    day,
-                  ]
-                    .filter(given)
-                    .join(" · ")}
-                </span>
-              </span>
-            </TooltipContent>
-          </Tooltip>
-        );
-      })}
-    </div>
   );
 };
 
@@ -107,36 +169,34 @@ export const BannerHeader = ({
   // Only a conversation's own page shows who it was with; a team or a piece of work never shows its people.
   const shown = sticker;
   return (
-    <header className="flex flex-col gap-4">
+    <header {...stylex.props(styles.header)}>
       <Panel group={group} short>
         {shown === undefined ? (
           <Drawing group={group} small />
         ) : (
-          <div className="absolute bottom-4 left-5">{shown}</div>
+          <div {...stylex.props(styles.sticker)}>{shown}</div>
         )}
       </Panel>
-      <span className="flex flex-col gap-0.5">
-        <PageHeaderTitle className="wrap-break-word">
+      <div {...stylex.props(styles.titles)}>
+        <Heading level={1} size="lg">
           {note.kind === "statement"
             ? statementWords(note.id, note.title)
             : note.title}
-        </PageHeaderTitle>
+        </Heading>
         {note.kind === "statement" && isTeamClaim(note.id) ? (
           <ClaimBasis statementId={note.id} />
         ) : null}
         {/* Last heard follows the summary's last word, so a summary that wraps keeps it beside its words. A source's summary already carries its date. */}
-        <p className="text-muted-foreground text-sm">
+        <Text size="sm" color="muted">
           {note.summary}
           {note.kind === "source" || kern.lastHeard === undefined ? null : (
             <>
               {" "}
-              <span className="ml-1.5">
-                <LastHeard date={kern.lastHeard} />
-              </span>
+              <LastHeard date={kern.lastHeard} />
             </>
           )}
-        </p>
-      </span>
+        </Text>
+      </div>
     </header>
   );
 };
@@ -157,20 +217,23 @@ export const StatementLine = ({
   const week = isoWeek(place.source.date);
   return (
     <li
-      className={`grid items-baseline gap-4 border-t py-2.5 text-sm first:border-t-0 ${onRemove === undefined ? "grid-cols-[minmax(0,1fr)_auto]" : "grid-cols-[minmax(0,1fr)_auto_auto]"}`}
       data-statement={statement.id}
+      {...stylex.props(
+        styles.line,
+        onRemove !== undefined && styles.lineRemovable
+      )}
     >
-      <span className="flex min-w-0 flex-col gap-1">
+      <span {...stylex.props(styles.said)}>
         <Link
-          className="hover:underline"
           hash={statement.id}
           params={{ noteId: place.source.id }}
           to="/brain/$noteId"
+          {...stylex.props(styles.words, focusRingText)}
         >
           {statement.text}
         </Link>
         {showKind ? (
-          <span className="text-muted-foreground inline-flex items-center gap-1.5 text-xs">
+          <span {...stylex.props(styles.kind)}>
             <KindLabel kind={statement.kind} />
           </span>
         ) : null}
@@ -178,29 +241,37 @@ export const StatementLine = ({
           <ClaimBasis statementId={statement.id} />
         ) : null}
       </span>
-      <Link
-        className="text-muted-foreground hover:text-foreground max-w-64 truncate text-right text-xs hover:underline"
-        hash={statement.id}
-        params={{ noteId: place.source.id }}
-        title={place.source.title}
-        to="/brain/$noteId"
-      >
-        {/* Who said it as the company may read it, and the week: never a name, a day or the minute in the conversation. */}
-        {[who, t`week ${week}`].filter(given).join(" · ")}
-      </Link>
+      {/* Who said it as the company may read it, and the week: never a name, a day or the minute in the conversation. The source's title is its tooltip. */}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Link
+            hash={statement.id}
+            params={{ noteId: place.source.id }}
+            to="/brain/$noteId"
+            {...stylex.props(styles.where, focusRingText)}
+          >
+            {[who, t`week ${week}`].filter(given).join(" · ")}
+          </Link>
+        </TooltipTrigger>
+        <TooltipContent>{place.source.title}</TooltipContent>
+      </Tooltip>
       {onRemove === undefined ? null : (
-        <Button
-          aria-label={t`Remove this from the brain`}
-          className="self-center"
-          onClick={() => {
-            onRemove(statement);
-          }}
-          size="icon-xs"
-          title={t`Remove from the brain`}
-          variant="ghost"
-        >
-          <Trash2Icon />
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              aria-label={t`Remove this from the brain`}
+              onClick={() => {
+                onRemove(statement);
+              }}
+              size="icon-xs"
+              style={styles.remove}
+              variant="ghost"
+            >
+              <Icon icon={TrashIcon} />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{t`Remove from the brain`}</TooltipContent>
+        </Tooltip>
       )}
     </li>
   );
@@ -216,15 +287,25 @@ export const PartHeading = ({
   count?: number | string;
   children?: ReactNode;
 }) => (
-  <div className="flex flex-wrap items-center justify-between gap-3">
-    <h2 className="flex items-baseline gap-2 text-sm font-medium">
+  <div {...stylex.props(styles.partHeading)}>
+    <Heading level={2} size="2xs">
       {title}
       {count === undefined ? null : (
-        <span className="text-muted-foreground font-normal">{count}</span>
+        <span {...stylex.props(styles.count)}>{count}</span>
       )}
-    </h2>
+    </Heading>
     {children}
   </div>
+);
+
+/** What a fold says on its trigger: its title, and how many it holds. */
+const FoldTitle = ({ title, count }: { title: string; count?: number }) => (
+  <>
+    {title}
+    {count === undefined ? null : (
+      <span {...stylex.props(styles.count)}>{count}</span>
+    )}
+  </>
 );
 
 /** A folded part of the article, as the page folds its links: closed until asked for. */
@@ -237,18 +318,16 @@ export const Fold = ({
   count?: number | undefined;
   children: ReactNode;
 }) => (
-  <Collapsible>
-    <CollapsibleTrigger
-      render={<Button className="-ml-2.5" size="sm" variant="ghost" />}
-    >
-      <ChevronRightIcon className="text-muted-foreground transition-transform group-aria-expanded/button:rotate-90" />
-      {title}
-      {count === undefined ? null : (
-        <span className="text-muted-foreground">{count}</span>
+  <Collapsible fitContent>
+    <CollapsibleTrigger>
+      {count === undefined ? (
+        <FoldTitle title={title} />
+      ) : (
+        <FoldTitle count={count} title={title} />
       )}
     </CollapsibleTrigger>
     <CollapsibleContent>
-      <div className="flex flex-col gap-5 pt-2 pb-4">{children}</div>
+      <div {...stylex.props(styles.fold)}>{children}</div>
     </CollapsibleContent>
   </Collapsible>
 );

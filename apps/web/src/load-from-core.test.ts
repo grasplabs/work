@@ -1,3 +1,4 @@
+import { agentErrors } from "@grasp-os/shared/agent";
 import { internalErrors } from "@grasp-os/shared/errors";
 import { roleErrors } from "@grasp-os/shared/roles";
 import { i18n } from "@lingui/core";
@@ -9,7 +10,8 @@ import { loadFromCore, notLoadedText } from "./load-from-core.tsx";
 // What a page says when its read from core fails, over the tab's real
 // connection to a stand-in core: a read the connection drops under is core
 // out of reach, as one that never got a connection is, and never shows
-// the socket's own words; what core answers stays core's reason.
+// the socket's own words; what core answers stays core's reason; a thing
+// core has none of for the person is missing.
 
 /** A stand-in core whose page read ends as `read` does. */
 const tabWhoseRead = (read: () => Promise<unknown>): CoreConnection =>
@@ -80,5 +82,14 @@ describe("a page's read from core", () => {
     expect([refused.state, failed.state]).toStrictEqual(["refused", "refused"]);
     expect(refused.text).not.toContain("can't be reached");
     expect(failed.text).not.toContain("can't be reached");
+  });
+
+  it("says a chat core has none of for the person is missing, so its page is not found", async () => {
+    const gone = await shown(async () => {
+      await Promise.resolve();
+      throw agentErrors.create("agent.chat_not_found");
+    });
+
+    expect(gone.state).toBe("missing");
   });
 });

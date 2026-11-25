@@ -1,25 +1,27 @@
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from "@grasp-os/app-kit/components/alert";
 import type {
   DirectoryDeletedFailure,
   DirectoryProvider,
 } from "@grasp-os/shared/directory";
 import type { DirectoryRead } from "@grasp-os/shared/members";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/ui/components/alert";
+import { Text } from "@grasp-os/ui/components/text";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
-import { CircleAlertIcon, TriangleAlertIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
 import type { ReactElement } from "react";
 import { useEffect, useState } from "react";
 
 import { formatDateTime } from "../format.ts";
 import { loadFromCore } from "../load-from-core.tsx";
+import { SettingsGroup } from "../settings/section.tsx";
 import { useCore } from "../use-core.ts";
 import { adviceOf } from "./directory-read-advice.ts";
 import type { ReadAdvice } from "./directory-read-advice.ts";
 import { DirectoryReconnect } from "./directory-reconnect.tsx";
-import { SettingsBody, SettingsSection } from "./settings-parts.tsx";
 
 // Where the directory's daily read stands (GRA-2056, slice 4; GRA-2144),
 // for admins in Settings › Members: when it was last applied, and what an
@@ -32,6 +34,11 @@ import { SettingsBody, SettingsSection } from "./settings-parts.tsx";
 // (directory-reconnect.tsx, GRA-2171): what mends a read that needs it,
 // and what grants a scope asked for since (its groups'), which no read
 // fails for.
+
+const styles = stylex.create({
+  reads: { display: "flex", flexDirection: "column", gap: space["5"] },
+  read: { display: "flex", flexDirection: "column", gap: space["3"] },
+});
 
 /** The directory's provider, by its product's name (not translated). */
 const providerNames: Record<DirectoryProvider, string> = {
@@ -88,14 +95,15 @@ const DeletedReason = ({ reason }: { reason: DirectoryDeletedFailure }) => {
 
 /** One directory's read: when it was last applied, and what needs an admin. */
 const ReadStatus = ({ read }: { read: DirectoryRead }) => {
+  const { t } = useLingui();
   const name = providerNames[read.provider];
   const readAt = read.readAt === null ? null : formatDateTime(read.readAt);
   const people = read.people ?? 0;
   const { failure, deletedFailure } = read;
   const failedAt = failure === null ? null : formatDateTime(failure.at);
   return (
-    <div className="flex flex-col gap-3">
-      <p>
+    <div {...stylex.props(styles.read)}>
+      <Text size="sm">
         {readAt === null ? (
           <Trans>{name} hasn’t been read yet.</Trans>
         ) : (
@@ -105,37 +113,23 @@ const ReadStatus = ({ read }: { read: DirectoryRead }) => {
             value={people}
           />
         )}
-      </p>
+      </Text>
       {failure === null ? null : (
         <Alert variant="destructive">
-          <CircleAlertIcon />
-          <AlertTitle>
-            <Trans>
-              The directory couldn’t be read, last tried {failedAt}.
-            </Trans>
-          </AlertTitle>
+          <AlertTitle>{t`The directory couldn’t be read, last tried ${failedAt}.`}</AlertTitle>
           <AlertDescription>
-            <p>
-              <FailureAdvice advice={adviceOf(failure.code)} />
-            </p>
-            <p>
-              <Trans>
-                Until a read succeeds, nobody joins, moves or is suspended
-                through the directory.
-              </Trans>
-            </p>
+            <FailureAdvice advice={adviceOf(failure.code)} />{" "}
+            <Trans>
+              Until a read succeeds, nobody joins, moves or is suspended through
+              the directory.
+            </Trans>
           </AlertDescription>
         </Alert>
       )}
       {/* About the last read applied: while the reads since fail, that failure is what to mend. */}
       {deletedFailure === null || failure !== null ? null : (
-        <Alert variant="attention">
-          <TriangleAlertIcon />
-          <AlertTitle>
-            <Trans>
-              The last read couldn’t list the accounts deleted in the directory.
-            </Trans>
-          </AlertTitle>
+        <Alert variant="warning">
+          <AlertTitle>{t`The last read couldn’t list the accounts deleted in the directory.`}</AlertTitle>
           <AlertDescription>
             <DeletedReason reason={deletedFailure} />
           </AlertDescription>
@@ -172,15 +166,15 @@ export const DirectoryReads = () => {
     return null;
   }
   return (
-    <SettingsSection
+    <SettingsGroup
       description={t`Grasp reads your directory once a day, and keeps members, their teams and their suspensions as it says.`}
       title={t`Directory`}
     >
-      <SettingsBody>
+      <div {...stylex.props(styles.reads)}>
         {reads.map((read) => (
           <ReadStatus key={read.provider} read={read} />
         ))}
-      </SettingsBody>
-    </SettingsSection>
+      </div>
+    </SettingsGroup>
   );
 };
