@@ -1934,10 +1934,6 @@ msgstr "a figure"
 msgid "A file is downloaded only when you ask for it, with a click."
 msgstr "A file is downloaded only when you ask for it, with a click."
 
-#: src/onboarding/plan-story.tsx
-msgid "A finding"
-msgstr "A finding"
-
 #: src/onboarding/plan.tsx
 msgid "A finding reads like this: new people wait two to three days for a laptop from IT."
 msgstr "A finding reads like this: new people wait two to three days for a laptop from IT."
@@ -3964,6 +3960,10 @@ msgstr "Business process"
 #: src/activity/audit-log.tsx
 msgid "By"
 msgstr "By"
+
+#: src/onboarding/plan-story.tsx
+msgid "By {close}, I’ve heard the whole company, and the interviews close."
+msgstr "By {close}, I’ve heard the whole company, and the interviews close."
 
 #: src/workflows/workflow-page.tsx
 msgctxt "who started a workflow run"
@@ -7475,10 +7475,6 @@ msgstr "Find what was last agreed with them, and what is still open."
 msgid "Finds overdue invoices and drafts friendly reminders."
 msgstr "Finds overdue invoices and drafts friendly reminders."
 
-#: src/onboarding/plan-story.tsx
-msgid "First I talk with the people who know the work best."
-msgstr "First I talk with the people who know the work best."
-
 #: src/agents/agent-overview.tsx
 msgid "First run {when}"
 msgstr "First run {when}"
@@ -7702,6 +7698,10 @@ msgstr "Frequency"
 msgctxt "where a decision comes from"
 msgid "From"
 msgstr "From"
+
+#: src/onboarding/plan-story.tsx
+msgid "From {everyone}, everyone else gets their own link, and talks to me whenever it suits them."
+msgstr "From {everyone}, everyone else gets their own link, and talks to me whenever it suits them."
 
 #: src/agents/agent-share.tsx
 msgid "From {from}"
@@ -8303,6 +8303,10 @@ msgid "Helsinki"
 msgstr "Helsinki"
 
 #: src/onboarding/plan-story.tsx
+msgid "Here’s how the next two weeks go."
+msgstr "Here’s how the next two weeks go."
+
+#: src/onboarding/plan-story.tsx
 msgid "Here’s the plan"
 msgstr "Here’s the plan"
 
@@ -8646,10 +8650,6 @@ msgstr "I found nobody in {signIn}."
 #: src/interview/words.ts
 msgid "I lost the connection. Please check your internet. I have kept what you said, and I keep trying."
 msgstr "I lost the connection. Please check your internet. I have kept what you said, and I keep trying."
-
-#: src/onboarding/plan-story.tsx
-msgid "I read every conversation, and you get what I learned, team by team."
-msgstr "I read every conversation, and you get what I learned, team by team."
 
 #: src/onboarding/team-step.tsx
 msgid "I sent it"
@@ -9230,10 +9230,6 @@ msgstr "It opens for the member who created it, the admins, and whoever it is sh
 #: src/workflows/definition-editor.tsx
 msgid "It passes its checks."
 msgstr "It passes its checks."
-
-#: src/onboarding/plan-story.tsx
-msgid "It reads like this: new people wait two to three days for a laptop from IT."
-msgstr "It reads like this: new people wait two to three days for a laptop from IT."
 
 #: src/agents/new-agent.tsx
 msgid "It reads, and what it wants to change waits for you"
@@ -9933,10 +9929,6 @@ msgstr "Let Grasp’s mail through."
 msgid "Let it in"
 msgstr "Let it in"
 
-#: src/onboarding/plan-story.tsx
-msgid "Let me walk you through the next two weeks."
-msgstr "Let me walk you through the next two weeks."
-
 #: src/workflows/ask-stephen.tsx
 msgid "Let people ask Stephen to start it"
 msgstr "Let people ask Stephen to start it"
@@ -10003,6 +9995,10 @@ msgstr "Light up the dots"
 #: src/projects/project-dialog.tsx
 msgid "Lightbulb"
 msgstr "Lightbulb"
+
+#: src/onboarding/plan-story.tsx
+msgid "Like this: new people wait two to three days for a laptop from IT."
+msgstr "Like this: new people wait two to three days for a laptop from IT."
 
 #: src/frame/ui-words.tsx
 msgctxt "a change's lines"
@@ -12362,6 +12358,10 @@ msgstr "On · for everyone with Grasp"
 msgid "on {date} at {hour}"
 msgstr "on {date} at {hour}"
 
+#: src/onboarding/plan-story.tsx
+msgid "On {first}, I start with the people who know the work best, and they show me where the time really goes."
+msgstr "On {first}, I start with the people who know the work best, and they show me where the time really goes."
+
 #: src/settings/audit-chain.tsx
 msgid "On {time}, the chain broke at entry {entry}: nothing from there on is verified. {reason}"
 msgstr "On {time}, the chain broke at entry {entry}: nothing from there on is verified. {reason}"
@@ -12506,10 +12506,6 @@ msgstr "One real case"
 #: src/agents/agent-brief.ts
 msgid "One short message: what you found first, then what you suggest."
 msgstr "One short message: what you found first, then what you suggest."
-
-#: src/onboarding/plan-story.tsx
-msgid "One week in, the interviews close."
-msgstr "One week in, the interviews close."
 
 #: src/chat/connection-requests.tsx
 msgid "Only"
@@ -14729,10 +14725,6 @@ msgstr "Reword the goal"
 msgid "Right arrow for more"
 msgstr "Right arrow for more"
 
-#: src/onboarding/plan-story.tsx
-msgid "Right now it’s just you and me, getting ready."
-msgstr "Right now it’s just you and me, getting ready."
-
 #: src/workflows/business-process.tsx
 msgctxt "business process"
 msgid "Risk-to-Compliance"
@@ -15943,10 +15935,6 @@ msgstr "Show the preview"
 msgid "Show the time zones"
 msgstr "Show the time zones"
 
-#: src/onboarding/plan-story.tsx
-msgid "Show the whole plan"
-msgstr "Show the whole plan"
-
 #: src/brain/sources-page.tsx
 msgid "Show the whole text"
 msgstr "Show the whole text"
@@ -16174,6 +16162,10 @@ msgctxt "the Brain's skills page"
 msgid "Skills"
 msgstr "Skills"
 
+#: src/onboarding/plan-story.tsx
+msgid "Skip"
+msgstr "Skip"
+
 #: src/inbox/inbox-page.tsx
 msgctxt "put a to-do card at the back of the pile"
 msgid "Skip"
@@ -16212,6 +16204,10 @@ msgstr "Skipped, may still hold data"
 msgctxt "what a carousel's slide is"
 msgid "slide"
 msgstr "slide"
+
+#: src/onboarding/plan-story.tsx
+msgid "Small things like that add up. Let’s find them."
+msgstr "Small things like that add up. Let’s find them."
 
 #: src/settings/composer-settings.tsx
 msgctxt "the chat box's edge"
@@ -17050,6 +17046,10 @@ msgstr "Teams under five people show only whether their lead talked, so nobody c
 #: src/pages/frame-failure.tsx
 msgid "Technical details"
 msgstr "Technical details"
+
+#: src/onboarding/plan-story.tsx
+msgid "Tell me again"
+msgstr "Tell me again"
 
 #: src/frame/ui-words.tsx
 msgid "Terminal"
@@ -18011,8 +18011,8 @@ msgid "Then {task}"
 msgstr "Then {task}"
 
 #: src/onboarding/plan-story.tsx
-msgid "Then everyone else gets their own link, and we talk when it suits them."
-msgstr "Then everyone else gets their own link, and we talk when it suits them."
+msgid "Then I read every conversation, and on {findings} you get what I learned, team by team."
+msgstr "Then I read every conversation, and on {findings} you get what I learned, team by team."
 
 #: src/interview/words.ts
 msgid "Then, when it goes differently."
@@ -18536,10 +18536,6 @@ msgstr "To act in this workspace, ask its admin to add you as a user, and sign i
 #: src/settings/add-connection/words.ts
 msgid "To tell this key from others."
 msgstr "To tell this key from others."
-
-#: src/onboarding/plan-story.tsx
-msgid "Today"
-msgstr "Today"
 
 #: src/frame/ui-words.tsx
 msgctxt "a date to pick"
@@ -19481,10 +19477,6 @@ msgstr "Waits until"
 #: src/agents/agent-templates.ts
 msgid "Walk into every meeting knowing who is coming and what is still open."
 msgstr "Walk into every meeting knowing who is coming and what is still open."
-
-#: src/onboarding/plan-story.tsx
-msgid "Walk me through it again"
-msgstr "Walk me through it again"
 
 #: src/frame/ui-words.tsx
 msgctxt "a badge's dot"
