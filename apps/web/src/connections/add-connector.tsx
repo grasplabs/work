@@ -54,7 +54,7 @@ type ConnectorInput = Omit<AddConnectorRequest, "person" | "origin">;
 /** The field a refusal names, in words people read. */
 const problemTexts = {
   name: msg`Give it a name of at most 80 characters.`,
-  url: msg`The address is the server's own https:// URL, such as https://mcp.example.com/mcp, with no query.`,
+  url: msg`The address is the server's own https:// URL, such as https://mcp.example.com/mcp, with no query, fragment or user name in it.`,
   header: msg`The header is a name of letters, digits and dashes, and not one Grasp sets itself.`,
   client: msg`The client ID is at most 512 characters, and its secret at most 4,096.`,
 } as const satisfies Record<string, MessageDescriptor>;

@@ -17359,8 +17359,8 @@ msgid "The address can sign in again."
 msgstr "Mit der Adresse kann man sich wieder anmelden."
 
 #: src/connections/add-connector.tsx
-msgid "The address is the server's own https:// URL, such as https://mcp.example.com/mcp, with no query."
-msgstr "Die Adresse ist die eigene https://-URL des Servers, etwa https://mcp.example.com/mcp, ohne Abfrage."
+msgid "The address is the server's own https:// URL, such as https://mcp.example.com/mcp, with no query, fragment or user name in it."
+msgstr "Die Adresse ist die eigene https://-URL des Servers, etwa https://mcp.example.com/mcp, ohne Query-Parameter, Fragment oder Benutzernamen."
 
 #: src/frame/page-states.tsx
 msgid "The address may be wrong, or the page was moved or removed."

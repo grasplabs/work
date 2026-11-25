@@ -253,13 +253,19 @@ const forbiddenKeyHeaders: ReadonlySet<string> = new Set([
 export const addConnectorSchema = z.strictObject({
   person: connectionPersonSchema,
   name: z.string().trim().min(1).max(80),
-  /** The server's own address: no query, fragment or credentials in it. */
+  /**
+   * The server's own address: nothing but its origin and path, so no
+   * query, fragment or credentials, not even empty ones. One that isn't a
+   * URL at all is `z.url`'s to refuse.
+   */
   url: z
     .url({ protocol: /^https$/u })
     .max(connectorUrlMaxLength)
     .refine((value) => {
-      const { search, hash, username, password } = new URL(value);
-      return `${search}${hash}${username}${password}` === "";
+      const parsed = URL.parse(value);
+      return (
+        parsed === null || parsed.href === `${parsed.origin}${parsed.pathname}`
+      );
     }),
   /** The deployment's origin, from its config: its sign-in returns there. */
   origin: z.url(),

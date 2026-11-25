@@ -112,21 +112,6 @@ export interface ConnectorTool {
   annotations: ToolHints;
 }
 
-/** The server's URL an admin entered, if connect would ever call it. */
-const serverUrlOf = (url: string): URL => {
-  const parsed = URL.parse(url);
-  if (
-    parsed?.protocol !== "https:" ||
-    parsed.username !== "" ||
-    parsed.password !== "" ||
-    parsed.hash !== "" ||
-    parsed.search !== ""
-  ) {
-    throw connectionErrors.create("connection.server_refused");
-  }
-  return parsed;
-};
-
 /** A unique index refused the row: another connector has that URL. */
 const isDuplicate = (error: unknown): boolean =>
   error instanceof Error &&
@@ -149,7 +134,8 @@ export const addConnector = async (
     addConnectorSchema,
     request
   );
-  const server = serverUrlOf(url);
+  // An https URL of its origin and path alone (`addConnectorSchema`).
+  const server = new URL(url);
   const detail = { host: server.host, auth: auth.kind };
   await refuseStaff(env, person, detail);
   if (!isAdmin(person.role)) {
