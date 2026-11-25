@@ -347,6 +347,10 @@ export const useGlobalChat = (): GlobalChat => {
   return chat;
 };
 
+/** Whether the chat's idle bar stands over the page's foot; never outside the chat's provider. */
+export const useChatBarShown = (): boolean =>
+  use(GlobalChatContext)?.stage.bar ?? false;
+
 /**
  * Where the chat stands on this page: the chat's own, about the page's
  * subject too; the page's alone outside the chat's provider (a page that
