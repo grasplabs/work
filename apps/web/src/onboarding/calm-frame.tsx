@@ -73,7 +73,9 @@ const styles = stylex.create({
     paddingBlockEnd: { default: 0, [media.maxSm]: space[6] },
   },
   tools: { display: "flex", alignItems: "center", gap: space[1] },
+  // No line in the setup ends on a word or two alone: every paragraph wraps so its last line has company.
   main: {
+    textWrap: "pretty",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
@@ -93,7 +95,8 @@ const styles = stylex.create({
   step: { display: "grid", gap: space[10] },
   // A page with little on it: Stephen over the title, all of it on the column's middle.
   stepCentred: { justifyItems: "center", textAlign: "center", gap: space[8] },
-  head: { display: "grid", gap: space[4] },
+  // A step's title and its line wrap into even lines (Ruben: "a linebreak with 2 words… should never be possible").
+  head: { display: "grid", gap: space[4], textWrap: "balance" },
   // A welcome: its title and line on the column's middle, what it asks below at full width.
   headCentred: { justifyItems: "center", textAlign: "center" },
   // A step's way on stands on the column's middle, under its centred words (Ruben: "just center
