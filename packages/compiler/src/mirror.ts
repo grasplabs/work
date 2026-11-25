@@ -1,5 +1,6 @@
 import type { ValueDescriptor } from "@grasp-os/runtime/app";
 
+import { servedElsewhere } from "./openapi.ts";
 import type { Spec, SpecOperation } from "./openapi.ts";
 import {
   isNamePart,
@@ -366,8 +367,14 @@ export const checkMirror = (
         `${route.method} ${route.path} isn't a GET, as a tool's other routes are.`,
       ];
     }
+    // A skipped operation is still the vendor's to read, unless it is on
+    // another server, which a route under the spec's base never reaches.
     const shape = key(route.method, route.path);
-    return spec === undefined || byShape.has(shape) || skipped.has(shape)
+    const reason = skipped.get(shape);
+    const vendors =
+      byShape.has(shape) ||
+      (reason !== undefined && reason !== servedElsewhere);
+    return spec === undefined || vendors
       ? []
       : [
           `${route.method} ${route.path} isn't an operation of the vendor's spec.`,

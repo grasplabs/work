@@ -58,6 +58,27 @@ const spec = await readSpec(
           },
         },
       },
+      "/me": {
+        get: {
+          responses: {
+            "200": {
+              description: "ok",
+              content: { "application/json": { schema: { type: "string" } } },
+            },
+          },
+        },
+      },
+      "/lookup": {
+        servers: [{ url: "https://files.example.test" }],
+        get: {
+          responses: {
+            "200": {
+              description: "ok",
+              content: { "application/json": { schema: { type: "object" } } },
+            },
+          },
+        },
+      },
       "/deals/{id}": {
         parameters: [
           {
@@ -237,7 +258,7 @@ describe("a tool held to the vendor's spec", () => {
     ]);
   });
 
-  it("is named from its one write, read before or after it", () => {
+  it("is named from its one write, read before or after it, on the spec's server", () => {
     const operation = spec.operations.find(
       ({ name }) => name === "deals.update"
     );
@@ -251,10 +272,13 @@ describe("a tool held to the vendor's spec", () => {
       messages([
         update(["GET /deals", "PATCH /deals/{id}"]),
         update(["PATCH /deals/{id}", "GET /deals"]),
+        update(["GET /me", "PATCH /deals/{id}"]),
         update(["PATCH /deals/{id}", "GET elsewhere.example.test/deals"]),
+        update(["GET /lookup", "PATCH /deals/{id}"]),
       ])
     ).toStrictEqual([
       "deals.update: GET elsewhere.example.test/deals isn't on the spec's host api.example.test.",
+      "deals.update: GET /lookup isn't an operation of the vendor's spec.",
     ]);
   });
 
