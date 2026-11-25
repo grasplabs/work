@@ -131,8 +131,8 @@ const pipedrivePaths = {
   },
   "/deals/{id}/products": {
     parameters: [idParameter],
-    delete: {
-      operationId: "deleteManyDealProducts",
+    put: {
+      operationId: "updateManyDealProducts",
       responses: { "200": { description: "ok" } },
     },
   },
@@ -213,14 +213,66 @@ describe("a spec as tools", () => {
       "deals.list",
       "deals.create",
       "deals.get",
-      "deals.delete",
       "deals.update",
       "deals.followers.list",
-      "deals.products.deleteManyDealProducts",
+      "deals.products.updateManyDealProducts",
     ]);
-    expect(spec.skipped).toStrictEqual([]);
+    expect(spec.skipped).toStrictEqual([
+      {
+        operation: "DELETE /deals/{id}",
+        reason: "Its method isn't one a connector may call.",
+      },
+    ]);
     expect(spec.base).toBe("/api/v2");
     expect(spec.host).toBe("api.example.test");
+  });
+
+  it("skips what Grasp never does, and declares no less than the class rules find", async () => {
+    const answer = ok({ type: "object", properties: {} });
+    const { source, spec } = await generateConnector(
+      specText({
+        "/deals/{id}/share": {
+          parameters: [idParameter],
+          post: { operationId: "shareDeal", responses: answer },
+        },
+        "/deals/{id}/followers": {
+          parameters: [idParameter],
+          post: {
+            operationId: "addDealFollower",
+            requestBody: {
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: { user_id: { type: "integer" } },
+                  },
+                },
+              },
+            },
+            responses: answer,
+          },
+        },
+      }),
+      url,
+      { reach: "company" }
+    );
+    expect({
+      tools: spec.operations.map((tool) => tool.name),
+      skipped: spec.skipped,
+      reach: [...source.matchAll(/reach: "(?<reach>\w+)"/gu)].map(
+        (match) => match.groups?.reach
+      ),
+    }).toStrictEqual({
+      tools: ["deals.followers.create"],
+      skipped: [
+        {
+          operation: "POST /deals/{id}/share",
+          reason:
+            "Its tool, deals.share.create, is named for what Grasp never does.",
+        },
+      ],
+      reach: ["others"],
+    });
   });
 
   it("reads a parameter after a literal prefix that ends in a colon", async () => {
@@ -279,8 +331,8 @@ describe("a spec as tools", () => {
     const spec = await readSpec(specText(pipedrivePaths), url);
     const create = spec.operations.find((tool) => tool.name === "deals.create");
     const update = spec.operations.find((tool) => tool.name === "deals.update");
-    const deleted = spec.operations.find(
-      (tool) => tool.name === "deals.delete"
+    const unanswered = spec.operations.find(
+      (tool) => tool.name === "deals.products.updateManyDealProducts"
     );
     expect({
       title:
@@ -290,14 +342,14 @@ describe("a spec as tools", () => {
       auth: spec.auth?.kind,
       scopes: spec.operations.find((tool) => tool.name === "deals.list")
         ?.scopes,
-      deleted: [deleted?.answer, deleted?.returns],
+      unanswered: [unanswered?.answer, unanswered?.returns],
     }).toStrictEqual({
       title: "required",
       args: ["id", "title", "stage_id"],
       body: ["title", "stage_id"],
       auth: "oauth2",
       scopes: ["deals:read"],
-      deleted: [undefined, v.object({}).descriptor],
+      unanswered: [undefined, v.object({}).descriptor],
     });
   });
 
@@ -716,9 +768,9 @@ describe("a hostile spec", () => {
         `/deals/{id}/thing${index}`,
         {
           parameters: [idParameter],
-          delete: {
+          put: {
             operationId,
-            responses: { "204": { description: "gone" } },
+            responses: { "204": { description: "done" } },
           },
         },
       ])
@@ -838,8 +890,8 @@ describe("a hostile spec", () => {
     for (const path of paths) {
       const text = specText({
         [path]: {
-          delete: {
-            operationId: "removeThing",
+          put: {
+            operationId: "updateThing",
             responses: ok({ type: "string" }),
           },
         },

@@ -824,14 +824,35 @@ export interface DeclaredTool {
 }
 
 /**
+ * What tool `name` taking `input` declares at least, where its connector
+ * says `declared`: a read named for a change is a change, and a tool the
+ * rules find reaching others reaches others. They find that where its
+ * input names people it reaches, or it writes where people talk. Whether
+ * what it reads, or only sorts (`mail.label`), is the person's own or
+ * others' conversations stays the declaration's to say: the rules only
+ * guess it from a name word.
+ */
+export const ruledDeclaration = (
+  name: string,
+  input: Json,
+  declared: { readOnly: boolean; reach: ToolReach }
+): { readOnly: boolean; reach: ToolReach } => {
+  const found = findingsOf(name, input);
+  const readOnly = declared.readOnly && !found.changes;
+  const reachesOthers =
+    reachOf(found, readOnly, declared.reach) === "others" ||
+    (!readOnly && found.writesConversations);
+  const raised =
+    reachesOthers &&
+    toolClassOf({ readOnly, reach: declared.reach }) !== "reach-others";
+  return { readOnly, reach: raised ? "others" : declared.reach };
+};
+
+/**
  * Why the declaration of tool `name` claims less than the rules find, if
  * it does: it is one Grasp never runs; it claims to read but sends a
- * request other than a GET or HEAD, or is named for a change; or it
- * doesn't say it reaches others where the rules find it does: its input
- * names people it reaches, or it writes where people talk. Whether what
- * it reads, or only sorts (`mail.label`), is the person's own or others'
- * conversations is the declaration's to say: the rules only guess it from
- * a name word.
+ * request other than a GET or HEAD; or it claims less than
+ * `ruledDeclaration` gives it.
  */
 export const declarationProblem = (
   name: string,
@@ -840,17 +861,14 @@ export const declarationProblem = (
   if (isNeverTool(name)) {
     return "Grasp never runs it";
   }
-  const found = findingsOf(name, contract.input);
   if (readOnly && routes.some(({ method }) => !readMethods.has(method))) {
     return "it is read-only, so it sends only GET and HEAD requests";
   }
-  if (readOnly && found.changes) {
+  const ruled = ruledDeclaration(name, contract.input, { readOnly, reach });
+  if (ruled.readOnly !== readOnly) {
     return "it is read-only, but its name says it changes something";
   }
-  const reachesOthers =
-    reachOf(found, readOnly, reach) === "others" ||
-    (!readOnly && found.writesConversations);
-  if (reachesOthers && toolClassOf({ readOnly, reach }) !== "reach-others") {
+  if (ruled.reach !== reach) {
     return "its input names people or places it reaches, or it writes where people talk, so it reaches others";
   }
   return undefined;
