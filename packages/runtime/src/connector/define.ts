@@ -178,6 +178,12 @@ interface ToolBase<
   /** An object; the answer is checked against it before anyone sees it. */
   returns: Returns;
   /**
+   * The answer's field that names what it read or made, where the vendor's
+   * isn't `id` (a Google spreadsheet's `spreadsheetId`): its string is the
+   * answer's own provenance.
+   */
+  idField?: string;
+  /**
    * The one argument that names the record a call acts on (a mailbox, a
    * board), so a permission can be held to one. A path parameter of that
    * name is held to the record the call's permission names.
@@ -639,17 +645,37 @@ const checkedFilesOf = async (
 };
 
 /**
- * What an answer says it read: the string `id` of each of its `items`,
- * or else its own `id`, or nothing; only its own `id` for a tool that
- * answers an item.
+ * The field of a tool's answer that is its provenance: `id`, or the one it
+ * declares, which must be among the answer's fields.
  */
-const provenanceOf = (answer: JsonObject, item: boolean): string[] => {
+const idFieldOf = (
+  name: string,
+  declared: string | undefined,
+  answer: { fields: Readonly<Record<string, unknown>> }
+): string => {
+  if (declared !== undefined && !Object.hasOwn(answer.fields, declared)) {
+    throw new Error(`${name}: its idField is a field of its answer`);
+  }
+  return declared ?? "id";
+};
+
+/**
+ * What an answer says it read: the string `id` of each of its `items`,
+ * or else its own `idField`, or nothing; only its own `idField` for a
+ * tool that answers an item.
+ */
+const provenanceOf = (
+  answer: JsonObject,
+  item: boolean,
+  idField: string
+): string[] => {
   if (!item && Array.isArray(answer.items)) {
     return answer.items.flatMap((each: unknown) =>
       isRecord(each) && typeof each.id === "string" ? [each.id] : []
     );
   }
-  return typeof answer.id === "string" ? [answer.id] : [];
+  const id = answer[idField];
+  return typeof id === "string" ? [id] : [];
 };
 
 /**
@@ -699,7 +725,13 @@ const resultOf = (
     returns,
     readOnly,
     answersItem,
-  }: { returns: AnySchema; readOnly: boolean; answersItem: boolean }
+    idField,
+  }: {
+    returns: AnySchema;
+    readOnly: boolean;
+    answersItem: boolean;
+    idField: string;
+  }
 ): CallResult => {
   const checked = returns["~standard"].validate(output);
   const answer =
@@ -707,7 +739,7 @@ const resultOf = (
       ? checked.value
       : undefined;
   const provenance = provenanceSchema.safeParse(
-    answer === undefined ? [] : provenanceOf(answer, answersItem)
+    answer === undefined ? [] : provenanceOf(answer, answersItem, idField)
   );
   const [change, ...more] = changes;
   if (
@@ -783,6 +815,7 @@ const toolOf = <
     throw new Error(`${name}: its resource must be a string argument`);
   }
   checkFiles(name, declaration);
+  const idField = idFieldOf(name, declaration.idField, returns.descriptor);
   const mail = mailOf(name, declaration.mail, properties);
   const takesFiles = declaration.takesFiles === true;
   const answersItem = declaration.answersItem === true;
@@ -903,7 +936,12 @@ const toolOf = <
         );
       }
     }
-    return resultOf(output, changes, { returns, readOnly, answersItem });
+    return resultOf(output, changes, {
+      returns,
+      readOnly,
+      answersItem,
+      idField,
+    });
   };
   return {
     name,

@@ -822,7 +822,23 @@ const FileAnswer = v.object({
   content: v.string(),
 });
 
+const Sheet = v.object({ sheetId: v.string(), title: v.string() });
+
 const notesTools = {
+  "sheets.get": tool({
+    description: "Gets one sheet",
+    readOnly: true,
+    reach: "own",
+    idField: "sheetId",
+    routes: ["GET /v1/sheets/{sheetId}"],
+    args: { sheetId: v.string() },
+    returns: Sheet,
+    handler: async ({ sheetId }, api) =>
+      await api.get("/v1/sheets/{sheetId}", {
+        path: { sheetId },
+        returns: Sheet,
+      }),
+  }),
   "notes.list": tool({
     description: "Lists notes",
     readOnly: true,
@@ -1065,6 +1081,13 @@ describe("what a tool declares of items, files and confirmation", () => {
     ).toThrow("describes only its own input properties");
   });
 
+  it("takes provenance only from a field its answer has", () => {
+    expect(withNotes(declared(aRead, { idField: "name" }))).not.toThrow();
+    expect(withNotes(declared(aRead, { idField: "sheetId" }))).toThrow(
+      "its idField is a field of its answer"
+    );
+  });
+
   it("lets only a read answer an item or a file, and only a write take files", () => {
     expect(withNotes(declared(aWrite, { answersItem: true }))).toThrow(
       "Only a read-only action answers an item"
@@ -1143,15 +1166,23 @@ describe("a call of a tool that answers items and files", () => {
         next: null,
       },
       { id: "n3", text: "c" },
+      { sheetId: "s1", title: "Invoices" },
       { sku: "a", onHand: 1 },
     ];
     vendorSees(() => Response.json(answers.shift()));
     const list = await callNotes("notes.list", {});
     const item = await callNotes("notes.get", { id: "n3" });
+    const sheet = await callNotes("sheets.get", { sheetId: "s1" });
     const stockRead = await call("stock.get", { sku: "a" });
-    expect([list._meta, item._meta, stockRead._meta]).toStrictEqual([
+    expect([
+      list._meta,
+      item._meta,
+      sheet._meta,
+      stockRead._meta,
+    ]).toStrictEqual([
       { [provenanceMetaKey]: ["n1", "n2"] },
       { [provenanceMetaKey]: ["n3"] },
+      { [provenanceMetaKey]: ["s1"] },
       { [provenanceMetaKey]: [] },
     ]);
   });
