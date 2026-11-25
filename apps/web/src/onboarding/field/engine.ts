@@ -285,26 +285,6 @@ const settle = (elapsed: number) => {
   him.holds = him.holds.filter((hold) => hold.held || hold.on > 0.004);
 };
 
-/**
- * Each ring on the edge of a thing he holds, as much there as his light
- * is: it builds up and fades with it, in place. A ring not in use is gone.
- */
-const placeRings = (rings: readonly HTMLElement[]) => {
-  for (const [slot, ring] of rings.entries()) {
-    const hold = him.holds[slot];
-    if (hold === undefined) {
-      ring.style.opacity = "0";
-      continue;
-    }
-    const [x, y, width, height] = hold.box;
-    ring.style.opacity = String(hold.on);
-    ring.style.transform = `translate(${x}px, ${y}px)`;
-    ring.style.width = `${width}px`;
-    ring.style.height = `${height}px`;
-    ring.style.borderRadius = `${hold.radius}px`;
-  }
-};
-
 /** Him at rest where this screen has him, nothing gathered: what reduced motion shows. */
 const rested = () => {
   const { pose, rest, pointer } = him;
@@ -319,15 +299,14 @@ const rested = () => {
 
 /**
  * He is drawn on this canvas, under the page, from now on, as he is: a
- * screen drawn anew finds him where he was. Each thing he holds also gets
- * one of `rings`: a crisp line on its edge, drawn by the page so it follows
- * the element's own corner, and its own picture drawn large in his dither
- * on `marks`, a canvas over the page (marks.ts). Gives what stops it; nothing where WebGL can't
+ * screen drawn anew finds him where he was. Each thing he holds gets his
+ * light up to its edge, with no line of his own round it (Ruben: never a
+ * green ring round a component), and its own picture drawn large in his
+ * dither on `marks`, a canvas over the page (marks.ts). Gives what stops it; nothing where WebGL can't
  * run.
  */
 export const attachField = (
   canvas: HTMLCanvasElement,
-  rings: readonly HTMLElement[],
   marks: HTMLCanvasElement
 ): (() => void) | null => {
   const layer = layerOf(canvas);
@@ -353,7 +332,6 @@ export const attachField = (
     him.clock += elapsed / 1000;
     settle(elapsed);
     draw(layer, colours);
-    placeRings(rings);
     drawMarks(marks, him.holds, mint, him.clock);
     frame = requestAnimationFrame(loop);
   };
@@ -421,9 +399,6 @@ export const attachField = (
     scheme.removeEventListener("change", onColours);
     if (stopDrawing === stop) {
       stopDrawing = null;
-    }
-    for (const ring of rings) {
-      ring.style.opacity = "0";
     }
     drawMarks(marks, [], mint, 0);
   };

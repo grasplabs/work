@@ -6,7 +6,7 @@
 // system's ordered dither (Bayer's 4 by 4), as the flags and Damsko's
 // dithers are: where he rests on this screen (`u_rest`, each screen its own
 // place and tempo), a light that follows the pointer, and the soft light
-// round each thing he holds (`u_holds`).
+// round each thing he holds (`u_holds`), up to its edge.
 
 export const VERTEX = `
 attribute vec2 a_pos;
@@ -108,7 +108,7 @@ vec4 ambient(vec2 p, vec2 cellAt, vec2 window, float b, float seed, float t) {
     for (int i = 0; i < 4; i++) {
       vec3 look = u_holdLooks[i];
       if (look.x < 0.004) continue;
-      // As much clearing as there is of his ring: it comes and goes with it, never after it.
+      // As much clearing as there is of his light round it: it comes and goes with it, never after it.
       clear = min(clear, mix(1.0, step(0.0, roundBox(p, u_holds[i], look.z)), look.x));
     }
     level *= clear;
@@ -118,9 +118,9 @@ vec4 ambient(vec2 p, vec2 cellAt, vec2 window, float b, float seed, float t) {
       vec3 look = u_holdLooks[i];
       if (look.x < 0.004) continue;
       float d = roundBox(p, u_holds[i], look.z);
-      // His line is the element's own ring, drawn by the page so it follows its corner exactly;
-      // here only the soft light outside it, from just beyond the ring.
-      float halo = exp(-max(d - 3.0, 0.0) / (6.0 + 22.0 * look.x)) * step(3.0, d) * (0.06 + 0.5 * round_);
+      // No line of his own on the edge: his light runs straight up to it, from the first cell
+      // whose middle lies outside, so no band of blank cells stands between them.
+      float halo = exp(-max(d, 0.0) / (6.0 + 22.0 * look.x)) * step(0.0, d) * (0.06 + 0.5 * round_);
       level += look.x * halo;
     }
 

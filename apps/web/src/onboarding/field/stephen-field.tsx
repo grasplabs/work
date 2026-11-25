@@ -1,4 +1,4 @@
-import { colors, media, radius } from "@grasp-os/ui/lib/tokens.stylex";
+import { media } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { createContext, use, useEffect, useRef } from "react";
 import type { ReactNode } from "react";
@@ -33,26 +33,11 @@ const styles = stylex.create({
   listening: { display: "contents" },
   // Over the page: the pictures he draws on the things he holds.
   marks: { zIndex: 1 },
-  // His line on the edge of a thing he holds: placed and shown by the engine, a frame at a time.
-  ring: {
-    position: "fixed",
-    insetBlockStart: 0,
-    insetInlineStart: 0,
-    zIndex: 1,
-    pointerEvents: "none",
-    opacity: 0,
-    cornerShape: radius.shape,
-    boxShadow: `0 0 0 2px ${colors.mint}`,
-    display: { default: "block", [media.forcedColors]: "none" },
-  },
 });
 
 /** What he comes to: anything that can be pressed, chosen or typed in. */
 const ALIVE =
   "button, a[href], input, textarea, select, [role=button], [role=radio], [role=option], [role=checkbox], [role=switch], [role=tab]";
-
-/** How many rings: as many things as he lights at once. */
-const RINGS = 4;
 
 /**
  * The thing to press an event happened on, if any. A row whose press is
@@ -90,7 +75,6 @@ export const StephenField = ({
   children: ReactNode;
 }) => {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const rings = useRef<(HTMLSpanElement | null)[]>([]);
   const marks = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     if (canvas.current === null || marks.current === null) {
@@ -98,11 +82,7 @@ export const StephenField = ({
         // Nothing started.
       };
     }
-    const stop = attachField(
-      canvas.current,
-      rings.current.filter((ring) => ring !== null),
-      marks.current
-    );
+    const stop = attachField(canvas.current, marks.current);
     return () => {
       stop?.();
     };
@@ -145,16 +125,6 @@ export const StephenField = ({
         ref={marks}
         {...stylex.props(styles.layer, styles.marks)}
       />
-      {Array.from({ length: RINGS }, (_, slot) => (
-        <span
-          aria-hidden="true"
-          key={slot}
-          ref={(ring) => {
-            rings.current[slot] = ring;
-          }}
-          {...stylex.props(styles.ring)}
-        />
-      ))}
     </FieldContext>
   );
 };
