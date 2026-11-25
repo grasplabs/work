@@ -76,7 +76,7 @@ export const ComposerSettings = ({ userId }: { userId: string }) => {
           </PromptInputFooter>
         </PromptInput>
       </div>
-      <FieldGroup>
+      <FieldGroup controls="fit">
         <SettingRow
           help={t`The light around the box while Grasp works`}
           label={t`Colour`}

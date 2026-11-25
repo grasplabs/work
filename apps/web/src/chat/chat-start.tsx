@@ -14,7 +14,7 @@ import {
 } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Await } from "@tanstack/react-router";
+import { Await, useRouteContext } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
 import { briefOf, useStartFrom } from "../brain/opportunity-drafts.ts";
@@ -24,6 +24,7 @@ import { examplesFor } from "../make/examples.ts";
 import type { MakeExample } from "../make/examples.ts";
 import { BlueprintIdeas, WorkflowIdeas } from "../make/make-ideas.tsx";
 import { agentModelOf } from "./agent-choice.tsx";
+import { useLook } from "./backdrop-look.ts";
 import { Backdrop } from "./backdrop/backdrop.tsx";
 import { useGoToChat } from "./chat-link.ts";
 import { Composer } from "./composer.tsx";
@@ -36,7 +37,9 @@ import { useAsk } from "./use-ask.ts";
 
 // Chat's own page (routes/_shell.index.tsx): where to start. The question
 // "What should we look at today?", centred, with the box to ask in, on
-// the sand (backdrop/), with no bar over the page, as on #2503.
+// the person's background (their look, backdrop-look.ts, chosen in
+// Settings › Appearance; sand until they choose), with no bar over the
+// page, as on #2503.
 // Make something comes here too (`make`, from `?make=app` or
 // `?make=workflow` and `&project=`): what to get done, how to say it and
 // ideas to start from under the box (make/make-ideas.tsx), the blueprints for
@@ -211,7 +214,10 @@ export const ChatStart = ({
 }) => {
   const { t, i18n } = useLingui();
   const { offered, modelsUnavailable, retry } = useGlobalChat();
-  // The column the sand keeps clear of.
+  // What stands behind: the person's look, chosen in Settings › Appearance.
+  const { identity } = useRouteContext({ from: "/_shell" });
+  const look = useLook(identity.userId);
+  // The column the backdrop keeps clear of.
   const column = useRef<HTMLDivElement>(null);
   // With no bar over the page, the sidebar's trigger where the sidebar is away.
   const { state, isMobile } = useSidebar();
@@ -259,7 +265,7 @@ export const ChatStart = ({
     }
   });
   return (
-    <Backdrop clear={column}>
+    <Backdrop clear={column} variant={look}>
       {away ? (
         <span {...stylex.props(styles.trigger)}>
           <SidebarTrigger />

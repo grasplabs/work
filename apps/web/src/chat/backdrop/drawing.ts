@@ -1,6 +1,5 @@
-// What Backdrop and its drawer share: how a drawing is started, run, held
-// and stopped. The drawer (sand.ts) is loaded only when the backdrop first
-// comes into view.
+// What Backdrop and its two drawers share: how a drawing is started, run, held and stopped. The
+// drawers themselves (sand.ts, shader.ts) are loaded only when a backdrop first comes into view.
 
 /** A backdrop being drawn on its canvas. */
 export interface Drawing {
@@ -16,6 +15,8 @@ export interface DrawOptions {
   clear: () => DOMRect | undefined;
   /** Reduced motion: one settled picture, no loop. */
   still: boolean;
+  /** How far the page has gone, 0 to 1, read at each picture (Backdrop's `progress`; 0 without it). */
+  progress: () => number;
 }
 
 /** Counts a picture drawn on `canvas`, as `data-drawn`, so a check can see it draw and stop. */
