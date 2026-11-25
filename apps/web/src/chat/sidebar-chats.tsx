@@ -17,22 +17,32 @@ import type { ReactNode } from "react";
 import type { RowAction, SidebarMore, SidebarRow } from "../frame/sidebar.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { useTabShown } from "../use-tab-shown.ts";
 import { chatLink, useGoToChat } from "./chat-link.ts";
 import { useChatsWindow } from "./chat-switcher.tsx";
 import { onChatsChanged } from "./chats-changed.ts";
 import { DeleteChatDialog } from "./delete-chat-dialog.tsx";
+import { useChatOpenBeside } from "./global-chat.tsx";
 
 // The person's recent chats in the sidebar, as the reference's (#2503's
 // chat/sidebar-chats.tsx): the most recently used first, a few of them,
 // each a link to its own page, with its menu (open, rename, archive,
 // delete) and renamed in place too; the search (⌘K) finds the rest. Read
 // from core when the sidebar first shows, again after each page the router
-// resolves (a rename, an archive or a delete reads the page again), and
-// when an answer starts or ends (chats-changed.ts), so a row's Working
-// mark comes and goes with it.
+// resolves (a rename, an archive or a delete reads the page again), when
+// an answer starts or ends or a chat is read (chats-changed.ts), so a
+// row's Working mark and unread dot come and go with it, and when the
+// person comes back to the tab, for what was answered while they were
+// away. Core has no live word for a chat answering elsewhere (in the
+// background, on another device): while a listed chat works and the tab
+// is shown, the list is read again every few seconds, so its Working mark
+// turns into the dot without the person moving; it stops once none works.
 
 /** How many recent chats the sidebar lists. */
 const recentCount = 8;
+
+/** How often the list is read again while a listed chat works. */
+export const workingReadMs = 3000;
 
 /** The person's chats from core, the most recently used first; none while `enabled` is false. */
 const useChats = (enabled: boolean): ChatSummary[] => {
@@ -41,9 +51,13 @@ const useChats = (enabled: boolean): ChatSummary[] => {
   const [chats, setChats] = useState<ChatSummary[]>([]);
   // Only the latest read's answer shows: an earlier one may come back after it.
   const latest = useRef(0);
+  // Whether a read is on its way: the reading while a chat works waits for
+  // it, so a core slower than its pace still has its answers shown.
+  const reading = useRef(false);
   const read = useEffectEvent(() => {
     latest.current += 1;
     const asked = latest.current;
+    reading.current = true;
     void (async () => {
       try {
         const listed = await core.withSession(
@@ -55,7 +69,15 @@ const useChats = (enabled: boolean): ChatSummary[] => {
       } catch {
         // The sidebar keeps what it last read; the chats window says why.
       }
+      if (asked === latest.current) {
+        reading.current = false;
+      }
     })();
+  });
+  const readAgain = useEffectEvent(() => {
+    if (!reading.current) {
+      read();
+    }
   });
   useEffect(() => {
     const readIf = (): void => {
@@ -67,11 +89,32 @@ const useChats = (enabled: boolean): ChatSummary[] => {
     const unsubscribe = router.subscribe("onResolved", readIf);
     // An answer started or ended: its chat works, or no longer does.
     const unheard = onChatsChanged(readIf);
+    const back = (): void => {
+      if (document.visibilityState === "visible") {
+        readIf();
+      }
+    };
+    document.addEventListener("visibilitychange", back);
     return () => {
       unsubscribe();
       unheard();
+      document.removeEventListener("visibilitychange", back);
     };
   }, [enabled, router]);
+  // A chat works, answering where no page of this tab follows it: read
+  // again until none does, while anyone can see it.
+  const working =
+    useTabShown() && enabled && chats.some(({ running }) => running);
+  useEffect(() => {
+    const timer = working
+      ? setInterval(() => {
+          readAgain();
+        }, workingReadMs)
+      : undefined;
+    return () => {
+      clearInterval(timer);
+    };
+  }, [working]);
   return enabled ? chats : [];
 };
 
@@ -134,6 +177,7 @@ export const useRecentChats = ({
   const openChats = useChatsWindow();
   const { setOpenMobile } = useSidebar();
   const changes = useRowChanges();
+  const beside = useChatOpenBeside();
   const [deleting, setDeleting] = useState<ChatSummary>();
   // The window doesn't navigate, so the phone's sheet would stay over it: it goes first.
   const more: SidebarMore = {
@@ -152,6 +196,7 @@ export const useRecentChats = ({
   ];
   const rows = chats.slice(0, recentCount).map((chat): SidebarRow => {
     const { title } = chat;
+    const current = matchRoute(chatLink(chat.id)) !== false;
     return {
       id: chat.id,
       label: title,
@@ -159,10 +204,15 @@ export const useRecentChats = ({
       quiet: true,
       // The chat's own page (chat-link.ts), marked while it is open.
       render: (look) => <Link {...look} {...chatLink(chat.id)} />,
-      current: matchRoute(chatLink(chat.id)) !== false,
+      current,
       // Its agent is still answering: the Working mark at the row's end.
       working: chat.running,
       workingLabel: t`Answering`,
+      // Answered while the person wasn't looking (chat/unread.ts): a dot,
+      // never on the chat open in front of them, on its page or beside
+      // this one, which is read as it ends.
+      unread: chat.unread && !current && chat.id !== beside,
+      unreadLabel: t`Unread`,
       actions,
       actionsLabel: t`More for ${title}`,
       renameLabel: t`Rename ${title}`,

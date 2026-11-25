@@ -128,6 +128,13 @@ export interface SidebarRow extends SidebarSubRow {
   /** An agent works there now: the Working mark at the row's end. */
   working?: boolean;
   workingLabel?: string;
+  /**
+   * Something there the person hasn't seen: a small dot at the row's end,
+   * where the Working mark stands, which wins while both hold.
+   */
+  unread?: boolean;
+  /** What a screen reader hears of the dot ("Unread"). */
+  unreadLabel?: string;
   /** Its menu: behind three dots at its end, and on a right-click, a long press, the menu key or Shift+F10. */
   actions?: readonly RowAction[];
   /** The dots' name ("More for Weekly numbers"). */
@@ -365,6 +372,18 @@ const styles = stylex.create({
     alignItems: "center",
     justifyContent: "center",
     marginInlineStart: "auto",
+  },
+  // The unread dot: small and round (the pill radius, no corner shape, so
+  // never a squircle), in the primary ink: two of the Working mark's
+  // pixels across, so it stands as large as that mark's light.
+  unreadDot: {
+    width: `calc(${size.agentIndicatorDot} * 2)`,
+    height: `calc(${size.agentIndicatorDot} * 2)`,
+    borderRadius: radius.full,
+    backgroundColor: {
+      default: colors.primary,
+      [media.forcedColors]: "CanvasText",
+    },
   },
   // On a row with dots, where the dots stand: it gives way to them while the row is pointed at,
   // holds focus or has its menu open; on a touch screen, where the dots always show, before them.
@@ -633,6 +652,30 @@ const workingMark = (
   ) : null;
 
 /**
+ * The unread dot, in the Working mark's place, while nothing works there:
+ * product-side, from Damsko's tokens, as Damsko's row has no unread mark.
+ */
+const unreadMark = (
+  row: SidebarRow,
+  renaming: boolean,
+  dots: boolean
+): ReactNode =>
+  row.unread === true && row.working !== true ? (
+    <span
+      aria-hidden="true"
+      data-slot="sidebar-row-unread"
+      key="unread-mark"
+      {...stylex.props(
+        styles.working,
+        dots && styles.workingSlot,
+        renaming && styles.renaming
+      )}
+    >
+      <span {...stylex.props(styles.unreadDot)} />
+    </span>
+  ) : null;
+
+/**
  * A row's own words and what stands with them: its icon, its name, a second
  * line, its end, its Working mark. A list, not an element of its own, so a
  * name given as bare words reaches the row as such: Damsko's row cuts it
@@ -675,6 +718,7 @@ const rowWords = (
   ),
   rowEnd(row, renaming),
   workingMark(row, renaming, dots),
+  unreadMark(row, renaming, dots),
   row.count !== undefined && row.count > 0 && row.countLabel !== undefined ? (
     <span key="count" {...stylex.props(visuallyHidden)}>
       {row.countLabel}
@@ -683,6 +727,13 @@ const rowWords = (
   row.working === true && row.workingLabel !== undefined ? (
     <span key="working" {...stylex.props(visuallyHidden)}>
       {row.workingLabel}
+    </span>
+  ) : null,
+  row.unread === true &&
+  row.working !== true &&
+  row.unreadLabel !== undefined ? (
+    <span key="unread" {...stylex.props(visuallyHidden)}>
+      {row.unreadLabel}
     </span>
   ) : null,
 ];

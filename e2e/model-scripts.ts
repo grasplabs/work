@@ -124,6 +124,35 @@ export const appReady = "Your contact list is ready to try in the preview.";
 export const approvalDrawn =
   "Drew it: the approver you name decides on each invoice.";
 
+/** The long answer of `answersAtLength`: a step a paragraph, its last one apart. */
+export const monthEndCloseLast =
+  "Last, lock the period, so nothing posts into a month you closed.";
+const monthEndClose = [
+  "First, reconcile every bank account against its statement, and chase what doesn't match.",
+  "Then post the accruals: the costs of the month whose invoices haven't come yet.",
+  "Next, book the prepayments you spread over the months they cover.",
+  "Run depreciation on the fixed assets, as their schedules say.",
+  "Match the receivables to what customers paid, and follow up on what is overdue.",
+  "Match the payables to the suppliers' statements, and settle the differences.",
+  "Count what is in stock, and write off what was lost or damaged.",
+  "Revalue what is held in other currencies at the month's closing rates.",
+  "Reconcile the intercompany balances, so both sides of each say the same.",
+  "Review the payroll journal against the payslips, and the taxes owed on it.",
+  "Compare each cost line with its budget, and explain what moved.",
+  "Draft the profit and loss account and the balance sheet, and read them through.",
+  "Have someone who didn't prepare them review the numbers.",
+  "Check the VAT return against the ledger before it is filed.",
+  "Post the corrections the review found, each with its reason.",
+  "Reconcile the credit cards and the expense claims of the month.",
+  "Check that every invoice sent this month is booked in this month.",
+  "Write down the bad debts nobody will pay, as the policy allows.",
+  "Book the bonuses and holiday pay owed but not yet paid.",
+  "Update the cash flow forecast with what the month taught you.",
+  "Note anything unusual for the auditors while it is fresh.",
+  "Send the management pack to the board, with a page on what changed.",
+  monthEndCloseLast,
+].join("\n\n");
+
 /** An issue's identifier, as Linear's server names it (connect's test/linear-mcp-fake.ts). */
 const linearIssue = /(?<found>ENG-\d+)/u;
 
@@ -140,6 +169,14 @@ export const modelScripts = {
     replies: [
       says("Revenue by region, the deals that closed, and the pipeline."),
     ],
+  },
+  /**
+   * A long answer, given while the person was away: taller than the
+   * window, so the chat opens at its New line, never at its end.
+   */
+  answersAtLength: {
+    opener: "Walk me through the month-end close, step by step.",
+    replies: [says(monthEndClose)],
   },
   /**
    * The agent asks for the person's connection to a connector made from a
