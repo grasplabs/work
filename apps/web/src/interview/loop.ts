@@ -235,6 +235,8 @@ let again = 0;
 let unmeasure: (() => void) | null = null;
 /** The line he says or said last, and what follows it: said again when what cut him off was nothing. */
 let lastSaid: { how: VoiceTag | null; after: () => void } | null = null;
+/** His line was begun with its first sentence, and the rest of it is still owed. */
+let restOwed = false;
 
 /** Tells whoever follows the conversation what happens in it. */
 const announce = (event: LoopEvent): void => {
@@ -369,6 +371,8 @@ const speak = (
   const mine = speaking;
   rest();
   lastSaid = { how, after };
+  // Only a line begun with its first sentence has more to come.
+  restOwed = open;
   // oxlint-disable-next-line no-use-before-define -- the floor decides whether he listens while he speaks
   happen({ type: "speak", at: performance.now(), answers });
   tone = how;
@@ -851,6 +855,7 @@ const rounded = (known: Turn, line: EarlyLine): void => {
   }
   known.opening = null;
   const latest = on && known.order === turns;
+  restOwed = false;
   if (latest) {
     hisLine(line);
   }
@@ -1400,7 +1405,12 @@ const perform = (act: Act): void => {
     }
     case "resume": {
       if (lastSaid !== null && state.line !== "") {
-        speak(state.line, lastSaid.how, { after: lastSaid.after });
+        // Cut off in his first sentence with the rest still being written:
+        // he says it again as a line that goes on, so the rest follows.
+        speak(state.line, lastSaid.how, {
+          after: lastSaid.after,
+          open: restOwed,
+        });
       }
       return;
     }
