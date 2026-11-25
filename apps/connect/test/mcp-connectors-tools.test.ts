@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { callAs, outcome, someone } from "./connect.ts";
 import type { LinearTool } from "./linear-mcp-fake.ts";
@@ -28,6 +28,15 @@ const tool = (name: string, changes: Partial<LinearTool> = {}): LinearTool => ({
   inputSchema: noInput,
   ...changes,
 });
+
+/** How long a test waits for a list read after an answer. */
+const waitForRead = { timeout: 10_000 };
+
+/** The tools `connectionId` offers to ask for (`offeredConnectorTools`). */
+const offered = async (connectionId: string): Promise<string[]> => {
+  const offers = await exports.default.offeredConnectorTools([connectionId]);
+  return offers[connectionId] ?? [];
+};
 
 /** Anna's connection to Linear, its list read once: its ID and agent. */
 const connected = async () => {
@@ -63,6 +72,78 @@ const answerText = async (request: Request, result: string) => {
 };
 
 describe("a connector's tools", () => {
+  it("are offered to ask for as kept at once, and read again for the next ask once stale or never read", async () => {
+    const listed = linear.tools;
+    try {
+      const { connector, connectionId: stale } = await connected();
+      linear.tools = [...listed, tool("list_cycles")];
+      await env.DB.prepare(
+        "UPDATE connections SET tool_list_fresh_until = 1 WHERE id = ?"
+      )
+        .bind(stale)
+        .run();
+      const kept = await offered(stale);
+      await vi.waitFor(async () => {
+        await expect(offered(stale)).resolves.toContain("list_cycles");
+      }, waitForRead);
+      // Its read at connecting failed: nothing is kept.
+      const unread = await connectLinear(connector, someone());
+      await env.DB.batch([
+        env.DB.prepare(
+          "DELETE FROM connection_tools WHERE connection_id = ?"
+        ).bind(unread),
+        env.DB.prepare(
+          "UPDATE connections SET tool_list_read_at = NULL, tool_list_fresh_until = NULL WHERE id = ?"
+        ).bind(unread),
+      ]);
+      const none = await offered(unread);
+      await vi.waitFor(async () => {
+        await expect(offered(unread)).resolves.toContain("list_issues");
+      }, waitForRead);
+
+      expect({ kept: kept.includes("list_cycles"), none }).toStrictEqual({
+        kept: false,
+        none: [],
+      });
+    } finally {
+      linear.tools = listed;
+    }
+  });
+
+  it("are read and kept as it is connected, so they are offered before any call", async () => {
+    const connectionId = await connectLinear(await addLinear(), someone());
+    const [owner] = await exports.default.connectionOwners([connectionId]);
+
+    expect(Object.hasOwn(owner?.toolClasses ?? {}, "list_issues")).toBeTruthy();
+  });
+
+  it("are described to core's tool search as the server lists them: their types alone for a search, in full where named", async () => {
+    const { connectionId } = await connected();
+    const listed = linear.tools.find(({ name }) => name === "list_issues");
+    const searched = await exports.default.connectionTools({ connectionId });
+    const [full] = await exports.default.connectionTools({
+      connectionId,
+      actions: ["list_issues"],
+    });
+    const short = searched.find(({ name }) => name === "list_issues");
+
+    expect({
+      searched: { description: short?.description, output: short?.output },
+      full: {
+        name: full?.name,
+        description: full?.description,
+        input: full?.input === JSON.stringify(listed?.inputSchema),
+      },
+    }).toStrictEqual({
+      searched: { description: listed?.description, output: null },
+      full: {
+        name: "list_issues",
+        description: listed?.description,
+        input: true,
+      },
+    });
+  });
+
   it("are classed without their descriptions, and a poisoned schema isn't offered", async () => {
     const { connectionId, agent } = await connected();
     const depth = 100_000;

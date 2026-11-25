@@ -320,6 +320,7 @@ const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
     throw new Error(`${name}: its resource must be a string argument`);
   }
   const action: ActionManifest = {
+    description: declaration.description,
     routes,
     readOnly,
     reach,

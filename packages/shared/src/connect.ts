@@ -2310,6 +2310,16 @@ export interface ConnectApi
     connectionId: string
   ) => Promise<Record<string, Exclude<ToolClass, "never">>>;
   /**
+   * The tools each connection to a connector in `connectionIds` (at most
+   * `connectionOwnersMax`) offers to ask for, by ID: those of its list as
+   * connect keeps it that the rules class, answered at once. A list gone
+   * stale or never read is read again after the answer, for the next ask.
+   * Any other connection, an inactive one or an unknown ID is left out.
+   */
+  offeredConnectorTools: (
+    connectionIds: readonly string[]
+  ) => Promise<Record<string, string[]>>;
+  /**
    * The suite accounts the person `userId` connected as their own,
    * disconnected ones too, as connect verified them (`PersonalAccount`):
    * what core counts them as a reader of where it copies who may read an
@@ -2457,6 +2467,18 @@ export interface ConnectApi
    * server is asked: `connectorContract` reads each as it is served now.
    */
   connectorContracts: (request: ConnectorContractsRequest) => Promise<string[]>;
+  /**
+   * The tools a call of connection `connectionId` may name, each with its
+   * description and schemas: a native connection's as its connector's
+   * manifest in this release has them; a connector's, in full for
+   * `actions` alone, as its server lists them now, else as connect keeps
+   * them, at once (a stale list is read again after). None for any other
+   * connection, or one that is gone; `connect.server_unavailable` when a
+   * connector's list can't be read for `actions`.
+   */
+  connectionTools: (
+    request: ConnectionToolsRequest
+  ) => Promise<ConnectionTool[]>;
   /**
    * Whether an action of a connection only reads, the input properties it
    * takes and the connection's provider (`ActionShape`), by the rules a
@@ -2718,6 +2740,38 @@ export const connectorContractsRequestSchema = z.strictObject({
 export type ConnectorContractsRequest = z.input<
   typeof connectorContractsRequestSchema
 >;
+
+/**
+ * The connection whose tools `connectionTools` lists, and the tools to
+ * describe in full, if only some.
+ */
+export const connectionToolsRequestSchema = z.strictObject({
+  connectionId: connectionIdSchema,
+  actions: z.array(permissionActionSchema).min(1).max(20).optional(),
+});
+export type ConnectionToolsRequest = z.input<
+  typeof connectionToolsRequestSchema
+>;
+
+/**
+ * One tool a call of a connection may name, as its connector or server
+ * describes it: what core's tool search ranks and describes to the chat's
+ * agent. Data only: a call is still checked as any other.
+ */
+export interface ConnectionTool {
+  /** The action a call names, exactly. */
+  name: string;
+  /** What it does, as its connector or server says; empty if it says nothing. */
+  description: string;
+  /**
+   * The JSON Schemas of its input and output, as JSON text. In full only
+   * when it was named (`ConnectionToolsRequest.actions`): a search reads
+   * the start of its description, its input's types alone and no output.
+   */
+  input: string;
+  /** Null for a search, or a tool that lists no output schema. */
+  output: string | null;
+}
 
 /** Which action of which connection `actionShape` describes. */
 export const actionShapeRequestSchema = z.strictObject({

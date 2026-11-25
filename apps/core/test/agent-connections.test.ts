@@ -173,7 +173,7 @@ describe("a chat's connections", setUpTime, () => {
           const tried = async (name) => { try { return (await env.connections.call(name, "mail.search", { query: "invoice" })).output; } catch (error) { return error.message; } };
           const listed = await env.connections.list();
           return {
-            listed: listed.map(({ name, connectionId, actions }) => ({ name, connectionId, actions })),
+            listed: listed.map(({ name, tools }) => ({ name, tools })),
             mail: await tried("MAIL"),
             theirs: await tried("THEIRS"),
             ungranted: await tried("OTHER"),
@@ -201,8 +201,7 @@ describe("a chat's connections", setUpTime, () => {
         listed: [
           {
             name: "MAIL",
-            connectionId: mail.id,
-            actions: ["mail.send", "mail.search"],
+            tools: { "reach-others": 1, "read-company": 1 },
           },
         ],
         mail: { messages: ["invoice-1"] },
@@ -855,9 +854,9 @@ describe("a person's own connections in their own chat", setUpTime, () => {
       listed: listed?.text.includes(
         JSON.stringify({
           name: mail.id,
-          connectionId: mail.id,
+          account: null,
           resource: null,
-          actions: ["mail.search"],
+          tools: { "read-company": 1 },
         })
       ),
       read: read?.text.includes(`${marker}-1`),
@@ -905,9 +904,9 @@ describe("a person's own connections in their own chat", setUpTime, () => {
       listed: listed?.text.includes(
         JSON.stringify({
           name: mail.id,
-          connectionId: mail.id,
+          account: null,
           resource: null,
-          actions: ["mail.search"],
+          tools: { "read-company": 1 },
         })
       ),
       held: sent?.text,
@@ -1083,9 +1082,9 @@ describe(
         listed: listed?.text.includes(
           JSON.stringify({
             name: mail.id,
-            connectionId: mail.id,
+            account: null,
             resource: null,
-            actions: ["mail.search"],
+            tools: { "read-company": 1 },
           })
         ),
         read: read?.text.includes(`${marker}-1`),
@@ -1252,8 +1251,8 @@ describe(
 
       const [offered, hidden] = await codeResults(chat.stub, chat.chat.id);
       expect({
-        offered: offered?.text.includes(`"connectionId":"${mail.id}"`),
-        hidden: hidden?.text.includes(`"connectionId":"${mail.id}"`),
+        offered: offered?.text.includes(`"name":"${mail.id}"`),
+        hidden: hidden?.text.includes(`"name":"${mail.id}"`),
       }).toStrictEqual({ offered: true, hidden: false });
     });
 
@@ -1290,9 +1289,9 @@ describe(
         listed: listed?.text.includes(
           JSON.stringify({
             name: mail.id,
-            connectionId: mail.id,
+            account: null,
             resource: null,
-            actions: [],
+            tools: {},
           })
         ),
         read: read?.text.includes("connect.connection_inactive"),
