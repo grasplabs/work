@@ -1300,10 +1300,6 @@ msgstr "{query} busca en esta tabla, que no tiene búsqueda."
 msgid "{rating} of 5"
 msgstr "{rating} de 5"
 
-#: src/onboarding/documents-step.tsx
-msgid "{reading, plural, one {I’m reading # document from where it lives.} other {I’m reading # documents from where they live.}}"
-msgstr "{reading, plural, one {Estoy leyendo # documento desde donde está.} other {Estoy leyendo # documentos desde donde están.}}"
-
 #. How many of an app's tools only read, and how many change something.
 #: src/connections/app/words.ts
 msgid "{reads} read · {writes} change"
@@ -4643,14 +4639,6 @@ msgstr "Elegir cada {one} mostrado"
 #: src/frame/ui-words.tsx
 msgid "Choose files"
 msgstr "Elegir archivos"
-
-#: src/onboarding/documents-step.tsx
-msgid "Choose from Google Drive"
-msgstr "Elegir de Google Drive"
-
-#: src/onboarding/documents-step.tsx
-msgid "Choose from SharePoint or OneDrive"
-msgstr "Elegir de SharePoint o OneDrive"
 
 #: src/apps/app-access-requests.tsx
 msgid "Choose one"
@@ -8579,10 +8567,6 @@ msgstr "No puedo planificar ese día. Escribe uno como {example}, del {earliest}
 msgid "I changed my mind"
 msgstr "He cambiado de opinión"
 
-#: src/onboarding/documents-step.tsx
-msgid "I could not connect where your documents live. Try again with an administrator’s account, or add them here."
-msgstr "No pude conectar el lugar donde están tus documentos. Vuelve a intentarlo con una cuenta de administrador o añádelos aquí."
-
 #: src/onboarding/company-step.tsx
 msgid "I could not find the columns. The first row should name them: name, email, team and job."
 msgstr "No encontré las columnas. La primera fila debe nombrarlas: nombre, correo, equipo y puesto."
@@ -8602,10 +8586,6 @@ msgstr "No pude abrir esto ahora. Vuelve a intentarlo en un momento."
 #: src/onboarding/hr-leads.tsx
 msgid "I could not reach {name} just now. Try again in a moment."
 msgstr "No he podido conectar con {name} ahora mismo. Inténtalo de nuevo en un momento."
-
-#: src/onboarding/documents-step.tsx
-msgid "I could not reach {signIn} just now. Try again in a moment, or add the documents here."
-msgstr "No pude llegar a {signIn} ahora. Vuelve a intentarlo en un momento o añade los documentos aquí."
 
 #: src/onboarding/company-step.tsx
 msgid "I could not reach {signIn} just now. Try again in a moment, or use a staff list."
@@ -11359,10 +11339,6 @@ msgstr "Ya no se ofrece"
 msgid "No longer waits for you"
 msgstr "Ya no te espera"
 
-#: src/onboarding/documents-step.tsx
-msgid "No longer where it was"
-msgstr "Ya no está donde estaba"
-
 #: src/frame/ui-words.tsx
 #: src/inbox/report-viewer.tsx
 msgid "No matches"
@@ -11866,10 +11842,6 @@ msgstr "Aún no publicado."
 #: src/onboarding/documents-step.tsx
 msgid "Not read: add it again"
 msgstr "Sin leer: añádelo de nuevo"
-
-#: src/onboarding/documents-step.tsx
-msgid "Not read: connect it again"
-msgstr "Sin leer: vuelve a conectar"
 
 #: src/onboarding/documents-step.tsx
 msgid "Not read: no connection"
