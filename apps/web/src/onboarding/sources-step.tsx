@@ -55,7 +55,7 @@ const styles = stylex.create({
 });
 
 /** A place's logo, whole, on the middle of its tile. */
-const Logo = ({ src }: { src: string }) => (
+export const Logo = ({ src }: { src: string }) => (
   <ItemMedia align="center">
     <img alt="" src={src} {...stylex.props(styles.logo)} />
   </ItemMedia>
