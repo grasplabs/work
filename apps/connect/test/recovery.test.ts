@@ -1,5 +1,5 @@
-import { effectKeyPattern } from "@grasp-os/connector-kit/manifest";
 import { effectPropertyId } from "@grasp-os/connector-microsoft-365/graph";
+import { effectKeyPattern } from "@grasp-os/runtime/connector";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
@@ -426,13 +426,16 @@ describe("a Microsoft 365 write of unknown outcome", () => {
     expect(requests()).toHaveLength(1);
   });
 
-  it("is left unknown when another connector release claimed it", async () => {
+  it("is left unknown when another connector claimed it", async () => {
     const connection = await connected();
     graph.loseWriteAnswer();
     await outcome(draft(connection, "run-10:draft"));
-    // Claimed by a release that tagged nothing, say: not finding its tag
+    // Claimed by a connector that tagged nothing, say: not finding its tag
     // proves nothing.
-    await storedCalls(connection, "connector_version = 'microsoft-365@0.0.1'");
+    await storedCalls(
+      connection,
+      "connector_version = 'google-workspace+0000000000000000'"
+    );
     await claimedAgo(connection);
     await expect(
       retryable(draft(connection, "run-10:draft"))
@@ -443,12 +446,12 @@ describe("a Microsoft 365 write of unknown outcome", () => {
     }).toStrictEqual({ requests: 1, lookups: 0 });
   });
 
-  it("is left unknown when another build of the same connector version claimed it", async () => {
+  it("is left unknown when another build of the same connector claimed it", async () => {
     const connection = await connected();
     graph.loseWriteAnswer();
     await outcome(draft(connection, "run-15:draft"));
     const [claimedBy] = await columnOf(connection, "connector_version");
-    // The same version, other code: a build nobody bumped the version for.
+    // The same connector, other code.
     await storedCalls(
       connection,
       "connector_version = substr(connector_version, 1, instr(connector_version, '+')) || '0000000000000000'"
@@ -456,7 +459,7 @@ describe("a Microsoft 365 write of unknown outcome", () => {
     await claimedAgo(connection);
     const ended = await retryable(draft(connection, "run-15:draft"));
     expect({
-      claimedBy: /^microsoft-365@[^+]+\+[0-9a-f]{16}$/u.test(String(claimedBy)),
+      claimedBy: /^microsoft-365\+[0-9a-f]{16}$/u.test(String(claimedBy)),
       ended,
       requests: requests().length,
       lookups: lookups().length,

@@ -16,8 +16,8 @@ import {
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { connectorManifestSchema } from "@grasp-os/connector-kit/manifest";
-import type { ConnectorManifest } from "@grasp-os/connector-kit/manifest";
+import { connectorManifestSchema } from "@grasp-os/runtime/connector";
+import type { ConnectorManifest } from "@grasp-os/runtime/connector";
 import { build } from "vite-plus";
 import type { Plugin, Rolldown } from "vite-plus";
 import { z } from "zod";
@@ -150,7 +150,7 @@ export const buildConnectors = async (
   writeFileSync(outFile, `export default ${JSON.stringify(connectors)};\n`);
   for (const { manifest, code } of connectors) {
     console.info(
-      `Connector ${manifest.name} ${manifest.version}: ${(code.length / 1e3).toFixed(0)} kB`
+      `Connector ${manifest.name}: ${(code.length / 1e3).toFixed(0)} kB`
     );
   }
 };

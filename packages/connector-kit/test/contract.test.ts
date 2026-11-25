@@ -1,9 +1,6 @@
-import { describe, expect, it } from "vite-plus/test";
-import { z } from "zod";
-
-import { defineConnector, defineTool, ToolError } from "../src/connector.ts";
 import {
   connectorManifestSchema,
+  defineSync,
   effectAbsentMetaKey,
   effectKeyMetaKey,
   findMetaKey,
@@ -11,9 +8,13 @@ import {
   outcomeUnknownMetaKey,
   pathMatches,
   redirectHostMatches,
-} from "../src/manifest.ts";
-import type { Route } from "../src/manifest.ts";
-import { defineSync } from "../src/sync.ts";
+  ToolError,
+} from "@grasp-os/runtime/connector";
+import type { Route } from "@grasp-os/runtime/connector";
+import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
+
+import { defineConnector, defineTool } from "../src/connector.ts";
 
 // The connector contract, as a connector is defined: input parsed strictly
 // all the way down, one declared resource property, and only requests to
@@ -43,7 +44,6 @@ const connectorWith = (
 ) =>
   defineConnector({
     name: "example",
-    version: "1.0.0",
     provider: "microsoft",
     scopes: [],
     hosts: ["api.example.test"],
@@ -527,7 +527,6 @@ describe("a connector", () => {
     const withRoute = (extra: Record<string, unknown>) =>
       connectorManifestSchema.parse({
         name: "example",
-        version: "1.0.0",
         provider: "microsoft",
         scopes: [],
         hosts: ["api.example.test"],

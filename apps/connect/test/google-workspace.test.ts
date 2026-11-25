@@ -1,4 +1,4 @@
-import { connectorManifestSchema } from "@grasp-os/connector-kit/manifest";
+import { connectorManifestSchema } from "@grasp-os/runtime/connector";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";

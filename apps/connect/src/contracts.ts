@@ -1,4 +1,4 @@
-import { generatedContracts } from "@grasp-os/connector-kit/manifest";
+import { generatedContracts } from "@grasp-os/runtime/connector";
 import {
   actionShapeRequestSchema,
   connectErrors,

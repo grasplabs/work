@@ -694,9 +694,9 @@ importers:
       '@grasp-os/connector-google-workspace':
         specifier: workspace:*
         version: link:../../packages/connectors/google-workspace
-      '@grasp-os/connector-kit':
+      '@grasp-os/runtime':
         specifier: workspace:*
-        version: link:../../packages/connector-kit
+        version: link:../../packages/runtime
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -716,6 +716,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: 'catalog:'
         version: 5.20261113.1
+      '@grasp-os/connector-kit':
+        specifier: workspace:*
+        version: link:../../packages/connector-kit
       '@grasp-os/connector-microsoft-365':
         specifier: workspace:*
         version: link:../../packages/connectors/microsoft-365
@@ -1426,6 +1429,9 @@ importers:
 
   packages/connector-kit:
     dependencies:
+      '@grasp-os/runtime':
+        specifier: workspace:*
+        version: link:../runtime
       '@grasp-os/shared':
         specifier: workspace:*
         version: link:../shared
@@ -1438,6 +1444,9 @@ importers:
       '@grasp-os/connector-kit':
         specifier: workspace:*
         version: link:../../connector-kit
+      '@grasp-os/runtime':
+        specifier: workspace:*
+        version: link:../../runtime
       zod:
         specifier: 'catalog:'
         version: 4.6.7
@@ -1451,6 +1460,9 @@ importers:
       '@grasp-os/connector-kit':
         specifier: workspace:*
         version: link:../../connector-kit
+      '@grasp-os/runtime':
+        specifier: workspace:*
+        version: link:../../runtime
       fflate:
         specifier: 'catalog:'
         version: 0.8.3

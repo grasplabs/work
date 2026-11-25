@@ -1,6 +1,5 @@
-import { connectorManifestSchema } from "@grasp-os/connector-kit/manifest";
-import type { ConnectorManifest } from "@grasp-os/connector-kit/manifest";
-import type { SignIn } from "@grasp-os/connector-kit/sign-in";
+import { connectorManifestSchema } from "@grasp-os/runtime/connector";
+import type { ConnectorManifest, SignIn } from "@grasp-os/runtime/connector";
 import { log } from "@grasp-os/shared/log";
 
 import bundled from "#connectors";

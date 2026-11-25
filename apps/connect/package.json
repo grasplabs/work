@@ -18,8 +18,7 @@
     "db:migrate": "wrangler d1 migrations apply DB --remote"
   },
   "dependencies": {
-    "@grasp-os/connector-google-workspace": "workspace:*",
-    "@grasp-os/connector-kit": "workspace:*",
+    "@grasp-os/runtime": "workspace:*",
     "@grasp-os/shared": "workspace:*",
     "@grasp-os/workerflow": "workspace:*",
     "drizzle-orm": "catalog:",
@@ -28,6 +27,8 @@
   "devDependencies": {
     "@cloudflare/vitest-plugin": "catalog:",
     "@cloudflare/workers-types": "catalog:",
+    "@grasp-os/connector-google-workspace": "workspace:*",
+    "@grasp-os/connector-kit": "workspace:*",
     "@grasp-os/connector-microsoft-365": "workspace:*",
     "@modelcontextprotocol/sdk": "catalog:",
     "drizzle-kit": "catalog:",

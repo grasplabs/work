@@ -2,13 +2,10 @@ import {
   connectorIsolateRequests,
   syncMethod,
   syncPlacesMethod,
-} from "@grasp-os/connector-kit/manifest";
-import type { SyncManifest } from "@grasp-os/connector-kit/manifest";
-import {
   syncPlacesResultSchema,
   syncResultSchema,
-} from "@grasp-os/connector-kit/sync";
-import type { SyncFailure } from "@grasp-os/connector-kit/sync";
+} from "@grasp-os/runtime/connector";
+import type { SyncFailure, SyncManifest } from "@grasp-os/runtime/connector";
 import { createAuditEvent } from "@grasp-os/shared/audit";
 import {
   connectErrors,

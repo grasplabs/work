@@ -4,11 +4,8 @@
  * connect. Its provider is test/app-provider.ts's fake. `items.forge`
  * plays connector code gone wrong: it sends a key of its own.
  */
-import {
-  defineConnector,
-  defineTool,
-  ToolError,
-} from "@grasp-os/connector-kit/connector";
+import { defineConnector, defineTool } from "@grasp-os/connector-kit/connector";
+import { ToolError } from "@grasp-os/runtime/connector";
 import { z } from "zod";
 
 /** The app's API, which its connector calls and its key is checked at. */
@@ -48,7 +45,6 @@ const listRoute = {
 
 export default defineConnector({
   name: "sample-key",
-  version: "1.0.0",
   provider: "sample-key",
   signIn: {
     kind: "api_key",

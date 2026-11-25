@@ -1,15 +1,15 @@
-import { ToolError } from "@grasp-os/connector-kit/connector";
-import { segment } from "@grasp-os/connector-kit/provider";
 import {
-  RestartSyncError,
   cursorPart,
   defineSync,
   fetchInRoom,
   fromCursorPart,
   mayRequest,
+  RestartSyncError,
+  segment,
   syncRoom,
-} from "@grasp-os/connector-kit/sync";
-import type { SyncRoom } from "@grasp-os/connector-kit/sync";
+  ToolError,
+} from "@grasp-os/runtime/connector";
+import type { SyncRoom } from "@grasp-os/runtime/connector";
 import { syncPlaceSchema } from "@grasp-os/shared/sync";
 import type { SyncChoice } from "@grasp-os/shared/sync";
 import { z } from "zod";

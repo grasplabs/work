@@ -20,16 +20,16 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import {
+  connectorManifestSchema,
+  generatedContracts,
+} from "@grasp-os/runtime/connector";
 import { connectorCatalogSource } from "@grasp-os/runtime/host";
 import type { CatalogAction } from "@grasp-os/runtime/host";
 import { toolClassOf } from "@grasp-os/shared/connect";
 import type { ToolClass } from "@grasp-os/shared/connect";
 import { z } from "zod";
 
-import {
-  connectorManifestSchema,
-  generatedContracts,
-} from "../../packages/connector-kit/src/manifest.ts";
 import { connectorEntries } from "../connect/build.ts";
 import { readContractSchema } from "./src/connector-contracts.ts";
 

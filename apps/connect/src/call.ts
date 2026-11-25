@@ -1,12 +1,12 @@
 import {
-  confirmedMetaKey,
   attachmentsMetaKey,
+  confirmedMetaKey,
   effectKeyMetaKey,
   findMetaKey,
-  stampMetaKey,
   maxRetryAfterSeconds,
-} from "@grasp-os/connector-kit/manifest";
-import type { RecoveryMode } from "@grasp-os/connector-kit/manifest";
+  stampMetaKey,
+} from "@grasp-os/runtime/connector";
+import type { RecoveryMode } from "@grasp-os/runtime/connector";
 import type { CapabilityClaims } from "@grasp-os/shared/capability";
 import { connectErrors } from "@grasp-os/shared/connect";
 import type {

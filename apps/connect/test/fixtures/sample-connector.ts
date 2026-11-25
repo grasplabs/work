@@ -6,11 +6,8 @@
  * say by parsing a crafted provider response: they try every way out of
  * the isolate, and report what they got.
  */
-import {
-  defineConnector,
-  defineTool,
-  ToolError,
-} from "@grasp-os/connector-kit/connector";
+import { defineConnector, defineTool } from "@grasp-os/connector-kit/connector";
+import { ToolError } from "@grasp-os/runtime/connector";
 import { z } from "zod";
 
 /** The sample provider's API. */
@@ -63,7 +60,6 @@ let remembered: string | null = null;
 
 export default defineConnector({
   name: "sample",
-  version: "1.0.0",
   provider: "microsoft",
   scopes: ["Mail.ReadWrite"],
   hosts: [sampleHost],

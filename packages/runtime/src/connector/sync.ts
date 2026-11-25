@@ -20,7 +20,6 @@ import type {
 } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
-import { ToolError } from "./connector.ts";
 import { maxContentBytes } from "./content.ts";
 import {
   connectorIsolateRequests,
@@ -31,6 +30,7 @@ import {
   syncPlacesParamsSchema,
 } from "./manifest.ts";
 import type { Route, SyncManifest } from "./manifest.ts";
+import { ToolError } from "./server.ts";
 
 // How a native connector reads a source for native sync (GRA-1758): one
 // page of what changed from a cursor, as neutral items. A sync isn't a

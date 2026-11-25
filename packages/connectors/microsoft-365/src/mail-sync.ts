@@ -1,27 +1,24 @@
-import { ToolError } from "@grasp-os/connector-kit/connector";
-import { maxReadBytes, toBase64 } from "@grasp-os/connector-kit/content";
-import { segment } from "@grasp-os/connector-kit/provider";
 import {
   cursorPart,
   defineSync,
   fetchInRoom,
   fillPage,
-  fromInPagePart,
-  isTooLarge,
-  inPagePart,
-  startOfPage,
   fromCursorPart,
+  fromInPagePart,
+  inPagePart,
+  isTooLarge,
+  maxReadBytes,
   mayRequest,
   RestartSyncError,
+  segment,
+  startOfPage,
   syncPageLimits,
   syncRoom,
   takeContent,
-} from "@grasp-os/connector-kit/sync";
-import type {
-  EntryItems,
-  InPage,
-  SyncRoom,
-} from "@grasp-os/connector-kit/sync";
+  toBase64,
+  ToolError,
+} from "@grasp-os/runtime/connector";
+import type { EntryItems, InPage, SyncRoom } from "@grasp-os/runtime/connector";
 import type {
   SyncContent,
   SyncItem,

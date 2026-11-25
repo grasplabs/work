@@ -2608,13 +2608,13 @@ export interface ConnectorContractAction {
   input: string;
   output: string;
   /**
-   * It reads a file and answers its content (connector-kit's `contentAs`),
+   * It reads a file and answers its content (the connector runtime's `contentAs`),
    * which a workflow action may have core keep as a file of its run
    * (GRA-886). Only a native connector's read declares it; never Composio's.
    */
   answersFile?: true;
   /**
-   * It attaches files (connector-kit's `takesFiles`): its input has an
+   * It attaches files (a native tool's `takesFiles`): its input has an
    * `attachments` property, which in this contract names run files by ID
    * and which core turns into digests and bytes for a workflow's call
    * (GRA-887). Only a native connector's write declares it.

@@ -1,12 +1,13 @@
-import { ToolError } from "@grasp-os/connector-kit/connector";
-import { maxReadBytes, toBase64 } from "@grasp-os/connector-kit/content";
-import { segment } from "@grasp-os/connector-kit/provider";
 import {
-  RestartSyncError,
   defineSync,
   fetchBefore,
+  maxReadBytes,
+  RestartSyncError,
+  segment,
   syncPageLimits,
-} from "@grasp-os/connector-kit/sync";
+  toBase64,
+  ToolError,
+} from "@grasp-os/runtime/connector";
 import type {
   SyncContent,
   SyncItem,

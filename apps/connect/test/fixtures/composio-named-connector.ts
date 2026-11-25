@@ -12,7 +12,6 @@ const host = "api.composio-named.test";
 
 export default defineConnector({
   name: "composio",
-  version: "1.0.0",
   provider: "microsoft",
   scopes: ["Mail.Read"],
   hosts: [host],

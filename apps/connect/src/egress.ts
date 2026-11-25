@@ -6,8 +6,8 @@ import {
   pathMatches,
   redirectHostMatches,
   routeSchema,
-} from "@grasp-os/connector-kit/manifest";
-import type { EgressKind, Route } from "@grasp-os/connector-kit/manifest";
+} from "@grasp-os/runtime/connector";
+import type { EgressKind, Route } from "@grasp-os/runtime/connector";
 import { log } from "@grasp-os/shared/log";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { z } from "zod";

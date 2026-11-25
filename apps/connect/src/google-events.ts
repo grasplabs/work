@@ -1,5 +1,4 @@
-import { addressesOf } from "@grasp-os/connector-google-workspace/mime";
-import { stampHeader } from "@grasp-os/connector-kit/manifest";
+import { addressesOf, stampHeader } from "@grasp-os/runtime/connector";
 import { z } from "zod";
 
 import {
