@@ -1,10 +1,3 @@
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
 import { isThemeMode, ThemeToggle } from "@grasp-os/ui/components/theme-toggle";
 import { Icon } from "@grasp-os/ui/lib/icons";
 import {
@@ -27,12 +20,10 @@ import {
   onThemeChange,
   readTheme,
 } from "../frame/theme.ts";
-import { chooseLocale, isLocale, localeNames } from "../i18n.ts";
-import type { Locale } from "../i18n.ts";
 import type { Pose } from "../onboarding/field/engine.ts";
 import { aside } from "../onboarding/field/poses.ts";
 import { StephenField } from "../onboarding/field/stephen-field.tsx";
-import { useNarrow } from "../onboarding/use-narrow.ts";
+import { LanguagePicker } from "../onboarding/language-picker.tsx";
 
 // The frame every screen of someone's interview link stands in, full
 // screen, outside the app, as the sign-in page before it: Grasp's mark at
@@ -134,54 +125,6 @@ export const tool = {
  */
 const themeOwner = "interview";
 
-const languages = Object.entries(localeNames).flatMap(([code, name]) =>
-  isLocale(code) ? [{ code, name }] : []
-);
-
-/**
- * The language: the library's Select in its quiet form (ghost, small, no
- * box), as the setup's bar has it, so both flows share one control. Closed,
- * it says the language's own name; on a phone its short code ("EN"). Its
- * list names each in its own words.
- */
-const Language = () => {
-  const { t, i18n } = useLingui();
-  const narrow = useNarrow();
-  const locale: Locale = isLocale(i18n.locale) ? i18n.locale : "en";
-  const language = localeNames[locale];
-  return (
-    <Select
-      items={languages.map(({ code, name }) => ({
-        value: code,
-        label: narrow ? code.toUpperCase() : name,
-      }))}
-      onValueChange={(value) => {
-        if (isLocale(value)) {
-          void chooseLocale(value);
-        }
-      }}
-      value={locale}
-    >
-      <SelectTrigger
-        aria-label={t`Language: ${language}`}
-        size={tool.select}
-        // Named on a pause, as the header's other tools are.
-        tooltip={t`Language`}
-        variant="ghost"
-      >
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {languages.map(({ code, name }) => (
-          <SelectItem key={code} label={name} value={code}>
-            <span lang={code}>{name}</span>
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-};
-
 /** Light, dark or the system's, as one quiet icon that steps through them, as the setup's bar has it. */
 const Appearance = () => {
   const { t } = useLingui();
@@ -238,7 +181,7 @@ export const Frame = ({
           <Icon icon={GraspLogo} label="Grasp" />
         </span>
         <div {...stylex.props(styles.end)}>
-          <Language />
+          <LanguagePicker />
           <Appearance />
           {actions}
         </div>

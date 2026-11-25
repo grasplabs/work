@@ -9608,8 +9608,7 @@ msgstr "Wissen"
 msgid "Known"
 msgstr "Bekannt"
 
-#: src/interview/frame.tsx
-#: src/onboarding/calm-frame.tsx
+#: src/onboarding/language-picker.tsx
 #: src/routes/_shell.settings.profile.tsx
 msgid "Language"
 msgstr "Sprache"
@@ -9619,8 +9618,7 @@ msgctxt "what the Brain remembers about something"
 msgid "Language"
 msgstr "Sprache"
 
-#: src/interview/frame.tsx
-#: src/onboarding/calm-frame.tsx
+#: src/onboarding/language-picker.tsx
 msgid "Language: {language}"
 msgstr "Sprache: {language}"
 

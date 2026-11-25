@@ -9608,8 +9608,7 @@ msgstr "Kennis"
 msgid "Known"
 msgstr "Bekend"
 
-#: src/interview/frame.tsx
-#: src/onboarding/calm-frame.tsx
+#: src/onboarding/language-picker.tsx
 #: src/routes/_shell.settings.profile.tsx
 msgid "Language"
 msgstr "Taal"
@@ -9619,8 +9618,7 @@ msgctxt "what the Brain remembers about something"
 msgid "Language"
 msgstr "Taal"
 
-#: src/interview/frame.tsx
-#: src/onboarding/calm-frame.tsx
+#: src/onboarding/language-picker.tsx
 msgid "Language: {language}"
 msgstr "Taal: {language}"
 
