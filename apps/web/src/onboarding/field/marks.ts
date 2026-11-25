@@ -2,12 +2,11 @@ import { BAYER_MATRIX, DITHER_LEVELS } from "@grasp-os/ui/lib/utils";
 
 // What Stephen does with a component he holds: he takes its own picture,
 // the brand logo it carries (a provider's, a source's), and
-// draws it large in his dither across the component's free side, as the
-// language cards draw their flags: whole at the far edge, thinning out
-// toward the words, building up while he is on it and fading where it is
+// draws it small in his dither at the component's far end, in the logo's
+// own colours, so it reads as that logo (Ruben: large and in mint, nobody
+// knew what it was), building up while he is on it and fading where it is
 // when he leaves. Drawn on one canvas over the page, in cells as the flags
-// are, in the light's own colour; nothing is drawn over the component's
-// words. A component that is too narrow for a picture beside its words, or
+// are; nothing is drawn over the component's words. A component that is too narrow for a picture beside its words, or
 // has none, or draws its own (a canvas), gets none.
 
 /** A cell's side in CSS pixels: the flags' own. */
@@ -16,11 +15,11 @@ const CELL = 4;
 /** A component this much wider than tall has room for a picture beside its words. */
 const ROOMY = 2.4;
 
-/** The picture's height, as times the component's: it bleeds off the far edge. */
-const SCALE = 2.1;
+/** The picture's height, as times the component's: well inside it. */
+const SCALE = 0.6;
 
-/** How much of the component's width, from its far edge, the picture fades over. */
-const REACH = 0.6;
+/** How far the picture stands in from the component's far edge, in CSS pixels. */
+const INSET = 16;
 
 const bayerAt = (x: number, y: number): number =>
   ((BAYER_MATRIX[y % 4]?.[x % 4] ?? 0) + 0.5) / DITHER_LEVELS;
@@ -31,11 +30,12 @@ const LEAST_ROOM = 72;
 /** How far a picture keeps from the words, in CSS pixels. */
 const CLEAR = 12;
 
-/** A picture as cells: which are lit, read once from the component's own mark, and the free room it has. */
+/** A picture as cells: each one's colour, or none where it is clear, read once from the component's own mark, and the free room it has. */
 interface Mark {
   columns: number;
   rows: number;
-  lit: Uint8Array;
+  /** A cell's colour as CSS, null where it is clear, or "ink" where a one-colour logo takes the page's ink: drawn in the light's colour. */
+  lit: (string | null)[];
   /** From the component's far edge to the end of its words, in CSS pixels. */
   room: number;
 }
@@ -76,14 +76,15 @@ const pictureOf = (element: Element): SVGSVGElement | null => {
 const readMark = async (svg: SVGSVGElement, rows: number): Promise<Mark> => {
   const copy = svg.cloneNode(true);
   if (!(copy instanceof SVGSVGElement)) {
-    return { columns: 0, rows: 0, lit: new Uint8Array(), room: 0 };
+    return { columns: 0, rows: 0, lit: [], room: 0 };
   }
   const box = svg.viewBox.baseVal;
   const aspect = box.width > 0 && box.height > 0 ? box.width / box.height : 1;
   const columns = Math.max(1, Math.round(rows * aspect));
   copy.setAttribute("width", String(columns * 4));
   copy.setAttribute("height", String(rows * 4));
-  // Its look comes from the page's classes, which a picture alone doesn't have: solid, in one ink.
+  // Its own colours stay; what takes the page's ink (currentColor, or no fill at all) is drawn
+  // in pure black here, and drawn in the light's colour later.
   copy.removeAttribute("class");
   copy.setAttribute("fill", "#000");
   copy.setAttribute("color", "#000");
@@ -99,13 +100,23 @@ const readMark = async (svg: SVGSVGElement, rows: number): Promise<Mark> => {
   flat.height = rows;
   const context = flat.getContext("2d", { willReadFrequently: true });
   if (context === null) {
-    return { columns: 0, rows: 0, lit: new Uint8Array(), room: 0 };
+    return { columns: 0, rows: 0, lit: [], room: 0 };
   }
   context.drawImage(image, 0, 0, columns, rows);
   const { data } = context.getImageData(0, 0, columns, rows);
-  const lit = new Uint8Array(columns * rows);
-  for (let at = 0; at < lit.length; at += 1) {
-    lit[at] = (data[at * 4 + 3] ?? 0) > 96 ? 1 : 0;
+  const lit: Mark["lit"] = [];
+  for (let at = 0; at < columns * rows; at += 1) {
+    const [red = 0, green = 0, blue = 0, alpha = 0] = data.subarray(
+      at * 4,
+      at * 4 + 4
+    );
+    if (alpha <= 96) {
+      lit.push(null);
+    } else if (red + green + blue < 24) {
+      lit.push("ink");
+    } else {
+      lit.push(`rgb(${red} ${green} ${blue})`);
+    }
   }
   return { columns, rows, lit, room: 0 };
 };
@@ -124,7 +135,7 @@ const markOf = (element: Element, height: number): Mark | null => {
     return null;
   }
   marks.set(element, "reading");
-  const rows = Math.max(8, Math.round((height * SCALE) / CELL));
+  const rows = Math.max(5, Math.round((height * SCALE) / CELL));
   void (async () => {
     try {
       marks.set(element, { ...(await readMark(svg, rows)), room });
@@ -166,7 +177,6 @@ export const drawMarks = (
   }
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
   context.clearRect(0, 0, window.innerWidth, window.innerHeight);
-  context.fillStyle = colour;
   for (const { element, box, on } of held) {
     if (on < 0.01) {
       continue;
@@ -176,34 +186,34 @@ export const drawMarks = (
     if (mark === null || mark.columns === 0) {
       continue;
     }
-    const left = x + width - mark.columns * CELL * 0.82;
+    const left = x + width - INSET - mark.columns * CELL;
     const top = y + (height - mark.rows * CELL) / 2;
+    // Clear of its words: none drawn where they are.
     const free = x + width - mark.room + CLEAR;
-    const fadeFrom = Math.max(x + width * (1 - REACH), free);
-    // Kept inside the component, clear of its edge and of its words, so its edge and the words stay clean.
     context.save();
     context.beginPath();
-    context.rect(free, y + 3, x + width - 3 - free, height - 6);
+    context.rect(free, y, x + width - free, height);
     context.clip();
     for (let row = 0; row < mark.rows; row += 1) {
       for (let column = 0; column < mark.columns; column += 1) {
-        if (mark.lit[row * mark.columns + column] !== 1) {
+        const tone = mark.lit[row * mark.columns + column];
+        if (tone === null || tone === undefined) {
           continue;
         }
-        const cellX = left + column * CELL;
-        const cellY = top + row * CELL;
-        // Whole at the far edge, thinning out toward the words.
-        const across = Math.min(
-          1,
-          Math.max(0, (cellX - fadeFrom) / (x + width - fadeFrom))
-        );
+        // The whole logo builds up through the dither, a little alive while he is on it.
         const flicker = 0.06 * Math.sin(time * 2.2 + column * 0.7 + row * 1.3);
-        const much = on * across ** 1.4 + flicker;
+        const much = on * 1.1 + flicker;
         if (bayerAt(column, row) >= much) {
           continue;
         }
-        context.globalAlpha = Math.min(1, 0.25 + much);
-        context.fillRect(cellX, cellY, CELL - 1, CELL - 1);
+        context.fillStyle = tone === "ink" ? colour : tone;
+        context.globalAlpha = Math.min(1, 0.35 + much);
+        context.fillRect(
+          left + column * CELL,
+          top + row * CELL,
+          CELL - 1,
+          CELL - 1
+        );
       }
     }
     context.restore();
