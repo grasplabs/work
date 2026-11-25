@@ -683,6 +683,21 @@ describe("a connector's tools", () => {
           $defs: { Text: { type: "string" } },
         },
       }),
+      tool("get_composed", {
+        inputSchema: {
+          type: "object",
+          properties: {
+            send_now: {
+              allOf: [{ type: "boolean" }, { $ref: "#/$defs/Text" }],
+            },
+          },
+          $defs: { Text: { type: "string" } },
+        },
+      }),
+      tool(
+        "get_worded",
+        takes({ id: text, notify: { enum: ["yes", "no", "all"] } })
+      ),
       tool(
         "get_options",
         takes({ id: text, notify: { enum: [true, false, "all"] } })
@@ -740,6 +755,8 @@ describe("a connector's tools", () => {
       list_notifications: classes.list_notifications,
       get_mixed: classes.get_mixed,
       get_options: classes.get_options,
+      get_composed: classes.get_composed,
+      get_worded: classes.get_worded,
       get_brief: classes.get_brief,
       get_fanout: classes.get_fanout,
       get_anchored: classes.get_anchored,
@@ -786,6 +803,8 @@ describe("a connector's tools", () => {
       list_notifications: "read-own",
       get_mixed: "reach-others",
       get_options: "reach-others",
+      get_composed: "reach-others",
+      get_worded: "reach-others",
       get_brief: "reach-others",
       get_fanout: "reach-others",
       get_anchored: "reach-others",

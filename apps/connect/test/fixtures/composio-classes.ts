@@ -63,7 +63,7 @@ export const composioClasses: Record<string, Record<string, ToolClass>> = {
   bulk: Object.fromEntries(
     [
       ...Array.from({ length: 3000 }, (_, index) => `BULK_TOOL_${index}`),
-      "BULK_INVOICE_VOID",
+      "BULK_FIND_SHIPMENT",
       "BULK_LEDGER_EXPORT",
       ...Array.from({ length: 6 }, (_, index) => `BULK_LEDGER_READ_${index}`),
       ...Array.from({ length: 21 }, (_, index) => `BULK_QUOKKA_READ_${index}`),

@@ -641,11 +641,12 @@ const referenced = (root: Json, ref: Json | undefined): Json | undefined => {
 export const topNames = (schema: Json): string[] => {
   const found: string[] = [];
   const pending: Json[] = [schema];
-  const followed = new Set<Json>([schema]);
+  const seen = new Set<Json>();
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
-    if (!isRecord(next)) {
+    if (!isRecord(next) || seen.has(next)) {
       continue;
     }
+    seen.add(next);
     if (isRecord(next.properties)) {
       found.push(...Object.keys(next.properties));
     }
@@ -655,8 +656,7 @@ export const topNames = (schema: Json): string[] => {
       }
     }
     const definition = referenced(schema, next.$ref);
-    if (definition !== undefined && !followed.has(definition)) {
-      followed.add(definition);
+    if (definition !== undefined) {
       pending.push(definition);
     }
   }
@@ -722,20 +722,58 @@ const holdsFlag = (
 
 /**
  * Whether a schema says outright that its value may be a flag: its `type`
- * holds `boolean`, or its `enum` or `const` holds `true` or `false`. A model
- * reads that and sends one, whatever else the schema says.
+ * holds `boolean`, or its `enum` or `const` holds `true`, `false` or a flag
+ * word (`"yes"`, `"true"`). A model reads that and sends one, whatever else
+ * the schema says. Numbers and `null` don't say it: `[0, 5, 10]` minutes.
  */
 const saysFlag = (
   schema: Readonly<Record<string, Json | undefined>>
 ): boolean => {
   const { type, const: only } = schema;
   const values = schema.enum;
+  const said = (value: Json | undefined) =>
+    typeof value === "boolean" ||
+    (typeof value === "string" && isFlagValue(value));
   return (
     type === "boolean" ||
     (isJsonArray(type) && type.includes("boolean")) ||
-    typeof only === "boolean" ||
-    (isJsonArray(values) && values.some((value) => typeof value === "boolean"))
+    said(only) ||
+    (isJsonArray(values) && values.some(said))
   );
+};
+
+/**
+ * Whether `schema`, or any schema it is made of within the input's `root`
+ * (`allOf`, `anyOf`, `oneOf`, a `$ref`'s), says its value may be a flag
+ * (`saysFlag`). `clean` holds every schema already read whose own and
+ * composed schemas say none, so the properties of one input read each
+ * schema once: a read that finds none has read all it is made of.
+ */
+const mentionsFlag = (
+  schema: Json | undefined,
+  root: Json,
+  clean: Set<Json>
+): boolean => {
+  const pending: Json[] = schema === undefined ? [] : [schema];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    if (!isRecord(next) || clean.has(next)) {
+      continue;
+    }
+    if (saysFlag(next)) {
+      return true;
+    }
+    clean.add(next);
+    for (const members of [next.anyOf, next.oneOf, next.allOf]) {
+      if (isJsonArray(members)) {
+        pending.push(...members);
+      }
+    }
+    const named = referenced(root, next.$ref);
+    if (named !== undefined) {
+      pending.push(named);
+    }
+  }
+  return false;
 };
 
 /**
@@ -746,8 +784,7 @@ const maxFlagDepth = 64;
 
 /**
  * Whether a property's `schema`, within the input's `root`, lets its value
- * be a flag: it says so (`saysFlag`), whatever else it says, or every
- * constraint it has allows one. Its own allow one
+ * be a flag: every constraint it has allows one. Its own allow one
  * (`holdsFlag`); every member of its `allOf` and some of its `anyOf` or
  * `oneOf` allows one; and what its `$ref` names does. Text and numbers it
  * types (`delivery_status`, an enum of states) aren't flags. A schema with
@@ -763,7 +800,7 @@ const mayBeFlag = (
   known: Map<Json, boolean>,
   depth = 0
 ): boolean => {
-  if (!isRecord(schema) || depth > maxFlagDepth || saysFlag(schema)) {
+  if (!isRecord(schema) || depth > maxFlagDepth) {
     return true;
   }
   const answer = known.get(schema);
@@ -863,6 +900,7 @@ const findingsOf = (name: string, inputSchema: Json): Findings => {
   const sends = ([property]: Property) =>
     sendingStems.some((stem) => property.toLowerCase().includes(stem));
   const known = new Map<Json, boolean>();
+  const clean = new Set<Json>();
   return {
     reads:
       readVerbs.has(words[0] ?? "") ||
@@ -873,7 +911,9 @@ const findingsOf = (name: string, inputSchema: Json): Findings => {
       names(addressWords, "none") ||
       properties.some(
         (property) =>
-          sends(property) && mayBeFlag(property[1], inputSchema, known)
+          sends(property) &&
+          (mentionsFlag(property[1], inputSchema, clean) ||
+            mayBeFlag(property[1], inputSchema, known))
       ),
     targets:
       names(targetWords, draft ? "none" : "either") ||
