@@ -379,9 +379,12 @@ export const coreProject = (
                 MICROSOFT_DOCUMENTS_CLIENT_ID: documentsClient.id,
                 MICROSOFT_DOCUMENTS_CLIENT_SECRET: documentsClient.secret,
                 // Google Workspace's, which the fake Google there knows:
-                // Stephen's eval on Google connects through it.
-                GOOGLE_CLIENT_ID: googleConnectClient.id,
-                GOOGLE_CLIENT_SECRET: googleConnectClient.secret,
+                // Stephen's eval on Google connects through it. Its
+                // connector declares its sign-in, so its client is its
+                // entry here.
+                APP_OAUTH_CLIENTS: JSON.stringify({
+                  google: googleConnectClient,
+                }),
                 // The directory's own Google client (connect's providers.ts).
                 GOOGLE_DIRECTORY_CLIENT_ID: googleDirectoryClient.id,
                 GOOGLE_DIRECTORY_CLIENT_SECRET: googleDirectoryClient.secret,
