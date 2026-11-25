@@ -13,7 +13,7 @@ import { Countdown, budgetMinutes } from "./countdown.tsx";
 import { keepNow, update, useInterviewer, useProgress } from "./kept.ts";
 import { sendTyped, useLoop } from "./loop.ts";
 import { micProblem } from "./mic.ts";
-import { withoutLine } from "./progress.ts";
+import { withLineText, withoutLine } from "./progress.ts";
 import { ReadBack } from "./read-back.tsx";
 import { say, stopSpeaking, useSaidOf } from "./speech.ts";
 import { shownAs, wordsOf } from "./spoken.tsx";
@@ -233,6 +233,11 @@ const Room = ({
       <Transcript
         alone={alone}
         lines={progress.lines}
+        onEdit={(at, text) => {
+          // Kept at once, as a removal is: their own words, put right.
+          update((now) => withLineText(now, at, text));
+          keepNow();
+        }}
         onRemove={(at) => {
           // Kept at once: removing can't wait for the next save.
           update((now) => withoutLine(now, at));

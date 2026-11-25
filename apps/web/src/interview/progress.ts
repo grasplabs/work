@@ -274,6 +274,28 @@ export const withoutLine = (
   ),
 });
 
+/**
+ * A line of theirs, put right by them in the transcript: their words now,
+ * keeping only what he marked that is still in them, word for word.
+ */
+export const withLineText = (
+  progress: InterviewProgress,
+  at: number,
+  text: string
+): InterviewProgress => ({
+  ...progress,
+  lines: progress.lines.map((line, each) => {
+    if (each !== at || line.from !== "person" || line.removed === true) {
+      return line;
+    }
+    const { marks, ...rest } = line;
+    const kept = (marks ?? []).filter(
+      ({ quote }) => spanOf(text, quote) !== null
+    );
+    return kept.length > 0 ? { ...rest, text, marks: kept } : { ...rest, text };
+  }),
+});
+
 /** A line of the read-back, put right by them: their words, at once, also for the record until Stephen has heard of it. */
 export const withFactText = (
   progress: InterviewProgress,

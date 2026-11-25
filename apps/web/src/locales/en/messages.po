@@ -4201,6 +4201,7 @@ msgstr "Cases a week: {cases}."
 #: src/agents/new-agent.tsx
 #: src/apps/app-workflows.tsx
 #: src/drafts/share-with-team.tsx
+#: src/interview/transcript-looks.tsx
 #: src/routes/_shell.settings.outcomes.tsx
 #: src/settings/ai-providers.tsx
 msgid "Change"
@@ -4315,6 +4316,10 @@ msgstr "Change this line"
 #: src/apps/app-workflows.tsx
 msgid "Change what {alias} starts"
 msgstr "Change what {alias} starts"
+
+#: src/interview/transcript-looks.tsx
+msgid "Change your line: {words}"
+msgstr "Change your line: {words}"
 
 #: src/interview/read-back-story.tsx
 #: src/interview/read-back.tsx
@@ -6809,6 +6814,10 @@ msgstr "Enter the address to let in again."
 #: src/settings/invitations.tsx
 msgid "Enter the email of at least one person to invite."
 msgstr "Enter the email of at least one person to invite."
+
+#: src/interview/transcript-looks.tsx
+msgid "Enter to keep · Esc to leave it"
+msgstr "Enter to keep · Esc to leave it"
 
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
@@ -14338,6 +14347,7 @@ msgstr "Remind me"
 #: src/apps/data-model-changes.tsx
 #: src/apps/field-editor.tsx
 #: src/drafts/share-access.tsx
+#: src/interview/transcript-looks.tsx
 #: src/interview/transcript.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/guests.tsx
@@ -21387,6 +21397,10 @@ msgstr "Your invitations reached all {invited} people. {talked, plural, one {# h
 #: src/onboarding/language-cards.tsx
 msgid "Your language"
 msgstr "Your language"
+
+#: src/interview/transcript-looks.tsx
+msgid "Your line"
+msgstr "Your line"
 
 #: src/onboarding/campaign/concepts/road.tsx
 msgid "Your look"

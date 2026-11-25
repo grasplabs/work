@@ -17,6 +17,7 @@ import {
   ticked,
   withFactToggled,
   withLine,
+  withLineText,
   withoutLine,
   withShares,
 } from "./progress.ts";
@@ -432,5 +433,41 @@ describe("the interview's clock", () => {
     expect(
       minutesAt(begun(freshProgress, start, "type"), start + 600 * minute)
     ).toBe(240);
+  });
+});
+
+describe("a line of theirs put right in the transcript", () => {
+  it("takes their words and keeps only the marks still in them", () => {
+    const now = withLineText(
+      {
+        ...freshProgress,
+        lines: [
+          { from: "stephen", text: "How many?" },
+          {
+            from: "person",
+            text: "About 400 invoices a month.",
+            marks: [
+              { quote: "400 invoices", tag: "case" },
+              { quote: "a month", tag: "case" },
+            ],
+          },
+        ],
+      },
+      1,
+      "About 450 invoices a month."
+    );
+    expect(now.lines[1]).toStrictEqual({
+      from: "person",
+      text: "About 450 invoices a month.",
+      marks: [{ quote: "a month", tag: "case" }],
+    });
+  });
+
+  it("never changes his lines", () => {
+    const before = {
+      ...freshProgress,
+      lines: [{ from: "stephen" as const, text: "Hi." }],
+    };
+    expect(withLineText(before, 0, "Bye.").lines[0]?.text).toBe("Hi.");
   });
 });
