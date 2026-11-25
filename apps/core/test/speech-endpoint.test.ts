@@ -12,6 +12,7 @@ import { voiceBudgets } from "../src/onboarding/speech.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { storedKeyOf } from "../src/speech-cache.ts";
 import { secondsPerCharacter } from "./ai-providers-fake.ts";
+import { platformMistralKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import {
   onLink,
@@ -19,7 +20,7 @@ import {
   participate,
   signedInAs,
 } from "./interview-link.ts";
-import { carrying } from "./platform-providers.ts";
+import { carrying, plan } from "./platform-providers.ts";
 import { routed, signedInWithRole, unique, uniqueLetters } from "./sign-in.ts";
 
 // The onboarding's lines said out loud (src/onboarding/speech.ts), over
@@ -77,6 +78,9 @@ const eventsOf = (body: string) =>
 /** The audio of a line's events, each piece as its bytes. */
 const audioOf = (events: ReturnType<typeof eventsOf>): string[] =>
   events.flatMap((event) => ("audio" in event ? [atob(event.audio)] : []));
+
+/** The voice turning a line away for a moment. */
+const busy = { status: 429, headers: { "retry-after": "1" } };
 
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
@@ -243,6 +247,48 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     await expect(voiceCounted("interviews")).resolves.toBeCloseTo(
       before + text.length * secondsPerCharacter
     );
+  });
+
+  it("refuses a line asked for streamed at once when the voice is busy, as one asked for whole", async () => {
+    const { link } = await opened();
+    const text = newLine();
+    // Busy, and busy again when asked once more.
+    await plan(platformMistralKey, [busy, busy]);
+
+    const result = await codeOf(
+      await speak({ text, language: "en", link, stream: true })
+    );
+
+    expect(result).toStrictEqual([429, "speech.busy"]);
+  });
+
+  it("tells the page when a line breaks off halfway, and keeps nothing of it", async () => {
+    const { link } = await opened();
+    const text = newLine();
+    // A piece of the file, and then the stream ends without saying it is done.
+    await plan(platformMistralKey, [
+      {
+        sse: `data: ${JSON.stringify({ type: "speech.audio.delta", audio_data: btoa("RIFF") })}\n\n`,
+      },
+    ]);
+
+    const broken = await speak({ text, language: "en", link, stream: true });
+    const events = eventsOf(await broken.text());
+    // Asked again, it is said anew: nothing was kept.
+    const again = await speak({ text, language: "en", link });
+
+    expect({
+      status: broken.status,
+      audio: audioOf(events),
+      last: events.at(-1),
+      again: again.status,
+    }).toStrictEqual({
+      status: 200,
+      audio: ["RIFF"],
+      last: { failed: true },
+      again: 200,
+    });
+    await expect(carrying(text)).resolves.toHaveLength(2);
   });
 
   it.each([

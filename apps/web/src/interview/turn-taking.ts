@@ -321,9 +321,16 @@ const settle = (floor: Floor, at: number): Step => {
  */
 const listening = (floor: Floor): Step => {
   const hears = floor.voice && !floor.reading;
+  // The ear was open while he spoke: it starts afresh as he stops, so what
+  // it gathered of his own voice in the microphone never begins a stretch
+  // that would be taken for theirs.
+  const afresh = floor.hearing && floor.doing === "speaking";
+  const opens: Act[] = afresh
+    ? [{ type: "deaf" }, { type: "hear" }]
+    : [{ type: "hear" }];
   return {
     floor: { ...floor, doing: "listening", hearing: hears },
-    acts: hears && !floor.hearing ? [{ type: "hear" }] : [],
+    acts: hears && (afresh || !floor.hearing) ? opens : [],
   };
 };
 
@@ -378,13 +385,14 @@ const interrupted = (floor: Floor, at: number): Step => {
 };
 
 /**
- * What cut him off was nothing: he says his line again, unless they said
- * something before it that he still has to answer.
+ * A stretch came to nothing. When it cut him off, he says his line again;
+ * when they said something before it that he still has to answer, that is
+ * answered as if the stretch had not been.
  */
-const resumed = (floor: Floor): Step =>
+const resumed = (floor: Floor, at: number): Step =>
   floor.cut && floor.parts.length === 0 && !floor.talking
     ? { floor: { ...floor, cut: false }, acts: [{ type: "resume" }] }
-    : { floor, acts: [] };
+    : settle(floor, at);
 
 /** A stretch ended: it joins what he has to answer, its words to follow. */
 const quieted = (floor: Floor, at: number, stretch: number): Step => ({
@@ -420,7 +428,7 @@ const wordsIn = (
   });
   // A sound and no words (a cough, a door) that cut him off: he goes on.
   return words === ""
-    ? resumed({ ...floor, parts })
+    ? resumed({ ...floor, parts }, at)
     : settle({ ...floor, parts }, at);
 };
 
@@ -428,15 +436,18 @@ const wordsIn = (
  * His own voice cut him off: it isn't theirs to answer, he says his line
  * again, and from now on he doesn't listen while he speaks.
  */
-const echoed = (floor: Floor, stretch: number): Step => {
+const echoed = (floor: Floor, at: number, stretch: number): Step => {
   if (!floor.parts.some((part) => part.stretch === stretch)) {
     return { floor, acts: [] };
   }
-  return resumed({
-    ...floor,
-    interrupts: false,
-    parts: floor.parts.filter((part) => part.stretch !== stretch),
-  });
+  return resumed(
+    {
+      ...floor,
+      interrupts: false,
+      parts: floor.parts.filter((part) => part.stretch !== stretch),
+    },
+    at
+  );
 };
 
 /** A stretch couldn't be written down at all: he says so; what he did hear stays. */
@@ -600,7 +611,7 @@ const fromEar = (floor: Floor, happening: Heard): Step => {
       return lost(floor, happening.stretch);
     }
     case "echo": {
-      return echoed(floor, happening.stretch);
+      return echoed(floor, happening.at, happening.stretch);
     }
     default: {
       return happening satisfies never;

@@ -67,20 +67,16 @@ export interface SaidLine {
   audible: boolean;
 }
 
-/**
- * An event of a line as core answers it while it is made
- * (`SpeechStreamEvent` in `@grasp-os/shared/voice`): a piece of its audio,
- * or its words once it is whole. A line answered whole, in one, reads as
- * both at once.
- */
-const streamEventSchema = z.object({
-  audio: z.string().min(1).optional(),
-  words: z
-    .array(
+/** An event of a line as core answers it while it is made (`SpeechStreamEvent` in `@grasp-os/shared/voice`). */
+const streamEventSchema = z.union([
+  z.object({ audio: z.string().min(1) }),
+  z.object({
+    words: z.array(
       z.object({ text: z.string(), startMs: z.number(), endMs: z.number() })
-    )
-    .optional(),
-});
+    ),
+  }),
+  z.object({ failed: z.literal(true) }),
+]);
 
 /**
  * A line's sound as it comes: the pieces there so far, in order, and
@@ -297,10 +293,9 @@ const streamedClip = async (
     let all = false;
     try {
       for await (const event of streamEvents(body)) {
-        if (event.audio !== undefined) {
+        if ("audio" in event) {
           take(bytesOf(event.audio));
-        }
-        if (event.words !== undefined) {
+        } else if ("words" in event) {
           all = true;
           timed.resolve(scheduleBy(text, event.words));
         }
