@@ -21,6 +21,7 @@ import { AppDataRpc } from "./app-data.ts";
 import { AppIntegrationsRpc } from "./app-integrations.ts";
 import { AppMembersRpc } from "./app-members.ts";
 import { openAppLink, setAppLink } from "./app-own-links.ts";
+import { setVersionPicture } from "./app-pictures.ts";
 import { AppPreviewRpc } from "./app-preview-rpc.ts";
 import { AppReleasesRpc } from "./app-releases-rpc.ts";
 import { removeApp } from "./app-removal.ts";
@@ -187,6 +188,17 @@ export class AppsRpc extends CoreRpcTarget implements AppsApi {
     return await withPerson(
       this.#check,
       async (by) => await setAppLink(this.#env, by, app, link)
+    );
+  }
+
+  async setVersionPicture(
+    app: string,
+    version: number,
+    image: Uint8Array
+  ): Promise<string> {
+    return await withPerson(
+      this.#check,
+      async (by) => await setVersionPicture(this.#env, by, app, version, image)
     );
   }
 
