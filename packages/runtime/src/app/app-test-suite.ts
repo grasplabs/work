@@ -1,9 +1,9 @@
 import { isRecord } from "@grasp-os/shared/json";
 
 import { refuser } from "../common/declaration.ts";
-import { tablesOf } from "../common/define-schema.ts";
-import type { SchemaDefinition } from "../common/schema-types.ts";
 import type { AppTestFunction, AppTestSuite } from "./app-test-types.ts";
+import { tablesOf } from "./define-schema.ts";
+import type { SchemaDefinition } from "./schema-types.ts";
 import type { AnyTables } from "./server-function.ts";
 
 // App tests, as `@grasp-os/sdk/testing` exports them.

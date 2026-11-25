@@ -1,8 +1,8 @@
-import type { AccessMode, RowRole } from "../common/table-access.ts";
 import type {
   FrozenJson,
   ValueDescriptor,
 } from "../common/value-descriptor.ts";
+import type { AccessMode, RowRole } from "./table-access.ts";
 
 // An App's definition: what it is, as data. Its name, the
 // permissions it needs, and its data model:

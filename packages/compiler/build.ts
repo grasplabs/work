@@ -1867,7 +1867,7 @@ await withBuildLock(assets, async () => {
     testCatalog === undefined
       ? {}
       : {
-          [path.join(runtime, "src/connector-catalog.gen.ts")]:
+          [path.join(runtime, "src/app/connector-catalog.gen.ts")]:
             readText(testCatalog),
         };
   await buildAppCompiler(assets, versionModule, replaced);

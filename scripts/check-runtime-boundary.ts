@@ -3,12 +3,12 @@
  * breaks one fails CI rather than a review:
  *
  * - From `@grasp-os/runtime/connector`, the one entry of the runtime connect
- *   and every connector reach, nothing reaches React, TanStack, the design
- *   system's packages or App code.
- * - From each connector package's entry, nothing reaches the App host
- *   (`@grasp-os/runtime/host`) or App code.
+ *   and every connector reach, and from each connector package's entry,
+ *   nothing reaches the runtime's App or workflow code, React, TanStack or
+ *   the design system's packages.
  * - Connect imports of the runtime only `@grasp-os/runtime/connector`, and
  *   nothing of the SDK, which is App code's.
+ * - Each of the runtime's folders imports only its own files and common's.
  *
  * It walks the imports a module runs, read with oxc's parser: static
  * imports, re-exports and `import()`. Type-only ones don't count:
@@ -22,24 +22,14 @@ import { parseSync } from "oxc-parser";
 import { z } from "zod";
 
 /**
- * App code, under packages/runtime: the files only the App entries
- * (`./server`, `./react`, `./host`, `./page`, `./forms`, `./app`) own.
- * A folder ends in "/"; a file matches whatever its extension, as an
- * import names a module. Once the runtime's files move into src/app, this
- * is that folder alone.
+ * The runtime's folders (packages/runtime/src): one per kind of code, and
+ * `common`, what more than one kind uses. A file imports by value only
+ * its own folder's files and common's; common imports none of the others.
  */
-const appCode = [
-  "src/app/",
-  "src/react/",
-  "src/host.ts",
-  "src/page.ts",
-  "src/react.ts",
-  "src/server.ts",
-  "src/forms.ts",
-  "src/define-schema.ts",
-  "src/define-table.ts",
-  "src/table-access.ts",
-];
+const commonFolder = "common";
+
+/** The runtime's folders connector code never reaches. */
+const notForConnectors = new Set(["app", "workflow"]);
 
 /** Packages connector code never reaches: React, TanStack and the design system's. */
 const forbiddenPackage =
@@ -76,7 +66,11 @@ const stringLiteral = /^(?<quote>["'`])(?<value>[^"'`$]*)\k<quote>$/u;
 const suffixes = [".ts", ".tsx", ".js", "/index.ts", "/index.tsx", "/index.js"];
 
 export interface Violation {
-  rule: "connector-entry" | "connector-package" | "connect-imports";
+  rule:
+    | "connector-entry"
+    | "connector-package"
+    | "connect-imports"
+    | "runtime-folders";
   /** What reaches it: repo-relative files from the entry, then the module. */
   chain: string[];
 }
@@ -333,26 +327,21 @@ export const runtimeBoundaryViolations = (root: string): Violation[] => {
     }
     return path.resolve(runtime.dir, target);
   };
-  const isAppCode = (file: string): boolean => {
-    const relative = path.relative(runtime.dir, file).split(path.sep).join("/");
-    return appCode.some((each) =>
-      each.endsWith("/")
-        ? relative.startsWith(each)
-        : relative.replace(sourceFile, "") === each.replace(sourceFile, "")
-    );
-  };
-  const host = entryOf("./host");
-  const entryForbids = (reached: Reached): boolean =>
+  const runtimeSource = path.join(runtime.dir, "src");
+  /** The runtime folder `file` is in, if it is one of the runtime's sources. */
+  const folderOf = (file: string): string | undefined =>
+    file.startsWith(`${runtimeSource}${path.sep}`)
+      ? path.relative(runtimeSource, file).split(path.sep)[0]
+      : undefined;
+  const forbids = (reached: Reached): boolean =>
     "file" in reached
-      ? isAppCode(reached.file) ||
+      ? notForConnectors.has(folderOf(reached.file) ?? "") ||
         forbiddenPackage.test(ownerOf(reached.file)?.name ?? "")
       : forbiddenPackage.test(reached.external) ||
         reached.external.startsWith(computedImport);
-  const connectorForbids = (reached: Reached): boolean =>
-    entryForbids(reached) || ("file" in reached && reached.file === host);
 
-  const fromEntry = reach(entryOf("./connector"), entryForbids)
-    .filter(({ reached }) => entryForbids(reached))
+  const fromEntry = reach(entryOf("./connector"), forbids)
+    .filter(({ reached }) => forbids(reached))
     .map(({ chain }): Violation => ({ rule: "connector-entry", chain }));
 
   const connectors = path.join(root, "packages/connectors");
@@ -365,8 +354,8 @@ export const runtimeBoundaryViolations = (root: string): Violation[] => {
       )
     )
     .flatMap((entry) =>
-      reach(entry, connectorForbids)
-        .filter(({ reached }) => connectorForbids(reached))
+      reach(entry, forbids)
+        .filter(({ reached }) => forbids(reached))
         .map(({ chain }): Violation => ({ rule: "connector-package", chain }))
     );
 
@@ -384,15 +373,38 @@ export const runtimeBoundaryViolations = (root: string): Violation[] => {
       }))
   );
 
-  return [...fromEntry, ...fromConnectors, ...fromConnect];
+  const fromFolders = sourcesUnder(runtimeSource)
+    .filter((file) => !declarationFile.test(file))
+    .flatMap((file) =>
+      importsOf(file)
+        .filter((specifier) => specifier !== computedImport)
+        .flatMap((specifier) => resolve(file, specifier))
+        .flatMap((reached) => {
+          const folder = "file" in reached ? folderOf(reached.file) : undefined;
+          return folder === undefined ||
+            folder === commonFolder ||
+            folder === folderOf(file)
+            ? []
+            : [
+                {
+                  rule: "runtime-folders" as const,
+                  chain: [label({ file }), label(reached)],
+                },
+              ];
+        })
+    );
+
+  return [...fromEntry, ...fromConnectors, ...fromConnect, ...fromFolders];
 };
 
 /** What each rule holds, for the report. */
 const rules: Record<Violation["rule"], string> = {
-  "connector-entry": `${connectorEntry} reaches no React, TanStack, design system or App code`,
+  "connector-entry": `${connectorEntry} reaches no App or workflow code, React, TanStack or design system`,
   "connector-package":
-    "A connector reaches neither the App host nor what the connector entry may not",
+    "A connector reaches no App or workflow code, React, TanStack or design system",
   "connect-imports": `Connect imports only ${connectorEntry} of the runtime, and nothing of the SDK`,
+  "runtime-folders":
+    "A runtime folder imports only its own files and common's, and common none of the others'",
 };
 
 if (import.meta.main) {

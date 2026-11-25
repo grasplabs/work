@@ -15,7 +15,7 @@ export type {
   RowRule,
   RowRules,
   TableAccess,
-} from "../common/table-access.ts";
+} from "./table-access.ts";
 // The descriptor format a manifest names, for a host that writes one.
 export { descriptorVersion } from "../common/value-descriptor.ts";
 

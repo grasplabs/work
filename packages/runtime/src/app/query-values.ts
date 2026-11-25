@@ -1,6 +1,6 @@
 import { allowsNull, indexBase } from "../common/schema-fields.ts";
 import type { IndexBase } from "../common/schema-fields.ts";
-import type { TableState } from "../common/schema-types.ts";
+import type { TableState } from "./schema-types.ts";
 
 /** The managed fields a read may compare, and the base type of each. */
 const managedBases: Readonly<Record<string, IndexBase>> = {

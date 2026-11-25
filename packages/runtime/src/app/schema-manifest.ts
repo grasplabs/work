@@ -2,14 +2,14 @@ import { sha256Hex } from "@grasp-os/shared/encoding";
 import { canonicalText } from "@grasp-os/shared/json";
 
 import { isOverBytes, refuser } from "../common/declaration.ts";
-import { tablesOf } from "../common/define-schema.ts";
 import { SchemaDefinitionError } from "../common/schema-error.ts";
 import type { SchemaDefinitionCode } from "../common/schema-error.ts";
 import { managedFields } from "../common/schema-limits.ts";
-import type { SchemaDefinition } from "../common/schema-types.ts";
-import type { AccessModes, RowRules } from "../common/table-access.ts";
 import { descriptorVersion } from "../common/value-descriptor.ts";
 import type { ValueDescriptor } from "../common/value-descriptor.ts";
+import { tablesOf } from "./define-schema.ts";
+import type { SchemaDefinition } from "./schema-types.ts";
+import type { AccessModes, RowRules } from "./table-access.ts";
 
 // A schema's canonical manifest: the one form of a schema that leaves the
 // code that declared it. A store's host is handed it, a schema's hash is
