@@ -45,6 +45,16 @@ export const interviewPhases = [
   "readback",
 ] as const;
 
+/**
+ * Which order the read-back's parts are read in (interview-story.ts
+ * `readBackGroups`), as a number that goes up whenever that order changes.
+ * A place in the read-back (`confirmed`) is a page's number, and means
+ * another page under another order: one kept under another number is not
+ * trusted, and the read-back starts over (core's `#forSpeaker`). Agreeing
+ * to a page twice costs a moment; skipping one agrees to lines never read.
+ */
+export const readBackOrder = 2;
+
 /** What a fact is about: the kinds Stephen marks in what someone says. */
 export const factTags = [
   "step",
@@ -329,6 +339,12 @@ export const interviewProgressSchema = z.strictObject({
   seenAt: z.number().nonnegative().optional(),
   awayMs: z.number().nonnegative().optional(),
   confirmed: z.int().min(0).max(interviewLimits.facts),
+  /**
+   * The order of the read-back `confirmed` counts pages of
+   * (`readBackOrder`). None on an interview kept before the order was
+   * noted: its place is of an order that is gone.
+   */
+  readBack: z.int().min(1).optional(),
   adding: z.boolean(),
   addedAt: z.number().nonnegative(),
   /** How they found it, from 1 to 5, when they said so. */

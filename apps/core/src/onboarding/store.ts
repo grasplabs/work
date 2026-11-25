@@ -24,6 +24,7 @@ import {
   isErased,
   onlyForAsking,
   participationNotice,
+  readBackOrder,
   sharedWithTeam,
 } from "@grasp-os/shared/interview-links";
 import type {
@@ -10376,7 +10377,9 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Someone's interview as they read it back, and staff: whether they
    * read what this is (`told`) and which facts they agreed to (`agreed`)
-   * as this store holds them, never as the page last said.
+   * as this store holds them, never as the page last said; and their
+   * place in the read-back only when it was kept under the order its
+   * parts are read in now (`readBackOrder`).
    */
   #forSpeaker(
     person: string,
@@ -10389,6 +10392,10 @@ export class Onboarding extends DurableObject<Env> {
     const approved = this.#approvedOf(person);
     return {
       ...progress,
+      // A place in the read-back kept under another order of its parts
+      // points at another page: the read-back starts over, under this one.
+      confirmed: progress.readBack === readBackOrder ? progress.confirmed : 0,
+      readBack: readBackOrder,
       told: this.#participating(person) === null,
       facts: progress.facts.map(({ agreed: _agreed, ...fact }) => {
         const revision = revisions.get(fact.id);
