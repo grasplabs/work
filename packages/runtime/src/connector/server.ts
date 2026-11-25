@@ -1,12 +1,17 @@
 import type { ConnectorProvider } from "@grasp-os/shared/connect";
-import { isRecord } from "@grasp-os/shared/json";
+import { isPlainObject, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { z } from "zod";
 
+import { checkedManifest } from "#connector-manifest";
+
+import type {
+  ActionManifest,
+  ConnectorManifest,
+  RecoveryMode,
+} from "./manifest.ts";
 import {
   attachmentsMetaKey,
   confirmedMetaKey,
-  connectorManifestSchema,
   effectAbsentMetaKey,
   effectKeyMetaKey,
   effectKeyPattern,
@@ -17,15 +22,8 @@ import {
   stampMetaKey,
   stampPattern,
   syncMethod,
-  syncParamsSchema,
   syncPlacesMethod,
-  syncPlacesParamsSchema,
-} from "./manifest.ts";
-import type {
-  ActionManifest,
-  ConnectorManifest,
-  RecoveryMode,
-} from "./manifest.ts";
+} from "./protocol.ts";
 import type { SignInInput } from "./sign-in.ts";
 import type { Sync } from "./sync.ts";
 
@@ -245,6 +243,30 @@ export const checkOneWrite = (
   }
 };
 
+/** A JSON Schema as a generated contract holds it: JSON data. */
+type ContractSchema = ActionManifest["contract"]["input"];
+
+/** Whether `value` is JSON data: what `JSON.parse` could have made. */
+const isJsonData = (value: unknown): boolean => {
+  if (Array.isArray(value)) {
+    return value.every(isJsonData);
+  }
+  if (isPlainObject(value)) {
+    return Object.values(value).every(isJsonData);
+  }
+  return (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    (typeof value === "number" && Number.isFinite(value))
+  );
+};
+
+/** Whether each of an object's values is JSON data. */
+const isJsonObject = (
+  value: Record<string, unknown>
+): value is ContractSchema => Object.values(value).every(isJsonData);
+
 /**
  * A tool's input or output schema as its generated contract holds it:
  * JSON data, without the `$schema` marker, which says nothing about the
@@ -252,9 +274,13 @@ export const checkOneWrite = (
  */
 export const contractSchemaOf = (
   schema: Record<string, unknown>
-): ActionManifest["contract"]["input"] => {
+): ContractSchema => {
   const { $schema: _marker, ...rest } = schema;
-  return z.record(z.string(), z.json()).parse(structuredClone(rest));
+  const contract: Record<string, unknown> = structuredClone(rest);
+  if (!isJsonObject(contract)) {
+    throw new Error("A tool's schema must be JSON data");
+  }
+  return contract;
 };
 
 /** The keywords that say what a JSON Schema node allows. */
@@ -411,18 +437,31 @@ export interface ConnectorBase {
   hosts: readonly string[];
 }
 
-const requestSchema = z.object({
-  jsonrpc: z.literal("2.0"),
-  id: z.union([z.string(), z.number()]).optional(),
-  method: z.string(),
-  params: z.record(z.string(), z.unknown()).optional(),
-});
+/** Whether `value` is absent or an object, as an optional JSON-RPC member is. */
+const isOptionalRecord = (value: unknown): value is JsonObject | undefined =>
+  value === undefined || isRecord(value);
 
-const callParamsSchema = z.object({
-  name: z.string(),
-  arguments: z.record(z.string(), z.unknown()).optional(),
-  _meta: z.record(z.string(), z.unknown()).optional(),
-});
+/** A JSON-RPC request, from its body; undefined if it isn't one. */
+const requestOf = (
+  body: unknown
+):
+  | { id: string | number | undefined; method: string; params: JsonObject }
+  | undefined => {
+  if (!isRecord(body) || body.jsonrpc !== "2.0") {
+    return undefined;
+  }
+  const { id, method, params } = body;
+  if (
+    (id !== undefined &&
+      typeof id !== "string" &&
+      !(typeof id === "number" && Number.isFinite(id))) ||
+    typeof method !== "string" ||
+    !isOptionalRecord(params)
+  ) {
+    return undefined;
+  }
+  return { id, method, params: params ?? {} };
+};
 
 /** JSON-RPC error codes. */
 const parseError = -32_700;
@@ -462,7 +501,7 @@ export const serveConnector = (
     }
     syncs.set(sync.name, sync);
   }
-  const manifest = connectorManifestSchema.parse({
+  const manifest = checkedManifest({
     ...base,
     actions: Object.fromEntries(
       toolList.map(({ name, action }) => [name, action])
@@ -478,6 +517,9 @@ export const serveConnector = (
           ),
         }),
   });
+
+  const syncOf = ({ name }: JsonObject): Sync | undefined =>
+    typeof name === "string" ? syncs.get(name) : undefined;
 
   const respond = async (
     id: Id,
@@ -501,28 +543,30 @@ export const serveConnector = (
         });
       }
       case "tools/call": {
-        const call = callParamsSchema.safeParse(params);
+        const { name, arguments: args = {}, _meta: meta } = params;
         // Names match exactly: no case folding, no normalising.
-        const tool = call.success ? tools.get(call.data.name) : undefined;
+        const tool =
+          typeof name === "string" &&
+          isOptionalRecord(args) &&
+          isOptionalRecord(meta)
+            ? tools.get(name)
+            : undefined;
         if (tool === undefined) {
           return refusal(id, invalidParams, "No such tool");
         }
-        return answer(
-          id,
-          await tool.call(call.data?.arguments ?? {}, call.data?._meta)
-        );
+        return answer(id, await tool.call(args, meta));
       }
       case syncMethod: {
-        const sync = syncParamsSchema.safeParse(params);
-        const found = sync.success ? syncs.get(sync.data.name) : undefined;
+        // The sync checks the rest of what it is asked, and fails a request
+        // it can't take (sync.ts).
+        const found = syncOf(params);
         if (found === undefined) {
           return refusal(id, invalidParams, "No such sync");
         }
         return answer(id, await found.call(params));
       }
       case syncPlacesMethod: {
-        const sync = syncPlacesParamsSchema.safeParse(params);
-        const found = sync.success ? syncs.get(sync.data.name) : undefined;
+        const found = syncOf(params);
         if (found === undefined || found.manifest.places === "own") {
           return refusal(id, invalidParams, "No such sync with places");
         }
@@ -546,11 +590,11 @@ export const serveConnector = (
       } catch {
         return refusal(null, parseError, "Not JSON");
       }
-      const message = requestSchema.safeParse(body);
-      if (!message.success) {
+      const message = requestOf(body);
+      if (message === undefined) {
         return refusal(null, invalidRequest, "Not a JSON-RPC request");
       }
-      const { id, method, params = {} } = message.data;
+      const { id, method, params } = message;
       // A notification (no ID) gets no answer.
       if (id === undefined) {
         return new Response(null, { status: 202 });

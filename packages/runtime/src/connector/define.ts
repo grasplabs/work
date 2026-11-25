@@ -13,8 +13,8 @@ import type {
 import { v } from "../common/values.ts";
 import { apiFor, routeOf } from "./api.ts";
 import type { Api, RouteText } from "./api.ts";
-import { provenanceMetaKey, resourceMetaKey } from "./manifest.ts";
 import type { ActionManifest, Route } from "./manifest.ts";
+import { provenanceMetaKey, resourceMetaKey } from "./protocol.ts";
 import {
   callMetaOf,
   checkOneWrite,

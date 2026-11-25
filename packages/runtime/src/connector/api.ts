@@ -1,8 +1,8 @@
 import { validateValue } from "../common/value-interpreter.ts";
 import type { AnySchema } from "../common/value-schema.ts";
 import type { Infer } from "../common/value-types.ts";
-import { httpMethods, pathMatches } from "./manifest.ts";
 import type { Route } from "./manifest.ts";
+import { httpMethods, pathMatches } from "./protocol.ts";
 import { providerFetch, segment } from "./provider.ts";
 import { isWriteMethod, ToolError } from "./server.ts";
 
