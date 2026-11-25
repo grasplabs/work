@@ -220,7 +220,7 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     }
   );
 
-  it("leads an English line with its tone as an emotion the voice doesn't say, a Dutch one bare, and times only the line's words", async () => {
+  it("says a line bare whatever its tone, in any language, and times only the line's words", async () => {
     const { link } = await opened();
     const text = newLine();
 
@@ -242,19 +242,15 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     ];
 
     const asked = await askedFor(text);
-    // Only an English line is led by its tone: a tag pulls a Dutch line
-    // toward English delivery.
-    expect(asked.map(({ input }) => input)).toStrictEqual([
-      `[emotion=warm]${text}`,
-      text,
-    ]);
+    // No tone leads a line: a tag changed his delivery line by line.
+    expect(asked.map(({ input }) => input)).toStrictEqual([text, text]);
     expect(
       said.map((words) => words.map(({ text: word }) => word))
     ).toStrictEqual([text.split(" "), text.split(" ")]);
     expect(said.map((words) => words[0]?.startMs)).toStrictEqual([0, 0]);
   });
 
-  it("says a line as long as one may be, with its tone in front", async () => {
+  it("says a line as long as one may be, with no tone in front", async () => {
     const { link } = await opened();
     const start = newLine();
     const text = `${start}${"a".repeat(600 - start.length)}`;
@@ -269,7 +265,7 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
 
     expect(response.status).toBe(200);
     await expect(askedFor(start)).resolves.toMatchObject([
-      { input: `[emotion=grateful]${text}` },
+      { input: text },
     ]);
   });
 
