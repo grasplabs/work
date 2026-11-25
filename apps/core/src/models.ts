@@ -92,6 +92,7 @@ import type {
 } from "./model-transport.ts";
 import { recordResponse } from "./model-usage.ts";
 import type { ProviderNote, UsageRecord } from "./model-usage.ts";
+import { platformAi } from "./platform-ai.ts";
 import { usualHostsOf } from "./platform-hosts.ts";
 import {
   charactersOf,
@@ -3302,7 +3303,11 @@ const sessionRequest = async (
   sessionId: string,
   signal?: AbortSignal
 ): Promise<Response> => {
-  const target = platformTargetOf(env, await routesOrFailed(env), "mistral");
+  const target = platformTargetOf(
+    env,
+    await routesOrFailed(env),
+    platformAi.conversation.provider
+  );
   if (typeof target === "string") {
     throw modelErrors.create(target);
   }

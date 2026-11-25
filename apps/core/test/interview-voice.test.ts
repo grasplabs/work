@@ -180,6 +180,8 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
       // Mistral has written nothing down yet.
       { status: 200, body: { ...kept(said), transcripts: null } },
       { status: 200, body: kept(said) },
+      // Read again with that answer written down: nothing new.
+      { status: 200, body: kept(said) },
       { status: 200, body: {} },
     ]);
     const { requests, result } = await answering(
@@ -222,13 +224,21 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
           pass: joined.pass,
           noted: 0,
         });
+        const again = await ask(link, {
+          action: "answer",
+          ...standing,
+          pass: joined.pass,
+          noted: 1,
+        });
         const closed = await ask(link, { action: "close", pass: joined.pass });
         const earlyAnswer: VoiceAnswered = await early.json();
         const answer: VoiceAnswered = await answered.json();
+        const againAnswer: VoiceAnswered = await again.json();
         return {
           joined,
           early: earlyAnswer,
           answered: answer,
+          again: againAnswer,
           closed: closed.status,
         };
       }
@@ -246,10 +256,10 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
       },
       keyHandedBack: JSON.stringify(result).includes(platformMistralKey),
       sent: sent.map(({ method, path }) => ({ method, path })),
-      // Stephen, told who he talks with, on Mistral Small, in his voice,
-      // with talking over him listened for and his first line said for him.
+      // Told who he talks with, from the store, on Mistral Small, in his
+      // voice, with talking over him listened for and his first line said
+      // for him.
       session: {
-        stephen: asked.includes("You are Stephen,"),
         who: asked.includes("You talk with: Oli, Ops."),
         model: asked.includes('"llm":{"model":"mistral-small-latest"}'),
         voice: asked.includes('"voice_id":"voice_485"'),
@@ -257,8 +267,6 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
         listens: asked.includes('"start_threshold":0.3'),
         welcome: asked.includes("What do you do here, in a sentence or two?"),
         part: asked.includes('"name":"part"'),
-        // He talks; what is written down is asked of the notes' model.
-        writes: asked.includes("# What you write down"),
       },
       early: {
         noted: result.early.noted,
@@ -278,6 +286,9 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
         ),
       },
       heardForNotes: brief.includes(said),
+      // Read again with nothing new: nothing written twice, no model asked.
+      again: { noted: result.again.noted, turn: result.again.turn },
+      notesAsked: requests.length,
       closed: result.closed,
       audited: audited.map(({ detail }) => ({
         purpose: detail.purpose,
@@ -300,10 +311,10 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
         { method: "POST", path: "/v1/audio/sessions" },
         { method: "GET", path: "/v1/audio/sessions/sess_7f3a" },
         { method: "GET", path: "/v1/audio/sessions/sess_7f3a" },
+        { method: "GET", path: "/v1/audio/sessions/sess_7f3a" },
         { method: "DELETE", path: "/v1/audio/sessions/sess_7f3a" },
       ],
       session: {
-        stephen: true,
         who: true,
         model: true,
         voice: true,
@@ -311,7 +322,6 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
         listens: true,
         welcome: true,
         part: true,
-        writes: false,
       },
       early: { noted: 0, turn: null, lines: 0 },
       noted: 1,
@@ -337,6 +347,8 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
       },
       toldNow: { written: true, part: true },
       heardForNotes: true,
+      again: { noted: 1, turn: null },
+      notesAsked: 1,
       closed: 204,
       audited: [
         {
@@ -390,6 +402,88 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
         [400, "interview.invalid"],
       ],
       readAtMistral: 0,
+    });
+  });
+
+  it("tells the page a session Mistral refused didn't start, and closes one it opened but answered unusably", async () => {
+    const link = await opened();
+    const asked = await atMistral();
+    await plan(platformMistralKey, [
+      { status: 503, body: { message: "Busy" } },
+      // Opened, but with no room to join.
+      { status: 200, body: { id: "sess_9b1c", participant_token: "" } },
+      { status: 200, body: {} },
+    ]);
+    const { result } = await answering([], async () => ({
+      busy: await codeOf(
+        await ask(link, { action: "open", event: "start", ...standing })
+      ),
+      unusable: await codeOf(
+        await ask(link, { action: "open", event: "start", ...standing })
+      ),
+    }));
+    const after = await atMistral();
+    expect({
+      ...result,
+      sent: after
+        .slice(asked.length)
+        .map(({ method, path }) => ({ method, path })),
+    }).toStrictEqual({
+      busy: [503, null],
+      unusable: [503, null],
+      sent: [
+        { method: "POST", path: "/v1/audio/sessions" },
+        { method: "POST", path: "/v1/audio/sessions" },
+        { method: "DELETE", path: "/v1/audio/sessions/sess_9b1c" },
+      ],
+    });
+  });
+
+  it("closes the session they left when they come back to it, so one runs for a link", async () => {
+    const link = await opened();
+    await plan(platformMistralKey, [
+      { status: 200, body: openedSession },
+      { status: 200, body: {} },
+      { status: 200, body: { ...openedSession, id: "sess_8d2e" } },
+    ]);
+    const before = await atMistral();
+    const { result } = await answering([], async () => {
+      const first = await ask(link, {
+        action: "open",
+        event: "start",
+        ...standing,
+      });
+      const left: VoiceSessionJoin = await first.json();
+      const back = await ask(link, {
+        action: "open",
+        event: "resume",
+        ...standing,
+        before: [
+          { from: "stephen", text: "What do you do here?" },
+          { from: "person", text: "I plan the routes." },
+        ],
+        previous: left.pass,
+      });
+      const resumed: VoiceSessionJoin = await back.json();
+      return resumed.id;
+    });
+    const after = await atMistral();
+    const sent = after.slice(before.length);
+    expect({
+      resumed: result,
+      sent: sent.map(({ method, path }) => ({ method, path })),
+      // The new session knows the conversation before it, and says where it goes on.
+      knows: sent.at(-1)?.body.includes("I plan the routes."),
+      welcomed: sent.at(-1)?.body.includes("go on where we left off"),
+    }).toStrictEqual({
+      resumed: "sess_8d2e",
+      sent: [
+        { method: "POST", path: "/v1/audio/sessions" },
+        { method: "DELETE", path: "/v1/audio/sessions/sess_7f3a" },
+        { method: "POST", path: "/v1/audio/sessions" },
+      ],
+      knows: true,
+      welcomed: true,
     });
   });
 });

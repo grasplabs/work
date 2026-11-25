@@ -69,6 +69,8 @@ export const interviewVoiceRequestSchema = z.discriminatedUnion("action", [
     action: z.literal("open"),
     event: z.enum(["start", "resume", "add"]),
     ...standing,
+    /** The pass of the session they left, if the page still holds it: that one is closed. */
+    previous: voicePassSchema.optional(),
   }),
   /**
    * Write down what was said since `noted` of their answers: once one more

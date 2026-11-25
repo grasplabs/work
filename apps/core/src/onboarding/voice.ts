@@ -174,6 +174,27 @@ const welcome: Record<
   },
 };
 
+/** What he asks after a minute of silence. */
+const stillThere: Record<InterviewLocale, string> = {
+  en: "Are you still there?",
+  nl: "Ben je er nog?",
+  de: "Sind Sie noch da?",
+  fr: "Vous êtes toujours là ?",
+  es: "¿Sigues ahí?",
+};
+
+/**
+ * A session nobody talks in ends by itself: after a minute of silence
+ * Stephen asks once whether they are still there, and after another the
+ * session ends. A tab left open bills nothing for long; resuming opens a
+ * new one.
+ */
+const inactivityOf = (locale: InterviewLocale) => ({
+  timeout_ms: 60_000,
+  max_reminders: 1,
+  messages: [stillThere[locale]],
+});
+
 /** The function Stephen calls as he goes to another part (`partFunction`). */
 const partTool = {
   type: "function",
@@ -288,8 +309,14 @@ const sessionOfPass = async (
 
 // ---- What Mistral answers ------------------------------------------------
 
+/** A session's ID at Mistral: nothing that reads as more of a path. */
+const sessionIdSchema = z.string().regex(/^[\w-]{1,128}$/u);
+
+/** Whatever else came with it, the ID of a session Mistral opened. */
+const openedIdSchema = z.object({ id: sessionIdSchema });
+
 const openedSchema = z.object({
-  id: z.string().regex(/^[\w-]{1,128}$/u),
+  id: sessionIdSchema,
   participant_token: z.string().min(1),
   server_url: z.url({ protocol: /^wss$/u }),
   expires_at: z.iso.datetime({ offset: true }),
@@ -371,6 +398,40 @@ export const heardOf = (answer: unknown): Heard | null => {
 
 // ---- The route ----------------------------------------------------------
 
+/** A 2xx answer's JSON; undefined for any other answer, or one that isn't JSON. Read once, whole. */
+const jsonOrNothing = async (answered: Response): Promise<unknown> => {
+  if (!answered.ok) {
+    await answered.body?.cancel();
+    return undefined;
+  }
+  try {
+    const json: unknown = await answered.json();
+    return json;
+  } catch {
+    return undefined;
+  }
+};
+
+/** Closes `session` at Mistral; one that won't close ends by itself when it expires. */
+const closeQuietly = async (
+  env: Env,
+  session: string,
+  requestId: string
+): Promise<void> => {
+  try {
+    const answered = await models(env).closeConversation(session);
+    await answered.body?.cancel();
+    if (!answered.ok && answered.status !== 404) {
+      log.warn("interview.voice_not_closed", {
+        requestId,
+        status: answered.status,
+      });
+    }
+  } catch {
+    log.warn("interview.voice_not_closed", { requestId, status: 0 });
+  }
+};
+
 /** Why a request went wrong, as the page is told it. */
 const failed = (message: string, status: number): Response =>
   Response.json({ error: message, status }, { status, headers: linkHeaders });
@@ -397,6 +458,20 @@ const open = async (
   { env, context, secretMark, account, requestId }: Asked,
   asked: Extract<InterviewVoiceRequest, { action: "open" }>
 ): Promise<Response> => {
+  // Nothing said could be written down: no session is opened, nor paid for.
+  if ((await notesModelOf(env)) === undefined) {
+    log.error("interview.no_model", { requestId });
+    return failed("The interview is not set up yet.", 503);
+  }
+  // The session they left, when they come back with its pass: closed, so
+  // only one runs for a link.
+  const earlier =
+    asked.previous === undefined
+      ? null
+      : await sessionOfPass(env, asked.previous, secretMark, account);
+  if (earlier !== null) {
+    await closeQuietly(env, earlier, requestId);
+  }
   const [voice, company] = await Promise.all([
     voiceTextOf(context.kind, asked.locale),
     companyOf(env),
@@ -427,7 +502,10 @@ const open = async (
         },
         tts: { model: conversation.speaking, voice_id: conversation.voice },
         welcome_message: welcome[asked.locale][said],
-        turn: { allow_interruptions: true },
+        turn: {
+          allow_interruptions: true,
+          inactivity: inactivityOf(asked.locale),
+        },
         tools: [partTool],
       },
     });
@@ -439,16 +517,19 @@ const open = async (
     });
     return failed("The interview could not start. Try again.", 503);
   }
-  const opened = openedSchema.safeParse(
-    answered.ok ? await answered.json() : undefined
-  );
+  const raw = await jsonOrNothing(answered);
+  const opened = openedSchema.safeParse(raw);
   if (!opened.success) {
     // The status alone: Mistral's answer may repeat what it was sent.
-    await answered.body?.cancel();
     log.warn("interview.voice_not_opened", {
       requestId,
       status: answered.status,
     });
+    // Opened, but with nothing to join it by: closed, as nobody else can.
+    const unusable = openedIdSchema.safeParse(raw);
+    if (answered.ok && unusable.success) {
+      await closeQuietly(env, unusable.data.id, requestId);
+    }
     return failed("The interview could not start. Try again.", 503);
   }
   const { id, participant_token, server_url, expires_at } = opened.data;
@@ -543,7 +624,9 @@ const answer = async (
   const turn: TurnAsked = {
     event: asked.adding ? "add" : "answer",
     locale: asked.locale,
-    lines: heard.lines,
+    // The whole conversation, as a turn's brief has it: before this
+    // session too, on a resume. Quotes are checked in this session's alone.
+    lines: [...asked.before, ...heard.lines],
     facts: asked.facts,
     phase,
     minutes: asked.minutes,
@@ -616,19 +699,7 @@ const close = async (
   { env, requestId }: Asked,
   session: string
 ): Promise<Response> => {
-  try {
-    const answered = await models(env).closeConversation(session);
-    await answered.body?.cancel();
-    if (!answered.ok && answered.status !== 404) {
-      log.warn("interview.voice_not_closed", {
-        requestId,
-        status: answered.status,
-      });
-    }
-  } catch {
-    // It ends by itself at Mistral when it expires.
-    log.warn("interview.voice_not_closed", { requestId, status: 0 });
-  }
+  await closeQuietly(env, session, requestId);
   return new Response(null, { status: 204, headers: linkHeaders });
 };
 
