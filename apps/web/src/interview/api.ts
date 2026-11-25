@@ -336,6 +336,8 @@ export const askStory = async (
 
 /** Where this tab keeps a link's secret while it is away signing in. */
 const signingInSecret = "grasp.interview.signing-in";
+/** The address's query while it is away signing in (`?jump=`, `?readback=`), kept beside the secret. */
+const signingInSearch = "grasp.interview.signing-in-search";
 
 /**
  * The secret in the page's link: what follows its `#`; or, back from
@@ -345,16 +347,27 @@ const signingInSecret = "grasp.interview.signing-in";
 export const linkSecret = (): string => {
   const inLink = window.location.hash.slice(1);
   let kept: string | null = null;
+  let keptSearch = "";
   try {
     kept = sessionStorage.getItem(signingInSecret);
+    keptSearch = sessionStorage.getItem(signingInSearch) ?? "";
     sessionStorage.removeItem(signingInSecret);
+    sessionStorage.removeItem(signingInSearch);
   } catch {
     // Storage refused: the link's own address is all there is.
   }
   if (inLink !== "" || kept === null) {
     return inLink;
   }
-  window.history.replaceState(null, "", `${window.location.pathname}#${kept}`);
+  // What the address asked for besides the secret comes back with it, unless
+  // the way back brought its own (a sign-in's `?error=`).
+  const search =
+    window.location.search === "" ? keptSearch : window.location.search;
+  window.history.replaceState(
+    null,
+    "",
+    `${window.location.pathname}${search}#${kept}`
+  );
   return kept;
 };
 
@@ -366,6 +379,7 @@ export const linkSecret = (): string => {
 export const keepWhileSigningIn = (secret: string): void => {
   try {
     sessionStorage.setItem(signingInSecret, secret);
+    sessionStorage.setItem(signingInSearch, window.location.search);
   } catch {
     // Storage refused: they open their link again from their email.
   }
