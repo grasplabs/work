@@ -19,8 +19,10 @@ import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 
+import { PauseNote } from "../answer-pause.tsx";
+import type { AnswersPause } from "../answer-pause.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import { formatList } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
@@ -124,16 +126,21 @@ const Findings = ({ findings }: { findings: readonly DependencyFinding[] }) => {
 
 const PackageRequest = ({
   request,
+  pause,
   onDecided,
   onApproved,
 }: {
   request: DependencyRequest;
+  /** Held a moment after an answer in the chat moved this card into place. */
+  pause: AnswersPause;
   onDecided: () => void;
   onApproved: () => void;
 }) => {
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
   const router = useRouter();
+  const pauseId = useId();
+  const pausedBy = pause.held ? pauseId : undefined;
   const decide = async (approved: boolean): Promise<void> => {
     const decided = await run(async (session) => {
       await session.dependencies.decide(request.id, {
@@ -160,6 +167,7 @@ const PackageRequest = ({
   const removed = formatList(request.removed);
   return (
     <Confirmation approval={{ id: request.id }} state="approval-requested">
+      {pause.held ? <PauseNote id={pauseId} /> : null}
       <ConfirmationTitle>
         <ConfirmationRequest>
           <Trans>The agent asks for npm packages for {subject}</Trans>
@@ -205,6 +213,7 @@ const PackageRequest = ({
           onPress={async () => {
             await decide(false);
           }}
+          pausedBy={pausedBy}
           variant="outline"
         >
           <Trans>Deny</Trans>
@@ -215,6 +224,7 @@ const PackageRequest = ({
           onPress={async () => {
             await decide(true);
           }}
+          pausedBy={pausedBy}
         >
           <Trans>Approve</Trans>
         </DecisionButton>
@@ -231,10 +241,13 @@ const PackageRequest = ({
 export const PackageRequests = ({
   chatId,
   version,
+  pause,
   onApproved,
 }: {
   chatId: string;
   version: number;
+  /** The pause the chat's answers share (`WaitingForYou`): each decision here holds them all. */
+  pause: AnswersPause;
   /**
    * Once packages are approved: the agent's turn ended asking for them,
    * and only a new one carries on (core's notice starts none).
@@ -273,8 +286,10 @@ export const PackageRequests = ({
           key={request.id}
           onApproved={onApproved}
           onDecided={() => {
+            pause.hold();
             setReads(reads + 1);
           }}
+          pause={pause}
           request={request}
         />
       ))}

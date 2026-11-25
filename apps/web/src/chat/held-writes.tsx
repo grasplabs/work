@@ -29,6 +29,8 @@ import { useRouter } from "@tanstack/react-router";
 import { useEffect, useId, useState } from "react";
 import type { ReactNode } from "react";
 
+import { PauseNote } from "../answer-pause.tsx";
+import type { AnswersPause } from "../answer-pause.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { formatDateTime } from "../format.ts";
@@ -549,10 +551,13 @@ export const HeldWriteDetails = ({
 /** A held write as a confirmation in the chat: what it is, everything it sends, Reject and Confirm. */
 export const HeldWrite = ({
   action,
+  pause,
   onDecided,
   onConfirmed,
 }: {
   action: PendingAction;
+  /** Held a moment after an answer in the chat moved this card into place. */
+  pause: AnswersPause;
   /**
    * Told once a decision ended, with why it failed if it did: connect
    * takes a confirmed action before it carries it out, so one that then
@@ -566,6 +571,8 @@ export const HeldWrite = ({
   const router = useRouter();
   const { t } = useLingui();
   const shown = useShown(action);
+  const pauseId = useId();
+  const pausedBy = pause.held ? pauseId : undefined;
   const title = action.description?.title ?? action.action;
   const what = useHeldName(action);
   // Read again however it went: a failed decision may have changed
@@ -588,6 +595,7 @@ export const HeldWrite = ({
   };
   return (
     <section aria-label={what}>
+      {pause.held ? <PauseNote id={pauseId} /> : null}
       <Confirmation approval={{ id: action.id }} state="approval-requested">
         <ConfirmationTitle>
           <ConfirmationRequest>
@@ -602,6 +610,7 @@ export const HeldWrite = ({
             onPress={async () => {
               await decide(declineHeld(action), false);
             }}
+            pausedBy={pausedBy}
             variant="outline"
           >
             <Trans>Reject</Trans>
@@ -613,6 +622,7 @@ export const HeldWrite = ({
             onPress={async () => {
               await decide(confirmHeld(action), true);
             }}
+            pausedBy={pausedBy}
           >
             <Trans>Confirm</Trans>
           </DecisionButton>
@@ -654,11 +664,14 @@ const DecisionFailedAlert = ({ failed }: { failed: DecisionFailed }) => {
 const HeldAppCallCard = ({
   chatId,
   call,
+  pause,
   onDecided,
   onConfirmed,
 }: {
   chatId: string;
   call: HeldAppCall;
+  /** Held a moment after an answer in the chat moved this card into place. */
+  pause: AnswersPause;
   /**
    * Told once a decision ended, with why it failed if it did
    * (`DecisionFailed`): deciding ends the hold either way, so the card
@@ -671,6 +684,8 @@ const HeldAppCallCard = ({
   const { busy, run } = useCoreAction();
   const router = useRouter();
   const { t } = useLingui();
+  const pauseId = useId();
+  const pausedBy = pause.held ? pauseId : undefined;
   // Named by the App's builder and the agent's code: every character nobody
   // sees shown as an escape, as the request is (`shownVisibly`).
   const app = shownVisibly(call.appName ?? call.appId);
@@ -695,6 +710,7 @@ const HeldAppCallCard = ({
   };
   return (
     <section aria-label={what}>
+      {pause.held ? <PauseNote id={pauseId} /> : null}
       <Confirmation approval={{ id: call.id }} state="approval-requested">
         <ConfirmationTitle>
           <ConfirmationRequest>
@@ -730,6 +746,7 @@ const HeldAppCallCard = ({
                 await session.chats.declineHeldCall(chatId, call.id);
               }, false);
             }}
+            pausedBy={pausedBy}
             variant="outline"
           >
             <Trans>Reject</Trans>
@@ -746,6 +763,7 @@ const HeldAppCallCard = ({
                 );
               }, true);
             }}
+            pausedBy={pausedBy}
           >
             <Trans>Confirm</Trans>
           </DecisionButton>
@@ -763,11 +781,14 @@ const RejectAll = ({
   chatId,
   actions,
   calls,
+  pause,
   onDecided,
 }: {
   chatId: string;
   actions: readonly PendingAction[];
   calls: readonly HeldAppCall[];
+  /** Held a moment after an answer in the chat moved this row into place. */
+  pause: AnswersPause;
   /**
    * Told once the rejections settled, with why the first refused one
    * failed: what it rejected may still wait, but this row goes once fewer
@@ -778,6 +799,7 @@ const RejectAll = ({
   const { busy, run } = useCoreAction();
   const router = useRouter();
   const { t } = useLingui();
+  const pauseId = useId();
   const count = actions.length + calls.length;
   // Each write as its own card names it (`useHeldName`, and the App card's).
   const names = [
@@ -794,6 +816,7 @@ const RejectAll = ({
   ];
   return (
     <div {...stylex.props(styles.rejectAll)}>
+      {pause.held ? <PauseNote id={pauseId} /> : null}
       <Quiet>
         <Plural
           one="# change waits for you to confirm or reject it."
@@ -802,7 +825,9 @@ const RejectAll = ({
         />
       </Quiet>
       <Button
-        disabled={busy}
+        aria-describedby={pause.held ? pauseId : undefined}
+        disabled={busy || pause.held}
+        focusableWhenDisabled={pause.held}
         onClick={() => {
           void (async () => {
             let failed: DecisionFailed | undefined;
@@ -850,10 +875,12 @@ const RejectAll = ({
 const ChatHeldWrites = ({
   chatId,
   version,
+  pause,
   onConfirmed,
 }: {
   chatId: string;
   version: number;
+  pause: AnswersPause;
   onConfirmed: () => void;
 }) => {
   const [held, setHeld] = useState<Held>({ state: "loading" });
@@ -863,6 +890,13 @@ const ChatHeldWrites = ({
   // its card is gone, so the list keeps it until their next decision.
   const [failed, setFailed] = useState<DecisionFailed>();
   const { t } = useLingui();
+  // A decision ended: its card goes, or a failure is said above the list,
+  // and the cards move; every answer in the chat holds a moment.
+  const decided = (failure?: DecisionFailed): void => {
+    pause.hold();
+    setFailed(failure);
+    setReads((read) => read + 1);
+  };
   useEffect(() => {
     let current = true;
     const read = async (): Promise<void> => {
@@ -894,10 +928,8 @@ const ChatHeldWrites = ({
           actions={held.actions}
           calls={held.calls}
           chatId={chatId}
-          onDecided={(failure) => {
-            setFailed(failure);
-            setReads((read) => read + 1);
-          }}
+          onDecided={decided}
+          pause={pause}
         />
       ) : null}
       {held.calls.map((call) => (
@@ -906,10 +938,8 @@ const ChatHeldWrites = ({
           chatId={chatId}
           key={call.id}
           onConfirmed={onConfirmed}
-          onDecided={(failure) => {
-            setFailed(failure);
-            setReads((read) => read + 1);
-          }}
+          onDecided={decided}
+          pause={pause}
         />
       ))}
       {held.actions.map((action) => (
@@ -917,10 +947,8 @@ const ChatHeldWrites = ({
           action={action}
           key={action.id}
           onConfirmed={onConfirmed}
-          onDecided={(failure) => {
-            setFailed(failure);
-            setReads((read) => read + 1);
-          }}
+          onDecided={decided}
+          pause={pause}
         />
       ))}
     </section>
@@ -936,10 +964,13 @@ const ChatHeldWrites = ({
 export const HeldWrites = ({
   chatId,
   version,
+  pause,
   onConfirmed,
 }: {
   chatId: string;
   version: number;
+  /** The pause the chat's answers share (`WaitingForYou`): each decision here holds them all. */
+  pause: AnswersPause;
   onConfirmed: () => void;
 }) => (
   // One list per chat: what it read and why a decision failed are that
@@ -948,6 +979,7 @@ export const HeldWrites = ({
     chatId={chatId}
     key={chatId}
     onConfirmed={onConfirmed}
+    pause={pause}
     version={version}
   />
 );
