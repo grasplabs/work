@@ -12994,10 +12994,6 @@ msgctxt "the settings an app offers itself"
 msgid "Options"
 msgstr "Optionen"
 
-#: src/onboarding/calm-frame.tsx
-msgid "or press"
-msgstr "oder drücken Sie"
-
 #: src/onboarding/company-step.tsx
 msgid "Or use a staff list"
 msgstr "Oder eine Mitarbeiterliste verwenden"
