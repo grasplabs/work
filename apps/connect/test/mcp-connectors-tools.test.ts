@@ -612,6 +612,8 @@ describe("a connector's tools", () => {
         "update_ticket",
         takes({ id: text, shouldnotify: { type: "boolean" } })
       ),
+      tool("fetch_report", takes({ id: text, sendNow: { type: "boolean" } })),
+      tool("list_deliveries", takes({ delivery_status: text })),
     ];
     const { connectionId } = await connected();
     const classes = await classesOf(connectionId);
@@ -651,6 +653,8 @@ describe("a connector's tools", () => {
       write_draft: classes.write_draft,
       save_draft_for: classes.save_draft_for,
       update_ticket: classes.update_ticket,
+      fetch_report: classes.fetch_report,
+      list_deliveries: classes.list_deliveries,
     }).toStrictEqual({
       post_to_channel: "reach-others",
       save_note: "reach-others",
@@ -686,6 +690,8 @@ describe("a connector's tools", () => {
       write_draft: "reach-others",
       save_draft_for: "reach-others",
       update_ticket: "reach-others",
+      fetch_report: "reach-others",
+      list_deliveries: "read-own",
     });
   });
 

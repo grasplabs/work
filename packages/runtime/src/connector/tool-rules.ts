@@ -300,7 +300,10 @@ const sendingWords: ReadonlySet<string> = new Set([
 /**
  * What an input's property holds where it sends (`sendNow`, `autosend`,
  * `shouldNotify`, `scheduleDate`), found anywhere in its name. Not
- * `post`, which `postalCode` holds.
+ * `post`, which `postalCode` holds. Such a property makes a change reach
+ * others; as a flag, it makes any tool reach others, a read too
+ * (`fetch_report` taking `sendNow`), while a read that filters by one
+ * (`list_deliveries` taking `delivery_status`) stays a read.
  */
 const sendingStems: readonly string[] = [
   "broadcast",
@@ -696,7 +699,10 @@ interface Findings {
   reads: boolean;
   /** Its name holds a verb that changes something. */
   changes: boolean;
-  /** Its input names people or an address it reaches, whatever it does. */
+  /**
+   * Its input names people or an address it reaches, or has a flag that
+   * sends (`sendNow`, `notify`), whatever it does.
+   */
   recipients: boolean;
   /**
    * Its input names people or places a change of it acts on, or its name
@@ -736,20 +742,26 @@ const findingsOf = (name: string, inputSchema: Json): Findings => {
     );
   const names = (starts: readonly string[], to: "none" | "first" | "either") =>
     properties.some((property) => namesPeople(property, starts, to));
+  const sends = ([property]: Property) =>
+    sendingStems.some((stem) => property.toLowerCase().includes(stem));
   return {
     reads:
       readVerbs.has(words[0] ?? "") ||
       (readVerbs.has(words[1] ?? "") && !delivers(words[0] ?? "")),
     changes: words.some((word) => isOneOf(changeWords, word)),
     recipients:
-      (!draft && names(recipientWords, "first")) || names(addressWords, "none"),
+      (!draft && names(recipientWords, "first")) ||
+      names(addressWords, "none") ||
+      properties.some(
+        (property) =>
+          sends(property) &&
+          isRecord(property[1]) &&
+          property[1].type === "boolean"
+      ),
     targets:
       names(targetWords, draft ? "none" : "either") ||
       (!draft && words.some(delivers)) ||
-      properties.some(([property]) => {
-        const joined = property.toLowerCase();
-        return sendingStems.some((stem) => joined.includes(stem));
-      }),
+      properties.some(sends),
     conversations: words.some((word) => conversationWords.has(word)),
     writesConversations:
       !draft &&
