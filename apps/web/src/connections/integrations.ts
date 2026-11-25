@@ -32,7 +32,7 @@ export interface Integration {
   categories: string[];
   /** Which of Grasp's kinds of app it is; `Other` where the catalog doesn't list it. */
   group: CatalogGroup;
-  /** What it is for, in a sentence, where the catalog says. */
+  /** What it is for, in a sentence, as the catalog sends it: none for a native one (`descriptionOf`). */
   description: string | null;
   /** Whose sign-in app connecting it takes; unknown where the catalog doesn't list it. */
   auth: CatalogAuth | undefined;
@@ -122,7 +122,7 @@ export const integrationsOf = (
     name: entry.name,
     categories: entry.categories,
     group: entry.group,
-    description: descriptionOf(entry),
+    description: entry.description,
     auth: entry.auth,
     logo: entry.logo,
     toolCount: entry.toolCount,
@@ -308,8 +308,8 @@ export const find = (
   const byUse = integrations.filter(
     (integration) =>
       !named.has(integration) &&
-      [...integration.categories, integration.description ?? ""].some((text) =>
-        text.toLocaleLowerCase().includes(needle)
+      [...integration.categories, descriptionOf(integration) ?? ""].some(
+        (text) => text.toLocaleLowerCase().includes(needle)
       )
   );
   const starts = (integration: Integration): number =>

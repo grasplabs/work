@@ -190,10 +190,11 @@ const askModel = async (
           job: agent.job,
           instructions: agent.instructions,
         },
-        apps: offered.map(({ app, name, description }) => ({
+        apps: offered.map(({ app, name, description, products }) => ({
           app,
           name,
           description,
+          products,
         })),
       }),
       schema: workedOutSchema,

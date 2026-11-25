@@ -12980,7 +12980,7 @@ msgstr "Unser erstes Gespräch ist gelöscht. Ich lösche noch, was ich daraus e
 
 #: src/connections/native-descriptions.ts
 msgid "Outlook mail and calendars, and files in OneDrive and SharePoint."
-msgstr "Outlook-Mail und -Kalender sowie Dateien in OneDrive und SharePoint."
+msgstr "Outlook-E-Mails und -Kalender sowie Dateien in OneDrive und SharePoint."
 
 #: src/apps/resource-bindings.tsx
 msgid "Output"

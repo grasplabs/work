@@ -3,10 +3,8 @@ import type {
   OfferedCatalog,
 } from "@grasp-os/shared/connect";
 import type { ConnectionWorkflow } from "@grasp-os/shared/workflows";
-import { i18n } from "@lingui/core";
 import { describe, expect, it } from "vite-plus/test";
 
-import { messages as german } from "../locales/de/messages.po";
 import {
   beyond,
   find,
@@ -104,31 +102,6 @@ describe(integrationsOf, () => {
         name: "Microsoft Entra ID",
         listed: false,
       },
-    ]);
-  });
-
-  it("words Grasp's own connectors in the page's language, and a Composio toolkit as the catalog describes it, whatever its slug", () => {
-    const entries = [
-      entry("microsoft", []),
-      entry("google", [], { source: "composio", description: "A toolkit." }),
-    ];
-    const english = integrationsOf(entries, []);
-    i18n.loadAndActivate({ locale: "de", messages: german });
-    const inGerman = integrationsOf(entries, []);
-    i18n.loadAndActivate({ locale: "en", messages: {} });
-    expect(
-      [english, inGerman].map((listed) =>
-        listed.map(({ description }) => description)
-      )
-    ).toStrictEqual([
-      [
-        "Outlook mail and calendars, and files in OneDrive and SharePoint.",
-        "A toolkit.",
-      ],
-      [
-        "Outlook-Mail und -Kalender sowie Dateien in OneDrive und SharePoint.",
-        "A toolkit.",
-      ],
     ]);
   });
 

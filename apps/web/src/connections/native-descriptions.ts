@@ -1,4 +1,4 @@
-import type { CatalogEntry, OAuthProvider } from "@grasp-os/shared/connect";
+import type { OAuthProvider } from "@grasp-os/shared/connect";
 import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
@@ -17,13 +17,18 @@ const nativeDescriptions: Readonly<Partial<Record<string, MessageDescriptor>>> =
 
 /**
  * What a catalog entry is for, in a sentence: a native one's in the web's
- * words, any other's as the catalog sends it. Read when rendering.
+ * words, any other's as the catalog sends it. Read when rendering, so it
+ * follows the page's language.
  */
 export const descriptionOf = ({
   source,
   id,
   description,
-}: Pick<CatalogEntry, "source" | "id" | "description">): string | null => {
+}: {
+  source: string;
+  id: string;
+  description: string | null;
+}): string | null => {
   const words =
     source === "native" && Object.hasOwn(nativeDescriptions, id)
       ? nativeDescriptions[id]
