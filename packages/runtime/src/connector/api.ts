@@ -1,3 +1,4 @@
+import { validateValue } from "../common/value-interpreter.ts";
 import type { AnySchema } from "../common/value-schema.ts";
 import type { Infer } from "../common/value-types.ts";
 import { httpMethods, pathMatches } from "./manifest.ts";
@@ -162,6 +163,8 @@ const jsonOf = (text: string): unknown => {
 /**
  * A vendor's answer to a request: checked against its `returns` and typed
  * by it where it has one, else the JSON, or the text where it isn't JSON.
+ * Fields `returns` doesn't name are left out, so a field the vendor adds
+ * never breaks a call.
  */
 const answerOf = <Returns extends AnySchema | undefined>(
   text: string,
@@ -176,7 +179,9 @@ const answerOf = <Returns extends AnySchema | undefined>(
     return (answer === undefined ? text : answer) as ApiAnswer<Returns>;
   }
   const checked =
-    answer === undefined ? undefined : returns["~standard"].validate(answer);
+    answer === undefined
+      ? undefined
+      : validateValue(returns.descriptor, answer, { unknownFields: "drop" });
   if (checked !== undefined && checked.issues === undefined) {
     // SAFETY: checked against `returns`, which is what types it.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY

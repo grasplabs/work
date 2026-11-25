@@ -476,6 +476,34 @@ describe("a call of a tool", () => {
     });
   });
 
+  it("leaves out the fields a vendor's answer has beyond what the request reads", async () => {
+    vendorAnswers(
+      Response.json({ sku: "a", onHand: 3, warehouse: { id: "w1" } }),
+      Response.json({
+        data: [{ sku: "a", onHand: 1, added: "2026-11-25" }],
+        next_cursor: null,
+        total: 1,
+      }),
+      Response.json({ sku: "a", onHand: 2, updatedBy: "someone" })
+    );
+    const read = await call("stock.get", { sku: "a" });
+    const list = await call("stock.list", {});
+    const write = await call(
+      "stock.update",
+      { sku: "a", onHand: 2 },
+      { [effectKeyMetaKey]: key }
+    );
+    expect([
+      read.structuredContent,
+      list.structuredContent,
+      write.structuredContent,
+    ]).toStrictEqual([
+      { sku: "a", onHand: 3 },
+      { items: [{ sku: "a", onHand: 1 }], next: null },
+      { sku: "a", onHand: 2 },
+    ]);
+  });
+
   it("pages as items and next, leaving out the query parameters it isn't given", async () => {
     vendorAnswers(
       Response.json({ data: [{ sku: "a", onHand: 1 }], next_cursor: "c2" })
