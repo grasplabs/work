@@ -51,9 +51,13 @@ const useChats = (enabled: boolean): ChatSummary[] => {
   const [chats, setChats] = useState<ChatSummary[]>([]);
   // Only the latest read's answer shows: an earlier one may come back after it.
   const latest = useRef(0);
+  // Whether a read is on its way: the reading while a chat works waits for
+  // it, so a core slower than its pace still has its answers shown.
+  const reading = useRef(false);
   const read = useEffectEvent(() => {
     latest.current += 1;
     const asked = latest.current;
+    reading.current = true;
     void (async () => {
       try {
         const listed = await core.withSession(
@@ -65,7 +69,15 @@ const useChats = (enabled: boolean): ChatSummary[] => {
       } catch {
         // The sidebar keeps what it last read; the chats window says why.
       }
+      if (asked === latest.current) {
+        reading.current = false;
+      }
     })();
+  });
+  const readAgain = useEffectEvent(() => {
+    if (!reading.current) {
+      read();
+    }
   });
   useEffect(() => {
     const readIf = (): void => {
@@ -96,7 +108,7 @@ const useChats = (enabled: boolean): ChatSummary[] => {
   useEffect(() => {
     const timer = working
       ? setInterval(() => {
-          read();
+          readAgain();
         }, workingReadMs)
       : undefined;
     return () => {

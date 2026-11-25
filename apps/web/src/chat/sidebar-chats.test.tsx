@@ -691,4 +691,50 @@ describe("renaming a recent chat from its row", () => {
       vi.useRealTimers();
     }
   });
+
+  it("shows what a read finds while a chat works even when core takes longer to answer than the pace of reading", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      let state = { running: true, unread: false };
+      // Each answer after the first waits until the test lets it go.
+      const answers: (() => void)[] = [];
+      const list = vi.fn<() => Promise<ChatSummary[]>>(async () => {
+        const now = { ...chatNamed("chat-1", "Month-end"), ...state };
+        if (list.mock.calls.length > 1) {
+          const { promise, resolve } = Promise.withResolvers<boolean>();
+          answers.push(() => {
+            resolve(true);
+          });
+          await promise;
+        }
+        return [now];
+      });
+      await shownWith({ list });
+      await vi.waitFor(() => {
+        expect(
+          document.querySelectorAll("[data-slot=sidebar-row-working]")
+        ).toHaveLength(1);
+      });
+      state = { running: false, unread: true };
+      // A read starts, and core is slow: three more paces pass.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(workingReadMs * 4);
+      });
+      const asked = list.mock.calls.length;
+      await act(async () => {
+        for (const answer of answers) {
+          answer();
+        }
+        await Promise.resolve();
+      });
+
+      await vi.waitFor(() => {
+        expect(dots()).toBe(1);
+      });
+      // One read at a time: no new one while the slow one was on its way.
+      expect(asked).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
