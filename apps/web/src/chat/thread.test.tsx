@@ -446,7 +446,7 @@ describe(ChatThread, () => {
 
     expect({
       line: shown.includes("Saved to your memory"),
-      notice: shown.includes("Acme renews on 1 March"),
+      notice: shown.includes("Saved a memory, Acme renews on 1 March"),
       forgotten,
       undoLeft: [...document.querySelectorAll("button")].some(
         (button) => button.textContent === "Undo"
