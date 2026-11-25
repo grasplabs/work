@@ -85,10 +85,9 @@ const loneSurrogate = /\p{Cs}/u;
  * parser would quietly mend in how the address is written, this is refused:
  * spaces and control characters, which it drops; a backslash, which it
  * reads as `/`; a character IDNA drops unseen from the host; a lone
- * surrogate, which it replaces; and a scheme without `//`
- * and a host after it. So is
- * any user name or password, even an empty one (`@` before the host:
- * `https://good.example@evil.example`), which fetch refuses anyway.
+ * surrogate, which it replaces; and a scheme without `//` and a host after
+ * it. So is any user name or password, even an empty one (`@` before the
+ * host: `https://good.example@evil.example`), which fetch refuses anyway.
  */
 export const isWebUrl = (text: string): boolean => {
   for (const char of text) {
