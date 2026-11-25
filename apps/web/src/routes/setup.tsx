@@ -31,8 +31,8 @@ import { loadCoreStatus } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { PageError } from "../frame/page-states.tsx";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
-import { CalmFrame, isNewPlace } from "../onboarding/calm-frame.tsx";
-import type { ContinuePlace, Ways } from "../onboarding/calm-frame.tsx";
+import { CalmFrame } from "../onboarding/calm-frame.tsx";
+import type { Ways } from "../onboarding/calm-frame.tsx";
 import { CampaignFrame } from "../onboarding/campaign/campaign-page.tsx";
 import { isCampaignState } from "../onboarding/campaign/fixtures.ts";
 import type { CampaignState } from "../onboarding/campaign/fixtures.ts";
@@ -50,6 +50,7 @@ import {
   reachedOf,
   settledAs,
   stepIndex,
+  partOf,
   stepShown,
   steps,
   suitesFor,
@@ -185,16 +186,28 @@ const waysOf = (
   return ends ? undefined : ways;
 };
 
+/** The track's progress on a screen: its part, named; none on a screen in no part. */
+const progressOf = (
+  part: ReturnType<typeof partOf>,
+  names: readonly string[]
+) =>
+  part === null
+    ? undefined
+    : {
+        at: part.at,
+        of: part.of,
+        name: names[part.part] ?? "",
+        share: part.share,
+      };
+
 const Setup = () => {
-  const { i18n } = useLingui();
+  const { i18n, t } = useLingui();
+  // The parts the setup is told in, named on the track along the page's foot.
+  const partNames = [t`Getting started`, t`Your company`, t`Your team`];
   const navigate = useNavigate();
   const { identity, signIn, suites } = Route.useRouteContext();
   const loaded = Route.useLoaderData();
-  const {
-    step: asked,
-    state: campaignState,
-    continue: place,
-  } = Route.useSearch();
+  const { step: asked, state: campaignState } = Route.useSearch();
   const data = loaded.state === "ready" ? loaded.data : null;
   // The screens this company's flow has, in its order; all of them where core can't say.
   // The same list while the flow is the same, so what goes by it runs once per change.
@@ -230,11 +243,7 @@ const Setup = () => {
   // Every screen settles into the next in one quiet fade; over once the screen is there.
   const turnTo = async (next: SetupStep): Promise<void> => {
     await smoothly(async () => {
-      // In development, the place tried for Continue goes along from step to step.
-      await navigate({
-        to: "/setup",
-        search: { step: next, ...(place !== undefined && { continue: place }) },
-      });
+      await navigate({ to: "/setup", search: { step: next } });
     });
   };
   const go = (next: SetupStep) => {
@@ -267,7 +276,7 @@ const Setup = () => {
     <CalmFrame
       userId={identity.userId}
       ways={waysOf(index, furthest, path, go)}
-      progress={{ at: index, of: path.length }}
+      progress={progressOf(partOf(step, path), partNames)}
       centred={step === "open" || step === "company"}
       language={step !== "welcome"}
       pose={poses[step]}
@@ -366,13 +375,9 @@ export const Route = createFileRoute("/setup")({
     step?: SetupStep;
     connection?: string;
     state?: CampaignState;
-    /** In development only: where a step's Continue stands (calm-frame.tsx). */
-    continue?: ContinuePlace;
   } => ({
     ...(isStep(search.step) && { step: search.step }),
     ...(isCampaignState(search.state) && { state: search.state }),
-    ...(import.meta.env.DEV &&
-      isNewPlace(search.continue) && { continue: search.continue }),
     ...(typeof search.connection === "string" && {
       connection: search.connection,
     }),

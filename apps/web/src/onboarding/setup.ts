@@ -406,3 +406,46 @@ export const teamNumbersOf = (team: {
     ? { shown: "asked", asked: team.asked }
     : { shown: "both", talked: team.talked, asked: team.asked };
 };
+
+/**
+ * The few parts the setup is told in, so it feels like a few steps, not a
+ * dozen screens: getting to know each other, the company, the team. The
+ * screens after the interviews (the review, the opening) are in none.
+ */
+export const setupParts = [
+  ["welcome", "ai", "about"],
+  ["company", "sources", "documents", "pulse"],
+  ["leads", "team"],
+] as const satisfies readonly (readonly SetupStep[])[];
+
+/**
+ * Where `step` is in the parts this `path` has: which part of how many,
+ * and how much of the whole is behind them (each part an equal share,
+ * the screens within it filling it); null for a screen in no part.
+ */
+export const partOf = (
+  step: SetupStep,
+  path: SetupPath = steps
+): { at: number; of: number; part: number; share: number } | null => {
+  const parts = setupParts
+    .map((screens, part) => ({
+      part,
+      screens: screens.filter((screen) => path.includes(screen)),
+    }))
+    .filter(({ screens }) => screens.length > 0);
+  const at = parts.findIndex(({ screens }) =>
+    screens.some((screen) => screen === step)
+  );
+  const found = parts[at];
+  if (found === undefined) {
+    return null;
+  }
+  const screens: readonly SetupStep[] = found.screens;
+  const within = screens.indexOf(step) + 1;
+  return {
+    at,
+    of: parts.length,
+    part: found.part,
+    share: (at + within / found.screens.length) / parts.length,
+  };
+};
