@@ -1,28 +1,19 @@
+// The scenes and the dithers behind Chat's start, as #2503's library draws
+// them with WebGL: a scene a picture dithered all over from night to lime,
+// a dither a field of silk set as ink by Bayer's threshold, in a pattern and
+// a colour. Its stops are Damsko's brand colours. Loaded only when a
+// backdrop first comes into view (field.tsx).
+import { durations } from "@grasp-os/ui/lib/tokens.values";
+
 import { drawn, nothingDrawn } from "./drawing.ts";
 import type { DrawOptions, Drawing } from "./drawing.ts";
-
-// #2503's dithers, drawn by WebGL on the backdrop's canvas: a field of
-// silk, its light set as ink in 3px cells by Bayer's threshold, in one
-// flat colour, the canvas's own (`color`), faint, so a full field reads
-// as a tint. Its stops are Damsko's brand colours. Loaded only when a
-// backdrop first comes into view (backdrop.tsx). From #2503's backdrop
-// shader, its dithers alone: the product draws no scene.
-
-/** The dithers #2503 draws, each a field of its own. */
-export type DitherKind = "dusk" | "dots" | "door";
-
-/**
- * A dither's ink, as #2503's tones number them in the shader: `mint`, one
- * flat colour, the canvas's own, faint; `aurora`, a run of the light's
- * greens by the field's own light, pine where it is fullest to lime at
- * its fringes, as a page that failed stands on.
- */
-export type DitherTone = "mint" | "aurora";
-
-const toneNumbers: Readonly<Record<DitherTone, number>> = {
-  mint: 2,
-  aurora: 7,
-};
+import type {
+  BackdropDither,
+  BackdropPattern,
+  BackdropScene,
+  BackdropTone,
+} from "./look.ts";
+import { ditherPatterns, ditherTones, isScene } from "./look.ts";
 
 const VERTEX = `
 attribute vec2 a_pos;
@@ -193,7 +184,126 @@ vec2 field() {
 }
 `;
 
-const KINDS: Record<DitherKind, { source: string }> = {
+/** A scene's picture and how it is graded. */
+interface Picture {
+  /** The part kept when it is cropped to fill the field, 0 to 1 each way, from the top left. */
+  focus: readonly [number, number];
+  /** Over 1 deepens its darks, under 1 lifts them. */
+  gamma: number;
+  gain: number;
+  /** Drawn as its negative: for a picture of a light sky, which is to be night. */
+  invert: boolean;
+  /** How far it sways, as a part of its width. */
+  sway: number;
+  /** How much the silk's light takes from it and gives to it, 0 to 1. */
+  drift: number;
+}
+
+// A scene: the picture, filling the field (a little larger, so it can sway), its light graded, the
+// silk's light drifting through it, dimmer round the middle where the page's words stand, then
+// every cell set to one of the two greens its light lies between, by Bayer's threshold.
+const PICTURE = `
+void main() {
+  float aspect = u_res.x / u_res.y;
+  float imageAspect = u_imageRes.x / u_imageRes.y;
+  vec2 crop = aspect > imageAspect
+    ? vec2(1.0, imageAspect / aspect)
+    : vec2(aspect / imageAspect, 1.0);
+  crop *= 0.94;
+  vec2 focus = vec2(u_focus.x, 1.0 - u_focus.y);
+  vec2 uv = (v_uv - 0.5) * crop + 0.5 + (focus - 0.5) * (1.0 - crop);
+  vec2 p = v_uv * vec2(aspect, 1.0);
+  vec2 sway = vec2(
+    fbm(p * 2.2 + vec2(0.0, u_time * 0.02)),
+    fbm(p * 2.2 + vec2(5.2, 1.3) - u_time * 0.017)
+  ) - 0.5;
+  uv += sway * u_grade.z;
+  uv.x += 0.012 * sin(u_time * 0.03);
+  float lum = texture2D(u_image, clamp(uv, 0.0, 1.0)).r;
+  lum = mix(lum, 1.0 - lum, u_invert);
+  float tone = pow(lum, u_grade.x) * u_grade.y;
+  tone *= u_arrive;
+  float light = silk(p * 1.1, u_time * 0.7);
+  tone *= 1.0 + u_grade.w * (smoothstep(0.25, 0.75, light) - 0.5) * 2.0;
+  vec2 mid = (v_uv - vec2(0.5, 0.53)) * vec2(min(aspect, 1.8) * 0.8, 1.9);
+  tone *= mix(0.42, 1.0, smoothstep(0.12, 0.62, length(mid)));
+  // Under what stands on it the scene stays at most this light (Damsko: so a title over a
+  // bright band in a narrow window still reads), easing back to itself a little way off.
+  if (u_hasClear > 0.5) {
+    vec2 fc = gl_FragCoord.xy;
+    vec2 off = max(max(u_clear.xy - fc, fc - u_clear.zw), 0.0);
+    float away = smoothstep(0.0, 16.0, length(off));
+    tone = mix(min(tone, 0.3), tone, away);
+  }
+  const float steps = 5.0;
+  float q = floor(clamp(tone, 0.0, 1.0) * steps + bayer8(gl_FragCoord.xy)) / steps;
+  gl_FragColor = vec4(palette(q * 0.86), 1.0);
+}`;
+
+const sceneOf = (picture: Picture) => ({ picture, source: PICTURE });
+
+const KINDS: Record<
+  BackdropScene | BackdropDither,
+  { picture?: Picture; source: string }
+> = {
+  // The Cosmic Cliffs of the Carina Nebula (NASA, ESA, CSA, STScI; James
+  // Webb Space Telescope, 2022): ridges of gas under a field of stars.
+  cliffs: sceneOf({
+    focus: [0.5, 0.5],
+    gamma: 0.85,
+    gain: 1.2,
+    invert: false,
+    sway: 0.014,
+    drift: 0.4,
+  }),
+  // The Great Wave off Kanagawa (Katsushika Hokusai, about 1831), as its
+  // negative: the sky is night and the wave's body carries the light.
+  wave: sceneOf({
+    focus: [0.35, 0.45],
+    gamma: 1.5,
+    gain: 1.15,
+    invert: true,
+    sway: 0.02,
+    drift: 0.3,
+  }),
+  // A northern light from orbit, over Manicouagan's ring (NASA).
+  aurora: sceneOf({
+    focus: [0.5, 0.4],
+    gamma: 1.25,
+    gain: 1.25,
+    invert: false,
+    sway: 0.018,
+    drift: 0.45,
+  }),
+  // The Starry Night (Vincent van Gogh, 1889).
+  starry: sceneOf({
+    focus: [0.5, 0.35],
+    gamma: 1.6,
+    gain: 1.3,
+    invert: false,
+    sway: 0.022,
+    drift: 0.3,
+  }),
+  // Fine Wind, Clear Morning (Katsushika Hokusai, about 1831): Fuji under
+  // a mackerel sky.
+  fuji: sceneOf({
+    focus: [0.6, 0.5],
+    gamma: 1.7,
+    gain: 1.1,
+    invert: false,
+    sway: 0.012,
+    drift: 0.35,
+  }),
+  // Wanderer above the Sea of Fog (Caspar David Friedrich, about 1818).
+  wanderer: sceneOf({
+    focus: [0.5, 0.42],
+    gamma: 1.8,
+    gain: 1.1,
+    invert: false,
+    sway: 0.012,
+    drift: 0.45,
+  }),
+  // Dusk: the far side of the silk's broad folds.
   dusk: {
     source: `
 void main() {
@@ -257,7 +367,7 @@ const compile = (
 /** The program of `kind`, sent to be linked, not yet asked whether it has: asking waits for it. */
 const linking = (
   gl: WebGLRenderingContext,
-  kind: DitherKind
+  kind: BackdropScene | BackdropDither
 ): WebGLProgram | null => {
   const vertex = compile(gl, gl.VERTEX_SHADER, VERTEX);
   const fragment = compile(gl, gl.FRAGMENT_SHADER, COMMON + KINDS[kind].source);
@@ -298,22 +408,33 @@ const linked = (
 /** The linked program of `kind`, with the one quad it draws on; none where WebGL won't. */
 const programOf = (
   gl: WebGLRenderingContext,
-  kind: DitherKind
+  kind: BackdropScene | BackdropDither
 ): WebGLProgram | null => linked(gl, linking(gl, kind));
 
-/** A dither's frame: every CSS pixel through the silk, its clock slow, so fifteen a second shows all its motion. */
+/**
+ * How long a frame is. A scene is a ninth of the field's pixels and cheap, at twenty a second; a
+ * dither is every CSS pixel of it through the silk, and its clock runs slow, so fifteen a second
+ * shows all of its motion at half the cost of thirty.
+ */
+const sceneFrameMs = 1000 / 20;
 const ditherFrameMs = 1000 / 15;
 
-/** How much slower a dither's clock runs than the silk's own. */
+/** How large a scene's cell is, in CSS pixels, as Capy's dither's is. */
+const sceneCell = 3;
+
+/** How much slower a dither's clock runs than a scene's. */
 const ditherPace = 0.3;
 
 /** Where the shader's clock starts, so the first picture is already a settled one. */
 const startAt = 8;
 
+/** How much further the silk turns over the whole of `progress`, in the shader's seconds. */
+const progressTurn = 6;
+
 /** How fast the door's lamp eases towards the pointer, per second. */
 const lampPull = 1.6;
 
-/** The light's seven stops, night to paper: the colours the runs are drawn in. */
+/** The light's seven stops, night to paper: the tokens the scenes and the runs are drawn in. */
 const stops = ["night", "ink", "pine", "mint", "sea", "lime", "paper"].map(
   (stop) => `--damsko-brand-${stop}`
 );
@@ -343,26 +464,37 @@ const rgbaOf = (() => {
   };
 })();
 
-/** Draws the dither `kind` on `element`, in the pattern Bayer's 3px cells and its canvas's own colour, run and held by Backdrop. */
-export const startDither = (
+/** Draws the shader backdrop `kind` on `element` (a dither with its pattern and tone), run and held by Backdrop. */
+export const startShader = (
   element: HTMLCanvasElement,
-  kind: DitherKind,
-  options: DrawOptions,
-  tone: DitherTone = "mint"
+  kind: BackdropScene | BackdropDither,
+  dither: { pattern: BackdropPattern; tone: BackdropTone },
+  options: DrawOptions & {
+    /** Where the scene pictures are served from: a folder URL ending in a slash. */
+    scenes: string;
+    /** A small window (a preview tile): the small picture (<kind>.small.jpg), a fifth the weight. */
+    small?: boolean;
+  }
 ): Drawing => {
+  const nothing = nothingDrawn;
+  const scene = isScene(kind);
+  const { picture } = KINDS[kind];
+  // As the shader numbers them: patterns from 1, none for a scene.
+  const pattern = scene ? 0 : ditherPatterns.indexOf(dither.pattern) + 1;
+  const tone = scene ? 0 : ditherTones.indexOf(dither.tone);
   // Kept between frames: it is drawn only every other frame or so, and a frame it isn't drawn on
   // would otherwise show nothing.
   const gl = element.getContext("webgl", {
-    alpha: true,
+    alpha: !scene,
     antialias: false,
     preserveDrawingBuffer: true,
   });
   if (gl === null) {
-    return nothingDrawn;
+    return nothing;
   }
   const program = programOf(gl, kind);
   if (program === null) {
-    return nothingDrawn;
+    return nothing;
   }
   const at = (name: string) => gl.getUniformLocation(program, name);
   const res = at("u_res");
@@ -373,16 +505,62 @@ export const startDither = (
   const toneAt = at("u_tone");
   const paletteAt = at("u_palette");
   const flatAt = at("u_flat");
+  const clearAt = at("u_clear");
   const hasClearAt = at("u_hasClear");
   const progressAt = at("u_progress");
+  // A scene's picture: night until it has loaded, then its light.
+  const loading = picture === undefined ? undefined : new Image();
+  if (picture !== undefined) {
+    gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.LUMINANCE,
+      1,
+      1,
+      0,
+      gl.LUMINANCE,
+      gl.UNSIGNED_BYTE,
+      new Uint8Array([picture.invert ? 255 : 0])
+    );
+    for (const side of [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T]) {
+      gl.texParameteri(gl.TEXTURE_2D, side, gl.CLAMP_TO_EDGE);
+    }
+    for (const filter of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) {
+      gl.texParameteri(gl.TEXTURE_2D, filter, gl.LINEAR);
+    }
+    gl.uniform1i(at("u_image"), 0);
+    gl.uniform2f(at("u_imageRes"), 1, 1);
+    gl.uniform2f(at("u_focus"), picture.focus[0], picture.focus[1]);
+    gl.uniform4f(
+      at("u_grade"),
+      picture.gamma,
+      picture.gain,
+      picture.sway,
+      picture.drift
+    );
+    gl.uniform1f(at("u_invert"), picture.invert ? 1 : 0);
+    gl.uniform1f(at("u_arrive"), 0);
+  }
   const { still } = options;
+  // A scene: one canvas pixel to a cell. A dither: one to a CSS pixel, whatever the screen's
+  // density, so a sharp screen costs no more. Both scaled up crisp.
+  const ratio = scene ? 1 / sceneCell : 1;
+  const pace = scene ? 1 : ditherPace;
+  const frameMs = scene ? sceneFrameMs : ditherFrameMs;
   const lamp = { x: 0.5, y: 0.5, tx: 0.5, ty: 0.5 };
   const begun = performance.now();
   let last = begun;
   let frame = 0;
+  // The frame of a scene's picture coming up, while it does.
+  let rising = 0;
   let running = false;
-  // The colours, read as they resolve here: they follow the theme. Read once, and again only when
-  // the theme may have changed, never at every picture.
+  /**
+   * The colours, read from the tokens as they resolve here: they follow the theme. Read once, and
+   * again only when the theme may have changed (the document's attributes, the system's scheme),
+   * never at every picture: reading the computed style each time cost a frame of its own.
+   */
   let coloured = false;
   const recolour = (): void => {
     coloured = false;
@@ -390,7 +568,7 @@ export const startDither = (
   const themeWatch = new MutationObserver(recolour);
   themeWatch.observe(document.documentElement, {
     attributes: true,
-    attributeFilter: ["data-mode", "class", "style"],
+    attributeFilter: ["data-theme", "class", "style"],
   });
   const scheme = matchMedia("(prefers-color-scheme: dark)");
   scheme.addEventListener("change", recolour);
@@ -408,10 +586,31 @@ export const startDither = (
     const [r, g, b, a] = rgbaOf(style.color);
     gl.uniform4f(flatAt, r, g, b, a);
   };
+  /** What stands on a scene, in the canvas's pixels from its foot. */
+  const keepClear = (): void => {
+    // Only a preview tile keeps its words' ground dark; a full scene dims softly round the middle,
+    // as the product's Chat page does, with no band under the question and the box.
+    const kept = scene && options.small === true ? options.clear() : undefined;
+    if (kept === undefined || kept.width === 0) {
+      gl.uniform1f(hasClearAt, 0);
+      return;
+    }
+    const box = element.getBoundingClientRect();
+    const across = element.width / Math.max(1, box.width);
+    const down = element.height / Math.max(1, box.height);
+    gl.uniform4f(
+      clearAt,
+      (kept.left - box.left) * across,
+      (box.bottom - kept.bottom) * down,
+      (kept.right - box.left) * across,
+      (box.bottom - kept.top) * down
+    );
+    gl.uniform1f(hasClearAt, 1);
+  };
   const fit = (): void => {
     const box = element.getBoundingClientRect();
-    element.width = Math.max(1, Math.round(box.width));
-    element.height = Math.max(1, Math.round(box.height));
+    element.width = Math.max(1, Math.round(box.width * ratio));
+    element.height = Math.max(1, Math.round(box.height * ratio));
     gl.viewport(0, 0, element.width, element.height);
   };
   const draw = (now: number): void => {
@@ -420,23 +619,26 @@ export const startDither = (
     lamp.x += (lamp.tx - lamp.x) * Math.min(1, lampPull * dt);
     lamp.y += (lamp.ty - lamp.y) * Math.min(1, lampPull * dt);
     colour();
-    gl.uniform1f(hasClearAt, 0);
+    keepClear();
     gl.uniform2f(res, element.width, element.height);
-    gl.uniform1f(cellAt, 1);
-    // Bayer's pattern (the shader's first) in its tone.
-    gl.uniform1f(patternAt, 1);
-    gl.uniform1f(toneAt, toneNumbers[tone]);
-    gl.uniform1f(progressAt, 0);
-    // With reduced motion the silk stands at one moment: the same picture however often it is drawn.
+    gl.uniform1f(cellAt, 1 / ratio);
+    gl.uniform1f(patternAt, pattern);
+    gl.uniform1f(toneAt, tone);
+    const progress = Math.min(1, Math.max(0, options.progress()));
+    gl.uniform1f(progressAt, progress);
+    // The silk's own drift, and a stretch more for the way the page has gone: scrolling turns it.
+    // With reduced motion the silk stands at one moment: the same picture however often it is drawn
+    // (resized, a scene's picture arriving).
     const elapsed = still ? 0 : (now - begun) / 1000;
-    gl.uniform1f(time, startAt + elapsed * ditherPace);
+    gl.uniform1f(time, startAt + elapsed * pace + progress * progressTurn);
+    // The lamp in the canvas's pixels, its y from the foot, as WebGL counts.
     gl.uniform2f(lampAt, lamp.x * element.width, (1 - lamp.y) * element.height);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     drawn(element);
   };
   const loop = (now: number): void => {
     frame = requestAnimationFrame(loop);
-    if (now - last >= ditherFrameMs) {
+    if (now - last >= frameMs) {
       draw(now);
     }
   };
@@ -453,6 +655,39 @@ export const startDither = (
   });
   resized.observe(element);
   fit();
+  if (loading !== undefined) {
+    loading.addEventListener("load", () => {
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.LUMINANCE,
+        gl.LUMINANCE,
+        gl.UNSIGNED_BYTE,
+        loading
+      );
+      gl.uniform2f(
+        at("u_imageRes"),
+        loading.naturalWidth,
+        loading.naturalHeight
+      );
+      // It comes up from night over duration-mark, as arrive.in fades content in; with reduced
+      // motion it is there at once. Drawn frame by frame until it has, even while held or still.
+      const arrivedAt = performance.now();
+      const arriveAt = at("u_arrive");
+      const rise = (now: number): void => {
+        const done = still
+          ? 1
+          : Math.min(1, (now - arrivedAt) / durations.mark);
+        gl.uniform1f(arriveAt, done);
+        draw(now);
+        if (done < 1) {
+          rising = requestAnimationFrame(rise);
+        }
+      };
+      rise(arrivedAt);
+    });
+    loading.src = `${options.scenes}${kind}${options.small === true ? ".small" : ""}.jpg`;
+  }
   draw(begun);
   const run = (on: boolean): void => {
     if (still || on === running) {
@@ -467,9 +702,11 @@ export const startDither = (
       window.removeEventListener("pointermove", point);
     }
   };
-  // A context the browser takes away draws nothing more: the loop stops.
+  // A context the browser takes away (the GPU reset, too many contexts) draws nothing more: the
+  // loop stops rather than drawing into nothing at every frame.
   const lost = (): void => {
     run(false);
+    cancelAnimationFrame(rising);
   };
   element.addEventListener("webglcontextlost", lost);
   return {
@@ -479,8 +716,14 @@ export const startDither = (
       resized.disconnect();
       themeWatch.disconnect();
       scheme.removeEventListener("change", recolour);
+      cancelAnimationFrame(rising);
       element.removeEventListener("webglcontextlost", lost);
-      // A canvas that has left the page lets its context go now: a browser keeps only so many.
+      // A picture still on its way is let go.
+      loading?.removeAttribute("src");
+      // A canvas that has left the page lets its context go now, not when it is collected: a
+      // browser keeps only so many (about 16) and loses the oldest, a backdrop still in view, when
+      // more are made, as stepping through looks does (each look a canvas of its own). A canvas
+      // still in the page keeps it: the drawing may start on it again.
       if (!element.isConnected) {
         gl.getExtension("WEBGL_lose_context")?.loseContext();
       }
