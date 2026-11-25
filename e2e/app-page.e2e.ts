@@ -202,7 +202,9 @@ test("a builder renames an App and says what it is for in its settings, archives
   await expect(page).toHaveURL(
     new RegExp(`/apps/${app}/settings\\?section=connections$`, "u")
   );
-  const integrations = page.getByRole("region", { name: "Connectors" });
+  const integrations = page.getByRole("region", {
+    name: "Connectors it needs",
+  });
   await expect(integrations.getByText("No connectors yet.")).toBeVisible();
   await expect(
     integrations.getByRole("button", { name: "Add a connector" })

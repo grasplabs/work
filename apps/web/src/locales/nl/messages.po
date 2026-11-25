@@ -4986,6 +4986,10 @@ msgctxt "state of one app"
 msgid "Connected"
 msgstr "Gekoppeld"
 
+#: src/apps/app-settings.tsx
+msgid "Connected accounts in use"
+msgstr "Gebruikte gekoppelde accounts"
+
 #: src/activity/audit-words.ts
 msgid "Connected an account"
 msgstr "Een account gekoppeld"
@@ -5087,16 +5091,11 @@ msgctxt "an app's settings section"
 msgid "Connections"
 msgstr "Verbindingen"
 
-#: src/apps/app-settings.tsx
-msgid "Connections in use"
-msgstr "Gebruikte verbindingen"
-
 #: src/apps/resource-bindings.tsx
 #: src/routes/_shell.connectors.$integration.tsx
 msgid "Connector"
 msgstr "Connector"
 
-#: src/apps/app-integrations.tsx
 #: src/connections/integrations-sidebar.tsx
 #: src/connections/integrations-skeleton.tsx
 #: src/frame/app-sidebar.tsx
@@ -5104,6 +5103,10 @@ msgstr "Connector"
 #: src/routes/_shell.connectors.index.tsx
 msgid "Connectors"
 msgstr "Connectoren"
+
+#: src/apps/app-integrations.tsx
+msgid "Connectors it needs"
+msgstr "Connectoren die hij nodig heeft"
 
 #: src/connections/integration-item.tsx
 msgid "Connects with a key"
@@ -11547,8 +11550,8 @@ msgid "None live"
 msgstr "Geen live"
 
 #: src/apps/resource-bindings.tsx
-msgid "None of the App's connector permissions serves {contract} with every action it declares. Grant one first."
-msgstr "Geen van de connectorrechten van de app bedient {contract} met elke actie die hij declareert. Verleen er eerst een."
+msgid "None of the App's permissions on a connection serves {contract} with every action it declares. Grant one first."
+msgstr "Geen van de rechten van de app op een verbinding bedient {contract} met elke actie die hij declareert. Verleen er eerst een."
 
 #: src/interview/read-back.tsx
 msgid "None of this is right"

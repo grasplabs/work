@@ -4986,6 +4986,10 @@ msgctxt "state of one app"
 msgid "Connected"
 msgstr "Connected"
 
+#: src/apps/app-settings.tsx
+msgid "Connected accounts in use"
+msgstr "Connected accounts in use"
+
 #: src/activity/audit-words.ts
 msgid "Connected an account"
 msgstr "Connected an account"
@@ -5087,16 +5091,11 @@ msgctxt "an app's settings section"
 msgid "Connections"
 msgstr "Connections"
 
-#: src/apps/app-settings.tsx
-msgid "Connections in use"
-msgstr "Connections in use"
-
 #: src/apps/resource-bindings.tsx
 #: src/routes/_shell.connectors.$integration.tsx
 msgid "Connector"
 msgstr "Connector"
 
-#: src/apps/app-integrations.tsx
 #: src/connections/integrations-sidebar.tsx
 #: src/connections/integrations-skeleton.tsx
 #: src/frame/app-sidebar.tsx
@@ -5104,6 +5103,10 @@ msgstr "Connector"
 #: src/routes/_shell.connectors.index.tsx
 msgid "Connectors"
 msgstr "Connectors"
+
+#: src/apps/app-integrations.tsx
+msgid "Connectors it needs"
+msgstr "Connectors it needs"
 
 #: src/connections/integration-item.tsx
 msgid "Connects with a key"
@@ -11547,8 +11550,8 @@ msgid "None live"
 msgstr "None live"
 
 #: src/apps/resource-bindings.tsx
-msgid "None of the App's connector permissions serves {contract} with every action it declares. Grant one first."
-msgstr "None of the App's connector permissions serves {contract} with every action it declares. Grant one first."
+msgid "None of the App's permissions on a connection serves {contract} with every action it declares. Grant one first."
+msgstr "None of the App's permissions on a connection serves {contract} with every action it declares. Grant one first."
 
 #: src/interview/read-back.tsx
 msgid "None of this is right"

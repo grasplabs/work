@@ -4986,6 +4986,10 @@ msgctxt "state of one app"
 msgid "Connected"
 msgstr "Verbunden"
 
+#: src/apps/app-settings.tsx
+msgid "Connected accounts in use"
+msgstr "Verwendete verbundene Konten"
+
 #: src/activity/audit-words.ts
 msgid "Connected an account"
 msgstr "Ein Konto verbunden"
@@ -5087,16 +5091,11 @@ msgctxt "an app's settings section"
 msgid "Connections"
 msgstr "Verbindungen"
 
-#: src/apps/app-settings.tsx
-msgid "Connections in use"
-msgstr "Verwendete Verbindungen"
-
 #: src/apps/resource-bindings.tsx
 #: src/routes/_shell.connectors.$integration.tsx
 msgid "Connector"
 msgstr "Konnektor"
 
-#: src/apps/app-integrations.tsx
 #: src/connections/integrations-sidebar.tsx
 #: src/connections/integrations-skeleton.tsx
 #: src/frame/app-sidebar.tsx
@@ -5104,6 +5103,10 @@ msgstr "Konnektor"
 #: src/routes/_shell.connectors.index.tsx
 msgid "Connectors"
 msgstr "Konnektoren"
+
+#: src/apps/app-integrations.tsx
+msgid "Connectors it needs"
+msgstr "Konnektoren, die sie braucht"
 
 #: src/connections/integration-item.tsx
 msgid "Connects with a key"
@@ -11547,8 +11550,8 @@ msgid "None live"
 msgstr "Keine live"
 
 #: src/apps/resource-bindings.tsx
-msgid "None of the App's connector permissions serves {contract} with every action it declares. Grant one first."
-msgstr "Keine Konnektorberechtigung der App bedient {contract} mit allen deklarierten Aktionen. Erteile zuerst eine."
+msgid "None of the App's permissions on a connection serves {contract} with every action it declares. Grant one first."
+msgstr "Keine Berechtigung der App für eine Verbindung bedient {contract} mit allen deklarierten Aktionen. Erteile zuerst eine."
 
 #: src/interview/read-back.tsx
 msgid "None of this is right"

@@ -194,7 +194,7 @@ const NothingToChoose = ({
   }
   const reasons: Readonly<Record<DeclaredResource["kind"], string>> = {
     model: t`This deployment allows no model.`,
-    connector: t`None of the App's connector permissions serves ${contract} with every action it declares. Grant one first.`,
+    connector: t`None of the App's permissions on a connection serves ${contract} with every action it declares. Grant one first.`,
     brain: t`The App has no permission to read the Brain. Grant one first.`,
     grasp: t`The App has no permission to read the platform's statistics. Grant one first.`,
   };

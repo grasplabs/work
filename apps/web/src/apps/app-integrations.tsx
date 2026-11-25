@@ -195,13 +195,13 @@ export const AppIntegrations = ({
   const appName = app.name;
   return (
     <Card size="sm" asChild>
-      <section aria-label={t`Connectors`}>
+      <section aria-label={t`Connectors it needs`}>
         <CardHeader>
           <WithInfo
             of="title"
             info={t`Where the App’s data comes from. Those its code asks for are here by themselves; add any other it needs. Adding one connects nothing.`}
           >
-            <CardTitle level={3}>{t`Connectors`}</CardTitle>
+            <CardTitle level={3}>{t`Connectors it needs`}</CardTitle>
           </WithInfo>
           <CardAction>
             {builds ? (
@@ -224,7 +224,7 @@ export const AppIntegrations = ({
                 {t`No connectors yet.`}
               </Text>
             ) : (
-              <ItemGroup aria-label={t`Connectors`}>
+              <ItemGroup aria-label={t`Connectors it needs`}>
                 {lines.map((line, at) => {
                   const integrationName = line.name;
                   const addedOnly =

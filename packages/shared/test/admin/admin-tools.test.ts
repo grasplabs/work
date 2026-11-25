@@ -224,7 +224,7 @@ describe("what an answer names, as it goes to an outside model", () => {
         `The lead of team ${team.id} has not talked yet.`,
         `work ${work.id} is told so differently that it is better split in two; its team's lead decides.`,
         "The research disagrees with the company’s own account; the admin shows where.",
-        `integration ${integration.id} stopped working until someone at the company signs in again.`,
+        `connector ${integration.id} stopped working until someone at the company signs in again.`,
       ].join("\n")
     );
     expect(people.length).toBeGreaterThan(0);
