@@ -500,6 +500,7 @@ add(
       "http://localhost:8080/a?b=c#d",
       "https://münchen.example/straße",
       "HTTPS://Example.com",
+      "https://example.com/?q=\u2764\uFE0F",
       "https://example.com/a b",
       "https:example.com",
       "http:/example.com",
@@ -511,6 +512,7 @@ add(
       "https://@example.com",
       "https://goo\u200Bgle.com",
       "https://ex\u00ADample.com",
+      "https://example.com/\uD800",
       " https://example.com",
       "https://example.com\n",
       "/relative/path",
@@ -525,7 +527,8 @@ add(
     { value: "http://localhost:8080/a?b=c#d" },
     { value: "https://münchen.example/straße" },
     { value: "HTTPS://Example.com" },
-    ...Array.from({ length: 19 }, () => ({ issues: [["value.invalid_url"]] })),
+    { value: "https://example.com/?q=\u2764\uFE0F" },
+    ...Array.from({ length: 20 }, () => ({ issues: [["value.invalid_url"]] })),
   ]
 );
 add(

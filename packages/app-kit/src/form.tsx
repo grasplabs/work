@@ -373,7 +373,7 @@ const isRequired = (descriptor: ValueDescriptor | undefined): boolean => {
   if (descriptor.kind === "array") {
     return (descriptor.min ?? 0) > 0;
   }
-  // Any JSON takes null, so it is never missing.
+  // Any JSON takes null, which a cleared control sends, so it is never missing.
   return descriptor.kind !== "boolean" && descriptor.kind !== "json";
 };
 
@@ -421,7 +421,10 @@ const FieldShell = <Values,>({
             [errorId]: invalid,
           }),
           descriptor,
-          empty: descriptor?.nullable === true ? null : undefined,
+          empty:
+            descriptor?.nullable === true || descriptor?.kind === "json"
+              ? null
+              : undefined,
           handleChange: (next) => {
             // SAFETY: each field hands on a value of the type its name
             // admits (FieldNameOf), or one the validator then refuses.

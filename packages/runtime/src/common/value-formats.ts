@@ -69,6 +69,7 @@ const webUrlStart = /^https?:\/\/[^/]/iu;
 
 // What IDNA drops from a host without a word (a zero-width space, a soft
 // hyphen), so the text would name another host than the one it reads as.
+// Elsewhere the parser percent-encodes them, as it does an emoji's selector.
 const invisible = /\p{Default_Ignorable_Code_Point}/u;
 
 /**
@@ -77,7 +78,8 @@ const invisible = /\p{Default_Ignorable_Code_Point}/u;
  * (percent-decoded, IDNA-mapped, IPv4 in its short forms). What that parser
  * would quietly mend in how the address is written is refused instead:
  * spaces and control characters, which it drops; a backslash, which it
- * reads as `/`; a character IDNA drops unseen; and a scheme without `//`
+ * reads as `/`; a character IDNA drops unseen from the host; a lone
+ * surrogate, which it replaces; and a scheme without `//`
  * and a host after it. So is
  * any user name or password, even an empty one (`@` before the host:
  * `https://good.example@evil.example`), which fetch refuses anyway.
@@ -92,7 +94,8 @@ export const isWebUrl = (text: string): boolean => {
   return (
     webUrlStart.test(text) &&
     !authority.includes("@") &&
-    !invisible.test(text) &&
+    !invisible.test(authority) &&
+    text.isWellFormed() &&
     URL.canParse(text)
   );
 };
