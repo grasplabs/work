@@ -13,6 +13,7 @@ import { Link, useLocation } from "@tanstack/react-router";
 
 import { GraspLogo } from "../../connections/brand-logos.ts";
 import { CampaignWeek } from "./campaign-week.tsx";
+import { Canvas } from "./concepts/canvas.tsx";
 import { Letter } from "./concepts/letter.tsx";
 import { Mosaic } from "./concepts/mosaic.tsx";
 import { RoadPage } from "./concepts/road.tsx";
@@ -20,10 +21,10 @@ import { campaigns } from "./fixtures.ts";
 import type { CampaignState } from "./fixtures.ts";
 
 /** The routes' `?concept=` letter: in development, which concept of the progress page shows. */
-export type Concept = "a" | "b" | "c";
+export type Concept = "a" | "b" | "c" | "d";
 
 export const isConcept = (value: unknown): value is Concept =>
-  value === "a" || value === "b" || value === "c";
+  value === "a" || value === "b" || value === "c" || value === "d";
 
 const styles = stylex.create({
   window: {
@@ -52,8 +53,9 @@ const styles = stylex.create({
 });
 
 /**
- * Concepts only, in development: `?concept=a|b|c` shows the progress
- * page as the letter, the company in one picture, or the road; without
+ * Concepts only, in development: `?concept=a|b|c|d` shows the progress
+ * page as the letter, the company in one picture, the road, or the
+ * canvas that fills in as interviews end; without
  * it, the week as it is.
  */
 const useProgressConcept = (): Concept | null => {
@@ -71,6 +73,9 @@ export const CampaignConcept = ({ state }: { state: CampaignState }) => {
   }
   if (concept === "b") {
     return <Mosaic campaign={campaign} key={state} />;
+  }
+  if (concept === "d") {
+    return <Canvas campaign={campaign} key={state} />;
   }
   if (concept === "c") {
     return <RoadPage campaign={campaign} />;

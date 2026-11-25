@@ -1964,6 +1964,10 @@ msgstr "Een JSON-waarde"
 msgid "A line of mine, removed."
 msgstr "Een beurt van mij, verwijderd."
 
+#: src/onboarding/campaign/concepts/canvas.tsx
+msgid "A list or sheet of their own, beside the systems"
+msgstr "Een eigen lijst of sheet naast de systemen"
+
 #: src/activity/audit-words.ts
 msgid "A model call was refused"
 msgstr "Een modelaanroep is geweigerd"
@@ -3882,6 +3886,10 @@ msgstr "Koppelingen"
 #: src/workflows/files-and-apps.tsx
 msgid "Bindings of version {version}"
 msgstr "Koppelingen van versie {version}"
+
+#: src/onboarding/campaign/concepts/canvas.tsx
+msgid "Blank for now. It fills in as each interview ends."
+msgstr "Nog leeg. Het vult zich na elk afgerond interview."
 
 #: src/brain/brain.ts
 msgid "Blocker"
@@ -8335,6 +8343,10 @@ msgstr "De chat van Grasp"
 msgid "Grasp's team can help here until then"
 msgstr "Tot dan kan het team van Grasp hier helpen"
 
+#: src/onboarding/campaign/concepts/canvas.tsx
+msgid "Green lines: new that day"
+msgstr "Groene lijnen: nieuw die dag"
+
 #: src/settings/backdrop-settings.tsx
 msgid "Grid"
 msgstr "Raster van stippen"
@@ -8795,6 +8807,10 @@ msgstr "Icoon"
 #: src/people/people-apart.ts
 msgid "ID …{end}"
 msgstr "ID …{end}"
+
+#: src/onboarding/campaign/concepts/canvas.tsx
+msgid "Ideas taking shape"
+msgstr "Ideeën krijgen vorm"
 
 #: src/make/make-ideas.tsx
 msgid "Ideas to start from"
@@ -11117,6 +11133,7 @@ msgid "Never started: {refusal}"
 msgstr "Nooit gestart: {refusal}"
 
 #: src/agents/setup/schedule-step.tsx
+#: src/onboarding/campaign/concepts/canvas.tsx
 msgid "New"
 msgstr "Nieuw"
 
@@ -11444,6 +11461,10 @@ msgstr "Nog geen doelen."
 #: src/routes/_shell.settings.brain.tsx
 msgid "No group"
 msgstr "Geen groep"
+
+#: src/onboarding/campaign/concepts/canvas.tsx
+msgid "No ideas yet. They come once we see how the work runs."
+msgstr "Nog geen ideeën. Die komen zodra we zien hoe het werk loopt."
 
 #: src/agents/agents-overview.tsx
 msgid "No job written yet"
@@ -12322,6 +12343,10 @@ msgstr "Nog niets"
 #: src/chat/agent-draft-card.tsx
 msgid "Nothing yet: you turn it on on its page"
 msgstr "Nog niets: je zet het aan op zijn pagina"
+
+#: src/onboarding/campaign/concepts/canvas.tsx
+msgid "Nothing yet. Patterns show once a few interviews are in."
+msgstr "Nog niets. Patronen verschijnen na een paar interviews."
 
 #: src/brain/memories-page.tsx
 msgid "Nothing you can read"
@@ -14555,6 +14580,10 @@ msgstr "Een pakketaanvraag vervangen"
 msgid "Replaced an AI provider's key"
 msgstr "De sleutel van een AI-aanbieder vervangen"
 
+#: src/onboarding/campaign/concepts/canvas.tsx
+msgid "Replay the week"
+msgstr "Week afspelen"
+
 #: src/inbox/report-row.tsx
 msgid "Report · {day}"
 msgstr "Rapport · {day}"
@@ -16376,6 +16405,14 @@ msgctxt "the chat box's edge"
 msgid "Smooth"
 msgstr "Zacht"
 
+#: src/onboarding/campaign/concepts/canvas.tsx
+msgid "So far: {works, plural, one {# piece of work} other {# pieces of work}} and {tools, plural, one {# tool} other {# tools}}."
+msgstr "Tot nu toe: {works, plural, one {# stuk werk} other {# stukken werk}} en {tools, plural, one {# tool} other {# tools}}."
+
+#: src/onboarding/campaign/concepts/canvas.tsx
+msgid "So far: {works, plural, one {# piece of work} other {# pieces of work}}, {tools, plural, one {# tool} other {# tools}} and {handoffs, plural, one {# hand-over between teams} other {# hand-overs between teams}}."
+msgstr "Tot nu toe: {works, plural, one {# stuk werk} other {# stukken werk}}, {tools, plural, one {# tool} other {# tools}} en {handoffs, plural, one {# overdracht tussen teams} other {# overdrachten tussen teams}}."
+
 #: src/onboarding/company-step.tsx
 msgid "So I can see your teams, roles and directory. I only read names, email addresses, teams and jobs, nothing else."
 msgstr "Zo zie ik je teams, rollen en adresboek. Ik lees alleen namen, e-mailadressen, teams en functies, verder niets."
@@ -16787,6 +16824,10 @@ msgstr "Stappen"
 msgctxt "how an answer was thought out"
 msgid "Steps"
 msgstr "Stappen"
+
+#: src/onboarding/campaign/concepts/canvas.tsx
+msgid "Steps; one told two ways in green"
+msgstr "Stappen; een die op twee manieren verteld is in groen"
 
 #: src/brain/atlas-map.ts
 #: src/brain/atlas-overlays.tsx
@@ -20306,6 +20347,10 @@ msgstr "Wat is verstuurd, wordt achtergehouden: de run die het verstuurde, mag n
 #: src/onboarding/campaign/campaign-findings.tsx
 msgid "What we learned"
 msgstr "Wat we leerden"
+
+#: src/onboarding/campaign/concepts/canvas.tsx
+msgid "What we see"
+msgstr "Wat we zien"
 
 #: src/interview/closed.tsx
 msgid "What you agreed to is kept. Forgot something? This link works until {closes}."
