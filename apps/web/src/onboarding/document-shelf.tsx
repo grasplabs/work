@@ -6,27 +6,38 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
 
 import { kindOfName } from "./document-pages.tsx";
-import { useStill } from "./pixel-cursor.tsx";
+import { keysOf, useStill } from "./pixel-cursor.tsx";
 import { PixelPage } from "./pixel-page.tsx";
 
-// What was shared on the documents step, under its drop zone: one small
-// chip a document, its own pixel page (pixel-page.tsx) and its name, side by
-// side. A file on its way has the same chip, its page filling in cell by
-// cell as it is sent and read, its name pale until it is in; then it is
-// simply one of the documents shared, with Remove. One that could not be
-// read says why, with Try again. A chip arrives with a small pixel step,
-// as the pages do; under reduced motion it is just there.
+// What was shared on the documents step, over its drop zone from its start
+// edge, one chip after the other: its own pixel page (pixel-page.tsx) and
+// its name. A file on its way says so under its name, "Uploading…", its
+// page pale and filling in cell by cell as it is sent and read; once in,
+// the line goes, its name darkens and a small green pixel tick lands on its
+// page: it is in. Then Remove, a plain cross that greys on hover and focus.
+// One that could not be read says why, with Try again. A chip arrives with
+// a small pixel step, as the pages do; under reduced motion it is just there.
 
 const arrive = stylex.keyframes({
   "0%": { opacity: 0, transform: "scale(0.7)" },
   "100%": { opacity: 1, transform: "scale(1)" },
 });
 
+const land = stylex.keyframes({
+  "0%": { opacity: 0, transform: "translateY(-4px) scale(0.4)" },
+  "100%": { opacity: 1, transform: "translateY(0) scale(1)" },
+});
+
+const stepIn = {
+  animationDuration: "240ms",
+  animationTimingFunction: "steps(4, end)",
+} as const;
+
 const styles = stylex.create({
   shelf: {
     display: "flex",
     flexWrap: "wrap",
-    justifyContent: "center",
+    justifyContent: "flex-start",
     gap: space[2],
     margin: 0,
     padding: 0,
@@ -38,24 +49,37 @@ const styles = stylex.create({
     gap: space[2],
     minWidth: 0,
     maxWidth: "100%",
-    minHeight: 40,
+    minHeight: 44,
     paddingBlock: 6,
     paddingInlineStart: 10,
-    paddingInlineEnd: 4,
+    paddingInlineEnd: 6,
     borderRadius: radius.lg,
     backgroundColor: colors.muted,
     animationName: {
       default: arrive,
       "@media (prefers-reduced-motion: reduce)": "none",
     },
-    animationDuration: "240ms",
-    animationTimingFunction: "steps(4, end)",
+    ...stepIn,
   },
   // A document already in comes without a step: only a file arriving makes one.
   settled: { animationName: "none" },
   // A chip without an action at its end keeps the same room there.
-  bare: { paddingInlineEnd: 12 },
-  page: { display: "flex", flexShrink: 0 },
+  bare: { paddingInlineEnd: 14 },
+  page: { position: "relative", display: "flex", flexShrink: 0 },
+  // The tick, on the page's foot corner, a little over its edge.
+  tick: {
+    position: "absolute",
+    insetBlockEnd: -4,
+    insetInlineEnd: -6,
+    display: "block",
+    fill: colors.success,
+    animationName: {
+      default: land,
+      "@media (prefers-reduced-motion: reduce)": "none",
+    },
+    ...stepIn,
+  },
+  tickSettled: { animationName: "none" },
   words: { display: "grid", minWidth: 0 },
   name: {
     overflow: "hidden",
@@ -70,13 +94,119 @@ const styles = stylex.create({
     transitionDuration: "240ms",
   },
   coming: { color: colors.mutedForeground },
-  problem: {
-    color: colors.destructive,
+  line: {
+    color: colors.mutedForeground,
     fontFamily: font.sans,
     fontSize: font.textXs,
     lineHeight: font.textXsLine,
   },
+  problem: { color: colors.destructive },
+  // Remove: a plain cross, greyed under the pointer and on focus; no ring of its own, the grey says it.
+  remove: {
+    display: "inline-grid",
+    placeItems: "center",
+    flexShrink: 0,
+    width: 28,
+    height: 28,
+    padding: 0,
+    border: "none",
+    borderRadius: radius.md,
+    color: colors.mutedForeground,
+    backgroundColor: {
+      default: "transparent",
+      ":hover": colors.accentActive,
+      ":focus-visible": colors.accentActive,
+    },
+    outline: "none",
+    cursor: "pointer",
+    transitionProperty: "background-color, color",
+    transitionDuration: "120ms",
+    ":hover": { color: colors.foreground },
+    ":disabled": { cursor: "default", opacity: 0.5 },
+  },
 });
+
+/** The tick, a character a cell: its green (x); its white rim is drawn round it. */
+const tickCells = [".....x", "....xx", "x..xx.", "xxxx..", ".xx..."];
+const tickCell = 2;
+
+/** The tick's cells and the white ones round them, so it reads on any page. */
+const tickRects = (() => {
+  const on = new Set<string>();
+  for (const [y, row] of tickCells.entries()) {
+    for (const [x, mark] of keysOf(row).entries()) {
+      if (mark === "x") {
+        on.add(`${String(x + 1)},${String(y + 1)}`);
+      }
+    }
+  }
+  const rim = new Set<string>();
+  for (const spot of on) {
+    const [x = 0, y = 0] = spot.split(",").map(Number);
+    for (const dx of [-1, 0, 1]) {
+      for (const dy of [-1, 0, 1]) {
+        const near = `${String(x + dx)},${String(y + dy)}`;
+        if (!on.has(near)) {
+          rim.add(near);
+        }
+      }
+    }
+  }
+  return { on: [...on], rim: [...rim] };
+})();
+
+/** A small green pixel tick: this one is in. */
+const Tick = ({ settled }: { settled: boolean }) => {
+  const toRect = (spot: string, white: boolean) => {
+    const [x = 0, y = 0] = spot.split(",").map(Number);
+    return (
+      <rect
+        fill={white ? "white" : undefined}
+        height={tickCell}
+        key={`${white ? "r" : "t"}${spot}`}
+        width={tickCell}
+        x={x * tickCell}
+        y={y * tickCell}
+      />
+    );
+  };
+  return (
+    <svg
+      aria-hidden="true"
+      height={(tickCells.length + 2) * tickCell}
+      shapeRendering="crispEdges"
+      width={8 * tickCell}
+      {...stylex.props(styles.tick, settled && styles.tickSettled)}
+    >
+      {tickRects.rim.map((spot) => toRect(spot, true))}
+      {tickRects.on.map((spot) => toRect(spot, false))}
+    </svg>
+  );
+};
+
+/** Remove, as a plain cross. */
+const Remove = ({
+  name,
+  disabled = false,
+  onClick,
+}: {
+  name: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <button
+      aria-label={t`Remove ${name}`}
+      disabled={disabled}
+      onClick={onClick}
+      type="button"
+      {...stylex.props(styles.remove)}
+    >
+      <Icon icon={XIcon} />
+    </button>
+  );
+};
 
 /** A file on its way: sent and read, or refused with why. */
 export interface Sending {
@@ -137,32 +267,32 @@ const ComingChip = ({
   const { file, done, problem } = sending;
   const filled = useFilled(done, problem !== null);
   const { name } = file;
+  let line = null;
+  if (problem !== null) {
+    line = (
+      <span {...stylex.props(styles.line, styles.problem)}>{problem}</span>
+    );
+  } else if (!done) {
+    line = <span {...stylex.props(styles.line)}>{t`Uploading…`}</span>;
+  }
   return (
     <li {...stylex.props(styles.chip, problem === null && styles.bare)}>
       <span {...stylex.props(styles.page)}>
         <PixelPage cell={2} filled={filled} kind={kindOfName(name)} />
+        {done ? <Tick settled={false} /> : null}
       </span>
       <span {...stylex.props(styles.words)}>
         <span {...stylex.props(styles.name, !done && styles.coming)}>
           {name}
         </span>
-        {problem === null ? null : (
-          <span {...stylex.props(styles.problem)}>{problem}</span>
-        )}
+        {line}
       </span>
       {problem === null ? null : (
         <>
           <Button onClick={onRetry} size="xs" variant="ghost">
             {t`Try again`}
           </Button>
-          <Button
-            aria-label={t`Remove ${name}`}
-            onClick={onDismiss}
-            size="icon-xs"
-            variant="ghost"
-          >
-            <Icon icon={XIcon} />
-          </Button>
+          <Remove name={name} onClick={onDismiss} />
         </>
       )}
     </li>
@@ -201,21 +331,18 @@ export const DocumentShelf = ({
         <li key={id} {...stylex.props(styles.chip, styles.settled)}>
           <span {...stylex.props(styles.page)}>
             <PixelPage cell={2} kind={kindOfName(name)} />
+            <Tick settled />
           </span>
           <span {...stylex.props(styles.words)}>
             <span {...stylex.props(styles.name)}>{name}</span>
           </span>
-          <Button
-            aria-label={t`Remove ${name}`}
+          <Remove
             disabled={busy}
+            name={name}
             onClick={() => {
               onRemove(id);
             }}
-            size="icon-xs"
-            variant="ghost"
-          >
-            <Icon icon={XIcon} />
-          </Button>
+          />
         </li>
       ))}
       {coming.map((sending) => (
