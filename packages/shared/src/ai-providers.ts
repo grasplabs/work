@@ -39,11 +39,14 @@ export type OrganizationProviderId = z.infer<
 export const aiKeySavedAtSchema = z.number().int().nonnegative();
 
 /**
- * Every provider: each is one an organization may add a key for. Grasp's
- * own speech feature reaches Mistral, on Grasp's key (core's
- * src/platform-ai.ts).
+ * Every provider: an organization's, and ElevenLabs, which only Grasp's
+ * own speech feature reaches, on Grasp's key (core's src/platform-ai.ts):
+ * the admin's onboarding is said with it, an interview with Mistral.
  */
-export const aiProviderIds = organizationProviderIds;
+export const aiProviderIds = [
+  ...organizationProviderIds,
+  "elevenlabs",
+] as const;
 export const aiProviderIdSchema = z.enum(aiProviderIds);
 export type AiProviderId = z.infer<typeof aiProviderIdSchema>;
 
@@ -54,7 +57,7 @@ export type AiProviderApi =
   | "openai-completions";
 
 /** The one request header a provider takes its key in. */
-export type AiKeyHeader = "x-api-key" | "authorization";
+export type AiKeyHeader = "x-api-key" | "xi-api-key" | "authorization";
 
 /** One provider, as core routes to it and connect sends to it. */
 export interface AiProviderSpec {
@@ -69,12 +72,14 @@ export interface AiProviderSpec {
   /**
    * The paths below its host a model request may go to, and nothing else
    * its key could reach (files, fine-tuning, an account's settings). For
-   * an OpenAI-compatible endpoint, below its base URL's own path.
+   * an OpenAI-compatible endpoint, below its base URL's own path. A `*`
+   * segment is one ID of letters and digits, such as a voice's.
    */
   paths: readonly string[];
   /**
    * The queries a model request may carry, each exactly and naming no
-   * data; `""` where it may carry none.
+   * data; `""` where it may carry none. ElevenLabs's has no `""`: a line
+   * without `enable_logging=false` would be kept by ElevenLabs.
    */
   queries: readonly string[];
   /**
@@ -84,7 +89,7 @@ export interface AiProviderSpec {
    * organization's key). Empty for a provider with none.
    */
   realtime: readonly { path: string; query: string }[];
-  /** Where its key goes: `x-api-key: <key>` or `authorization: Bearer <key>`. */
+  /** Where its key goes: `x-api-key: <key>`, `xi-api-key: <key>` or `authorization: Bearer <key>`. */
   keyHeader: AiKeyHeader;
   /** Where it runs, in plain words, for the admin. */
   whereItRuns: string;
@@ -100,6 +105,7 @@ export interface AiProviderSpec {
     | "OPENAI_API_KEY"
     | "MISTRAL_API_KEY"
     | "OPENROUTER_API_KEY"
+    | "ELEVENLABS_API_KEY"
     | undefined;
   /**
    * The model a test of a newly added key asks, one of the cheapest of its
@@ -205,6 +211,23 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     testModel: undefined,
     statusPage: undefined,
   },
+  // Grasp's own speech feature only, never an organization's key: a line
+  // of the admin's onboarding said with when each character is said, kept
+  // by neither side.
+  elevenlabs: {
+    id: "elevenlabs",
+    label: "ElevenLabs",
+    baseUrls: {},
+    paths: ["/v1/text-to-speech/*/with-timestamps"],
+    queries: ["?enable_logging=false&output_format=mp3_44100_128"],
+    realtime: [],
+    keyHeader: "xi-api-key",
+    whereItRuns: "ElevenLabs, United States",
+    region: "us",
+    platformSecret: "ELEVENLABS_API_KEY",
+    testModel: undefined,
+    statusPage: "https://status.elevenlabs.io",
+  },
 };
 
 /** The host a fixed provider's requests go to; none for a custom endpoint. */
@@ -215,11 +238,13 @@ export const aiProviderHost = (provider: AiProviderId): string | undefined => {
 
 /**
  * The host Grasp's own key for a provider goes to where it isn't the
- * provider's usual one: its EU data residency host, for OpenAI. Grasp's own features always go there, in the EU whatever
+ * provider's usual one: its EU data residency host, for OpenAI and
+ * ElevenLabs. Grasp's own features always go there, in the EU whatever
  * the deployment: keeping them there is Grasp's to do.
  */
 const platformHosts: Readonly<Partial<Record<AiProviderId, string>>> = {
   openai: "eu.api.openai.com",
+  elevenlabs: "api.eu.residency.elevenlabs.io",
 };
 
 /** Where a platform feature's requests go on Grasp's own key, and where that is. */
@@ -233,13 +258,14 @@ export interface PlatformRoute {
 
 /**
  * A provider's usual host, outside the EU, for a provider whose platform
- * features may be sent there for testing (`usualHostProviders`): OpenAI,
- * whose EU data residency host takes only keys of an account or project
- * that has EU residency. A provider not named here
+ * features may be sent there for testing (`usualHostProviders`): OpenAI
+ * and ElevenLabs, whose EU data residency hosts take only keys of an
+ * account or project that has EU residency. A provider not named here
  * always goes to its platform host.
  */
 const usualHosts: Readonly<Partial<Record<AiProviderId, string>>> = {
   openai: "api.openai.com",
+  elevenlabs: "api.elevenlabs.io",
 };
 
 /**

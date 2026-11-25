@@ -10,6 +10,7 @@ import { z } from "zod";
 
 import { voiceBudgets } from "../src/onboarding/speech.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { platformAi } from "../src/platform-ai.ts";
 import { storedKeyOf } from "../src/speech-cache.ts";
 import { secondsPerCharacter } from "./ai-providers-fake.ts";
 import { mockIdp } from "./idp.ts";
@@ -345,7 +346,7 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     await expect(carrying(after)).resolves.toStrictEqual([]);
   });
 
-  it("says a line for an admin signed in, counted as their own onboarding's", async () => {
+  it("says a line for an admin signed in with ElevenLabs, counted as their own onboarding's", async () => {
     const { session } = await signedInWithRole(idp, "admin");
     const before = await voiceCounted("reading");
     const text = newLine();
@@ -357,9 +358,17 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     const result = { status: response.status, body: await response.json() };
 
     expect(result.status).toBe(200);
-    expect(answerSchema.parse(result.body).words).toHaveLength(3);
-    await expect(askedFor(text)).resolves.toMatchObject([
-      { voice_id: "voice_1788" },
+    expect(answerSchema.parse(result.body)).toMatchObject({
+      mime: "audio/mpeg",
+      words: text.split(" ").map((word) => ({ text: word })),
+    });
+    // An admin's onboarding is said with ElevenLabs, in its own voices.
+    const carried = await carrying(text);
+    expect(carried.map(({ host, path }) => ({ host, path }))).toStrictEqual([
+      {
+        host: "api.eu.residency.elevenlabs.io",
+        path: `/v1/text-to-speech/${platformAi.onboardingSpeech.voices.mark}/with-timestamps?enable_logging=false&output_format=mp3_44100_128`,
+      },
     ]);
     await expect(voiceCounted("reading")).resolves.toBeCloseTo(
       before + text.length * secondsPerCharacter

@@ -134,8 +134,8 @@ export const parseModelRef = (ref: string): ModelRef | undefined => {
  * OpenAI-compatible endpoint, whose models the organization names.
  */
 export const catalogModelsOf = (provider: AiProviderId): AiProviderModel[] => {
-  // A custom endpoint names its own.
-  if (provider === "openai-compatible") {
+  // A custom endpoint names its own; ElevenLabs only says Grasp's lines.
+  if (provider === "openai-compatible" || provider === "elevenlabs") {
     return [];
   }
   const catalog: Readonly<Record<string, Model<Api>>> = providers[provider];

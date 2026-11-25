@@ -97,6 +97,7 @@ import {
   charactersOf,
   hearingCostOf,
   parseHearingRef,
+  alignedWordsOf,
   parseVoiceRef,
   speechCostOf,
   wordsOf,
@@ -2443,16 +2444,78 @@ const speechRetries = 1;
 const speechRetryMs = 500;
 
 /**
- * The audio asked for: a WAV file, whose size says how long the line
- * takes to say, which Mistral's answer doesn't otherwise tell.
+ * The audio asked of Mistral: a WAV file, whose size says how long the
+ * line takes to say, which Mistral's answer doesn't otherwise tell.
  */
 const speechFormat = { name: "wav", mime: "audio/wav" } as const;
 
-/** Where a line is said: Mistral's speech endpoint, the whole file at once. */
+/** Where Mistral says a line: its speech endpoint, the whole file at once. */
 const speechPath = "/v1/audio/speech";
 
 /** Mistral's answer: the audio. */
 const spokenSchema = z.object({ audio_data: z.string().min(1) });
+
+/** The audio asked of ElevenLabs: MP3 at 44.1 kHz, 128 kbit/s, its default. */
+const elevenLabsFormat = {
+  query: "mp3_44100_128",
+  mime: "audio/mpeg",
+} as const;
+
+/**
+ * Steadier than ElevenLabs's default: a voice says many separate lines,
+ * so one line should sound like the next more than it should surprise.
+ */
+const elevenLabsVoiceSettings = { stability: 0.7, similarity_boost: 0.8 };
+
+/** The same seed for every line ElevenLabs says, so the same words sound the same. */
+const elevenLabsSeed = 7;
+
+/** ElevenLabs's answer: the audio, and when each character is said. */
+const elevenLabsSpokenSchema = z.object({
+  audio_base64: z.string().min(1),
+  alignment: z.object({
+    characters: z.array(z.string()),
+    character_start_times_seconds: z.array(z.number().nonnegative()),
+    character_end_times_seconds: z.array(z.number().nonnegative()),
+  }),
+});
+
+/**
+ * A line's provider request: Mistral's speech endpoint with no language
+ * named, as Voxtral says a line in the language it is written in; or
+ * ElevenLabs's, which tells when each character is said, with the line's
+ * language, and kept by neither side (`enable_logging=false`).
+ */
+const speechRequestOf = (
+  call: SpeechSession,
+  ref: VoiceRef
+): { path: string; body: string } => {
+  if (ref.provider === "mistral") {
+    return {
+      path: speechPath,
+      body: JSON.stringify({
+        model: ref.id,
+        input: call.text,
+        voice_id: call.voice,
+        response_format: speechFormat.name,
+      }),
+    };
+  }
+  const query = new URLSearchParams({
+    enable_logging: "false",
+    output_format: elevenLabsFormat.query,
+  });
+  return {
+    path: `/v1/text-to-speech/${call.voice}/with-timestamps?${query.toString()}`,
+    body: JSON.stringify({
+      text: call.text,
+      model_id: ref.id,
+      language_code: call.language,
+      seed: elevenLabsSeed,
+      voice_settings: elevenLabsVoiceSettings,
+    }),
+  };
+};
 
 /** Base64 as bytes; `undefined` for text that isn't base64. */
 const bytesOf = (base64: string): Uint8Array | undefined => {
@@ -2625,14 +2688,7 @@ const admitSpeech = async (
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
   }
-  // No language is named: Voxtral says a line in the language it is
-  // written in.
-  const body = JSON.stringify({
-    model: ref.id,
-    input: call.text,
-    voice_id: call.voice,
-    response_format: speechFormat.name,
-  });
+  const { path, body } = speechRequestOf(call, ref);
   return {
     env,
     call,
@@ -2642,7 +2698,7 @@ const admitSpeech = async (
       await connectRequest(
         env,
         target,
-        speechPath,
+        path,
         {
           headers: {
             "content-type": "application/json",
@@ -2756,16 +2812,28 @@ const wavSeconds = (bytes: Uint8Array): number | undefined => {
 };
 
 /**
- * What a line's answer holds, read; `undefined` when it isn't a line. Its
- * words are those of the `line` asked for, timed over the audio's length.
+ * What a line's answer holds, read; `undefined` when it isn't a line.
+ * ElevenLabs's words are timed as it aligned them; Mistral's are those of
+ * the `line` asked for, timed over the audio's length.
  */
 const readSpeech = async (
   answered: Response,
-  line: string
+  line: string,
+  ref: VoiceRef
 ): Promise<Speech | undefined> => {
-  const parsed = spokenSchema.safeParse(
-    await answered.json().catch(() => null)
-  );
+  const answer: unknown = await answered.json().catch(() => null);
+  if (ref.provider === "elevenlabs") {
+    const aligned = elevenLabsSpokenSchema.safeParse(answer);
+    if (!aligned.success) {
+      return undefined;
+    }
+    const audio = bytesOf(aligned.data.audio_base64);
+    const words = alignedWordsOf(aligned.data.alignment);
+    return audio === undefined || words === undefined
+      ? undefined
+      : { audio, mime: elevenLabsFormat.mime, words };
+  }
+  const parsed = spokenSchema.safeParse(answer);
   if (!parsed.success) {
     return undefined;
   }
@@ -2779,13 +2847,14 @@ const readSpeech = async (
 /** The line the provider answered with, read; none when it said nothing. */
 const heardSpeech = async (
   { answered, answering }: SpeechSent,
-  line: string
+  line: string,
+  ref: VoiceRef
 ): Promise<Speech | undefined> => {
   if (answered === undefined || answering === undefined) {
     return undefined;
   }
   try {
-    return await readSpeech(answered, line);
+    return await readSpeech(answered, line, ref);
   } catch {
     // Cut off while its answer came in: said and billed all the same.
     return undefined;
@@ -3118,7 +3187,7 @@ const speakLine = async (
   const limit = deadline(call.timeoutMs ?? speechTimeoutMs, signal);
   try {
     const sent = await sendSpeech(route, limit);
-    const speech = await heardSpeech(sent, route.call.text);
+    const speech = await heardSpeech(sent, route.call.text, route.ref);
     const stopped = limit.stopped();
     const outcome = speechOutcome(
       speech,
