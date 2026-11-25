@@ -349,9 +349,7 @@ export const AskedOfGraspRows = ({
         <Button
           aria-label={`Asked of Grasp: open ${app.name} on Apps asked for`}
           nativeButton={false}
-          render={
-            <Link search={{ app: appKey(app.name) }} to="/integrations" />
-          }
+          render={<Link search={{ app: appKey(app.name) }} to="/connectors" />}
           size="sm"
           variant="outline"
         >

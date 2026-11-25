@@ -8,7 +8,7 @@
 const levels = [
   /^\/settings(?:\/|$)/u,
   /^\/brain(?:\/|$)/u,
-  /^\/integrations(?:\/|$)/u,
+  /^\/connectors(?:\/|$)/u,
   /^\/apps\/[^/]+/u,
   /^\/agents\/(?!new$)[^/]+/u,
 ];

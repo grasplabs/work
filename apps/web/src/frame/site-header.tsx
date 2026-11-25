@@ -46,7 +46,7 @@ export type Crumb =
         | "/apps"
         | "/workflows"
         | "/agents"
-        | "/integrations";
+        | "/connectors";
     }
   | {
       label: string;

@@ -291,7 +291,7 @@ export const startAs = async (
     scope: "personal",
     origin: clientOrigin,
     tenant: provider === "microsoft" ? acmeTenant : acmeDomain,
-    returnTo: "/integrations",
+    returnTo: "/connectors",
     ...options,
   });
   return new URL(url);

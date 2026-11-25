@@ -94,6 +94,6 @@ const Integrations = () => (
 );
 
 /** An organization's Integrations: what it connected, and what is still to connect. */
-export const Route = createFileRoute("/organizations/$clientId/integrations")({
+export const Route = createFileRoute("/organizations/$clientId/connectors")({
   component: Integrations,
 });

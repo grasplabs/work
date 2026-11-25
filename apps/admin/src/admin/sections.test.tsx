@@ -203,7 +203,7 @@ describe("an organization's integrations, workflows and members", () => {
   ])(
     "shows what a company connected only once it signed in ($when), says core doesn't report its connections yet, and that what is still to connect comes from Composio",
     async ({ snapshot, says }) => {
-      const { container } = await openAcme("/integrations", snapshot);
+      const { container } = await openAcme("/connectors", snapshot);
 
       expect(integrationsOf(container)).toStrictEqual({
         ...says,
@@ -257,7 +257,7 @@ describe("an organization's integrations, workflows and members", () => {
   };
 
   it("shows what a company connected, and the app a workflow is bound to that isn't connected any more", async () => {
-    const integrations = await openAcme("/integrations", disconnected);
+    const integrations = await openAcme("/connectors", disconnected);
     const page = integrations.main();
 
     expect({

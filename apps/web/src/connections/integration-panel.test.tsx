@@ -282,7 +282,7 @@ describe("an app's panel", () => {
           toolkit: "hubspot",
           tools: ["HUBSPOT_LIST_CONTACTS", "HUBSPOT_CREATE_NOTE"],
           consent: composioConsentText,
-          returnTo: "/integrations/composio:hubspot",
+          returnTo: "/connectors/composio:hubspot",
         },
       ],
       failed: true,
@@ -497,7 +497,7 @@ describe("an app's panel", () => {
         {
           provider: "microsoft",
           scope: "shared",
-          returnTo: "/integrations/native:microsoft",
+          returnTo: "/connectors/native:microsoft",
         },
       ],
     });
@@ -515,7 +515,7 @@ describe("an app's panel", () => {
         {
           provider: "microsoft",
           scope: "personal",
-          returnTo: "/integrations/native:microsoft",
+          returnTo: "/connectors/native:microsoft",
         },
       ],
     });

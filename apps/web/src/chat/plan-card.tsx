@@ -70,7 +70,7 @@ const Need = ({ need }: { need: ChatPlanNeed }) => {
       <Button asChild size="xs" variant="outline">
         <Link
           params={{ integration: integrationKey(need.source, need.provider) }}
-          to="/integrations/$integration"
+          to="/connectors/$integration"
         >
           <Trans>Connect</Trans>
         </Link>

@@ -83,16 +83,16 @@ export const useIntegrationsSection = (
   const { t, i18n } = useLingui();
   const { pathname } = useLocation();
   const overview = useMatch({
-    from: "/_shell/integrations/",
+    from: "/_shell/connectors/",
     shouldThrow: false,
   });
   // An app's page reads the same catalog and connections, so its kinds match the overview's.
   const app = useMatch({
-    from: "/_shell/integrations/$integration",
+    from: "/_shell/connectors/$integration",
     shouldThrow: false,
   });
   const inIntegrations =
-    pathname === "/integrations" || pathname.startsWith("/integrations/");
+    pathname === "/connectors" || pathname.startsWith("/connectors/");
   if (!inIntegrations) {
     return undefined;
   }
@@ -110,10 +110,10 @@ export const useIntegrationsSection = (
   );
   return {
     id: "integrations",
-    title: t`Integrations`,
+    title: t`Connectors`,
     icon: CableIcon,
     // Its name opens the overview: no Overview row of its own.
-    home: (look) => <Link {...look} to="/integrations" />,
+    home: (look) => <Link {...look} to="/connectors" />,
     homeCurrent: overview !== undefined && chosen === undefined,
     back: {
       label: t`Back`,
@@ -129,7 +129,7 @@ export const useIntegrationsSection = (
             label: i18n._(groupLabel[group]),
             icon: kindIcons[group],
             render: (look) => (
-              <Link {...look} search={{ group }} to="/integrations" />
+              <Link {...look} search={{ group }} to="/connectors" />
             ),
             current: chosen === group,
             ...(count === undefined ? {} : { end: formatNumber(count) }),

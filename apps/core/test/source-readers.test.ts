@@ -130,7 +130,7 @@ const connectedGoogle = async (who: {
   const { url } = await api.connections.start({
     provider: "google",
     scope: "personal",
-    returnTo: "/integrations",
+    returnTo: "/connectors",
   });
   const flow = new URL(url);
   const [local = ""] = who.email.split("@");
@@ -177,7 +177,7 @@ const connectedMicrosoft = async (
   const { url } = await core.authenticate().connections.start({
     provider: "microsoft",
     scope: "personal",
-    returnTo: "/integrations",
+    returnTo: "/connectors",
   });
   const authorization = new URL(url);
   await backFromProvider(
@@ -1822,7 +1822,7 @@ describe("readers copied from the source", () => {
       const { url } = await core.authenticate().connections.start({
         provider: "google",
         scope: "personal",
-        returnTo: "/integrations",
+        returnTo: "/connectors",
       });
       const flow = new URL(url);
       // Her callback gets past Google's code exchange, and waits before
@@ -2262,7 +2262,7 @@ describe("groups copied from the source", () => {
       const { url } = await core.authenticate().connections.start({
         provider: "google",
         scope: "personal",
-        returnTo: "/integrations",
+        returnTo: "/connectors",
       });
       const flow = new URL(url);
       const [local = ""] = carol.email.split("@");

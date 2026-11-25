@@ -76,7 +76,7 @@ import type { AllowedTool } from "./tool-choices.ts";
  * says the app is connected again when `again`.
  */
 export const returnToOf = (key: string, again = false): string =>
-  again ? `/integrations/${key}?again=1` : `/integrations/${key}`;
+  again ? `/connectors/${key}?again=1` : `/connectors/${key}`;
 
 /** Sends the browser to the provider, once core started the flow. */
 export const goTo = (started: { url: string } | undefined): void => {

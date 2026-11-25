@@ -1248,7 +1248,7 @@ export const handleConnectionCallback = async (
   // A flow that fails returns to the Integrations page, where people start
   // connecting and can read why: its own `returnTo` stays with connect,
   // which may never have found the flow.
-  const integrationsPage = new URL("/integrations", config.origin);
+  const integrationsPage = new URL("/connectors", config.origin);
   const failed = (code: string): Response => {
     integrationsPage.searchParams.set("connectionError", code);
     return redirect(integrationsPage);
