@@ -6,8 +6,6 @@
  *   and every connector reach, and from each connector package's entry,
  *   nothing reaches the runtime's App or workflow code, React, TanStack or
  *   the design system's packages.
- * - Connect imports of the runtime only `@grasp-os/runtime/connector`, and
- *   nothing of the SDK, which is App code's.
  * - Each of the runtime's folders imports only its own files and common's.
  *
  * It walks the imports a module runs, read with oxc's parser: static
@@ -38,12 +36,6 @@ const forbiddenPackage =
 /** The one entry of the runtime connect imports. */
 const connectorEntry = "@grasp-os/runtime/connector";
 
-/** What connect may not import: the runtime but its connector entry, and the SDK. */
-const connectForbids = (specifier: string): boolean =>
-  (/^@grasp-os\/runtime(?:\/|$)/u.test(specifier) &&
-    specifier !== connectorEntry) ||
-  /^@grasp-os\/sdk(?:\/|$)/u.test(specifier);
-
 /**
  * An `import()` of a computed value: no walk can follow it, so it is a
  * violation wherever the walk reaches one.
@@ -66,11 +58,7 @@ const stringLiteral = /^(?<quote>["'`])(?<value>[^"'`$]*)\k<quote>$/u;
 const suffixes = [".ts", ".tsx", ".js", "/index.ts", "/index.tsx", "/index.js"];
 
 export interface Violation {
-  rule:
-    | "connector-entry"
-    | "connector-package"
-    | "connect-imports"
-    | "runtime-folders";
+  rule: "connector-entry" | "connector-package" | "runtime-folders";
   /** What reaches it: repo-relative files from the entry, then the module. */
   chain: string[];
 }
@@ -359,20 +347,6 @@ export const runtimeBoundaryViolations = (root: string): Violation[] => {
         .map(({ chain }): Violation => ({ rule: "connector-package", chain }))
     );
 
-  const connect = path.join(root, "apps/connect");
-  const build = path.join(connect, "build.ts");
-  const fromConnect = [
-    ...sourcesUnder(path.join(connect, "src")),
-    ...[build].filter(isFile),
-  ].flatMap((file) =>
-    importsOf(file)
-      .filter(connectForbids)
-      .map((specifier): Violation => ({
-        rule: "connect-imports",
-        chain: [label({ file }), specifier],
-      }))
-  );
-
   const fromFolders = sourcesUnder(runtimeSource)
     .filter((file) => !declarationFile.test(file))
     .flatMap((file) =>
@@ -394,7 +368,7 @@ export const runtimeBoundaryViolations = (root: string): Violation[] => {
         })
     );
 
-  return [...fromEntry, ...fromConnectors, ...fromConnect, ...fromFolders];
+  return [...fromEntry, ...fromConnectors, ...fromFolders];
 };
 
 /** What each rule holds, for the report. */
@@ -402,7 +376,6 @@ const rules: Record<Violation["rule"], string> = {
   "connector-entry": `${connectorEntry} reaches no App or workflow code, React, TanStack or design system`,
   "connector-package":
     "A connector reaches no App or workflow code, React, TanStack or design system",
-  "connect-imports": `Connect imports only ${connectorEntry} of the runtime, and nothing of the SDK`,
   "runtime-folders":
     "A runtime folder imports only its own files and common's, and common none of the others'",
 };

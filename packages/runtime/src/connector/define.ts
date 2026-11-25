@@ -21,6 +21,7 @@ import {
   contractSchemaOf,
   failure,
   isClosed,
+  isWriteMethod,
   lookUp,
   recoveryOf,
   runFailure,
@@ -108,12 +109,12 @@ interface WriteTool<
   /**
    * Looks the effect of the call with `call.key` up instead of carrying it
    * out: what the handler would have answered if it happened, null only if
-   * it certainly didn't. Only GETs, on the tool's own routes.
+   * it certainly didn't. Its `api` has only the tool's reads.
    */
   find?: (
     args: ToolArgs<Args>,
-    call: { key: string },
-    api: Api
+    api: Api,
+    call: { key: string }
   ) => Promise<InferInput<Returns> | null>;
 }
 
@@ -320,6 +321,7 @@ const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
     },
   };
   const apiOfCall = (): Api => apiFor(connector.title, connector.hosts, routes);
+  const reads = routes.filter(({ method }) => !isWriteMethod(method));
   const find =
     declaration.readOnly || declaration.find === undefined
       ? undefined
@@ -339,7 +341,11 @@ const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
         find === undefined
           ? undefined
           : async (data: typeof parsed.value, effect: { key: string }) => {
-              const found = await find(data, effect, apiOfCall());
+              const found = await find(
+                data,
+                apiFor(connector.title, connector.hosts, reads),
+                effect
+              );
               return found === null ? null : { output: found };
             },
         parsed.value,

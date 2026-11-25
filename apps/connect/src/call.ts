@@ -96,7 +96,7 @@ const httpRefusalSchema = z.object({
 /**
  * `connect.server_unavailable` for a call its tool says did nothing, with
  * the wait the tool passed on, if it did (`{ error: { retryAfterSeconds } }`,
- * as the connector kit reports a provider's `retry-after`). An HTTP
+ * as runtime/connector reports a provider's `retry-after`). An HTTP
  * connection's refusal of what it was answered (a redirect off what the
  * admin approved) is `connect.http_refused`: trying again won't help.
  */
@@ -129,7 +129,7 @@ const accessDeniedSchema = z.object({
 
 /**
  * Whether a native connector's tool says its provider refused it access
- * (`{ error: { code: "access_denied" } }`, as the connector kit reports a
+ * (`{ error: { code: "access_denied" } }`, as runtime/connector reports a
  * 401 or 403).
  */
 const isAccessDenied = (

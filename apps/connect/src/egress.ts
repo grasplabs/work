@@ -42,7 +42,7 @@ import { z } from "zod";
 
 /**
  * Largest provider response a connector may read, in bytes: room for the
- * 4 MiB a tool reads (`checkReadable` in the connector kit).
+ * 4 MiB a tool reads (`checkReadable` in runtime/connector).
  */
 export const maxEgressResponseBytes = 10 * 1024 * 1024;
 

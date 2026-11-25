@@ -92,16 +92,16 @@ const oldKit = [
 const isWithin = (folder: string, file: string): boolean =>
   file === folder || file.startsWith(`${folder}${path.sep}`);
 
-/** The folder of the package `file` is in: the nearest with a package.json. */
-const packageFolderOf = (file: string): string => {
-  const folder = path.dirname(file);
-  if (existsSync(path.join(folder, "package.json"))) {
-    return folder;
-  }
-  if (path.dirname(folder) === folder) {
-    throw new Error(`${file} is in no package`);
-  }
-  return packageFolderOf(folder);
+/**
+ * The folder of a connector's own files, from its `entry`: its package's,
+ * for a package in packages/connectors, and else the entry's own folder,
+ * so a sample connector of connect's tests reaches none of connect's code.
+ */
+const ownFolderOf = (entry: string): string => {
+  const [name] = path.relative(packages, entry).split(path.sep);
+  return isWithin(packages, entry) && name !== undefined
+    ? path.join(packages, name)
+    : path.dirname(entry);
 };
 
 /**
@@ -168,7 +168,7 @@ const bundle = async (entry: string): Promise<string> => {
       root,
       logLevel: "warn",
       mode: "production",
-      plugins: [connectorImports(packageFolderOf(entry)), entryModule(entry)],
+      plugins: [connectorImports(ownFolderOf(entry)), entryModule(entry)],
       build: {
         write: false,
         minify: true,

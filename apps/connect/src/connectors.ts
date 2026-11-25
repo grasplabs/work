@@ -62,7 +62,7 @@ export const nativeRelease = async (
 
 /**
  * Largest answer connect reads from a native connector, in bytes: a read
- * of a file or an attachment carries its content, and the connector kit
+ * of a file or an attachment carries its content, and runtime/connector
  * keeps that to 8 MiB as JSON (4 MiB of file, in base64 or as escaped
  * text; `contentAs`), with room to spare.
  */

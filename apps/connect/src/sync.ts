@@ -47,7 +47,7 @@ import { McpError } from "./mcp.ts";
 // Native sync's read (GRA-1758): one page of one source's changes, for
 // core, which applies it to the Brain and keeps the cursor. A source is a
 // connection and a place in it, read by one of its connector's syncs
-// (the connector kit's sync.ts). The ways it can fail, which the tests
+// (runtime/connector's sync.ts). The ways it can fail, which the tests
 // start from:
 //
 // - The token leaving connect: the page is read in a fresh isolate of the

@@ -145,7 +145,7 @@ const reservedProviderIds: ReadonlySet<string> = new Set([
 
 /**
  * Any other app a person signs in to, with OAuth 2.0 or an API key, as its
- * native connector's provider record describes it (the connector kit's
+ * native connector's provider record describes it (runtime/connector's
  * `signInSchema`): `hubspot`, `sample-crm`. Never one of the suites' names.
  */
 export const appProviderSchema = z

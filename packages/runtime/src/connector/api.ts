@@ -1,7 +1,8 @@
 import type { AnySchema } from "../common/value-schema.ts";
 import type { Infer } from "../common/value-types.ts";
+import { httpMethods } from "./manifest.ts";
 import type { Route } from "./manifest.ts";
-import { providerFetch } from "./provider.ts";
+import { providerFetch, segment } from "./provider.ts";
 import { isWriteMethod, ToolError } from "./server.ts";
 
 // How a connector's handler reaches its vendor: by the routes its tool
@@ -12,20 +13,13 @@ import { isWriteMethod, ToolError } from "./server.ts";
 // way out of the isolate is connect's egress. The token is added there,
 // never here.
 //
-// It sends at most one write per call, as the call's last request: once a
-// write went out, any further request is refused. Connect's "nothing was
-// done" (a 429 to the one write) and "outcome unknown" rest on that.
+// It sends at most one write per call, as the call's last request: a write
+// waits for no answer still out, and once it went out any further request
+// is refused. Connect's "nothing was done" (a 429 to the one write) and
+// "outcome unknown" rest on that.
 
 /** The HTTP methods a route may have. */
-export const routeMethods = [
-  "GET",
-  "HEAD",
-  "POST",
-  "PUT",
-  "PATCH",
-  "DELETE",
-] as const;
-export type RouteMethod = (typeof routeMethods)[number];
+export type RouteMethod = (typeof httpMethods)[number];
 
 /** A route as a tool declares it: `"GET /v1/stock/{sku}"`. */
 export type RouteText = `${RouteMethod} ${string}`;
@@ -76,7 +70,7 @@ export interface Api {
 const routeText = /^(?<method>[A-Z]+) (?<target>\S+)$/u;
 
 const isRouteMethod = (method: string): method is RouteMethod =>
-  routeMethods.some((each) => each === method);
+  httpMethods.some((each) => each === method);
 
 /**
  * The route `text` names on the connector's `hosts`: a path on its only
@@ -106,18 +100,28 @@ export const routeOf = (text: string, hosts: readonly string[]): Route => {
 
 const parameter = /\{(?<name>[A-Za-z_]\w*)\}/gu;
 
-/** `path` with each `{name}` replaced by its value, encoded as one segment. */
+/** A path parameter's value that would be no segment, or move the path. */
+const notOneSegment = new Set(["", ".", ".."]);
+
+/**
+ * `path` with each `{name}` replaced by its value, encoded as one segment;
+ * undefined if a value is missing or would be no segment of its own.
+ */
 const filledPath = (
   path: string,
   values: Readonly<Record<string, string | number>>
-): string =>
-  path.replaceAll(parameter, (_match, name: string) => {
+): string | undefined => {
+  let complete = true;
+  const filled = path.replaceAll(parameter, (_match, name: string) => {
     const value = Object.hasOwn(values, name) ? values[name] : undefined;
-    if (value === undefined) {
-      throw new Error(`No value for the path parameter {${name}}`);
+    if (value === undefined || notOneSegment.has(String(value))) {
+      complete = false;
+      return "";
     }
-    return encodeURIComponent(String(value));
+    return segment(String(value));
   });
+  return complete ? filled : undefined;
+};
 
 const queryOf = (
   query: Readonly<Record<string, QueryValue>>
@@ -173,13 +177,29 @@ export const apiFor = (
     invalidStatuses: [400, 422],
   });
   let wrote = false;
+  let pending = 0;
+  /**
+   * The connector's own mistake, refused before anything is sent: nothing
+   * was done, unless its write went out before it.
+   */
+  const refused = (message: string): ToolError =>
+    new ToolError(message, {
+      code: "failed",
+      notPerformed: !wrote,
+      outcomeUnknown: wrote,
+    });
   const send =
     (method: RouteMethod): Send =>
     async <Returns extends AnySchema | undefined = undefined>(
       route: string,
       request: ApiRequest<Returns> = {}
     ): Promise<ApiAnswer<Returns>> => {
-      const target = routeOf(`${method} ${route}`, hosts);
+      let target: Route;
+      try {
+        target = routeOf(`${method} ${route}`, hosts);
+      } catch {
+        throw refused(`${method} ${route} isn't one of the tool's routes`);
+      }
       if (
         !routes.some(
           (each) =>
@@ -188,35 +208,51 @@ export const apiFor = (
             each.path === target.path
         )
       ) {
-        throw new Error(`${method} ${route} isn't one of the tool's routes`);
+        throw refused(`${method} ${route} isn't one of the tool's routes`);
       }
-      if (wrote) {
-        throw new Error("A tool sends at most one write, as its last request");
-      }
-      const url = new URL(
-        `https://${target.host}${filledPath(target.path, request.path ?? {})}`
-      );
-      url.search = queryOf(request.query ?? {}).toString();
       const write = isWriteMethod(method);
+      if (wrote || (write && pending > 0)) {
+        throw refused("A tool sends at most one write, as its last request");
+      }
+      const path = filledPath(target.path, request.path ?? {});
+      if (path === undefined) {
+        throw refused(
+          `${method} ${route} needs a value for each path parameter, one segment each`
+        );
+      }
+      const url = new URL(`https://${target.host}${path}`);
+      url.search = queryOf(request.query ?? {}).toString();
       wrote = write;
-      const response = await vendor.fetch(
-        url,
-        request.body === undefined
-          ? { method }
-          : {
-              method,
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify(request.body),
-            }
-      );
-      const answer = jsonOf(await response.text());
+      pending += 1;
+      let text: string;
+      try {
+        const response = await vendor.fetch(
+          url,
+          request.body === undefined
+            ? { method }
+            : {
+                method,
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(request.body),
+              }
+        );
+        text = await response.text();
+      } finally {
+        pending -= 1;
+      }
+      const answer = jsonOf(text);
+      if (request.returns === undefined) {
+        // SAFETY: `unknown` without `returns`: the vendor's JSON, or its
+        // text where the answer isn't JSON.
+        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+        return (answer === undefined ? text : answer) as ApiAnswer<Returns>;
+      }
       const checked =
-        answer === undefined || request.returns === undefined
-          ? { value: answer }
+        answer === undefined
+          ? undefined
           : request.returns["~standard"].validate(answer);
-      if (checked.issues === undefined && checked.value !== undefined) {
-        // SAFETY: checked against `returns` where it is given, which is
-        // what types it; `unknown` otherwise.
+      if (checked !== undefined && checked.issues === undefined) {
+        // SAFETY: checked against `returns`, which is what types it.
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
         return checked.value as ApiAnswer<Returns>;
       }

@@ -304,8 +304,10 @@ export default defineConfig({
       {
         // A connector is written with @grasp-os/sdk/connector and its own
         // files, nothing else (GRA-1374): no Zod, no Node, no other package
-        // of ours or npm's. Connect's build refuses the rest too
-        // (apps/connect/build.ts). Google Workspace and Microsoft 365 keep
+        // of ours or npm's. Its own files: `./…` in its folder, or
+        // `../src/…` from another folder of the package (test/), and no
+        // `..` past that, so no path leaves the package. Connect's build
+        // refuses the rest too (apps/connect/build.ts). Google Workspace and Microsoft 365 keep
         // the old kit, Zod and the runtime until they move to the SDK
         // (GRA-2323, GRA-2324), as do connect's sample connectors written
         // with the old kit.
@@ -328,7 +330,14 @@ export default defineConfig({
               patterns: [
                 brainStoreImports,
                 {
-                  group: ["*", "!@grasp-os/sdk/connector", "!./**", "!../**"],
+                  group: [
+                    "*",
+                    "!@grasp-os/sdk/connector",
+                    "!./**",
+                    "!../src/**",
+                    "./**/../**",
+                    "../src/**/../**",
+                  ],
                   message:
                     "A connector imports @grasp-os/sdk/connector and its own files, nothing else.",
                 },

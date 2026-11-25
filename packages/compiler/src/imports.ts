@@ -565,26 +565,6 @@ export const generatedWorkflowCode: CodeKind = {
   ),
 };
 
-/**
- * What a connector is written with (`@grasp-os/sdk/connector`). It isn't
- * one of App code's SDK entries (`sdkEntries`, app-code.ts): an App calls
- * a connector through `ctx.connections`, never with the code connectors
- * are written in.
- */
-export const connectorSdkImports = ["@grasp-os/sdk/connector"] as const;
-
-/** Connector code imports only `connectorSdkImports` and its own files. */
-export const connectorCode: CodeKind = {
-  name: "Connector",
-  folder: "src/",
-  imports: new Map(
-    connectorSdkImports.map((specifier) => [
-      specifier,
-      kitModuleName(specifier),
-    ])
-  ),
-};
-
 const javascriptExtension = /\.js$/u;
 
 /**

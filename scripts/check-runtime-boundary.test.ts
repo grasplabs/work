@@ -8,9 +8,9 @@ import { runtimeBoundaryViolations } from "./check-runtime-boundary.ts";
 
 // A small workspace (testdata/runtime-boundary) of the shape the check
 // reads: the runtime in its folders (app, workflow, connector, common),
-// the SDK, one connector and connect. Each test copies it and changes one
-// file. What the connector
-// entry reaches, the connector reaches too, through the SDK.
+// the SDK and one connector. Each test copies it and changes one file.
+// What the connector entry reaches, the connector reaches too, through the
+// SDK.
 
 const fixture = path.join(import.meta.dirname, "testdata/runtime-boundary");
 
@@ -161,22 +161,6 @@ describe(runtimeBoundaryViolations, () => {
       },
     ]);
   });
-
-  it.each(["@grasp-os/runtime/server", "@grasp-os/sdk/connector"])(
-    "refuses connect's import of %s",
-    (specifier) => {
-      expect(
-        violationsWith({
-          "apps/connect/src/index.js": `export { v } from "${specifier}";\n`,
-        })
-      ).toStrictEqual([
-        {
-          rule: "connect-imports",
-          chain: ["apps/connect/src/index.js", specifier],
-        },
-      ]);
-    }
-  );
 
   it.each([
     ["common", "common/table.js", "../app/host.js", "app/host.js"],

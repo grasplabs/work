@@ -73,7 +73,7 @@ const setStock = tool({
   routes: ["GET /v1/stock/{sku}", "PUT /v1/stock/{sku}"],
   args: { sku: v.string(), onHand: v.number().integer() },
   returns: Stock,
-  find: async ({ sku }, _call, api) =>
+  find: async ({ sku }, api) =>
     await api.get("/v1/stock/{sku}", { path: { sku }, returns: Stock }),
   handler: async ({ sku, onHand }, api) =>
     await api.put("/v1/stock/{sku}", {
@@ -95,6 +95,62 @@ const writeThenRead = tool({
     await api.put("/v1/stock/{sku}", { path: { sku }, body: { onHand: 1 } });
     return await api.get("/v1/stock/{sku}", { path: { sku }, returns: Stock });
   },
+});
+
+/** A write that, wrongly, sends its write while a read is still out. */
+const writeDuringRead = tool({
+  description: "Reads and sets the stock at once",
+  readOnly: false,
+  reach: "company",
+  routes: ["GET /v1/stock/{sku}", "PUT /v1/stock/{sku}"],
+  args: { sku: v.string() },
+  returns: Stock,
+  handler: async ({ sku }, api) => {
+    const [, written] = await Promise.all([
+      api.get("/v1/stock/{sku}", { path: { sku } }),
+      api.put("/v1/stock/{sku}", {
+        path: { sku },
+        body: { onHand: 1 },
+        returns: Stock,
+      }),
+    ]);
+    return written;
+  },
+});
+
+/** A write whose lookup, wrongly, sends the write. */
+const findByWriting = tool({
+  description: "Sets the stock, and finds it by setting it again",
+  readOnly: false,
+  reach: "company",
+  routes: ["GET /v1/stock/{sku}", "PUT /v1/stock/{sku}"],
+  args: { sku: v.string() },
+  returns: Stock,
+  find: async ({ sku }, api) =>
+    await api.put("/v1/stock/{sku}", {
+      path: { sku },
+      body: { onHand: 1 },
+      returns: Stock,
+    }),
+  handler: async ({ sku }, api) =>
+    await api.put("/v1/stock/{sku}", {
+      path: { sku },
+      body: { onHand: 1 },
+      returns: Stock,
+    }),
+});
+
+/** A write whose vendor answers it with text. */
+const deleteStock = tool({
+  description: "Deletes one product's stock",
+  readOnly: false,
+  reach: "company",
+  routes: ["DELETE /v1/stock/{sku}"],
+  args: { sku: v.string() },
+  returns: v.object({ answer: v.string() }),
+  handler: async ({ sku }, api) => ({
+    answer: String(await api.delete("/v1/stock/{sku}", { path: { sku } })),
+  }),
 });
 
 /** A read whose handler asks for a route it didn't declare. */
@@ -120,6 +176,9 @@ const stock = defineConnector({
     "stock.update": setStock,
     "stock.writeThenRead": writeThenRead,
     "stock.stray": strayRead,
+    "stock.writeDuringRead": writeDuringRead,
+    "stock.findByWriting": findByWriting,
+    "stock.delete": deleteStock,
   },
 });
 
@@ -328,6 +387,19 @@ describe("a call of a tool", () => {
     });
   });
 
+  it("refuses a path parameter that would be no segment of its own, sending nothing", async () => {
+    vendorAnswers(Response.json({ sku: "a", onHand: 1 }));
+    const results = [
+      await call("stock.get", { sku: ".." }),
+      await call("stock.get", { sku: "." }),
+      await call("stock.get", { sku: "" }),
+    ];
+    expect({
+      errors: results.map(({ isError }) => isError),
+      asked,
+    }).toStrictEqual({ errors: [true, true, true], asked: [] });
+  });
+
   it("pages as items and next, leaving out the query parameters it isn't given", async () => {
     vendorAnswers(
       Response.json({ data: [{ sku: "a", onHand: 1 }], next_cursor: "c2" })
@@ -412,6 +484,34 @@ describe("a call of a tool", () => {
     });
   });
 
+  it("sends no write while a read is still out, and says nothing was done", async () => {
+    vendorAnswers(Response.json({ sku: "a", onHand: 1 }));
+    const result = await call(
+      "stock.writeDuringRead",
+      { sku: "a" },
+      { [effectKeyMetaKey]: key }
+    );
+    expect({
+      sent: asked.map(({ method }) => method),
+      isError: result.isError,
+      meta: result._meta,
+    }).toStrictEqual({
+      sent: ["GET"],
+      isError: true,
+      meta: { [notPerformedMetaKey]: true },
+    });
+  });
+
+  it("answers a write's text where the vendor answers with text", async () => {
+    vendorAnswers(new Response("Deleted", { status: 200 }));
+    const result = await call(
+      "stock.delete",
+      { sku: "a" },
+      { [effectKeyMetaKey]: key }
+    );
+    expect(result.structuredContent).toStrictEqual({ answer: "Deleted" });
+  });
+
   it("says a rate-limited write did nothing", async () => {
     vendorAnswers(new Response(null, { status: 429 }));
     const result = await call(
@@ -441,6 +541,19 @@ describe("a call of a tool", () => {
       sent: asked.map(({ method }) => method),
       result: result.structuredContent,
     }).toStrictEqual({ sent: ["GET"], result: { sku: "a", onHand: 2 } });
+  });
+
+  it("lets a lookup send none of its tool's writes", async () => {
+    vendorAnswers(Response.json({ sku: "a", onHand: 1 }));
+    const result = await call(
+      "stock.findByWriting",
+      { sku: "a" },
+      { [effectKeyMetaKey]: key, [findMetaKey]: true }
+    );
+    expect({ isError: result.isError, asked }).toStrictEqual({
+      isError: true,
+      asked: [],
+    });
   });
 
   it("lists its tools with their schemas and hints, as MCP describes them", async () => {
