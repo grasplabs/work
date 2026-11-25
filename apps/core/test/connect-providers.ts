@@ -26,6 +26,7 @@ import { botConnectorFake } from "./bot-connector-fake.ts";
 import { composioApiScript, composioLogoScript } from "./composio-api.ts";
 import { driveSyncControlUrl, driveSyncFake } from "./drive-sync-fake.ts";
 import { mailServerScript } from "./mail-server.ts";
+import { pipedriveControlUrl, pipedriveFake } from "./pipedrive-fake.ts";
 import { sampleKeyControlUrl, sampleKeyFake } from "./sample-key-fake.ts";
 import { sampleSyncControlUrl, sampleSyncFake } from "./sample-sync-fake.ts";
 import { stephenGoogleFake } from "./stephen-google-fake.ts";
@@ -543,6 +544,7 @@ const stephenGoogle = (${stephenGoogleFake.toString()})();
 const driveSync = (${driveSyncFake.toString()})();
 const sampleSync = (${sampleSyncFake.toString()})();
 const sampleKey = (${sampleKeyFake.toString()})();
+const pipedrive = (${pipedriveFake.toString()})();
 const graphSent = [];
 const graphLosing = new Map();
 const graphDrafts = new Map();
@@ -1041,6 +1043,13 @@ export default {
     const fromSampleKey = sampleKey.answer(request, url);
     if (fromSampleKey !== undefined) {
       return fromSampleKey;
+    }
+    if (url.origin + url.pathname === ${JSON.stringify(pipedriveControlUrl)}) {
+      return await pipedrive.control(request);
+    }
+    const fromPipedrive = pipedrive.answer(request, url);
+    if (fromPipedrive !== undefined) {
+      return fromPipedrive;
     }
     if (url.href === ${JSON.stringify(stephenGoogleUrl)}) {
       return await stephenGoogle.control(request);

@@ -20,3 +20,8 @@ pnpm-lock.yaml linguist-generated=true
 *.webp binary
 *.woff binary
 *.woff2 binary
+
+# A vendor's OpenAPI spec, byte for byte: generated tools record its hash.
+**/openapi.yaml -text linguist-generated=true
+**/openapi.json -text linguist-generated=true
+**/tools.gen.ts linguist-generated=true
