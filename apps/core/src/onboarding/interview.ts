@@ -9,7 +9,6 @@ import {
   answerOf,
   checkedTurn,
   earlyNext,
-  earlyOpening,
   earlyPlainLine,
   fileCalled,
   interviewTurnMaxBytes,
@@ -343,15 +342,14 @@ const settled = async (promise: Promise<unknown>): Promise<Settled> => {
 const unheard = (): void => undefined;
 
 /**
- * One turn: the line as soon as it is written (its first short sentence
- * even sooner, then where the interview goes), what was written down once
+ * One turn: the line as soon as it is written whole (then where the
+ * interview goes), what was written down once
  * the line is out, then the whole turn checked. A line the model declines
  * is asked once more of the careful one; anything else that fails is the
  * page's to try again.
  */
 const holdTurn = async (held: Turn): Promise<void> => {
   const { turn, quick, careful, send } = held;
-  let opened = false;
   let early = false;
   let steered = false;
   let notes: Promise<Settled> | null = null;
@@ -359,14 +357,10 @@ const holdTurn = async (held: Turn): Promise<void> => {
     notes ??= settled(write(held, careful));
     return await notes;
   };
+  // His line goes out whole, never its first sentence ahead of the rest:
+  // each part said on its own came out in a voice and tone of its own,
+  // loose sentences rather than one line.
   const onText = (written: string) => {
-    if (!(opened || early)) {
-      const opening = earlyOpening(written);
-      opened = opening !== null;
-      if (opening !== null) {
-        send({ opening });
-      }
-    }
     if (!early) {
       const line = earlyPlainLine(written);
       early = line !== null;
