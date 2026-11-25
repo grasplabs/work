@@ -156,15 +156,14 @@ const SaidLine = ({ line, said }: { line: string; said: number }) => {
   );
 };
 
-/** The stage while they talk: the minutes left, and his line as he says it. */
-const Asking = ({ left }: { left: number }) => {
+/** The stage while they talk: his line as he says it; the minutes left stand in the header (page.tsx). */
+const Asking = () => {
   const loop = useLoop();
   const saidOf = useSaidOf(loop.line);
   // While he says it, its words come one by one; once said, or waiting, they all stand.
   const said = loop.doing === "speaking" ? Math.max(loop.from, saidOf, 0) : -1;
   return (
     <div {...stylex.props(styles.question)}>
-      <Countdown left={left} />
       {loop.line === "" ? null : (
         <div
           aria-live="polite"
@@ -247,14 +246,11 @@ const Room = ({
 
 /** The conversation, or its read-back: the stage, and the card at its foot. */
 export const Conversation = ({
-  left,
   reading,
   transcript,
   alone,
   onTalk,
 }: {
-  /** Seconds left. */
-  left: number;
   reading: boolean;
   transcript: boolean;
   alone: boolean;
@@ -262,7 +258,7 @@ export const Conversation = ({
 }) => (
   <Room alone={alone} transcript={transcript}>
     <div {...stylex.props(styles.stage, reading && styles.reading)}>
-      {reading ? <ReadBack /> : <Asking left={left} />}
+      {reading ? <ReadBack /> : <Asking />}
     </div>
     <AnswerBox onTalk={onTalk} reading={reading} />
   </Room>

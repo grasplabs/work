@@ -26,7 +26,12 @@ import type { OpenSession } from "./api.ts";
 import { Page, Words } from "./calm.tsx";
 import { Closed, DeleteInterview } from "./closed.tsx";
 import { besideQuery, Conversation, TimeUp } from "./conversation.tsx";
-import { secondsLeft, useCountdownMarks, useNow } from "./countdown.tsx";
+import {
+  Countdown,
+  secondsLeft,
+  useCountdownMarks,
+  useNow,
+} from "./countdown.tsx";
 import { DevJump } from "./dev-jump.tsx";
 import { Frame, tool } from "./frame.tsx";
 import {
@@ -496,14 +501,12 @@ const useTranscript = (running: boolean) => {
 /** The conversation, its read-back, or the end of its minutes. */
 const Talking = ({
   name,
-  left,
   reading,
   timeUp,
   transcript,
   alone,
 }: {
   name: string;
-  left: number;
   reading: boolean;
   timeUp: boolean;
   transcript: boolean;
@@ -514,7 +517,6 @@ const Talking = ({
   ) : (
     <Conversation
       alone={alone}
-      left={left}
       onTalk={() => {
         void talkAgain();
       }}
@@ -538,6 +540,32 @@ const poseOf = (stage: ReactNode, story: boolean): Pose | undefined => {
   }
   return isValidElement(stage) && stage.type === Talking ? undefined : beside;
 };
+
+/**
+ * The header's end: on a local stack the jump menu, then the page's own
+ * actions, and while they talk the minutes left, at its far end.
+ */
+const HeaderEnd = ({
+  actions,
+  left,
+  running,
+  reading,
+  onJumped,
+}: {
+  actions: ReactNode;
+  /** Seconds left. */
+  left: number;
+  /** The conversation runs, and the read-back isn't on screen: the minutes count. */
+  running: boolean;
+  reading: boolean;
+  onJumped: () => void;
+}) => (
+  <>
+    <DevJump onJumped={onJumped} />
+    {actions}
+    {running && !reading ? <Countdown left={left} /> : null}
+  </>
+);
 
 /** The interview on the link, held on this device. */
 export const InterviewPage = ({ session }: { session: OpenSession }) => {
@@ -617,7 +645,6 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
     stage = (
       <Talking
         alone={alone}
-        left={left}
         name={session.name}
         reading={reading}
         timeUp={timeUp}
@@ -633,14 +660,15 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
   return (
     <Frame
       actions={
-        <>
-          <DevJump
-            onJumped={() => {
-              setStopped(false);
-            }}
-          />
-          {actions}
-        </>
+        <HeaderEnd
+          actions={actions}
+          left={left}
+          reading={reading}
+          running={running}
+          onJumped={() => {
+            setStopped(false);
+          }}
+        />
       }
       pose={poseOf(stage, story)}
       strip={!reading}
