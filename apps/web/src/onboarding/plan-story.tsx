@@ -360,6 +360,16 @@ const useTelling = (today: string, shown: boolean) => {
     at,
     // Once told, all of it said and settled, none of it still fresh.
     partSaid: shown ? (part?.text.length ?? 0) + 20 : said - (starts[at] ?? 0),
+    // How far into the part the words are, 0 to 1: the picture's lights follow it.
+    progress: shown
+      ? 1
+      : Math.min(
+          1,
+          Math.max(
+            0,
+            (said - (starts[at] ?? 0)) / Math.max(1, part?.text.length ?? 1)
+          )
+        ),
     began,
     setBegan,
     setOver,
@@ -378,7 +388,7 @@ export const PlanStory = ({
   const reduce = useLessMotion();
   const [told, setTold] = useState(toldBefore);
   const shown = told || reduce;
-  const { narration, part, at, partSaid, began, setBegan, setOver } =
+  const { narration, part, at, partSaid, progress, began, setBegan, setOver } =
     useTelling(today, shown);
   const days = useMemo(() => planDays(planStart(today)), [today]);
 
@@ -429,7 +439,12 @@ export const PlanStory = ({
   const scene: Scene = part?.scene ?? "you";
   return createPortal(
     <section data-mode="dark" {...stylex.props(styles.stage, fadeIn)}>
-      <PlanPictures days={days} scene={scene} still={reduce} />
+      <PlanPictures
+        days={days}
+        progress={progress}
+        scene={scene}
+        still={reduce}
+      />
       <div {...stylex.props(styles.bar)}>
         <Sound />
       </div>
