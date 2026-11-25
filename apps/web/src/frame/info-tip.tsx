@@ -12,9 +12,9 @@ import type { ReactNode } from "react";
 
 // More about a part of a page behind an info mark beside its title or a
 // setting's label: what it shows, who can see it, why. An icon-only ghost
-// Button named by `aria-label`, its words in a Tooltip that opens on hover
-// and focus and closes on a press, as #2503's info mark (its setting row's
-// InfoMark, a plain Tooltip). The mark stands after the
+// Button named by `aria-label`, its words in a Tooltip that opens on hover,
+// focus and a press (`toggleable`), so a tap on a phone shows them too, as
+// Damsko's Tooltip docs compose an info mark. The mark stands after the
 // title, never inside it: a heading's or a label's name is all the words in
 // it, so a mark inside would join the card's heading ("Owner More about the
 // owner") or the control's name ("Made for More about this section"). The
@@ -47,7 +47,7 @@ const styles = stylex.create({
   },
 });
 
-/** The info mark: `children` said on hover and focus; `label` names it for a screen reader. */
+/** The info mark: `children` said on hover, focus and a press; `label` names it for a screen reader. */
 export const InfoTip = ({
   label,
   children,
@@ -57,7 +57,7 @@ export const InfoTip = ({
 }) => {
   const { t } = useLingui();
   return (
-    <Tooltip>
+    <Tooltip toggleable>
       <TooltipTrigger asChild>
         <Button
           aria-label={label ?? t`More about this section`}
