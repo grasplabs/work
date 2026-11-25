@@ -1,14 +1,16 @@
 import { v, ValueDefinitionError } from "@grasp-os/runtime/app";
-import type { ValueSchema } from "@grasp-os/runtime/app";
+import type { StringSchema, ValueSchema } from "@grasp-os/runtime/app";
 import { isRecord } from "@grasp-os/shared/json";
 import { valueDepth } from "@grasp-os/shared/value-depth";
 
 // A spec's JSON Schema (OpenAPI 3.1, dereferenced) as `v`: the types the
-// generator writes and the mirror check compares. What `v` can't say is
-// left out, never guessed: a free-form object, a tuple, a schema that
-// refers to itself, one nested past what a value may be, or a name `v`
-// refuses (too long, a prototype key). The caller decides what leaving it
-// out means: a dropped field of an answer, or an operation skipped.
+// generator writes and the mirror check compares. In an answer, what has
+// no fixed shape is `v.json()`: a free-form value or object, a tuple, and
+// a schema cut off where it refers to itself or nests past what a value
+// may be. Arguments are never open, so in a request the same is left out,
+// and so is a name `v` refuses (too long, a prototype key) anywhere. The
+// caller decides what leaving it out means: a dropped field or parameter,
+// or an operation skipped.
 
 /** A schema `v` built. */
 export type Schema = ValueSchema<unknown, unknown>;
@@ -49,6 +51,9 @@ export const list = (value: unknown): readonly unknown[] =>
 
 export const record = (value: unknown): Node => (isRecord(value) ? value : {});
 
+const text = (value: unknown): string | undefined =>
+  typeof value === "string" ? value : undefined;
+
 /** What `make` builds, or undefined where `v` refuses it. */
 export const built = <Built>(make: () => Built): Built | undefined => {
   try {
@@ -59,6 +64,19 @@ export const built = <Built>(make: () => Built): Built | undefined => {
     }
     throw error;
   }
+};
+
+/** What has no fixed shape: any JSON in an answer, nothing in a request. */
+const free = (reading: Reading): Modifiable | undefined =>
+  reading.mode === "response" ? v.json() : undefined;
+
+/** The `format`s a string keeps, as `v` checks them. */
+const formats: Readonly<
+  Record<string, (schema: StringSchema) => StringSchema>
+> = {
+  "date-time": (schema) => schema.datetime(),
+  date: (schema) => schema.date(),
+  email: (schema) => schema.email(),
 };
 
 /** The JSON types a schema allows, null included. */
@@ -148,8 +166,14 @@ export const schemaOf = (
   reading: Reading,
   depth: number
 ): Modifiable | undefined => {
-  if (!isRecord(node) || reading.open.has(node) || depth > depthBudget) {
+  if (node === undefined || node === true) {
+    return free(reading);
+  }
+  if (!isRecord(node)) {
     return undefined;
+  }
+  if (reading.open.has(node) || depth > depthBudget) {
+    return free(reading);
   }
   reading.read.nodes += 1;
   if (reading.read.nodes > operationMaxNodes) {
@@ -228,9 +252,8 @@ const objectOf = (
     return fields === undefined ? undefined : built(() => v.object(fields));
   }
   const values = node.additionalProperties;
-  const value = isRecord(values)
-    ? schemaOf(values, reading, depth + 1)
-    : undefined;
+  const value =
+    values === false ? undefined : schemaOf(values, reading, depth + 1);
   return value === undefined ? undefined : built(() => v.record(value));
 };
 
@@ -242,7 +265,12 @@ const typedAs = (
 ): Modifiable | undefined => {
   switch (type) {
     case "string": {
-      return v.string();
+      const format = text(node.format);
+      const formatted =
+        format !== undefined && Object.hasOwn(formats, format)
+          ? formats[format]
+          : undefined;
+      return formatted === undefined ? v.string() : formatted(v.string());
     }
     case "integer": {
       return v.number().integer();
@@ -282,15 +310,17 @@ const schemaBody = (
   }
   const alternatives = Array.isArray(node.oneOf) ? node.oneOf : node.anyOf;
   if (Array.isArray(alternatives)) {
-    return unionOf(
-      alternatives.map((member) => schemaOf(member, reading, depth + 1))
+    return (
+      unionOf(
+        alternatives.map((member) => schemaOf(member, reading, depth + 1))
+      ) ?? free(reading)
     );
   }
   const types = typesOf(node);
   const nullable = types.includes("null");
   const others = types.filter((type) => type !== "null");
   if (others.length === 0) {
-    return nullable ? v.null() : undefined;
+    return nullable ? v.null() : free(reading);
   }
   const schema = unionOf(
     others.map((type) => typedAs(type, node, reading, depth))

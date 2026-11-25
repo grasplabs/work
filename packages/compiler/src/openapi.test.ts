@@ -519,9 +519,13 @@ describe("a hostile spec", () => {
     const node = spec.operations.find((tool) => tool.name === "nodes.get");
     const child =
       node?.returns.kind === "object" ? node.returns.fields.child : undefined;
-    expect(child?.kind === "object" && Object.keys(child.fields)).toStrictEqual(
-      ["id"]
-    );
+    expect(
+      child?.kind === "object" &&
+        Object.entries(child.fields).map(([name, field]) => [name, field.kind])
+    ).toStrictEqual([
+      ["id", "number"],
+      ["child", "json"],
+    ]);
     expect(spec.operations.map((tool) => tool.name)).toContain("deep.get");
     expect(spec.skipped).toStrictEqual([
       { operation: "GET /wide/{id}", reason: "Its schemas are too large." },

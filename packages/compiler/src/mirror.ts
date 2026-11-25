@@ -69,6 +69,16 @@ const valuesOf = (
   return descriptor.kind === "literal" ? [descriptor.value] : undefined;
 };
 
+/** A string's format, if it has one. */
+const formatOf = (descriptor: ValueDescriptor): string | undefined =>
+  descriptor.kind === "string"
+    ? ["email", "datetime", "date", "url"].find(
+        (name) =>
+          Object.hasOwn(descriptor, name) &&
+          Reflect.get(descriptor, name) === true
+      )
+    : undefined;
+
 /** Whether every value of a scalar `inner` is one of scalar `outer`'s. */
 const scalarWithin = (
   inner: ValueDescriptor,
@@ -76,10 +86,11 @@ const scalarWithin = (
 ): boolean => {
   const values = valuesOf(inner);
   if (outer.kind === "string") {
-    return (
-      inner.kind === "string" ||
-      values?.every((value) => typeof value === "string") === true
-    );
+    const format = formatOf(outer);
+    return inner.kind === "string"
+      ? format === undefined || formatOf(inner) === format
+      : format === undefined &&
+          values?.every((value) => typeof value === "string") === true;
   }
   if (outer.kind === "number") {
     const integers =
@@ -127,6 +138,9 @@ const within = (
     return `${at} is required, but the vendor's answer may leave it out.`;
   }
   const differs = `${at} doesn't keep the vendor's type.`;
+  if (outer.kind === "json") {
+    return undefined;
+  }
   if (outer.kind === "union") {
     const members = inner.kind === "union" ? inner.members : [inner];
     const kept = members.every((member) =>
