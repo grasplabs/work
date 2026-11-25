@@ -23,13 +23,13 @@ import { z } from "zod";
 import { maxContentBytes } from "./content.ts";
 import {
   connectorIsolateRequests,
-  egressTooLargeMessage,
   syncManifestSchema,
   syncNameSchema,
   syncParamsSchema,
   syncPlacesParamsSchema,
 } from "./manifest.ts";
 import type { Route, SyncManifest } from "./manifest.ts";
+import { egressTooLargeMessage } from "./protocol.ts";
 import { ToolError } from "./server.ts";
 
 // How a native connector reads a source for native sync (GRA-1758): one

@@ -1,6 +1,6 @@
 import type { z } from "zod";
 
-import { egressHeader, egressKind, maxRetryAfterSeconds } from "./manifest.ts";
+import { egressHeader, egressKind, maxRetryAfterSeconds } from "./protocol.ts";
 import { invalidCode, isWriteMethod as isWrite, ToolError } from "./server.ts";
 
 // How a connector's tools reach their provider: plain `fetch` through

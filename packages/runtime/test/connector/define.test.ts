@@ -15,7 +15,7 @@ import {
   findMetaKey,
   notPerformedMetaKey,
   outcomeUnknownMetaKey,
-} from "../../src/connector/manifest.ts";
+} from "../../src/connector/protocol.ts";
 import type { Connector } from "../../src/connector/server.ts";
 
 // A connector as @grasp-os/sdk/connector writes it, and the MCP server it

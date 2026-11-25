@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { egressHeader, egressKind } from "../../src/connector/manifest.ts";
+import { egressHeader, egressKind } from "../../src/connector/protocol.ts";
 import { providerFetch } from "../../src/connector/provider.ts";
 import { ToolError } from "../../src/connector/server.ts";
 

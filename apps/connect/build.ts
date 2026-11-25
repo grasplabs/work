@@ -24,7 +24,7 @@ import type {
   ConnectorDeclaration,
   ConnectorManifest,
 } from "@grasp-os/runtime/connector";
-import { build } from "vite-plus";
+import { build, defaultClientConditions } from "vite-plus";
 import type { Plugin, Rolldown } from "vite-plus";
 import { z } from "zod";
 
@@ -242,6 +242,34 @@ const chunksOf = (
     .flatMap((output) => ("output" in output ? output.output : []))
     .filter((file) => file.type === "chunk");
 
+/**
+ * The condition a connector is bundled for its isolate under: the
+ * runtime's modules that only connect and its build need there take an
+ * isolate's form under it (the runtime's `#connector-manifest`).
+ */
+const isolateCondition = "connector-isolate";
+
+/** Part of the path of each of Zod's modules. */
+const zodModule = `${path.sep}node_modules${path.sep}zod${path.sep}`;
+
+/**
+ * Refuses a connector whose isolate would load Zod, unless code written
+ * with the old kit brings it (`oldKit`). An isolate evaluates its whole
+ * bundle each time it loads, once per call, and Zod with the schemas made
+ * with it took most of a call's time: a connector on `sdkConnector`
+ * loads only what it uses.
+ */
+const checkLoads = (entry: string, modules: readonly string[]): void => {
+  if (
+    modules.some((id) => id.includes(zodModule)) &&
+    !modules.some((id) => oldKit.some((each) => isWithin(each, id)))
+  ) {
+    throw new Error(
+      `${entry} would load Zod in its isolate: a module of ${sdkConnector} it imports reaches it`
+    );
+  }
+};
+
 /** The connector at `entry`, bundled with what it imports into one module. */
 const bundle = async (entry: string): Promise<string> => {
   const chunks = chunksOf(
@@ -251,6 +279,7 @@ const bundle = async (entry: string): Promise<string> => {
       logLevel: "warn",
       mode: "production",
       plugins: [connectorImports(ownFolderOf(entry)), entryModule(entry)],
+      resolve: { conditions: [...defaultClientConditions, isolateCondition] },
       build: {
         write: false,
         minify: true,
@@ -272,6 +301,7 @@ const bundle = async (entry: string): Promise<string> => {
   if (chunk === undefined || chunks.length !== 1) {
     throw new Error(`${entry} didn't bundle into one module`);
   }
+  checkLoads(entry, Object.keys(chunk.modules));
   return chunk.code;
 };
 
