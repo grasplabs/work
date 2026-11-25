@@ -14,6 +14,12 @@ import { callTool as call, toolError } from "./tool-calls.ts";
 // name and checks that together they check every tool once.
 
 /**
+ * A refusal of a key the tool doesn't declare: `v`'s code, or Zod's from
+ * the tools still written with the old kit (GRA-2323, GRA-2324).
+ */
+const unknownKey = /value\.unknown_key|unrecognized_keys/u;
+
+/**
  * The native tools the file `file` (a path or URL) checks, from its own
  * name: `native-tools-<part>-of-<parts>.test.ts`, every `parts`-th tool
  * from the `part`th.
@@ -82,7 +88,7 @@ export const everyNativeTool = (file: string): void => {
         expect(
           refusals
             .slice(0, undeclared.length)
-            .every((text) => String(text).includes("unrecognized_keys"))
+            .every((text) => unknownKey.test(String(text)))
         ).toBeTruthy();
         expect(
           refusals
