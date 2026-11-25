@@ -1,12 +1,5 @@
 import { Button } from "@grasp-os/ui/components/button";
 import { Heading } from "@grasp-os/ui/components/heading";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@grasp-os/ui/components/select";
 import { Text } from "@grasp-os/ui/components/text";
 import { isThemeMode, ThemeToggle } from "@grasp-os/ui/components/theme-toggle";
 import {
@@ -32,14 +25,12 @@ import {
   onThemeChange,
   readTheme,
 } from "../frame/theme.ts";
-import { chooseLocale, isLocale, localeNames } from "../i18n.ts";
-import type { Locale } from "../i18n.ts";
 import { useCore } from "../use-core.ts";
 import { allowSound, setVoiceOn, useSay, useVoice } from "../voice/voice.ts";
 import type { Pose } from "./field/engine.ts";
 import { fromTheTop } from "./field/poses.ts";
 import { StephenField } from "./field/stephen-field.tsx";
-import { useNarrow } from "./use-narrow.ts";
+import { LanguagePicker } from "./language-picker.tsx";
 
 // The frame of the setup and of the page a member waits on: full screen,
 // outside the app. One quiet bar on top, Grasp's mark at its start, the
@@ -129,53 +120,6 @@ const tool = {
   select: "sm",
   toggle: "sm",
 } as const;
-
-const languages = Object.entries(localeNames).flatMap(([code, name]) =>
-  isLocale(code) ? [{ code, name }] : []
-);
-
-/** The language in the bar: a quiet Select of the five, each in its own words; on a phone its short code. */
-const Language = () => {
-  const { t, i18n } = useLingui();
-  const narrow = useNarrow();
-  const locale: Locale = isLocale(i18n.locale) ? i18n.locale : "en";
-  const language = localeNames[locale];
-  return (
-    <Select
-      items={languages.map(({ code, name }) => ({
-        value: code,
-        label: narrow ? code.toUpperCase() : name,
-      }))}
-      onValueChange={(value) => {
-        if (isLocale(value)) {
-          void chooseLocale(value);
-        }
-      }}
-      value={locale}
-    >
-      <SelectTrigger
-        aria-label={t`Language: ${language}`}
-        size={tool.select}
-        // Named on a pause, as the bar's other tools are.
-        tooltip={t`Language`}
-        variant="ghost"
-      >
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {languages.map(({ code, name }) => (
-          <SelectItem
-            key={code}
-            label={narrow ? code.toUpperCase() : name}
-            value={code}
-          >
-            <span lang={code}>{name}</span>
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-};
 
 /**
  * Light, dark or the system's, as one quiet icon that steps through them:
@@ -329,7 +273,7 @@ export const CalmFrame = ({
           <Icon icon={GraspLogo} label="Grasp" />
         </span>
         <div {...stylex.props(styles.tools)}>
-          {language ? <Language /> : null}
+          {language ? <LanguagePicker /> : null}
           <Sound />
           <Appearance userId={userId} />
           <Leave />
