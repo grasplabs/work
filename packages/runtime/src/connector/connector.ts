@@ -116,6 +116,7 @@ export {
   accountLookupSchema,
   endpointHost,
   reservedAuthorizationParams,
+  scopeToken,
   signInSchema,
   tenantKinds,
   withTenant,

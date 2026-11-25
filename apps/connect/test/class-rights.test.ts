@@ -278,7 +278,9 @@ describe("Read others' words", () => {
     });
     // Made before grants were kept: the old wide set never read chats.
     const ben = someone();
-    const bens = await connectAccount(providers, ben, ownAccount(ben));
+    const bens = await keptBeforeGrants(
+      await connectAccount(providers, ben, ownAccount(ben))
+    );
 
     await exports.default.requireClassRights({ classes: ["read-others"] });
 
@@ -371,12 +373,26 @@ describe("a class turned on", () => {
   });
 
   it("refuses a consent whose answer lists no grant: it would count as the old wide set", async () => {
-    const anna = someone();
-    await expect(
-      outcome(
-        connectAccount(providers, anna, { ...ownAccount(anna), granted: "" })
-      )
-    ).resolves.toBe("connection.scopes_refused");
+    const answers = { unsaid: null, empty: "" };
+    const outcomes: Record<string, string> = {};
+    for (const provider of ["microsoft", "google"] as const) {
+      for (const [name, granted] of Object.entries(answers)) {
+        const person = someone();
+        // oxlint-disable-next-line no-await-in-loop -- each with its own answer
+        outcomes[`${provider} ${name}`] = await outcome(
+          connectAccount(providers, person, {
+            ...ownAccount(person, provider),
+            granted,
+          })
+        );
+      }
+    }
+    expect(outcomes).toStrictEqual({
+      "microsoft unsaid": "connection.scopes_refused",
+      "microsoft empty": "connection.scopes_refused",
+      "google unsaid": "connection.scopes_refused",
+      "google empty": "connection.scopes_refused",
+    });
   });
 
   it("leaves a disconnected connection as it is", async () => {
