@@ -19,6 +19,7 @@ import {
 } from "../interview/api.ts";
 import type { OpenSession } from "../interview/api.ts";
 import { Actions, Page as Calm, Words } from "../interview/calm.tsx";
+import { jumpOnOpen } from "../interview/dev-jump.tsx";
 import { Frame } from "../interview/frame.tsx";
 import { holdInterview, releaseInterview } from "../interview/kept.ts";
 import { InterviewPage } from "../interview/page.tsx";
@@ -165,6 +166,8 @@ const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
     version: answer.version,
     progress: answer.progress === null ? null : resumed(answer.progress),
   });
+  // On a local stack, `?jump=` puts the interview where it asks first.
+  await jumpOnOpen(secret);
   return { state: "open", secret, session: answer };
 };
 
