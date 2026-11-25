@@ -4,10 +4,3 @@ declare module "*.po" {
 
   export const messages: Messages;
 }
-
-/** A catalog's lean part (lean-parts.ts), compiled alike. */
-declare module "*.po?lean" {
-  import type { Messages } from "@lingui/core";
-
-  export const messages: Messages;
-}

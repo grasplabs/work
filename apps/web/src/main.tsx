@@ -9,8 +9,8 @@ import { createRoot } from "react-dom/client";
 import { bootOf } from "./boot-path.ts";
 import { reportError } from "./error-reports.ts";
 import { startI18n } from "./i18n.ts";
-import { isLeanPath, leanPaths } from "./lean-pages.ts";
-import { loadLeanStyles } from "./page-parts.ts";
+import { partAt } from "./lean-pages.ts";
+import { loadStartStyles } from "./page-parts.ts";
 
 // The one file every page loads: it asks for the page's routes at once,
 // alongside its language. At an interview link that is the interview
@@ -63,13 +63,10 @@ const NoWords = () => (
  * and the build split into hundreds of tiny files.
  */
 const start = async (): Promise<void> => {
-  const lean = isLeanPath(window.location.pathname, leanPaths);
+  const part = partAt(window.location.pathname);
   let worded = true;
   try {
-    await Promise.all([
-      startI18n({ lean }),
-      lean ? loadLeanStyles() : undefined,
-    ]);
+    await Promise.all([startI18n(part), loadStartStyles(part)]);
   } catch {
     worded = false;
   }
