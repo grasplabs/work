@@ -850,10 +850,18 @@ const rounded = (known: Turn, line: EarlyLine): void => {
     return;
   }
   known.opening = null;
-  if (on && known.order === turns) {
+  const latest = on && known.order === turns;
+  if (latest) {
     hisLine(line);
   }
+  // Cut off in its first sentence, nothing of it is being said any more:
+  // the whole line still stands, so it is all of it he says again when
+  // what cut him off was nothing.
+  const hushed = underway === null;
   grow(line.say);
+  if (latest && hushed && state.doing !== "speaking") {
+    set({ line: line.say });
+  }
 };
 
 /** What one turn knows while it runs. */

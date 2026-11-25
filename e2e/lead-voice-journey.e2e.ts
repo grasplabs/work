@@ -157,17 +157,18 @@ const voiceSaysNothing = async (page: Page, heard: Heard): Promise<void> => {
   await page.route("**/api/speech", async (route: Route) => {
     const line = speechSchema.parse(route.request().postDataJSON());
     heard.said.push(line.text);
+    // As core answers a line asked for as it is made: its audio, then its
+    // words, a line of JSON each (`SpeechStreamEvent`).
+    const audio = wavOf(
+      8000,
+      Array.from({ length: 4000 }, () => 0)
+    ).toString("base64");
+    const words = line.text
+      .split(/\s+/u)
+      .map((text) => ({ text, startMs: 0, endMs: 500 }));
     await route.fulfill({
-      json: {
-        audio: wavOf(
-          8000,
-          Array.from({ length: 4000 }, () => 0)
-        ).toString("base64"),
-        mime: "audio/wav",
-        words: line.text
-          .split(/\s+/u)
-          .map((text) => ({ text, startMs: 0, endMs: 500 })),
-      },
+      contentType: "application/x-ndjson",
+      body: `${JSON.stringify({ audio })}\n${JSON.stringify({ words })}\n`,
     });
   });
 };

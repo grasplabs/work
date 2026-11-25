@@ -399,6 +399,40 @@ describe("his own line", () => {
     });
   });
 
+  it("still answers what they said before a sound that was no words", () => {
+    const heard = play([
+      ...talking,
+      // No full stop: he waits a moment for more.
+      ...stretch(1, "We use SAP", 2000, 3000),
+      // A cough while he waits: the wait starts over, and is not forgotten.
+      ...stretch(2, "", 3300, 3600),
+    ]);
+    const answered = play(
+      [{ type: "waited", at: 4800, wait: "settle" }],
+      heard.floor
+    );
+    expect({
+      waits: heard.acts.at(-1),
+      asked: asks(answered.acts).map(({ text }) => text),
+    }).toStrictEqual({
+      waits: { type: "after", wait: "settle", ms: 1000 },
+      asked: ["We use SAP"],
+    });
+  });
+
+  it("starts his ear afresh as he stops speaking, so the end of his own line is never theirs", () => {
+    const { acts } = play([
+      ...talking,
+      ...stretch(1, "Yes.", 2000, 3000),
+      { type: "speak", at: 4000, answers: true },
+      { type: "listen", at: 6000 },
+    ]);
+    expect(acts.slice(-2).map(({ type }) => type)).toStrictEqual([
+      "deaf",
+      "hear",
+    ]);
+  });
+
   it("never answers his own voice, says his line again, and stops listening while he speaks", () => {
     const cutOff = play([
       ...talking,

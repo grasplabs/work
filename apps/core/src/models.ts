@@ -2825,18 +2825,38 @@ const readSpeech = async (
 /** What ends a line of an event stream: a line feed, a carriage return, or both. */
 const eventLineEnd = /\r\n|\n|\r/u;
 
+/** An event of Mistral's speech stream, as far as it is read: what it is, and its piece of the file. */
+const speechEventSchema = z.object({
+  type: z.string().optional(),
+  audio_data: z.string().min(1).optional(),
+});
+
+/** The event that ends a line's stream: every piece of the file came before it. */
+const speechDone = "speech.audio.done";
+
 /**
- * The audio of one event of Mistral's speech stream, by the lines of its
- * `data` field joined (the event stream format, HTML's "server-sent
- * events"): a `speech.audio.delta`'s chunk of the file. None for any other
- * event, such as `speech.audio.done`.
+ * One event of Mistral's speech stream, by the lines of its `data` field
+ * joined (the event stream format, HTML's "server-sent events"): the piece
+ * of the file a `speech.audio.delta` carries, or that the line is done.
+ * Nothing for any other event.
  */
-const audioOfEvent = (data: readonly string[]): Uint8Array | undefined => {
-  if (data.length === 0) {
-    return undefined;
+const speechEventOf = (
+  data: readonly string[]
+): { piece?: Uint8Array; done: boolean } => {
+  const parsed = speechEventSchema.safeParse(
+    data.length === 0 ? undefined : jsonOf(data.join("\n"))
+  );
+  if (!parsed.success) {
+    return { done: false };
   }
-  const parsed = spokenSchema.safeParse(jsonOf(data.join("\n")));
-  return parsed.success ? bytesOf(parsed.data.audio_data) : undefined;
+  const piece =
+    parsed.data.audio_data === undefined
+      ? undefined
+      : bytesOf(parsed.data.audio_data);
+  return {
+    ...(piece === undefined ? {} : { piece }),
+    done: parsed.data.type === speechDone,
+  };
 };
 
 /** Pieces of a file as one. */
@@ -2857,7 +2877,8 @@ const joinedBytes = (pieces: readonly Uint8Array[]): Uint8Array => {
  * the file goes to `onAudio` the moment it is there, so whoever listens
  * hears the start of the line while the rest is made; `undefined` when it
  * isn't a line. Put together, the pieces are the file a line asked for
- * whole would be.
+ * whole would be. A stream that ends without saying the line is done broke
+ * off: what came of it is no line to keep.
  */
 const readSpeechStream = async (
   answered: Response,
@@ -2870,14 +2891,16 @@ const readSpeechStream = async (
   const pieces: Uint8Array[] = [];
   let data: string[] = [];
   let unread = "";
+  let done = false;
   const take = (written: string): void => {
     // A blank line ends an event; a `data` line adds to the one underway.
     if (written === "") {
-      const piece = audioOfEvent(data);
+      const event = speechEventOf(data);
       data = [];
-      if (piece !== undefined) {
-        pieces.push(piece);
-        onAudio(piece);
+      done ||= event.done;
+      if (event.piece !== undefined) {
+        pieces.push(event.piece);
+        onAudio(event.piece);
       }
       return;
     }
@@ -2899,7 +2922,7 @@ const readSpeechStream = async (
     }
   }
   const audio = joinedBytes(pieces);
-  const seconds = wavSeconds(audio);
+  const seconds = done ? wavSeconds(audio) : undefined;
   return seconds === undefined
     ? undefined
     : { audio, mime: speechFormat.mime, words: wordsOf(line, seconds) };

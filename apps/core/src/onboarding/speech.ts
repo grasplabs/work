@@ -363,6 +363,8 @@ const sayStreamed = async ({
     }
   };
   const begun = Promise.withResolvers<boolean>();
+  /** A piece of the line went out: the answer is the stream from then on. */
+  let streaming = false;
   const speaking = platformSpeech(env, {
     purpose,
     trigger: listener.trigger,
@@ -377,6 +379,7 @@ const sayStreamed = async ({
     },
     undefined,
     (piece) => {
+      streaming = true;
       begun.resolve(true);
       void send({ audio: toBase64(piece) });
     }
@@ -384,6 +387,7 @@ const sayStreamed = async ({
   const made = (async (): Promise<unknown> => {
     try {
       const speech = await speaking;
+      streaming = true;
       begun.resolve(true);
       await send({ words: speech.words });
       await writer.close().catch(() => null);
@@ -405,9 +409,21 @@ const sayStreamed = async ({
       ]);
       return undefined;
     } catch (error) {
+      if (streaming) {
+        // Broken off halfway: the page is told, as its answer began.
+        log.warn("speech.failed", {
+          requestId,
+          code: modelErrors.codeOf(error),
+        });
+        await send({ failed: true });
+        await writer.close().catch(() => null);
+      } else {
+        // Nothing went out, and nobody reads the stream: a write to it
+        // would never settle. The request is refused as one asked for
+        // whole is (below).
+        await writer.abort().catch(() => null);
+      }
       begun.resolve(false);
-      await send({ failed: true });
-      await writer.close().catch(() => null);
       return error;
     }
   })();
