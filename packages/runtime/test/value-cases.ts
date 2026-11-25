@@ -496,6 +496,7 @@ add(
       "http:/example.com",
       "https:\\\\evil.com\\@good.com",
       "https://example.com\\path",
+      "https:///example.com",
       " https://example.com",
       "https://example.com\n",
       "/relative/path",
@@ -510,7 +511,7 @@ add(
     { value: "http://localhost:8080/a?b=c#d" },
     { value: "https://münchen.example/straße" },
     { value: "HTTPS://Example.com" },
-    ...Array.from({ length: 13 }, () => ({ issues: [["value.invalid_url"]] })),
+    ...Array.from({ length: 14 }, () => ({ issues: [["value.invalid_url"]] })),
   ]
 );
 add(
@@ -1825,6 +1826,39 @@ add(
         ["value.unknown_key", "tags", 0, "color"],
       ],
     },
+  ]
+);
+add(
+  "an answer read with unknownFields drop takes the union member that drops the fewest keys",
+  () => {
+    const drop = { unknownFields: "drop" } as const;
+    const person = v.union(
+      v.object({ id: v.number() }),
+      v.object({ id: v.number(), name: v.string() }),
+      v.object({ id: v.number(), name: v.string(), team: v.string() })
+    );
+    const inList = v.array(person);
+    return [
+      validateValue(
+        person.descriptor,
+        { id: 1, name: "Ada", extra: true },
+        drop
+      ),
+      validateValue(person.descriptor, { id: 2, extra: true }, drop),
+      validateValue(
+        inList.descriptor,
+        [
+          { id: 3, name: "Bo", team: "x" },
+          { id: 4, team: "y" },
+        ],
+        drop
+      ),
+    ];
+  },
+  [
+    { value: { id: 1, name: "Ada" } },
+    { value: { id: 2 } },
+    { value: [{ id: 3, name: "Bo", team: "x" }, { id: 4 }] },
   ]
 );
 add(

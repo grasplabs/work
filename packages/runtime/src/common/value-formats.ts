@@ -64,13 +64,16 @@ export const isDateTime = (text: string): boolean => {
   return (utcMinute + minutesInDay) % minutesInDay === minutesInDay - 1;
 };
 
-const webUrlStart = /^https?:\/\//iu;
+// `//` and then a host: the parser reads `https:///host` as `https://host`.
+const webUrlStart = /^https?:\/\/[^/]/iu;
 
 /**
- * An absolute `http` or `https` URL that the WHATWG parser reads as
- * written. What it would mend is refused, so another parser of the kept
- * text reads the same address: spaces and control characters, which it
- * drops; a backslash, which it reads as `/`; and a scheme without `//`.
+ * An absolute `http` or `https` URL, read as the WHATWG URL parser reads
+ * it: as an App's `new URL` and connect's fetch do, a host included
+ * (percent-decoded, IDNA-mapped, IPv4 in its short forms). What that parser
+ * would quietly mend in how the address is written is refused instead:
+ * spaces and control characters, which it drops; a backslash, which it
+ * reads as `/`; and a scheme without `//` and a host after it.
  */
 export const isWebUrl = (text: string): boolean => {
   for (const char of text) {

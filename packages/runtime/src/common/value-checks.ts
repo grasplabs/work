@@ -21,6 +21,8 @@ export interface CheckState {
    * refused: how an answer from outside is read (`ValueCheckOptions`).
    */
   readonly dropUnknownFields: boolean;
+  /** Keys dropped so far: how a union picks the member that keeps most. */
+  dropped: number;
   /** Read past `valueLimits.steps`: the whole check is refused. */
   exhausted: boolean;
   /** Stop once this many issues are collected. */
@@ -78,11 +80,13 @@ export const checkStrictObject = (
     return refuse(state, "value.invalid_type");
   }
   let valid = true;
-  for (const key of state.dropUnknownFields ? [] : Object.keys(value)) {
+  for (const key of Object.keys(value)) {
     if (state.stopped) {
       break;
     }
-    if (!keys.has(key)) {
+    if (!keys.has(key) && state.dropUnknownFields) {
+      state.dropped += 1;
+    } else if (!keys.has(key)) {
       // The path names the key only when it is short: an issue never
       // carries an unbounded piece of what was submitted.
       const named = key.length <= valueLimits.nameLength;

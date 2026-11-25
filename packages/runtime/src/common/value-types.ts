@@ -95,9 +95,10 @@ export interface StringSchema<
   /** Removes whitespace at both ends before the length is checked. */
   readonly trim: () => StringSchema<Input, Output>;
   /**
-   * An absolute `http` or `https` URL, as the WHATWG URL parser reads one,
-   * with no spaces or control characters, kept as the text it was. A string
-   * has one format at most.
+   * An absolute `http` or `https` URL, as the WHATWG URL parser reads one
+   * (`new URL`), written out in full: `//` and a host, no spaces, control
+   * characters or backslashes. Kept as the text it was. A string has one
+   * format at most.
    */
   readonly url: () => StringSchema<Input, Output>;
 }

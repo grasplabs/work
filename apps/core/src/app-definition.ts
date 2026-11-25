@@ -397,12 +397,12 @@ const fieldTypeOf = (type: ValueDescriptor): FieldType => {
       cascade: type.onDelete === "cascade",
     };
   }
-  // A string held to a format other than email is edited in code alone:
-  // the editor's kinds have no place for it, and would drop it.
-  const formatted =
-    type.kind === "string" &&
-    (type.datetime === true || type.date === true || type.url === true);
-  if (type.kind === "string" && !formatted) {
+  if (type.kind === "string") {
+    // A format other than email is edited in code alone: the editor's
+    // kinds have no place for it, and would drop it.
+    if (type.datetime === true || type.date === true || type.url === true) {
+      return { kind: "other" };
+    }
     return {
       kind: type.email ? "email" : "text",
       trim: type.trim,
@@ -425,7 +425,7 @@ const fieldTypeOf = (type: ValueDescriptor): FieldType => {
         typeof type.defaultValue === "boolean" ? type.defaultValue : null,
     };
   }
-  return { kind: type.kind === "string" ? "other" : fieldKinds[type.kind] };
+  return { kind: fieldKinds[type.kind] };
 };
 
 /** A field as the Data view shows it (`DataModelField`). */
