@@ -11,8 +11,7 @@ import {
   models,
   usableAnswerTokens,
 } from "../models.ts";
-import { statementKinds } from "./brain-intake.ts";
-import { withoutNames } from "./names.ts";
+import { statementKinds, withoutNames } from "./brain-intake.ts";
 import { allowed, hidden, terminal } from "./plain-text.ts";
 import type { Took } from "./store.ts";
 

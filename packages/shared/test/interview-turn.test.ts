@@ -286,67 +286,43 @@ describe("a turn from the model", () => {
     ]);
   });
 
-  it("takes a spoken answer as it was heard: a quote's words in one stretch, but for a word heard as another; a typed one only as it stands", () => {
+  it("takes a spoken answer with the spaces, hyphens and punctuation it was heard with, and never a word that was not said", () => {
     const answers = [
-      "I do check the invoice number",
-      "the first thing every morning is that an invoice from a supplier comes in and much later in exact I book whatever is approved",
-      "so the invoice comes in by mail and then I book it in exact on line and I do not check the amount every time",
+      "I open the file, and then... I book about 14 a week in exact on line.",
+      "Nobody checks it. I send an email to the supplier with the invoice",
     ];
-    const quotes = [
-      // One word heard as another, in a long quote.
-      "the invoice comes in by email and then I book it",
-      // One word heard as two, in a short one.
-      "Exact Online",
-      // The same words in another order.
-      "book it and then the invoice comes in",
-      // Never said.
-      "forty invoices a week",
-      // Its words are there, spread over a long sentence two answers back.
-      "the first invoice is approved",
-      // The opposite of what was said, either way round.
-      "I do not check the invoice number",
-      "I check the amount every time",
-    ];
-    const kept = (typed: boolean) =>
+    const keptOf = (quote: string, typed: boolean) =>
       checked(
-        { say: "Then?", facts: quotes.map((quote) => stepFrom(quote)) },
+        { say: "Then?", facts: [stepFrom(quote)] },
         {
           ...context,
           answers: answers.map((text) => (typed ? { text, typed } : { text })),
         }
-      ).facts.length;
-    const keptOf = (quote: string) =>
-      checked(
-        { say: "Then?", facts: [stepFrom(quote)] },
-        { ...context, answers: answers.map((text) => ({ text })) }
       ).facts.length === 1;
+    const quotes = [
+      // Heard as two words, with a comma or a hyphen more or less.
+      "Exact Online",
+      "an e-mail to the supplier",
+      "I open the file and then I book",
+      // A word that was not said, however close.
+      "I delete the file",
+      "about 40 a week",
+      "Somebody checks it",
+      "the supplier without the invoice",
+      // The same words in another order.
+      "book it and then open the file",
+    ];
     expect({
-      spoken: quotes.filter((quote) => keptOf(quote)),
-      typed: kept(true),
+      spoken: quotes.filter((quote) => keptOf(quote, false)),
+      typed: quotes.filter((quote) => keptOf(quote, true)),
     }).toStrictEqual({
       spoken: [
-        "the invoice comes in by email and then I book it",
         "Exact Online",
+        "an e-mail to the supplier",
+        "I open the file and then I book",
       ],
-      typed: 0,
+      typed: [],
     });
-  });
-
-  it("hears a word written with or without a hyphen, and a short quote only word for word", () => {
-    const said = (heard: string, quote: string) =>
-      checked(
-        { say: "Then?", facts: [stepFrom(quote)] },
-        { ...context, answers: [{ text: heard }] }
-      ).facts.length === 1;
-    expect({
-      hyphen: said(
-        "then I send an email to the supplier",
-        "an e-mail to the supplier"
-      ),
-      // Two words allow no miss: "the list" is not "the sheet".
-      short: said("I check it in the list", "the sheet"),
-      three: said("I check it in our sheet", "in the sheet"),
-    }).toStrictEqual({ hyphen: true, short: false, three: true });
   });
 
   it("counts what it leaves out, by why", () => {

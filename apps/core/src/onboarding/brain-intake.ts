@@ -17,7 +17,6 @@ import { canonicalJson } from "@grasp-os/shared/json";
 import { log } from "@grasp-os/shared/log";
 
 import type { Support } from "./drawing-support.ts";
-import { withoutNames } from "./names.ts";
 import { plainPart } from "./plain-text.ts";
 import type { TeamClaim } from "./team-claims.ts";
 import { inUnitOf } from "./work-drawing.ts";
@@ -155,6 +154,40 @@ export interface Intake {
   drawings: IntakeDrawing[];
   rests: Rest[];
 }
+
+const escaped = (text: string): string =>
+  text.replaceAll(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`);
+
+/**
+ * Takes the names on the staff list out of a text: each first and last
+ * name, as a whole word, becomes "someone". A word that is also a name
+ * ("Mark") goes too: better a word lost than a name kept.
+ */
+export const withoutNames = (
+  names: readonly string[]
+): ((text: string) => string) => {
+  const words = [
+    ...new Set(
+      names.flatMap((name) =>
+        name.split(/\s+/u).filter((word) => word.length >= 2)
+      )
+    ),
+  ];
+  if (words.length === 0) {
+    return (text) => text;
+  }
+  const named = new RegExp(
+    `(?<![\\p{L}\\p{N}])(?:${words.map(escaped).join("|")})(?![\\p{L}\\p{N}])`,
+    "gu"
+  );
+  return (text) => {
+    const said = text.replaceAll(named, "someone");
+    // A sentence that started with a name starts with a capital still.
+    return said.startsWith("someone") && !text.startsWith("someone")
+      ? `S${said.slice(1)}`
+      : said;
+  };
+};
 
 /** The median of some numbers, the lower of the middle two; none of none. */
 const medianOf = (values: readonly number[]): number | undefined =>

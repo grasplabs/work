@@ -3785,10 +3785,6 @@ msgstr "Antes de que me ponga en contacto, avisa a tu equipo"
 msgid "Before meetings"
 msgstr "Antes de las reuniones"
 
-#: src/interview/words.ts
-msgid "Before the work: what you told me about AI."
-msgstr "Antes del trabajo: lo que me contaste sobre la IA."
-
 #: src/onboarding/setup-steps.tsx
 msgid "Before we start, which language do you prefer?"
 msgstr "Antes de empezar, ¿qué idioma prefieres?"
@@ -7477,10 +7473,6 @@ msgstr "Primero necesito tu lista de personal."
 msgid "First run {when}"
 msgstr "Primera ejecución: {when}"
 
-#: src/interview/words.ts
-msgid "First, the steps."
-msgstr "Primero, los pasos."
-
 #: src/inbox/report-viewer.tsx
 msgid "Fit"
 msgstr "Ajustar"
@@ -9775,8 +9767,8 @@ msgid "Last week"
 msgstr "La semana pasada"
 
 #: src/interview/words.ts
-msgid "Last, the numbers and the result."
-msgstr "Por último, las cifras y el resultado."
+msgid "Last: what you told me about AI."
+msgstr "Por último: lo que me contaste sobre la IA."
 
 #: src/routes/_shell.settings.instructions.tsx
 msgid "Lasting facts"
@@ -12252,6 +12244,10 @@ msgstr "Ahora"
 msgctxt "how a workflow stands now"
 msgid "Now"
 msgstr "Ahora"
+
+#: src/interview/words.ts
+msgid "Now, the steps."
+msgstr "Ahora, los pasos."
 
 #: src/interview/words.ts
 msgid "Number"
@@ -18022,6 +18018,10 @@ msgstr "Después {task}"
 #: src/onboarding/about-story.tsx
 msgid "Then I talk to your team myself: short conversations, over two weeks. That’s where I learn the most."
 msgstr "Después hablo yo mismo con tu equipo: conversaciones cortas, a lo largo de dos semanas. Ahí es donde más aprendo."
+
+#: src/interview/words.ts
+msgid "Then, the numbers and the result."
+msgstr "Después, las cifras y el resultado."
 
 #: src/interview/words.ts
 msgid "Then, when it goes differently."

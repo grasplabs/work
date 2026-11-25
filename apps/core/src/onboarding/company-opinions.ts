@@ -5,8 +5,7 @@ import { minTeamShown } from "@grasp-os/shared/onboarding";
 import { z } from "zod";
 
 import { modelSettings, modelForRole, models } from "../models.ts";
-import { ownId } from "./brain-intake.ts";
-import { withoutNames } from "./names.ts";
+import { ownId, withoutNames } from "./brain-intake.ts";
 import {
   backingOf,
   checksFor,

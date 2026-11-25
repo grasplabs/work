@@ -49,16 +49,16 @@ export const useLoopWords = (locale: Locale): LoopWords => {
   const { t } = useLingui();
   const intros: Record<ReadBackGroup, [string, string]> = {
     you: [
-      t`Before the work: what you told me about AI.`,
+      t`Last: what you told me about AI.`,
       t`More of what you told me about AI.`,
     ],
     tasks: [t`Your recurring work.`, t`More of your recurring work.`],
-    steps: [t`First, the steps.`, t`More of the steps.`],
+    steps: [t`Now, the steps.`, t`More of the steps.`],
     differently: [
       t`Then, when it goes differently.`,
       t`More of when it goes differently.`,
     ],
-    result: [t`Last, the numbers and the result.`, t`And the rest.`],
+    result: [t`Then, the numbers and the result.`, t`And the rest.`],
     together: [t`This is what I wrote down.`, t`And the rest.`],
   };
   return {

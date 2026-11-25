@@ -2,7 +2,8 @@ import type { DrawnWork } from "@grasp-os/shared/admin/org-record";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import { describe, expect, it } from "vite-plus/test";
 
-import { withoutNames } from "../src/onboarding/names.ts";
+import { withoutNames } from "../src/onboarding/brain-intake.ts";
+import { namedIn } from "../src/onboarding/names.ts";
 import { stillOpen } from "../src/onboarding/still-open.ts";
 import { toldAbout } from "../src/onboarding/told-work.ts";
 
@@ -17,8 +18,9 @@ import { toldAbout } from "../src/onboarding/told-work.ts";
 //   and the list never empties.
 // - A colleague's name reaching someone else's interviewer: in a line a
 //   model wrote, as the one who does a step, or as whose numbers they are;
-//   written without its accent, with an "s", or as a short form.
-// - Ordinary words lost because someone is called Will or An.
+//   written without its accent or with an "s".
+// - The Brain's own filter of names taking ordinary words out of what
+//   people read.
 // - More of it than a brief should carry.
 
 const facts = (...tags: FactTag[]) => tags.map((tag) => ({ tag }));
@@ -175,46 +177,41 @@ const staff = [
   "An Peeters",
 ];
 
-describe("a name from the staff list in a text", () => {
-  const clean = withoutNames(staff);
+describe("a line that holds a name from the staff list", () => {
+  const named = namedIn(staff);
 
-  it("goes, whole or in part, without its accent, with an s, or as a short form", () => {
-    expect(
-      [
-        "Ask Inge de Vries.",
-        "Ask José, or Jose's lead.",
-        "It lies on Inges desk.",
-        "Check with Alex first.",
-        "Marie and Mo sign it.",
-        "Send it to PEETERS.",
-      ].map((text) => clean(text))
-    ).toStrictEqual([
-      "Ask someone someone someone.",
-      "Ask someone, or someone's lead.",
-      "It lies on someone desk.",
-      "Check with someone first.",
-      "Someone and someone sign it.",
-      "Send it to someone.",
-    ]);
+  it("is found whatever the name's capitals or accents, in part, and with an s", () => {
+    const lines = [
+      "Ask Inge de Vries.",
+      "Ask Jose when the number is missing.",
+      "It is on Joses list.",
+      "Forward it to marie's inbox.",
+      "Send it to PEETERS.",
+      "It will go out the same day.",
+    ];
+    expect(lines.filter((line) => !named(line))).toStrictEqual([]);
   });
 
-  it("leaves the words a short name is also: only written as a name it goes", () => {
-    const plain = [
-      "It will go out the same day.",
-      "Attach an order to it.",
-      "The order follows in the same mo.",
-      "Take it to heart.",
+  it("is not found in a line without one, or in a longer word a name is part of", () => {
+    const lines = [
+      "Open the invoice.",
+      "Check the willing suppliers.",
+      "Book it in Exact.",
     ];
-    expect({
-      plain: plain.map((text) => clean(text)),
-      named: clean("Then Will takes it to An."),
-      // With a capital it can't be told from the name: better a word lost.
-      first: clean("An order follows."),
-    }).toStrictEqual({
-      plain,
-      named: "Then someone takes it to someone.",
-      first: "Someone order follows.",
-    });
+    expect(lines.filter((line) => named(line))).toStrictEqual([]);
+  });
+});
+
+describe("a statement the Brain keeps", () => {
+  it("loses a colleague's name and keeps the word someone is also called", () => {
+    const clean = withoutNames(["Tom Price", "Noor Nijs"]);
+    expect([
+      clean("Check the price list."),
+      clean("Ask Noor for the price list."),
+    ]).toStrictEqual([
+      "Check the price list.",
+      "Ask someone for the price list.",
+    ]);
   });
 });
 
@@ -256,19 +253,16 @@ describe("what the team already told about a piece of work", () => {
     );
   });
 
-  it("leaves out every line in which a name from the staff list is found, and names the work when only what is open is left", () => {
+  it("leaves out every line that holds a name from the staff list, and names the work when only what is open is left", () => {
     expect({
       lines: toldAbout(
         "incoming invoices",
         drawn({
           steps: [
             step("Open the invoice."),
-            step("Ask Inge when the number is missing."),
+            step("Ask Jose when the number is missing."),
+            step("Put it on Inges list."),
             step("Send it to Mo."),
-            step("Forward it to Marie's inbox."),
-            step("Put it on Joses tray."),
-            step("Check with Alex first."),
-            step("It will go out the same day."),
           ],
           open: ["Why does De Vries check each one?", "What does Li do then?"],
         }),
@@ -286,7 +280,6 @@ describe("what the team already told about a piece of work", () => {
       lines: [
         "What the team already told about incoming invoices (how it goes, no names):",
         "- Open the invoice.",
-        "- It will go out the same day.",
       ].join("\n"),
       open: "Still open about incoming invoices: Who approves above the limit?",
     });

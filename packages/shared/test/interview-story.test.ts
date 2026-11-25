@@ -185,7 +185,7 @@ describe("the read-back", () => {
       ids: idsOf(parts),
     }).toStrictEqual({
       groups: ["together"],
-      ids: [["e", "b", "d", "c", "a"]],
+      ids: [["b", "d", "c", "a", "e"]],
     });
   });
 
@@ -228,7 +228,7 @@ describe("the read-back", () => {
       fact("k", "number"),
       fact("l", "done"),
     ]);
-    expect(parts.map(({ facts }) => facts.length)).toStrictEqual([7, 5]);
+    expect(parts.map(({ facts }) => facts.length)).toStrictEqual([6, 6]);
   });
 
   it("has nothing to read when nothing was written down", () => {

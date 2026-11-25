@@ -321,7 +321,7 @@ const openings: Readonly<
     lines: [
       {
         from: "stephen",
-        text: "First a few questions about you and AI, then your work. Do you already use AI in your work, like ChatGPT or Copilot?",
+        text: "First your work as a whole, then one part of it up close. What do you do here, in a sentence or two?",
       },
       { from: "person", text: "no, not really" },
       {
@@ -345,7 +345,7 @@ const openings: Readonly<
     lines: [
       {
         from: "stephen",
-        text: "Eerst een paar vragen over jou en AI, daarna over je werk. Gebruik je AI al in je werk, zoals ChatGPT of Copilot?",
+        text: "Eerst je werk als geheel, daarna één onderdeel ervan van dichtbij. Wat doe je hier, in een of twee zinnen?",
       },
       { from: "person", text: "nee, niet echt" },
       { from: "stephen", text: "Oké. Maakt iets je zorgen bij AI op je werk?" },

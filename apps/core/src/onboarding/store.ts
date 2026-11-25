@@ -198,7 +198,7 @@ import {
 import type { MailState, MailToQueue } from "../mail-outbox.ts";
 import { mailDomain, mailSends, sendMail } from "../mail.ts";
 import { forgetStored } from "../speech-cache.ts";
-import { intakeIds, intakeOf } from "./brain-intake.ts";
+import { intakeIds, intakeOf, withoutNames } from "./brain-intake.ts";
 import type { IntakeClaim, IntakeDrawing, TeamIntake } from "./brain-intake.ts";
 import {
   candidateId,
@@ -228,7 +228,6 @@ import {
 } from "./kickoff.ts";
 import { linkSecretOf } from "./link-secret.ts";
 import { linkMail, reminderMail, updateMail } from "./mail-text.ts";
-import { withoutNames } from "./names.ts";
 import type { Proposer } from "./proposals.ts";
 import { referralOf, referred } from "./referral.ts";
 import {
@@ -249,7 +248,7 @@ import { interviewBrief, setupView } from "./stephen-setup.ts";
 import { onboardingStoreName } from "./store-name.ts";
 import { checksFor, teamClaims } from "./team-claims.ts";
 import { assignWork, companyName, drawTeamMap } from "./team-map.ts";
-import { toldAbout, toldByEnough } from "./told-work.ts";
+import { toldAbout, toldByEnough, toldSomething } from "./told-work.ts";
 import { drawWork, knownOf } from "./work-drawing.ts";
 import type { WorkBrief, WorkKnown } from "./work-drawing.ts";
 
@@ -2688,13 +2687,17 @@ export class Onboarding extends DurableObject<Env> {
     const drawn = kind === "lead" ? null : this.#drawingAskedOf(person.id);
     // Only of work that is named to them (`#workOf`), and only once two
     // people besides them told it: with one, every line would be that one
-    // colleague's, and their teammate would know whose. Their own words
-    // they know already. What the drawing left open goes by the same rule.
+    // colleague's, and their teammate would know whose. Who told is read
+    // from what each said of this work (`told`), not from whom it was
+    // drawn with (`from`): that is everyone who agreed to an interview,
+    // also who said nothing of it. Their own words they know already. What
+    // the drawing left open goes by the same rule.
     const toldByOthers =
       work !== "" &&
       drawn !== null &&
-      drawn.from.filter((teller) => teller !== person.id).length >=
-        toldByEnough;
+      Object.entries(drawn.told).filter(
+        ([teller, told]) => teller !== person.id && toldSomething(told)
+      ).length >= toldByEnough;
     const known = [
       ...(kind === "lead" ? teamKnown(person.name, teamName, members) : []),
       ...(drawn !== null && toldByOthers

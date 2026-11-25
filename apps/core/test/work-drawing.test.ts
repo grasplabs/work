@@ -256,6 +256,25 @@ const ticketsReply = (ids: Ids): ProviderReply => ({
   outputTokens: 900,
 });
 
+/** What the model answers for tickets when Max alone told anything of them. */
+const maxAloneReply = (ids: Ids): ProviderReply => ({
+  text: JSON.stringify({
+    starts: "A customer email arrives as a ticket in Zendesk.",
+    starts_by: [ids.max],
+    steps: [
+      {
+        text: "Open the ticket.",
+        who: "Agent",
+        tool: "Zendesk",
+        by: [ids.max],
+      },
+    ],
+    open: ["Who answers the difficult ones?"],
+  }),
+  inputTokens: 4000,
+  outputTokens: 900,
+});
+
 /** The lead's map drawn, and everyone's links out: tickets and the rota, by id. */
 const mapped = async (ids: Ids) => {
   const store = onboardingStore(env);
@@ -513,15 +532,23 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
     ]);
     // Max alone told it: to Noor every line would be his, and he knows his own.
     const one = await toldTo();
+    // Mia agrees to an interview that says nothing of the tickets: the
+    // drawing is made with her, and every line of it is still Max's.
     await agree(await openLink(ids.mia), 0, [
-      fact("i1", "step", "Mia opens the ticket."),
+      fact("i1", "wish", "Mia would like fewer meetings."),
+    ]);
+    await answering([maxAloneReply(ids)], async () => await store.drawNext());
+    const quiet = await toldTo();
+    await agree(await openLink(ids.mo), 0, [
+      fact("o1", "step", "Mo opens the ticket."),
     ]);
     await answering([ticketsReply(ids)], async () => await store.drawNext());
-    // Max and Mia told it: two others for Noor, one other for each of them.
-    const two = await toldTo();
-    expect({ one, two }).toStrictEqual({
+    // All three told it: two others for each of them, and three for Noor.
+    const all = await toldTo();
+    expect({ one, quiet, all }).toStrictEqual({
       one: { told: [], open: [] },
-      two: { told: ["noor"], open: ["noor"] },
+      quiet: { told: [], open: [] },
+      all: { told: ["max", "mia", "noor"], open: ["max", "mia", "noor"] },
     });
   });
 
