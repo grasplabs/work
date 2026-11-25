@@ -841,6 +841,9 @@ export const appProvider = ({
       header: signIn.header,
       value: `${signIn.prefix ?? ""}${key}`,
     });
+    const templates = hosts.filter(
+      (host) => hostTemplateOf(host) !== undefined
+    );
     return {
       kind: "api_key",
       id: provider,
@@ -848,7 +851,11 @@ export const appProvider = ({
       credential,
       account: async (key, _owner, given) =>
         await accountAt(signIn.account, credential(key), given),
-      hostTemplates: hosts.filter((host) => hostTemplateOf(host) !== undefined),
+      hostTemplates: templates,
+      // A whole host is an admin's to give: on a shared connection alone.
+      ...(templates.some((host) => hostTemplateOf(host)?.suffix === null)
+        ? { sharedOnly: true }
+        : {}),
     };
   }
   const { account, idToken, tenant } = signIn;

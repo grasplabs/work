@@ -14,6 +14,7 @@ import { log } from "@grasp-os/shared/log";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { z } from "zod";
 
+import { credentialForms, withoutCredential } from "./credential-copies.ts";
 import { pauseAsked } from "./pause.ts";
 
 // A native connector's only way out. Connect loads each call's connector
@@ -123,9 +124,6 @@ const responseHeadersDropped = new Set([
   "content-length",
   egressHeader,
 ]);
-
-/** What a copy of the credential in an answer's header is replaced with. */
-const credentialPlaceholder = "[credential]";
 
 const egressPropsSchema = z.strictObject({
   /** Which connector, for the log: its name and version. */
@@ -311,15 +309,11 @@ const answerHeaders = (
   response: Response,
   { value, secret }: EgressProps["credential"]
 ): Headers => {
+  const forms = credentialForms([value, secret]);
   const headers = new Headers();
   for (const [name, sent] of response.headers) {
     if (!responseHeadersDropped.has(name)) {
-      headers.append(
-        name,
-        sent
-          .replaceAll(value, credentialPlaceholder)
-          .replaceAll(secret, credentialPlaceholder)
-      );
+      headers.append(name, withoutCredential(sent, forms));
     }
   }
   return headers;

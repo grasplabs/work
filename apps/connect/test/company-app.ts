@@ -37,6 +37,11 @@ export interface CompanyRequest {
   body: string;
 }
 
+interface Holder {
+  account: CompanyAccount;
+  host: string | undefined;
+}
+
 interface Code {
   challenge: string;
   redirectUri: string;
@@ -62,8 +67,9 @@ const hostOf = (apiDomain: string | undefined): string | undefined =>
 /**
  * The app: its token endpoint, which redeems a code only with Grasp's
  * client in the form, the verifier of its challenge and its redirect URI,
- * and answers with the account's `api_domain`; and each company's host,
- * which answers only a token issued for that host. Registered after the
+ * or a refresh token once, and answers with the account's `api_domain`
+ * (`options.refreshedApiDomain` instead on a refresh, when set); and each
+ * company's host, which answers only a token issued for that host. Registered after the
  * internet, so it sees every request first and hands on the rest.
  */
 export const fakeCompanyApp = () => {
@@ -71,10 +77,30 @@ export const fakeCompanyApp = () => {
   /** Every access and refresh token issued, to look for. */
   const issued: string[] = [];
   const codes = new Map<string, Code>();
-  const holders = new Map<
-    string,
-    { account: CompanyAccount; host: string | undefined }
-  >();
+  /** Access and refresh tokens → the account and host they're for. */
+  const holders = new Map<string, Holder>();
+  const refreshTokens = new Map<string, Holder>();
+  const options: {
+    /** The `api_domain` a refresh's answer names, if not the account's. */
+    refreshedApiDomain: string | undefined;
+  } = { refreshedApiDomain: undefined };
+
+  const tokens = (holder: Holder, apiDomain: string | undefined): Response => {
+    const accessToken = `company-access-${crypto.randomUUID()}`;
+    const refreshToken = `company-refresh-${crypto.randomUUID()}`;
+    issued.push(accessToken, refreshToken);
+    holders.set(accessToken, holder);
+    refreshTokens.set(refreshToken, holder);
+    return Response.json({
+      token_type: "Bearer",
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      expires_in: 3600,
+      ...(apiDomain === undefined
+        ? {}
+        : { [sampleCompanyHostField]: apiDomain }),
+    });
+  };
 
   const tokenEndpoint = async (form: URLSearchParams): Promise<Response> => {
     if (
@@ -82,6 +108,17 @@ export const fakeCompanyApp = () => {
       form.get("client_secret") !== client.secret
     ) {
       return json({ error: "invalid_client" }, 401);
+    }
+    if (form.get("grant_type") === "refresh_token") {
+      const token = form.get("refresh_token") ?? "";
+      const holder = refreshTokens.get(token);
+      refreshTokens.delete(token);
+      return holder === undefined
+        ? json({ error: "invalid_grant" }, 400)
+        : tokens(
+            holder,
+            options.refreshedApiDomain ?? holder.account.apiDomain
+          );
     }
     const code = form.get("code") ?? "";
     const issuedFor = codes.get(code);
@@ -95,24 +132,10 @@ export const fakeCompanyApp = () => {
       return json({ error: "invalid_grant" }, 400);
     }
     const { account } = issuedFor;
-    const [accessToken, refreshToken] = [
-      "company-access",
-      "company-refresh",
-    ].map((prefix) => `${prefix}-${crypto.randomUUID()}`);
-    issued.push(accessToken ?? "", refreshToken ?? "");
-    holders.set(accessToken ?? "", {
-      account,
-      host: hostOf(account.apiDomain),
-    });
-    return Response.json({
-      token_type: "Bearer",
-      access_token: accessToken,
-      refresh_token: refreshToken,
-      expires_in: 3600,
-      ...(account.apiDomain === undefined
-        ? {}
-        : { [sampleCompanyHostField]: account.apiDomain }),
-    });
+    return tokens(
+      { account, host: hostOf(account.apiDomain) },
+      account.apiDomain
+    );
   };
 
   const api = (url: URL, authorization: string | null): Response => {
@@ -131,6 +154,8 @@ export const fakeCompanyApp = () => {
     issued.length = 0;
     codes.clear();
     holders.clear();
+    refreshTokens.clear();
+    options.refreshedApiDomain = undefined;
     const passThrough =
       vi.mocked(globalThis.fetch).getMockImplementation() ?? globalThis.fetch;
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -163,6 +188,7 @@ export const fakeCompanyApp = () => {
   return {
     requests,
     issued,
+    options,
     /** The code the app sends back once `account` consents at `url`. */
     authorize: (url: URL, account: CompanyAccount): string => {
       const code = `company-code-${crypto.randomUUID()}`;

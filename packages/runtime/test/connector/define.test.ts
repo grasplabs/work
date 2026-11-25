@@ -35,9 +35,17 @@ const keyAuth = auth.apiKey({
 /** A host template filled per connection, under the vendor's name. */
 const companyHost = "{company}.stock.test";
 
-/** A connector on `hosts` that signs in with OAuth 2.0, its account at the first. */
+/**
+ * A connector on `hosts` that signs in with OAuth 2.0, its account read by
+ * a lookup at the first, or from an ID token.
+ */
 const companySignIn =
-  (hosts: string[], hostsFrom?: Record<string, string>) => () =>
+  (
+    hosts: string[],
+    hostsFrom?: Record<string, string>,
+    reads: "lookup" | "idToken" = "lookup"
+  ) =>
+  () =>
     defineConnector({
       name: "stock",
       title: "Stock",
@@ -48,7 +56,9 @@ const companySignIn =
         tokenUrl: "https://auth.stock.test/token",
         scopes: { "stock:read": "Read stock" },
         ...(hostsFrom === undefined ? {} : { hostsFrom }),
-        account: { url: `https://${hosts[0]}/v1/account`, id: "/id" },
+        ...(reads === "lookup"
+          ? { account: { url: `https://${hosts[0]}/v1/account`, id: "/id" } }
+          : { idToken: { issuer: "https://auth.stock.test", subject: "sub" } }),
       }),
       tools: {},
     });
@@ -395,23 +405,18 @@ describe("a connector's definition", () => {
       "{Company}.stock.test",
       "{company}stock.test",
       "x.{company}.stock.test",
+      // A template's stand-in, named as a fixed host.
+      "company.stock.test.invalid",
       "{}",
     ]) {
       expect(at(template)).toThrow("Not a host, or a host template");
     }
   });
 
-  it("fills an OAuth sign-in's template under a fixed name from the token response (hostsFrom)", () => {
-    const filled = companySignIn([companyHost], {
-      [companyHost]: "/api_domain",
-    })();
-    expect(filled.manifest.hosts).toStrictEqual([companyHost]);
-    expect(filled.manifest.signIn).toMatchObject({
-      hostsFrom: { [companyHost]: "/api_domain" },
-    });
-  });
-
-  it("refuses an OAuth sign-in's template hostsFrom doesn't fill, a whole host from the token response, and hostsFrom for a host that isn't a template of its", () => {
+  it("fills an OAuth sign-in's template under a fixed name from the token response with a lookup there, and refuses any other hostsFrom", () => {
+    expect(
+      companySignIn([companyHost], { [companyHost]: "/api_domain" })
+    ).not.toThrow();
     const unfilled = "A host template is filled by an API key's sign-in";
     const notOurs = "hostsFrom names only the connector's host templates";
     const refused: [string[], Record<string, string> | undefined, string][] = [
@@ -432,6 +437,10 @@ describe("a connector's definition", () => {
     for (const [hosts, hostsFrom, refusal] of refused) {
       expect(companySignIn(hosts, hostsFrom)).toThrow(refusal);
     }
+    // An ID token's subject is the vendor's, whatever host the response names.
+    expect(
+      companySignIn([companyHost], { [companyHost]: "/api_domain" }, "idToken")
+    ).toThrow("A sign-in with hostsFrom reads its account with a lookup");
   });
 
   it("refuses args that let any key through", () => {

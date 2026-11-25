@@ -17,7 +17,7 @@ export const dnsLabel = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 
 /**
  * A host filled per connection: `{name}.<host>`, one DNS label under a
- * fixed name (`{company}.pipedrive.com`), or `{name}` alone, a whole
+ * fixed name (`{company}.example.com`), or `{name}` alone, a whole
  * host only an admin sets, on a shared connection. A connector's code
  * sends its requests to the template's stand-in (`requestHost`); only
  * connect's egress fills it, with the host the connection signed in with
@@ -49,16 +49,36 @@ export const declaredHostSchema = z
   .string()
   .max(253)
   .refine(
-    (host) => hostPattern.test(host) || hostTemplateOf(host) !== undefined,
+    (host) =>
+      (hostPattern.test(host) && !host.endsWith(".invalid")) ||
+      hostTemplateOf(host) !== undefined,
     "Not a host, or a host template: {name}.<host> or {name}"
   );
 
 /**
+ * The host `value` names, a host or an HTTPS origin, as a URL parser
+ * reads it (in lower case); none for anything else: a port, userinfo, a
+ * path or a query. A filled host still has to fit its template.
+ */
+export const hostOf = (value: string): string | undefined => {
+  const url = URL.parse(value.includes("://") ? value : `https://${value}`);
+  return url?.protocol === "https:" &&
+    url.username === "" &&
+    url.password === "" &&
+    url.port === "" &&
+    url.pathname === "/" &&
+    url.search === "" &&
+    url.hash === ""
+    ? url.hostname
+    : undefined;
+};
+
+/**
  * The host a connector's code sends a declared host's requests to: a
  * fixed host itself; for a template, its name and fixed name under
- * `.invalid` (RFC 6761), which never resolves, as `company.pipedrive.com.invalid`
- * for `{company}.pipedrive.com`. A URL can't carry the template as it is,
- * and connector code never learns the host: egress fills it.
+ * `.invalid` (RFC 6761), which never resolves, as `company.example.com.invalid`
+ * for `{company}.example.com`. fetch refuses a host with the template's
+ * braces in it, and connector code never learns the host: egress fills it.
  */
 export const requestHost = (declared: string): string => {
   const template = hostTemplateOf(declared);

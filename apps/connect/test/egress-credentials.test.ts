@@ -1,8 +1,11 @@
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
-import { exports } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { env, exports } from "cloudflare:workers";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import { connectionTokens } from "../src/db/schema.ts";
 import { connectApp, fakeApps } from "./app-provider.ts";
 import {
   companyAccountOf,
@@ -12,7 +15,10 @@ import {
 } from "./company-app.ts";
 import { auditEvents, outcome, someone } from "./connect.ts";
 import { sampleCompanyLoginHost } from "./fixtures/sample-company-connector.ts";
-import { sampleHostHeader } from "./fixtures/sample-host-connector.ts";
+import {
+  sampleHostFilled,
+  sampleHostHeader,
+} from "./fixtures/sample-host-connector.ts";
 import {
   sampleKeyApiHost,
   sampleKeyFilesHost,
@@ -37,14 +43,15 @@ import { callTool } from "./tool-calls.ts";
 //      connection's, at a host of theirs, which receives the key at the
 //      account lookup or on the next call.
 // CH4  A host that isn't one: an address, a port, userinfo, a path, a
-//      host for a template the connector doesn't have.
+//      trailing dot, a host for a template the connector doesn't have.
 // CH5  A connection pointed at another host without signing in again,
 //      keeping the key it had; the same account at two hosts mistaken
 //      for one connection.
 // CH6  Connector code naming a filled host itself, or another, past the
 //      template egress fills.
 // CH7  A token response names the host: one outside the template, an
-//      address, a port or a path, gets nothing.
+//      address, a port or a path, gets nothing; nor does the host a
+//      refresh's answer names.
 
 fakeProviders();
 const apps = fakeApps();
@@ -52,7 +59,7 @@ const items = [{ id: "item-1", title: "First" }];
 
 /** The hosts an app of each client runs on, each with the key it takes. */
 const erpKey = "erp-key-1";
-const erpHosts = new Set(["erp.acme.test", "erp-2.acme.test"]);
+const erpHosts = new Set([sampleHostFilled, "erp-2.acme.test"]);
 
 const internet = fakeInternet((request, url) => {
   if (url.hostname === sampleKeyApiHost) {
@@ -198,7 +205,7 @@ describe("a host set per connection", () => {
       { "{host}": "erp.acme.test:8443" },
       { "{host}": "user@erp.acme.test" },
       { "{host}": "erp.acme.test/v1" },
-      { "{host}": "ERP.acme.test" },
+      { "{host}": "erp.acme.test." },
       { "{host}": "localhost" },
       { "{host}": "erp.acme.test", "{other}": "erp.acme.test" },
       { "{other}": "erp.acme.test" },
@@ -209,6 +216,49 @@ describe("a host set per connection", () => {
         "connection.invalid"
       );
     }
+    expect(internet.sent).toStrictEqual([]);
+  });
+
+  it("is the host as a DNS name: one given in capitals connects at its lowercase, and only there (CH4)", async () => {
+    const admin = someone("admin");
+    const { connectionId } = await connectErp(admin, {
+      "{host}": "ERP.Acme.test",
+    });
+    await listOn({ id: connectionId, person: admin }, "items.list");
+    expect(
+      internet.sent.map(({ host, path }) => ({ host, path }))
+    ).toStrictEqual([
+      { host: sampleHostFilled, path: "/v1/whoami" },
+      { host: sampleHostFilled, path: "/v1/boards/board-1/items" },
+    ]);
+  });
+
+  it("is never reached by connector code naming it, or a template the connector doesn't have: egress refuses the host, and nothing is sent (CH6)", async () => {
+    const admin = someone("admin");
+    const { connectionId } = await connectErp(admin, {
+      "{host}": sampleHostFilled,
+    });
+    internet.sent.length = 0;
+    const warned: string[] = [];
+    vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
+      warned.push(JSON.stringify(args));
+    });
+    const reached: unknown[] = [];
+    for (const action of ["items.direct", "items.elsewhere"]) {
+      // oxlint-disable-next-line no-await-in-loop -- one attempt after another
+      const { output } = await listOn(
+        { id: connectionId, person: admin },
+        action
+      );
+      reached.push(JSON.parse(output));
+    }
+    expect(reached).toStrictEqual([{ status: 403 }, { status: 403 }]);
+    expect(
+      warned.filter((line) => line.includes("egress.refused"))
+    ).toStrictEqual([
+      expect.stringMatching(/"reason":"host"/u),
+      expect.stringMatching(/"reason":"host"/u),
+    ]);
     expect(internet.sent).toStrictEqual([]);
   });
 
@@ -276,6 +326,7 @@ describe("a host the token response names", () => {
       `https://u@${acme}`,
       "10.0.0.1",
       "a.b.sample-company.test",
+      `${acme}.`,
       undefined,
     ];
     const outcomes: [string, string, number][] = [];
@@ -329,6 +380,51 @@ describe("a host the token response names", () => {
     ).toStrictEqual([
       { host: acme, path: "/v1/items" },
       { host: "globex.sample-company.test", path: "/v1/items" },
+    ]);
+    expect(internet.sent).toStrictEqual([]);
+  });
+
+  it("is the host as a DNS name: an origin in capitals connects at its lowercase (CH7)", async () => {
+    const person = someone();
+    const id = await connectCompany(person, "https://Acme.sample-company.test");
+    await callTool({ id, person }, "items.list", {});
+    expect(
+      company.requests.map(({ host, path }) => ({ host, path }))
+    ).toStrictEqual([
+      { host: sampleCompanyLoginHost, path: "/oauth/token" },
+      { host: acme, path: "/v1/me" },
+      { host: acme, path: "/v1/items" },
+    ]);
+    expect(internet.sent).toStrictEqual([]);
+  });
+
+  it("stays the one the connection signed in with when a refresh's answer names another: the call goes there with the new token (CH7)", async () => {
+    const person = someone();
+    const id = await connectCompany(person, `https://${acme}`);
+    company.options.refreshedApiDomain = "https://globex.sample-company.test";
+    // The access token runs out: the next call refreshes it first.
+    await drizzle(env.DB)
+      .update(connectionTokens)
+      .set({ accessExpiresAt: new Date(Date.now() - 1000) })
+      .where(eq(connectionTokens.connectionId, id));
+    company.requests.length = 0;
+    const result = await callTool({ id, person }, "items.list", {});
+    expect(JSON.parse(result.output)).toStrictEqual({ items: companyItems });
+    // Two from the sign-in, then the refresh's.
+    const renewed = `Bearer ${company.issued[2]}`;
+    expect(
+      company.requests.map(({ host, path, authorization }) => ({
+        host,
+        path,
+        authorization,
+      }))
+    ).toStrictEqual([
+      {
+        host: sampleCompanyLoginHost,
+        path: "/oauth/token",
+        authorization: null,
+      },
+      { host: acme, path: "/v1/items", authorization: renewed },
     ]);
     expect(internet.sent).toStrictEqual([]);
   });

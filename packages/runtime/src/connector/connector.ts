@@ -124,6 +124,7 @@ export {
   declaredHostSchema,
   filledHost,
   fitsTemplate,
+  hostOf,
   hostTemplateOf,
   requestHost,
 } from "./hosts.ts";

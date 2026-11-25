@@ -1,4 +1,4 @@
-import { fitsTemplate, scopeToken } from "@grasp-os/runtime/connector";
+import { fitsTemplate, hostOf, scopeToken } from "@grasp-os/runtime/connector";
 import type { AccountLookup } from "@grasp-os/runtime/connector";
 import { fromBase64Url } from "@grasp-os/shared/encoding";
 
@@ -240,21 +240,6 @@ const textAt = (value: unknown, pointer: string | undefined): string | null => {
     : null;
 };
 
-/**
- * The host a token response gives as a host or an HTTPS origin, nothing
- * else: no port, userinfo, path or query.
- */
-const namedHost = (value: string | null): string | undefined => {
-  if (value === null || !value.includes("://")) {
-    return value ?? undefined;
-  }
-  const url = URL.parse(value);
-  return url?.protocol === "https:" &&
-    value.replace(/\/$/u, "") === `https://${url.hostname}`
-    ? url.hostname
-    : undefined;
-};
-
 /** Each template's host the token response names, if every one fits it. */
 const hostsNamed = (
   hostsFrom: Readonly<Record<string, string>>,
@@ -262,7 +247,8 @@ const hostsNamed = (
 ): Record<string, string> | undefined => {
   const hosts: Record<string, string> = {};
   for (const [template, pointer] of Object.entries(hostsFrom)) {
-    const host = namedHost(textAt(body, pointer));
+    const named = textAt(body, pointer);
+    const host = named === null ? undefined : hostOf(named);
     if (host === undefined || !fitsTemplate(template, host)) {
       return undefined;
     }

@@ -1016,6 +1016,43 @@ describe("the egress handler", () => {
     expect(api.sent).toStrictEqual([]);
   });
 
+  it("sends a host template's request only to the host sealed with the connection, when it fits the template", async () => {
+    const template = "{company}.boards.test";
+    const props = (connectionHosts: Record<string, string>) =>
+      egressProps({
+        hosts: [template],
+        credentialHosts: [template],
+        connectionHosts,
+        routes: [{ method: "GET", host: template, path: "/v1/items" }],
+      });
+    const standIn = "https://company.boards.test.invalid/v1/items";
+    const unfit: Record<string, string>[] = [
+      {},
+      { [template]: "evil.test" },
+      { [template]: "acme.boards.test.evil.test" },
+      { [template]: "a.b.boards.test" },
+      { [template]: "10.0.0.1" },
+      { "{other}.boards.test": "acme.boards.test" },
+    ];
+    const statuses = await Promise.all(
+      unfit.map(async (connectionHosts) => {
+        const response = await exports
+          .ConnectorEgress({ props: props(connectionHosts) })
+          .fetch(standIn);
+        return response.status;
+      })
+    );
+    expect(statuses).toStrictEqual(unfit.map(() => 403));
+    expect(api.sent).toStrictEqual([]);
+    const sealed = exports.ConnectorEgress({
+      props: props({ [template]: "acme.boards.test" }),
+    });
+    await expect(sealed.fetch(standIn)).resolves.toMatchObject({ status: 200 });
+    expect(api.sent.map(({ host, path }) => ({ host, path }))).toStrictEqual([
+      { host: "acme.boards.test", path: "/v1/items" },
+    ]);
+  });
+
   it("closes when the call's time is up", async () => {
     const egress = exports.ConnectorEgress({
       props: egressProps({ expiresAt: Date.now() - 1 }),

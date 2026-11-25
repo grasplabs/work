@@ -1,4 +1,4 @@
-import { fitsTemplate, hostTemplateOf } from "@grasp-os/runtime/connector";
+import { fitsTemplate, hostOf } from "@grasp-os/runtime/connector";
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import {
   connectErrors,
@@ -1402,7 +1402,7 @@ export const connectWithKey = async (
     provider: providerId,
     scope,
     key,
-    hosts = {},
+    hosts: given = {},
   } = connectionErrors.parse(
     "connection.invalid",
     connectWithKeySchema,
@@ -1440,20 +1440,24 @@ export const connectWithKey = async (
       connectionId
     );
   };
-  // A host for each of its connector's host templates, fitting it, and
-  // nothing else; a whole host (`{host}`) only for a shared connection,
-  // which only an admin connects. Each is sealed with the key (GRA-2350).
+  // A host for each of its connector's host templates, as a URL parser
+  // reads it, fitting the template, and nothing else; each is sealed with
+  // the key (GRA-2350). A whole host (`{host}`) makes the app shared only.
   const templates = provider.hostTemplates ?? [];
-  const givenHosts =
-    Object.keys(hosts).length === templates.length &&
-    templates.every(
+  const hosts = Object.fromEntries(
+    Object.entries(given).map(([template, host]) => [
+      template,
+      hostOf(host) ?? "",
+    ])
+  );
+  if (
+    Object.keys(hosts).length !== templates.length ||
+    !templates.every(
       (template) =>
         Object.hasOwn(hosts, template) &&
         fitsTemplate(template, hosts[template] ?? "")
-    ) &&
-    (scope === "shared" ||
-      templates.every((template) => hostTemplateOf(template)?.suffix !== null));
-  if (!givenHosts) {
+    )
+  ) {
     await refuse("connection.invalid");
     throw connectionErrors.create("connection.invalid");
   }

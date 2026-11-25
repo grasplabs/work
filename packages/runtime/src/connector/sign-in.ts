@@ -403,6 +403,13 @@ const oauth2SignInSchema = z
     "A scope can't hold the separator it is joined with"
   )
   .refine(
+    ({ idToken, hostsFrom }) =>
+      idToken === undefined || hostsFrom === undefined,
+    // An ID token's subject is the vendor's, whatever host the response
+    // names: only a lookup at the filled host reads the account there.
+    "A sign-in with hostsFrom reads its account with a lookup, not an ID token"
+  )
+  .refine(
     ({ account, idToken }) =>
       (account === undefined) !== (idToken === undefined),
     "An account lookup or an ID token, one of them"
