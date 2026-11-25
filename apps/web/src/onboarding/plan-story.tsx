@@ -10,13 +10,7 @@ import {
 } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import {
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 
 import { readingTiming, saidBy, wordsOf } from "../voice/timing.ts";
@@ -34,23 +28,23 @@ import { poseField } from "./field/engine.ts";
 import { poses } from "./field/poses.ts";
 import { PlanPictures } from "./plan-pictures.tsx";
 import type { Scene } from "./plan-scenes.ts";
-import { dateOf, planDays, planStart } from "./plan.ts";
+import { dateOf, planStart } from "./plan.ts";
 
 // "Here's the plan", told as a story (as the first onboarding told it,
 // `about-story.tsx` before a955fb8). Stephen tells the admin's own two
 // weeks in one breath, one flowing narration with the plan's own days in
-// it, and the whole window tells it with him in pictures: it turns to
-// night and becomes one of the Appearance page's scenes, a picture
-// dithered in the brand's greens by the same shader, and every part of
-// the story is a picture of its own that turns into the next as he goes
-// on (plan-pictures.tsx, plan-scenes.ts). Under it, on the picture's dark
+// it, and the whole window tells it with him in footage: it turns to
+// night and becomes one of the Appearance page's scenes, dithered in the
+// brand's greens by the same shader, and every part of the story is a
+// stock clip of its own that turns into the next as he goes on
+// (plan-pictures.tsx, plan-scenes.ts). Under it, on the picture's dark
 // foot, each part streams in word by word as he says it. Once told, the
-// last picture stays, his last words under it, and only then Continue
-// fades in, where every step keeps it: at the foot, on the right.
+// last clip stays, his last words under it, and only then Continue fades
+// in, where every step keeps it: at the foot, on the right.
 //
 // With his voice on, the story follows it; off, the pace of speech;
 // paused, it holds. Under reduced motion, and coming back to the step,
-// the last picture stands at once, still; it can be told again from
+// the last clip stands at once, still; it can be told again from
 // there, and skipped while it is told. A screen reader hears each part
 // whole, as it comes.
 
@@ -359,16 +353,6 @@ const useTelling = (today: string, shown: boolean) => {
     at,
     // Once told, all of it said and settled, none of it still fresh.
     partSaid: shown ? (part?.text.length ?? 0) + 20 : said - (starts[at] ?? 0),
-    // How far into the part the words are, 0 to 1: the picture's lights follow it.
-    progress: shown
-      ? 1
-      : Math.min(
-          1,
-          Math.max(
-            0,
-            (said - (starts[at] ?? 0)) / Math.max(1, part?.text.length ?? 1)
-          )
-        ),
     began,
     setBegan,
     setOver,
@@ -387,9 +371,8 @@ export const PlanStory = ({
   const reduce = useLessMotion();
   const [told, setTold] = useState(toldBefore);
   const shown = told || reduce;
-  const { narration, part, at, partSaid, progress, began, setBegan, setOver } =
+  const { narration, part, at, partSaid, began, setBegan, setOver } =
     useTelling(today, shown);
-  const days = useMemo(() => planDays(planStart(today)), [today]);
 
   const finish = () => {
     toldBefore = true;
@@ -438,12 +421,7 @@ export const PlanStory = ({
   const scene: Scene = part?.scene ?? "you";
   return createPortal(
     <section data-mode="dark" {...stylex.props(styles.stage, fadeIn)}>
-      <PlanPictures
-        days={days}
-        progress={progress}
-        scene={scene}
-        still={reduce}
-      />
+      <PlanPictures scene={scene} still={reduce} />
       <div {...stylex.props(styles.bar)}>
         <Sound />
       </div>
