@@ -122,7 +122,9 @@ export interface OAuthProviderConfig {
    * Whether a consent's token answer must list the scopes it granted:
    * every provider asked by class (a suite's, a connector's own sign-in
    * with rights), whose connection holds only what its grant lists
-   * (provider-rights.ts `holdsClassRights`).
+   * (provider-rights.ts `holdsClassRights`). Stricter than RFC 6749 §5.1,
+   * which lets an answer leave `scope` out when it granted all it was asked:
+   * a grant asked by class is read, never assumed.
    */
   grantListed?: boolean;
   /**
@@ -919,12 +921,7 @@ const scopesOf = (
   { scopePrefix }: Pick<OAuthProviderConfig, "scopePrefix">,
   scope: string
 ): Set<string> =>
-  new Set(
-    scope
-      .split(" ")
-      .filter((each) => each !== "")
-      .map((each) => rightKey(each, scopePrefix))
-  );
+  new Set(scope.split(" ").map((each) => rightKey(each, scopePrefix)));
 
 /**
  * Whether a renewal's `tokens` still hold every scope `provider` requires

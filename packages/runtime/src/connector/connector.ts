@@ -121,6 +121,7 @@ export {
   keyHeaderSchema,
   plainEndpointSchema,
   reservedAuthorizationParams,
+  scopeToken,
   signInSchema,
   signInScopesSchema,
   tenantKinds,
