@@ -235,13 +235,9 @@ const againstOperation = (
 };
 
 /** A tool's name against its route, where no spec says more. */
-const againstRoute = (
-  tool: MirrorTool,
-  route: Route,
-  base: string
-): string[] => {
+const againstRoute = (tool: MirrorTool, route: Route): string[] => {
   const pages = pageItem(tool.returns) !== undefined;
-  const naming = routeName(route, base, pages);
+  const naming = routeName(route, pages);
   if ("problem" in naming) {
     return [naming.problem];
   }
@@ -269,13 +265,11 @@ const againstRoute = (
 };
 
 /**
- * Holds a connector's tools to the mirror rule. `base` is the path its
- * API's routes start with, and `spec` the vendor's, where it is known: its
- * own base then holds.
+ * Holds a connector's tools to the mirror rule, and to the vendor's spec
+ * where the connector declares one.
  */
 export const checkMirror = (
   tools: readonly MirrorTool[],
-  base: string,
   spec?: Spec
 ): MirrorProblem[] => {
   const byShape = new Map(
@@ -294,7 +288,7 @@ export const checkMirror = (
     const operation = byShape.get(`${route.method} ${shapeOf(route.path)}`);
     const problems =
       operation === undefined
-        ? againstRoute(tool, route, spec?.base ?? base)
+        ? againstRoute(tool, route)
         : againstOperation(tool, route, operation);
     return problems.map((message) => ({ tool: tool.name, message }));
   });

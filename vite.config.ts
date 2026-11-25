@@ -41,6 +41,11 @@ const generated = [
   "packages/ui/src/styles/**",
   "packages/ui/src/lib/tokens.stylex.ts",
   "packages/ui/src/lib/tokens.values.ts",
+  // A connector's tools, generated from its vendor's OpenAPI spec, and the
+  // spec as the vendor serves it, which they record the hash of
+  // (scripts/connector-openapi.ts).
+  "**/tools.gen.ts",
+  "apps/connect/test/fixtures/*/openapi.yaml",
 ];
 
 /** Why a target may not extend Cap'n Web's or workerd's RpcTarget itself. */
@@ -314,6 +319,7 @@ export default defineConfig({
         files: [
           "packages/connectors/**",
           "apps/connect/test/fixtures/*-connector.ts",
+          "apps/connect/test/fixtures/*/**",
         ],
         excludeFiles: [
           "packages/connectors/google-workspace/**",
@@ -352,7 +358,10 @@ export default defineConfig({
         // (scripts/check-runtime-boundary.ts), and nothing of the SDK,
         // which is App code's. Its sample connectors are connectors.
         files: ["apps/connect/**"],
-        excludeFiles: ["apps/connect/test/fixtures/*-connector.ts"],
+        excludeFiles: [
+          "apps/connect/test/fixtures/*-connector.ts",
+          "apps/connect/test/fixtures/*/**",
+        ],
         rules: {
           "no-restricted-imports": [
             "error",

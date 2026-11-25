@@ -3,9 +3,11 @@
 // name follows from that route, so two connectors for one API, written
 // apart, name their tools alike:
 //
-// - The family is the route's collection: its literal segments after the
-//   API's base path, joined by dots (`GET /api/v2/deals/{id}/followers` under
-//   `/api/v2` is the family `deals.followers`).
+// - The family is the route's collection: its literal segments, joined by
+//   dots (`GET /deals/{id}/followers` is the family `deals.followers`). A
+//   route is a path under the API's base path (`/api/v2`), which the
+//   connector declares once and its HTTP client puts in front of every
+//   route, so a version or an `/api` prefix never names a tool.
 // - The action is `list` for GET on a collection that answers a page, `get`
 //   for GET on an item, `create` for POST on a collection, `update` for
 //   PATCH or PUT on an item and `delete` for DELETE on an item. A route ends
@@ -46,7 +48,7 @@ export type Segment =
 
 export interface Route {
   readonly method: HttpMethod;
-  /** The path as the route declares it, base path included. */
+  /** The path as the route declares it, under the API's base path. */
   readonly path: string;
   readonly segments: readonly Segment[];
 }
@@ -115,11 +117,18 @@ export const pathSegments = (path: string): Segment[] | undefined => {
   return segments;
 };
 
-/** Reads a declared route, `GET /api/v2/deals`, or undefined. */
+/**
+ * Reads a declared route, `GET /deals`, or undefined. A route that names
+ * its host (`GET api.example.com/deals`, where a connector has several) is
+ * read by its path.
+ */
 export const readRoute = (route: string): Route | undefined => {
   const space = route.indexOf(" ");
   const method = route.slice(0, space);
-  const path = route.slice(space + 1);
+  const target = route.slice(space + 1);
+  const path = target.startsWith("/")
+    ? target
+    : target.slice(Math.max(target.indexOf("/"), 0));
   if (space === -1 || !isMethod(method)) {
     return undefined;
   }
@@ -137,38 +146,14 @@ export type RouteName =
   | { readonly problem: string };
 
 /**
- * The family and the standard action of a route under the API's base path
- * (`/api/v2`, or `` for none). `pages` says whether the route answers a
- * page, which makes GET on a collection `list`.
+ * The family and the standard action of a route. `pages` says whether the
+ * route answers a page, which makes GET on a collection `list`.
  */
-export const routeName = (
-  route: Route,
-  base: string,
-  pages: boolean
-): RouteName => {
-  const baseSegments = pathSegments(base === "" ? "/" : base);
-  if (baseSegments === undefined) {
-    return {
-      problem: `The API's base path ${JSON.stringify(base)} isn't a plain path.`,
-    };
-  }
-  const under = baseSegments.every((segment, index) => {
-    const own = route.segments[index];
-    return (
-      segment.kind === "literal" &&
-      own?.kind === "literal" &&
-      own.text === segment.text
-    );
-  });
-  if (!under) {
-    return {
-      problem: `${route.path} isn't under the API's base path ${base}.`,
-    };
-  }
-  const rest = route.segments.slice(baseSegments.length);
-  const family = rest.flatMap((segment) =>
+export const routeName = (route: Route, pages: boolean): RouteName => {
+  const family = route.segments.flatMap((segment) =>
     segment.kind === "literal" ? [segment.text] : []
   );
+  const rest = route.segments;
   if (family.length === 0) {
     return { problem: `${route.path} names no collection.` };
   }

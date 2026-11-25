@@ -1,3 +1,4 @@
+import { v } from "@grasp-os/runtime/app";
 import { parseSync } from "oxc-parser";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -190,13 +191,20 @@ const statements = (source: string) => {
   return parsed.program.body.map((statement) => statement.type);
 };
 
+/** What generated source holds: imports, the spec's exports, schemas, tools. */
 const sourceStatements = [
   "ImportDeclaration",
   "ExportNamedDeclaration",
   "ExportNamedDeclaration",
   "ExportNamedDeclaration",
   "ExportNamedDeclaration",
+  "VariableDeclaration",
+  "VariableDeclaration",
+  "ExportNamedDeclaration",
 ];
+
+/** The same, for a spec that names no sign-in. */
+const sourceWithoutSignIn = sourceStatements.toSpliced(4, 1);
 
 describe("a spec as tools", () => {
   it("makes one tool per operation, named from its route", async () => {
@@ -230,7 +238,7 @@ describe("a spec as tools", () => {
       returns:
         list?.returns.kind === "object" && Object.keys(list.returns.fields),
     }).toStrictEqual({
-      path: "/api/v2/deals",
+      path: "/deals",
       args: ["pipeline_id", "ids", "cursor"],
       ids: { name: "ids", in: "query", separator: "," },
       items: ["data"],
@@ -244,6 +252,9 @@ describe("a spec as tools", () => {
     const spec = await readSpec(specText(pipedrivePaths), url);
     const create = spec.operations.find((tool) => tool.name === "deals.create");
     const update = spec.operations.find((tool) => tool.name === "deals.update");
+    const deleted = spec.operations.find(
+      (tool) => tool.name === "deals.delete"
+    );
     expect({
       title:
         create?.args.kind === "object" && create.args.fields.title?.presence,
@@ -252,16 +263,62 @@ describe("a spec as tools", () => {
       auth: spec.auth?.kind,
       scopes: spec.operations.find((tool) => tool.name === "deals.list")
         ?.scopes,
-      deleted: spec.operations.find((tool) => tool.name === "deals.delete")
-        ?.returns.kind,
+      deleted: [deleted?.answer, deleted?.returns],
     }).toStrictEqual({
       title: "required",
       args: ["id", "title", "stage_id"],
       body: ["title", "stage_id"],
       auth: "oauth2",
       scopes: ["deals:read"],
-      deleted: "null",
+      deleted: [undefined, v.object({}).descriptor],
     });
+  });
+
+  it("signs in with the scheme the connector picks, and refuses one it can't", async () => {
+    const text = specText(pipedrivePaths, {
+      security: [{ oauth2: [] }, { api_key: [] }],
+    });
+    const spec = await readSpec(text, url, "api_key");
+    expect({
+      auth: spec.auth,
+      scopes: [...new Set(spec.operations.flatMap((tool) => tool.scopes))],
+    }).toStrictEqual({
+      auth: { kind: "apiKey", header: "x-api-token" },
+      scopes: [],
+    });
+    await expect(readSpec(text, url, "basic")).rejects.toThrow(SpecError);
+  });
+
+  it("makes no tool of an operation whose arguments take keys no one names", async () => {
+    const free = (schema: unknown) => ({
+      post: {
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: { type: "object", properties: { meta: schema } },
+            },
+          },
+        },
+        responses: ok({ type: "object", properties: {} }),
+      },
+    });
+    const spec = await readSpec(
+      specText({
+        "/labels": free({
+          type: "object",
+          additionalProperties: { type: "string" },
+        }),
+        "/notes": free({
+          type: "array",
+          items: { type: "object", additionalProperties: { type: "integer" } },
+        }),
+      }),
+      url
+    );
+    expect(spec.skipped.map((skipped) => skipped.operation)).toStrictEqual([
+      "POST /labels",
+      "POST /notes",
+    ]);
   });
 
   it("names two operations that would share a name by the vendor's operation names", async () => {
@@ -343,7 +400,8 @@ describe("a spec as tools", () => {
     );
     expect(
       spec.operations.map((tool) => `${tool.name} ${tool.path}`)
-    ).toStrictEqual(["deals.get /v1/deals/{id}"]);
+    ).toStrictEqual(["deals.get /deals/{id}"]);
+    expect(spec.base).toBe("/v1");
   });
 });
 
@@ -399,7 +457,22 @@ describe("a hostile spec", () => {
           },
         },
       },
-      {}
+      {
+        components: {
+          securitySchemes: {
+            oauth2: {
+              type: "oauth2",
+              flows: {
+                authorizationCode: {
+                  authorizationUrl: "https://oauth.example.test/authorize",
+                  tokenUrl: "https://oauth.example.test/token",
+                  scopes: { [quote]: quote },
+                },
+              },
+            },
+          },
+        },
+      }
     );
     const { source, spec } = await generateConnector(text, url);
     const [list] = spec.operations;
@@ -530,7 +603,7 @@ describe("a hostile spec", () => {
     expect(spec.skipped).toStrictEqual([
       { operation: "GET /wide/{id}", reason: "Its schemas are too large." },
     ]);
-    expect(statements(source)).toStrictEqual(sourceStatements.slice(0, 4));
+    expect(statements(source)).toStrictEqual(sourceWithoutSignIn);
   });
 
   it("fetches nothing a reference points at", async () => {

@@ -112,7 +112,7 @@ const page = (item: Parameters<typeof v.array>[0]) =>
 
 const dealsList = (changes: Partial<MirrorTool> = {}): MirrorTool => ({
   name: "deals.list",
-  routes: ["GET /api/v2/deals"],
+  routes: ["GET /deals"],
   args: shape({
     pipeline_id: v.number().integer().optional(),
     cursor: v.string().optional(),
@@ -127,7 +127,7 @@ const dealsList = (changes: Partial<MirrorTool> = {}): MirrorTool => ({
 });
 
 const messages = (tools: MirrorTool[], withSpec = true) =>
-  checkMirror(tools, "/api/v2", withSpec ? spec : undefined).map(
+  checkMirror(tools, withSpec ? spec : undefined).map(
     (problem) => `${problem.tool}: ${problem.message}`
   );
 
@@ -202,7 +202,7 @@ describe("a tool held to the vendor's spec", () => {
         }),
         {
           name: "deals.update",
-          routes: ["PATCH /api/v2/deals/{id}"],
+          routes: ["PATCH /deals/{id}"],
           args: shape({
             id: v.number().integer(),
             deal: v.object({ title: v.string() }),
@@ -225,14 +225,14 @@ describe("a tool held to the vendor's spec", () => {
         dealsList({ name: "deals.fetch" }),
         {
           name: "deals.update",
-          routes: ["PATCH /api/v2/deals/{deal_id}"],
+          routes: ["PATCH /deals/{deal_id}"],
           args: shape({ deal_id: v.number().integer() }),
           returns: v.object({}).descriptor,
         },
       ])
     ).toStrictEqual([
-      "deals.fetch: GET /api/v2/deals is named deals.list.",
-      "deals.update: Its route renames the vendor's path parameters: /api/v2/deals/{id}.",
+      "deals.fetch: GET /deals is named deals.list.",
+      "deals.update: Its route renames the vendor's path parameters: /deals/{id}.",
       "deals.update: args.deal_id isn't a field of the vendor's: keep the vendor's names and shapes.",
     ]);
   });
@@ -255,21 +255,17 @@ describe("a tool with no spec to hold it to", () => {
     expect(
       messages(
         [
-          tool("deals.list", "GET /api/v2/deals", listed),
-          tool("deals.get", "GET /api/v2/deals/{id}"),
-          tool("deals.create", "POST /api/v2/deals"),
-          tool("deals.update", "PUT /api/v2/deals/{id}"),
-          tool("deals.delete", "DELETE /api/v2/deals/{id}"),
-          tool(
-            "deals.followers.list",
-            "GET /api/v2/deals/{id}/followers",
-            listed
-          ),
+          tool("deals.list", "GET /deals", listed),
+          tool("deals.get", "GET /deals/{id}"),
+          tool("deals.create", "POST /deals"),
+          tool("deals.update", "PUT /deals/{id}"),
+          tool("deals.delete", "DELETE /deals/{id}"),
+          tool("deals.followers.list", "GET /deals/{id}/followers", listed),
           tool(
             "deals.products.deleteManyDealProducts",
-            "DELETE /api/v2/deals/{id}/products"
+            "DELETE /deals/{id}/products"
           ),
-          tool("deals.search.searchDeals", "GET /api/v2/deals/search"),
+          tool("deals.search.searchDeals", "GET /deals/search"),
         ],
         false
       )
@@ -280,13 +276,13 @@ describe("a tool with no spec to hold it to", () => {
     expect(
       messages(
         [
-          tool("deals.fetch", "GET /api/v2/deals/{id}"),
-          tool("pipedrive.deals.get", "GET /api/v2/deals/{id}"),
-          tool("deals.list", "GET /api/v2/deals/{id}"),
-          tool("deals.list", "GET /api/v2/deals"),
-          tool("deals.products.delete", "DELETE /api/v2/deals/{id}/products"),
-          tool("deals.change", "PATCH /api/v2/deals/{id}"),
-          tool("deals.get", "GET /api/v1/deals/{id}"),
+          tool("deals.fetch", "GET /deals/{id}"),
+          tool("pipedrive.deals.get", "GET /deals/{id}"),
+          tool("deals.list", "GET /deals/{id}"),
+          tool("deals.list", "GET /deals"),
+          tool("deals.products.delete", "DELETE /deals/{id}/products"),
+          tool("deals.change", "PATCH /deals/{id}"),
+          tool("deals.get", "GET /v1/deals/{id}"),
           {
             name: "deals.get",
             routes: [],
@@ -297,15 +293,15 @@ describe("a tool with no spec to hold it to", () => {
         false
       )
     ).toStrictEqual([
-      "deals.fetch: GET /api/v2/deals/{id} is named deals.get.",
-      "pipedrive.deals.get: GET /api/v2/deals/{id} is named deals.get.",
-      "deals.list: GET /api/v2/deals/{id} is named deals.get.",
+      "deals.fetch: GET /deals/{id} is named deals.get.",
+      "pipedrive.deals.get: GET /deals/{id} is named deals.get.",
+      "deals.list: GET /deals/{id} is named deals.get.",
       "deals.list: A list answers page(item): { items, next }.",
-      "deals.list: GET /api/v2/deals is named deals.<the vendor's operation name>.",
+      "deals.list: GET /deals is named deals.<the vendor's operation name>.",
       "deals.list: A list answers page(item): { items, next }.",
-      "deals.products.delete: DELETE /api/v2/deals/{id}/products is named deals.products.<the vendor's operation name>.",
-      "deals.change: PATCH /api/v2/deals/{id} is named deals.update.",
-      "deals.get: /api/v1/deals/{id} isn't under the API's base path /api/v2.",
+      "deals.products.delete: DELETE /deals/{id}/products is named deals.products.<the vendor's operation name>.",
+      "deals.change: PATCH /deals/{id} is named deals.update.",
+      "deals.get: GET /v1/deals/{id} is named v1.deals.get.",
       "deals.get: It declares no route it is named from.",
     ]);
   });

@@ -22,6 +22,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./inputs": "./src/inputs.ts",
+    "./mirror": "./src/mirror.ts",
+    "./openapi": "./src/openapi.ts",
     "./page-imports": "./src/page-imports.ts",
     "./oxc": "./src/oxc.ts",
     "./oxc-wasm": "./oxc-wasm/wasm.ts",

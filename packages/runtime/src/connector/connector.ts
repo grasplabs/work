@@ -14,6 +14,7 @@ export type {
   ConnectorDeclaration,
   ConnectorReader,
   ConnectorTool,
+  DefinedConnector,
   EventDeclaration,
   SyncDeclaration,
   ToolArgs,
