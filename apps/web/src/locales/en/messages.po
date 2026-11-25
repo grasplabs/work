@@ -342,6 +342,10 @@ msgstr "{count, plural, one {# interview in week {week}} other {# interviews in 
 msgid "{count, plural, one {# more line} other {# more lines}}"
 msgstr "{count, plural, one {# more line} other {# more lines}}"
 
+#: src/frame/ui-words.tsx
+msgid "{count, plural, one {# more row} other {# more rows}}"
+msgstr "{count, plural, one {# more row} other {# more rows}}"
+
 #: src/chat/subject-bar.tsx
 msgid "{count, plural, one {# more thing this chat worked on} other {# more things this chat worked on}}"
 msgstr "{count, plural, one {# more thing this chat worked on} other {# more things this chat worked on}}"
@@ -3741,6 +3745,10 @@ msgstr "Back and forward"
 #: src/frame/ui-words.tsx
 msgid "Back to reference {number}"
 msgstr "Back to reference {number}"
+
+#: src/frame/ui-words.tsx
+msgid "Back to reference {number}-{mark}"
+msgstr "Back to reference {number}-{mark}"
 
 #: src/apps/app-workspace.tsx
 msgid "Back to your version"

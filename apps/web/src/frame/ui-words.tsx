@@ -514,9 +514,15 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       external: t`opens in a new tab`,
     },
     markdown: {
-      back: (number) => t`Back to reference ${number}`,
+      // A note used more than once leads back to each use: the second is "1-2".
+      back: (number, mark) =>
+        mark > 1
+          ? t`Back to reference ${number}-${mark}`
+          : t`Back to reference ${number}`,
       done: t({ message: "Done", context: "a task in a list" }),
       footnote: (number) => t`Footnote ${number}`,
+      moreRows: (count) =>
+        plural(count, { one: "# more row", other: "# more rows" }),
       notDone: t({ message: "Not done", context: "a task in a list" }),
       table: t({ message: "Table", context: "a table in a text" }),
     },
