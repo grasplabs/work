@@ -39,6 +39,7 @@ import { interviewCaller } from "./interview-caller.ts";
 import { interviewerText } from "./interviewer-text.ts";
 import { stephenVersion } from "./lab-marks.ts";
 import { linkHeaders, linkRefusal, noCallerRefusal } from "./links.ts";
+import { NAMED } from "./stephen.ts";
 import { onboardingStore } from "./store.ts";
 import type { Took, TurnContext } from "./store.ts";
 
@@ -99,6 +100,17 @@ const happenedOf = (
     add: `${name} agreed to the read-back earlier and has just come back on their link to add something. Ask what they would like to add or put right.`,
   };
 };
+
+/**
+ * What Stephen is told last, after the brief and the format of his line:
+ * the language he speaks. His instructions, the brief and their examples
+ * are English, and said only at the top they lose out to all that
+ * English: a quick model then says a line in English mid-interview, often
+ * an example line as it stands. Told last, it is the nearest word to his
+ * line.
+ */
+export const languageLast = (locale: TurnAsked["locale"]): string =>
+  `Say your line in ${NAMED[locale]}: every word of it, your small words too, also when they answered in another language, and also a line from the examples in your instructions, which you say in ${NAMED[locale]}, never as it stands in English.`;
 
 /** The first part takes 3 minutes at most: a talker can fill the whole interview with it. */
 const aiPartMinutes = 3;
@@ -252,10 +264,11 @@ const session = (model: string) =>
 
 /** Streams the line's model; `onText` sees everything written so far. */
 const speak = async (
-  { env, system, brief, signal, count }: Turn,
+  held: Turn,
   model: string,
   onText: (written: string) => void
 ): Promise<string> => {
+  const { env, system, brief, signal, count } = held;
   const agent = await models(env).agent({
     ...session(model),
     maxTokens: lineTokens,
@@ -267,7 +280,7 @@ const speak = async (
       messages: [
         {
           role: "user",
-          content: `${brief}\n\n${onlyLine}`,
+          content: `${brief}\n\n${onlyLine}\n${languageLast(held.turn.locale)}`,
           timestamp: Date.now(),
         },
       ],
