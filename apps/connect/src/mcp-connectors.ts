@@ -87,6 +87,8 @@ const defaultListTtlMs = 5 * 60 * 1000;
  * Least time between two reads of one connection's tool list after an
  * answer (`refreshLater`): longer than a read may take, so asks at once
  * start one read, and a server that failed isn't asked again at every ask.
+ * A list its server keeps fresh for less is read again after this, for
+ * offers and search; calls and requests read it live once it is stale.
  */
 const laterReadGapMs = 5 * 60 * 1000;
 
@@ -511,6 +513,11 @@ const readOnceLater = async (
       .where(
         and(
           eq(connections.id, connection.id),
+          eq(connections.status, "active"),
+          or(
+            isNull(connections.toolListFreshUntil),
+            lte(connections.toolListFreshUntil, new Date(now))
+          ),
           or(
             isNull(connections.toolListTriedAt),
             lte(connections.toolListTriedAt, new Date(now - laterReadGapMs))
@@ -618,10 +625,12 @@ export const keepToolList = async (
 ): Promise<void> => {
   let connection: Connection | undefined;
   try {
+    // Signed in afresh: a read after an answer may start at once again.
     connection = await drizzle(env.DB)
-      .select()
-      .from(connections)
+      .update(connections)
+      .set({ toolListTriedAt: null })
       .where(eq(connections.id, connectionId))
+      .returning()
       .get();
   } catch (error) {
     log.warn("connections.tool_list_unread", {

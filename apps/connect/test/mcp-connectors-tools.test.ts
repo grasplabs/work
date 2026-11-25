@@ -151,9 +151,10 @@ describe("a connector's tools", () => {
         expect(reads).toBeGreaterThan(once);
       }, waitForRead);
 
-      expect({ soon, later: reads }).toStrictEqual({
-        soon: once,
-        later: 2 * once,
+      expect({ once, soon, later: reads }).toStrictEqual({
+        once: 1,
+        soon: 1,
+        later: 2,
       });
     } finally {
       linear.next = undefined;
