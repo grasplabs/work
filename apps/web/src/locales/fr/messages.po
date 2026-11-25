@@ -4558,6 +4558,10 @@ msgstr "Vérification de votre export…"
 msgid "Checking the App…"
 msgstr "Vérification de l’App…"
 
+#: src/frame/page-states.tsx
+msgid "Checking whether Grasp can be reached"
+msgstr "Vérification de la disponibilité de Grasp"
+
 #: src/workflows/definition-editor.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Checking…"
@@ -7971,6 +7975,10 @@ msgstr "Grasp demande"
 msgid "Grasp asks what it should do, one question at a time."
 msgstr "Grasp vous demande ce qu’il doit faire, une question à la fois."
 
+#: src/frame/page-states.tsx
+msgid "Grasp can be reached"
+msgstr "Grasp est disponible"
+
 #: src/chat/global-chat.tsx
 #: src/core.ts
 #: src/interview/api.ts
@@ -11194,6 +11202,10 @@ msgstr "Aucun fournisseur d'IA n'est connecté."
 #: src/inbox/decision-card.tsx
 msgid "No answer by {date}: it closes."
 msgstr "Sans réponse d'ici le {date} : elle se ferme."
+
+#: src/frame/page-states.tsx
+msgid "No answer from Grasp yet"
+msgstr "Pas encore de réponse de Grasp"
 
 #: src/agents/setup/apps-picker.tsx
 msgid "No app by that name."
