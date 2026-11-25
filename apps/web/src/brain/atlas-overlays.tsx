@@ -39,8 +39,10 @@ const styles = stylex.create({
     gap: space["3"],
     minWidth: 0,
   },
-  // Where even the legend's words don't fit (a phone), it scrolls sideways rather than wrap.
+  // Where even the legend's words don't fit (a phone), it scrolls sideways rather than wrap:
+  // its marks stay on one line, as wide as they are, as #2503's legend keeps them.
   legend: { minWidth: 0, overflowX: "auto", scrollbarWidth: "none" },
+  oneLine: { width: "max-content", maxWidth: "none" },
   end: {
     display: "flex",
     flexShrink: 0,
@@ -120,6 +122,7 @@ export const AtlasToolbar = ({
             onSpot(next);
           }}
           size="xs"
+          style={styles.oneLine}
           value={picked === undefined ? [] : [picked]}
         >
           {marks.map((mark) => (
