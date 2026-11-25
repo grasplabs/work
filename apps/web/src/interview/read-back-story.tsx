@@ -16,6 +16,10 @@ import {
   FieldLabel,
 } from "@grasp-os/ui/components/field";
 import {
+  InlineCitation,
+  InlineCitationText,
+} from "@grasp-os/ui/components/inline-citation";
+import {
   Popover,
   PopoverAnchor,
   PopoverContent,
@@ -49,7 +53,6 @@ import { useEffect, useEffectEvent, useId, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 
 import type { Pose } from "../onboarding/field/engine.ts";
-import { voice } from "./interview.stylex.ts";
 import { update, useKind, useProgress } from "./kept.ts";
 import { looks } from "./looks.ts";
 import { agreeToPart, changeLine, storyFor, useLoop } from "./loop.ts";
@@ -61,7 +64,7 @@ import {
   withShares,
 } from "./progress.ts";
 import { markedTerms, sourceOf, storyPieces } from "./read-back-terms.ts";
-import type { Term } from "./read-back-terms.ts";
+import type { Source, Term } from "./read-back-terms.ts";
 import { useSaidIn } from "./speech.ts";
 import { SpokenText } from "./spoken.tsx";
 import { usePromise } from "./words.ts";
@@ -124,36 +127,31 @@ const styles = stylex.create({
     color: colors.foreground,
     textWrap: "pretty",
   },
-  // A sentence: pressed to open what can be done with it. Its ground
-  // follows its lines when it wraps. His line under the sentence he says draws in from its start and
-  // draws back as he goes on, on the library's curve; its colour comes and
-  // goes the same way, so nothing jumps.
+  // A sentence: pressed to open what can be done with it. Damsko's
+  // highlight for words a source stands behind (InlineCitationText) lights
+  // it under the pointer and on focus; the same ground stands under the
+  // sentence Stephen says now, and while it is open. Its ground follows its
+  // lines when it wraps.
   sentence: {
-    borderRadius: radius.sm,
-    paddingBlockEnd: "0.2em",
+    borderRadius: radius.xs,
     boxDecorationBreak: "clone",
     WebkitBoxDecorationBreak: "clone",
     cursor: "pointer",
-    backgroundColor: {
-      default: "transparent",
-      [media.hover]: { default: "transparent", ":hover": colors.secondary },
-    },
-    backgroundImage: `linear-gradient(${voice.heat}, ${voice.heat})`,
-    backgroundRepeat: "no-repeat",
-    backgroundPosition: "0 100%",
-    backgroundSize: "0% 2px",
+    backgroundColor: "transparent",
     transitionProperty: {
-      default: "background-color, background-size, color",
+      default: "background-color",
       [media.reducedMotion]: "none",
     },
-    transitionDuration: duration.ui,
-    transitionTimingFunction: duration.easeInOut,
+    transitionDuration: duration.hover,
+    transitionTimingFunction: duration.ease,
   },
-  open: { backgroundColor: colors.secondary },
-  // Where he is in his telling: the sentence he says now carries his warmth
-  // as a line under it; those still to come wait in grey.
-  saying: { backgroundSize: "100% 2px" },
-  waiting: { color: colors.subtleForeground },
+  lit: { backgroundColor: colors.accent },
+  // When they said it, over their words: the transcript's own time.
+  when: {
+    display: "block",
+    fontVariantNumeric: "tabular-nums",
+    opacity: 0.7,
+  },
   // A thing the line names: a quiet pill in the words' own size, its
   // maker's mark whole at the height of a letter, sitting on the line.
   pill: {
@@ -197,6 +195,20 @@ const styles = stylex.create({
     gap: space["2"],
   },
   choices: { display: "flex", flexDirection: "column", gap: space["2"] },
+  // The way on at the end of the row, the lesser way before it.
+  bar: {
+    display: "flex",
+    flexDirection: "row-reverse",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["3"],
+    // As wide as the story over it, its end at the story's end.
+    boxSizing: "border-box",
+    width: "100%",
+    maxWidth: "36rem",
+    marginInline: "auto",
+    paddingBlock: space["3"],
+  },
   editor: {
     display: "flex",
     flexDirection: "column",
@@ -422,6 +434,31 @@ const LinesEditor = ({
  * from, and where it goes when that differs from the rest. Pressed, what
  * can be done with its lines opens beside it.
  */
+/** What a sentence comes from, as the tooltip shows it: their words, and when in the conversation. */
+interface Hint {
+  said: string;
+  /** Minutes and seconds into the conversation ("4:05"), as a transcript has it. */
+  when: string | null;
+}
+
+const hintOf = (
+  source: Source | null,
+  startedAt: number | null
+): Hint | null => {
+  if (source === null) {
+    return null;
+  }
+  if (source.at === null || startedAt === null || source.at < startedAt) {
+    return { said: source.said, when: null };
+  }
+  const seconds = Math.floor((source.at - startedAt) / 1000);
+  const minutes = Math.floor(seconds / 60);
+  return {
+    said: source.said,
+    when: `${minutes}:${String(seconds % 60).padStart(2, "0")}`,
+  };
+};
+
 const Sentence = ({
   text,
   facts,
@@ -436,7 +473,7 @@ const Sentence = ({
   marked: readonly string[];
   told: Told | null;
   /** What they said that it comes from, as near as the page can tell. */
-  source: string | null;
+  source: Hint | null;
   /** Where its lines go, when that is not where the rest go. */
   elsewhere: string | null;
   goingOf: (fact: InterviewFact) => Going;
@@ -448,6 +485,7 @@ const Sentence = ({
     <span
       aria-expanded={open}
       aria-haspopup="dialog"
+      data-field="still"
       onClick={() => {
         setOpen(true);
       }}
@@ -460,9 +498,7 @@ const Sentence = ({
       {...stylex.props(
         styles.sentence,
         focusRingText,
-        open && styles.open,
-        told === "saying" && styles.saying,
-        told === "waiting" && styles.waiting
+        (open || told === "saying") && styles.lit
       )}
     >
       {pieces.map((piece) =>
@@ -477,9 +513,17 @@ const Sentence = ({
   // The anchor outside, the tooltip's trigger inside: the anchor passes on
   // only its place, the trigger all it needs to open.
   const anchored = (
-    <PopoverAnchor asChild>
-      {hinted ? <TooltipTrigger asChild>{sentence}</TooltipTrigger> : sentence}
-    </PopoverAnchor>
+    <InlineCitation>
+      <InlineCitationText>
+        <PopoverAnchor asChild>
+          {hinted ? (
+            <TooltipTrigger asChild>{sentence}</TooltipTrigger>
+          ) : (
+            sentence
+          )}
+        </PopoverAnchor>
+      </InlineCitationText>
+    </InlineCitation>
   );
   return (
     <Popover
@@ -491,8 +535,12 @@ const Sentence = ({
       {hinted ? (
         <Tooltip>
           {anchored}
-          <TooltipContent>
-            {source === null ? null : <q>{source}</q>}
+          {/* Under the sentence, so it never stands over the heading. */}
+          <TooltipContent align="start" side="bottom">
+            {source?.when === null || source === null ? null : (
+              <span {...stylex.props(styles.when)}>{source.when}</span>
+            )}
+            {source === null ? null : <q>{source.said}</q>}
             {source !== null && elsewhere !== null ? <br /> : null}
             {elsewhere}
           </TooltipContent>
@@ -553,7 +601,7 @@ interface Unit {
   key: string;
   text: string;
   facts: InterviewFact[];
-  source: string | null;
+  source: Hint | null;
   elsewhere: string | null;
 }
 
@@ -561,7 +609,7 @@ interface Unit {
 const storySentences = (
   story: StorySentence[],
   facts: InterviewFact[],
-  sourceFor: (told: InterviewFact[]) => string | null,
+  sourceFor: (told: InterviewFact[]) => Hint | null,
   elsewhereOf: (facts: InterviewFact[]) => string | null
 ): Unit[] =>
   story.flatMap(({ say, ids }) => {
@@ -584,15 +632,17 @@ const storyUnits = ({
   facts,
   story,
   lines,
+  startedAt,
   elsewhereOf,
 }: {
   facts: InterviewFact[];
   story: StorySentence[] | null;
   lines: InterviewProgress["lines"];
+  startedAt: number | null;
   elsewhereOf: (facts: InterviewFact[]) => string | null;
 }): Unit[] => {
-  const sourceFor = (told: InterviewFact[]): string | null =>
-    sourceOf(told.map(({ text }) => text).join(" "), lines);
+  const sourceFor = (told: InterviewFact[]): Hint | null =>
+    hintOf(sourceOf(told.map(({ text }) => text).join(" "), lines), startedAt);
   if (story !== null) {
     // A line no sentence tells stands as it is, after them: nothing they
     // agree to goes unseen.
@@ -633,7 +683,6 @@ export const ReadBack = () => {
       : -1;
   const left = part?.facts.filter(({ out }) => out !== true) ?? [];
   const out = part?.facts.filter(({ out: taken }) => taken === true) ?? [];
-  const agree = useAgree(left.length, out.length);
   const story = useStory(part);
   const goingWords: Record<Going, string> = {
     team: t`Shared with your team`,
@@ -662,6 +711,7 @@ export const ReadBack = () => {
     facts: left,
     story,
     lines: progress.lines,
+    startedAt: progress.startedAt,
     elsewhereOf: (facts) => {
       const goes = facts.map(going).find((each) => each !== most);
       return goes === undefined ? null : goingWords[goes];
@@ -712,17 +762,8 @@ export const ReadBack = () => {
             {once}
           </Badge>
         ) : null}
-        <div {...stylex.props(styles.actions)}>
-          <Button
-            disabled={loop.doing === "idle"}
-            onClick={() => {
-              agreeToPart(out.length > 0 ? `${agree}.` : undefined);
-            }}
-            size="lg"
-          >
-            {agree}
-          </Button>
-          {out.length > 0 ? (
+        {out.length > 0 ? (
+          <div {...stylex.props(styles.actions)}>
             <Button
               onClick={() => {
                 const ids = out.map(({ id }) => id);
@@ -736,9 +777,43 @@ export const ReadBack = () => {
                 other: "Put back the # lines taken out",
               })}
             </Button>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
       </div>
+    </div>
+  );
+};
+
+/**
+ * The bar at the read-back's foot, where the box stands in the
+ * conversation: agreeing to the part, its main way on, and changing
+ * something before it, which brings the box back to say what.
+ */
+export const ReadBackBar = ({ onChange }: { onChange: () => void }) => {
+  const { t } = useLingui();
+  const loop = useLoop();
+  const progress = useProgress();
+  const { part } = partAt(progress);
+  const left = part?.facts.filter(({ out }) => out !== true) ?? [];
+  const out = part?.facts.filter(({ out: taken }) => taken === true) ?? [];
+  const agree = useAgree(left.length, out.length);
+  if (part === undefined) {
+    return null;
+  }
+  return (
+    <div {...stylex.props(styles.bar, fadeIn)}>
+      <Button
+        disabled={loop.doing === "idle"}
+        onClick={() => {
+          agreeToPart(out.length > 0 ? `${agree}.` : undefined);
+        }}
+        size="lg"
+      >
+        {agree}
+      </Button>
+      <Button onClick={onChange} size="lg" variant="outline">
+        {t`Change something`}
+      </Button>
     </div>
   );
 };
