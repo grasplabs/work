@@ -115,6 +115,51 @@ describe("a connector's tools", () => {
     }
   });
 
+  it("are read once for asks that find them stale at once, and not again for a while after that read failed", async () => {
+    const { connectionId } = await connected();
+    await listExpires(connectionId);
+    let reads = 0;
+    const failing = (): Response => {
+      reads += 1;
+      linear.next = failing;
+      return new Response(null, { status: 503 });
+    };
+    linear.next = failing;
+    try {
+      const ask = async () =>
+        await Promise.all([
+          offered(connectionId),
+          offered(connectionId),
+          exports.default.connectionTools({ connectionId }),
+        ]);
+      await ask();
+      await vi.waitFor(() => {
+        expect(reads).toBeGreaterThan(0);
+      }, waitForRead);
+      const once = reads;
+      await ask();
+      await ask();
+      const soon = reads;
+      // The gap since that read passes.
+      await env.DB.prepare(
+        "UPDATE connections SET tool_list_tried_at = 0 WHERE id = ?"
+      )
+        .bind(connectionId)
+        .run();
+      await ask();
+      await vi.waitFor(() => {
+        expect(reads).toBeGreaterThan(once);
+      }, waitForRead);
+
+      expect({ soon, later: reads }).toStrictEqual({
+        soon: once,
+        later: 2 * once,
+      });
+    } finally {
+      linear.next = undefined;
+    }
+  });
+
   it("are read and kept as it is connected, so they are offered before any call", async () => {
     const connectionId = await connectLinear(await addLinear(), someone());
     const [owner] = await exports.default.connectionOwners([connectionId]);
