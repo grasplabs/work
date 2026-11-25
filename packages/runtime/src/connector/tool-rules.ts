@@ -641,7 +641,7 @@ const referenced = (root: Json, ref: Json | undefined): Json | undefined => {
 export const topNames = (schema: Json): string[] => {
   const found: string[] = [];
   const pending: Json[] = [schema];
-  const followed = new Set<string>();
+  const followed = new Set<Json>([schema]);
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
     if (!isRecord(next)) {
       continue;
@@ -655,12 +655,8 @@ export const topNames = (schema: Json): string[] => {
       }
     }
     const definition = referenced(schema, next.$ref);
-    if (
-      typeof next.$ref === "string" &&
-      definition !== undefined &&
-      !followed.has(next.$ref)
-    ) {
-      followed.add(next.$ref);
+    if (definition !== undefined && !followed.has(definition)) {
+      followed.add(definition);
       pending.push(definition);
     }
   }
@@ -725,6 +721,24 @@ const holdsFlag = (
 };
 
 /**
+ * Whether a schema says outright that its value may be a flag: its `type`
+ * holds `boolean`, or its `enum` or `const` holds `true` or `false`. A model
+ * reads that and sends one, whatever else the schema says.
+ */
+const saysFlag = (
+  schema: Readonly<Record<string, Json | undefined>>
+): boolean => {
+  const { type, const: only } = schema;
+  const values = schema.enum;
+  return (
+    type === "boolean" ||
+    (isJsonArray(type) && type.includes("boolean")) ||
+    typeof only === "boolean" ||
+    (isJsonArray(values) && values.some((value) => typeof value === "boolean"))
+  );
+};
+
+/**
  * How deep `mayBeFlag` reads a schema, `$ref`s followed: they chain past
  * the depth a listed schema may nest, and the stack is finite.
  */
@@ -732,7 +746,8 @@ const maxFlagDepth = 64;
 
 /**
  * Whether a property's `schema`, within the input's `root`, lets its value
- * be a flag: every constraint it has allows one. Its own allow one
+ * be a flag: it says so (`saysFlag`), whatever else it says, or every
+ * constraint it has allows one. Its own allow one
  * (`holdsFlag`); every member of its `allOf` and some of its `anyOf` or
  * `oneOf` allows one; and what its `$ref` names does. Text and numbers it
  * types (`delivery_status`, an enum of states) aren't flags. A schema with
@@ -748,7 +763,7 @@ const mayBeFlag = (
   known: Map<Json, boolean>,
   depth = 0
 ): boolean => {
-  if (!isRecord(schema) || depth > maxFlagDepth) {
+  if (!isRecord(schema) || depth > maxFlagDepth || saysFlag(schema)) {
     return true;
   }
   const answer = known.get(schema);

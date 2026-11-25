@@ -676,6 +676,17 @@ describe("a connector's tools", () => {
           $defs: { Flag: { $anchor: "Flag", type: "boolean" } },
         },
       }),
+      tool("get_mixed", {
+        inputSchema: {
+          type: "object",
+          properties: { send_now: { type: "boolean", $ref: "#/$defs/Text" } },
+          $defs: { Text: { type: "string" } },
+        },
+      }),
+      tool(
+        "get_options",
+        takes({ id: text, notify: { enum: [true, false, "all"] } })
+      ),
       tool("get_brief", {
         inputSchema: {
           type: "object",
@@ -727,6 +738,8 @@ describe("a connector's tools", () => {
       read_summary: classes.read_summary,
       list_deliveries: classes.list_deliveries,
       list_notifications: classes.list_notifications,
+      get_mixed: classes.get_mixed,
+      get_options: classes.get_options,
       get_brief: classes.get_brief,
       get_fanout: classes.get_fanout,
       get_anchored: classes.get_anchored,
@@ -771,6 +784,8 @@ describe("a connector's tools", () => {
       read_summary: "reach-others",
       list_deliveries: "read-own",
       list_notifications: "read-own",
+      get_mixed: "reach-others",
+      get_options: "reach-others",
       get_brief: "reach-others",
       get_fanout: "reach-others",
       get_anchored: "reach-others",
