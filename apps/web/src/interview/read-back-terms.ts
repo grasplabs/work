@@ -31,17 +31,21 @@ import {
 /**
  * A thing a line names, and its maker's own mark when the product has one:
  * drawn (`logo`, from brand-logos.ts) or a whole logo file in its own
- * colours (`src`, from `public/logos`, as the setup's tiles show them).
+ * colours (`src`, from `public/logos`, as the setup's source and HR tiles
+ * show them).
  */
 export interface Term {
   logo: IconData | null;
   src: string | null;
+  /** `src` is the name written as its maker writes it (AFAS), shown in place of the words. */
+  wordmark: boolean;
 }
 
 interface Tool {
   name: string;
   logo?: IconData;
   src?: string;
+  wordmark?: true;
   /** Also an everyday word ("Teams", "Exact"): found only as the tool writes it. */
   word?: true;
 }
@@ -82,7 +86,12 @@ const tools: readonly Tool[] = [
   { name: "Salesforce" },
   { name: "HubSpot", logo: HubSpotLogo },
   { name: "SAP", logo: SapLogo, word: true },
-  { name: "AFAS" },
+  { name: "AFAS", src: "/logos/afas.svg", wordmark: true },
+  { name: "Personio", src: "/logos/personio.svg" },
+  { name: "HiBob", src: "/logos/hibob.svg" },
+  { name: "Nmbrs", src: "/logos/nmbrs.svg" },
+  { name: "Loket", src: "/logos/loket.svg", word: true },
+  { name: "Workday", src: "/logos/workday.svg", word: true },
   { name: "Exact", word: true },
   { name: "Zendesk", logo: ZendeskLogo },
   { name: "Dropbox", src: "/logos/dropbox.svg", word: true },
@@ -164,7 +173,11 @@ export const storyPieces = (
       pieces.push({
         at: match.index,
         text: words,
-        term: { logo: tool?.logo ?? null, src: tool?.src ?? null },
+        term: {
+          logo: tool?.logo ?? null,
+          src: tool?.src ?? null,
+          wordmark: tool?.wordmark === true,
+        },
       });
       at = match.index + words.length;
     }

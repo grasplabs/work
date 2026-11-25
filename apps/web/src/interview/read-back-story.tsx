@@ -179,11 +179,21 @@ const styles = stylex.create({
     verticalAlign: "-0.13em",
     [iconVars.size]: "0.95em",
   },
+  // A logo file keeps its own shape: as high as the mark, as wide as it is.
   logoFile: {
-    display: "block",
-    width: "100%",
-    height: "100%",
-    objectFit: "contain",
+    display: "inline-block",
+    height: "0.95em",
+    width: "auto",
+    maxWidth: "1.8em",
+    marginInlineEnd: "0.32em",
+    verticalAlign: "-0.13em",
+  },
+  // A name its maker writes as a logo (AFAS) stands for the words, at cap height.
+  wordmark: {
+    display: "inline-block",
+    height: "0.72em",
+    width: "auto",
+    verticalAlign: "0",
   },
   // B: a line taken out stays where it was, struck through and faded.
   out: {
@@ -341,13 +351,16 @@ const LineEditor = ({
 
 /** A thing a line names, in the line: its maker's mark, if any, and its words. */
 const TermPill = ({ term, text }: { term: Term; text: string }) => {
-  let mark: ReactNode = null;
-  if (term.src !== null) {
-    mark = (
-      <span {...stylex.props(styles.logo)}>
-        <img alt="" src={term.src} {...stylex.props(styles.logoFile)} />
+  if (term.src !== null && term.wordmark) {
+    return (
+      <span {...stylex.props(styles.pill)}>
+        <img alt={text} src={term.src} {...stylex.props(styles.wordmark)} />
       </span>
     );
+  }
+  let mark: ReactNode = null;
+  if (term.src !== null) {
+    mark = <img alt="" src={term.src} {...stylex.props(styles.logoFile)} />;
   } else if (term.logo !== null) {
     mark = (
       <span {...stylex.props(styles.logo)}>
