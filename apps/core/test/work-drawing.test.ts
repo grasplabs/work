@@ -39,7 +39,8 @@ import { unique } from "./sign-in.ts";
 //
 // - People's numbers averaged into one, or made up where nobody gave any.
 // - What the lead said about the whole team told as if it were the work.
-// - What earlier interviews left open never reaching the next interview.
+// - What earlier interviews left open never reaching the next interview,
+//   or the drawing as its model wrote it reaching it.
 // - A drawing that keeps failing being tried for good, or never again.
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -279,7 +280,7 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
   // store's own alarm, set whenever a team falls due, would try first.
   beforeEach(aloneInTheStore);
 
-  it("is drawn from three agreed interviews, keeps each person's numbers apart, and tells the next interview only what its routine lacks, never a colleague's words", async () => {
+  it("is drawn from three agreed interviews, keeps each person's numbers apart, and tells the next interview only what its routine lacks, never the drawing as its model wrote it", async () => {
     const store = onboardingStore(env);
     const ids = await team();
     const { tickets } = await mapped(ids);
@@ -365,8 +366,11 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
       after: after
         .split("\n")
         .find((line) => line.startsWith("Nobody has said yet")),
-      // The drawing's open questions are written from what as few as one
-      // colleague said: none reaches another person's interview (GRA-330).
+      // Nothing of the drawing as its model wrote it reaches another
+      // interview: not its steps, its open questions or how some do it
+      // otherwise. What is told on is the Brain's checked drawing, once it
+      // stands (brain-intake-drawings.test.ts).
+      told: after.includes("What the team already told"),
       openQuestions: work?.drawn?.open.filter((question) =>
         after.includes(question)
       ),
@@ -414,6 +418,7 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
       // shows only the whole team's, so it is still asked (GRA-1749).
       after:
         "Nobody has said yet, so ask when it comes up: how many the whole team does, in a week or a month; where it waits, and for what; what they look at to decide; who gets it after them.",
+      told: false,
       openQuestions: [],
       saidByMo: false,
       due: [],
