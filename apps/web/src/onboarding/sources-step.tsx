@@ -82,7 +82,7 @@ export const useSaveChoices = () => {
 let lastRead: Integration[] = [];
 
 /** The integrations Grasp offers here, with what is connected: the ones last read, or none, while they load. */
-const useIntegrations = (): Integration[] => {
+export const useIntegrations = (): Integration[] => {
   const core = useCore();
   const [integrations, setIntegrations] = useState<Integration[]>(lastRead);
   useEffect(() => {
@@ -371,6 +371,7 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
           }
         }}
         open={searching}
+        placeholder={t`Search apps, for example Dropbox`}
       />
       {connecting === null ? null : (
         <ConnectDialog
