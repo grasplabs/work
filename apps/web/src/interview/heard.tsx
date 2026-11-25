@@ -5,12 +5,12 @@ import {
   size,
   space,
 } from "@grasp-os/ui/lib/tokens.stylex";
+import { flightMs, landsAt, startFlight } from "@grasp-os/ui/lib/word-flight";
+import type { Flight, Place } from "@grasp-os/ui/lib/word-flight";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useLayoutEffect, useRef } from "react";
 
 import { transcriptId } from "./transcript.tsx";
-import { flightMs, landsAt, startFlight } from "./word-flight.ts";
-import type { Flight, Place } from "./word-flight.ts";
 
 // What they say, written over the composer as they say it. The composer
 // stays one slim row; their words stand above it, the newest line at its

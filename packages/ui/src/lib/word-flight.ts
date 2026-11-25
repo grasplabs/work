@@ -1,4 +1,5 @@
-// How a spoken word gets from the composer to the page (heard.tsx): a
+// How a spoken word gets from the voice to the page (the interview's heard.tsx, a dictation's
+// prompt-input-heard.tsx): a
 // handful of small squares, the same pixels as the dither the voice is
 // drawn in, leave the composer's field one after another, bend the same
 // way as one stream, and close in on the word's place. Each comes out of
