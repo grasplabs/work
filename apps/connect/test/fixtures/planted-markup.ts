@@ -60,13 +60,19 @@ export const plantedHtml: Readonly<
     html: `<p>${shownText}<title>${plantedInstruction}</title></p><dialog>${plantedInstruction}</dialog><video>${plantedInstruction}</video><canvas>${plantedInstruction}</canvas><svg><desc>${plantedInstruction}</desc><title>${plantedInstruction}</title><defs><text>${plantedInstruction}</text></defs><symbol><text>${plantedInstruction}</text></symbol><script>${plantedInstruction}</script><style>${plantedInstruction}</style></svg><math><semantics><mi>x</mi><annotation>${plantedInstruction}</annotation></semantics><script>${plantedInstruction}</script><style>${plantedInstruction}</style></math>`,
     shown: `${shownText}\nx`,
   },
+  // A drawing draws only its text elements' characters, and a formula
+  // its shown parts.
+  drawnAlone: {
+    html: `<p>${shownText}</p><svg><g>${plantedInstruction}</g>${plantedInstruction}<foo>${plantedInstruction}</foo><text hidden>Due</text><foreignObject><p>soon</p></foreignObject></svg><p><math><mphantom><mi>${plantedInstruction}</mi></mphantom><semantics><mi>y</mi><mtext>${plantedInstruction}</mtext></semantics><maction><mi>z</mi><mtext>${plantedInstruction}</mtext></maction></math></p>`,
+    shown: `${shownText}\nDue\nsoon\nyz`,
+  },
   // What only an SVG drawing hides, a page shows.
   drawingNamesElsewhere: {
     html: "<p>Due <desc>Friday</desc> <metadata>noon</metadata></p><section>Owner</section><section>Sam</section>",
     shown: "Due Friday noon\nOwner\nSam",
   },
   neverShown: {
-    html: `<noscript>${plantedInstruction}</noscript><template><p>${plantedInstruction}</p></template><iframe>${plantedInstruction}</iframe><datalist><option>${plantedInstruction}</option></datalist><div popover>${plantedInstruction}</div><progress>${plantedInstruction}</progress><meter>${plantedInstruction}</meter><p>${shownText}</p>`,
+    html: `<noscript>${plantedInstruction}</noscript><template><p>${plantedInstruction}</p></template><iframe>${plantedInstruction}</iframe><datalist><option>${plantedInstruction}</option></datalist><div popover>${plantedInstruction}</div><object>${plantedInstruction}</object><progress>${plantedInstruction}</progress><meter>${plantedInstruction}</meter><p>${shownText}</p>`,
     shown: shownText,
   },
   // A closed `details` shows its summary alone.
@@ -116,6 +122,10 @@ export const plantedHtml: Readonly<
     html: `<body ${Array.from({ length: 3000 }, (_, at) => `a${at}`).join(" ")}>${"<body>".repeat(4000)}`,
     shown: null,
   },
+  // Branches the tree builder moves deeper once built (the adoption
+  // agency), and elements it fosters before a table.
+  movedDeeper: { html: "<i><b><div></i>".repeat(3000), shown: null },
+  fostered: { html: `<table>${"<br>".repeat(20_000)}</table>`, shown: null },
   // A template's content nests inside it, however its tree holds it.
   nestedTemplates: { html: "<template>".repeat(5000), shown: null },
 };
@@ -177,6 +187,13 @@ export const plantedWordXml: Readonly<
     // The hidden run's paragraph stands, empty.
     shown: `${shownText}\n`,
   },
+  // A drawing hidden from view, its text box with it.
+  hiddenDrawing: {
+    xml: documentXml(
+      `<w:p><w:r><w:drawing><wp:anchor xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><wp:docPr id="1" name="Box" hidden="1"/><w:txbxContent>${paragraph(plantedInstruction)}</w:txbxContent></wp:anchor></w:drawing></w:r><w:r><w:t>${shownText}</w:t></w:r></w:p>`
+    ),
+    shown: shownText,
+  },
   // A tracked move: its text, at its new place alone.
   moved: {
     xml: documentXml(
@@ -187,7 +204,7 @@ export const plantedWordXml: Readonly<
   // A tracked deletion, and a field's code: Word shows its result.
   deletedAndFieldCode: {
     xml: documentXml(
-      `<w:p><w:del w:id="3"><w:r><w:t>${plantedInstruction}</w:t></w:r></w:del><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:t>${plantedInstruction}</w:t></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>${shownText}</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r><w:r><w:t>.</w:t></w:r></w:p><w:p><w:del w:id="4"><w:r><w:fldChar w:fldCharType="begin"/></w:r></w:del><w:r><mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Fallback><w:r><w:fldChar w:fldCharType="begin"/></w:r></mc:Fallback></mc:AlternateContent></w:r><w:r><w:t>${shownText}</w:t></w:r></w:p>`
+      `<w:p><w:del w:id="3"><w:r><w:t>${plantedInstruction}</w:t></w:r></w:del><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:t>${plantedInstruction}</w:t></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>${shownText}</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r><w:r><w:t>.</w:t></w:r></w:p><w:p><w:del w:id="4"><w:r><w:fldChar w:fldCharType="begin"/></w:r></w:del><w:r><mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Choice Requires="w"/><mc:Fallback><w:r><w:fldChar w:fldCharType="begin"/></w:r></mc:Fallback></mc:AlternateContent></w:r><w:r><w:t>${shownText}</w:t></w:r></w:p>`
     ),
     // A field begun where Word shows nothing hides nothing after it.
     shown: `${shownText}.\n${shownText}`,

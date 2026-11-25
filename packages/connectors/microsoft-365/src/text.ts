@@ -41,14 +41,15 @@ export const decoded = (
 
 type Node = DefaultTreeAdapterTypes.ChildNode;
 type Element = DefaultTreeAdapterTypes.Element;
+type ParentNode = DefaultTreeAdapterTypes.ParentNode;
 
 /**
  * Elements whose content a browser never shows, by their namespace: what
  * a page, a drawing or a formula runs or is styled with, a page's head and
- * title, what stands in for
- * scripts, frames, embeds and media, a list of suggestions; a drawing's
- * own description and what it only refers to; a formula's annotations. A
- * template's content is outside the tree already.
+ * title, what stands in for scripts, frames, objects, media and widgets,
+ * a list of suggestions; a drawing's own description and what it only
+ * refers to; a formula's annotations and phantoms. A template's content is
+ * outside the tree already.
  */
 const unread: Readonly<Record<string, ReadonlySet<string>>> = {
   [htmlSpec.NS.HTML]: new Set([
@@ -63,6 +64,7 @@ const unread: Readonly<Record<string, ReadonlySet<string>>> = {
     "audio",
     "video",
     "canvas",
+    "object",
     "datalist",
     "meter",
     "progress",
@@ -86,32 +88,58 @@ const unread: Readonly<Record<string, ReadonlySet<string>>> = {
     "style",
     "annotation",
     "annotation-xml",
+    "mphantom",
   ]),
 };
 
 const hasAttribute = ({ attrs }: Element, attribute: string): boolean =>
   attrs.some(({ name }) => name === attribute);
 
+const isHtml = ({ namespaceURI }: Element): boolean =>
+  namespaceURI === htmlSpec.NS.HTML;
+
 /** Whether a browser hides `element` and all it holds. */
 const isUnread = (element: Element): boolean =>
   unread[element.namespaceURI]?.has(element.tagName) === true ||
-  hasAttribute(element, "hidden") ||
-  hasAttribute(element, "popover") ||
-  (element.tagName === "dialog" && !hasAttribute(element, "open"));
+  (isHtml(element) &&
+    (hasAttribute(element, "hidden") ||
+      hasAttribute(element, "popover") ||
+      (element.tagName === "dialog" && !hasAttribute(element, "open"))));
+
+/** Formula elements that show their first child alone (MathML Core). */
+const firstShown: ReadonlySet<string> = new Set(["semantics", "maction"]);
 
 /**
  * What a browser shows of what `element` holds: of a closed `details`,
- * only its first `summary`.
+ * only its first `summary`; of a formula's `semantics` or `maction`,
+ * only its first element.
  */
 const shownChildren = (element: Element): readonly Node[] => {
-  if (element.tagName !== "details" || hasAttribute(element, "open")) {
+  let shown: Node | undefined;
+  if (
+    element.namespaceURI === htmlSpec.NS.MATHML &&
+    firstShown.has(element.tagName)
+  ) {
+    shown = element.childNodes.find((node) => "tagName" in node);
+  } else if (
+    element.tagName === "details" &&
+    isHtml(element) &&
+    !hasAttribute(element, "open")
+  ) {
+    shown = element.childNodes.find(
+      (node) => "tagName" in node && node.tagName === "summary"
+    );
+  } else {
     return element.childNodes;
   }
-  const summary = element.childNodes.find(
-    (node) => "tagName" in node && node.tagName === "summary"
-  );
-  return summary === undefined ? [] : [summary];
+  return shown === undefined ? [] : [shown];
 };
+
+/**
+ * Drawing elements whose text a browser draws: a drawing's characters
+ * outside them are never shown (SVG 2, 11.1).
+ */
+const drawnText: ReadonlySet<string> = new Set(["text", "foreignObject"]);
 
 /** Elements on lines of their own: paragraphs, headings, list items, table rows, sections. */
 const lineEnds: ReadonlySet<string> = new Set([
@@ -181,7 +209,6 @@ const maxElements = (html: string): number => html.length + 16;
 const boundedTree = (
   html: string
 ): TreeAdapter<DefaultTreeAdapterTypes.DefaultTreeAdapterMap> => {
-  const depths = new WeakMap<object, number>();
   /** Each template's content, by the template: it nests at its depth. */
   const templates = new WeakMap<object, Element>();
   let elements = 0;
@@ -194,21 +221,29 @@ const boundedTree = (
       });
     }
   };
-  const depthOf = (parent: object): number => {
-    const template = templates.get(parent);
-    return depths.get(template ?? parent) ?? 0;
-  };
-  const placed = (parent: object, node: Node): void => {
+  /**
+   * Refuses an element placed in `parent` past {@link maxDepth}, counted
+   * where it is now: the tree builder moves whole branches deeper (the
+   * adoption agency), so a depth noted when an element was placed can be
+   * stale by the time it gets children.
+   */
+  const placed = (parent: ParentNode, node: Node): void => {
     if (!("tagName" in node)) {
       return;
     }
-    const depth = depthOf(parent) + 1;
-    if (depth > maxDepth) {
-      throw new ToolError("This text's markup nests too deep to read", {
-        code: "too_large",
-      });
+    let depth = 1;
+    for (
+      let at: ParentNode | null = templates.get(parent) ?? parent;
+      at !== null && "tagName" in at;
+      at = templates.get(at.parentNode ?? {}) ?? at.parentNode
+    ) {
+      depth += 1;
+      if (depth > maxDepth) {
+        throw new ToolError("This text's markup nests too deep to read", {
+          code: "too_large",
+        });
+      }
     }
-    depths.set(node, depth);
   };
   return {
     ...defaultTreeAdapter,
@@ -220,9 +255,16 @@ const boundedTree = (
       placed(parent, node);
       defaultTreeAdapter.appendChild(parent, node);
     },
+    // Before a table, an element the tree builder fosters there: looking
+    // up its place costs the parent's children each time.
     insertBefore: (parent, node, before) => {
+      built(parent.childNodes.length);
       placed(parent, node);
       defaultTreeAdapter.insertBefore(parent, node, before);
+    },
+    insertTextBefore: (parent, text, before) => {
+      built(parent.childNodes.length);
+      defaultTreeAdapter.insertTextBefore(parent, text, before);
     },
     // A `body` or `html` tag again adds its attributes to the element's,
     // looking through all it has.
@@ -244,9 +286,9 @@ const spacesBeforeBreak = /[ \t]+\n/gu;
 const spacesBeforeTab = / +\t/gu;
 const blankLines = /\n{2,}/gu;
 
-/** What ends once an element's content is read: a line, a cell, `pre`. */
+/** What ends once an element's content is read: a line, a cell, `pre`, drawn text. */
 interface Leaving {
-  leave: "line" | "cell" | "inCell" | "pre";
+  leave: "line" | "cell" | "inCell" | "pre" | "drawn";
 }
 
 /**
@@ -273,6 +315,8 @@ export const htmlText = (html: string): string => {
   };
   pushChildren(parse(html, { treeAdapter: boundedTree(html) }).childNodes);
   let pre = 0;
+  /** How many of a drawing's elements whose text it draws are open. */
+  let drawn = 0;
   let cells = 0;
   let rowCells = 0;
   /** Whether nothing but a line break or a tab stands before what comes next. */
@@ -299,6 +343,8 @@ export const htmlText = (html: string): string => {
       space();
     } else if (what === "cell") {
       cells -= 1;
+    } else if (what === "drawn") {
+      drawn -= 1;
     } else {
       pre -= 1;
     }
@@ -344,6 +390,12 @@ export const htmlText = (html: string): string => {
     if (tagName === "pre") {
       pre += 1;
       steps.push({ leave: "pre" });
+    } else if (
+      element.namespaceURI === htmlSpec.NS.SVG &&
+      drawnText.has(tagName)
+    ) {
+      drawn += 1;
+      steps.push({ leave: "drawn" });
     }
     pushChildren(shownChildren(element));
   };
@@ -351,7 +403,14 @@ export const htmlText = (html: string): string => {
     if ("leave" in step) {
       leave(step);
     } else if (step.nodeName === "#text" && "value" in step) {
-      read(step.value);
+      const { parentNode } = step;
+      const inDrawing =
+        parentNode !== null &&
+        "namespaceURI" in parentNode &&
+        parentNode.namespaceURI === htmlSpec.NS.SVG;
+      if (!inDrawing || drawn > 0) {
+        read(step.value);
+      }
     } else if ("tagName" in step && !isUnread(step)) {
       enter(step);
     }

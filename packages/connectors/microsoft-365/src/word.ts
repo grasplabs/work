@@ -233,6 +233,27 @@ const wordAttribute = (tag: SaxesTagNS, local: string): string | undefined =>
 /** A toggle property's values that turn it off (ECMA-376 Part 1, 17.17.4). */
 const offValues: ReadonlySet<string> = new Set(["false", "0", "off"]);
 
+/** WordprocessingML Drawing's namespace: as Word saves it, and as Strict. */
+const drawingNamespaces: ReadonlySet<string> = new Set([
+  "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
+  "http://purl.oclc.org/ooxml/drawingml/wordprocessingDrawing",
+]);
+
+/** A WordprocessingML Drawing element's local name; `""` for any other. */
+const drawingName = ({ uri, local }: SaxesTagNS): string =>
+  drawingNamespaces.has(uri) ? local : "";
+
+/**
+ * Whether a drawing's properties (`wp:docPr`) hide it, as Word's
+ * selection pane does: present, but not shown (ECMA-376 Part 1, 20.4.2.5).
+ */
+const isHiddenDrawing = ({ attributes }: SaxesTagNS): boolean => {
+  const hidden = Object.values(attributes).find(
+    ({ uri, local }) => uri === "" && local === "hidden"
+  )?.value;
+  return hidden !== undefined && !offValues.has(hidden);
+};
+
 /**
  * Whether `tag` is a run property that hides the run's text (`vanish`,
  * `specVanish`), as Word hides it unless a person asks to see it: the
@@ -261,12 +282,17 @@ const bodyText = (xml: string): string => {
    * code, which Word shows only as the field's result.
    */
   const fields: boolean[] = [];
+  /** How many of {@link fields} are in their code. */
+  let inCode = 0;
+  /** The drawings open now, innermost last: whether each is hidden. */
+  const drawings: boolean[] = [];
   /** Whether what is read now is the body's, and shown. */
   const reading = (): boolean =>
     inBody > 0 &&
     inUnshown === 0 &&
+    inCode === 0 &&
     !runs.includes(true) &&
-    !fields.includes(true);
+    !drawings.includes(true);
   /**
    * A field's begin, separator or end, a run's `fldChar`: one in what the
    * document doesn't show (an unused fallback, a deletion) is no field's.
@@ -278,27 +304,42 @@ const bodyText = (xml: string): string => {
     const type = wordAttribute(tag, "fldCharType");
     if (type === "begin") {
       fields.push(true);
-    } else if (type === "separate" && fields.length > 0) {
+      inCode += 1;
+    } else if (type === "separate" && fields.at(-1) === true) {
       fields[fields.length - 1] = false;
-    } else if (type === "end") {
-      fields.pop();
+      inCode -= 1;
+    } else if (type === "end" && fields.pop() === true) {
+      inCode -= 1;
+    }
+  };
+  /**
+   * What `tag`, named `name`, opened in `parent`, says of what is shown:
+   * a run, a field or a drawing, and whether it hides.
+   */
+  const opened = (
+    tag: SaxesTagNS,
+    name: string,
+    parent: string | undefined
+  ): void => {
+    const drawing = drawingName(tag);
+    if (drawing === "inline" || drawing === "anchor") {
+      drawings.push(false);
+    } else if (drawing === "docPr" && isHiddenDrawing(tag)) {
+      drawings[drawings.length - 1] = true;
+    }
+    if (name === "r") {
+      runs.push(false);
+    } else if (parent === "r" && name === "fldChar") {
+      fieldChar(tag);
+    } else if (parent === "rPr" && open.at(-2) === "r" && hidesRun(tag, name)) {
+      runs[runs.length - 1] = true;
     }
   };
   readXml(xml, {
     open: (tag) => {
       const name = wordName(tag);
       const parent = open.at(-1);
-      if (name === "r") {
-        runs.push(false);
-      } else if (parent === "r" && name === "fldChar") {
-        fieldChar(tag);
-      } else if (
-        parent === "rPr" &&
-        open.at(-2) === "r" &&
-        hidesRun(tag, name)
-      ) {
-        runs[runs.length - 1] = true;
-      }
+      opened(tag, name, parent);
       open.push(name);
       inBody += name === "body" ? 1 : 0;
       inUnshown += isUnshown(tag, name) ? 1 : 0;
@@ -322,6 +363,10 @@ const bodyText = (xml: string): string => {
       const name = open.pop();
       if (name === "r") {
         runs.pop();
+      }
+      const drawing = drawingName(tag);
+      if (drawing === "inline" || drawing === "anchor") {
+        drawings.pop();
       }
       if (reading() && name === "p") {
         lines.push(line ?? "");
