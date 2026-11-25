@@ -10,8 +10,9 @@ import { minutesAt, ticked } from "./progress.ts";
 
 // The interview's countdown, its one delight: the minutes and seconds left
 // of the one budget (20 minutes), counting down from 20:00 in the body's
-// words, with tabular numbers. Each digit stands in a cell of its own that
-// cannot be seen and only clips the roll: when a digit changes, the old one
+// words, with tabular numbers and no leading zero (19:42, 5:00, 0:00).
+// Each digit stands in a cell of its own that cannot be seen and only
+// clips the roll: when a digit changes, the old one
 // slides up and out as the new one comes in from below, like an airport
 // board. Only the digits that change move. No fill, edge or shadow; the
 // colon is plain text. From 5:00 left it takes the warning colour; at 0:00
@@ -157,6 +158,12 @@ const Digit = ({ value }: { value: string }) => {
   );
 };
 
+/** Seconds as the countdown shows them: minutes without a leading zero, then two digits of seconds (19:42, 5:00, 0:00). */
+export const clockOf = (seconds: number): string => {
+  const whole = Math.max(0, Math.round(seconds));
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+};
+
 /** The interview's countdown: the minutes and seconds left, each digit rolling as it changes. */
 export const Countdown = ({
   left,
@@ -166,18 +173,19 @@ export const Countdown = ({
 }) => {
   const { t } = useLingui();
   const seconds = Math.max(0, Math.round(left));
-  const digits = `${String(Math.floor(seconds / 60)).padStart(2, "0")}${String(seconds % 60).padStart(2, "0")}`;
-  const clock = `${digits.slice(0, 2)}:${digits.slice(2)}`;
+  const clock = clockOf(seconds);
+  const [minutes = "0", secs = "00"] = clock.split(":");
   return (
     <span
       {...stylex.props(styles.row, seconds <= nearSeconds && styles.warning)}
     >
       <span {...stylex.props(visuallyHidden)}>{t`Time left: ${clock}`}</span>
-      <Digit value={digits[0] ?? "0"} />
-      <Digit value={digits[1] ?? "0"} />
+      {/* The tens of minutes only while there are any: 19:42, then 9:59, never 09:59. */}
+      {minutes.length > 1 ? <Digit value={minutes.slice(0, 1)} /> : null}
+      <Digit value={minutes.slice(-1)} />
       <span aria-hidden="true">:</span>
-      <Digit value={digits[2] ?? "0"} />
-      <Digit value={digits[3] ?? "0"} />
+      <Digit value={secs.slice(0, 1)} />
+      <Digit value={secs.slice(1)} />
     </span>
   );
 };

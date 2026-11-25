@@ -1,6 +1,7 @@
 import { Button } from "@grasp-os/ui/components/button";
 import { Heading } from "@grasp-os/ui/components/heading";
 import { Text } from "@grasp-os/ui/components/text";
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { duration, media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -23,9 +24,13 @@ import { useInterviewWords } from "./words.ts";
 // Stephen's line, large, in the serif of what Grasp says, over it the
 // minutes left, alone; at its foot Damsko's PromptInput, spoken while it
 // may be (PromptInputVoice), typed otherwise. His words stream in as he
-// says them: each word fades in once, opacity only, a word not yet said
+// says them: whole words, each fading in once, opacity only, on the
+// library's `ui` duration and its in-and-out curve, a word not yet said
 // keeping its room so the line never reflows; under reduced motion words
-// show as they arrive. The engine (loop.ts, speech.ts, mic.ts) says, hears
+// show as they arrive. Their pace is his voice's, or the pace of speech
+// without sound. As the streaming spec has it (grasplabs/damsko#54), the
+// moving words are hidden from a screen reader, and the whole line is
+// said to it once, when it rests. The engine (loop.ts, speech.ts, mic.ts) says, hears
 // and decides whose turn it is; this only draws it. What was said before is
 // in the transcript, beside the stage on a wide window, in its place on a
 // narrow one. At the end of the minutes Stephen stops, says nothing is
@@ -40,7 +45,7 @@ const stream = stylex.create({
     opacity: 1,
     transitionProperty: { default: "opacity", [media.reducedMotion]: "none" },
     transitionDuration: duration.ui,
-    transitionTimingFunction: duration.ease,
+    transitionTimingFunction: duration.easeInOut,
   },
   unseen: { opacity: 0 },
 });
@@ -116,17 +121,21 @@ const Streamed = ({
   said: number;
 }) => (
   <>
-    {wordsOf(text).map(({ word, start }) => (
-      <span
-        key={start}
-        {...stylex.props(
-          stream.word,
-          said >= 0 && said <= from + start && stream.unseen
-        )}
-      >
-        {word}
-      </span>
-    ))}
+    {/* The moving words are only seen; the words at rest are what a screen reader is given, once. */}
+    <span aria-hidden="true">
+      {wordsOf(text).map(({ word, start }) => (
+        <span
+          key={start}
+          {...stylex.props(
+            stream.word,
+            said >= 0 && said <= from + start && stream.unseen
+          )}
+        >
+          {word}
+        </span>
+      ))}
+    </span>
+    {said < 0 ? <span {...stylex.props(visuallyHidden)}>{text}</span> : null}
   </>
 );
 
