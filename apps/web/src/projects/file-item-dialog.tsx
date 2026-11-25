@@ -115,6 +115,7 @@ const FileForm = ({
               setShare(false);
             }}
             placeholder={t`Find an app or workflow`}
+            triggerLabel={t`Show the apps and workflows`}
             value={chosen}
           />
         </Field>

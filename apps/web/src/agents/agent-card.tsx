@@ -155,8 +155,9 @@ const styles = stylex.create({
     letterSpacing: font.trackingUi,
   },
   key: { margin: 0, color: colors.mutedForeground },
-  // The job, as the old card's sentence: Damsko's CardDescription breaks
-  // its lines "pretty", which wraps a job's words otherwise.
+  // The job, as CardDescription draws a card's sentence: its own element,
+  // as CardDescription takes no id and the card's link is described by it
+  // (registry gap of 25 Nov 2026).
   job: {
     display: "block",
     margin: 0,

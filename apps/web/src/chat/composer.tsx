@@ -53,6 +53,7 @@ import { useMemberAdmin } from "../use-member-admin.ts";
 import { FileCards } from "./chat-files.tsx";
 import type { CardFile } from "./chat-files.tsx";
 import { promptStatusOf } from "./chat-states.ts";
+import { useOwnComposerLook } from "./composer-look.ts";
 import { ConnectAiProvider } from "./connect-ai-provider.tsx";
 import { useDictation } from "./dictation.ts";
 import type { StopNote } from "./dictation.ts";
@@ -721,6 +722,8 @@ export const Composer = ({
   // No AI provider to call yet: the box takes nothing. Not while the models
   // are still being read, so what is typed then stays.
   const noProvider = offered !== undefined && lacksModel(model);
+  // The person's own look at work (Settings › Appearance).
+  const look = useOwnComposerLook();
   const dictation = useDictation(text, onText, {
     off: !dictates,
     note: stopNote,
@@ -752,8 +755,10 @@ export const Composer = ({
 
   return (
     <PromptInput
+      accent={look.accent}
       compact={compact}
       disabled={noProvider}
+      edge={look.edge}
       maxLength={maxQuestionLength}
       onSubmit={() => {
         // What this send meets is newer than why dictating stopped before it.

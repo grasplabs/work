@@ -28,7 +28,7 @@ import type { ReactElement, ReactNode } from "react";
 import { useI18n } from "../lib/i18n";
 import { EllipsisIcon, Icon, LoaderIcon } from "../lib/icons";
 import type { IconData } from "../lib/icons";
-import { fadeIn, texture } from "../lib/styles";
+import { fadeIn, texture, textureTint } from "../lib/styles";
 import {
   colors,
   duration,
@@ -344,11 +344,6 @@ const styles = stylex.create({
   // ---- The banner's texture ----
   // The shared texture (lib's `texture`), under the banner's words.
   textureBehind: { zIndex: -1 },
-  // In the object's own colour: from the top, down, the same in either direction. In the dark the
-  // colour's own hue and strength at a lightness that shows on a dark ground.
-  tinted: (tint: string) => ({
-    backgroundImage: `linear-gradient(to bottom, light-dark(${tint}, oklch(from ${tint} 0.72 c h)), transparent 85%)`,
-  }),
 
   // ---- PageHeaderToolbar ----
   // The container the toolbar measures; the toolbar itself is laid out inside it.
@@ -436,7 +431,7 @@ const Texture = ({ tint }: { tint: string | undefined }) => (
     {...stylex.props(
       texture,
       styles.textureBehind,
-      tint !== undefined && styles.tinted(tint)
+      tint !== undefined && textureTint(tint)
     )}
   />
 );

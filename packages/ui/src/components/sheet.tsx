@@ -315,6 +315,11 @@ export interface SheetContentProps extends Omit<
    * @default true
    */
   showCloseButton?: boolean;
+  /**
+   * Its name, for a screen reader and an agent, when it shows no SheetTitle: a sheet whose own
+   * content heads it (a picture, a sidebar). With a SheetTitle, the title names it.
+   */
+  "aria-label"?: string;
   /** Layout only. */
   style?: LayoutStyle;
 }

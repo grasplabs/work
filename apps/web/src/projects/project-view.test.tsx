@@ -409,7 +409,9 @@ describe("A project's page", () => {
     await press(button("Add"));
     // Found by name in the list, as a person picks it.
     await press(
-      document.querySelector('[role="dialog"] [aria-label="Show the choices"]')
+      document.querySelector(
+        '[role="dialog"] [aria-label="Show the apps and workflows"]'
+      )
     );
     await press(
       [...document.querySelectorAll('[role="option"]')].find(

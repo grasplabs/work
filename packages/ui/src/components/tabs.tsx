@@ -286,9 +286,9 @@ const styles = stylex.create({
   // The track's room above and below holds each tab's 44px target on a touch screen, so the row's scrolling never cuts it.
   listDefault: {
     gap: space["1"],
-    // Written as the two long forms: the base list's own inline padding is a long form, which a
-    // short `padding` here would not replace, and the track would be wider at its sides.
-    paddingInline: space["1"],
+    // Half a tab gap at its sides, as the original's track: more than above and below, so the
+    // first and last tab stand clear of the track's rounded ends. Long forms, as the base list's.
+    paddingInline: `calc(${space.tabGap} / 2)`,
     paddingBlock: {
       default: space["1"],
       [COARSE]: `calc((${size.tapTarget} - ${size.controlSm}) / 2)`,

@@ -3,6 +3,8 @@
 // list popup Select shares, and the letters that matched are drawn in the text colour. An item can
 // carry `media` (an avatar, a logo) and a `description` line under its words, as a person does; the
 // chosen item's media stands at the field's start, and the field's own `media` while there is none.
+// With `multiple` it takes several values, each a chip in the field (its media, its words, a button
+// that takes it away), with no chevron.
 //
 //   <Field>
 //     <FieldLabel>Country</FieldLabel>
@@ -11,6 +13,7 @@
 //   <Combobox items={[{ type: "group", label: "Europe", items }]}>
 //     <ComboboxEmpty>No city has that name</ComboboxEmpty>
 //   </Combobox>
+//   <Combobox multiple items={people} placeholder="Add people" />
 //   <Combobox
 //     media={<Icon icon={UsersIcon} />}
 //     items={[{ value: "amara", label: "Amara Okafor", description: "Operations", media: <Avatar … /> }]}
@@ -24,6 +27,9 @@ import * as stylex from "@stylexjs/stylex";
 import type { ChangeDetails } from "@ui-sdk/core";
 import {
   Combobox as ComboboxPrimitive,
+  ComboboxChip,
+  ComboboxChipRemove,
+  ComboboxChips,
   ComboboxContent,
   ComboboxEmpty as EmptyPrimitive,
   ComboboxGroup,
@@ -46,14 +52,16 @@ import type {
   ComboboxTriggerState,
   ComboboxValueChangeReason,
   ComboboxValueState,
+  ListAnnouncement,
   ListData,
   ListItem,
 } from "@ui-sdk/react/combobox";
-import { useEffect, useId, useRef, useState } from "react";
+import { isValidElement, useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { useI18n } from "../lib/i18n";
-import { CheckIcon, ChevronDownIcon, Icon } from "../lib/icons";
+import type { I18nCatalog } from "../lib/i18n";
+import { CheckIcon, ChevronDownIcon, Icon, XIcon } from "../lib/icons";
 import { pressedJustNow, transformOriginFrom } from "../lib/layer";
 import {
   focusField,
@@ -76,6 +84,8 @@ import { popup } from "../lib/tokens.values";
 import { className, isDevelopment, isInvalid, warnUnnamed } from "../lib/utils";
 import type { LayoutStyle } from "../lib/utils";
 import { iconVars, listMarker, motionVars } from "../lib/vars.stylex";
+import { Avatar } from "./avatar";
+import type { AvatarProps } from "./avatar";
 
 /** The control's height: Input's and Button's. */
 export type ComboboxSize = "sm" | "default" | "lg";
@@ -110,36 +120,16 @@ export type ComboboxItems = ListData<string, ComboboxItem>;
 
 // Every prop is documented once, here; the props on the docs page are read from ComboboxProps.
 
-/** Every prop a Combobox takes. */
-export interface ComboboxProps {
+/** What a Combobox takes whether it holds one value or several. */
+interface ComboboxBase {
   /**
    * What can be chosen: strings (each is its own value and label), `{ value, label, keywords,
    * disabled, media, description }`, groups and separators. `keywords` are other words that find an
    * item ("Holland").
    */
   items: ComboboxItems;
-  /**
-   * What stands at the field's start while nothing is chosen, or the chosen item has no `media`: a
-   * quiet icon. A chosen item's own `media` always stands there, with or without this, and steps
-   * aside while the words typed are a search. Give it when the items have media, so the words keep
-   * their place as a choice is made and cleared.
-   */
-  media?: ReactNode;
   /** A ComboboxEmpty, for the words the list says when nothing matches. Without one, the catalogue's. */
   children?: ReactNode;
-  /** The value chosen at first. A form reset returns here. Leave it out to start with nothing. */
-  defaultValue?: string | null;
-  /** The value, when you keep it in state. `null` is nothing chosen. Pair it with `onValueChange`. */
-  value?: string | null;
-  /**
-   * Called with the new value and why it changed: a choice in the list, emptied text, a form reset,
-   * or code and agents. `details.source` is `"agent"` when an agent chose, and `details.cancel()`
-   * keeps the value as it was.
-   */
-  onValueChange?: (
-    value: string | null,
-    details: ChangeDetails<ComboboxValueChangeReason>
-  ) => void;
   /** What it says while it is empty: a verb and the thing ("Search countries"). */
   placeholder?: string;
   /**
@@ -176,6 +166,69 @@ export interface ComboboxProps {
   /** Layout only: margins, alignment and width. Colours, heights and corners belong to the combobox. */
   style?: LayoutStyle;
 }
+
+/**
+ * One value: the field shows it, with a chevron at its end that opens the list.
+ * @when one value
+ */
+interface ComboboxSingle extends ComboboxBase {
+  /**
+   * Several values, each a chip in the field (the chosen item's media, its words, a button that
+   * takes it away), with no chevron: the list opens as you type or press the arrow keys. A chosen
+   * item stays in the list, ticked; choosing it again takes it away.
+   * @default false
+   */
+  multiple?: false;
+  /**
+   * What stands at the field's start while nothing is chosen, or the chosen item has no `media`: a
+   * quiet icon. One value only. A chosen item's own `media` always stands there, with or without this, and steps
+   * aside while the words typed are a search. Give it when the items have media, so the words keep
+   * their place as a choice is made and cleared.
+   */
+  media?: ReactNode;
+  /**
+   * The name of the button at the field's end that opens the list, for a screen reader, a voice
+   * command and an agent, when the catalogue's ("Show the choices") does not say what the list
+   * holds ("Show the apps and workflows"). One value only: with several there is no such button.
+   */
+  triggerLabel?: string;
+  /**
+   * The value chosen at first, `null` for nothing; several, a list. A form reset returns here.
+   * Leave it out to start with nothing.
+   */
+  defaultValue?: string | null;
+  /**
+   * The value, when you keep it in state: `null` is nothing chosen; several, a list. Pair it with
+   * `onValueChange`.
+   */
+  value?: string | null;
+  /**
+   * Called with the new value (several: the list) and why it changed: a choice in the list, emptied
+   * text, a form reset, or code and agents. `details.source` is `"agent"` when an agent chose, and
+   * `details.cancel()` keeps the value as it was.
+   */
+  onValueChange?: (
+    value: string | null,
+    details: ChangeDetails<ComboboxValueChangeReason>
+  ) => void;
+}
+
+/**
+ * Several values, each a chip in the field.
+ * @when several values
+ */
+interface ComboboxMultiple extends ComboboxBase {
+  multiple: true;
+  defaultValue?: string[];
+  value?: string[];
+  onValueChange?: (
+    value: string[],
+    details: ChangeDetails<ComboboxValueChangeReason>
+  ) => void;
+}
+
+/** Every prop a Combobox takes. */
+export type ComboboxProps = ComboboxSingle | ComboboxMultiple;
 
 /** Every prop a ComboboxEmpty takes. */
 export interface ComboboxEmptyProps {
@@ -437,7 +490,162 @@ const styles = stylex.create({
   content: {
     minWidth: "var(--anchor-width)",
   },
+  // Several values: the chips and the typing in one box with the field's own fill, edge and focus,
+  // the system's corner, growing a line as the chips wrap. No chevron: the list opens as you type.
+  chips: {
+    position: "relative",
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space[1],
+    boxSizing: "border-box",
+    width: "100%",
+    minWidth: 0,
+    paddingInline: space[1],
+    // In forced colours a real edge, as the field's.
+    borderWidth: { default: 0, [FORCED]: 1 },
+    borderStyle: "solid",
+    borderColor: "currentColor",
+    borderRadius: radius.xl,
+    cornerShape: radius.shape,
+    backgroundColor: colors.inputBg,
+    boxShadow: {
+      default: `inset 0 0 0 1px ${colors.input}, ${shadow.inputShadow}`,
+      ":focus-within": size.inputFocus,
+      ":has(input[aria-invalid=true])": {
+        default: size.inputInvalid,
+        ":focus-within": size.inputFocusInvalid,
+      },
+      ":has(input:disabled)": `inset 0 0 0 1px ${colors.input}`,
+    },
+    opacity: { default: 1, ":has(input:disabled)": size.opacityDisabled },
+    cursor: { default: "text", ":has(input:disabled)": "not-allowed" },
+    transitionProperty: "box-shadow",
+    transitionDuration: duration.hover,
+    transitionTimingFunction: duration.ease,
+  },
+  // One line's height at each size, a chip centred in it.
+  chipsSm: {
+    minHeight: size.controlSm,
+    paddingBlock: `calc((${size.controlSm} - ${size.controlXs}) / 2)`,
+  },
+  chipsDefault: {
+    minHeight: size.controlDefault,
+    paddingBlock: `calc((${size.controlDefault} - ${size.controlXs}) / 2)`,
+  },
+  chipsLg: {
+    minHeight: size.controlLg,
+    paddingBlock: `calc((${size.controlLg} - ${size.controlXs}) / 2)`,
+  },
+  // The typing after the chips: a chip's height, on the box's fill.
+  chipsInput: {
+    flexGrow: 1,
+    flexBasis: "8rem",
+    minWidth: 0,
+    height: size.controlXs,
+    margin: 0,
+    paddingBlock: 0,
+    paddingInline: space[2],
+    appearance: "none",
+    borderWidth: 0,
+    outline: "none",
+    backgroundColor: "transparent",
+    color: colors.foreground,
+    caretColor: colors.foreground,
+    fontFamily: font.sans,
+    fontSize: {
+      default: font.textSm,
+      [media.maxSmOrCoarse]: size.inputTextTouch,
+    },
+    lineHeight: font.textSmLine,
+    cursor: { default: "text", ":disabled": "not-allowed" },
+    "::selection": {
+      backgroundColor: colors.inputSelection,
+      color: colors.foreground,
+    },
+    "::placeholder": {
+      color: colors.mutedForeground,
+      opacity: 1,
+      textOverflow: "ellipsis",
+    },
+  },
+  // A chosen value: a pill (the plain full radius, never the squircle) with the item's media, its
+  // words and the button that takes it away; the arrow keys reach it, with the ring round it.
+  chip: {
+    [iconVars.size]: size.badgeIcon,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: space[1],
+    maxWidth: "100%",
+    minWidth: 0,
+    height: size.controlXs,
+    boxSizing: "border-box",
+    paddingInlineStart: space[1],
+    borderRadius: radius.full,
+    cornerShape: "round",
+    backgroundColor: colors.muted,
+    boxShadow: size.borderStrong,
+    color: colors.foreground,
+    fontSize: font.textXs,
+    lineHeight: font.textXsLine,
+    outline: {
+      default: "none",
+      [FORCED]: "1px solid CanvasText",
+      ":focus-visible": `${size.ringWidth} solid ${colors.ring}`,
+    },
+  },
+  // The item's media in a chip: a face as large as the words' line, an icon at a badge's size.
+  chipMedia: {
+    display: "inline-flex",
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    width: size.avatar2xs,
+    height: size.avatar2xs,
+    color: colors.mutedForeground,
+  },
+  chipWords: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  chipRemove: {
+    position: "relative",
+    display: "inline-flex",
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    width: size.controlXs,
+    height: size.controlXs,
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    borderRadius: radius.circle,
+    backgroundColor: {
+      default: "transparent",
+      ":hover": { default: null, [HOVER]: colors.accent },
+    },
+    color: colors.mutedForeground,
+    cursor: "pointer",
+    WebkitTapHighlightColor: "transparent",
+    touchAction: "manipulation",
+  },
+  // On a touch screen the remove button's press area is 44px, unseen.
+  chipRemoveTarget: {
+    position: "absolute",
+    inset: {
+      default: 0,
+      [COARSE]: `calc((${size.controlXs} - ${size.tapTarget}) / 2)`,
+    },
+  },
 });
+
+const chipsSizeStyles = {
+  sm: styles.chipsSm,
+  default: styles.chipsDefault,
+  lg: styles.chipsLg,
+} as const;
 
 const sizeStyles = {
   sm: inputStyles.sm,
@@ -640,10 +848,78 @@ export const ComboboxOptions = ({ items, children }: ComboboxOptionsProps) => {
   );
 };
 
-/** Type to find one value in a list. */
+/** A chosen item's media in a chip: an Avatar drawn at the chip's line (2xs), anything else as given. */
+const chipMediaOf = (given: ReactNode): ReactNode =>
+  isValidElement<AvatarProps>(given) && given.type === Avatar ? (
+    <Avatar {...given.props} size="2xs" />
+  ) : (
+    given
+  );
+
+/** The values given as data, whether one or several. */
+const valuesOf = (value: string | readonly string[] | null | undefined) => {
+  if (value === null || value === undefined) {
+    return [];
+  }
+  return typeof value === "string" ? [value] : value;
+};
+
+/** The chosen values, each a chip: its media, its words, the button that takes it away. */
+const Chips = ({
+  values,
+  byValue,
+}: {
+  values: unknown;
+  byValue: Map<string, ComboboxItem>;
+}) => {
+  const words = useI18n();
+  const chosen = Array.isArray(values)
+    ? values.filter((value): value is string => typeof value === "string")
+    : [];
+  return chosen.map((value) => {
+    const item = byValue.get(value);
+    const label = item?.label ?? value;
+    return (
+      <ComboboxChip
+        key={value}
+        value={value}
+        aria-label={label}
+        {...stylex.props(styles.chip)}
+      >
+        {item?.media === undefined ? null : (
+          <span aria-hidden="true" {...stylex.props(styles.chipMedia)}>
+            {chipMediaOf(item.media)}
+          </span>
+        )}
+        <span {...stylex.props(styles.chipWords)}>{label}</span>
+        <ComboboxChipRemove
+          aria-label={words.combobox.remove(label)}
+          {...stylex.props(styles.chipRemove)}
+        >
+          <span aria-hidden="true" {...stylex.props(styles.chipRemoveTarget)} />
+          <Icon icon={XIcon} />
+        </ComboboxChipRemove>
+      </ComboboxChip>
+    );
+  });
+};
+
+/** What the list says as it changes, in the catalogue's words: how many match, or what was taken away. */
+const announcementOf =
+  (words: I18nCatalog["combobox"]) =>
+  (change: ListAnnouncement): string => {
+    if (change.type === "removed") {
+      return words.removed(change.label);
+    }
+    if (change.loading) {
+      return words.loading;
+    }
+    return change.count === 0 ? words.empty : words.results(change.count);
+  };
+
+/** Type to find one value in a list, or several with `multiple`. */
 export const Combobox = ({
   items,
-  media: resting,
   children,
   size: scale = "default",
   placeholder,
@@ -651,7 +927,6 @@ export const Combobox = ({
   "aria-label": ariaLabel,
   "aria-invalid": ariaInvalid,
   id,
-  onValueChange,
   ...options
 }: ComboboxProps) => {
   const words = useI18n();
@@ -662,25 +937,28 @@ export const Combobox = ({
   const fromChevron = transformOriginFrom(() =>
     pressedJustNow(pressedAt.current) ? chevron.current : null
   );
+  // Several values: the chips' box, the field the list hangs under (the typing in it is narrower).
+  const [chipsBox, setChipsBox] = useState<HTMLDivElement | null>(null);
   // The value is always an item's: a value from outside the list (an agent's, or code's) is refused,
   // so whoever set it hears that it failed.
   const byValue = byValueOf(items);
   // What was typed, while it is typed: with words that are a search, not the chosen item's own, its
   // media steps aside for the quiet one, so a picture never claims the words are its item's.
   const [typed, setTyped] = useState("");
-  const change = (
-    next: string | null,
+  const refused = (
+    next: string | readonly string[] | null,
     details: ChangeDetails<ComboboxValueChangeReason>
   ) => {
-    if (next !== null && !byValue.has(next)) {
-      details.cancel();
-      // An agent hears why, in words.
-      if (details.source === "agent") {
-        throw new Error(words.combobox.notChoice(next));
-      }
-      return;
+    const stranger = valuesOf(next).find((value) => !byValue.has(value));
+    if (stranger === undefined) {
+      return false;
     }
-    onValueChange?.(next, details);
+    details.cancel();
+    // An agent hears why, in words.
+    if (details.source === "agent") {
+      throw new Error(words.combobox.notChoice(stranger));
+    }
+    return true;
   };
   // In development, say so when nothing names it: no Field label, no aria-label.
   const input = useRef<HTMLInputElement | null>(null);
@@ -695,25 +973,117 @@ export const Combobox = ({
       return;
     }
     const listed = byValueOf(items);
-    for (const start of [options.value, options.defaultValue]) {
-      if (start !== null && start !== undefined && !listed.has(start)) {
+    for (const start of [
+      ...valuesOf(options.value),
+      ...valuesOf(options.defaultValue),
+    ]) {
+      if (!listed.has(start)) {
         console.error(`Combobox: ${start} is not one of its items.`);
       }
     }
   }, [items, options.value, options.defaultValue]);
 
+  const onQueryChange = (
+    query: string,
+    details: ChangeDetails<ComboboxQueryChangeReason>
+  ) => {
+    setTyped(details.reason === "input-change" ? query : "");
+  };
+  const listPopup = (
+    <ComboboxContent
+      ref={fromChevron}
+      anchor={options.multiple === true ? (chipsBox ?? undefined) : undefined}
+      sideOffset={popup.gap}
+      collisionPadding={popup.gutter}
+      {...stylex.props(
+        listMarker,
+        listStyles.popup,
+        styles.content,
+        scrollbarHidden
+      )}
+    >
+      <ComboboxOptions items={items}>{children}</ComboboxOptions>
+    </ComboboxContent>
+  );
+
+  if (options.multiple === true) {
+    const { multiple, onValueChange, ...rest } = options;
+    return (
+      <ComboboxPrimitive<string, true>
+        items={searchedItems(items)}
+        autoHighlight="always"
+        announcement={announcementOf(words.combobox)}
+        {...rest}
+        multiple={multiple}
+        itemToLabel={(value: string) => byValue.get(value)?.label ?? value}
+        onValueChange={(
+          next: string[],
+          details: ChangeDetails<ComboboxValueChangeReason>
+        ) => {
+          if (!refused(next, details)) {
+            onValueChange?.(next, details);
+          }
+        }}
+        onQueryChange={onQueryChange}
+      >
+        <ComboboxChips
+          ref={setChipsBox}
+          data-slot="combobox-chips"
+          {...stylex.props(
+            styles.chips,
+            chipsSizeStyles[scale],
+            focusField.within,
+            style
+          )}
+        >
+          {/* The typing after the chips; it says what to do only while nothing is chosen. */}
+          <ComboboxValue>
+            {(state: ComboboxValueState): ReactNode => (
+              <>
+                <Chips values={state.value} byValue={byValue} />
+                <ComboboxInput
+                  ref={input}
+                  id={id}
+                  aria-label={ariaLabel}
+                  aria-invalid={ariaInvalid}
+                  placeholder={
+                    Array.isArray(state.value) && state.value.length > 0
+                      ? undefined
+                      : placeholder
+                  }
+                  {...stylex.props(styles.chipsInput)}
+                />
+              </>
+            )}
+          </ComboboxValue>
+        </ComboboxChips>
+        {listPopup}
+      </ComboboxPrimitive>
+    );
+  }
+
+  const {
+    multiple: _one,
+    onValueChange,
+    media: resting,
+    triggerLabel,
+    ...rest
+  } = options;
   return (
     <ComboboxPrimitive
       items={searchedItems(items)}
       autoHighlight="always"
-      {...options}
-      onValueChange={change}
-      onQueryChange={(
-        query: string,
-        details: ChangeDetails<ComboboxQueryChangeReason>
+      announcement={announcementOf(words.combobox)}
+      {...rest}
+      onValueChange={(
+        next: string | null,
+        details: ChangeDetails<ComboboxValueChangeReason>
       ) => {
-        setTyped(details.reason === "input-change" ? query : "");
+        if (!refused(next, details)) {
+          onValueChange?.(next, details);
+        }
       }}
+      onQueryChange={onQueryChange}
     >
       {/* The box that holds the field, its touch target and the chevron. */}
       <div data-slot="combobox" {...stylex.props(styles.box, style)}>
@@ -775,7 +1145,7 @@ export const Combobox = ({
             pressedAt.current =
               Date.now() - (performance.now() - event.timeStamp);
           }}
-          aria-label={words.combobox.trigger}
+          aria-label={triggerLabel ?? words.combobox.trigger}
           className={(state: ComboboxTriggerState) =>
             className(
               styles.trigger,
@@ -802,19 +1172,7 @@ export const Combobox = ({
           )}
         </ComboboxTrigger>
       </div>
-      <ComboboxContent
-        ref={fromChevron}
-        sideOffset={popup.gap}
-        collisionPadding={popup.gutter}
-        {...stylex.props(
-          listMarker,
-          listStyles.popup,
-          styles.content,
-          scrollbarHidden
-        )}
-      >
-        <ComboboxOptions items={items}>{children}</ComboboxOptions>
-      </ComboboxContent>
+      {listPopup}
     </ComboboxPrimitive>
   );
 };
