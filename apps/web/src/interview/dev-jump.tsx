@@ -107,7 +107,7 @@ const said: { phase: InterviewPhase; lines: [string, string] }[] = [
     phase: "exceptions",
     lines: [
       "What happens when it doesn't match?",
-      "I email the buyer and it waits, sometimes a week, in a spreadsheet I keep.",
+      "I email the buyer and it waits, sometimes a week, in an Excel sheet I keep.",
     ],
   },
   {
@@ -154,7 +154,7 @@ const inDutch: {
     ],
     exceptions: [
       "Wat gebeurt er als het niet klopt?",
-      "Dan mail ik de inkoper en blijft hij liggen, soms een week, in een spreadsheet die ik bijhoud.",
+      "Dan mail ik de inkoper en blijft hij liggen, soms een week, in een Excel-sheet die ik bijhoud.",
     ],
     numbers: [
       "Hoeveel komen er ongeveer binnen?",
@@ -167,11 +167,11 @@ const inDutch: {
   },
   noted: {
     f1: "Je doet de crediteurenadministratie.",
-    f2: "Facturen komen als pdf binnen in de crediteureninbox.",
+    f2: "Facturen komen als pdf binnen in de crediteureninbox in Outlook.",
     f3: "Je boekt elke factuur in Exact.",
     f4: "Je checkt de bedragen regel voor regel tegen de inkooporder.",
-    f5: "Klopt het niet, dan mail je de inkoper.",
-    f6: "Openstaande verschillen wachten in een spreadsheet die je bijhoudt.",
+    f5: "Klopt het niet, dan stuur je de inkoper een bericht in Teams.",
+    f6: "Openstaande verschillen wachten in een Excel-sheet die je bijhoudt.",
     f7: "Zo'n 400 facturen per maand, één op de tien wijkt af.",
     f8: "Klaar is goedgekeurd en in de betaalrun van vrijdag.",
   },
@@ -192,7 +192,7 @@ const noted: (Omit<InterviewFact, "record"> & { phase: InterviewPhase })[] = [
     id: "f2",
     phase: "story",
     tag: "step",
-    text: "Invoices arrive as PDFs in the AP inbox.",
+    text: "Invoices arrive as PDFs in the AP inbox in Outlook.",
   },
   {
     id: "f3",
@@ -210,13 +210,13 @@ const noted: (Omit<InterviewFact, "record"> & { phase: InterviewPhase })[] = [
     id: "f5",
     phase: "exceptions",
     tag: "handoff",
-    text: "When it doesn't match, you email the buyer.",
+    text: "When it doesn't match, you message the buyer in Teams.",
   },
   {
     id: "f6",
     phase: "exceptions",
     tag: "workaround",
-    text: "Open mismatches wait in a spreadsheet you keep.",
+    text: "Open mismatches wait in an Excel sheet you keep.",
   },
   {
     id: "f7",

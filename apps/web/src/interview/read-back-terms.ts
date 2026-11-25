@@ -4,10 +4,21 @@ import type { IconData } from "@grasp-os/ui/lib/icons";
 
 import {
   AnthropicLogo,
+  ClaudeLogo,
+  DeepSeekLogo,
+  GeminiLogo,
+  GmailLogo,
+  GoogleDocsLogo,
   GoogleLogo,
+  GoogleSheetsLogo,
+  HubSpotLogo,
+  JiraLogo,
   MicrosoftLogo,
   MistralLogo,
   OpenAiLogo,
+  PerplexityLogo,
+  SapLogo,
+  ZendeskLogo,
 } from "../connections/brand-logos.ts";
 
 // Concepts only, for the read-back told as a story (read-back-story.tsx):
@@ -17,48 +28,64 @@ import {
 // draws one, and what Stephen marked in their own words in the
 // conversation (`InterviewLine.marks`), where the line says it again.
 
-/** A thing a line names: how it is written, and its maker's mark when the product has one. */
+/**
+ * A thing a line names, and its maker's own mark when the product has one:
+ * drawn (`logo`, from brand-logos.ts) or a whole logo file in its own
+ * colours (`src`, from `public/logos`, as the setup's tiles show them).
+ */
 export interface Term {
   logo: IconData | null;
+  src: string | null;
+}
+
+interface Tool {
+  name: string;
+  logo?: IconData;
+  src?: string;
+  /** Also an everyday word ("Teams", "Exact"): found only as the tool writes it. */
+  word?: true;
 }
 
 /**
  * The tools named most in work, as they are written, with their maker's
- * mark. Found in any case, but for a name that is also an everyday word
- * ("Teams", "Word", "Exact"): that one only as the tool writes it.
+ * mark. Microsoft's own apps carry Microsoft's mark: the product has no
+ * file of Excel's, Outlook's, Word's or PowerPoint's own.
  */
-const tools: readonly { name: string; logo: IconData | null; word?: true }[] = [
+const tools: readonly Tool[] = [
   { name: "Microsoft 365", logo: MicrosoftLogo },
   { name: "Copilot", logo: MicrosoftLogo },
   { name: "Excel", logo: MicrosoftLogo },
   { name: "Outlook", logo: MicrosoftLogo },
-  { name: "Teams", logo: MicrosoftLogo, word: true },
+  { name: "Teams", src: "/logos/microsoft-teams.svg", word: true },
   { name: "Word", logo: MicrosoftLogo, word: true },
   { name: "PowerPoint", logo: MicrosoftLogo },
-  { name: "SharePoint", logo: MicrosoftLogo },
-  { name: "OneDrive", logo: MicrosoftLogo },
+  { name: "SharePoint", src: "/logos/microsoft-sharepoint.svg" },
+  { name: "OneDrive", src: "/logos/microsoft-onedrive.svg" },
   { name: "ChatGPT", logo: OpenAiLogo },
   { name: "OpenAI", logo: OpenAiLogo },
-  { name: "Claude", logo: AnthropicLogo, word: true },
+  { name: "Claude", logo: ClaudeLogo, word: true },
+  { name: "Anthropic", logo: AnthropicLogo },
   { name: "Mistral", logo: MistralLogo, word: true },
   { name: "Le Chat", logo: MistralLogo, word: true },
-  { name: "Gemini", logo: GoogleLogo, word: true },
-  { name: "Gmail", logo: GoogleLogo },
-  { name: "Google Drive", logo: GoogleLogo },
-  { name: "Google Docs", logo: GoogleLogo },
-  { name: "Google Sheets", logo: GoogleLogo },
-  { name: "DeepSeek", logo: null },
-  { name: "Perplexity", logo: null, word: true },
-  { name: "Slack", logo: null, word: true },
-  { name: "Notion", logo: null, word: true },
-  { name: "Jira", logo: null },
-  { name: "Confluence", logo: null, word: true },
-  { name: "Salesforce", logo: null },
-  { name: "HubSpot", logo: null },
-  { name: "SAP", logo: null, word: true },
-  { name: "AFAS", logo: null },
-  { name: "Exact", logo: null, word: true },
-  { name: "Zendesk", logo: null },
+  { name: "Gemini", logo: GeminiLogo, word: true },
+  { name: "Gmail", logo: GmailLogo },
+  { name: "Google Drive", src: "/logos/google-drive.svg" },
+  { name: "Google Docs", logo: GoogleDocsLogo },
+  { name: "Google Sheets", logo: GoogleSheetsLogo },
+  { name: "Google", logo: GoogleLogo, word: true },
+  { name: "DeepSeek", logo: DeepSeekLogo },
+  { name: "Perplexity", logo: PerplexityLogo, word: true },
+  { name: "Slack", src: "/logos/slack.svg", word: true },
+  { name: "Notion", src: "/logos/notion.svg", word: true },
+  { name: "Jira", logo: JiraLogo },
+  { name: "Confluence", src: "/logos/confluence.svg", word: true },
+  { name: "Salesforce" },
+  { name: "HubSpot", logo: HubSpotLogo },
+  { name: "SAP", logo: SapLogo, word: true },
+  { name: "AFAS" },
+  { name: "Exact", word: true },
+  { name: "Zendesk", logo: ZendeskLogo },
+  { name: "Dropbox", src: "/logos/dropbox.svg", word: true },
 ];
 
 /** The tool `words` name, if they name one as it is written. */
@@ -137,7 +164,7 @@ export const storyPieces = (
       pieces.push({
         at: match.index,
         text: words,
-        term: { logo: tool?.logo ?? null },
+        term: { logo: tool?.logo ?? null, src: tool?.src ?? null },
       });
       at = match.index + words.length;
     }
