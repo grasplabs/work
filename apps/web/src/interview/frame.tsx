@@ -24,6 +24,7 @@ import type { Pose } from "../onboarding/field/engine.ts";
 import { aside } from "../onboarding/field/poses.ts";
 import { StephenField } from "../onboarding/field/stephen-field.tsx";
 import { LanguagePicker } from "../onboarding/language-picker.tsx";
+import { StartOver } from "../onboarding/start-over.tsx";
 
 // The frame every screen of someone's interview link stands in, full
 // screen, outside the app, as the sign-in page before it: Grasp's mark at
@@ -183,6 +184,7 @@ export const Frame = ({
         <div {...stylex.props(styles.end)}>
           <LanguagePicker />
           <Appearance />
+          <StartOver size="icon-sm" />
           {actions}
         </div>
       </header>

@@ -31,6 +31,7 @@ import type { Pose } from "./field/engine.ts";
 import { fromTheTop } from "./field/poses.ts";
 import { StephenField } from "./field/stephen-field.tsx";
 import { LanguagePicker } from "./language-picker.tsx";
+import { StartOver } from "./start-over.tsx";
 
 // The frame of the setup and of the page a member waits on: full screen,
 // outside the app. One quiet bar on top, Grasp's mark at its start, the
@@ -276,6 +277,7 @@ export const CalmFrame = ({
           {language ? <LanguagePicker /> : null}
           <Sound />
           <Appearance userId={userId} />
+          <StartOver size={tool.button} />
           <Leave />
         </div>
       </header>
