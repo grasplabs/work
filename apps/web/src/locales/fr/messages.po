@@ -4002,10 +4002,6 @@ msgstr "Processus métier"
 msgid "By"
 msgstr "Par"
 
-#: src/onboarding/plan-story.tsx
-msgid "By {close}, I’ve heard the whole company, and the interviews close."
-msgstr "D’ici le {close}, j’ai entendu toute l’entreprise, et les entretiens se terminent."
-
 #: src/workflows/workflow-page.tsx
 msgctxt "who started a workflow run"
 msgid "By {who}"
@@ -7814,10 +7810,6 @@ msgctxt "where a decision comes from"
 msgid "From"
 msgstr "De"
 
-#: src/onboarding/plan-story.tsx
-msgid "From {everyone}, everyone else gets their own link, and talks to me whenever it suits them."
-msgstr "À partir du {everyone}, tous les autres reçoivent leur propre lien et me parlent quand ça leur convient."
-
 #: src/agents/agent-share.tsx
 msgid "From {from}"
 msgstr "De {from}"
@@ -8446,8 +8438,8 @@ msgid "Helsinki"
 msgstr "Helsinki"
 
 #: src/onboarding/plan-story.tsx
-msgid "Here’s how the next two weeks go."
-msgstr "Voici comment se passent les deux prochaines semaines."
+msgid "Here’s a quick look at the next two weeks."
+msgstr "Voici un aperçu rapide des deux prochaines semaines."
 
 #: src/onboarding/plan-story.tsx
 msgid "Here’s the plan"
@@ -8801,6 +8793,10 @@ msgstr "Je préfère passer mon tour"
 #: src/interview/start.tsx
 msgid "I’d rather skip this"
 msgstr "Je préfère passer"
+
+#: src/onboarding/plan-story.tsx
+msgid "I’ll pull everything together, and on {findings} we’ll walk through the report: where work gets stuck and which processes make the most sense to tackle first."
+msgstr "Je rassemble tout, et le {findings} nous parcourons ensemble le rapport : où le travail bloque et quels processus il vaut mieux traiter en premier."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I’ll set up Grasp with you, one step at a time. Which language would you like?"
@@ -10130,10 +10126,6 @@ msgstr "Faire briller les points"
 msgid "Lightbulb"
 msgstr "Ampoule"
 
-#: src/onboarding/plan-story.tsx
-msgid "Like this: most people lose the first hours of their day to email."
-msgstr "Par exemple : la plupart perdent les premières heures de leur journée dans leurs e-mails."
-
 #: src/settings/backdrop-settings.tsx
 msgid "Lime"
 msgstr "Citron vert"
@@ -10951,6 +10943,10 @@ msgstr "Point du matin"
 #: src/apps/field-editor.tsx
 msgid "Most characters"
 msgstr "Nombre maximal de caractères"
+
+#: src/onboarding/plan-story.tsx
+msgid "Most of the time, it’s the small things that pile up—and end up making the biggest difference."
+msgstr "Le plus souvent, ce sont les petites choses qui s’accumulent, et qui finissent par faire la plus grande différence."
 
 #: src/onboarding/campaign/concepts/concept-words.ts
 msgid "Most people talk in the first three days, so the next two count most."
@@ -12517,10 +12513,6 @@ msgstr "Activé · pour tous ceux qui ont Grasp"
 #: src/onboarding/send-plan-form.tsx
 msgid "on {date} at {hour}"
 msgstr "le {date} à {hour}"
-
-#: src/onboarding/plan-story.tsx
-msgid "On {first}, I start with the people who know the work best, and they show me where the time really goes."
-msgstr "Le {first}, je commence avec les personnes qui connaissent le mieux le travail, et elles me montrent où le temps passe vraiment."
 
 #: src/settings/audit-chain.tsx
 msgid "On {time}, the chain broke at entry {entry}: nothing from there on is verified. {reason}"
@@ -16409,10 +16401,6 @@ msgctxt "what a carousel's slide is"
 msgid "slide"
 msgstr "diapositive"
 
-#: src/onboarding/plan-story.tsx
-msgid "Small things like that add up. Let’s find them."
-msgstr "Ces petites choses s’additionnent. Trouvons-les."
-
 #: src/settings/composer-settings.tsx
 msgctxt "the chat box's edge"
 msgid "Smooth"
@@ -16722,6 +16710,10 @@ msgstr "A commencé à transmettre quelque chose au Brain"
 msgctxt "status of a workflow run"
 msgid "Starting"
 msgstr "Démarrage"
+
+#: src/onboarding/plan-story.tsx
+msgid "Starting {everyone}, the rest of the team follows. Everyone gets their own link and can do the chat whenever it suits them."
+msgstr "À partir du {everyone}, le reste de l’équipe suit. Chacun reçoit son propre lien et peut faire l’échange quand cela lui convient."
 
 #: src/agents/setup/job-step.tsx
 msgid "Starting points"
@@ -18220,10 +18212,6 @@ msgstr "Puis {task}"
 #: src/onboarding/leads-step.tsx
 msgid "Then everyone gets their link"
 msgstr "Ensuite, chacun reçoit son lien"
-
-#: src/onboarding/plan-story.tsx
-msgid "Then I read every conversation, and on {findings} you get what I learned, theme by theme."
-msgstr "Ensuite, je lis chaque conversation, et le {findings} vous recevez ce que j’ai appris, thème par thème."
 
 #: src/interview/words.ts
 msgid "Then, when it goes differently."
@@ -19769,6 +19757,10 @@ msgstr "Nous en avons assez entendu."
 msgid "We have what we need."
 msgstr "Nous avons ce qu’il nous faut."
 
+#: src/onboarding/plan-story.tsx
+msgid "We kick off on {first} with a small first group. They’ll get a link for a quick chat about what their day-to-day looks like, which tools they use, and where their time goes."
+msgstr "Nous commençons le {first} avec un petit premier groupe. Ils recevront un lien pour un court échange sur leur quotidien, les outils qu’ils utilisent et où passe leur temps."
+
 #: src/onboarding/setup-steps.tsx
 msgid "We open your platform once we’ve checked everything with you. You’ll hear from us."
 msgstr "Nous ouvrons votre plateforme dès que nous avons tout vérifié avec vous. Vous aurez de nos nouvelles."
@@ -19788,6 +19780,10 @@ msgstr "Nous la conservons scellée. Vous n’en verrez plus que les quatre dern
 #: src/onboarding/team-step.tsx
 msgid "We want to spend less time on repetitive work, so there’s more time for our clients. This is about how work flows, not about jobs."
 msgstr "Nous voulons passer moins de temps sur les tâches répétitives, pour avoir plus de temps pour nos clients. Il s’agit de la façon dont le travail circule, pas des postes."
+
+#: src/onboarding/plan-story.tsx
+msgid "We wrap up on {close}, once we’ve heard from almost everyone."
+msgstr "Nous clôturons les échanges le {close}, une fois que nous avons entendu presque tout le monde."
 
 #: src/onboarding/campaign/concepts/concept-words.ts
 msgid "We write down how each team works"

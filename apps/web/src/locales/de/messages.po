@@ -4002,10 +4002,6 @@ msgstr "Geschäftsprozess"
 msgid "By"
 msgstr "Von"
 
-#: src/onboarding/plan-story.tsx
-msgid "By {close}, I’ve heard the whole company, and the interviews close."
-msgstr "Bis {close} habe ich die ganze Firma gehört, und die Interviews schließen."
-
 #: src/workflows/workflow-page.tsx
 msgctxt "who started a workflow run"
 msgid "By {who}"
@@ -7814,10 +7810,6 @@ msgctxt "where a decision comes from"
 msgid "From"
 msgstr "Von"
 
-#: src/onboarding/plan-story.tsx
-msgid "From {everyone}, everyone else gets their own link, and talks to me whenever it suits them."
-msgstr "Ab {everyone} bekommen alle anderen ihren eigenen Link und sprechen mit mir, wann es ihnen passt."
-
 #: src/agents/agent-share.tsx
 msgid "From {from}"
 msgstr "Von {from}"
@@ -8446,8 +8438,8 @@ msgid "Helsinki"
 msgstr "Helsinki"
 
 #: src/onboarding/plan-story.tsx
-msgid "Here’s how the next two weeks go."
-msgstr "So laufen die nächsten zwei Wochen."
+msgid "Here’s a quick look at the next two weeks."
+msgstr "Hier ein kurzer Blick auf die nächsten zwei Wochen."
 
 #: src/onboarding/plan-story.tsx
 msgid "Here’s the plan"
@@ -8801,6 +8793,10 @@ msgstr "Ich möchte das lieber auslassen"
 #: src/interview/start.tsx
 msgid "I’d rather skip this"
 msgstr "Ich lasse das lieber aus"
+
+#: src/onboarding/plan-story.tsx
+msgid "I’ll pull everything together, and on {findings} we’ll walk through the report: where work gets stuck and which processes make the most sense to tackle first."
+msgstr "Ich fasse alles zusammen, und am {findings} gehen wir den Bericht gemeinsam durch: wo die Arbeit hängen bleibt und welche Prozesse wir am besten zuerst angehen."
 
 #: src/onboarding/setup-steps.tsx
 msgid "I’ll set up Grasp with you, one step at a time. Which language would you like?"
@@ -10130,10 +10126,6 @@ msgstr "Punkte hervorheben"
 msgid "Lightbulb"
 msgstr "Glühbirne"
 
-#: src/onboarding/plan-story.tsx
-msgid "Like this: most people lose the first hours of their day to email."
-msgstr "Zum Beispiel: Die meisten verlieren die ersten Stunden ihres Tages an E-Mails."
-
 #: src/settings/backdrop-settings.tsx
 msgid "Lime"
 msgstr "Limette"
@@ -10951,6 +10943,10 @@ msgstr "Morgenbriefing"
 #: src/apps/field-editor.tsx
 msgid "Most characters"
 msgstr "Höchstens Zeichen"
+
+#: src/onboarding/plan-story.tsx
+msgid "Most of the time, it’s the small things that pile up—and end up making the biggest difference."
+msgstr "Meistens sind es gerade die kleinen Dinge, die sich anhäufen – und am Ende den größten Unterschied machen."
 
 #: src/onboarding/campaign/concepts/concept-words.ts
 msgid "Most people talk in the first three days, so the next two count most."
@@ -12517,10 +12513,6 @@ msgstr "An · für alle mit Grasp"
 #: src/onboarding/send-plan-form.tsx
 msgid "on {date} at {hour}"
 msgstr "am {date} um {hour}"
-
-#: src/onboarding/plan-story.tsx
-msgid "On {first}, I start with the people who know the work best, and they show me where the time really goes."
-msgstr "Am {first} fange ich mit den Menschen an, die die Arbeit am besten kennen, und sie zeigen mir, wo die Zeit wirklich hingeht."
 
 #: src/settings/audit-chain.tsx
 msgid "On {time}, the chain broke at entry {entry}: nothing from there on is verified. {reason}"
@@ -16409,10 +16401,6 @@ msgctxt "what a carousel's slide is"
 msgid "slide"
 msgstr "Folie"
 
-#: src/onboarding/plan-story.tsx
-msgid "Small things like that add up. Let’s find them."
-msgstr "Solche Kleinigkeiten summieren sich. Lass sie uns finden."
-
 #: src/settings/composer-settings.tsx
 msgctxt "the chat box's edge"
 msgid "Smooth"
@@ -16722,6 +16710,10 @@ msgstr "Begonnen, etwas an das Brain zu übergeben"
 msgctxt "status of a workflow run"
 msgid "Starting"
 msgstr "Startet"
+
+#: src/onboarding/plan-story.tsx
+msgid "Starting {everyone}, the rest of the team follows. Everyone gets their own link and can do the chat whenever it suits them."
+msgstr "Ab {everyone} folgt der Rest des Teams. Alle bekommen ihren eigenen Link und können das Gespräch führen, wann es ihnen passt."
 
 #: src/agents/setup/job-step.tsx
 msgid "Starting points"
@@ -18220,10 +18212,6 @@ msgstr "Dann {task}"
 #: src/onboarding/leads-step.tsx
 msgid "Then everyone gets their link"
 msgstr "Danach bekommt jede Person ihren Link"
-
-#: src/onboarding/plan-story.tsx
-msgid "Then I read every conversation, and on {findings} you get what I learned, theme by theme."
-msgstr "Dann lese ich jedes Gespräch, und am {findings} bekommst du, was ich gelernt habe, Thema für Thema."
 
 #: src/interview/words.ts
 msgid "Then, when it goes differently."
@@ -19769,6 +19757,10 @@ msgstr "Wir haben genug gehört."
 msgid "We have what we need."
 msgstr "Wir haben, was wir brauchen."
 
+#: src/onboarding/plan-story.tsx
+msgid "We kick off on {first} with a small first group. They’ll get a link for a quick chat about what their day-to-day looks like, which tools they use, and where their time goes."
+msgstr "Wir starten am {first} mit einer kleinen ersten Gruppe. Sie bekommen einen Link für ein kurzes Gespräch darüber, wie ihr Arbeitsalltag aussieht, welche Tools sie nutzen und wo ihre Zeit hingeht."
+
 #: src/onboarding/setup-steps.tsx
 msgid "We open your platform once we’ve checked everything with you. You’ll hear from us."
 msgstr "Wir öffnen Ihre Plattform, sobald wir alles mit Ihnen geprüft haben. Sie hören von uns."
@@ -19788,6 +19780,10 @@ msgstr "Wir speichern ihn versiegelt. Du siehst nur noch die letzten vier Zeiche
 #: src/onboarding/team-step.tsx
 msgid "We want to spend less time on repetitive work, so there’s more time for our clients. This is about how work flows, not about jobs."
 msgstr "Wir wollen weniger Zeit mit wiederkehrender Arbeit verbringen, damit mehr Zeit für unsere Kunden bleibt. Es geht darum, wie die Arbeit läuft, nicht um Stellen."
+
+#: src/onboarding/plan-story.tsx
+msgid "We wrap up on {close}, once we’ve heard from almost everyone."
+msgstr "Am {close} schließen wir die Gespräche ab, wenn wir fast alle gehört haben."
 
 #: src/onboarding/campaign/concepts/concept-words.ts
 msgid "We write down how each team works"

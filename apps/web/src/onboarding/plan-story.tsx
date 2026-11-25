@@ -98,7 +98,7 @@ const styles = stylex.create({
     display: "grid",
     alignContent: "end",
     width: "100%",
-    maxWidth: "40rem",
+    maxWidth: "48rem",
     paddingInline: space[6],
     textAlign: "center",
     minHeight: {
@@ -179,28 +179,27 @@ const useParts = (today: string): Part[] => {
   const close = format.format(dateOf(start, "close"));
   const findings = format.format(dateOf(start, "findings"));
   return [
-    { scene: "you", text: t`Here’s how the next two weeks go.` },
+    { scene: "you", text: t`Here’s a quick look at the next two weeks.` },
     {
       scene: "first",
-      text: t`On ${first}, I start with the people who know the work best, and they show me where the time really goes.`,
+      text: t`We kick off on ${first} with a small first group. They’ll get a link for a quick chat about what their day-to-day looks like, which tools they use, and where their time goes.`,
     },
     {
       scene: "everyone",
-      text: t`From ${everyone}, everyone else gets their own link, and talks to me whenever it suits them.`,
+      text: t`Starting ${everyone}, the rest of the team follows. Everyone gets their own link and can do the chat whenever it suits them.`,
     },
     {
       scene: "close",
-      text: t`By ${close}, I’ve heard the whole company, and the interviews close.`,
+      text: t`We wrap up on ${close}, once we’ve heard from almost everyone.`,
     },
     {
       scene: "learned",
-      text: t`Then I read every conversation, and on ${findings} you get what I learned, theme by theme.`,
+      text: t`I’ll pull everything together, and on ${findings} we’ll walk through the report: where work gets stuck and which processes make the most sense to tackle first.`,
     },
     {
-      scene: "finding",
-      text: t`Like this: most people lose the first hours of their day to email.`,
+      scene: "rest",
+      text: t`Most of the time, it’s the small things that pile up—and end up making the biggest difference.`,
     },
-    { scene: "rest", text: t`Small things like that add up. Let’s find them.` },
   ];
 };
 
