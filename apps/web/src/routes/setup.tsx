@@ -31,8 +31,8 @@ import { loadCoreStatus } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { PageError } from "../frame/page-states.tsx";
 import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
-import { CalmFrame } from "../onboarding/calm-frame.tsx";
-import type { Ways } from "../onboarding/calm-frame.tsx";
+import { CalmFrame, isNewPlace } from "../onboarding/calm-frame.tsx";
+import type { ContinuePlace, Ways } from "../onboarding/calm-frame.tsx";
 import { CampaignFrame } from "../onboarding/campaign/campaign-page.tsx";
 import { isCampaignState } from "../onboarding/campaign/fixtures.ts";
 import type { CampaignState } from "../onboarding/campaign/fixtures.ts";
@@ -190,7 +190,11 @@ const Setup = () => {
   const navigate = useNavigate();
   const { identity, signIn, suites } = Route.useRouteContext();
   const loaded = Route.useLoaderData();
-  const { step: asked, state: campaignState } = Route.useSearch();
+  const {
+    step: asked,
+    state: campaignState,
+    continue: place,
+  } = Route.useSearch();
   const data = loaded.state === "ready" ? loaded.data : null;
   // The screens this company's flow has, in its order; all of them where core can't say.
   // The same list while the flow is the same, so what goes by it runs once per change.
@@ -226,7 +230,11 @@ const Setup = () => {
   // Every screen settles into the next in one quiet fade; over once the screen is there.
   const turnTo = async (next: SetupStep): Promise<void> => {
     await smoothly(async () => {
-      await navigate({ to: "/setup", search: { step: next } });
+      // In development, the place tried for Continue goes along from step to step.
+      await navigate({
+        to: "/setup",
+        search: { step: next, ...(place !== undefined && { continue: place }) },
+      });
     });
   };
   const go = (next: SetupStep) => {
@@ -358,9 +366,13 @@ export const Route = createFileRoute("/setup")({
     step?: SetupStep;
     connection?: string;
     state?: CampaignState;
+    /** In development only: where a step's Continue stands (calm-frame.tsx). */
+    continue?: ContinuePlace;
   } => ({
     ...(isStep(search.step) && { step: search.step }),
     ...(isCampaignState(search.state) && { state: search.state }),
+    ...(import.meta.env.DEV &&
+      isNewPlace(search.continue) && { continue: search.continue }),
     ...(typeof search.connection === "string" && {
       connection: search.connection,
     }),

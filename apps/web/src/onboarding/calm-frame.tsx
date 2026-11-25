@@ -347,7 +347,8 @@ const Leave = () => {
  */
 export type ContinuePlace = "centre" | "bar" | "corner" | "inline";
 
-const isNewPlace = (written: string | null): written is ContinuePlace =>
+/** Whether a search names one of the new places, as `/setup` keeps it from step to step. */
+export const isNewPlace = (written: unknown): written is ContinuePlace =>
   written === "bar" || written === "corner" || written === "inline";
 
 const useContinuePlace = (): ContinuePlace => {
