@@ -41,7 +41,8 @@ export const aiKeySavedAtSchema = z.number().int().nonnegative();
 /**
  * Every provider: an organization's, and ElevenLabs, which only Grasp's
  * own speech feature reaches, on Grasp's key (core's src/platform-ai.ts):
- * the admin's onboarding is said with it, an interview with Mistral.
+ * the admin's onboarding is said with it, an interview with Mistral,
+ * which holds the onboarding interview too, on Grasp's key.
  */
 export const aiProviderIds = [
   ...organizationProviderIds,
@@ -167,8 +168,9 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     id: "mistral",
     label: "Mistral AI",
     baseUrls: { "openai-completions": "https://api.mistral.ai/v1" },
-    // Its chat completions, and the speech Grasp's own lines are said
-    // with (Voxtral), on Grasp's key alone.
+    // Its chat completions, which the onboarding interview also runs on
+    // with Grasp's key, and the speech Grasp's own lines are said with
+    // (Voxtral), on Grasp's key alone.
     paths: ["/v1/chat/completions", "/v1/audio/speech"],
     queries: [""],
     realtime: [],
@@ -498,7 +500,11 @@ export interface AiProviderListed extends AiProviderKey {
 }
 
 /** Grasp's own AI features, which Grasp pays for, on its own keys. */
-export const aiPlatformFeatures = ["transcription", "speech"] as const;
+export const aiPlatformFeatures = [
+  "transcription",
+  "speech",
+  "interview",
+] as const;
 export type AiPlatformFeature = (typeof aiPlatformFeatures)[number];
 
 /**

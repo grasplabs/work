@@ -57,6 +57,7 @@ import {
 } from "./speech.ts";
 import type { Saying, Voicing } from "./speech.ts";
 import {
+  echoes,
   hiccup,
   pauseFor,
   quietFloor,
@@ -88,8 +89,11 @@ import type { LoopWords } from "./words.ts";
 // that happens here, also what his ears hear (ear.ts), and says what to
 // do: he answers when they are done, waits when they aren't, and drops his
 // answer when they talk on. One ear is opened for the conversation, for
-// whoever chose to talk, and it is deaf whenever the floor says so: while
-// he speaks, and through the read-back until he asks whether it is right.
+// whoever chose to talk, and it is deaf whenever the floor says so:
+// through the read-back until he asks whether it is right. It hears while
+// he speaks, so they can talk over him: he stops at once and hears them
+// out; when it was nothing, or his own voice in the microphone, he says
+// his line again.
 //
 // When core can't be reached, a turn is asked for again by itself, twice.
 // Only when that doesn't help does anyone notice: Stephen says so himself,
@@ -229,6 +233,10 @@ let troubled = 0;
 let owed: (() => void) | null = null;
 let again = 0;
 let unmeasure: (() => void) | null = null;
+/** The line he says or said last, and what follows it: said again when what cut him off was nothing. */
+let lastSaid: { how: VoiceTag | null; after: () => void } | null = null;
+/** His line was begun with its first sentence, and the rest of it is still owed. */
+let restOwed = false;
 
 /** Tells whoever follows the conversation what happens in it. */
 const announce = (event: LoopEvent): void => {
@@ -362,7 +370,10 @@ const speak = (
   speaking += 1;
   const mine = speaking;
   rest();
-  // oxlint-disable-next-line no-use-before-define -- the floor closes the ear while he speaks
+  lastSaid = { how, after };
+  // Only a line begun with its first sentence has more to come.
+  restOwed = open;
+  // oxlint-disable-next-line no-use-before-define -- the floor decides whether he listens while he speaks
   happen({ type: "speak", at: performance.now(), answers });
   tone = how;
   asked = line.trim().endsWith("?");
@@ -848,10 +859,19 @@ const rounded = (known: Turn, line: EarlyLine): void => {
     return;
   }
   known.opening = null;
-  if (on && known.order === turns) {
+  const latest = on && known.order === turns;
+  restOwed = false;
+  if (latest) {
     hisLine(line);
   }
+  // Cut off in its first sentence, nothing of it is being said any more:
+  // the whole line still stands, so it is all of it he says again when
+  // what cut him off was nothing.
+  const hushed = underway === null;
   grow(line.say);
+  if (latest && hushed && state.doing !== "speaking") {
+    set({ line: line.say });
+  }
 };
 
 /** What one turn knows while it runs. */
@@ -1264,8 +1284,14 @@ const heardBy =
         break;
       }
       case "final": {
+        // What cut him off may be his own voice, where the microphone hears the speaker: never theirs to answer.
+        const own = floor.cut && echoes(event.text, state.line);
         // oxlint-disable-next-line no-use-before-define -- as above
-        happen({ type: "final", at, stretch, text: event.text });
+        happen(
+          own
+            ? { type: "echo", at, stretch }
+            : { type: "final", at, stretch, text: event.text }
+        );
         break;
       }
       case "unheard": {
@@ -1315,6 +1341,7 @@ const hearken = async (): Promise<void> => {
     locale: words.locale,
     link,
     pause: () => pauseFor(swift, pauseMs),
+    wary: () => floor.doing === "speaking",
   });
   earOpening = false;
   if (opened === null) {
@@ -1387,6 +1414,17 @@ const perform = (act: Act): void => {
       rest();
       return;
     }
+    case "resume": {
+      if (lastSaid !== null && state.line !== "") {
+        // Cut off in his first sentence with the rest still being written:
+        // he says it again as a line that goes on, so the rest follows.
+        speak(state.line, lastSaid.how, {
+          after: lastSaid.after,
+          open: restOwed,
+        });
+      }
+      return;
+    }
     case "after": {
       waitFor(act.wait, act.ms);
       return;
@@ -1423,7 +1461,15 @@ const follow = (happening: Happening): void => {
     }
     return;
   }
-  if (happening.type === "stretch-start" && state.doing === "thinking") {
+  // They talk on while he thinks, or over him while he speaks: he listens.
+  const interrupted =
+    happening.type === "stretch-start" &&
+    state.doing === "speaking" &&
+    floor.doing === "listening";
+  if (
+    (happening.type === "stretch-start" && state.doing === "thinking") ||
+    interrupted
+  ) {
     show("listening");
   }
   if (happening.type === "final") {
@@ -1435,6 +1481,7 @@ const follow = (happening: Happening): void => {
     happening.type === "stretch-end" ||
     happening.type === "final" ||
     happening.type === "unheard" ||
+    happening.type === "echo" ||
     happening.type === "typed";
   if (heard) {
     bubble();

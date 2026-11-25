@@ -31,9 +31,10 @@ import { modelErrors } from "@grasp-os/shared/models";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
 
 import { errorResponse } from "../errors.ts";
-import { modelSettings, modelForRole, models } from "../models.ts";
+import { models } from "../models.ts";
 import type { ModelCall } from "../models.ts";
 import { readOrganization } from "../organization.ts";
+import { platformAi } from "../platform-ai.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { interviewCaller } from "./interview-caller.ts";
 import { interviewerText } from "./interviewer-text.ts";
@@ -45,10 +46,12 @@ import type { Took, TurnContext } from "./store.ts";
 // One turn of someone's interview, `POST /api/interview/turn`, on their own
 // link: Stephen's next line as soon as it is written, and what he writes
 // down from what was just said. Two models through the model gateway, side
-// by side: the deployment's quick one says his line, in plain named lines,
-// because whoever he talks to is waiting for it; its careful one writes
-// down what was said, as checked JSON, once his line is out, because
-// nobody waits for that and it is what the interview is for. Ported from
+// by side, both Mistral's on Grasp's own key (src/platform-ai.ts), as his
+// voice is, whatever provider the organization connected: a quick one says
+// his line, in plain named lines, because whoever he talks to is waiting
+// for it; a careful one writes down what was said, as checked JSON, once
+// his line is out, because nobody waits for that and it is what the
+// interview is for. Ported from
 // the prototype (grasplabs/prototype, packages/grasp: worker/interview.ts).
 //
 // What it must not do, from the threat model (GRA-307), and what stops it:
@@ -195,11 +198,22 @@ const lostThread = () =>
 /** The gateway's own refusals, as the stream ends with them (models.ts). */
 const gatewayRefusal = /^The model call was refused \((?<code>[a-z_.]+)\)/u;
 
-/** What a gateway refusal tells the page: busy is worth a retry, the rest isn't. */
-const refusalOf = (code: string | undefined): TurnFailedError =>
-  code === "model.rate_limited"
-    ? new TurnFailedError("Stephen is busy. Try again in a minute.", 429)
+/** Grasp has no key for the interview's provider here, or it has no host. */
+const notSetUp = new Set(["model.not_allowed", "model.unconfigured"]);
+
+/**
+ * What a gateway refusal tells the page: busy is worth a retry; an
+ * interview that isn't set up (Grasp's key is missing) is not, and the
+ * rest may be.
+ */
+const refusalOf = (code: string | undefined): TurnFailedError => {
+  if (code === "model.rate_limited") {
+    return new TurnFailedError("Stephen is busy. Try again in a minute.", 429);
+  }
+  return notSetUp.has(code ?? "")
+    ? new TurnFailedError("The interview is not set up yet.", 503)
     : new TurnFailedError("Stephen could not be reached. Try again.", 502);
+};
 
 /** The text a finished answer holds; it throws when there is none to use. */
 const textOfAnswer = (answer: AssistantMessage): string => {
@@ -268,7 +282,7 @@ const speak = async (
   onText: (written: string) => void
 ): Promise<string> => {
   const { env, system, brief, signal, count } = held;
-  const agent = await models(env).agent({
+  const agent = await models(env).interview.agent({
     ...session(model),
     maxTokens: lineTokens,
   });
@@ -312,7 +326,7 @@ const write = async (
     signal,
   };
   try {
-    const { output, usage } = await models(env).call(call);
+    const { output, usage } = await models(env).interview.call(call);
     count({
       purpose: "interviews",
       model,
@@ -452,22 +466,7 @@ export const turnStream = async ({
   meter,
   ran,
 }: TurnInput): Promise<Response> => {
-  const settings = await modelSettings(env);
-  // No provider connected yet: the interview isn't set up, as the person
-  // with the link is told; the log says why (`model.no_provider`).
-  const connected = settings.models.length > 0;
-  const quick = connected ? modelForRole(settings, "quick") : undefined;
-  const careful = connected ? modelForRole(settings, "careful") : undefined;
-  if (quick === undefined || careful === undefined) {
-    log.error("interview.no_model", {
-      requestId,
-      ...(connected ? {} : { code: "model.no_provider" }),
-    });
-    return Response.json(
-      { error: "The interview is not set up yet.", status: 503 },
-      { status: 503, headers: linkHeaders }
-    );
-  }
+  const { line: quick, notes: careful } = platformAi.interview;
   const [{ text: system, mark }, name] = await Promise.all([
     interviewerText(turn.interviewer, context.kind, turn.locale),
     company,

@@ -5,7 +5,7 @@ import { speechPath } from "@grasp-os/shared/voice";
 import type { SpeechRequestBody } from "@grasp-os/shared/voice";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { voiceBudgets } from "../src/onboarding/speech.ts";
@@ -13,6 +13,7 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { platformAi } from "../src/platform-ai.ts";
 import { storedKeyOf } from "../src/speech-cache.ts";
 import { secondsPerCharacter } from "./ai-providers-fake.ts";
+import { platformMistralKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import {
   onLink,
@@ -20,7 +21,7 @@ import {
   participate,
   signedInAs,
 } from "./interview-link.ts";
-import { carrying } from "./platform-providers.ts";
+import { carrying, plan } from "./platform-providers.ts";
 import { routed, signedInWithRole, unique, uniqueLetters } from "./sign-in.ts";
 
 // The onboarding's lines said out loud (src/onboarding/speech.ts), over
@@ -60,6 +61,27 @@ const askedSchema = z.object({
   model: z.string(),
   voice_id: z.string(),
 });
+
+/** An event of a line answered as it is made. */
+const streamEventSchema = z.union([
+  z.object({ audio: z.string() }),
+  z.object({ words: answerSchema.shape.words }),
+  z.object({ failed: z.literal(true) }),
+]);
+
+/** Every event of a line answered as it is made, a line of JSON each. */
+const eventsOf = (body: string) =>
+  body
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => streamEventSchema.parse(JSON.parse(line)));
+
+/** The audio of a line's events, each piece as its bytes. */
+const audioOf = (events: ReturnType<typeof eventsOf>): string[] =>
+  events.flatMap((event) => ("audio" in event ? [atob(event.audio)] : []));
+
+/** The voice turning a line away for a moment. */
+const busy = { status: 429, headers: { "retry-after": "1" } };
 
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
@@ -183,6 +205,91 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     await expect(voiceCounted("interviews")).resolves.toBeCloseTo(
       before + text.length * secondsPerCharacter
     );
+  });
+
+  it("answers a line asked for streamed as it is made: its audio in pieces, then its words, and keeps it whole for the next to ask", async () => {
+    const { link } = await opened();
+    const text = newLine();
+    const before = await voiceCounted("interviews");
+
+    const streamed = await speak({ text, language: "en", link, stream: true });
+    const events = eventsOf(await streamed.text());
+    // Kept and counted once the answer is out: asked again only then.
+    await vi.waitFor(async () => {
+      await expect(voiceCounted("interviews")).resolves.toBeGreaterThan(before);
+    });
+    const asWhole = await speak({ text, language: "en", link });
+    const whole = answerSchema.parse(await asWhole.json());
+    const again = await speak({ text, language: "en", link, stream: true });
+    const kept = eventsOf(await again.text());
+
+    const said = Math.round(text.length * secondsPerCharacter * 1000);
+    expect({
+      status: streamed.status,
+      type: streamed.headers.get("content-type"),
+      // The provider's pieces, as they came: more than one.
+      inPieces: audioOf(events).length > 1,
+      audio: audioOf(events).join("") === atob(whole.audio),
+      last: events.at(-1),
+      keptAudio: audioOf(kept).join("") === atob(whole.audio),
+      keptLast: kept.at(-1),
+    }).toStrictEqual({
+      status: 200,
+      type: "application/x-ndjson",
+      inPieces: true,
+      audio: true,
+      last: { words: whole.words },
+      keptAudio: true,
+      keptLast: { words: whole.words },
+    });
+    expect(whole.words.at(-1)?.endMs).toBe(said);
+    // Said once, and counted once, however often and however it was asked.
+    await expect(carrying(text)).resolves.toHaveLength(1);
+    await expect(voiceCounted("interviews")).resolves.toBeCloseTo(
+      before + text.length * secondsPerCharacter
+    );
+  });
+
+  it("refuses a line asked for streamed at once when the voice is busy, as one asked for whole", async () => {
+    const { link } = await opened();
+    const text = newLine();
+    // Busy, and busy again when asked once more.
+    await plan(platformMistralKey, [busy, busy]);
+
+    const result = await codeOf(
+      await speak({ text, language: "en", link, stream: true })
+    );
+
+    expect(result).toStrictEqual([429, "speech.busy"]);
+  });
+
+  it("tells the page when a line breaks off halfway, and keeps nothing of it", async () => {
+    const { link } = await opened();
+    const text = newLine();
+    // A piece of the file, and then the stream ends without saying it is done.
+    await plan(platformMistralKey, [
+      {
+        sse: `data: ${JSON.stringify({ type: "speech.audio.delta", audio_data: btoa("RIFF") })}\n\n`,
+      },
+    ]);
+
+    const broken = await speak({ text, language: "en", link, stream: true });
+    const events = eventsOf(await broken.text());
+    // Asked again, it is said anew: nothing was kept.
+    const again = await speak({ text, language: "en", link });
+
+    expect({
+      status: broken.status,
+      audio: audioOf(events),
+      last: events.at(-1),
+      again: again.status,
+    }).toStrictEqual({
+      status: 200,
+      audio: ["RIFF"],
+      last: { failed: true },
+      again: 200,
+    });
+    await expect(carrying(text)).resolves.toHaveLength(2);
   });
 
   it.each([

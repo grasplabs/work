@@ -165,7 +165,7 @@ describe(
       }).toStrictEqual({
         status: 200,
         body: { sentences },
-        models: ["claude-sonnet-4-5"],
+        models: ["mistral-small-latest"],
         system: true,
         counted: 1,
       });
