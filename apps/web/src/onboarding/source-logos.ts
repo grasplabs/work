@@ -9,7 +9,7 @@ import type { DocumentSource } from "./setup.ts";
 // take Teams and Slack; microsoft-sharepoint, which that set lacks, from
 // theSVG (MIT). The trademarks stay with their owners; they are shown only
 // to name the place. Dropbox and Box from the same set. The HR platforms':
-// Personio and HiBob from theSVG (MIT); Nmbrs's mark from its own logo and
+// Personio, HiBob, Loket (its loket.nl badge) and Workday from theSVG (MIT); Nmbrs's mark from its own logo and
 // AFAS’s word traced from the logo artwork Ruben sent.
 
 const logos: Readonly<Record<string, string>> = {
@@ -37,7 +37,18 @@ export const hrLogos: Readonly<Record<HrPlatform, string>> = {
   AFAS: "/logos/afas.svg",
   HiBob: "/logos/hibob.svg",
   Nmbrs: "/logos/nmbrs.svg",
+  Loket: "/logos/loket.svg",
 };
+
+/** Logos of HR platforms a kickoff may name beyond those offered, by product name. */
+const namedHrLogos: Readonly<Record<string, string>> = {
+  ...hrLogos,
+  Workday: "/logos/workday.svg",
+};
+
+/** The logo of an HR platform by its name, or none Grasp has. */
+export const hrLogoOf = (name: string): string | null =>
+  Object.hasOwn(namedHrLogos, name) ? (namedHrLogos[name] ?? null) : null;
 
 /** The logo a place carries, by its address; none for a place Grasp has no logo for. */
 export const sourceLogo = (source: DocumentSource): string | null =>

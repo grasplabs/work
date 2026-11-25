@@ -4,7 +4,8 @@ import type { InterviewLocale } from "./onboarding.ts";
 
 // What the kickoff (core's onboarding/kickoff.ts) told about the company
 // that the admin's onboarding speaks of: which suites and places it works
-// in, so those are offered first or alone, and a few words about the
+// in, so those are offered first or alone, the HR platform it named, and a
+// few words about the
 // company in each language the onboarding speaks, so Stephen talks about
 // its work rather than anyone's. Nothing here but what the kickoff said;
 // where it said nothing, the onboarding speaks as it does for anyone.
@@ -40,6 +41,8 @@ export interface OnboardingContext {
   suites: OAuthProvider[];
   /** The places for documents the kickoff named; empty when it named none. */
   sources: DocumentSourceId[];
+  /** The HR platform the kickoff named, by its product name ("Personio"); null when it named none. */
+  hr: string | null;
   /** Stephen's words about the company, by language; a language missing has none. */
   words: Partial<Record<InterviewLocale, ContextWords>>;
 }
@@ -48,5 +51,6 @@ export interface OnboardingContext {
 export const noContext: OnboardingContext = {
   suites: [],
   sources: [],
+  hr: null,
   words: {},
 };

@@ -1,19 +1,28 @@
 import type { Roster } from "@grasp-os/shared/onboarding";
 import { hrPlatforms } from "@grasp-os/shared/onboarding-choices";
-import type { SetupChoices } from "@grasp-os/shared/onboarding-choices";
+import type {
+  HrPlatform,
+  SetupChoices,
+} from "@grasp-os/shared/onboarding-choices";
 import { Button } from "@grasp-os/ui/components/button";
 import { Card } from "@grasp-os/ui/components/card";
 import { Combobox } from "@grasp-os/ui/components/combobox";
 import {
   Item,
   ItemContent,
+  ItemDescription,
   ItemGrid,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import { Switch } from "@grasp-os/ui/components/switch";
 import { Text } from "@grasp-os/ui/components/text";
-import { ArrowRightIcon, Icon, PlusIcon } from "@grasp-os/ui/lib/icons";
+import {
+  ArrowRightIcon,
+  Icon,
+  PlusIcon,
+  UsersIcon,
+} from "@grasp-os/ui/lib/icons";
 import { colors, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -27,7 +36,7 @@ import { WaitingNote } from "./company-step.tsx";
 import { ConnectorSearch } from "./connector-search.tsx";
 import { ForgetTeams } from "./forget-teams.tsx";
 import { HrLeads } from "./hr-leads.tsx";
-import { hrLogos } from "./source-logos.ts";
+import { hrLogoOf } from "./source-logos.ts";
 import { Logo, useIntegrations, useSaveChoices } from "./sources-step.tsx";
 import { useRefresh } from "./step-parts.ts";
 import type { StepProps } from "./step-parts.ts";
@@ -71,9 +80,12 @@ const styles = stylex.create({
 /** The HR platform: one named, which Grasp sets up with them; another asked for by name; or none. */
 const HrPlatformChoice = ({
   choices,
+  named,
   onDone,
 }: {
   choices: SetupChoices;
+  /** The HR platform Grasp's kickoff call named, if any: offered first, marked as said there. */
+  named: string | null;
   onDone: () => void;
 }) => {
   const { t } = useLingui();
@@ -87,6 +99,17 @@ const HrPlatformChoice = ({
     }
   };
   const chosen = hr !== null && hr.kind !== "none";
+  // Six tiles with the + one: the platform the kickoff named first, then those offered, the last
+  // giving way when the one named is none of them.
+  const namedOffered = hrPlatforms.find((each) => each === named);
+  const tiles: { name: string; platform: HrPlatform | null }[] = [
+    ...(named === null
+      ? []
+      : [{ name: named, platform: namedOffered ?? null }]),
+    ...hrPlatforms
+      .filter((each) => each !== named)
+      .map((each) => ({ name: each, platform: each })),
+  ].slice(0, hrPlatforms.length);
   let body = t`It knows who leads which team, so I can talk to the leads first. We connect it with you.`;
   if (hr?.kind === "platform") {
     const { name } = hr;
@@ -141,20 +164,38 @@ const HrPlatformChoice = ({
       {chosen ? null : (
         <div {...stylex.props(styles.stack)}>
           <ItemGrid aria-label={t`HR platforms`} columns={3}>
-            {hrPlatforms.map((name) => (
-              <Item
-                key={name}
-                onClick={() => {
-                  void choose({ kind: "platform", name });
-                }}
-                variant="outline"
-              >
-                <Logo src={hrLogos[name]} />
-                <ItemContent>
-                  <ItemTitle>{name}</ItemTitle>
-                </ItemContent>
-              </Item>
-            ))}
+            {tiles.map(({ name, platform }) => {
+              const logo = hrLogoOf(name);
+              const said = name === named;
+              return (
+                <Item
+                  done={said}
+                  key={name}
+                  onClick={() => {
+                    void choose(
+                      platform === null
+                        ? { kind: "asked", name }
+                        : { kind: "platform", name: platform }
+                    );
+                  }}
+                  variant="outline"
+                >
+                  {logo === null ? (
+                    <ItemMedia variant="icon">
+                      <Icon icon={UsersIcon} />
+                    </ItemMedia>
+                  ) : (
+                    <Logo src={logo} />
+                  )}
+                  <ItemContent>
+                    <ItemTitle>{name}</ItemTitle>
+                    {said ? (
+                      <ItemDescription>{t`From our call`}</ItemDescription>
+                    ) : null}
+                  </ItemContent>
+                </Item>
+              );
+            })}
             <Item
               onClick={() => {
                 setSearching(true);
@@ -369,6 +410,7 @@ export const LeadsStep = (props: StepProps) => {
     return (
       <HrPlatformChoice
         choices={props.data.choices}
+        named={props.data.view.context.hr}
         onDone={() => {
           setHrSaid(true);
         }}

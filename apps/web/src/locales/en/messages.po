@@ -7775,6 +7775,10 @@ msgstr "From Google Drive. I read only the files you add."
 msgid "From how a team works, version {version}"
 msgstr "From how a team works, version {version}"
 
+#: src/onboarding/leads-step.tsx
+msgid "From our call"
+msgstr "From our call"
+
 #: src/onboarding/place-picker.tsx
 msgid "From SharePoint or OneDrive. I read only the files you add."
 msgstr "From SharePoint or OneDrive. I read only the files you add."

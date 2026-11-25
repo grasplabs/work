@@ -20,7 +20,13 @@ export const documentSourceIdSchema = z.enum(documentSourceIds);
 export type DocumentSourceId = z.infer<typeof documentSourceIdSchema>;
 
 /** The HR platforms the onboarding offers by name. */
-export const hrPlatforms = ["Personio", "AFAS", "HiBob", "Nmbrs"] as const;
+export const hrPlatforms = [
+  "Personio",
+  "AFAS",
+  "HiBob",
+  "Nmbrs",
+  "Loket",
+] as const;
 export const hrPlatformSchema = z.enum(hrPlatforms);
 export type HrPlatform = z.infer<typeof hrPlatformSchema>;
 
