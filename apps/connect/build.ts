@@ -30,24 +30,34 @@ export const connectorsFile = path.join(root, "dist/connectors.js");
 
 const packageSchema = z.object({
   exports: z.object({ ".": z.string() }),
+  dependencies: z.record(z.string(), z.string()).optional(),
 });
 
-/** Every connector package's entry module. */
-export const connectorEntries = (): string[] =>
+/** A connector package's folder and its package.json. */
+const connectorPackages = (): {
+  dir: string;
+  manifest: z.infer<typeof packageSchema>;
+}[] =>
   readdirSync(packages)
     .map((dir) => path.join(packages, dir))
     .filter((dir) => existsSync(path.join(dir, "package.json")))
-    .map((dir) => {
-      const manifest = packageSchema.parse(
+    .map((dir) => ({
+      dir,
+      manifest: packageSchema.parse(
         JSON.parse(readFileSync(path.join(dir, "package.json"), "utf-8"))
-      );
-      const entry = path.resolve(dir, manifest.exports["."]);
-      // A package builds only its own code, never a file outside its folder.
-      if (!entry.startsWith(`${dir}${path.sep}`)) {
-        throw new Error(`${dir}'s entry is outside its folder`);
-      }
-      return entry;
-    });
+      ),
+    }));
+
+/** Every connector package's entry module. */
+export const connectorEntries = (): string[] =>
+  connectorPackages().map(({ dir, manifest }) => {
+    const entry = path.resolve(dir, manifest.exports["."]);
+    // A package builds only its own code, never a file outside its folder.
+    if (!entry.startsWith(`${dir}${path.sep}`)) {
+      throw new Error(`${dir}'s entry is outside its folder`);
+    }
+    return entry;
+  });
 
 const moduleSchema = z.object({
   default: z.object({ manifest: z.unknown() }),
@@ -61,12 +71,15 @@ const sdkConnector = "@grasp-os/sdk/connector";
 /**
  * The code still written with the old kit, Zod and the runtime, which may
  * import what it does until it moves to `sdkConnector` (GRA-2323,
- * GRA-2324): the two packages, and the sample connectors of connect's
- * tests written with them.
+ * GRA-2324, GRA-2329): every connector package that depends on the kit,
+ * and the sample connectors of connect's tests written with it.
  */
 const oldKit = [
-  path.join(packages, "google-workspace"),
-  path.join(packages, "microsoft-365"),
+  ...connectorPackages()
+    .filter(({ manifest }) =>
+      Object.hasOwn(manifest.dependencies ?? {}, "@grasp-os/connector-kit")
+    )
+    .map(({ dir }) => dir),
   ...[
     "sample-connector.ts",
     "sample-sync-connector.ts",

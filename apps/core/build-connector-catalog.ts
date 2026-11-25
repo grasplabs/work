@@ -52,8 +52,11 @@ const moduleSchema = z.object({
   default: z.object({ manifest: z.unknown() }),
 });
 
-/** Every generated contract of the connectors at `entries`, by its actions. */
-const catalogOf = async (
+/**
+ * Every generated contract of the connectors at `entries`, by its actions:
+ * the release's here, and core's tests' (test/global-setup.ts).
+ */
+export const catalogOf = async (
   entries: readonly string[]
 ): Promise<Map<string, Map<string, CatalogAction>>> => {
   const catalog = new Map<string, Map<string, CatalogAction>>();
