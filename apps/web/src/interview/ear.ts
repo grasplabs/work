@@ -35,6 +35,11 @@ export interface EarOptions {
   link: { secret: string };
   /** How long a silence ends a stretch, in ms, asked every moment: it can change while they talk. `pauseMs` without it. */
   pause?: () => number;
+  /**
+   * Whether Stephen speaks right now, asked every moment: then only a
+   * voice that stays is a stretch (`steadyLeastMs`), as it stops him.
+   */
+  wary?: () => boolean;
 }
 
 /** What an ear hears, in the order it hears it: for each stretch `stretch-start`, `partial`s, `stretch-end`, then `final` or `unheard`. */
@@ -80,6 +85,13 @@ const longestMs = 30_000;
 const silenceMs = 12_000;
 /** How long there must be a voice before it is a stretch, in ms: less is a click or a cough. */
 const voicedLeastMs = 200;
+/**
+ * How long a voice must stay, more than it falls silent, before it is a
+ * stretch while Stephen speaks, in ms: a click, a cough or what is left of
+ * his own voice in the microphone doesn't stop him, someone who talks
+ * over him does, within half a second.
+ */
+const steadyLeastMs = 450;
 /** The shortest a stretch is from its first voice to its end, in ms. */
 const stretchLeastMs = 400;
 /** How much sound is kept while nobody speaks, in seconds: once someone is known to speak, the start of it is in there. */
@@ -148,6 +160,26 @@ const fresh = (number: number): Stretch => ({
   before: performance.now(),
   ended: 0,
 });
+
+/**
+ * One more look at the microphone, noted in the stretch: whether there
+ * has been a voice in it for long enough by now to be someone speaking.
+ * While Stephen speaks (`wary`), a voice has to stay: its silences count
+ * against it, and it takes longer (`steadyLeastMs`).
+ */
+const looked = (
+  at: Stretch,
+  { speaks, wary, now }: { speaks: boolean; wary: boolean; now: number }
+): boolean => {
+  if (speaks) {
+    at.voiced += Math.min(now - at.before, 100);
+    at.lastLoud = now;
+  } else if (wary) {
+    at.voiced = Math.max(0, at.voiced - (now - at.before));
+  }
+  at.before = now;
+  return at.spokeAt !== 0 && at.voiced > (wary ? steadyLeastMs : voicedLeastMs);
+};
 
 /**
  * Listens until closed: the microphone is asked for first. Nothing when it
@@ -292,6 +324,8 @@ export const openEar = async (options: EarOptions): Promise<Ear | null> => {
     });
   };
 
+  const wary = (): boolean => options.wary?.() === true;
+
   /** One look at the microphone. */
   const tick = (speaks: boolean): void => {
     if (closed || deaf) {
@@ -308,12 +342,8 @@ export const openEar = async (options: EarOptions): Promise<Ear | null> => {
     if (at.loud >= 3 && at.spokeAt === 0) {
       at.spokeAt = now;
     }
-    if (speaks) {
-      at.voiced += Math.min(now - at.before, 100);
-      at.lastLoud = now;
-    }
-    at.before = now;
-    if (at.spokeAt !== 0 && at.voiced > voicedLeastMs && !at.talking) {
+    const steady = looked(at, { speaks, wary: !at.talking && wary(), now });
+    if (steady && !at.talking) {
       begin(now);
     }
     const pause = options.pause?.() ?? pauseMs;

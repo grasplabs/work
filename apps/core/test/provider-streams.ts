@@ -374,7 +374,11 @@ const chatCompletionEvents = (
         {
           index: 0,
           delta: {},
-          finish_reason: stopOf(answer, ["stop", "length", "tool_calls"]),
+          // A refusal, as chat completions end one: its content filtered.
+          finish_reason:
+            answer.refused === true
+              ? "content_filter"
+              : stopOf(answer, ["stop", "length", "tool_calls"]),
         },
       ],
     }),

@@ -211,13 +211,17 @@ const platformProvider = (
  * switch them off here, but they see where that data goes.
  */
 const platformUses = (env: Env): AiPlatformUse[] => {
-  const { transcription, speech } = platformAi;
+  const { transcription, speech, interview } = platformAi;
   return [
     {
       feature: "transcription",
       provider: platformProvider(env, transcription.provider),
     },
     { feature: "speech", provider: platformProvider(env, speech.provider) },
+    {
+      feature: "interview",
+      provider: platformProvider(env, interview.provider),
+    },
   ];
 };
 

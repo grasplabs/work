@@ -12,9 +12,13 @@
 // listening while he thinks: when they talk on, the answer on its way is
 // dropped and he waits for the rest. When the model says they stopped in
 // the middle of a sentence, he waits for the rest, and after a silence
-// (`nudgeMs`) he answers with what there is. From the line in which he
-// says he will read back until he asks whether it is right, he doesn't
-// listen.
+// (`nudgeMs`) he answers with what there is. He listens while he speaks
+// too, as in any conversation: when they talk over him he stops at once
+// and hears them out (`interrupted`). A sound that turns out to be no
+// words has him say his line again; his own voice taken for theirs (the
+// microphone heard the speaker) has him say it again and not listen while
+// he speaks from then on. From the line in which he says he will read
+// back until he asks whether it is right, he doesn't listen.
 
 /** What Stephen is doing. */
 export type Doing = "idle" | "speaking" | "listening" | "thinking";
@@ -34,8 +38,12 @@ export interface Floor {
   doing: Doing;
   /** They chose to talk: he listens through the ear, not only the box. */
   voice: boolean;
-  /** The ear is open. Never while he speaks. */
+  /** The ear is open: while he listens and thinks, and while he speaks a line they can talk over. */
   hearing: boolean;
+  /** They can talk over him. Not once his own voice was taken for theirs. */
+  interrupts: boolean;
+  /** They talked over him, and what they said isn't written down yet. */
+  cut: boolean;
   /** From his line that leads to the read-back until he asks whether it is right: he doesn't listen. */
   reading: boolean;
   /** They are talking right now. */
@@ -78,6 +86,8 @@ export type Happening =
   | { type: "stretch-end"; at: number; stretch: number }
   | { type: "final"; at: number; stretch: number; text: string }
   | { type: "unheard"; at: number; stretch: number }
+  /** What cut him off was his own voice, heard by the microphone. */
+  | { type: "echo"; at: number; stretch: number }
   /** They sent what they typed. */
   | { type: "typed"; at: number; text: string }
   /** A wait is over. */
@@ -100,8 +110,10 @@ export type Act =
   | { type: "ask"; turn: number; text: string; typed: boolean; nudge: boolean }
   /** The turn on its way counts for nothing any more: they talked on. */
   | { type: "drop"; turn: number }
-  /** Stop saying his line: they typed over him. */
+  /** Stop saying his line: they typed or talked over him. */
   | { type: "hush" }
+  /** Say the line he was cut off in again: nothing was said after all. */
+  | { type: "resume" }
   /** Set a wait, in place of one of the same name; or clear it. */
   | { type: "after"; wait: Wait; ms: number }
   | { type: "clear"; wait: Wait }
@@ -142,6 +154,8 @@ export const quietFloor: Floor = {
   doing: "idle",
   voice: false,
   hearing: false,
+  interrupts: true,
+  cut: false,
   reading: false,
   talking: false,
   live: "",
@@ -266,7 +280,7 @@ const commit = (floor: Floor, nudge: boolean): Step => {
   const turn = floor.turns + 1;
   const typed = floor.parts.every((part) => part.typed);
   const ask: Act = { type: "ask", turn, text, typed, nudge };
-  const asked = { ...floor, turns: turn, asking: turn };
+  const asked = { ...floor, turns: turn, asking: turn, cut: false };
   // Spoken, he looks as if he listens a moment longer: they may only be taking a breath.
   if (!typed && floor.doing === "listening" && floor.hearing) {
     return {
@@ -307,9 +321,16 @@ const settle = (floor: Floor, at: number): Step => {
  */
 const listening = (floor: Floor): Step => {
   const hears = floor.voice && !floor.reading;
+  // The ear was open while he spoke: it starts afresh as he stops, so what
+  // it gathered of his own voice in the microphone never begins a stretch
+  // that would be taken for theirs.
+  const afresh = floor.hearing && floor.doing === "speaking";
+  const opens: Act[] = afresh
+    ? [{ type: "deaf" }, { type: "hear" }]
+    : [{ type: "hear" }];
   return {
     floor: { ...floor, doing: "listening", hearing: hears },
-    acts: hears && !floor.hearing ? [{ type: "hear" }] : [],
+    acts: hears && (afresh || !floor.hearing) ? opens : [],
   };
 };
 
@@ -354,6 +375,25 @@ const talks = (floor: Floor, at: number): Step => {
   };
 };
 
+/** They talk over him: he stops at once, and hears them out. */
+const interrupted = (floor: Floor, at: number): Step => {
+  const talking = talks(floor, at);
+  return {
+    floor: { ...talking.floor, doing: "listening", cut: true },
+    acts: [...talking.acts, { type: "hush" }],
+  };
+};
+
+/**
+ * A stretch came to nothing. When it cut him off, he says his line again;
+ * when they said something before it that he still has to answer, that is
+ * answered as if the stretch had not been.
+ */
+const resumed = (floor: Floor, at: number): Step =>
+  floor.cut && floor.parts.length === 0 && !floor.talking
+    ? { floor: { ...floor, cut: false }, acts: [{ type: "resume" }] }
+    : settle(floor, at);
+
 /** A stretch ended: it joins what he has to answer, its words to follow. */
 const quieted = (floor: Floor, at: number, stretch: number): Step => ({
   floor: {
@@ -386,7 +426,28 @@ const wordsIn = (
     }
     return words === "" ? [] : [{ ...part, words, waiting: false }];
   });
-  return settle({ ...floor, parts }, at);
+  // A sound and no words (a cough, a door) that cut him off: he goes on.
+  return words === ""
+    ? resumed({ ...floor, parts }, at)
+    : settle({ ...floor, parts }, at);
+};
+
+/**
+ * His own voice cut him off: it isn't theirs to answer, he says his line
+ * again, and from now on he doesn't listen while he speaks.
+ */
+const echoed = (floor: Floor, at: number, stretch: number): Step => {
+  if (!floor.parts.some((part) => part.stretch === stretch)) {
+    return { floor, acts: [] };
+  }
+  return resumed(
+    {
+      ...floor,
+      interrupts: false,
+      parts: floor.parts.filter((part) => part.stretch !== stretch),
+    },
+    at
+  );
 };
 
 /** A stretch couldn't be written down at all: he says so; what he did hear stays. */
@@ -397,6 +458,7 @@ const lost = (floor: Floor, stretch: number): Step => {
   return {
     floor: {
       ...floor,
+      cut: false,
       parts: floor.parts.filter((part) => part.stretch !== stretch),
     },
     acts: [{ type: "unheard" }],
@@ -447,7 +509,12 @@ const waitOver = (floor: Floor, at: number, wait: Wait): Step => {
   };
 };
 
-/** He begins a line: the ear closes; what he answers is his now. */
+/**
+ * He begins a line: what is being said counts for nothing, and what he
+ * answers is his now. He listens afresh while he says it, so they can
+ * talk over him, unless it leads to the read-back or his own voice was
+ * taken for theirs before.
+ */
 const speaks = (
   floor: Floor,
   {
@@ -456,15 +523,23 @@ const speaks = (
   }: { answers?: boolean; readsBack?: boolean }
 ): Step => {
   const deaf = deafened(floor);
+  const reading = floor.reading || readsBack;
+  const open = floor.voice && floor.interrupts && !reading;
   return {
     floor: {
       ...deaf.floor,
       doing: "speaking",
-      reading: floor.reading || readsBack,
+      reading,
+      hearing: open,
+      cut: false,
       asking: answers ? null : floor.asking,
       parts: answers ? [] : deaf.floor.parts,
     },
-    acts: [...unwaited, ...deaf.acts],
+    acts: [
+      ...unwaited,
+      ...deaf.acts,
+      ...(open ? [{ type: "hear" } as const] : []),
+    ],
   };
 };
 
@@ -498,13 +573,26 @@ const voiced = (floor: Floor, on: boolean): Step => {
 /** What the ear says. */
 type Heard = Extract<
   Happening,
-  { type: "stretch-start" | "partial" | "stretch-end" | "final" | "unheard" }
+  {
+    type:
+      | "stretch-start"
+      | "partial"
+      | "stretch-end"
+      | "final"
+      | "unheard"
+      | "echo";
+  }
 >;
 
 const fromEar = (floor: Floor, happening: Heard): Step => {
   switch (happening.type) {
     case "stretch-start": {
-      return floor.hearing ? talks(floor, happening.at) : { floor, acts: [] };
+      if (!floor.hearing) {
+        return { floor, acts: [] };
+      }
+      return floor.doing === "speaking"
+        ? interrupted(floor, happening.at)
+        : talks(floor, happening.at);
     }
     case "partial": {
       return floor.hearing
@@ -521,6 +609,9 @@ const fromEar = (floor: Floor, happening: Heard): Step => {
     }
     case "unheard": {
       return lost(floor, happening.stretch);
+    }
+    case "echo": {
+      return echoed(floor, happening.at, happening.stretch);
     }
     default: {
       return happening satisfies never;
@@ -595,7 +686,12 @@ export const step = (floor: Floor, happening: Happening): Step => {
     case "stop": {
       const deaf = deafened(floor);
       return {
-        floor: { ...quietFloor, turns: floor.turns, voice: floor.voice },
+        floor: {
+          ...quietFloor,
+          turns: floor.turns,
+          voice: floor.voice,
+          interrupts: floor.interrupts,
+        },
         acts: [...unwaited, ...deaf.acts],
       };
     }
@@ -608,7 +704,8 @@ export const step = (floor: Floor, happening: Happening): Step => {
     case "partial":
     case "stretch-end":
     case "final":
-    case "unheard": {
+    case "unheard":
+    case "echo": {
       return fromEar(floor, happening);
     }
     default: {
@@ -662,4 +759,30 @@ export const troubleOf = ({
     return { say: status === 0 || !online ? "offline" : "trouble", again };
   }
   return { say: tried === laterWaits.length ? "stillTrouble" : null, again };
+};
+
+const wordsOnly = /[^\p{L}\p{N}\s]/gu;
+
+/** Words as they are compared: small letters, no punctuation, one space. */
+const plainWords = (text: string): string[] =>
+  text
+    .toLowerCase()
+    .replaceAll(wordsOnly, " ")
+    .split(space)
+    .filter((word) => word !== "");
+
+/**
+ * Whether what was heard over his line is that line itself: its words
+ * stand in it in the same order, one after the other. Where the
+ * microphone hears the speaker, his own voice comes back as theirs, and
+ * it must never be answered. He is cut off within a word or two of it, so
+ * one word is enough: a "yes" of theirs that is also a word of his line
+ * is taken for his, and he says his line again.
+ */
+export const echoes = (heard: string, line: string): boolean => {
+  const words = plainWords(heard);
+  return (
+    words.length > 0 &&
+    ` ${plainWords(line).join(" ")} `.includes(` ${words.join(" ")} `)
+  );
 };

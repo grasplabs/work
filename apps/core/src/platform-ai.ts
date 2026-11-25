@@ -43,7 +43,12 @@ const onboardingVoices = {
  * Each feature's provider and model: OpenAI's GPT-4o Transcribe writes
  * down speech, live and recorded; Mistral's Voxtral TTS 3 says an
  * interview's lines (`speech`), and ElevenLabs's Eleven v4 the admin's
- * onboarding (`onboardingSpeech`), each with its own voices.
+ * onboarding (`onboardingSpeech`), each with its own voices; and Mistral
+ * holds the interview itself. Its `line` model writes what the
+ * interviewer says while someone waits for it: Mistral Small, the model
+ * Mistral's own voice agents answer with, for how soon its first words
+ * come. Its `notes` model writes down what was said, which nobody waits
+ * for and the interview is for: Mistral Medium.
  */
 export const platformAi = {
   transcription: { provider: "openai", model: "gpt-4o-transcribe" },
@@ -57,4 +62,13 @@ export const platformAi = {
     model: "eleven_v4",
     voices: onboardingVoices,
   },
+  interview: {
+    provider: "mistral",
+    line: "mistral/mistral-small-latest",
+    notes: "mistral/mistral-medium-latest",
+  },
 } as const;
+
+/** Whether `model` is one the interview runs on, as the gateway names it. */
+export const isInterviewModel = (model: string): boolean =>
+  model === platformAi.interview.line || model === platformAi.interview.notes;

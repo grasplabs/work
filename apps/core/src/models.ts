@@ -92,7 +92,9 @@ import type {
 } from "./model-transport.ts";
 import { recordResponse } from "./model-usage.ts";
 import type { ProviderNote, UsageRecord } from "./model-usage.ts";
+import { isInterviewModel, platformAi } from "./platform-ai.ts";
 import { usualHostsOf } from "./platform-hosts.ts";
+import { jsonOf } from "./request-body.ts";
 import {
   charactersOf,
   hearingCostOf,
@@ -1562,12 +1564,17 @@ const parseCall = <Schema extends z.ZodType>(
  *   admins chose, of an AI provider it connected, with its key.
  * - `test`: an admin's test of a provider the organization connected
  *   (ai-providers.ts): any of that provider's models, with its key.
+ * - `interview`: a turn of an onboarding interview (onboarding/
+ *   interview.ts), Grasp's own feature: one of the models fixed for it in
+ *   src/platform-ai.ts, with Grasp's key, whatever the organization chose.
  */
 type Via =
   | { kind: "chosen" }
-  | { kind: "test"; provider: ConnectTarget["provider"] };
+  | { kind: "test"; provider: ConnectTarget["provider"] }
+  | { kind: "interview" };
 
 const chosenVia: Via = { kind: "chosen" };
+const interviewVia: Via = { kind: "interview" };
 
 /** Where an admitted call goes, and how. */
 interface Routing {
@@ -1586,7 +1593,8 @@ const connectRouting = async (
   call: Session,
   ref: ModelRef,
   target: ConnectTarget,
-  fallbacks: readonly string[]
+  fallbacks: readonly string[],
+  feature: PlatformAiFeature = "organization"
 ): Promise<Routing> => {
   const endpoint = connectRoute(env, target, ref);
   if (endpoint === undefined) {
@@ -1599,9 +1607,10 @@ const connectRouting = async (
       provider: target.provider,
       region: target.platform?.region ?? aiProviders[target.provider].region,
       credential: target.credential,
-      // A text call on Grasp's key is only ever the organization's own, on
-      // Grasp's AI (`graspRouting`), which it pays Grasp for.
-      ...(target.credential === "platform" ? { feature: "organization" } : {}),
+      // A text call on Grasp's key is the organization's own, on Grasp's
+      // AI (`graspRouting`), which it pays Grasp for, or a feature of
+      // Grasp's own (`interviewRouting`), which Grasp pays for.
+      ...(target.credential === "platform" ? { feature } : {}),
     },
     fallbacks,
   };
@@ -1672,6 +1681,60 @@ const graspRouting = async (
 };
 
 /**
+ * Where Grasp's own key for `provider` goes, as `routes` and the
+ * deployment's hosts have it, or the code it is refused with: Grasp has no
+ * key for it here, or it has no fixed host. The one decision a call and
+ * `canListen` share, so neither says what the other doesn't.
+ */
+const platformTargetOf = (
+  env: Env,
+  routes: AiProviderRoutes,
+  provider: ConnectTarget["provider"]
+):
+  | (ConnectTarget & { platform: PlatformRoute })
+  | "model.not_allowed"
+  | "model.unconfigured" => {
+  if (!routes.platform.includes(provider)) {
+    return "model.not_allowed";
+  }
+  const platform = platformRouteOf(provider, usualHostsOf(env));
+  if (platform === undefined) {
+    return "model.unconfigured";
+  }
+  return { credential: "platform", provider, baseUrl: null, platform };
+};
+
+/**
+ * Where a turn of an interview goes: to one of the models fixed for it
+ * (src/platform-ai.ts), on Grasp's key for their provider, and nothing
+ * else. Only core's own onboarding asks, never an App or a person's chat;
+ * a provider Grasp has no key for leaves it refused, never served by the
+ * organization's own.
+ */
+const interviewRouting = async (
+  env: Env,
+  call: Session,
+  routes: AiProviderRoutes,
+  ref: ModelRef | undefined
+): Promise<{ ref: ModelRef; routing: Routing }> => {
+  const onboarding = call.work !== undefined && "onboarding" in call.work;
+  if (ref === undefined || !onboarding || !isInterviewModel(call.model)) {
+    return await refuse(env, call, { code: "model.not_allowed" });
+  }
+  const target = platformTargetOf(env, routes, platformAi.interview.provider);
+  if (target === "model.not_allowed") {
+    return await refuse(env, call, { code: target, because: "platform" });
+  }
+  if (target === "model.unconfigured") {
+    throw modelErrors.create(target);
+  }
+  return {
+    ref,
+    routing: await connectRouting(env, call, ref, target, [], "interview"),
+  };
+};
+
+/**
  * Where `call` goes, as `via` lets it through (`Via`), or its refusal,
  * audited: a model of a provider with no key for it is never routed.
  */
@@ -1686,6 +1749,9 @@ const routingOf = async (
   const connected = routes.organization.find(
     (route) => route.provider === provider
   );
+  if (via.kind === "interview") {
+    return await interviewRouting(env, call, routes, ref);
+  }
   if (via.kind === "test") {
     if (
       ref === undefined ||
@@ -2307,7 +2373,8 @@ const relay = async (
   context: TranscriptContext,
   out: AssistantMessageEventStream,
   caller: AbortSignal | undefined,
-  cache: RequestCache
+  cache: RequestCache,
+  via: Via
 ): Promise<void> => {
   if (caller?.aborted === true) {
     // Cancelled before it was sent: nothing to record.
@@ -2320,7 +2387,7 @@ const relay = async (
   }
   let route: Route | undefined = undefined;
   try {
-    route = await admit(env, session);
+    route = await admit(env, session, via);
   } catch (error) {
     const code = modelErrors.codeOf(error) ?? permissionErrors.codeOf(error);
     if (code === undefined) {
@@ -2368,10 +2435,11 @@ const relayOrFail = async (
   context: TranscriptContext,
   out: AssistantMessageEventStream,
   caller: AbortSignal | undefined,
-  cache: RequestCache
+  cache: RequestCache,
+  via: Via
 ): Promise<void> => {
   try {
-    await relay(env, session, model, context, out, caller, cache);
+    await relay(env, session, model, context, out, caller, cache, via);
   } catch (error) {
     log.error("model.stream_failed", errorFields(error));
     // Ignored if the loop already has the request's last event.
@@ -2449,7 +2517,7 @@ const speechRetryMs = 500;
  */
 const speechFormat = { name: "wav", mime: "audio/wav" } as const;
 
-/** Where Mistral says a line: its speech endpoint, the whole file at once. */
+/** Where Mistral says a line: its speech endpoint, the whole file at once or in pieces as it is made. */
 const speechPath = "/v1/audio/speech";
 
 /** Mistral's answer: the audio. */
@@ -2488,7 +2556,8 @@ const elevenLabsSpokenSchema = z.object({
  */
 const speechRequestOf = (
   call: SpeechSession,
-  ref: VoiceRef
+  ref: VoiceRef,
+  streamed: boolean
 ): { path: string; body: string } => {
   if (ref.provider === "mistral") {
     return {
@@ -2498,6 +2567,7 @@ const speechRequestOf = (
         input: call.text,
         voice_id: call.voice,
         response_format: speechFormat.name,
+        ...(streamed ? { stream: true } : {}),
       }),
     };
   }
@@ -2621,30 +2691,6 @@ interface SpeechRoute {
 }
 
 /**
- * Where Grasp's own key for `provider` goes, as `routes` and the
- * deployment's hosts have it, or the code it is refused with: Grasp has no
- * key for it here, or it has no fixed host. The one decision a call and
- * `canListen` share, so neither says what the other doesn't.
- */
-const platformTargetOf = (
-  env: Env,
-  routes: AiProviderRoutes,
-  provider: ConnectTarget["provider"]
-):
-  | (ConnectTarget & { platform: PlatformRoute })
-  | "model.not_allowed"
-  | "model.unconfigured" => {
-  if (!routes.platform.includes(provider)) {
-    return "model.not_allowed";
-  }
-  const platform = platformRouteOf(provider, usualHostsOf(env));
-  if (platform === undefined) {
-    return "model.unconfigured";
-  }
-  return { credential: "platform", provider, baseUrl: null, platform };
-};
-
-/**
  * Where a platform voice feature goes: Grasp's own key for `provider`,
  * through connect; refused, and audited, when Grasp has no key for it.
  */
@@ -2671,7 +2717,8 @@ const platformTarget = async (
  */
 const admitSpeech = async (
   env: Env,
-  call: SpeechSession
+  call: SpeechSession,
+  streamed: boolean
 ): Promise<SpeechRoute> => {
   const ref = parseVoiceRef(call.model);
   if (ref === undefined) {
@@ -2688,7 +2735,9 @@ const admitSpeech = async (
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
   }
-  const { path, body } = speechRequestOf(call, ref);
+  // Streamed, the same file comes in pieces as it is made: Mistral's alone.
+  const pieces = streamed && ref.provider === "mistral";
+  const { path, body } = speechRequestOf(call, ref, pieces);
   return {
     env,
     call,
@@ -2702,7 +2751,7 @@ const admitSpeech = async (
         {
           headers: {
             "content-type": "application/json",
-            accept: "application/json",
+            accept: pieces ? "text/event-stream" : "application/json",
           },
           body,
         },
@@ -2844,17 +2893,126 @@ const readSpeech = async (
     : { audio, mime: speechFormat.mime, words: wordsOf(line, seconds) };
 };
 
+/** What ends a line of an event stream: a line feed, a carriage return, or both. */
+const eventLineEnd = /\r\n|\n|\r/u;
+
+/** An event of Mistral's speech stream, as far as it is read: what it is, and its piece of the file. */
+const speechEventSchema = z.object({
+  type: z.string().optional(),
+  audio_data: z.string().min(1).optional(),
+});
+
+/** The event that ends a line's stream: every piece of the file came before it. */
+const speechDone = "speech.audio.done";
+
+/**
+ * One event of Mistral's speech stream, by the lines of its `data` field
+ * joined (the event stream format, HTML's "server-sent events"): the piece
+ * of the file a `speech.audio.delta` carries, or that the line is done.
+ * Nothing for any other event.
+ */
+const speechEventOf = (
+  data: readonly string[]
+): { piece?: Uint8Array; done: boolean } => {
+  const parsed = speechEventSchema.safeParse(
+    data.length === 0 ? undefined : jsonOf(data.join("\n"))
+  );
+  if (!parsed.success) {
+    return { done: false };
+  }
+  const piece =
+    parsed.data.audio_data === undefined
+      ? undefined
+      : bytesOf(parsed.data.audio_data);
+  return {
+    ...(piece === undefined ? {} : { piece }),
+    done: parsed.data.type === speechDone,
+  };
+};
+
+/** Pieces of a file as one. */
+const joinedBytes = (pieces: readonly Uint8Array[]): Uint8Array => {
+  const whole = new Uint8Array(
+    pieces.reduce((sum, piece) => sum + piece.byteLength, 0)
+  );
+  let at = 0;
+  for (const piece of pieces) {
+    whole.set(piece, at);
+    at += piece.byteLength;
+  }
+  return whole;
+};
+
+/**
+ * What a line's streamed answer holds, read as it comes: each piece of
+ * the file goes to `onAudio` the moment it is there, so whoever listens
+ * hears the start of the line while the rest is made; `undefined` when it
+ * isn't a line. Put together, the pieces are the file a line asked for
+ * whole would be. A stream that ends without saying the line is done broke
+ * off: what came of it is no line to keep.
+ */
+const readSpeechStream = async (
+  answered: Response,
+  line: string,
+  onAudio: (piece: Uint8Array) => void
+): Promise<Speech | undefined> => {
+  if (answered.body === null) {
+    return undefined;
+  }
+  const pieces: Uint8Array[] = [];
+  let data: string[] = [];
+  let unread = "";
+  let done = false;
+  const take = (written: string): void => {
+    // A blank line ends an event; a `data` line adds to the one underway.
+    if (written === "") {
+      const event = speechEventOf(data);
+      data = [];
+      done ||= event.done;
+      if (event.piece !== undefined) {
+        pieces.push(event.piece);
+        onAudio(event.piece);
+      }
+      return;
+    }
+    if (written.startsWith("data:")) {
+      const value = written.slice("data:".length);
+      data.push(value.startsWith(" ") ? value.slice(1) : value);
+    }
+  };
+  for await (const text of answered.body.pipeThrough(new TextDecoderStream())) {
+    unread += text;
+    // A carriage return at the very end may be half of a line's end.
+    const held = unread.endsWith("\r") ? "\r" : "";
+    const lines = unread
+      .slice(0, unread.length - held.length)
+      .split(eventLineEnd);
+    unread = (lines.pop() ?? "") + held;
+    for (const written of lines) {
+      take(written);
+    }
+  }
+  const audio = joinedBytes(pieces);
+  const seconds = done ? wavSeconds(audio) : undefined;
+  return seconds === undefined
+    ? undefined
+    : { audio, mime: speechFormat.mime, words: wordsOf(line, seconds) };
+};
+
 /** The line the provider answered with, read; none when it said nothing. */
 const heardSpeech = async (
   { answered, answering }: SpeechSent,
   line: string,
-  ref: VoiceRef
+  ref: VoiceRef,
+  onAudio: ((piece: Uint8Array) => void) | undefined
 ): Promise<Speech | undefined> => {
   if (answered === undefined || answering === undefined) {
     return undefined;
   }
   try {
-    return await readSpeech(answered, line, ref);
+    return onAudio === undefined || ref.provider !== "mistral"
+      ? await readSpeech(answered, line, ref)
+      : await readSpeechStream(answered, line, onAudio);
   } catch {
     // Cut off while its answer came in: said and billed all the same.
     return undefined;
@@ -3180,14 +3338,15 @@ const canListen = async (env: Env, model: string): Promise<boolean> => {
 const speakLine = async (
   env: Env,
   fields: SpeechCall,
-  signal: AbortSignal | undefined
+  signal: AbortSignal | undefined,
+  onAudio: ((piece: Uint8Array) => void) | undefined
 ): Promise<Speech> => {
   const call = parseCall(speechSchema, fields);
-  const route = await admitSpeech(env, call);
+  const route = await admitSpeech(env, call, onAudio !== undefined);
   const limit = deadline(call.timeoutMs ?? speechTimeoutMs, signal);
   try {
     const sent = await sendSpeech(route, limit);
-    const speech = await heardSpeech(sent, route.call.text, route.ref);
+    const speech = await heardSpeech(sent, route.call.text, route.ref, onAudio);
     const stopped = limit.stopped();
     const outcome = speechOutcome(
       speech,
@@ -3241,11 +3400,12 @@ export type AgentSession = z.input<typeof sessionSchema> & {
 const agentModel = async (
   env: Env,
   fields: AgentSession,
-  provenance: () => readonly string[]
+  provenance: () => readonly string[],
+  via: Via = chosenVia
 ): Promise<AgentModel> => {
   const session = parseCall(sessionSchema, fields);
   // Refused up front, before the loop keeps or sends anything.
-  const { model } = await admit(env, session);
+  const { model } = await admit(env, session, via);
   return {
     model,
     inputTokens:
@@ -3262,10 +3422,19 @@ const agentModel = async (
       // The loop reads the answer from `out` as it streams in.
       // The loop's prompt cache options reach the provider as pi sets them:
       // a fallback model's request keeps them too.
-      void relayOrFail(env, request, model, context, out, options?.signal, {
-        sessionId: options?.sessionId,
-        retention: options?.cacheRetention,
-      });
+      void relayOrFail(
+        env,
+        request,
+        model,
+        context,
+        out,
+        options?.signal,
+        {
+          sessionId: options?.sessionId,
+          retention: options?.cacheRetention,
+        },
+        via
+      );
       return out;
     },
   };
@@ -3317,8 +3486,29 @@ export const models = (env: Env) => ({
     session: AgentSession,
     provenance: () => readonly string[] = () => []
   ): Promise<AgentModel> => await agentModel(env, session, provenance),
-  speak: async (call: SpeechCall, signal?: AbortSignal): Promise<Speech> =>
-    await speakLine(env, call, signal),
+  /**
+   * The onboarding interview's own calls (onboarding/interview.ts,
+   * story.ts): to the models fixed for it (src/platform-ai.ts), on
+   * Grasp's key, whatever the organization chose; judged, metered and
+   * audited like any, and recorded as Grasp's `interview` feature.
+   */
+  interview: {
+    call: async <Output = undefined>(
+      call: ModelCall<Output>
+    ): Promise<ModelAnswer<Output>> => await callModel(env, call, interviewVia),
+    agent: async (session: AgentSession): Promise<AgentModel> =>
+      await agentModel(env, session, () => [], interviewVia),
+  },
+  /**
+   * Says a line. With `onAudio`, the line is asked for streamed: each
+   * piece of its file is handed over as the provider makes it, and the
+   * whole line is still what comes back.
+   */
+  speak: async (
+    call: SpeechCall,
+    signal?: AbortSignal,
+    onAudio?: (piece: Uint8Array) => void
+  ): Promise<Speech> => await speakLine(env, call, signal, onAudio),
   listen: async (call: ListeningCall): Promise<Listening> =>
     await listenThrough(env, call),
   /**
