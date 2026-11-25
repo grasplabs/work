@@ -12,6 +12,7 @@ import { finishConnection } from "../src/oauth.ts";
 import {
   auditEvents,
   connectAccount,
+  outcome,
   ownAccount,
   runMaintenance,
   someone,
@@ -64,6 +65,15 @@ const stored = async (connectionId: string) => {
     .from(connectionTokens)
     .where(eq(connectionTokens.connectionId, connectionId));
   return { status: connection?.status, tokens: tokens.length };
+};
+
+/** As a connection kept before grants were: its grant isn't stored. */
+const keptBeforeGrants = async (connectionId: string): Promise<string> => {
+  await drizzle(env.DB)
+    .update(connectionTokens)
+    .set({ grantedScopes: null })
+    .where(eq(connectionTokens.connectionId, connectionId));
+  return connectionId;
 };
 
 const active = { status: "active", tokens: 1 };
@@ -211,7 +221,9 @@ describe("a shared mailbox pointed at", () => {
     });
     // Made before grants were kept: the old wide set holds them.
     const carl = someone();
-    const carls = await connectAccount(providers, carl, ownAccount(carl));
+    const carls = await keptBeforeGrants(
+      await connectAccount(providers, carl, ownAccount(carl))
+    );
 
     await exports.default.requireClassRights({
       classes: [],
@@ -345,8 +357,10 @@ describe("a class turned on", () => {
 
   it("counts a connection made before grants were kept as holding the wide set it was asked for", async () => {
     const anna = someone();
-    // An answer that lists nothing, as kept before: the old wide set.
-    const annas = await connectAccount(providers, anna, ownAccount(anna));
+    // Kept before grants were: the old wide set.
+    const annas = await keptBeforeGrants(
+      await connectAccount(providers, anna, ownAccount(anna))
+    );
 
     await exports.default.requireClassRights({ classes: ["reach-others"] });
     await expect(stored(annas)).resolves.toStrictEqual(active);
@@ -354,6 +368,15 @@ describe("a class turned on", () => {
     // Read company now reads Planner too, which the wide set never asked.
     await exports.default.requireClassRights({ classes: ["read-company"] });
     await expect(stored(annas)).resolves.toStrictEqual(askedAgain);
+  });
+
+  it("refuses a consent whose answer lists no grant: it would count as the old wide set", async () => {
+    const anna = someone();
+    await expect(
+      outcome(
+        connectAccount(providers, anna, { ...ownAccount(anna), granted: "" })
+      )
+    ).resolves.toBe("connection.scopes_refused");
   });
 
   it("leaves a disconnected connection as it is", async () => {
@@ -537,8 +560,9 @@ describe("Google Workspace", () => {
   });
 
   it("counts a connection made before grants were kept as holding what Google was asked for then", async () => {
-    // An answer that lists nothing: gmail.modify, reading events and Drive.
+    // Kept before grants were: gmail.modify, reading events and Drive.
     const { connectionId } = await connectGoogle();
+    await keptBeforeGrants(connectionId);
 
     await exports.default.requireClassRights({
       classes: ["read-company", "change-company", "reach-others"],

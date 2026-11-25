@@ -176,13 +176,15 @@ const lifetimeSeconds = (value: unknown): number => {
     : defaultLifetimeSeconds;
 };
 
-const whitespace = /\s+/u;
+/** A scope token (RFC 6749 §3.3): `1*NQCHAR`. */
+const scopeToken = /^[\u0021\u0023-\u005B\u005D-\u007E]+$/u;
 
 /**
- * The scopes a token answer lists (RFC 6749 §5.1), split on white space
- * and on the separator `provider` joins its own with, joined with a space:
- * read this one way, by every check and as stored. One that lists none is
- * as absent.
+ * The scopes a token answer lists (RFC 6749 §5.1), as §3.3 writes them:
+ * scope tokens, each after the last and a space, or the separator
+ * `provider` joins its own with. Joined with a space, they are read one
+ * way, by every check and as stored. An answer that isn't such a list,
+ * an empty one too, is as absent.
  */
 const grantedScope = (
   { scopeSeparator }: OAuthProviderConfig,
@@ -191,11 +193,10 @@ const grantedScope = (
   if (typeof scope !== "string") {
     return undefined;
   }
-  const listed = scope
-    .split(whitespace)
-    .flatMap((each) => each.split(scopeSeparator))
-    .filter((each) => each !== "");
-  return listed.length === 0 ? undefined : listed.join(" ");
+  const listed = scope.split(" ").flatMap((each) => each.split(scopeSeparator));
+  return listed.every((each) => scopeToken.test(each))
+    ? listed.join(" ")
+    : undefined;
 };
 
 const tokenSet = (
