@@ -27,6 +27,7 @@
   "devDependencies": {
     "@cloudflare/vitest-plugin": "catalog:",
     "@cloudflare/workers-types": "catalog:",
+    "@grasp-os/compiler": "workspace:*",
     "@grasp-os/connector-google-workspace": "workspace:*",
     "@grasp-os/connector-kit": "workspace:*",
     "@grasp-os/connector-microsoft-365": "workspace:*",
