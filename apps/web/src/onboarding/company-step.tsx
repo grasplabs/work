@@ -18,6 +18,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
+import { Separator } from "@grasp-os/ui/components/separator";
 import { Text } from "@grasp-os/ui/components/text";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
@@ -67,6 +68,11 @@ import { XlsxError, xlsxMost, xlsxRows } from "./xlsx.ts";
 
 const styles = stylex.create({
   stack: { display: "grid", gap: space[4] },
+  drop: { display: "grid", gap: space[2] },
+  example: { justifySelf: "center" },
+  // "Or use a staff list", through the middle of a line either side.
+  or: { display: "flex", alignItems: "center", gap: space[3] },
+  orLine: { flexGrow: 1, flexBasis: 0, alignSelf: "center" },
 });
 
 /** The first few people on the list, by name; someone core erased has none. */
@@ -197,10 +203,15 @@ export const WaitingNote = ({ waiting }: { waiting: number }) =>
     </Text>
   ) : null;
 
-/** What there is now, said in the step's line: who is in, and from where; or the quickest way in. */
-const useBody = ({
+/**
+ * The step's title and line. Without a roster it leads with the sign-in,
+ * named for what Grasp reads through it; a staff list is the way in only
+ * where this deployment signs in with no suite. With one, it says who is in
+ * and from where.
+ */
+const useWords = ({
   roster,
-  listShown,
+  another,
   fromDirectory,
   suites,
   people,
@@ -208,21 +219,21 @@ const useBody = ({
   pictured,
 }: {
   roster: Roster | null;
+  /** Another list asked for, over the roster there is. */
+  another: boolean;
   /** A concept draws the roster: the line says what it holds, and leaves the names to the picture. */
   pictured: boolean;
-  /** The upload is out: the line says what to share. */
-  listShown: boolean;
   fromDirectory: DirectorySuite | null;
   suites: DirectorySuite[];
   people: number;
   teams: number;
-}): string => {
+}): { title: string; body: string } => {
   const { t } = useLingui();
-  if (roster !== null && listShown) {
-    return t`Share another staff list as a CSV or Excel file, a row per person. It replaces the one I have now.`;
-  }
-  if (roster === null && listShown) {
-    return t`Share a staff list as a CSV or Excel file, a row per person. No list at hand? Skip this, and we’ll sort it out with you.`;
+  if (roster !== null && another) {
+    return {
+      title: t`Use another staff list`,
+      body: t`Share another staff list as a CSV or Excel file, a row per person. It replaces the one I have now.`,
+    };
   }
   if (roster !== null) {
     const signIn = fromDirectory === null ? "" : suiteNames[fromDirectory];
@@ -231,39 +242,42 @@ const useBody = ({
         ? t`From your staff list I can see ${people} people in ${teams} teams.`
         : t`${signIn} is connected. I can see ${people} people in ${teams} teams.`;
     if (pictured) {
-      return seen;
+      return { title: t`Here’s your company`, body: seen };
     }
     // A few of them by name, so the admin sees it is their own company.
     const names = formatList(namesOf(roster));
     const among = t`Among them ${names}.`;
-    return `${seen} ${among}`;
+    return { title: t`Here’s your company`, body: `${seen} ${among}` };
   }
+  const reads = t`So I can see your teams, roles and directory. I only read names, email addresses, teams and jobs, nothing else.`;
   if (suites.length > 1) {
-    return t`Connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. No list at hand? Skip this, and we’ll sort it out with you.`;
+    return { title: t`Connect your work account`, body: reads };
   }
   if (suites[0] !== undefined) {
     const signIn = suiteNames[suites[0]];
-    return t`Connect your ${signIn} sign-in. I’ll only see names, teams and roles. No list at hand? Skip this, and we’ll sort it out with you.`;
+    return { title: t`Connect your ${signIn} account`, body: reads };
   }
-  return t`Share a staff list as a CSV or Excel file, a row per person. No list at hand? Skip this, and we’ll sort it out with you.`;
+  return {
+    title: t`Share your staff list`,
+    body: t`Share a staff list as a CSV or Excel file, a row per person. No list at hand? Skip this, and we’ll sort it out with you.`,
+  };
 };
 
 /**
- * The step's ways on: Continue once there is a roster, a staff list instead
- * of a sign-in, and more about it; without one, a way past it. `end` holds
- * the buttons, main first; `also` the link on its own line under them.
+ * The step's ways on: Continue once there is a roster, another list or a
+ * staff list instead of a sign-in, and more about it; without one, a way
+ * past it. `end` holds the buttons, main first; `also` the link on its own
+ * line under them.
  */
 const useCompanyWays = ({
   roster,
   another,
-  signInsFirst,
   fromDirectory,
   onAnother,
   onward,
 }: {
   roster: boolean;
   another: boolean;
-  signInsFirst: boolean;
   fromDirectory: DirectorySuite | null;
   onAnother: () => void;
   onward: () => Promise<void>;
@@ -299,31 +313,40 @@ const useCompanyWays = ({
     };
   }
   // No list yet: never forced. Grasp's own people sort it out with them in their talks.
-  const skip = (
-    <Button
-      onClick={() => {
-        void onward();
-      }}
-      size="lg"
-      variant={signInsFirst ? "link" : "outline"}
-    >
-      {t`Skip for now`}
-    </Button>
-  );
-  if (signInsFirst) {
-    return {
-      end: (
-        <Button onClick={onAnother} size="lg" variant="outline">
-          {t`Use a staff list instead`}
-        </Button>
-      ),
-      also: skip,
-    };
-  }
   return {
-    end: skip,
+    end: null,
     also: (
-      <Button asChild size="lg" variant="link">
+      <Button
+        onClick={() => {
+          void onward();
+        }}
+        size="lg"
+        variant="link"
+      >
+        {t`Skip for now`}
+      </Button>
+    ),
+  };
+};
+
+/** Where a staff list goes: dropped or chosen right here, with an example to copy. */
+const StaffListDrop = ({
+  onUpload,
+  disabled,
+}: {
+  onUpload: (file: File) => Promise<void>;
+  disabled: boolean;
+}) => {
+  const { t } = useLingui();
+  return (
+    <div {...stylex.props(styles.drop)}>
+      <FileUpload
+        accept={[".csv", ".tsv", ".txt", ".xlsx"]}
+        description={t`A CSV or Excel file, a row per person`}
+        disabled={disabled}
+        onUpload={onUpload}
+      />
+      <Button asChild size="sm" style={styles.example} variant="link">
         <a
           download="staff-list-example.csv"
           href={`data:text/csv;charset=utf-8,${encodeURIComponent(exampleList)}`}
@@ -331,8 +354,8 @@ const useCompanyWays = ({
           {t`See an example`}
         </a>
       </Button>
-    ),
-  };
+    </div>
+  );
 };
 
 /** Concepts only: the roster drawn, as dots (a) or as rows (b). */
@@ -458,15 +481,16 @@ export const CompanyStep = (props: StepProps) => {
     }
   });
   const fromDirectory = directoryShown(fresh, directory);
-  const signInsFirst = roster === null && suites.length > 0 && !another;
-  const listShown = roster === null ? !signInsFirst : another;
+  // Without a roster the sign-ins lead and the drop zone stands right under them; with one, only when another list is asked for.
+  const signIns = roster === null && suites.length > 0;
+  const listShown = roster === null || another;
   // Concepts only: `?concept=a|b` draws the roster, once there is one and no other list is asked for.
   const concept = useCompanyConcept();
   const pictured = concept !== null && roster !== null && !listShown;
-  const body = useBody({
+  const { title, body } = useWords({
+    another,
     pictured,
     roster,
-    listShown,
     fromDirectory,
     suites,
     people,
@@ -480,19 +504,13 @@ export const CompanyStep = (props: StepProps) => {
     },
     onward: props.onward,
     roster: roster !== null,
-    signInsFirst,
   });
   return (
-    <CalmStep
-      also={also}
-      body={body}
-      end={end}
-      title={t`Who’s who at your company?`}
-    >
+    <CalmStep also={also} body={body} end={end} title={title}>
       {pictured ? <Pictured concept={concept} roster={roster} /> : null}
-      {signInsFirst || listShown || problem !== null || waiting > 0 ? (
+      {listShown || problem !== null || waiting > 0 ? (
         <div {...stylex.props(styles.stack)}>
-          {signInsFirst ? (
+          {signIns ? (
             <ItemGroup aria-label={t`Your sign-in`}>
               {suites.map((suite) => {
                 const signIn = suiteNames[suite];
@@ -526,9 +544,17 @@ export const CompanyStep = (props: StepProps) => {
               })}
             </ItemGroup>
           ) : null}
+          {signIns ? (
+            <div {...stylex.props(styles.or)}>
+              <Separator decorative style={styles.orLine} />
+              <Text color="muted" size="sm">
+                {t`Or use a staff list`}
+              </Text>
+              <Separator decorative style={styles.orLine} />
+            </div>
+          ) : null}
           {listShown ? (
-            <FileUpload
-              accept={[".csv", ".tsv", ".txt", ".xlsx"]}
+            <StaffListDrop
               disabled={reading !== null && reading !== "list"}
               onUpload={upload}
             />

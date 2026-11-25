@@ -1882,6 +1882,10 @@ msgstr "Een koppeling die werkt heeft de plaats ervan ingenomen, dus deze kan nu
 msgid "A copy of everything the Brain keeps for you alone: your own sources and what it remembers from them. Only you can make it and download it, and it is deleted when your data is erased."
 msgstr "Een kopie van alles wat het Brain alleen voor jou bewaart: je eigen bronnen en wat het daaruit onthoudt. Alleen jij kunt hem maken en downloaden, en hij wordt verwijderd als je gegevens worden gewist."
 
+#: src/onboarding/company-step.tsx
+msgid "A CSV or Excel file, a row per person"
+msgstr "Een CSV- of Excelbestand, één rij per persoon"
+
 #: src/drafts/publish-errors.ts
 msgid "A data migration moved this App's records on since this version, so it can't be shared again. Share a new version instead."
 msgstr "Een gegevensmigratie heeft de records van deze App sinds deze versie verder gezet, dus die kan niet opnieuw gedeeld worden. Deel in plaats daarvan een nieuwe versie."
@@ -4960,12 +4964,12 @@ msgid "Connect the apps your work runs on"
 msgstr "Koppel de apps waar je werk op draait"
 
 #: src/onboarding/company-step.tsx
-msgid "Connect your {signIn} sign-in. I’ll only see names, teams and roles. No list at hand? Skip this, and we’ll sort it out with you."
-msgstr "Koppel je {signIn}-login. Ik zie alleen namen, teams en rollen. Geen lijst bij de hand? Sla dit over, dan regelen we het samen met je."
+msgid "Connect your {signIn} account"
+msgstr "Koppel je {signIn}-account"
 
 #: src/onboarding/company-step.tsx
-msgid "Connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. No list at hand? Skip this, and we’ll sort it out with you."
-msgstr "Koppel je Microsoft- of Google-login. Ik zie alleen namen, teams en rollen. Geen lijst bij de hand? Sla dit over, dan regelen we het samen met je."
+msgid "Connect your work account"
+msgstr "Koppel je werkaccount"
 
 #: src/onboarding/sources-step.tsx
 msgid "connected"
@@ -8210,6 +8214,10 @@ msgstr "Dit is het plan"
 #: src/chat/plan-card.tsx
 msgid "Here's what Grasp will make"
 msgstr "Dit gaat Grasp maken"
+
+#: src/onboarding/company-step.tsx
+msgid "Here’s your company"
+msgstr "Dit is je bedrijf"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Here’s your Grasp."
@@ -12751,6 +12759,10 @@ msgctxt "the settings an app offers itself"
 msgid "Options"
 msgstr "Opties"
 
+#: src/onboarding/company-step.tsx
+msgid "Or use a staff list"
+msgstr "Of gebruik een personeelslijst"
+
 #: src/interview/closed.tsx
 msgid "Or withdraw: nothing you said is used from now on, and you can still read it here."
 msgstr "Of trek je terug: niets van wat je zei wordt nog gebruikt, en je kunt het hier nog steeds lezen."
@@ -15561,6 +15573,10 @@ msgstr "Met het bedrijf delen"
 msgid "Share with your team"
 msgstr "Delen met je team"
 
+#: src/onboarding/company-step.tsx
+msgid "Share your staff list"
+msgstr "Deel je personeelslijst"
+
 #: src/brain/memories-page.tsx
 msgid "Share…"
 msgstr "Delen…"
@@ -16049,6 +16065,10 @@ msgstr "dia"
 msgctxt "the chat box's edge"
 msgid "Smooth"
 msgstr "Zacht"
+
+#: src/onboarding/company-step.tsx
+msgid "So I can see your teams, roles and directory. I only read names, email addresses, teams and jobs, nothing else."
+msgstr "Zo zie ik je teams, rollen en adresboek. Ik lees alleen namen, e-mailadressen, teams en functies, verder niets."
 
 #: src/agents/setup/words.ts
 msgid "Some teams"
@@ -18854,6 +18874,10 @@ msgstr "Een andere lijst gebruiken"
 msgid "Use another platform"
 msgstr "Ander platform kiezen"
 
+#: src/onboarding/company-step.tsx
+msgid "Use another staff list"
+msgstr "Een andere personeelslijst gebruiken"
+
 #: src/agents/setup/words.ts
 msgid "Use Apps"
 msgstr "Apps gebruiken"
@@ -20191,10 +20215,6 @@ msgstr "Met wie je kunt delen kon niet worden gelezen. Probeer het zo opnieuw."
 #: src/connections/connect-dialog.tsx
 msgid "Who uses it"
 msgstr "Wie het gebruikt"
-
-#: src/onboarding/company-step.tsx
-msgid "Who’s who at your company?"
-msgstr "Wie is wie in je bedrijf?"
 
 #: src/apps/draft-changes.tsx
 msgid "whoever added the row"

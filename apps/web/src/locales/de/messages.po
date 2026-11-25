@@ -1882,6 +1882,10 @@ msgstr "Eine funktionierende Verbindung hat ihren Platz eingenommen, daher kann 
 msgid "A copy of everything the Brain keeps for you alone: your own sources and what it remembers from them. Only you can make it and download it, and it is deleted when your data is erased."
 msgstr "Eine Kopie von allem, was das Brain nur für Sie aufbewahrt: Ihre eigenen Quellen und was es daraus behält. Nur Sie können sie erstellen und herunterladen, und sie wird mit Ihren Daten gelöscht."
 
+#: src/onboarding/company-step.tsx
+msgid "A CSV or Excel file, a row per person"
+msgstr "Eine CSV- oder Excel-Datei, eine Zeile pro Person"
+
 #: src/drafts/publish-errors.ts
 msgid "A data migration moved this App's records on since this version, so it can't be shared again. Share a new version instead."
 msgstr "Eine Datenmigration hat die Datensätze dieser App seit dieser Version weiterentwickelt, daher kann sie nicht erneut geteilt werden. Teilen Sie stattdessen eine neue Version."
@@ -4960,12 +4964,12 @@ msgid "Connect the apps your work runs on"
 msgstr "Verbinden Sie die Apps, mit denen Sie arbeiten"
 
 #: src/onboarding/company-step.tsx
-msgid "Connect your {signIn} sign-in. I’ll only see names, teams and roles. No list at hand? Skip this, and we’ll sort it out with you."
-msgstr "Verbinden Sie Ihre {signIn}-Anmeldung. Ich sehe nur Namen, Teams und Rollen. Keine Liste zur Hand? Überspringen Sie diesen Schritt, wir klären das gemeinsam mit Ihnen."
+msgid "Connect your {signIn} account"
+msgstr "Verbinden Sie Ihr {signIn}-Konto"
 
 #: src/onboarding/company-step.tsx
-msgid "Connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. No list at hand? Skip this, and we’ll sort it out with you."
-msgstr "Verbinden Sie Ihre Microsoft- oder Google-Anmeldung. Ich sehe nur Namen, Teams und Rollen. Keine Liste zur Hand? Überspringen Sie diesen Schritt, wir klären das gemeinsam mit Ihnen."
+msgid "Connect your work account"
+msgstr "Verbinden Sie Ihr Arbeitskonto"
 
 #: src/onboarding/sources-step.tsx
 msgid "connected"
@@ -8210,6 +8214,10 @@ msgstr "Das ist der Plan"
 #: src/chat/plan-card.tsx
 msgid "Here's what Grasp will make"
 msgstr "Das wird Grasp bauen"
+
+#: src/onboarding/company-step.tsx
+msgid "Here’s your company"
+msgstr "Das ist Ihr Unternehmen"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Here’s your Grasp."
@@ -12751,6 +12759,10 @@ msgctxt "the settings an app offers itself"
 msgid "Options"
 msgstr "Optionen"
 
+#: src/onboarding/company-step.tsx
+msgid "Or use a staff list"
+msgstr "Oder eine Mitarbeiterliste verwenden"
+
 #: src/interview/closed.tsx
 msgid "Or withdraw: nothing you said is used from now on, and you can still read it here."
 msgstr "Oder ziehen Sie sich zurück: Nichts von dem, was Sie gesagt haben, wird ab jetzt verwendet, und Sie können es hier weiterhin lesen."
@@ -15561,6 +15573,10 @@ msgstr "Mit dem Unternehmen teilen"
 msgid "Share with your team"
 msgstr "Mit Ihrem Team teilen"
 
+#: src/onboarding/company-step.tsx
+msgid "Share your staff list"
+msgstr "Teilen Sie Ihre Mitarbeiterliste"
+
 #: src/brain/memories-page.tsx
 msgid "Share…"
 msgstr "Teilen…"
@@ -16049,6 +16065,10 @@ msgstr "Folie"
 msgctxt "the chat box's edge"
 msgid "Smooth"
 msgstr "Weich"
+
+#: src/onboarding/company-step.tsx
+msgid "So I can see your teams, roles and directory. I only read names, email addresses, teams and jobs, nothing else."
+msgstr "So sehe ich Ihre Teams, Rollen und Ihr Verzeichnis. Ich lese nur Namen, E-Mail-Adressen, Teams und Funktionen, sonst nichts."
 
 #: src/agents/setup/words.ts
 msgid "Some teams"
@@ -18854,6 +18874,10 @@ msgstr "Andere Liste verwenden"
 msgid "Use another platform"
 msgstr "Andere Plattform wählen"
 
+#: src/onboarding/company-step.tsx
+msgid "Use another staff list"
+msgstr "Eine andere Mitarbeiterliste verwenden"
+
 #: src/agents/setup/words.ts
 msgid "Use Apps"
 msgstr "Apps nutzen"
@@ -20191,10 +20215,6 @@ msgstr "Mit wem Sie teilen können, konnte nicht gelesen werden. Versuchen Sie e
 #: src/connections/connect-dialog.tsx
 msgid "Who uses it"
 msgstr "Wer es nutzt"
-
-#: src/onboarding/company-step.tsx
-msgid "Who’s who at your company?"
-msgstr "Wer ist wer in Ihrem Unternehmen?"
 
 #: src/apps/draft-changes.tsx
 msgid "whoever added the row"
