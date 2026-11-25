@@ -1,6 +1,7 @@
 import type { ChatSummary } from "@grasp-os/shared/chat";
 import { useEffect, useState } from "react";
 
+import { connectionNames } from "../connections/integrations.ts";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -19,22 +20,21 @@ export interface ChatNames {
 }
 
 /**
- * The names of the connections the person can see, by ID: a list refused
- * only leaves those IDs unnamed.
+ * The names of the connections the person can see, by ID, as the
+ * Connectors page names them: a list refused only leaves those IDs
+ * unnamed.
  */
 const readSourceNames = async (
   session: Session
 ): Promise<ReadonlyMap<string, SourceName>> => {
   const names = new Map<string, SourceName>();
   try {
-    for (const {
-      id,
-      provider,
-      accountName,
-    } of await session.connections.list()) {
-      names.set(id, {
-        name: accountName === null ? provider : `${provider} (${accountName})`,
-      });
+    const [listed, catalog] = await Promise.all([
+      session.connections.list(),
+      session.connections.catalog(),
+    ]);
+    for (const [id, name] of connectionNames(catalog.entries, listed)) {
+      names.set(id, { name });
     }
   } catch {
     // Refused: the IDs stay unnamed.

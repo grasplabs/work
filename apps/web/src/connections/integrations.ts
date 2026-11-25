@@ -136,12 +136,16 @@ export const integrationsOf = (
         key,
         source: connection.source,
         id: connection.provider,
-        // The catalog has its name, or the product we know it as; else its ID stands in.
+        // The catalog has its name; else the name an admin gave the
+        // connector, or the product we know it as; else the provider's
+        // own ID (a vendor's, as `gmail`) stands in.
         name:
+          connection.connectorName ??
           (connection.source === "native" &&
           Object.hasOwn(unlistedNames, connection.provider)
             ? unlistedNames[connection.provider]
-            : undefined) ?? connection.provider,
+            : undefined) ??
+          connection.provider,
         categories: [],
         group: "Other",
         description: null,
@@ -338,6 +342,35 @@ export const httpConnectionsOf = (
       ? [{ connection, http: connection.http }]
       : []
   );
+
+/** A connection's name: its app's, with its account's where the provider names one. */
+export const connectionLabel = (
+  connection: Pick<ListedConnection, "accountName">,
+  integration: Pick<Integration, "name">
+): string =>
+  connection.accountName === null
+    ? integration.name
+    : `${integration.name} (${connection.accountName})`;
+
+/**
+ * Every live connection's name, by ID, as the Connectors page shows it:
+ * a catalog entry's (`connectionLabel`), an HTTP connection's own.
+ */
+export const connectionNames = (
+  entries: readonly Entry[],
+  connections: readonly ListedConnection[]
+): Map<string, string> =>
+  new Map([
+    ...integrationsOf(entries, connections).flatMap((integration) =>
+      integration.connections.map((connection): [string, string] => [
+        connection.id,
+        connectionLabel(connection, integration),
+      ])
+    ),
+    ...httpConnectionsOf(connections).map(
+      ({ connection, http }): [string, string] => [connection.id, http.name]
+    ),
+  ]);
 
 /** A name as it is compared: letters and digits only, so "Google Sheets" is "google_sheets". */
 export const plain = (name: string): string =>

@@ -57,7 +57,11 @@ import {
   readToolNames,
   toolResourcesOf,
 } from "./connections.ts";
-import { isConnectorId, providerConfigFor } from "./connector-providers.ts";
+import {
+  connectorNames,
+  isConnectorId,
+  providerConfigFor,
+} from "./connector-providers.ts";
 import {
   connections,
   connectionTokens,
@@ -1489,29 +1493,43 @@ export const listConnections = async (
       )
     )
     .orderBy(desc(connections.createdAt));
-  const http = await httpSummaries(
-    env,
-    rows.filter(({ serverKind }) => serverKind === "http").map(({ id }) => id)
-  );
-  return rows.map((row) => ({
-    id: row.id,
-    source: row.serverKind,
-    provider: row.provider,
-    scope: row.scope,
-    status: row.status,
-    ownerUserId: row.ownerUserId,
-    connectedBy: row.connectedBy,
-    accountName: row.accountName,
-    createdAt: row.createdAt.toISOString(),
-    ...(row.serverKind === "composio" && {
-      ...(row.composioAuth !== null && { composioAuth: row.composioAuth }),
-      tools: allowedToolNames(row),
-      offeredTools: offeredToolNames(row),
-      readTools: readToolNames(row),
-      toolResources: toolResourcesOf(row),
-    }),
-    ...(http.has(row.id) && { http: http.get(row.id) }),
-  }));
+  const [http, named] = await Promise.all([
+    httpSummaries(
+      env,
+      rows.filter(({ serverKind }) => serverKind === "http").map(({ id }) => id)
+    ),
+    connectorNames(env.DB, [
+      ...new Set(
+        rows.flatMap(({ serverKind, provider }) =>
+          serverKind === "connector" ? [provider] : []
+        )
+      ),
+    ]),
+  ]);
+  return rows.map((row) => {
+    // Only a connector's ID is in `named`: a provider name takes no underscore.
+    const connectorName = named.get(row.provider);
+    return {
+      id: row.id,
+      source: row.serverKind,
+      provider: row.provider,
+      scope: row.scope,
+      status: row.status,
+      ownerUserId: row.ownerUserId,
+      connectedBy: row.connectedBy,
+      accountName: row.accountName,
+      createdAt: row.createdAt.toISOString(),
+      ...(row.serverKind === "composio" && {
+        ...(row.composioAuth !== null && { composioAuth: row.composioAuth }),
+        tools: allowedToolNames(row),
+        offeredTools: offeredToolNames(row),
+        readTools: readToolNames(row),
+        toolResources: toolResourcesOf(row),
+      }),
+      ...(http.has(row.id) && { http: http.get(row.id) }),
+      ...(connectorName !== undefined && { connectorName }),
+    };
+  });
 };
 
 /**

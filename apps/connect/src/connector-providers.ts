@@ -1,6 +1,6 @@
 import { connectorIdSchema } from "@grasp-os/shared/connect";
 import { errorFields, log } from "@grasp-os/shared/log";
-import { and, eq, like } from "drizzle-orm";
+import { and, eq, like, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { connectors } from "./db/schema.ts";
@@ -33,6 +33,24 @@ export const connectorRow = async (
         .where(eq(connectors.id, id))
         .get()
     : undefined;
+
+/** The names admins gave the connectors `ids` name, by ID. */
+export const connectorNames = async (
+  db: D1Database,
+  ids: readonly string[]
+): Promise<Map<string, string>> => {
+  if (ids.length === 0) {
+    return new Map();
+  }
+  const rows = await drizzle(db)
+    .select({ id: connectors.id, name: connectors.name })
+    .from(connectors)
+    // As one JSON parameter: D1 binds at most 100 to a statement.
+    .where(
+      sql`${connectors.id} IN (SELECT value FROM json_each(${JSON.stringify(ids)}))`
+    );
+  return new Map(rows.map(({ id, name }) => [id, name]));
+};
 
 /**
  * What a connector's client secret is sealed for: the connector and the

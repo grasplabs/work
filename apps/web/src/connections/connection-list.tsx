@@ -49,6 +49,7 @@ import { FactRow, RowAlert, SettingsRows } from "./app/rows.tsx";
 import { BrainAudience, useBrainAudiences } from "./brain-audience.tsx";
 import { ChatReads } from "./chat-reads.tsx";
 import { canReconnect, ConnectDialog } from "./connect-dialog.tsx";
+import { connectionLabel } from "./integrations.ts";
 import type { Integration } from "./integrations.ts";
 import { SectionCard } from "./section-card.tsx";
 import { useChange } from "./use-change.ts";
@@ -413,15 +414,6 @@ export const DisconnectDialog = ({
   </AlertDialog>
 );
 
-/** A connection's name: its app's, with its account's where the provider names one. */
-const labelOf = (
-  connection: ListedConnection,
-  integration: Integration
-): string =>
-  connection.accountName === null
-    ? integration.name
-    : `${integration.name} (${connection.accountName})`;
-
 /**
  * Whether `identity` chooses who may read in the Brain what agents read
  * through `connection` (brain-audience.tsx): one of the company's own
@@ -528,7 +520,7 @@ export const StoppedNotice = ({
       </Button>
       <DisconnectDialog
         connection={connection}
-        label={labelOf(connection, integration)}
+        label={connectionLabel(connection, integration)}
         last={!integration.listed && integration.connections.length === 1}
         onOpenChange={setOpen}
         open={open}
@@ -551,7 +543,7 @@ export const AccountActions = ({
   integration: Integration;
   identity: Identity;
 }) => {
-  const label = labelOf(connection, integration);
+  const label = connectionLabel(connection, integration);
   return (
     <>
       {connection.status === "needs_reauth" &&
@@ -603,7 +595,7 @@ export const ConnectionsAccess = ({
   const holders = held?.state === "ready" ? held.data : undefined;
   const several = integration.connections.length > 1;
   return integration.connections.map((connection) => {
-    const label = labelOf(connection, integration);
+    const label = connectionLabel(connection, integration);
     const stuck =
       connection.status === "needs_reauth" &&
       !canReconnect(connection, integration.offered, identity);

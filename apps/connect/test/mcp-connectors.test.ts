@@ -95,6 +95,20 @@ describe("a connector made from Linear's MCP server URL", () => {
     ]);
   });
 
+  it("lists its connections under the name its admin gave it, which the catalog alone may not show", async () => {
+    const connector = await addLinear();
+    const anna = someone();
+    const connectionId = await connectLinear(connector, anna);
+
+    const listed = await exports.default.listConnections(anna);
+
+    expect(listed.find(({ id }) => id === connectionId)).toMatchObject({
+      source: "connector",
+      provider: connector,
+      connectorName: "Linear",
+    });
+  });
+
   it("pauses its connection for every caller when its server rate limits it, until the server's time passes", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     const connector = await addLinear();

@@ -548,6 +548,12 @@ export interface ConnectionSummary {
    * credential goes in: never the credential. Absent for any other.
    */
   http?: HttpConnectionSummary;
+  /**
+   * A connection to a connector made from a URL: the name the admin who
+   * added the connector gave it, also where the catalog doesn't list it
+   * to this person (no longer offered). Absent for any other.
+   */
+  connectorName?: string;
 }
 
 /**

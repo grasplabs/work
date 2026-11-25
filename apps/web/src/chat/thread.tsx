@@ -881,6 +881,8 @@ interface AnswerContext extends StepContext {
   waiting: string | undefined;
   /** Who gave it, named where the chat has answers from more than one agent. */
   agentName: string | undefined;
+  /** What the chat read, folded under its words: the last answer's alone, once it is done. */
+  sources: ReactNode;
 }
 
 /** What follows a stored reply: the questions it asked, and the plan or agent it drafted. */
@@ -1079,6 +1081,7 @@ const AnswerBody = ({
       {text === "" && status !== "stopped" ? null : (
         <MessageResponse streaming={partial !== null}>{text}</MessageResponse>
       )}
+      {context.sources}
       <AnswerEnding ending={ending} retry={context.onRetry} />
       {replies.map((reply) => (
         <AnswerAfter context={context} key={reply.id} reply={reply} />
@@ -1360,6 +1363,7 @@ export const ChatThread = ({
   compact = false,
   build,
   newLineBefore,
+  sources,
   children,
 }: {
   /**
@@ -1400,6 +1404,12 @@ export const ChatThread = ({
    * None, and it opens at its end.
    */
   newLineBefore?: number;
+  /**
+   * What the chat read (its provenance, kept for the chat as a whole):
+   * under the last answer's words once it is done, as Damsko's Sources
+   * folds what an answer drew on under it.
+   */
+  sources?: ReactNode;
   /** Shown after the messages, in the thread: what is held, why it stopped. */
   children?: ReactNode;
 }) => {
@@ -1423,6 +1433,9 @@ export const ChatThread = ({
   const rows = rowsOf(messages, shown, running);
   const liveRow = rows.findLast(
     (row): row is AnswerTurn => row.kind === "answer" && row.live
+  );
+  const lastAnswerRow = rows.findLast(
+    (row): row is AnswerTurn => row.kind === "answer"
   );
   const liveThinking =
     liveRow?.replies[0] === undefined
@@ -1508,6 +1521,8 @@ export const ChatThread = ({
       build,
       waiting,
       agentName: agentNameOf(turn),
+      sources:
+        turn.id === lastAnswerRow?.id && !turn.live ? sources : undefined,
     };
   };
   const lined = withNewLine(withDayLines(rows), newLineBefore);

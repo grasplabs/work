@@ -19062,7 +19062,6 @@ msgid "United States"
 msgstr "Estados Unidos"
 
 #: src/activity/pending.tsx
-#: src/chat/sources.tsx
 msgid "Unknown"
 msgstr "Desconocida"
 
@@ -19086,6 +19085,8 @@ msgid "Unknown outcomes"
 msgstr "Resultados desconocidos"
 
 #: src/brain/brain.ts
+#: src/chat/chat-markdown.ts
+#: src/chat/sources.tsx
 msgid "Unknown source"
 msgstr "Fuente desconocida"
 
