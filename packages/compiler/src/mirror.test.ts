@@ -68,6 +68,25 @@ const spec = await readSpec(
           },
         },
       },
+      "/files/{id}:download": {
+        servers: [{ url: "https://files.example.test" }],
+        get: {
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "ok",
+              content: { "application/json": { schema: { type: "object" } } },
+            },
+          },
+        },
+      },
       "/lookup": {
         servers: [{ url: "https://files.example.test" }],
         get: {
@@ -275,10 +294,12 @@ describe("a tool held to the vendor's spec", () => {
         update(["GET /me", "PATCH /deals/{id}"]),
         update(["PATCH /deals/{id}", "GET elsewhere.example.test/deals"]),
         update(["GET /lookup", "PATCH /deals/{id}"]),
+        update(["GET /files/{id}:download", "PATCH /deals/{id}"]),
       ])
     ).toStrictEqual([
       "deals.update: GET elsewhere.example.test/deals isn't on the spec's host api.example.test.",
       "deals.update: GET /lookup isn't an operation of the vendor's spec.",
+      "deals.update: GET /files/{id}:download isn't an operation of the vendor's spec.",
     ]);
   });
 
