@@ -216,6 +216,20 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`Sent an App's event to a webhook`,
   },
   { action: "app", text: msg`Changed an App` },
+  { action: "session.ended", text: msg`Signed out a device` },
+  { action: "organization.renamed", text: msg`Renamed the organization` },
+  {
+    action: "organization.logo.updated",
+    text: msg`Changed the organization's logo`,
+  },
+  {
+    action: "organization.logo.removed",
+    text: msg`Removed the organization's logo`,
+  },
+  {
+    action: "organization.time_zone.updated",
+    text: msg`Changed the organization's time zone`,
+  },
   { action: "member.removed", text: msg`Removed a member` },
   {
     action: "member.erasure.requested",
@@ -345,6 +359,19 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`Stopped a schedule that kept failing`,
   },
   { action: "workflow", text: msg`Changed a workflow` },
+  { action: "ai_provider.added", text: msg`Added an AI provider's key` },
+  { action: "ai_provider.replaced", text: msg`Replaced an AI provider's key` },
+  { action: "ai_provider.removed", text: msg`Deleted an AI provider's key` },
+  { action: "ai_provider.tested", text: msg`Tested an AI provider's key` },
+  {
+    action: "ai_provider.models_set",
+    text: msg`Changed the default and fallback models`,
+  },
+  {
+    action: "ai_provider.source_set",
+    text: msg`Chose between Grasp's AI and the organization's own key`,
+  },
+  { action: "ai_provider", text: msg`Changed the AI providers` },
   { action: "platform", text: msg`Updated Grasp` },
   {
     action: "improvement.signals.computed",
@@ -397,6 +424,169 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   { action: "audit.searched", text: msg`Searched the audit trail` },
   { action: "audit.exported", text: msg`Exported the audit trail` },
   { action: "audit.verified", text: msg`Checked the audit trail's chain` },
+  {
+    action: "admin.brain.erasure.looked_up",
+    text: msg`Looked up whether something was erased from the Brain`,
+  },
+  { action: "admin.brain.read", text: msg`Read the Brain's report` },
+  { action: "admin.command", text: msg`Sent a change from Grasp's admin` },
+  { action: "admin.kickoff.read", text: msg`Read the onboarding kickoff` },
+  {
+    action: "admin.snapshot.read",
+    text: msg`Read a snapshot of the workspace`,
+  },
+  {
+    action: "agent.adopted",
+    text: msg`Took on an agent offered to the company`,
+  },
+  { action: "agent.app.changed", text: msg`Changed an App an agent may use` },
+  {
+    action: "agent.apps.worked_out",
+    text: msg`Asked Grasp which Apps an agent needs`,
+  },
+  { action: "agent.changed", text: msg`Changed an agent` },
+  {
+    action: "agent.class.changed",
+    text: msg`Changed for whom an agent has a kind of tool`,
+  },
+  {
+    action: "agent.declined",
+    text: msg`Declined an agent offered to the company`,
+  },
+  { action: "agent.deleted", text: msg`Deleted an agent` },
+  { action: "agent.document.added", text: msg`Added a document to an agent` },
+  {
+    action: "agent.document.removed",
+    text: msg`Removed a document from an agent`,
+  },
+  { action: "agent.made", text: msg`Made an agent` },
+  {
+    action: "agent.offered",
+    text: msg`Offered an agent to the company, or took the offer back`,
+  },
+  { action: "agent.paused", text: msg`Paused or resumed an agent` },
+  {
+    action: "agent.reach.changed",
+    text: msg`Turned an agent on or off, or changed who may reach it`,
+  },
+  { action: "agent.wake.deleted", text: msg`Deleted an agent's schedule` },
+  { action: "agent.wake.made", text: msg`Set up a schedule for an agent` },
+  {
+    action: "agent.wake.paused",
+    text: msg`Paused or resumed an agent's schedule`,
+  },
+  {
+    action: "brain.connection_audience.changed",
+    text: msg`Changed who reads what a shared connection brings into the Brain`,
+  },
+  {
+    action: "brain.gap.answerer_erased",
+    text: msg`Forgot an erased member as the one who answered the Brain's questions`,
+  },
+  {
+    action: "brain.gap.asked",
+    text: msg`Asked people to fill a gap in the Brain`,
+  },
+  {
+    action: "brain.gap.redacted",
+    text: msg`Took away an answer to the Brain's question`,
+  },
+  { action: "brain.records.added", text: msg`Added records to the Brain` },
+  {
+    action: "brain.records.forgotten",
+    text: msg`Had the Brain forget a record`,
+  },
+  {
+    action: "brain.shared_reads.erase_requested",
+    text: msg`Asked to erase what the Brain kept from a shared connection`,
+  },
+  {
+    action: "brain.shared_reads.erased",
+    text: msg`Erased what the Brain kept from a shared connection`,
+  },
+  {
+    action: "brain.skills.installed",
+    text: msg`Installed Grasp's skills with a release`,
+  },
+  {
+    action: "brain.source.handover_started",
+    text: msg`Started handing something over to the Brain`,
+  },
+  {
+    action: "brain.team_groups.arranged",
+    text: msg`Arranged the company's groups of teams`,
+  },
+  {
+    action: "brain.team_groups.saved",
+    text: msg`Saved the company's groups of teams`,
+  },
+  {
+    action: "brain.work.more_voices_asked",
+    text: msg`Asked Stephen to hear more people about a piece of work`,
+  },
+  { action: "channel_account.linked", text: msg`Linked a chat app account` },
+  {
+    action: "channel_account.unlinked",
+    text: msg`Unlinked a chat app account`,
+  },
+  {
+    action: "directory.group_mapped",
+    text: msg`Matched a directory group to a team`,
+  },
+  {
+    action: "directory.group_unmapped",
+    text: msg`Stopped matching a directory group to a team`,
+  },
+  { action: "file.downloaded", text: msg`Downloaded a file` },
+  { action: "file.previewed", text: msg`Previewed a file` },
+  { action: "file.sent_to_run", text: msg`Handed a file to a run` },
+  { action: "instructions.saved", text: msg`Saved instructions` },
+  {
+    action: "onboarding.directory_read",
+    text: msg`Read the directory for the onboarding`,
+  },
+  {
+    action: "onboarding.document_fetched",
+    text: msg`Shared a document for the onboarding`,
+  },
+  { action: "onboarding.gate.closed", text: msg`Closed Grasp to the company` },
+  {
+    action: "onboarding.gate.opened",
+    text: msg`Opened Grasp to the whole company`,
+  },
+  {
+    action: "onboarding.gate.threshold_set",
+    text: msg`Set how much Grasp must know before it opens to the company`,
+  },
+  {
+    action: "onboarding.hr_read",
+    text: msg`Read the HR system for the onboarding`,
+  },
+  {
+    action: "onboarding.staff_access.ended",
+    text: msg`Ended Grasp staff's access`,
+  },
+  { action: "opportunity.dismissed", text: msg`Dismissed an opportunity` },
+  {
+    action: "opportunity.restored",
+    text: msg`Brought back a dismissed opportunity`,
+  },
+  {
+    action: "staff.accessed",
+    text: msg`Viewed something as Grasp staff`,
+  },
+  {
+    action: "stephen.place.changed",
+    text: msg`Changed who reaches Stephen in a place`,
+  },
+  {
+    action: "stephen.reach.changed",
+    text: msg`Turned Stephen on or off, or changed who may reach him`,
+  },
+  { action: "store.created", text: msg`Created a data store` },
+  { action: "store.deleted", text: msg`Deleted a data store` },
+  { action: "version.published", text: msg`Published a version` },
+  { action: "version.rolled_back", text: msg`Went back to an earlier version` },
 ];
 
 /**

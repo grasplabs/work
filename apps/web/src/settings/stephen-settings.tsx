@@ -1,23 +1,3 @@
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@grasp-os/app-kit/components/dropdown-menu";
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-} from "@grasp-os/app-kit/components/empty";
-import { Item } from "@grasp-os/app-kit/components/item";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@grasp-os/app-kit/components/sheet";
-import { Switch } from "@grasp-os/app-kit/components/switch";
 import { chatPlatformName as placeName } from "@grasp-os/shared/chat";
 import type {
   CompanyToolClass,
@@ -26,21 +6,61 @@ import type {
 } from "@grasp-os/shared/connect";
 import type { StephenReach } from "@grasp-os/shared/stephen-reach";
 import type { StephenWeek } from "@grasp-os/shared/stephen-requests";
+import { BrandIcon } from "@grasp-os/ui/components/brand-icon";
+import { Button } from "@grasp-os/ui/components/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@grasp-os/ui/components/dropdown-menu";
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+} from "@grasp-os/ui/components/empty";
+import { FieldGroup } from "@grasp-os/ui/components/field";
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import {
+  Sheet,
+  SheetBody,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@grasp-os/ui/components/sheet";
+import { Switch } from "@grasp-os/ui/components/switch";
+import {
+  Icon,
+  LayoutDashboardIcon,
+  MessageCircleIcon,
+  PlusIcon,
+} from "@grasp-os/ui/lib/icons";
+import type { IconData } from "@grasp-os/ui/lib/icons";
+import { colors, radius, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Link, useRouter } from "@tanstack/react-router";
-import { ChevronRightIcon } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
+import { SectionCard } from "../agents/section-card.tsx";
+import { SettingRow } from "../agents/setting-row.tsx";
 import { changeThenRefresh } from "../change-then-refresh.ts";
-import { AddLogo, AppLogo } from "../connections/app-logo.tsx";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { formatNumber } from "../format.ts";
+import { brands, placeMarks } from "../frame/brands.ts";
 import { useCoreAction } from "../use-core-action.ts";
-import { SettingsSection } from "./settings-parts.tsx";
+import { SeparatedItems } from "../workflows/separated-items.tsx";
 import {
   AudienceControl,
   appAudienceOf,
@@ -60,7 +80,9 @@ import { StephenCard } from "./stephen-card.tsx";
 // per app as a pack, each opening its panel, with its done and failed
 // counts; and the workflows people may start by asking him. Each layer
 // only narrows the one above it; core keeps it and holds him to it from
-// the next message (stephen-reach.ts, tool-classes.ts). Every control
+// the next message (stephen-reach.ts, tool-classes.ts). On the library:
+// each part a compact, flush Section card of rows; what a row means sits
+// behind its info mark; a place or an app opens in a sheet. Every control
 // saves at once and reads the page again. The company's own admins change
 // it; Grasp staff only read it. The prototype's Microsoft 365 demo (its
 // register, leave and expenses) stays behind.
@@ -92,34 +114,42 @@ const appNames: Readonly<Record<string, string>> = {
 /** Places Stephen can be added to, by their chat platform. */
 const addable = ["teams", "slack"] as const;
 
-/**
- * The logos of the places, by their chat platform (`apps/web/public/logos`):
- * microsoft-teams.svg and slack.svg are the gilbarbara/logos set, CC0,
- * through `@iconify-json/logos`, as the prototype bundles them. The
- * trademarks stay with their owners; they are shown only to name the place.
- */
-const placeLogos: Readonly<Record<string, string>> = {
-  teams: "/logos/microsoft-teams.svg",
-  slack: "/logos/slack.svg",
+/** The product's marks for the places and apps on this page, by their id. */
+const marks: Readonly<Record<string, IconData>> = {
+  ...placeMarks,
+  microsoft: brands.microsoft.logo,
+  google: brands.google.logo,
 };
 
-/** A place's logo, as a tile beside its name. */
-const PlaceLogo = ({
-  place,
-  size = "xs",
-}: {
-  place: string;
-  size?: "xs" | "default";
-}) => (
-  <AppLogo
-    logo={placeLogos[place] ?? null}
-    name={placeName(place)}
-    size={size}
-  />
-);
+/** Whether the product has a mark for `key`. */
+const isBrand = (key: string): boolean => Object.hasOwn(marks, key);
 
-/** One setting's row: its name and what it means, then its control. */
-export const Row = ({
+/** A place's mark as an icon, for a row that takes one: a chat's for a place Grasp has no mark for. */
+const placeIcon = (place: string): IconData =>
+  marks[place] ?? MessageCircleIcon;
+
+const styles = stylex.create({
+  // The fact under a row's name, after its dot.
+  line: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: space["2"],
+    minWidth: 0,
+  },
+  dot: {
+    width: space["2"],
+    height: space["2"],
+    flexShrink: 0,
+    borderRadius: radius.circle,
+    borderStyle: "solid",
+    borderWidth: size.hairline,
+    borderColor: colors.mutedForeground,
+  },
+  dotOn: { backgroundColor: colors.foreground, borderColor: colors.foreground },
+});
+
+/** One setting's row: its name, what it means behind its info mark, then its control. */
+const Row = ({
   name,
   description,
   children,
@@ -128,73 +158,75 @@ export const Row = ({
   description?: string;
   children: ReactNode;
 }) => (
-  <li className="flex flex-col gap-3 border-t px-5 py-4 sm:flex-row sm:items-start sm:justify-between sm:gap-8">
-    <span className="flex min-w-0 flex-col gap-0.5">
-      <span>{name}</span>
-      {description === undefined ? null : (
-        <span className="text-muted-foreground">{description}</span>
-      )}
-    </span>
-    <span className="flex flex-none flex-col gap-3 sm:items-end">
-      {children}
-    </span>
-  </li>
+  <SettingRow info={description} label={name}>
+    {children}
+  </SettingRow>
 );
 
 /** Whether he is on in a place, as a dot before its line, as the prototype's places have it. */
 const stateDot = {
-  on: "bg-foreground size-2 flex-none rounded-full",
-  off: "border-muted-foreground size-2 flex-none rounded-full border",
+  on: [styles.dot, styles.dotOn],
+  off: [styles.dot],
 } as const;
 
 /**
- * A row that opens its panel: a logo, a name, one fact, and the chevron.
+ * A row that opens its panel: a mark, a name, one fact, and the chevron.
  * A place's fact has a dot before it: filled where he is on there, hollow
- * where he is off.
+ * where he is off. The mark is `logo`, or `icon` where Grasp has no logo.
  */
-export const OpenRow = ({
+const OpenRow = ({
   logo,
+  icon,
   name,
   line,
   state,
   onOpen,
 }: {
-  logo: ReactNode;
+  logo?: ReactNode;
+  icon?: IconData;
   name: string;
   line: string;
   state?: keyof typeof stateDot;
   onOpen?: () => void;
-}) => (
-  <li>
-    <Item
-      onClick={onOpen}
-      render={
-        onOpen === undefined ? undefined : (
-          // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- the row's name and line are its words, as the Item's children
-          <button type="button" />
-        )
-      }
-      variant="row"
-    >
-      {logo}
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate font-medium">{name}</span>
-        <span className="text-muted-foreground flex min-w-0 items-center gap-1.5">
-          {state === undefined ? null : (
-            <span aria-hidden="true" className={stateDot[state]} />
-          )}
-          <span className="truncate">{line}</span>
-        </span>
-      </span>
-      {onOpen === undefined ? null : (
-        <ChevronRightIcon
-          aria-hidden="true"
-          className="text-muted-foreground size-4 flex-none"
-        />
+}) => {
+  const parts = (
+    <>
+      {icon === undefined ? (
+        <ItemMedia align="center">{logo}</ItemMedia>
+      ) : (
+        <ItemMedia variant="default">
+          <Icon icon={icon} />
+        </ItemMedia>
       )}
+      <ItemContent>
+        <ItemTitle>{name}</ItemTitle>
+        <ItemDescription>
+          <span {...stylex.props(styles.line)}>
+            {state === undefined ? null : (
+              <span aria-hidden="true" {...stylex.props(stateDot[state])} />
+            )}
+            {line}
+          </span>
+        </ItemDescription>
+      </ItemContent>
+    </>
+  );
+  return onOpen === undefined ? (
+    <Item size="sm">{parts}</Item>
+  ) : (
+    <Item onClick={onOpen} size="sm">
+      {parts}
     </Item>
-  </li>
-);
+  );
+};
+
+/** A brand's mark on a row, or nothing where Grasp has none. */
+const markOf = (key: string): ReactNode => {
+  const logo = marks[key];
+  return logo === undefined ? undefined : (
+    <BrandIcon decorative logo={logo} name={key} tile={false} />
+  );
+};
 
 /** What a page change asks of core, then the page read again. */
 type Change = (action: (session: Session) => Promise<unknown>) => Promise<void>;
@@ -222,70 +254,72 @@ const PlacePanel = ({
   const on = place.audience.who !== "nobody";
   return (
     <>
-      <SheetHeader className="mr-8">
+      <SheetHeader>
         <SheetTitle>{name}</SheetTitle>
         <SheetDescription>{on ? t`On` : t`Off`}</SheetDescription>
       </SheetHeader>
-      <ul>
-        <Row
-          description={t`Off, he answers nobody here. A place only ever narrows who he reaches.`}
-          name={t`On in ${name}`}
-        >
-          <Switch
-            aria-label={t`On in ${name}`}
-            checked={on}
-            disabled={!can}
-            onCheckedChange={(next) => {
-              void change(async (session) => {
-                await session.connections.setStephenPlace(
-                  place.place,
-                  next ? { who: "asStephen" } : { who: "nobody" },
-                  place.acts
-                );
-              });
-            }}
-          />
-        </Row>
-        <Row name={t`Who reaches him here`}>
-          <AudienceControl
-            editable={can}
-            key={JSON.stringify(place.audience)}
-            label={t`Who reaches him in ${name}`}
-            offers={["same", "teams", "nobody"]}
-            same={t`As for Stephen`}
-            teams={reach.teams}
-            value={chosenOf(place.audience)}
-            onSave={async (chosen) => {
-              await change(async (session) => {
-                await session.connections.setStephenPlace(
-                  place.place,
-                  placeAudienceOf(chosen),
-                  place.acts
-                );
-              });
-            }}
-          />
-        </Row>
-        <Row
-          description={t`Off, he only answers here: he holds no change for people to confirm.`}
-          name={t`Does things for people here`}
-        >
-          <Switch
-            aria-label={t`Does things for people in ${name}`}
-            checked={place.acts}
-            disabled={!can}
-            onCheckedChange={(acts) => {
-              void change(async (session) => {
-                await session.connections.setStephenPlace(
-                  place.place,
-                  place.audience,
-                  acts
-                );
-              });
-            }}
-          />
-        </Row>
-      </ul>
+      <SheetBody>
+        <FieldGroup>
+          <Row
+            description={t`Off, he answers nobody here. A place only ever narrows who he reaches.`}
+            name={t`On in ${name}`}
+          >
+            <Switch
+              checked={on}
+              disabled={!can}
+              aria-label={t`On in ${name}`}
+              onCheckedChange={(next) => {
+                void change(async (session) => {
+                  await session.connections.setStephenPlace(
+                    place.place,
+                    next ? { who: "asStephen" } : { who: "nobody" },
+                    place.acts
+                  );
+                });
+              }}
+            />
+          </Row>
+          <Row name={t`Who reaches him here`}>
+            <AudienceControl
+              editable={can}
+              key={JSON.stringify(place.audience)}
+              label={t`Who reaches him in ${name}`}
+              offers={["same", "teams", "nobody"]}
+              same={t`As for Stephen`}
+              teams={reach.teams}
+              value={chosenOf(place.audience)}
+              onSave={async (chosen) => {
+                await change(async (session) => {
+                  await session.connections.setStephenPlace(
+                    place.place,
+                    placeAudienceOf(chosen),
+                    place.acts
+                  );
+                });
+              }}
+            />
+          </Row>
+          <Row
+            description={t`Off, he only answers here: he holds no change for people to confirm.`}
+            name={t`Does things for people here`}
+          >
+            <Switch
+              checked={place.acts}
+              disabled={!can}
+              aria-label={t`Does things for people in ${name}`}
+              onCheckedChange={(acts) => {
+                void change(async (session) => {
+                  await session.connections.setStephenPlace(
+                    place.place,
+                    place.audience,
+                    acts
+                  );
+                });
+              }}
+            />
+          </Row>
+        </FieldGroup>
+      </SheetBody>
     </>
   );
 };
@@ -306,45 +340,86 @@ const AppPanel = ({
   const appName = appNames[app.app] ?? app.app;
   return (
     <>
-      <SheetHeader className="mr-8">
+      <SheetHeader>
         <SheetTitle>{appName}</SheetTitle>
         <SheetDescription>
           {t`What he may do in ${appName}, with each person's own sign-in: as for the whole company, or for fewer people.`}
         </SheetDescription>
       </SheetHeader>
-      <ul>
-        {app.classes.map(({ toolClass, audience }) => {
-          const name = i18n._(classNames[toolClass]);
-          return (
-            <Row key={toolClass} name={name}>
-              <AudienceControl
-                editable={can}
-                key={JSON.stringify(audience)}
-                label={t`${name} in ${appName}`}
-                offers={["same", "teams", "nobody"]}
-                same={t`As for the whole company`}
-                teams={reach.teams}
-                value={chosenOf(audience)}
-                onSave={async (chosen) => {
-                  await change(async (session) => {
-                    await session.connections.setAppToolClass(
-                      app.app,
-                      toolClass,
-                      appAudienceOf(chosen)
-                    );
-                  });
-                }}
-              />
-            </Row>
-          );
-        })}
-      </ul>
+      <SheetBody>
+        <FieldGroup>
+          {app.classes.map(({ toolClass, audience }) => {
+            const name = i18n._(classNames[toolClass]);
+            return (
+              <Row key={toolClass} name={name}>
+                <AudienceControl
+                  editable={can}
+                  key={JSON.stringify(audience)}
+                  label={t`${name} in ${appName}`}
+                  offers={["same", "teams", "nobody"]}
+                  same={t`As for the whole company`}
+                  teams={reach.teams}
+                  value={chosenOf(audience)}
+                  onSave={async (chosen) => {
+                    await change(async (session) => {
+                      await session.connections.setAppToolClass(
+                        app.app,
+                        toolClass,
+                        appAudienceOf(chosen)
+                      );
+                    });
+                  }}
+                />
+              </Row>
+            );
+          })}
+        </FieldGroup>
+      </SheetBody>
     </>
   );
 };
 
 /** What is open beside the page: a place or an app. */
 type Opened = { kind: "place" | "app"; id: string } | null;
+
+/** The places he can still be added to, in a menu at the head of their card. */
+const AddPlace = ({
+  places,
+  disabled,
+  change,
+}: {
+  places: readonly (typeof addable)[number][];
+  disabled: boolean;
+  change: Change;
+}) => (
+  <DropdownMenu>
+    <DropdownMenuTrigger asChild disabled={disabled}>
+      <Button size="sm" variant="outline">
+        <Icon icon={PlusIcon} />
+        <Trans>Add a place</Trans>
+      </Button>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="end">
+      {places.map((place) => (
+        <DropdownMenuItem
+          icon={placeIcon(place)}
+          key={place}
+          onSelect={() => {
+            void change(async (session) => {
+              await session.connections.setStephenPlace(
+                place,
+                { who: "asStephen" },
+                true
+              );
+            });
+          }}
+        >
+          {placeName(place)}
+        </DropdownMenuItem>
+      ))}
+    </DropdownMenuContent>
+  </DropdownMenu>
+);
 
 /**
  * Settings › Stephen: his card, his places, and what he may do,
@@ -402,78 +477,56 @@ export const StephenSettings = ({
         week={week}
       />
       <ErrorText>{failure}</ErrorText>
-      <SettingsSection
-        description={t`Each place only narrows who reaches him there, and whether he does things for people there or only answers.`}
+      <SectionCard
+        flush
+        actions={
+          editable && toAdd.length > 0 ? (
+            <AddPlace change={change} disabled={!can} places={toAdd} />
+          ) : undefined
+        }
+        info={t`Each place only narrows who reaches him there, and whether he does things for people there or only answers.`}
         title={t`Where people reach him`}
       >
-        <ul className="border-t">
-          <OpenRow
-            line={t`On · for everyone with Grasp`}
-            logo={<AppLogo logo="/favicon.svg" name="Grasp" />}
-            name={t`Grasp's chat`}
-            state="on"
-          />
-          {reach.places.map((place) => (
-            <OpenRow
-              key={place.place}
-              line={place.audience.who === "nobody" ? t`Off` : t`On`}
-              logo={<PlaceLogo place={place.place} size="default" />}
-              name={placeName(place.place)}
-              onOpen={() => {
-                setOpened({ kind: "place", id: place.place });
-              }}
-              state={place.audience.who === "nobody" ? "off" : "on"}
-            />
-          ))}
-          {editable && toAdd.length > 0 ? (
-            <li>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  disabled={!can}
-                  render={
-                    <Item
-                      render={
-                        // oxlint-disable-next-line jsx-a11y/control-has-associated-label -- "Add a place" is its words, as the trigger's children
-                        <button type="button" />
-                      }
-                      variant="row"
-                    />
+        <SeparatedItems
+          aria-label={t`Where people reach him`}
+          rows={[
+            {
+              key: "grasp",
+              row: (
+                <OpenRow
+                  icon={MessageCircleIcon}
+                  line={t`On · for everyone with Grasp`}
+                  name={t`Grasp's chat`}
+                  state="on"
+                />
+              ),
+            },
+            ...reach.places.map((place) => ({
+              key: place.place,
+              row: (
+                <OpenRow
+                  icon={
+                    isBrand(place.place) ? undefined : placeIcon(place.place)
                   }
-                >
-                  <AddLogo />
-                  <span className="text-muted-foreground">
-                    <Trans>Add a place</Trans>
-                  </span>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
-                  {toAdd.map((place) => (
-                    <DropdownMenuItem
-                      key={place}
-                      onClick={() => {
-                        void change(async (session) => {
-                          await session.connections.setStephenPlace(
-                            place,
-                            { who: "asStephen" },
-                            true
-                          );
-                        });
-                      }}
-                    >
-                      <PlaceLogo place={place} />
-                      {placeName(place)}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </li>
-          ) : null}
-        </ul>
-      </SettingsSection>
-      <SettingsSection
-        description={t`Every tool he has is of one of these kinds. Each is on for whom you choose, in every app.`}
+                  line={place.audience.who === "nobody" ? t`Off` : t`On`}
+                  logo={markOf(place.place)}
+                  name={placeName(place.place)}
+                  onOpen={() => {
+                    setOpened({ kind: "place", id: place.place });
+                  }}
+                  state={place.audience.who === "nobody" ? "off" : "on"}
+                />
+              ),
+            })),
+          ]}
+        />
+      </SectionCard>
+      <SectionCard
+        flush
+        info={t`Every tool he has is of one of these kinds. Each is on for whom you choose, in every app.`}
         title={t`What he may do`}
       >
-        <ul>
+        <FieldGroup controls="fit">
           {classes.map(({ toolClass, audience }) => {
             const name = i18n._(classNames[toolClass]);
             return (
@@ -501,67 +554,76 @@ export const StephenSettings = ({
               </Row>
             );
           })}
-        </ul>
-      </SettingsSection>
-      <SettingsSection
-        description={t`What he can do in each system, as one pack, with each person's own sign-in.`}
+        </FieldGroup>
+      </SectionCard>
+      <SectionCard
+        flush
+        info={t`What he can do in each system, as one pack, with each person's own sign-in.`}
         title={t`Apps`}
       >
-        <ul className="border-t">
-          {reach.apps.map(({ app }) => {
+        <SeparatedItems
+          aria-label={t`Apps`}
+          rows={reach.apps.map(({ app }) => {
             const pack = packs.get(app);
             const done = formatNumber(pack?.done ?? 0);
             const failed = formatNumber(pack?.failed ?? 0);
             const appName = appNames[app] ?? app;
-            return (
-              <OpenRow
-                key={app}
-                line={
-                  pack === undefined
-                    ? t`Not used in the last 30 days`
-                    : t`${done} done · ${failed} failed · 30 days`
-                }
-                logo={<AppLogo logo={`/logos/${app}.svg`} name={appName} />}
-                name={appName}
-                onOpen={() => {
-                  setOpened({ kind: "app", id: app });
-                }}
-              />
-            );
+            return {
+              key: app,
+              row: (
+                <OpenRow
+                  icon={isBrand(app) ? undefined : LayoutDashboardIcon}
+                  line={
+                    pack === undefined
+                      ? t`Not used in the last 30 days`
+                      : t`${done} done · ${failed} failed · 30 days`
+                  }
+                  logo={markOf(app)}
+                  name={appName}
+                  onOpen={() => {
+                    setOpened({ kind: "app", id: app });
+                  }}
+                />
+              ),
+            };
           })}
-        </ul>
-      </SettingsSection>
+        />
+      </SectionCard>
       {workflows === null ? null : (
-        <SettingsSection
-          description={t`People can start these by asking him. A workflow's owner opens it to asking on its page.`}
+        <SectionCard
+          flush
+          info={t`People can start these by asking him. A workflow's owner opens it to asking on its page.`}
           title={t`Workflows`}
         >
           {workflows.length === 0 ? (
-            <div className="border-t">
-              <Empty size="xs">
-                <EmptyHeader>
-                  <EmptyDescription>
-                    <Trans>No workflow is open to asking yet.</Trans>
-                  </EmptyDescription>
-                </EmptyHeader>
-              </Empty>
-            </div>
+            <Empty size="default">
+              <EmptyHeader>
+                <EmptyDescription>
+                  <Trans>No workflow is open to asking yet.</Trans>
+                </EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           ) : (
-            <ul>
-              {workflows.map((workflow) => (
-                <li className="border-t px-5 py-3" key={workflow.id}>
-                  <Link
-                    className="hover:underline"
-                    params={{ workflow: workflow.id }}
-                    to="/workflows/$workflow"
-                  >
-                    {workflow.name}
-                  </Link>
-                </li>
-              ))}
-            </ul>
+            <SeparatedItems
+              aria-label={t`Workflows`}
+              rows={workflows.map((workflow) => ({
+                key: workflow.id,
+                row: (
+                  <Item asChild key={workflow.id} size="sm">
+                    <Link
+                      params={{ workflow: workflow.id }}
+                      to="/workflows/$workflow"
+                    >
+                      <ItemContent>
+                        <ItemTitle>{workflow.name}</ItemTitle>
+                      </ItemContent>
+                    </Link>
+                  </Item>
+                ),
+              }))}
+            />
           )}
-        </SettingsSection>
+        </SectionCard>
       )}
       <Sheet
         onOpenChange={(open) => {
@@ -571,11 +633,7 @@ export const StephenSettings = ({
         }}
         open={openPlace !== undefined || openApp !== undefined}
       >
-        <SheetContent
-          className="overflow-y-auto"
-          closeLabel={t`Close`}
-          size="wide"
-        >
+        <SheetContent size="lg">
           {openPlace === undefined ? null : (
             <PlacePanel
               can={can}

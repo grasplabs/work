@@ -15,7 +15,7 @@ export interface GoalWording {
 }
 
 /** The source of what admins set in Grasp on `day` (an ISO date): one a day. */
-export const goalSourceOf = (day: string): BrainRecordInput => ({
+const goalSourceOf = (day: string): BrainRecordInput => ({
   type: "source",
   id: `src-goals-${day}`,
   kind: "document",

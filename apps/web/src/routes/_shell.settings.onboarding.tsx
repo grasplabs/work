@@ -1,138 +1,37 @@
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemMedia,
-  ItemTitle,
-} from "@grasp-os/app-kit/components/item";
-import { useLingui } from "@lingui/react/macro";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { ArrowRightIcon, CircleDashedIcon } from "lucide-react";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
-import { NotLoadedState } from "../frame/page-states.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
-import {
-  CampaignConcept,
-  isConcept,
-} from "../onboarding/campaign/campaign-page.tsx";
-import { isCampaignState } from "../onboarding/campaign/fixtures.ts";
-import { InterviewsProgress } from "../onboarding/interviews-progress.tsx";
-import { listeningOf } from "../onboarding/setup.ts";
-import {
-  SettingsBody,
-  SettingsError,
-  SettingsLoading,
-  SettingsSection,
-} from "../settings/settings-parts.tsx";
 
-// Settings, Onboarding, for admins: while Stephen talks to the team, where
-// the interviews stand and the links to send, as the onboarding's own step
-// shows them (onboarding/interviews-progress.tsx), here without his voice.
-// Before the interviews are planned, the way to the onboarding; once who
-// works where is in, planning them and sending the links is an open to-do,
-// as when the admin left it for later on the onboarding's last step.
-
-const today = (): string => new Date().toISOString().slice(0, 10);
-
-const OnboardingPage = () => {
-  const { t } = useLingui();
-  const page = Route.useLoaderData();
-  const { concept, state } = Route.useSearch();
-  const title = t`Onboarding`;
-  // Concepts only: the campaign page's concept, as the onboarding shows it, from fixtures.
-  if (concept !== undefined) {
-    return (
-      <SettingsSection title={title}>
-        <CampaignConcept concept={concept} state={state ?? "day3"} />
-      </SettingsSection>
-    );
-  }
-  if (page.state !== "ready") {
-    return (
-      <SettingsSection title={title}>
-        <NotLoadedState heading="h3" page={page} />
-      </SettingsSection>
-    );
-  }
-  const { view, links } = page.data;
-  const now = today();
-  // Who works where is in, but nobody is asked yet: the links wait for the admin.
-  const linksToDo = view.plan === null && view.roster !== null;
-  let step: { step?: "team" | "listening" } = {};
-  if (linksToDo) {
-    step = { step: "team" };
-  } else if (view.plan !== null) {
-    step = { step: "listening" };
-  }
-  return (
-    <SettingsSection
-      action={
-        <Button
-          nativeButton={false}
-          render={<Link search={step} to="/setup" />}
-          size="sm"
-          variant="outline"
-        >
-          {t`Open your onboarding`}
-          <ArrowRightIcon data-icon="inline-end" />
-        </Button>
-      }
-      description={t`While Stephen talks to your team: how far the interviews are, team by team, and everyone’s own link to send.`}
-      title={title}
-    >
-      <SettingsBody>
-        {linksToDo ? (
-          <Item variant="outline">
-            <ItemMedia variant="icon">
-              <CircleDashedIcon />
-            </ItemMedia>
-            <ItemContent>
-              <ItemTitle>{t`To do: let your team know, and send the interview links`}</ItemTitle>
-              <ItemDescription>{t`Stephen talks to nobody until you pick the day the interviews start.`}</ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              <Button
-                nativeButton={false}
-                render={<Link search={{ step: "team" }} to="/setup" />}
-                size="sm"
-              >
-                {t`Do it now`}
-              </Button>
-            </ItemActions>
-          </Item>
-        ) : null}
-        {view.plan === null && !linksToDo ? (
-          <p className="text-muted-foreground">{t`The interviews aren’t planned yet. You plan them at the end of your onboarding.`}</p>
-        ) : null}
-        {view.plan === null ? null : (
-          <InterviewsProgress
-            links={links}
-            listening={listeningOf(view, now)}
-            today={now}
-            view={view}
-          />
-        )}
-      </SettingsBody>
-    </SettingsSection>
-  );
-};
+// Settings, Onboarding, as it was: Settings no longer lists the
+// onboarding's interviews. While they run, from the moment who works where
+// is in until Grasp opens the gate, an old link here leads to where they
+// stand and the links to send, the onboarding's own step (`/setup`, as
+// onboarding/setup-steps.tsx shows them); once they are over, or for anyone
+// they aren't for, to the inbox. The reference sends to the inbox's
+// Interviews item, which the inbox here doesn't have.
 
 export const Route = createFileRoute("/_shell/settings/onboarding")({
-  validateSearch: (search: Record<string, unknown>) => ({
-    ...(isConcept(search.concept) && { concept: search.concept }),
-    ...(isCampaignState(search.state) && { state: search.state }),
-  }),
-  pendingComponent: SettingsLoading,
-  errorComponent: SettingsError,
-  component: OnboardingPage,
-  loader: async ({ context: { core } }) =>
-    await loadFromCore(core, async (session) => {
-      const [view, links] = await Promise.all([
+  loader: async ({ context: { core } }) => {
+    const read = await loadFromCore(core, async (session) => {
+      const [view, programme] = await Promise.all([
         session.onboarding.view(),
-        session.onboarding.links(),
+        session.onboarding.programme(),
       ]);
-      return { view, links };
-    }),
+      return { view, stage: programme?.stage ?? null };
+    });
+    const running =
+      read.state === "ready" &&
+      read.data.stage !== "open" &&
+      (read.data.view.plan !== null || read.data.view.roster !== null);
+    if (running) {
+      // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
+      throw redirect({
+        to: "/setup",
+        search: { step: read.data.view.plan === null ? "team" : "listening" },
+        replace: true,
+      });
+    }
+    // oxlint-disable-next-line typescript/only-throw-error -- the router redirects on a thrown redirect
+    throw redirect({ to: "/inbox", replace: true });
+  },
 });

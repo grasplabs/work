@@ -377,6 +377,17 @@ const press = async (target: HTMLElement | undefined): Promise<void> => {
   await settle();
 };
 
+/**
+ * The open alert dialog's answer whose text starts with `text`: its
+ * text also holds the words it shows while working and when it failed.
+ */
+const answer = (text: string): HTMLButtonElement | undefined =>
+  [
+    ...document.querySelectorAll<HTMLButtonElement>(
+      '[role="alertdialog"] button'
+    ),
+  ].find((each) => each.textContent.startsWith(text));
+
 /** The page's skill editor. */
 const editor = (): HTMLTextAreaElement => {
   const found = document.querySelector("textarea");
@@ -751,7 +762,7 @@ describe("the skills page", () => {
     await click("Save");
     const afterSave = document.activeElement === editor();
     await press(buttons("Delete")[0]);
-    await press(buttons("Delete for good").at(-1));
+    await press(answer("Delete for good"));
 
     expect({
       afterSave,
@@ -764,14 +775,14 @@ describe("the skills page", () => {
     await click("Save");
     const kept = {
       own: document.body.textContent?.includes("quote-a-tender"),
-      said: document.body.textContent?.includes("Out of reach."),
+      said: document.body.textContent?.includes("Grasp can't be reached"),
     };
     await click("Try again");
 
     expect({
       kept,
       calls,
-      said: document.body.textContent?.includes("Out of reach."),
+      said: document.body.textContent?.includes("Grasp can't be reached"),
       offered: buttons("Try again").length,
     }).toStrictEqual({
       kept: { own: true, said: true },
@@ -783,7 +794,9 @@ describe("the skills page", () => {
 
   it("offers Try again when the page can't be read at first, and shows it once it can", async () => {
     const { calls } = await shown({ admin: false, overviewRefusals: [1] });
-    const refused = document.body.textContent?.includes("Out of reach.");
+    const refused = document.body.textContent?.includes(
+      "Grasp can't be reached"
+    );
     await click("Try again");
 
     expect({
@@ -912,11 +925,7 @@ describe("the skills page", () => {
     });
     const text = document.body.textContent ?? "";
     await click("Retire");
-    await press(
-      [...document.querySelectorAll<HTMLElement>("button")].findLast(
-        (each) => each.textContent === "Retire"
-      )
-    );
+    await press(answer("Retire"));
     expect({
       legal: text.includes("Legal, version 2"),
       gone: text.includes("t-3, not added yet"),
@@ -936,9 +945,9 @@ describe("the skills page", () => {
       company: ["file-expenses", "book-travel"],
       replacing: ["book-travel"],
     });
-    const lines = [
-      ...document.querySelectorAll('[data-slot="item-content"]'),
-    ].map((item) => item.textContent);
+    const lines = [...document.querySelectorAll('[data-slot="item"]')].map(
+      (item) => item.textContent
+    );
     expect({
       replacing: lines.some(
         (line) =>

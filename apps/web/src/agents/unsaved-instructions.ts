@@ -1,10 +1,14 @@
+import { failureText } from "@grasp-os/shared/errors";
 import type {
   InstructionFileText,
   InstructionsApi,
 } from "@grasp-os/shared/instruction-files";
 
+import type { Session } from "../core.ts";
+import { workOutQuietly } from "./agent-apps-card.tsx";
+
 // Instructions typed for a new agent that couldn't be saved once the
-// agent was made (new-agent.tsx), handed to the agent's page, which opens
+// agent was made (manual-agent.tsx, new-agent.tsx), handed to the agent's page, which opens
 // on Instructions with them as the editor's unsaved draft and why they
 // weren't saved, so nothing typed is dropped. In this tab's memory alone,
 // until the page's route takes them, which it does only along with the
@@ -22,20 +26,49 @@ export interface UnsavedInstructions {
 const kept = new Map<string, UnsavedInstructions>();
 
 /** Keeps `unsaved` for the agent `agentId`'s page. */
-export const keepUnsaved = (
-  agentId: string,
-  unsaved: UnsavedInstructions
-): void => {
+const keepUnsaved = (agentId: string, unsaved: UnsavedInstructions): void => {
   kept.set(agentId, unsaved);
 };
 
 /** What was kept for the agent `agentId`'s page, once: taken, it is gone. */
-export const takeUnsaved = (
-  agentId: string
-): UnsavedInstructions | undefined => {
+const takeUnsaved = (agentId: string): UnsavedInstructions | undefined => {
   const found = kept.get(agentId);
   kept.delete(agentId);
   return found;
+};
+
+/**
+ * Saves `instructions` as the new agent `agentId`'s instruction file, and
+ * then, unless `workOut` is false (its maker chose its apps), works out
+ * the apps they call for: whether they were saved. Not saved, they are
+ * kept for its page with why (`keepUnsaved`).
+ */
+export const saveFirstInstructions = async (
+  session: Session,
+  agentId: string,
+  instructions: string,
+  { workOut = true }: { workOut?: boolean } = {}
+): Promise<boolean> => {
+  const change = crypto.randomUUID();
+  try {
+    await session.instructions.save({
+      file: { scope: "agent", agentId },
+      change,
+      text: instructions,
+      after: 0,
+    });
+  } catch (error) {
+    keepUnsaved(agentId, {
+      text: instructions,
+      change,
+      failure: failureText(error),
+    });
+    return false;
+  }
+  if (workOut) {
+    await workOutQuietly(session, agentId);
+  }
+  return true;
 };
 
 /**

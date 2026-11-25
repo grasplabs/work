@@ -1,3 +1,6 @@
+import type { ToolClassAudience } from "@grasp-os/shared/connect";
+import type { StephenReach } from "@grasp-os/shared/stephen-reach";
+import type { StephenWeek } from "@grasp-os/shared/stephen-requests";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -7,32 +10,35 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@grasp-os/app-kit/components/alert-dialog";
-import { Button } from "@grasp-os/app-kit/components/button";
-import { Switch } from "@grasp-os/app-kit/components/switch";
+} from "@grasp-os/ui/components/alert-dialog";
+import { Button } from "@grasp-os/ui/components/button";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/app-kit/components/tooltip";
-import { cn } from "@grasp-os/app-kit/lib/utils";
-import type { ToolClassAudience } from "@grasp-os/shared/connect";
-import type { StephenReach } from "@grasp-os/shared/stephen-reach";
-import type { StephenWeek } from "@grasp-os/shared/stephen-requests";
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+} from "@grasp-os/ui/components/empty";
+import {
+  FieldGroup,
+  FieldLegend,
+  FieldSet,
+} from "@grasp-os/ui/components/field";
+import { Switch } from "@grasp-os/ui/components/switch";
+import { Text } from "@grasp-os/ui/components/text";
+import { colors, radius, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { useRouteContext } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { SectionCard } from "../agents/section-card.tsx";
+import { FactRow, SettingRow } from "../agents/setting-row.tsx";
 import { setActiveChat } from "../chat/active-chat.ts";
 import { openChat } from "../chat/chat-layout.ts";
 import { readChoice, resolveChoice } from "../chat/model-choice.ts";
 import type { Session } from "../core.ts";
-import { ErrorText } from "../error-text.tsx";
 import { formatNumber, formatPercent } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
-import { SettingsRow, SettingsSection } from "./settings-parts.tsx";
 import { AudienceControl, audienceOf, chosenOf } from "./stephen-audience.tsx";
-import { StephenAvatar } from "./stephen-avatar.tsx";
 
 // Stephen himself, on top of Settings › Stephen, as the prototype's
 // `components/stephen/stephen-card.tsx`: his name, whether he is on
@@ -41,38 +47,68 @@ import { StephenAvatar } from "./stephen-avatar.tsx";
 // asked that he did not know, with the role to ask. Counts only: never
 // what anyone wrote, and never per person.
 
-/** A bar's height by its share of the tallest week: static classes, no inline style. */
-const barHeights = [
-  "h-1",
-  "h-1.5",
-  "h-2",
-  "h-3",
-  "h-4",
-  "h-5",
-  "h-6",
-  "h-7",
-  "h-8",
-  "h-9",
-  "h-10",
+const styles = stylex.create({
+  // People who asked, a bar per week, along the row's end.
+  bars: {
+    display: "flex",
+    alignItems: "flex-end",
+    gap: space["1"],
+    height: space["10"],
+    flexShrink: 0,
+  },
+  bar: {
+    width: space["3"],
+    borderRadius: radius.sm,
+    backgroundColor: colors.subtleForeground,
+  },
+  // This week, in ink.
+  barNow: { backgroundColor: colors.foreground },
+  // The switch and the words that say how he stands, in the card's head.
+  state: { display: "inline-flex", alignItems: "center", gap: space["3"] },
+});
+
+/** A bar's height by its share of the tallest week, from the spacing scale. */
+const barHeights = stylex.create({
+  h1: { height: space["1"] },
+  h2: { height: space["2"] },
+  h3: { height: space["3"] },
+  h4: { height: space["4"] },
+  h5: { height: space["5"] },
+  h6: { height: space["6"] },
+  h7: { height: space["7"] },
+  h8: { height: space["8"] },
+  h10: { height: space["10"] },
+});
+
+const barSteps = [
+  barHeights.h1,
+  barHeights.h2,
+  barHeights.h3,
+  barHeights.h4,
+  barHeights.h5,
+  barHeights.h6,
+  barHeights.h7,
+  barHeights.h8,
+  barHeights.h10,
 ] as const;
+
+/** The step of a week's bar: its share of the tallest week. */
+const barStep = (people: number, most: number) =>
+  barSteps[Math.round((people / most) * (barSteps.length - 1))];
 
 /** People who asked him something, a bar per week, this week in ink. The words beside it say the numbers. */
 const WeekBars = ({ weeks }: { weeks: StephenWeek["weeks"] }) => {
   const most = Math.max(1, ...weeks.map(({ people }) => people));
   return (
-    <div aria-hidden="true" className="flex h-10 flex-none items-end gap-1">
+    <div aria-hidden="true" {...stylex.props(styles.bars)}>
       {weeks.map((each, index) => (
         <span
-          className={cn(
-            "w-3 rounded-xs",
-            barHeights[
-              Math.round((each.people / most) * (barHeights.length - 1))
-            ],
-            index === weeks.length - 1
-              ? "bg-foreground"
-              : "bg-muted-foreground/40"
-          )}
           key={each.week}
+          {...stylex.props(
+            styles.bar,
+            barStep(each.people, most),
+            index === weeks.length - 1 && styles.barNow
+          )}
         />
       ))}
     </div>
@@ -84,9 +120,11 @@ const Usage = ({ week }: { week: StephenWeek }) => {
   const { t } = useLingui();
   if (week.questions === 0) {
     return (
-      <p className="text-muted-foreground border-t px-5 py-3">
-        <Trans>Nobody asked him anything yet.</Trans>
-      </p>
+      <Empty size="sm">
+        <EmptyHeader>
+          <EmptyDescription>{t`Nobody asked him anything yet.`}</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
     );
   }
   const asked = formatNumber(week.asked);
@@ -95,20 +133,13 @@ const Usage = ({ week }: { week: StephenWeek }) => {
   const answered = formatNumber(week.answered);
   const questions = formatNumber(week.questions);
   return (
-    <div className="flex items-center gap-5 border-t px-5 py-4">
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <p className="font-medium">{t`${asked} of ${reach} asked him this week`}</p>
-        <Tooltip>
-          <TooltipTrigger
-            render={<p className="text-muted-foreground w-fit" />}
-          >
-            {t`${share} of questions answered · 30 days`}
-          </TooltipTrigger>
-          <TooltipContent>{t`${answered} of ${questions} questions`}</TooltipContent>
-        </Tooltip>
-      </div>
+    <FactRow
+      help={t`${share} of questions answered · 30 days`}
+      info={t`${answered} of ${questions} questions`}
+      label={t`${asked} of ${reach} asked him this week`}
+    >
       <WeekBars weeks={week.weeks} />
-    </div>
+    </FactRow>
   );
 };
 
@@ -182,16 +213,13 @@ const UnknownRow = ({ row }: { row: StephenWeek["unanswered"][number] }) => {
   const { wording } = row;
   const { role } = row;
   return (
-    <li className="flex items-start gap-3 py-2">
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span>{wording}</span>
-        <span className="text-muted-foreground">
-          {role === null
-            ? t`${asked} asked`
-            : t`${asked} asked · ${role} knows`}
-        </span>
-        <ErrorText>{failure}</ErrorText>
-      </div>
+    <SettingRow
+      error={failure}
+      help={
+        role === null ? t`${asked} asked` : t`${asked} asked · ${role} knows`
+      }
+      label={wording}
+    >
       <Button
         disabled={busy}
         onClick={() => {
@@ -207,7 +235,7 @@ const UnknownRow = ({ row }: { row: StephenWeek["unanswered"][number] }) => {
       >
         {role === null ? t`Ask` : t`Ask the ${role}`}
       </Button>
-    </li>
+    </SettingRow>
   );
 };
 
@@ -226,16 +254,18 @@ export const StephenCard = ({
   const { t } = useLingui();
   const [pausing, setPausing] = useState(false);
   return (
-    <SettingsSection
-      action={
-        <span className="flex items-center gap-3">
-          <span className="text-muted-foreground">
-            {reach.on ? t`On` : t`Paused outside Grasp`}
-          </span>
+    <SectionCard
+      flush
+      title={t`Outside Grasp`}
+      actions={
+        <span {...stylex.props(styles.state)}>
+          <Text as="span" size="sm" color="muted">
+            {reach.on ? t`On` : t`Paused`}
+          </Text>
           <Switch
-            aria-label={t`Stephen outside Grasp`}
             checked={reach.on}
             disabled={!can}
+            aria-label={t`Stephen outside Grasp`}
             onCheckedChange={(on) => {
               if (on) {
                 void onReach(true, reach.audience);
@@ -246,34 +276,32 @@ export const StephenCard = ({
           />
         </span>
       }
-      media={<StephenAvatar />}
-      title="Stephen"
     >
-      <SettingsRow label={t`Who can talk to him`}>
-        <AudienceControl
-          editable={can}
-          key={JSON.stringify(reach.audience)}
-          label={t`Who can talk to him`}
-          offers={["everyone", "teams", "nobody"]}
-          teams={reach.teams}
-          value={chosenOf(reach.audience)}
-          onSave={async (chosen) => {
-            await onReach(reach.on, audienceOf(chosen));
-          }}
-        />
-      </SettingsRow>
-      {week === null ? null : <Usage week={week} />}
+      <FieldGroup controls="fit">
+        <SettingRow label={t`Who can talk to him`}>
+          <AudienceControl
+            editable={can}
+            key={JSON.stringify(reach.audience)}
+            label={t`Who can talk to him`}
+            offers={["everyone", "teams", "nobody"]}
+            teams={reach.teams}
+            value={chosenOf(reach.audience)}
+            onSave={async (chosen) => {
+              await onReach(reach.on, audienceOf(chosen));
+            }}
+          />
+        </SettingRow>
+        {week === null ? null : <Usage week={week} />}
+      </FieldGroup>
       {week === null || week.unanswered.length === 0 ? null : (
-        <div className="border-t px-5 pt-3 pb-1">
-          <h3 className="text-muted-foreground">
-            <Trans>What he didn’t know</Trans>
-          </h3>
-          <ul>
+        <FieldSet>
+          <FieldLegend variant="label">{t`What he didn’t know`}</FieldLegend>
+          <FieldGroup>
             {week.unanswered.map((row) => (
               <UnknownRow key={row.question} row={row} />
             ))}
-          </ul>
-        </div>
+          </FieldGroup>
+        </FieldSet>
       )}
       <AlertDialog onOpenChange={setPausing} open={pausing}>
         <AlertDialogContent>
@@ -289,19 +317,18 @@ export const StephenCard = ({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>
-              <Trans>Cancel</Trans>
-            </AlertDialogCancel>
+            <AlertDialogCancel />
             <AlertDialogAction
               onClick={() => {
                 void onReach(false, reach.audience);
               }}
+              variant="default"
             >
-              <Trans>Pause</Trans>
+              {t`Pause`}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </SettingsSection>
+    </SectionCard>
   );
 };

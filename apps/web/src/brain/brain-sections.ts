@@ -1,15 +1,12 @@
-import type { MessageDescriptor } from "@lingui/core";
-import { msg } from "@lingui/core/macro";
 import {
-  AppWindowIcon,
-  CircleDashedIcon,
-  LibraryIcon,
-  TargetIcon,
+  FileDocIcon,
+  RocketIcon,
   UsersIcon,
   WorkflowIcon,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+} from "@grasp-os/ui/lib/icons";
+import type { IconData } from "@grasp-os/ui/lib/icons";
 
+import { AppWindowIcon, CircleHelpIcon } from "../frame/sidebar-icons.ts";
 import type { Folder, Group, Note } from "./brain.ts";
 
 // The parts of the brain, as the prototype has them
@@ -22,8 +19,7 @@ export interface BrainSection {
   /** Its folder's id in `Note.path`, joined with "/". */
   key: string;
   group: Group;
-  icon: LucideIcon;
-  description: MessageDescriptor;
+  icon: IconData;
 }
 
 export const brainSections: BrainSection[] = [
@@ -31,43 +27,37 @@ export const brainSections: BrainSection[] = [
     slug: "vision",
     key: "1 Vision",
     group: "vision",
-    icon: TargetIcon,
-    description: msg`What the board wants from the sprint: its goals and the rules of the road.`,
+    icon: RocketIcon,
   },
   {
     slug: "teams",
     key: "2 Inventory/Teams",
     group: "teams",
     icon: UsersIcon,
-    description: msg`Every team Grasp spoke to: who they are, how they work and what slows them down.`,
   },
   {
     slug: "workflows",
     key: "2 Inventory/Candidates",
     group: "candidates",
     icon: WorkflowIcon,
-    description: msg`Time-consuming work that could be automated, and what was said about each.`,
   },
   {
     slug: "tools",
     key: "2 Inventory/Tools",
     group: "tools",
     icon: AppWindowIcon,
-    description: msg`The apps teams named, and the ones seen in use that nobody mentioned.`,
   },
   {
     slug: "gaps",
     key: "2 Inventory/Gaps",
     group: "gaps",
-    icon: CircleDashedIcon,
-    description: msg`What Grasp does not know yet, and who can answer it.`,
+    icon: CircleHelpIcon,
   },
   {
     slug: "sources",
     key: "Sources",
     group: "sources",
-    icon: LibraryIcon,
-    description: msg`Where everything came from: conversations, documents, Pulse and connections.`,
+    icon: FileDocIcon,
   },
 ];
 
@@ -84,18 +74,8 @@ export const findFolder = (folder: Folder, key: string): Folder | undefined => {
   return undefined;
 };
 
-/** The part a note sits in, from its folders. */
-export const sectionOf = (
-  note: Pick<Note, "path">
-): BrainSection | undefined => {
-  const key = note.path.join("/");
-  return brainSections.find(
-    (section) => key === section.key || key.startsWith(`${section.key}/`)
-  );
-};
-
 /** A run of notes under one heading on a part's page; the first run has no heading. */
-export interface NoteGroup {
+interface NoteGroup {
   key: string;
   name?: string;
   /** The group's own page, such as a source folder's. */

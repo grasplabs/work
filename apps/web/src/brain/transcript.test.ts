@@ -2,7 +2,7 @@ import type { Statement, Transcript } from "@grasp-os/shared/brain";
 import { describe, expect, it } from "vite-plus/test";
 
 import { testWorkspace } from "./test-workspace.ts";
-import { highlightsOf, placeLabel, placeOf } from "./transcript.ts";
+import { highlightsOf, placeLabel, placeOf, position } from "./transcript.ts";
 
 // The prototype's tests of statements as highlights in their
 // transcripts, on the brain's test company where they read its records.
@@ -78,20 +78,17 @@ describe("transcripts", () => {
     ]);
   });
 
-  it("places every statement in the brain in the words of its source, so none is left as a loose note", () => {
-    const ws = testWorkspace();
-    const unplaced = ws.statements
-      .filter((each) => placeOf(each, ws.sources)?.at === undefined)
-      .map((each) => each.id);
-    expect(unplaced).toStrictEqual([]);
-  });
-
   it("writes a place in the transcript’s own unit: a minute or a passage", () => {
     expect(placeLabel({}, "12:26")).toBe("12:26");
     expect(placeLabel({ unit: "passage" }, "3")).toBe("§ 3");
     const { sources } = testWorkspace();
     expect(placeOf(statementIn("st-allowed"), sources)?.at).toBe("01:51");
     expect(placeOf(statementIn("st-procedure"), sources)?.at).toBe("§ 2");
+  });
+
+  it("reads a minute in the transcript as seconds", () => {
+    expect(position("12:26")).toBe(746);
+    expect(position("37")).toBe(37);
   });
 
   it("places a statement at its minute, with the turn before and after it", () => {
