@@ -183,6 +183,24 @@ const holdingWhatWasRead = () =>
 const workingLine = () =>
   spoken(document.querySelector('[data-slot="shimmer"]'));
 
+/**
+ * Where the working mark on the line over the answer stands: in the mark's
+ * place before its words, as a step's mark does; inside its words; or none.
+ */
+const markOnLine = () => {
+  const line = document.querySelector(
+    '[data-slot="chain-of-thought"] button[aria-expanded] > [data-slot="trace-line"]'
+  );
+  const mark = line?.querySelector('[data-slot="agent-indicator"]');
+  if (mark === null || mark === undefined) {
+    return "none";
+  }
+  return mark.closest('[data-slot="trace-title"]') === null &&
+    mark.closest('[data-slot="trace-icon"]') === line?.firstElementChild
+    ? "in the mark's place"
+    : "in the words";
+};
+
 /** The answer's steps, in order: each step's words. */
 const stepLines = () =>
   [
@@ -525,6 +543,34 @@ describe(ChatThread, () => {
     expect({ checking, otherwise: workingLine() }).toStrictEqual({
       checking: "Checking the App…",
       otherwise: "Working on it",
+    });
+  });
+
+  it("shows the working mark in the line's own mark place while it works closed, and none on the line once open", async () => {
+    await thread(
+      [
+        asked,
+        {
+          id: 2,
+          role: "assistant",
+          text: "Let me check.",
+          code: [],
+          tools: [],
+          end: "done",
+          at: "2026-10-27T09:00:05.000Z",
+        },
+      ],
+      null,
+      [],
+      undefined,
+      false
+    );
+    const closed = markOnLine();
+    await openSteps();
+
+    expect({ closed, open: markOnLine() }).toStrictEqual({
+      closed: "in the mark's place",
+      open: "none",
     });
   });
 

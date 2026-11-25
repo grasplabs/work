@@ -14,6 +14,7 @@ export type {
   ConnectorDeclaration,
   ConnectorReader,
   ConnectorTool,
+  DefinedConnector,
   EventDeclaration,
   SyncDeclaration,
   ToolArgs,
@@ -112,8 +113,11 @@ export type {
 export {
   accountLookupSchema,
   endpointHost,
+  keyHeaderSchema,
+  plainEndpointSchema,
   reservedAuthorizationParams,
   signInSchema,
+  signInScopesSchema,
 } from "./sign-in.ts";
 export { addressesOf } from "./mail-addresses.ts";
 export type { Address } from "./mail-addresses.ts";

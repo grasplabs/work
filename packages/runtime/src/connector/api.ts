@@ -70,16 +70,26 @@ export interface Api {
 
 const routeText = /^(?<method>[A-Z]+) (?<target>\S+)$/u;
 
+/** A base path: literal segments, each after a slash, none a dot segment. */
+const basePath = /^(?:\/(?!\.\.?(?:\/|$))[\w.~-]+)+$/u;
+
 const isRouteMethod = (method: string): method is RouteMethod =>
   httpMethods.some((each) => each === method);
 
 /**
- * The route `text` names on the connector's `hosts`: a path on its only
- * host (`GET /v1/items`), or on the host it names
- * (`GET api.example.com/v1/items`). Throws when it names neither; the
- * manifest checks the path.
+ * The route `text` names on the connector's `hosts`, under its `base`
+ * path: a path on its only host (`GET /items`), or on the host it names
+ * (`GET api.example.com/items`), with `base` in front. Throws when it
+ * names neither, or `base` isn't a path; the manifest checks the path.
  */
-export const routeOf = (text: string, hosts: readonly string[]): Route => {
+export const routeOf = (
+  text: string,
+  hosts: readonly string[],
+  base = ""
+): Route => {
+  if (base !== "" && !basePath.test(base)) {
+    throw new Error(`"${base}" is not a base path: /api/v2`);
+  }
   const { method = "", target = "" } = routeText.exec(text)?.groups ?? {};
   if (!isRouteMethod(method)) {
     throw new Error(`"${text}" is not a route: METHOD /path`);
@@ -89,14 +99,14 @@ export const routeOf = (text: string, hosts: readonly string[]): Route => {
     if (hosts.length !== 1 || onlyHost === undefined) {
       throw new Error(`"${text}" names no host, and the connector has several`);
     }
-    return { method, host: onlyHost, path: target };
+    return { method, host: onlyHost, path: `${base}${target}` };
   }
   const slash = target.indexOf("/");
   const host = target.slice(0, Math.max(slash, 0));
   if (slash === -1 || !hosts.includes(host)) {
     throw new Error(`"${text}" names a host the connector doesn't list`);
   }
-  return { method, host, path: target.slice(slash) };
+  return { method, host, path: `${base}${target.slice(slash)}` };
 };
 
 const parameter = /\{(?<name>[A-Za-z_]\w*)\}/gu;
@@ -196,12 +206,14 @@ const answerOf = <Returns extends AnySchema | undefined>(
 
 /**
  * The API one call of a tool may use: its `routes` on the connector's
- * `hosts`, at the vendor called `name` in the errors a caller sees.
+ * `hosts` under its `base`, at the vendor called `name` in the errors a
+ * caller sees.
  */
 export const apiFor = (
   name: string,
   hosts: readonly string[],
-  routes: readonly Route[]
+  routes: readonly Route[],
+  base = ""
 ): { api: Api; wrote: () => boolean } => {
   const vendor = providerFetch({
     name,
@@ -232,7 +244,7 @@ export const apiFor = (
     ): Promise<ApiAnswer<Returns>> => {
       let target: Route;
       try {
-        target = routeOf(`${method} ${route}`, hosts);
+        target = routeOf(`${method} ${route}`, hosts, base);
       } catch {
         throw refused(`${method} ${route} isn't one of the tool's routes`);
       }

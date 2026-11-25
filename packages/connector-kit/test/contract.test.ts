@@ -836,10 +836,11 @@ describe("generated contracts", () => {
         toolNamed("items.list"),
         toolNamed("items.get"),
         toolNamed("people.find"),
-        // No family, or an action name a declaration can't list: in no
-        // contract, so neither served by connect nor in the SDK's catalog.
-        toolNamed("ping"),
+        // A family is the name but its last part, which may hold dots.
         toolNamed("items.archive.all"),
+        // No family: in no contract, so neither served by connect nor in
+        // the SDK's catalog.
+        toolNamed("ping"),
       ],
     });
     expect(
@@ -853,6 +854,7 @@ describe("generated contracts", () => {
       )
     ).toStrictEqual({
       "example.items@1": { list: "items.list", get: "items.get" },
+      "example.items.archive@1": { all: "items.archive.all" },
       "example.people@1": { find: "people.find" },
     });
   });

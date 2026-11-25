@@ -70,7 +70,7 @@ const endpointSchema = z
  * nothing to mix it into, or the authorization endpoint, whose parameters
  * are connect's and the record's `authorizationParams`, every one checked.
  */
-const plainEndpointSchema = endpointSchema.refine(
+export const plainEndpointSchema = endpointSchema.refine(
   (value) => urlOf(value)?.search === "",
   "An endpoint without a query string"
 );
@@ -138,6 +138,9 @@ export type AccountLookup = z.infer<typeof accountLookupSchema>;
 /** A display name, as the catalog will show it. */
 const appNameSchema = z.string().min(1).max(64);
 
+/** Exactly what connect asks for: the connector's scopes are among them. */
+export const signInScopesSchema = z.array(scopeSchema).min(1).max(64);
+
 /**
  * OAuth 2.0's authorization code grant with PKCE (S256) and refresh
  * tokens, with Grasp's own app at the provider (its credentials are the
@@ -151,8 +154,7 @@ const oauth2SignInSchema = z
     tokenEndpoint: plainEndpointSchema,
     /** RFC 7009; without one, disconnecting deletes the tokens only. */
     revocationEndpoint: plainEndpointSchema.optional(),
-    /** Exactly what connect asks for: the connector's scopes are among them. */
-    scopes: z.array(scopeSchema).min(1).max(64),
+    scopes: signInScopesSchema,
     /** How the scopes are joined: RFC 6749 says a space; some apps a comma. */
     scopeSeparator: z.enum([" ", ","]).default(" "),
     /** Parameters the authorization request adds to connect's own. */
@@ -191,7 +193,7 @@ const refusedKeyHeaders: ReadonlySet<string> = new Set([
   "grasp-egress",
 ]);
 
-const keyHeaderSchema = z
+export const keyHeaderSchema = z
   .string()
   .regex(/^[a-z][a-z0-9-]{0,63}$/u)
   .refine(
