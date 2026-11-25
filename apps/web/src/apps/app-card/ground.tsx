@@ -3,13 +3,14 @@ import { motionVars } from "@grasp-os/ui/lib/vars.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useState } from "react";
 
-import { sceneKinds } from "./scenes.ts";
-import type { Scene } from "./scenes.ts";
+import { sceneKinds } from "../../chat/backdrop/look.ts";
+import type { BackdropScene as Scene } from "../../chat/backdrop/look.ts";
 
-// An App card's drawn ground: one of the backdrop's scenes (shader.ts), dithered
+// An App card's drawn ground: one of the backdrop's scenes (chat/backdrop/shader.ts), dithered
 // from night to lime and turned to a hue of its own, drawn once as a still picture when the card
 // first comes into view and never again. The page's grounds draw one at a time, so they hold one
-// WebGL context at most.
+// WebGL context at most. The backdrop's own still drawer, as the reference's cards use theirs,
+// from each scene's small picture.
 
 /** The hues a drawn ground can be turned to; left out, the light's own green. */
 export type AppCardGroundHue = "rose" | "coral" | "olive" | "teal";
@@ -139,11 +140,20 @@ const drawGround = async (
   keepPicture: (picture: string | null) => void
 ) => {
   // Loaded only once a ground first comes into view.
-  const { stillPictureOf } = await import("./shader.ts");
+  const { stillPictureOf } = await import("../../chat/backdrop/shader.ts");
   const { width, height } = box.getBoundingClientRect();
   stillPictureOf(
     scene,
-    { scenes: SCENES, width, height, palette: paletteOf(box) },
+    // A scene draws no dither: its pattern and tone are not read.
+    { pattern: "bayer", tone: "light" },
+    {
+      scenes: SCENES,
+      small: true,
+      width,
+      height,
+      palette: paletteOf(box),
+      flat: getComputedStyle(box).color,
+    },
     keepPicture
   );
 };

@@ -1,8 +1,8 @@
-import type { InterviewLocale as Locale } from "@grasp-os/shared/onboarding";
+import type { InterviewLocale as Locale } from "../onboarding.ts";
 
 /**
  * Stephen himself: who he is, how he talks, how an interview goes and what he follows up on, as
- * one text for the model that makes him speak (`interview.ts`). What he does when he asks for an
+ * one text for the model that makes him speak (core's `onboarding/interview.ts`). What he does when he asks for an
  * example and when he goes to the read-back is said by the caller (`partsOf`). Its examples are
  * about invoices on purpose: no answer key in the Stephen Lab is about those, so an example is
  * never taken for something that was said.

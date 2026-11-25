@@ -1,6 +1,7 @@
 import type { AuditActor } from "@grasp-os/shared/audit";
 import { oauthProviderSchema } from "@grasp-os/shared/connect";
 import type { OAuthProvider } from "@grasp-os/shared/connect";
+import { NAMED } from "@grasp-os/shared/interviewers/stephen";
 import {
   kickoffErrors,
   kickoffTeamNameMaxLength,
@@ -33,7 +34,6 @@ import { z } from "zod";
 import { ExtractorUnavailableError, localExtractor } from "../files/extract.ts";
 import type { LocalExtractorEnv } from "../files/extract.ts";
 import { modelSettings, modelForRole, models } from "../models.ts";
-import { NAMED } from "./stephen.ts";
 
 // The kickoff, read for the ten things Stephen needs before his first
 // interview (GRA-318), from the prototype's `worker/first-conversation.ts`
