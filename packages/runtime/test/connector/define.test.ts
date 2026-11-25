@@ -142,6 +142,24 @@ const findByWriting = tool({
     }),
 });
 
+/** A write that, wrongly, holds a read's refusal and throws it after its write. */
+const throwAfterWrite = tool({
+  description: "Reads the stock, sets it, then fails as the read did",
+  readOnly: false,
+  reach: "company",
+  routes: ["GET /v1/stock/{sku}", "PUT /v1/stock/{sku}"],
+  args: { sku: v.string() },
+  returns: Stock,
+  handler: async ({ sku }, api) => {
+    const read = await api
+      .get("/v1/stock/{sku}", { path: { sku } })
+      .then(() => {})
+      .catch((error: unknown) => error);
+    await api.put("/v1/stock/{sku}", { path: { sku }, body: { onHand: 1 } });
+    throw read;
+  },
+});
+
 /** A write whose vendor answers it with text. */
 const deleteStock = tool({
   description: "Deletes one product's stock",
@@ -181,6 +199,7 @@ const stock = defineConnector({
     "stock.writeDuringRead": writeDuringRead,
     "stock.findByWriting": findByWriting,
     "stock.delete": deleteStock,
+    "stock.throwAfterWrite": throwAfterWrite,
   },
 });
 
@@ -387,8 +406,12 @@ describe("a connector's definition", () => {
         events: { restocked },
         syncs,
       });
+    const writing = { ...products };
+    // As plain JavaScript could declare it: its types say GET.
+    Reflect.set(writing, "routes", ["POST /v1/stock"]);
     expect(() => withSyncs({ products })).not.toThrow();
     expect(() => withSyncs({ products: offHosts })).toThrow("doesn't list");
+    expect(() => withSyncs({ products: writing })).toThrow("only reads");
   });
 
   it("makes the manifest connect decides by: its sign-in, routes, recovery and resource", () => {
@@ -421,27 +444,36 @@ describe("a call of a tool", () => {
   });
 
   it("sends its declared route, each path parameter one encoded segment, and answers the vendor's data", async () => {
-    vendorAnswers(Response.json({ sku: "a/b", onHand: 3 }));
-    const result = await call("stock.get", { sku: "a/b" });
+    vendorAnswers(Response.json({ sku: "a b", onHand: 3 }));
+    const result = await call("stock.get", { sku: "a b" });
     expect({ asked, result: result.structuredContent }).toStrictEqual({
       asked: [
-        { method: "GET", url: `https://${host}/v1/stock/a%2Fb`, body: "" },
+        { method: "GET", url: `https://${host}/v1/stock/a%20b`, body: "" },
       ],
-      result: { sku: "a/b", onHand: 3 },
+      result: { sku: "a b", onHand: 3 },
     });
   });
 
   it("refuses a path parameter that would be no segment of its own, sending nothing", async () => {
     vendorAnswers(Response.json({ sku: "a", onHand: 1 }));
-    const results = [
-      await call("stock.get", { sku: ".." }),
-      await call("stock.get", { sku: "." }),
-      await call("stock.get", { sku: "" }),
-    ];
+    const values = ["..", ".", "", "urn:li:1", "50%", "a;b"];
+    const results = await Promise.all(
+      values.map(
+        async (sku) =>
+          await call(
+            "stock.update",
+            { sku, onHand: 1 },
+            { [effectKeyMetaKey]: key }
+          )
+      )
+    );
     expect({
-      errors: results.map(({ isError }) => isError),
+      refusals: results.map(({ isError, _meta }) => [isError, _meta]),
       asked,
-    }).toStrictEqual({ errors: [true, true, true], asked: [] });
+    }).toStrictEqual({
+      refusals: values.map(() => [true, { [notPerformedMetaKey]: true }]),
+      asked: [],
+    });
   });
 
   it("pages as items and next, leaving out the query parameters it isn't given", async () => {
@@ -554,6 +586,25 @@ describe("a call of a tool", () => {
       { [effectKeyMetaKey]: key }
     );
     expect(result.structuredContent).toStrictEqual({ answer: "Deleted" });
+  });
+
+  it("never says nothing was done once its write went out", async () => {
+    vendorAnswers(
+      new Response(null, { status: 429 }),
+      Response.json({ sku: "a", onHand: 1 })
+    );
+    const result = await call(
+      "stock.throwAfterWrite",
+      { sku: "a" },
+      { [effectKeyMetaKey]: key }
+    );
+    expect({
+      sent: asked.map(({ method }) => method),
+      meta: result._meta,
+    }).toStrictEqual({
+      sent: ["GET", "PUT"],
+      meta: { [outcomeUnknownMetaKey]: true },
+    });
   });
 
   it("says a rate-limited write did nothing", async () => {

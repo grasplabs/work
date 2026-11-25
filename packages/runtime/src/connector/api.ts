@@ -1,6 +1,6 @@
 import type { AnySchema } from "../common/value-schema.ts";
 import type { Infer } from "../common/value-types.ts";
-import { httpMethods } from "./manifest.ts";
+import { httpMethods, pathMatches } from "./manifest.ts";
 import type { Route } from "./manifest.ts";
 import { providerFetch, segment } from "./provider.ts";
 import { isWriteMethod, ToolError } from "./server.ts";
@@ -100,12 +100,9 @@ export const routeOf = (text: string, hosts: readonly string[]): Route => {
 
 const parameter = /\{(?<name>[A-Za-z_]\w*)\}/gu;
 
-/** A path parameter's value that would be no segment, or move the path. */
-const notOneSegment = new Set(["", ".", ".."]);
-
 /**
- * `path` with each `{name}` replaced by its value, encoded as one segment;
- * undefined if a value is missing or would be no segment of its own.
+ * `path` with each `{name}` replaced by its value, encoded; undefined if a
+ * value is missing.
  */
 const filledPath = (
   path: string,
@@ -114,7 +111,7 @@ const filledPath = (
   let complete = true;
   const filled = path.replaceAll(parameter, (_match, name: string) => {
     const value = Object.hasOwn(values, name) ? values[name] : undefined;
-    if (value === undefined || notOneSegment.has(String(value))) {
+    if (value === undefined) {
       complete = false;
       return "";
     }
@@ -163,6 +160,36 @@ const jsonOf = (text: string): unknown => {
 };
 
 /**
+ * A vendor's answer to a request: checked against its `returns` and typed
+ * by it where it has one, else the JSON, or the text where it isn't JSON.
+ */
+const answerOf = <Returns extends AnySchema | undefined>(
+  text: string,
+  returns: Returns | undefined,
+  name: string,
+  write: boolean
+): ApiAnswer<Returns> => {
+  const answer = jsonOf(text);
+  if (returns === undefined) {
+    // SAFETY: `unknown` without `returns`.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return (answer === undefined ? text : answer) as ApiAnswer<Returns>;
+  }
+  const checked =
+    answer === undefined ? undefined : returns["~standard"].validate(answer);
+  if (checked !== undefined && checked.issues === undefined) {
+    // SAFETY: checked against `returns`, which is what types it.
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+    return checked.value as ApiAnswer<Returns>;
+  }
+  // A write the vendor took went through, and what it made can't be told.
+  throw new ToolError(`${name}'s answer isn't what the connector expects`, {
+    code: "failed",
+    outcomeUnknown: write,
+  });
+};
+
+/**
  * The API one call of a tool may use: its `routes` on the connector's
  * `hosts`, at the vendor called `name` in the errors a caller sees.
  */
@@ -170,23 +197,25 @@ export const apiFor = (
   name: string,
   hosts: readonly string[],
   routes: readonly Route[]
-): Api => {
+): { api: Api; wrote: () => boolean } => {
   const vendor = providerFetch({
     name,
     errorCodeOf,
     invalidStatuses: [400, 422],
   });
   let wrote = false;
+  /** Whether the write may have done something: it went out, and wasn't refused. */
+  let took = false;
   let pending = 0;
   /**
    * The connector's own mistake, refused before anything is sent: nothing
-   * was done, unless its write went out before it.
+   * was done, unless its write may have done something before it.
    */
   const refused = (message: string): ToolError =>
     new ToolError(message, {
       code: "failed",
-      notPerformed: !wrote,
-      outcomeUnknown: wrote,
+      notPerformed: !took,
+      outcomeUnknown: took,
     });
   const send =
     (method: RouteMethod): Send =>
@@ -215,12 +244,14 @@ export const apiFor = (
         throw refused("A tool sends at most one write, as its last request");
       }
       const path = filledPath(target.path, request.path ?? {});
-      if (path === undefined) {
+      const url = new URL(`https://${target.host}${path ?? ""}`);
+      // Egress's own rule: each value is one segment of plain text, so a
+      // value it would refuse is refused here, before anything is sent.
+      if (path === undefined || !pathMatches(target.path, url.pathname)) {
         throw refused(
-          `${method} ${route} needs a value for each path parameter, one segment each`
+          `${method} ${route} needs a value for each path parameter: one segment, not "." or "..", without / \\ ? # % ; :`
         );
       }
-      const url = new URL(`https://${target.host}${path}`);
       url.search = queryOf(request.query ?? {}).toString();
       wrote = write;
       pending += 1;
@@ -237,35 +268,24 @@ export const apiFor = (
               }
         );
         text = await response.text();
+      } catch (error) {
+        took ||= write && !(error instanceof ToolError && error.notPerformed);
+        throw error;
       } finally {
         pending -= 1;
       }
-      const answer = jsonOf(text);
-      if (request.returns === undefined) {
-        // SAFETY: `unknown` without `returns`: the vendor's JSON, or its
-        // text where the answer isn't JSON.
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-        return (answer === undefined ? text : answer) as ApiAnswer<Returns>;
-      }
-      const checked =
-        answer === undefined
-          ? undefined
-          : request.returns["~standard"].validate(answer);
-      if (checked !== undefined && checked.issues === undefined) {
-        // SAFETY: checked against `returns`, which is what types it.
-        // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
-        return checked.value as ApiAnswer<Returns>;
-      }
-      const message = `${name}'s answer isn't what the connector expects`;
-      // A write the vendor took went through, and what it made can't be told.
-      throw new ToolError(message, { code: "failed", outcomeUnknown: write });
+      took ||= write;
+      return answerOf(text, request.returns, name, write);
     };
   return {
-    get: send("GET"),
-    head: send("HEAD"),
-    post: send("POST"),
-    put: send("PUT"),
-    patch: send("PATCH"),
-    delete: send("DELETE"),
+    api: {
+      get: send("GET"),
+      head: send("HEAD"),
+      post: send("POST"),
+      put: send("PUT"),
+      patch: send("PATCH"),
+      delete: send("DELETE"),
+    },
+    wrote: () => took,
   };
 };

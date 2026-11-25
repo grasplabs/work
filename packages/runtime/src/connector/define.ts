@@ -26,6 +26,7 @@ import {
   recoveryOf,
   runFailure,
   serveConnector,
+  ToolError,
 } from "./server.ts";
 import type { CallResult, Connector, JsonObject, Tool } from "./server.ts";
 import type { AccountLookup, SignInInput } from "./sign-in.ts";
@@ -54,8 +55,9 @@ interface ToolBase<Args extends ValueShape, Returns extends AnySchema> {
   description: string;
   /**
    * Whom it reaches: `own`, only the person it acts for; `company`, what
-   * the company keeps together; `others`, other people. Say the furthest
-   * any call can reach: its class follows from this and `readOnly`.
+   * the company keeps together; `others`, other people; `conversations`,
+   * what other people said where the person was. Say the furthest any call
+   * can reach: its class follows from this and `readOnly`.
    */
   reach: ToolReach;
   /** The OAuth scopes it needs, among those its connector's `auth` asks for. */
@@ -329,7 +331,6 @@ const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
       output: contractSchemaOf(outputSchema),
     },
   };
-  const apiOfCall = (): Api => apiFor(connector.title, connector.hosts, routes);
   const reads = routes.filter(({ method }) => !isWriteMethod(method));
   const find =
     declaration.readOnly || declaration.find === undefined
@@ -352,7 +353,7 @@ const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
           : async (data: typeof parsed.value, effect: { key: string }) => {
               const found = await find(
                 data,
-                apiFor(connector.title, connector.hosts, reads),
+                apiFor(connector.title, connector.hosts, reads).api,
                 effect
               );
               return found === null ? null : { output: found };
@@ -365,10 +366,18 @@ const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
       }
       ({ output } = looked);
     } else {
+      const { api, wrote } = apiFor(connector.title, connector.hosts, routes);
       try {
-        output = await handler(parsed.value, apiOfCall(), { key: meta.key });
+        output = await handler(parsed.value, api, { key: meta.key });
       } catch (error) {
-        return runFailure(error, readOnly);
+        // Once its write went out, nothing the handler throws can say that
+        // nothing was done: a read's 429 rethrown after the write included.
+        return runFailure(
+          wrote() && error instanceof ToolError && error.notPerformed
+            ? new ToolError(error.message, { outcomeUnknown: true })
+            : error,
+          readOnly
+        );
       }
     }
     const checked = returns["~standard"].validate(output);
@@ -450,7 +459,9 @@ export const defineConnector = (
     ...Object.values(syncs),
   ]) {
     for (const route of routes) {
-      routeOf(route, hosts);
+      if (routeOf(route, hosts).method !== "GET") {
+        throw new Error(`"${route}": an event or a sync only reads, by GET`);
+      }
     }
   }
   const scopes = new Set(Object.values(tools).flatMap((each) => each.scopes));
