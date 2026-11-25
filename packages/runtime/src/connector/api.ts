@@ -209,8 +209,10 @@ export const apiFor = (
     invalidStatuses: [400, 422],
   });
   let wrote = false;
-  /** Whether the write may have done something: it went out, and wasn't refused. */
-  let took = false;
+  /** Whether the write's own answer says it did nothing. */
+  let writeDidNothing = false;
+  /** Whether the write may have done something: sent, and not refused. */
+  const took = (): boolean => wrote && !writeDidNothing;
   let pending = 0;
   /**
    * The connector's own mistake, refused before anything is sent: nothing
@@ -219,8 +221,8 @@ export const apiFor = (
   const refused = (message: string): ToolError =>
     new ToolError(message, {
       code: "failed",
-      notPerformed: !took,
-      outcomeUnknown: took,
+      notPerformed: !took(),
+      outcomeUnknown: took(),
     });
   const send =
     (method: RouteMethod): Send =>
@@ -254,7 +256,7 @@ export const apiFor = (
       // value it would refuse is refused here, before anything is sent.
       if (path === undefined || !pathMatches(target.path, url.pathname)) {
         throw refused(
-          `${method} ${route} needs a value for each path parameter: one segment, not "." or "..", without / \\ ? # % ; :`
+          `${method} ${route} needs a value for each path parameter: one segment, not "." or "..", with no character egress refuses (/ \\ ? # % ; : or a control)`
         );
       }
       url.search = queryOf(request.query ?? {}).toString();
@@ -274,12 +276,13 @@ export const apiFor = (
         );
         text = await response.text();
       } catch (error) {
-        took ||= write && !(error instanceof ToolError && error.notPerformed);
+        // Refused (a throttle, a 4xx, egress) rather than lost on the way.
+        writeDidNothing ||=
+          write && error instanceof ToolError && !error.outcomeUnknown;
         throw error;
       } finally {
         pending -= 1;
       }
-      took ||= write;
       return answerOf(text, request.returns, name, write);
     };
   return {
@@ -291,6 +294,6 @@ export const apiFor = (
       patch: send("PATCH"),
       delete: send("DELETE"),
     },
-    wrote: () => took,
+    wrote: took,
   };
 };

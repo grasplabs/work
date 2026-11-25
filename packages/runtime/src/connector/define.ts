@@ -370,11 +370,14 @@ const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
       try {
         output = await handler(parsed.value, api, { key: meta.key });
       } catch (error) {
-        // Once its write went out, nothing the handler throws can say that
-        // nothing was done: a read's 429 rethrown after the write included.
+        // Once its write may have done something, whatever the handler
+        // throws leaves the outcome unknown: a read's refusal rethrown
+        // after the write can't say that nothing, or nothing yet, was done.
         return runFailure(
-          wrote() && error instanceof ToolError && error.notPerformed
-            ? new ToolError(error.message, { outcomeUnknown: true })
+          wrote() && error instanceof ToolError && !error.outcomeUnknown
+            ? new ToolError("The action's outcome is unknown", {
+                outcomeUnknown: true,
+              })
             : error,
           readOnly
         );

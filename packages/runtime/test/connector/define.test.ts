@@ -142,6 +142,27 @@ const findByWriting = tool({
     }),
 });
 
+/** A write that, wrongly, reads while its write is still out. */
+const readDuringWrite = tool({
+  description: "Sets the stock and reads it at once",
+  readOnly: false,
+  reach: "company",
+  routes: ["GET /v1/stock/{sku}", "PUT /v1/stock/{sku}"],
+  args: { sku: v.string() },
+  returns: Stock,
+  handler: async ({ sku }, api) => {
+    const [written] = await Promise.all([
+      api.put("/v1/stock/{sku}", {
+        path: { sku },
+        body: { onHand: 1 },
+        returns: Stock,
+      }),
+      api.get("/v1/stock/{sku}", { path: { sku } }),
+    ]);
+    return written;
+  },
+});
+
 /** A write that, wrongly, holds a read's refusal and throws it after its write. */
 const throwAfterWrite = tool({
   description: "Reads the stock, sets it, then fails as the read did",
@@ -200,6 +221,7 @@ const stock = defineConnector({
     "stock.findByWriting": findByWriting,
     "stock.delete": deleteStock,
     "stock.throwAfterWrite": throwAfterWrite,
+    "stock.readDuringWrite": readDuringWrite,
   },
 });
 
@@ -616,13 +638,36 @@ describe("a call of a tool", () => {
     expect(result.structuredContent).toStrictEqual({ answer: "Deleted" });
   });
 
-  it("never says nothing was done once its write went out", async () => {
-    vendorAnswers(
-      new Response(null, { status: 429 }),
-      Response.json({ sku: "a", onHand: 1 })
-    );
+  it("leaves the outcome unknown once its write went out, whatever it throws after", async () => {
+    const after = async (read: Response) => {
+      vendorAnswers(read, Response.json({ sku: "a", onHand: 1 }));
+      const result = await call(
+        "stock.throwAfterWrite",
+        { sku: "a" },
+        { [effectKeyMetaKey]: key }
+      );
+      return [result._meta, result.content];
+    };
+    const unknown = [
+      { [outcomeUnknownMetaKey]: true },
+      [{ type: "text", text: "The action's outcome is unknown" }],
+    ];
+    expect([
+      await after(new Response(null, { status: 429 })),
+      await after(new Response(null, { status: 404 })),
+    ]).toStrictEqual([unknown, unknown]);
+    expect(asked.map(({ method }) => method)).toStrictEqual([
+      "GET",
+      "PUT",
+      "GET",
+      "PUT",
+    ]);
+  });
+
+  it("leaves the outcome unknown for a request refused while its write is out", async () => {
+    vendorAnswers(Response.json({ sku: "a", onHand: 1 }));
     const result = await call(
-      "stock.throwAfterWrite",
+      "stock.readDuringWrite",
       { sku: "a" },
       { [effectKeyMetaKey]: key }
     );
@@ -630,23 +675,30 @@ describe("a call of a tool", () => {
       sent: asked.map(({ method }) => method),
       meta: result._meta,
     }).toStrictEqual({
-      sent: ["GET", "PUT"],
+      sent: ["PUT"],
       meta: { [outcomeUnknownMetaKey]: true },
     });
   });
 
-  it("says a rate-limited write did nothing", async () => {
-    vendorAnswers(new Response(null, { status: 429 }));
-    const result = await call(
-      "stock.update",
-      { sku: "a", onHand: 2 },
-      {
-        [effectKeyMetaKey]: key,
-      }
+  it("says a rate-limited write did nothing, and a refused one failed", async () => {
+    vendorAnswers(
+      new Response(null, { status: 429 }),
+      new Response(null, { status: 400 })
     );
-    expect([result.isError, result._meta]).toStrictEqual([
-      true,
-      { [notPerformedMetaKey]: true },
+    const write = async () =>
+      await call(
+        "stock.update",
+        { sku: "a", onHand: 2 },
+        { [effectKeyMetaKey]: key }
+      );
+    const throttled = await write();
+    const refused = await write();
+    expect([
+      [throttled.isError, throttled._meta],
+      [refused.isError, refused._meta],
+    ]).toStrictEqual([
+      [true, { [notPerformedMetaKey]: true }],
+      [true, undefined],
     ]);
   });
 
