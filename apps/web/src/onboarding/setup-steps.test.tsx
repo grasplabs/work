@@ -322,7 +322,7 @@ describe("a setup without a staff list", () => {
     expect({
       plans: team.includes("Grasp’s staff plan the day I start with you."),
       day: team.includes("Tomorrow"),
-      sent: team.includes("I sent it"),
+      sent: team.includes("Continue"),
     }).toStrictEqual({ plans: true, day: false, sent: true });
   });
 });

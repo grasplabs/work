@@ -148,7 +148,7 @@ export const TeamStep = ({
             size="lg"
             status={busy || refreshing ? "loading" : "idle"}
           >
-            {t`I sent it`}
+            {t`Continue`}
           </Button>
           {view.plan === null ? (
             <Button

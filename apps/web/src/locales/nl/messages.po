@@ -5256,6 +5256,7 @@ msgstr "Gebruikte context"
 #: src/onboarding/plan-story.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/onboarding/sources-step.tsx
+#: src/onboarding/team-step.tsx
 msgid "Continue"
 msgstr "Doorgaan"
 
@@ -8754,10 +8755,6 @@ msgstr "Ik heb in {signIn} niemand gevonden."
 #: src/interview/words.ts
 msgid "I lost the connection. Please check your internet. I have kept what you said, and I keep trying."
 msgstr "Ik ben de verbinding kwijt. Controleer je internet. Ik heb bewaard wat je zei en ik blijf het proberen."
-
-#: src/onboarding/team-step.tsx
-msgid "I sent it"
-msgstr "Ik heb het verstuurd"
 
 #: src/onboarding/leads-step.tsx
 msgid "I talk to each team lead first, so they hear about me before their team does. Check who leads which team, and which teams take part."

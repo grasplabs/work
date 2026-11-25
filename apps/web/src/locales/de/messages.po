@@ -5256,6 +5256,7 @@ msgstr "Genutzter Kontext"
 #: src/onboarding/plan-story.tsx
 #: src/onboarding/setup-steps.tsx
 #: src/onboarding/sources-step.tsx
+#: src/onboarding/team-step.tsx
 msgid "Continue"
 msgstr "Weiter"
 
@@ -8754,10 +8755,6 @@ msgstr "Ich habe in {signIn} niemanden gefunden."
 #: src/interview/words.ts
 msgid "I lost the connection. Please check your internet. I have kept what you said, and I keep trying."
 msgstr "Ich habe die Verbindung verloren. Bitte prüfen Sie Ihr Internet. Ich habe behalten, was Sie gesagt haben, und versuche es weiter."
-
-#: src/onboarding/team-step.tsx
-msgid "I sent it"
-msgstr "Ich habe sie verschickt"
 
 #: src/onboarding/leads-step.tsx
 msgid "I talk to each team lead first, so they hear about me before their team does. Check who leads which team, and which teams take part."
