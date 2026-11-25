@@ -800,13 +800,12 @@ export const ReadBackFoot = ({ onChange }: { onChange: () => void }) => {
         </>
       }
       label={t`Parts`}
-      share={at / count}
+      // The part they are in counts as under way, so the line shows from the first.
+      share={n / count}
       start={
-        count > 1 ? (
-          <Text as="span" color="muted" size="sm">
-            {t`Part ${n} of ${count}`}
-          </Text>
-        ) : null
+        <Text as="span" color="muted" size="sm">
+          {t`Part ${n} of ${count}`}
+        </Text>
       }
     />
   );

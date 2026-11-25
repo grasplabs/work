@@ -1288,6 +1288,11 @@ const noMicrophone = (): void => {
   update((progress) => ({ ...progress, mode: "type" }));
   // oxlint-disable-next-line no-use-before-define -- the floor stops listening by ear
   happen({ type: "voice", at: performance.now(), on: false });
+  // On the read-back his question stands: the box to type in is there anyway.
+  if (isReading(progressNow())) {
+    listen();
+    return;
+  }
   if (words !== null) {
     notice(words.noMicrophone, () => {
       listen();
