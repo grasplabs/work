@@ -662,7 +662,7 @@
   /* The width of the band of light that crosses a wave placeholder. */
   --damsko-skeleton-band: 420px;
   /* How fast the wave's light travels, in pixels a second: slow enough to read as light, not a flash. */
-  --damsko-skeleton-wave-speed: 520;
+  --damsko-skeleton-wave-speed: 900;
   /* The share of a wave's pass the light rests before the next one. */
   --damsko-skeleton-wave-rest: 0.2;
   /* How far the wave is from upright: a placeholder lower on the page is reached this much later. */
@@ -676,6 +676,10 @@
   --damsko-spinner-faint: var(--damsko-skeleton-low);
   /* How faint a spinner's last bar is: its bars fade from full to this round the turn. At 0.3 the last bars sank into a dark ground and the spinner read weaker than its words. */
   --damsko-spinner-fade: 0.4;
+  /* How faint a spinner's last bar is on a filled control (a working default, success or destructive button): high enough that the whole ring reads turning on the fill. */
+  --damsko-spinner-fade-on-fill: 0.62;
+  /* A spinner's stroke on a filled control, in the icon's 24-unit grid: 1.5px at 16px. At the icon's 1px the ring stood thin and grey alone in a wide filled button, which read as empty. */
+  --damsko-spinner-stroke-on-fill: 2.25;
   /* The curve of a still spinner's breath. */
   --damsko-spinner-ease: var(--damsko-skeleton-ease);
   /* Agent indicator: agent indicator. */

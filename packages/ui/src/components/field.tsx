@@ -474,8 +474,15 @@ const noteStyles = stylex.create({
     fontWeight: font.weightNormal,
     // A word too long for its line still breaks.
     overflowWrap: "anywhere",
-    // No word left alone on a last line.
-    textWrap: "pretty",
+    // No word left alone on a last line; a setting's help wraps as it falls, as the original's
+    // setting row did.
+    textWrap: {
+      default: "pretty",
+      [stylex.when.ancestor(
+        ":is([data-orientation=responsive])",
+        fieldControlMarker
+      )]: "wrap",
+    },
     justifySelf: "stretch",
   },
   description: {

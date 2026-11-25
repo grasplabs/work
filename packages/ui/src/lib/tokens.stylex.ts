@@ -606,6 +606,8 @@ export const size = stylex.defineConsts({
   spinnerBreath: "var(--damsko-spinner-breath)",
   spinnerFaint: "var(--damsko-spinner-faint)",
   spinnerFade: "var(--damsko-spinner-fade)",
+  spinnerFadeOnFill: "var(--damsko-spinner-fade-on-fill)",
+  spinnerStrokeOnFill: "var(--damsko-spinner-stroke-on-fill)",
   // Agent indicator: agent indicator.
   agentIndicatorDot: "var(--damsko-agent-indicator-dot)",
   agentIndicatorGap: "var(--damsko-agent-indicator-gap)",

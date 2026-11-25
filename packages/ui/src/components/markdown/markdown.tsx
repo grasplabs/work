@@ -517,7 +517,10 @@ const held = (
   if (url === "streamdown:incomplete-image") {
     return null;
   }
-  const so = /\]\((?<url>[^\s)]*)$/u.exec(tail)?.groups?.url ?? "https://";
+  // The address so far: after the first `](` past the last space or `)`.
+  const end = tail.split(/[\s)]/u).at(-1) ?? "";
+  const at = end.indexOf("](");
+  const so = at === -1 ? "https://" : end.slice(at + 2);
   const own =
     shared.renderLink === undefined &&
     shared.provided === null &&

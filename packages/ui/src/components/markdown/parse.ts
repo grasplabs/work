@@ -11,14 +11,26 @@ export type RootContent = MarkdownRoot["children"][number];
 
 // Strike-through is two tildes, as a model writes it (`20~25°C` is a tilde). micromark weighs each
 // emphasis or link mark of a paragraph against those before it, so many unmatched ones cost their
-// number squared (`a*` repeated: 1.7 s for 40 KB): a block with a paragraph of more than 1,000 (its
-// fenced code aside) is read without them, as words, and without `![^1]`, a note's mark after a `!`,
-// which looks back for its picture.
-const OFF =
-  "attention strikethrough labelStartLink labelStartImage labelEnd gfmPotentialFootnoteCall";
-const GFM = [gfm({ singleTilde: false })];
-const PLAIN = [...GFM, { disable: { null: OFF.split(" ") } }];
-const FROM = [gfmFromMarkdown()];
+// number squared (`a*` repeated: 1.7 s for 40 KB): a block with a paragraph of more than 1,000, or
+// with more than 5,000 in all (its fenced code aside), is read without them, as words, and without
+// `![^1]`, a note's mark after a `!`, which looks back for its picture. A paragraph is counted from
+// each line that may start a part, so the total holds where such a line only goes on with it
+// (`1a*a*…` lines: 19 s for 80 KB).
+const MARKS =
+  "attention strikethrough labelStartLink labelStartImage labelEnd gfmPotentialFootnoteCall".split(
+    " "
+  );
+// micromark, then the tree's own pass for bare addresses, read a bare address again from each place
+// one may start to the end of its word, which only a space, a tab or a line's end ends (`www.a_`
+// repeated: 3 s for 24 KB): a block with a word of more than 1,000 characters (its fenced code
+// aside) is read without bare addresses.
+const ADDRESSES = ["wwwAutolink", "protocolAutolink", "emailAutolink"];
+const GFM = gfm({ singleTilde: false });
+const FROM = gfmFromMarkdown();
+const NO_ADDRESSES = FROM.map((extension) => ({
+  ...extension,
+  transforms: [],
+}));
 /** The names an answer defines, as the tree has them. */
 export interface Names {
   links: ReadonlySet<string>;
@@ -91,40 +103,50 @@ const fenceAfter = (fence: string, line: string) => {
   return closes(line, fence) ? "" : fence;
 };
 // A line led by more than 64 characters of indent and container marks: a list or a quote nested
-// past 32 deep, which micromark weighs as its depth squared (400 deep: 5 s for 80 KB).
-const DEEP = /^(?:[ \t]|(?:[-*+>]|\d{1,9}[.)])(?=[ \t])){65,}/u;
+// past 32 deep, which micromark weighs as its depth squared (400 deep: 5 s for 80 KB). A quote's
+// `>` needs no space after it (`>- ` repeated).
+const DEEP = /^(?:[ \t>]|(?:[-*+]|\d{1,9}[.)])(?=[ \t])){65,}/u;
 /**
  * The source as it is read, fenced code left as it is: a line nested past 32 deep keeps its last 64
- * characters of lead, so it is drawn 32 deep; and whether a paragraph has more than 1,000 marks.
+ * characters of lead, so it is drawn at most 64 deep; whether a paragraph has more than 1,000 marks
+ * or the block more than 5,000 (`many`), and whether a word has more than 1,000 characters (`long`).
  */
 const bounded = (source: string) => {
   let fence = "";
   let marks = 0;
+  let total = 0;
   let many = false;
+  let long = false;
   const out: string[] = [];
   for (const [at, line] of source.split("\n").entries()) {
     const was = fence;
     fence = fenceAfter(was, line);
     // A fence, a list item, a row, a heading or a blank line starts a part of its own.
     const starts = fence !== "" || /^[ \t>]*(?:[-*+|#\d]|$)/u.test(line);
-    marks = (starts ? 0 : marks) + line.replaceAll(/[^*_~[\]]/gu, "").length;
-    many ||= was === "" && marks > 1000;
+    const count = line.replaceAll(/[^*_~[\]]/gu, "").length;
+    marks = (starts ? 0 : marks) + count;
+    total += was === "" ? count : 0;
+    many ||= was === "" && (marks > 1000 || total > 5000);
+    long ||=
+      was === "" && line.split(/[\t\r ]/u).some((word) => word.length > 1000);
     out.push(
       at === 0 ? "" : "\n",
       was === "" ? line.replace(DEEP, (lead) => lead.slice(-64)) : line
     );
   }
-  return { text: out.join(""), many };
+  return { text: out.join(""), many, long };
 };
 const read = (
   source: string,
   names = NO_NAMES,
   asked: Asked[] = []
 ): MarkdownRoot => {
-  const { text, many } = bounded(source);
+  const { text, many, long } = bounded(source);
   try {
-    const extensions = [...(many ? PLAIN : GFM), told(names, asked)];
-    return fromMarkdown(text, { extensions, mdastExtensions: FROM });
+    const off = [...(many ? MARKS : []), ...(long ? ADDRESSES : [])];
+    const extensions = [GFM, { disable: { null: off } }, told(names, asked)];
+    const mdastExtensions = long ? NO_ADDRESSES : FROM;
+    return fromMarkdown(text, { extensions, mdastExtensions });
   } catch {
     // Nesting deep enough to exhaust the stack (thousands of `>` on a line): its words.
     const words = { type: "text" as const, value: source };
@@ -191,6 +213,7 @@ export interface Cut {
   end: End | null;
   blank: boolean;
   run: number;
+  lines: number;
 }
 const FIRST: Cut = {
   starts: [0],
@@ -199,23 +222,31 @@ const FIRST: Cut = {
   end: null,
   blank: false,
   run: 0,
+  lines: 0,
 };
+const ITEM = /^(?:[-*+]|\d{1,9}[.)])[ \t]+\S/u;
 /** Where each top-level block of `source` starts, the scan going on from `from` (a shorter one's). */
 export const blockStarts = (source: string, from = FIRST): Cut => {
   const starts = from.starts.slice(0, from.count);
-  let { at, end, blank, run } = from;
+  let { at, end, blank, run, lines } = from;
   let kept = { ...from, starts };
   while (at < source.length) {
     const next = source.indexOf("\n", at) + 1 || source.length;
     const line = source.slice(at, next).trimEnd();
     if (end === null) {
-      // A paragraph of more than 1,000 lines goes on as another: micromark weighs a paragraph's
-      // lines as their number squared, and the block being written is read again as it grows.
+      // A paragraph of more than 1,000 lines goes on as another, and so does a list at its next
+      // item: micromark weighs a paragraph's lines, and a list's items that hold lists, as their
+      // number squared (`- - a` 4,000 times: 1 s), and the block being written is read again as it
+      // grows.
       run = STARTS.test(line) && /^[^>|<]/u.test(line) ? run + 1 : 0;
-      const starting = blank ? STARTS.test(line) : run > 1000;
+      lines += 1;
+      const starting = blank
+        ? STARTS.test(line)
+        : run > 1000 || (lines > 1000 && ITEM.test(line));
       if (starting && at > (starts.at(-1) ?? 0)) {
         starts.push(at);
         run = 1;
+        lines = 1;
       }
       end = endOf(line);
     } else {
@@ -224,7 +255,7 @@ export const blockStarts = (source: string, from = FIRST): Cut => {
     blank = end === null && line === "";
     at = next;
     if (source.charAt(next - 1) === "\n") {
-      kept = { starts, at, count: starts.length, end, blank, run };
+      kept = { starts, at, count: starts.length, end, blank, run, lines };
     }
   }
   return { ...kept, starts };
@@ -272,6 +303,11 @@ const REPAIR = {
  * closed after it, as remend closes it for the words before.
  */
 const repair = (block: string) => {
+  // remend 1.5.0 heals brackets nested n deep in n² (16,000 deep: 1.2 s); 1.5.1 heals them in
+  // linear time. Until then a block with more than 1,000 `[` is drawn as written.
+  if (block.split("[").length > 1001) {
+    return block;
+  }
   // An address whose parentheses balance (`…_(format)`) is still open: remend would take its first
   // `)` for the link's end, so it is cut back to its `](`, a half link.
   const at = block.lastIndexOf("](");

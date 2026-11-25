@@ -190,7 +190,7 @@ interface ComboboxSingle extends ComboboxBase {
   /**
    * The name of the button at the field's end that opens the list, for a screen reader, a voice
    * command and an agent, when the catalogue's ("Show the choices") does not say what the list
-   * holds ("Show the apps and workflows"). One value only: with several there is no such button.
+   * holds ("Show the countries"). One value only: with several there is no such button.
    */
   triggerLabel?: string;
   /**
