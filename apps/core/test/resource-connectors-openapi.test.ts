@@ -172,7 +172,7 @@ describe(
       const crm = await dealsApp([]);
       await expect(
         publishDefined(env, crm.by, crm.app, dealsFiles("closed"))
-      ).rejects.toMatchObject({ code: "version.build_failed" });
+      ).rejects.toMatchObject({ code: "app.draft_failed" });
       await expect(
         publishDefined(env, crm.by, crm.app, dealsFiles("won"))
       ).resolves.toMatchObject({ version: 2 });

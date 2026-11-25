@@ -619,7 +619,7 @@ const contractActionPattern = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/u;
  * its name after the family (`mail.send` is `send` of
  * `microsoft-365.mail@1`). The family is all of the name but its last
  * part, as the mirror rule names a tool (`deals.followers.list` is `list`
- * of `pipedrive.deals.followers@1`). Connect serves contracts from this, and the
+ * of `crm.deals.followers@1`). Connect serves contracts from this, and the
  * SDK's connector catalog is typed from it, so both name the same
  * contracts and actions.
  */

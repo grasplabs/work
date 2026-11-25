@@ -114,6 +114,16 @@ const checkMirrorOf = async (
     declaration.openapi === undefined
       ? undefined
       : await specBeside(entry, declaration.openapi);
+  // Held to a spec, it calls the API the spec describes, nowhere else.
+  if (
+    spec !== undefined &&
+    ((declaration.base ?? "") !== spec.base ||
+      !declaration.hosts.includes(spec.host))
+  ) {
+    throw new Error(
+      `${declaration.name} calls ${declaration.hosts.join(", ")}${declaration.base ?? ""}, but its spec is of ${spec.host}${spec.base}`
+    );
+  }
   const problems = checkMirror(
     Object.entries(declaration.tools).map(([name, each]) => ({
       name,
@@ -282,9 +292,14 @@ export const buildConnectors = async (
       await import(pathToFileURL(entry).href)
     );
     const manifest = connectorManifestSchema.parse(loaded.default.manifest);
-    if (loaded.default.declaration !== undefined) {
+    const { declaration } = loaded.default;
+    if (declaration !== undefined) {
       // oxlint-disable-next-line no-await-in-loop -- one connector at a time
-      await checkMirrorOf(entry, loaded.default.declaration);
+      await checkMirrorOf(entry, declaration);
+    } else if (!oldKit.some((each) => isWithin(each, entry))) {
+      throw new Error(
+        `${entry} exports no connector made with defineConnector from ${sdkConnector}`
+      );
     }
     if (connectors.some((each) => each.manifest.name === manifest.name)) {
       throw new Error(`Two connectors are named ${manifest.name}`);

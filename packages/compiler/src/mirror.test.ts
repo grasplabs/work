@@ -236,6 +236,21 @@ describe("a tool held to the vendor's spec", () => {
       "deals.update: args.deal_id isn't a field of the vendor's: keep the vendor's names and shapes.",
     ]);
   });
+
+  it("is refused a route the spec doesn't have, and a second route of another family", () => {
+    expect(
+      messages([
+        dealsList({
+          name: "deals.archived.list",
+          routes: ["GET /deals/archived"],
+        }),
+        dealsList({ routes: ["GET /deals", "GET /persons"] }),
+      ])
+    ).toStrictEqual([
+      "deals.archived.list: GET /deals/archived isn't an operation of the vendor's spec.",
+      "deals.list: GET /persons isn't an operation of the vendor's spec.",
+    ]);
+  });
 });
 
 const tool = (
@@ -284,6 +299,10 @@ describe("a tool with no spec to hold it to", () => {
           tool("deals.change", "PATCH /deals/{id}"),
           tool("deals.get", "GET /v1/deals/{id}"),
           {
+            ...tool("deals.delete", "DELETE /deals/{id}"),
+            routes: ["DELETE /deals/{id}", "DELETE /persons/{id}"],
+          },
+          {
             name: "deals.get",
             routes: [],
             args: {},
@@ -302,6 +321,7 @@ describe("a tool with no spec to hold it to", () => {
       "deals.products.delete: DELETE /deals/{id}/products is named deals.products.<the vendor's operation name>.",
       "deals.change: PATCH /deals/{id} is named deals.update.",
       "deals.get: GET /v1/deals/{id} is named v1.deals.get.",
+      "deals.delete: DELETE /persons/{id} isn't of its family deals.",
       "deals.get: It declares no route it is named from.",
     ]);
   });

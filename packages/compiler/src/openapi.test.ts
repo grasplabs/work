@@ -321,6 +321,68 @@ describe("a spec as tools", () => {
     ]);
   });
 
+  it("reads an allOf of one schema as that schema, and an answer's enum as any value of its type", async () => {
+    const spec = await readSpec(
+      specText({
+        "/deals/{id}": {
+          parameters: [idParameter],
+          get: {
+            parameters: [
+              {
+                name: "status",
+                in: "query",
+                schema: { type: "string", enum: ["open", "won"] },
+              },
+            ],
+            responses: ok({
+              type: "object",
+              properties: {
+                visible_to: { allOf: [{ type: "integer", enum: [1, 3] }] },
+                status: { type: "string", enum: ["open", "won"] },
+              },
+            }),
+          },
+        },
+      }),
+      url
+    );
+    const [get] = spec.operations;
+    expect({
+      status: get?.args.kind === "object" && get.args.fields.status?.kind,
+      answer:
+        get?.returns.kind === "object" &&
+        Object.entries(get.returns.fields).map(([name, field]) => [
+          name,
+          field.kind,
+        ]),
+    }).toStrictEqual({
+      status: "enum",
+      answer: [
+        ["visible_to", "number"],
+        ["status", "string"],
+      ],
+    });
+  });
+
+  it("names no tool by a vendor's name that is a standard action", async () => {
+    const spec = await readSpec(
+      specText({
+        "/deals/{id}/merge": {
+          parameters: [idParameter],
+          put: {
+            operationId: "delete",
+            responses: ok({ type: "object", properties: {} }),
+          },
+        },
+      }),
+      url
+    );
+    expect({
+      tools: spec.operations,
+      skipped: spec.skipped.map((each) => each.operation),
+    }).toStrictEqual({ tools: [], skipped: ["PUT /deals/{id}/merge"] });
+  });
+
   it("names two operations that would share a name by the vendor's operation names", async () => {
     const spec = await readSpec(
       specText({
