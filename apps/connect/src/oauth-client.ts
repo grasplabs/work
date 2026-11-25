@@ -1,4 +1,4 @@
-import type { AccountLookup } from "@grasp-os/connector-kit/sign-in";
+import type { AccountLookup } from "@grasp-os/runtime/connector";
 import { fromBase64Url } from "@grasp-os/shared/encoding";
 
 import type {
@@ -117,6 +117,9 @@ const clientAuth = (
   client: OAuthClientCredentials,
   authentication: OAuthProviderConfig["clientAuthentication"]
 ): { headers: Record<string, string>; fields: Record<string, string> } => {
+  if (authentication === "none") {
+    return { headers: {}, fields: { client_id: client.id } };
+  }
   if (authentication === "client_secret_post") {
     return {
       headers: {},
@@ -213,6 +216,7 @@ export const exchangeCode = async (
       code,
       redirect_uri: redirectUri,
       code_verifier: verifier,
+      ...provider.tokenParams,
     }),
     requestedAt
   );
@@ -230,6 +234,7 @@ export const refreshTokens = async (
     await post(provider.tokenEndpoint(tenant), provider, client, {
       grant_type: "refresh_token",
       refresh_token: refreshToken,
+      ...provider.tokenParams,
     }),
     requestedAt
   );

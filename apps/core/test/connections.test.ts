@@ -908,3 +908,19 @@ describe("the revokes to make by hand", () => {
     ).toStrictEqual([false]);
   });
 });
+
+describe("the deployment's client metadata document", () => {
+  it("names this origin's callback as a public client, for an MCP server's sign-in to read without a session", async () => {
+    const response = await routed("/api/connections/client-metadata.json");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toStrictEqual({
+      client_id: `${clientOrigin}/api/connections/client-metadata.json`,
+      client_name: "Grasp",
+      redirect_uris: [`${clientOrigin}/api/connections/callback`],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    });
+  });
+});

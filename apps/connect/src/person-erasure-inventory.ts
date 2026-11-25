@@ -31,6 +31,12 @@ export const erasureInventory: Readonly<Record<string, ErasureClass>> = {
   // Goes with its grant's `connection_tokens` row (ON DELETE CASCADE).
   connection_tenant_tokens: { erased: "connect" },
   connector_events: { erased: "connect" },
+  // What a connector's server listed for a connection of theirs.
+  connection_tools: { erased: "connect" },
+  connectors: {
+    company:
+      "the organization's connectors made from a URL; `created_by` names the admin who added one",
+  },
   event_sources: { erased: "connect" },
   idempotent_calls: { erased: "connect" },
   pending_actions: { erased: "connect" },
@@ -73,6 +79,7 @@ export const reviewedPersonColumns: Readonly<
 > = {
   call_changes: ["on_behalf_of"],
   composio_flows: ["user_id"],
+  connectors: ["created_by"],
   connections: [
     "account_email",
     "account_senders",

@@ -15,7 +15,7 @@ export type {
   RowRule,
   RowRules,
   TableAccess,
-} from "../common/table-access.ts";
+} from "./table-access.ts";
 // The descriptor format a manifest names, for a host that writes one.
 export { descriptorVersion } from "../common/value-descriptor.ts";
 
@@ -134,6 +134,12 @@ export type {
 // told its answer's shape); values are still checked by the descriptor.
 export { jsonSchemaOf } from "../common/json-schema.ts";
 export type { JsonSchema } from "../common/json-schema.ts";
+
+// A value checked against a descriptor the host holds, as its schema's
+// `validate` checks it; with `unknownFields: "drop"`, how an answer from
+// outside is read against what it should return.
+export { validateValue } from "../common/value-interpreter.ts";
+export type { ValueCheckOptions } from "../common/value-interpreter.ts";
 
 // The session client as a host makes it: over the host's own
 // transport, one per App session, mounted for the pages it serves. App

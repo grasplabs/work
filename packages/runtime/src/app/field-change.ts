@@ -45,6 +45,50 @@ const referenceKinds: ReadonlySet<ValueDescriptor["kind"]> = new Set([
 export const holdsReference = (descriptor: ValueDescriptor): boolean =>
   holdsKind(descriptor, referenceKinds);
 
+/**
+ * Whether `after` holds as any JSON a record ID or a file `before` held:
+ * no longer one, though a store would keep indexing and cascading it.
+ * Compared in place through objects, array items, record values and a
+ * union's members (any of them, either side).
+ */
+const referenceMadeJson = (
+  before: ValueDescriptor,
+  after: ValueDescriptor
+): boolean => {
+  if (!holdsReference(before)) {
+    return false;
+  }
+  if (after.kind === "json") {
+    return true;
+  }
+  if (after.kind === "union") {
+    return after.members.some((member) => referenceMadeJson(before, member));
+  }
+  if (before.kind === "union") {
+    return before.members.some((member) => referenceMadeJson(member, after));
+  }
+  if (before.kind === "object") {
+    return Object.entries(before.fields).some(([name, field]) => {
+      if (after.kind === "record") {
+        return referenceMadeJson(field, after.value);
+      }
+      const now =
+        after.kind === "object" && Object.hasOwn(after.fields, name)
+          ? after.fields[name]
+          : undefined;
+      return now !== undefined && referenceMadeJson(field, now);
+    });
+  }
+  if (before.kind === "array" && after.kind === "array") {
+    return referenceMadeJson(before.item, after.item);
+  }
+  return (
+    before.kind === "record" &&
+    after.kind === "record" &&
+    referenceMadeJson(before.value, after.value)
+  );
+};
+
 /** Whether `descriptor` has a defaulted field nested in it, at any depth. */
 const holdsNestedDefault = (descriptor: ValueDescriptor): boolean => {
   if (descriptor.kind === "object") {
@@ -115,4 +159,5 @@ export const fieldWidens = (
 ): boolean =>
   (after.presence === "optional" || before.presence !== "optional") &&
   assignable(before, after) &&
+  !referenceMadeJson(before, after) &&
   !addsNestedDefault(before, after);

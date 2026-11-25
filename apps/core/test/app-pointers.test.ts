@@ -14,6 +14,7 @@ import {
   signedInApi,
   staffPerson,
 } from "./sign-in.ts";
+import { connectDb } from "./test-env.ts";
 
 // Company apps through Composio, by class (GRA-725): the chat's agent
 // reads in an app only where an admin pointed it, for its person, within
@@ -50,6 +51,27 @@ const mailApp = async (admin: Admin) => {
     audience: { who: "nobody" },
   });
   return mail;
+};
+
+/** A connection to a connector made from a URL, shared unless `owner` is given. */
+const connectorConnection = async (owner: string | null): Promise<string> => {
+  const id = `connection-${crypto.randomUUID()}`;
+  const now = Date.now();
+  await connectDb()
+    .prepare(
+      "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', 'connector', ?, ?, ?)"
+    )
+    .bind(
+      id,
+      "mcp_0123456789abcdef",
+      owner === null ? "shared" : "personal",
+      owner,
+      "mcp_0123456789abcdef",
+      now,
+      now
+    )
+    .run();
+  return id;
 };
 
 /**
@@ -181,6 +203,29 @@ describe("a company app", setUpTime, () => {
         send: message("connect.class_off"),
       })
     );
+  });
+
+  it("is pointed at as a whole app when it is a connector made from a URL", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const shared = await connectorConnection(null);
+    const personal = await connectorConnection(admin.userId);
+    const pointer = async (connectionId: string, resources: string[]) => {
+      await admin.api.connections.pointApp({
+        connectionId,
+        resources,
+        audience: { who: "everyone" },
+      });
+    };
+
+    expect({
+      withinResources: await outcome(pointer(shared, ["project-1"])),
+      wholeApp: await outcome(pointer(shared, [])),
+      someonesOwn: await outcome(pointer(personal, [])),
+    }).toStrictEqual({
+      withinResources: "connection.invalid",
+      wholeApp: "ok",
+      someonesOwn: "connection.invalid",
+    });
   });
 
   it("is pointed at by the company's admins only, never by Grasp staff, and only a company app's connection", async () => {

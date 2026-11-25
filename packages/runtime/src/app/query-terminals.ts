@@ -9,9 +9,9 @@ import { searchTerms } from "@grasp-os/shared/store-reads";
 import type { QueryTerminal } from "@grasp-os/shared/store-reads";
 
 import { relationOf } from "../common/schema-fields.ts";
-import type { TableState } from "../common/schema-types.ts";
 import { refuse } from "./query-error.ts";
 import { baseOf, hasOnly } from "./query-values.ts";
+import type { TableState } from "./schema-types.ts";
 
 /**
  * A count a terminal takes, checked: a whole number from `min` up to the

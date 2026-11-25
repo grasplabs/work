@@ -9,7 +9,7 @@
 import {
   notPerformedMetaKey,
   outcomeUnknownMetaKey,
-} from "@grasp-os/connector-kit/manifest";
+} from "@grasp-os/runtime/connector";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { afterEach, beforeEach, vi } from "vite-plus/test";

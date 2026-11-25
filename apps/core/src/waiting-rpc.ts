@@ -206,9 +206,12 @@ const notificationItems = async (
             id: `stoppedEvents:${notification.id}`,
             verdicts: [],
             notification,
-            // An HTTP connection listens for no events: never one of these.
+            // An HTTP connection, or one to a connector made from a URL,
+            // listens for no events: never one of these.
             account:
-              connection === undefined || connection.source === "http"
+              connection === undefined ||
+              connection.source === "http" ||
+              connection.source === "connector"
                 ? null
                 : {
                     name: connection.accountName,
@@ -264,8 +267,9 @@ const connectionItems = async (
       const entry = entries.get(`${connection.source}:${connection.provider}`);
       const { source } = connection;
       // An HTTP connection is never signed in again: its admin approves
-      // another (`canSignInAgain` says so too).
-      if (source === "http") {
+      // another (`canSignInAgain` says so too). A connector made from a URL
+      // is in no catalog yet, so nothing names it here.
+      if (source === "http" || source === "connector") {
         return [];
       }
       const waits =

@@ -69,6 +69,7 @@ import type { Connection } from "./connections.ts";
 import {
   connections,
   erasedPeople,
+  connectors,
   idempotentCalls,
   pendingActions,
 } from "./db/schema.ts";
@@ -151,15 +152,20 @@ export const shownConnection = {
   accountName: connections.accountName,
   serverKind: connections.serverKind,
   server: connections.server,
+  // A connector's name, for a connection to one made from a URL.
+  connectorName: sql<
+    string | null
+  >`(select ${connectors.name} from ${connectors} where ${connectors.id} = ${connections.server})`,
 };
 
 const withConnection = { row: pendingActions, connection: shownConnection };
 
 /** What a held action's connection is, if connect still has it. */
-export type ShownConnection = Pick<
-  Connection,
-  "provider" | "accountName" | "serverKind" | "server"
-> | null;
+export type ShownConnection =
+  | (Pick<Connection, "provider" | "accountName" | "serverKind" | "server"> & {
+      connectorName?: string | null;
+    })
+  | null;
 
 /** One value of a call's input, as a description shows it (`ActionDescription`). */
 const shownValue = (value: Json): string | string[] => {
@@ -319,7 +325,7 @@ export const nameOf = (connection: ShownConnection): string | null => {
   if (connection === null) {
     return null;
   }
-  const name = providerName(connection);
+  const name = connection.connectorName ?? providerName(connection);
   return connection.accountName === null
     ? name
     : `${name} (${connection.accountName})`;

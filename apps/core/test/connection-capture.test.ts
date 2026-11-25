@@ -1,5 +1,5 @@
 import { brainOf, personalBrainOf } from "@grasp-os/brain-next/contract";
-import { provenanceMetaKey } from "@grasp-os/connector-kit/manifest";
+import { provenanceMetaKey } from "@grasp-os/runtime/connector";
 import { auditOutboxTakeMax, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { chatIdSchema } from "@grasp-os/shared/ids";

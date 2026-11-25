@@ -24,6 +24,7 @@ import { connections } from "./db/schema.ts";
 import { mcpServer } from "./mcp.ts";
 import type { McpServer } from "./mcp.ts";
 import { isNeverTool } from "./never.ts";
+import { keptToolClasses } from "./tool-rules.ts";
 
 // The connection registry: which connections exist, whose they are, and
 // which MCP server carries out their actions.
@@ -303,17 +304,27 @@ export const connectionOwners = async (
       accountAddresses: connections.accountAddresses,
       accountSenders: connections.accountSenders,
       tools: connections.tools,
+      scope: connections.scope,
     })
     .from(connections)
     .where(inArray(connections.id, ids));
-  return rows.map(({ accountAddresses, accountSenders, tools, ...row }) => ({
-    ...row,
-    accountAddresses: accountAddresses ?? [],
-    accountSenders: accountSenders ?? [],
-    ...(row.source === "composio" && {
-      toolClasses: offeredToolClasses({ provider: row.provider, tools }),
-    }),
-  }));
+  const connectorClasses = await keptToolClasses(
+    db,
+    rows.filter(({ source }) => source === "connector")
+  );
+  return rows.map(
+    ({ accountAddresses, accountSenders, tools, scope: _scope, ...row }) => ({
+      ...row,
+      accountAddresses: accountAddresses ?? [],
+      accountSenders: accountSenders ?? [],
+      ...(row.source === "composio" && {
+        toolClasses: offeredToolClasses({ provider: row.provider, tools }),
+      }),
+      ...(row.source === "connector" && {
+        toolClasses: connectorClasses.get(row.id) ?? {},
+      }),
+    })
+  );
 };
 
 /** The person `personalAccounts` is asked about: core's user ID. */

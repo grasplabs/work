@@ -1,3 +1,5 @@
+import { attachmentsMetaKey } from "@grasp-os/runtime/connector";
+import type { Route } from "@grasp-os/runtime/connector";
 import { attachmentLimits } from "@grasp-os/shared/connector-attachments";
 import { sha256HexOfBytes, toBase64 } from "@grasp-os/shared/encoding";
 import { describe, expect, it } from "vite-plus/test";
@@ -9,8 +11,6 @@ import {
   defineConnector,
   defineTool,
 } from "../src/connector.ts";
-import { attachmentsMetaKey } from "../src/manifest.ts";
-import type { Route } from "../src/manifest.ts";
 
 // A write that takes files (GRA-887), as a connector defines it and
 // connect calls it. The ways it can fail come first: bytes beside the
@@ -67,7 +67,6 @@ const plainTool = defineTool({
 
 const connector = defineConnector({
   name: "example",
-  version: "1.0.0",
   provider: "microsoft",
   scopes: [],
   hosts: ["api.example.test"],

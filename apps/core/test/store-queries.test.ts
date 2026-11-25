@@ -983,6 +983,12 @@ describe("projection of unions of every kind", () => {
     });
   });
 
+  it("shows any JSON a field holds whole, at every depth", async () => {
+    await expect(
+      shapesRead(v.json(), { a: [1, { b: null }] }, ["x", 2], "plain")
+    ).resolves.toStrictEqual([{ a: [1, { b: null }] }, ["x", 2], "plain"]);
+  });
+
   it("projects through nested unions to the member the value fits", async () => {
     await expect(
       shapesRead(

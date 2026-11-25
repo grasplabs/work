@@ -1,7 +1,4 @@
-import type {
-  ActionManifest,
-  SyncManifest,
-} from "@grasp-os/connector-kit/manifest";
+import type { ActionManifest, SyncManifest } from "@grasp-os/runtime/connector";
 import type { CapabilityClaims } from "@grasp-os/shared/capability";
 import { connectErrors } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -39,18 +36,18 @@ const releaseOf = async ({
   code,
 }: NativeConnector): Promise<string> => {
   const hash = await sha256Hex(code);
-  return `${manifest.name}@${manifest.version}+${hash.slice(0, 16)}`;
+  return `${manifest.name}+${hash.slice(0, 16)}`;
 };
 
 /** Each connector's release, as `nativeRelease` derives it, once. */
 const releases = new Map<NativeConnector, Promise<string>>();
 
 /**
- * Which build of a connector this is: `name@version+<hash>`, the hash the
- * first 16 hex characters of its bundled code's SHA-256. A call of unknown
+ * Which build of a connector this is: `name+<hash>`, the hash the first
+ * 16 hex characters of its bundled code's SHA-256. A call of unknown
  * outcome is recovered only by the build that claimed it, so any change
  * of its code (how it tags, finds or repeats) stops recovery of calls the
- * old build claimed, whether or not anyone bumped the version.
+ * old build claimed.
  */
 export const nativeRelease = async (
   connector: NativeConnector
@@ -65,7 +62,7 @@ export const nativeRelease = async (
 
 /**
  * Largest answer connect reads from a native connector, in bytes: a read
- * of a file or an attachment carries its content, and the connector kit
+ * of a file or an attachment carries its content, and runtime/connector
  * keeps that to 8 MiB as JSON (4 MiB of file, in base64 or as escaped
  * text; `contentAs`), with room to spare.
  */
@@ -122,7 +119,7 @@ const isolateServer = async (
   egress: Pick<EgressProps, "callId" | "routes" | "values">
 ): Promise<NativeMcpServer> => {
   const props: EgressProps = {
-    connector: `${manifest.name}@${manifest.version}`,
+    connector: manifest.name,
     hosts: manifest.hosts,
     ...egress,
     credential: await credentialFor(env, connection.id),

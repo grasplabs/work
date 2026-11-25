@@ -1,4 +1,3 @@
-import type { SchemaDefinition } from "../common/schema-types.ts";
 import type { ValueDescriptor } from "../common/value-descriptor.ts";
 import type { Grant } from "./ctx-workflows.ts";
 import type { Migration, MigrationManifest } from "./migration.ts";
@@ -14,6 +13,7 @@ import type {
 } from "./permission-types.ts";
 import type { SchemaAnswer } from "./schema-answer.ts";
 import type { SchemaManifest } from "./schema-manifest.ts";
+import type { SchemaDefinition } from "./schema-types.ts";
 import type {
   AnyFunction,
   FunctionKind,

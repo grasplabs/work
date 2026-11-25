@@ -1,6 +1,5 @@
-import { defineTool, ToolError } from "@grasp-os/connector-kit/connector";
-import { checkReadable } from "@grasp-os/connector-kit/content";
-import { segment } from "@grasp-os/connector-kit/provider";
+import { defineTool } from "@grasp-os/connector-kit/connector";
+import { checkReadable, segment, ToolError } from "@grasp-os/runtime/connector";
 import { z } from "zod";
 
 import { fileIn } from "./files.ts";

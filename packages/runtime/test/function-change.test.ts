@@ -38,6 +38,19 @@ const nested = (field: AnySchema): Record<string, AnySchema> => ({
 const before = fn({ title: v.string().max(200) }, v.object({ id: v.string() }));
 
 describe(functionBreak, () => {
+  test("takes any JSON where a record ID was, and answers a shape where any JSON was", () => {
+    expect([
+      functionBreak(
+        fn({ task: v.id("tasks") }, v.json()),
+        fn({ task: v.json() }, v.object({ task: v.id("tasks") }))
+      ),
+      functionBreak(
+        fn({ task: v.json() }, null),
+        fn({ task: v.id("tasks") }, null)
+      ),
+    ]).toStrictEqual([undefined, expect.stringMatching(/arguments/u)]);
+  });
+
   test("takes an argument a caller may leave out as one it may still leave out", () => {
     const defaulted = fn(
       { title: v.string(), status: v.string().default("open") },

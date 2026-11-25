@@ -26,6 +26,7 @@ import { botConnectorFake } from "./bot-connector-fake.ts";
 import { composioApiScript, composioLogoScript } from "./composio-api.ts";
 import { driveSyncControlUrl, driveSyncFake } from "./drive-sync-fake.ts";
 import { mailServerScript } from "./mail-server.ts";
+import { sampleKeyControlUrl, sampleKeyFake } from "./sample-key-fake.ts";
 import { sampleSyncControlUrl, sampleSyncFake } from "./sample-sync-fake.ts";
 import { stephenGoogleFake } from "./stephen-google-fake.ts";
 import { stephenGraphFake } from "./stephen-graph-fake.ts";
@@ -541,6 +542,7 @@ const stephenGraph = (${stephenGraphFake.toString()})();
 const stephenGoogle = (${stephenGoogleFake.toString()})();
 const driveSync = (${driveSyncFake.toString()})();
 const sampleSync = (${sampleSyncFake.toString()})();
+const sampleKey = (${sampleKeyFake.toString()})();
 const graphSent = [];
 const graphLosing = new Map();
 const graphDrafts = new Map();
@@ -1032,6 +1034,13 @@ export default {
     const fromSampleSync = sampleSync.answer(request, url);
     if (fromSampleSync !== undefined) {
       return fromSampleSync;
+    }
+    if (url.origin + url.pathname === ${JSON.stringify(sampleKeyControlUrl)}) {
+      return await sampleKey.control(request);
+    }
+    const fromSampleKey = sampleKey.answer(request, url);
+    if (fromSampleKey !== undefined) {
+      return fromSampleKey;
     }
     if (url.href === ${JSON.stringify(stephenGoogleUrl)}) {
       return await stephenGoogle.control(request);
