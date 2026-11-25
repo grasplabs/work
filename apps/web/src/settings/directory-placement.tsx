@@ -15,6 +15,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -34,8 +35,6 @@ import type { ReactNode } from "react";
 import { ErrorText } from "../error-text.tsx";
 import { formatDate } from "../format.ts";
 import { useCore } from "../use-core.ts";
-import { SeparatedItems } from "../workflows/separated-items.tsx";
-import type { SeparatedRow } from "../workflows/separated-items.tsx";
 import { SettingsGroup } from "./section.tsx";
 import { addTeamMember, removeTeamMember } from "./team-changes.ts";
 import { useTeamChange } from "./use-team-change.ts";
@@ -65,16 +64,19 @@ const PlacementSection = ({
   description,
   aside,
   label,
-  rows,
+  children,
 }: {
   title: string;
   description: string;
   aside?: ReactNode;
   label: string;
-  rows: readonly SeparatedRow[];
+  /** Its rows, an Item each. */
+  children: ReactNode;
 }) => (
   <SettingsGroup aside={aside} description={description} flush title={title}>
-    <SeparatedItems aria-label={label} rows={rows} />
+    <ItemGroup aria-label={label} separated>
+      {children}
+    </ItemGroup>
   </SettingsGroup>
 );
 
@@ -225,24 +227,23 @@ const Unplaced = ({
       }
       description={t`Nothing shared with a team reaches them yet. Add each to one, and the directory keeps your choice.`}
       label={t`Not in a team`}
-      rows={people.map((person) => ({
-        key: person.userId,
-        row: (
-          <PersonRow
-            actions={
-              <AddToTeam onChanged={onChanged} person={person} teams={teams} />
-            }
-            person={person}
-          >
-            <DirectorySays
-              department={person.department}
-              departmentTeam={person.departmentTeam}
-            />
-          </PersonRow>
-        ),
-      }))}
       title={t`Not in a team`}
-    />
+    >
+      {people.map((person) => (
+        <PersonRow
+          key={person.userId}
+          actions={
+            <AddToTeam onChanged={onChanged} person={person} teams={teams} />
+          }
+          person={person}
+        >
+          <DirectorySays
+            department={person.department}
+            departmentTeam={person.departmentTeam}
+          />
+        </PersonRow>
+      ))}
+    </PlacementSection>
   );
 };
 
@@ -306,39 +307,34 @@ const Movers = ({
       }
       description={t`Their department in the directory no longer fills this team. They stay until you move them.`}
       label={t`Team doesn’t match the directory`}
-      rows={movers.map((mover) => {
-        const team = mover.team.name;
-        return {
-          key: `${mover.userId} ${mover.team.id}`,
-          row: (
-            <PersonRow
-              actions={
-                <>
-                  <TakeOff
-                    onChanged={onChanged}
-                    person={mover}
-                    team={mover.team}
-                  />
-                  <AddToTeam
-                    onChanged={onChanged}
-                    person={mover}
-                    teams={teams}
-                  />
-                </>
-              }
-              person={mover}
-            >
-              <Trans>In {team} from the directory.</Trans>{" "}
-              <DirectorySays
-                department={mover.department}
-                departmentTeam={mover.departmentTeam}
-              />
-            </PersonRow>
-          ),
-        };
-      })}
       title={t`Team doesn’t match the directory`}
-    />
+    >
+      {movers.map((mover) => {
+        const team = mover.team.name;
+        return (
+          <PersonRow
+            key={`${mover.userId} ${mover.team.id}`}
+            actions={
+              <>
+                <TakeOff
+                  onChanged={onChanged}
+                  person={mover}
+                  team={mover.team}
+                />
+                <AddToTeam onChanged={onChanged} person={mover} teams={teams} />
+              </>
+            }
+            person={mover}
+          >
+            <Trans>In {team} from the directory.</Trans>{" "}
+            <DirectorySays
+              department={mover.department}
+              departmentTeam={mover.departmentTeam}
+            />
+          </PersonRow>
+        );
+      })}
+    </PlacementSection>
   );
 };
 
@@ -425,12 +421,16 @@ const Pins = ({
     <PlacementSection
       description={t`An admin set these by hand, and the directory leaves them as they are.`}
       label={t`Placed by hand`}
-      rows={pins.map((pin) => ({
-        key: `${pin.userId} ${pin.team.id}`,
-        row: <PinRow onChanged={onChanged} pin={pin} />,
-      }))}
       title={t`Placed by hand`}
-    />
+    >
+      {pins.map((pin) => (
+        <PinRow
+          key={`${pin.userId} ${pin.team.id}`}
+          onChanged={onChanged}
+          pin={pin}
+        />
+      ))}
+    </PlacementSection>
   );
 };
 

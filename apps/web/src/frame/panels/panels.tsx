@@ -156,6 +156,7 @@ const styles = stylex.create({
     marginInlineEnd: size.sidebarCardGap,
     overflow: "clip",
     borderRadius: radius.md,
+    cornerShape: radius.shape,
     backgroundColor: colors.sidebarCard,
     // Its edge a line inside it, round all four corners, as the page's card (app-shell.tsx `card`,
     // FRESH.md F89): drawn outside, a lift was cut by the clip of its side of the group. Drawn over
@@ -164,8 +165,9 @@ const styles = stylex.create({
     [cardLine.width]: size.hairline,
     // A box at the panels' foot (the chat's) rounds its corner no deeper
     // than this card's round it, as #2503's (its shell-panel-composer-corner):
-    // the card's corner times 1.84, 22px against the box's own 24px.
-    "--damsko-prompt-input-radius": `calc(${radius.md} * 1.84)`,
+    // 22px against the box's own 24px, in every browser. Not the card's
+    // corner token, which is 22px only where corner-shape draws a squircle.
+    "--damsko-prompt-input-radius": "22px",
   },
   headLine: {
     position: "absolute",
@@ -187,6 +189,7 @@ const styles = stylex.create({
     marginBlock: { default: size.sidebarCardGap, [NARROW]: 0 },
     marginInlineEnd: { default: size.sidebarCardGap, [NARROW]: 0 },
     borderRadius: { default: radius.md, [NARROW]: 0 },
+    cornerShape: radius.shape,
     backgroundColor: { default: colors.sidebarCard, [NARROW]: "transparent" },
     [cardLine.width]: { default: size.hairline, [NARROW]: "0px" },
   },
@@ -211,6 +214,7 @@ const styles = stylex.create({
   // Going full screen they keep their own card's look until they lie on the page's card, whole.
   stillCard: {
     borderRadius: { default: radius.md, [NARROW]: 0 },
+    cornerShape: radius.shape,
     backgroundColor: { default: colors.sidebarCard, [NARROW]: "transparent" },
     [cardLine.width]: { default: size.hairline, [NARROW]: "0px" },
   },
@@ -281,6 +285,7 @@ const styles = stylex.create({
     marginBlock: 0,
     marginInlineEnd: 0,
     borderRadius: { default: radius.md, [NARROW]: 0 },
+    cornerShape: radius.shape,
     backgroundColor: colors.sidebarCard,
     [cardLine.width]: { default: size.hairline, [NARROW]: "0px" },
   },

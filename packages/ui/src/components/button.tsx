@@ -13,13 +13,15 @@
 // while it works the button is busy, takes no second press and shows a spinner; once it settles, a
 // tick or the alert for a moment, then it rests. While it works the spinner takes the place of its
 // icon and the words stay; with no icon the mark stands over the words, which keep their place
-// unseen (and their name for a screen reader), so the button never changes width. Words for a
-// state (`loadingText`, `successText`, `errorText`) are said, and shown in the words' place, every
-// one stacked in the same cell so the widest sets the width; there, success with no words of its
-// own is the tick before the button's words, so the button keeps the tick's room at rest (its
-// width never changes as the tick comes). Failed, it draws the quiet fill with
-// destructive words and edge, whatever its variant. A page that runs the work elsewhere (a form's
-// submit) gives `status` instead.
+// unseen (and their name for a screen reader), so the button never changes width. `loadingText` is
+// announced to a screen reader, never shown: the spinner shows that it works, as the original's and
+// the common kits' loading buttons do. `successText` and `errorText` are announced and shown in the
+// words' place, each beside its mark, every one stacked in the same cell so the widest sets the
+// width; a failure with no `errorText` shows the alert alone, and its announcement is the
+// catalogue's. Given any of the three, success with no words of its own is the tick before the
+// button's words, so the button keeps the tick's room at rest (its width never changes as the tick
+// comes). Failed, it draws the quiet fill with destructive words and edge, whatever its variant. A
+// page that runs the work elsewhere (a form's submit) gives `status` instead.
 //
 // `tooltip` gives it a Tooltip of its own, as SidebarMenuButton's: an icon-only button shows its
 // name (`aria-label`) by default, `tooltip={false}` shows none, and words show those. Inside a
@@ -37,10 +39,14 @@ import { isValidElement } from "react";
 import type { ComponentProps, ReactElement, ReactNode } from "react";
 
 import { useAction } from "../hooks/use-action";
-import type { ActionResult, ActionStatus } from "../hooks/use-action";
+import type {
+  ActionResult,
+  ActionStatus,
+  ActionText,
+} from "../hooks/use-action";
 import { useI18n } from "../lib/i18n";
 import { CheckIcon, CircleAlertIcon, Icon } from "../lib/icons";
-import { focusRing, hyphenate } from "../lib/styles";
+import { focusRing, hyphenate, tapTarget } from "../lib/styles";
 import {
   colors,
   duration,
@@ -62,6 +68,7 @@ import type { LayoutStyle } from "../lib/utils";
 import { iconVars, layerFooterMarker, motionVars } from "../lib/vars.stylex";
 import { buttonMarker, ghostVars } from "./button.stylex";
 import { Spinner } from "./spinner";
+import { spinnerVars } from "./spinner.stylex";
 import { ControlTooltip } from "./tooltip";
 
 export type ButtonVariant =
@@ -130,11 +137,18 @@ interface ButtonBase extends Omit<
    * reader, and back to rest. A failure is caught and said, never thrown to the page.
    */
   onClick?: ComponentProps<typeof ButtonPrimitive>["onClick"];
-  /** Said while its press works, and shown in place of its words ("Saving"). */
+  /**
+   * Announced to a screen reader while its press works ("Saving"); never shown: the spinner shows
+   * that it works, and the button keeps its words. Given, it keeps the tick's room at rest, as
+   * either text below does.
+   */
   loadingText?: string;
-  /** Said once its press worked, and shown in place of its words for a moment ("Saved"). */
+  /** Announced once its press worked, and shown in place of its words for a moment ("Saved"). */
   successText?: string;
-  /** Said when its press failed, and shown in place of its words for a moment ("Not saved"). */
+  /**
+   * Announced when its press failed, and shown in place of its words for a moment ("Not saved").
+   * Left out, the alert shows alone and the catalogue's word is announced.
+   */
   errorText?: string;
   /**
    * Where its work is, when the page runs it (a form's submit): the Button shows it and leaves
@@ -199,7 +213,6 @@ export type ButtonProps = WithWords | IconOnly;
 
 // Hover only where a pointer can hover, so a tap never leaves a button lit.
 const HOVER = media.hover;
-const COARSE = media.pointerCoarse;
 const FORCED = media.forcedColors;
 
 // A Button group's own items: never a layer a trigger in it draws inline (a Dropdown menu's list
@@ -215,7 +228,6 @@ const LAST = `:nth-last-child(1 of ${ITEM})`;
 const FOOTERS =
   "[data-slot=dialog-footer], [data-slot=alert-dialog-footer], [data-slot=sheet-footer], [data-slot=drawer-footer]";
 const FOOTER_ACTION = `:is(:is(${FOOTERS}) > *)`;
-const IN_FOOTER_ACTION = `:is(:is(${FOOTERS}) > * > *)`;
 
 const styles = stylex.create({
   base: {
@@ -237,7 +249,6 @@ const styles = stylex.create({
     borderWidth: { default: 0, [FORCED]: 1 },
     borderStyle: "solid",
     borderColor: { default: "currentColor", [FORCED]: "ButtonText" },
-    cornerShape: radius.shape,
     fontFamily: font.sans,
     fontSize: font.textSm,
     lineHeight: font.textSmLine,
@@ -411,12 +422,6 @@ const styles = stylex.create({
       },
     },
   },
-  // A finger needs 44px: on a touch screen an unseen area makes up the difference.
-  target: {
-    position: "absolute",
-    insetInline: 0,
-    insetBlock: 0,
-  },
 });
 
 // Height comes from the line plus padding, so a wrapped label makes the button taller and never
@@ -428,6 +433,7 @@ const sizeStyles = stylex.create({
     paddingBlock: `calc((${sizes.controlXs} - ${font.textSmLine}) / 2)`,
     paddingInline: space["2"],
     borderRadius: `min(${radius.xl}, calc(${sizes.controlXs} / 2))`,
+    cornerShape: radius.shape,
   },
   sm: {
     minHeight: sizes.controlSm,
@@ -435,6 +441,7 @@ const sizeStyles = stylex.create({
     paddingBlock: `calc((${sizes.controlSm} - ${font.textSmLine}) / 2)`,
     paddingInline: space["3"],
     borderRadius: `min(${radius.xl}, calc(${sizes.controlSm} / 2))`,
+    cornerShape: radius.shape,
   },
   default: {
     minHeight: sizes.controlDefault,
@@ -442,6 +449,7 @@ const sizeStyles = stylex.create({
     paddingBlock: `calc((${sizes.controlDefault} - ${font.textSmLine}) / 2)`,
     paddingInline: space["3"],
     borderRadius: `min(${radius.xl}, calc(${sizes.controlDefault} / 2))`,
+    cornerShape: radius.shape,
   },
   lg: {
     // The large size's icon is the default one, with words or without.
@@ -451,6 +459,7 @@ const sizeStyles = stylex.create({
     paddingBlock: `calc((${sizes.controlLg} - ${font.textSmLine}) / 2)`,
     paddingInline: space["4"],
     borderRadius: `min(${radius.xl}, calc(${sizes.controlLg} / 2))`,
+    cornerShape: radius.shape,
   },
   "icon-xs": {
     minHeight: sizes.controlXs,
@@ -458,6 +467,7 @@ const sizeStyles = stylex.create({
     paddingBlock: `calc((${sizes.controlXs} - ${font.textSmLine}) / 2)`,
     paddingInline: 0,
     borderRadius: `min(${radius.xl}, calc(${sizes.controlXs} / 2))`,
+    cornerShape: radius.shape,
   },
   "icon-sm": {
     minHeight: sizes.controlSm,
@@ -465,6 +475,7 @@ const sizeStyles = stylex.create({
     paddingBlock: `calc((${sizes.controlSm} - ${font.textSmLine}) / 2)`,
     paddingInline: 0,
     borderRadius: `min(${radius.xl}, calc(${sizes.controlSm} / 2))`,
+    cornerShape: radius.shape,
   },
   icon: {
     minHeight: sizes.controlDefault,
@@ -472,6 +483,7 @@ const sizeStyles = stylex.create({
     paddingBlock: `calc((${sizes.controlDefault} - ${font.textSmLine}) / 2)`,
     paddingInline: 0,
     borderRadius: `min(${radius.xl}, calc(${sizes.controlDefault} / 2))`,
+    cornerShape: radius.shape,
   },
   "icon-lg": {
     [iconVars.size]: sizes.iconDefault,
@@ -480,6 +492,7 @@ const sizeStyles = stylex.create({
     paddingBlock: `calc((${sizes.controlLg} - ${font.textSmLine}) / 2)`,
     paddingInline: 0,
     borderRadius: `min(${radius.xl}, calc(${sizes.controlLg} / 2))`,
+    cornerShape: radius.shape,
   },
 });
 
@@ -504,64 +517,16 @@ const unsizedStyles = stylex.create({
       default: `min(${radius.xl}, calc(${sizes.controlDefault} / 2))`,
       [FOOTER_ACTION]: `min(${radius.xl}, calc(${sizes.controlSm} / 2))`,
     },
+    cornerShape: radius.shape,
   },
-  // Its touch target, a direct child of the button.
-  target: {
-    insetBlock: {
-      default: 0,
-      [COARSE]: {
-        default: `calc((${sizes.controlDefault} - ${sizes.tapTarget}) / 2)`,
-        [IN_FOOTER_ACTION]: `calc((${sizes.controlSm} - ${sizes.tapTarget}) / 2)`,
-      },
-    },
-  },
-});
-
-// The touch target of each size: as tall as a finger needs, and as wide for a square.
-const targetStyles = stylex.create({
-  xs: {
-    insetBlock: {
-      default: 0,
-      [COARSE]: `calc((${sizes.controlXs} - ${sizes.tapTarget}) / 2)`,
-    },
-  },
-  sm: {
-    insetBlock: {
-      default: 0,
-      [COARSE]: `calc((${sizes.controlSm} - ${sizes.tapTarget}) / 2)`,
-    },
-  },
-  default: {
-    insetBlock: {
-      default: 0,
-      [COARSE]: `calc((${sizes.controlDefault} - ${sizes.tapTarget}) / 2)`,
-    },
-  },
-  lg: { insetBlock: 0 },
-  "icon-xs": {
-    inset: {
-      default: 0,
-      [COARSE]: `calc((${sizes.controlXs} - ${sizes.tapTarget}) / 2)`,
-    },
-  },
-  "icon-sm": {
-    inset: {
-      default: 0,
-      [COARSE]: `calc((${sizes.controlSm} - ${sizes.tapTarget}) / 2)`,
-    },
-  },
-  icon: {
-    inset: {
-      default: 0,
-      [COARSE]: `calc((${sizes.controlDefault} - ${sizes.tapTarget}) / 2)`,
-    },
-  },
-  "icon-lg": { inset: 0 },
 });
 
 // Each variant at rest; its hover and press are in liveStyles, left out while it cannot be pressed.
 const variantStyles = stylex.create({
   default: {
+    // On the fill a working spinner's last bars stay seen and its ring is drawn heavier.
+    [spinnerVars.floor]: sizes.spinnerFadeOnFill,
+    [spinnerVars.stroke]: sizes.spinnerStrokeOnFill,
     color: colors.primaryForeground,
     backgroundColor: colors.primary,
     boxShadow: shadow.bevelInk,
@@ -574,6 +539,8 @@ const variantStyles = stylex.create({
     boxShadow: "none",
   },
   destructive: {
+    [spinnerVars.floor]: sizes.spinnerFadeOnFill,
+    [spinnerVars.stroke]: sizes.spinnerStrokeOnFill,
     color: colors.destructiveFillForeground,
     backgroundColor: colors.destructiveFill,
     boxShadow: shadow.bevelDestructive,
@@ -582,6 +549,8 @@ const variantStyles = stylex.create({
   // wider than the button so it can move: under a pointer it leans a step deeper, pressed it draws
   // to its deepest. Its fill is under it, for forced colours.
   success: {
+    [spinnerVars.floor]: sizes.spinnerFadeOnFill,
+    [spinnerVars.stroke]: sizes.spinnerStrokeOnFill,
     color: colors.successFillForeground,
     backgroundColor: colors.successFill,
     backgroundImage: { default: colors.successLight, [FORCED]: "none" },
@@ -841,12 +810,10 @@ const ownOf = (
 /** The sheen over a filled button, and the touch target. */
 const Inside = ({
   variant,
-  size,
   pressable,
   failed,
 }: {
   variant: ButtonVariant;
-  size: ButtonSize | undefined;
   pressable: boolean;
   failed: boolean;
 }) => (
@@ -857,13 +824,7 @@ const Inside = ({
         {...stylex.props(styles.sheen, pressable && styles.sheenLive)}
       />
     )}
-    <span
-      aria-hidden="true"
-      {...stylex.props(
-        styles.target,
-        size === undefined ? unsizedStyles.target : targetStyles[size]
-      )}
-    />
+    <span aria-hidden="true" {...stylex.props(tapTarget)} />
   </>
 );
 
@@ -1013,7 +974,9 @@ const statusStyles = stylex.create({
   },
 });
 
-type Labels = Partial<Record<Exclude<ActionStatus, "idle">, string>>;
+// The words a state shows in the words' place: how it went. While it works only the spinner shows,
+// and the button keeps its own words, as the original's did (its loading words are said, not shown).
+type Labels = Partial<Record<"success" | "error", string>>;
 
 /** A state's mark: the spinner while it works, a tick, the alert. */
 const Mark = ({ status }: { status: Exclude<ActionStatus, "idle"> }) => {
@@ -1110,16 +1073,19 @@ const cutWords = (children: ReactNode): ReactNode[] =>
 const Status = ({
   status,
   labels,
+  laidOut: stacked,
   truncate,
   children: given,
 }: {
   status: ActionStatus;
   labels: Labels;
+  /** Given words for any state: laid out with its states, in one cell. */
+  laidOut: boolean;
   truncate: boolean;
   children: ReactNode;
 }) => {
-  const stacked = Object.values(labels).some((each) => each !== undefined);
-  const label = status === "idle" ? undefined : labels[status];
+  const label =
+    status === "idle" || status === "loading" ? undefined : labels[status];
   // Laid out with its states side by side, success with no words of its own is the tick before the
   // button's own words, as the original's done state: drawn in the words' own layer (the words are
   // never drawn twice), in the icon's place, or with no icon in the room the words keep at rest.
@@ -1170,7 +1136,7 @@ const Status = ({
         >
           {children}
         </span>
-        {(["loading", "success", "error"] as const).map((each) =>
+        {(["success", "error"] as const).map((each) =>
           labels[each] === undefined ? null : (
             <span
               key={each}
@@ -1212,13 +1178,9 @@ const withStatus = (
 const usePress = (
   onClick: ButtonBase["onClick"],
   held: ActionStatus | undefined,
-  labels: Labels
+  texts: ActionText
 ) => {
-  const action = useAction(waitFor, {
-    loadingText: labels.loading,
-    successText: labels.success,
-    errorText: labels.error,
-  });
+  const action = useAction(waitFor, texts);
   if (held !== undefined) {
     return { status: held, press: onClick };
   }
@@ -1257,9 +1219,9 @@ const Pressable = ({
 }: ButtonProps) => {
   const { agentAsks, agentPresses } = useI18n().action;
   const { status, press } = usePress(onClick, held, {
-    loading: loadingText,
-    success: successText,
-    error: errorText,
+    loadingText,
+    successText,
+    errorText,
   });
   const working = status === "loading";
   const extra = withStatus(rest, status);
@@ -1272,27 +1234,23 @@ const Pressable = ({
     { agentAsks, agentPresses }
   );
   const inside = (
-    <Inside
-      variant={variant}
-      size={size}
-      pressable={!off}
-      failed={hasFailed(extra)}
-    />
+    <Inside variant={variant} pressable={!off} failed={hasFailed(extra)} />
   );
   const element =
     asChild && isValidElement<{ children?: ReactNode }>(children)
       ? children
       : undefined;
-  // An icon-only button keeps its square: its words are said, never shown.
+  // Given words for its states, it runs work, and is laid out with them. An icon-only button keeps
+  // its square: its words are said, never shown.
+  const laidOut =
+    !isIconSize(size) &&
+    [loadingText, successText, errorText].some((each) => each !== undefined);
   const words = (content: ReactNode) => (
     <Status
       status={status}
       truncate={truncate}
-      labels={
-        isIconSize(size)
-          ? {}
-          : { loading: loadingText, success: successText, error: errorText }
-      }
+      laidOut={laidOut}
+      labels={laidOut ? { success: successText, error: errorText } : {}}
     >
       {content}
     </Status>

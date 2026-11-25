@@ -65,7 +65,7 @@ export const popup = {
 
 /** The wave of light a Skeleton's script works out: its speed (px a second), rest and slope. */
 export const skeletonWave = {
-  speed: 520,
+  speed: 900,
   rest: 0.2,
   slope: 0.6,
 } as const;

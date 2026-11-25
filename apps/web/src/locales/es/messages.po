@@ -342,6 +342,10 @@ msgstr "{count, plural, one {# entrevista en la semana {week}} other {# entrevis
 msgid "{count, plural, one {# more line} other {# more lines}}"
 msgstr "{count, plural, one {# línea más} other {# líneas más}}"
 
+#: src/frame/ui-words.tsx
+msgid "{count, plural, one {# more row} other {# more rows}}"
+msgstr "{count, plural, one {# fila más} other {# filas más}}"
+
 #: src/chat/subject-bar.tsx
 msgid "{count, plural, one {# more thing this chat worked on} other {# more things this chat worked on}}"
 msgstr "{count, plural, one {# elemento más en el que trabajó este chat} other {# elementos más en los que trabajó este chat}}"
@@ -1132,6 +1136,10 @@ msgstr "{name}, en {app}"
 #: src/frame/ui-words.tsx
 msgid "{name}, lines"
 msgstr "{name}, líneas"
+
+#: src/frame/ui-words.tsx
+msgid "{name}, position {position} of {total}."
+msgstr "{name}, posición {position} de {total}."
 
 #: src/onboarding/about-story.tsx
 msgid "{name}, where does the time go in your week?"
@@ -3771,6 +3779,10 @@ msgstr "Atrás y adelante"
 #: src/frame/ui-words.tsx
 msgid "Back to reference {number}"
 msgstr "Volver a la referencia {number}"
+
+#: src/frame/ui-words.tsx
+msgid "Back to reference {number}-{mark}"
+msgstr "Volver a la referencia {number}-{mark}"
 
 #: src/apps/app-workspace.tsx
 msgid "Back to your version"
@@ -10175,6 +10187,7 @@ msgid "Live, being measured"
 msgstr "En marcha, en medición"
 
 #: src/brain/part-not-loaded.tsx
+#: src/frame/page-states.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Loaded"
 msgstr "Cargado"
@@ -11794,6 +11807,10 @@ msgstr "Sin comprobar"
 msgid "Not checked yet"
 msgstr "Aún no comprobado"
 
+#: src/activity/audit-log.tsx
+msgid "Not cleared"
+msgstr "No se ha borrado"
+
 #: src/brain/brain-atlas.ts
 msgid "Not confirmed by the board yet"
 msgstr "Aún no confirmada por la dirección"
@@ -11901,6 +11918,7 @@ msgid "Not live yet"
 msgstr "Aún no activo"
 
 #: src/brain/part-not-loaded.tsx
+#: src/frame/page-states.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Not loaded"
 msgstr "No cargado"
@@ -11999,6 +12017,7 @@ msgstr "No compartido con el proyecto"
 msgid "Not shared yet"
 msgstr "Aún no compartido"
 
+#: src/activity/audit-log.tsx
 #: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
 msgid "Not shown"
@@ -13504,6 +13523,10 @@ msgstr "Elige qué puede hacer. Puedes cambiarlo más tarde."
 msgid "Picked in the chat"
 msgstr "Elegido en el chat"
 
+#: src/frame/ui-words.tsx
+msgid "Picked up {name}, position {position} of {total}."
+msgstr "Se levantó {name}, posición {position} de {total}."
+
 #: src/onboarding/interviews-progress.tsx
 msgid "pieces of work found"
 msgstr "trabajos encontrados"
@@ -13629,6 +13652,10 @@ msgstr "Pulsa Intro para añadirlo."
 #: src/frame/panels/head.tsx
 msgid "Press or press F2 to rename"
 msgstr "Pulsa o pulsa F2 para cambiar el nombre"
+
+#: src/frame/ui-words.tsx
+msgid "Press Space or Enter to pick it up, the arrow keys to move it, Space or Enter to put it down, or Escape to put it back."
+msgstr "Pulse Espacio o Intro para levantarlo, las flechas para moverlo, Espacio o Intro para soltarlo, o Escape para devolverlo a su sitio."
 
 #: src/frame/ui-words.tsx
 msgid "Presses \"{words}\""
@@ -13806,6 +13833,14 @@ msgstr "Purchase-to-Pay"
 msgctxt "what the Brain remembers about something"
 msgid "Purpose"
 msgstr "Propósito"
+
+#: src/frame/ui-words.tsx
+msgid "Put {name} back at position {position} of {total}."
+msgstr "Se devolvió {name} a la posición {position} de {total}."
+
+#: src/frame/ui-words.tsx
+msgid "Put {name} down at position {position} of {total}."
+msgstr "Se soltó {name} en la posición {position} de {total}."
 
 #: src/interview/read-back.tsx
 msgid "Put back"
@@ -18844,9 +18879,12 @@ msgstr "Vuelve a intentar preparar {name}."
 msgid "Try the search again"
 msgstr "Volver a buscar"
 
+#: src/frame/page-states.tsx
+msgid "Trying again"
+msgstr "Reintentando"
+
 #: src/brain/part-not-loaded.tsx
 #: src/chat/builds.tsx
-#: src/frame/page-states.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Trying again…"
 msgstr "Reintentando…"

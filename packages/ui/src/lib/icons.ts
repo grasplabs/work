@@ -1,10 +1,19 @@
 // The icons of Damsko: the one way an icon is drawn, and the house set. Every drawing is a
-// Hugeicons drawing (only from there), named by its shape with an `Icon` suffix, as lucide names
-// them (`CheckIcon`, `XIcon`, `EllipsisIcon`), so a component asks for a shape, not for
-// `Tick02Icon`. Add an icon here before using it; never import from @hugeicons directly.
+// Hugeicons drawing (only from there), drawn by Icon, at its holder's size and stroke.
+//
+// The house set holds the drawings Damsko's own parts draw, and the shapes products share a meaning
+// for, each named by its shape with an `Icon` suffix, as lucide names them (`CheckIcon`, `XIcon`,
+// `EllipsisIcon`), so a part asks for a shape, not for `Tick02Icon`, and every product draws "more
+// actions" with the same drawing. A Damsko part imports only from here. Any other drawing a product
+// needs it imports from @hugeicons/core-free-icons itself, the package this file draws from, and
+// draws through the same Icon, with no change here: a named import of one drawing, which a
+// bundler keeps alone (the package has no side effects), as it keeps only the house set's
+// drawings a page uses. A drawing that points along the line is marked with `directional` where it
+// is named. One that every product comes to share moves into the house set.
 //
 //   <Icon icon={PlusIcon} />                  beside words: hidden from screen readers
 //   <Icon icon={PlusIcon} label={add} />      standing alone, with a name
+//   <Icon icon={FloppyDiskIcon} />            any Hugeicons drawing, imported by the product
 //
 // Icon draws with the stroke and size the holder sets through iconVars (vars.stylex.ts): a button
 // sets them for the icons in it, and an icon on its own takes the defaults (16px, a 1.5 stroke).
@@ -74,6 +83,7 @@ import {
   GoBackward10SecIcon,
   GoForward10SecIcon,
   GridViewIcon,
+  GripVerticalIcon as HugeGripVerticalIcon,
   HashtagIcon,
   HelpCircleIcon,
   Home01Icon,
@@ -106,7 +116,7 @@ import {
   PencilEdit02Icon,
   PlayIcon as HugePlayIcon,
   Redo02Icon,
-  RefreshIcon,
+  Refresh01Icon,
   RepeatIcon as HugeRepeatIcon,
   Rocket01Icon,
   ScaleIcon as HugeScaleIcon,
@@ -195,8 +205,13 @@ const solidForm = (icon: IconData): IconData => {
   return copy;
 };
 
-/** Marks a drawing as one that points along the line, so it mirrors in right-to-left text. */
-const pointing = (icon: IconData): IconData => {
+/**
+ * Marks a drawing as directional: one that points along the line (an arrow, a chevron, send,
+ * undo), so it mirrors in right-to-left text. The house set's are marked already; mark a Hugeicons
+ * drawing a product imports itself once, where it is named (`const NextIcon =
+ * directional(ArrowRight03Icon)`).
+ */
+export const directional = (icon: IconData): IconData => {
   pointers.add(icon);
   return icon;
 };
@@ -215,8 +230,9 @@ const styles = stylex.create({
   },
   filled: { stroke: "none" },
   solid: { fill: "currentColor" },
-  // Turned with `scale`, the property UI SDK turns a list item's icon with ([data-mirror] in right to
-  // left): both set the one value, so an icon in a menu or a list turns once, never twice.
+  // Turned with `scale`. Once a UI SDK item icon has been drawn, UI SDK's own rule turns every
+  // hidden [data-mirror] drawing on the page with `scale` in right to left, so any pointing icon
+  // (leading an item, at its end, or on its own) gets the one value from both and turns once.
   mirror: {
     scale: { default: null, ":dir(rtl)": "-1 1" },
   },
@@ -320,13 +336,13 @@ export const ArrowDownIcon: IconData = ArrowDown02Icon;
 /** Go back a step. ArrowLeft02Icon. */
 export const ArrowLeftIcon: IconData =
   /* @__PURE__ */
-  pointing(ArrowLeft02Icon);
+  directional(ArrowLeft02Icon);
 /** Switch to another: an account, an organisation. ArrowLeftRightIcon. */
 export const ArrowLeftRightIcon: IconData = HugeArrowLeftRightIcon;
 /** Go on to the next step. ArrowRight02Icon: an arrow with a stem, never a chevron. */
 export const ArrowRightIcon: IconData =
   /* @__PURE__ */
-  pointing(ArrowRight02Icon);
+  directional(ArrowRight02Icon);
 /** A column that can be sorted, and is not. ArrowUpDownIcon. */
 export const ArrowUpDownIcon: IconData = HugeArrowUpDownIcon;
 /** A column sorted from low to high. ArrowUp02Icon. */
@@ -334,7 +350,7 @@ export const ArrowUpIcon: IconData = ArrowUp02Icon;
 /** A link that opens another site, in a new tab. ArrowUpRight01Icon. */
 export const ArrowUpRightIcon: IconData =
   /* @__PURE__ */
-  pointing(ArrowUpRight01Icon);
+  directional(ArrowUpRight01Icon);
 /** Listening: dictation is on and hearing you. AudioWave01Icon. */
 export const AudioWaveformIcon: IconData = AudioWave01Icon;
 /** Notifications. Notification03Icon. */
@@ -360,11 +376,11 @@ export const ChevronDownIcon: IconData = ArrowDown01Icon;
 /** A step back: Previous, in a pagination. ArrowLeft01Icon. */
 export const ChevronLeftIcon: IconData =
   /* @__PURE__ */
-  pointing(ArrowLeft01Icon);
+  directional(ArrowLeft01Icon);
 /** A step on: Next, in a pagination. ArrowRight01Icon. */
 export const ChevronRightIcon: IconData =
   /* @__PURE__ */
-  pointing(ArrowRight01Icon);
+  directional(ArrowRight01Icon);
 /** A step up: the section before, in a viewer. ArrowUp01Icon. */
 export const ChevronUpIcon: IconData = ArrowUp01Icon;
 /** A menu that opens up and down from where it stands (a profile's). UnfoldMoreIcon. */
@@ -435,6 +451,8 @@ export const GlobeIcon: IconData = HugeGlobeIcon;
 export const GoBackward10Icon: IconData = GoBackward10SecIcon;
 /** Go forward 10 seconds. GoForward10SecIcon. */
 export const GoForward10Icon: IconData = GoForward10SecIcon;
+/** A handle to drag: an item of a list put in order by hand. GripVerticalIcon. */
+export const GripVerticalIcon: IconData = HugeGripVerticalIcon;
 /** A column of numbers. HashtagIcon. */
 export const HashIcon: IconData = HashtagIcon;
 /** The first page, a workspace's home. Home01Icon. */
@@ -466,7 +484,7 @@ export const ListDashIcon: IconData = LeftToRightListDashIcon;
 /** Show as a list. LeftToRightListBulletIcon. */
 export const ListIcon: IconData =
   /* @__PURE__ */
-  pointing(LeftToRightListBulletIcon);
+  directional(LeftToRightListBulletIcon);
 /** Working: drawn turning while something happens. Loading03Icon. */
 export const LoaderIcon: IconData = Loading03Icon;
 /** Locked: there, but the person cannot open it. SquareLock02Icon. */
@@ -474,7 +492,7 @@ export const LockIcon: IconData = SquareLock02Icon;
 /** Sign out. Logout03Icon. */
 export const LogOutIcon: IconData =
   /* @__PURE__ */
-  pointing(Logout03Icon);
+  directional(Logout03Icon);
 /** An email. Mail01Icon. */
 export const MailIcon: IconData = Mail01Icon;
 /** Where something happens: a place. Location01Icon. */
@@ -501,15 +519,15 @@ export const MoonIcon: IconData = Moon02Icon;
  * system, so its tip still leads the name tag that follows it. */
 export const MousePointerIcon: IconData =
   /* @__PURE__ */
-  pointing(Cursor02Icon);
+  directional(Cursor02Icon);
 /** Fold or unfold a sidebar. SidebarLeftIcon. */
 export const PanelLeftIcon: IconData =
   /* @__PURE__ */
-  pointing(SidebarLeftIcon);
+  directional(SidebarLeftIcon);
 /** Show or set aside a panel at the end, such as App shell's panels on a phone. SidebarRightIcon. */
 export const PanelRightIcon: IconData =
   /* @__PURE__ */
-  pointing(SidebarRightIcon);
+  directional(SidebarRightIcon);
 /** Attach a file. Attachment01Icon. */
 export const PaperclipIcon: IconData = Attachment01Icon;
 /** Pause what is playing. PauseIcon. */
@@ -527,9 +545,9 @@ export const PlusIcon: IconData = Add01Icon;
 /** Redo what was undone. Redo02Icon. */
 export const RedoIcon: IconData =
   /* @__PURE__ */
-  pointing(Redo02Icon);
-/** Try again, or write the answer again. RefreshIcon. */
-export const RefreshCwIcon: IconData = RefreshIcon;
+  directional(Redo02Icon);
+/** Try again, or write the answer again. Refresh01Icon. */
+export const RefreshCwIcon: IconData = Refresh01Icon;
 /** Two arrows chasing each other round: something that repeats. RepeatIcon. */
 export const RepeatIcon: IconData = HugeRepeatIcon;
 /** Launch: a first run, a release, a plan put to work. Rocket01Icon. */
@@ -543,7 +561,7 @@ export const SearchIcon: IconData = Search01Icon;
 /** Send a message or an invite. Sent02Icon. */
 export const SendIcon: IconData =
   /* @__PURE__ */
-  pointing(Sent02Icon);
+  directional(Sent02Icon);
 /** A system or a service an action touches. ServerStack01Icon. */
 export const ServerIcon: IconData = ServerStack01Icon;
 /** Settings. Settings01Icon. */
@@ -585,11 +603,11 @@ export const TextAlignCenterIcon: IconData = HugeTextAlignCenterIcon;
 /** Text set to the end. TextAlignRightIcon. */
 export const TextAlignEndIcon: IconData =
   /* @__PURE__ */
-  pointing(TextAlignRightIcon);
+  directional(TextAlignRightIcon);
 /** Text set to the start. TextAlignLeftIcon. */
 export const TextAlignStartIcon: IconData =
   /* @__PURE__ */
-  pointing(TextAlignLeftIcon);
+  directional(TextAlignLeftIcon);
 /** A field someone types into: a text input. InputTextIcon. */
 export const TextCursorInputIcon: IconData = InputTextIcon;
 /** A column of short text. TextIcon. */
@@ -621,7 +639,7 @@ export const UnderlineIcon: IconData = TextUnderlineIcon;
 /** Undo the last change. Undo02Icon. */
 export const UndoIcon: IconData =
   /* @__PURE__ */
-  pointing(Undo02Icon);
+  directional(Undo02Icon);
 /** Send a file up: a drop zone, an upload button. Upload01Icon. */
 export const UploadIcon: IconData = Upload01Icon;
 /** Invite a person. UserAdd01Icon. */

@@ -243,6 +243,7 @@ const styles = stylex.create({
     borderStyle: "solid",
     borderColor: "currentColor",
     borderRadius: "inherit",
+    cornerShape: "inherit",
     backgroundColor: colors.switchTrack,
     // Vertical scrolling stays with the page; a sideways move is a drag.
     touchAction: "pan-y",
@@ -294,6 +295,7 @@ const styles = stylex.create({
     zIndex: 0,
     overflow: "hidden",
     borderRadius: "inherit",
+    cornerShape: "inherit",
     backgroundColor: colors.successFill,
     backgroundImage: colors.successLight,
     backgroundSize: size.successLightSize,
@@ -313,6 +315,7 @@ const styles = stylex.create({
     position: "absolute",
     inset: 0,
     borderRadius: "inherit",
+    cornerShape: "inherit",
     backgroundImage: `linear-gradient(${colors.buttonSheen}, transparent)`,
     opacity: 0.6,
     transitionProperty: "opacity",
@@ -881,7 +884,11 @@ export const Switch = (allProps: SwitchProps) => {
       return;
     }
     setSaving("error");
-    announce(failure);
+    // In a Field its FieldError says the words, through the same live region (UI SDK's field):
+    // said here only where no Field shows them.
+    if (field === null) {
+      announce(failure);
+    }
   };
 
   const handleCheckedChange: NonNullable<

@@ -7,6 +7,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemGroup,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import { Switch } from "@grasp-os/ui/components/switch";
@@ -17,7 +18,6 @@ import { changeThenRefresh } from "../change-then-refresh.ts";
 import type { Session } from "../core.ts";
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
-import { SeparatedItems } from "../workflows/separated-items.tsx";
 import { SectionCard } from "./section-card.tsx";
 import { SettingRow } from "./setting-row.tsx";
 
@@ -144,51 +144,47 @@ export const OfferedAgents = ({
       flush
       title={t`Offered to the company`}
     >
-      <SeparatedItems
-        aria-label={t`Offered to the company`}
-        rows={offered.map((agent) => {
+      <ItemGroup separated aria-label={t`Offered to the company`}>
+        {offered.map((agent) => {
           const { name, job } = agent;
           const from = nameOf(agent.ownerId);
-          return {
-            key: agent.id,
-            row: (
-              <Item key={agent.id} size="sm">
-                <ItemContent>
-                  <ItemTitle>{name}</ItemTitle>
-                  <ItemDescription>
-                    {job === "" ? t`From ${from}` : t`From ${from} · ${job}`}
-                  </ItemDescription>
-                </ItemContent>
-                {editable ? (
-                  <ItemActions>
-                    <Button
-                      disabled={busy}
-                      onClick={() => {
-                        decide(agent.id, false);
-                      }}
-                      size="sm"
-                      variant="ghost"
-                    >
-                      {t`Decline`}
-                    </Button>
-                    <Button
-                      aria-label={t`Take ${name} on for the company`}
-                      disabled={busy}
-                      onClick={() => {
-                        decide(agent.id, true);
-                      }}
-                      size="sm"
-                      variant="default"
-                    >
-                      {t`Take on`}
-                    </Button>
-                  </ItemActions>
-                ) : null}
-              </Item>
-            ),
-          };
+          return (
+            <Item key={agent.id} size="sm">
+              <ItemContent>
+                <ItemTitle>{name}</ItemTitle>
+                <ItemDescription>
+                  {job === "" ? t`From ${from}` : t`From ${from} · ${job}`}
+                </ItemDescription>
+              </ItemContent>
+              {editable ? (
+                <ItemActions>
+                  <Button
+                    disabled={busy}
+                    onClick={() => {
+                      decide(agent.id, false);
+                    }}
+                    size="sm"
+                    variant="ghost"
+                  >
+                    {t`Decline`}
+                  </Button>
+                  <Button
+                    aria-label={t`Take ${name} on for the company`}
+                    disabled={busy}
+                    onClick={() => {
+                      decide(agent.id, true);
+                    }}
+                    size="sm"
+                    variant="default"
+                  >
+                    {t`Take on`}
+                  </Button>
+                </ItemActions>
+              ) : null}
+            </Item>
+          );
         })}
-      />
+      </ItemGroup>
       <ErrorText>{failure}</ErrorText>
     </SectionCard>
   );

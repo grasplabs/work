@@ -118,8 +118,19 @@ const styles = stylex.create({
     outline: { default: "none", [media.forcedColors]: "1px solid CanvasText" },
     outlineOffset: -1,
   },
-  horizontal: { flexDirection: "row", alignItems: "stretch" },
-  vertical: { flexDirection: "column", alignItems: "stretch" },
+  horizontal: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    "--tap-room-inline": "0px",
+  },
+  // Edge to edge: each button's touch target stops at its own edge towards the next (tapTarget),
+  // which a row gives by default and a column says.
+  vertical: {
+    flexDirection: "column",
+    alignItems: "stretch",
+    "--tap-room-inline": size.tapTarget,
+    "--tap-room-block": "0px",
+  },
   // The line's box: a child of the group, so it knows its neighbours. While either shows a fill the
   // line goes: the fill's own edge divides the two.
   line: {

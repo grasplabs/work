@@ -342,6 +342,10 @@ msgstr "{count, plural, one {# Interview in Kalenderwoche {week}} other {# Inter
 msgid "{count, plural, one {# more line} other {# more lines}}"
 msgstr "{count, plural, one {# weitere Zeile} other {# weitere Zeilen}}"
 
+#: src/frame/ui-words.tsx
+msgid "{count, plural, one {# more row} other {# more rows}}"
+msgstr "{count, plural, one {# weitere Zeile} other {# weitere Zeilen}}"
+
 #: src/chat/subject-bar.tsx
 msgid "{count, plural, one {# more thing this chat worked on} other {# more things this chat worked on}}"
 msgstr "{count, plural, one {# weiteres Element, an dem dieser Chat gearbeitet hat} other {# weitere Elemente, an denen dieser Chat gearbeitet hat}}"
@@ -1132,6 +1136,10 @@ msgstr "{name}, in {app}"
 #: src/frame/ui-words.tsx
 msgid "{name}, lines"
 msgstr "{name}, Zeilen"
+
+#: src/frame/ui-words.tsx
+msgid "{name}, position {position} of {total}."
+msgstr "{name}, Position {position} von {total}."
 
 #: src/onboarding/about-story.tsx
 msgid "{name}, where does the time go in your week?"
@@ -3771,6 +3779,10 @@ msgstr "Zurück und weiter"
 #: src/frame/ui-words.tsx
 msgid "Back to reference {number}"
 msgstr "Zurück zu Verweis {number}"
+
+#: src/frame/ui-words.tsx
+msgid "Back to reference {number}-{mark}"
+msgstr "Zurück zu Verweis {number}-{mark}"
 
 #: src/apps/app-workspace.tsx
 msgid "Back to your version"
@@ -10175,6 +10187,7 @@ msgid "Live, being measured"
 msgstr "Live, wird gemessen"
 
 #: src/brain/part-not-loaded.tsx
+#: src/frame/page-states.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Loaded"
 msgstr "Geladen"
@@ -11794,6 +11807,10 @@ msgstr "Nicht geprüft"
 msgid "Not checked yet"
 msgstr "Noch nicht geprüft"
 
+#: src/activity/audit-log.tsx
+msgid "Not cleared"
+msgstr "Nicht zurückgesetzt"
+
 #: src/brain/brain-atlas.ts
 msgid "Not confirmed by the board yet"
 msgstr "Noch nicht von der Geschäftsleitung bestätigt"
@@ -11901,6 +11918,7 @@ msgid "Not live yet"
 msgstr "Noch nicht live"
 
 #: src/brain/part-not-loaded.tsx
+#: src/frame/page-states.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Not loaded"
 msgstr "Nicht geladen"
@@ -11999,6 +12017,7 @@ msgstr "Nicht mit dem Projekt geteilt"
 msgid "Not shared yet"
 msgstr "Noch nicht geteilt"
 
+#: src/activity/audit-log.tsx
 #: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
 msgid "Not shown"
@@ -13504,6 +13523,10 @@ msgstr "Wählen Sie, was er darf. Sie können das später ändern."
 msgid "Picked in the chat"
 msgstr "Im Chat gewählt"
 
+#: src/frame/ui-words.tsx
+msgid "Picked up {name}, position {position} of {total}."
+msgstr "{name} aufgenommen, Position {position} von {total}."
+
 #: src/onboarding/interviews-progress.tsx
 msgid "pieces of work found"
 msgstr "Aufgaben gefunden"
@@ -13629,6 +13652,10 @@ msgstr "Drücken Sie die Eingabetaste, um es hinzuzufügen."
 #: src/frame/panels/head.tsx
 msgid "Press or press F2 to rename"
 msgstr "Drücken oder F2 drücken zum Umbenennen"
+
+#: src/frame/ui-words.tsx
+msgid "Press Space or Enter to pick it up, the arrow keys to move it, Space or Enter to put it down, or Escape to put it back."
+msgstr "Drücken Sie die Leertaste oder die Eingabetaste zum Aufnehmen, die Pfeiltasten zum Verschieben, die Leertaste oder die Eingabetaste zum Ablegen oder Esc zum Zurücklegen."
 
 #: src/frame/ui-words.tsx
 msgid "Presses \"{words}\""
@@ -13806,6 +13833,14 @@ msgstr "Purchase-to-Pay"
 msgctxt "what the Brain remembers about something"
 msgid "Purpose"
 msgstr "Zweck"
+
+#: src/frame/ui-words.tsx
+msgid "Put {name} back at position {position} of {total}."
+msgstr "{name} zurück an Position {position} von {total} gelegt."
+
+#: src/frame/ui-words.tsx
+msgid "Put {name} down at position {position} of {total}."
+msgstr "{name} an Position {position} von {total} abgelegt."
 
 #: src/interview/read-back.tsx
 msgid "Put back"
@@ -18844,9 +18879,12 @@ msgstr "Versuche noch einmal, {name} einzurichten."
 msgid "Try the search again"
 msgstr "Suche erneut versuchen"
 
+#: src/frame/page-states.tsx
+msgid "Trying again"
+msgstr "Neuer Versuch"
+
 #: src/brain/part-not-loaded.tsx
 #: src/chat/builds.tsx
-#: src/frame/page-states.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Trying again…"
 msgstr "Neuer Versuch…"

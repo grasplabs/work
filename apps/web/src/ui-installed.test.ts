@@ -122,6 +122,8 @@ const parts: Record<string, () => Promise<unknown>> = {
     await import("@grasp-os/ui/components/message-scroller"),
   "components/model-selector": async () =>
     await import("@grasp-os/ui/components/model-selector"),
+  "components/native-select": async () =>
+    await import("@grasp-os/ui/components/native-select"),
   "components/navigation-menu": async () =>
     await import("@grasp-os/ui/components/navigation-menu"),
   "components/number-field": async () =>
@@ -165,6 +167,8 @@ const parts: Record<string, () => Promise<unknown>> = {
     await import("@grasp-os/ui/components/slider"),
   "components/snippet": async () =>
     await import("@grasp-os/ui/components/snippet"),
+  "components/sortable-list": async () =>
+    await import("@grasp-os/ui/components/sortable-list"),
   "components/sources": async () =>
     await import("@grasp-os/ui/components/sources"),
   "components/spinner": async () =>

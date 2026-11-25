@@ -81,7 +81,7 @@ import {
 } from "../../lib/tokens.stylex";
 import { ownValue } from "../../lib/utils";
 import type { LayoutStyle } from "../../lib/utils";
-import { ringInsetMarker } from "../../lib/vars.stylex";
+import { ringInsetMarker, skeletonVars } from "../../lib/vars.stylex";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -603,15 +603,13 @@ const styles = stylex.create({
     alignItems: "center",
     height: size.tableTextLine,
   },
-  // The picture's circle, an sm avatar's, cut from Skeleton's own.
+  // The picture's circle, an sm avatar's, which its Skeleton fills.
   personPicture: {
-    display: "grid",
-    placeItems: "center",
+    [skeletonVars.size]: "100%",
+    display: "flex",
     flexShrink: 0,
     width: size.avatarSm,
     height: size.avatarSm,
-    overflow: "hidden",
-    borderRadius: radius.circle,
   },
   personName: { width: "8rem" },
   personDetail: { width: "11rem", maxWidth: "100%" },

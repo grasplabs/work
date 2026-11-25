@@ -23,6 +23,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -47,7 +48,6 @@ import { NotLoadedState } from "../frame/page-states.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useHeldDialog } from "../workflows/held-dialog.ts";
-import { SeparatedItems } from "../workflows/separated-items.tsx";
 import { forgetChatLink } from "./chat-link.ts";
 import { NamedRows, RowNote, SettingRow, SettingsGroup } from "./section.tsx";
 
@@ -356,13 +356,11 @@ const LinkedChatAccounts = ({ accounts }: { accounts: ChannelAccount[] }) => {
   }
   return (
     <NamedRows label={t`Linked chat accounts`}>
-      <SeparatedItems
-        aria-label={t`Linked chat accounts`}
-        rows={accounts.map((account) => ({
-          key: account.id,
-          row: <AccountRow account={account} />,
-        }))}
-      />
+      <ItemGroup separated aria-label={t`Linked chat accounts`}>
+        {accounts.map((account) => (
+          <AccountRow key={account.id} account={account} />
+        ))}
+      </ItemGroup>
     </NamedRows>
   );
 };

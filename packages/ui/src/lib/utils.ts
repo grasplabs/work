@@ -1,10 +1,18 @@
-// Small things every component shares: the style a caller may pass, the live region, a ref
+// Small things every component shares: the style a caller may pass, the live regions, a ref
 // helper, a measure after layout, asChild, the words among children, and the system's dither as
 // numbers.
 import * as stylex from "@stylexjs/stylex";
+import { announce as say, prepareAnnouncements } from "@ui-sdk/core";
 import { renderElement } from "@ui-sdk/react/primitive";
 import type { RenderProp } from "@ui-sdk/react/primitive";
-import { createContext, createElement, isValidElement, lazy, use } from "react";
+import {
+  createContext,
+  createElement,
+  isValidElement,
+  lazy,
+  use,
+  useSyncExternalStore,
+} from "react";
 import type { ReactElement, ReactNode, Ref } from "react";
 
 import { durations } from "./tokens.values";
@@ -150,13 +158,13 @@ export const ownValue = <T>(
 ): T | undefined => (Object.hasOwn(table, key) ? table[key] : undefined);
 
 /** The schemes a link may lead to. Any other (javascript:, data:, file:) leads nowhere. */
-const ALLOWED = new Set(["http:", "https:", "mailto:"]);
+const ALLOWED = new Set(["http:", "https:", "mailto:", "tel:"]);
 /** The site a relative address is read against, to tell a path on this site from another's. */
 const SAME_SITE = "https://same-site.invalid";
 
 /**
  * Where a link given as data may lead (an answer's, a source's), resolved; null when nowhere: any
- * scheme but http, https and mailto, or nothing. With `relative`, a path on the same site
+ * scheme but http, https, mailto and tel, or nothing. With `relative`, a path on the same site
  * (`/files/report`) leads there as written; one that leaves it (`//elsewhere.com`) never does.
  */
 export const safeHref = (
@@ -188,7 +196,7 @@ export interface CitedSource {
 }
 
 /**
- * A cited source's address as a link can take it (`safeHref`: http, https or mailto), with the
+ * A cited source's address as a link can take it (`safeHref`: http, https, mailto or tel), with the
  * host read from that checked address (without "www.") or, for mail, the address. Anything else
  * (`javascript:`, `data:`, a path, words) is null, and the source is shown as words.
  */
@@ -299,7 +307,12 @@ export const isDevelopment = process.env.NODE_ENV !== "production";
  */
 export const warnUnnamed = (
   part: string,
-  control: HTMLInputElement | HTMLButtonElement | HTMLTextAreaElement | null
+  control:
+    | HTMLInputElement
+    | HTMLButtonElement
+    | HTMLTextAreaElement
+    | HTMLSelectElement
+    | null
 ) => {
   if (!(isDevelopment && control)) {
     return;
@@ -348,6 +361,22 @@ export const nothing = () => {
   // Nothing was started, so nothing stops.
 };
 
+const REDUCE = "(prefers-reduced-motion: reduce)";
+const watchMotion = (changed: () => void) => {
+  const query = window.matchMedia(REDUCE);
+  query.addEventListener("change", changed);
+  return () => {
+    query.removeEventListener("change", changed);
+  };
+};
+/** Whether the reader asked for less motion, kept current; on the server, not. */
+export const useReducedMotion = () =>
+  useSyncExternalStore(
+    watchMotion,
+    () => window.matchMedia(REDUCE).matches,
+    () => false
+  );
+
 /** Sets a ref, a function or an object, to `node`. */
 export const assignRef = <T>(ref: Ref<T> | undefined, node: T | null) => {
   if (typeof ref === "function") {
@@ -361,65 +390,180 @@ export const assignRef = <T>(ref: Ref<T> | undefined, node: T | null) => {
 export type Politeness = "polite" | "assertive";
 
 const regions = new Map<Politeness, HTMLElement>();
-/** What waits to be said, in order: assertive messages first, then polite ones. */
-const waiting: { message: string; politeness: Politeness }[] = [];
+/**
+ * What waits to be said, in order: assertive messages first, then polite ones. A message with a
+ * `key` stands for the latest news of one thing (where an item being moved is now).
+ */
+const waiting: { message: string; politeness: Politeness; key?: string }[] = [];
 let speaking = false;
 // How long a message stays alone in its region before the next replaces it: long enough for a
 // screen reader to have taken it, so one said straight after another never cuts it off.
 const HOLD = 400;
 
-const regionOf = (politeness: Politeness): HTMLElement => {
-  let region = regions.get(politeness);
-  if (region?.isConnected !== true) {
-    region = document.createElement("p");
-    region.setAttribute("role", politeness === "polite" ? "status" : "alert");
-    region.setAttribute("aria-live", politeness);
-    region.dataset.slot = "live-region";
-    // Visually hidden: present to a screen reader, never seen.
-    region.style.cssText =
-      "position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap";
-    document.body.append(region);
-    regions.set(politeness, region);
-  }
-  return region;
+// When a message last came into a region from elsewhere (UI SDK's own: a toast, a field's error),
+// and what this queue last wrote, so its own words are not taken for another's.
+let othersSaidAt = Number.NEGATIVE_INFINITY;
+let ours = "";
+
+// A deferred step (the queue's timer, its frame, a region's watch) can run after the page has gone,
+// as a test's environment is torn down with a message still waiting: it then does nothing, and the
+// queue ends.
+const pageGone = (region?: HTMLElement) =>
+  typeof document === "undefined" || region?.isConnected === false;
+
+const stop = () => {
+  waiting.length = 0;
+  speaking = false;
 };
 
+/** A message another part said into `region`: the next of ours waits its hold, so it never cuts that one off. */
+const heedOthers = (region: HTMLElement) => {
+  new MutationObserver(() => {
+    if (pageGone(region)) {
+      return;
+    }
+    const text = region.textContent;
+    if (text !== "" && text !== ours) {
+      othersSaidAt = performance.now();
+    }
+  }).observe(region, { childList: true, characterData: true, subtree: true });
+};
+
+/**
+ * The page's two live regions, UI SDK's (`prepareAnnouncements`), so the page has one pair, there
+ * before anything is said. UI SDK makes them `role="status"` and `role="alert"`: an empty status
+ * and an empty alert on every page, which a page's own `getByRole("status")` or "no alert here"
+ * then finds. The roles go; `aria-live` and `aria-atomic`, all either role means to a screen
+ * reader, stay. Does nothing on the server, or where UI SDK speaks through an announcer of its own.
+ *
+ * What it relies on in UI SDK (platform/announce.js, at the pinned version; live-regions.spec
+ * fails if it changes): each region is a child of the body marked `data-ui-sdk-announcer`, `""`
+ * for the polite one and `"assertive"` for the other, and one that has left the page is made anew,
+ * with its role, at its next message. So a new region is readied as it comes (`watchLiveRegions`).
+ */
+export const readyLiveRegions = (): void => {
+  if (typeof document === "undefined" || document.body === null) {
+    return;
+  }
+  prepareAnnouncements(document);
+  for (const politeness of ["polite", "assertive"] as const) {
+    const region = document.querySelector<HTMLElement>(
+      politeness === "assertive"
+        ? '[data-ui-sdk-announcer="assertive"]'
+        : '[data-ui-sdk-announcer=""]'
+    );
+    if (region === null || regions.get(politeness) === region) {
+      continue;
+    }
+    region.removeAttribute("role");
+    heedOthers(region);
+    regions.set(politeness, region);
+  }
+};
+
+/** Readies the regions now, and again whenever UI SDK puts a new one in the body. */
+const watchLiveRegions = () => {
+  readyLiveRegions();
+  new MutationObserver((changes) => {
+    if (
+      changes.some((change) =>
+        [...change.addedNodes].some(
+          (node) =>
+            node instanceof HTMLElement &&
+            node.dataset.uiSdkAnnouncer !== undefined
+        )
+      )
+    ) {
+      readyLiveRegions();
+    }
+  }).observe(document.body, { childList: true });
+};
+
+// Ready from the start, so a screen reader knows the regions before their first message.
+if (typeof document !== "undefined") {
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", watchLiveRegions, {
+      once: true,
+    });
+  } else if (document.body !== null) {
+    watchLiveRegions();
+  }
+}
+
 const sayNext = () => {
+  if (pageGone()) {
+    stop();
+    return;
+  }
   const next = waiting.shift();
   speaking = next !== undefined;
   if (next === undefined) {
     return;
   }
-  const region = regionOf(next.politeness);
+  readyLiveRegions();
+  const region = regions.get(next.politeness);
+  if (region === undefined) {
+    // UI SDK speaks through an announcer of its own: this goes there.
+    say(next.message, { priority: next.politeness });
+    setTimeout(sayNext, HOLD);
+    return;
+  }
+  // Another part's message is still being taken: this one waits until it has been.
+  const wait = othersSaidAt + HOLD - performance.now();
+  if (wait > 0) {
+    waiting.unshift(next);
+    setTimeout(sayNext, wait);
+    return;
+  }
   // Emptied first, so the same message twice in a row is said twice.
   region.textContent = "";
   requestAnimationFrame(() => {
+    if (pageGone(region)) {
+      stop();
+      return;
+    }
+    ours = next.message;
     region.textContent = next.message;
     setTimeout(sayNext, HOLD);
   });
 };
 
 /**
- * Says `message` once to a screen reader, through one visually hidden live region for the whole
- * page (`data-slot="live-region"`), made on first use. A part never puts a live region beside
+ * Says `message` once to a screen reader, through the page's one pair of live regions, UI SDK's,
+ * readied as the page starts (`readyLiveRegions`). A part never puts a live region beside
  * itself, so nothing is added next to a button in a row. Messages said in quick succession wait
  * their turn, each said whole: polite ones in order, an assertive one ahead of the polite ones
- * still waiting. Does nothing on the server.
+ * still waiting. A message with a `key` takes the place of the one with that key still waiting,
+ * so news that is out of date by the time its turn comes is never said: a move, not every step
+ * of it. Does nothing on the server.
  *
  *   announce(saved);
+ *   announce(`${name}, position ${at} of ${total}.`, "assertive", "move");
  */
 export const announce = (
   message: string,
-  politeness: Politeness = "polite"
+  politeness: Politeness = "polite",
+  key?: string
 ) => {
   if (typeof document === "undefined") {
     return;
+  }
+  // The out-of-date news goes, and this takes its turn as a new message: after anything said
+  // since (a drop, the next pick up), never before it.
+  const stale =
+    key === undefined ? -1 : waiting.findIndex((each) => each.key === key);
+  if (stale !== -1) {
+    waiting.splice(stale, 1);
   }
   const at =
     politeness === "assertive"
       ? waiting.findIndex((each) => each.politeness === "polite")
       : -1;
-  waiting.splice(at === -1 ? waiting.length : at, 0, { message, politeness });
+  waiting.splice(at === -1 ? waiting.length : at, 0, {
+    message,
+    politeness,
+    key,
+  });
   if (!speaking) {
     sayNext();
   }

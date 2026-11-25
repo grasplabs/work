@@ -338,6 +338,7 @@ const styles = stylex.create({
     position: "absolute",
     inset: 0,
     borderRadius: radius.sidebarRowRadius,
+    cornerShape: radius.shape,
     pointerEvents: "none",
     backgroundColor: {
       default: "transparent",
@@ -421,6 +422,7 @@ const styles = stylex.create({
     paddingInlineEnd: size.sidebarRowInline,
     borderWidth: 0,
     borderRadius: radius.sidebarRowRadius,
+    cornerShape: radius.shape,
     backgroundColor: "transparent",
     color: colors.sidebarForeground,
     fontFamily: font.sans,
