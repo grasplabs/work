@@ -103,6 +103,8 @@
     "./event-source-path": "./src/event-source-path.ts",
     "./event-sources": "./src/event-sources.ts",
     "./interview-hear": "./src/interview-hear.ts",
+    "./interviewers/claire": "./src/interviewers/claire.ts",
+    "./interviewers/stephen": "./src/interviewers/stephen.ts",
     "./interview-links": "./src/interview-links.ts",
     "./interview-story": "./src/interview-story.ts",
     "./interview-turn": "./src/interview-turn.ts",
