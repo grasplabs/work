@@ -174,8 +174,20 @@ const row = (name: string): HTMLElement => {
   return found;
 };
 
-const switchOf = (name: string): Element | null =>
-  row(name).querySelector('[role="switch"]');
+/** The answers, in the order the dialog lists them. */
+const answers = ["View only", "View and change", "Everything", "Choose myself"];
+
+/** The radio of the answer labelled `label`. */
+const radio = (label: string): Element | undefined =>
+  document.querySelectorAll('[data-slot="radio-group-item"]')[
+    answers.indexOf(label)
+  ];
+
+/** The toggle `choice` (Off, Read or Write) in the row of the tool named `name`. */
+const toggle = (name: string, choice: string): Element | undefined =>
+  [...row(name).querySelectorAll("button")].find(
+    (each) => each.textContent?.trim() === choice
+  );
 
 const button = (text: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll("button")].find(
@@ -191,47 +203,41 @@ describe("choosing what Grasp may do in a toolkit", () => {
     document.body.innerHTML = "";
   });
 
-  it("says Never for a tool that is off, and starts one switched on as Composio's hint says", async () => {
-    await opened(hubspot);
-    expect(row("HUBSPOT_LIST_CONTACTS").textContent).toContain("Never");
-    expect(
-      switchOf("HUBSPOT_LIST_CONTACTS")?.getAttribute("aria-checked")
-    ).toBe("false");
-
-    await press(switchOf("HUBSPOT_LIST_CONTACTS"));
-    await press(switchOf("HUBSPOT_CREATE_NOTE"));
-    expect(row("HUBSPOT_LIST_CONTACTS").textContent).toContain("Read");
-    expect(row("HUBSPOT_CREATE_NOTE").textContent).toContain("Write");
-  });
-
-  it("sends a tool as only reading or as changing things, as its badge was last pressed", async () => {
+  it("starts with every tool that only views on, as Read, and nothing that changes things", async () => {
     const sent = await opened(hubspot);
-    await press(switchOf("HUBSPOT_LIST_CONTACTS"));
-    await press(switchOf("HUBSPOT_CREATE_NOTE"));
-    await press(
-      row("HUBSPOT_LIST_CONTACTS").querySelector(
-        "button[aria-label*='Change to']"
-      )
-    );
-    await press(
-      row("HUBSPOT_CREATE_NOTE").querySelector(
-        "button[aria-label*='Change to']"
-      )
-    );
-    await press(button("Consent and connect"));
-    expect(sent).toStrictEqual([
-      ["HUBSPOT_LIST_CONTACTS", { name: "HUBSPOT_CREATE_NOTE", read: true }],
-    ]);
-  });
-
-  it("sends nothing of a tool switched off again", async () => {
-    const sent = await opened(hubspot);
-    await press(switchOf("HUBSPOT_LIST_CONTACTS"));
-    await press(switchOf("HUBSPOT_CREATE_NOTE"));
-    await press(switchOf("HUBSPOT_CREATE_NOTE"));
-    await press(button("Consent and connect"));
+    expect(document.body.textContent).toContain("1 actions, all view only");
+    await press(button("Allow and sign in"));
     expect(sent).toStrictEqual([
       [{ name: "HUBSPOT_LIST_CONTACTS", read: true }],
     ]);
+  });
+
+  it("turns on what changes things, as Write, in one choice", async () => {
+    const sent = await opened(hubspot);
+    await press(radio("View and change"));
+    await press(button("Allow and sign in"));
+    expect(sent).toStrictEqual([
+      [{ name: "HUBSPOT_LIST_CONTACTS", read: true }, "HUBSPOT_CREATE_NOTE"],
+    ]);
+  });
+
+  it("sends each tool as it was last set when choosing per action, and warns of Read against the hint", async () => {
+    const sent = await opened(hubspot);
+    await press(radio("Choose myself"));
+    await press(toggle("HUBSPOT_LIST_CONTACTS", "Off"));
+    await press(toggle("HUBSPOT_CREATE_NOTE", "Read"));
+    expect(row("HUBSPOT_CREATE_NOTE").textContent).toContain(
+      "As Read, it would do so without asking."
+    );
+    await press(button("Allow and sign in"));
+    expect(sent).toStrictEqual([[{ name: "HUBSPOT_CREATE_NOTE", read: true }]]);
+  });
+
+  it("can't connect with every tool off", async () => {
+    await opened(hubspot);
+    await press(radio("Choose myself"));
+    await press(button("Turn these off"));
+    expect(document.body.textContent).toContain("Nothing turned on yet");
+    expect(button("Allow and sign in")?.disabled).toBeTruthy();
   });
 });

@@ -252,35 +252,31 @@ describe("an app's panel", () => {
   it("has an admin connect a toolkit for everyone, consenting to its text word for word", async () => {
     const sent = await opened("hubspot", []);
     await press(buttons("Connect")[0]);
+    await press(buttons("Read the full consent")[0]);
     const dialog = dialogOf("Connect HubSpot");
     const shown = {
       consent: dialog?.textContent.includes(composioConsentText) ?? false,
       // Who uses a toolkit isn't asked: it is always everyone.
-      forEveryone: dialog?.textContent.includes("Everyone") ?? false,
-      choice: buttons("Just you").length,
+      choice: buttons("Just for you").length,
     };
-    // Every tool may change things too, asking first: none goes as a read.
-    await press(
-      document.querySelector('[aria-label="What Grasp may do: All tools"]')
-    );
-    await press(
-      [...document.querySelectorAll('[role="option"]')].find((each) =>
-        each.textContent.startsWith("Write")
-      )
-    );
-    await press(dialogAction("Connect"));
+    // Every tool on, the one that changes things asking first.
+    await press(document.querySelectorAll('[data-slot="radio-group-item"]')[1]);
+    await press(dialogAction("Allow and sign in"));
 
     expect({
       shown,
       sent,
       // Refused, it stays open and says so.
-      failed: dialogAction("Connect")?.dataset.status === "error",
+      failed: dialog?.querySelector('[role="alert"]') !== null,
     }).toStrictEqual({
-      shown: { consent: true, forEveryone: true, choice: 0 },
+      shown: { consent: true, choice: 0 },
       sent: [
         {
           toolkit: "hubspot",
-          tools: ["HUBSPOT_LIST_CONTACTS", "HUBSPOT_CREATE_NOTE"],
+          tools: [
+            { name: "HUBSPOT_LIST_CONTACTS", read: true },
+            "HUBSPOT_CREATE_NOTE",
+          ],
           consent: composioConsentText,
           returnTo: "/integrations/composio:hubspot",
         },
@@ -312,7 +308,7 @@ describe("an app's panel", () => {
     };
     const sent = await opened("hubspot", [stopped]);
     await press(buttons("Connect again")[0]);
-    await press(dialogAction("Connect"));
+    await press(dialogAction("Allow and sign in"));
 
     // Only the connect: the stopped connection stays, with its consent, its
     // Brain audience and its permissions, until someone disconnects it.
@@ -351,7 +347,7 @@ describe("an app's panel", () => {
       { ...stopped, tools: ["HUBSPOT_CREATE_NOTE"], readTools: [] },
     ]);
     await press(buttons("Connect again")[0]);
-    await press(dialogAction("Connect"));
+    await press(dialogAction("Allow and sign in"));
 
     expect(
       sent.map((each) => ("toolkit" in each ? each.tools : each))
@@ -418,7 +414,7 @@ describe("an app's panel", () => {
       ],
     });
     await press(buttons("Connect again")[0]);
-    await press(dialogAction("Connect"));
+    await press(dialogAction("Allow and sign in"));
 
     // From what the stopped one allowed; the one that works is left alone.
     expect(
@@ -448,14 +444,17 @@ describe("an app's panel", () => {
       },
     });
     await press(buttons("Connect")[0]);
-    // Pressed twice while core starts it: one start.
+    // While core starts it, there is no Sign in to press again.
     await press(dialogAction("Sign in to Microsoft 365"));
-    await press(dialogAction("Sign in to Microsoft 365"));
-    const once = sent.length;
-    // Closed and opened again, for everyone this time.
-    await press(buttons("Cancel")[0]);
+    const once = {
+      starts: sent.length,
+      again: dialogAction("Sign in to Microsoft 365"),
+    };
+    // Closed by its corner, the dialog's over the panel's, and opened again,
+    // for everyone this time.
+    await press(buttons("Close").at(-1));
     await press(buttons("Connect")[0]);
-    await press(buttons("Everyone")[0]);
+    await press(buttons("For everyone")[0]);
     await press(dialogAction("Sign in to Microsoft 365"));
     // The first, just for the admin, answers last: it sends the browser nowhere.
     await act(async () => {
@@ -476,7 +475,7 @@ describe("an app's panel", () => {
       scopes: sent.map((each) => ("scope" in each ? each.scope : each)),
       went,
     }).toStrictEqual({
-      once: 1,
+      once: { starts: 1, again: undefined },
       scopes: ["personal", "shared"],
       went: ["https://login.example.test/shared"],
     });
@@ -488,7 +487,7 @@ describe("an app's panel", () => {
     const where = dialogOf("Connect Microsoft 365")?.textContent.includes(
       "login.microsoftonline.com"
     );
-    await press(buttons("Everyone")[0]);
+    await press(buttons("For everyone")[0]);
     await press(dialogAction("Sign in to Microsoft 365"));
 
     expect({ where, sent }).toStrictEqual({
@@ -506,7 +505,7 @@ describe("an app's panel", () => {
   it("has a member connect Microsoft 365 for themselves alone, with no choice", async () => {
     const sent = await opened("microsoft", [], person({ role: "user" }));
     await press(buttons("Connect")[0]);
-    const choice = buttons("Everyone").length;
+    const choice = buttons("For everyone").length;
     await press(dialogAction("Sign in to Microsoft 365"));
 
     expect({ choice, sent }).toStrictEqual({

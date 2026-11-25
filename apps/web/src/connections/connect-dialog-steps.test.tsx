@@ -91,7 +91,7 @@ const settled = async (): Promise<void> => {
  */
 const opened = async (
   identity: Identity,
-  start: () => Promise<{ url: string }>,
+  start: (request?: { scope: string }) => Promise<{ url: string }>,
   integration = microsoft,
   more: Record<string, unknown> = {}
 ): Promise<void> => {
@@ -167,20 +167,23 @@ const press = async (
   await settled();
 };
 
-/** What allows the toolkit's one tool: its row's label. */
-const allow = (): HTMLElement | null | undefined =>
-  [...document.querySelectorAll("li")]
-    .find(
-      (each) =>
-        // The tool HUBSPOT_LIST_CONTACTS, as it shows: "List contacts" in
-        // HubSpot's dialog, with its toolkit's name before it in another's.
+/** The Off toggle of the toolkit's one tool, once choosing per action. */
+const off = (): HTMLElement | undefined =>
+  [
+    ...([...document.querySelectorAll("li")]
+      .find(
+        (each) =>
+          each.textContent?.toLowerCase().includes("list contacts") &&
+          each.querySelector("li") === null
+      )
+      ?.querySelectorAll("button") ?? []),
+  ].find((each) => each.textContent?.trim() === "Off");
 
-        // The tool HUBSPOT_LIST_CONTACTS, as it shows: "List contacts" in
-        // HubSpot's dialog, with its toolkit's name before it in another's.
-        each.textContent?.toLowerCase().includes("list contacts") &&
-        each.querySelector("li") === null
-    )
-    ?.querySelector<HTMLElement>("label");
+/** The radio of choosing per action: the last of the answers. */
+const chooseMyself = (): HTMLElement | undefined =>
+  [
+    ...document.querySelectorAll<HTMLElement>('[data-slot="radio-group-item"]'),
+  ].at(-1);
 
 /** Types `value` into `input`, as someone typing does. */
 const type = async (
@@ -211,12 +214,6 @@ const field = (label: string): HTMLInputElement | null | undefined => {
     : document.querySelector<HTMLInputElement>(`[id="${id}"]`);
 };
 
-/** Where the step titled `title` stands. */
-const stepState = (title: string): string | undefined =>
-  [...document.querySelectorAll<HTMLElement>("section[data-state]")].find(
-    (each) => each.querySelector("h3")?.textContent === title
-  )?.dataset.state;
-
 describe("the connect dialog's steps", () => {
   afterEach(() => {
     act(() => {
@@ -228,31 +225,27 @@ describe("the connect dialog's steps", () => {
     vi.restoreAllMocks();
   });
 
-  it("counts keeping the scope it starts with as choosing it", async () => {
-    await opened(someone("admin"), async () => await waitingForever());
-    expect([stepState("Who uses it"), stepState("Sign in")]).toStrictEqual([
-      "active",
-      "idle",
-    ]);
-
-    // The option chosen already, as a person presses it: its radio.
-    const preselected = document.querySelector<HTMLElement>(
-      '[role="radio"][aria-checked="true"]'
-    );
-    await press(preselected);
-    expect([stepState("Who uses it"), stepState("Sign in")]).toStrictEqual([
-      "done",
-      "active",
-    ]);
+  it("has an admin choose who uses it, and signs in for that", async () => {
+    const scopes: unknown[] = [];
+    await opened(someone("admin"), async (request?: { scope: string }) => {
+      scopes.push(request?.scope);
+      return await waitingForever();
+    });
+    expect(document.body.textContent).toContain("Who uses it");
+    await press(button("For everyone"));
+    await press(button("Sign in to Microsoft 365"));
+    expect(scopes).toStrictEqual(["shared"]);
   });
 
-  it("counts signing in with the scope it starts with as choosing it", async () => {
-    await opened(someone("admin"), async () => await waitingForever());
+  it("asks anyone else nothing, and signs in for them alone", async () => {
+    const scopes: unknown[] = [];
+    await opened(someone("user"), async (request?: { scope: string }) => {
+      scopes.push(request?.scope);
+      return await waitingForever();
+    });
+    expect(document.body.textContent).not.toContain("Who uses it");
     await press(button("Sign in to Microsoft 365"));
-    expect([stepState("Who uses it"), stepState("Sign in")]).toStrictEqual([
-      "done",
-      "active",
-    ]);
+    expect(scopes).toStrictEqual(["personal"]);
   });
 
   it("goes by the newest attempt only, when an older one answers after trying again failed", async () => {
@@ -287,7 +280,7 @@ describe("the connect dialog's steps", () => {
       vi.advanceTimersByTime(6000);
       await Promise.resolve();
     });
-    await press(button("Try again"));
+    await press(button("Taking long? Try again"));
     expect(document.querySelector('[role="alert"]')).not.toBeNull();
     expect(button("Sign in to Microsoft 365")).toBeDefined();
 
@@ -317,15 +310,18 @@ describe("the connect dialog's steps", () => {
       },
       hubspot
     );
-    await press(allow());
-    await press(button("Consent and connect"));
+    await press(button("Allow and sign in"));
     await act(async () => {
       vi.advanceTimersByTime(6000);
       await Promise.resolve();
     });
-    await press(allow());
-    await press(button("Try again"));
-    expect({ disabled: button("Try again")?.disabled, starts }).toStrictEqual({
+    await press(chooseMyself());
+    await press(off());
+    await press(button("Taking long? Try again"));
+    expect({
+      disabled: button("Taking long? Try again")?.disabled,
+      starts,
+    }).toStrictEqual({
       disabled: true,
       starts: 1,
     });
@@ -379,11 +375,10 @@ describe("the connect dialog's steps", () => {
         },
       }
     );
-    await press(allow());
     await type(field("API key"), "pd_secret");
-    const waitsForAll = button("Consent and connect")?.disabled;
+    const waitsForAll = button("Allow and connect")?.disabled;
     await type(field("Subdomain"), "acme");
-    await press(button("Consent and connect"));
+    await press(button("Allow and connect"));
 
     expect({
       types: [field("API key")?.type, field("Subdomain")?.type],
@@ -434,16 +429,15 @@ describe("the connect dialog's steps", () => {
         },
       }
     );
-    await press(allow());
     await type(field("API key"), "pd_secret");
-    await press(button("Consent and connect"));
+    await press(button("Allow and connect"));
     await act(async () => {
       vi.advanceTimersByTime(60_000);
       await Promise.resolve();
     });
     expect({
       waiting: document.body.textContent?.includes("Waiting for Pipedesk"),
-      retry: button("Try again"),
+      retry: button("Taking long? Try again"),
       sent,
     }).toStrictEqual({ waiting: true, retry: undefined, sent: 1 });
   });
@@ -456,8 +450,8 @@ describe("the connect dialog's steps", () => {
       vi.advanceTimersByTime(6000);
       await Promise.resolve();
     });
-    await press(button("Try again"));
-    expect(button("Try again")).toBeUndefined();
+    await press(button("Taking long? Try again"));
+    expect(button("Taking long? Try again")).toBeUndefined();
     expect(document.body.textContent).toContain("Waiting for Microsoft 365");
   });
 });

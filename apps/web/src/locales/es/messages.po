@@ -35,14 +35,8 @@ msgstr "{0, plural, one {# línea quitada.} other {# líneas quitadas.}}"
 msgid "{0, plural, one {# thing that was said in it goes with it.} other {# things that were said in it go with it.}}"
 msgstr "{0, plural, one {# cosa que se dijo en ella se va con ella.} other {# cosas que se dijeron en ella se van con ella.}}"
 
-#. placeholder {0}: words.title
-#. placeholder {1}: tools.length
-#: src/connections/permissions/presets.tsx
-msgid "{0} · {on} of {1}"
-msgstr "{0} · {on} de {1}"
-
-#. placeholder {0}: countOf(value)
-#: src/connections/permissions/presets.tsx
+#. placeholder {0}: presetChoice(sorted, value).length
+#: src/connections/permissions/permission-choice.tsx
 msgid "{0} actions"
 msgstr "{0} acciones"
 
@@ -947,8 +941,6 @@ msgid "{name} (Grasp staff)"
 msgstr "{name} (personal de Grasp)"
 
 #: src/connections/permissions/action-list.tsx
-#: src/connections/permissions/buckets.tsx
-#: src/connections/permissions/presets.tsx
 msgid "{name} (old)"
 msgstr "{name} (obsoleta)"
 
@@ -1101,17 +1093,9 @@ msgstr "{name} puede usar cualquier app que permitan sus tipos de trabajo. Dale 
 msgid "{name} may use no app: each was taken off. Give one back, or add one."
 msgstr "{name} no puede usar ninguna app: se quitaron todas. Devuelve una o añade otra."
 
-#: src/connections/tool-choice.tsx
-msgid "{name} may write. Change to Read"
-msgstr "{name} puede escribir. Cambiar a Lectura"
-
 #: src/agents/agent-wakes.tsx
 msgid "{name} only works when asked."
 msgstr "{name} solo trabaja cuando se le pide."
-
-#: src/connections/tool-choice.tsx
-msgid "{name} reads only. Change to Write"
-msgstr "{name} solo lee. Cambiar a Escritura"
 
 #: src/frame/ui-words.tsx
 msgid "{name} removed"
@@ -1212,11 +1196,6 @@ msgstr "{number}. {system}: {step}"
 #: src/brain/opportunity-drafts.ts
 msgid "{number}. {system}: {step} (copied from another system)"
 msgstr "{number}. {system}: {step} (copiado de otro sistema)"
-
-#. placeholder {0}: tools.length
-#: src/connections/permissions/buckets.tsx
-msgid "{on} of {0}"
-msgstr "{on} de {0}"
 
 #: src/frame/ui-words.tsx
 msgid "{only} removed"
@@ -2123,10 +2102,6 @@ msgstr "Un equipo sin responsable recibe sus enlaces el primer día, y pregunto 
 msgid "A tick: yes or no"
 msgstr "Una casilla: sí o no"
 
-#: src/connections/connect-dialog.tsx
-msgid "A tool switched on starts as Read where Composio says it only reads; Grasp doesn't check that. A Read tool runs without asking. A call of a Write tool from chat, or from a person using an App, waits for that person to confirm it; a workflow's run makes it as one of its steps. Press a tool's Read or Write to change it. Mark a tool Read only if it changes nothing: marked wrongly, it changes things without asking."
-msgstr "Una herramienta activada empieza en Lectura donde Composio dice que solo lee; Grasp no lo comprueba. Una herramienta de Lectura se ejecuta sin preguntar. La llamada a una herramienta de Escritura desde el chat, o de una persona que usa una aplicación, espera a que esa persona la confirme; la ejecución de un flujo de trabajo la hace como uno de sus pasos. Pulsa Lectura o Escritura en una herramienta para cambiarla. Marca una herramienta como Lectura solo si no cambia nada: si está mal marcada, cambia cosas sin preguntar."
-
 #: src/apps/field-kinds.tsx
 msgid "A type the App's code declares"
 msgstr "Un tipo que declara el código de la App"
@@ -2739,6 +2714,7 @@ msgctxt "inbox item kind"
 msgid "AI tool"
 msgstr "Herramienta de IA"
 
+#: src/connections/permissions/action-list.tsx
 #: src/routes/_shell.workflows.runs.tsx
 msgid "All"
 msgstr "Todo"
@@ -2752,11 +2728,6 @@ msgstr "Todo"
 msgid "All ({total})"
 msgstr "Todos ({total})"
 
-#. placeholder {0}: sorted.length
-#: src/connections/permissions/action-list.tsx
-msgid "All {0}"
-msgstr "Todas {0}"
-
 #: src/agents/setup/apps-picker.tsx
 msgid "All apps"
 msgstr "Todas las aplicaciones"
@@ -2766,12 +2737,6 @@ msgstr "Todas las aplicaciones"
 msgid "All chats"
 msgstr "Todos los chats"
 
-#. placeholder {0}: words.title
-#: src/connections/permissions/buckets.tsx
-#: src/connections/permissions/presets.tsx
-msgid "All of {0}"
-msgstr "Todo en {0}"
-
 #: src/settings/add-connection/words.ts
 msgid "All providers"
 msgstr "Todos los proveedores"
@@ -2780,14 +2745,14 @@ msgstr "Todos los proveedores"
 msgid "All steps done"
 msgstr "Todos los pasos hechos"
 
-#: src/connections/app/words.ts
-msgid "All tools"
-msgstr "Todas las herramientas"
-
 #: src/inbox/item-detail.tsx
 msgctxt "let a workflow's trigger start it"
 msgid "Allow"
 msgstr "Permitir"
+
+#: src/connections/connect-dialog.tsx
+msgid "Allow and connect"
+msgstr "Permitir y conectar"
 
 #: src/connections/connect-dialog.tsx
 msgid "Allow and sign in"
@@ -2823,11 +2788,11 @@ msgctxt "what the Brain remembers about something"
 msgid "Also called"
 msgstr "También llamado"
 
-#: src/connections/permissions/presets.tsx
-msgid "Also creates and changes things. Grasp asks first."
-msgstr "También crea y cambia cosas. Grasp pregunta antes."
+#: src/connections/permissions/permission-choice.tsx
+msgid "Also creates and edits. Grasp asks first."
+msgstr "También crea y edita. Grasp pregunta antes."
 
-#: src/connections/permissions/presets.tsx
+#: src/connections/permissions/permission-choice.tsx
 msgid "Also deletes and cancels. Grasp asks first."
 msgstr "También elimina y cancela. Grasp pregunta antes."
 
@@ -3727,14 +3692,6 @@ msgstr "Pidiendo conectar {binding}"
 msgid "Asks before each run"
 msgstr "Pregunta antes de cada uso"
 
-#: src/connections/permissions/parts.tsx
-msgid "Asks first. Often can't be undone."
-msgstr "Pregunta antes. A menudo no se puede deshacer."
-
-#: src/connections/permissions/parts.tsx
-msgid "Asks the person first. A workflow does it as a step."
-msgstr "Pregunta primero a la persona. Un flujo lo hace como paso."
-
 #: src/agents/setup/abilities-step.tsx
 msgid "Asks you first"
 msgstr "Te pregunta antes"
@@ -3840,10 +3797,6 @@ msgstr "Retroceder 10 segundos"
 #: src/frame/ui-words.tsx
 msgid "Back to reference {number}"
 msgstr "Volver a la referencia {number}"
-
-#: src/connections/permissions/action-list.tsx
-msgid "Back to the start"
-msgstr "Volver al inicio"
 
 #: src/apps/app-workspace.tsx
 msgid "Back to your version"
@@ -4159,8 +4112,6 @@ msgstr "No se puede ofrecer Ejecutar: {unread}"
 #: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
 #: src/confirmed.tsx
-#: src/connections/app/words.ts
-#: src/connections/connect-dialog.tsx
 #: src/connections/http-connections.tsx
 #: src/connections/request-app-dialog.tsx
 #: src/drafts/share-with-team.tsx
@@ -4711,7 +4662,7 @@ msgstr "Elegir cada {one} mostrado"
 msgid "Choose files"
 msgstr "Elegir archivos"
 
-#: src/connections/permissions/presets.tsx
+#: src/connections/permissions/permission-choice.tsx
 msgid "Choose myself"
 msgstr "Elegir yo"
 
@@ -4719,13 +4670,13 @@ msgstr "Elegir yo"
 msgid "Choose one"
 msgstr "Elija uno"
 
-#: src/connections/permissions/buckets.tsx
-msgid "Choose per action"
-msgstr "Elegir por acción"
+#: src/connections/connect-dialog.tsx
+msgid "Choose what Grasp may do in {app}, then enter its key."
+msgstr "Elige qué puede hacer Grasp en {app} y luego introduce su clave."
 
-#: src/connections/permissions/concept-dialog.tsx
-msgid "Choose what Grasp may do in {app}. Then you sign in at {app}, which takes about a minute."
-msgstr "Elige qué puede hacer Grasp en {app}. Después inicias sesión en {app}, lo que lleva un minuto."
+#: src/connections/connect-dialog.tsx
+msgid "Choose what Grasp may do in {app}, then sign in there."
+msgstr "Elige qué puede hacer Grasp en {app} y luego inicia sesión allí."
 
 #: src/interview/destination.tsx
 msgid "Choose where each line goes. A line you move counts again once you save."
@@ -4948,9 +4899,9 @@ msgctxt "a tool's state"
 msgid "Completed"
 msgstr "Completado"
 
-#: src/connections/permissions/parts.tsx
-msgid "Composio keeps the access to {app} in its own cloud. Grasp never sees it and only uses what you turn on here. You can change this or disconnect at any time."
-msgstr "Composio guarda el acceso a {app} en su propia nube. Grasp nunca lo ve y solo usa lo que actives aquí. Puedes cambiarlo o desconectarlo cuando quieras."
+#: src/connections/connect-dialog.tsx
+msgid "Composio keeps the key in its cloud. Grasp uses it only for what you allow."
+msgstr "Composio guarda la clave en su nube. Grasp solo la usa para lo que permitas."
 
 #: src/connections/permissions/action-list.tsx
 msgid "Composio says this changes things. As Read, it would do so without asking."
@@ -5031,14 +4982,12 @@ msgstr "Confirmado. Continúa."
 msgid "Connect"
 msgstr "Conectar"
 
-#: src/connections/app/words.ts
 #: src/connections/connect-dialog.tsx
 #: src/connections/integration-item.tsx
-#: src/connections/permissions/concept-dialog.tsx
 msgid "Connect {app}"
 msgstr "Conectar {app}"
 
-#: src/connections/app/words.ts
+#: src/connections/connect-dialog.tsx
 msgid "Connect {app} again"
 msgstr "Volver a conectar {app}"
 
@@ -5225,22 +5174,9 @@ msgstr "Conexiones en uso"
 msgid "Connects with a key"
 msgstr "Se conecta con una clave"
 
-#: src/connections/app/words.ts
 #: src/connections/connection-list.tsx
 msgid "Consent"
 msgstr "Consentimiento"
-
-#: src/connections/connect-dialog.tsx
-msgid "Consent and connect"
-msgstr "Dar consentimiento y conectar"
-
-#: src/connections/connect-dialog.tsx
-msgid "Consent and enter the key"
-msgstr "Dar consentimiento e introducir la clave"
-
-#: src/connections/connect-dialog.tsx
-msgid "Consent and sign in"
-msgstr "Dar consentimiento e iniciar sesión"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -5566,10 +5502,6 @@ msgstr "No se pudo dejar de compartir"
 msgid "Couldn't upload"
 msgstr "No se pudo subir"
 
-#: src/connections/permissions/parts.tsx
-msgid "Create and change"
-msgstr "Crear y cambiar"
-
 #: src/apps/app-data-model.tsx
 msgid "Create table"
 msgstr "Crear tabla"
@@ -5879,10 +5811,6 @@ msgstr "¿Eliminar {name}?"
 #: src/projects/project-view.tsx
 msgid "Delete {projectName}?"
 msgstr "¿Eliminar {projectName}?"
-
-#: src/connections/permissions/parts.tsx
-msgid "Delete and cancel"
-msgstr "Eliminar y cancelar"
 
 #: src/agents/agent-page.tsx
 #: src/apps/app-remove.tsx
@@ -7171,6 +7099,10 @@ msgstr "Todos los que usan la App"
 msgid "Everyone with the {name} role"
 msgstr "Todos con el rol {name}"
 
+#: src/connections/permissions/permission-choice.tsx
+msgid "Everything"
+msgstr "Todo"
+
 #: src/workflows/business-process.tsx
 msgid "Everything around employees, from hiring to leaving."
 msgstr "Todo lo relativo a los empleados, desde la contratación hasta la salida."
@@ -7218,10 +7150,6 @@ msgstr "Todo lo que el Brain guardó de ella se borra para siempre."
 #: src/interview/closed.tsx
 msgid "Everything you told me is removed for good and cannot be brought back. Is only something wrong? Then put it right with “Add something” instead."
 msgstr "Todo lo que me has contado se elimina para siempre y no se puede recuperar. ¿Solo hay algo mal? Corrígelo mejor con «Añadir algo»."
-
-#: src/connections/permissions/presets.tsx
-msgid "Everything, deleting too"
-msgstr "Todo, también eliminar"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -8228,10 +8156,6 @@ msgstr "Grasp se abre para todos"
 #: src/connections/integrations-band.tsx
 msgid "Grasp reaches only what you connect."
 msgstr "Grasp solo accede a lo que conectas."
-
-#: src/connections/permissions/presets.tsx
-msgid "Grasp reads what is in {app} and changes nothing."
-msgstr "Grasp lee lo que hay en {app} y no cambia nada."
 
 #: src/settings/directory-reads.tsx
 msgid "Grasp reads your directory once a day, and keeps members, their teams and their suspensions as it says."
@@ -9452,6 +9376,10 @@ msgstr "Su acceso caducó. Un administrador de tu organización puede volver a c
 msgid "Its access ran out. Grasp staff can't reconnect it: an admin of the organization can."
 msgstr "Su acceso caducó. El personal de Grasp no puede reconectarla: un administrador de la organización sí."
 
+#: src/connections/connect-dialog.tsx
+msgid "Its access ran out. Sign in again to keep it working."
+msgstr "Su acceso caducó. Vuelve a iniciar sesión para que siga funcionando."
+
 #: src/settings/ai-providers.tsx
 msgid "Its account is out of credit."
 msgstr "La cuenta se ha quedado sin crédito."
@@ -9645,10 +9573,6 @@ msgstr "Solo para ti"
 #: src/agents/setup/words.ts
 msgid "Just me"
 msgstr "Solo yo"
-
-#: src/connections/app/words.ts
-msgid "Just you"
-msgstr "Solo tú"
 
 #: src/onboarding/review-parts.tsx
 msgid "Keep “Require sender authentication” on, then save."
@@ -11076,7 +11000,6 @@ msgid "Needs you"
 msgstr "Te necesita"
 
 #: src/connections/app/words.ts
-#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Never"
 msgstr "Nunca"
@@ -13896,7 +13819,6 @@ msgstr "Lectura"
 
 #: src/connections/app/words.ts
 #: src/connections/permissions/action-list.tsx
-#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Read"
 msgstr "Lectura"
@@ -14099,6 +14021,10 @@ msgstr "Leyendo quién puede ser responsable…"
 msgid "Reads"
 msgstr "Lee"
 
+#: src/connections/permissions/permission-choice.tsx
+msgid "Reads what is in {app}, changes nothing."
+msgstr "Lee lo que hay en {app}, no cambia nada."
+
 #: src/connections/app/words.ts
 msgid "Reads without asking, changes nothing"
 msgstr "Lee sin preguntar, no cambia nada"
@@ -14142,7 +14068,7 @@ msgstr "Ejecuciones recientes"
 
 #: src/agents/setup/apps-picker.tsx
 #: src/agents/setup/apps-step.tsx
-#: src/connections/permissions/presets.tsx
+#: src/connections/permissions/permission-choice.tsx
 #: src/frame/ui-words.tsx
 #: src/settings/ai-providers.tsx
 msgid "Recommended"
@@ -15075,10 +15001,6 @@ msgstr "Se ejecuta cuando se le pide"
 msgid "Runs without asking"
 msgstr "Se ejecuta sin preguntar"
 
-#: src/connections/permissions/parts.tsx
-msgid "Runs without asking. Changes nothing."
-msgstr "Se ejecuta sin preguntar. No cambia nada."
-
 #: src/agents/setup/words.ts
 msgid "Runs your company's workflows."
 msgstr "Ejecuta los flujos de trabajo de tu empresa."
@@ -15464,10 +15386,6 @@ msgstr "Buscar zonas horarias"
 msgid "Search tools"
 msgstr "Buscar herramientas"
 
-#: src/connections/permissions/action-list.tsx
-msgid "Search, for example “event”"
-msgstr "Buscar, por ejemplo «event»"
-
 #: src/apps/indexes-view.tsx
 msgid "Search, to find records by the words in them"
 msgstr "Búsqueda, para encontrar registros por sus palabras"
@@ -15681,6 +15599,10 @@ msgstr "Establecido"
 #: src/activity/audit-words.ts
 msgid "Set aside entries the audit trail couldn't take"
 msgstr "Apartó entradas que el registro de auditoría no pudo aceptar"
+
+#: src/connections/permissions/permission-choice.tsx
+msgid "Set each action to Off, Read or Write."
+msgstr "Pon cada acción en No, Leer o Escribir."
 
 #: src/activity/audit-words.ts
 msgid "Set how much Grasp must know before it opens to the company"
@@ -16098,7 +16020,6 @@ msgstr "Se muestra con la aplicación. No la abre a nadie: quien puede usarla es
 msgid "Sidebar"
 msgstr "Barra lateral"
 
-#: src/connections/connect-dialog.tsx
 #: src/guest-sign-in.tsx
 msgid "Sign in"
 msgstr "Iniciar sesión"
@@ -16114,7 +16035,10 @@ msgstr "Volver a iniciar sesión"
 msgid "Sign in again to go on."
 msgstr "Vuelve a iniciar sesión para continuar."
 
-#: src/connections/app/words.ts
+#: src/connections/connect-dialog.tsx
+msgid "Sign in at {app} to connect it. It takes about a minute."
+msgstr "Inicia sesión en {app} para conectarlo. Lleva un minuto."
+
 #: src/connections/connect-dialog.tsx
 msgid "Sign in to {app}"
 msgstr "Iniciar sesión en {app}"
@@ -16228,14 +16152,6 @@ msgstr "Cerró la sesión de un dispositivo"
 msgctxt "kind of app"
 msgid "Signing"
 msgstr "Firma electrónica"
-
-#: src/connections/connect-dialog.tsx
-msgid "Signing in"
-msgstr "Inicio de sesión"
-
-#: src/connections/connect-dialog.tsx
-msgid "Signing in happens at {app}. It takes about a minute."
-msgstr "El inicio de sesión se hace en {app}. Tarda alrededor de un minuto."
 
 #: src/frame/person-menu.tsx
 msgid "Signing out didn't work"
@@ -16739,7 +16655,6 @@ msgid "Stephen outside Grasp"
 msgstr "Stephen fuera de Grasp"
 
 #: src/agents/agent-brief.ts
-#: src/connections/connect-dialog.tsx
 #: src/onboarding/calm-frame.tsx
 msgid "Steps"
 msgstr "Pasos"
@@ -17049,8 +16964,8 @@ msgid "Takes out"
 msgstr "Quita"
 
 #: src/connections/connect-dialog.tsx
-msgid "Taking long?"
-msgstr "¿Tarda mucho?"
+msgid "Taking long? Try again"
+msgstr "¿Tarda mucho? Reintentar"
 
 #: src/projects/project-people.tsx
 #: src/projects/project-view.tsx
@@ -18590,17 +18505,9 @@ msgstr "Tres en círculo"
 msgid "Through"
 msgstr "A través de"
 
-#: src/connections/connect-dialog.tsx
-msgid "Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow."
-msgstr "A través de Composio, que guarda el acceso en su propia nube. Tus flujos de trabajo pueden usarlo una vez conectado, solo para lo que permitas."
-
 #: src/settings/audit-chain.tsx
 msgid "Through entry {through}…"
 msgstr "Hasta la entrada {through}…"
-
-#: src/connections/connect-dialog.tsx
-msgid "Through Grasp's own connector, which keeps the access in your deployment. Your workflows can use it once it is connected, only for what you allow."
-msgstr "A través del conector propio de Grasp, que guarda el acceso en tu despliegue. Tus flujos de trabajo pueden usarlo una vez conectado, solo para lo que permitas."
 
 #: src/brain/sources-page.tsx
 msgctxt "how search found a memory"
@@ -18787,10 +18694,6 @@ msgstr "Herramientas permitidas: {tools}"
 msgid "Tools allowed: none recorded"
 msgstr "Herramientas permitidas: ninguna registrada"
 
-#: src/connections/connect-dialog.tsx
-msgid "Tools to allow"
-msgstr "Herramientas que permitir"
-
 #: src/frame/ui-words.tsx
 msgid "Total cost"
 msgstr "Coste total"
@@ -18853,7 +18756,6 @@ msgstr "Intentar"
 #: src/chat/chat-body.tsx
 #: src/chat/models-unavailable.tsx
 #: src/chat/thread.tsx
-#: src/connections/connect-dialog.tsx
 #: src/connections/part-not-loaded.tsx
 #: src/connections/sync-places.tsx
 #: src/frame/page-states.tsx
@@ -18885,10 +18787,6 @@ msgstr "Reintentando…"
 #: src/agents/agent-templates.ts
 msgid "Turn a full inbox into a short list of what needs a person today."
 msgstr "Convierte una bandeja llena en una lista breve de lo que necesita a una persona hoy."
-
-#: src/connections/permissions/presets.tsx
-msgid "Turn each action on or off."
-msgstr "Activa o desactiva cada acción."
 
 #: src/onboarding/calm-frame.tsx
 msgid "Turn my voice off"
@@ -19410,10 +19308,6 @@ msgstr "Versiones"
 msgid "Vienna"
 msgstr "Viena"
 
-#: src/connections/permissions/parts.tsx
-msgid "View"
-msgstr "Consultar"
-
 #: src/frame/ui-words.tsx
 msgctxt "a table's view settings"
 msgid "View"
@@ -19428,6 +19322,10 @@ msgstr "Consultar"
 msgid "View all"
 msgstr "Ver todo"
 
+#: src/connections/permissions/permission-choice.tsx
+msgid "View and change"
+msgstr "Consultar y cambiar"
+
 #: src/drafts/draft-history.tsx
 msgid "View changes"
 msgstr "Ver cambios"
@@ -19436,13 +19334,9 @@ msgstr "Ver cambios"
 msgid "View in map"
 msgstr "Ver en el mapa"
 
-#: src/connections/permissions/presets.tsx
+#: src/connections/permissions/permission-choice.tsx
 msgid "View only"
 msgstr "Solo consultar"
-
-#: src/connections/permissions/presets.tsx
-msgid "View, create and change"
-msgstr "Consultar, crear y cambiar"
 
 #: src/activity/audit-words.ts
 msgid "Viewed something as Grasp staff"
@@ -19503,7 +19397,6 @@ msgctxt "status of a workflow run"
 msgid "Waiting"
 msgstr "Esperando"
 
-#: src/connections/app-actions.tsx
 #: src/connections/connect-dialog.tsx
 msgid "Waiting for {app}"
 msgstr "Esperando a {app}"
@@ -19889,8 +19782,7 @@ msgid "What Grasp did"
 msgstr "Lo que hizo Grasp"
 
 #: src/connections/app/words.ts
-#: src/connections/connect-dialog.tsx
-#: src/connections/permissions/presets.tsx
+#: src/connections/permissions/permission-choice.tsx
 msgid "What Grasp may do"
 msgstr "Qué puede hacer Grasp"
 
@@ -20600,7 +20492,6 @@ msgstr "Quién ve qué filas"
 msgid "Who to share with couldn't be read. Try again in a moment."
 msgstr "No se pudo leer con quién compartir. Vuelve a intentarlo en un momento."
 
-#: src/connections/app/words.ts
 #: src/connections/connect-dialog.tsx
 msgid "Who uses it"
 msgstr "Quién lo usa"
@@ -20907,7 +20798,6 @@ msgstr "Llave inglesa"
 
 #: src/connections/app/words.ts
 #: src/connections/permissions/action-list.tsx
-#: src/connections/tool-choice.tsx
 msgctxt "what a tool may do"
 msgid "Write"
 msgstr "Escritura"
@@ -21052,10 +20942,6 @@ msgstr "Tú y la IA"
 msgid "You and your leads look it over"
 msgstr "Tú y tus responsables lo revisáis"
 
-#: src/connections/connect-dialog.tsx
-msgid "You approve there. {app} shows what Grasp asks for."
-msgstr "Allí lo apruebas. {app} muestra lo que pide Grasp."
-
 #: src/agents/setup/apps-picker.tsx
 msgid "You can add it now and connect it after the agent is made."
 msgstr "Puedes añadirla ahora y conectarla cuando el agente esté creado."
@@ -21113,10 +20999,6 @@ msgstr "No puedes abrir esto"
 msgid "You choose people and teams on its page"
 msgstr "Eliges personas y equipos en su página"
 
-#: src/connections/connect-dialog.tsx
-msgid "You come back to {app}’s page here."
-msgstr "Vuelves aquí a la página de {app}."
-
 #: src/sign-in-errors.ts
 msgid "You don't have access to this organization. Ask an admin."
 msgstr "No tienes acceso a esta organización. Pregunta a un administrador."
@@ -21154,14 +21036,18 @@ msgstr "Aún no has compartido ninguno de tus recuerdos."
 msgid "You look it over"
 msgstr "Tú lo revisas"
 
+#: src/connections/connect-dialog.tsx
+msgid "You sign in at {app}. Composio keeps the access in its cloud, and Grasp uses it only for what you allow."
+msgstr "Inicias sesión en {app}. Composio guarda el acceso en su nube y Grasp solo lo usa para lo que permitas."
+
 #. {host} is the web address of the sign-in page, e.g. login.microsoftonline.com.
 #: src/connections/connect-dialog.tsx
-msgid "You sign in at {host}"
-msgstr "Inicias sesión en {host}"
+msgid "You sign in at {host}. The access stays in your deployment, and Grasp uses it only for what you allow."
+msgstr "Inicias sesión en {host}. El acceso se queda en tu despliegue y Grasp solo lo usa para lo que permitas."
 
 #: src/connections/connect-dialog.tsx
-msgid "You sign in on {app}’s own page."
-msgstr "Inicias sesión en la propia página de {app}."
+msgid "You sign in on {app}’s own page. The access stays in your deployment, and Grasp uses it only for what you allow."
+msgstr "Inicias sesión en la propia página de {app}. El acceso se queda en tu despliegue y Grasp solo lo usa para lo que permitas."
 
 #: src/interview/page.tsx
 msgid "You withdrew. Nothing you said is used from now on."
@@ -21174,11 +21060,6 @@ msgstr "Te retiraste. Lo que el Cerebro guardó de ello se está eliminando."
 #: src/connections/recommended-apps.tsx
 msgid "You work in {name}"
 msgstr "Trabajas en {name}"
-
-#. {host} is the web address of the sign-in page, e.g. login.microsoftonline.com.
-#: src/connections/app/words.ts
-msgid "You’ll sign in at {host}."
-msgstr "Iniciarás sesión en {host}."
 
 #: src/chat/answer-words.tsx
 msgid "You’re about to visit an external website."

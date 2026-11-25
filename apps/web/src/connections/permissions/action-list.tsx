@@ -1,8 +1,8 @@
-// Concept C, one list to manage: every action in a compact row, found by
-// typing, narrowed by kind, each with Off, Read or Write on one control. A
-// row opens to its provider's own description, which stays in its words.
-// "Turn all off" and "Back to the start" work on what the list shows, so a
-// search for "delete" and one press take every delete away.
+// Every action of an app in a compact row, found by typing, narrowed by
+// kind, each with Off, Read or Write on one control. A row's name opens its
+// provider's own description, which stays in its words. "Turn these off"
+// works on what the list shows, so a search for "delete" and one press take
+// every delete away.
 import { Button } from "@grasp-os/ui/components/button";
 import {
   InputGroup,
@@ -14,13 +14,7 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@grasp-os/ui/components/toggle-group";
-import {
-  ChevronDownIcon,
-  ChevronRightIcon,
-  Icon,
-  SearchIcon,
-  TriangleAlertIcon,
-} from "@grasp-os/ui/lib/icons";
+import { Icon, SearchIcon, TriangleAlertIcon } from "@grasp-os/ui/lib/icons";
 import { colors, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
 import { useLingui } from "@lingui/react/macro";
@@ -28,34 +22,27 @@ import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import type { AllowedTool } from "../tool-choices.ts";
-import {
-  choiceOf,
-  countOn,
-  startingChoice,
-  withAll,
-  withChoice,
-} from "./model.ts";
+import { choiceOf, countOn, withAll, withChoice } from "./model.ts";
 import type { Choice, SortedTool, ToolKind } from "./model.ts";
 import { KindDot } from "./parts.tsx";
 
 const styles = stylex.create({
-  stack: { display: "grid", gap: space[3] },
+  stack: { display: "grid", gap: space[2] },
   tools: {
     display: "flex",
     flexWrap: "wrap",
     alignItems: "center",
-    justifyContent: "space-between",
     gap: space[2],
   },
-  bulk: { display: "flex", alignItems: "center", gap: space[1] },
+  search: { flexBasis: "12rem", flexGrow: 1, minWidth: 0 },
   list: { display: "grid", margin: 0, padding: 0, listStyle: "none" },
   row: {
     display: "grid",
     gap: space[1],
-    paddingBlock: space[2],
-    borderBottomWidth: 1,
-    borderBottomStyle: "solid",
-    borderBottomColor: colors.border,
+    paddingBlock: space[1],
+    borderTopWidth: 1,
+    borderTopStyle: "solid",
+    borderTopColor: colors.border,
   },
   line: {
     display: "grid",
@@ -75,10 +62,8 @@ const styles = stylex.create({
     font: "inherit",
     textAlign: "start",
     cursor: "pointer",
-    [iconVars.size]: size.iconSm,
   },
-  chevron: { display: "flex", flexShrink: 0, color: colors.subtleForeground },
-  about: { display: "grid", gap: space[1], paddingInlineStart: space[6] },
+  about: { paddingInlineStart: space[4], paddingBlockEnd: space[1] },
   warn: {
     display: "flex",
     alignItems: "center",
@@ -127,9 +112,6 @@ const Row = ({
           type="button"
           {...stylex.props(styles.name)}
         >
-          <span aria-hidden {...stylex.props(styles.chevron)}>
-            <Icon icon={open ? ChevronDownIcon : ChevronRightIcon} />
-          </span>
           <KindDot kind={kind} />
           <Text
             as="span"
@@ -180,7 +162,7 @@ const Row = ({
   );
 };
 
-/** Concept C: every action in one list, found by typing. */
+/** Every action in one list, found by typing. */
 export const ActionList = ({
   sorted,
   allowed,
@@ -203,7 +185,7 @@ export const ActionList = ({
           : entry.kind === filter))
   );
   const filters: { value: Filter; label: string }[] = [
-    { value: "all", label: t`All ${sorted.length}` },
+    { value: "all", label: t`All` },
     { value: "look", label: t({ message: "View", context: "kind of tool" }) },
     {
       value: "change",
@@ -215,65 +197,50 @@ export const ActionList = ({
     },
     { value: "on", label: t`On ${countOn(allowed, sorted)}` },
   ];
-  // What "Back to the start" gives the rows shown: view on, the rest off.
-  const reset = (): void => {
-    const start = startingChoice(shown);
-    onAllowed([...withAll(allowed, shown, false), ...start]);
-  };
   return (
     <div {...stylex.props(styles.stack)}>
-      <InputGroup>
-        <InputGroupAddon>
-          <Icon icon={SearchIcon} />
-        </InputGroupAddon>
-        <InputGroupInput
-          aria-label={t`Search actions`}
-          onValueChange={setQuery}
-          placeholder={t`Search, for example “event”`}
-          type="search"
-          value={query}
-        />
-      </InputGroup>
       <div {...stylex.props(styles.tools)}>
-        <ToggleGroup
-          aria-label={t`Show`}
-          onValueChange={(value) => {
-            const [next] = value;
-            if (isFilter(next)) {
-              setFilter(next);
-            }
+        <InputGroup size="sm" style={styles.search}>
+          <InputGroupAddon>
+            <Icon icon={SearchIcon} />
+          </InputGroupAddon>
+          <InputGroupInput
+            aria-label={t`Search actions`}
+            onValueChange={setQuery}
+            placeholder={t`Search actions`}
+            type="search"
+            value={query}
+          />
+        </InputGroup>
+        <Button
+          disabled={countOn(allowed, shown) === 0}
+          onClick={() => {
+            onAllowed(withAll(allowed, shown, false));
           }}
-          value={[filter]}
+          size="xs"
+          variant="ghost"
         >
-          {filters.map(({ value, label }) => (
-            <ToggleGroupItem key={value} value={value}>
-              {label}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-        <div {...stylex.props(styles.bulk)}>
-          <Button
-            disabled={shown.length === 0}
-            onClick={() => {
-              onAllowed(withAll(allowed, shown, false));
-            }}
-            size="xs"
-            variant="ghost"
-          >
-            {t`Turn these off`}
-          </Button>
-          <Button
-            disabled={shown.length === 0}
-            onClick={reset}
-            size="xs"
-            variant="ghost"
-          >
-            {t`Back to the start`}
-          </Button>
-        </div>
+          {t`Turn these off`}
+        </Button>
       </div>
+      <ToggleGroup
+        aria-label={t`Show`}
+        onValueChange={(value) => {
+          const [next] = value;
+          if (isFilter(next)) {
+            setFilter(next);
+          }
+        }}
+        value={[filter]}
+      >
+        {filters.map(({ value, label }) => (
+          <ToggleGroupItem key={value} value={value}>
+            {label}
+          </ToggleGroupItem>
+        ))}
+      </ToggleGroup>
       {shown.length === 0 ? (
-        <Text color="muted" size="sm">
+        <Text color="muted" size="xs">
           {t`No action matches.`}
         </Text>
       ) : (

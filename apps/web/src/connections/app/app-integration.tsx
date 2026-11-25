@@ -1,5 +1,5 @@
 // App integration: an app as the Integrations page shows it, in three parts drawn from one App
-// (model.ts), and the connect dialog beside them (connect-app.tsx), as #2503's library block
+// (model.ts), connected in the one connect dialog (connect-dialog.tsx), as #2503's library block
 // (`grasp/blocks/app-integration`) drew them, on Damsko's parts:
 //
 //   <ItemGrid aria-label="Connected">{apps.map((app) => <AppTile key={app.id} app={app} onOpen={open} />)}</ItemGrid>
