@@ -7,23 +7,29 @@ import {
   shadow,
   space,
 } from "@grasp-os/ui/lib/tokens.stylex";
+import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
+import { useLayoutEffect, useRef } from "react";
+import type { RefObject } from "react";
 
-import type { Moment } from "./plan.tsx";
+import type { Moment } from "./plan.ts";
 
 // The plan's story shown as the thing itself, sped up (plan-story.tsx):
-// while Stephen tells the two weeks, the admin watches them happen. A rail
+// while Stephen tells the two weeks, the admin watches them happen, one
+// scene morphing into the next rather than one replacing another. A rail
 // of the plan's four days runs along the top, lit up to where the story
-// is. On the left, the people: first one interview with someone who knows
-// the work, its words coming in as they would; then the whole company, a
-// tile for each person lighting up as they talk, counted, until every one
-// has and the interviews close. On the right, from the start, the report
-// they will get, empty and waiting for its day; it fills in team by team,
-// and then the one finding the story names lifts out of the interview's
-// own words to the top of it. Shown, not drawn: the same cards, type and
-// colours as the product. Decoration for sighted people only (the words
-// above it say it all).
+// is. On the left, one interview: Mila, who knows the work, talking with
+// Stephen about her mornings. Then her words fold away and the whole
+// company comes out of her: a tile for each person flies out of her
+// picture into place and lights up as they talk, counted, until every one
+// has and the interviews close. On the right, the report waits for its
+// day; when it comes, the people fly over into it, grouped by what they
+// raised, each theme a row of the very tiles that said it, the longest
+// first. Then the first theme opens, and Mila's own words are in it. The
+// moves are FLIP: an element measured where it was and played from there
+// to where it is now (Web Animations), so nothing snaps. Decoration for
+// sighted people only (the words above it say it all).
 
 /** The parts of the story, in its order. */
 export type Scene =
@@ -45,6 +51,9 @@ const order: Scene[] = [
   "rest",
 ];
 
+/** How far into the story `scene` is, by its place in it. */
+const indexOf = (scene: Scene): number => order.indexOf(scene);
+
 /** How many people the company has, in the demo. */
 const PEOPLE = 42;
 
@@ -53,9 +62,73 @@ const hash = (n: number): number => {
   return s - Math.floor(s);
 };
 
+/** Each person's initials; the first is Mila de Vries. */
 const initialsOf = (i: number): string =>
-  String.fromCodePoint(65 + Math.floor(hash(i * 3.7) * 26)) +
-  String.fromCodePoint(65 + Math.floor(hash(i * 9.1) * 26));
+  i === 0
+    ? "MV"
+    : String.fromCodePoint(65 + Math.floor(hash(i * 3.7) * 26)) +
+      String.fromCodePoint(65 + Math.floor(hash(i * 9.1) * 26));
+
+/** The order people talk in, Mila first: a person's rank, by index. */
+const talkRank = (() => {
+  const rest = Array.from({ length: PEOPLE - 1 }, (_, k) => k + 1).toSorted(
+    (a, b) => hash(a * 5.3) - hash(b * 5.3)
+  );
+  const rank = new Map<number, number>([[0, 0]]);
+  for (const [r, i] of rest.entries()) {
+    rank.set(i, r + 1);
+  }
+  return rank;
+})();
+
+/** How many raised each theme, most first; Mila raised the first. */
+const themeSizes = [13, 9, 7, 5] as const;
+
+/** Who raised each theme: people by index, Mila first in the first. */
+const themePeople = (() => {
+  const pool = Array.from({ length: PEOPLE - 1 }, (_, k) => k + 1).toSorted(
+    (a, b) => hash(a * 2.9) - hash(b * 2.9)
+  );
+  let at = 0;
+  return themeSizes.map((size, theme) => {
+    const people = theme === 0 ? [0] : [];
+    while (people.length < size) {
+      people.push(pool[at] ?? 1);
+      at += 1;
+    }
+    return people;
+  });
+})();
+
+const EASE = "cubic-bezier(0.2, 0.75, 0.2, 1)";
+
+/**
+ * FLIP: `element`, already where it now stands, played from `from` (the box it comes out of) to
+ * there: moved and scaled from that box's middle, faded in on the way if `fade`.
+ */
+const flyFrom = (
+  element: Element,
+  from: DOMRect,
+  { delay = 0, ms = 900, fade = true } = {}
+): void => {
+  const to = element.getBoundingClientRect();
+  if (to.width === 0 || from.width === 0) {
+    return;
+  }
+  const dx = from.left + from.width / 2 - (to.left + to.width / 2);
+  const dy = from.top + from.height / 2 - (to.top + to.height / 2);
+  const scale = from.width / to.width;
+  element.animate(
+    [
+      {
+        transform: `translate(${dx}px, ${dy}px) scale(${scale})`,
+        opacity: fade ? 0 : 1,
+      },
+      { transform: "none", opacity: 1 },
+    ],
+    { duration: ms, delay, easing: EASE, fill: "backwards" }
+  );
+};
 
 const styles = stylex.create({
   demo: {
@@ -64,15 +137,14 @@ const styles = stylex.create({
     width: "100%",
     maxWidth: "62rem",
   },
-  // The rail of the four days.
   rail: {
-    position: "relative",
     display: "grid",
     gridTemplateColumns: "repeat(4, 1fr)",
     gap: space[2],
   },
   stop: {
     display: "grid",
+    alignContent: "start",
     gap: space[1],
     paddingTop: space[3],
     borderTopWidth: 2,
@@ -87,10 +159,7 @@ const styles = stylex.create({
     borderTopColor: colors.mintDeep,
     color: colors.mutedForeground,
   },
-  stopNow: {
-    borderTopColor: colors.mintDeep,
-    color: colors.foreground,
-  },
+  stopNow: { color: colors.foreground },
   stopDate: {
     fontSize: font.textSm,
     lineHeight: font.textSmLine,
@@ -104,27 +173,36 @@ const styles = stylex.create({
   },
   panels: {
     display: "grid",
-    gridTemplateColumns: { default: "1.15fr 1fr", [media.maxSm]: "1fr" },
+    gridTemplateColumns: { default: "1fr 1fr", [media.maxSm]: "1fr" },
     gap: space[4],
-    alignItems: "start",
+    alignItems: "stretch",
   },
   card: {
-    position: "relative",
     display: "grid",
     alignContent: "start",
-    gap: space[3],
-    minHeight: { default: "19rem", [media.maxSm]: "auto" },
+    gap: space[4],
+    minHeight: { default: "21rem", [media.maxSm]: "auto" },
     padding: space[5],
     borderRadius: radius.xl,
     backgroundColor: colors.card,
     boxShadow: shadow.md,
-    overflow: "hidden",
   },
-  cardHead: {
+  // Two heads in one place, one fading into the other.
+  heads: { display: "grid" },
+  head: {
+    gridArea: "1 / 1",
     display: "flex",
     alignItems: "center",
     gap: space[3],
-    minHeight: "2.5rem",
+    minHeight: "2.75rem",
+    transitionProperty: "opacity, transform",
+    transitionDuration: "600ms",
+    transitionTimingFunction: duration.ease,
+  },
+  headGone: {
+    opacity: 0,
+    transform: "translateY(-6px)",
+    pointerEvents: "none",
   },
   eyebrow: {
     fontSize: font.textXs,
@@ -138,11 +216,11 @@ const styles = stylex.create({
     display: "grid",
     placeItems: "center",
     flexShrink: 0,
-    width: "2.5rem",
-    height: "2.5rem",
+    width: "2.75rem",
+    height: "2.75rem",
     borderRadius: radius.full,
-    backgroundColor: colors.successSubtle,
-    color: colors.pine,
+    backgroundColor: colors.brandMint,
+    color: colors.brandNight,
     fontSize: font.textSm,
     fontWeight: font.weightMedium,
   },
@@ -165,7 +243,9 @@ const styles = stylex.create({
     height: "1.25rem",
   },
   bar: {
+    display: "block",
     width: "3px",
+    height: "100%",
     borderRadius: radius.full,
     backgroundColor: colors.mintDeep,
     animationName: stylex.keyframes({
@@ -175,10 +255,23 @@ const styles = stylex.create({
     animationDuration: "900ms",
     animationIterationCount: "infinite",
     animationTimingFunction: "ease-in-out",
-    height: "100%",
   },
-  quiet: { animationPlayState: "paused", opacity: 0.4 },
-  // The interview's words.
+  quiet: { animationPlayState: "paused", opacity: 0.35 },
+  // What folds away: its row goes to nothing, so what is below rises into its place.
+  fold: {
+    display: "grid",
+    gridTemplateRows: "1fr",
+    transitionProperty: "grid-template-rows, opacity",
+    transitionDuration: "700ms",
+    transitionTimingFunction: duration.ease,
+  },
+  folded: { gridTemplateRows: "0fr", opacity: 0 },
+  foldInner: {
+    display: "grid",
+    gap: space[3],
+    minHeight: 0,
+    overflow: "hidden",
+  },
   turn: {
     margin: 0,
     fontSize: font.textBase,
@@ -192,16 +285,6 @@ const styles = stylex.create({
   },
   stephen: { color: colors.mutedForeground, fontStyle: "italic" },
   turnShown: { opacity: 1, transform: "none" },
-  mark: {
-    borderRadius: radius.xs,
-    transitionProperty: "background-color, box-shadow",
-    transitionDuration: "600ms",
-  },
-  marked: {
-    backgroundColor: colors.successSubtle,
-    boxShadow: `0 0 0 2px ${colors.successSubtle}`,
-  },
-  // The whole company, a tile each.
   crowd: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fill, minmax(2.25rem, 1fr))",
@@ -216,24 +299,22 @@ const styles = stylex.create({
     color: colors.subtleForeground,
     fontSize: font.textXs,
     fontWeight: font.weightMedium,
-    transitionProperty: "background-color, color, transform, box-shadow",
+    transitionProperty: "background-color, color, opacity, box-shadow",
     transitionDuration: "400ms",
     transitionTimingFunction: duration.ease,
   },
   tileTalking: {
     backgroundColor: colors.brandMint,
     color: colors.brandNight,
-    transform: "scale(1.12)",
     boxShadow: `0 0 0 3px ${colors.successSubtle}`,
   },
-  tileDone: {
-    backgroundColor: colors.successSubtle,
-    color: colors.pine,
-  },
+  tileDone: { backgroundColor: colors.successSubtle, color: colors.pine },
+  // Gone over to the report: what is left is a trace.
+  tileLeft: { opacity: 0.25 },
   count: {
+    fontFamily: font.serif,
     fontSize: font.headingMd,
     lineHeight: font.headingMdLine,
-    fontFamily: font.serif,
     color: colors.foreground,
     fontVariantNumeric: "tabular-nums",
   },
@@ -253,91 +334,87 @@ const styles = stylex.create({
     transitionTimingFunction: duration.ease,
   },
   pillShown: { opacity: 1, transform: "none" },
-  // The report.
-  report: {
-    transitionProperty: "opacity",
-    transitionDuration: "700ms",
-  },
-  waiting: { opacity: 0.55 },
-  rows: { display: "grid", gap: space[3] },
-  row: {
-    display: "grid",
-    gridTemplateColumns: "7rem 1fr auto",
-    alignItems: "center",
-    gap: space[3],
-    fontSize: font.textSm,
-    lineHeight: font.textSmLine,
-    color: colors.foreground,
-  },
-  track: {
-    display: "block",
-    height: "0.5rem",
-    borderRadius: radius.full,
-    backgroundColor: colors.muted,
-    overflow: "hidden",
-  },
-  fill: {
-    display: "block",
-    width: "100%",
-    height: "100%",
-    borderRadius: radius.full,
-    backgroundColor: colors.mintDeep,
-    transformOrigin: "left",
-    transform: "scaleX(0)",
-    transitionProperty: "transform",
-    transitionDuration: "900ms",
-    transitionTimingFunction: duration.ease,
-  },
-  number: {
-    minWidth: "1.5rem",
-    textAlign: "end",
-    color: colors.mutedForeground,
-    fontVariantNumeric: "tabular-nums",
-  },
-  skeleton: {
-    display: "block",
-    height: "0.75rem",
-    borderRadius: radius.full,
-    backgroundColor: colors.muted,
-  },
-  finding: {
+  themes: { display: "grid", gap: space[1] },
+  theme: {
     display: "grid",
     gap: space[2],
-    padding: space[4],
+    padding: space[3],
     borderRadius: radius.lg,
-    backgroundColor: colors.successSubtle,
-    opacity: 0,
-    transform: "translateX(-2.5rem) scale(0.96)",
-    transitionProperty: "opacity, transform",
-    transitionDuration: "800ms",
-    transitionTimingFunction: duration.ease,
+    transitionProperty: "background-color",
+    transitionDuration: "700ms",
   },
-  findingShown: { opacity: 1, transform: "none" },
-  findingTitle: {
+  themeOpen: { backgroundColor: colors.successSubtle },
+  themeHead: {
+    display: "grid",
+    gridTemplateColumns: "1fr auto",
+    alignItems: "baseline",
+    gap: space[3],
+  },
+  titleCell: { display: "grid" },
+  themeTitle: {
+    gridArea: "1 / 1",
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+    fontWeight: font.weightMedium,
+    color: colors.foreground,
+    transitionProperty: "opacity",
+    transitionDuration: "500ms",
+  },
+  themeTitleOpen: {
     fontFamily: font.serif,
+    fontWeight: font.weightNormal,
     fontSize: font.headingSm,
     lineHeight: font.headingSmLine,
-    color: colors.foreground,
-    textWrap: "balance",
   },
-  findingQuote: {
+  themeCount: {
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+    color: colors.mutedForeground,
+    fontVariantNumeric: "tabular-nums",
+    whiteSpace: "nowrap",
+    transitionProperty: "opacity",
+    transitionDuration: "500ms",
+  },
+  hidden: { opacity: 0 },
+  // Before its day: where a theme will be, a grey line.
+  placeholder: {
+    gridArea: "1 / 1",
+    alignSelf: "center",
+    height: "0.6rem",
+    width: "70%",
+    borderRadius: radius.full,
+    backgroundColor: colors.muted,
+    transitionProperty: "opacity",
+    transitionDuration: "500ms",
+  },
+  dots: { display: "flex", flexWrap: "wrap", gap: "4px" },
+  dot: {
+    display: "grid",
+    placeItems: "center",
+    width: "1.375rem",
+    height: "1.375rem",
+    borderRadius: radius.full,
+    backgroundColor: colors.successSubtle,
+    color: colors.pine,
+    fontSize: "0.5625rem",
+    fontWeight: font.weightMedium,
+    transitionProperty: "background-color, color",
+    transitionDuration: "500ms",
+  },
+  dotMila: { backgroundColor: colors.brandMint, color: colors.brandNight },
+  dotEmpty: { backgroundColor: colors.muted, color: "transparent" },
+  quote: {
+    margin: 0,
     fontSize: font.textSm,
     lineHeight: font.textSmLine,
     color: colors.mutedForeground,
     fontStyle: "italic",
   },
-  skeletonWide: { width: "70%" },
-  skeletonShort: { width: "45%" },
 });
 
-// What changes with each bar and row: a voice bar's moment, a team's share.
 const moving = stylex.create({
   delay: (ms: string) => ({ animationDelay: ms }),
-  share: (part: number) => ({ transform: `scaleX(${part})` }),
 });
-
-/** How far into the story `scene` is, by its place in it. */
-const indexOf = (scene: Scene): number => order.indexOf(scene);
 
 /** The rail of the plan's four days, lit up to where the story is. */
 const Rail = ({
@@ -363,14 +440,13 @@ const Rail = ({
     <div {...stylex.props(styles.rail)}>
       {stops.map((stop, i) => {
         const next = stops[i + 1]?.at ?? Number.POSITIVE_INFINITY;
-        const isNow = now >= stop.at && now < next;
         return (
           <div
             key={stop.id}
             {...stylex.props(
               styles.stop,
               now >= stop.at && styles.stopPast,
-              isNow && styles.stopNow
+              now >= stop.at && now < next && styles.stopNow
             )}
           >
             <span {...stylex.props(styles.stopDate)}>{dates[stop.id]}</span>
@@ -398,179 +474,102 @@ const Live = ({ on }: { on: boolean }) => (
   </span>
 );
 
-/** The one interview: someone who knows the work, talking with Stephen. */
-const Interview = ({
-  progress,
-  marked,
-}: {
-  progress: number;
-  marked: boolean;
-}) => {
-  const { t } = useLingui();
-  const turns = [
-    { by: "stephen", text: t`Walk me through someone’s first week here.` },
-    {
-      by: "them",
-      text: t`Honestly, the first days they mostly wait.`,
-    },
-    {
-      by: "them",
-      mark: t`IT needs two or three days to get a laptop ready.`,
-    },
-  ] as const;
-  return (
-    <>
-      <div {...stylex.props(styles.cardHead)}>
-        <span {...stylex.props(styles.avatar)}>MV</span>
-        <span {...stylex.props(styles.who)}>
-          <span {...stylex.props(styles.name)}>Mila de Vries</span>
-          <span {...stylex.props(styles.role)}>{t`Operations lead`}</span>
-        </span>
-        <Live on={progress > 0 && progress < 1 && !marked} />
-      </div>
-      {turns.map((turn, i) => (
-        <p
-          key={turn.by + String(i)}
-          {...stylex.props(
-            styles.turn,
-            turn.by === "stephen" && styles.stephen,
-            (progress > i * 0.28 || marked) && styles.turnShown
-          )}
-        >
-          {"mark" in turn ? (
-            <span {...stylex.props(styles.mark, marked && styles.marked)}>
-              {turn.mark}
-            </span>
-          ) : (
-            turn.text
-          )}
-        </p>
-      ))}
-    </>
-  );
-};
+/** What the story shows at a moment: how far each part of it has come. */
+interface Shown {
+  heard: number;
+  crowd: boolean;
+  talked: number;
+  closed: boolean;
+  reported: boolean;
+  themesIn: number;
+  open: boolean;
+}
 
-/** The whole company, a tile each, lighting up as they talk, until every one has. */
-const Crowd = ({ progress, closed }: { progress: number; closed: boolean }) => {
-  const { t } = useLingui();
-  // Each person's moment to talk, spread over the part; a few talking at any time.
-  const done = closed ? PEOPLE : Math.round(progress * PEOPLE * 0.92);
-  const people = Array.from({ length: PEOPLE }, (_, i) => ({
-    i,
-    at: hash(i * 5.3) * 0.85,
-  }));
-  const ranked = people.toSorted((a, b) => a.at - b.at);
-  const talkedBy = new Map(ranked.map((one, rank) => [one.i, rank]));
-  return (
-    <>
-      <div {...stylex.props(styles.cardHead)}>
-        <span {...stylex.props(styles.who)}>
-          <span
-            {...stylex.props(styles.eyebrow)}
-          >{t`Talked with Stephen`}</span>
-          <span {...stylex.props(styles.count)}>
-            {done} / {PEOPLE}
-          </span>
-        </span>
-        <Live on={!closed} />
-      </div>
-      <div {...stylex.props(styles.crowd)}>
-        {people.map(({ i }) => {
-          const rank = talkedBy.get(i) ?? 0;
-          const isDone = rank < done;
-          const talking = !closed && rank >= done && rank < done + 4;
-          return (
-            <span
-              key={i}
-              {...stylex.props(
-                styles.tile,
-                isDone && styles.tileDone,
-                talking && styles.tileTalking
-              )}
-            >
-              {initialsOf(i)}
-            </span>
-          );
-        })}
-      </div>
-      <span {...stylex.props(styles.pill, closed && styles.pillShown)}>
-        {t`Interviews closed`}
-      </span>
-    </>
-  );
-};
-
-/** What they get: the report, empty until its day, then team by team, then the finding on top. */
-const Report = ({
-  scene,
-  progress,
-  date,
-}: {
-  scene: Scene;
-  progress: number;
-  date: string;
-}) => {
-  const { t } = useLingui();
+const shownAt = (scene: Scene, progress: number): Shown => {
   const now = indexOf(scene);
-  const filling = now >= indexOf("learned");
-  const found = now >= indexOf("finding");
-  const teams = [
-    { name: t`Operations`, count: 7 },
-    { name: t`Sales`, count: 5 },
-    { name: t`IT`, count: 4 },
-    { name: t`Finance`, count: 3 },
-  ];
-  const most = 7;
-  const lit = scene === "learned" ? progress * (teams.length + 1) : 99;
-  return (
-    <div
-      {...stylex.props(styles.card, styles.report, !filling && styles.waiting)}
-    >
-      <div {...stylex.props(styles.cardHead)}>
-        <span {...stylex.props(styles.who)}>
-          <span {...stylex.props(styles.eyebrow)}>{date}</span>
-          <span {...stylex.props(styles.name)}>{t`What I learned`}</span>
-        </span>
-      </div>
-      <div
-        {...stylex.props(styles.finding, found && styles.findingShown)}
-        aria-hidden={!found}
-      >
-        <span {...stylex.props(styles.eyebrow)}>{t`Operations · IT`}</span>
-        <span {...stylex.props(styles.findingTitle)}>
-          {t`New people wait two to three days for a laptop from IT.`}
-        </span>
-        <span {...stylex.props(styles.findingQuote)}>
-          “{t`IT needs two or three days to get a laptop ready.`}” · Mila de
-          Vries
-        </span>
-      </div>
-      <div {...stylex.props(styles.rows)}>
-        {teams.map((team, i) => (
-          <div key={team.name} {...stylex.props(styles.row)}>
-            <span>{team.name}</span>
-            <span {...stylex.props(styles.track)}>
-              <span
-                {...stylex.props(
-                  styles.fill,
-                  filling && lit > i && moving.share(team.count / most)
-                )}
-              />
-            </span>
-            <span {...stylex.props(styles.number)}>
-              {filling && lit > i ? team.count : "–"}
-            </span>
-          </div>
-        ))}
-        {filling ? null : (
-          <>
-            <span {...stylex.props(styles.skeleton, styles.skeletonWide)} />
-            <span {...stylex.props(styles.skeleton, styles.skeletonShort)} />
-          </>
-        )}
-      </div>
-    </div>
-  );
+  const closed = now >= indexOf("close");
+  const open = now >= indexOf("finding");
+  // The interview, told over its own part, whole once the story is past it.
+  let heard = now > indexOf("first") ? 1 : 0;
+  if (scene === "first") {
+    heard = progress;
+  }
+  // The company talking over its part: Mila first, then the rest in their order.
+  let talked = 0;
+  if (scene === "everyone") {
+    talked = Math.max(1, Math.round(progress * PEOPLE * 0.93));
+  } else if (closed) {
+    talked = PEOPLE;
+  }
+  // The themes coming in one after another over the report's part.
+  let themesIn = 0;
+  if (scene === "learned") {
+    themesIn = Math.min(themeSizes.length, Math.floor(progress * 5.5));
+  } else if (open) {
+    themesIn = themeSizes.length;
+  }
+  return {
+    heard,
+    crowd: now >= indexOf("everyone"),
+    talked,
+    closed,
+    reported: now >= indexOf("learned"),
+    themesIn,
+    open,
+  };
+};
+
+/** The morphs, played as the story moves on: what was where, flown to where it is now. */
+const useMorphs = (
+  root: RefObject<HTMLDivElement | null>,
+  crowd: boolean,
+  themesIn: number
+): void => {
+  const was = useRef({ crowd, themesIn });
+  useLayoutEffect(() => {
+    const element = root.current;
+    const before = was.current;
+    was.current = { crowd, themesIn };
+    if (
+      element === null ||
+      matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      return;
+    }
+    // The company comes out of Mila: every tile flies out of her picture into its place.
+    if (crowd && !before.crowd) {
+      const from = element
+        .querySelector("[data-mila]")
+        ?.getBoundingClientRect();
+      if (from !== undefined) {
+        for (const tile of element.querySelectorAll<HTMLElement>(
+          "[data-tile]"
+        )) {
+          const i = Number(tile.dataset.tile);
+          flyFrom(tile, from, {
+            delay: i === 0 ? 0 : 120 + (talkRank.get(i) ?? 0) * 16,
+            fade: i !== 0,
+          });
+        }
+      }
+    }
+    // The people go over to the report: each dot of a theme just come flies from its tile.
+    if (themesIn > before.themesIn) {
+      for (const dot of element.querySelectorAll<HTMLElement>("[data-dot]")) {
+        const [theme = 0, i = 0, k = 0] = (dot.dataset.dot ?? "")
+          .split(":")
+          .map(Number);
+        if (theme >= before.themesIn && theme < themesIn) {
+          const from = element
+            .querySelector(`[data-tile="${String(i)}"]`)
+            ?.getBoundingClientRect();
+          if (from !== undefined) {
+            flyFrom(dot, from, { delay: k * 24, ms: 1000, fade: false });
+          }
+        }
+      }
+    }
+  }, [root, crowd, themesIn]);
 };
 
 /** The two weeks, happening: the rail, the people, the report. */
@@ -585,29 +584,190 @@ export const PlanDemo = ({
   /** The plan's four days, as the rail shows them. */
   dates: Record<Moment, string>;
 }) => {
-  const now = indexOf(scene);
-  const crowd = now >= indexOf("everyone") && now < indexOf("finding");
-  const closed = now >= indexOf("close");
-  // The interview: told over its own part, whole once the story is past it.
-  let heard = now > indexOf("first") ? 1 : 0;
-  if (scene === "first") {
-    heard = progress;
-  }
+  const { t } = useLingui();
+  const root = useRef<HTMLDivElement>(null);
+  const { heard, crowd, talked, closed, reported, themesIn, open } = shownAt(
+    scene,
+    progress
+  );
+  const turns = [
+    { by: "stephen", text: t`Walk me through a normal morning.` },
+    { by: "mila", text: t`I spend the first two hours just sorting email.` },
+    {
+      by: "mila",
+      text: t`Half of it is the same questions, answered again and again.`,
+    },
+  ] as const;
+  const themes = [
+    t`Email eats the first hours of the day`,
+    t`Approvals wait on one person`,
+    t`The same numbers are typed in twice`,
+    t`Nobody knows where the latest file is`,
+  ];
+
+  useMorphs(root, crowd, themesIn);
+
+  const inReport = new Set(themePeople.slice(0, themesIn).flat());
   return (
-    <div aria-hidden="true" {...stylex.props(styles.demo)}>
+    <div aria-hidden="true" ref={root} {...stylex.props(styles.demo)}>
       <Rail dates={dates} scene={scene} />
       <div {...stylex.props(styles.panels)}>
         <div {...stylex.props(styles.card)}>
+          <div {...stylex.props(styles.heads)}>
+            <div {...stylex.props(styles.head, crowd && styles.headGone)}>
+              <span data-mila="" {...stylex.props(styles.avatar)}>
+                MV
+              </span>
+              <span {...stylex.props(styles.who)}>
+                <span {...stylex.props(styles.name)}>Mila de Vries</span>
+                <span {...stylex.props(styles.role)}>{t`Operations lead`}</span>
+              </span>
+              <Live on={heard > 0 && heard < 1} />
+            </div>
+            <div {...stylex.props(styles.head, !crowd && styles.headGone)}>
+              <span {...stylex.props(styles.who)}>
+                <span {...stylex.props(styles.eyebrow)}>
+                  {t`Talked with Stephen`}
+                </span>
+                <span {...stylex.props(styles.count)}>
+                  {talked} / {PEOPLE}
+                </span>
+              </span>
+              <Live on={crowd && !closed} />
+            </div>
+          </div>
+          <div {...stylex.props(styles.fold, crowd && styles.folded)}>
+            <div {...stylex.props(styles.foldInner)}>
+              {turns.map((turn, i) => (
+                <p
+                  key={turn.text}
+                  {...stylex.props(
+                    styles.turn,
+                    turn.by === "stephen" && styles.stephen,
+                    heard > i * 0.28 && styles.turnShown
+                  )}
+                >
+                  {turn.text}
+                </p>
+              ))}
+            </div>
+          </div>
           {crowd ? (
-            <Crowd
-              closed={closed}
-              progress={scene === "everyone" ? progress : 1}
-            />
-          ) : (
-            <Interview marked={now >= indexOf("finding")} progress={heard} />
-          )}
+            <div {...stylex.props(styles.crowd)}>
+              {Array.from({ length: PEOPLE }, (_, i) => {
+                const rank = talkRank.get(i) ?? 0;
+                return (
+                  <span
+                    data-tile={i}
+                    key={i}
+                    {...stylex.props(
+                      styles.tile,
+                      rank < talked && styles.tileDone,
+                      !closed &&
+                        rank >= talked &&
+                        rank < talked + 4 &&
+                        styles.tileTalking,
+                      inReport.has(i) && styles.tileLeft
+                    )}
+                  >
+                    {initialsOf(i)}
+                  </span>
+                );
+              })}
+            </div>
+          ) : null}
+          {crowd ? (
+            <span
+              {...stylex.props(
+                styles.pill,
+                closed && !reported && styles.pillShown
+              )}
+            >
+              {t`Interviews closed`}
+            </span>
+          ) : null}
         </div>
-        <Report date={dates.findings} progress={progress} scene={scene} />
+        <div {...stylex.props(styles.card)}>
+          <div {...stylex.props(styles.head)}>
+            <span {...stylex.props(styles.who)}>
+              <span {...stylex.props(styles.eyebrow)}>{dates.findings}</span>
+              <span {...stylex.props(styles.name)}>{t`What I learned`}</span>
+              <span {...stylex.props(styles.role)}>
+                {t`Each theme, with the people who raised it`}
+              </span>
+            </span>
+          </div>
+          <div {...stylex.props(styles.themes)}>
+            {themes.map((title, theme) => {
+              const shown = theme < themesIn;
+              const isOpen = open && theme === 0;
+              const people = themePeople[theme] ?? [];
+              const count = people.length;
+              return (
+                <div
+                  key={title}
+                  {...stylex.props(styles.theme, isOpen && styles.themeOpen)}
+                >
+                  <div {...stylex.props(styles.themeHead)}>
+                    <span {...stylex.props(styles.titleCell)}>
+                      <span
+                        {...stylex.props(
+                          styles.placeholder,
+                          shown && styles.hidden
+                        )}
+                      />
+                      <span
+                        {...stylex.props(
+                          styles.themeTitle,
+                          isOpen && styles.themeTitleOpen,
+                          !shown && styles.hidden
+                        )}
+                      >
+                        {title}
+                      </span>
+                    </span>
+                    <span
+                      {...stylex.props(
+                        styles.themeCount,
+                        !shown && styles.hidden
+                      )}
+                    >
+                      {t`${plural(count, { one: "# person", other: "# people" })}`}
+                    </span>
+                  </div>
+                  <span {...stylex.props(styles.dots)}>
+                    {people.map((i, k) => (
+                      <span
+                        data-dot={`${String(theme)}:${String(i)}:${String(k)}`}
+                        key={i}
+                        {...stylex.props(
+                          styles.dot,
+                          isOpen && i === 0 && styles.dotMila,
+                          !shown && styles.dotEmpty
+                        )}
+                      >
+                        {initialsOf(i)}
+                      </span>
+                    ))}
+                  </span>
+                  {theme === 0 ? (
+                    <div
+                      {...stylex.props(styles.fold, !isOpen && styles.folded)}
+                    >
+                      <div {...stylex.props(styles.foldInner)}>
+                        <p {...stylex.props(styles.quote)}>
+                          “
+                          {t`Half of it is the same questions, answered again and again.`}
+                          ” · Mila de Vries
+                        </p>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );

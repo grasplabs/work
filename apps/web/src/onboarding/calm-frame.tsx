@@ -435,7 +435,7 @@ export const CalmFrame = ({
 };
 
 /** A step's way on, at the track's end; it fades in as it arrives (the plan's, once the story ends). */
-const StepEnd = ({ end }: { end: ReactNode }) => {
+export const StepEnd = ({ end }: { end: ReactNode }) => {
   const slot = useContext(EndPlace);
   const ref = useEnterGoesOn();
   if (slot === null) {
