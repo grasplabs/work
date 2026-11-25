@@ -90,9 +90,10 @@ const Back = ({ label, to }: { label: string; to: BackTo }) => (
 type BackTo = "/";
 
 /**
- * The level of a failure's title, as the workspace's `ErrorState` has it:
- * `h1` where it stands for the whole page, `h2` under a section's own
- * heading (an organization's, whose page keeps its title and column).
+ * The heading level of a failure's title, as the workspace's `ErrorState`
+ * has it: 1 where it stands for the whole page (and fills it), 2 under a
+ * section's own heading (an organization's, whose page keeps its title
+ * and column).
  */
 type FailureHeading = 1 | 2;
 
