@@ -8,7 +8,6 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
-import { Heading } from "@grasp-os/ui/components/heading";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { Snippet } from "@grasp-os/ui/components/snippet";
 import type { IconData } from "@grasp-os/ui/lib/icons";
@@ -17,9 +16,10 @@ import { colors, font, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
-import { use, useEffect, useEffectEvent } from "react";
+import { use, useEffect, useEffectEvent, useRef } from "react";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
+import { Backdrop } from "../chat/backdrop/backdrop.tsx";
 import { notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
@@ -81,6 +81,19 @@ const styles = stylex.create({
     gap: space["4"],
     maxWidth: "28rem",
     textAlign: "center",
+  },
+  // #2503's failed page's heading: the serif at the large heading's size,
+  // wrapped as it falls, at the serif's own spacing. Damsko's Heading
+  // balances its lines and tightens the serif (registry gap of 25 Nov
+  // 2026), so a long title broke elsewhere.
+  failedTitle: {
+    margin: 0,
+    fontFamily: font.serif,
+    fontSize: font.headingLg,
+    lineHeight: font.headingLgLine,
+    fontWeight: font.weightNormal,
+    color: colors.foreground,
+    overflowWrap: "break-word",
   },
   sentence: {
     margin: 0,
@@ -287,46 +300,114 @@ export const splitReference = (
 };
 
 /**
- * Asks for the page again (its loaders read from core once more), or for
- * what a section reads itself (`again`), while not already `trying`; or,
- * to `reload`, loads Grasp anew.
+ * A page that failed, as #2503's failed page draws it (frame/page-failed.tsx):
+ * on its dither (dusk, Bayer's cells, the aurora's greens, faded out at
+ * the foot), a real heading, the one plain sentence it was given (said as
+ * it appears), the reference to copy, Try again and the quiet way on
+ * (`wayOn`), and anything folded under it (`children`, a frame's technical
+ * details). It takes the page's room (in the card under the page's bar,
+ * or in an App's frame), the `whole` window outside the frame, or only a
+ * `section`'s under a page's own heading.
  */
-const TryAgain = ({
-  trying,
-  reload,
-  again,
+export const PageFailed = ({
+  title,
+  reason,
+  heading = "h1",
+  whole = false,
+  section = false,
+  trying = false,
+  onRetry,
+  wayOn,
+  children,
 }: {
-  trying: boolean;
-  reload: boolean;
-  again: (() => void) | undefined;
+  /** What failed, as its heading: "This page didn't load". */
+  title: string;
+  /** Why, in one plain sentence, with its reference if core gave one (split off to copy). */
+  reason: string | undefined;
+  /** Its heading's level: the page's own unless it sits under one. */
+  heading?: StateHeading;
+  /** Whether it is the whole window: outside the frame, where nothing else stands. */
+  whole?: boolean;
+  /** Whether it stands in a section under a page's own heading: a section's room, not the page's. */
+  section?: boolean;
+  /** Whether it is being read again now: Try again waits, and the sentence goes until it is back. */
+  trying?: boolean;
+  /** Reads again what failed. */
+  onRetry: () => void;
+  /** A quiet way on beside Try again: Go to Chat, Fix with Grasp. */
+  wayOn?: ReactNode;
+  children?: ReactNode;
 }) => {
-  const router = useRouter();
   const { t } = useLingui();
+  const words = useRef<HTMLDivElement>(null);
+  const Title = heading;
+  const split: { sentence?: string; reference?: string } =
+    reason === undefined ? {} : splitReference(reason);
+  const { reference } = split;
+  // Only words that tell the reader something, as #2503's: core's words
+  // for "anything nobody planned for" say only that it failed, which the
+  // title says already.
+  const said = split.sentence?.trim() ?? "";
+  const sentence =
+    said === "" ||
+    said === expectedMessageOf("internal.unexpected") ||
+    said === t`Something went wrong.`
+      ? undefined
+      : said;
   return (
-    <Button
-      disabled={trying}
-      onClick={() => {
-        if (reload) {
-          window.location.reload();
-          return;
-        }
-        if (again === undefined) {
-          void router.invalidate();
-          return;
-        }
-        again();
-      }}
+    <Backdrop
+      clear={words}
+      dither="dusk"
+      style={[
+        styles.failed,
+        whole && styles.failedWhole,
+        section && styles.failedSection,
+      ]}
+      tone="aurora"
     >
-      {trying ? t`Trying again…` : t`Try again`}
-    </Button>
+      <div data-slot="page-failed" ref={words} {...stylex.props(styles.words)}>
+        <Title {...stylex.props(styles.failedTitle)}>{title}</Title>
+        {/* Said once as it appears; gone while trying, so it is said
+            again if it fails again. */}
+        {trying || sentence === undefined ? null : (
+          <p role="alert" {...stylex.props(styles.sentence)}>
+            {sentence}
+          </p>
+        )}
+        {reference === undefined ? null : (
+          <Snippet
+            aria-label={t`Reference for support`}
+            size="sm"
+            style={styles.reference}
+            value={reference}
+          />
+        )}
+        <div {...stylex.props(styles.actions)}>
+          <Button disabled={trying} onClick={onRetry}>
+            {trying ? t`Trying again…` : t`Try again`}
+          </Button>
+          {wayOn}
+        </div>
+        {children}
+      </div>
+      {/* Without a useful reason the title is said, from a line only a
+          screen reader reads. */}
+      {trying || sentence !== undefined ? null : (
+        <p role="alert" {...stylex.props(visuallyHidden)}>
+          {title}
+        </p>
+      )}
+    </Backdrop>
   );
 };
 
 /**
  * The error, in a page that keeps its own frame, such as the Brain with
- * its navigation: #2503's failed page, a real heading, the one plain
- * sentence core gave (said as it appears), the reference to copy, Try
- * again and the quiet way on.
+ * its navigation: the failed page (`PageFailed`) with core's reason. Try
+ * again asks for the page again (its loaders read from core once more),
+ * or for what a section reads itself (`again`), or, to `reload`, loads
+ * Grasp anew; where it stands for the page in the frame, the way on is
+ * Chat.
  */
 export const ErrorState = ({
   reason,
@@ -349,64 +430,32 @@ export const ErrorState = ({
   again?: () => void;
 }) => {
   const { t } = useLingui();
+  const router = useRouter();
   const loading = useRouterState({ select: (state) => state.isLoading });
   // Only the page's own loaders say they are on their way.
   const trying = again === undefined && loading;
   const inFrame = use(InFrame);
-  const split: { sentence?: string; reference?: string } =
-    reason === undefined ? {} : splitReference(reason);
-  const { reference } = split;
-  // Only words that tell the reader something, as #2503's: core's words
-  // for "anything nobody planned for" say only that it failed, which the
-  // title says already.
-  const words = split.sentence?.trim() ?? "";
-  const sentence =
-    words === "" ||
-    words === expectedMessageOf("internal.unexpected") ||
-    words === t`Something went wrong.`
-      ? undefined
-      : words;
-  const shownTitle = title ?? t`This page didn't load`;
   return (
-    <div
-      {...stylex.props(
-        styles.failed,
-        !inFrame && styles.failedWhole,
-        heading !== "h1" && styles.failedSection
-      )}
-    >
-      <div data-slot="page-failed" {...stylex.props(styles.words)}>
-        <Heading level={levels[heading]} size="lg">
-          {shownTitle}
-        </Heading>
-        {/* Said once as it appears; gone while trying, so it is said
-            again if it fails again. */}
-        {trying || sentence === undefined ? null : (
-          <p role="alert" {...stylex.props(styles.sentence)}>
-            {sentence}
-          </p>
-        )}
-        {reference === undefined ? null : (
-          <Snippet
-            aria-label={t`Reference for support`}
-            size="sm"
-            style={styles.reference}
-            value={reference}
-          />
-        )}
-        <div {...stylex.props(styles.actions)}>
-          <TryAgain again={again} reload={reload} trying={trying} />
-          {offersChat(heading, inFrame) ? <GoToChat /> : null}
-        </div>
-      </div>
-      {/* Without a useful reason the title is said, from a line only a
-          screen reader reads. */}
-      {trying || sentence !== undefined ? null : (
-        <p role="alert" {...stylex.props(visuallyHidden)}>
-          {shownTitle}
-        </p>
-      )}
-    </div>
+    <PageFailed
+      heading={heading}
+      section={heading !== "h1"}
+      whole={!inFrame}
+      onRetry={() => {
+        if (reload) {
+          window.location.reload();
+          return;
+        }
+        if (again === undefined) {
+          void router.invalidate();
+          return;
+        }
+        again();
+      }}
+      reason={reason}
+      title={title ?? t`This page didn't load`}
+      trying={trying}
+      wayOn={offersChat(heading, inFrame) ? <GoToChat /> : undefined}
+    />
   );
 };
 

@@ -12536,7 +12536,7 @@ msgstr "Ouvrir en page"
 
 #: src/workflows/workflow-rows.tsx
 msgid "Open Chat"
-msgstr "Ouvrir le chat"
+msgstr "Ouvrir la conversation"
 
 #: src/apps/app-workspace.tsx
 msgid "Open Data"
@@ -12592,6 +12592,10 @@ msgstr "Les tâches en cours et leurs échéances."
 #: src/inbox/item-detail.tsx
 msgid "Open the App"
 msgstr "Ouvrir l’application"
+
+#: src/chat/chat-bar.tsx
+msgid "Open the chat"
+msgstr "Ouvrir la conversation"
 
 #: src/apps/app-workspace.tsx
 msgid "Open the chat in Chat"
@@ -18436,7 +18440,6 @@ msgstr "Essayer"
 #: src/inbox/inbox-page.tsx
 #: src/interview/destination.tsx
 #: src/interview/sound-check.tsx
-#: src/pages/frame-failure.tsx
 #: src/settings/sign-in-settings.tsx
 msgid "Try again"
 msgstr "Réessayer"
