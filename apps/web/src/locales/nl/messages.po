@@ -8099,7 +8099,7 @@ msgstr "Grasp stuurt de gebeurtenissen van de App daar niet meer heen. Het gehei
 msgid "Grasp tries again every quarter of an hour. If it keeps failing, ask Grasp’s support to help."
 msgstr "Grasp probeert het elk kwartier opnieuw. Blijft het mislukken, vraag dan de support van Grasp om hulp."
 
-#: src/route-error.tsx
+#: src/route-error-reason.ts
 msgid "Grasp was updated while this page was open. Try again to load the new version."
 msgstr "Grasp is bijgewerkt terwijl deze pagina open stond. Probeer het opnieuw om de nieuwe versie te laden."
 
@@ -16130,7 +16130,7 @@ msgstr "Er ging iets mis bij het openen."
 
 #: src/connections/part-not-loaded.tsx
 #: src/frame/page-states.tsx
-#: src/route-error.tsx
+#: src/route-error-reason.ts
 msgid "Something went wrong."
 msgstr "Er ging iets mis."
 
@@ -18114,6 +18114,7 @@ msgid "This page couldn't load"
 msgstr "Deze pagina kon niet laden"
 
 #: src/frame/page-states.tsx
+#: src/interview-routes.tsx
 msgid "This page didn't load"
 msgstr "Deze pagina is niet geladen"
 
@@ -18498,6 +18499,7 @@ msgstr "Proberen"
 #: src/frame/ui-words.tsx
 #: src/inbox/decision-card.tsx
 #: src/inbox/inbox-page.tsx
+#: src/interview-routes.tsx
 #: src/interview/destination.tsx
 #: src/settings/sign-in-settings.tsx
 msgid "Try again"

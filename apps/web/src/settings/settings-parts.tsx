@@ -17,7 +17,7 @@ import type { ReactNode } from "react";
 
 import { isFileGone } from "../error-reports.ts";
 import { ErrorState, LoadingLines } from "../frame/page-states.tsx";
-import { useRouteErrorReason } from "../route-error.tsx";
+import { useRouteErrorReason } from "../route-error-reason.ts";
 
 // Settings' building blocks, as in the prototype (`components/settings.tsx`):
 // a section on a card of its own, and its rows.

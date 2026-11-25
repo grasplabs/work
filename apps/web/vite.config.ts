@@ -17,6 +17,7 @@ import { Features } from "lightningcss";
 import { defineConfig } from "vite-plus";
 import type { Plugin } from "vite-plus";
 
+import { bootPreload } from "./boot-preload.ts";
 import { localePreload } from "./locale-preload.ts";
 
 // Lingui looks for its config from the working directory, which is the repo
@@ -144,6 +145,7 @@ export default defineConfig(({ command }) => ({
     // Compiles a `.po` catalog when the page imports it.
     lingui({ configPath: linguiConfigPath }),
     localePreload(),
+    bootPreload(),
     tailwindcss(),
     devServerPolicy,
   ],

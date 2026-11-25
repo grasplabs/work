@@ -8099,7 +8099,7 @@ msgstr "Grasp sendet die Ereignisse der App nicht mehr dorthin. Das Geheimnis ka
 msgid "Grasp tries again every quarter of an hour. If it keeps failing, ask Grasp’s support to help."
 msgstr "Grasp versucht es jede Viertelstunde erneut. Schlägt es weiter fehl, bitten Sie den Support von Grasp um Hilfe."
 
-#: src/route-error.tsx
+#: src/route-error-reason.ts
 msgid "Grasp was updated while this page was open. Try again to load the new version."
 msgstr "Grasp wurde aktualisiert, während diese Seite offen war. Versuchen Sie es erneut, um die neue Version zu laden."
 
@@ -16130,7 +16130,7 @@ msgstr "Beim Öffnen ist etwas schiefgegangen."
 
 #: src/connections/part-not-loaded.tsx
 #: src/frame/page-states.tsx
-#: src/route-error.tsx
+#: src/route-error-reason.ts
 msgid "Something went wrong."
 msgstr "Etwas ist schiefgelaufen."
 
@@ -18114,6 +18114,7 @@ msgid "This page couldn't load"
 msgstr "Diese Seite konnte nicht geladen werden"
 
 #: src/frame/page-states.tsx
+#: src/interview-routes.tsx
 msgid "This page didn't load"
 msgstr "Diese Seite wurde nicht geladen"
 
@@ -18498,6 +18499,7 @@ msgstr "Versuchen"
 #: src/frame/ui-words.tsx
 #: src/inbox/decision-card.tsx
 #: src/inbox/inbox-page.tsx
+#: src/interview-routes.tsx
 #: src/interview/destination.tsx
 #: src/settings/sign-in-settings.tsx
 msgid "Try again"
