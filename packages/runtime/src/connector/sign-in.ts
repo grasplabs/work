@@ -182,8 +182,11 @@ const paramNameSchema = z
     "A parameter connect sets itself"
   );
 
-/** An OAuth scope: RFC 6749 §3.3's characters. */
-const scopeSchema = z.string().regex(/^[!#-[\]-~]{1,256}$/u);
+/** A scope token (RFC 6749 §3.3): `1*NQCHAR`. */
+export const scopeToken = /^[!#-[\]-~]+$/u;
+
+/** An OAuth scope: a scope token. */
+const scopeSchema = z.string().max(256).regex(scopeToken);
 
 /**
  * An RFC 6901 JSON pointer into the account lookup's answer, such as

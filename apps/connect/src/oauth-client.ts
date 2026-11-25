@@ -1,3 +1,4 @@
+import { scopeToken } from "@grasp-os/runtime/connector";
 import type { AccountLookup } from "@grasp-os/runtime/connector";
 import { fromBase64Url } from "@grasp-os/shared/encoding";
 
@@ -61,7 +62,7 @@ export interface TokenSet {
   idToken?: string;
   /**
    * The scopes the provider says it granted, joined with a space; none
-   * where its answer lists none (`grantedScope`).
+   * where its answer lists none or isn't a valid list (`grantedScope`).
    */
   scope?: string;
 }
@@ -175,15 +176,14 @@ const lifetimeSeconds = (value: unknown): number => {
     : defaultLifetimeSeconds;
 };
 
-/** A scope token (RFC 6749 §3.3): `1*NQCHAR`. */
-const scopeToken = /^[\u0021\u0023-\u005B\u005D-\u007E]+$/u;
-
 /**
  * The scopes a token answer lists (RFC 6749 §5.1), as §3.3 writes them:
  * scope tokens, each after the last and a space, or the separator
  * `provider` joins its own with. Joined with a space, they are read one
  * way, by every check and as stored. An answer that isn't such a list,
- * an empty one too, is as absent.
+ * an empty one too, is as absent: refused at consent where the grant must
+ * be listed, and a renewal's keeps the earlier grant. Only a provider
+ * breaking the RFC sends one, and it still enforces the token's own grant.
  */
 const grantedScope = (
   { scopeSeparator }: OAuthProviderConfig,

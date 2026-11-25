@@ -380,9 +380,7 @@ export const classesOnByDefault: readonly CompanyToolClass[] =
 
 /** The rights a token's answer lists (`scope`), each once. */
 export const grantedRights = (scope: string | undefined): string[] | null =>
-  scope === undefined
-    ? null
-    : [...new Set(scope.split(" ").filter((each) => each !== ""))];
+  scope === undefined ? null : [...new Set(scope.split(" "))];
 
 /**
  * Whether a `provider` connection granted `granted` (a token answer's
