@@ -23,7 +23,7 @@ import {
 } from "./directory.ts";
 import { SourceError, requestBudget } from "./event-kinds.ts";
 import type { ProviderAccess } from "./event-kinds.ts";
-import { grantHolds } from "./providers.ts";
+import { grantHolds, providerFor } from "./providers.ts";
 import { grantedScopesOf } from "./tokens.ts";
 
 // The directory's groups (GRA-2056): an admin maps an Entra group to a
@@ -237,7 +237,12 @@ const holdsGroups = async (
   connectionId: string
 ): Promise<boolean> => {
   const granted = await grantedScopesOf(env, connectionId);
-  return granted !== null && grantHolds(granted, groupsScope);
+  const directory = providerFor("microsoft-directory");
+  return (
+    granted !== null &&
+    directory?.kind === "oauth" &&
+    grantHolds(directory, granted, groupsScope)
+  );
 };
 
 /**

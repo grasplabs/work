@@ -220,8 +220,11 @@ export const buildConnectors = async (
     // An app's record says how to sign in to it, and its connector gets its
     // token: one connector per app, so neither is in doubt.
     if (
-      manifest.signIn !== undefined &&
-      connectors.some((each) => each.manifest.provider === manifest.provider)
+      connectors.some(
+        (each) =>
+          each.manifest.provider === manifest.provider &&
+          (each.manifest.signIn !== undefined || manifest.signIn !== undefined)
+      )
     ) {
       throw new Error(`Two connectors are for the app ${manifest.provider}`);
     }
