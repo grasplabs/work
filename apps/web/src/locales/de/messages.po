@@ -12594,6 +12594,10 @@ msgstr "Offene Aufgaben und ihre Fälligkeitsdaten."
 msgid "Open the App"
 msgstr "App öffnen"
 
+#: src/chat/chat-bar.tsx
+msgid "Open the chat"
+msgstr "Den Chat öffnen"
+
 #: src/apps/app-workspace.tsx
 msgid "Open the chat in Chat"
 msgstr "Den Chat im Chat öffnen"
@@ -18441,7 +18445,6 @@ msgstr "Versuchen"
 #: src/inbox/inbox-page.tsx
 #: src/interview/destination.tsx
 #: src/interview/sound-check.tsx
-#: src/pages/frame-failure.tsx
 #: src/settings/sign-in-settings.tsx
 msgid "Try again"
 msgstr "Erneut versuchen"
