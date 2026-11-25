@@ -665,12 +665,14 @@ export const servedElsewhere = "It is served from a server of its own.";
 const candidateOf = (from: Source): Candidate => {
   const { method, item, operation } = from;
   const path = from.key;
+  // First: a route on another server, whatever else is wrong with it, is
+  // one no route under the spec's base reaches.
+  if (operation.servers !== undefined || item.servers !== undefined) {
+    throw new OperationError(servedElsewhere);
+  }
   const segments = pathSegments(path);
   if (segments === undefined) {
     throw new OperationError("Its path isn't one a route may take.");
-  }
-  if (operation.servers !== undefined || item.servers !== undefined) {
-    throw new OperationError(servedElsewhere);
   }
   const request: Reading = {
     mode: "request",
