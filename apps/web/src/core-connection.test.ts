@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { authErrors } from "@grasp-os/shared/errors";
 import { roleErrors } from "@grasp-os/shared/roles";
 import {
@@ -20,6 +21,7 @@ import {
 import type { SessionEnded } from "./core-connection.ts";
 import { CoreTimeoutError } from "./core.ts";
 import { tabLink } from "./pages/tab-link.ts";
+import { keepChatLink, pendingChatLink } from "./settings/chat-link.ts";
 
 // The tab's one connection to core (spec 11.2), shared by the shell and
 // every App frame, with a stand-in for core: what each new connection
@@ -256,6 +258,7 @@ describe("the tab's one connection to core", () => {
       const second = frameOn(core);
       setActiveChat("their-chat");
       setActiveChat("their-app-chat", slotOf({ kind: "app", id: "invoices" }));
+      keepChatLink("their-chat-link-secret");
       // Into the same record as the page's reload, so the order is seen.
       const listening = core.onEnded(() => {
         ended.push("frame stopped");
@@ -273,12 +276,14 @@ describe("the tab's one connection to core", () => {
           activeChat(),
           activeChat(slotOf({ kind: "app", id: "invoices" })),
         ],
+        chatLink: pendingChatLink(),
       }).toStrictEqual({
         told: [[why], [why]],
         order: ["frame stopped", "page reloads"],
         disposed: true,
         waiting: code,
         chats: [undefined, undefined],
+        chatLink: undefined,
       });
 
       // Nobody gets a stub after the end, a frame that joins late neither.
@@ -322,7 +327,7 @@ describe("the tab's one connection to core", () => {
     });
   });
 
-  it("stops every frame when the person signs out", async () => {
+  it("stops every frame when the person signs out, and forgets the chat link they opened in the tab, so whoever signs in next isn't offered it", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => await Promise.resolve(new Response("{}")))
@@ -330,9 +335,15 @@ describe("the tab's one connection to core", () => {
     const { core, ended } = tab([one]);
     await core.session();
     const frame = frameOn(core);
+    keepChatLink("their-chat-link-secret");
+    const kept = pendingChatLink();
 
     await signOut(core);
 
+    expect({ kept, after: pendingChatLink() }).toStrictEqual({
+      kept: "their-chat-link-secret",
+      after: undefined,
+    });
     expect(frame.told).toStrictEqual(["signed-out"]);
     expect(ended).toStrictEqual(["page reloads"]);
     await expect(refusal(frame.link.session())).resolves.toBe(

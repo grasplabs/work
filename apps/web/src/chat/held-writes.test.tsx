@@ -2,6 +2,7 @@
 import { heldAppCallsPage } from "@grasp-os/shared/chat";
 import type { HeldAppCall } from "@grasp-os/shared/chat";
 import type { PendingAction } from "@grasp-os/shared/connect";
+import type { DependencyRequest } from "@grasp-os/shared/dependencies";
 import {
   agentIdSchema,
   chatIdSchema,
@@ -21,7 +22,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
-import { HeldWrites } from "./held-writes.tsx";
+import { WaitingForYou } from "./waiting-for-you.tsx";
 
 // A write to an App held because the chat used something only the person
 // can read (held-app-calls.ts in core), against core's chats and pending
@@ -29,7 +30,9 @@ import { HeldWrites } from "./held-writes.tsx";
 // waits and shows exactly the request that would run, before anything is
 // pressed; confirming names that request's hash, and rejecting runs
 // nothing. A decision that fails is said above the list, as its card
-// may be gone, until the next decision, and in its own chat alone.
+// may be gone, until the next decision, and in its own chat alone. The
+// cards that move up into the place of one decided, the packages asked for
+// under them too, hold their answers a moment, as the Inbox's next item.
 
 /** The exact input the card shows, as its block draws it. */
 const exactShown = (): string | undefined =>
@@ -90,6 +93,36 @@ const mail: PendingAction = {
   requestedAt: "2026-11-15T10:00:00.000Z",
 };
 
+/** Packages the chat's agent asked for, under its held writes. */
+const invoicePackages: DependencyRequest = {
+  id: "request-1",
+  subject: { type: "app", id: "app-1", name: "Invoice Manager" },
+  status: "pending",
+  purpose: "Format the invoice dates",
+  graphHash: "a".repeat(64),
+  lock: {
+    lockfileVersion: 2,
+    registry: "https://registry.npmjs.org",
+    requested: { "date-fns": "^4.1.0" },
+    direct: { "date-fns": "4.1.0" },
+    entries: ["date-fns"],
+    packages: {
+      "date-fns@4.1.0": {
+        name: "date-fns",
+        version: "4.1.0",
+        integrity: `sha512-${"A".repeat(86)}==`,
+        license: "MIT",
+        publishedAt: "2024-09-17T00:00:00.000Z",
+        dependencies: {},
+      },
+    },
+  },
+  removed: [],
+  findings: [],
+  requestedBy: { userId: "user-1", name: "Sanne de Wit" },
+  requestedAt: "2026-11-11T10:00:00.000Z",
+};
+
 /** What a core holds, and how it answers decisions. */
 interface Held {
   /** The App writes held in each chat, by its ID. */
@@ -105,6 +138,13 @@ interface Held {
   refusingBefore?: Record<string, Error>;
   /** Each decision of these waits for its promise before it is taken. */
   waiting?: Record<string, Promise<unknown>>;
+  /**
+   * Each confirmation of these is taken at once, then waits for its
+   * promise before it answers: an App write core runs once it took it.
+   */
+  running?: Record<string, Promise<unknown>>;
+  /** The npm packages the chat's agent asked for, under the writes. */
+  packages?: readonly DependencyRequest[];
 }
 
 /** The chats told to go on, one for each confirmation that went through. */
@@ -113,6 +153,7 @@ const carriedOn: string[] = [];
 /** A chat's held writes, with a way to open another chat in the same place. */
 const Switching = () => {
   const [chatId, setChatId] = useState("chat-1");
+  const [version, setVersion] = useState(0);
   return (
     <>
       <button
@@ -122,12 +163,23 @@ const Switching = () => {
         }}
         type="button"
       />
-      <HeldWrites
+      {/* Core telling the chat what it holds changed (`ChatUpdate.held`). */}
+      <button
+        aria-label="Held changed"
+        onClick={() => {
+          setVersion((was) => was + 1);
+        }}
+        type="button"
+      />
+      <WaitingForYou
         chatId={chatId}
+        onApproved={() => {
+          // Approving packages carries nothing on in these tests.
+        }}
         onConfirmed={() => {
           carriedOn.push(chatId);
         }}
-        version={0}
+        version={version}
       />
     </>
   );
@@ -145,6 +197,8 @@ const shown = async ({
   refusing = {},
   refusingBefore = {},
   waiting: slow = {},
+  running = {},
+  packages = [],
 }: Held = {}) => {
   const confirmed: { chatId: string; id: string; requestHash: string }[] = [];
   const declined: { chatId: string; id: string }[] = [];
@@ -163,8 +217,21 @@ const shown = async ({
       throw refusal;
     }
   };
+  const approved: string[] = [];
   const session = {
+    dependencies: {
+      decide: async (id: string): Promise<void> => {
+        await Promise.resolve();
+        approved.push(id);
+      },
+    },
     chats: {
+      connectionRequests: async (): Promise<never[]> =>
+        await Promise.resolve([]),
+      packageRequests: async (): Promise<DependencyRequest[]> =>
+        await Promise.resolve(
+          packages.filter(({ id }) => !approved.includes(id))
+        ),
       heldCalls: async (
         chatId: string,
         after?: string
@@ -188,6 +255,7 @@ const shown = async ({
         await Promise.resolve();
         confirmed.push({ chatId, id, requestHash });
         await decide(id);
+        await running[id];
       },
       declineHeldCall: async (chatId: string, id: string): Promise<void> => {
         await Promise.resolve();
@@ -228,7 +296,7 @@ const shown = async ({
     await router.load();
   });
   await settled();
-  return { confirmed, declined };
+  return { confirmed, declined, approved };
 };
 
 /** What the list says went wrong, if anything, as a screen reader hears it. */
@@ -251,6 +319,50 @@ const press = async (label: string): Promise<void> => {
     await Promise.resolve();
   });
   await settled();
+};
+
+/** The button labelled `label`, or the one whose words are `label`. */
+const buttonOf = (label: string): HTMLButtonElement | undefined =>
+  [...document.querySelectorAll("button")].find(
+    (button) =>
+      button.getAttribute("aria-label") === label ||
+      button.textContent === label
+  );
+
+/**
+ * Whether the button `label` is held, out of use, and what it is described
+ * by while it is, as a screen reader hears it.
+ */
+const holding = (label: string): { held: boolean; said: string } => {
+  const button = buttonOf(label);
+  const said = (button?.getAttribute("aria-describedby") ?? "")
+    .split(" ")
+    .map((id) =>
+      id === "" ? "" : document.querySelector(`#${id}`)?.textContent
+    )
+    .join("");
+  return {
+    held:
+      button !== undefined &&
+      (button.disabled || button.getAttribute("aria-disabled") === "true"),
+    said,
+  };
+};
+
+/** The pause, as it is said. */
+const pauseSaid =
+  "Its answers can be used in a moment, so a press meant for the one before doesn't answer it.";
+
+/** Waits out the moment the answers hold after a decision moved the cards. */
+const pastThePause = async (): Promise<void> => {
+  await act(async () => {
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    // Longer than the pause (answer-pause.tsx).
+    setTimeout(() => {
+      resolve(true);
+    }, 1100);
+    await promise;
+  });
 };
 
 /** The Confirm button of the mail connect holds, as its card names it. */
@@ -442,6 +554,7 @@ describe("a write to an App held for the person", () => {
     };
     await shown({ actions: [search] });
     await press("Confirm mail.search on Outlook");
+    await pastThePause();
     await press("Confirm notes.create in Notes");
 
     expect(carriedOn).toStrictEqual(["chat-1", "chat-1"]);
@@ -460,7 +573,9 @@ describe("a write to an App held for the person", () => {
       refusing: { [mail.id]: refusal, [second.id]: refusal },
     });
     await press("Reject notes.create in Notes");
+    await pastThePause();
     await press("Confirm notes.archive in Notes");
+    await pastThePause();
     await press("Confirm mail.send on Outlook");
 
     expect(carriedOn).toStrictEqual([]);
@@ -513,6 +628,7 @@ describe("a write to an App held for the person", () => {
     });
     await press("Reject notes.create in Notes");
     const afterFailed = alerted();
+    await pastThePause();
     await press("Confirm notes.archive in Notes");
 
     expect({ afterFailed, afterNext: alerted() }).toStrictEqual({
@@ -621,6 +737,125 @@ describe("a write to an App held for the person", () => {
     expect({ cards: cards(), said: alerted() }).toStrictEqual({
       cards: ["notes.restore in Notes"],
       said: `notes.restore in Notes didn't go through.${refusal.message}`,
+    });
+  });
+
+  it("holds the answers of the writes that moved into the place of one just confirmed, says so, and lets them answer a moment later", async () => {
+    const second: HeldAppCall = {
+      ...held,
+      id: "held-2",
+      function: "notes.share",
+      request: JSON.stringify({
+        reference: { name: "notes.share", kind: "mutation" },
+        args: { with: "everyone@outside.test" },
+      }),
+      requestHash: "d".repeat(64),
+    };
+    const { confirmed } = await shown({
+      calls: { "chat-1": [held, second] },
+      actions: [mail],
+    });
+    // The person double-clicks Confirm on the first card: the first click
+    // confirms it, and the next card moves up into its place.
+    await press("Confirm notes.create in Notes");
+    const moved = {
+      order: cards(),
+      answers: [
+        "Confirm notes.share in Notes",
+        "Reject notes.share in Notes",
+        "Confirm mail.send on Outlook",
+        "Reject all",
+      ].map(holding),
+    };
+    // The second click, on what is now under the pointer.
+    await press("Confirm notes.share in Notes");
+    const pressedInThePause = confirmed.map(({ id }) => id);
+    await pastThePause();
+    const later = holding("Confirm notes.share in Notes");
+    await press("Confirm notes.share in Notes");
+
+    const heldAndSaid = { held: true, said: pauseSaid };
+    expect({
+      moved,
+      pressedInThePause,
+      later,
+      confirmed: confirmed.map(({ id }) => id),
+    }).toStrictEqual({
+      moved: {
+        order: ["notes.share in Notes", "mail.send on Outlook"],
+        answers: [heldAndSaid, heldAndSaid, heldAndSaid, heldAndSaid],
+      },
+      pressedInThePause: ["held-1"],
+      later: { held: false, said: "" },
+      confirmed: ["held-1", "held-2"],
+    });
+  });
+
+  it("holds the answers of the write that moved up while the one confirmed still runs, once core says it was taken", async () => {
+    const second: HeldAppCall = {
+      ...held,
+      id: "held-2",
+      function: "notes.share",
+    };
+    const app = Promise.withResolvers<boolean>();
+    const { confirmed } = await shown({
+      calls: { "chat-1": [held, second] },
+      running: { [held.id]: app.promise },
+    });
+    await press("Confirm notes.create in Notes");
+    // Core took it and says so; the App still runs it.
+    await press("Held changed");
+    const moved = {
+      order: cards(),
+      answer: holding("Confirm notes.share in Notes"),
+    };
+    // The second press of a double click, on what is now under the pointer.
+    await press("Confirm notes.share in Notes");
+    const pressedInThePause = confirmed.map(({ id }) => id);
+    app.resolve(true);
+    await settled();
+    await pastThePause();
+    await press("Confirm notes.share in Notes");
+
+    expect({
+      moved,
+      pressedInThePause,
+      confirmed: confirmed.map(({ id }) => id),
+    }).toStrictEqual({
+      moved: {
+        order: ["notes.share in Notes"],
+        answer: { held: true, said: pauseSaid },
+      },
+      pressedInThePause: ["held-1"],
+      confirmed: ["held-1", "held-2"],
+    });
+  });
+
+  it("holds the packages asked for under the writes once the write above them is confirmed", async () => {
+    const { confirmed, approved } = await shown({
+      packages: [invoicePackages],
+    });
+    const approve = "Approve the packages for Invoice Manager";
+    const before = holding(approve);
+    await press("Confirm notes.create in Notes");
+    const moved = holding(approve);
+    await press(approve);
+    const pressedInThePause = [...approved];
+    await pastThePause();
+    await press(approve);
+
+    expect({
+      before,
+      confirmed: confirmed.map(({ id }) => id),
+      moved,
+      pressedInThePause,
+      approved,
+    }).toStrictEqual({
+      before: { held: false, said: "" },
+      confirmed: ["held-1"],
+      moved: { held: true, said: pauseSaid },
+      pressedInThePause: [],
+      approved: ["request-1"],
     });
   });
 });

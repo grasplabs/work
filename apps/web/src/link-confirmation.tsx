@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { confirmGate } from "./confirm-gate.ts";
 import type { ConfirmGate } from "./confirm-gate.ts";
+import { linkAddress } from "./link-address.ts";
 
 // The page's confirmation of a link an App's page asks to open (spec
 // 10.7.7, decision 2 on GRA-259), when the person didn't just click in
@@ -91,6 +92,12 @@ export const LinkConfirmDialog = ({
       window.removeEventListener("keydown", input, { capture: true });
     };
   }, [pending]);
+  // Named as the chat's question names a link (link-address.ts): in ASCII,
+  // whatever came, the origin of the whole URL when there is one.
+  const address =
+    pending === undefined
+      ? undefined
+      : linkAddress(pending.url ?? pending.origin);
   /** The button's own press began now: only one begun once enabled counts. */
   const press = (): void => {
     gate.current?.gate.press(performance.now());
@@ -114,10 +121,10 @@ export const LinkConfirmDialog = ({
             </Trans>
           </AlertDialogDescription>
         </AlertDialogHeader>
-        <p className="font-mono text-sm break-all">{pending?.origin}</p>
+        <p className="font-mono text-sm break-all">{address?.origin}</p>
         {pending?.url === undefined ? null : (
           <p className="text-muted-foreground font-mono text-xs break-all">
-            {pending.url}
+            {address?.href}
           </p>
         )}
         <AlertDialogFooter>

@@ -15,6 +15,7 @@ import {
   withTimeout,
 } from "./core.ts";
 import type { Session } from "./core.ts";
+import { forgetChatLink } from "./settings/chat-link.ts";
 
 /** Why the person's session ended under the page. */
 export type SessionEnded = "signed-out" | "principal-changed";
@@ -297,9 +298,11 @@ export class CoreConnection {
         failures.push(error);
       }
     }
-    // The open chats were this person's: whoever signs in next starts
-    // without them, however the session ended.
+    // The open chats, and a chat link opened in the tab to link to their
+    // account, were this person's: whoever signs in next starts without
+    // them, however the session ended, and is never offered the link.
     forgetActiveChats();
+    forgetChatLink();
     this.#onSessionEnded();
     if (failures.length > 0) {
       throw new AggregateError(failures, "Stopping a frame failed.");

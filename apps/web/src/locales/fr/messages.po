@@ -9221,8 +9221,7 @@ msgstr "Son accès a expiré. L’équipe Grasp ne peut pas la reconnecter : un 
 msgid "Its account is out of credit."
 msgstr "Le compte n’a plus de crédit."
 
-#: src/inbox/approval-request.tsx
-#: src/inbox/item-detail.tsx
+#: src/answer-pause.tsx
 msgid "Its answers can be used in a moment, so a press meant for the one before doesn't answer it."
 msgstr "Ses réponses seront utilisables dans un instant, pour qu'un clic destiné au précédent n'y réponde pas."
 
@@ -16047,6 +16046,10 @@ msgstr "Quelqu’un qui n’est plus là"
 #: src/agents/own-agents-admin.tsx
 msgid "Someone no longer in the company"
 msgstr "Une personne qui ne fait plus partie de l’entreprise"
+
+#: src/settings/ai-providers.tsx
+msgid "Someone saved a new {label} key since you opened it, so nothing was deleted."
+msgstr "Quelqu’un a enregistré une nouvelle clé {label} depuis que vous l’avez ouverte : rien n’a donc été supprimé."
 
 #: src/settings/instruction-file.tsx
 msgid "Someone saved this file since you started. Put your changes aside to see their version, then make yours again."

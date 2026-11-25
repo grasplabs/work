@@ -1173,9 +1173,13 @@ export const AiProvidersSettings = ({
   const router = useRouter();
   const core = useCore();
   const { busy, failure, run } = useCoreAction();
+  // A key deleted in its dialog that someone replaced first: kept, and
+  // said here, since the dialog goes with the row of the key it showed.
+  const [replaced, setReplaced] = useState<string>();
   const { providers, offered, choice } = listing;
   /** A change, then the page read again; false where it failed, which the page says. */
   const change = async (action: Change): Promise<boolean> => {
+    setReplaced(undefined);
     const done = await run(async (session) => {
       await changeThenRefresh(
         async () => {
@@ -1191,6 +1195,7 @@ export const AiProvidersSettings = ({
   };
   /** A change from a dialog: it throws where it failed, so the dialog says why. */
   const changeOrThrow = async (action: Change): Promise<void> => {
+    setReplaced(undefined);
     await core.withSession(async (session) => {
       await changeThenRefresh(
         async () => {
@@ -1235,6 +1240,8 @@ export const AiProvidersSettings = ({
   );
   // On Grasp's AI, having no key of its own keeps nothing from answering.
   const unanswered = providers.length === 0 && listing.source !== "grasp";
+  // Why the last change failed, or that a deleted key had been replaced.
+  const said = failure ?? replaced;
   return (
     <>
       <Source
@@ -1274,9 +1281,9 @@ export const AiProvidersSettings = ({
           flush
           title={t`Providers`}
         >
-          {failure === undefined ? null : (
+          {said === undefined ? null : (
             <FieldGroup>
-              <RowAlert variant="destructive">{failure}</RowAlert>
+              <RowAlert variant="destructive">{said}</RowAlert>
             </FieldGroup>
           )}
           {providers.length > 0 ? (
@@ -1288,9 +1295,29 @@ export const AiProvidersSettings = ({
                 row: (
                   <ProviderRow
                     editable={editable}
+                    // Only the key the dialog shows: one another admin
+                    // saved since stays, and the page says nothing was
+                    // deleted, as the dialog goes with the row it was on.
                     onDelete={async () => {
                       await changeOrThrow(async (session) => {
-                        await session.aiProviders.remove(provider.provider);
+                        await session.aiProviders.remove(
+                          provider.provider,
+                          provider.updatedAt
+                        );
+                        const now = await session.aiProviders.list();
+                        if (
+                          now.providers.some(
+                            (each) => each.provider === provider.provider
+                          )
+                        ) {
+                          const label = providerName(
+                            provider.provider,
+                            provider.label
+                          );
+                          const why = t`Someone saved a new ${label} key since you opened it, so nothing was deleted.`;
+                          setReplaced(why);
+                          throw new Error(why);
+                        }
                       });
                     }}
                     onReplace={async (key) => {

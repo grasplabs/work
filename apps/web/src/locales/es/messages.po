@@ -9221,8 +9221,7 @@ msgstr "Su acceso caducó. El personal de Grasp no puede reconectarla: un admini
 msgid "Its account is out of credit."
 msgstr "La cuenta se ha quedado sin crédito."
 
-#: src/inbox/approval-request.tsx
-#: src/inbox/item-detail.tsx
+#: src/answer-pause.tsx
 msgid "Its answers can be used in a moment, so a press meant for the one before doesn't answer it."
 msgstr "Sus respuestas se podrán usar en un momento, para que una pulsación pensada para el anterior no lo responda."
 
@@ -16047,6 +16046,10 @@ msgstr "Alguien que ya no está"
 #: src/agents/own-agents-admin.tsx
 msgid "Someone no longer in the company"
 msgstr "Alguien que ya no está en la empresa"
+
+#: src/settings/ai-providers.tsx
+msgid "Someone saved a new {label} key since you opened it, so nothing was deleted."
+msgstr "Alguien guardó una nueva clave de {label} desde que la abriste, así que no se eliminó nada."
 
 #: src/settings/instruction-file.tsx
 msgid "Someone saved this file since you started. Put your changes aside to see their version, then make yours again."
