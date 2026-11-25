@@ -19085,6 +19085,7 @@ msgid "Uploading, {percent}%"
 msgstr "Uploading, {percent}%"
 
 #: src/brain/sources-page.tsx
+#: src/onboarding/document-shelf.tsx
 msgid "Uploading…"
 msgstr "Uploading…"
 
