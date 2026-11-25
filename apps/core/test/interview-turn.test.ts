@@ -32,6 +32,8 @@ import { unique } from "./sign-in.ts";
 //
 // - The page saying who it is or what Stephen knows: the request takes no
 //   such field, and the brief holds what the store knows.
+// - Him asking again for what is written down, or never for what is not:
+//   the brief says what the record still misses, from the facts so far.
 // - A line out that breaks his rules, or a fact whose words weren't said.
 // - A turn given up halfway going uncounted, or still running.
 // - A page that names another interviewer getting one: another text, or
@@ -53,7 +55,7 @@ const turnOf = (events: TurnEvent[]): StephenTurn | undefined =>
   events.flatMap((event) => ("turn" in event ? [event.turn] : []))[0];
 
 /** What his line's model answers: six named lines. */
-const line = (say: string, more = "no", part = "you"): ProviderReply => ({
+const line = (say: string, more = "no", part = "week"): ProviderReply => ({
   text: `TONE: none\nSAY: ${say}\nPART: ${part}\nWANTS: answer\nMORE: ${more}\nAGREED: no\n`,
   inputTokens: 1500,
   outputTokens: 40,
@@ -79,7 +81,7 @@ describe("an interview turn", { timeout: 60_000 }, () => {
     const { requests, result } = await answering(
       [
         line(
-          "First a few questions about you and AI, then your work. Do you already use AI in your work?"
+          "First your work as a whole, then one part of it up close. What do you do here?"
         ),
         // Nothing was said yet: nothing to write down.
         notes({ facts: [], changes: [] }),
@@ -112,13 +114,16 @@ describe("an interview turn", { timeout: 60_000 }, () => {
             event: "answer",
             locale: "en",
             lines: [
-              {
-                from: "stephen",
-                text: "Do you already use AI in your work?",
-              },
+              { from: "stephen", text: "What do you do here?" },
               { from: "person", text: said, typed: true },
             ],
-            facts: [],
+            facts: [
+              { id: "f1", tag: "task", text: "You handle invoices daily." },
+              { id: "f2", tag: "step", text: "You open the invoice." },
+              { id: "f3", tag: "step", text: "You match it to the order." },
+              { id: "f4", tag: "step", text: "You book it." },
+              { id: "f5", tag: "system", text: "You work in Exact." },
+            ],
             phase: "steps",
             minutes: 4,
           })
@@ -127,7 +132,16 @@ describe("an interview turn", { timeout: 60_000 }, () => {
       }
     );
     const brief = JSON.stringify(requests[0]?.body);
+    const later = JSON.stringify(requests[2]?.body);
     expect({
+      // Nothing written down yet: the first thing the record misses.
+      openAtStart: brief.includes(
+        String.raw`What is still open, most important first:\n- which work comes back every day or week, and how often\n`
+      ),
+      // With the story and the system written down, what comes after them.
+      openLater: later.includes(
+        String.raw`What is still open, most important first:\n- who gets it after them, and how\n- where it waits, and for what\n`
+      ),
       started: turnOf(result.start)?.say,
       startedEarly: result.start.some((event) => "line" in event),
       answered: turnOf(result.answer),
@@ -135,8 +149,10 @@ describe("an interview turn", { timeout: 60_000 }, () => {
       toldName: brief.includes("You talk with: Oli, Ops."),
       noLead: brief.includes('say \\"I was told\\" instead'),
     }).toStrictEqual({
+      openAtStart: true,
+      openLater: true,
       started:
-        "First a few questions about you and AI, then your work. Do you already use AI in your work?",
+        "First your work as a whole, then one part of it up close. What do you do here?",
       startedEarly: true,
       answered: {
         say: "Okay. Which system do you open first?",

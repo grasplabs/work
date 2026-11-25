@@ -2,6 +2,7 @@ import {
   erasedFact,
   interviewLimits,
   nextFactId,
+  readBackOrder,
   removedLine,
   shareByDefault,
 } from "@grasp-os/shared/interview-links";
@@ -38,6 +39,7 @@ export const freshProgress: InterviewProgress = {
   wants: "answer",
   startedAt: null,
   confirmed: 0,
+  readBack: readBackOrder,
   adding: false,
   addedAt: 0,
 };

@@ -3785,10 +3785,6 @@ msgstr "Antes de que me ponga en contacto, avisa a tu equipo"
 msgid "Before meetings"
 msgstr "Antes de las reuniones"
 
-#: src/interview/words.ts
-msgid "Before the work: what you told me about AI."
-msgstr "Antes del trabajo: lo que me contaste sobre la IA."
-
 #: src/onboarding/setup-steps.tsx
 msgid "Before we start, which language do you prefer?"
 msgstr "Antes de empezar, ¿qué idioma prefieres?"
@@ -7477,10 +7473,6 @@ msgstr "Primero necesito tu lista de personal."
 msgid "First run {when}"
 msgstr "Primera ejecución: {when}"
 
-#: src/interview/words.ts
-msgid "First, the steps."
-msgstr "Primero, los pasos."
-
 #: src/inbox/report-viewer.tsx
 msgid "Fit"
 msgstr "Ajustar"
@@ -9779,8 +9771,8 @@ msgid "Last week"
 msgstr "La semana pasada"
 
 #: src/interview/words.ts
-msgid "Last, the numbers and the result."
-msgstr "Por último, las cifras y el resultado."
+msgid "Last: what you told me about AI."
+msgstr "Por último: lo que me contaste sobre la IA."
 
 #: src/routes/_shell.settings.instructions.tsx
 msgid "Lasting facts"
@@ -10770,6 +10762,10 @@ msgstr "Más de lo que me contaste sobre la IA."
 #: src/interview/words.ts
 msgid "More of when it goes differently."
 msgstr "Más sobre cuando va de otra manera."
+
+#: src/interview/words.ts
+msgid "More of your recurring work."
+msgstr "Más trabajo recurrente."
 
 #: src/brain/work-knowledge.tsx
 msgid "More people are asked about it in the next interviews."
@@ -14135,6 +14131,10 @@ msgstr "Los registros de {table} sin {field} reciben «{value}»."
 #: src/apps/data-model-changes.tsx
 msgid "Records in {table} that lack {field} need a value before this can be published."
 msgstr "Los registros de {table} sin {field} necesitan un valor antes de poder publicarse."
+
+#: src/interview/words.ts
+msgid "Recurring work"
+msgstr "Trabajo recurrente"
 
 #: src/brain/gap-actions.tsx
 msgid "Redact it"
@@ -17918,6 +17918,10 @@ msgstr "Los archivos fuente de la versión {sourceVersion}"
 msgid "The step, as JSON"
 msgstr "El paso, en JSON"
 
+#: src/interview/words.ts
+msgid "The steps."
+msgstr "Los pasos."
+
 #: src/settings/teams.tsx
 msgid "The team couldn't be created. Try again."
 msgstr "No se ha podido crear el equipo. Inténtalo de nuevo."
@@ -18022,6 +18026,10 @@ msgstr "Después {task}"
 #: src/onboarding/about-story.tsx
 msgid "Then I talk to your team myself: short conversations, over two weeks. That’s where I learn the most."
 msgstr "Después hablo yo mismo con tu equipo: conversaciones cortas, a lo largo de dos semanas. Ahí es donde más aprendo."
+
+#: src/interview/words.ts
+msgid "Then, the numbers and the result."
+msgstr "Después, las cifras y el resultado."
 
 #: src/interview/words.ts
 msgid "Then, when it goes differently."
@@ -21179,6 +21187,10 @@ msgstr "Tu plataforma está abierta."
 msgid "Your question"
 msgstr "Tu pregunta"
 
+#: src/interview/words.ts
+msgid "Your recurring work."
+msgstr "Tu trabajo recurrente."
+
 #: src/inbox/report-row.tsx
 msgid "Your report on week {week} is ready"
 msgstr "Tu informe de la semana {week} está listo"
@@ -21260,6 +21272,10 @@ msgstr "Tus disparadores ya no reciben correo nuevo de {name}"
 #: src/routes/apps.$app.draft.tsx
 msgid "Your version of the App"
 msgstr "Tu versión de la App"
+
+#: src/interview/words.ts
+msgid "Your week"
+msgstr "Tu semana"
 
 #: src/inbox/report-row.tsx
 msgid "Your weekly report"
