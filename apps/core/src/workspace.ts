@@ -1285,6 +1285,7 @@ export class Workspace extends DurableObject<Env> {
         makeProject: chats.makeProject,
         archivedAt: chats.archivedAt,
         agentId: chats.agentId,
+        readUpTo: chats.readUpTo,
         said: sql<string>`'' || ${saidWords}`,
       })
       .from(chats)
@@ -1472,6 +1473,8 @@ export class Workspace extends DurableObject<Env> {
           thread: thread ?? null,
           makeKind: make?.kind ?? null,
           makeProject: make?.project ?? null,
+          // Nothing seen yet: every answer is news until its person looks.
+          readUpTo: 0,
         })
         .returning()
         .get();
@@ -4457,6 +4460,7 @@ export class Workspace extends DurableObject<Env> {
         makeKind: chats.makeKind,
         makeProject: chats.makeProject,
         archivedAt: chats.archivedAt,
+        readUpTo: chats.readUpTo,
       })
       .from(chats)
       .where(
@@ -4484,18 +4488,74 @@ export class Workspace extends DurableObject<Env> {
       | "makeKind"
       | "makeProject"
       | "archivedAt"
+      | "readUpTo"
     >
   ): ChatSummary {
+    const running = this.#isRunning(chat.id);
     return {
       id: chat.id,
       title: chat.title,
       agentId: chat.agentId,
       createdAt: chat.createdAt.toISOString(),
       lastAt: chat.lastAt.toISOString(),
-      running: this.#isRunning(chat.id),
+      running,
+      // While its agent works the list shows that instead: unread once done.
+      unread: !running && this.#hasUnseenAnswer(chat.id, chat.readUpTo),
       make: makeOf(chat),
       archived: chat.archivedAt !== null,
     };
+  }
+
+  /**
+   * Whether the chat holds an answer stored after `readUpTo`, the last
+   * message its person saw. None for a chat with no read position, made
+   * before chats kept one: read, so they don't all light up at once. Only
+   * the agent's answers: the person's own questions and a step's result
+   * are never news to them. By the chat's index, stopping at the first.
+   */
+  #hasUnseenAnswer(chatId: ChatId, readUpTo: number | null): boolean {
+    if (readUpTo === null) {
+      return false;
+    }
+    return (
+      this.#db
+        .select({ id: chatMessages.id })
+        .from(chatMessages)
+        .where(
+          and(
+            eq(chatMessages.chatId, chatId),
+            gt(chatMessages.id, readUpTo),
+            sql`json_extract(${chatMessages.message}, '$.role') = 'assistant'`
+          )
+        )
+        .limit(1)
+        .get() !== undefined
+    );
+  }
+
+  /**
+   * Marks `personId`'s chat `chatId` seen up to its latest message
+   * (`ChatsApi.markRead`), never back: a page that shows less, on another
+   * device, leaves it where a newer one put it. The last message they had
+   * seen before: 0 for none, null for a chat made before chats kept it,
+   * which counts as read. Only their own chat in Grasp
+   * (`#graspChat`): anyone else's is refused as if there were none.
+   */
+  markChatRead(chatId: unknown, personId: string): number | null {
+    const chat = this.#graspChat(chatId, personId);
+    const latest = this.#db
+      .select({ id: sql<number | null>`max(${chatMessages.id})` })
+      .from(chatMessages)
+      .where(eq(chatMessages.chatId, chat.id))
+      .get()?.id;
+    if (typeof latest === "number" && latest > (chat.readUpTo ?? 0)) {
+      this.#db
+        .update(chats)
+        .set({ readUpTo: latest })
+        .where(eq(chats.id, chat.id))
+        .run();
+    }
+    return chat.readUpTo;
   }
 
   /**

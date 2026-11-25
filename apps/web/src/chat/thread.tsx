@@ -14,6 +14,7 @@ import { Bubble, BubbleContent } from "@grasp-os/ui/components/bubble";
 import { Button } from "@grasp-os/ui/components/button";
 import { CopyButton } from "@grasp-os/ui/components/copy-button";
 import { Link } from "@grasp-os/ui/components/link";
+import { Marker, MarkerContent } from "@grasp-os/ui/components/marker";
 import {
   Message,
   MessageAction,
@@ -56,7 +57,7 @@ import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link as RouterLink, useLocation } from "@tanstack/react-router";
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useId, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
 import type { ThinkingOf } from "../brain/thinking/play.ts";
@@ -85,6 +86,7 @@ import { SavedMemoryLine } from "./saved-memory.tsx";
 import { readingFileOf, signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
 import { shortTime, turnsOf, workedFor } from "./turns.ts";
+import { newLineRow, OpenAtNewLine } from "./unread.ts";
 
 /**
  * An answer's thinking as a card (thinking-card.tsx), loaded once an
@@ -544,6 +546,7 @@ type Row =
     }
   | AnswerTurn
   | { kind: "after"; id: string; at?: undefined; children: ReactNode }
+  | { kind: "new"; id: string; at?: undefined }
   | {
       kind: "day";
       id: string;
@@ -615,6 +618,46 @@ const DayLine = ({
         {words}
       </Text>
       <Separator decorative style={styles.dayRule} />
+    </div>
+  );
+};
+
+/**
+ * The rows with the New line over the answer that holds reply `before`,
+ * the first the person hadn't seen as the chat opened (unread.ts); as
+ * they are where there is none.
+ */
+const withNewLine = (rows: readonly Row[], before: number | undefined) => {
+  const at = rows.findIndex(
+    (row) =>
+      row.kind === "answer" && row.replies.some(({ id }) => id === before)
+  );
+  return at === -1
+    ? [...rows]
+    : [
+        ...rows.slice(0, at),
+        { kind: "new" as const, id: newLineRow },
+        ...rows.slice(at),
+      ];
+};
+
+/**
+ * The New line, over what the person hadn't seen: a separator named New,
+ * its word in the middle of a hairline. Never focused: the thread opens
+ * with it near the top instead.
+ */
+const NewLine = () => {
+  const { t } = useLingui();
+  const words = t({
+    message: "New",
+    context: "the line in a chat over the answers the person hasn't read",
+  });
+  return (
+    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- an hr holds no words, and Marker draws its word between the rules
+    <div aria-label={words} role="separator">
+      <Marker variant="separator">
+        <MarkerContent>{words}</MarkerContent>
+      </Marker>
     </div>
   );
 };
@@ -1319,6 +1362,7 @@ export const ChatThread = ({
   onRetry,
   compact = false,
   build,
+  newLineBefore,
   children,
 }: {
   /**
@@ -1352,6 +1396,13 @@ export const ChatThread = ({
    * chat): without it, a plan shows with no way to build it.
    */
   build?: ThreadBuild;
+  /**
+   * The answer the New line goes over, the first the person hadn't seen
+   * as the chat opened: the thread opens with it near the top, or at its
+   * end when all it has unread fits (MessageScroller's `last-anchor`).
+   * None, and it opens at its end.
+   */
+  newLineBefore?: number;
   /** Shown after the messages, in the thread: what is held, why it stopped. */
   children?: ReactNode;
 }) => {
@@ -1462,7 +1513,8 @@ export const ChatThread = ({
       agentName: agentNameOf(turn),
     };
   };
-  const lined = withDayLines(rows);
+  const lined = withNewLine(withDayLines(rows), newLineBefore);
+  const logId = useId();
   const items: Row[] =
     children === undefined || children === null
       ? lined
@@ -1474,8 +1526,13 @@ export const ChatThread = ({
     <div {...stylex.props(styles.room)}>
       <AnswerLinks>
         <MessageScrollerProvider autoScroll loading={!loaded}>
+          {/* It opens at its end, as ever, or at the New line (unread.ts). */}
+          <OpenAtNewLine
+            line={loaded ? newLineBefore : undefined}
+            logId={logId}
+          />
           <MessageScroller>
-            <MessageScrollerViewport aria-label={t`Messages`}>
+            <MessageScrollerViewport aria-label={t`Messages`} id={logId}>
               <MessageScrollerContent aria-busy={running}>
                 {loaded
                   ? items.map((row) => (
@@ -1492,6 +1549,7 @@ export const ChatThread = ({
                           <AnswerRow context={contextOf(row)} turn={row} />
                         ) : null}
                         {row.kind === "after" ? row.children : null}
+                        {row.kind === "new" ? <NewLine /> : null}
                         {row.kind === "day" ? (
                           <DayLine
                             ago={row.ago}

@@ -11066,6 +11066,11 @@ msgctxt "an entity the Brain first saw in this version"
 msgid "New"
 msgstr "Nouveau"
 
+#: src/chat/thread.tsx
+msgctxt "the line in a chat over the answers the person hasn't read"
+msgid "New"
+msgstr "Nouveau"
+
 #: src/agents/agents-overview.tsx
 #: src/agents/new-agent.tsx
 #: src/routes/_shell.agents.index.tsx
@@ -19061,6 +19066,10 @@ msgstr "A dissocié un compte d’application de chat"
 #: src/frame/ui-words.tsx
 msgid "Unpin"
 msgstr "Désépingler"
+
+#: src/chat/sidebar-chats.tsx
+msgid "Unread"
+msgstr "Non lu"
 
 #: src/activity/audit-log.tsx
 msgid "Unreadable event"
