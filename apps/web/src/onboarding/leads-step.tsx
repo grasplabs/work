@@ -7,7 +7,7 @@ import { Combobox } from "@grasp-os/ui/components/combobox";
 import {
   Item,
   ItemContent,
-  ItemGroup,
+  ItemGrid,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -27,13 +27,15 @@ import { WaitingNote } from "./company-step.tsx";
 import { ConnectorSearch } from "./connector-search.tsx";
 import { ForgetTeams } from "./forget-teams.tsx";
 import { HrLeads } from "./hr-leads.tsx";
-import { useIntegrations, useSaveChoices } from "./sources-step.tsx";
+import { hrLogos } from "./source-logos.ts";
+import { Logo, useIntegrations, useSaveChoices } from "./sources-step.tsx";
 import { useRefresh } from "./step-parts.ts";
 import type { StepProps } from "./step-parts.ts";
 import { SupportLink } from "./support-link.tsx";
 import { orgConfirmed, orgDraft } from "./visit.ts";
 
-// The leads: first which HR platform the company uses, a row each, pressed
+// The leads: first which HR platform the company uses, a tile each with its
+// logo, as the documents step has them, pressed
 // to choose it, until the admin said; then, without a staff list, that
 // Grasp's staff set the teams up with them; else the organization as Stephen
 // will interview it, on one card: a row a team, who leads it, chosen from
@@ -138,7 +140,7 @@ const HrPlatformChoice = ({
     >
       {chosen ? null : (
         <div {...stylex.props(styles.stack)}>
-          <ItemGroup aria-label={t`HR platforms`}>
+          <ItemGrid aria-label={t`HR platforms`} columns={3}>
             {hrPlatforms.map((name) => (
               <Item
                 key={name}
@@ -147,6 +149,7 @@ const HrPlatformChoice = ({
                 }}
                 variant="outline"
               >
+                <Logo src={hrLogos[name]} />
                 <ItemContent>
                   <ItemTitle>{name}</ItemTitle>
                 </ItemContent>
@@ -165,7 +168,7 @@ const HrPlatformChoice = ({
                 <ItemTitle>{t`Another platform`}</ItemTitle>
               </ItemContent>
             </Item>
-          </ItemGroup>
+          </ItemGrid>
           <ErrorText>{failure}</ErrorText>
         </div>
       )}

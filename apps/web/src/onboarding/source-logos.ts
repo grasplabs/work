@@ -1,3 +1,5 @@
+import type { HrPlatform } from "@grasp-os/shared/onboarding-choices";
+
 import type { DocumentSource } from "./setup.ts";
 
 // The logos of the places documents live, for the sources step: each
@@ -6,7 +8,9 @@ import type { DocumentSource } from "./setup.ts";
 // (notion-icon) from the gilbarbara/logos set (CC0), as Stephen's settings
 // take Teams and Slack; microsoft-sharepoint, which that set lacks, from
 // theSVG (MIT). The trademarks stay with their owners; they are shown only
-// to name the place. Dropbox and Box from the same set.
+// to name the place. Dropbox and Box from the same set. The HR platforms':
+// Personio and HiBob from theSVG (MIT); Nmbrs's mark from its own logo and
+// AFAS’s word from its own tile (afas.nl), traced.
 
 const logos: Readonly<Record<string, string>> = {
   sharepoint: "/logos/microsoft-sharepoint.svg",
@@ -26,6 +30,14 @@ export const namedPlaces = [
   { name: "Dropbox", logo: "/logos/dropbox.svg" },
   { name: "Box", logo: "/logos/box.svg" },
 ] as const;
+
+/** The logo of each HR platform offered as a tile, whole, in its own colours. */
+export const hrLogos: Readonly<Record<HrPlatform, string>> = {
+  Personio: "/logos/personio.svg",
+  AFAS: "/logos/afas.svg",
+  HiBob: "/logos/hibob.svg",
+  Nmbrs: "/logos/nmbrs.svg",
+};
 
 /** The logo a place carries, by its address; none for a place Grasp has no logo for. */
 export const sourceLogo = (source: DocumentSource): string | null =>
