@@ -6932,6 +6932,10 @@ msgstr "Chaque jour ouvré à 9:00"
 msgid "Everyone"
 msgstr "Tout le monde"
 
+#: src/onboarding/team-step.tsx
+msgid "Everyone at {company}"
+msgstr "Toute l’équipe de {company}"
+
 #: src/brain/sources-page.tsx
 msgid "Everyone can read this upload."
 msgstr "Tout le monde peut lire ce fichier importé."
@@ -7001,6 +7005,10 @@ msgstr "Tout le monde dans cette équipe pourra lire tout ce que contiennent les
 #: src/drafts/share-with-team.tsx
 msgid "Everyone it is shared with can open it once it is published."
 msgstr "Toutes les personnes avec qui elle est partagée peuvent l’ouvrir dès qu’elle est publiée."
+
+#: src/onboarding/team-step.tsx
+msgid "Everyone on your team"
+msgstr "Toute votre équipe"
 
 #: src/apps/access-view.tsx
 #: src/apps/draft-changes.tsx
@@ -10988,6 +10996,10 @@ msgstr "Nouveau courriel dans Microsoft 365"
 #: src/agents/agent-templates.ts
 msgid "New mail since the last run."
 msgstr "Les nouveaux courriels depuis la dernière exécution."
+
+#: src/onboarding/message-compose.tsx
+msgid "New message"
+msgstr "Nouveau message"
 
 #: src/apps/field-editor.tsx
 msgid "New option"
@@ -17588,7 +17600,7 @@ msgstr "Impossible de remettre le logo"
 msgid "The logo could not be removed"
 msgstr "Le logo n’a pas pu être supprimé"
 
-#: src/onboarding/team-step.tsx
+#: src/onboarding/message-compose.tsx
 msgid "The message"
 msgstr "Le message"
 
@@ -18386,6 +18398,11 @@ msgstr "Chronologie"
 #: src/apps/app-access-requests.tsx
 msgid "To"
 msgstr "Au"
+
+#: src/onboarding/message-compose.tsx
+msgctxt "an email's recipients"
+msgid "To"
+msgstr "À"
 
 #: src/routes/staff.tsx
 msgid "To act in this workspace, ask its admin to add you as a user, and sign in as one."

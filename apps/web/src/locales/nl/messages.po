@@ -6932,6 +6932,10 @@ msgstr "Elke werkdag om 9:00"
 msgid "Everyone"
 msgstr "Iedereen"
 
+#: src/onboarding/team-step.tsx
+msgid "Everyone at {company}"
+msgstr "Iedereen bij {company}"
+
 #: src/brain/sources-page.tsx
 msgid "Everyone can read this upload."
 msgstr "Iedereen kan deze upload lezen."
@@ -7001,6 +7005,10 @@ msgstr "Iedereen in dit team kan alles lezen in de plekken die je kiest, wat hun
 #: src/drafts/share-with-team.tsx
 msgid "Everyone it is shared with can open it once it is published."
 msgstr "Iedereen met wie hij gedeeld is, kan hem openen zodra hij gepubliceerd is."
+
+#: src/onboarding/team-step.tsx
+msgid "Everyone on your team"
+msgstr "Iedereen in je team"
 
 #: src/apps/access-view.tsx
 #: src/apps/draft-changes.tsx
@@ -10988,6 +10996,10 @@ msgstr "Nieuwe mail in Microsoft 365"
 #: src/agents/agent-templates.ts
 msgid "New mail since the last run."
 msgstr "Nieuwe mail sinds de vorige run."
+
+#: src/onboarding/message-compose.tsx
+msgid "New message"
+msgstr "Nieuw bericht"
 
 #: src/apps/field-editor.tsx
 msgid "New option"
@@ -17588,7 +17600,7 @@ msgstr "Het logo kon niet worden teruggezet"
 msgid "The logo could not be removed"
 msgstr "Het logo kon niet worden verwijderd"
 
-#: src/onboarding/team-step.tsx
+#: src/onboarding/message-compose.tsx
 msgid "The message"
 msgstr "Het bericht"
 
@@ -18386,6 +18398,11 @@ msgstr "Tijdlijn"
 #: src/apps/app-access-requests.tsx
 msgid "To"
 msgstr "Tot"
+
+#: src/onboarding/message-compose.tsx
+msgctxt "an email's recipients"
+msgid "To"
+msgstr "Aan"
 
 #: src/routes/staff.tsx
 msgid "To act in this workspace, ask its admin to add you as a user, and sign in as one."
