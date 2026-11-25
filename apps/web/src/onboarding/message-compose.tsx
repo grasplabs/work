@@ -20,8 +20,6 @@ import {
   easeInOut,
   frames,
   isStill,
-  keysOf,
-  wait,
 } from "./pixel-cursor.tsx";
 import type { Point } from "./pixel-cursor.tsx";
 
@@ -29,9 +27,9 @@ import type { Point } from "./pixel-cursor.tsx";
 // it is for, the message and, on its foot, what the step puts there (copy,
 // the postmark). The first time the step opens, Stephen writes it: his
 // pixel cursor, the documents step's visitors' own (pixel-cursor.tsx),
-// comes in and the words stream in after a caret it follows, a key at a
-// time, pausing at a comma and longer between paragraphs, and then it
-// leaves. The field holds the whole message all along, so it is read,
+// comes in slowly and the words stream in after a caret it eases after,
+// a word at a time, each fading in, pausing at a comma and longer between
+// paragraphs, and then it drifts off, over the window's foot as well. The field holds the whole message all along, so it is read,
 // copied and sent whole while he writes; a press, a key or focus in it
 // and he is done at once, the words theirs to change. Not again once
 // written or changed, and never under reduced motion.
@@ -39,6 +37,8 @@ import type { Point } from "./pixel-cursor.tsx";
 const styles = stylex.create({
   window: {
     display: "grid",
+    // His cursor lies over the whole window, its foot too, and nothing outside it.
+    isolation: "isolate",
     backgroundColor: colors.card,
     borderWidth: 1,
     borderStyle: "solid",
@@ -138,6 +138,7 @@ const styles = stylex.create({
   layer: {
     position: "absolute",
     inset: 0,
+    zIndex: 2,
     pointerEvents: "none",
   },
   cursor: {
@@ -217,20 +218,25 @@ const partsIn = (body: HTMLElement): Parts | null => {
   return { body, typed, caret, rest, cursor, bubble };
 };
 
-/** When each key of `keys` is down, in ms from the first: quick, a breath at a comma, longer at a full stop and between paragraphs. */
-const timesOf = (keys: string[]): number[] => {
+/** The message in the pieces it streams in: each word with the spaces or lines before it, so the caret stands right after the word. */
+const piecesOf = (text: string): string[] => text.match(/\s*\S+|\s+/gu) ?? [];
+
+/** When each piece of `pieces` appears, in ms from the first: an unhurried pace, a breath at a comma, longer at a full stop and between paragraphs. */
+const timesOf = (pieces: string[]): number[] => {
   const times: number[] = [];
   let total = 0;
-  for (const [index, key] of keys.entries()) {
-    const before = keys[index - 1] ?? "";
-    let pause = between(9, 24);
-    if (before === "\n" && key !== "\n") {
-      pause += between(260, 420);
-    } else if (/[.?!]/u.test(before) && key === " ") {
-      pause += between(140, 240);
-    } else if (before === "," && key === " ") {
-      pause += between(60, 120);
+  for (const [index, piece] of pieces.entries()) {
+    const before = pieces[index - 1] ?? "";
+    let pause = between(110, 170);
+    if (piece.includes("\n\n")) {
+      pause += between(550, 750);
+    } else if (/[.?!]$/u.test(before)) {
+      pause += between(280, 420);
+    } else if (before.endsWith(",")) {
+      pause += between(140, 220);
     }
+    // A long word takes a little longer.
+    pause += Math.min(80, piece.trim().length * 6);
     total += pause;
     times.push(total);
   }
@@ -248,7 +254,7 @@ const write = async (
     return;
   }
   const { typed, caret, rest, cursor, bubble } = parts;
-  const keys = keysOf(text);
+  const pieces = piecesOf(text);
   typed.textContent = "";
   rest.textContent = text;
   /** Where the tip rests: just after the caret, low on its line. */
@@ -294,7 +300,7 @@ const write = async (
   paint();
   cursor.style.opacity = "1";
   // In from the window's title, to the start of the message.
-  await glide(caretAt, between(800, 1000), between(-0.2, 0.2));
+  await glide(caretAt, between(1300, 1600), between(-0.2, 0.2));
   calm = 1;
   bubble.animate(
     [
@@ -302,35 +308,51 @@ const write = async (
       { opacity: 1, transform: "scale(1)" },
     ],
     {
-      duration: 220,
+      duration: 260,
       easing: "cubic-bezier(0.2, 0.9, 0.3, 1.25)",
       fill: "forwards",
     }
   );
-  await frames(between(300, 450), signal, paint);
-  // The words, a key at a time, the cursor a little behind the caret, as a hand follows its eye.
-  const times = timesOf(keys);
+  await frames(between(500, 700), signal, paint);
+  // The words, one at a time, each fading in; the cursor eases after the caret, as a hand follows
+  // its eye, and glides back along a line when it wraps rather than jumping.
+  const times = timesOf(pieces);
   const total = times.at(-1) ?? 0;
   let count = 0;
-  await frames(total, signal, (t) => {
-    const now = t * total;
-    const next = times.filter((time) => time <= now).length;
-    if (next !== count) {
-      count = next;
-      typed.textContent = keys.slice(0, count).join("");
-      rest.textContent = keys.slice(count).join("");
-    }
+  let last = performance.now();
+  const follow = () => {
+    const now = performance.now();
+    const ease = 1 - Math.exp(-(now - last) / 140);
+    last = now;
     const target = caretAt();
     at = {
-      x: at.x + (target.x - at.x) * 0.3,
-      y: at.y + (target.y - at.y) * 0.3,
+      x: at.x + (target.x - at.x) * ease,
+      y: at.y + (target.y - at.y) * ease,
     };
     paint();
+  };
+  await frames(total, signal, (t) => {
+    const next = times.filter((time) => time <= t * total).length;
+    while (count < next) {
+      const word = document.createElement("span");
+      word.textContent = pieces[count] ?? "";
+      typed.append(word);
+      word.animate(
+        [
+          { opacity: 0, filter: "blur(2px)" },
+          { opacity: 1, filter: "blur(0)" },
+        ],
+        { duration: 320, easing: "ease-out" }
+      );
+      count += 1;
+      rest.textContent = pieces.slice(count).join("");
+    }
+    follow();
   });
-  await wait(between(500, 700), signal);
+  await frames(between(700, 900), signal, follow);
   // Done: the label goes, and he drifts down toward the foot, fading as he goes.
   bubble.animate([{ opacity: 1 }, { opacity: 0, transform: "scale(0.6)" }], {
-    duration: 160,
+    duration: 220,
     easing: "ease-in",
     fill: "forwards",
   });
@@ -340,12 +362,12 @@ const write = async (
     y: body.clientHeight + 24,
   };
   const fade = cursor.animate([{ opacity: 1 }, { opacity: 0 }], {
-    duration: 700,
-    delay: 300,
+    duration: 900,
+    delay: 400,
     easing: "ease-in",
     fill: "forwards",
   });
-  await glide(() => away, 1000, between(-0.15, 0.15));
+  await glide(() => away, 1400, between(-0.15, 0.15));
   fade.cancel();
 };
 

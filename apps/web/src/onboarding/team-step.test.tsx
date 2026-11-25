@@ -255,10 +255,10 @@ const typeDay = async (typed: string): Promise<void> => {
 
 const sendButton = (): HTMLButtonElement => {
   const found = [...document.querySelectorAll("button")].find(
-    (each) => each.textContent?.trim() === "I sent it"
+    (each) => each.textContent?.trim() === "Continue"
   );
   if (found === undefined) {
-    throw new TypeError("No I sent it");
+    throw new TypeError("No Continue");
   }
   return found;
 };
@@ -596,12 +596,12 @@ describe("the team step's confirmation", () => {
     const { promise: reread, resolve: answered } =
       Promise.withResolvers<boolean>();
     const { saved } = await shown("en", ["en-GB"], { reread });
-    await press("I sent it");
+    await press("Continue");
     expect({
-      busy: button("I sent it")?.getAttribute("aria-busy"),
+      busy: button("Continue")?.getAttribute("aria-busy"),
       saved: saved.length,
     }).toStrictEqual({ busy: "true", saved: 1 });
-    await press("I sent it");
+    await press("Continue");
     expect(saved).toHaveLength(1);
     await act(async () => {
       answered(true);
@@ -609,7 +609,7 @@ describe("the team step's confirmation", () => {
     });
     await settled();
     expect({
-      busy: button("I sent it")?.getAttribute("aria-busy") ?? null,
+      busy: button("Continue")?.getAttribute("aria-busy") ?? null,
       saved: saved.length,
     }).toStrictEqual({ busy: null, saved: 1 });
   });
