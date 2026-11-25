@@ -2,6 +2,8 @@ import { FieldGroup } from "@grasp-os/ui/components/field";
 import {
   PromptInput,
   PromptInputBody,
+  PromptInputFooter,
+  PromptInputSubmit,
   PromptInputTextarea,
 } from "@grasp-os/ui/components/prompt-input";
 import {
@@ -65,6 +67,13 @@ export const ComposerSettings = ({ userId }: { userId: string }) => {
               placeholder={t`Ask Grasp`}
             />
           </PromptInputBody>
+          <PromptInputFooter>
+            <PromptInputSubmit
+              onStop={() => {
+                // Only to look at.
+              }}
+            />
+          </PromptInputFooter>
         </PromptInput>
       </div>
       <FieldGroup>
