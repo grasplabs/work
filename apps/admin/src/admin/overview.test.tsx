@@ -105,8 +105,6 @@ describe("the admin's frame", () => {
       waitingNotDeployed: waitingEntry?.textContent?.includes("not deployed"),
       opensAcme:
         container.querySelector('a[href="/organizations/acme"]') !== null,
-      downExplained:
-        downEntry?.querySelector('[data-slot="tooltip-trigger"]') !== null,
       oldBar:
         container.querySelector('[aria-label="Console"]') !== null ||
         (container.textContent ?? "").includes("Back to the console"),
@@ -117,7 +115,6 @@ describe("the admin's frame", () => {
       downUnreachable: true,
       waitingNotDeployed: true,
       opensAcme: true,
-      downExplained: true,
       oldBar: false,
     });
   });

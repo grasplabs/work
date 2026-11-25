@@ -52,6 +52,13 @@ const entryOf = (root: Element, title: string): Element | undefined =>
     )
   );
 
+/** What a column entry says when things wait for Grasp there: "3 things need Grasp". */
+const waitsMark = /\d+ things? needs? Grasp/u;
+
+/** Whether the page says a part of its section isn't read yet (its source note). */
+const notYetRead = (text: string): boolean =>
+  text.includes("doesn’t hold it yet") || text.includes("once it is connected");
+
 /** The part of the page titled `title`. */
 const partOf = (root: Element, title: string): Element | undefined =>
   [...root.querySelectorAll("section")].find(
@@ -91,11 +98,10 @@ describe("an organization's page", () => {
       onOverview: entryOf(container, "Overview")?.getAttribute("aria-current"),
       title: container.querySelector("main h1")?.textContent,
       known: column.includes("85% known. Ready for Grasp’s go"),
-      waits: ["Steps", "Details", "Interviews"].map(
-        (title) =>
-          entryOf(container, title)?.textContent?.includes(
-            "Something waits for Grasp"
-          ) ?? false
+      waits: ["Steps", "Details", "Interviews"].map((title) =>
+        waitsMark.test(
+          entryOf(container, title)?.closest("li")?.textContent ?? ""
+        )
       ),
       source: text.includes("From the company’s own Grasp."),
       needs: [
@@ -174,7 +180,7 @@ describe("an organization's page", () => {
     const usage = await openAcme("/ai-use", snapshot);
     const usagePage = [
       usage.container.querySelector("main h1")?.textContent,
-      usage.container.querySelector('[data-slot="source-note"]'),
+      notYetRead(usage.main()),
     ];
     const setup = await openAcme("/setup", snapshot);
 
@@ -183,7 +189,7 @@ describe("an organization's page", () => {
       usage: usagePage,
       setup: [
         setup.container.querySelector("main h1")?.textContent,
-        setup.container.querySelector('[data-slot="source-note"]'),
+        notYetRead(setup.main()),
       ],
     }).toStrictEqual({
       details: {
@@ -193,8 +199,8 @@ describe("an organization's page", () => {
         current: "page",
         overviewCurrent: null,
       },
-      usage: ["AI use", null],
-      setup: ["Setup", null],
+      usage: ["AI use", false],
+      setup: ["Setup", false],
     });
   });
 

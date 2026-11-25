@@ -4,7 +4,7 @@
  * `components/admin/org-sidebar.tsx`): a column beside the page with its
  * name, how much Grasp knows about it, and every section, grouped as the
  * company itself, its onboarding, how it uses the platform and the record
- * of it all; a dot marks a section where something waits for Grasp. On a
+ * of it all; a count marks how many things wait for Grasp in a section. On a
  * phone the sections are one choice at the top of the page. Each section
  * has its title, what it is for, and where its figures come from, and
  * under that what the section's own route shows.
@@ -19,14 +19,16 @@
  * the column folded the way the reader last left it.
  */
 
+import type { AdminView } from "@grasp-os/shared/admin/admin-view";
+import { dateOn, listenDays } from "@grasp-os/shared/admin/onboarding-admin";
 import {
   Alert,
   AlertAction,
   AlertDescription,
   AlertTitle,
-} from "@grasp-os/app-kit/components/alert";
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button, buttonVariants } from "@grasp-os/app-kit/components/button";
+} from "@grasp-os/ui/components/alert";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   Empty,
   EmptyContent,
@@ -34,29 +36,48 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@grasp-os/app-kit/components/empty";
-import { PageHeader } from "@grasp-os/app-kit/components/page-header";
-import {
-  PageSidebar,
-  PageSidebarBody,
-  PageSidebarTop,
-  PageSidebarRailButton,
-  PageSidebarRailDivider,
-  PageSidebarRailExpand,
-} from "@grasp-os/app-kit/components/page-sidebar";
+} from "@grasp-os/ui/components/empty";
+import { PageHeader } from "@grasp-os/ui/components/page-header";
 import {
   Select,
   SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
-} from "@grasp-os/app-kit/components/select";
-import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
-import { cn } from "@grasp-os/app-kit/lib/utils";
-import type { AdminView } from "@grasp-os/shared/admin/admin-view";
-import { dateOn, listenDays } from "@grasp-os/shared/admin/onboarding-admin";
+} from "@grasp-os/ui/components/select";
+import type { SelectItems } from "@grasp-os/ui/components/select";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuBadge,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarTrigger,
+  useSidebar,
+} from "@grasp-os/ui/components/sidebar";
+import { Skeleton } from "@grasp-os/ui/components/skeleton";
+import { Text } from "@grasp-os/ui/components/text";
+import {
+  CircleAlertIcon,
+  ClockIcon,
+  Icon,
+  RefreshCwIcon,
+} from "@grasp-os/ui/lib/icons";
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import {
+  colors,
+  font,
+  media,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import {
   Link,
   Outlet,
@@ -65,19 +86,13 @@ import {
   useMatchRoute,
   useRouter,
 } from "@tanstack/react-router";
-import {
-  HourglassIcon,
-  RotateCcwIcon,
-  TriangleAlertIcon,
-  UnplugIcon,
-} from "lucide-react";
-import { createContext, Fragment, Suspense, use, useState } from "react";
-import type { ComponentProps } from "react";
+import { createContext, Suspense, use, useState } from "react";
+import type { ComponentProps, ReactNode } from "react";
 
 import type { ClientAdmin } from "../clients/admin.ts";
 import type { GridRow } from "../clients/grid.ts";
 import type { AnsweredAdmin, OrgRead } from "./org-reads.ts";
-import { AdminHeader, PageBody, PageHeading } from "./page.tsx";
+import { AdminHeader, PageBody } from "./page.tsx";
 import { KnowledgeDots } from "./parts.tsx";
 import {
   needSection,
@@ -93,6 +108,58 @@ import { Ago, useSettled } from "./settled.tsx";
 import type { Deferred } from "./settled.tsx";
 import { organizationOf, unreadWhy, whyUnread } from "./views.ts";
 import { formatDate, stageLines } from "./words.ts";
+
+const styles = stylex.create({
+  // Under the bar, the column beside the section, each as tall as the
+  // card: the section scrolls on its own, the column stays.
+  row: { flexGrow: 1, minHeight: 0 },
+  section: {
+    position: "relative",
+    flexGrow: 1,
+    minWidth: 0,
+    overflowY: "auto",
+  },
+  // The column's head: the organization's name, the fold at the end.
+  head: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["2"],
+    minHeight: size.sidebarIconButton,
+    paddingInlineStart: size.sidebarRowInline,
+  },
+  headFolded: { justifyContent: "center", paddingInlineStart: 0 },
+  name: { flexGrow: 1, minWidth: 0 },
+  // How much is known: the dots over a line that says when it opens, in
+  // the warning's colour once it waits on Grasp's go.
+  knowing: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["1"],
+    minWidth: 0,
+  },
+  opens: {
+    fontSize: font.textXs,
+    lineHeight: font.textXsLine,
+    color: colors.mutedForeground,
+  },
+  opensWaits: { color: colors.warning },
+  // The day the interviews are on, at the column's foot.
+  day: { display: "flex", flexDirection: "column", gap: space["1"] },
+  // Under a desktop's width the sections are the select at the top of the
+  // page, as the column has no room beside the admin's sidebar there.
+  narrowOnly: { display: { default: null, [media.lg]: "none" } },
+  buttons: {
+    display: "flex",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: space["2"],
+  },
+  loading: { display: "flex", flexDirection: "column", gap: space["4"] },
+  skeletonSmall: { height: space["10"] },
+  skeletonCard: { height: "7rem" },
+  skeletonTable: { height: "12rem" },
+  readNote: { display: "flex", alignItems: "center", gap: space["1"] },
+});
 
 /** A client whose core answered, with its view. */
 export interface AnsweredOrganization {
@@ -181,7 +248,15 @@ const SectionLink = ({
   />
 );
 
-/** An entry of the open column: its icon, its title, and a dot when something waits for Grasp there. */
+/** What waits for Grasp in a section, in words: "1 thing needs Grasp". */
+const waitsWords = (waits: number): string =>
+  `${waits} ${waits === 1 ? "thing needs" : "things need"} Grasp`;
+
+/**
+ * An entry of the column: its icon and its title, and how many things
+ * wait for Grasp there. Folded to its icons, its tooltip says the title
+ * and what waits.
+ */
 const SectionItem = ({
   section,
   clientId,
@@ -189,43 +264,10 @@ const SectionItem = ({
 }: {
   section: OrgSection;
   clientId: string;
-  waits: boolean;
-}) => {
-  const { title, icon: Icon } = sectionWords[section];
-  return (
-    <SectionLink
-      className="text-muted-foreground hover:bg-muted/60 hover:text-foreground focus-visible:ring-ring/50 data-[status=active]:bg-muted data-[status=active]:text-foreground flex h-8 flex-none items-center gap-2 rounded-md px-2 transition-colors outline-none focus-visible:ring-3"
-      clientId={clientId}
-      section={section}
-    >
-      <Icon aria-hidden className="size-4 flex-none" />
-      <span className="min-w-0 flex-1 truncate">{title}</span>
-      {waits ? (
-        <>
-          <span
-            aria-hidden
-            className="bg-status-attention size-1.5 flex-none rounded-full"
-          />
-          <span className="sr-only">Something waits for Grasp</span>
-        </>
-      ) : null}
-    </SectionLink>
-  );
-};
-
-/** An entry of the folded column: its icon, named by its tooltip, a link announced as the link it is. */
-const RailItem = ({
-  section,
-  clientId,
-  waits,
-}: {
-  section: OrgSection;
-  clientId: string;
-  waits: boolean;
+  waits: number;
 }) => {
   const matchRoute = useMatchRoute();
-  const { title, icon: Icon } = sectionWords[section];
-  const label = waits ? `${title}: something waits for Grasp` : title;
+  const { title, icon } = sectionWords[section];
   const active =
     matchRoute({
       to: sectionTo[section],
@@ -233,23 +275,24 @@ const RailItem = ({
       fuzzy: section !== "overview",
     }) !== false;
   return (
-    <PageSidebarRailButton
-      active={active}
-      label={label}
-      render={<SectionLink clientId={clientId} section={section} />}
-    >
-      <span className="relative flex">
-        <Icon />
-        {/* Folded, the column still marks where something waits, as it does open. */}
-        {waits ? (
-          <span
-            aria-hidden
-            className="bg-status-attention absolute -top-0.5 -right-0.5 size-1.5 rounded-full"
-            data-waits
-          />
-        ) : null}
-      </span>
-    </PageSidebarRailButton>
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        asChild
+        isActive={active}
+        tooltip={waits === 0 ? undefined : `${title}: ${waitsWords(waits)}`}
+      >
+        <SectionLink clientId={clientId} section={section}>
+          <Icon icon={icon} />
+          {title}
+        </SectionLink>
+      </SidebarMenuButton>
+      {waits === 0 ? null : (
+        <SidebarMenuBadge>
+          {waits}
+          <span {...stylex.props(visuallyHidden)}>{waitsWords(waits)}</span>
+        </SidebarMenuBadge>
+      )}
+    </SidebarMenuItem>
   );
 };
 
@@ -258,26 +301,25 @@ const Knowing = ({ clientId, view }: { clientId: string; view: AdminView }) => {
   const opens = stageLines(view).open;
   const waits = view.knowledge.ready && view.knowledge.opened === null;
   return (
-    <SectionLink
-      className="hover:bg-muted/60 focus-visible:ring-ring/50 mb-2 flex flex-none flex-col gap-1.5 rounded-md px-2 py-1.5 outline-none focus-visible:ring-3"
-      clientId={clientId}
-      section="steps"
-    >
-      <KnowledgeDots
-        count={knowledgeDots}
-        knowledge={view.knowledge}
-        label={opens}
-      />
-      <span
-        aria-hidden
-        className={cn(
-          "text-xs",
-          waits ? "text-status-attention" : "text-muted-foreground"
-        )}
-      >
-        {opens}
-      </span>
-    </SectionLink>
+    <SidebarMenuItem>
+      <SidebarMenuButton asChild size="lg">
+        <SectionLink clientId={clientId} section="steps">
+          <span {...stylex.props(styles.knowing)}>
+            <KnowledgeDots
+              count={knowledgeDots}
+              knowledge={view.knowledge}
+              label={opens}
+            />
+            <span
+              aria-hidden
+              {...stylex.props(styles.opens, waits && styles.opensWaits)}
+            >
+              {opens}
+            </span>
+          </span>
+        </SectionLink>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
   );
 };
 
@@ -287,32 +329,91 @@ const InterviewDay = ({ view }: { view: AdminView }) => {
   // The last day the links worked: the plan's days count from day 0.
   const lastDay = formatDate(dateOn(view.org, listenDays(view.org) - 1));
   return (
-    <div className="text-muted-foreground flex flex-none flex-col gap-1 border-t px-5 py-3 text-xs">
-      <span>
+    <div {...stylex.props(styles.day)}>
+      <Text as="span" color="muted" size="xs">
         {view.closed
           ? `The interviews closed on ${lastDay}`
           : `The interviews, on ${date}`}
-      </span>
-      <span className="text-foreground tabular-nums">
+      </Text>
+      <Text as="span" color="default" size="xs">
         Day {view.day} of {listenDays(view.org)}
-      </span>
+      </Text>
     </div>
   );
 };
 
+/** The column's head: the organization's name and the fold; folded, the fold alone. */
+const ColumnHead = ({ name }: { name: string }) => {
+  const { state } = useSidebar();
+  const folded = state === "collapsed";
+  return (
+    <div {...stylex.props(styles.head, folded && styles.headFolded)}>
+      {folded ? null : (
+        <h2 {...stylex.props(styles.name)}>
+          <Text as="span" color="default" size="sm" truncate weight="medium">
+            {name}
+          </Text>
+        </h2>
+      )}
+      <SidebarTrigger aria-label="Show or hide the sections" />
+    </div>
+  );
+};
+
+/** What the column says on top while its core isn't read: reading it, or why not. */
+const ColumnState = ({
+  clientId,
+  view,
+  reading,
+}: {
+  clientId: string;
+  view: AdminView | null;
+  reading: boolean;
+}) => {
+  const { state } = useSidebar();
+  if (state === "collapsed") {
+    return null;
+  }
+  if (view !== null) {
+    return <Knowing clientId={clientId} view={view} />;
+  }
+  return (
+    <SidebarMenuItem>
+      {reading ? (
+        <Skeleton style={styles.skeletonSmall} variant="rectangular" />
+      ) : (
+        // Nothing of it is known now: where to see why, in sight on every section.
+        <Badge asChild variant="warning">
+          <SectionLink clientId={clientId} section="setup">
+            Not read now: see its Setup
+          </SectionLink>
+        </Badge>
+      )}
+    </SidebarMenuItem>
+  );
+};
+
+/** The day the interviews are on, at the column's foot once the team is told; not on the rail. */
+const ColumnFoot = ({ view }: { view: AdminView | null }) => {
+  const { state } = useSidebar();
+  return view?.told === true && state !== "collapsed" ? (
+    <SidebarFooter>
+      <InterviewDay view={view} />
+    </SidebarFooter>
+  ) : null;
+};
+
 /**
- * The column beside the organization, the kit's page sidebar as the
- * workspace's pages have it: its name and how much Grasp knows on top,
- * then every section in its groups, and once the team is told, the day
- * its interviews are on. Folded, a rail of the sections' icons.
+ * The column beside the organization, as the workspace's pages have one:
+ * its name and how much Grasp knows on top, then every section in its
+ * groups, and once the team is told, the day its interviews are on.
+ * Folded, a rail of the sections' icons.
  */
 const ColumnLayout = ({
   name,
   clientId,
   view,
   reading,
-  folded,
-  setFolded,
 }: {
   name: string;
   clientId: string;
@@ -320,134 +421,101 @@ const ColumnLayout = ({
   view: AdminView | null;
   /** Its core's answer isn't in yet. */
   reading: boolean;
-  folded: boolean;
-  setFolded: (folded: boolean) => void;
 }) => {
-  const waiting = new Set(view?.needs.map(needSection));
-
+  const waiting = new Map<OrgSection, number>();
+  for (const need of view?.needs ?? []) {
+    const section = needSection(need);
+    waiting.set(section, (waiting.get(section) ?? 0) + 1);
+  }
   return (
-    <PageSidebar
-      // Beside the admin's own sidebar there is room for it only from a
-      // desktop's width on: below that the sections are the select at the
-      // top of the page, so the page never shrinks to a few words a line.
-      className="md:hidden lg:flex"
-      folded={folded}
-      label={name}
-      landmark="navigation"
-    >
-      {folded ? (
-        <>
-          <PageSidebarRailExpand
-            label="Expand the sections"
-            onExpand={() => {
-              setFolded(false);
-            }}
-          />
-          <PageSidebarRailDivider />
-          <RailItem
-            clientId={clientId}
-            section="overview"
-            waits={waiting.has("overview")}
-          />
-          {sectionGroups.map((group) => (
-            <Fragment key={group.id}>
-              <PageSidebarRailDivider />
-              {group.sections.map((section) => (
-                <RailItem
-                  clientId={clientId}
-                  key={section}
-                  section={section}
-                  waits={waiting.has(section)}
-                />
-              ))}
-            </Fragment>
-          ))}
-        </>
-      ) : (
-        <>
-          <PageSidebarTop
-            fold={{
-              label: "Fold the sections",
-              onFold: () => {
-                setFolded(true);
-              },
-            }}
-            joined
-          >
-            <h2 className="truncate px-2 font-medium">{name}</h2>
-          </PageSidebarTop>
-          <PageSidebarBody joined>
-            {view === null && reading ? (
-              <Skeleton className="mb-2 h-10 flex-none" data-loading />
-            ) : null}
-            {view === null && !reading ? (
-              // Nothing of it is known now: where to see why, in sight on every section.
-              <Badge
-                className="mb-2"
-                render={<SectionLink clientId={clientId} section="setup" />}
-                variant="attention"
-              >
-                Not read now: see its Setup
-              </Badge>
-            ) : null}
-            {view === null ? null : <Knowing clientId={clientId} view={view} />}
-            <SectionItem
-              clientId={clientId}
-              section="overview"
-              waits={waiting.has("overview")}
-            />
-            {sectionGroups.map((group) => (
-              <Fragment key={group.id}>
-                <span aria-hidden className="bg-border my-2 h-px flex-none" />
-                <span className="text-muted-foreground px-2 pb-1 text-xs">
-                  {group.label}
-                </span>
+    <Sidebar aria-label="Sections" collapsible="icon">
+      <SidebarHeader>
+        <ColumnHead name={name} />
+      </SidebarHeader>
+      <SidebarContent aria-label={name}>
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <ColumnState clientId={clientId} reading={reading} view={view} />
+              <SectionItem
+                clientId={clientId}
+                section="overview"
+                waits={waiting.get("overview") ?? 0}
+              />
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        {sectionGroups.map((group) => (
+          <SidebarGroup key={group.id}>
+            <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
                 {group.sections.map((section) => (
                   <SectionItem
                     clientId={clientId}
                     key={section}
                     section={section}
-                    waits={waiting.has(section)}
+                    waits={waiting.get(section) ?? 0}
                   />
                 ))}
-              </Fragment>
-            ))}
-          </PageSidebarBody>
-          {view?.told === true ? <InterviewDay view={view} /> : null}
-        </>
-      )}
-    </PageSidebar>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
+      </SidebarContent>
+      <ColumnFoot view={view} />
+    </Sidebar>
   );
 };
 
 /** The column once its core's answer is in. */
-const SettledColumn = (props: {
+const SettledColumn = ({
+  name,
+  clientId,
+}: {
   name: string;
   clientId: string;
-  folded: boolean;
-  setFolded: (folded: boolean) => void;
 }) => {
   const { admin } = useOrgRead();
   return (
     <ColumnLayout
-      {...props}
+      clientId={clientId}
+      name={name}
       reading={false}
       view={organizationOf(admin).view}
     />
   );
 };
 
-/** The column: every section at once, what waits where once its core answered. */
-const OrgColumn = ({ name, clientId }: { name: string; clientId: string }) => {
-  // Kept here, above what fills in, so the column stays as it was left.
-  const [folded, setFolded] = useState(false);
-  const column = { name, clientId, folded, setFolded };
-  return (
-    <Suspense fallback={<ColumnLayout {...column} reading view={null} />}>
-      <SettledColumn {...column} />
+/**
+ * The column, and the section beside it, under the page's bar: a Sidebar
+ * of its own, with its own fold, which stays as it was left. Every
+ * section at once, what waits where once its core answered. Only the
+ * column waits on that answer, never the section beside it, so a Setup
+ * being typed in keeps what was typed. From a desktop's width on only:
+ * below it the sections are the select at the top of the page, as the
+ * admin's own sidebar takes the room there.
+ */
+const OrgColumn = ({
+  name,
+  clientId,
+  children,
+}: {
+  name: string;
+  clientId: string;
+  children: ReactNode;
+}) => (
+  <SidebarProvider keyboardShortcut={false} style={styles.row}>
+    <Suspense
+      fallback={
+        <ColumnLayout clientId={clientId} name={name} reading view={null} />
+      }
+    >
+      <SettledColumn clientId={clientId} name={name} />
     </Suspense>
-  );
-};
+    {children}
+  </SidebarProvider>
+);
 
 /** Without room for the column, the sections are one choice at the top of the page. */
 const SectionSelect = ({
@@ -458,43 +526,33 @@ const SectionSelect = ({
   section: OrgSection;
 }) => {
   const navigate = useNavigate();
-  const items = orgSections.map((each) => ({
-    value: each,
-    label: sectionWords[each].title,
-  }));
+  const items: SelectItems = [
+    { value: "overview", label: sectionWords.overview.title },
+    ...sectionGroups.map((group) => ({
+      type: "group" as const,
+      label: group.label,
+      items: group.sections.map((each) => ({
+        value: each,
+        label: sectionWords[each].title,
+      })),
+    })),
+  ];
   return (
-    <div className="lg:hidden">
-      <Select
-        items={items}
-        onValueChange={(value: OrgSection | null) => {
-          if (value !== null) {
-            void navigate({ to: sectionTo[value], params: { clientId } });
-          }
-        }}
-        value={section}
-      >
-        <SelectTrigger aria-label="Section" className="w-full">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectGroup>
-            <SelectItem value="overview">
-              {sectionWords.overview.title}
-            </SelectItem>
-          </SelectGroup>
-          {sectionGroups.map((group) => (
-            <SelectGroup key={group.id}>
-              <SelectLabel>{group.label}</SelectLabel>
-              {group.sections.map((each) => (
-                <SelectItem key={each} value={each}>
-                  {sectionWords[each].title}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
+    <Select
+      items={items}
+      onValueChange={(value) => {
+        const chosen = orgSections.find((each) => each === value);
+        if (chosen !== undefined) {
+          void navigate({ to: sectionTo[chosen], params: { clientId } });
+        }
+      }}
+      value={section}
+    >
+      <SelectTrigger aria-label="Section" style={styles.narrowOnly}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent />
+    </Select>
   );
 };
 
@@ -511,9 +569,9 @@ const laterLine = ({ source, what = "This" }: Origin): string =>
 const SourceNote = ({ origins }: { origins: readonly Origin[] }) => {
   const lines = origins.filter((origin) => !origin.read).map(laterLine);
   return lines.length === 0 ? null : (
-    <p className="text-muted-foreground text-sm" data-slot="source-note">
+    <Text color="muted" size="sm">
       {lines.join(" ")}
-    </p>
+    </Text>
   );
 };
 
@@ -568,17 +626,11 @@ const UnreadSection = ({
   const { busy, readAgain } = useReadAgain();
   const unset = admin.error === "not_deployed";
   return (
-    <Empty data-unread={admin.error}>
+    <Empty>
       <EmptyHeader>
-        <EmptyMedia variant="icon">
-          {unset ? <HourglassIcon /> : <UnplugIcon />}
-        </EmptyMedia>
-        <EmptyTitle>
-          <h2>
-            {unset
-              ? `${name} isn’t set up yet`
-              : `${name}’s Grasp didn’t answer`}
-          </h2>
+        <EmptyMedia icon={unset ? ClockIcon : CircleAlertIcon} variant="icon" />
+        <EmptyTitle level={2}>
+          {unset ? `${name} isn’t set up yet` : `${name}’s Grasp didn’t answer`}
         </EmptyTitle>
         <EmptyDescription>
           {section === "overview"
@@ -587,21 +639,19 @@ const UnreadSection = ({
         </EmptyDescription>
       </EmptyHeader>
       <EmptyContent>
-        <div className="flex flex-wrap justify-center gap-2">
+        <div {...stylex.props(styles.buttons)}>
           {unset ? null : (
             <Button disabled={busy} onClick={readAgain}>
-              <RotateCcwIcon data-icon="inline-start" />
+              <Icon icon={RefreshCwIcon} />
               {busy ? "Asking again…" : "Try again"}
             </Button>
           )}
           {/* A link that looks like a button: it is announced as the link it is. */}
-          <Link
-            className={buttonVariants({ variant: "outline" })}
-            params={{ clientId }}
-            to={sectionTo.setup}
-          >
-            {unset ? "See its Setup progress" : "Its Setup"}
-          </Link>
+          <Button asChild variant="outline">
+            <Link params={{ clientId }} to={sectionTo.setup}>
+              {unset ? "See its Setup progress" : "Its Setup"}
+            </Link>
+          </Button>
         </div>
       </EmptyContent>
     </Empty>
@@ -610,10 +660,12 @@ const UnreadSection = ({
 
 /** Where a section will be, while its organization's core is read. */
 const SectionLoading = () => (
-  <div aria-busy className="flex flex-col gap-4" data-loading>
-    <span className="sr-only">Reading it from the company’s own Grasp…</span>
-    <Skeleton className="h-28 w-full" />
-    <Skeleton className="h-48 w-full" />
+  <div aria-busy {...stylex.props(styles.loading)}>
+    <span {...stylex.props(visuallyHidden)}>
+      Reading it from the company’s own Grasp…
+    </span>
+    <Skeleton style={styles.skeletonCard} variant="rectangular" />
+    <Skeleton style={styles.skeletonTable} variant="rectangular" />
   </div>
 );
 
@@ -627,34 +679,27 @@ const capitalized = (text: string): string =>
  */
 const ReadNote = ({ read }: { read: OrgRead & { admin: AnsweredAdmin } }) => {
   const { busy, readAgain } = useReadAgain();
-  const again = (
-    <Button disabled={busy} onClick={readAgain} size="xs" variant="link">
-      {busy ? "Reading…" : "Read again"}
-    </Button>
-  );
   if (read.stale === null) {
     return (
-      <p
-        className="text-muted-foreground flex items-center gap-1 text-xs"
-        data-slot="read-note"
-      >
-        <span>
+      <div {...stylex.props(styles.readNote)}>
+        <Text as="span" color="muted" size="xs">
           Read <Ago at={read.admin.at} />.
-        </span>
-        {again}
-      </p>
+        </Text>
+        <Button disabled={busy} onClick={readAgain} size="xs" variant="link">
+          {busy ? "Reading…" : "Read again"}
+        </Button>
+      </div>
     );
   }
   return (
-    <Alert data-slot="read-note" live="polite" variant="attention">
-      <TriangleAlertIcon />
+    <Alert live="polite" variant="warning">
       <AlertTitle>Its Grasp couldn’t be read again just now</AlertTitle>
       <AlertDescription>
         {`${capitalized(whyUnread(read.stale.error))}. This is what it answered `}
         <Ago at={read.admin.at} />.
       </AlertDescription>
       <AlertAction>
-        <Button disabled={busy} onClick={readAgain} size="sm" variant="outline">
+        <Button disabled={busy} onClick={readAgain} size="xs" variant="outline">
           {busy ? "Asking again…" : "Try again"}
         </Button>
       </AlertAction>
@@ -691,15 +736,10 @@ const SectionGate = ({ section }: { section: OrgSection }) => {
 const OverviewAbout = () => {
   const { admin } = useOrgRead();
   const { view } = organizationOf(admin);
-  let about = "";
   if (view !== null) {
-    about = aboutOf(view);
-  } else if (admin.state !== "answered") {
-    about = unreadWhy(admin);
+    return aboutOf(view);
   }
-  return about === "" ? null : (
-    <p className="text-muted-foreground text-sm">{about}</p>
-  );
+  return admin.state === "answered" ? "" : unreadWhy(admin);
 };
 
 /** Where a section's figures come from, and when they were read, once its core answered. */
@@ -749,26 +789,25 @@ export const OrganizationPage = ({
   return (
     <OrgReadContext value={read}>
       <AdminHeader page={name} />
-      <div className="flex min-h-0 flex-1 text-sm">
-        <OrgColumn clientId={clientId} name={name} />
-        <div className="relative min-w-0 flex-1 overflow-y-auto">
+      <OrgColumn clientId={clientId} name={name}>
+        <div {...stylex.props(styles.section)}>
           <PageBody>
             <SectionSelect clientId={clientId} section={section} />
-            <PageHeader>
-              <PageHeading
-                description={section === "overview" ? undefined : about}
-                title={section === "overview" ? name : title}
-              >
-                {section === "overview" ? (
+            <PageHeader
+              description={
+                section === "overview" ? (
                   <Suspense fallback={null}>
                     <OverviewAbout />
                   </Suspense>
-                ) : null}
-                <Suspense fallback={null}>
-                  <ReadNotes section={section} />
-                </Suspense>
-              </PageHeading>
-            </PageHeader>
+                ) : (
+                  about
+                )
+              }
+              title={section === "overview" ? name : title}
+            />
+            <Suspense fallback={null}>
+              <ReadNotes section={section} />
+            </Suspense>
             {withoutCore ? (
               // Shown at once, and never swapped for anything as the answer comes.
               <Outlet />
@@ -779,7 +818,7 @@ export const OrganizationPage = ({
             )}
           </PageBody>
         </div>
-      </div>
+      </OrgColumn>
     </OrgReadContext>
   );
 };
@@ -792,14 +831,10 @@ export const OffboardedPage = ({ client }: { client: GridRow }) => (
   <>
     <AdminHeader page={client.name} />
     <PageBody>
-      <PageHeader>
-        <PageHeading title={client.name} />
-      </PageHeader>
-      <Empty data-unread="offboarded">
+      <PageHeader title={client.name} />
+      <Empty>
         <EmptyHeader>
-          <EmptyTitle>
-            <h2>{`${client.name} was offboarded`}</h2>
-          </EmptyTitle>
+          <EmptyTitle level={2}>{`${client.name} was offboarded`}</EmptyTitle>
           <EmptyDescription>
             Its own Grasp is gone, so there is nothing of it to read. Platform
             keeps what is left of it.
@@ -807,12 +842,9 @@ export const OffboardedPage = ({ client }: { client: GridRow }) => (
         </EmptyHeader>
         <EmptyContent>
           {/* A link that looks like a button: it is announced as the link it is. */}
-          <Link
-            className={buttonVariants({ variant: "outline" })}
-            to="/platform/offboarded"
-          >
-            Offboarded organizations
-          </Link>
+          <Button asChild variant="outline">
+            <Link to="/platform/offboarded">Offboarded organizations</Link>
+          </Button>
         </EmptyContent>
       </Empty>
     </PageBody>
