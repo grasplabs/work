@@ -161,6 +161,10 @@ catalog:
   better-auth: 1.7.14
   # The admin's Cloudflare Access check.
   jose: 6.2.12
+  # The voice lab (apps/admin): Mistral's voice agent session in the browser,
+  # and the audio transport its SDK loads for it.
+  "@mistralai/mistralai": 3.5.0
+  livekit-client: 2.25.0
   # Vercel's Chat SDK (MIT): one bot on Teams and Slack, its
   # state in Durable Objects (packages/chat). Its adapters
   # move together; keep them on chat's version.

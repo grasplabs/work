@@ -126,10 +126,12 @@ const styles = stylex.create({
   // Over the page, centred at the card's foot, clear of its edges: what
   // stays at hand on every page. Not in the card's own box, which is the
   // main landmark (SidebarInset), so it is no part of the page's content:
-  // over it, on the card's edges as the card publishes them. Presses go
-  // through where it has nothing.
+  // over it, on the card's edges as the card publishes them. Placed on the
+  // document, not the window, so it moves with the card where the document
+  // scrolls (a phone's page scrolled to its end), as #2503's dock, which
+  // stands in its card. Presses go through where it has nothing.
   dock: {
-    position: "fixed",
+    position: "absolute",
     insetInlineStart: `calc(var(--app-shell-main-left, 0px) + ${space["4"]})`,
     insetInlineEnd: `calc(var(--app-shell-main-right, 0px) + ${space["4"]})`,
     insetBlockEnd: `calc(var(--app-shell-main-bottom, 0px) + ${space["4"]})`,
@@ -147,6 +149,16 @@ const styles = stylex.create({
       default: null,
       [media.maxSm]: `inset(-100vh -100vw calc(-1 * ${space["4"]}) -100vw)`,
     },
+  },
+  // The window's room on the document, the dock's own: what the dock holds
+  // (its light, a bar sunk away under the foot) is cut at it, so it never
+  // makes the document taller, as #2503's dock in its card never does.
+  dockLayer: {
+    position: "absolute",
+    inset: 0,
+    zIndex: 30,
+    overflow: "clip",
+    pointerEvents: "none",
   },
   // What it holds takes presses again: inherited, through a wrapper that
   // draws no box of its own.
@@ -199,9 +211,11 @@ const usePublishedPage = () => {
         "--app-shell-main-right",
         `${root.clientWidth - box.right}px`
       );
+      // On the document, as the dock is placed: the same wherever the
+      // document stands scrolled when it is measured.
       root.style.setProperty(
         "--app-shell-main-bottom",
-        `${root.clientHeight - box.bottom}px`
+        `${root.clientHeight - (box.bottom + window.scrollY)}px`
       );
     };
     publish();
@@ -372,15 +386,17 @@ export const AppFrame = ({
             />
           )}
           {dock === undefined ? null : (
-            <div
-              data-slot="app-shell-dock"
-              inert={panels?.covered === true}
-              {...stylex.props(
-                styles.dock,
-                panels?.covered === true && styles.covered
-              )}
-            >
-              <div {...stylex.props(styles.docked)}>{dock}</div>
+            <div {...stylex.props(styles.dockLayer)}>
+              <div
+                data-slot="app-shell-dock"
+                inert={panels?.covered === true}
+                {...stylex.props(
+                  styles.dock,
+                  panels?.covered === true && styles.covered
+                )}
+              >
+                <div {...stylex.props(styles.docked)}>{dock}</div>
+              </div>
             </div>
           )}
         </SidebarProvider>

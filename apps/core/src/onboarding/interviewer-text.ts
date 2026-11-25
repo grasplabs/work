@@ -1,11 +1,5 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import type {
-  InterviewKind,
-  InterviewLocale,
-  Interviewer,
-} from "@grasp-os/shared/onboarding";
-
-import { WHO_CLAIRE } from "./claire.ts";
+import { WHO_CLAIRE } from "@grasp-os/shared/interviewers/claire";
 import {
   inLanguage,
   leadPartsOf,
@@ -13,10 +7,15 @@ import {
   NAME,
   partsOf,
   WHO,
-} from "./stephen.ts";
+} from "@grasp-os/shared/interviewers/stephen";
+import type {
+  InterviewKind,
+  InterviewLocale,
+  Interviewer,
+} from "@grasp-os/shared/onboarding";
 
 // What the model that holds an interview is told, whole: who Stephen or
-// Claire is and how they talk (stephen.ts, claire.ts), how the interview
+// Claire is and how they talk (@grasp-os/shared/interviewers), how the interview
 // goes, what they follow up on, and what they write down. Ported from the
 // prototype (grasplabs/prototype, packages/grasp: worker/stephen.ts,
 // worker/claire.ts, and WRITING and READ_BACK in worker/interview.ts),
@@ -30,7 +29,7 @@ import {
 // the same text has the same mark here and in the lab.
 
 /**
- * What comes after who Stephen is (`stephen.ts`) when Grasp's own models
+ * What comes after who Stephen is (@grasp-os/shared/interviewers/stephen) when Grasp's own models
  * make him speak: what he writes down, and the shape he answers in.
  */
 const WRITING = `# What you write down
