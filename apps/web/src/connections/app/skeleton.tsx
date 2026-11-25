@@ -20,7 +20,6 @@
 // So nothing moves when the data arrives: the grid's columns and rows, the panel's sections.
 import {
   Item,
-  ItemActions,
   ItemContent,
   ItemDescription,
   ItemDetail,
@@ -127,7 +126,6 @@ const styles = stylex.create({
   // What Grasp may do: the counts' line and the two-tone bar, at the panel's inset.
   // The facts at the inset of the rows' words, as the Inspector's.
   facts: { paddingInline: space.sidePanelPadding },
-  noActions: { marginInlineStart: `calc(-1 * ${space["2"]})` },
   balance: {
     display: "grid",
     gap: space["2"],
@@ -363,10 +361,6 @@ const waitingRows = (count: number, label: string) => (
               </ItemDetail>
             </ItemTitle>
           </ItemContent>
-          {/* No actions: the detail ends at the row's inset (panel.tsx). */}
-          <ItemActions style={styles.noActions}>
-            <span aria-hidden="true" />
-          </ItemActions>
         </Item>
       </Fragment>
     ))}

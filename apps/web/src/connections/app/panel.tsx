@@ -14,7 +14,6 @@
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Item,
-  ItemActions,
   ItemContent,
   ItemDetail,
   ItemGroup,
@@ -74,11 +73,6 @@ const styles = stylex.create({
   },
   // The facts at the inset of the rows' words, as the Inspector's.
   facts: { paddingInline: space.sidePanelPadding },
-  // A row that never has actions: its detail ends at the row's inset, not
-  // before the room a side panel's row keeps for one (registry gap of 24
-  // Nov 2026: Item has no such row). The actions' slot holds nothing, and
-  // gives back the gap before it.
-  noActions: { marginInlineStart: `calc(-1 * ${space["2"]})` },
 });
 
 /** Every prop an AppPanel takes. */
@@ -108,12 +102,9 @@ interface PanelRow {
 const Rows = ({
   label,
   rows,
-  noActions = false,
 }: {
   label: string;
   rows: readonly PanelRow[];
-  /** No row ever has actions: each detail ends at the row's own inset. */
-  noActions?: boolean;
 }) => (
   <ItemGroup aria-label={label}>
     {rows.map(({ onClick: handleClick, ...row }, index) => (
@@ -131,11 +122,6 @@ const Rows = ({
               <ItemDetail>{row.detail}</ItemDetail>
             </ItemTitle>
           </ItemContent>
-          {noActions ? (
-            <ItemActions style={styles.noActions}>
-              <span aria-hidden="true" />
-            </ItemActions>
-          ) : null}
         </Item>
       </Fragment>
     ))}
@@ -219,7 +205,6 @@ const MayDoSection = ({
         </div>
         <Rows
           label={words.mayDo}
-          noActions
           rows={groups.map((group) => ({
             id: group.name ?? words.other,
             name: group.name ?? words.other,
