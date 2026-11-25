@@ -476,13 +476,7 @@ export const TeamsPanel = () => {
     <TeamsList data={loaded.data} onChanged={reload} />
   ) : (
     <SettingsGroup title={t`Teams`}>
-      <NotLoadedState
-        again={() => {
-          void reload();
-        }}
-        heading="h3"
-        page={loaded}
-      />
+      <NotLoadedState heading="h3" page={loaded} reread={reload} />
     </SettingsGroup>
   );
 };

@@ -15,7 +15,7 @@ import {
 } from "@tanstack/react-router";
 import type { AnyRoute } from "@tanstack/react-router";
 import type { RpcStub } from "capnweb";
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -30,6 +30,7 @@ import {
   ErrorState,
   NotFound,
   NotFoundState,
+  NotLoadedState,
   PageError,
   PageNotLoaded,
 } from "./page-states.tsx";
@@ -46,6 +47,41 @@ Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 let root: Root | undefined;
 
 const reason = "Grasp can't be reached right now. Reference: req-1";
+
+/** A connection to core that is up, and stays up. */
+const steadyCore = {
+  connected: true,
+  onConnected: () => () => {
+    // Nothing to stop: it never drops.
+  },
+};
+
+/**
+ * A section that reads itself, failed: Try again reads it once more, and
+ * the read `loads` or is refused again.
+ */
+const Rereading = ({ loads }: { loads: boolean }) => {
+  const [page, setPage] = useState<Loaded<string>>({
+    state: "refused",
+    message: reason,
+  });
+  return page.state === "ready" ? (
+    <p>{page.data}</p>
+  ) : (
+    <NotLoadedState
+      heading="h2"
+      page={page}
+      reread={async () => {
+        await Promise.resolve();
+        setPage(
+          loads
+            ? { state: "ready", data: "The section's words" }
+            : { state: "refused", message: reason }
+        );
+      }}
+    />
+  );
+};
 
 /** The app at `path`, in the frame or not, counting the broken page's reads. */
 const opened = async (path: string, inFrame = true, core?: object) => {
@@ -64,6 +100,16 @@ const opened = async (path: string, inFrame = true, core?: object) => {
         reads.broken += 1;
       },
       component: () => <PageError reason={reason} />,
+    }),
+    createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/reread-fails",
+      component: () => <Rereading loads={false} />,
+    }),
+    createRoute({
+      getParentRoute: () => rootRoute,
+      path: "/reread-loads",
+      component: () => <Rereading loads />,
     }),
     createRoute({
       getParentRoute: () => rootRoute,
@@ -107,6 +153,17 @@ const settled = async (): Promise<void> => {
     setTimeout(() => {
       resolve(true);
     }, 0);
+    await promise;
+  });
+};
+
+/** Lets `ms` pass, and what it brings settle: a frame, a button's result. */
+const waited = async (ms: number): Promise<void> => {
+  await act(async () => {
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    setTimeout(() => {
+      resolve(true);
+    }, ms);
     await promise;
   });
 };
@@ -220,6 +277,39 @@ describe("where a page can't stand", () => {
       await opened("/section");
       expect(control("Try again")).toBeDefined();
       expect(control("Go to Chat")).toBeUndefined();
+    });
+
+    it("says Not loaded when a section read again fails again, and never Loaded", async () => {
+      await opened("/reread-fails", true, steadyCore);
+      const shown = new Set<string>();
+      const watch = new MutationObserver(() => {
+        for (const button of document.querySelectorAll("button")) {
+          shown.add(wordsOf(button));
+        }
+      });
+      watch.observe(document.body, {
+        subtree: true,
+        childList: true,
+        attributes: true,
+        characterData: true,
+      });
+      await click("Try again");
+      await waited(100);
+      watch.disconnect();
+      expect({
+        now: control("Not loaded") !== undefined,
+        saidLoaded: shown.has("Loaded"),
+      }).toStrictEqual({ now: true, saidLoaded: false });
+    });
+
+    it("draws the section once a read again loads it", async () => {
+      await opened("/reread-loads", true, steadyCore);
+      await click("Try again");
+      await waited(100);
+      expect({
+        words: document.body.textContent?.includes("The section's words"),
+        tryAgain: control("Try again"),
+      }).toStrictEqual({ words: true, tryAgain: undefined });
     });
   });
 });

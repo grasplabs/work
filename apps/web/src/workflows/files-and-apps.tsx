@@ -461,15 +461,15 @@ const Approved = ({
 
 /**
  * A part of the tab: loading until read, then its content or why not,
- * read again with `again` when it is the tab's own read.
+ * read again with `reread` when it is the tab's own read.
  */
 const Part = <T,>({
   loaded,
-  again,
+  reread,
   children,
 }: {
   loaded: Loaded<T> | undefined;
-  again?: () => void;
+  reread?: () => Promise<void>;
   children: (data: T) => ReactNode;
 }): ReactNode => {
   if (loaded === undefined) {
@@ -482,7 +482,7 @@ const Part = <T,>({
   return loaded.state === "ready" ? (
     children(loaded.data)
   ) : (
-    <NotLoadedState again={again} page={loaded} />
+    <NotLoadedState page={loaded} reread={reread} />
   );
 };
 
@@ -703,15 +703,13 @@ export const FilesAndApps = ({
 
   // A part read again (Try again, or core back after a blip): every part
   // the tab reads, what was read staying until it lands.
-  const again = (): void => {
-    void (async () => {
-      const filesRead = loadFromCore(
-        core,
-        async (session) => await session.workflowResources.files(workflow)
-      );
-      await changed();
-      setFiles(await filesRead);
-    })();
+  const again = async (): Promise<void> => {
+    const filesRead = loadFromCore(
+      core,
+      async (session) => await session.workflowResources.files(workflow)
+    );
+    await changed();
+    setFiles(await filesRead);
   };
 
   return (
@@ -722,7 +720,7 @@ export const FilesAndApps = ({
           info={t`It can't start until you approve what each binding reaches, for the version it runs.`}
           title={t`Waiting for your approval`}
         >
-          <Part again={again} loaded={pending}>
+          <Part reread={again} loaded={pending}>
             {(data) => (
               <Waiting
                 onApproved={(alias) => {
@@ -744,7 +742,7 @@ export const FilesAndApps = ({
       runningBindings.data === null ? null : (
         <Section title={t`Its bindings`}>
           <Part
-            again={versionsRead ? again : undefined}
+            reread={versionsRead ? again : undefined}
             loaded={runningBindings}
           >
             {(data) =>
@@ -769,12 +767,12 @@ export const FilesAndApps = ({
       )}
       <Section flush title={t`Apps it works in`}>
         {/* Without the versions, the page's own read failed: its loaders. */}
-        <Part again={versionsRead ? again : undefined} loaded={appsOf}>
+        <Part reread={versionsRead ? again : undefined} loaded={appsOf}>
           {(data) => <Apps apps={data} />}
         </Part>
       </Section>
       <Section flush title={t`Files its runs wrote`}>
-        <Part again={again} loaded={files}>
+        <Part reread={again} loaded={files}>
           {(data) => <Files files={data} />}
         </Part>
       </Section>
