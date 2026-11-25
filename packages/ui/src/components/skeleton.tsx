@@ -29,6 +29,7 @@ import {
 } from "../lib/tokens.stylex";
 import { skeletonWave } from "../lib/tokens.values";
 import type { LayoutStyle } from "../lib/utils";
+import { skeletonVars } from "../lib/vars.stylex";
 
 export type SkeletonVariant = "text" | "rectangular" | "circular";
 export type SkeletonSize = "sm" | "default" | "lg";
@@ -333,7 +334,7 @@ const styles = stylex.create({
   rectangular: {
     width: "100%",
     flexShrink: 1,
-    height: size.controlDefault,
+    height: skeletonVars.block,
     borderRadius: radius.xl,
     cornerShape: radius.shape,
   },

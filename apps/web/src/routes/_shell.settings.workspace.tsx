@@ -20,7 +20,6 @@ import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { OrgCard, OrgCardLoading } from "../settings/org-card.tsx";
 import {
-  OwnWords,
   SettingRow,
   SettingsError,
   SettingsGroup,
@@ -177,29 +176,24 @@ const TimeZoneField = ({
       }}
       status={status}
     >
-      <OwnWords
-        words={({ combobox }) => ({
-          combobox: { ...combobox, trigger: t`Show the time zones` },
-        })}
+      <Combobox
+        items={items}
+        style={controlStyles.fill}
+        onValueChange={(value) => {
+          idle();
+          if (value !== null && value !== saved) {
+            send(value);
+          }
+        }}
+        placeholder={t`Search time zones`}
+        // Read-only while its own save runs, not disabled: a disabled field drops the keyboard's focus.
+        readOnly={!canChange || busy}
+        size="sm"
+        triggerLabel={t`Show the time zones`}
+        value={saved}
       >
-        <Combobox
-          items={items}
-          style={controlStyles.fill}
-          onValueChange={(value) => {
-            idle();
-            if (value !== null && value !== saved) {
-              send(value);
-            }
-          }}
-          placeholder={t`Search time zones`}
-          // Read-only while its own save runs, not disabled: a disabled field drops the keyboard's focus.
-          readOnly={!canChange || busy}
-          size="sm"
-          value={saved}
-        >
-          <ComboboxEmpty>{t`No time zone by that name`}</ComboboxEmpty>
-        </Combobox>
-      </OwnWords>
+        <ComboboxEmpty>{t`No time zone by that name`}</ComboboxEmpty>
+      </Combobox>
     </SettingRow>
   );
 };

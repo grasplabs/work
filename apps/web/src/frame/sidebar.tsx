@@ -208,10 +208,13 @@ const styles = stylex.create({
     gap: size.sidebarRowGap,
     minHeight: size.sidebarIconButton,
   },
-  // In the phone's sheet the head stands nearer the sheet's top, as the
-  // reference's does over the main list and over a level alike: space-1
-  // under the sheet's top, the sidebar's room above taken back.
-  headInSheet: { marginBlockStart: `calc(${space["1"]} - ${space["4"]})` },
+  // In the phone's sheet the head stands space-1 under the sheet's top, as
+  // the reference's does over the main list and over a level alike.
+  // Damsko's SidebarHeader keeps 16px less the sheet's inset there, which
+  // puts it 6px lower (registry gap of 25 Nov 2026): that room taken back.
+  headInSheet: {
+    marginBlockStart: `calc(${space["1"]} - (${space["4"]} - ${size.sheetPadding}))`,
+  },
   mark: {
     [iconVars.size]: size.appShellMark,
     display: "flex",
@@ -256,10 +259,6 @@ const styles = stylex.create({
   // and its action stay inside the panel that folds it (which cuts off
   // what stands past it). Inline only: nothing shows while it is folded.
   under: { paddingInlineStart: space["3"] },
-  // A row's action stands space-1 in from the row's end, as the
-  // reference's dots do (Damsko's stands 2px in: registry gap of 24 Nov 2026).
-  action: { insetInlineEnd: space["1"] },
-  quiet: { fontWeight: font.weightNormal },
   more: {
     fontWeight: font.weightNormal,
     color: {
@@ -325,8 +324,9 @@ const styles = stylex.create({
   // A row with its own menu keeps its hover while the pointer is anywhere on
   // it, its dots too, and while their menu is open, as the reference's
   // (#2503's sidebar.tsx `row`): a fill under the row's link, which is
-  // clear at rest (Damsko's row fills only under the pointer on itself:
-  // registry gap of 24 Nov 2026), and the name in the ink.
+  // clear at rest, and the name in the ink. Damsko's row holds its own only
+  // when its action is the item's child; here the link and the dots stand
+  // in the right-click menu's area (registry gap of 25 Nov 2026).
   held: {
     position: "absolute",
     inset: 0,
@@ -356,10 +356,6 @@ const styles = stylex.create({
         colors.sidebarForeground,
     },
   },
-  // The dots in the ink, as the reference's ghost button draws them
-  // (Damsko's action stays quiet until the pointer is on it: registry gap
-  // of 24 Nov 2026).
-  dotsInk: { display: "inline-flex", color: colors.sidebarForeground },
   // The row's menu on a right-click, as narrow as the reference's.
   contextMenu: { minWidth: "12rem" },
   // The Working mark at a row's end, in an icon's room, never squeezed.
@@ -590,14 +586,8 @@ const RowDots = ({
 }) => (
   <DropdownMenu>
     <DropdownMenuTrigger asChild>
-      <SidebarMenuAction
-        aria-label={row.actionsLabel ?? row.label}
-        showOnHover
-        style={styles.action}
-      >
-        <span {...stylex.props(styles.dotsInk)}>
-          <Icon icon={EllipsisIcon} />
-        </span>
+      <SidebarMenuAction aria-label={row.actionsLabel ?? row.label} showOnHover>
+        <Icon icon={EllipsisIcon} />
       </SidebarMenuAction>
     </DropdownMenuTrigger>
     <DropdownMenuContent align="start">
@@ -606,9 +596,11 @@ const RowDots = ({
   </DropdownMenu>
 );
 
-/** Whether the row draws its name itself (its weight, a second line, a rename), not as Damsko's bare words. */
+/** Whether the row draws its name itself (a second line, a rename, the ink its dots hold), not as Damsko's bare words. */
 const ownName = (row: SidebarRow) =>
-  row.detail !== undefined || row.quiet === true || row.onRename !== undefined;
+  row.detail !== undefined ||
+  row.onRename !== undefined ||
+  (row.actions?.length ?? 0) > 0;
 
 /** Short words at a row's end ("2d"), quiet, and what a screen reader hears of them. */
 const rowEnd = (row: SidebarRow, renaming: boolean): ReactNode =>
@@ -663,7 +655,6 @@ const rowWords = (
       key="name"
       {...stylex.props(
         styles.name,
-        row.quiet === true && styles.quiet,
         dots && styles.heldInk,
         renaming && styles.renaming
       )}
@@ -676,10 +667,7 @@ const rowWords = (
       key="words"
       {...stylex.props(styles.words, renaming && styles.renaming)}
     >
-      <span
-        data-row-name=""
-        {...stylex.props(styles.name, row.quiet === true && styles.quiet)}
-      >
+      <span data-row-name="" {...stylex.props(styles.name)}>
         {row.label}
       </span>
       <span {...stylex.props(styles.detail)}>{row.detail}</span>
@@ -842,6 +830,8 @@ const RowButton = ({
     "aria-describedby": describedBy,
     // While it is renamed: drawn under the field, out of reach.
     inert: inert || undefined,
+    // A thing in a list of them (a chat): its name in the regular weight.
+    variant: row.quiet === true ? ("quiet" as const) : undefined,
   };
   return row.render === undefined ? (
     <SidebarMenuButton

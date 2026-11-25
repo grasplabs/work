@@ -41,7 +41,7 @@ import {
   WandSparklesIcon,
   WorkflowIcon,
 } from "@grasp-os/ui/lib/icons";
-import { focusRing } from "@grasp-os/ui/lib/styles";
+import { focusRing, texture, textureTint } from "@grasp-os/ui/lib/styles";
 import {
   colors,
   duration,
@@ -77,7 +77,6 @@ import {
 } from "./parts.tsx";
 import type { AppActions } from "./parts.tsx";
 import { rowFrame, RowFrame, SettingsRows } from "./rows.tsx";
-import { Texture } from "./texture.tsx";
 import { groupTools, matches } from "./tools.ts";
 import type { ToolGroup } from "./tools.ts";
 import { useAppIntegrationWords } from "./words.ts";
@@ -870,7 +869,14 @@ export const AppPage = ({
     <div data-slot="app-page" {...stylex.props(styles.page)}>
       <div {...stylex.props(styles.column)}>
         <header {...stylex.props(styles.headCard)}>
-          <Texture style={styles.headCardTexture} tint={tint} />
+          <span
+            aria-hidden="true"
+            {...stylex.props(
+              texture,
+              tint !== undefined && textureTint(tint),
+              styles.headCardTexture
+            )}
+          />
           <AppMark app={app} size="lg" />
           <div {...stylex.props(styles.headWords)}>
             <h1 {...stylex.props(styles.nameSm)}>{app.name}</h1>
