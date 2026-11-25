@@ -12,9 +12,10 @@ import { extensionOf } from "./document-files.ts";
 // with its own kind of content, fanned out at the zone's two edges and
 // thinning out toward its words, so the words stand clear. Each kind shared
 // already lies on a small pile of its own, a sheet for each, up to three.
-// While the pointer is on the zone or files are dragged over it, the pages
-// fan open and rise a little, as if to take them. At rest they are still;
-// under reduced motion they never move.
+// At rest the zone is clear: the pages come up, dithering in, only when
+// something is thrown in, files dragged over it or dropped, or a visitor's
+// toss (document-visitors.tsx); they fan open as if to take it, and fade
+// away again a moment after. Under reduced motion they never show.
 
 const styles = stylex.create({
   // The zone and the pages over it, in one box.
@@ -212,9 +213,9 @@ interface Page {
   pile: number;
 }
 
-/** How much the pages are awake: open (pointer on the zone) and taking (files over it). */
+/** How much the pages are awake: shown (there at all) and taking (files over it, or a toss landing). */
 interface Life {
-  open: number;
+  shown: number;
   taking: number;
 }
 
@@ -244,7 +245,8 @@ const lay = (
 ): Page[] => {
   const room = width / 2 - clear;
   const margin = Math.min(room * 0.2, 28);
-  const byHeight = Math.round((height * 0.72) / cell);
+  // Small, so they stay a passing sign and not a picture: about half the zone, never past 22 cells.
+  const byHeight = Math.min(22, Math.round((height * 0.5) / cell));
   // Two pages a side where they fit, overlapping; else the outer one alone, whole.
   const fitting = (much: number) =>
     Math.min(byHeight, Math.floor((room - margin) / (much * 0.76 * cell)));
@@ -254,8 +256,9 @@ const lay = (
     return [];
   }
   const wide = Math.round(tall * 0.76) * cell;
-  const spread = life.open * 0.25 + life.taking * 0.5;
-  const lift = (life.open * 0.04 + life.taking * 0.1) * height;
+  const spread = life.taking * 0.5;
+  // They rise into place as they show, and a little more as they take.
+  const lift = life.taking * 0.1 * height - (1 - life.shown) * cell * 4;
   return sides
     .filter(({ inner }) => both || !inner)
     .map(({ kind, side, inner, turn }) => {
@@ -273,7 +276,7 @@ const lay = (
         h,
         x: side < 0 ? fromEdge : width - fromEdge,
         y: height / 2 + (inner ? cell : -cell) - lift * (inner ? 1.4 : 1),
-        turn: turn * (1 + life.open * 0.8 + life.taking * 1.6),
+        turn: turn * (1 + life.taking * 1.6),
         pile: piles[kind],
       };
     });
@@ -296,7 +299,8 @@ const minAlpha = 0.18;
 const draw = (
   context: CanvasRenderingContext2D,
   words: Words,
-  pages: Page[]
+  pages: Page[],
+  shown: number
 ) => {
   const { width, height } = words;
   const columns = Math.ceil(width / cell);
@@ -306,7 +310,8 @@ const draw = (
   for (let row = 0; row < rows; row += 1) {
     for (let column = 0; column < columns; column += 1) {
       const px = (column + 0.5) * cell;
-      const much = presence(px, words);
+      // Dithered in and out as they show: cell by cell, never a fade.
+      const much = presence(px, words) * shown;
       if (much <= 0) {
         continue;
       }
@@ -384,7 +389,7 @@ export const DocumentPages = ({
 }) => {
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
-  const wanted = useRef<Life>({ open: 0, taking: 0 });
+  const wanted = useRef<Life>({ shown: 0, taking: 0 });
   const wake = useRef<(() => void) | null>(null);
   const piles = { pdf: 0, word: 0, sheet: 0, slides: 0, text: 0 };
   for (const name of shared) {
@@ -456,7 +461,9 @@ export const DocumentPages = ({
         height: area.height,
         clear: clear + cell * 4,
       };
-      draw(context, words, lay(words, life, own));
+      if (life.shown > 0.004) {
+        draw(context, words, lay(words, life, own), life.shown);
+      }
       context.restore();
     };
     const step = (now: number) => {
@@ -464,15 +471,19 @@ export const DocumentPages = ({
       last = now;
       // Halfway there every 60 ms: settled well within 300.
       const toward = 0.5 ** (elapsed / 60);
-      life.open =
-        wanted.current.open + (life.open - wanted.current.open) * toward;
+      // Shown comes up at the same pace, and goes slower.
+      const showing = wanted.current.shown > life.shown;
+      life.shown =
+        wanted.current.shown +
+        (life.shown - wanted.current.shown) *
+          (showing ? toward : 0.5 ** (elapsed / 160));
       life.taking =
         wanted.current.taking + (life.taking - wanted.current.taking) * toward;
       const settled =
-        Math.abs(life.open - wanted.current.open) < 0.004 &&
+        Math.abs(life.shown - wanted.current.shown) < 0.004 &&
         Math.abs(life.taking - wanted.current.taking) < 0.004;
       if (settled) {
-        life.open = wanted.current.open;
+        life.shown = wanted.current.shown;
         life.taking = wanted.current.taking;
       }
       paint();
@@ -507,41 +518,51 @@ export const DocumentPages = ({
     wanted.current = { ...wanted.current, ...life };
     wake.current?.();
   };
-  // A page a visitor tossed in (document-visitors.tsx): the pages open to take it, as for a real drop, and settle.
+  // Something thrown in: a visitor's toss (document-visitors.tsx) or a real drop. The pages show and
+  // open to take it, settle, and a moment later go again.
   const dragging = useRef(false);
+  const later = useRef({ settle: 0, hide: 0 });
+  const landed = (taking: number) => {
+    clearTimeout(later.current.settle);
+    clearTimeout(later.current.hide);
+    want({ shown: 1, taking });
+    later.current.settle = window.setTimeout(() => {
+      if (!dragging.current) {
+        want({ taking: 0 });
+      }
+    }, 320);
+    later.current.hide = window.setTimeout(() => {
+      if (!dragging.current) {
+        want({ shown: 0 });
+      }
+    }, 1500);
+  };
   useEffect(() => {
     const element = box.current;
+    const timers = later.current;
     if (element === null) {
       return () => {
         // Nothing to catch with.
       };
     }
-    let settle = 0;
     const caught = () => {
-      if (dragging.current) {
-        return;
+      if (!dragging.current) {
+        landed(0.7);
       }
-      wanted.current = { ...wanted.current, taking: 0.7 };
-      wake.current?.();
-      clearTimeout(settle);
-      settle = window.setTimeout(() => {
-        if (!dragging.current) {
-          wanted.current = { ...wanted.current, taking: 0 };
-          wake.current?.();
-        }
-      }, 320);
     };
     element.addEventListener("documentcaught", caught);
     return () => {
-      clearTimeout(settle);
+      clearTimeout(timers.settle);
+      clearTimeout(timers.hide);
       element.removeEventListener("documentcaught", caught);
     };
-  }, []);
+  });
   return (
     <div
       onDragEnter={() => {
         dragging.current = true;
-        want({ taking: 1 });
+        clearTimeout(later.current.hide);
+        want({ shown: 1, taking: 1 });
       }}
       onDragLeave={(event) => {
         const into = event.relatedTarget;
@@ -549,18 +570,12 @@ export const DocumentPages = ({
           into instanceof Node && box.current?.contains(into) === true;
         if (!inside) {
           dragging.current = false;
-          want({ taking: 0 });
+          want({ shown: 0, taking: 0 });
         }
       }}
       onDrop={() => {
         dragging.current = false;
-        want({ taking: 0 });
-      }}
-      onPointerEnter={() => {
-        want({ open: 1 });
-      }}
-      onPointerLeave={() => {
-        want({ open: 0 });
+        landed(0.6);
       }}
       ref={box}
       {...stylex.props(styles.box)}
