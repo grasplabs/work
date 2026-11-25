@@ -33,6 +33,7 @@ import { useCore } from "../use-core.ts";
 import { CalmStep } from "./calm-frame.tsx";
 import { readable } from "./document-files.ts";
 import { DocumentPages } from "./document-pages.tsx";
+import { DocumentVisitors } from "./document-visitors.tsx";
 import { PlacePicker } from "./place-picker.tsx";
 import type { PickedFile } from "./place-picker.tsx";
 import { kindsOf, useContextWords } from "./sources-step.tsx";
@@ -56,6 +57,8 @@ import type { StepProps } from "./step-parts.ts";
 // or Google, the admin can pick them where they live instead (GRA-370):
 // SharePoint and OneDrive, or Google Drive, connected here through
 // Grasp's own read-only connection, which fetches only the files picked.
+// Now and then a visitor's cursor drifts in beside the zone, asks for a
+// kind of document, and tosses one in (document-visitors.tsx).
 
 const styles = stylex.create({
   stack: { display: "grid", gap: space[4] },
@@ -363,6 +366,7 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
         )}
         <ErrorText>{placeProblem ?? undefined}</ErrorText>
       </div>
+      <DocumentVisitors paused={picking !== null || ask !== null} />
       {picking === null ? null : (
         <PlacePicker
           onAdd={(files) => {

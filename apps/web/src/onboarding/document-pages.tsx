@@ -37,10 +37,19 @@ const styles = stylex.create({
 /** A cell's side in CSS pixels: the flags' own. */
 const cell = 4;
 
-type Kind = "pdf" | "word" | "sheet" | "slides" | "text";
+export type Kind = "pdf" | "word" | "sheet" | "slides" | "text";
+
+/** Every kind, in the order the visitors (document-visitors.tsx) hold them. */
+export const kindNames: readonly Kind[] = [
+  "pdf",
+  "word",
+  "sheet",
+  "slides",
+  "text",
+];
 
 /** Each kind's own colour, as its makers paint it. */
-const colourOf: Record<Kind, string> = {
+export const colourOf: Record<Kind, string> = {
   pdf: "#d6403a",
   word: "#2b5797",
   sheet: "#1e7145",
@@ -498,9 +507,40 @@ export const DocumentPages = ({
     wanted.current = { ...wanted.current, ...life };
     wake.current?.();
   };
+  // A page a visitor tossed in (document-visitors.tsx): the pages open to take it, as for a real drop, and settle.
+  const dragging = useRef(false);
+  useEffect(() => {
+    const element = box.current;
+    if (element === null) {
+      return () => {
+        // Nothing to catch with.
+      };
+    }
+    let settle = 0;
+    const caught = () => {
+      if (dragging.current) {
+        return;
+      }
+      wanted.current = { ...wanted.current, taking: 0.7 };
+      wake.current?.();
+      clearTimeout(settle);
+      settle = window.setTimeout(() => {
+        if (!dragging.current) {
+          wanted.current = { ...wanted.current, taking: 0 };
+          wake.current?.();
+        }
+      }, 320);
+    };
+    element.addEventListener("documentcaught", caught);
+    return () => {
+      clearTimeout(settle);
+      element.removeEventListener("documentcaught", caught);
+    };
+  }, []);
   return (
     <div
       onDragEnter={() => {
+        dragging.current = true;
         want({ taking: 1 });
       }}
       onDragLeave={(event) => {
@@ -508,10 +548,12 @@ export const DocumentPages = ({
         const inside =
           into instanceof Node && box.current?.contains(into) === true;
         if (!inside) {
+          dragging.current = false;
           want({ taking: 0 });
         }
       }}
       onDrop={() => {
+        dragging.current = false;
         want({ taking: 0 });
       }}
       onPointerEnter={() => {
