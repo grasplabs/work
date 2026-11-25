@@ -11,7 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AskRouteImport } from './routes/ask'
-import { Route as IntegrationsRouteImport } from './routes/integrations'
+import { Route as ConnectorsRouteImport } from './routes/connectors'
 import { Route as LabRouteImport } from './routes/lab'
 import { Route as NewOrganizationRouteImport } from './routes/new-organization'
 import { Route as OrganizationsClientIdRouteImport } from './routes/organizations/$clientId'
@@ -21,9 +21,9 @@ import { Route as PlatformOffboardedRouteImport } from './routes/platform/offboa
 import { Route as OrganizationsClientIdIndexRouteImport } from './routes/organizations/$clientId/index'
 import { Route as OrganizationsClientIdAiUseRouteImport } from './routes/organizations/$clientId/ai-use'
 import { Route as OrganizationsClientIdBrainRouteImport } from './routes/organizations/$clientId/brain'
+import { Route as OrganizationsClientIdConnectorsRouteImport } from './routes/organizations/$clientId/connectors'
 import { Route as OrganizationsClientIdDetailsRouteImport } from './routes/organizations/$clientId/details'
 import { Route as OrganizationsClientIdHoursRouteImport } from './routes/organizations/$clientId/hours'
-import { Route as OrganizationsClientIdIntegrationsRouteImport } from './routes/organizations/$clientId/integrations'
 import { Route as OrganizationsClientIdInterviewsRouteImport } from './routes/organizations/$clientId/interviews'
 import { Route as OrganizationsClientIdLogRouteImport } from './routes/organizations/$clientId/log'
 import { Route as OrganizationsClientIdSetupRouteImport } from './routes/organizations/$clientId/setup'
@@ -42,9 +42,9 @@ const AskRoute = AskRouteImport.update({
   path: '/ask',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IntegrationsRoute = IntegrationsRouteImport.update({
-  id: '/integrations',
-  path: '/integrations',
+const ConnectorsRoute = ConnectorsRouteImport.update({
+  id: '/connectors',
+  path: '/connectors',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LabRoute = LabRouteImport.update({
@@ -95,6 +95,12 @@ const OrganizationsClientIdBrainRoute =
     path: '/brain',
     getParentRoute: () => OrganizationsClientIdRoute,
   } as any)
+const OrganizationsClientIdConnectorsRoute =
+  OrganizationsClientIdConnectorsRouteImport.update({
+    id: '/connectors',
+    path: '/connectors',
+    getParentRoute: () => OrganizationsClientIdRoute,
+  } as any)
 const OrganizationsClientIdDetailsRoute =
   OrganizationsClientIdDetailsRouteImport.update({
     id: '/details',
@@ -105,12 +111,6 @@ const OrganizationsClientIdHoursRoute =
   OrganizationsClientIdHoursRouteImport.update({
     id: '/hours',
     path: '/hours',
-    getParentRoute: () => OrganizationsClientIdRoute,
-  } as any)
-const OrganizationsClientIdIntegrationsRoute =
-  OrganizationsClientIdIntegrationsRouteImport.update({
-    id: '/integrations',
-    path: '/integrations',
     getParentRoute: () => OrganizationsClientIdRoute,
   } as any)
 const OrganizationsClientIdInterviewsRoute =
@@ -158,7 +158,7 @@ const PlatformReleasesReleaseIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/ask': typeof AskRoute
-  '/integrations': typeof IntegrationsRoute
+  '/connectors': typeof ConnectorsRoute
   '/lab': typeof LabRoute
   '/new-organization': typeof NewOrganizationRoute
   '/organizations/$clientId': typeof OrganizationsClientIdRouteWithChildren
@@ -167,9 +167,9 @@ export interface FileRoutesByFullPath {
   '/platform/': typeof PlatformIndexRoute
   '/organizations/$clientId/ai-use': typeof OrganizationsClientIdAiUseRoute
   '/organizations/$clientId/brain': typeof OrganizationsClientIdBrainRoute
+  '/organizations/$clientId/connectors': typeof OrganizationsClientIdConnectorsRoute
   '/organizations/$clientId/details': typeof OrganizationsClientIdDetailsRoute
   '/organizations/$clientId/hours': typeof OrganizationsClientIdHoursRoute
-  '/organizations/$clientId/integrations': typeof OrganizationsClientIdIntegrationsRoute
   '/organizations/$clientId/interviews': typeof OrganizationsClientIdInterviewsRoute
   '/organizations/$clientId/log': typeof OrganizationsClientIdLogRoute
   '/organizations/$clientId/setup': typeof OrganizationsClientIdSetupRoute
@@ -182,7 +182,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/ask': typeof AskRoute
-  '/integrations': typeof IntegrationsRoute
+  '/connectors': typeof ConnectorsRoute
   '/lab': typeof LabRoute
   '/new-organization': typeof NewOrganizationRoute
   '/platform/maintenance': typeof PlatformMaintenanceRoute
@@ -190,9 +190,9 @@ export interface FileRoutesByTo {
   '/platform': typeof PlatformIndexRoute
   '/organizations/$clientId/ai-use': typeof OrganizationsClientIdAiUseRoute
   '/organizations/$clientId/brain': typeof OrganizationsClientIdBrainRoute
+  '/organizations/$clientId/connectors': typeof OrganizationsClientIdConnectorsRoute
   '/organizations/$clientId/details': typeof OrganizationsClientIdDetailsRoute
   '/organizations/$clientId/hours': typeof OrganizationsClientIdHoursRoute
-  '/organizations/$clientId/integrations': typeof OrganizationsClientIdIntegrationsRoute
   '/organizations/$clientId/interviews': typeof OrganizationsClientIdInterviewsRoute
   '/organizations/$clientId/log': typeof OrganizationsClientIdLogRoute
   '/organizations/$clientId/setup': typeof OrganizationsClientIdSetupRoute
@@ -206,7 +206,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/ask': typeof AskRoute
-  '/integrations': typeof IntegrationsRoute
+  '/connectors': typeof ConnectorsRoute
   '/lab': typeof LabRoute
   '/new-organization': typeof NewOrganizationRoute
   '/organizations/$clientId': typeof OrganizationsClientIdRouteWithChildren
@@ -215,9 +215,9 @@ export interface FileRoutesById {
   '/platform/': typeof PlatformIndexRoute
   '/organizations/$clientId/ai-use': typeof OrganizationsClientIdAiUseRoute
   '/organizations/$clientId/brain': typeof OrganizationsClientIdBrainRoute
+  '/organizations/$clientId/connectors': typeof OrganizationsClientIdConnectorsRoute
   '/organizations/$clientId/details': typeof OrganizationsClientIdDetailsRoute
   '/organizations/$clientId/hours': typeof OrganizationsClientIdHoursRoute
-  '/organizations/$clientId/integrations': typeof OrganizationsClientIdIntegrationsRoute
   '/organizations/$clientId/interviews': typeof OrganizationsClientIdInterviewsRoute
   '/organizations/$clientId/log': typeof OrganizationsClientIdLogRoute
   '/organizations/$clientId/setup': typeof OrganizationsClientIdSetupRoute
@@ -232,7 +232,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/ask'
-    | '/integrations'
+    | '/connectors'
     | '/lab'
     | '/new-organization'
     | '/organizations/$clientId'
@@ -241,9 +241,9 @@ export interface FileRouteTypes {
     | '/platform/'
     | '/organizations/$clientId/ai-use'
     | '/organizations/$clientId/brain'
+    | '/organizations/$clientId/connectors'
     | '/organizations/$clientId/details'
     | '/organizations/$clientId/hours'
-    | '/organizations/$clientId/integrations'
     | '/organizations/$clientId/interviews'
     | '/organizations/$clientId/log'
     | '/organizations/$clientId/setup'
@@ -256,7 +256,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/ask'
-    | '/integrations'
+    | '/connectors'
     | '/lab'
     | '/new-organization'
     | '/platform/maintenance'
@@ -264,9 +264,9 @@ export interface FileRouteTypes {
     | '/platform'
     | '/organizations/$clientId/ai-use'
     | '/organizations/$clientId/brain'
+    | '/organizations/$clientId/connectors'
     | '/organizations/$clientId/details'
     | '/organizations/$clientId/hours'
-    | '/organizations/$clientId/integrations'
     | '/organizations/$clientId/interviews'
     | '/organizations/$clientId/log'
     | '/organizations/$clientId/setup'
@@ -279,7 +279,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/ask'
-    | '/integrations'
+    | '/connectors'
     | '/lab'
     | '/new-organization'
     | '/organizations/$clientId'
@@ -288,9 +288,9 @@ export interface FileRouteTypes {
     | '/platform/'
     | '/organizations/$clientId/ai-use'
     | '/organizations/$clientId/brain'
+    | '/organizations/$clientId/connectors'
     | '/organizations/$clientId/details'
     | '/organizations/$clientId/hours'
-    | '/organizations/$clientId/integrations'
     | '/organizations/$clientId/interviews'
     | '/organizations/$clientId/log'
     | '/organizations/$clientId/setup'
@@ -304,7 +304,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AskRoute: typeof AskRoute
-  IntegrationsRoute: typeof IntegrationsRoute
+  ConnectorsRoute: typeof ConnectorsRoute
   LabRoute: typeof LabRoute
   NewOrganizationRoute: typeof NewOrganizationRoute
   OrganizationsClientIdRoute: typeof OrganizationsClientIdRouteWithChildren
@@ -331,11 +331,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AskRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/integrations': {
-      id: '/integrations'
-      path: '/integrations'
-      fullPath: '/integrations'
-      preLoaderRoute: typeof IntegrationsRouteImport
+    '/connectors': {
+      id: '/connectors'
+      path: '/connectors'
+      fullPath: '/connectors'
+      preLoaderRoute: typeof ConnectorsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/lab': {
@@ -401,6 +401,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrganizationsClientIdBrainRouteImport
       parentRoute: typeof OrganizationsClientIdRoute
     }
+    '/organizations/$clientId/connectors': {
+      id: '/organizations/$clientId/connectors'
+      path: '/connectors'
+      fullPath: '/organizations/$clientId/connectors'
+      preLoaderRoute: typeof OrganizationsClientIdConnectorsRouteImport
+      parentRoute: typeof OrganizationsClientIdRoute
+    }
     '/organizations/$clientId/details': {
       id: '/organizations/$clientId/details'
       path: '/details'
@@ -413,13 +420,6 @@ declare module '@tanstack/react-router' {
       path: '/hours'
       fullPath: '/organizations/$clientId/hours'
       preLoaderRoute: typeof OrganizationsClientIdHoursRouteImport
-      parentRoute: typeof OrganizationsClientIdRoute
-    }
-    '/organizations/$clientId/integrations': {
-      id: '/organizations/$clientId/integrations'
-      path: '/integrations'
-      fullPath: '/organizations/$clientId/integrations'
-      preLoaderRoute: typeof OrganizationsClientIdIntegrationsRouteImport
       parentRoute: typeof OrganizationsClientIdRoute
     }
     '/organizations/$clientId/interviews': {
@@ -477,9 +477,9 @@ declare module '@tanstack/react-router' {
 interface OrganizationsClientIdRouteChildren {
   OrganizationsClientIdAiUseRoute: typeof OrganizationsClientIdAiUseRoute
   OrganizationsClientIdBrainRoute: typeof OrganizationsClientIdBrainRoute
+  OrganizationsClientIdConnectorsRoute: typeof OrganizationsClientIdConnectorsRoute
   OrganizationsClientIdDetailsRoute: typeof OrganizationsClientIdDetailsRoute
   OrganizationsClientIdHoursRoute: typeof OrganizationsClientIdHoursRoute
-  OrganizationsClientIdIntegrationsRoute: typeof OrganizationsClientIdIntegrationsRoute
   OrganizationsClientIdInterviewsRoute: typeof OrganizationsClientIdInterviewsRoute
   OrganizationsClientIdLogRoute: typeof OrganizationsClientIdLogRoute
   OrganizationsClientIdSetupRoute: typeof OrganizationsClientIdSetupRoute
@@ -491,10 +491,9 @@ interface OrganizationsClientIdRouteChildren {
 const OrganizationsClientIdRouteChildren: OrganizationsClientIdRouteChildren = {
   OrganizationsClientIdAiUseRoute: OrganizationsClientIdAiUseRoute,
   OrganizationsClientIdBrainRoute: OrganizationsClientIdBrainRoute,
+  OrganizationsClientIdConnectorsRoute: OrganizationsClientIdConnectorsRoute,
   OrganizationsClientIdDetailsRoute: OrganizationsClientIdDetailsRoute,
   OrganizationsClientIdHoursRoute: OrganizationsClientIdHoursRoute,
-  OrganizationsClientIdIntegrationsRoute:
-    OrganizationsClientIdIntegrationsRoute,
   OrganizationsClientIdInterviewsRoute: OrganizationsClientIdInterviewsRoute,
   OrganizationsClientIdLogRoute: OrganizationsClientIdLogRoute,
   OrganizationsClientIdSetupRoute: OrganizationsClientIdSetupRoute,
@@ -511,7 +510,7 @@ const OrganizationsClientIdRouteWithChildren =
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AskRoute: AskRoute,
-  IntegrationsRoute: IntegrationsRoute,
+  ConnectorsRoute: ConnectorsRoute,
   LabRoute: LabRoute,
   NewOrganizationRoute: NewOrganizationRoute,
   OrganizationsClientIdRoute: OrganizationsClientIdRouteWithChildren,

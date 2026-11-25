@@ -274,7 +274,7 @@ describe("connecting a Composio toolkit", () => {
           tools: allowed,
           consent: composioConsentText,
           origin: clientOrigin,
-          returnTo: "/integrations",
+          returnTo: "/connectors",
         })
       )
     ).resolves.toBe("connection.provider_unavailable");

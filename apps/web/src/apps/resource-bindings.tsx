@@ -81,7 +81,7 @@ const kindLabels: Readonly<
   Record<DeclaredResource["kind"], MessageDescriptor>
 > = {
   model: msg`AI`,
-  connector: msg`Integration`,
+  connector: msg`Connector`,
   brain: msg`Brain`,
   grasp: msg`The platform's statistics`,
 };
@@ -102,7 +102,7 @@ const stateReasons: Readonly<Partial<Record<BindingState, MessageDescriptor>>> =
     declaration_changed: msg`The current version declares it differently from the version its binding was approved for. Bind it again to approve what it declares now.`,
     contract_changed: msg`What it is bound to has changed since the binding was approved. Bind it again once you've checked it still fits.`,
     grant_lost: msg`What it is bound to can't serve it any more: its permission was revoked, or the model is no longer allowed.`,
-    unchecked: msg`The App has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always.`,
+    unchecked: msg`The App has too many connectors to check them all on this page, so this binding wasn't checked. Its next request is checked as always.`,
   };
 
 const styles = stylex.create({
@@ -194,7 +194,7 @@ const NothingToChoose = ({
   }
   const reasons: Readonly<Record<DeclaredResource["kind"], string>> = {
     model: t`This deployment allows no model.`,
-    connector: t`None of the App's integration permissions serves ${contract} with every action it declares. Grant one first.`,
+    connector: t`None of the App's connector permissions serves ${contract} with every action it declares. Grant one first.`,
     brain: t`The App has no permission to read the Brain. Grant one first.`,
     grasp: t`The App has no permission to read the platform's statistics. Grant one first.`,
   };
@@ -587,8 +587,8 @@ export const ResourceBindings = ({
               of="title"
               info={
                 decides
-                  ? t`The App's actions reach a model, an integration or knowledge only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it.`
-                  : t`The App's actions reach a model, an integration or knowledge only through a binding an admin of your organization approves.`
+                  ? t`The App's actions reach a model, a connector or knowledge only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it.`
+                  : t`The App's actions reach a model, a connector or knowledge only through a binding an admin of your organization approves.`
               }
             >
               <CardTitle level={3}>{t`Resources`}</CardTitle>

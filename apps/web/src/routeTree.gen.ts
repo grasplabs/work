@@ -38,8 +38,8 @@ import { Route as ShellBrainOpportunitiesRouteImport } from './routes/_shell.bra
 import { Route as ShellBrainSkillsRouteImport } from './routes/_shell.brain.skills'
 import { Route as ShellBrainSourcesRouteImport } from './routes/_shell.brain.sources'
 import { Route as ShellChatsChatIdRouteImport } from './routes/_shell.chats.$chatId'
-import { Route as ShellIntegrationsIndexRouteImport } from './routes/_shell.integrations.index'
-import { Route as ShellIntegrationsIntegrationRouteImport } from './routes/_shell.integrations.$integration'
+import { Route as ShellConnectorsIndexRouteImport } from './routes/_shell.connectors.index'
+import { Route as ShellConnectorsIntegrationRouteImport } from './routes/_shell.connectors.$integration'
 import { Route as ShellProjectsIndexRouteImport } from './routes/_shell.projects.index'
 import { Route as ShellProjectsProjectIdRouteImport } from './routes/_shell.projects.$projectId'
 import { Route as ShellSettingsIndexRouteImport } from './routes/_shell.settings.index'
@@ -215,15 +215,15 @@ const ShellChatsChatIdRoute = ShellChatsChatIdRouteImport.update({
   path: '/chats/$chatId',
   getParentRoute: () => ShellRoute,
 } as any)
-const ShellIntegrationsIndexRoute = ShellIntegrationsIndexRouteImport.update({
-  id: '/integrations/',
-  path: '/integrations/',
+const ShellConnectorsIndexRoute = ShellConnectorsIndexRouteImport.update({
+  id: '/connectors/',
+  path: '/connectors/',
   getParentRoute: () => ShellRoute,
 } as any)
-const ShellIntegrationsIntegrationRoute =
-  ShellIntegrationsIntegrationRouteImport.update({
-    id: '/integrations/$integration',
-    path: '/integrations/$integration',
+const ShellConnectorsIntegrationRoute =
+  ShellConnectorsIntegrationRouteImport.update({
+    id: '/connectors/$integration',
+    path: '/connectors/$integration',
     getParentRoute: () => ShellRoute,
   } as any)
 const ShellProjectsIndexRoute = ShellProjectsIndexRouteImport.update({
@@ -407,7 +407,7 @@ export interface FileRoutesByFullPath {
   '/brain/skills': typeof ShellBrainSkillsRoute
   '/brain/sources': typeof ShellBrainSourcesRoute
   '/chats/$chatId': typeof ShellChatsChatIdRoute
-  '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
+  '/connectors/$integration': typeof ShellConnectorsIntegrationRoute
   '/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/settings/ai-providers': typeof ShellSettingsAiProvidersRoute
   '/settings/appearance': typeof ShellSettingsAppearanceRoute
@@ -432,7 +432,7 @@ export interface FileRoutesByFullPath {
   '/agents/': typeof ShellAgentsIndexRoute
   '/apps/': typeof ShellAppsIndexRoute
   '/brain/': typeof ShellBrainIndexRoute
-  '/integrations/': typeof ShellIntegrationsIndexRoute
+  '/connectors/': typeof ShellConnectorsIndexRoute
   '/projects/': typeof ShellProjectsIndexRoute
   '/settings/': typeof ShellSettingsIndexRoute
   '/workflows/': typeof ShellWorkflowsIndexRoute
@@ -467,7 +467,7 @@ export interface FileRoutesByTo {
   '/brain/skills': typeof ShellBrainSkillsRoute
   '/brain/sources': typeof ShellBrainSourcesRoute
   '/chats/$chatId': typeof ShellChatsChatIdRoute
-  '/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
+  '/connectors/$integration': typeof ShellConnectorsIntegrationRoute
   '/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/settings/ai-providers': typeof ShellSettingsAiProvidersRoute
   '/settings/appearance': typeof ShellSettingsAppearanceRoute
@@ -492,7 +492,7 @@ export interface FileRoutesByTo {
   '/agents': typeof ShellAgentsIndexRoute
   '/apps': typeof ShellAppsIndexRoute
   '/brain': typeof ShellBrainIndexRoute
-  '/integrations': typeof ShellIntegrationsIndexRoute
+  '/connectors': typeof ShellConnectorsIndexRoute
   '/projects': typeof ShellProjectsIndexRoute
   '/settings': typeof ShellSettingsIndexRoute
   '/workflows': typeof ShellWorkflowsIndexRoute
@@ -531,7 +531,7 @@ export interface FileRoutesById {
   '/_shell/brain/skills': typeof ShellBrainSkillsRoute
   '/_shell/brain/sources': typeof ShellBrainSourcesRoute
   '/_shell/chats/$chatId': typeof ShellChatsChatIdRoute
-  '/_shell/integrations/$integration': typeof ShellIntegrationsIntegrationRoute
+  '/_shell/connectors/$integration': typeof ShellConnectorsIntegrationRoute
   '/_shell/projects/$projectId': typeof ShellProjectsProjectIdRoute
   '/_shell/settings/ai-providers': typeof ShellSettingsAiProvidersRoute
   '/_shell/settings/appearance': typeof ShellSettingsAppearanceRoute
@@ -556,7 +556,7 @@ export interface FileRoutesById {
   '/_shell/agents/': typeof ShellAgentsIndexRoute
   '/_shell/apps/': typeof ShellAppsIndexRoute
   '/_shell/brain/': typeof ShellBrainIndexRoute
-  '/_shell/integrations/': typeof ShellIntegrationsIndexRoute
+  '/_shell/connectors/': typeof ShellConnectorsIndexRoute
   '/_shell/projects/': typeof ShellProjectsIndexRoute
   '/_shell/settings/': typeof ShellSettingsIndexRoute
   '/_shell/workflows/': typeof ShellWorkflowsIndexRoute
@@ -595,7 +595,7 @@ export interface FileRouteTypes {
     | '/brain/skills'
     | '/brain/sources'
     | '/chats/$chatId'
-    | '/integrations/$integration'
+    | '/connectors/$integration'
     | '/projects/$projectId'
     | '/settings/ai-providers'
     | '/settings/appearance'
@@ -620,7 +620,7 @@ export interface FileRouteTypes {
     | '/agents/'
     | '/apps/'
     | '/brain/'
-    | '/integrations/'
+    | '/connectors/'
     | '/projects/'
     | '/settings/'
     | '/workflows/'
@@ -655,7 +655,7 @@ export interface FileRouteTypes {
     | '/brain/skills'
     | '/brain/sources'
     | '/chats/$chatId'
-    | '/integrations/$integration'
+    | '/connectors/$integration'
     | '/projects/$projectId'
     | '/settings/ai-providers'
     | '/settings/appearance'
@@ -680,7 +680,7 @@ export interface FileRouteTypes {
     | '/agents'
     | '/apps'
     | '/brain'
-    | '/integrations'
+    | '/connectors'
     | '/projects'
     | '/settings'
     | '/workflows'
@@ -718,7 +718,7 @@ export interface FileRouteTypes {
     | '/_shell/brain/skills'
     | '/_shell/brain/sources'
     | '/_shell/chats/$chatId'
-    | '/_shell/integrations/$integration'
+    | '/_shell/connectors/$integration'
     | '/_shell/projects/$projectId'
     | '/_shell/settings/ai-providers'
     | '/_shell/settings/appearance'
@@ -743,7 +743,7 @@ export interface FileRouteTypes {
     | '/_shell/agents/'
     | '/_shell/apps/'
     | '/_shell/brain/'
-    | '/_shell/integrations/'
+    | '/_shell/connectors/'
     | '/_shell/projects/'
     | '/_shell/settings/'
     | '/_shell/workflows/'
@@ -977,18 +977,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellChatsChatIdRouteImport
       parentRoute: typeof ShellRoute
     }
-    '/_shell/integrations/': {
-      id: '/_shell/integrations/'
-      path: '/integrations'
-      fullPath: '/integrations/'
-      preLoaderRoute: typeof ShellIntegrationsIndexRouteImport
+    '/_shell/connectors/': {
+      id: '/_shell/connectors/'
+      path: '/connectors'
+      fullPath: '/connectors/'
+      preLoaderRoute: typeof ShellConnectorsIndexRouteImport
       parentRoute: typeof ShellRoute
     }
-    '/_shell/integrations/$integration': {
-      id: '/_shell/integrations/$integration'
-      path: '/integrations/$integration'
-      fullPath: '/integrations/$integration'
-      preLoaderRoute: typeof ShellIntegrationsIntegrationRouteImport
+    '/_shell/connectors/$integration': {
+      id: '/_shell/connectors/$integration'
+      path: '/connectors/$integration'
+      fullPath: '/connectors/$integration'
+      preLoaderRoute: typeof ShellConnectorsIntegrationRouteImport
       parentRoute: typeof ShellRoute
     }
     '/_shell/projects/': {
@@ -1293,13 +1293,13 @@ interface ShellRouteChildren {
   ShellAgentsNewRoute: typeof ShellAgentsNewRoute
   ShellAppsAppRoute: typeof ShellAppsAppRouteWithChildren
   ShellChatsChatIdRoute: typeof ShellChatsChatIdRoute
-  ShellIntegrationsIntegrationRoute: typeof ShellIntegrationsIntegrationRoute
+  ShellConnectorsIntegrationRoute: typeof ShellConnectorsIntegrationRoute
   ShellProjectsProjectIdRoute: typeof ShellProjectsProjectIdRoute
   ShellWorkflowsWorkflowRoute: typeof ShellWorkflowsWorkflowRoute
   ShellWorkflowsRunsRoute: typeof ShellWorkflowsRunsRoute
   ShellAgentsIndexRoute: typeof ShellAgentsIndexRoute
   ShellAppsIndexRoute: typeof ShellAppsIndexRoute
-  ShellIntegrationsIndexRoute: typeof ShellIntegrationsIndexRoute
+  ShellConnectorsIndexRoute: typeof ShellConnectorsIndexRoute
   ShellProjectsIndexRoute: typeof ShellProjectsIndexRoute
   ShellWorkflowsIndexRoute: typeof ShellWorkflowsIndexRoute
   ShellAppsAppSettingsRoute: typeof ShellAppsAppSettingsRoute
@@ -1317,13 +1317,13 @@ const ShellRouteChildren: ShellRouteChildren = {
   ShellAgentsNewRoute: ShellAgentsNewRoute,
   ShellAppsAppRoute: ShellAppsAppRouteWithChildren,
   ShellChatsChatIdRoute: ShellChatsChatIdRoute,
-  ShellIntegrationsIntegrationRoute: ShellIntegrationsIntegrationRoute,
+  ShellConnectorsIntegrationRoute: ShellConnectorsIntegrationRoute,
   ShellProjectsProjectIdRoute: ShellProjectsProjectIdRoute,
   ShellWorkflowsWorkflowRoute: ShellWorkflowsWorkflowRoute,
   ShellWorkflowsRunsRoute: ShellWorkflowsRunsRoute,
   ShellAgentsIndexRoute: ShellAgentsIndexRoute,
   ShellAppsIndexRoute: ShellAppsIndexRoute,
-  ShellIntegrationsIndexRoute: ShellIntegrationsIndexRoute,
+  ShellConnectorsIndexRoute: ShellConnectorsIndexRoute,
   ShellProjectsIndexRoute: ShellProjectsIndexRoute,
   ShellWorkflowsIndexRoute: ShellWorkflowsIndexRoute,
   ShellAppsAppSettingsRoute: ShellAppsAppSettingsRoute,

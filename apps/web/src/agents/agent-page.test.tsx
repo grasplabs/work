@@ -1923,7 +1923,7 @@ describe("an agent's page", () => {
       ],
       asked: asked.slice(before).map((each) => each.slice(0, 4)),
     }).toStrictEqual({
-      suggested: [true, "/integrations/composio%3Ahubspot"],
+      suggested: [true, "/connectors/composio%3Ahubspot"],
       asked: [["app", "agent-1", "native:google", true]],
     });
   });

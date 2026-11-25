@@ -10,7 +10,7 @@ interface IntegrationsSearch {
 const Integrations = () => <AppsAsked open={Route.useSearch().app} />;
 
 /** The apps the companies asked Grasp to add (src/admin/integrations.tsx). */
-export const Route = createFileRoute("/integrations")({
+export const Route = createFileRoute("/connectors")({
   validateSearch: (search: Record<string, unknown>): IntegrationsSearch =>
     typeof search.app === "string" && search.app !== ""
       ? { app: search.app }

@@ -113,7 +113,7 @@ msgstr "{app}: run van {workflowId}"
 msgid "{app}'s model can't be read, so its calls get no answer."
 msgstr "Het model van {app} kan niet worden gelezen, dus de aanroepen krijgen geen antwoord."
 
-#: src/routes/_shell.integrations.$integration.tsx
+#: src/routes/_shell.connectors.$integration.tsx
 msgid "{app}'s tools"
 msgstr "De tools van {app}"
 
@@ -487,7 +487,7 @@ msgstr "{count, plural, one {één keer gezocht} other {# keer gezocht}}"
 msgid "{count, plural, one {Show # unchanged line} other {Show # unchanged lines}}"
 msgstr "{count, plural, one {# ongewijzigde regel tonen} other {# ongewijzigde regels tonen}}"
 
-#: src/routes/_shell.integrations.index.tsx
+#: src/routes/_shell.connectors.index.tsx
 msgid "{count, plural, one {Show the # app in {label}} other {Show all # in {label}}}"
 msgstr "{count, plural, one {De # app in {label} tonen} other {Alle # in {label} tonen}}"
 
@@ -1411,9 +1411,9 @@ msgstr "{share} van {source}"
 msgid "{share} of questions answered · 30 days"
 msgstr "{share} van de vragen beantwoord · 30 dagen"
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "{shown, plural, one {# integration shown} other {# integrations shown}}"
-msgstr "{shown, plural, one {# integratie getoond} other {# integraties getoond}}"
+#: src/routes/_shell.connectors.index.tsx
+msgid "{shown, plural, one {# connector shown} other {# connectors shown}}"
+msgstr "{shown, plural, one {# connector getoond} other {# connectoren getoond}}"
 
 #: src/workflows/listed-count.tsx
 msgid "{shown} entries or more"
@@ -2295,6 +2295,7 @@ msgid "Add a connection"
 msgstr "Koppeling toevoegen"
 
 #: src/agents/setup/apps-picker.tsx
+#: src/apps/app-integrations.tsx
 msgid "Add a connector"
 msgstr "Een connector toevoegen"
 
@@ -2346,7 +2347,7 @@ msgstr "Tijd toevoegen"
 msgid "Add a trigger"
 msgstr "Een trigger toevoegen"
 
-#: src/routes/_shell.integrations.index.tsx
+#: src/routes/_shell.connectors.index.tsx
 msgctxt "apps that can still be connected"
 msgid "Add an app"
 msgstr "App toevoegen"
@@ -2358,10 +2359,6 @@ msgstr "Een HTTP-verbinding toevoegen"
 #: src/apps/indexes-view.tsx
 msgid "Add an index"
 msgstr "Index toevoegen"
-
-#: src/apps/app-integrations.tsx
-msgid "Add an integration"
-msgstr "Een integratie toevoegen"
 
 #: src/settings/add-connection/words.ts
 msgid "Add another"
@@ -2489,7 +2486,7 @@ msgid "Added by hand"
 msgstr "Met de hand toegevoegd"
 
 #: src/apps/app-integrations.tsx
-msgctxt "why an integration is one of an App's"
+msgctxt "why a connector is one of an App's"
 msgid "Added by hand"
 msgstr "Met de hand toegevoegd"
 
@@ -3130,7 +3127,7 @@ msgstr "App {app}"
 
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.apps.$app.tsx
-#: src/routes/_shell.integrations.$integration.tsx
+#: src/routes/_shell.connectors.$integration.tsx
 msgid "App not found"
 msgstr "App niet gevonden"
 
@@ -3496,7 +3493,7 @@ msgstr "Toegang vragen voor deze app"
 msgid "Ask for it"
 msgstr "Doorgeven"
 
-#: src/routes/_shell.integrations.index.tsx
+#: src/routes/_shell.connectors.index.tsx
 msgid "Ask for the app you need, and an admin can add it."
 msgstr "Vraag de app aan die je nodig hebt, dan kan een beheerder hem toevoegen."
 
@@ -4362,8 +4359,8 @@ msgid "Changed whether an App's data goes to code outside Grasp"
 msgstr "Gewijzigd of de gegevens van een app naar code buiten Grasp gaan"
 
 #: src/activity/audit-words.ts
-msgid "Changed which integrations are offered"
-msgstr "Gewijzigd welke integraties worden aangeboden"
+msgid "Changed which connectors are offered"
+msgstr "Gewijzigd welke connectoren worden aangeboden"
 
 #: src/activity/audit-words.ts
 msgid "Changed who reaches Stephen in a place"
@@ -4655,7 +4652,7 @@ msgstr "Wissen"
 
 #: src/agents/setup/apps-picker.tsx
 #: src/frame/ui-words.tsx
-#: src/routes/_shell.integrations.index.tsx
+#: src/routes/_shell.connectors.index.tsx
 #: src/settings/add-connection/words.ts
 msgid "Clear search"
 msgstr "Zoekopdracht wissen"
@@ -4835,7 +4832,7 @@ msgctxt "a tool's state"
 msgid "Completed"
 msgstr "Voltooid"
 
-#: src/routes/_shell.integrations.index.tsx
+#: src/routes/_shell.connectors.index.tsx
 msgid "Composio's toolkits can't be listed right now. Try again shortly."
 msgstr "De toolkits van Composio kunnen nu niet worden getoond. Probeer het zo opnieuw."
 
@@ -4978,7 +4975,7 @@ msgstr "Koppel de apps waar je werk op draait"
 msgid "Connected"
 msgstr "Gekoppeld"
 
-#: src/routes/_shell.integrations.index.tsx
+#: src/routes/_shell.connectors.index.tsx
 msgctxt "apps that are connected"
 msgid "Connected"
 msgstr "Gekoppeld"
@@ -5093,6 +5090,20 @@ msgstr "Verbindingen"
 #: src/apps/app-settings.tsx
 msgid "Connections in use"
 msgstr "Gebruikte verbindingen"
+
+#: src/apps/resource-bindings.tsx
+#: src/routes/_shell.connectors.$integration.tsx
+msgid "Connector"
+msgstr "Connector"
+
+#: src/apps/app-integrations.tsx
+#: src/connections/integrations-sidebar.tsx
+#: src/connections/integrations-skeleton.tsx
+#: src/frame/app-sidebar.tsx
+#: src/routes/_shell.connectors.$integration.tsx
+#: src/routes/_shell.connectors.index.tsx
+msgid "Connectors"
+msgstr "Connectoren"
 
 #: src/connections/integration-item.tsx
 msgid "Connects with a key"
@@ -7933,7 +7944,7 @@ msgid "Grasp can’t say how far it got just now. It goes on all the same."
 msgstr "Grasp kan nu niet zeggen hoe ver het is. Het gaat toch door."
 
 #: src/connections/request-app-dialog.tsx
-msgctxt "“Requested” is the name of a section on the Integrations page."
+msgctxt "“Requested” is the name of a section on the Connectors page."
 msgid "Grasp checks what it takes to connect it. You find it under Requested."
 msgstr "Grasp zoekt uit wat er nodig is om hem te koppelen. Je vindt hem onder Aangevraagd."
 
@@ -8087,7 +8098,7 @@ msgid "Grasp staff access"
 msgstr "Toegang van Grasp-medewerkers"
 
 #: src/connections/integration-facts.ts
-#: src/routes/_shell.integrations.index.tsx
+#: src/routes/_shell.connectors.index.tsx
 msgid "Grasp staff can't connect accounts or change what is offered here: that is for the organization's own people."
 msgstr "Grasp-medewerkers kunnen hier geen accounts koppelen of wijzigen wat wordt aangeboden: dat is aan de eigen mensen van de organisatie."
 
@@ -8852,20 +8863,6 @@ msgstr "Instructies"
 msgid "Instructions for this App"
 msgstr "Instructies voor deze App"
 
-#: src/apps/resource-bindings.tsx
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "Integration"
-msgstr "Integratie"
-
-#: src/apps/app-integrations.tsx
-#: src/connections/integrations-sidebar.tsx
-#: src/connections/integrations-skeleton.tsx
-#: src/frame/app-sidebar.tsx
-#: src/routes/_shell.integrations.$integration.tsx
-#: src/routes/_shell.integrations.index.tsx
-msgid "Integrations"
-msgstr "Integraties"
-
 #: src/activity/audit-event.tsx
 msgid "Integrity"
 msgstr "Integriteit"
@@ -9289,7 +9286,7 @@ msgid "Its code can't be read"
 msgstr "De code kan niet worden gelezen"
 
 #: src/apps/app-integrations.tsx
-msgctxt "why an integration is one of an App's"
+msgctxt "why a connector is one of an App's"
 msgid "Its code uses it"
 msgstr "Zijn code gebruikt hem"
 
@@ -10055,8 +10052,8 @@ msgid "Loading {many}"
 msgstr "{many} laden"
 
 #: src/connections/integrations-skeleton.tsx
-msgid "Loading integrations"
-msgstr "Integraties laden"
+msgid "Loading connectors"
+msgstr "Connectoren laden"
 
 #: src/frame/ui-words.tsx
 msgid "Loading more {many}"
@@ -10428,8 +10425,8 @@ msgid "members of the team in {field}"
 msgstr "leden van het team in {field}"
 
 #: src/connections/app/words.ts
-msgid "Members see it in Integrations."
-msgstr "Leden zien het bij Integraties."
+msgid "Members see it in Connectors."
+msgstr "Leden zien het bij Connectoren."
 
 #: src/brain/brain-section.tsx
 #: src/brain/memories-page.tsx
@@ -11124,7 +11121,7 @@ msgstr "Geen app heet ‘{asked}’"
 msgid "No apps added yet."
 msgstr "Nog geen apps toegevoegd."
 
-#: src/routes/_shell.integrations.index.tsx
+#: src/routes/_shell.connectors.index.tsx
 msgid "No apps match your search"
 msgstr "Geen apps gevonden voor je zoekopdracht"
 
@@ -11175,6 +11172,14 @@ msgstr "Nog geen code"
 #: src/brain/brain.ts
 msgid "No connector yet"
 msgstr "Nog geen connector"
+
+#: src/apps/app-integrations.tsx
+msgid "No connectors match your search."
+msgstr "Geen connectoren komen overeen met je zoekopdracht."
+
+#: src/apps/app-integrations.tsx
+msgid "No connectors yet."
+msgstr "Nog geen connectoren."
 
 #: src/frame/ui-words.tsx
 msgid "No date"
@@ -11227,14 +11232,6 @@ msgstr "Nog geen doelen."
 #: src/routes/_shell.settings.brain.tsx
 msgid "No group"
 msgstr "Geen groep"
-
-#: src/apps/app-integrations.tsx
-msgid "No integrations match your search."
-msgstr "Geen integraties komen overeen met je zoekopdracht."
-
-#: src/apps/app-integrations.tsx
-msgid "No integrations yet."
-msgstr "Nog geen integraties."
 
 #: src/agents/agents-overview.tsx
 msgid "No job written yet"
@@ -11550,8 +11547,8 @@ msgid "None live"
 msgstr "Geen live"
 
 #: src/apps/resource-bindings.tsx
-msgid "None of the App's integration permissions serves {contract} with every action it declares. Grant one first."
-msgstr "Geen van de integratierechten van de app bedient {contract} met elke actie die hij declareert. Verleen er eerst een."
+msgid "None of the App's connector permissions serves {contract} with every action it declares. Grant one first."
+msgstr "Geen van de connectorrechten van de app bedient {contract} met elke actie die hij declareert. Verleen er eerst een."
 
 #: src/interview/read-back.tsx
 msgid "None of this is right"
@@ -11686,7 +11683,7 @@ msgid "Not every choice could be checked: some may be missing from the list."
 msgstr "Niet elke keuze kon worden gecontroleerd: er kunnen er in de lijst ontbreken."
 
 #: src/frame/page-states.tsx
-#: src/routes/_shell.integrations.$integration.tsx
+#: src/routes/_shell.connectors.$integration.tsx
 #: src/routes/decisions.$decision.tsx
 msgid "Not found"
 msgstr "Niet gevonden"
@@ -14352,7 +14349,7 @@ msgstr "Opnieuw aanvragen"
 msgid "Request an app"
 msgstr "Een app aanvragen"
 
-#: src/routes/_shell.integrations.index.tsx
+#: src/routes/_shell.connectors.index.tsx
 msgid "Request app"
 msgstr "App aanvragen"
 
@@ -15186,7 +15183,7 @@ msgid "Search {name}"
 msgstr "{name} doorzoeken"
 
 #: src/agents/setup/apps-picker.tsx
-#: src/routes/_shell.integrations.index.tsx
+#: src/routes/_shell.connectors.index.tsx
 msgid "Search apps"
 msgstr "Apps zoeken"
 
@@ -15195,6 +15192,11 @@ msgstr "Apps zoeken"
 msgid "Search chats"
 msgstr "Chats doorzoeken"
 
+#: src/apps/app-integrations.tsx
+#: src/routes/_shell.connectors.index.tsx
+msgid "Search connectors"
+msgstr "Connectoren doorzoeken"
+
 #: src/activity/audit-log.tsx
 msgid "Search events by person or ID"
 msgstr "Gebeurtenissen zoeken op persoon of ID"
@@ -15202,11 +15204,6 @@ msgstr "Gebeurtenissen zoeken op persoon of ID"
 #: src/apps/indexes-view.tsx
 msgid "Search in {searched}"
 msgstr "Zoeken in {searched}"
-
-#: src/apps/app-integrations.tsx
-#: src/routes/_shell.integrations.index.tsx
-msgid "Search integrations"
-msgstr "Integraties doorzoeken"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Search members"
@@ -17201,8 +17198,8 @@ msgid "The App has no permission to read the platform's statistics. Grant one fi
 msgstr "De app heeft geen recht om de platformstatistieken te lezen. Verleen er eerst een."
 
 #: src/apps/resource-bindings.tsx
-msgid "The App has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always."
-msgstr "De app heeft te veel integraties om ze op deze pagina allemaal te controleren, dus deze koppeling is niet gecontroleerd. Het volgende verzoek wordt zoals altijd gecontroleerd."
+msgid "The App has too many connectors to check them all on this page, so this binding wasn't checked. Its next request is checked as always."
+msgstr "De app heeft te veel connectoren om ze op deze pagina allemaal te controleren, dus deze koppeling is niet gecontroleerd. Het volgende verzoek wordt zoals altijd gecontroleerd."
 
 #: src/apps/app-workflows.tsx
 msgid "The App starts no workflow of its own."
@@ -17213,12 +17210,12 @@ msgid "The App's actions can't use it until an admin binds it."
 msgstr "De acties van de app kunnen hem pas gebruiken als een beheerder hem koppelt."
 
 #: src/apps/resource-bindings.tsx
-msgid "The App's actions reach a model, an integration or knowledge only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
-msgstr "De acties van de app bereiken een model, een integratie of kennis alleen via een koppeling die een beheerder hier goedkeurt. Iets declareren verleent niets, en een koppeling intrekken stopt het volgende verzoek erdoor."
+msgid "The App's actions reach a model, a connector or knowledge only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
+msgstr "De acties van de app bereiken een model, een connector of kennis alleen via een koppeling die een beheerder hier goedkeurt. Iets declareren verleent niets, en een koppeling intrekken stopt het volgende verzoek erdoor."
 
 #: src/apps/resource-bindings.tsx
-msgid "The App's actions reach a model, an integration or knowledge only through a binding an admin of your organization approves."
-msgstr "De acties van de app bereiken een model, een integratie of kennis alleen via een koppeling die een beheerder van je organisatie goedkeurt."
+msgid "The App's actions reach a model, a connector or knowledge only through a binding an admin of your organization approves."
+msgstr "De acties van de app bereiken een model, een connector of kennis alleen via een koppeling die een beheerder van je organisatie goedkeurt."
 
 #: src/apps/access-view.tsx
 #: src/apps/draft-changes.tsx
@@ -17345,13 +17342,13 @@ msgstr "Het bedrijfsproces dat {name} dient"
 msgid "The catalog can’t be read right now, so nothing can be added. Try again in a moment."
 msgstr "De catalogus kan nu niet worden gelezen, dus er kan niets worden toegevoegd. Probeer het zo meteen opnieuw."
 
-#: src/routes/_shell.integrations.$integration.tsx
+#: src/routes/_shell.connectors.$integration.tsx
 msgid "The catalog doesn't list {app}, so its tools can't be shown."
 msgstr "De catalogus vermeldt {app} niet, dus de tools kunnen niet worden getoond."
 
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "The catalog of integrations couldn't be read, so this page shows only what your accounts say about it."
-msgstr "De catalogus van integraties kon niet worden gelezen, dus deze pagina toont alleen wat je accounts erover zeggen."
+#: src/routes/_shell.connectors.$integration.tsx
+msgid "The catalog of connectors couldn't be read, so this page shows only what your accounts say about it."
+msgstr "De catalogus van connectoren kon niet worden gelezen, dus deze pagina toont alleen wat je accounts erover zeggen."
 
 #: src/apps/app-workflows.tsx
 msgid "The change goes into the App's draft, which declares what the workflow's live version has. Once you publish the draft, the App starts that workflow's live version by this name. Starting it still takes the App's own permission on the workflow, which an admin grants."
@@ -20123,7 +20120,7 @@ msgstr "Welke AI"
 msgid "Which AI should I think with?"
 msgstr "Met welke AI zal ik denken?"
 
-#: src/routes/_shell.integrations.$integration.tsx
+#: src/routes/_shell.connectors.$integration.tsx
 msgid "Which Apps and agents hold permissions"
 msgstr "Welke Apps en agents rechten hebben"
 

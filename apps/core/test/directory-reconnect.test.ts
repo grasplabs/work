@@ -177,7 +177,7 @@ describe("connecting the directory again from Settings", () => {
       staff: "role.forbidden",
       suspended: "auth.unauthenticated",
       elsewhere: {
-        page: "/integrations",
+        page: "/connectors",
         connection: null,
         error: "connection.wrong_account",
       },
@@ -364,7 +364,7 @@ describe("connecting the directory again from Settings", () => {
       read: { connectionId: now?.connectionId, failure: now?.failure },
     }).toStrictEqual({
       landed: {
-        page: "/integrations",
+        page: "/connectors",
         connection: null,
         error: "connection.scopes_refused",
       },
@@ -385,7 +385,7 @@ describe("connecting the directory again from Settings", () => {
     }).toStrictEqual({
       first: true,
       again: {
-        page: "/integrations",
+        page: "/connectors",
         connection: null,
         error: "connection.already_connected",
       },
@@ -437,12 +437,12 @@ describe("connecting the directory again from Settings", () => {
     }).toStrictEqual({
       outcomes: {
         notAdmin: {
-          page: "/integrations",
+          page: "/connectors",
           connection: null,
           error: "connection.directory_unreadable",
         },
         throttled: {
-          page: "/integrations",
+          page: "/connectors",
           connection: null,
           error: "connection.directory_unchecked",
         },

@@ -71,7 +71,7 @@ describe("an organization's page", () => {
       "Workflows",
       "Platform",
       "Setup",
-      "Integrations",
+      "Connectors",
       "AI use",
       "Hours",
       "Records",
