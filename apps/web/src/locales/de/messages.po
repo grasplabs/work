@@ -13579,7 +13579,7 @@ msgstr "Drücken oder F2 drücken zum Umbenennen"
 
 #: src/frame/ui-words.tsx
 msgid "Press Space or Enter to pick it up, the arrow keys to move it, Space or Enter to put it down, or Escape to put it back."
-msgstr "Drücken Sie die Leertaste oder Eingabe zum Aufnehmen, die Pfeiltasten zum Verschieben, die Leertaste oder Eingabe zum Ablegen oder Escape zum Zurücklegen."
+msgstr "Drücken Sie die Leertaste oder die Eingabetaste zum Aufnehmen, die Pfeiltasten zum Verschieben, die Leertaste oder die Eingabetaste zum Ablegen oder Esc zum Zurücklegen."
 
 #: src/frame/ui-words.tsx
 msgid "Presses \"{words}\""

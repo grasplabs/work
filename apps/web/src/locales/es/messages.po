@@ -13449,7 +13449,7 @@ msgstr "Elegido en el chat"
 
 #: src/frame/ui-words.tsx
 msgid "Picked up {name}, position {position} of {total}."
-msgstr "{name} levantado, posición {position} de {total}."
+msgstr "Se levantó {name}, posición {position} de {total}."
 
 #: src/onboarding/interviews-progress.tsx
 msgid "pieces of work found"
@@ -13760,11 +13760,11 @@ msgstr "Propósito"
 
 #: src/frame/ui-words.tsx
 msgid "Put {name} back at position {position} of {total}."
-msgstr "{name} devuelto a la posición {position} de {total}."
+msgstr "Se devolvió {name} a la posición {position} de {total}."
 
 #: src/frame/ui-words.tsx
 msgid "Put {name} down at position {position} of {total}."
-msgstr "{name} soltado en la posición {position} de {total}."
+msgstr "Se soltó {name} en la posición {position} de {total}."
 
 #: src/interview/read-back.tsx
 msgid "Put back"
