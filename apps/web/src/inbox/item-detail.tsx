@@ -164,7 +164,6 @@ const ConfirmedAct = ({
               await act.onPress?.();
               setOpen(false);
             }}
-            size="sm"
             variant={confirm.variant ?? "destructive"}
           >
             {act.label}

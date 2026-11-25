@@ -63,8 +63,8 @@ import {
 import { Text } from "@grasp-os/ui/components/text";
 import { Textarea } from "@grasp-os/ui/components/textarea";
 import {
+  CableIcon,
   CalendarIcon,
-  GlobeIcon,
   Icon,
   LinkIcon,
   MailIcon,
@@ -187,7 +187,7 @@ const kindIcons: Record<WorkflowTrigger["kind"], IconData> = {
   schedule: CalendarIcon,
   email: MailIcon,
   webhook: LinkIcon,
-  connector: GlobeIcon,
+  connector: CableIcon,
 };
 
 /** A trigger's mark: its kind's icon. */

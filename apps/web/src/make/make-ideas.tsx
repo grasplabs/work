@@ -7,7 +7,7 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
-import { Icon, LayoutGridIcon, WorkflowIcon } from "@grasp-os/ui/lib/icons";
+import { AppWindowIcon, Icon, WorkflowIcon } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
 
@@ -90,7 +90,7 @@ export const BlueprintIdeas = ({
             ? t`Make an App from the ${name} blueprint.`
             : t`Make an App from the ${name} blueprint: ${description}`,
       }))}
-      icon={LayoutGridIcon}
+      icon={AppWindowIcon}
       onPick={onPick}
     />
   );

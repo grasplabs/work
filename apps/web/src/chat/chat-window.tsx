@@ -298,7 +298,6 @@ const RenameChatDialog = ({
           <Button
             disabled={!valid || trimmed === chat.title || busy}
             form={formId}
-            size="sm"
             type="submit"
           >
             <Trans>Rename</Trans>

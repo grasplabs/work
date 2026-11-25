@@ -22,7 +22,7 @@ import { KeyValueList } from "@grasp-os/ui/components/key-value";
 import { Text } from "@grasp-os/ui/components/text";
 import { useScrollEdges } from "@grasp-os/ui/hooks/use-scroll-edges";
 import { codeStyles, focusRing } from "@grasp-os/ui/lib/styles";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { font, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
@@ -70,9 +70,21 @@ const styles = stylex.create({
   },
   // The exact input on a code block's ground, every line drawn: long
   // ones wrap, and what still overflows scrolls inside it, not the page.
+  // Set as Damsko's CodeBlockContent sets its code (its size, line, and
+  // room: 12px, and its line bar's 2px at the start), so it reads as the
+  // reference's block without one element per line.
   exact: {
+    boxSizing: "border-box",
     width: "100%",
+    minWidth: 0,
     margin: 0,
+    paddingBlock: space["3"],
+    paddingInlineStart: `calc(${space["3"]} + ${size.codeBlockBarWidth})`,
+    paddingInlineEnd: space["3"],
+    fontFamily: font.mono,
+    fontSize: font.textSm,
+    lineHeight: font.codeBlockLine,
+    tabSize: 2,
     whiteSpace: "pre-wrap",
     overflowWrap: "anywhere",
     overflowX: "auto",
@@ -334,19 +346,17 @@ export const ExactInput = ({
       </Button>
       {open ? (
         // All of it, in a plain block: what is confirmed is never folded
-        // away, and a code block draws only so many lines.
+        // away, and its text is exactly what Confirm sends. Damsko's
+        // CodeBlock could draw it whole (`maxLines={false}`), but as an
+        // element per line, highlighted: about 1.3 s more to open a request
+        // at connect's 64 KiB.
         <pre
           aria-label={scrolls ? name : undefined}
           id={id}
           ref={scroller}
           role={scrolls ? "region" : undefined}
           tabIndex={scrolls ? 0 : undefined}
-          {...stylex.props(
-            codeStyles.surface,
-            codeStyles.text,
-            styles.exact,
-            focusRing
-          )}
+          {...stylex.props(codeStyles.surface, styles.exact, focusRing)}
         >
           {inputOf(input)}
         </pre>

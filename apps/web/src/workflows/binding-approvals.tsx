@@ -213,6 +213,7 @@ const OfferedChoice = ({
           void onApprove(alias, choice.target);
         }}
         size="sm"
+        variant="success"
       >
         {t`Approve`}
       </Button>
@@ -293,6 +294,7 @@ const DecidersChoice = ({
             });
           }}
           size="sm"
+          variant="success"
         >
           {t`Approve`}
         </Button>

@@ -1,4 +1,6 @@
 import {
+  AppWindowIcon,
+  CircleHelpIcon,
   FileDocIcon,
   RocketIcon,
   UsersIcon,
@@ -6,7 +8,6 @@ import {
 } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
 
-import { AppWindowIcon, CircleHelpIcon } from "../frame/sidebar-icons.ts";
 import type { Folder, Group, Note } from "./brain.ts";
 
 // The parts of the brain, as the prototype has them
