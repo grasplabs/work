@@ -10,7 +10,7 @@ import {
 } from "@grasp-os/shared/brain-report";
 import { channelPlatformOf } from "@grasp-os/shared/channels";
 import { connectionCallbackPath } from "@grasp-os/shared/connect";
-import { devResetPath } from "@grasp-os/shared/dev-reset";
+import { devInterviewLinkPath, devResetPath } from "@grasp-os/shared/dev-reset";
 import { errorReportPath } from "@grasp-os/shared/error-reports";
 import { internalErrors, requestErrors } from "@grasp-os/shared/errors";
 import { requestIdHeader } from "@grasp-os/shared/http";
@@ -69,7 +69,10 @@ import { docsResponse } from "./docs.ts";
 import { errorReportResponse } from "./error-reports.ts";
 import { errorResponse } from "./errors.ts";
 import { mailIngressResponse } from "./mail-ingress.ts";
-import { devResetResponse } from "./onboarding/dev-reset.ts";
+import {
+  devInterviewLinkResponse,
+  devResetResponse,
+} from "./onboarding/dev-reset.ts";
 import { hearResponse } from "./onboarding/hear.ts";
 import { interviewTurnResponse } from "./onboarding/interview.ts";
 import { labResponse } from "./onboarding/lab.ts";
@@ -345,6 +348,7 @@ const pathHandlers: ReadonlyMap<
   [errorReportPath, errorReportResponse],
   [onboardingSummaryPath, onboardingSummaryResponse],
   [devResetPath, devResetResponse],
+  [devInterviewLinkPath, devInterviewLinkResponse],
   [aiStatusReportPath, aiStatusReportResponse],
   [brainReportPath, brainReportResponse],
   [brainActionPath, brainActionResponse],

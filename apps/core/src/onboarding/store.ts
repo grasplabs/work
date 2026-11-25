@@ -2158,6 +2158,23 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
+   * On a local stack only (`vp run dev`): the link path of whoever has
+   * `address` on the list, or else of noor@acme.test, or else of the
+   * first person on it (dev-reset.ts `devInterviewLinkResponse`). None
+   * anywhere else, or with nobody on the list.
+   */
+  async devLinkFor(address: string): Promise<string | null> {
+    if (this.env.DEV_SKIP_ROUTER_SECRET !== "true") {
+      return null;
+    }
+    const listed = this.#roster()?.people ?? [];
+    const named = (to: string) =>
+      listed.find(({ email }) => foldedAddress(email) === foldedAddress(to));
+    const person = named(address) ?? named("noor@acme.test") ?? listed[0];
+    return person === undefined ? null : await this.linkOf(person.id);
+  }
+
+  /**
    * What a link opens, for the signed-in `caller` (links.ts): the account
    * it belongs to, or, before it belongs to any, one whose address the
    * company's sign-in verified is the one it was sent to (`#holds`). The
@@ -2177,7 +2194,11 @@ export class Onboarding extends DurableObject<Env> {
         return opened;
       }
       const { person, link } = opened.value;
-      if (link.account === null || link.openedAt === null) {
+      // On a local stack, the account that opened it last (`#heldAt`).
+      const takenOver =
+        this.env.DEV_SKIP_ROUTER_SECRET === "true" &&
+        link.account !== caller.account;
+      if (link.account === null || link.openedAt === null || takenOver) {
         // Theirs from this moment, in the same transaction that found the
         // address theirs (`#holds`).
         this.#db
@@ -10127,6 +10148,12 @@ export class Onboarding extends DurableObject<Env> {
   ): string | null {
     if (caller.account === "") {
       return null;
+    }
+    // On a local stack only (`vp run dev`): whoever is signed in holds
+    // every link, so whoever works on the interview opens it under any
+    // account (`devLinkFor`). Never set anywhere else.
+    if (this.env.DEV_SKIP_ROUTER_SECRET === "true") {
+      return link.sentTo ?? foldedAddress(listed);
     }
     if (link.account !== null) {
       return link.account === caller.account ? (link.sentTo ?? "") : null;

@@ -3,6 +3,7 @@ import { authErrors, requestErrors } from "@grasp-os/shared/errors";
 import { identify } from "../auth/identity.ts";
 import { errorResponse } from "../errors.ts";
 import { isLocalDevRequest } from "../router-secret.ts";
+import { interviewCaller } from "./interview-caller.ts";
 import { onboardingStore } from "./store.ts";
 
 // The onboarding started over, `POST /api/dev/onboarding/start-over`: on
@@ -43,4 +44,43 @@ export const devResetResponse = async (
   }
   const done = await onboardingStore(env).startOverLocally();
   return done ? new Response(null, { status: 204 }) : notFound(requestId);
+};
+
+/**
+ * `POST /api/dev/onboarding/interview-link`, on a local stack only: the
+ * path of the interview link of whoever is signed in there, or else of
+ * noor@acme.test, or else of the first person on the list, so the page
+ * opens `/interview#dev` as that link (the web's routes/interview.tsx)
+ * however often the onboarding started over or was seeded again. On a
+ * local stack any account signed in opens any link (the store's
+ * `#heldAt`). On a deployed core the route isn't there.
+ */
+export const devInterviewLinkResponse = async (
+  request: Request,
+  env: Env,
+  requestId: string
+): Promise<Response> => {
+  const fetchSite = request.headers.get("sec-fetch-site");
+  if (
+    !isLocalDevRequest(request, env) ||
+    request.method !== "POST" ||
+    (fetchSite !== null && !sameSiteFetches.has(fetchSite))
+  ) {
+    return notFound(requestId);
+  }
+  const caller = await interviewCaller(env, request.headers);
+  if (typeof caller === "string") {
+    return errorResponse(
+      401,
+      authErrors.create("auth.unauthenticated"),
+      requestId
+    );
+  }
+  const path = await onboardingStore(env).devLinkFor(caller.address ?? "");
+  return path === null
+    ? notFound(requestId)
+    : Response.json(
+        { path },
+        { headers: { "referrer-policy": "no-referrer" } }
+      );
 };
