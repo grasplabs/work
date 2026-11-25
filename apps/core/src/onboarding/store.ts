@@ -10290,6 +10290,10 @@ export class Onboarding extends DurableObject<Env> {
 
   /** Counts a call on someone's link; false past `linkCallsPerMinute`. */
   #withinLimit(person: string, now: string): boolean {
+    // A local stack (`vp run dev`) has no limit: whoever tests clicks fast.
+    if (this.env.DEV_SKIP_ROUTER_SECRET === "true") {
+      return true;
+    }
     const minute = now.slice(0, 16);
     const calls = this.#calls.get(person);
     const count = calls?.minute === minute ? calls.count + 1 : 1;
