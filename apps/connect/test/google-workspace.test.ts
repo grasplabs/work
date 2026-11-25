@@ -1649,6 +1649,7 @@ describe("the Google Workspace connector's Sheets tools", () => {
         sheets: [
           { properties: { title: sheetNames[1], index: 1 } },
           { properties: { title: sheetNames[0], index: 0 } },
+          { properties: { title: sheetNames[2], index: 2 } },
         ],
       },
       provenance: [fileIds.sheet],
@@ -1720,6 +1721,20 @@ describe("the Google Workspace connector's Sheets tools", () => {
     const [, read] = requests();
     expect(read?.search.getAll("ranges")).toStrictEqual(ranges);
     expect(read?.query.includeGridData).toBe("true");
+  });
+
+  it("answer no more than a thousand rows across the ranges asked for", async () => {
+    const connection = await connected();
+    const [register, , ledger] = sheetNames;
+    await expect(
+      toolError(
+        call(connection, "spreadsheets.get", {
+          driveId: financeDrive,
+          spreadsheetId: fileIds.sheet,
+          ranges: [`'${register}'!A1:D3`, `'${ledger}'!A:A`],
+        })
+      )
+    ).resolves.toMatchObject({ error: { code: "too_large" } });
   });
 
   it("read nothing of another drive's file, or a file that isn't a spreadsheet, and pass on a range Sheets can't read as invalid", async () => {

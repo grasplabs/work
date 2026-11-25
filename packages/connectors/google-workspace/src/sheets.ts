@@ -22,6 +22,12 @@ const spreadsheet = `${sheetsHost}/v4/spreadsheets/{spreadsheetId}`;
 
 const spreadsheetMimeType = "application/vnd.google-apps.spreadsheet";
 
+/**
+ * The most rows a read answers, across its ranges: a range Sheets reads
+ * whole (`'Invoices'`, `A:Z`) can't fill the model's context.
+ */
+const maxRows = 1000;
+
 const sheetsFields =
   "spreadsheetId,properties.title,sheets.properties(title,index)";
 const gridFields =
@@ -83,7 +89,7 @@ const spreadsheetAnswer = v.object({
 export const sheetsTools: Readonly<Record<string, ConnectorTool>> = {
   "spreadsheets.get": tool({
     description:
-      "Reads a Google spreadsheet in a shared drive: its sheets, and with ranges the cells they hold, row by row. A range is A1 notation with its sheet's name in single quotes (a quote in it doubled): 'Invoices'!A1:F200. Ask for the rows you need. A cell gives its value (effectiveValue) and what the sheet shows (formattedValue), which is how a day or a time reads right.",
+      "Reads a Google spreadsheet in a shared drive: its sheets, and with ranges the cells they hold, row by row. A range is A1 notation with its sheet's name in single quotes (a quote in it doubled): 'Invoices'!A1:F200. Ask for the rows you need: a read answers at most 1000 rows across its ranges. A cell gives its value (effectiveValue) and what the sheet shows (formattedValue), which is how a day or a time reads right.",
     args: {
       driveId: driveIdArg,
       spreadsheetId: v.string().min(1).max(1024),
@@ -117,6 +123,15 @@ export const sheetsTools: Readonly<Record<string, ConnectorTool>> = {
         throw new ToolError("This drive has no such spreadsheet", {
           code: "not_found",
         });
+      }
+      const rows = (answered.sheets ?? [])
+        .flatMap(({ data = [] }) => data)
+        .reduce((count, { rowData = [] }) => count + rowData.length, 0);
+      if (rows > maxRows) {
+        throw new ToolError(
+          `The ranges hold ${rows} rows, and a read answers at most ${maxRows}: ask for fewer`,
+          { code: "too_large" }
+        );
       }
       return answered;
     },

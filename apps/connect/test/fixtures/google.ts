@@ -503,7 +503,7 @@ export const contentOf = (id: string, exportType: string | null) => {
 };
 
 /** The spreadsheet's sheets, as Sheets lists them: not in their order. */
-export const sheetNames = ["Invoices", "Ben's notes"] as const;
+export const sheetNames = ["Invoices", "Ben's notes", "Ledger"] as const;
 
 /** The spreadsheet `id`'s metadata, as Sheets answers it. */
 export const spreadsheet = (id: string) => ({
@@ -514,6 +514,7 @@ export const spreadsheet = (id: string) => ({
       properties: { sheetId: 712_904_388, title: sheetNames[1], index: 1 },
     },
     { properties: { sheetId: 0, title: sheetNames[0], index: 0 } },
+    { properties: { sheetId: 118_204_771, title: sheetNames[2], index: 2 } },
   ],
   spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${id}/edit`,
 });
@@ -562,6 +563,10 @@ export const sheetGrid: Record<string, object[][]> = {
     ],
   ],
   [sheetNames[1]]: [[textCell("Chase 0041 on Friday")]],
+  // More rows than a read may answer (sheets.ts `maxRows`).
+  [sheetNames[2]]: Array.from({ length: 1001 }, (_, row) => [
+    textCell(`Entry ${row + 1}`),
+  ]),
 };
 
 /** Google's error answers. */
