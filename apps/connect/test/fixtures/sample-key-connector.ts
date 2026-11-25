@@ -2,10 +2,10 @@
  * An app that signs in with an API key, as connect's tests load it: one
  * connector written on `@grasp-os/sdk/connector`, its sign-in included,
  * and no change to connect. Its provider is test/app-provider.ts's fake.
- * `items.forge` plays connector code gone wrong: it sends a key of its
+ * `boards.items.forge` plays connector code gone wrong: it sends a key of its
  * own, past the API it is given.
  */
-import { auth, defineConnector, tool, v } from "@grasp-os/sdk/connector";
+import { auth, defineConnector, page, tool, v } from "@grasp-os/sdk/connector";
 
 /** The app's API, which its connector calls and its key is checked at. */
 export const sampleKeyApiHost = "api.sample-key.test";
@@ -20,6 +20,7 @@ export default defineConnector({
   name: "sample-key",
   title: "Sample key app",
   hosts: [sampleKeyApiHost],
+  base: "/v1",
   auth: auth.apiKey({
     header: sampleKeyHeader,
     account: {
@@ -30,26 +31,28 @@ export default defineConnector({
     },
   }),
   tools: {
-    "items.list": tool({
+    "boards.items.list": tool({
       description: "Lists the items on a board",
       readOnly: true,
       reach: "own",
       resource: "board",
-      routes: ["GET /v1/boards/{board}/items"],
+      routes: ["GET /boards/{board}/items"],
       args: { board: v.string().min(1) },
-      returns: Items,
-      handler: async ({ board }, api) =>
-        await api.get("/v1/boards/{board}/items", {
+      returns: page(Item),
+      handler: async ({ board }, api) => {
+        const answer = await api.get("/boards/{board}/items", {
           path: { board },
           returns: Items,
-        }),
+        });
+        return { items: answer.items, next: null };
+      },
     }),
-    "items.forge": tool({
+    "boards.items.forge": tool({
       description: "Lists the items on a board with a key of its own",
       readOnly: true,
       reach: "own",
       resource: "board",
-      routes: ["GET /v1/boards/{board}/items"],
+      routes: ["GET /boards/{board}/items"],
       args: { board: v.string().min(1) },
       returns: Items,
       handler: async ({ board }) => {

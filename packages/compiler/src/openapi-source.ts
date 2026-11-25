@@ -1,4 +1,5 @@
 import type { ValueDescriptor } from "@grasp-os/runtime/app";
+import type { ToolReach } from "@grasp-os/shared/connect";
 
 import { readSpec } from "./openapi.ts";
 import type { Spec, SpecAuth, SpecOperation } from "./openapi.ts";
@@ -51,53 +52,66 @@ const scalarOf = (descriptor: ValueDescriptor): string | undefined => {
     : undefined;
 };
 
-/** The builder call of a descriptor's own kind, its modifiers aside. */
-const builderOf = (descriptor: ValueDescriptor, indent: string): string => {
-  const scalar = scalarOf(descriptor);
-  if (scalar !== undefined) {
-    return scalar;
-  }
-  // oxlint-disable no-use-before-define -- what a value holds are values
-  if (descriptor.kind === "array") {
-    return `v.array(${valueOf(descriptor.item, indent)})`;
-  }
-  if (descriptor.kind === "record") {
-    return `v.record(${valueOf(descriptor.value, indent)})`;
-  }
-  if (descriptor.kind === "union") {
-    const members = descriptor.members.map((member) => valueOf(member, indent));
-    return `v.union(${members.join(", ")})`;
-  }
-  if (descriptor.kind === "object") {
-    return `v.object(${shapeOf(descriptor.fields, indent)})`;
-  }
-  // oxlint-enable no-use-before-define
-  throw new Error(`A spec makes no ${descriptor.kind}.`);
+/**
+ * Writes descriptors as builder calls. A descriptor in `named` is written
+ * as its name instead: a page's item, which the answer holds and the
+ * tool's `returns` names too.
+ */
+const writer = (named: ReadonlyMap<ValueDescriptor, string>) => {
+  const builderOf = (descriptor: ValueDescriptor, indent: string): string => {
+    const scalar = scalarOf(descriptor);
+    if (scalar !== undefined) {
+      return scalar;
+    }
+    // oxlint-disable no-use-before-define -- what a value holds are values
+    if (descriptor.kind === "array") {
+      return `v.array(${valueOf(descriptor.item, indent)})`;
+    }
+    if (descriptor.kind === "record") {
+      return `v.record(${valueOf(descriptor.value, indent)})`;
+    }
+    if (descriptor.kind === "union") {
+      const members = descriptor.members.map((member) =>
+        valueOf(member, indent)
+      );
+      return `v.union(${members.join(", ")})`;
+    }
+    if (descriptor.kind === "object") {
+      return `v.object(${shapeOf(descriptor.fields, indent)})`;
+    }
+    // oxlint-enable no-use-before-define
+    throw new Error(`A spec makes no ${descriptor.kind}.`);
+  };
+  const valueOf = (descriptor: ValueDescriptor, indent: string): string => {
+    const name = named.get(descriptor);
+    if (name !== undefined) {
+      return name;
+    }
+    const nullable = descriptor.nullable ? ".nullable()" : "";
+    const optional = descriptor.presence === "optional" ? ".optional()" : "";
+    return `${builderOf(descriptor, indent)}${nullable}${optional}`;
+  };
+  const shapeOf = (
+    fields: Readonly<Record<string, ValueDescriptor>>,
+    indent: string
+  ): string => {
+    const entries = Object.entries(fields);
+    if (entries.length === 0) {
+      return "{}";
+    }
+    const inner = `${indent}  `;
+    const lines = entries.map(
+      ([name, field]) => `${inner}${keyOf(name)}: ${valueOf(field, inner)},`
+    );
+    return `{\n${lines.join("\n")}\n${indent}}`;
+  };
+  return { valueOf, shapeOf };
 };
 
-const valueOf = (descriptor: ValueDescriptor, indent: string): string => {
-  const nullable = descriptor.nullable ? ".nullable()" : "";
-  const optional = descriptor.presence === "optional" ? ".optional()" : "";
-  return `${builderOf(descriptor, indent)}${nullable}${optional}`;
-};
-
-const shapeOf = (
-  fields: Readonly<Record<string, ValueDescriptor>>,
-  indent: string
-): string => {
-  const entries = Object.entries(fields);
-  if (entries.length === 0) {
-    return "{}";
-  }
-  const inner = `${indent}  `;
-  const lines = entries.map(
-    ([name, field]) => `${inner}${keyOf(name)}: ${valueOf(field, inner)},`
-  );
-  return `{\n${lines.join("\n")}\n${indent}}`;
-};
+const plain = writer(new Map());
 
 /** The request a handler sends: its path, query and body, from its args. */
-const requestOf = (operation: SpecOperation): string => {
+const requestOf = (operation: SpecOperation, returns: string): string => {
   const argument = (name: string, separator?: string): string => {
     const value = `args${read(name, false)}`;
     const sent =
@@ -118,24 +132,27 @@ const requestOf = (operation: SpecOperation): string => {
     ],
     ["body", operation.body.map((name) => argument(name))],
   ] as const;
-  const init = parts
-    .filter(([, members]) => members.length > 0)
-    .map(([part, members]) => `${part}: { ${members.join(", ")} }`);
+  const init = [
+    ...parts
+      .filter(([, members]) => members.length > 0)
+      .map(([part, members]) => `${part}: { ${members.join(", ")} }`),
+    ...(operation.answer === undefined ? [] : [`returns: ${returns}`]),
+  ];
   const options = init.length === 0 ? "" : `, { ${init.join(", ")} }`;
   return `api.${operation.method.toLowerCase()}(${json(operation.path)}${options})`;
 };
 
 const handlerOf = (operation: SpecOperation, indent: string): string => {
-  const call = requestOf(operation);
+  const call = requestOf(operation, `answers[${json(operation.name)}]`);
   const takes =
     operation.parameters.length + operation.body.length > 0 ? "args" : "_args";
   const { page } = operation;
   if (page !== undefined) {
-    const items = page.items.map((name) => read(name, true)).join("");
+    const items = page.items.map((name) => read(name, false)).join("");
     const next =
       page.next === undefined
         ? "null"
-        : `answer${page.next.map((name) => read(name, true)).join("")} ?? null`;
+        : `answer${page.next.map((name, index) => read(name, index > 0)).join("")} ?? null`;
     return [
       `async (${takes}, api) => {`,
       `${indent}  const answer = await ${call};`,
@@ -143,74 +160,90 @@ const handlerOf = (operation: SpecOperation, indent: string): string => {
       `${indent}}`,
     ].join("\n");
   }
-  if (operation.returns.kind === "null") {
+  if (operation.answer === undefined) {
     return [
       `async (${takes}, api) => {`,
       `${indent}  await ${call};`,
-      `${indent}  return null;`,
+      `${indent}  return {};`,
       `${indent}}`,
     ].join("\n");
   }
-  return `(${takes}, api) => ${call}`;
+  return `async (${takes}, api) => await ${call}`;
 };
 
-const toolOf = (operation: SpecOperation): string => {
+const toolOf = (operation: SpecOperation, reach: ToolReach): string => {
   const indent = "    ";
-  const returns =
-    operation.page === undefined
-      ? valueOf(operation.returns, indent)
-      : `page(${valueOf(operation.page.item, indent)})`;
+  const name = json(operation.name);
+  let returns = `answers[${name}]`;
+  if (operation.page !== undefined) {
+    returns = `page(items[${name}])`;
+  } else if (operation.answer === undefined) {
+    returns = "v.object({})";
+  }
   const args = operation.args.kind === "object" ? operation.args.fields : {};
   const route = `${operation.method} ${operation.path}`;
   return [
-    `  ${json(operation.name)}: tool({`,
+    `  ${name}: tool({`,
     `${indent}description: ${json(operation.description)},`,
     `${indent}readOnly: ${String(operation.readOnly)},`,
-    `${indent}scopes: ${json(operation.scopes)},`,
+    `${indent}reach: ${json(reach)},`,
+    ...(operation.scopes.length === 0
+      ? []
+      : [`${indent}scopes: ${json(operation.scopes)},`]),
     `${indent}routes: [${json(route)}],`,
-    `${indent}args: ${shapeOf(args, indent)},`,
+    `${indent}args: ${plain.shapeOf(args, indent)},`,
     `${indent}returns: ${returns},`,
     `${indent}handler: ${handlerOf(operation, indent)},`,
     "  }),",
   ].join("\n");
 };
 
-const authOf = (auth: SpecAuth): string => {
-  switch (auth.kind) {
-    case "oauth2": {
-      return [
-        "auth.oauth2({",
-        `  authorizeUrl: ${json(auth.authorizeUrl)},`,
-        `  tokenUrl: ${json(auth.tokenUrl)},`,
-        `  scopes: ${json(auth.scopes)},`,
-        "})",
-      ].join("\n");
-    }
-    case "apiKey": {
-      return `auth.apiKey({ in: ${json(auth.in)}, name: ${json(auth.name)} })`;
-    }
-    case "bearer":
-    case "basic": {
-      return `auth.${auth.kind}()`;
-    }
-    default: {
-      return auth satisfies never;
-    }
+/** What the SDK's `auth` takes for the spec's sign-in, but the account. */
+const signInOf = (auth: SpecAuth): object => {
+  if (auth.kind === "oauth2") {
+    const { authorizeUrl, tokenUrl, scopes } = auth;
+    return { authorizeUrl, tokenUrl, scopes };
   }
+  const { header, prefix } = auth;
+  return prefix === undefined ? { header } : { header, prefix };
 };
 
+/** How the generated connector reads its spec. */
+export interface GenerateOptions {
+  /**
+   * The spec's name for the security scheme the connector signs in with,
+   * where it offers several; else the one people sign in with most easily.
+   */
+  readonly scheme?: string;
+  /**
+   * Whom its tools reach, which no spec says: `others` unless the
+   * connector says less, so a tool is never classed below what it may do.
+   */
+  readonly reach?: ToolReach;
+}
+
 /** A spec's tools as source; `url` is the address it was read from. */
-export const sourceOf = (spec: Spec, url: string): string => {
-  const pages = spec.operations.some(
-    (operation) => operation.page !== undefined
+export const sourceOf = (
+  spec: Spec,
+  url: string,
+  reach: ToolReach = "others"
+): string => {
+  const pages = spec.operations.flatMap((operation) =>
+    operation.page === undefined ? [] : [{ operation, page: operation.page }]
   );
-  const imports = [
-    ...(spec.auth === undefined ? [] : ["auth"]),
-    ...(pages ? ["page"] : []),
-    "tool",
-    "v",
-  ];
+  const withItems = writer(
+    new Map(
+      pages.map(({ operation, page }) => [
+        page.item,
+        `items[${json(operation.name)}]`,
+      ])
+    )
+  );
+  const imports = [...(pages.length > 0 ? ["page"] : []), "tool", "v"];
   const openapi = `{ url: ${json(url)}, sha256: ${json(spec.sha256)} }`;
+  const entries = (
+    list: readonly { name: string; value: string }[]
+  ): string[] => list.map(({ name, value }) => `  ${json(name)}: ${value},`);
   return [
     "// Generated by @grasp-os/compiler from the OpenAPI spec at `openapi.url`,",
     "// whose text hashes to `openapi.sha256`. Regeneration replaces this file:",
@@ -222,11 +255,32 @@ export const sourceOf = (spec: Spec, url: string): string => {
     "",
     `export const hosts = [${json(spec.host)}];`,
     "",
+    `export const base = ${json(spec.base)};`,
+    "",
     ...(spec.auth === undefined
       ? []
-      : [`export const signIn = ${authOf(spec.auth)};`, ""]),
+      : [`export const signIn = ${json(signInOf(spec.auth))} as const;`, ""]),
+    "const items = {",
+    ...entries(
+      pages.map(({ operation, page }) => ({
+        name: operation.name,
+        value: plain.valueOf(page.item, "  "),
+      }))
+    ),
+    "};",
+    "",
+    "const answers = {",
+    ...entries(
+      spec.operations.flatMap(({ name, answer }) =>
+        answer === undefined
+          ? []
+          : [{ name, value: withItems.valueOf(answer, "  ") }]
+      )
+    ),
+    "};",
+    "",
     "export const tools = {",
-    ...spec.operations.map(toolOf),
+    ...spec.operations.map((operation) => toolOf(operation, reach)),
     "};",
     "",
   ].join("\n");
@@ -235,14 +289,15 @@ export const sourceOf = (spec: Spec, url: string): string => {
 /**
  * Generates a connector's tools from its vendor's spec: the source of the
  * file regeneration replaces, and the spec as read, with what it skipped.
- * It exports the spec's URL and hash (`openapi`), the host and sign-in the
- * spec names (`hosts`, `signIn`) and the tools; the connector's own file
- * adds the rest.
+ * It exports the spec's URL and hash (`openapi`), the host, base path and
+ * sign-in the spec names (`hosts`, `base`, `signIn`) and the tools; the
+ * connector's own file adds the rest.
  */
 export const generateConnector = async (
   input: string,
-  url: string
+  url: string,
+  options: GenerateOptions = {}
 ): Promise<{ source: string; spec: Spec }> => {
-  const spec = await readSpec(input, url);
-  return { source: sourceOf(spec, url), spec };
+  const spec = await readSpec(input, url, options.scheme);
+  return { source: sourceOf(spec, url, options.reach), spec };
 };

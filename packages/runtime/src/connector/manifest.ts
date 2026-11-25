@@ -617,7 +617,9 @@ const contractActionPattern = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/u;
  * The contracts `manifest` generates (spec 12): one per family of its
  * tools, `<connector>.<family>@1`, holding each tool of the family under
  * its name after the family (`mail.send` is `send` of
- * `microsoft-365.mail@1`). Connect serves contracts from this, and the
+ * `microsoft-365.mail@1`). The family is all of the name but its last
+ * part, as the mirror rule names a tool (`deals.followers.list` is `list`
+ * of `pipedrive.deals.followers@1`). Connect serves contracts from this, and the
  * SDK's connector catalog is typed from it, so both name the same
  * contracts and actions.
  */
@@ -626,7 +628,7 @@ export const generatedContracts = (
 ): ReadonlyMap<string, ReadonlyMap<string, ContractAction>> => {
   const contracts = new Map<string, Map<string, ContractAction>>();
   for (const [tool, declared] of Object.entries(manifest.actions)) {
-    const dot = tool.indexOf(".");
+    const dot = tool.lastIndexOf(".");
     const action = tool.slice(dot + 1);
     if (dot > 0 && contractActionPattern.test(action)) {
       const contract = `${manifest.name}.${tool.slice(0, dot)}@${generatedContractMajor}`;

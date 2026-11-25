@@ -52,7 +52,12 @@ const nextNames: ReadonlySet<string> = new Set([
 /** The statuses an operation's answer is read from, the first one present. */
 const successes = ["200", "201", "202", "203", "204", "205", "206", "2XX"];
 
-/** How a connector signs in, as the spec's security schemes say. */
+/**
+ * How a connector signs in, as the spec's security schemes say and the
+ * SDK's `auth` takes it: OAuth 2.0's authorization code, or a key in a
+ * header (a bearer token is one, after `Bearer `). Whose account a
+ * sign-in is, no spec says: the connector adds it.
+ */
 export type SpecAuth =
   | {
       readonly kind: "oauth2";
@@ -62,11 +67,9 @@ export type SpecAuth =
     }
   | {
       readonly kind: "apiKey";
-      readonly in: "header" | "query";
-      readonly name: string;
-    }
-  | { readonly kind: "bearer" }
-  | { readonly kind: "basic" };
+      readonly header: string;
+      readonly prefix?: string;
+    };
 
 /** One argument the route takes outside the body. */
 export interface SpecParameter {
@@ -89,7 +92,7 @@ export interface SpecPage {
 export interface SpecOperation {
   readonly name: string;
   readonly method: HttpMethod;
-  /** The route's path, the API's base path included. */
+  /** The route's path as the spec keys it, under the API's base path. */
   readonly path: string;
   readonly description: string;
   readonly readOnly: boolean;
@@ -99,6 +102,8 @@ export interface SpecOperation {
   readonly body: readonly string[];
   /** An object: every parameter and body field, as the vendor names them. */
   readonly args: ValueDescriptor;
+  /** The vendor's answer, or undefined where it answers nothing. */
+  readonly answer: ValueDescriptor | undefined;
   /** The answer as the tool gives it: the vendor's, or a page of it. */
   readonly returns: ValueDescriptor;
   readonly page: SpecPage | undefined;
@@ -228,31 +233,35 @@ const authOf = (scheme: Node): SpecAuth | undefined => {
     return oauthOf(scheme);
   }
   const name = text(scheme.name);
-  if (scheme.type === "apiKey" && name !== undefined) {
-    const where = scheme.in;
-    return where === "header" || where === "query"
-      ? { kind: "apiKey", in: where, name }
-      : undefined;
+  if (
+    scheme.type === "apiKey" &&
+    scheme.in === "header" &&
+    name !== undefined
+  ) {
+    return { kind: "apiKey", header: name };
   }
-  const kind = text(scheme.scheme)?.toLowerCase();
-  if (scheme.type === "http" && (kind === "bearer" || kind === "basic")) {
-    return { kind };
-  }
-  return undefined;
+  const bearer = text(scheme.scheme)?.toLowerCase() === "bearer";
+  return scheme.type === "http" && bearer
+    ? { kind: "apiKey", header: "Authorization", prefix: "Bearer " }
+    : undefined;
 };
 
 /** The order the connector picks among the schemes a spec offers. */
 const preference: Readonly<Record<SpecAuth["kind"], number>> = {
   oauth2: 0,
-  bearer: 1,
-  apiKey: 2,
-  basic: 3,
+  apiKey: 1,
 };
 
 /** The scheme the connector signs in with, of those operations ask for. */
+/**
+ * The scheme the connector signs in with: `wanted`, the name the spec
+ * gives it, where the connector picks one, or else the one people sign in
+ * with most easily among those the operations take.
+ */
 const chosenScheme = (
   document: Node,
-  requirements: readonly unknown[]
+  requirements: readonly unknown[],
+  wanted: string | undefined
 ): { name: string; auth: SpecAuth } | undefined => {
   const schemes = record(record(document.components).securitySchemes);
   const used = new Set(
@@ -262,8 +271,19 @@ const chosenScheme = (
     const auth = authOf(record(schemes[name]));
     return auth === undefined ? [] : [{ name, auth }];
   });
-  candidates.sort((a, b) => preference[a.auth.kind] - preference[b.auth.kind]);
-  return candidates[0];
+  if (wanted === undefined) {
+    candidates.sort(
+      (a, b) => preference[a.auth.kind] - preference[b.auth.kind]
+    );
+    return candidates[0];
+  }
+  const named = candidates.find((candidate) => candidate.name === wanted);
+  if (named === undefined) {
+    throw new SpecError(
+      `No operation signs in with a scheme ${quoted(wanted)} the connector can use.`
+    );
+  }
+  return named;
 };
 
 /**
@@ -273,7 +293,7 @@ const chosenScheme = (
  */
 const scopesOf = (
   requirements: readonly unknown[],
-  scheme: string | undefined
+  scheme: { name: string; auth: SpecAuth } | undefined
 ): string[] => {
   if (requirements.length === 0) {
     return [];
@@ -283,10 +303,21 @@ const scopesOf = (
     if (names.length === 0) {
       return [];
     }
-    if (scheme !== undefined && names.length === 1 && names[0] === scheme) {
-      return list(record(requirement)[scheme]).filter(
+    if (
+      scheme !== undefined &&
+      names.length === 1 &&
+      names[0] === scheme.name
+    ) {
+      const scopes = list(record(requirement)[scheme.name]).filter(
         (scope): scope is string => typeof scope === "string"
       );
+      const declared = scheme.auth.kind === "oauth2" ? scheme.auth.scopes : {};
+      if (scopes.some((scope) => !Object.hasOwn(declared, scope))) {
+        throw new OperationError(
+          "It needs a scope its sign-in doesn't declare."
+        );
+      }
+      return scopes;
     }
   }
   throw new OperationError("It needs a sign-in the connector doesn't use.");
@@ -329,6 +360,37 @@ const arrayStyle = (node: Node): { separator?: string } | undefined => {
     : undefined;
 };
 
+/**
+ * Whether a value names every key it may hold, as a tool's arguments must
+ * throughout (the runtime's `isClosed`): no record and no free-form JSON.
+ */
+const isStrict = (descriptor: ValueDescriptor): boolean => {
+  if (descriptor.kind === "record" || descriptor.kind === "json") {
+    return false;
+  }
+  if (descriptor.kind === "object") {
+    return Object.values(descriptor.fields).every(isStrict);
+  }
+  if (descriptor.kind === "array") {
+    return isStrict(descriptor.item);
+  }
+  return descriptor.kind !== "union" || descriptor.members.every(isStrict);
+};
+
+/** Whether a path segment may hold the value: a string or a number, never null or a boolean. */
+const holdsSegment = (descriptor: ValueDescriptor): boolean => {
+  if (descriptor.nullable) {
+    return false;
+  }
+  if (descriptor.kind === "literal") {
+    return (
+      typeof descriptor.value === "string" ||
+      typeof descriptor.value === "number"
+    );
+  }
+  return ["string", "number", "enum"].includes(descriptor.kind);
+};
+
 /** One parameter as an argument, or undefined where it can't be typed. */
 const parameterOf = (
   { name, where, node }: Declared,
@@ -351,6 +413,9 @@ const parameterOf = (
   }
   const required = node.required === true || where === "path";
   const field = required ? schema : schema.optional();
+  if (where === "path" && !holdsSegment(descriptor)) {
+    return undefined;
+  }
   if (scalarKinds.has(descriptor.kind)) {
     return { field, parameter: { name, in: where } };
   }
@@ -438,7 +503,11 @@ const bodyOf = (operation: Node, reading: Reading): Record<string, Schema> => {
 };
 
 /** The answer of the operation's first success; null when it has no content. */
-const answerOf = (operation: Node, reading: Reading): Modifiable => {
+/** The success answer's schema, or undefined where it answers nothing. */
+const answerOf = (
+  operation: Node,
+  reading: Reading
+): Modifiable | undefined => {
   const responses = record(operation.responses);
   const code = successes.find((status) => Object.hasOwn(responses, status));
   if (code === undefined) {
@@ -446,7 +515,7 @@ const answerOf = (operation: Node, reading: Reading): Modifiable => {
   }
   const { found, schema } = contentOf(responses[code]);
   if (!found) {
-    return v.null();
+    return undefined;
   }
   const answer = schemaOf(schema, reading, 1);
   if (answer === undefined) {
@@ -531,16 +600,38 @@ interface Source {
   readonly method: HttpMethod;
   /** The path as the spec keys it, under the base. */
   readonly key: string;
-  readonly base: string;
   readonly item: Node;
   readonly operation: Node;
   readonly security: readonly unknown[];
-  readonly scheme: string | undefined;
+  readonly scheme: { name: string; auth: SpecAuth } | undefined;
 }
 
+/**
+ * What an operation answers: the vendor's answer, the page in it where a
+ * GET on a collection answers one, and what the tool returns of it.
+ */
+const answeredBy = (
+  operation: Node,
+  collection: boolean,
+  reading: Reading
+): Pick<SpecOperation, "answer" | "page" | "returns"> => {
+  const answer = answerOf(operation, reading)?.descriptor;
+  if (answer === undefined) {
+    return { answer, page: undefined, returns: v.object({}).descriptor };
+  }
+  const page = collection ? pageOf(answer) : undefined;
+  if (page !== undefined) {
+    return { answer, page, returns: pageDescriptor(page.item) };
+  }
+  if (answer.kind !== "object" || answer.nullable) {
+    throw new OperationError("Its answer isn't an object.");
+  }
+  return { answer, page, returns: answer };
+};
+
 const candidateOf = (from: Source): Candidate => {
-  const { method, base, item, operation } = from;
-  const path = `${base}${from.key}`;
+  const { method, item, operation } = from;
+  const path = from.key;
   const segments = pathSegments(path);
   if (segments === undefined) {
     throw new OperationError("Its path isn't one a route may take.");
@@ -571,16 +662,19 @@ const candidateOf = (from: Source): Candidate => {
   if (args === undefined) {
     throw new OperationError("Its arguments are too large.");
   }
-  const answer = answerOf(operation, {
-    ...request,
-    mode: "response",
-  }).descriptor;
-  const collection = method === "GET" && segments.at(-1)?.kind === "literal";
-  const page = collection ? pageOf(answer) : undefined;
+  if (!isStrict(args.descriptor)) {
+    throw new OperationError(
+      "Its arguments take a free-form value, and a tool's are strict."
+    );
+  }
+  const answered = answeredBy(
+    operation,
+    method === "GET" && segments.at(-1)?.kind === "literal",
+    { ...request, mode: "response" }
+  );
   const naming = routeName(
     { method, path, segments },
-    base,
-    page !== undefined
+    answered.page !== undefined
   );
   if ("problem" in naming) {
     throw new OperationError(naming.problem);
@@ -597,8 +691,7 @@ const candidateOf = (from: Source): Candidate => {
       parameters,
       body: Object.keys(body),
       args: args.descriptor,
-      returns: page === undefined ? answer : pageDescriptor(page.item),
-      page,
+      ...answered,
     },
     label: `${method} ${from.key}`,
     operationId:
@@ -676,7 +769,11 @@ const documentOf = async (input: string): Promise<Node> => {
  * from. `url` is where the spec was read from. Throws `SpecError` for a
  * spec that isn't valid OpenAPI or names no plain HTTPS server.
  */
-export const readSpec = async (input: string, url: string): Promise<Spec> => {
+export const readSpec = async (
+  input: string,
+  url: string,
+  scheme?: string
+): Promise<Spec> => {
   const document = await documentOf(input);
   const { host, base } = serverOf(document, url);
   const global = list(document.security);
@@ -696,9 +793,10 @@ export const readSpec = async (input: string, url: string): Promise<Spec> => {
   }
   const security = (operation: Node): readonly unknown[] =>
     Array.isArray(operation.security) ? operation.security : global;
-  const scheme = chosenScheme(
+  const chosen = chosenScheme(
     document,
-    operations.flatMap(({ operation }) => security(operation))
+    operations.flatMap(({ operation }) => security(operation)),
+    scheme
   );
   const skipped: SkippedOperation[] = [];
   const candidates: Candidate[] = [];
@@ -708,11 +806,10 @@ export const readSpec = async (input: string, url: string): Promise<Spec> => {
         candidateOf({
           method,
           key,
-          base,
           item,
           operation,
           security: security(operation),
-          scheme: scheme?.name,
+          scheme: chosen,
         })
       );
     } catch (error) {
@@ -726,7 +823,7 @@ export const readSpec = async (input: string, url: string): Promise<Spec> => {
     sha256: await sha256(input),
     host,
     base,
-    auth: scheme?.auth,
+    auth: chosen?.auth,
     operations: named(candidates, skipped),
     skipped,
   };

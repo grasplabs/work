@@ -2637,11 +2637,13 @@ export type AppDropRequest = z.input<typeof appDropRequestSchema>;
 
 /**
  * A generated contract's ID: `<connector>.<family>@<major>`, or
- * `composio.<toolkit>@1`.
+ * `composio.<toolkit>@1`. A family is a tool's name but its last part, so
+ * it is written as tool names are, and may have parts of its own
+ * (`deals.followers` of `deals.followers.list`).
  */
 export const connectorContractIdSchema = z
   .string()
-  .regex(/^[a-z][a-z0-9-]{0,62}\.[a-z][a-z0-9_-]{0,62}@[1-9]\d{0,5}$/u);
+  .regex(/^[a-z][a-z0-9-]{0,62}\.[A-Za-z][\w.-]{0,62}@[1-9]\d{0,5}$/u);
 
 /** Which contract to read, and the connection that must serve it. */
 export const connectorContractRequestSchema = z.strictObject({

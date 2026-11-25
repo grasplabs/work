@@ -16,8 +16,14 @@ import {
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { checkMirror } from "@grasp-os/compiler/mirror";
+import { readSpec } from "@grasp-os/compiler/openapi";
+import type { Spec } from "@grasp-os/compiler/openapi";
 import { connectorManifestSchema } from "@grasp-os/runtime/connector";
-import type { ConnectorManifest } from "@grasp-os/runtime/connector";
+import type {
+  ConnectorDeclaration,
+  ConnectorManifest,
+} from "@grasp-os/runtime/connector";
 import { build } from "vite-plus";
 import type { Plugin, Rolldown } from "vite-plus";
 import { z } from "zod";
@@ -60,8 +66,70 @@ export const connectorEntries = (): string[] =>
   });
 
 const moduleSchema = z.object({
-  default: z.object({ manifest: z.unknown() }),
+  default: z.object({
+    manifest: z.unknown(),
+    // A connector written on `sdkConnector` has its declaration; one on the
+    // old kit hasn't, and isn't on the SDK until it moves.
+    declaration: z
+      .custom<ConnectorDeclaration>(
+        (value) => typeof value === "object" && value !== null
+      )
+      .optional(),
+  }),
 });
+
+/**
+ * The spec a connector declares, from the file beside its entry
+ * (`openapi.yaml` or `openapi.json`, as scripts/connector-openapi.ts writes
+ * it), which must be the text its tools were generated from.
+ */
+const specBeside = async (
+  entry: string,
+  openapi: NonNullable<ConnectorDeclaration["openapi"]>
+): Promise<Spec> => {
+  const file = ["openapi.yaml", "openapi.json"]
+    .map((name) => path.join(path.dirname(entry), name))
+    .find((each) => existsSync(each));
+  if (file === undefined) {
+    throw new Error(`${entry} declares an OpenAPI spec, and none is beside it`);
+  }
+  const spec = await readSpec(readFileSync(file, "utf-8"), openapi.url);
+  if (spec.sha256 !== openapi.sha256) {
+    throw new Error(`${file} isn't the spec ${entry} was generated from`);
+  }
+  return spec;
+};
+
+/**
+ * Holds a connector written on `sdkConnector` to the mirror rule
+ * (GRA-2319): each tool named from its route, and where it declares its
+ * vendor's spec, each argument and answer field as the spec has it. The
+ * build fails on any tool that breaks it.
+ */
+const checkMirrorOf = async (
+  entry: string,
+  declaration: ConnectorDeclaration
+): Promise<void> => {
+  const spec =
+    declaration.openapi === undefined
+      ? undefined
+      : await specBeside(entry, declaration.openapi);
+  const problems = checkMirror(
+    Object.entries(declaration.tools).map(([name, each]) => ({
+      name,
+      routes: each.routes,
+      args: each.args,
+      returns: each.returns,
+    })),
+    spec
+  );
+  if (problems.length > 0) {
+    const lines = problems.map(({ tool, message }) => `${tool}: ${message}`);
+    throw new Error(
+      `${declaration.name} breaks the mirror rule:\n${lines.join("\n")}`
+    );
+  }
+};
 
 const entryId = "\0connector-entry";
 
@@ -214,6 +282,10 @@ export const buildConnectors = async (
       await import(pathToFileURL(entry).href)
     );
     const manifest = connectorManifestSchema.parse(loaded.default.manifest);
+    if (loaded.default.declaration !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- one connector at a time
+      await checkMirrorOf(entry, loaded.default.declaration);
+    }
     if (connectors.some((each) => each.manifest.name === manifest.name)) {
       throw new Error(`Two connectors are named ${manifest.name}`);
     }
