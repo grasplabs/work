@@ -97,6 +97,26 @@ const Timing = ({ call }: { call: Call }) => {
   );
 };
 
+/**
+ * What Mistral kept of the call, once it is over: how often he spoke, and
+ * how often it heard them talk over him. Talking over him that it never
+ * counted was not heard; counted but heard on, it was not acted on.
+ */
+const Record = ({ call }: { call: Call }) =>
+  call.record === null ? null : (
+    <Section
+      description="As Mistral recorded the call once it ended: how often Stephen spoke, and how often it heard you talk over him and cut him off."
+      title="Talking over him"
+    >
+      <SectionRow label="Times he spoke">
+        <Stat>{call.record.spoke}</Stat>
+      </SectionRow>
+      <SectionRow label="Times cut off">
+        <Stat>{call.record.cutOff}</Stat>
+      </SectionRow>
+    </Section>
+  );
+
 /** What was said, as Mistral wrote it down: theirs on the right, his on the left. */
 const Conversation = ({ call }: { call: Call }) => {
   if (call.said.length === 0) {
@@ -222,6 +242,7 @@ export const VoiceLab = () => {
         )}
       </Section>
       <Timing call={call} />
+      <Record call={call} />
       <Conversation call={call} />
     </div>
   );
