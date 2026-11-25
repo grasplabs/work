@@ -1415,6 +1415,10 @@ msgstr "{shown, plural, one {Se muestra # integración} other {Se muestran # int
 msgid "{shown} entries or more"
 msgstr "{shown} entradas o más"
 
+#: src/inbox/report-viewer.tsx
+msgid "{shown} of {count}"
+msgstr "{shown} de {count}"
+
 #: src/workflows/listed-count.tsx
 msgid "{shown} runs or more"
 msgstr "{shown} ejecuciones o más"
@@ -4693,6 +4697,10 @@ msgstr "Cerrar"
 msgid "Close {name}"
 msgstr "Cerrar {name}"
 
+#: src/inbox/report-viewer.tsx
+msgid "Close find"
+msgstr "Cerrar la búsqueda"
+
 #: src/brain/gap-actions.tsx
 msgid "Close it"
 msgstr "Cerrarla"
@@ -4736,6 +4744,10 @@ msgstr "Código"
 #: src/apps/app-code.tsx
 msgid "Code of {file}"
 msgstr "Código de {file}"
+
+#: src/inbox/report-viewer.tsx
+msgid "Code of {name}"
+msgstr "Código de {name}"
 
 #: src/projects/project-dialog.tsx
 msgid "Coins"
@@ -6221,10 +6233,6 @@ msgstr "Hacerlo bien"
 msgid "Double-click or press F2 to rename"
 msgstr "Haz doble clic o pulsa F2 para cambiar el nombre"
 
-#: src/inbox/report-row.tsx
-msgid "Download"
-msgstr "Descargar"
-
 #: src/workflows/run-files.tsx
 #: src/workflows/version-source.tsx
 msgctxt "download a file"
@@ -7327,6 +7335,10 @@ msgstr "Buscar una app o un flujo de trabajo"
 msgid "Find every invoice more than 14 days past its due date."
 msgstr "Busca todas las facturas que lleven más de 14 días vencidas."
 
+#: src/inbox/report-viewer.tsx
+msgid "Find in the file"
+msgstr "Buscar en el archivo"
+
 #: src/agents/agent-templates.ts
 msgid "Find leads with no contact in the last 7 days."
 msgstr "Busca los leads sin contacto en los últimos 7 días."
@@ -7366,6 +7378,10 @@ msgstr "Primera ejecución: {when}"
 #: src/interview/words.ts
 msgid "First, the steps."
 msgstr "Primero, los pasos."
+
+#: src/inbox/report-viewer.tsx
+msgid "Fit"
+msgstr "Ajustar"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Fit and center"
@@ -9555,6 +9571,10 @@ msgstr "Clave …{last}"
 msgid "Key …{last} · {region}"
 msgstr "Clave …{last} · {region}"
 
+#: src/inbox/report-viewer.tsx
+msgid "Keyboard shortcuts"
+msgstr "Atajos de teclado"
+
 #: src/apps/resource-bindings.tsx
 #: src/brain/memories-page.tsx
 #: src/routes/_shell.brain.$noteId.tsx
@@ -10025,6 +10045,10 @@ msgstr "Cargando más {many}"
 #: src/connections/integrations-skeleton.tsx
 msgid "Loading the app"
 msgstr "Cargando la app"
+
+#: src/inbox/report-viewer.tsx
+msgid "Loading the code"
+msgstr "Cargando el código"
 
 #: src/frame/ui-words.tsx
 msgid "Loading the conversation"
@@ -10969,6 +10993,10 @@ msgstr "Siguiente"
 msgctxt "what starts a workflow next"
 msgid "Next"
 msgstr "Siguiente"
+
+#: src/inbox/report-viewer.tsx
+msgid "Next match"
+msgstr "Siguiente coincidencia"
 
 #: src/frame/ui-words.tsx
 msgid "Next month"
@@ -13405,6 +13433,18 @@ msgstr "Pulsa o pulsa F2 para cambiar el nombre"
 msgid "Presses \"{words}\""
 msgstr "Pulsa «{words}»"
 
+#: src/inbox/report-viewer.tsx
+msgid "Preview"
+msgstr "Vista previa"
+
+#: src/inbox/report-viewer.tsx
+msgid "Preview of {name}"
+msgstr "Vista previa de {name}"
+
+#: src/inbox/report-viewer.tsx
+msgid "Preview or code"
+msgstr "Vista previa o código"
+
 #: src/apps/app-section.tsx
 msgid "Preview width"
 msgstr "Ancho de la vista previa"
@@ -13430,6 +13470,10 @@ msgstr "Anterior"
 #: src/activity/audit-event.tsx
 msgid "Previous hash"
 msgstr "Hash anterior"
+
+#: src/inbox/report-viewer.tsx
+msgid "Previous match"
+msgstr "Coincidencia anterior"
 
 #: src/frame/ui-words.tsx
 msgid "Previous month"
@@ -15730,9 +15774,17 @@ msgstr "Mostrar contenido"
 msgid "Show the choices"
 msgstr "Mostrar las opciones"
 
+#: src/inbox/report-viewer.tsx
+msgid "Show the code"
+msgstr "Mostrar el código"
+
 #: src/settings/event-source-activity.tsx
 msgid "Show the payload of {type}"
 msgstr "Mostrar el contenido de {type}"
+
+#: src/inbox/report-viewer.tsx
+msgid "Show the preview"
+msgstr "Mostrar la vista previa"
 
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Show the time zones"
@@ -15741,6 +15793,10 @@ msgstr "Mostrar las zonas horarias"
 #: src/brain/sources-page.tsx
 msgid "Show the whole text"
 msgstr "Mostrar todo el texto"
+
+#: src/inbox/report-viewer.tsx
+msgid "Show these shortcuts"
+msgstr "Mostrar estos atajos"
 
 #: src/settings/event-source-activity.tsx
 msgid "Show what {name} received"
@@ -16600,6 +16656,10 @@ msgstr "Enjambre"
 #: src/onboarding/setup-steps.tsx
 msgid "Switch a team off and nobody in it gets a link."
 msgstr "Desactiva un equipo y nadie en él recibe un enlace."
+
+#: src/inbox/report-viewer.tsx
+msgid "Switch between preview and code"
+msgstr "Cambiar entre vista previa y código"
 
 #: src/pages/page-frame.tsx
 msgid "Switch now"
@@ -21017,6 +21077,10 @@ msgstr "Acercar"
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom out"
 msgstr "Alejar"
+
+#: src/inbox/report-viewer.tsx
+msgid "Zoom to fit"
+msgstr "Ajustar al tamaño"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx

@@ -19,14 +19,11 @@ import {
   SheetTitle,
 } from "@grasp-os/ui/components/sheet";
 import { Spinner } from "@grasp-os/ui/components/spinner";
-import {
-  DownloadIcon,
-  FileIcon,
-  FilePdfIcon,
-  Icon,
-} from "@grasp-os/ui/lib/icons";
+import { FileIcon, FilePdfIcon, Icon } from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 import { Await, useRouter } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 
@@ -36,14 +33,30 @@ import { notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { ReportView } from "./report-view.tsx";
+import { ReportViewer } from "./report-viewer.tsx";
 
 // The weekly report as a row of the Inbox: it stands at the head of the
 // list on the day the report on the week that closed is ready, and on
 // every other day as a quiet row at the list's foot, opening the week so
-// far. Opening it shows the report's page (report-view.tsx) in a sheet;
-// Download saves that page as one HTML file, with its styles and fonts
+// far. Opening it shows the report's page (report-view.tsx) in a sheet,
+// in the file viewer (report-viewer.tsx), as the file it is: its code is
+// that page as one HTML file, its download the same file with its fonts
 // carried in it, and Save as PDF prints the same page, its fonts loaded
 // from this origin.
+
+const styles = stylex.create({
+  // The viewer has what the sheet has between its title and its foot.
+  viewer: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr)",
+    gridTemplateRows: "minmax(0, 1fr)",
+    placeItems: "center",
+    flexGrow: 1,
+    minHeight: 0,
+    paddingBlockStart: space["4"],
+    paddingInline: space["6"],
+  },
+});
 
 /** How many bytes go to `String.fromCodePoint` at once: well under any engine's argument limit. */
 const CHUNK = 8192;
@@ -289,7 +302,11 @@ const useCompany = (): string | undefined => {
   return company;
 };
 
-/** The report's page in the sheet, and what saves it: Download and Save as PDF. */
+/**
+ * The report in the file viewer, as #2503 shows it: its page in the
+ * viewer's card, its code under Code, its file downloaded from the
+ * viewer's bar; and Save as PDF at the sheet's foot.
+ */
 const ReportSheetBody = ({
   report,
   programme,
@@ -302,6 +319,7 @@ const ReportSheetBody = ({
   const page = useRef<HTMLDivElement>(null);
   // Named by the week it is on, the one that closed, as its row and the sheet say.
   const week = String(programme.nextReport.week).padStart(2, "0");
+  const name = `weekly-report-week-${week}.html`;
   const fileOf = async (embed: boolean): Promise<string | undefined> => {
     const drawn = page.current;
     if (drawn === null || company === undefined) {
@@ -315,37 +333,31 @@ const ReportSheetBody = ({
   };
   return (
     <>
-      <SheetBody>
+      <div {...stylex.props(styles.viewer)}>
         {company === undefined ? (
           <Spinner aria-label={t`Loading the report`} size="lg" />
         ) : (
-          <ReportView
-            company={company}
-            programme={programme}
-            ref={page}
-            report={report}
-          />
+          <ReportViewer
+            kind="HTML"
+            name={name}
+            onDownload={async () => {
+              const html = await fileOf(true);
+              if (html !== undefined) {
+                downloadText(name, html, "text/html");
+              }
+            }}
+            readCode={async () => await fileOf(false)}
+          >
+            <ReportView
+              company={company}
+              programme={programme}
+              ref={page}
+              report={report}
+            />
+          </ReportViewer>
         )}
-      </SheetBody>
+      </div>
       <SheetFooter>
-        <Button
-          disabled={company === undefined}
-          onClick={async () => {
-            const html = await fileOf(true);
-            if (html !== undefined) {
-              downloadText(
-                `weekly-report-week-${week}.html`,
-                html,
-                "text/html"
-              );
-            }
-          }}
-          size="sm"
-          variant="outline"
-        >
-          <Icon icon={DownloadIcon} />
-          {t`Download`}
-        </Button>
         <Button
           disabled={company === undefined}
           onClick={async () => {

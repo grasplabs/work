@@ -1415,6 +1415,10 @@ msgstr "{shown, plural, one {# integratie getoond} other {# integraties getoond}
 msgid "{shown} entries or more"
 msgstr "{shown} regels of meer"
 
+#: src/inbox/report-viewer.tsx
+msgid "{shown} of {count}"
+msgstr "{shown} van {count}"
+
 #: src/workflows/listed-count.tsx
 msgid "{shown} runs or more"
 msgstr "{shown} runs of meer"
@@ -4693,6 +4697,10 @@ msgstr "Sluiten"
 msgid "Close {name}"
 msgstr "{name} sluiten"
 
+#: src/inbox/report-viewer.tsx
+msgid "Close find"
+msgstr "Zoeken sluiten"
+
 #: src/brain/gap-actions.tsx
 msgid "Close it"
 msgstr "Sluiten"
@@ -4736,6 +4744,10 @@ msgstr "Code"
 #: src/apps/app-code.tsx
 msgid "Code of {file}"
 msgstr "Code van {file}"
+
+#: src/inbox/report-viewer.tsx
+msgid "Code of {name}"
+msgstr "Code van {name}"
 
 #: src/projects/project-dialog.tsx
 msgid "Coins"
@@ -6221,10 +6233,6 @@ msgstr "Wanneer het goed is"
 msgid "Double-click or press F2 to rename"
 msgstr "Dubbelklik of druk op F2 om de naam te wijzigen"
 
-#: src/inbox/report-row.tsx
-msgid "Download"
-msgstr "Downloaden"
-
 #: src/workflows/run-files.tsx
 #: src/workflows/version-source.tsx
 msgctxt "download a file"
@@ -7327,6 +7335,10 @@ msgstr "Een app of workflow zoeken"
 msgid "Find every invoice more than 14 days past its due date."
 msgstr "Zoek elke factuur die meer dan 14 dagen over de vervaldatum is."
 
+#: src/inbox/report-viewer.tsx
+msgid "Find in the file"
+msgstr "Zoeken in het bestand"
+
 #: src/agents/agent-templates.ts
 msgid "Find leads with no contact in the last 7 days."
 msgstr "Zoek leads zonder contact in de afgelopen 7 dagen."
@@ -7366,6 +7378,10 @@ msgstr "Eerste keer {when}"
 #: src/interview/words.ts
 msgid "First, the steps."
 msgstr "Eerst de stappen."
+
+#: src/inbox/report-viewer.tsx
+msgid "Fit"
+msgstr "Passend"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Fit and center"
@@ -9555,6 +9571,10 @@ msgstr "Sleutel …{last}"
 msgid "Key …{last} · {region}"
 msgstr "Sleutel …{last} · {region}"
 
+#: src/inbox/report-viewer.tsx
+msgid "Keyboard shortcuts"
+msgstr "Sneltoetsen"
+
 #: src/apps/resource-bindings.tsx
 #: src/brain/memories-page.tsx
 #: src/routes/_shell.brain.$noteId.tsx
@@ -10025,6 +10045,10 @@ msgstr "Meer {many} laden"
 #: src/connections/integrations-skeleton.tsx
 msgid "Loading the app"
 msgstr "De app laden"
+
+#: src/inbox/report-viewer.tsx
+msgid "Loading the code"
+msgstr "De code wordt geladen"
 
 #: src/frame/ui-words.tsx
 msgid "Loading the conversation"
@@ -10969,6 +10993,10 @@ msgstr "Volgende"
 msgctxt "what starts a workflow next"
 msgid "Next"
 msgstr "Volgende"
+
+#: src/inbox/report-viewer.tsx
+msgid "Next match"
+msgstr "Volgende treffer"
 
 #: src/frame/ui-words.tsx
 msgid "Next month"
@@ -13405,6 +13433,18 @@ msgstr "Druk of druk op F2 om te hernoemen"
 msgid "Presses \"{words}\""
 msgstr "Drukt op \"{words}\""
 
+#: src/inbox/report-viewer.tsx
+msgid "Preview"
+msgstr "Voorbeeld"
+
+#: src/inbox/report-viewer.tsx
+msgid "Preview of {name}"
+msgstr "Voorbeeld van {name}"
+
+#: src/inbox/report-viewer.tsx
+msgid "Preview or code"
+msgstr "Voorbeeld of code"
+
 #: src/apps/app-section.tsx
 msgid "Preview width"
 msgstr "Breedte van het voorbeeld"
@@ -13430,6 +13470,10 @@ msgstr "Vorige"
 #: src/activity/audit-event.tsx
 msgid "Previous hash"
 msgstr "Vorige hash"
+
+#: src/inbox/report-viewer.tsx
+msgid "Previous match"
+msgstr "Vorige treffer"
 
 #: src/frame/ui-words.tsx
 msgid "Previous month"
@@ -15730,9 +15774,17 @@ msgstr "Payload tonen"
 msgid "Show the choices"
 msgstr "Toon de keuzes"
 
+#: src/inbox/report-viewer.tsx
+msgid "Show the code"
+msgstr "Code tonen"
+
 #: src/settings/event-source-activity.tsx
 msgid "Show the payload of {type}"
 msgstr "Payload van {type} tonen"
+
+#: src/inbox/report-viewer.tsx
+msgid "Show the preview"
+msgstr "Voorbeeld tonen"
 
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Show the time zones"
@@ -15741,6 +15793,10 @@ msgstr "Tijdzones tonen"
 #: src/brain/sources-page.tsx
 msgid "Show the whole text"
 msgstr "De hele tekst tonen"
+
+#: src/inbox/report-viewer.tsx
+msgid "Show these shortcuts"
+msgstr "Deze sneltoetsen tonen"
 
 #: src/settings/event-source-activity.tsx
 msgid "Show what {name} received"
@@ -16600,6 +16656,10 @@ msgstr "Zwerm"
 #: src/onboarding/setup-steps.tsx
 msgid "Switch a team off and nobody in it gets a link."
 msgstr "Zet een team uit en niemand erin krijgt een link."
+
+#: src/inbox/report-viewer.tsx
+msgid "Switch between preview and code"
+msgstr "Wisselen tussen voorbeeld en code"
 
 #: src/pages/page-frame.tsx
 msgid "Switch now"
@@ -21017,6 +21077,10 @@ msgstr "Inzoomen"
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom out"
 msgstr "Uitzoomen"
+
+#: src/inbox/report-viewer.tsx
+msgid "Zoom to fit"
+msgstr "Zoomen naar passend"
 
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
