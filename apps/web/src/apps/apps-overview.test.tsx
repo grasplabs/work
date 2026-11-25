@@ -62,6 +62,7 @@ const overview = (
     version: pages ? 1 : null,
     pages,
   },
+  picture: null,
 });
 
 const viewerOf = (
