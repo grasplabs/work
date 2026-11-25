@@ -124,12 +124,47 @@ export const appReady = "Your contact list is ready to try in the preview.";
 export const approvalDrawn =
   "Drew it: the approver you name decides on each invoice.";
 
+/** An issue's identifier, as Linear's server names it (connect's test/linear-mcp-fake.ts). */
+const linearIssue = /(?<found>ENG-\d+)/u;
+
+/** What the agent says once it asked for the connector's connection (`readsLinear`). */
+export const linearAsked = "Grant it here, and I'll look.";
+
+/** What the agent says once it read the first issue through the connector (`readsLinear`). */
+export const linearAnswer = /^The first open one is ENG-\d+\.$/u;
+
 export const modelScripts = {
   /** A chat turn, end to end: the person asks, the agent answers. */
   answers: {
     opener: "What should the weekly sales report cover?",
     replies: [
       says("Revenue by region, the deals that closed, and the pipeline."),
+    ],
+  },
+  /**
+   * The agent asks for the person's connection to a connector made from a
+   * URL whose tools list issues, by what it can do; once they granted it
+   * and say so, it lists their issues through it and names the first, as
+   * Linear's server answered.
+   */
+  readsLinear: {
+    opener: "Which issues are open in Linear?",
+    replies: [
+      calls("asklinear", "executeCode", {
+        code: `export default async (self, env) => {
+  const all = await env.connections.available();
+  const linear = all.find((each) => each.actions.includes("list_issues"));
+  return await env.connections.request({ connectionId: linear.connectionId, actions: ["list_issues"], binding: "LINEAR", reason: "To find your open issues." });
+};`,
+      }),
+      says(linearAsked),
+      calls("listlinear", "executeCode", {
+        code: `export default async (self, env) => {
+  const { output } = await env.connections.call("LINEAR", "list_issues", { limit: 1 });
+  return output;
+};`,
+      }),
+      (said) => says(`The first open one is ${readIn(said, linearIssue)}.`),
     ],
   },
   /**

@@ -31,7 +31,7 @@ import {
   FieldError,
   FieldLabel,
 } from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
+import { Input, SecretInput } from "@grasp-os/ui/components/input";
 import {
   Item,
   ItemContent,
@@ -66,7 +66,9 @@ import type { AllowedTool } from "./tool-choices.ts";
 // Connecting an app, as the prototype's one dialog does it
 // (`components/connect-dialog.tsx`), in numbered steps: for a Composio
 // toolkit, an admin first chooses what Grasp may do and consents; then the
-// person signs in at the app, which sends them back to its page here.
+// person signs in at the app, which sends them back to its page here. A
+// connector an admin made from a URL is connected as a native suite is:
+// signing in at its server, or typing the key it takes.
 // Signing in again to a connection whose access ran out is the same sign-in
 // for its provider and scope. Core and connect check every step: the page
 // offers only what the role can do.
@@ -89,7 +91,8 @@ export const goTo = (started: { url: string } | undefined): void => {
  * Whether this person can start connecting `integration`: never Grasp
  * staff, never an entry that isn't offered (core refuses admins too), never
  * one that needs the organization's own sign-in app (connect refuses it);
- * a native provider for anyone, a Composio toolkit for admins.
+ * a native provider or a connector made from a URL for anyone, a Composio
+ * toolkit for admins.
  */
 export const canConnect = (
   integration: Integration,
@@ -101,7 +104,7 @@ export const canConnect = (
   if (integration.source === "native") {
     return oauthProviderSchema.safeParse(integration.id).success;
   }
-  return isAdmin(identity.role);
+  return integration.source === "connector" || isAdmin(identity.role);
 };
 
 /** Whether an admin connects it for this person: they can't connect it, and they aren't one of the organization's admins. */
@@ -451,7 +454,55 @@ const ScopeChoice = ({
   );
 };
 
-/** The native provider's sign-in: who uses it (an admin chooses), then signing in. */
+/**
+ * The key a connector's server takes, typed in here and never shown: it
+ * stays in this form until it goes to core, and the form never submits
+ * itself (Enter connects, through `onSubmit`), so it never reaches an
+ * address or the history.
+ */
+const KeyEntry = ({
+  value,
+  disabled,
+  onChange,
+  onSubmit,
+}: {
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+}) => {
+  const { t } = useLingui();
+  return (
+    <form
+      method="post"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!disabled && value !== "") {
+          onSubmit();
+        }
+      }}
+      {...stylex.props(styles.part)}
+    >
+      <Field>
+        <FieldLabel>{t`Key`}</FieldLabel>
+        <SecretInput
+          disabled={disabled}
+          onValueChange={onChange}
+          required
+          spellCheck={false}
+          value={value}
+        />
+        <FieldDescription>{t`The key its server takes. Grasp keeps it sealed and never shows it again.`}</FieldDescription>
+      </Field>
+    </form>
+  );
+};
+
+/**
+ * Signing in to a native provider or a connector made from a URL: who uses
+ * it (an admin chooses), then signing in, or typing the key a connector's
+ * server takes.
+ */
 const NativeFlow = ({
   integration,
   identity,
@@ -474,36 +525,53 @@ const NativeFlow = ({
   // Done once the admin chose who uses it, the default (just for them)
   // included: by picking an option, or by going on to sign in with it.
   const [chose, setChose] = useState(false);
-  const provider = oauthProviderSchema.safeParse(integration.id);
+  const [key, setKey] = useState("");
+  const withKey = integration.auth === "key";
   const app = integration.name;
   const start = async (): Promise<void> => {
-    if (!provider.success) {
-      return;
-    }
     setChose(true);
-    await begin(
-      async (session) =>
-        await session.connections.start({
-          provider: provider.data,
-          scope,
-          returnTo,
-        })
+    await begin(async (session) =>
+      withKey
+        ? await session.connections.connectWithKey({
+            provider: integration.id,
+            scope,
+            key,
+            returnTo,
+          })
+        : await session.connections.start({
+            provider: integration.id,
+            scope,
+            returnTo,
+          })
     );
   };
   const signIn = (
     <>
-      <SignInSteps app={app} host={signInHostOf(integration)} />
+      {withKey ? (
+        <KeyEntry
+          disabled={busy}
+          onChange={setKey}
+          onSubmit={() => {
+            void start();
+          }}
+          value={key}
+        />
+      ) : (
+        <SignInSteps app={app} host={signInHostOf(integration)} />
+      )}
       <Actions
         app={app}
         attempt={attempt}
         busy={busy}
         cancel={t`Cancel`}
+        disabled={withKey && key === ""}
         onClose={onClose}
         onStart={() => {
           void start();
         }}
+        retries={!withKey}
       >
-        {t`Sign in to ${app}`}
+        {withKey ? t`Connect ${app}` : t`Sign in to ${app}`}
       </Actions>
       {failure === undefined ? null : (
         <Alert variant="destructive">
@@ -894,6 +962,12 @@ export const ConnectDialog = ({
 }) => {
   const { t } = useLingui();
   const app = integration.name;
+  // Who keeps the access, and who carries out what it's allowed.
+  const descriptions = {
+    native: t`Through Grasp's own connector, which keeps the access in your deployment. Your workflows can use it once it is connected, only for what you allow.`,
+    connector: t`Through ${app}'s own MCP server, which carries out what you allow. Grasp keeps the access in your deployment, and your workflows can use it once it is connected.`,
+    composio: t`Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow.`,
+  };
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent>
@@ -904,14 +978,12 @@ export const ConnectDialog = ({
               : t`Sign in to ${app} again`}
           </DialogTitle>
           <DialogDescription>
-            {integration.source === "native"
-              ? t`Through Grasp's own connector, which keeps the access in your deployment. Your workflows can use it once it is connected, only for what you allow.`
-              : t`Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow.`}
+            {descriptions[integration.source]}
           </DialogDescription>
         </DialogHeader>
         <DialogBody>
           {/* Only while open, so each opening starts from its first step. */}
-          {open && integration.source === "native" ? (
+          {open && integration.source !== "composio" ? (
             <NativeFlow
               again={again}
               identity={identity}

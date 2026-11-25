@@ -181,6 +181,7 @@ export const rpcParamNames: ParamNames = {
   },
   "ConnectionsRpc": {
     "addAgentDocument": ["agentId","file"],
+    "addConnector": ["request"],
     "adoptAgent": ["agentId"],
     "agentApps": ["agentId"],
     "agentDocuments": ["agentId"],
@@ -197,6 +198,7 @@ export const rpcParamNames: ParamNames = {
     "changeTools": ["request"],
     "connectToolkit": ["request"],
     "connectToolkitWithKey": ["request"],
+    "connectWithKey": ["request"],
     "createHttp": ["connection"],
     "declineAgent": ["agentId"],
     "deleteAgent": ["agentId"],

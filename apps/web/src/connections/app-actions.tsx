@@ -144,7 +144,8 @@ const ConnectToolkit = ({
 };
 
 /**
- * Connecting one of Grasp's own connectors from the app parts' dialog. Its
+ * Connecting one of Grasp's own connectors, or a connector made from a URL
+ * whose server signs in, from the app parts' dialog. Its
  * Sign in follows the start, so it can't be pressed again meanwhile; and
  * only the newest start sends the browser away, should an older one, from
  * the dialog opened before, answer later.
@@ -163,8 +164,12 @@ const ConnectNative = ({
   const core = useCore();
   const { t } = useLingui();
   const newest = useRef(0);
-  const provider = oauthProviderSchema.safeParse(integration.id);
-  if (!provider.success) {
+  // A native suite by its provider, a connector made from a URL by its ID.
+  const provider =
+    integration.source === "connector"
+      ? integration.id
+      : oauthProviderSchema.safeParse(integration.id).data;
+  if (provider === undefined) {
     return null;
   }
   const app = integration.name;
@@ -175,7 +180,7 @@ const ConnectNative = ({
       const started = await core.withSession(
         async (session) =>
           await session.connections.start({
-            provider: provider.data,
+            provider,
             scope: forWhom === "everyone" ? "shared" : "personal",
             returnTo: returnToOf(integration.key),
           })
@@ -258,8 +263,13 @@ const connectWayOf = (
     return undefined;
   }
   const none = integration.connections.length === 0;
-  if (integration.source === "native") {
-    return none ? "native" : undefined;
+  // A connector made from a URL signs in as a native suite does, or takes
+  // a key, which the steps dialog asks for.
+  if (integration.source !== "composio") {
+    if (!none) {
+      return undefined;
+    }
+    return integration.auth === "key" ? "dialog" : "native";
   }
   if (!none && stopped.length === 0) {
     return undefined;
@@ -347,7 +357,7 @@ export const useAppActions = ({
   if (
     connectable &&
     !none &&
-    (integration.source === "native" ||
+    (integration.source !== "composio" ||
       (integration.auth === "managed" && stopped.length === 0))
   ) {
     actions.onConnectAnother = openNative();
