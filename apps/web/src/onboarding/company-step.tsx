@@ -227,12 +227,13 @@ const useWords = ({
   suites: DirectorySuite[];
   people: number;
   teams: number;
-}): { title: string; body: string | null } => {
+}): { title: string; body: string | null; spoken: string } => {
   const { t } = useLingui();
   if (roster !== null && another) {
     return {
       title: t`Use another staff list`,
       body: t`Share another staff list as a CSV or Excel file, a row per person. It replaces the one I have now.`,
+      spoken: t`Got a newer list? Share it here, and it replaces the one I have now.`,
     };
   }
   if (roster !== null) {
@@ -241,25 +242,36 @@ const useWords = ({
       fromDirectory === null
         ? t`From your staff list I can see ${people} people in ${teams} teams.`
         : t`${signIn} is connected. I can see ${people} people in ${teams} teams.`;
+    // Said as a tutor would: what's in front of them, and what to do with it.
+    const spoken = t`There it is, your company. I can see ${people} people in ${teams} teams. Have a quick look whether that seems right, and then we’ll move on.`;
     if (pictured) {
-      return { title: t`Here’s your company`, body: seen };
+      return { title: t`Here’s your company`, body: seen, spoken };
     }
     // A few of them by name, so the admin sees it is their own company.
     const names = formatList(namesOf(roster));
     const among = t`Among them ${names}.`;
-    return { title: t`Here’s your company`, body: `${seen} ${among}` };
+    return { title: t`Here’s your company`, body: `${seen} ${among}`, spoken };
   }
   // Just the ask, no line under it (Ruben: what matters is that they connect their account).
   if (suites.length > 1) {
-    return { title: t`Connect your work account`, body: null };
+    return {
+      title: t`Connect your work account`,
+      body: null,
+      spoken: t`Now let’s get to know your company. If you connect your work account, I can see who works there and in which team, so I know who to talk to later on.`,
+    };
   }
   if (suites[0] !== undefined) {
     const signIn = suiteNames[suites[0]];
-    return { title: t`Connect your ${signIn} account`, body: null };
+    return {
+      title: t`Connect your ${signIn} account`,
+      body: null,
+      spoken: t`Now let’s get to know your company. If you connect your ${signIn} account, I can see who works there and in which team, so I know who to talk to later on.`,
+    };
   }
   return {
     title: t`Share your staff list`,
     body: t`Share a staff list as a CSV or Excel file, a row per person. No list at hand? Skip this, and we’ll sort it out with you.`,
+    spoken: t`Now let’s get to know your company. A staff list works fine for that, one row per person with their team and job. Don’t have one at hand? No problem, skip it and we’ll sort it out together.`,
   };
 };
 
@@ -488,7 +500,7 @@ export const CompanyStep = (props: StepProps) => {
   // Concepts only: `?concept=a|b` draws the roster, once there is one and no other list is asked for.
   const concept = useCompanyConcept();
   const pictured = concept !== null && roster !== null && !listShown;
-  const { title, body } = useWords({
+  const { title, body, spoken } = useWords({
     another,
     pictured,
     roster,
@@ -507,7 +519,7 @@ export const CompanyStep = (props: StepProps) => {
     roster: roster !== null,
   });
   return (
-    <CalmStep also={also} body={body} end={end} title={title}>
+    <CalmStep also={also} body={body} end={end} spoken={spoken} title={title}>
       {pictured ? <Pictured concept={concept} roster={roster} /> : null}
       {listShown || problem !== null || waiting > 0 ? (
         <div {...stylex.props(styles.stack)}>

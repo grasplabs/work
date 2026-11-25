@@ -164,6 +164,11 @@ export const TeamStep = ({
           ) : null}
         </>
       }
+      spoken={
+        planned
+          ? t`We’re nearly there. Before I reach out to anyone, it helps if they hear about me from you first. People open up a lot more when they know why I’m asking. So send them this message yourself, and then pick the day I can start.`
+          : t`We’re nearly there. Before I reach out to anyone, it helps if they hear about me from you first. People open up a lot more when they know why I’m asking. So send them this message yourself, and Grasp’s team will plan the day I start together with you.`
+      }
       title={t`Before I reach out, let your team know`}
     >
       <div {...stylex.props(styles.stack)}>

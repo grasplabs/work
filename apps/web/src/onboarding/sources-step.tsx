@@ -247,6 +247,7 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
           {t`Continue`}
         </Button>
       }
+      spoken={t`Next, I’d like to understand how the work actually gets done. Most of that is written down somewhere, in handbooks, procedures or how-tos. Show me where those live, and I’ll only read what you choose to share with me.`}
       title={t`Where does the work get written down?`}
     >
       <div {...stylex.props(styles.stack)}>
