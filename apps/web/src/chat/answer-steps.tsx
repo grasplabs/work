@@ -52,7 +52,7 @@ import type { StepStatus } from "./chat-states.ts";
 export interface AnswerStep {
   id: string;
   /** What kind of step it is, for the line that says what the steps came to. */
-  kind: "search" | "read" | "write" | "tool";
+  kind: "search" | "read" | "write" | "remember" | "tool";
   /** What it did, in the past once finished; as it goes until then. */
   label: string;
   /** What it does while it works: the line over the steps says it. */
