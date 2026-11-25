@@ -237,8 +237,8 @@ export interface PageSkeletonIntegrationsProps {
   runs?: readonly (number | PageSkeletonRun)[];
   /** The slim hero's card waits too, between the header and the runs. @default false */
   band?: boolean;
-  /** What the region says while it waits, for a screen reader. @default "Loading integrations" */
-  label?: string;
+  /** What the region says while it waits, for a screen reader, in the page's language. */
+  label: string;
 }
 
 /** A run with a note under its heading, as Recommended's "From your Microsoft 365, …". */
@@ -273,7 +273,7 @@ const WaitingTile = () => (
 export const PageSkeletonIntegrations = ({
   runs = RUNS,
   band = false,
-  label = "Loading integrations",
+  label,
 }: PageSkeletonIntegrationsProps) => (
   <output
     data-slot="page-skeleton-integrations"

@@ -139,7 +139,7 @@ const useGroups = ({
     return [];
   }
   const at = (
-    to: "/" | "/brain" | "/apps" | "/workflows" | "/agents" | "/integrations",
+    to: "/" | "/brain" | "/apps" | "/workflows" | "/agents" | "/connectors",
     fuzzy = true
   ) => matchRoute({ to, fuzzy }) !== false;
   const sections: SidebarGroupEntry = {
@@ -188,10 +188,10 @@ const useGroups = ({
       },
       {
         id: "integrations",
-        label: t`Integrations`,
+        label: t`Connectors`,
         icon: CableIcon,
-        render: (look) => <Link {...look} to="/integrations" />,
-        current: at("/integrations"),
+        render: (look) => <Link {...look} to="/connectors" />,
+        current: at("/connectors"),
       },
     ],
   };
