@@ -1930,6 +1930,10 @@ msgstr "Un hueco: esta conexión no puede decirle a Grasp qué cambió en ella, 
 msgid "A JSON value"
 msgstr "Un valor JSON"
 
+#: src/connections/add-connector.tsx
+msgid "A key in a header"
+msgstr "Una clave en un encabezado"
+
 #: src/interview/transcript.tsx
 msgid "A line of mine, removed."
 msgstr "Una intervención mía, eliminada."
@@ -2311,6 +2315,10 @@ msgstr "Añadir una conexión"
 msgid "Add a connector"
 msgstr "Añadir un conector"
 
+#: src/connections/add-connector.tsx
+msgid "Add a connector by URL"
+msgstr "Añadir un conector por URL"
+
 #: src/settings/ai-providers.tsx
 msgid "Add a fallback"
 msgstr "Añadir un modelo de reserva"
@@ -2377,6 +2385,7 @@ msgid "Add another"
 msgstr "Añadir otra"
 
 #: src/agents/setup/apps-step.tsx
+#: src/connections/add-connector.tsx
 msgid "Add connector"
 msgstr "Añadir conector"
 
@@ -2423,6 +2432,10 @@ msgstr "Añade las aplicaciones en las que trabaja."
 #: src/connections/http-connections.tsx
 msgid "Add the connection"
 msgstr "Añadir la conexión"
+
+#: src/connections/add-connector.tsx
+msgid "Add the connector"
+msgstr "Añadir el conector"
 
 #: src/workflows/workflow-triggers.tsx
 msgid "Add the trigger"
@@ -3094,6 +3107,10 @@ msgstr "Responde las preguntas del equipo con lo que sabe la empresa."
 #: src/chat/agent-draft-card.tsx
 msgid "Any app its kinds of work allow"
 msgstr "Cualquier app que permitan sus tipos de trabajo"
+
+#: src/connections/add-connector.tsx
+msgid "Any app with its own MCP server. Grasp keeps the access in your deployment, and people connect it from its page."
+msgstr "Cualquier app con su propio servidor MCP. Grasp guarda el acceso en tu implantación, y cada persona la conecta desde su página."
 
 #: src/workflows/binding-approvals.tsx
 msgid "Any event its webhook source sends of the types its contract admits"
@@ -4089,6 +4106,7 @@ msgstr "No se puede ofrecer Ejecutar: {unread}"
 #: src/chat/chat-window.tsx
 #: src/chat/delete-chat-dialog.tsx
 #: src/confirmed.tsx
+#: src/connections/add-connector.tsx
 #: src/connections/app/words.ts
 #: src/connections/connect-dialog.tsx
 #: src/connections/http-connections.tsx
@@ -4496,6 +4514,7 @@ msgid "Chat with {name}"
 msgstr "Chatear con {name}"
 
 #: src/chat/chat-window.tsx
+#: src/connections/chat-reads.tsx
 #: src/frame/app-sidebar.tsx
 #: src/projects/project-view.tsx
 msgid "Chats"
@@ -4720,6 +4739,14 @@ msgstr "Borrado"
 #: src/frame/ui-words.tsx
 msgid "Click or drop a picture."
 msgstr "Haz clic o suelta una imagen."
+
+#: src/connections/add-connector.tsx
+msgid "Client ID (optional)"
+msgstr "ID de cliente (opcional)"
+
+#: src/connections/add-connector.tsx
+msgid "Client secret (optional)"
+msgstr "Secreto de cliente (opcional)"
 
 #: src/settings/backdrop-settings.tsx
 msgid "Cliffs"
@@ -6509,6 +6536,10 @@ msgstr "Cada llamada enviada para alguien aparece aquí hasta que esa persona di
 msgid "Each path prefix starts with /, on its own line, with no query or dot segments."
 msgstr "Cada prefijo de ruta empieza por /, en su propia línea, sin consulta ni segmentos de punto."
 
+#: src/connections/add-connector.tsx
+msgid "Each person who connects it types their own key, which goes in this header."
+msgstr "Cada persona que la conecta escribe su propia clave, que va en este encabezado."
+
 #: src/settings/stephen-settings.tsx
 msgid "Each place only narrows who reaches him there, and whether he does things for people there or only answers."
 msgstr "Cada lugar solo limita quién lo contacta allí y si hace cosas por las personas o solo responde."
@@ -7034,6 +7065,7 @@ msgstr "Todos en él · {shownRole}"
 #: src/agents/new-agent.tsx
 #: src/chat/agent-draft-card.tsx
 #: src/connections/brain-audience.tsx
+#: src/connections/chat-reads.tsx
 msgid "Everyone in the company"
 msgstr "Todos en la empresa"
 
@@ -7867,6 +7899,10 @@ msgstr "Devolver"
 msgid "Give it a name of at most {longest} characters."
 msgstr "Dale un nombre de como máximo {longest} caracteres."
 
+#: src/connections/add-connector.tsx
+msgid "Give it a name of at most 80 characters."
+msgstr "Ponle un nombre de 80 caracteres como máximo."
+
 #: src/agents/agent-form.tsx
 msgid "Give it a name."
 msgstr "Dale un nombre."
@@ -8112,6 +8148,10 @@ msgstr "Grasp aún no está abierto. Vuelve a intentarlo más tarde."
 msgid "Grasp itself"
 msgstr "El propio Grasp"
 
+#: src/connections/add-connector.tsx
+msgid "Grasp keeps it sealed and never shows it again."
+msgstr "Grasp lo guarda sellado y no vuelve a mostrarlo."
+
 #: src/settings/erasures.tsx
 msgid "Grasp keeps no copy of it, so type it in full."
 msgstr "Grasp no guarda ninguna copia, así que escríbela completa."
@@ -8293,6 +8333,7 @@ msgstr "Hash"
 msgid "He stops answering everywhere outside Grasp, and says so once to whoever writes. Grasp’s chat keeps working."
 msgstr "Deja de responder en todas partes fuera de Grasp y lo dice una vez a quien escriba. El chat de Grasp sigue funcionando."
 
+#: src/connections/add-connector.tsx
 #: src/connections/http-connections.tsx
 msgid "Header name"
 msgstr "Nombre de la cabecera"
@@ -8463,6 +8504,10 @@ msgstr "Cuánto piensa"
 #: src/agents/setup/thinking-step.tsx
 msgid "How hard should {name} think?"
 msgstr "¿Cuánto debe pensar {name}?"
+
+#: src/connections/add-connector.tsx
+msgid "How it signs in"
+msgstr "Cómo se inicia sesión"
 
 #: src/workflows/item-test.tsx
 msgid "How it went then"
@@ -9655,6 +9700,7 @@ msgstr "Mantenido a mano fuera de {team} desde el {date}."
 msgid "Kept something the chat can no longer read from the model"
 msgstr "Ocultó al modelo algo que el chat ya no puede leer"
 
+#: src/connections/connect-dialog.tsx
 #: src/onboarding/ai-step.tsx
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
@@ -10885,6 +10931,7 @@ msgstr "Mi versión de la App no arrancó. Averigua por qué y arréglalo:"
 #: src/apps/app-data-model.tsx
 #: src/apps/app-settings.tsx
 #: src/apps/field-editor.tsx
+#: src/connections/add-connector.tsx
 #: src/connections/http-connections.tsx
 #: src/frame/panels/head.tsx
 #: src/frame/panels/rename.tsx
@@ -11029,6 +11076,11 @@ msgstr "Nuevo"
 
 #: src/brain/learned-section.tsx
 msgctxt "an entity the Brain first saw in this version"
+msgid "New"
+msgstr "Nuevo"
+
+#: src/chat/thread.tsx
+msgctxt "the line in a chat over the answers the person hasn't read"
 msgid "New"
 msgstr "Nuevo"
 
@@ -11572,6 +11624,7 @@ msgstr "No: se cambió o no enlaza con el evento anterior."
 
 #: src/apps/access-view.tsx
 #: src/connections/brain-audience.tsx
+#: src/connections/chat-reads.tsx
 msgid "Nobody"
 msgstr "Nadie"
 
@@ -12555,6 +12608,10 @@ msgstr "Solo los creadores ven esto."
 msgid "Only counted anonymously"
 msgstr "Solo cuenta de forma anónima"
 
+#: src/connections/add-connector.tsx
+msgid "Only for a server that doesn't register Grasp itself: the client its vendor issued for Grasp."
+msgstr "Solo para un servidor que no registra a Grasp por sí mismo: el cliente que su proveedor emitió para Grasp."
+
 #: src/workflows/workflow-diagram.tsx
 msgid "Only if its condition holds"
 msgstr "Solo si se cumple su condición"
@@ -13361,6 +13418,10 @@ msgstr "Personas de fuera de tu organización, invitadas a lo que se comparte co
 #: src/onboarding/setup-steps.tsx
 msgid "People respond better when they know why I’m reaching out. I’ve drafted a message you can send yourself. Then pick the day the interviews start."
 msgstr "La gente responde mejor cuando sabe por qué me pongo en contacto. He redactado un mensaje que puedes enviar tú mismo. Después elige el día en que empiezan las entrevistas."
+
+#: src/connections/add-connector.tsx
+msgid "People sign in at the server"
+msgstr "Cada persona inicia sesión en el servidor"
 
 #: src/settings/team-members-dialog.tsx
 msgid "People to tick"
@@ -15628,6 +15689,10 @@ msgstr "Enviada a {owner} el {day}"
 msgid "Served by"
 msgstr "Flujos que contribuyen"
 
+#: src/connections/add-connector.tsx
+msgid "Server URL"
+msgstr "URL del servidor"
+
 #: src/onboarding/hr-leads.tsx
 msgid "Service user ID"
 msgstr "ID del usuario de servicio"
@@ -16285,6 +16350,7 @@ msgid "Some files weren’t added. I can read PDF, Word, Excel, PowerPoint and t
 msgstr "No se añadió todo. Puedo leer PDF, Word, Excel, PowerPoint y texto."
 
 #: src/agents/setup/words.ts
+#: src/connections/chat-reads.tsx
 msgid "Some teams"
 msgstr "Algunos equipos"
 
@@ -17051,6 +17117,7 @@ msgstr "Equipo"
 #: src/brain/memories-page.tsx
 #: src/brain/sources-page.tsx
 #: src/connections/brain-audience.tsx
+#: src/connections/chat-reads.tsx
 msgid "Team {name}"
 msgstr "Equipo {name}"
 
@@ -17331,9 +17398,17 @@ msgstr "La dirección"
 msgid "The address can sign in again."
 msgstr "La dirección puede volver a iniciar sesión."
 
+#: src/connections/add-connector.tsx
+msgid "The address is the server's own https:// URL, such as https://mcp.example.com/mcp, with no query, fragment or user name in it."
+msgstr "La dirección es la URL https:// propia del servidor, como https://mcp.example.com/mcp, sin consulta, fragmento ni nombre de usuario."
+
 #: src/frame/page-states.tsx
 msgid "The address may be wrong, or the page was moved or removed."
 msgstr "Puede que la dirección sea incorrecta, o que la página se haya movido o eliminado."
+
+#: src/connections/add-connector.tsx
+msgid "The address of its MCP server, as its vendor gives it."
+msgstr "La dirección de su servidor MCP, tal como la da su proveedor."
 
 #: src/chat/connection-requests.tsx
 msgid "The agent asked an admin for {name}"
@@ -17558,6 +17633,10 @@ msgstr "No se pudo cambiar el nombre del chat. Inténtalo de nuevo."
 msgid "The checks, reviews and records the regulator expects from you."
 msgstr "Los controles, revisiones y registros que el regulador espera de usted."
 
+#: src/connections/add-connector.tsx
+msgid "The client ID is at most 512 characters, and its secret at most 4,096."
+msgstr "El ID de cliente tiene como máximo 512 caracteres, y su secreto como máximo 4096."
+
 #: src/routes/setup.tsx
 msgid "The company brain: {percent}% known. Dark dots are what I know, grey dots what I still need to learn."
 msgstr "El Brain de la empresa: {percent} % conocido. Los puntos oscuros son lo que sé; los grises, lo que aún tengo que aprender."
@@ -17706,6 +17785,10 @@ msgstr "La exportación no ha funcionado. Inténtalo de nuevo."
 msgid "The first links go out"
 msgstr "Los primeros enlaces salen"
 
+#: src/connections/add-connector.tsx
+msgid "The header is a name of letters, digits and dashes, and not one Grasp sets itself."
+msgstr "El encabezado es un nombre de letras, dígitos y guiones, y no uno que Grasp ponga por sí mismo."
+
 #: src/drafts/draft-history.tsx
 msgid "The history of your changes couldn't be read. Try again in a moment."
 msgstr "No se pudo leer el historial de tus cambios. Inténtalo de nuevo en un momento."
@@ -17734,6 +17817,10 @@ msgstr "La entrada no es JSON."
 #: src/interview/page.tsx
 msgid "The interviews are over."
 msgstr "Las entrevistas han terminado."
+
+#: src/connections/connect-dialog.tsx
+msgid "The key its server takes. Grasp keeps it sealed and never shows it again."
+msgstr "La clave que acepta su servidor. Grasp la guarda sellada y no vuelve a mostrarla."
 
 #: src/routes/_shell.settings.profile.tsx
 msgid "The language Grasp speaks to you"
@@ -18025,6 +18112,10 @@ msgstr "La ejecución del flujo de trabajo que lo preguntó ha terminado, así q
 #: src/settings/event-sources.tsx
 msgid "The workflows couldn't be read."
 msgstr "No se pudieron leer los flujos de trabajo."
+
+#: src/connections/chat-reads.tsx
+msgid "Their assistant reads in all of {label} for them. Anything it changes there waits for them to confirm it."
+msgstr "Su asistente lee en todo {label} por ellos. Todo lo que cambie allí espera a que lo confirmen."
 
 #: src/settings/directory-placement.tsx
 msgid "Their department in the directory no longer fills this team. They stay until you move them."
@@ -18498,6 +18589,10 @@ msgstr "Tres en círculo"
 #: src/activity/audit-event.tsx
 msgid "Through"
 msgstr "A través de"
+
+#: src/connections/connect-dialog.tsx
+msgid "Through {app}'s own MCP server, which carries out what you allow. Grasp keeps the access in your deployment, and your workflows can use it once it is connected."
+msgstr "A través del propio servidor MCP de {app}, que lleva a cabo lo que permitas. Grasp guarda el acceso en tu implementación, y tus flujos de trabajo pueden usarlo una vez conectado."
 
 #: src/connections/connect-dialog.tsx
 msgid "Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow."
@@ -19009,6 +19104,10 @@ msgstr "Desvinculó una cuenta de una aplicación de chat"
 #: src/frame/ui-words.tsx
 msgid "Unpin"
 msgstr "Desfijar"
+
+#: src/chat/sidebar-chats.tsx
+msgid "Unread"
+msgstr "No leído"
 
 #: src/activity/audit-log.tsx
 msgid "Unreadable event"
@@ -20471,6 +20570,10 @@ msgstr "quien añadió la fila"
 #: src/connections/sync-places.tsx
 msgid "Whoever you let read {label} in the Brain will be able to read everything in the places you pick, whatever their permissions in {label}."
 msgstr "Quien dejes leer {label} en el Brain podrá leer todo lo que haya en los lugares que elijas, sean cuales sean sus permisos en {label}."
+
+#: src/connections/chat-reads.tsx
+msgid "Whose chats read in it"
+msgstr "De quién son los chats que leen en él"
 
 #: src/chat/agent-draft-card.tsx
 msgid "Whose it is"

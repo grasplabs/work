@@ -163,6 +163,7 @@ export const rpcParamNames: ParamNames = {
     "heldCalls": ["chatId","after"],
     "list": ["options"],
     "makeDraftedAgent": ["chatId","make"],
+    "markRead": ["chatId"],
     "models": [],
     "names": [],
     "packageRequests": ["chatId"],
@@ -181,6 +182,7 @@ export const rpcParamNames: ParamNames = {
   },
   "ConnectionsRpc": {
     "addAgentDocument": ["agentId","file"],
+    "addConnector": ["request"],
     "adoptAgent": ["agentId"],
     "agentApps": ["agentId"],
     "agentDocuments": ["agentId"],
@@ -197,6 +199,7 @@ export const rpcParamNames: ParamNames = {
     "changeTools": ["request"],
     "connectToolkit": ["request"],
     "connectToolkitWithKey": ["request"],
+    "connectWithKey": ["request"],
     "createHttp": ["connection"],
     "declineAgent": ["agentId"],
     "deleteAgent": ["agentId"],

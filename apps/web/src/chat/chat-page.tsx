@@ -124,6 +124,8 @@ export const ChatPage = ({
               focusBox={() => {
                 boxOf(page.current)?.focus();
               }}
+              // The page is keyed by its chat, and shows only that one.
+              seen
             />
             <ChatFooter chat={chat} inColumn listening />
           </>

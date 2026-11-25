@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import type { ChatSummary } from "@grasp-os/shared/chat";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { SidebarProvider, useSidebar } from "@grasp-os/ui/components/sidebar";
 import { Toaster } from "@grasp-os/ui/components/toast";
 import { i18n } from "@lingui/core";
@@ -9,6 +10,7 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
 import type { AnyRouter } from "@tanstack/react-router";
@@ -18,8 +20,11 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { FrameSidebar } from "../frame/sidebar.tsx";
+import { forgetActiveChats, setActiveChat } from "./active-chat.ts";
+import { closeChat, openChat } from "./chat-layout.ts";
 import { tellChatsChanged } from "./chats-changed.ts";
-import { useRecentChats } from "./sidebar-chats.tsx";
+import { GlobalChatProvider } from "./global-chat.tsx";
+import { useRecentChats, workingReadMs } from "./sidebar-chats.tsx";
 
 // The sidebar's recent chats on a phone, where the sidebar is a sheet over
 // the page: a chat is a link to its own page, which the frame's sheet
@@ -37,6 +42,7 @@ const chat: ChatSummary = {
   createdAt: "2026-11-17T09:00:00.000Z",
   lastAt: "2026-11-17T09:00:00.000Z",
   running: false,
+  unread: false,
   make: null,
   archived: false,
 };
@@ -173,6 +179,19 @@ const chatNamed = (
   title,
   running,
 });
+
+/** Whether the tab is shown, as the page reads it. */
+const setShown = (visible: boolean) => {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    get: () => (visible ? "visible" : "hidden"),
+  });
+  document.dispatchEvent(new Event("visibilitychange"));
+};
+
+/** How many unread dots the sidebar shows. */
+const dots = () =>
+  document.querySelectorAll("[data-slot=sidebar-row-unread]").length;
 
 /** The sidebar with the recent chats alone, and the toasts. */
 const RenameFrame = () => {
@@ -494,5 +513,228 @@ describe("renaming a recent chat from its row", () => {
         document.querySelectorAll("[data-slot=sidebar-row-working]")
       ).toHaveLength(0);
     });
+  });
+
+  it("shows a dot said as Unread once an answer the person hasn't seen ends, never while it works nor on the chat open in front of them", async () => {
+    let state = { running: true, unread: false };
+    const { router } = await shownWith({
+      list: async () =>
+        await Promise.resolve([
+          { ...chatNamed("chat-1", "Month-end"), ...state },
+        ]),
+    });
+    const marks = () => ({
+      working: document.querySelectorAll("[data-slot=sidebar-row-working]")
+        .length,
+      dot: document.querySelectorAll("[data-slot=sidebar-row-unread]").length,
+      said: linkIn(itemOf("chat-1")).textContent.includes("Unread"),
+    });
+    await vi.waitFor(() => {
+      expect(marks()).toStrictEqual({ working: 1, dot: 0, said: false });
+    });
+
+    state = { running: false, unread: true };
+    await act(async () => {
+      tellChatsChanged();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(marks()).toStrictEqual({ working: 0, dot: 1, said: true });
+    });
+
+    // Opened: no dot on the chat in front of them.
+    await act(async () => {
+      await router.navigate({
+        to: "/chats/$chatId",
+        params: { chatId: "chat-1" },
+      });
+    });
+    await vi.waitFor(() => {
+      expect(marks()).toStrictEqual({ working: 0, dot: 0, said: false });
+    });
+  });
+
+  it("shows no dot on the chat open beside the page, and shows it again once that chat is closed to its bar", async () => {
+    const chats = {
+      list: async () =>
+        await Promise.resolve([
+          { ...chatNamed("chat-1", "Month-end"), unread: true },
+        ]),
+      models: async () => await Promise.resolve(["openai/gpt-5"]),
+      efforts: async () => await Promise.resolve({}),
+      agents: async () => await Promise.resolve([]),
+      names: async () => await Promise.resolve({}),
+      summary: async () =>
+        await Promise.resolve(chatNamed("chat-1", "Month-end")),
+      heldCalls: async () => await Promise.resolve([]),
+      worked: async () => await Promise.resolve([]),
+      watch: async () => await Promise.withResolvers<never>().promise,
+      markRead: async () => await Promise.withResolvers<never>().promise,
+    };
+    const core = {
+      withSession: async <T,>(
+        action: (reached: { chats: typeof chats }) => Promise<T>
+      ): Promise<T> => await action({ chats }),
+    };
+    const identity: Identity = {
+      userId: "user-1",
+      email: "user-1@acme.test",
+      name: "user-1",
+      role: "builder",
+      teams: [],
+      staff: false,
+      expiresAt: "2026-11-01T09:00:00.000Z",
+    };
+    const rootRoute = createRootRoute({ component: Outlet });
+    const shell = createRoute({
+      getParentRoute: () => rootRoute,
+      id: "_shell",
+      beforeLoad: () => ({ identity }),
+      component: () => (
+        <GlobalChatProvider>
+          <RenameFrame />
+        </GlobalChatProvider>
+      ),
+    });
+    const router: AnyRouter = createRouter({
+      routeTree: rootRoute.addChildren([
+        shell.addChildren([
+          createRoute({ getParentRoute: () => shell, path: "/apps" }),
+        ]),
+      ]),
+      history: createMemoryHistory({ initialEntries: ["/apps"] }),
+      context: { core },
+    });
+    setActiveChat("chat-1", "chat");
+    openChat("floating");
+    const host = document.createElement("div");
+    document.body.append(host);
+    await act(async () => {
+      root = createRoot(host);
+      root.render(
+        <I18nProvider i18n={i18n}>
+          <SidebarProvider>
+            <RouterProvider router={router} />
+          </SidebarProvider>
+        </I18nProvider>
+      );
+      await router.load();
+    });
+    await vi.waitFor(() => {
+      expect(linkIn(itemOf("chat-1"))).toBeDefined();
+    });
+    const beside = dots();
+
+    act(() => {
+      closeChat();
+    });
+    await vi.waitFor(() => {
+      expect(dots()).toBe(1);
+    });
+    act(() => {
+      forgetActiveChats();
+    });
+    expect(beside).toBe(0);
+  });
+
+  it("reads the list again every few seconds while a chat works and the tab is shown, so its Working mark turns into the dot, and stops once none works or the tab hides", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      let state = { running: true, unread: false };
+      const list = vi.fn<() => Promise<ChatSummary[]>>(
+        async () =>
+          await Promise.resolve([
+            { ...chatNamed("chat-1", "Month-end"), ...state },
+          ])
+      );
+      await shownWith({ list });
+      await vi.waitFor(() => {
+        expect(
+          document.querySelectorAll("[data-slot=sidebar-row-working]")
+        ).toHaveLength(1);
+      });
+      /** How many times the list is read over `ms`. */
+      const readsOver = async (ms: number): Promise<number> => {
+        const before = list.mock.calls.length;
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(ms);
+        });
+        return list.mock.calls.length - before;
+      };
+      const working = await readsOver(workingReadMs * 2);
+
+      // Hidden: nobody sees it, so nothing is read.
+      act(() => {
+        setShown(false);
+      });
+      const hidden = await readsOver(workingReadMs * 3);
+      // Shown again (read once for coming back), then the answer ends in
+      // the background: the next read turns the mark into the dot.
+      state = { running: false, unread: true };
+      act(() => {
+        setShown(true);
+      });
+      await vi.waitFor(() => {
+        expect(dots()).toBe(1);
+      });
+      const done = await readsOver(workingReadMs * 3);
+
+      expect({
+        working,
+        hidden,
+        done,
+        marks: document.querySelectorAll("[data-slot=sidebar-row-working]")
+          .length,
+      }).toStrictEqual({ working: 2, hidden: 0, done: 0, marks: 0 });
+    } finally {
+      setShown(true);
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows what a read finds while a chat works even when core takes longer to answer than the pace of reading", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      let state = { running: true, unread: false };
+      // Each answer after the first waits until the test lets it go.
+      const answers: (() => void)[] = [];
+      const list = vi.fn<() => Promise<ChatSummary[]>>(async () => {
+        const now = { ...chatNamed("chat-1", "Month-end"), ...state };
+        if (list.mock.calls.length > 1) {
+          const { promise, resolve } = Promise.withResolvers<boolean>();
+          answers.push(() => {
+            resolve(true);
+          });
+          await promise;
+        }
+        return [now];
+      });
+      await shownWith({ list });
+      await vi.waitFor(() => {
+        expect(
+          document.querySelectorAll("[data-slot=sidebar-row-working]")
+        ).toHaveLength(1);
+      });
+      state = { running: false, unread: true };
+      // A read starts, and core is slow: three more paces pass.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(workingReadMs * 4);
+      });
+      const asked = list.mock.calls.length;
+      await act(async () => {
+        for (const answer of answers) {
+          answer();
+        }
+        await Promise.resolve();
+      });
+
+      await vi.waitFor(() => {
+        expect(dots()).toBe(1);
+      });
+      // One read at a time: no new one while the slow one was on its way.
+      expect(asked).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

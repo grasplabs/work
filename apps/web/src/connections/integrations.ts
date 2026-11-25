@@ -1,3 +1,4 @@
+import { catalogSourceSchema } from "@grasp-os/shared/connect";
 import type {
   CatalogAuth,
   CatalogGroup,
@@ -26,7 +27,7 @@ export interface Integration {
   /** `source:id`, as the address names it. */
   key: string;
   source: CatalogSource;
-  /** A native provider (`microsoft`), or a Composio toolkit's slug. */
+  /** A native provider (`microsoft`), a Composio toolkit's slug, or a connector's ID. */
   id: string;
   name: string;
   categories: string[];
@@ -38,7 +39,7 @@ export interface Integration {
   auth: CatalogAuth | undefined;
   /** Where core serves its logo, or `null`: its first letter stands in. */
   logo: string | null;
-  /** How many tools it has; unknown where the catalog doesn't list it. */
+  /** How many tools it has; unknown where the catalog doesn't list it, or doesn't count them (a connector's). */
   toolCount: number | undefined;
   /** Whether people are offered it; an entry the catalog doesn't list counts as not. */
   offered: boolean;
@@ -67,15 +68,11 @@ export const parseIntegrationKey = (
   key: string
 ): { source: CatalogSource; id: string } | undefined => {
   const [source, id, ...rest] = key.split(":");
-  if (
-    (source !== "native" && source !== "composio") ||
-    id === undefined ||
-    id === "" ||
-    rest.length > 0
-  ) {
+  const parsed = catalogSourceSchema.safeParse(source);
+  if (!parsed.success || id === undefined || id === "" || rest.length > 0) {
     return undefined;
   }
-  return { source, id };
+  return { source: parsed.data, id };
 };
 
 /**
@@ -125,7 +122,7 @@ export const integrationsOf = (
     description: entry.description,
     auth: entry.auth,
     logo: entry.logo,
-    toolCount: entry.toolCount,
+    toolCount: entry.toolCount ?? undefined,
     offered: entry.offered,
     listed: true,
     connections: of(entry.source, entry.id),

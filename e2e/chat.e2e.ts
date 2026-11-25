@@ -3,9 +3,10 @@ import type { Page } from "@playwright/test";
 
 import { execute } from "./connections-seed.ts";
 import { test } from "./csp.ts";
-import { modelScripts } from "./model-scripts.ts";
+import { modelScripts, monthEndCloseLast } from "./model-scripts.ts";
 import { apiOf, peopleIn } from "./people.ts";
 import type { Person } from "./people.ts";
+import { e2eModel } from "./stack.ts";
 
 // The Chat page: a person asks in a new chat, which opens Grasp's chat full
 // screen over the page, and follows the answer as it comes in, finds it in
@@ -326,6 +327,51 @@ test("a person asks, and reads the agent's answer once its turn ends", async ({
     messages.getByRole("button", { name: "Ask again" })
   ).toBeVisible();
   await expect(messages.getByRole("alert")).toHaveCount(0);
+});
+
+test("a person comes back to a chat that answered while they were away, sees its dot, opens it and lands at the New line", async ({
+  pageOf,
+}) => {
+  const { user } = peopleIn("chat");
+  const page = await pageOf(user);
+  const title = `Month-end ${crypto.randomUUID().slice(0, 8)}`;
+  // Asked elsewhere (their phone, say), and answered while Grasp was
+  // nowhere open: core marked none of it seen.
+  const { core, api } = apiOf(user);
+  try {
+    const chat = await api.chats.create(title);
+    await api.chats.send(chat.id, {
+      text: `${modelScripts.answersAtLength.opener} (${title})`,
+      model: e2eModel,
+    });
+    await expect
+      .poll(async () => await api.chats.summary(chat.id), { timeout: 30_000 })
+      .toMatchObject({ running: false, unread: true });
+  } finally {
+    core[Symbol.dispose]();
+  }
+
+  // They come back: the chat's row has its dot, said as Unread.
+  await page.goto("/");
+  const sidebar = page.getByRole("navigation", { name: "Main" });
+  await sidebar.getByRole("link", { name: `${title} Unread` }).click();
+
+  // The chat opens at the New line, near the top, with room over it: the
+  // answer is longer than the window, so its end is below, to scroll to.
+  const messages = page.getByRole("log", { name: "Messages" });
+  const line = messages.getByRole("separator", { name: "New" });
+  await expect(line).toBeInViewport();
+  await expect(messages.getByText(monthEndCloseLast)).not.toBeInViewport();
+  await expect(
+    page.getByRole("button", { name: "Jump to latest" })
+  ).toBeVisible();
+
+  // Read now, on core: back on Chat's start, the row has no dot.
+  await sidebar.getByRole("link", { name: "Chat", exact: true }).click();
+  await expect(page).toHaveURL(/\/$/u);
+  await expect(
+    sidebar.getByRole("link", { name: title, exact: true })
+  ).toBeVisible();
 });
 
 test("a person answers the agent's questions in the box's place, and sends the answers", async ({
