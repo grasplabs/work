@@ -10244,6 +10244,10 @@ msgstr "Wir hören zu. Die Interviews enden am {day}, {left, plural, one {in # T
 msgid "Listening. The interviews close tonight."
 msgstr "Wir hören zu. Die Interviews enden heute Abend."
 
+#: src/interview/composer.tsx
+msgid "Listening…"
+msgstr "Ich höre zu…"
+
 #: src/connections/app/words.ts
 msgctxt "a group of an app's tools"
 msgid "Lists"
@@ -15652,6 +15656,10 @@ msgstr "Gesehen, aber nicht beschrieben: {seenOnly}."
 msgid "Seen, never mentioned"
 msgstr "Erkannt, nie erwähnt"
 
+#: src/interview/composer.tsx
+msgid "Send"
+msgstr "Senden"
+
 #: src/frame/ui-words.tsx
 msgctxt "send a message"
 msgid "Send"
@@ -16874,6 +16882,10 @@ msgstr "Stoppen"
 msgid "Stop and ask"
 msgstr "Stoppen und fragen"
 
+#: src/interview/composer.tsx
+msgid "Stop listening"
+msgstr "Zuhören beenden"
+
 #: src/drafts/sharing.tsx
 msgid "Stop sharing"
 msgstr "Nicht mehr teilen"
@@ -17136,10 +17148,6 @@ msgstr "Wird entfernt"
 msgid "Taking you to the Microsoft sign-in…"
 msgstr "Sie werden zur Anmeldung bei Microsoft weitergeleitet…"
 
-#: src/interview/composer.tsx
-msgid "Talk"
-msgstr "Sprechen"
-
 #: src/onboarding/campaign/concepts/mosaic.tsx
 msgid "Talked"
 msgstr "Gesprochen"
@@ -17151,6 +17159,10 @@ msgstr "Besprochen in {source}"
 #: src/onboarding/campaign/concepts/mosaic.tsx
 msgid "Talked today"
 msgstr "Heute gesprochen"
+
+#: src/interview/composer.tsx
+msgid "Tap and speak"
+msgstr "Tippen und sprechen"
 
 #: src/projects/project-dialog.tsx
 msgid "Target"
