@@ -32,6 +32,27 @@ const keyAuth = auth.apiKey({
   account: { url: `https://${host}/v1/account`, id: "/id" },
 });
 
+/** A host template filled per connection, under the vendor's name. */
+const companyHost = "{company}.stock.test";
+
+/** A connector on `hosts` that signs in with OAuth 2.0, its account at the first. */
+const companySignIn =
+  (hosts: string[], hostsFrom?: Record<string, string>) => () =>
+    defineConnector({
+      name: "stock",
+      title: "Stock",
+      hosts,
+      auth: auth.oauth2({
+        hosts,
+        authorizeUrl: "https://auth.stock.test/authorize",
+        tokenUrl: "https://auth.stock.test/token",
+        scopes: { "stock:read": "Read stock" },
+        ...(hostsFrom === undefined ? {} : { hostsFrom }),
+        account: { url: `https://${hosts[0]}/v1/account`, id: "/id" },
+      }),
+      tools: {},
+    });
+
 const Stock = v.object({ sku: v.string(), onHand: v.number().integer() });
 
 const getStock = tool({
@@ -377,6 +398,39 @@ describe("a connector's definition", () => {
       "{}",
     ]) {
       expect(at(template)).toThrow("Not a host, or a host template");
+    }
+  });
+
+  it("fills an OAuth sign-in's template under a fixed name from the token response (hostsFrom)", () => {
+    const filled = companySignIn([companyHost], {
+      [companyHost]: "/api_domain",
+    })();
+    expect(filled.manifest.hosts).toStrictEqual([companyHost]);
+    expect(filled.manifest.signIn).toMatchObject({
+      hostsFrom: { [companyHost]: "/api_domain" },
+    });
+  });
+
+  it("refuses an OAuth sign-in's template hostsFrom doesn't fill, a whole host from the token response, and hostsFrom for a host that isn't a template of its", () => {
+    const unfilled = "A host template is filled by an API key's sign-in";
+    const notOurs = "hostsFrom names only the connector's host templates";
+    const refused: [string[], Record<string, string> | undefined, string][] = [
+      [[companyHost], undefined, unfilled],
+      // A whole host is only an admin's to give, never a token response's.
+      [["{host}"], { "{host}": "/api_domain" }, unfilled],
+      [
+        [companyHost],
+        { [companyHost]: "/api_domain", "{region}.stock.test": "/region" },
+        notOurs,
+      ],
+      [
+        [companyHost, host],
+        { [companyHost]: "/api_domain", [host]: "/api_host" },
+        notOurs,
+      ],
+    ];
+    for (const [hosts, hostsFrom, refusal] of refused) {
+      expect(companySignIn(hosts, hostsFrom)).toThrow(refusal);
     }
   });
 

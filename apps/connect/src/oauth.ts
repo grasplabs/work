@@ -902,9 +902,12 @@ const keepTokens = async (
     await refuse(reason, { connectionId: held?.id });
     throw connectionErrors.create(reason);
   };
-  if (account === null) {
-    // A suite's account outside the tenant, or an app's lookup that
-    // named none.
+  if (
+    account === null ||
+    (provider.hostsFrom !== undefined && tokens.hosts === undefined)
+  ) {
+    // A suite's account outside the tenant, an app's lookup that named
+    // none, or a token response naming a host its template doesn't fit.
     return await refusal(
       provider.pinned
         ? "connection.wrong_account"
@@ -930,6 +933,7 @@ const keepTokens = async (
       refreshToken,
       expiresAt: tokens.expiresAt,
       scope: tokens.scope,
+      ...(tokens.hosts === undefined ? {} : { hosts: tokens.hosts }),
     },
     drop,
     refuse
@@ -1453,20 +1457,15 @@ export const connectWithKey = async (
     await refuse("connection.invalid");
     throw connectionErrors.create("connection.invalid");
   }
-  const found = await provider.account(key, ownerOf({ scope }, person), hosts);
-  if (found === null) {
+  const account = await provider.account(
+    key,
+    ownerOf({ scope }, person),
+    hosts
+  );
+  if (account === null) {
     await refuse("connection.provider_refused", { outcome: "failed" });
     throw connectionErrors.create("connection.provider_refused");
   }
-  // An account at a host set per connection is that host's: one with the
-  // same ID at another host is another account, and another connection.
-  const account =
-    templates.length === 0
-      ? found
-      : {
-          ...found,
-          id: `${found.id}@${templates.map((template) => hosts[template]).join(",")}`,
-        };
   const kept = {
     apiKey: key,
     expiresAt: apiKeyExpiresAt,

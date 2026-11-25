@@ -530,10 +530,27 @@ export const connectorManifestSchema = z
   )
   .refine(
     ({ signIn, hosts }) =>
-      signIn?.kind === "api_key" ||
-      hosts.every((host) => hostTemplateOf(host) === undefined),
-    // Its values are given with the key, when the connection signs in.
-    "Only a connector that signs in with an API key has a host template"
+      hosts.every((host) => {
+        const template = hostTemplateOf(host);
+        return (
+          template === undefined ||
+          signIn?.kind === "api_key" ||
+          (signIn?.kind === "oauth2" &&
+            template.suffix !== null &&
+            Object.hasOwn(signIn.hostsFrom ?? {}, host))
+        );
+      }),
+    // Given with the key when a connection signs in, or named by the token
+    // response under a fixed name: a whole host only an admin types.
+    "A host template is filled by an API key's sign-in, or by the token response (hostsFrom) under a fixed name"
+  )
+  .refine(
+    ({ signIn, hosts }) =>
+      signIn?.kind !== "oauth2" ||
+      Object.keys(signIn.hostsFrom ?? {}).every(
+        (host) => hosts.includes(host) && hostTemplateOf(host) !== undefined
+      ),
+    "hostsFrom names only the connector's host templates"
   )
   .refine(
     ({ hosts, actions, syncs = {} }) =>

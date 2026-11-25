@@ -129,7 +129,7 @@ const endpointSchema = z
 const isEndpointTemplate = (value: string): boolean => {
   const filled = checkedTenants.map((tenant) => withTenant(value, tenant));
   const origins = new Set(filled.map((each) => urlOf(each)?.origin));
-  return filled.every(isEndpoint) && origins.size === 1;
+  return filled.every((each) => isEndpoint(each)) && origins.size === 1;
 };
 
 const endpointTemplateSchema = z
@@ -388,6 +388,13 @@ const oauth2SignInSchema = z
     renewalRequires: scopeListSchema.optional(),
     /** `account`: revoking one token revokes the account's whole grant. */
     grant: z.literal("account").optional(),
+    /**
+     * Each of the connector's host templates (`{company}.example.com`),
+     * and where the token response names its host: a pointer to a host,
+     * or to an HTTPS origin. A sign-in whose response names one that
+     * doesn't fit its template connects nothing.
+     */
+    hostsFrom: z.record(z.string().max(253), pointerSchema).optional(),
   })
   .refine(
     ({ scopes, scopeSeparator }) =>

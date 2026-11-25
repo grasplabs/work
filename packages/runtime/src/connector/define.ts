@@ -287,6 +287,13 @@ export type OAuth2Declaration = {
   renewalRequires?: readonly string[];
   /** `account`: revoking one token revokes the account's whole grant. */
   grant?: "account";
+  /**
+   * Where the token response names the host of each of the connector's
+   * host templates (`{company}.example.com`): a JSON Pointer to a host or
+   * an HTTPS origin, such as `/api_domain`. Connect checks it fits the
+   * template before any request goes there.
+   */
+  hostsFrom?: Readonly<Record<string, string>>;
 } & (
   | { account: AccountDeclaration; idToken?: never }
   | { idToken: IdTokenDeclaration; account?: never }

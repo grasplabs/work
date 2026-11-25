@@ -14,7 +14,7 @@ A connector is written on `@grasp-os/sdk/connector`. This guide shows how.
 A connector runs in connect, each call of a tool in an isolate of its own, and holds nothing from one call to the next. Three rules hold for all its code:
 
 - It imports only `@grasp-os/sdk/connector` and its own files.
-- It never sees a token or a key. Connect adds the connection's credential to each request on its way out, after the connector's code is done with it.
+- It never sees a token or a key. Connect adds the connection's credential to each request on its way out, after the connector's code is done with it, and only for the hosts the sign-in names. No answer it reads carries a cookie or the credential back.
 - Every request goes through connect's egress, and only to a route the called tool declares, on one of the connector's hosts. Anything else is refused before it leaves.
 
 ## A connector
@@ -176,9 +176,55 @@ export const boardsSignIn = auth.oauth2({
 });
 ```
 
-Both name an `account` lookup: a GET to a URL on one of the connector's hosts, sent with the new token or key, and JSON Pointers into its answer for the account's stable `id` and, if the vendor has them, its `name` and `email`. The email, as the vendor vouches for it, is what lets a person connect their own account. Without it, the vendor's accounts are connected only as shared ones, by an admin.
+Both name an `account` lookup: a GET to a URL on one of the hosts the credential goes to, sent with the new token or key, and JSON Pointers into its answer for the account's stable `id` and, if the vendor has them, its `name` and `email`. The email, as the vendor vouches for it, is what lets a person connect their own account. Without it, the vendor's accounts are connected only as shared ones, by an admin.
 
 Grasp's client at the vendor, its ID and secret, is the deployment's, found by the provider's name: a connector never names one.
+
+### Where the credential goes
+
+The credential goes only to the hosts the sign-in names in `hosts`. A request to any other host of the connector goes without it. A connector with one host needs no `hosts`: the credential goes to that host. A connector with several hosts must name them, and its `account` lookup must go to one of them:
+
+```ts hosts.ts
+import { auth } from "@grasp-os/sdk/connector";
+
+// The connector's hosts are api.boards.example and files.boards.example:
+// downloads from files.boards.example go without the key.
+export const boardsKey = auth.apiKey({
+  header: "x-api-key",
+  hosts: ["api.boards.example"],
+  account: { url: "https://api.boards.example/v1/me", id: "/account/id" },
+});
+```
+
+Before the connector's code reads an answer, connect drops its `Set-Cookie` and `Set-Cookie2` headers and replaces any copy of the credential in its headers with `[credential]`. A redirect is followed only to a host a route's `redirects` names, and never with the credential.
+
+### Hosts set per connection
+
+A host that differs from one connection to the next is a template in `hosts`:
+
+- `{name}.<host>`: one DNS label in front of a fixed name, such as `{company}.boards.example`.
+- `{name}` alone: a whole host, such as a company's own server. Only an admin gives it, for a shared connection.
+
+Routes name a template like any other host, and the connector's code never learns the host it stands for: connect fills it in as each request leaves. With `auth.apiKey`, whoever connects gives each template's host along with the key. With `auth.oauth2`, the token response names the host. `hostsFrom` maps each template to a JSON Pointer into that response, pointing at a host or an HTTPS origin:
+
+```ts company.ts
+import { auth } from "@grasp-os/sdk/connector";
+
+// The connector's hosts are ["{company}.boards.example"].
+export const companySignIn = auth.oauth2({
+  authorizeUrl: "https://boards.example/oauth/authorize",
+  tokenUrl: "https://boards.example/oauth/token",
+  scopes: { "items:read": "Read the items on boards" },
+  hostsFrom: { "{company}.boards.example": "/api_domain" },
+  account: {
+    url: "https://{company}.boards.example/v1/me",
+    id: "/id",
+    email: "/email",
+  },
+});
+```
+
+A filled host must fit its template: a DNS name with no address, port, userinfo or path, and for `{name}.<host>` one label in front of the fixed name. Connect checks this before anything is sent there, the account lookup included. A sign-in whose host doesn't fit connects nothing. The hosts are sealed with the credential, so a connection's host never changes: the same account at another host is another connection, and moving to another host means connecting again.
 
 ### A suite's sign-in
 

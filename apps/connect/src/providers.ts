@@ -171,6 +171,11 @@ export interface OAuthProviderConfig {
    */
   tokenParams?: Readonly<Record<string, string>>;
   /**
+   * For an app whose connector has host templates, where the token
+   * response names each one's host (`TokenSet.hosts`).
+   */
+  hostsFrom?: Readonly<Record<string, string>>;
+  /**
    * The authorization server a flow's answer must come from (RFC 9207):
    * its issuer, and whether it says it puts `iss` on every answer. An
    * answer with another `iss`, or with none when it promised one, is
@@ -736,7 +741,9 @@ const appClient = (
 /**
  * The account an app's lookup names, with `credential`, its host filled
  * with the connection's (`hosts`) where it is a template; none if it has
- * no host that fits.
+ * no host that fits. An account at hosts set per connection is theirs:
+ * one with the same ID at another host is another account, and another
+ * connection, so a connection's hosts never change.
  */
 const accountAt = async (
   lookup: AccountLookup,
@@ -749,7 +756,14 @@ const accountAt = async (
     return null;
   }
   url.hostname = host;
-  return await lookupAccount({ ...lookup, url: url.href }, credential);
+  const found = await lookupAccount({ ...lookup, url: url.href }, credential);
+  const templates = Object.keys(hosts).toSorted();
+  return found === null || templates.length === 0
+    ? found
+    : {
+        ...found,
+        id: `${found.id}@${templates.map((template) => hosts[template]).join(",")}`,
+      };
 };
 
 /** A claim's value, when it's there: `undefined` when it isn't. */
@@ -873,14 +887,15 @@ export const appProvider = ({
       ),
     clientAuthentication: signIn.clientAuthentication,
     client: (env) => appClient(env, provider),
+    ...(signIn.hostsFrom === undefined ? {} : { hostsFrom: signIn.hostsFrom }),
     ...(idToken === undefined
       ? {
           // No ID token is trusted from an app with a lookup: its lookup
           // names the account, and it has no subject apart from that.
-          account: async ({ accessToken }: TokenSet) =>
+          account: async ({ accessToken, hosts: named }: TokenSet) =>
             account === undefined
               ? null
-              : await accountAt(account, bearer(accessToken)),
+              : await accountAt(account, bearer(accessToken), named),
         }
       : {
           subject: ({ idToken: token }) => {

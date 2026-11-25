@@ -10,6 +10,11 @@ import { connections } from "../src/db/schema.ts";
 import type { EgressProps } from "../src/egress.ts";
 import { connectApp, fakeApps } from "./app-provider.ts";
 import type { AppName } from "./app-provider.ts";
+import {
+  companyAccountOf,
+  connectCompanyApp,
+  fakeCompanyApp,
+} from "./company-app.ts";
 import { connectAccount, ownAccount, someone } from "./connect.ts";
 import type { Call } from "./connect.ts";
 import { sampleHost } from "./fixtures/sample-connector.ts";
@@ -31,6 +36,7 @@ export const providers = fakeProviders();
 export const apps = fakeApps();
 export const api = fakeSampleApi();
 export const tenantApp = fakeTenantApp();
+export const companyApp = fakeCompanyApp();
 
 /** A person's own Microsoft account, connected to `server`. */
 export const connectionTo = async (
@@ -60,7 +66,8 @@ export const isApp = (provider: string): provider is AppName =>
 /**
  * A person's own account at `provider`, connected to `server`: through
  * the app's own sign-in for an app, whose connector is the one it names,
- * the sample tenant app's at its own authorization server, and an admin's
+ * the sample tenant app's at its own authorization server, the sample
+ * company app's at the host its token response names, and an admin's
  * shared one for an app on a host of its own.
  */
 export const connectionOf = async (
@@ -73,6 +80,15 @@ export const connectionOf = async (
       tenantApp,
       person,
       tenantAccountOf(person)
+    );
+    return { id, person };
+  }
+  if (provider === "sample-company") {
+    const person = someone();
+    const id = await connectCompanyApp(
+      companyApp,
+      person,
+      companyAccountOf(person, "https://acme.sample-company.test")
     );
     return { id, person };
   }

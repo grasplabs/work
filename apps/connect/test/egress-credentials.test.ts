@@ -4,7 +4,14 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { connectApp, fakeApps } from "./app-provider.ts";
+import {
+  companyAccountOf,
+  companyItems,
+  connectCompanyApp,
+  fakeCompanyApp,
+} from "./company-app.ts";
 import { auditEvents, outcome, someone } from "./connect.ts";
+import { sampleCompanyLoginHost } from "./fixtures/sample-company-connector.ts";
 import { sampleHostHeader } from "./fixtures/sample-host-connector.ts";
 import {
   sampleKeyApiHost,
@@ -36,6 +43,8 @@ import { callTool } from "./tool-calls.ts";
 //      for one connection.
 // CH6  Connector code naming a filled host itself, or another, past the
 //      template egress fills.
+// CH7  A token response names the host: one outside the template, an
+//      address, a port or a path, gets nothing.
 
 fakeProviders();
 const apps = fakeApps();
@@ -71,6 +80,7 @@ const internet = fakeInternet((request, url) => {
   return json({ items });
 });
 const audit = auditEvents();
+const company = fakeCompanyApp();
 
 const listOn = async (
   connection: { id: string; person: ConnectionPerson },
@@ -214,5 +224,112 @@ describe("a host set per connection", () => {
       "erp.acme.test",
       "erp-2.acme.test",
     ]);
+  });
+});
+
+describe("a host the token response names", () => {
+  const acme = "acme.sample-company.test";
+
+  /** The person's account at the app, its token response naming `apiDomain`. */
+  const connectCompany = async (
+    person: ConnectionPerson,
+    apiDomain: string | undefined,
+    id?: string
+  ) =>
+    await connectCompanyApp(
+      company,
+      person,
+      companyAccountOf(person, apiDomain, id)
+    );
+
+  it("is the host the connection signs in with when it fits the template: the lookup and every call go there alone, with the token (CH7)", async () => {
+    const person = someone();
+    const id = await connectCompany(person, `https://${acme}`);
+    const result = await callTool({ id, person }, "items.list", {});
+    expect(JSON.parse(result.output)).toStrictEqual({ items: companyItems });
+    const bearer = `Bearer ${company.issued[0]}`;
+    expect(
+      company.requests.map(({ host, path, authorization }) => ({
+        host,
+        path,
+        authorization,
+      }))
+    ).toStrictEqual([
+      {
+        host: sampleCompanyLoginHost,
+        path: "/oauth/token",
+        authorization: null,
+      },
+      { host: acme, path: "/v1/me", authorization: bearer },
+      { host: acme, path: "/v1/items", authorization: bearer },
+    ]);
+    expect(internet.sent).toStrictEqual([]);
+  });
+
+  it("connects nothing when it isn't one label under the template's fixed name, and no request with the token is sent (CH7)", async () => {
+    const given = [
+      "https://evil.test",
+      `https://${acme}.evil.test`,
+      `http://${acme}`,
+      `https://${acme}:8443`,
+      `https://${acme}/x`,
+      `https://u@${acme}`,
+      "10.0.0.1",
+      "a.b.sample-company.test",
+      undefined,
+    ];
+    const outcomes: [string, string, number][] = [];
+    for (const apiDomain of given) {
+      const person = someone();
+      // oxlint-disable-next-line no-await-in-loop -- one attempt after another
+      const ended = await outcome(connectCompany(person, apiDomain));
+      // oxlint-disable-next-line no-await-in-loop -- read after each attempt
+      const listed = await exports.default.listConnections(person);
+      const kept = listed.filter(
+        ({ provider }) => provider === "sample-company"
+      );
+      outcomes.push([apiDomain ?? "(none)", ended, kept.length]);
+    }
+    expect(outcomes).toStrictEqual(
+      given.map((apiDomain) => [
+        apiDomain ?? "(none)",
+        "connection.provider_refused",
+        0,
+      ])
+    );
+    // The token endpoint alone, once for each: no lookup went anywhere.
+    expect(
+      company.requests.map(({ host, path }) => ({ host, path }))
+    ).toStrictEqual(
+      given.map(() => ({ host: sampleCompanyLoginHost, path: "/oauth/token" }))
+    );
+    expect(internet.sent).toStrictEqual([]);
+  });
+
+  it("is the connection's: the same account at another company's host is another connection, each calling its own host (CH7)", async () => {
+    const person = someone();
+    const accountId = `company-account-${crypto.randomUUID()}`;
+    const atAcme = await connectCompany(person, `https://${acme}`, accountId);
+    const atGlobex = await connectCompany(
+      person,
+      "globex.sample-company.test",
+      accountId
+    );
+    expect(atGlobex).not.toBe(atAcme);
+    company.requests.length = 0;
+    const results = [
+      await callTool({ id: atAcme, person }, "items.list", {}),
+      await callTool({ id: atGlobex, person }, "items.list", {}),
+    ];
+    expect(
+      results.map(({ output }): unknown => JSON.parse(output))
+    ).toStrictEqual([{ items: companyItems }, { items: companyItems }]);
+    expect(
+      company.requests.map(({ host, path }) => ({ host, path }))
+    ).toStrictEqual([
+      { host: acme, path: "/v1/items" },
+      { host: "globex.sample-company.test", path: "/v1/items" },
+    ]);
+    expect(internet.sent).toStrictEqual([]);
   });
 });

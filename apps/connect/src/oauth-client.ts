@@ -1,4 +1,4 @@
-import { scopeToken } from "@grasp-os/runtime/connector";
+import { fitsTemplate, scopeToken } from "@grasp-os/runtime/connector";
 import type { AccountLookup } from "@grasp-os/runtime/connector";
 import { fromBase64Url } from "@grasp-os/shared/encoding";
 
@@ -65,6 +65,11 @@ export interface TokenSet {
    * where its answer lists none or isn't a valid list (`grantedScope`).
    */
   scope?: string;
+  /**
+   * Each host template's host, as the token response names it where the
+   * provider's `hostsFrom` points; none unless every one fits its template.
+   */
+  hosts?: Readonly<Record<string, string>>;
 }
 
 /** The first `maxResponseBytes` of the body; more than that is refused. */
@@ -198,6 +203,74 @@ const grantedScope = (
     : undefined;
 };
 
+/** Longest account ID, name or address taken from an app's lookup. */
+export const maxAccountField = 256;
+
+/** What `pointer` (RFC 6901, plain names and indexes) names in `value`. */
+const at = (value: unknown, pointer: string): unknown => {
+  let current = value;
+  for (const name of pointer.split("/").slice(1)) {
+    if (Array.isArray(current) && /^\d+$/u.test(name)) {
+      current = current[Number(name)];
+    } else if (
+      typeof current === "object" &&
+      current !== null &&
+      !Array.isArray(current) &&
+      Object.hasOwn(current, name)
+    ) {
+      current = Reflect.get(current, name);
+    } else {
+      return undefined;
+    }
+  }
+  return current;
+};
+
+/** A field of the account, as text, if it is some. */
+const textAt = (value: unknown, pointer: string | undefined): string | null => {
+  const found = pointer === undefined ? undefined : at(value, pointer);
+  const text =
+    typeof found === "number" && Number.isSafeInteger(found)
+      ? String(found)
+      : found;
+  return typeof text === "string" &&
+    text !== "" &&
+    text.length <= maxAccountField
+    ? text
+    : null;
+};
+
+/**
+ * The host a token response gives as a host or an HTTPS origin, nothing
+ * else: no port, userinfo, path or query.
+ */
+const namedHost = (value: string | null): string | undefined => {
+  if (value === null || !value.includes("://")) {
+    return value ?? undefined;
+  }
+  const url = URL.parse(value);
+  return url?.protocol === "https:" &&
+    value.replace(/\/$/u, "") === `https://${url.hostname}`
+    ? url.hostname
+    : undefined;
+};
+
+/** Each template's host the token response names, if every one fits it. */
+const hostsNamed = (
+  hostsFrom: Readonly<Record<string, string>>,
+  body: Record<string, unknown>
+): Record<string, string> | undefined => {
+  const hosts: Record<string, string> = {};
+  for (const [template, pointer] of Object.entries(hostsFrom)) {
+    const host = namedHost(textAt(body, pointer));
+    if (host === undefined || !fitsTemplate(template, host)) {
+      return undefined;
+    }
+    hosts[template] = host;
+  }
+  return hosts;
+};
+
 const tokenSet = (
   provider: OAuthProviderConfig,
   body: Record<string, unknown>,
@@ -222,6 +295,10 @@ const tokenSet = (
     expiresAt: requestedAt + lifetimeSeconds(expiresIn) * 1000,
     idToken: typeof idToken === "string" ? idToken : undefined,
     scope: grantedScope(provider, scope),
+    hosts:
+      provider.hostsFrom === undefined
+        ? undefined
+        : hostsNamed(provider.hostsFrom, body),
   };
 };
 
@@ -322,43 +399,6 @@ export const idTokenClaims = (idToken: string | undefined): unknown => {
   } catch {
     return undefined;
   }
-};
-
-/** Longest account ID, name or address taken from an app's lookup. */
-export const maxAccountField = 256;
-
-/** What `pointer` (RFC 6901, plain names and indexes) names in `value`. */
-const at = (value: unknown, pointer: string): unknown => {
-  let current = value;
-  for (const name of pointer.split("/").slice(1)) {
-    if (Array.isArray(current) && /^\d+$/u.test(name)) {
-      current = current[Number(name)];
-    } else if (
-      typeof current === "object" &&
-      current !== null &&
-      !Array.isArray(current) &&
-      Object.hasOwn(current, name)
-    ) {
-      current = Reflect.get(current, name);
-    } else {
-      return undefined;
-    }
-  }
-  return current;
-};
-
-/** A field of the account, as text, if it is some. */
-const textAt = (value: unknown, pointer: string | undefined): string | null => {
-  const found = pointer === undefined ? undefined : at(value, pointer);
-  const text =
-    typeof found === "number" && Number.isSafeInteger(found)
-      ? String(found)
-      : found;
-  return typeof text === "string" &&
-    text !== "" &&
-    text.length <= maxAccountField
-    ? text
-    : null;
 };
 
 /**
