@@ -1,22 +1,42 @@
-import { buttonVariants } from "@grasp-os/app-kit/components/button";
 import { releaseIdSchema } from "@grasp-os/shared/release-id";
-import { createFileRoute, Link, notFound } from "@tanstack/react-router";
+import { Button } from "@grasp-os/ui/components/button";
+import { CardContent } from "@grasp-os/ui/components/card";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { Link } from "@grasp-os/ui/components/link";
+import { Text } from "@grasp-os/ui/components/text";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
+import {
+  createFileRoute,
+  Link as RouterLink,
+  notFound,
+} from "@tanstack/react-router";
 
 import { PageLoading } from "../../../admin/failure.tsx";
 import { AdminPage } from "../../../admin/page.tsx";
+import { Panel, PanelNote } from "../../../admin/panel.tsx";
 import {
   channelsId,
   PlatformNav,
   platformCrumb,
   releasesCrumb,
 } from "../../../admin/platform-nav.tsx";
-import { Facts, listed, Quiet } from "../../../admin/release-parts.tsx";
-import { Section } from "../../../admin/section.tsx";
+import { Facts, listed } from "../../../admin/release-parts.tsx";
 import { formatTime } from "../../../releases/format.ts";
 import { fetchRelease } from "../../../releases/functions.ts";
 import type { WorkerView } from "../../../releases/queries.ts";
 import { releaseTitle } from "../../../releases/version.ts";
 import { channelWords } from "../../../rollout/channel-words.ts";
+
+const styles = stylex.create({
+  page: { display: "flex", flexDirection: "column", gap: space["6"] },
+});
 
 /** One of the release's Workers, in a line: what deploying it changes. */
 const workerLine = (worker: WorkerView): string =>
@@ -33,65 +53,82 @@ const ReleasePage = () => {
   return (
     <AdminPage
       action={
-        <Link className={buttonVariants()} hash={channelsId} to="/platform">
-          Promote it
-        </Link>
+        <Button asChild>
+          <RouterLink hash={channelsId} to="/platform">
+            Promote it
+          </RouterLink>
+        </Button>
       }
       description={title === "" ? undefined : title}
       parents={[platformCrumb, releasesCrumb]}
       title={release.id}
     >
       <PlatformNav />
-      <div className="flex flex-col gap-6 text-sm">
-        <Section title="What it holds">
+      <div {...stylex.props(styles.page)}>
+        <Panel title="What it holds">
           {release.notes === "" ? (
-            <Quiet>No note.</Quiet>
+            <PanelNote>No note.</PanelNote>
           ) : (
-            <p className="border-t px-5 py-3">{release.notes}</p>
+            <CardContent>
+              <Text size="sm">{release.notes}</Text>
+            </CardContent>
           )}
-        </Section>
-        <Section
+        </Panel>
+        <Panel
           description="Every time a channel was set to it, the newest first."
           title="Channels"
         >
           {release.history.length === 0 ? (
-            <Quiet>It hasn&apos;t been on a channel.</Quiet>
+            <PanelNote>It hasn&apos;t been on a channel.</PanelNote>
           ) : (
-            <ul className="flex flex-col">
-              {release.history.map((event) => (
-                <li
-                  className="flex items-baseline justify-between gap-4 border-t px-5 py-2"
-                  key={`${event.at.getTime()}-${event.channel}`}
-                >
-                  <span>{`${channelWords[event.channel]}, by ${event.actor}`}</span>
-                  <span className="text-muted-foreground text-xs tabular-nums">
-                    {formatTime(event.at)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-        <Section title="Who runs it">
-          {release.running.length === 0 ? (
-            <Quiet>No company runs it now.</Quiet>
-          ) : (
-            <ul className="flex flex-col">
-              {release.running.map((client) => (
-                <li className="border-t px-5 py-2" key={client.id}>
-                  <Link
-                    className="underline-offset-4 hover:underline"
-                    params={{ clientId: client.id }}
-                    to="/organizations/$clientId/setup"
+            <CardContent flush>
+              <ItemGroup separated>
+                {release.history.map((event) => (
+                  <Item
+                    key={`${event.at.getTime()}-${event.channel}`}
+                    size="sm"
                   >
-                    {client.name}
-                  </Link>
-                </li>
-              ))}
-            </ul>
+                    <ItemContent>
+                      <ItemTitle>{`${channelWords[event.channel]}, by ${event.actor}`}</ItemTitle>
+                    </ItemContent>
+                    <ItemActions>
+                      <Text as="span" color="muted" size="xs">
+                        {formatTime(event.at)}
+                      </Text>
+                    </ItemActions>
+                  </Item>
+                ))}
+              </ItemGroup>
+            </CardContent>
           )}
-        </Section>
-        <Section title="The record">
+        </Panel>
+        <Panel title="Who runs it">
+          {release.running.length === 0 ? (
+            <PanelNote>No company runs it now.</PanelNote>
+          ) : (
+            <CardContent flush>
+              <ItemGroup separated>
+                {release.running.map((client) => (
+                  <Item key={client.id} size="sm">
+                    <ItemContent>
+                      <ItemTitle>
+                        <Link asChild variant="plain">
+                          <RouterLink
+                            params={{ clientId: client.id }}
+                            to="/organizations/$clientId/setup"
+                          >
+                            {client.name}
+                          </RouterLink>
+                        </Link>
+                      </ItemTitle>
+                    </ItemContent>
+                  </Item>
+                ))}
+              </ItemGroup>
+            </CardContent>
+          )}
+        </Panel>
+        <Panel title="The record">
           <Facts
             rows={[
               { label: "Commit", value: release.commitSha, mono: true },
@@ -124,7 +161,7 @@ const ReleasePage = () => {
               })),
             ]}
           />
-        </Section>
+        </Panel>
       </div>
     </AdminPage>
   );
