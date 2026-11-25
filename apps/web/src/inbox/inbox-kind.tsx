@@ -10,10 +10,10 @@ import {
   MessageCircleIcon,
   PencilIcon,
   PlayIcon,
-  SparklesIcon,
   TriangleAlertIcon,
   UserSparklesIcon,
   WorkflowIcon,
+  ZapIcon,
 } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
 import type { MessageDescriptor } from "@lingui/core";
@@ -109,6 +109,6 @@ export const kindMark: Record<InboxKind, IconData> = {
   stoppedEvents: MailIcon,
   appMessage: BellIcon,
   bindingApproval: LockIcon,
-  skillShare: SparklesIcon,
+  skillShare: ZapIcon,
   decision: ListChecksIcon,
 };

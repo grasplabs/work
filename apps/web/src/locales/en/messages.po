@@ -2691,6 +2691,11 @@ msgstr "All steps done"
 msgid "All tools"
 msgstr "All tools"
 
+#: src/inbox/item-detail.tsx
+msgctxt "let a workflow's trigger start it"
+msgid "Allow"
+msgstr "Allow"
+
 #: src/connections/http-connections.tsx
 msgid "Allow at least one method."
 msgstr "Allow at least one method."
@@ -4719,6 +4724,7 @@ msgstr "Closing the books and producing the numbers leadership looks at."
 
 #: src/brain/sources-page.tsx
 #: src/guest-sign-in.tsx
+#: src/inbox/report-viewer.tsx
 msgid "Code"
 msgstr "Code"
 
@@ -5035,6 +5041,10 @@ msgstr "Connection requests"
 #: src/workflows/trigger-description.ts
 msgid "Connection trigger"
 msgstr "Connection trigger"
+
+#: src/activity/pending.tsx
+msgid "Connection trigger for {workflow}"
+msgstr "Connection trigger for {workflow}"
 
 #: src/brain/brain.ts
 #: src/projects/project-view.tsx
@@ -5601,6 +5611,7 @@ msgid "Decline"
 msgstr "Decline"
 
 #: src/inbox/decision-card.tsx
+#: src/inbox/item-detail.tsx
 msgctxt "a workflow's decision"
 msgid "Decline"
 msgstr "Decline"
@@ -6220,6 +6231,7 @@ msgctxt "download a file"
 msgid "Download"
 msgstr "Download"
 
+#: src/inbox/report-viewer.tsx
 #: src/workflows/run-files.tsx
 msgid "Download {name}"
 msgstr "Download {name}"
@@ -6506,6 +6518,10 @@ msgstr "Email payment receipts"
 #: src/workflows/trigger-description.ts
 msgid "Email trigger"
 msgstr "Email trigger"
+
+#: src/activity/pending.tsx
+msgid "Email trigger for {workflow}"
+msgstr "Email trigger for {workflow}"
 
 #: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
@@ -7823,7 +7839,7 @@ msgstr "Grant"
 msgid "Grant {name}"
 msgstr "Grant {name}"
 
-#: src/inbox/items.ts
+#: src/activity/pending.tsx
 msgid "Grant {who}?"
 msgstr "Grant {who}?"
 
@@ -9745,6 +9761,22 @@ msgstr "Legal hold: {hold}"
 msgid "Let {name}’s old address in again?"
 msgstr "Let {name}’s old address in again?"
 
+#: src/activity/pending.tsx
+msgid "Let {workflow} start on events from its connection?"
+msgstr "Let {workflow} start on events from its connection?"
+
+#: src/activity/pending.tsx
+msgid "Let {workflow} start on its schedule?"
+msgstr "Let {workflow} start on its schedule?"
+
+#: src/activity/pending.tsx
+msgid "Let {workflow} start when an email arrives?"
+msgstr "Let {workflow} start when an email arrives?"
+
+#: src/activity/pending.tsx
+msgid "Let {workflow} start when its webhook is called?"
+msgstr "Let {workflow} start when its webhook is called?"
+
 #: src/activity/audit-words.ts
 msgid "Let an App's data go to a webhook"
 msgstr "Let an App's data go to a webhook"
@@ -10477,6 +10509,7 @@ msgid "Moon"
 msgstr "Moon"
 
 #: src/apps/app-workspace.tsx
+#: src/inbox/report-viewer.tsx
 msgid "More"
 msgstr "More"
 
@@ -11181,6 +11214,7 @@ msgid "No longer where it was"
 msgstr "No longer where it was"
 
 #: src/frame/ui-words.tsx
+#: src/inbox/report-viewer.tsx
 msgid "No matches"
 msgstr "No matches"
 
@@ -19281,6 +19315,10 @@ msgstr "Web pages"
 msgid "Webhook trigger"
 msgstr "Webhook trigger"
 
+#: src/activity/pending.tsx
+msgid "Webhook trigger for {workflow} ({what})"
+msgstr "Webhook trigger for {workflow} ({what})"
+
 #: src/apps/app-webhooks.tsx
 msgid "Webhooks"
 msgstr "Webhooks"
@@ -20969,11 +21007,13 @@ msgid "Zoom"
 msgstr "Zoom"
 
 #: src/brain/atlas-overlays.tsx
+#: src/inbox/report-viewer.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom in"
 msgstr "Zoom in"
 
 #: src/brain/atlas-overlays.tsx
+#: src/inbox/report-viewer.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom out"
 msgstr "Zoom out"

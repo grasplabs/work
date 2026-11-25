@@ -42,7 +42,11 @@ import { useRouter } from "@tanstack/react-router";
 import { useId, useState } from "react";
 import type { ReactNode } from "react";
 
-import { grantReviewed, reviewedVersion } from "../activity/pending.tsx";
+import {
+  grantReviewed,
+  reviewedVersion,
+  triggerStartOf,
+} from "../activity/pending.tsx";
 import {
   confirmHeld,
   declineHeld,
@@ -101,6 +105,17 @@ const styles = stylex.create({
     padding: 0,
   },
   closedOff: { opacity: size.opacityDisabled },
+  // Its question's lines kept even, as #2503's card title sets them.
+  balanced: { display: "block", textWrap: "balance" },
+  // A workflow approval's lines, then its answers at the row's end (decision-card.tsx).
+  ask: { display: "flex", flexDirection: "column", gap: space["3"] },
+  answers: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: space["2"],
+  },
 });
 
 /** One of an item's actions: a press that goes to core, or the way to where it is done. */
@@ -349,7 +364,9 @@ const ItemFrame = ({
             tabIndex={-1}
             {...stylex.props(focusRingText)}
           >
-            <CardTitle level={2}>{item.title}</CardTitle>
+            <CardTitle level={2}>
+              <span {...stylex.props(styles.balanced)}>{item.title}</span>
+            </CardTitle>
           </span>
           <span {...stylex.props(styles.marks)}>
             <Badge icon={kindMark[item.kind]} size="sm">
@@ -570,7 +587,113 @@ const HeldStartItem = ({
   );
 };
 
-/** A permission request: approving grants it for the version of its App that was reviewed. */
+/**
+ * An ask about a workflow, in the shape every workflow approval takes
+ * (decision-card.tsx), as #2503's: what is asked, the workflow it is
+ * about, what to read, then Decline and the yes at the row's end. Its
+ * answers wait a moment where it opened in place of one just answered,
+ * and stay off once it waits no more; focus lands on its title once an
+ * answer is through or refused. An answer core refuses stays on the card,
+ * with why; one it takes lets the item go.
+ */
+const WorkflowAsk = ({
+  frame,
+  said,
+  details,
+  yes,
+  onApprove,
+  onDecline,
+}: {
+  frame: Frame;
+  /** The workflow it is about. */
+  said: string;
+  details: ReactNode;
+  /** What the yes says: what it does. */
+  yes: string;
+  onApprove: (session: Session) => Promise<unknown>;
+  onDecline: (session: Session) => Promise<unknown>;
+}) => {
+  const { t } = useLingui();
+  const titleId = useId();
+  const pauseId = useId();
+  const { busy, failure, decide } = useDecide(frame);
+  const armed = useArmed(frame.arriving);
+  const off = busy || !armed || frame.gone;
+  // The pause after an answer, said to a screen reader on each answer.
+  const paused = !armed && !busy && !frame.gone;
+  const pausedBy = paused ? pauseId : undefined;
+  const { title } = frame.item;
+  return (
+    <Card asChild>
+      <section aria-labelledby={titleId}>
+        <CardHeader>
+          {/* Where focus lands once an answer is through or refused. */}
+          <span
+            data-item-heading
+            id={titleId}
+            tabIndex={-1}
+            {...stylex.props(focusRingText)}
+          >
+            <CardTitle level={2}>
+              <span {...stylex.props(styles.balanced)}>{title}</span>
+            </CardTitle>
+          </span>
+        </CardHeader>
+        <CardContent>
+          <div {...stylex.props(styles.ask)}>
+            <Text as="span" color="muted" size="sm">
+              {said}
+            </Text>
+            {details}
+            {failure === undefined ? null : (
+              <Alert variant="destructive">
+                <AlertDescription>{failure}</AlertDescription>
+              </Alert>
+            )}
+            <div {...stylex.props(styles.answers)}>
+              <Button
+                aria-describedby={pausedBy}
+                disabled={off}
+                focusableWhenDisabled={paused}
+                onClick={() => {
+                  void decide(onDecline, t`Declined: ${title}`);
+                }}
+                size="sm"
+                variant="ghost"
+              >
+                {t({ message: "Decline", context: "a workflow's decision" })}
+              </Button>
+              <Button
+                aria-describedby={pausedBy}
+                disabled={off}
+                focusableWhenDisabled={paused}
+                onClick={() => {
+                  void decide(onApprove, t`Approved: ${title}`);
+                }}
+                size="sm"
+                variant="outline"
+              >
+                {yes}
+              </Button>
+            </div>
+            {paused ? (
+              <span id={pauseId} {...stylex.props(visuallyHidden)}>
+                {t`Its answers can be used in a moment, so a press meant for the one before doesn't answer it.`}
+              </span>
+            ) : null}
+          </div>
+        </CardContent>
+      </section>
+    </Card>
+  );
+};
+
+/**
+ * A permission request: approving grants it for the version of its App
+ * that was reviewed. A trigger's ask to start its workflow is a workflow
+ * approval, "Allow" its yes; any other an approval request, "Grant it".
+ * Declining refuses only a request that still waits (core's `decline`).
+ */
 const RequestItem = ({
   frame,
   source,
@@ -580,23 +703,40 @@ const RequestItem = ({
 }) => {
   const { t } = useLingui();
   const { request, pending } = source;
+  const details = (
+    <RequestDetails directory={pending.directory} request={request} />
+  );
+  const grant = async (session: Session) =>
+    await grantReviewed(
+      session.permissions,
+      request,
+      reviewedVersion(request, pending.directory)
+    );
+  const decline = async (session: Session) =>
+    await session.permissions.decline(request.id);
+  const started = triggerStartOf(request);
+  if (started !== undefined) {
+    return (
+      <WorkflowAsk
+        details={details}
+        frame={frame}
+        onApprove={grant}
+        onDecline={decline}
+        said={started.workflow}
+        yes={t({
+          message: "Allow",
+          context: "let a workflow's trigger start it",
+        })}
+      />
+    );
+  }
   return (
     <ApprovalFrame
       approveLabel={t`Grant it`}
-      details={
-        <RequestDetails directory={pending.directory} request={request} />
-      }
+      details={details}
       frame={frame}
-      onApprove={async (session) =>
-        await grantReviewed(
-          session.permissions,
-          request,
-          reviewedVersion(request, pending.directory)
-        )
-      }
-      onDecline={async (session) =>
-        await session.permissions.decline(request.id)
-      }
+      onApprove={grant}
+      onDecline={decline}
     />
   );
 };

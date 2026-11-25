@@ -2691,6 +2691,11 @@ msgstr "Alle stappen klaar"
 msgid "All tools"
 msgstr "Alle tools"
 
+#: src/inbox/item-detail.tsx
+msgctxt "let a workflow's trigger start it"
+msgid "Allow"
+msgstr "Toestaan"
+
 #: src/connections/http-connections.tsx
 msgid "Allow at least one method."
 msgstr "Sta minstens één methode toe."
@@ -4719,6 +4724,7 @@ msgstr "De boeken afsluiten en de cijfers maken waar de directie naar kijkt."
 
 #: src/brain/sources-page.tsx
 #: src/guest-sign-in.tsx
+#: src/inbox/report-viewer.tsx
 msgid "Code"
 msgstr "Code"
 
@@ -5035,6 +5041,10 @@ msgstr "Verbindingsverzoeken"
 #: src/workflows/trigger-description.ts
 msgid "Connection trigger"
 msgstr "Koppelingstrigger"
+
+#: src/activity/pending.tsx
+msgid "Connection trigger for {workflow}"
+msgstr "Verbindingstrigger voor {workflow}"
 
 #: src/brain/brain.ts
 #: src/projects/project-view.tsx
@@ -5601,6 +5611,7 @@ msgid "Decline"
 msgstr "Weigeren"
 
 #: src/inbox/decision-card.tsx
+#: src/inbox/item-detail.tsx
 msgctxt "a workflow's decision"
 msgid "Decline"
 msgstr "Afwijzen"
@@ -6220,6 +6231,7 @@ msgctxt "download a file"
 msgid "Download"
 msgstr "Downloaden"
 
+#: src/inbox/report-viewer.tsx
 #: src/workflows/run-files.tsx
 msgid "Download {name}"
 msgstr "{name} downloaden"
@@ -6506,6 +6518,10 @@ msgstr "Betaalbewijzen per e-mail"
 #: src/workflows/trigger-description.ts
 msgid "Email trigger"
 msgstr "E-mailtrigger"
+
+#: src/activity/pending.tsx
+msgid "Email trigger for {workflow}"
+msgstr "E-mailtrigger voor {workflow}"
 
 #: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
@@ -7823,7 +7839,7 @@ msgstr "Toestaan"
 msgid "Grant {name}"
 msgstr "{name} toestaan"
 
-#: src/inbox/items.ts
+#: src/activity/pending.tsx
 msgid "Grant {who}?"
 msgstr "{who} verlenen?"
 
@@ -9745,6 +9761,22 @@ msgstr "Juridische bewaarplicht: {hold}"
 msgid "Let {name}’s old address in again?"
 msgstr "Het oude adres van {name} weer toelaten?"
 
+#: src/activity/pending.tsx
+msgid "Let {workflow} start on events from its connection?"
+msgstr "{workflow} laten starten bij gebeurtenissen uit de verbinding?"
+
+#: src/activity/pending.tsx
+msgid "Let {workflow} start on its schedule?"
+msgstr "{workflow} laten starten volgens het schema?"
+
+#: src/activity/pending.tsx
+msgid "Let {workflow} start when an email arrives?"
+msgstr "{workflow} laten starten als er een e-mail binnenkomt?"
+
+#: src/activity/pending.tsx
+msgid "Let {workflow} start when its webhook is called?"
+msgstr "{workflow} laten starten als de webhook wordt aangeroepen?"
+
 #: src/activity/audit-words.ts
 msgid "Let an App's data go to a webhook"
 msgstr "Heeft de gegevens van een app naar een webhook laten gaan"
@@ -10477,6 +10509,7 @@ msgid "Moon"
 msgstr "Maan"
 
 #: src/apps/app-workspace.tsx
+#: src/inbox/report-viewer.tsx
 msgid "More"
 msgstr "Meer"
 
@@ -11181,6 +11214,7 @@ msgid "No longer where it was"
 msgstr "Staat niet meer waar het stond"
 
 #: src/frame/ui-words.tsx
+#: src/inbox/report-viewer.tsx
 msgid "No matches"
 msgstr "Geen overeenkomsten"
 
@@ -19281,6 +19315,10 @@ msgstr "Webpagina's"
 msgid "Webhook trigger"
 msgstr "Webhooktrigger"
 
+#: src/activity/pending.tsx
+msgid "Webhook trigger for {workflow} ({what})"
+msgstr "Webhooktrigger voor {workflow} ({what})"
+
 #: src/apps/app-webhooks.tsx
 msgid "Webhooks"
 msgstr "Webhooks"
@@ -20969,11 +21007,13 @@ msgid "Zoom"
 msgstr "Zoom"
 
 #: src/brain/atlas-overlays.tsx
+#: src/inbox/report-viewer.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom in"
 msgstr "Inzoomen"
 
 #: src/brain/atlas-overlays.tsx
+#: src/inbox/report-viewer.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom out"
 msgstr "Uitzoomen"
