@@ -208,6 +208,13 @@ const styles = stylex.create({
     gap: size.sidebarRowGap,
     minHeight: size.sidebarIconButton,
   },
+  // In the phone's sheet the head stands space-1 under the sheet's top, as
+  // the reference's does over the main list and over a level alike.
+  // Damsko's SidebarHeader keeps 16px less the sheet's inset there, which
+  // puts it 6px lower (registry gap of 25 Nov 2026): that room taken back.
+  headInSheet: {
+    marginBlockStart: `calc(${space["1"]} - (${space["4"]} - ${size.sheetPadding}))`,
+  },
   mark: {
     [iconVars.size]: size.appShellMark,
     display: "flex",
@@ -1147,7 +1154,7 @@ export const FrameSidebar = ({
   return (
     <Sidebar aria-label={label} variant="inset">
       <SidebarHeader>
-        <div {...stylex.props(styles.head)}>
+        <div {...stylex.props(styles.head, isMobile && styles.headInSheet)}>
           <span {...stylex.props(styles.mark)}>{mark}</span>
           <div {...stylex.props(styles.tools)}>
             {search === undefined ? null : (
