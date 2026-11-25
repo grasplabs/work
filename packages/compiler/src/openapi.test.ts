@@ -535,6 +535,10 @@ describe("a spec as tools", () => {
                 visible_to: { allOf: [{ type: "integer", enum: [1, 3] }] },
                 status: { type: "string", enum: ["open", "won"] },
                 label: { allOf: [{ allOf: [{ type: "string" }] }] },
+                choice: {
+                  description: "A label or its number",
+                  allOf: [{ oneOf: [{ type: "string" }, { type: "integer" }] }],
+                },
               },
             }),
           },
@@ -559,6 +563,7 @@ describe("a spec as tools", () => {
         ["visible_to", "number"],
         ["status", "string"],
         ["label", "string"],
+        ["choice", "union"],
       ],
     });
   });

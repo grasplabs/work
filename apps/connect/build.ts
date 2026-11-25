@@ -135,7 +135,6 @@ const checkMirrorOf = async (
       args: each.args,
       returns: each.returns,
     })),
-    declaration.hosts,
     spec
   );
   if (problems.length > 0) {

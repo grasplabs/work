@@ -127,11 +127,9 @@ const dealsList = (changes: Partial<MirrorTool> = {}): MirrorTool => ({
 });
 
 const messages = (tools: MirrorTool[], withSpec = true) =>
-  checkMirror(
-    tools,
-    ["api.example.test", "elsewhere.example.test"],
-    withSpec ? spec : undefined
-  ).map((problem) => `${problem.tool}: ${problem.message}`);
+  checkMirror(tools, withSpec ? spec : undefined).map(
+    (problem) => `${problem.tool}: ${problem.message}`
+  );
 
 describe("a tool held to the vendor's spec", () => {
   it("passes as the generator made it", () => {
@@ -239,6 +237,27 @@ describe("a tool held to the vendor's spec", () => {
     ]);
   });
 
+  it("is named from its one write, read before or after it", () => {
+    const operation = spec.operations.find(
+      ({ name }) => name === "deals.update"
+    );
+    const update = (routes: string[]): MirrorTool => ({
+      name: "deals.update",
+      routes,
+      args: operation?.args.kind === "object" ? operation.args.fields : {},
+      returns: operation?.returns ?? v.null().descriptor,
+    });
+    expect(
+      messages([
+        update(["GET /deals", "PATCH /deals/{id}"]),
+        update(["PATCH /deals/{id}", "GET /deals"]),
+        update(["PATCH /deals/{id}", "GET elsewhere.example.test/deals"]),
+      ])
+    ).toStrictEqual([
+      "deals.update: GET elsewhere.example.test/deals isn't on the spec's host api.example.test.",
+    ]);
+  });
+
   it("is refused a route the spec doesn't have, or one on another host", () => {
     expect(
       messages([
@@ -340,14 +359,12 @@ describe("a tool with no spec to hold it to", () => {
           ]),
           writing("deals.delete", ["DELETE /deals/{id}", "PATCH /deals/{id}"]),
           writing("deals.get", ["GET /deals/{id}", "HEAD /deals"]),
-          writing("deals.get", ["GET /deals/{id}", "GET stranger.test/me"]),
         ],
         false
       )
     ).toStrictEqual([
       "deals.delete: It declares 2 writes, and a tool sends one.",
       "deals.get: HEAD /deals isn't a GET, as a tool's other routes are.",
-      "deals.get: GET stranger.test/me isn't on the connector's hosts.",
     ]);
   });
 
@@ -355,15 +372,21 @@ describe("a tool with no spec to hold it to", () => {
     expect(
       messages(
         [
-          tool("driveItem.getContent", "GET /drive/root:/{name}:/content"),
+          tool("drive.getContent", "GET /drive/root:/{name}:/content"),
           tool("deals.getDeal", "GET /deals/{id}"),
-          tool("drive root", "GET /drive/root:/{name}:/content"),
+          tool("deals.get", "GET /v2.0/deals/{id}"),
+          tool("deals.delete", "DELETE /{collection}/{id}"),
+          tool("drive.get", "DELETE /drive/root:/{name}:"),
+          tool("content", "GET /drive/root:/{name}:/content"),
         ],
         false
       )
     ).toStrictEqual([
       "deals.getDeal: GET /deals/{id} is named deals.get.",
-      "drive root: GET /drive/root:/{name}:/content can't be named from its route: name it as the vendor names the operation.",
+      "deals.get: The segment \"v2.0\" of /v2.0/deals/{id} can't be part of a tool's name.",
+      "deals.delete: /{collection}/{id} names no collection.",
+      "drive.get: DELETE /drive/root:/{name}: is named drive.<the vendor's operation name>.",
+      "content: GET /drive/root:/{name}:/content is named drive.<the vendor's operation name>.",
     ]);
   });
 });
