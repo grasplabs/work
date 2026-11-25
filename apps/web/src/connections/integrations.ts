@@ -11,6 +11,8 @@ import type {
   ConnectionWorkflows,
 } from "@grasp-os/shared/workflows";
 
+import { matchedDescriptionOf } from "./native-descriptions.ts";
+
 // Integrations, as the prototype lists them (`routes/integrations`): every
 // app Grasp can work in, one per catalog entry, each with the connections
 // made to it. A connection whose entry the catalog no longer lists to this
@@ -30,7 +32,7 @@ export interface Integration {
   categories: string[];
   /** Which of Grasp's kinds of app it is; `Other` where the catalog doesn't list it. */
   group: CatalogGroup;
-  /** What it is for, in a sentence, where the catalog says. */
+  /** What it is for, in a sentence, as the catalog sends it: none for a native one (`descriptionOf`). */
   description: string | null;
   /** Whose sign-in app connecting it takes; unknown where the catalog doesn't list it. */
   auth: CatalogAuth | undefined;
@@ -306,8 +308,8 @@ export const find = (
   const byUse = integrations.filter(
     (integration) =>
       !named.has(integration) &&
-      [...integration.categories, integration.description ?? ""].some((text) =>
-        text.toLocaleLowerCase().includes(needle)
+      [...integration.categories, matchedDescriptionOf(integration)].some(
+        (text) => text.toLocaleLowerCase().includes(needle)
       )
   );
   const starts = (integration: Integration): number =>

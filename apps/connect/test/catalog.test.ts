@@ -146,29 +146,37 @@ describe("the catalog", () => {
     });
   });
 
-  it("describes each entry in one sentence and places it in one of Grasp's groups", async () => {
+  it("describes each Composio toolkit in one sentence, leaves a native entry's words to the web with the products it reaches, and places each in one of Grasp's groups", async () => {
     const { entries } = await exports.default.catalog();
     expect(
-      entries.map(({ id, description, group }) => [id, description, group])
+      entries.map(({ id, description, products, group }) => [
+        id,
+        description,
+        products,
+        group,
+      ])
     ).toStrictEqual([
       [
         "microsoft",
-        "Outlook mail and calendars, and files in OneDrive and SharePoint.",
+        null,
+        ["Outlook", "OneDrive", "SharePoint"],
         "Email and calendar",
       ],
       [
         "google",
-        "Gmail, Google Calendar, and files in Google Drive.",
+        null,
+        ["Gmail", "Google Calendar", "Google Drive"],
         "Email and calendar",
       ],
       [
         "hubspot",
         "HubSpot is a CRM platform for marketing, sales and service.",
+        undefined,
         "CRM",
       ],
-      ["linear", null, "Projects and tasks"],
-      ["acme_erp", "Acme ERP toolkit", "Other"],
-      ["notion", null, "Other"],
+      ["linear", null, undefined, "Projects and tasks"],
+      ["acme_erp", "Acme ERP toolkit", undefined, "Other"],
+      ["notion", null, undefined, "Other"],
     ]);
   });
 
