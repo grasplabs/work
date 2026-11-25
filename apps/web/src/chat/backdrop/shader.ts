@@ -364,13 +364,13 @@ const compile = (
   return shader;
 };
 
-/** A program of `source` over the shared parts, sent to be linked, not yet asked whether it has: asking waits for it. */
+/** The program of `kind`, sent to be linked, not yet asked whether it has: asking waits for it. */
 const linking = (
   gl: WebGLRenderingContext,
-  source: string
+  kind: BackdropScene | BackdropDither
 ): WebGLProgram | null => {
   const vertex = compile(gl, gl.VERTEX_SHADER, VERTEX);
-  const fragment = compile(gl, gl.FRAGMENT_SHADER, COMMON + source);
+  const fragment = compile(gl, gl.FRAGMENT_SHADER, COMMON + KINDS[kind].source);
   const program = gl.createProgram();
   if (vertex === null || fragment === null || program === null) {
     return null;
@@ -409,28 +409,18 @@ const linked = (
 const programOf = (
   gl: WebGLRenderingContext,
   kind: BackdropScene | BackdropDither
-): WebGLProgram | null => linked(gl, linking(gl, KINDS[kind].source));
-
-/**
- * A program of the scenes' own: `source`'s main over the same light, noise, silk, palette and
- * Bayer's threshold the scenes are drawn with, linked, with the one quad it draws on; none where
- * WebGL won't. The plan's story draws its pictures with it (onboarding/plan-pictures.ts).
- */
-export const sceneProgram = (
-  gl: WebGLRenderingContext,
-  source: string
-): WebGLProgram | null => linked(gl, linking(gl, source));
+): WebGLProgram | null => linked(gl, linking(gl, kind));
 
 /**
  * How long a frame is. A scene is a ninth of the field's pixels and cheap, at twenty a second; a
  * dither is every CSS pixel of it through the silk, and its clock runs slow, so fifteen a second
  * shows all of its motion at half the cost of thirty.
  */
-export const sceneFrameMs = 1000 / 20;
+const sceneFrameMs = 1000 / 20;
 const ditherFrameMs = 1000 / 15;
 
 /** How large a scene's cell is, in CSS pixels, as Capy's dither's is. */
-export const sceneCell = 3;
+const sceneCell = 3;
 
 /** How much slower a dither's clock runs than a scene's. */
 const ditherPace = 0.3;
@@ -445,18 +435,12 @@ const progressTurn = 6;
 const lampPull = 1.6;
 
 /** The light's seven stops, night to paper: the tokens the scenes and the runs are drawn in. */
-export const stops = [
-  "night",
-  "ink",
-  "pine",
-  "mint",
-  "sea",
-  "lime",
-  "paper",
-].map((stop) => `--damsko-brand-${stop}`);
+const stops = ["night", "ink", "pine", "mint", "sea", "lime", "paper"].map(
+  (stop) => `--damsko-brand-${stop}`
+);
 
 /** A CSS colour as sRGB, 0 to 1 with its alpha, as a 2D canvas paints it. */
-export const rgbaOf = (() => {
+const rgbaOf = (() => {
   const known = new Map<string, readonly [number, number, number, number]>();
   return (colour: string): readonly [number, number, number, number] => {
     const kept = known.get(colour);

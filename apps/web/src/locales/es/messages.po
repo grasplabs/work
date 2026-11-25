@@ -7098,6 +7098,7 @@ msgstr "Todo el equipo de {company}"
 msgid "Everyone can read this upload."
 msgstr "Todo el mundo puede leer este archivo subido."
 
+#: src/onboarding/plan-demo.tsx
 #: src/onboarding/plan.tsx
 msgid "Everyone else gets their own link"
 msgstr "Los demás reciben su propio enlace"
@@ -7530,6 +7531,10 @@ msgstr "Valor del filtro"
 #: src/activity/audit-log.tsx
 msgid "Filters"
 msgstr "Filtros"
+
+#: src/onboarding/plan-demo.tsx
+msgid "Finance"
+msgstr "Finanzas"
 
 #: src/connections/groups.ts
 msgctxt "kind of app"
@@ -8564,6 +8569,10 @@ msgstr "Mantén pulsado para eliminar la clave"
 msgid "Home"
 msgstr "Inicio"
 
+#: src/onboarding/plan-demo.tsx
+msgid "Honestly, the first days they mostly wait."
+msgstr "Sinceramente, los primeros días sobre todo esperan."
+
 #: src/brain/opportunities-page.tsx
 msgid "Hours a week"
 msgstr "Horas por semana"
@@ -9104,6 +9113,10 @@ msgstr "Entrevista: {role}"
 msgid "Interviews"
 msgstr "Entrevistas"
 
+#: src/onboarding/plan-demo.tsx
+msgid "Interviews closed"
+msgstr "Entrevistas cerradas"
+
 #: src/onboarding/campaign/concepts/concept-words.ts
 msgid "Invitations went out"
 msgstr "Invitaciones enviadas"
@@ -9183,6 +9196,10 @@ msgstr "¿Es esta tu organización?"
 msgctxt "business process"
 msgid "Issue-to-Resolution"
 msgstr "Issue-to-Resolution"
+
+#: src/onboarding/plan-demo.tsx
+msgid "IT"
+msgstr "TI"
 
 #: src/agents/setup/schedule-step.tsx
 msgid "It also works on its own, at the times you set."
@@ -9337,6 +9354,10 @@ msgstr "Puede que se haya renombrado o eliminado."
 #: src/apps/draft-changes.tsx
 msgid "It may read the name, email and teams of everyone in the organization."
 msgstr "Puede leer el nombre, el correo electrónico y los equipos de todas las personas de la organización."
+
+#: src/onboarding/plan-demo.tsx
+msgid "IT needs two or three days to get a laptop ready."
+msgstr "TI necesita dos o tres días para tener un portátil listo."
 
 #: src/agents/agent-wakes.tsx
 msgid "It only reads. What it wants to change waits in that person's chat."
@@ -11206,6 +11227,10 @@ msgstr "Mensaje nuevo"
 msgid "New option"
 msgstr "Opción nueva"
 
+#: src/onboarding/plan-demo.tsx
+msgid "New people wait two to three days for a laptop from IT."
+msgstr "Las personas nuevas esperan de dos a tres días un portátil de TI."
+
 #: src/projects/project-dialog.tsx
 #: src/routes/_shell.projects.index.tsx
 msgid "New project"
@@ -13003,8 +13028,17 @@ msgid "Opens the App for the workspace's members who may use it, while it is pub
 msgstr "Abre la aplicación para los miembros del espacio de trabajo que pueden usarla, mientras esté publicada."
 
 #: src/apps/resource-bindings.tsx
+#: src/onboarding/plan-demo.tsx
 msgid "Operations"
 msgstr "Operaciones"
+
+#: src/onboarding/plan-demo.tsx
+msgid "Operations · IT"
+msgstr "Operaciones · TI"
+
+#: src/onboarding/plan-demo.tsx
+msgid "Operations lead"
+msgstr "Responsable de operaciones"
 
 #: src/frame/ui-words.tsx
 msgctxt "a table filter"
@@ -15177,6 +15211,10 @@ msgstr "Dijiste que no ocurrió: {who}."
 msgid "Said it happened: {who}."
 msgstr "Dijiste que ocurrió: {who}."
 
+#: src/onboarding/plan-demo.tsx
+msgid "Sales"
+msgstr "Ventas"
+
 #: src/apps/app-own-link.tsx
 msgid "sales-pipeline"
 msgstr "embudo-de-ventas"
@@ -17154,6 +17192,10 @@ msgstr "Se habló de ello en {source}"
 msgid "Talked today"
 msgstr "Habló hoy"
 
+#: src/onboarding/plan-demo.tsx
+msgid "Talked with Stephen"
+msgstr "Han hablado con Stephen"
+
 #: src/projects/project-dialog.tsx
 msgid "Target"
 msgstr "Diana"
@@ -17881,6 +17923,7 @@ msgid "The interviews are over."
 msgstr "Las entrevistas han terminado."
 
 #: src/onboarding/campaign/concepts/concept-words.ts
+#: src/onboarding/plan-demo.tsx
 #: src/onboarding/plan.tsx
 msgid "The interviews close"
 msgstr "Las entrevistas se cierran"
@@ -18006,6 +18049,7 @@ msgstr "Los paquetes están aprobados. Continúa."
 msgid "The passage around it"
 msgstr "El pasaje que lo rodea"
 
+#: src/onboarding/plan-demo.tsx
 #: src/onboarding/plan.tsx
 msgid "The people who know the work best go first"
 msgstr "Quienes mejor conocen el trabajo van primero"
@@ -19691,6 +19735,10 @@ msgstr "Espera hasta"
 msgid "Walk into every meeting knowing who is coming and what is still open."
 msgstr "Haz que la persona llegue a cada reunión sabiendo quién viene y qué sigue pendiente."
 
+#: src/onboarding/plan-demo.tsx
+msgid "Walk me through someone’s first week here."
+msgstr "Cuéntame cómo es la primera semana de alguien aquí."
+
 #: src/settings/backdrop-settings.tsx
 msgid "Wanderer"
 msgstr "Caminante"
@@ -19995,6 +20043,10 @@ msgstr "Lo que puede hacer"
 #: src/settings/stephen-settings.tsx
 msgid "What he may do in {appName}, with each person's own sign-in: as for the whole company, or for fewer people."
 msgstr "Lo que puede hacer en {appName}, con el inicio de sesión de cada persona: como para toda la empresa o para menos personas."
+
+#: src/onboarding/plan-demo.tsx
+msgid "What I learned"
+msgstr "Lo que aprendí"
 
 #: src/interview/transcript.tsx
 msgid "What is marked is what I wrote down. You check it at the end."
@@ -21181,6 +21233,7 @@ msgstr "Eliges personas y equipos en su página"
 msgid "You don't have access to this organization. Ask an admin."
 msgstr "No tienes acceso a esta organización. Pregunta a un administrador."
 
+#: src/onboarding/plan-demo.tsx
 #: src/onboarding/plan.tsx
 msgid "You get what I learned"
 msgstr "Recibes lo que aprendí"

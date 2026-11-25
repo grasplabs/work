@@ -16,7 +16,6 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { createPortal } from "react-dom";
 
 import { readingTiming, saidBy, wordsOf } from "../voice/timing.ts";
 import {
@@ -31,21 +30,21 @@ import {
 import { CalmStep } from "./calm-frame.tsx";
 import { poseField } from "./field/engine.ts";
 import { poses } from "./field/poses.ts";
-import { PlanPictures } from "./plan-pictures.tsx";
-import type { Scene } from "./plan-scenes.ts";
-import { dateOf, PlanBody, planDays, planStart } from "./plan.tsx";
+import { PlanDemo } from "./plan-demo.tsx";
+import type { Scene } from "./plan-demo.tsx";
+import { dateOf, PlanBody, planDateFormat, planStart } from "./plan.tsx";
+import type { Moment } from "./plan.tsx";
 
 // "Here's the plan", told as a story before it is shown (as the first
 // onboarding told it, `about-story.tsx` before a955fb8). Stephen tells the
 // admin's own two weeks in one breath, one flowing narration with the
-// plan's own days in it, and the whole window tells it with him in
-// pictures: it turns to night and becomes one of the Appearance page's
-// scenes, a picture dithered in the brand's greens by the same shader,
-// and every part of the story is a picture of its own that morphs into
-// the next as he goes on (plan-pictures.tsx, plan-scenes.ts). Under it,
-// on the picture's dark foot, each part streams in word by word as he
-// says it. Once told, the night fades and the plan stands summed up
-// (plan.tsx), and only then Continue.
+// plan's own days in it, and while he does the admin watches them happen,
+// sped up (plan-demo.tsx): the plan's days along a rail, one interview
+// with someone who knows the work, then the whole company talking until
+// the interviews close, and the report they get filling in team by team,
+// the finding he names lifting out of the interview's own words. His
+// words stream in above it as he says them. Once told, it fades and the
+// plan stands summed up (plan.tsx), and only then Continue.
 //
 // With his voice on, the story follows it; off, the pace of speech;
 // paused, it holds. Under reduced motion, and coming back to the step, the
@@ -53,35 +52,29 @@ import { dateOf, PlanBody, planDays, planStart } from "./plan.tsx";
 // while it is told. A screen reader hears each part whole, as it comes.
 
 const styles = stylex.create({
-  // The whole window, night, over the page and its bar while the story is told.
+  // The story, wider than the step's column: centred on it, out to the window's sides.
   stage: {
-    position: "fixed",
-    inset: 0,
-    zIndex: 10,
-    isolation: "isolate",
     display: "grid",
-    alignContent: "end",
+    gap: space[6],
     justifyItems: "center",
-    paddingInline: space[6],
-    paddingBottom: { default: "12svh", [media.maxSm]: "8svh" },
-    backgroundColor: colors.brandNight,
-    color: colors.bodyForeground,
+    width: "min(62rem, calc(100vw - 2rem))",
+    marginInline: "calc((100% - min(62rem, calc(100vw - 2rem))) / 2)",
+    paddingTop: space[4],
     opacity: 1,
     transitionProperty: "opacity",
-    transitionDuration: "900ms",
+    transitionDuration: "700ms",
     transitionTimingFunction: duration.ease,
   },
   leaving: { opacity: 0 },
-  // The words, on the picture's dark foot: room for three lines, so nothing moves.
+  // His words: room for two lines, so nothing below them moves.
   words: {
     display: "grid",
     alignContent: "end",
     width: "100%",
-    maxWidth: "40rem",
-    textAlign: "center",
+    maxWidth: "44rem",
     minHeight: {
-      default: "calc(3 * var(--damsko-heading-lg-line))",
-      [media.maxSm]: "calc(4 * var(--damsko-heading-md-line))",
+      default: "calc(2 * var(--damsko-heading-md-line))",
+      [media.maxSm]: "calc(4 * var(--damsko-heading-sm-line))",
     },
   },
   line: {
@@ -89,15 +82,14 @@ const styles = stylex.create({
     color: colors.foreground,
     fontFamily: font.serif,
     fontWeight: font.weightNormal,
-    fontSize: { default: font.headingLg, [media.maxSm]: font.headingMd },
+    fontSize: { default: font.headingMd, [media.maxSm]: font.headingSm },
     lineHeight: {
-      default: font.headingLgLine,
-      [media.maxSm]: font.headingMdLine,
+      default: font.headingMdLine,
+      [media.maxSm]: font.headingSmLine,
     },
     letterSpacing: font.trackingTitle,
     textAlign: "center",
     textWrap: "balance",
-    textShadow: "0 0 24px var(--damsko-brand-night)",
   },
   word: {
     display: "inline-block",
@@ -110,13 +102,8 @@ const styles = stylex.create({
     transitionTimingFunction: duration.ease,
   },
   said: { opacity: 1, filter: "blur(0)", transform: "none" },
-  fresh: { color: colors.brandLime },
-  skip: {
-    position: "absolute",
-    top: space[4],
-    insetInlineEnd: space[4],
-    opacity: 0.7,
-  },
+  fresh: { color: colors.mintDeep },
+  skip: { opacity: 0.7 },
 });
 
 /** Told once in this visit: coming back to the step, the plan is there summed up. */
@@ -263,7 +250,18 @@ export const PlanStory = ({
   const parts = useParts(today);
   const narration = parts.map((part) => part.text).join(" ");
   const starts = startsOf(parts);
-  const days = useMemo(() => planDays(planStart(today)), [today]);
+  const { i18n } = useLingui();
+  const dates = useMemo(() => {
+    const start = planStart(today);
+    const format = planDateFormat(i18n.locale);
+    const on = (moment: Moment): string => format.format(dateOf(start, moment));
+    return {
+      first: on("first"),
+      everyone: on("everyone"),
+      close: on("close"),
+      findings: on("findings"),
+    };
+  }, [today, i18n.locale]);
   const [began, setBegan] = useState<number | null>(null);
   const [over, setOver] = useState(false);
   // The night fading, the story told, before the plan stands.
@@ -306,7 +304,7 @@ export const PlanStory = ({
           return;
         }
         setLeaving(true);
-        await hold(900);
+        await hold(700);
         if (!left) {
           latest.current.finish();
         }
@@ -377,25 +375,25 @@ export const PlanStory = ({
     );
   }
   const partSaid = said - (starts[at] ?? 0);
-  return createPortal(
-    <section
-      data-mode="dark"
-      {...stylex.props(styles.stage, fadeIn, leaving && styles.leaving)}
-    >
+  const progress = Math.min(
+    1,
+    Math.max(0, partSaid / Math.max(1, part?.text.length ?? 1))
+  );
+  return (
+    <section {...stylex.props(styles.stage, fadeIn, leaving && styles.leaving)}>
       <h1 {...stylex.props(visuallyHidden)}>{t`Here’s the plan`}</h1>
-      <PlanPictures days={days} scene={scene} />
       <div {...stylex.props(styles.words)}>
         <Streamed key={`part-${at}`} said={partSaid} text={part?.text ?? ""} />
         <span aria-live="polite" {...stylex.props(visuallyHidden)}>
           {began === null ? "" : part?.text}
         </span>
       </div>
+      <PlanDemo dates={dates} progress={progress} scene={scene} />
       <span {...stylex.props(styles.skip)}>
         <Button onClick={finish} size="sm" variant="link">
           {t`Skip`}
         </Button>
       </span>
-    </section>,
-    document.body
+    </section>
   );
 };
