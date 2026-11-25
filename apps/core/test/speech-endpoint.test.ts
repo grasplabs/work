@@ -5,7 +5,7 @@ import { speechPath } from "@grasp-os/shared/voice";
 import type { SpeechRequestBody } from "@grasp-os/shared/voice";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { voiceBudgets } from "../src/onboarding/speech.ts";
@@ -59,6 +59,24 @@ const askedSchema = z.object({
   model: z.string(),
   voice_id: z.string(),
 });
+
+/** An event of a line answered as it is made. */
+const streamEventSchema = z.union([
+  z.object({ audio: z.string() }),
+  z.object({ words: answerSchema.shape.words }),
+  z.object({ failed: z.literal(true) }),
+]);
+
+/** Every event of a line answered as it is made, a line of JSON each. */
+const eventsOf = (body: string) =>
+  body
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => streamEventSchema.parse(JSON.parse(line)));
+
+/** The audio of a line's events, each piece as its bytes. */
+const audioOf = (events: ReturnType<typeof eventsOf>): string[] =>
+  events.flatMap((event) => ("audio" in event ? [atob(event.audio)] : []));
 
 const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
@@ -179,6 +197,49 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     expect(result.again).toStrictEqual(result.first);
     await expect(carrying(text)).resolves.toHaveLength(1);
     // Counted once, for the line said: 30 ms for each of its characters.
+    await expect(voiceCounted("interviews")).resolves.toBeCloseTo(
+      before + text.length * secondsPerCharacter
+    );
+  });
+
+  it("answers a line asked for streamed as it is made: its audio in pieces, then its words, and keeps it whole for the next to ask", async () => {
+    const { link } = await opened();
+    const text = newLine();
+    const before = await voiceCounted("interviews");
+
+    const streamed = await speak({ text, language: "en", link, stream: true });
+    const events = eventsOf(await streamed.text());
+    // Kept and counted once the answer is out: asked again only then.
+    await vi.waitFor(async () => {
+      await expect(voiceCounted("interviews")).resolves.toBeGreaterThan(before);
+    });
+    const asWhole = await speak({ text, language: "en", link });
+    const whole = answerSchema.parse(await asWhole.json());
+    const again = await speak({ text, language: "en", link, stream: true });
+    const kept = eventsOf(await again.text());
+
+    const said = Math.round(text.length * secondsPerCharacter * 1000);
+    expect({
+      status: streamed.status,
+      type: streamed.headers.get("content-type"),
+      // The provider's pieces, as they came: more than one.
+      inPieces: audioOf(events).length > 1,
+      audio: audioOf(events).join("") === atob(whole.audio),
+      last: events.at(-1),
+      keptAudio: audioOf(kept).join("") === atob(whole.audio),
+      keptLast: kept.at(-1),
+    }).toStrictEqual({
+      status: 200,
+      type: "application/x-ndjson",
+      inPieces: true,
+      audio: true,
+      last: { words: whole.words },
+      keptAudio: true,
+      keptLast: { words: whole.words },
+    });
+    expect(whole.words.at(-1)?.endMs).toBe(said);
+    // Said once, and counted once, however often and however it was asked.
+    await expect(carrying(text)).resolves.toHaveLength(1);
     await expect(voiceCounted("interviews")).resolves.toBeCloseTo(
       before + text.length * secondsPerCharacter
     );
