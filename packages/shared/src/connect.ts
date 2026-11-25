@@ -1070,10 +1070,12 @@ export interface CatalogEntry {
 
 /**
  * What connecting an entry takes. `managed`: signing in, with an app Grasp
- * or Composio holds, so connecting needs nothing but consent; every native
- * provider is. `key`: a Composio toolkit Composio connects with a key, a
- * token or a username and password, which an admin types into Grasp's own
- * form (`ConnectionsApi.keyFields`). `own`: a Composio toolkit that only
+ * or Composio holds, or one a connector's server registered, so connecting
+ * needs nothing but consent; every native provider is. `key`: a Composio
+ * toolkit Composio connects with a key, a token or a username and password,
+ * which an admin types into Grasp's own form (`ConnectionsApi.keyFields`),
+ * or a connector whose server takes a key in a header, which each person
+ * types as they connect it (`ConnectionsApi.connectWithKey`). `own`: a Composio toolkit that only
  * signs in with an OAuth app nobody registered for this deployment, which
  * Grasp can't take yet, so connecting it is refused
  * (`connection.own_auth_required`).

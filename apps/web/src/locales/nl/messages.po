@@ -4517,10 +4517,6 @@ msgstr "Chats"
 msgid "Chats and drafts"
 msgstr "Chats en concepten"
 
-#: src/connections/chat-reads.tsx
-msgid "Chats read in it for"
-msgstr "Chats lezen erin voor"
-
 #. Folder of the chats people had with a Grasp agent
 #: src/brain/brain.ts
 msgid "Chats with Grasp"
@@ -17363,8 +17359,8 @@ msgid "The address can sign in again."
 msgstr "Met het adres kan weer worden aangemeld."
 
 #: src/connections/add-connector.tsx
-msgid "The address is the server's own https:// URL, such as https://mcp.example.com/mcp, with no query."
-msgstr "Het adres is de eigen https://-URL van de server, zoals https://mcp.example.com/mcp, zonder query."
+msgid "The address is the server's own https:// URL, such as https://mcp.example.com/mcp."
+msgstr "Het adres is de eigen https://-URL van de server, zoals https://mcp.example.com/mcp."
 
 #: src/frame/page-states.tsx
 msgid "The address may be wrong, or the page was moved or removed."
@@ -17596,6 +17592,10 @@ msgstr "De chat kon niet worden hernoemd. Probeer het opnieuw."
 #: src/workflows/business-process.tsx
 msgid "The checks, reviews and records the regulator expects from you."
 msgstr "De controles, beoordelingen en vastleggingen die de toezichthouder van je verwacht."
+
+#: src/connections/add-connector.tsx
+msgid "The client ID is at most 512 characters, and its secret at most 4,096."
+msgstr "De client-ID is hoogstens 512 tekens, en het secret hoogstens 4.096."
 
 #: src/routes/setup.tsx
 msgid "The company brain: {percent}% known. Dark dots are what I know, grey dots what I still need to learn."
@@ -18549,6 +18549,10 @@ msgstr "Drie cirkelend"
 #: src/activity/audit-event.tsx
 msgid "Through"
 msgstr "Via"
+
+#: src/connections/connect-dialog.tsx
+msgid "Through {app}'s own MCP server, which carries out what you allow. Grasp keeps the access in your deployment, and your workflows can use it once it is connected."
+msgstr "Via de eigen MCP-server van {app}, die uitvoert wat je toestaat. Grasp bewaart de toegang in je eigen omgeving, en je workflows kunnen het gebruiken zodra het gekoppeld is."
 
 #: src/connections/connect-dialog.tsx
 msgid "Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow."
@@ -20519,6 +20523,10 @@ msgstr "wie de rij heeft toegevoegd"
 #: src/connections/sync-places.tsx
 msgid "Whoever you let read {label} in the Brain will be able to read everything in the places you pick, whatever their permissions in {label}."
 msgstr "Wie je {label} in het Brain laat lezen, kan alles lezen in de plekken die je kiest, wat zijn of haar rechten in {label} ook zijn."
+
+#: src/connections/chat-reads.tsx
+msgid "Whose chats read in it"
+msgstr "Wiens chats erin lezen"
 
 #: src/chat/agent-draft-card.tsx
 msgid "Whose it is"

@@ -31,7 +31,7 @@ import {
   FieldError,
   FieldLabel,
 } from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
+import { Input, SecretInput } from "@grasp-os/ui/components/input";
 import {
   Item,
   ItemContent,
@@ -456,17 +456,20 @@ const ScopeChoice = ({
 
 /**
  * The key a connector's server takes, typed in here and never shown: it
- * stays in this form until it goes to core, and the form never submits by
- * itself, so it never reaches an address or the history.
+ * stays in this form until it goes to core, and the form never submits
+ * itself (Enter connects, through `onSubmit`), so it never reaches an
+ * address or the history.
  */
 const KeyEntry = ({
   value,
   disabled,
   onChange,
+  onSubmit,
 }: {
   value: string;
   disabled: boolean;
   onChange: (value: string) => void;
+  onSubmit: () => void;
 }) => {
   const { t } = useLingui();
   return (
@@ -474,19 +477,19 @@ const KeyEntry = ({
       method="post"
       onSubmit={(event) => {
         event.preventDefault();
+        if (!disabled && value !== "") {
+          onSubmit();
+        }
       }}
       {...stylex.props(styles.part)}
     >
       <Field>
         <FieldLabel>{t`Key`}</FieldLabel>
-        <Input
-          autoComplete="off"
+        <SecretInput
           disabled={disabled}
           onValueChange={onChange}
           required
-          secret
           spellCheck={false}
-          type="password"
           value={value}
         />
         <FieldDescription>{t`The key its server takes. Grasp keeps it sealed and never shows it again.`}</FieldDescription>
@@ -545,7 +548,14 @@ const NativeFlow = ({
   const signIn = (
     <>
       {withKey ? (
-        <KeyEntry disabled={busy} onChange={setKey} value={key} />
+        <KeyEntry
+          disabled={busy}
+          onChange={setKey}
+          onSubmit={() => {
+            void start();
+          }}
+          value={key}
+        />
       ) : (
         <SignInSteps app={app} host={signInHostOf(integration)} />
       )}
@@ -952,6 +962,12 @@ export const ConnectDialog = ({
 }) => {
   const { t } = useLingui();
   const app = integration.name;
+  // Who keeps the access, and who carries out what it's allowed.
+  const descriptions = {
+    native: t`Through Grasp's own connector, which keeps the access in your deployment. Your workflows can use it once it is connected, only for what you allow.`,
+    connector: t`Through ${app}'s own MCP server, which carries out what you allow. Grasp keeps the access in your deployment, and your workflows can use it once it is connected.`,
+    composio: t`Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow.`,
+  };
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent>
@@ -962,9 +978,7 @@ export const ConnectDialog = ({
               : t`Sign in to ${app} again`}
           </DialogTitle>
           <DialogDescription>
-            {integration.source === "composio"
-              ? t`Through Composio, which keeps the access in its own cloud. Your workflows can use it once it is connected, only for what you allow.`
-              : t`Through Grasp's own connector, which keeps the access in your deployment. Your workflows can use it once it is connected, only for what you allow.`}
+            {descriptions[integration.source]}
           </DialogDescription>
         </DialogHeader>
         <DialogBody>

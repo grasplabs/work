@@ -144,7 +144,7 @@ export const ChatReads = ({
       <FieldGroup>
         <Field orientation="responsive">
           <FieldContent>
-            <FieldLabel>{t`Chats read in it for`}</FieldLabel>
+            <FieldLabel>{t`Whose chats read in it`}</FieldLabel>
             <FieldDescription>{t`Their assistant reads in all of ${label} for them. Anything it changes there waits for them to confirm it.`}</FieldDescription>
           </FieldContent>
           <Select

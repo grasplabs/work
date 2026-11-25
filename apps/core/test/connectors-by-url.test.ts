@@ -1,3 +1,4 @@
+import { readRelayRequest } from "@grasp-os/shared/oauth-relay";
 import type { WaitingFeed } from "@grasp-os/shared/waiting";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -6,8 +7,16 @@ import type { Consent } from "../../connect/test/linear-mcp-fake.ts";
 import { codeResults, codeStep, personalChatsOf, says } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { linearConsentUrl } from "./linear-service.ts";
+import { mailConnection, mailWithSearch } from "./mail-connection.ts";
 import { clientOrigin } from "./sign-in-config.ts";
-import { outcome, routed, signedInApi } from "./sign-in.ts";
+import {
+  openRpc,
+  outcome,
+  routed,
+  signedInApi,
+  signedInWithRole,
+  withSignIn,
+} from "./sign-in.ts";
 import { connectDb, testBinding } from "./test-env.ts";
 
 // Connectors made from an MCP server's URL, through core (GRA-2331): an
@@ -166,6 +175,33 @@ describe("a connector made from a URL", slow, () => {
     ]);
   });
 
+  it("signs in past the relay on a hosted deployment: its server returns to the deployment's own callback", async () => {
+    const id = await linear();
+    const hostedOrigin = "https://acme.ongrasp.app";
+    const relayOrigin = "https://auth.ongrasp.app";
+    const { session } = await signedInWithRole(idp, "user");
+    const { core } = await openRpc(session, {
+      origin: hostedOrigin,
+      coreEnv: withSignIn({
+        origin: hostedOrigin,
+        callbackOrigin: relayOrigin,
+      }),
+    });
+    const { url } = await core.authenticate().connections.start({
+      provider: id,
+      scope: "personal",
+      returnTo: "/connectors",
+    });
+    const asked = new URL(url);
+    expect(asked.searchParams.get("redirect_uri")).toBe(
+      `${hostedOrigin}/api/connections/callback`
+    );
+    // Its state as connect made it, nothing the relay would take.
+    const atRelay = new URL(`${relayOrigin}/callback/connections`);
+    atRelay.searchParams.set("state", asked.searchParams.get("state") ?? "");
+    expect(readRelayRequest(atRelay, "production")).toBeNull();
+  });
+
   it("can't be connected while an admin hides it, and is in no one's catalog but an admin's", async () => {
     const id = await linear();
     const admin = await signedInApi(idp, "admin");
@@ -278,5 +314,54 @@ describe("a connector made from a URL", slow, () => {
     const [, called] = steps.map(({ text }) => text);
     // Linear's own words for its first issue, as its server answered them.
     expect(called).toContain("ENG-");
+  });
+
+  it("whose list can't be read leaves its person's other connections askable, and says why when asked for", async () => {
+    const id = await linear();
+    const person = await signedInApi(idp, "user");
+    const connectionId = await connect(person, id);
+    const mail = await mailConnection([], mailWithSearch);
+    // Its list due again, and its access gone, as connect leaves it once
+    // its server's sign-in fails.
+    const db = connectDb();
+    await db.batch([
+      db
+        .prepare(
+          "UPDATE connections SET scope = 'personal', owner_user_id = ? WHERE id = ?"
+        )
+        .bind(person.userId, mail.id),
+      db
+        .prepare(
+          "UPDATE connections SET tool_list_fresh_until = NULL WHERE id = ?"
+        )
+        .bind(connectionId),
+      db
+        .prepare("DELETE FROM connection_tokens WHERE connection_id = ?")
+        .bind(connectionId),
+    ]);
+    const chats = await personalChatsOf(
+      person.userId,
+      codeStep(
+        `export default async (self, env) => { const all = await env.connections.available(); return JSON.stringify(all.filter((each) => [${JSON.stringify(connectionId)}, ${JSON.stringify(mail.id)}].includes(each.connectionId)).map(({ connectionId, actions }) => ({ connectionId, actions })).toSorted((a, b) => a.actions.length - b.actions.length)); };`
+      ),
+      codeStep(
+        `export default async (self, env) => await env.connections.request({ connectionId: ${JSON.stringify(connectionId)}, actions: ["list_issues"], binding: "LINEAR", reason: "To find your open issues." }).then(() => "asked", (error) => error.message);`
+      ),
+      says("One of them is down.")
+    );
+    const chat = await chats.newChat();
+    await chat.ask("Which of my connections can you use?");
+
+    const steps = await codeResults(chats.stub, chat.chat.id);
+    const [offered, asked] = steps.map(({ text }) => text);
+    expect(offered).toContain(
+      JSON.stringify([
+        { connectionId, actions: [] },
+        { connectionId: mail.id, actions: ["mail.send", "mail.search"] },
+      ])
+    );
+    expect(asked).toBe(
+      "Returned:\nThis connection isn't active: it needs to be connected again."
+    );
   });
 });

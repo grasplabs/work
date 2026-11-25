@@ -20,7 +20,7 @@ import {
   FieldLabel,
 } from "@grasp-os/ui/components/field";
 import { Form } from "@grasp-os/ui/components/form";
-import { Input } from "@grasp-os/ui/components/input";
+import { Input, SecretInput } from "@grasp-os/ui/components/input";
 import {
   Select,
   SelectContent,
@@ -54,17 +54,18 @@ type ConnectorInput = Omit<AddConnectorRequest, "person" | "origin">;
 /** The field a refusal names, in words people read. */
 const problemTexts = {
   name: msg`Give it a name of at most 80 characters.`,
-  url: msg`The address is the server's own https:// URL, such as https://mcp.example.com/mcp, with no query.`,
-  auth: msg`The header is a name of letters, digits and dashes, and not one Grasp sets itself.`,
+  url: msg`The address is the server's own https:// URL, such as https://mcp.example.com/mcp.`,
+  header: msg`The header is a name of letters, digits and dashes, and not one Grasp sets itself.`,
+  client: msg`The client ID is at most 512 characters, and its secret at most 4,096.`,
 } as const satisfies Record<string, MessageDescriptor>;
 
 /** Why the form isn't a connector core takes, by the first field wrong. */
-const problemOf = (field: PropertyKey | undefined): string =>
-  i18n._(
-    field === "name" || field === "url"
-      ? problemTexts[field]
-      : problemTexts.auth
-  );
+const problemOf = ([field, part]: readonly PropertyKey[]): string => {
+  if (field === "name" || field === "url") {
+    return i18n._(problemTexts[field]);
+  }
+  return i18n._(part === "client" ? problemTexts.client : problemTexts.header);
+};
 
 /** What was typed, as core takes it: a client only where an ID was typed. */
 const inputOf = ({
@@ -131,7 +132,7 @@ const AddConnectorForm = ({ onAdded }: { onAdded: () => void }) => {
       .omit({ person: true, origin: true })
       .safeParse(input);
     if (!parsed.success) {
-      setProblem(problemOf(parsed.error.issues[0]?.path[0]));
+      setProblem(problemOf(parsed.error.issues[0]?.path ?? []));
       return;
     }
     void action.run(async (session) => {
@@ -233,12 +234,10 @@ const AddConnectorForm = ({ onAdded }: { onAdded: () => void }) => {
               {clientId.trim() === "" ? null : (
                 <Field>
                   <FieldLabel>{t`Client secret (optional)`}</FieldLabel>
-                  <Input
+                  <SecretInput
                     size="sm"
-                    autoComplete="off"
                     onValueChange={setClientSecret}
                     spellCheck={false}
-                    type="password"
                     value={clientSecret}
                   />
                   <FieldDescription>
