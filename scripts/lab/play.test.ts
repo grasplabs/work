@@ -20,7 +20,7 @@ import { askedFor, awayLine, pasteOf, splitOf } from "./events.ts";
 import type { Answer, Player } from "./person.ts";
 import { agrees, playInterview } from "./play.ts";
 
-type Asked = Omit<InterviewTurnRequest, "secret">;
+type Asked = Omit<InterviewTurnRequest, "secret" | "interviewer">;
 
 const stephen = (more: Partial<StephenTurn>): StephenTurn => ({
   say: "",

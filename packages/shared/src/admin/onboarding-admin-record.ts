@@ -1,5 +1,3 @@
-import { INTERVIEWERS } from "./interviewer.ts";
-import type { Interviewer } from "./interviewer.ts";
 import { MIN_GROUP, PHASES, RECORD_FIELDS } from "./interviews.ts";
 import type { Phase } from "./interviews.ts";
 import {
@@ -266,13 +264,6 @@ export interface StephenStats {
   started: number;
   /** What the people who talked to him said of it, from 1 to 5: how many said so, the average, and how many gave each. */
   rating: { count: number; average: number; by: Record<number, number> };
-  /** Who people chose to talk with, in the order they are offered: how many each, and what the ones who said so thought of it. */
-  chose: {
-    interviewer: Interviewer;
-    count: number;
-    rated: number;
-    average: number;
-  }[];
   /** How long the agreed interviews took, in minutes: the leads' and everyone else's, on average. */
   length: { lead: number; employee: number };
   /** How many agreed interviews took how long: by minutes, in steps. */
@@ -382,20 +373,6 @@ export const stephenOf = (view: OrgView): StephenStats => {
     reviewed: false,
     started: view.interviews.length,
     rating: ratingsOf(finished),
-    chose: INTERVIEWERS.map((interviewer) => {
-      const theirs = view.interviews.filter(
-        (interview) => interview.interviewer === interviewer
-      );
-      const rating = ratingsOf(
-        theirs.filter((interview) => interview.approved)
-      );
-      return {
-        interviewer,
-        count: theirs.length,
-        rated: rating.count,
-        average: rating.average,
-      };
-    }),
     length: {
       lead: average(
         minutesOf,

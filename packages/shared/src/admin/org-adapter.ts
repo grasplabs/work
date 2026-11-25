@@ -1,7 +1,6 @@
 import { addMonths } from "./admin-account.ts";
 import { KEPT_SHARE, PRICES } from "./admin-usage.ts";
 import type { Model } from "./admin-usage.ts";
-import { interviewerOf } from "./interviewer.ts";
 import { PHASES } from "./interviews.ts";
 import type { Phase } from "./interviews.ts";
 import {
@@ -388,7 +387,6 @@ export const orgOfSnapshot = (snapshot: StaffSnapshot): Org => {
           : 0,
         toRead: false,
         rating: interview.progress.rating ?? null,
-        interviewer: interviewerOf(interview.progress.interviewer),
         ...heldBy(interview),
       },
     ];

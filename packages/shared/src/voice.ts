@@ -116,9 +116,10 @@ export interface LiveTranscription {
 export const speechPath = "/api/speech";
 
 /**
- * Who says a line: Stephen, or Claire when she holds the interview; and
- * the sample speakers of the conversation that shows how an interview
- * goes, each clearly not Stephen.
+ * Who says a line: Stephen, and the sample speakers of the conversation
+ * that shows how an interview goes, each clearly not Stephen. Claire stays
+ * here because the onboarding's pages still ask for her voice until they
+ * drop the choice: core says her lines in Stephen's.
  */
 export const speakers = ["stephen", "claire", "mark", "lisa", "tim"] as const;
 export type Speaker = (typeof speakers)[number];

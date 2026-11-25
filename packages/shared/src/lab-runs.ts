@@ -10,7 +10,6 @@ import { z } from "zod";
 
 import { caseScoreSchema, meansOf } from "./lab-compare.ts";
 import { labViaSchema } from "./lab.ts";
-import { interviewerSchema } from "./onboarding.ts";
 
 /** What was run: whole interviews, the notes of a fixed conversation, the next line at a fixed moment, or the drawing of fixed interviews. */
 export const benches = ["whole", "notes", "ask", "draw"] as const;
@@ -18,7 +17,8 @@ export type Bench = (typeof benches)[number];
 
 /** Which Stephen a result is of. */
 export const stephenVersionSchema = z.object({
-  interviewer: interviewerSchema,
+  /** Who held it: Stephen. A run kept of anyone else doesn't fit, and is left out. */
+  interviewer: z.literal("stephen"),
   /** The mark of the text of someone's own interview, and of a lead's, in the run's language. */
   own: z.string(),
   lead: z.string(),

@@ -94,7 +94,7 @@ export const interviewStoryResponse = async (
     });
     return asTheyStand(503);
   }
-  const { text: system } = await tellingText(asked.interviewer, asked.locale);
+  const { text: system } = await tellingText(asked.locale);
   try {
     const { output, usage } = await models(env).call({
       model,

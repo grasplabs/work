@@ -147,7 +147,6 @@ const labOf = (
     results: results.filter((each) => each.set === "open"),
     scores,
     organizations,
-    interviewer: "stephen",
     now,
   });
 
@@ -388,7 +387,6 @@ describe("live, group by group", () => {
         organization("Bakkerij", held("v1", 4, 4), "edge"),
         organization("Molen", held("v1", 6, 3), "stable"),
       ],
-      interviewer: "stephen",
       now,
       channel: "edge",
     });
@@ -450,7 +448,6 @@ describe("the overview", () => {
         organization("Bakkerij", held("v1", 3, 3), "stable"),
         organization("Molen", held("v2", 3, 3), "edge"),
       ],
-      interviewer: "stephen",
       now,
       channel: "stable",
     });
@@ -498,7 +495,7 @@ describe("the overview", () => {
 });
 
 describe("one Stephen run as two releases", () => {
-  it("keeps the real interviews of his earlier release with him when only Claire's texts changed", () => {
+  it("keeps the real interviews of his earlier release with him when his texts and the way he talks stayed as they were", () => {
     const lab = labOf(
       [run("r1", [0.6], {}, "talks-s"), run("r2", [0.6], {}, "talks-s")],
       [organization("Bakkerij", held("r1", 3, 3))]
