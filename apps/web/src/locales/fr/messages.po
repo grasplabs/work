@@ -1133,6 +1133,10 @@ msgstr "{name}, dans {app}"
 msgid "{name}, lines"
 msgstr "{name}, lignes"
 
+#: src/frame/ui-words.tsx
+msgid "{name}, position {position} of {total}."
+msgstr "{name}, position {position} sur {total}."
+
 #: src/onboarding/about-story.tsx
 msgid "{name}, where does the time go in your week?"
 msgstr "{name}, où part le temps dans votre semaine ?"
@@ -13443,6 +13447,10 @@ msgstr "Choisissez ce qu’il peut faire. Vous pourrez le modifier plus tard."
 msgid "Picked in the chat"
 msgstr "Choisi dans le chat"
 
+#: src/frame/ui-words.tsx
+msgid "Picked up {name}, position {position} of {total}."
+msgstr "{name} saisi, position {position} sur {total}."
+
 #: src/onboarding/interviews-progress.tsx
 msgid "pieces of work found"
 msgstr "tâches trouvées"
@@ -13568,6 +13576,10 @@ msgstr "Appuyez sur Entrée pour l’ajouter."
 #: src/frame/panels/head.tsx
 msgid "Press or press F2 to rename"
 msgstr "Appuyez ou appuyez sur F2 pour renommer"
+
+#: src/frame/ui-words.tsx
+msgid "Press Space or Enter to pick it up, the arrow keys to move it, Space or Enter to put it down, or Escape to put it back."
+msgstr "Appuyez sur Espace ou Entrée pour le saisir, sur les flèches pour le déplacer, sur Espace ou Entrée pour le déposer, ou sur Échap pour le remettre à sa place."
 
 #: src/frame/ui-words.tsx
 msgid "Presses \"{words}\""
@@ -13745,6 +13757,14 @@ msgstr "Purchase-to-Pay"
 msgctxt "what the Brain remembers about something"
 msgid "Purpose"
 msgstr "Objet"
+
+#: src/frame/ui-words.tsx
+msgid "Put {name} back at position {position} of {total}."
+msgstr "{name} remis à la position {position} sur {total}."
+
+#: src/frame/ui-words.tsx
+msgid "Put {name} down at position {position} of {total}."
+msgstr "{name} déposé à la position {position} sur {total}."
 
 #: src/interview/read-back.tsx
 msgid "Put back"

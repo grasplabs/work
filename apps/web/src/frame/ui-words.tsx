@@ -677,6 +677,17 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       name: t`Sidebar`,
       toggle: t`Show or hide the sidebar`,
     },
+    sortableList: {
+      instructions: t`Press Space or Enter to pick it up, the arrow keys to move it, Space or Enter to put it down, or Escape to put it back.`,
+      grabbed: (name, position, total) =>
+        t`Picked up ${name}, position ${position} of ${total}.`,
+      moved: (name, position, total) =>
+        t`${name}, position ${position} of ${total}.`,
+      dropped: (name, position, total) =>
+        t`Put ${name} down at position ${position} of ${total}.`,
+      cancelled: (name, position, total) =>
+        t`Put ${name} back at position ${position} of ${total}.`,
+    },
     sources: {
       count: (count) =>
         plural(count, {

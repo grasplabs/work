@@ -1133,6 +1133,10 @@ msgstr "{name}, en {app}"
 msgid "{name}, lines"
 msgstr "{name}, líneas"
 
+#: src/frame/ui-words.tsx
+msgid "{name}, position {position} of {total}."
+msgstr "{name}, posición {position} de {total}."
+
 #: src/onboarding/about-story.tsx
 msgid "{name}, where does the time go in your week?"
 msgstr "{name}, ¿en qué se te va el tiempo durante la semana?"
@@ -13443,6 +13447,10 @@ msgstr "Elige qué puede hacer. Puedes cambiarlo más tarde."
 msgid "Picked in the chat"
 msgstr "Elegido en el chat"
 
+#: src/frame/ui-words.tsx
+msgid "Picked up {name}, position {position} of {total}."
+msgstr "{name} levantado, posición {position} de {total}."
+
 #: src/onboarding/interviews-progress.tsx
 msgid "pieces of work found"
 msgstr "trabajos encontrados"
@@ -13568,6 +13576,10 @@ msgstr "Pulsa Intro para añadirlo."
 #: src/frame/panels/head.tsx
 msgid "Press or press F2 to rename"
 msgstr "Pulsa o pulsa F2 para cambiar el nombre"
+
+#: src/frame/ui-words.tsx
+msgid "Press Space or Enter to pick it up, the arrow keys to move it, Space or Enter to put it down, or Escape to put it back."
+msgstr "Pulse Espacio o Intro para levantarlo, las flechas para moverlo, Espacio o Intro para soltarlo, o Escape para devolverlo a su sitio."
 
 #: src/frame/ui-words.tsx
 msgid "Presses \"{words}\""
@@ -13745,6 +13757,14 @@ msgstr "Purchase-to-Pay"
 msgctxt "what the Brain remembers about something"
 msgid "Purpose"
 msgstr "Propósito"
+
+#: src/frame/ui-words.tsx
+msgid "Put {name} back at position {position} of {total}."
+msgstr "{name} devuelto a la posición {position} de {total}."
+
+#: src/frame/ui-words.tsx
+msgid "Put {name} down at position {position} of {total}."
+msgstr "{name} soltado en la posición {position} de {total}."
 
 #: src/interview/read-back.tsx
 msgid "Put back"

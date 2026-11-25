@@ -1133,6 +1133,10 @@ msgstr "{name}, in {app}"
 msgid "{name}, lines"
 msgstr "{name}, regels"
 
+#: src/frame/ui-words.tsx
+msgid "{name}, position {position} of {total}."
+msgstr "{name}, positie {position} van {total}."
+
 #: src/onboarding/about-story.tsx
 msgid "{name}, where does the time go in your week?"
 msgstr "{name}, waar gaat de tijd heen in jouw week?"
@@ -13443,6 +13447,10 @@ msgstr "Kies wat hij mag doen. Je kunt dit later wijzigen."
 msgid "Picked in the chat"
 msgstr "Gekozen in de chat"
 
+#: src/frame/ui-words.tsx
+msgid "Picked up {name}, position {position} of {total}."
+msgstr "{name} opgepakt, positie {position} van {total}."
+
 #: src/onboarding/interviews-progress.tsx
 msgid "pieces of work found"
 msgstr "stukken werk gevonden"
@@ -13568,6 +13576,10 @@ msgstr "Druk op Enter om het toe te voegen."
 #: src/frame/panels/head.tsx
 msgid "Press or press F2 to rename"
 msgstr "Druk of druk op F2 om te hernoemen"
+
+#: src/frame/ui-words.tsx
+msgid "Press Space or Enter to pick it up, the arrow keys to move it, Space or Enter to put it down, or Escape to put it back."
+msgstr "Druk op spatie of Enter om het op te pakken, op de pijltjestoetsen om het te verplaatsen, op spatie of Enter om het neer te zetten, of op Escape om het terug te zetten."
 
 #: src/frame/ui-words.tsx
 msgid "Presses \"{words}\""
@@ -13745,6 +13757,14 @@ msgstr "Purchase-to-Pay"
 msgctxt "what the Brain remembers about something"
 msgid "Purpose"
 msgstr "Doel"
+
+#: src/frame/ui-words.tsx
+msgid "Put {name} back at position {position} of {total}."
+msgstr "{name} teruggezet op positie {position} van {total}."
+
+#: src/frame/ui-words.tsx
+msgid "Put {name} down at position {position} of {total}."
+msgstr "{name} neergezet op positie {position} van {total}."
 
 #: src/interview/read-back.tsx
 msgid "Put back"
