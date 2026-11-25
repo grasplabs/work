@@ -93,6 +93,7 @@ const placeholderHeaders = (provider: AiProviderId): ProviderHeaders => {
   const none: ProviderHeaders = {
     Authorization: null,
     "x-api-key": null,
+    "xi-api-key": null,
   };
   return keyHeader === "authorization"
     ? { ...none, Authorization: `Bearer ${aiCredentialPlaceholder}` }

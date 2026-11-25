@@ -3,8 +3,8 @@ import type { SpokenWord } from "@grasp-os/shared/voice";
 // The voice models the model gateway offers (models.ts) for Grasp's own
 // speech and listening (@grasp-os/shared/platform-ai), beside the text
 // models of pi's catalog: our own small catalog, as pi's has no voice
-// models. Each speech model is Mistral's, priced per character it is
-// asked to say, which is how Mistral bills speech. Each transcription
+// models. Each speech model is Mistral's or ElevenLabs's, priced per
+// character it is asked to say, which is how both bill speech. Each transcription
 // model is OpenAI's, priced per second it hears, at a price never below
 // what the provider bills for it. Grasp pays for these on its own keys:
 // what each cost is recorded for Grasp's spend overview (model-usage.ts).
@@ -17,47 +17,85 @@ import type { SpokenWord } from "@grasp-os/shared/voice";
  * (https://docs.mistral.ai/models/voxtral-mini-tts-3-0), read on
  * 2026-11-24: $13 per million characters.
  */
-const dollarsPer1000Chars = {
-  /** Voxtral TTS 3, in which every line is said. */
+const mistralDollarsPer1000Chars = {
+  /** Voxtral TTS 3, in which an interview's lines are said. */
   "voxtral-mini-tts-3-0": 0.013,
 } as const;
 
-/** The providers that say a line: Mistral (platform-ai.ts). */
-const speechProviders = ["mistral"] as const;
+/**
+ * ElevenLabs's API prices for text to speech, in US dollars per 1,000
+ * characters, the same on every plan.
+ *
+ * Source: ElevenLabs's API pricing page, "Model pricing"
+ * (https://elevenlabs.io/pricing/api), read on 2026-10-21: v4 and v3 at
+ * $0.08, v4 Turbo and Flash at $0.04.
+ */
+const elevenLabsDollarsPer1000Chars = {
+  /** Eleven v4: the most expressive, in which the admin's onboarding is said. */
+  eleven_v4: 0.08,
+  eleven_v4_turbo: 0.04,
+  eleven_v3: 0.08,
+  eleven_flash_v2_5: 0.04,
+} as const;
+
+/** Each speech provider's models, with their prices (platform-ai.ts). */
+const dollarsPer1000Chars = {
+  mistral: mistralDollarsPer1000Chars,
+  elevenlabs: elevenLabsDollarsPer1000Chars,
+} as const;
+
+/** The providers that say a line: Mistral and ElevenLabs (platform-ai.ts). */
+const speechProviders = ["mistral", "elevenlabs"] as const;
 
 /** The providers that write down speech: OpenAI (platform-ai.ts). */
 const transcriptionProviders = ["openai"] as const;
 
 /** A speech model the gateway offers. */
-export interface VoiceRef {
-  provider: (typeof speechProviders)[number];
-  id: keyof typeof dollarsPer1000Chars;
-}
+export type VoiceRef = {
+  [P in (typeof speechProviders)[number]]: {
+    provider: P;
+    id: keyof (typeof dollarsPer1000Chars)[P];
+  };
+}[(typeof speechProviders)[number]];
 
-const isVoiceModel = (id: string): id is VoiceRef["id"] =>
-  Object.hasOwn(dollarsPer1000Chars, id);
+const isMistralModel = (
+  id: string
+): id is keyof typeof mistralDollarsPer1000Chars =>
+  Object.hasOwn(mistralDollarsPer1000Chars, id);
 
-const isSpeechProvider = (provider: string): provider is VoiceRef["provider"] =>
-  speechProviders.some((one) => one === provider);
+const isElevenLabsModel = (
+  id: string
+): id is keyof typeof elevenLabsDollarsPer1000Chars =>
+  Object.hasOwn(elevenLabsDollarsPer1000Chars, id);
 
 /**
  * A speech model as the gateway names it, `<provider>/<model>`, such as
- * `mistral/voxtral-mini-tts-3-0`; `undefined` for any other.
+ * `mistral/voxtral-mini-tts-3-0` or `elevenlabs/eleven_v4`; `undefined`
+ * for any other.
  */
 export const parseVoiceRef = (ref: string): VoiceRef | undefined => {
   const [provider, id, ...rest] = ref.split("/");
-  return provider !== undefined &&
-    isSpeechProvider(provider) &&
-    id !== undefined &&
-    rest.length === 0 &&
-    isVoiceModel(id)
-    ? { provider, id }
-    : undefined;
+  if (id === undefined || rest.length > 0) {
+    return undefined;
+  }
+  if (provider === "mistral" && isMistralModel(id)) {
+    return { provider, id };
+  }
+  if (provider === "elevenlabs" && isElevenLabsModel(id)) {
+    return { provider, id };
+  }
+  return undefined;
 };
 
+/** A model's price per 1,000 characters, in US dollars. */
+const priceOf = (ref: VoiceRef): number =>
+  ref.provider === "mistral"
+    ? dollarsPer1000Chars.mistral[ref.id]
+    : dollarsPer1000Chars.elevenlabs[ref.id];
+
 /** What saying `characters` characters costs on `ref`, in US dollars: per million, so whole micros stay whole. */
-export const speechCostOf = ({ id }: VoiceRef, characters: number): number =>
-  (characters * dollarsPer1000Chars[id] * 1000) / 1_000_000;
+export const speechCostOf = (ref: VoiceRef, characters: number): number =>
+  (characters * priceOf(ref) * 1000) / 1_000_000;
 
 /**
  * OpenAI's prices for speech to text, in US dollars per hour of audio.
@@ -164,5 +202,60 @@ export const wordsOf = (line: string, seconds: number): SpokenWord[] => {
     });
     before += said + (after[at] ?? 0);
   }
+  return words;
+};
+
+/** When each character of a line is said, in seconds, as ElevenLabs aligns it. */
+export interface Alignment {
+  characters: readonly string[];
+  character_start_times_seconds: readonly number[];
+  character_end_times_seconds: readonly number[];
+}
+
+const space = /^\s$/u;
+
+/**
+ * The words of a line ElevenLabs aligned, each a run of characters
+ * between spaces, with when its first character starts and its last
+ * ends, in whole ms. `undefined` when the alignment doesn't hold one time
+ * of each kind for every character.
+ */
+export const alignedWordsOf = ({
+  characters,
+  character_start_times_seconds: starts,
+  character_end_times_seconds: ends,
+}: Alignment): SpokenWord[] | undefined => {
+  if (
+    starts.length !== characters.length ||
+    ends.length !== characters.length
+  ) {
+    return undefined;
+  }
+  const words: SpokenWord[] = [];
+  let word: { text: string; start: number; end: number } | undefined =
+    undefined;
+  const close = (): void => {
+    if (word !== undefined) {
+      words.push({
+        text: word.text,
+        startMs: Math.round(word.start * 1000),
+        endMs: Math.round(word.end * 1000),
+      });
+      word = undefined;
+    }
+  };
+  for (const [at, character] of characters.entries()) {
+    const start = starts[at] ?? 0;
+    const end = ends[at] ?? start;
+    if (space.test(character)) {
+      close();
+    } else if (word === undefined) {
+      word = { text: character, start, end };
+    } else {
+      word.text += character;
+      word.end = end;
+    }
+  }
+  close();
   return words;
 };

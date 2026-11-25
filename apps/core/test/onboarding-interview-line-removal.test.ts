@@ -223,7 +223,7 @@ const takenOutFrom = async (
     await sayOnLink(link, story),
     await sayForAdmin(session, elsewhere),
     await stillKept(story),
-    await stillKept(elsewhere),
+    await stillKept(elsewhere, "onboarding"),
   ]).toStrictEqual([200, 200, true, true]);
   return { link, person, fact, other, story, elsewhere, out, version: v2 };
 };
@@ -238,7 +238,7 @@ const leftOf = async (
     onboarding: await onboardingTablesWith(theirs),
     core: await d1ColumnsWith(env.DB, theirs),
     cached: await stillKept(taken.story),
-    other: await stillKept(taken.elsewhere),
+    other: await stillKept(taken.elsewhere, "onboarding"),
     facts: kept !== null && "progress" in kept ? kept.progress.facts : null,
   };
 };
@@ -337,7 +337,9 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
     const before = {
       stephen: await onboardingTablesWith(stephen),
       theirs: await onboardingTablesWith(theirs),
-      said: await Promise.all(pieces.map(stillKept)),
+      said: await Promise.all(
+        pieces.map(async (piece) => await stillKept(piece))
+      ),
       statuses,
     };
 
@@ -359,8 +361,10 @@ describe("removing a line of an interview", { timeout: 60_000 }, () => {
         ...(await d1ColumnsWith(env.DB, stephen)),
         ...(await d1ColumnsWith(env.DB, theirs)),
       ],
-      cached: await Promise.all(pieces.map(stillKept)),
-      elsewhere: await stillKept(elsewhere),
+      cached: await Promise.all(
+        pieces.map(async (piece) => await stillKept(piece))
+      ),
+      elsewhere: await stillKept(elsewhere, "onboarding"),
       lines: kept !== null && "progress" in kept ? kept.progress.lines : null,
       audited: events.map(({ action }) => action),
       noted: noted.filter((what) => what === "interview.line_removed"),

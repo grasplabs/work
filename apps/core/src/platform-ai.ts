@@ -24,9 +24,26 @@ const voices = {
 } as const satisfies Record<Speaker, string>;
 
 /**
+ * Each speaker's voice in the admin's onboarding, by its ElevenLabs ID.
+ * Stephen's is "Adam", the voice Eleven v4 is shown with: young,
+ * confident, conversational. Claire's is "Jessica": playful, bright and
+ * warm. The sample speakers are ElevenLabs's own voices, each clearly
+ * not Stephen. As before Grasp moved its speech to KugelAudio, then
+ * Mistral.
+ */
+const onboardingVoices = {
+  stephen: "s3TPKV1kjDlVtZbl4Ksh",
+  claire: "r1KmysJdVYZjJCm4mL3b",
+  lisa: "EXAVITQu4vr4xnSDxMaL",
+  mark: "cjVigY5qzO86Huf0OWal",
+  tim: "TX3LPaxmHKxFdv7VOQHJ",
+} as const satisfies Record<Speaker, string>;
+
+/**
  * Each feature's provider and model: OpenAI's GPT-4o Transcribe writes
- * down speech, live and recorded, and Mistral's Voxtral TTS 3 says the
- * lines.
+ * down speech, live and recorded; Mistral's Voxtral TTS 3 says an
+ * interview's lines (`speech`), and ElevenLabs's Eleven v4 the admin's
+ * onboarding (`onboardingSpeech`), each with its own voices.
  */
 export const platformAi = {
   transcription: { provider: "openai", model: "gpt-4o-transcribe" },
@@ -34,5 +51,10 @@ export const platformAi = {
     provider: "mistral",
     model: "voxtral-mini-tts-3-0",
     voices,
+  },
+  onboardingSpeech: {
+    provider: "elevenlabs",
+    model: "eleven_v4",
+    voices: onboardingVoices,
   },
 } as const;

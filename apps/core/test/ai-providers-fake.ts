@@ -149,6 +149,8 @@ export const aiProvidersFake = () => {
     "api.openai.com",
     "eu.api.openai.com",
     "api.mistral.ai",
+    "api.elevenlabs.io",
+    "api.eu.residency.elevenlabs.io",
     "openrouter.ai",
     "llm.acme-ai.test",
   ]);
@@ -391,7 +393,58 @@ export const aiProvidersFake = () => {
       { headers: { "x-request-id": `req-speech-${seen.length}` } }
     );
   };
-  /** How Mistral's speech and OpenAI's audio endpoints answer when nothing is planned. */
+  /**
+   * ElevenLabs's line said with timestamps: the audio in base64, and when
+   * each character of the line is said; a voice Grasp didn't choose is
+   * refused, as ElevenLabs refuses a voice the account doesn't have.
+   */
+  const elevenLabsLine = (url: URL, body: string): Response => {
+    const voices = [
+      "s3TPKV1kjDlVtZbl4Ksh",
+      "r1KmysJdVYZjJCm4mL3b",
+      "EXAVITQu4vr4xnSDxMaL",
+      "cjVigY5qzO86Huf0OWal",
+      "TX3LPaxmHKxFdv7VOQHJ",
+    ];
+    const voice =
+      /^\/v1\/text-to-speech\/(?<voice>[^/]+)\/with-timestamps$/u.exec(
+        url.pathname
+      )?.groups?.voice;
+    if (voice === undefined || !voices.includes(voice)) {
+      return Response.json(
+        {
+          detail: {
+            status: "voice_not_found",
+            message: `A voice with the voice_id ${voice} was not found.`,
+          },
+        },
+        { status: 404 }
+      );
+    }
+    const asked: unknown = JSON.parse(body);
+    const text =
+      isRecord(asked) && typeof asked.text === "string" ? asked.text : "";
+    // The fake's lines are plain text, one code point to a character.
+    // oxlint-disable-next-line typescript/no-misused-spread -- see above
+    const characters = [...text];
+    const seconds = secondsPerCharacter;
+    return Response.json(
+      {
+        audio_base64: btoa("\0".repeat(characters.length * 400)),
+        alignment: {
+          characters,
+          character_start_times_seconds: characters.map(
+            (_, at) => at * seconds
+          ),
+          character_end_times_seconds: characters.map(
+            (_, at) => (at + 1) * seconds
+          ),
+        },
+      },
+      { headers: { "request-id": `req-speech-${seen.length}` } }
+    );
+  };
+  /** How Mistral's and ElevenLabs's speech and OpenAI's audio endpoints answer when nothing is planned. */
   const audioAnswer = (
     request: Request,
     url: URL,
@@ -401,6 +454,13 @@ export const aiProvidersFake = () => {
       return request.method === "POST" && url.pathname === "/v1/audio/speech"
         ? spokenLine(body)
         : undefined;
+    }
+    // Grasp's own ElevenLabs answers at its EU residency host, or its US one.
+    if (
+      url.hostname === "api.elevenlabs.io" ||
+      url.hostname === "api.eu.residency.elevenlabs.io"
+    ) {
+      return request.method === "POST" ? elevenLabsLine(url, body) : undefined;
     }
     // Grasp's own project answers at OpenAI's EU host, or its US one.
     if (

@@ -17,11 +17,10 @@ import { z } from "zod";
 import { signInConfig } from "../auth/config.ts";
 import { identify } from "../auth/identity.ts";
 import { errorResponse } from "../errors.ts";
-import { platformAi } from "../platform-ai.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { keepLine, keptLine, storedKeyOf } from "../speech-cache.ts";
 import type { SpokenKey } from "../speech-cache.ts";
-import { platformSpeech, speechModelOf } from "../speech.ts";
+import { platformSpeech, speechModelOf, speechOf } from "../speech.ts";
 import { auditStaffRoute } from "../staff-audit.ts";
 import { fromOwnSite, interviewCaller } from "./interview-caller.ts";
 import { linkHeaders, linkRefusal, noCallerRefusal } from "./links.ts";
@@ -35,7 +34,8 @@ import type { Took } from "./store.ts";
 // prototype, packages/grasp: worker/speech.ts).
 //
 // Said through speech synthesis behind its interface (speech.ts): the
-// Mistral voices fixed in src/platform-ai.ts, through the model
+// voices fixed in src/platform-ai.ts, Mistral's for an interview and
+// ElevenLabs's for an admin's onboarding, through the model
 // gateway: the deployment's rules judge every line, its
 // budgets are charged, and the audit log records it, never the line.
 //
@@ -305,8 +305,11 @@ const say = async (
   stored: string,
   requestId: string
 ): Promise<Response> => {
-  const model = speechModelOf();
-  const voice = platformAi.speech.voices[asked.speaker];
+  // An interview is said with Mistral, an admin's onboarding with
+  // ElevenLabs (platform-ai.ts).
+  const audience = asked.link === undefined ? "onboarding" : "interview";
+  const model = speechModelOf(audience);
+  const voice = speechOf(audience).voices[asked.speaker];
   const spoken = spokenOf(asked.text);
   const key: SpokenKey = {
     text: asked.text,

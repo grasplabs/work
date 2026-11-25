@@ -497,7 +497,9 @@ describe("a line whose take-out fails", { timeout: 60_000 }, () => {
           .one().n
     );
     const kept = await Promise.all(
-      [texts[0] ?? "", texts.at(-1) ?? ""].map(stillKept)
+      [texts[0] ?? "", texts.at(-1) ?? ""].map(
+        async (text) => await stillKept(text)
+      )
     );
 
     expect({ gone, armed, waiting, kept }).toStrictEqual({

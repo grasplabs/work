@@ -506,6 +506,22 @@ const carriesPlaceholder = (
     : request.headers.get(keyHeader) === aiCredentialPlaceholder;
 };
 
+/** One ID a `*` path segment stands for: letters and digits, nothing else. */
+const idSegment = /^[A-Za-z0-9]{1,64}$/u;
+
+/** Whether `pathname` is `path`, each `*` segment of it one ID. */
+const matchesPath = (pathname: string, path: string): boolean => {
+  const asked = pathname.split("/");
+  const allowed = path.split("/");
+  return (
+    asked.length === allowed.length &&
+    allowed.every((segment, index) => {
+      const given = asked[index] ?? "";
+      return segment === "*" ? idSegment.test(given) : segment === given;
+    })
+  );
+};
+
 /** Whether `url` is one of the provider's model endpoints, at `base`. */
 const isModelEndpoint = (
   url: URL,
@@ -516,8 +532,8 @@ const isModelEndpoint = (
   // A fixed provider's paths are whole; a custom endpoint's sit below its
   // base URL's own path.
   const custom = provider === "openai-compatible";
-  return aiProviders[provider].paths.some(
-    (path) => url.pathname === (custom ? `${prefix}${path}` : path)
+  return aiProviders[provider].paths.some((path) =>
+    matchesPath(url.pathname, custom ? `${prefix}${path}` : path)
   );
 };
 
@@ -580,7 +596,8 @@ const sendsToBase = (
 ): boolean => {
   const checked = checkEndpoint(url.href, policy);
   // The query a model request may carry: exactly one its provider names
-  // (`queries`), none only where it names `""`.
+  // (`queries`), none only where it names `""`. ElevenLabs's must be its
+  // own, so a line is never sent with logging left on.
   const query = aiProviders[provider].queries.includes(url.search);
   return (
     !("refused" in checked) &&
