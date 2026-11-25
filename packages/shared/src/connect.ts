@@ -273,6 +273,13 @@ export const finishConnectionSchema = z.strictObject({
 });
 export type FinishConnection = z.input<typeof finishConnectionSchema>;
 
+/** Which flow's start page to ask for, as `flowReturn` takes it: the person and the flow's state. */
+export const flowReturnSchema = finishConnectionSchema.pick({
+  person: true,
+  state: true,
+});
+export type FlowReturn = z.input<typeof flowReturnSchema>;
+
 /** Longest API key connect takes. */
 export const apiKeyMaxLength = 4096;
 
@@ -2225,6 +2232,13 @@ export interface ConnectApi
    * code can't be brought back to finish it later.
    */
   abandonFlow: (state: string) => Promise<void>;
+  /**
+   * Where a live flow the same person started was going back to (its
+   * `returnTo`), read before finishing it: a flow that then fails still
+   * returns them to the page they started from, with why. Nothing for a
+   * flow that isn't theirs, isn't live, or isn't one; it is only read.
+   */
+  flowReturn: (request: FlowReturn) => Promise<string | undefined>;
   /**
    * The catalog: the native providers, then Composio's toolkits if
    * connect has a Composio key. Composio failing to answer leaves the

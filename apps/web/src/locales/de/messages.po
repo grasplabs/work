@@ -5149,6 +5149,10 @@ msgstr "Verbunden, über Composio"
 msgid "Connecting"
 msgstr "Wird verbunden"
 
+#: src/onboarding/connection-return.ts
+msgid "Connecting didn't work, so nothing was connected. Try again, or choose another way."
+msgstr "Das Verbinden hat nicht geklappt, daher wurde nichts verbunden. Versuchen Sie es erneut oder wählen Sie einen anderen Weg."
+
 #: src/connection-errors.ts
 msgid "Connecting didn't work. Try again, or ask an admin."
 msgstr "Das Verbinden hat nicht funktioniert. Versuchen Sie es erneut oder fragen Sie einen Admin."
@@ -8776,6 +8780,10 @@ msgstr "Ich konnte diese Datei nicht lesen. Eine CSV- oder Excel-Datei funktioni
 #: src/onboarding/company-step.tsx
 msgid "I could not read who works where from {signIn}. Connect it again with an administrator’s account."
 msgstr "Ich konnte aus {signIn} nicht lesen, wer wo arbeitet. Verbinden Sie es noch einmal mit einem Administratorkonto."
+
+#: src/onboarding/connection-return.ts
+msgid "I couldn't check your directory just now. Try again in a moment."
+msgstr "Ich konnte Ihr Verzeichnis gerade nicht prüfen. Versuchen Sie es gleich noch einmal."
 
 #: src/onboarding/documents-step.tsx
 msgid "I couldn’t read this one"
@@ -17392,6 +17400,14 @@ msgstr "Danke, dass du Bescheid gibst"
 msgid "That account can't open this interview. Sign in with the work account your link was sent to."
 msgstr "Mit diesem Konto lässt sich dieses Interview nicht öffnen. Melden Sie sich mit dem Arbeitskonto an, an das Ihr Link geschickt wurde."
 
+#: src/onboarding/connection-return.ts
+msgid "That account can't read your company's directory. Try again with an admin account, or use a staff list."
+msgstr "Dieses Konto kann das Verzeichnis Ihres Unternehmens nicht lesen. Versuchen Sie es erneut mit einem Administratorkonto oder verwenden Sie eine Mitarbeiterliste."
+
+#: src/onboarding/connection-return.ts
+msgid "That account isn't in your organization. Try again with your work account."
+msgstr "Dieses Konto gehört nicht zu Ihrer Organisation. Versuchen Sie es erneut mit Ihrem Arbeitskonto."
+
 #: src/sign-in-errors.ts
 msgid "That account isn't part of your organization."
 msgstr "Dieses Konto gehört nicht zu Ihrer Organisation."
@@ -17451,6 +17467,10 @@ msgstr "Diesen Wert nimmt dieser Parameter nicht an."
 #: src/settings/add-connection/words.ts
 msgid "That key didn't work."
 msgstr "Dieser Schlüssel hat nicht funktioniert."
+
+#: src/onboarding/connection-return.ts
+msgid "That sign-in can't be reached right now. Try again in a moment, or choose another way."
+msgstr "Diese Anmeldung ist gerade nicht erreichbar. Versuchen Sie es gleich noch einmal oder wählen Sie einen anderen Weg."
 
 #: src/sign-in-errors.ts
 msgid "That staff account hasn't been given access here."
@@ -18142,6 +18162,14 @@ msgstr "Das Geheimnis ist widerrufen: Nichts von dieser Quelle startet einen Wor
 #: src/settings/event-sources.tsx
 msgid "The sender must sign with the new secret, which you see only once."
 msgstr "Der Absender muss mit dem neuen Geheimnis signieren, das Sie nur einmal sehen."
+
+#: src/onboarding/connection-return.ts
+msgid "The sign-in didn't finish, so nothing was connected. Try again, or choose another way."
+msgstr "Die Anmeldung wurde nicht abgeschlossen, daher wurde nichts verbunden. Versuchen Sie es erneut oder wählen Sie einen anderen Weg."
+
+#: src/onboarding/connection-return.ts
+msgid "The sign-in took too long, so nothing was connected. Try again."
+msgstr "Die Anmeldung hat zu lange gedauert, daher wurde nichts verbunden. Versuchen Sie es erneut."
 
 #: src/workflows/version-source.tsx
 msgid "The source files of version {sourceVersion}"

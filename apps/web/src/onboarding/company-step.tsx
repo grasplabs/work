@@ -37,6 +37,7 @@ import { CompanyDots } from "./company-dots.tsx";
 import { namedOf, useCompanyConcept } from "./company-picture.ts";
 import type { CompanyConcept } from "./company-picture.ts";
 import { CompanyRows } from "./company-rows.tsx";
+import { useConnectionReturn } from "./connection-return.ts";
 import {
   csvRows,
   directoryListOf,
@@ -394,7 +395,9 @@ export const CompanyStep = (props: StepProps) => {
   const search: unknown = useSearch({ strict: false });
   const returned = returnedSchema.safeParse(search).success;
   const [reading, setReading] = useState<DirectorySuite | "list" | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
+  // A sign-in that came back without connecting says so here, as any other problem.
+  const returnedWhy = useConnectionReturn();
+  const [problem, setProblem] = useState<string | null>(returnedWhy);
   // Read on this visit, and from where.
   const [fresh, setFresh] = useState<DirectorySuite | "list" | null>(null);
   // Another list, once there is one: the upload shows again.

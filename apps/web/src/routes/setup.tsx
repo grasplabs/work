@@ -374,12 +374,17 @@ export const Route = createFileRoute("/setup")({
   ): {
     step?: SetupStep;
     connection?: string;
+    connectionError?: string;
     state?: CampaignState;
   } => ({
     ...(isStep(search.step) && { step: search.step }),
     ...(isCampaignState(search.state) && { state: search.state }),
     ...(typeof search.connection === "string" && {
       connection: search.connection,
+    }),
+    // Why a sign-in a step started didn't finish (onboarding/connection-return.ts).
+    ...(typeof search.connectionError === "string" && {
+      connectionError: search.connectionError,
     }),
   }),
   beforeLoad: async ({ context: { core }, location }) => {

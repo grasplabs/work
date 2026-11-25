@@ -5149,6 +5149,10 @@ msgstr "Gekoppeld, via Composio"
 msgid "Connecting"
 msgstr "Koppelen"
 
+#: src/onboarding/connection-return.ts
+msgid "Connecting didn't work, so nothing was connected. Try again, or choose another way."
+msgstr "Koppelen is niet gelukt, dus er is niets gekoppeld. Probeer het opnieuw, of kies een andere manier."
+
 #: src/connection-errors.ts
 msgid "Connecting didn't work. Try again, or ask an admin."
 msgstr "Koppelen is niet gelukt. Probeer het opnieuw of vraag een beheerder."
@@ -8776,6 +8780,10 @@ msgstr "Ik kon dit bestand niet lezen. Een CSV- of Excelbestand werkt."
 #: src/onboarding/company-step.tsx
 msgid "I could not read who works where from {signIn}. Connect it again with an administrator’s account."
 msgstr "Ik kon uit {signIn} niet lezen wie waar werkt. Koppel het opnieuw met een beheerdersaccount."
+
+#: src/onboarding/connection-return.ts
+msgid "I couldn't check your directory just now. Try again in a moment."
+msgstr "Ik kon je adreslijst nu niet controleren. Probeer het zo opnieuw."
 
 #: src/onboarding/documents-step.tsx
 msgid "I couldn’t read this one"
@@ -17392,6 +17400,14 @@ msgstr "Bedankt dat je het laat weten"
 msgid "That account can't open this interview. Sign in with the work account your link was sent to."
 msgstr "Met dat account opent dit interview niet. Log in met het werkaccount waar je link naartoe is gestuurd."
 
+#: src/onboarding/connection-return.ts
+msgid "That account can't read your company's directory. Try again with an admin account, or use a staff list."
+msgstr "Dat account kan de adreslijst van je bedrijf niet lezen. Probeer het opnieuw met een beheerdersaccount, of gebruik een personeelslijst."
+
+#: src/onboarding/connection-return.ts
+msgid "That account isn't in your organization. Try again with your work account."
+msgstr "Dat account hoort niet bij je organisatie. Probeer het opnieuw met je werkaccount."
+
 #: src/sign-in-errors.ts
 msgid "That account isn't part of your organization."
 msgstr "Dat account hoort niet bij je organisatie."
@@ -17451,6 +17467,10 @@ msgstr "Deze parameter accepteert die waarde niet."
 #: src/settings/add-connection/words.ts
 msgid "That key didn't work."
 msgstr "Die sleutel werkte niet."
+
+#: src/onboarding/connection-return.ts
+msgid "That sign-in can't be reached right now. Try again in a moment, or choose another way."
+msgstr "Dat inloggen is nu niet bereikbaar. Probeer het zo opnieuw, of kies een andere manier."
 
 #: src/sign-in-errors.ts
 msgid "That staff account hasn't been given access here."
@@ -18142,6 +18162,14 @@ msgstr "Het geheim is ingetrokken: niets van deze bron start een workflow tot je
 #: src/settings/event-sources.tsx
 msgid "The sender must sign with the new secret, which you see only once."
 msgstr "De afzender moet ondertekenen met het nieuwe geheim, dat je maar één keer ziet."
+
+#: src/onboarding/connection-return.ts
+msgid "The sign-in didn't finish, so nothing was connected. Try again, or choose another way."
+msgstr "Het inloggen is niet afgerond, dus er is niets gekoppeld. Probeer het opnieuw, of kies een andere manier."
+
+#: src/onboarding/connection-return.ts
+msgid "The sign-in took too long, so nothing was connected. Try again."
+msgstr "Het inloggen duurde te lang, dus er is niets gekoppeld. Probeer het opnieuw."
 
 #: src/workflows/version-source.tsx
 msgid "The source files of version {sourceVersion}"
