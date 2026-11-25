@@ -7,8 +7,9 @@ import type { CompanyToolClass } from "@grasp-os/shared/connect";
 import { appRecords } from "./bundled-connectors.ts";
 import type { AppRecord } from "./bundled-connectors.ts";
 
-// What the suites, Microsoft 365 and Google Workspace, are asked for, by
-// the classes a company turned on (GRA-717, GRA-756): least privilege at
+// What a suite (Microsoft 365) or a connector's own sign-in with `rights`
+// (Google Workspace's) is asked for, by the classes a company turned on
+// (GRA-717, GRA-756): least privilege at
 // any breadth. A consent asks only the
 // rights of the classes on for anyone in the company, a connection's tokens
 // keep the rights they were granted (`connection_tokens.granted_scopes`),
@@ -21,11 +22,10 @@ import type { AppRecord } from "./bundled-connectors.ts";
 // with another's case or prefix counts as missing, or one that isn't
 // granted counts as held.
 //
-// Each connector's manifest (packages/connectors/microsoft-365,
-// google-workspace) names the most any class asks for; these tables say
-// which class asks which. A connector's own sign-in may say the same
-// (`rights`, runtime/connector's sign-in.ts), and is asked by class as these
-// are.
+// Microsoft 365's manifest (packages/connectors/microsoft-365) names the
+// most any class asks for; the tables here say which class asks which. A
+// connector's own sign-in says the same itself (`rights`, runtime/
+// connector's sign-in.ts), and is asked by class as these are.
 
 /** Asked whatever is on: the sign-in, and a refresh token. */
 const microsoftSignIn = [
@@ -100,72 +100,6 @@ const microsoftImpliedRights: Readonly<Record<string, readonly string[]>> = {
   "notes.readwrite": ["notes.read"],
 };
 
-/** A Google OAuth scope, by its name under Google's prefix. */
-const googleScope = (name: string): string =>
-  `https://www.googleapis.com/auth/${name}`;
-
-/**
- * Asked whatever is on: the sign-in, and the groups the account is in,
- * which core counts the person in a copied reader list's group by
- * (reader-groups.ts; Microsoft's sign-in `User.Read` reads them there).
- * Google gives a refresh token anyway.
- */
-const googleSignIn = [
-  "openid",
-  "email",
-  "profile",
-  googleScope("cloud-identity.groups.readonly"),
-] as const;
-
-/**
- * Each class's rights at Google, as the Google Workspace connector's tools
- * of that class need them. Reading the person's own is reading their
- * mailbox; changing it, labelling and drafting mail (`gmail.modify`),
- * putting an event in their own calendar (`calendar.events`, and the
- * calendar list that says which is theirs) and drafts in their own Drive
- * (`drive.file`: only the files Grasp made). The company's is reading
- * colleagues' and groups' calendars and the shared drives' files and
- * spreadsheets. Google has no tool that changes the company's.
- *
- * Reaching others asks `gmail.send`, but Gmail can't split sending off
- * modifying: `gmail.modify` sends too, so once Change own is on the grant
- * can send whether Reach others is on or not. There Reach others is held by
- * its class alone: core refuses `mail.send` before it signs a call for
- * connect while the class is off for the person (tool-classes.ts).
- *
- * Google has no tool that reads others' words (Teams is Microsoft's).
- */
-const googleClassRights: Readonly<Record<CompanyToolClass, readonly string[]>> =
-  {
-    "read-own": [googleScope("gmail.readonly")],
-    "change-own": [
-      googleScope("gmail.modify"),
-      googleScope("calendar.events"),
-      googleScope("calendar.calendarlist.readonly"),
-      googleScope("drive.file"),
-    ],
-    "read-company": [
-      googleScope("calendar.events.readonly"),
-      googleScope("drive.readonly"),
-    ],
-    "change-company": [],
-    "reach-others": [googleScope("gmail.send")],
-    "read-others": [],
-  };
-
-/**
- * The rights each Google right takes in, besides itself, by key: modifying
- * mail reads and sends it, and writing events reads them. `drive.file`
- * reads only Grasp's own files, so it takes in no reading of the rest.
- */
-const googleImpliedRights: Readonly<Record<string, readonly string[]>> = {
-  [googleScope("gmail.modify")]: [
-    googleScope("gmail.readonly"),
-    googleScope("gmail.send"),
-  ],
-  [googleScope("calendar.events")]: [googleScope("calendar.events.readonly")],
-};
-
 /** How Entra may prefix a Microsoft Graph right in a token's answer. */
 const graphPrefix = "https://graph.microsoft.com/";
 
@@ -229,26 +163,9 @@ const microsoftSuite: SuiteRights = {
   ],
 };
 
-const googleSuite: SuiteRights = {
-  signIn: googleSignIn,
-  classRights: googleClassRights,
-  implied: googleImpliedRights,
-  // A Google token reaches only its own person's mailbox: there are no
-  // shared mailboxes to ask for.
-  sharedMailbox: () => [],
-  // Before the connector wrote events and drafts (#1150, #1153).
-  before: [
-    ...googleSignIn,
-    googleScope("gmail.modify"),
-    googleScope("calendar.events.readonly"),
-    googleScope("drive.readonly"),
-  ],
-};
-
 /** The suites asked by class, by provider. */
 const suites: Readonly<Record<string, SuiteRights>> = {
   microsoft: microsoftSuite,
-  google: googleSuite,
 };
 
 /**
@@ -364,10 +281,6 @@ export const microsoftRights = (
   classes: readonly CompanyToolClass[],
   sharedMailbox = false
 ): string[] => suiteRights(microsoftSuite, classes, sharedMailbox);
-
-/** The rights to ask Google for, for `classes` (`suiteRights`). */
-export const googleRights = (classes: readonly CompanyToolClass[]): string[] =>
-  suiteRights(googleSuite, classes, false);
 
 /**
  * The classes on until an admin changes them, for a core that names none

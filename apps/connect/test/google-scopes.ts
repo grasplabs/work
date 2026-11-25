@@ -6,7 +6,7 @@
  * connection's grant doesn't cover fails in a test, not in a client's
  * tenant.
  */
-import { classesOnByDefault, googleRights } from "../src/provider-rights.ts";
+import { classesOnByDefault, rightsFor } from "../src/provider-rights.ts";
 import type { fakeProviders } from "./oauth-provider.ts";
 
 const scope = (name: string): string =>
@@ -117,7 +117,7 @@ const rules: readonly ScopeRule[] = [
  * PR I).
  */
 export const syncGrant = [
-  ...googleRights(classesOnByDefault),
+  ...(rightsFor("google", classesOnByDefault) ?? []),
   scope("drive.readonly"),
 ].join(" ");
 

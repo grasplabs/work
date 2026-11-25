@@ -108,8 +108,6 @@ export default defineProject({
           MICROSOFT_DIRECTORY_CLIENT_SECRET: clients.microsoftDirectory.secret,
           MICROSOFT_DOCUMENTS_CLIENT_ID: clients.microsoftDocuments.id,
           MICROSOFT_DOCUMENTS_CLIENT_SECRET: clients.microsoftDocuments.secret,
-          GOOGLE_CLIENT_ID: clients.google.id,
-          GOOGLE_CLIENT_SECRET: clients.google.secret,
           GOOGLE_DIRECTORY_CLIENT_ID: clients.googleDirectory.id,
           GOOGLE_DIRECTORY_CLIENT_SECRET: clients.googleDirectory.secret,
           GOOGLE_DOCUMENTS_CLIENT_ID: clients.googleDocuments.id,

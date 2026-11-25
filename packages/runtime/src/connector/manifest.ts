@@ -545,6 +545,14 @@ export const connectorManifestSchema = z
     "The account lookup goes to one of the connector's hosts"
   )
   .refine(
+    ({ signIn, hosts }) =>
+      signIn?.kind !== "oauth2" ||
+      signIn.idToken?.userinfo === undefined ||
+      hosts.includes(endpointHost(signIn.idToken.userinfo) ?? ""),
+    // It carries the token, as the lookup does.
+    "The userinfo endpoint is on one of the connector's hosts"
+  )
+  .refine(
     ({ hosts, actions, syncs = {} }) =>
       [...Object.values(actions), ...Object.values(syncs)].every(({ routes }) =>
         routes.every(({ host }) => hosts.includes(host))

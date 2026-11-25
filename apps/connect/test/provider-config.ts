@@ -52,4 +52,6 @@ export const appClients = {
     id: "grasp-sample-tenant",
     secret: "sample-tenant-secret",
   },
+  // Google Workspace's connector declares its sign-in, as an app does.
+  google: clients.google,
 } as const;

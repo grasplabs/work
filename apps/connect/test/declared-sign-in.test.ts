@@ -11,7 +11,12 @@ import { exchangeCode } from "../src/oauth-client.ts";
 import type { TokenSet } from "../src/oauth-client.ts";
 import { startConnection } from "../src/oauth.ts";
 import { holdsClassRights } from "../src/provider-rights.ts";
-import { appProvider, grantedAsAsked, providers } from "../src/providers.ts";
+import {
+  appProvider,
+  grantedAsAsked,
+  providerFor,
+  providers,
+} from "../src/providers.ts";
 import type { OAuthProviderConfig } from "../src/providers.ts";
 import {
   auditEvents,
@@ -367,21 +372,13 @@ describe("threat model", () => {
         sameIssuer: ["idp"],
       },
     });
-    // Google Workspace's.
-    const google = declared("google", {
-      authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth",
-      tokenUrl: "https://oauth2.googleapis.com/token",
-      scopes: { openid: "", email: "", profile: "" },
-      params: { access_type: "offline", prompt: "consent", hd: "{tenant}" },
-      tenant: "domain",
-      idToken: {
-        issuer: ["https://accounts.google.com", "accounts.google.com"],
-        subject: "sub",
-        name: ["email"],
-        email: ["email"],
-        claims: { hd: "{tenant}", email_verified: true },
-      },
-    });
+    // Google Workspace's, as its connector declares it: the suite's own
+    // config it replaced took the same four of these cases, and no other.
+    const google = providerFor("google");
+    const entraSuite = providers.microsoft;
+    if (google?.kind !== "oauth" || entraSuite === undefined) {
+      throw new Error("Google Workspace's sign-in and Microsoft 365's config");
+    }
     const entra = `https://login.microsoftonline.com/${acmeTenant}/v2.0`;
     const microsoftBase = {
       iss: entra,
@@ -477,27 +474,58 @@ describe("threat model", () => {
     await expect(
       differing(
         microsoft,
-        providers.microsoft,
+        entraSuite,
         acmeTenant,
         clients.microsoft.id,
         microsoftCases
       )
     ).resolves.toStrictEqual([]);
-    await expect(
-      differing(
-        google,
-        providers.google,
-        acmeDomain,
-        clients.google.id,
-        googleCases
-      )
-    ).resolves.toStrictEqual([]);
+    const googleAccounts = await Promise.all(
+      Object.entries(googleCases).map(async ([name, claims]) => {
+        const tokens: TokenSet = {
+          accessToken: "access",
+          expiresAt: Date.now() + 3_600_000,
+          idToken: unsignedJwt(claims),
+        };
+        const account = await google.account(
+          tokens,
+          acmeDomain,
+          clients.google.id,
+          owner
+        );
+        return account === null
+          ? []
+          : [{ name, account, subject: google.subject?.(tokens) }];
+      })
+    );
+    expect(googleAccounts.flat()).toStrictEqual([
+      {
+        name: "member",
+        account: { id: "g-1", name: "ada@acme.test", email: "ada@acme.test" },
+        subject: "g-1",
+      },
+      {
+        name: "bareIssuer",
+        account: { id: "g-1", name: "ada@acme.test", email: "ada@acme.test" },
+        subject: "g-1",
+      },
+      {
+        name: "domainInCase",
+        account: { id: "g-1", name: "ada@acme.test", email: "ada@acme.test" },
+        subject: "g-1",
+      },
+      {
+        name: "noEmail",
+        account: { id: "g-1", name: null, email: null },
+        subject: "g-1",
+      },
+    ]);
     // The one difference: an issuer is compared exactly, as OpenID
     // Connect has it (Core `3.1.3.7), where Entra's config read it without
     // case. Entra writes the tenant's GUID in lower case.
     const upper = await differing(
       microsoft,
-      providers.microsoft,
+      entraSuite,
       acmeTenant,
       clients.microsoft.id,
       { issuerInCase: { ...microsoftBase, iss: entra.toUpperCase() } }

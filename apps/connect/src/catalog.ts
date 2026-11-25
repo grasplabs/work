@@ -25,7 +25,7 @@ import { nativeConnector } from "./bundled-connectors.ts";
 import { ComposioError, composioKey, composioRequest } from "./composio.ts";
 import { connectorRow } from "./connector-providers.ts";
 import { connectors } from "./db/schema.ts";
-import { providers } from "./providers.ts";
+import { providerFor } from "./providers.ts";
 
 // The catalog: what an admin can connect. The native providers come from
 // this release (src/providers.ts and their connectors' manifests); Composio's
@@ -82,7 +82,9 @@ export const providerName = ({
 /** The native providers whose connector is in this release. */
 const nativeEntries = (): CatalogEntry[] =>
   oauthProviderSchema.options.flatMap((id) => {
-    const connector = nativeConnector(providers[id].server);
+    const server = providerFor(id)?.server;
+    const connector =
+      server === undefined ? undefined : nativeConnector(server);
     if (connector === undefined) {
       return [];
     }
@@ -604,9 +606,11 @@ export const catalogTools = async (
     return [];
   }
   if (source === "native") {
-    const provider = Object.values(providers).find((each) => each.id === id);
+    const server = oauthProviderSchema.safeParse(id).success
+      ? providerFor(id)?.server
+      : undefined;
     const connector =
-      provider === undefined ? undefined : nativeConnector(provider.server);
+      server === undefined ? undefined : nativeConnector(server);
     if (connector === undefined) {
       throw connectErrors.create("connect.catalog_entry_not_found");
     }
