@@ -86,7 +86,9 @@ export const usePixels = (
       if (context === null) {
         return;
       }
-      const { width, height } = element.getBoundingClientRect();
+      // The box's own size, untouched by a transform on it or around it (a chip arriving scaled).
+      const width = element.offsetWidth;
+      const height = element.offsetHeight;
       const ratio = Math.min(window.devicePixelRatio, 2);
       element.width = Math.round(width * ratio);
       element.height = Math.round(height * ratio);

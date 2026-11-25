@@ -1964,6 +1964,10 @@ msgstr "Ein JSON-Wert"
 msgid "A line of mine, removed."
 msgstr "Ein Beitrag von mir, entfernt."
 
+#: src/onboarding/campaign/concepts/canvas.tsx
+msgid "A list or sheet of their own, beside the systems"
+msgstr "Eine eigene Liste oder Tabelle neben den Systemen"
+
 #: src/activity/audit-words.ts
 msgid "A model call was refused"
 msgstr "Ein Modellaufruf wurde abgelehnt"
@@ -3882,6 +3886,10 @@ msgstr "Bindungen"
 #: src/workflows/files-and-apps.tsx
 msgid "Bindings of version {version}"
 msgstr "Bindungen von Version {version}"
+
+#: src/onboarding/campaign/concepts/canvas.tsx
+msgid "Blank for now. It fills in as each interview ends."
+msgstr "Noch leer. Es füllt sich mit jedem beendeten Interview."
 
 #: src/brain/brain.ts
 msgid "Blocker"
@@ -8335,6 +8343,10 @@ msgstr "Grasps Chat"
 msgid "Grasp's team can help here until then"
 msgstr "Bis dahin kann das Grasp-Team hier helfen"
 
+#: src/onboarding/campaign/concepts/canvas.tsx
+msgid "Green lines: new that day"
+msgstr "Grüne Linien: an dem Tag neu"
+
 #: src/settings/backdrop-settings.tsx
 msgid "Grid"
 msgstr "Punktraster"
@@ -8795,6 +8807,10 @@ msgstr "Symbol"
 #: src/people/people-apart.ts
 msgid "ID …{end}"
 msgstr "ID …{end}"
+
+#: src/onboarding/campaign/concepts/canvas.tsx
+msgid "Ideas taking shape"
+msgstr "Ideen nehmen Gestalt an"
 
 #: src/make/make-ideas.tsx
 msgid "Ideas to start from"
@@ -11117,6 +11133,7 @@ msgid "Never started: {refusal}"
 msgstr "Nie gestartet: {refusal}"
 
 #: src/agents/setup/schedule-step.tsx
+#: src/onboarding/campaign/concepts/canvas.tsx
 msgid "New"
 msgstr "Neu"
 
@@ -11444,6 +11461,10 @@ msgstr "Noch keine Ziele."
 #: src/routes/_shell.settings.brain.tsx
 msgid "No group"
 msgstr "Keine Gruppe"
+
+#: src/onboarding/campaign/concepts/canvas.tsx
+msgid "No ideas yet. They come once we see how the work runs."
+msgstr "Noch keine Ideen. Sie kommen, sobald wir sehen, wie die Arbeit läuft."
 
 #: src/agents/agents-overview.tsx
 msgid "No job written yet"
@@ -12322,6 +12343,10 @@ msgstr "Noch nichts"
 #: src/chat/agent-draft-card.tsx
 msgid "Nothing yet: you turn it on on its page"
 msgstr "Noch nichts: Du schaltest es auf seiner Seite ein"
+
+#: src/onboarding/campaign/concepts/canvas.tsx
+msgid "Nothing yet. Patterns show once a few interviews are in."
+msgstr "Noch nichts. Muster zeigen sich nach ein paar Interviews."
 
 #: src/brain/memories-page.tsx
 msgid "Nothing you can read"
@@ -14555,6 +14580,10 @@ msgstr "Eine Paketanfrage ersetzt"
 msgid "Replaced an AI provider's key"
 msgstr "Den Schlüssel eines KI-Anbieters ersetzt"
 
+#: src/onboarding/campaign/concepts/canvas.tsx
+msgid "Replay the week"
+msgstr "Woche abspielen"
+
 #: src/inbox/report-row.tsx
 msgid "Report · {day}"
 msgstr "Bericht · {day}"
@@ -16376,6 +16405,14 @@ msgctxt "the chat box's edge"
 msgid "Smooth"
 msgstr "Weich"
 
+#: src/onboarding/campaign/concepts/canvas.tsx
+msgid "So far: {works, plural, one {# piece of work} other {# pieces of work}} and {tools, plural, one {# tool} other {# tools}}."
+msgstr "Bisher: {works, plural, one {# Arbeitsablauf} other {# Arbeitsabläufe}} und {tools, plural, one {# Werkzeug} other {# Werkzeuge}}."
+
+#: src/onboarding/campaign/concepts/canvas.tsx
+msgid "So far: {works, plural, one {# piece of work} other {# pieces of work}}, {tools, plural, one {# tool} other {# tools}} and {handoffs, plural, one {# hand-over between teams} other {# hand-overs between teams}}."
+msgstr "Bisher: {works, plural, one {# Arbeitsablauf} other {# Arbeitsabläufe}}, {tools, plural, one {# Werkzeug} other {# Werkzeuge}} und {handoffs, plural, one {# Übergabe zwischen Teams} other {# Übergaben zwischen Teams}}."
+
 #: src/onboarding/company-step.tsx
 msgid "So I can see your teams, roles and directory. I only read names, email addresses, teams and jobs, nothing else."
 msgstr "So sehe ich Ihre Teams, Rollen und Ihr Verzeichnis. Ich lese nur Namen, E-Mail-Adressen, Teams und Funktionen, sonst nichts."
@@ -16787,6 +16824,10 @@ msgstr "Schritte"
 msgctxt "how an answer was thought out"
 msgid "Steps"
 msgstr "Schritte"
+
+#: src/onboarding/campaign/concepts/canvas.tsx
+msgid "Steps; one told two ways in green"
+msgstr "Schritte; einer, der auf zwei Arten erzählt wurde, in Grün"
 
 #: src/brain/atlas-map.ts
 #: src/brain/atlas-overlays.tsx
@@ -20306,6 +20347,10 @@ msgstr "Was gesendet wurde, wird zurückgehalten: Der Lauf, der es gesendet hat,
 #: src/onboarding/campaign/campaign-findings.tsx
 msgid "What we learned"
 msgstr "Was wir gelernt haben"
+
+#: src/onboarding/campaign/concepts/canvas.tsx
+msgid "What we see"
+msgstr "Was wir sehen"
 
 #: src/interview/closed.tsx
 msgid "What you agreed to is kept. Forgot something? This link works until {closes}."
