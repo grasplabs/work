@@ -1251,6 +1251,30 @@ describe("an agent's page", () => {
     expect(chips).toContain("Anna de Vries");
   });
 
+  it("shows any other link its instructions hold as its words alone, never one to follow", async () => {
+    const fake = await withClaire();
+    await fake.instructions.save({
+      file: { scope: "agent", agentId: "agent-1" },
+      change: "told-again",
+      text: "Read [the runbook](/brain/runbook), call [the desk](tel:+31201234567) or see [our site](https://example.com).",
+      after: 1,
+    });
+    await shown(fake, { agent: "Claire" });
+    const body = document.body.textContent;
+    expect({
+      words: ["the runbook", "the desk", "our site"].every((words) =>
+        body.includes(words)
+      ),
+      links: [...document.querySelectorAll("a[href]")]
+        .map((link) => link.getAttribute("href") ?? "")
+        .filter((href) =>
+          ["/brain/runbook", "tel:+31201234567", "https://example.com"].some(
+            (address) => href.startsWith(address)
+          )
+        ),
+    }).toStrictEqual({ words: true, links: [] });
+  });
+
   it("says when a schedule first runs before it ever has, and that it hasn't yet", async () => {
     const fake = await withClaire();
     await fake.connections.makeAgentWake("agent-1", {
