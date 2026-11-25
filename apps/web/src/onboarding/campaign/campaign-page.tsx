@@ -12,6 +12,7 @@ import * as stylex from "@stylexjs/stylex";
 import { Link, useLocation } from "@tanstack/react-router";
 
 import { GraspLogo } from "../../connections/brand-logos.ts";
+import { StartOver } from "../start-over.tsx";
 import { CampaignWeek } from "./campaign-week.tsx";
 import { Canvas } from "./concepts/canvas.tsx";
 import { Letter } from "./concepts/letter.tsx";
@@ -42,6 +43,7 @@ const styles = stylex.create({
   },
   column: { width: "100%" },
   mark: { display: "flex", [iconVars.size]: size.iconDefault },
+  tools: { display: "flex", alignItems: "center", gap: space[1] },
   main: {
     display: "flex",
     flexDirection: "column",
@@ -84,8 +86,8 @@ export const CampaignConcept = ({ state }: { state: CampaignState }) => {
 };
 
 /**
- * The campaign page, full screen: Grasp's mark and a way out on one quiet
- * bar, the week in a column under it. The page scrolls.
+ * The campaign page, full screen: Grasp's mark, and on a local stack the
+ * start-over button beside the way out, on one quiet bar, the week in a column under it. The page scrolls.
  */
 export const CampaignFrame = ({ state }: { state: CampaignState }) => {
   const { t } = useLingui();
@@ -95,17 +97,20 @@ export const CampaignFrame = ({ state }: { state: CampaignState }) => {
         <span {...stylex.props(styles.mark)}>
           <Icon icon={GraspLogo} label="Grasp" />
         </span>
-        <Button
-          aria-label={t`Close`}
-          asChild
-          size="icon-sm"
-          tooltip={t`Close`}
-          variant="ghost"
-        >
-          <Link to="/">
-            <Icon icon={XIcon} />
-          </Link>
-        </Button>
+        <div {...stylex.props(styles.tools)}>
+          <StartOver size="icon-sm" />
+          <Button
+            aria-label={t`Close`}
+            asChild
+            size="icon-sm"
+            tooltip={t`Close`}
+            variant="ghost"
+          >
+            <Link to="/">
+              <Icon icon={XIcon} />
+            </Link>
+          </Button>
+        </div>
       </header>
       <main {...stylex.props(styles.main)}>
         <Container size="lg" style={styles.column}>
