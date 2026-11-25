@@ -218,7 +218,9 @@ const styles = stylex.create({
     display: "flex",
     flexGrow: 1,
     alignItems: "center",
-    gap: space["2"],
+    // What trails the crumbs (where the subject stands) a space-3 after
+    // them, as the reference's bar sets them apart.
+    gap: space["3"],
     minWidth: 0,
     overflow: "hidden",
     // The crumbs in the sidebar's greys, as the reference's bar: the steps
