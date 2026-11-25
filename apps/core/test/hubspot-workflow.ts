@@ -58,7 +58,7 @@ export const connectHubspot = async (by: Admin): Promise<string> => {
     toolkit: "hubspot",
     tools: ["HUBSPOT_LIST_CONTACTS"],
     consent: composioConsentText,
-    returnTo: "/integrations",
+    returnTo: "/connectors",
   });
   const state = new URL(url).searchParams.get("state") ?? "";
   await backFromProvider(by.session, { state, status: "success" });

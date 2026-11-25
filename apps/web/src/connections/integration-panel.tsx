@@ -103,7 +103,7 @@ export const IntegrationPanel = ({
           }
         }}
         open
-        settingsHref={`/integrations/${integration.key}`}
+        settingsHref={`/connectors/${integration.key}`}
         {...actions}
         {...disconnect.actions}
         member={waitsForAdmin(integration, identity)}

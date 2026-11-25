@@ -77,7 +77,7 @@ export const ChatSources = ({
                 <Source
                   key={id}
                   onOpen={() => {
-                    void navigate({ to: "/integrations", search: {} });
+                    void navigate({ to: "/connectors", search: {} });
                   }}
                   origin={t`Connection`}
                   title={name}

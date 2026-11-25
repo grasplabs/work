@@ -123,10 +123,7 @@ describe("the admin's frame", () => {
   });
 
   it("says nothing is asked for yet where the table of apps goes, with nothing to act on", async () => {
-    const { container, main } = await openAdmin(
-      "/integrations",
-      frameOf([], [])
-    );
+    const { container, main } = await openAdmin("/connectors", frameOf([], []));
     const page = container.querySelector("main");
     const heading = page?.querySelector("h1");
 
@@ -168,19 +165,19 @@ describe("the admin's frame", () => {
       }),
     ];
     const apps = await openAdmin(
-      "/integrations",
+      "/connectors",
       frameOf([acme, globex], admins)
     );
     const table = apps.container.querySelector("main table");
     const rows = [...(table?.querySelectorAll("tbody tr") ?? [])];
     const rowOf = (key: string) =>
-      table?.querySelector(`a[href="/integrations?app=${key}"]`)?.closest("tr")
+      table?.querySelector(`a[href="/connectors?app=${key}"]`)?.closest("tr")
         ?.textContent ?? "";
     const text = table?.textContent ?? "";
     const sidebar =
       apps.container.querySelector('[data-slot="sidebar"]')?.textContent ?? "";
     const company = await openAdmin(
-      "/organizations/globex/integrations",
+      "/organizations/globex/connectors",
       frameOf([acme, globex], admins, { fetchClientAdmin: admins[1] })
     );
 
@@ -188,7 +185,7 @@ describe("the admin's frame", () => {
       rows: rows.length,
       links: ["exact-online", "twinfield"].map(
         (key) =>
-          table?.querySelector(`a[href="/integrations?app=${key}"]`) !== null
+          table?.querySelector(`a[href="/connectors?app=${key}"]`) !== null
       ),
       order: text.indexOf("Exact Online") < text.indexOf("Twinfield"),
       exact: rowOf("exact-online").includes(`${acme.name} and ${globex.name}`),
@@ -197,7 +194,7 @@ describe("the admin's frame", () => {
       nothingAsked: apps.main().includes("Nothing asked for yet"),
       companyAsked:
         company.container.querySelector(
-          'main a[href="/integrations?app=exact-online"]'
+          'main a[href="/connectors?app=exact-online"]'
         ) !== null,
       companyWords: company.main().includes("Asked of Grasp"),
     }).toStrictEqual({

@@ -124,7 +124,7 @@ describe("the revokes to make by hand", () => {
     });
   });
 
-  it("names a shared connection by its account, as admins see it on Integrations", async () => {
+  it("names a shared connection by its account, as admins see it on Connectors", async () => {
     const admin = someone("admin");
     const { account, connectionId } = await owedFor(admin, "shared");
     await failed(connectionId, stuckAttempts);

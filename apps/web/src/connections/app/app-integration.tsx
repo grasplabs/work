@@ -3,7 +3,7 @@
 // (`grasp/blocks/app-integration`) drew them, on Damsko's parts:
 //
 //   <ItemGrid aria-label="Connected">{apps.map((app) => <AppTile key={app.id} app={app} onOpen={open} />)}</ItemGrid>
-//   <AppPanel app={app} open={open} onOpenChange={setOpen} from={tile} settingsHref={`/integrations/${app.id}`} … />
+//   <AppPanel app={app} open={open} onOpenChange={setOpen} from={tile} settingsHref={`/connectors/${app.id}`} … />
 //   <AppPage app={app} editable onToolsChange={save} … />
 //
 // The tile: compact (56px), its mark, its name and one fact. The panel (panel.tsx): a SidePanel in a

@@ -332,7 +332,7 @@ const integrationRef = (
     id: integration.id,
     name: integration.name,
   });
-  return `integration ${integration.id}`;
+  return `connector ${integration.id}`;
 };
 
 /** `names` as an answer's structured content gives them. */
@@ -550,7 +550,7 @@ export const summaryOf = (
     `Phase: ${PHASE[phaseOf(view)]}. Step: ${STAGE[view.stage]}. Counted up to ${view.asOf}.`,
     `Known: ${view.knowledge.percent}% of what Grasp needs; it opens at ${view.knowledge.threshold}%.`,
     contractText(view),
-    `Members: ${view.seats.used} of ${view.seats.of} seats. Integrations: ${integrations}.`,
+    `Members: ${view.seats.used} of ${view.seats.of} seats. Connectors: ${integrations}.`,
     `AI: ${euroCents(view.usage.thisMonth.spend)} this month, ${euroCents(view.usage.total.spend)} in all.`,
     hoursText(view),
     `Health: ${healthOf(view).map(healthText).join("; ")}.`,

@@ -91,7 +91,7 @@ const Notices = ({
     }
   } else {
     notices.push(
-      t`The catalog of integrations couldn't be read, so this page shows only what your accounts say about it.`
+      t`The catalog of connectors couldn't be read, so this page shows only what your accounts say about it.`
     );
   }
   return (
@@ -125,7 +125,7 @@ const IntegrationPage = ({ integration }: { integration: Integration }) => {
     <>
       <SiteHeader
         crumbs={[
-          { label: t`Integrations`, to: "/integrations" },
+          { label: t`Connectors`, to: "/connectors" },
           { label: integration.name },
         ]}
       />
@@ -169,11 +169,11 @@ const IntegrationRoute = () => {
   const { integration: key } = Route.useParams();
   const { t } = useLingui();
   const parsed = parseIntegrationKey(key);
-  const integrations = { label: t`Integrations`, to: "/integrations" as const };
+  const integrations = { label: t`Connectors`, to: "/connectors" as const };
   if (connections.state !== "ready") {
     return (
       <PageNotLoaded
-        crumbs={[integrations, { label: parsed?.id ?? t`Integration` }]}
+        crumbs={[integrations, { label: parsed?.id ?? t`Connector` }]}
         page={connections}
       />
     );
@@ -197,7 +197,7 @@ const IntegrationRoute = () => {
   if (integration === undefined && catalog.state !== "ready") {
     return (
       <PageNotLoaded
-        crumbs={[integrations, { label: parsed?.id ?? t`Integration` }]}
+        crumbs={[integrations, { label: parsed?.id ?? t`Connector` }]}
         icon={IntegrationsIcon}
         notFound={t`App not found`}
         page={catalog}
@@ -216,7 +216,7 @@ const IntegrationRoute = () => {
   return <IntegrationPage integration={integration} />;
 };
 
-export const Route = createFileRoute("/_shell/integrations/$integration")({
+export const Route = createFileRoute("/_shell/connectors/$integration")({
   validateSearch: (search: Record<string, unknown>): IntegrationSearch => ({
     tab:
       search.tab === "account" || search.tab === "workflows"

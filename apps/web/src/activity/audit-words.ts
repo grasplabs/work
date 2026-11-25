@@ -29,7 +29,7 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
   { action: "connection.consent", text: msg`Gave consent for a connection` },
   {
     action: "connection.offer_changed",
-    text: msg`Changed which integrations are offered`,
+    text: msg`Changed which connectors are offered`,
   },
   {
     action: "connection.needs_reauth",

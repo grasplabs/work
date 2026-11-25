@@ -30,7 +30,7 @@ export const IntegrationsSkeleton = () => {
   const { app, group, q } = useSearch({ strict: false });
   // The overview shows the slim band, then Recommended, Connected and a kind.
   const overview = group === undefined && q === undefined;
-  const navigate = useNavigate({ from: "/integrations/" });
+  const navigate = useNavigate({ from: "/connectors/" });
   const close = (): void => {
     void navigate({
       search: (last) => ({ ...last, app: undefined }),
@@ -38,11 +38,11 @@ export const IntegrationsSkeleton = () => {
   };
   return (
     <>
-      <SiteHeader crumbs={[{ label: t`Integrations` }]} />
+      <SiteHeader crumbs={[{ label: t`Connectors` }]} />
       <Page>
         <PageSkeletonIntegrations
           band={overview}
-          label={t`Loading integrations`}
+          label={t`Loading connectors`}
           runs={overview ? [{ tiles: 3, note: true }, 2, 4] : undefined}
         />
       </Page>
@@ -88,7 +88,7 @@ export const IntegrationSkeleton = () => {
   const { identity } = useRouteContext({ from: "/_shell" });
   return (
     <>
-      <SiteHeader crumbs={[{ label: t`Integrations`, to: "/integrations" }]} />
+      <SiteHeader crumbs={[{ label: t`Connectors`, to: "/connectors" }]} />
       <Page>
         <PageSkeletonAppPage
           accounts={1}

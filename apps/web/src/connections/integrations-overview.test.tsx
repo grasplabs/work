@@ -73,7 +73,7 @@ const connection = (
 
 let root: Root | undefined;
 
-/** The overview's header and tiles at `/integrations`, and the router, to read where a press went. */
+/** The overview's header and tiles at `/connectors`, and the router, to read where a press went. */
 const admin = { role: "admin", staff: false, userId: "u1" } as const;
 const member = { role: "user", staff: false, userId: "u2" } as const;
 
@@ -85,7 +85,7 @@ const Tiles = ({
   integrations: readonly Integration[];
   identity: { role: "admin" | "user"; staff: boolean; userId: string };
 }) => {
-  const navigate = useNavigate({ from: "/integrations/" });
+  const navigate = useNavigate({ from: "/connectors/" });
   return (
     <ItemGrid aria-label="Apps">
       {integrations.map((integration) => (
@@ -120,7 +120,7 @@ const opened = async (
   const rootRoute = createRootRoute({ component: Outlet });
   const page = createRoute({
     getParentRoute: () => rootRoute,
-    path: "/integrations/",
+    path: "/connectors/",
     component: () => (
       <>
         <IntegrationsBand identity={identity} integrations={integrations} />
@@ -138,7 +138,7 @@ const opened = async (
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
-    history: createMemoryHistory({ initialEntries: ["/integrations/"] }),
+    history: createMemoryHistory({ initialEntries: ["/connectors/"] }),
   });
   const host = document.createElement("div");
   document.body.append(host);
@@ -178,7 +178,7 @@ const appAfter = async (
   return new URLSearchParams(router.state.location.searchStr).get("app");
 };
 
-describe("the Integrations overview", () => {
+describe("the Connectors overview", () => {
   afterEach(() => {
     act(() => {
       root?.unmount();

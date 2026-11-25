@@ -34,8 +34,8 @@ test("a person comes back from connecting Microsoft 365, sees each account on it
   // The list: one of their Microsoft 365 connections ran out beside ones
   // that work, so its tile says it needs someone, not how to fix one
   // account. Opened beside the list, its Manage menu offers to sign in again.
-  await page.goto("/integrations");
-  const search = page.getByRole("searchbox", { name: "Search integrations" });
+  await page.goto("/connectors");
+  const search = page.getByRole("searchbox", { name: "Search connectors" });
   await search.fill("micro");
   await expect(page).toHaveURL(/[?&]q=micro/u);
   const connected = page.getByRole("list", { name: "Connected" });
@@ -60,7 +60,7 @@ test("a person comes back from connecting Microsoft 365, sees each account on it
 
   // A link can name any ID: only a connection the page lists is news.
   await page.goto(
-    `/integrations/native:microsoft?connection=${crypto.randomUUID()}`
+    `/connectors/native:microsoft?connection=${crypto.randomUUID()}`
   );
   await expect(
     page.getByRole("heading", { level: 1, name: "Microsoft 365" })
@@ -68,7 +68,7 @@ test("a person comes back from connecting Microsoft 365, sees each account on it
   await expect(page.getByRole("dialog")).toHaveCount(0);
   // Where core's callback sends the browser once a flow finished: the
   // success screen, with what was chosen, until it is closed.
-  await page.goto(`/integrations/native:microsoft?connection=${mine.id}`);
+  await page.goto(`/connectors/native:microsoft?connection=${mine.id}`);
   const done = page.getByRole("dialog", {
     name: "Microsoft 365 is connected",
   });
@@ -178,25 +178,23 @@ test("a person comes back from connecting Microsoft 365, sees each account on it
 
   // A flow that failed comes back refused, and says what to do; a code
   // nobody knows says only the page's own words.
-  await page.goto("/integrations?connectionError=connection.already_connected");
+  await page.goto("/connectors?connectionError=connection.already_connected");
   await expect(page.getByRole("main").getByRole("alert")).toHaveText(
     "That account is already connected here. Disconnect it first to connect it again."
   );
-  await page.goto(
-    "/integrations?connectionError=%3Cb%3Eclick%20here%3C%2Fb%3E"
-  );
+  await page.goto("/connectors?connectionError=%3Cb%3Eclick%20here%3C%2Fb%3E");
   await expect(page.getByRole("main").getByRole("alert")).toHaveText(
     "Connecting didn't work. Try again, or ask an admin."
   );
   // A flow that finished, sent back without a page of its own, says so.
-  await page.goto(`/integrations?connection=${mine.id}`);
+  await page.goto(`/connectors?connection=${mine.id}`);
   await expect(
     page.getByRole("dialog", { name: "Microsoft 365 is connected" })
   ).toBeVisible();
   await page.keyboard.press("Escape");
 
   // An integration there isn't is not found, in the frame.
-  await page.goto("/integrations/native:no-such-app");
+  await page.goto("/connectors/native:no-such-app");
   await expect(
     page.getByRole("heading", { name: "App not found" })
   ).toBeVisible();
@@ -205,7 +203,7 @@ test("a person comes back from connecting Microsoft 365, sees each account on it
   ).toBeVisible();
 });
 
-test("a person reaches their account on an integration's page while the catalog or its tools don't come", async ({
+test("a person reaches their account on a connector's page while the catalog or its tools don't come", async ({
   pageOf,
 }) => {
   const { user } = peopleIn("connections");
@@ -215,7 +213,7 @@ test("a person reaches their account on an integration's page while the catalog 
   const slowTools = await pageOf(user);
   const toolsGate = await callGate(slowTools, '["connections","catalogTools"]');
   toolsGate.hold();
-  await slowTools.goto("/integrations/native:microsoft");
+  await slowTools.goto("/connectors/native:microsoft");
   await expect(
     rowOf(slowTools, mine).getByRole("button", {
       name: `Disconnect Microsoft 365 (${mine.account})`,
@@ -228,14 +226,14 @@ test("a person reaches their account on an integration's page while the catalog 
   const slowCatalog = await pageOf(user);
   const catalogGate = await callGate(slowCatalog, '["connections","catalog"]');
   catalogGate.hold();
-  await slowCatalog.goto("/integrations/native:microsoft");
+  await slowCatalog.goto("/connectors/native:microsoft");
   // Its name is the catalog's: without it, its ID.
   await expect(
     slowCatalog.getByRole("heading", { level: 1, name: "microsoft" })
   ).toBeVisible({ timeout: 15_000 });
   await expect(
     slowCatalog.getByText(
-      "The catalog of integrations couldn't be read, so this page shows only what your accounts say about it."
+      "The catalog of connectors couldn't be read, so this page shows only what your accounts say about it."
     )
   ).toBeVisible();
   await expect(
@@ -282,7 +280,7 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   // The App's Connections list the integrations of the connections it
   // may use, in those connections' state.
   await page.goto(`/apps/${appId}/settings?section=connections`);
-  const inUse = page.getByRole("region", { name: "Connections in use" });
+  const inUse = page.getByRole("region", { name: "Connected accounts in use" });
   const used = inUse.getByRole("listitem").filter({ hasText: "Microsoft 365" });
   await expect(used).toContainText("Connected for everyone");
   await expect(
@@ -290,7 +288,7 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   ).toBeVisible();
   await expect(inUse.getByRole("listitem")).toHaveCount(1);
 
-  await page.goto("/integrations/native:microsoft");
+  await page.goto("/connectors/native:microsoft");
   const mailboxRow = rowOf(page, mailbox);
   await expect(mailboxRow).toContainText("Connected");
   await expect(mailboxRow).toContainText("Everyone");
@@ -316,7 +314,7 @@ test("an admin sees which Apps can use a shared connection, revokes a permission
   // tools. The test stack lists no Composio toolkits, so its ID stands in
   // for its name. Its one account is disconnected from its row; the head
   // has nothing else to manage, so no Manage menu.
-  await page.goto("/integrations/composio:hubspot");
+  await page.goto("/connectors/composio:hubspot");
   await page
     .getByRole("button", { name: /consented to this before connecting it$/u })
     .click();
