@@ -18,8 +18,10 @@ import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 
+import { PauseNote } from "../answer-pause.tsx";
+import type { AnswersPause } from "../answer-pause.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import type { Session } from "../core.ts";
 import { useCoreAction } from "../use-core-action.ts";
@@ -108,15 +110,21 @@ const RequestDetails = ({ request }: { request: ChatConnectionRequest }) => {
 const ConnectionRequest = ({
   chatId,
   request,
+  pause,
   onDecided,
 }: {
   chatId: string;
   request: ChatConnectionRequest;
+  /** Held a moment after an answer in the chat moved this card into place. */
+  pause: AnswersPause;
   onDecided: () => void;
 }) => {
   const { t } = useLingui();
   const { busy, failure, run } = useCoreAction();
   const router = useRouter();
+  const pauseId = useId();
+  const pausedBy = pause.held ? pauseId : undefined;
+  const note = pause.held ? <PauseNote id={pauseId} /> : null;
   // Read again however it went: a failed decision may have changed
   // something too (decided elsewhere, say).
   const decide = async (
@@ -137,6 +145,7 @@ const ConnectionRequest = ({
   if (request.decidedBy === "you") {
     return (
       <Confirmation approval={{ id: request.id }} state="approval-requested">
+        {note}
         <ConfirmationTitle>
           <ConfirmationRequest>{t`Use ${name} in this chat`}</ConfirmationRequest>
         </ConfirmationTitle>
@@ -148,6 +157,7 @@ const ConnectionRequest = ({
             disabled={busy}
             label={t`Deny ${name}`}
             onPress={deny}
+            pausedBy={pausedBy}
             variant="outline"
           >
             {t`Deny`}
@@ -160,6 +170,7 @@ const ConnectionRequest = ({
                 await session.chats.grantConnection(chatId, request.id);
               });
             }}
+            pausedBy={pausedBy}
           >
             {t`Grant`}
           </DecisionButton>
@@ -172,12 +183,22 @@ const ConnectionRequest = ({
       <AlertTitle>{t`The agent asked an admin for ${name}`}</AlertTitle>
       <AlertDescription>
         <span {...stylex.props(styles.details)}>
+          {note}
           {t`An admin decides. It holds in this chat only.`}
-          <Button asChild disabled={busy} size="xs" variant="outline">
+          <Button
+            asChild
+            disabled={busy || pause.held}
+            focusableWhenDisabled={pause.held}
+            size="xs"
+            variant="outline"
+          >
             <button
+              aria-describedby={pausedBy}
               aria-label={t`Withdraw ${name}`}
               onClick={() => {
-                void deny();
+                if (!busy && !pause.held) {
+                  void deny();
+                }
               }}
               type="button"
             >
@@ -199,20 +220,34 @@ const ConnectionRequest = ({
 export const ConnectionRequests = ({
   chatId,
   version,
+  pause,
 }: {
   chatId: string;
   version: number;
+  /** The pause the chat's answers share (`WaitingForYou`): each decision here holds them all. */
+  pause: AnswersPause;
 }) => {
   const { t } = useLingui();
   const [read, setRead] = useState<Requests>({ state: "loading" });
+  const readBefore = useRef(false);
+  const holdAnswers = useEffectEvent(() => {
+    pause.hold();
+  });
   const core = useCore();
   const [reads, setReads] = useState(0);
   useEffect(() => {
     let current = true;
     const load = async (): Promise<void> => {
       const found = await readRequests(core, chatId);
-      // A read for another chat, or an older one, doesn't show.
+      // A read for another chat, or an older one, doesn't show. Any read
+      // after the first may move the cards (one decided goes, often before
+      // its decision has answered: core says so as it takes it; another
+      // comes): every answer in the chat holds a moment.
       if (current) {
+        if (readBefore.current) {
+          holdAnswers();
+        }
+        readBefore.current = true;
         setRead(found);
       }
     };
@@ -235,8 +270,10 @@ export const ConnectionRequests = ({
           chatId={chatId}
           key={request.id}
           onDecided={() => {
+            pause.hold();
             setReads(reads + 1);
           }}
+          pause={pause}
           request={request}
         />
       ))}

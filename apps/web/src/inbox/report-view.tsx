@@ -18,19 +18,21 @@ import {
 import { Heading } from "@grasp-os/ui/components/heading";
 import { StatGroup } from "@grasp-os/ui/components/stat";
 import { Text } from "@grasp-os/ui/components/text";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { radius, space } from "@grasp-os/ui/lib/tokens.stylex";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode, Ref } from "react";
 
+import { Texture } from "../connections/app/texture.tsx";
 import { formatDay, formatPercent } from "../format.ts";
 
 // The weekly report as a page of its own, made only of Damsko's parts: a
 // StatGroup for its figures, a Chart for the runs per day, ChartBarList
 // for the workflows and what could be better, Card, Heading and Text for
-// the rest. What it shows comes from `boardReport.read()`; a part core
+// the rest, the head on the product's faint dither (connections' Texture).
+// What it shows comes from `boardReport.read()`; a part core
 // couldn't read says so in its place, never as nothing that ran. It
 // downloads, and prints, as a snapshot of exactly this page
 // (report-row.tsx).
@@ -46,11 +48,18 @@ const styles = stylex.create({
     paddingBlock: space["8"],
     paddingInline: space["6"],
   },
+  // The one sentence that leads, on the faint dither of light, as #2503's report has it.
   head: {
+    position: "relative",
     display: "flex",
     flexDirection: "column",
     gap: space["3"],
+    padding: space["8"],
+    borderRadius: radius.xl,
+    cornerShape: radius.shape,
+    overflow: "hidden",
   },
+  over: { position: "relative" },
 });
 
 const readOf = <T,>(
@@ -262,12 +271,13 @@ const Report = ({ week }: { week: Week }) => {
   return (
     <>
       <div {...stylex.props(styles.head)}>
+        <Texture />
         {over === "" ? null : (
-          <Text color="muted" size="sm">
+          <Text color="muted" size="sm" style={styles.over}>
             {over}
           </Text>
         )}
-        <Heading level={1} size="xl">
+        <Heading level={1} size="xl" style={styles.over}>
           {ran === undefined ? (
             t`Week ${number} of ${weeks}`
           ) : (

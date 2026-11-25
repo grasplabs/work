@@ -126,7 +126,8 @@ const NewAgentLoading = () => {
 export const Route = createFileRoute("/_shell/agents/new")({
   // The setup has the whole card, edge to edge on its backdrop, and no
   // chat box at its foot: it is a task of its own (Ruben, 19 Nov 2026).
-  staticData: { chat: chatPresence.hidden },
+  // The chat stays a press away in the bar, as on the reference.
+  staticData: { chat: chatPresence.barless },
   validateSearch: (
     search: Record<string, unknown>
   ): { way?: NewAgentWay | undefined } => {

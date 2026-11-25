@@ -16,6 +16,8 @@ import { Trans } from "@lingui/react/macro";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
+import { linkAddress } from "../link-address.ts";
+
 // The agent's words, as Damsko's Markdown draws them (the answer's
 // MessageResponse, its thinking's ReasoningContent), with one rule of
 // Grasp's for every link the model wrote: a link out of Grasp asks first,
@@ -32,7 +34,9 @@ const leavingSchemes: ReadonlySet<string> = new Set([
 
 /**
  * A link out of Grasp: a button until the person says yes, then opened in
- * a tab of its own without this page as its opener.
+ * a tab of its own without this page as its opener. The question names
+ * where it leads as the browser will go there, in ASCII (link-address.ts),
+ * and that is what opens; what isn't a URL is its words alone.
  */
 export const LeavingLink = ({
   href,
@@ -42,6 +46,10 @@ export const LeavingLink = ({
   children: ReactNode;
 }) => {
   const [asking, setAsking] = useState(false);
+  const address = linkAddress(href, window.location.href);
+  if (address === undefined) {
+    return <span>{children}</span>;
+  }
   return (
     <>
       <Link asChild>
@@ -65,7 +73,7 @@ export const LeavingLink = ({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <Text size="sm" wrap="anywhere">
-            {href}
+            {address.href}
           </Text>
           <AlertDialogFooter>
             <AlertDialogCancel>
@@ -74,7 +82,7 @@ export const LeavingLink = ({
             <AlertDialogAction
               onClick={() => {
                 setAsking(false);
-                window.open(href, "_blank", "noopener,noreferrer");
+                window.open(address.href, "_blank", "noopener,noreferrer");
               }}
             >
               <Trans>Open link</Trans>

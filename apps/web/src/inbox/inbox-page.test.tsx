@@ -6,6 +6,8 @@ import {
   appIdSchema,
   connectionIdSchema,
   permissionIdSchema,
+  triggerIdSchema,
+  workflowResourceIdSchema,
 } from "@grasp-os/shared/ids";
 import type { GapAskedNotification } from "@grasp-os/shared/notifications";
 import { permissionErrors } from "@grasp-os/shared/permissions";
@@ -401,6 +403,32 @@ const rows = (): string[] =>
       ) ?? ""
   );
 
+/** Email trigger `id`'s request to start workflow `title`, named by its title. */
+const startRequestOf = (id: string, title: string): Permission => {
+  const workflow = workflowResourceIdSchema.parse(
+    `44444444-4444-4444-8444-44444444444${id}`
+  );
+  return {
+    ...requestOf(id, "START"),
+    subject: {
+      type: "trigger",
+      triggerId: triggerIdSchema.parse(
+        `55555555-5555-4555-8555-55555555555${id}`
+      ),
+    },
+    object: { type: "workflow", workflowId: workflow },
+    actions: ["start"],
+    trigger: {
+      kind: "email",
+      schedule: null,
+      event: null,
+      connection: null,
+      source: null,
+    },
+    workflowNames: { [workflow]: title },
+  };
+};
+
 /** Two permission requests, the newer first in the list. */
 const twoRequests = (): Permission[] => [
   requestOf("1", "Ledger"),
@@ -637,6 +665,53 @@ describe("the inbox", () => {
       },
       later: true,
       said: "Approved: Grant app-2: read on Connection invoices?",
+    });
+  });
+
+  it("asks a trigger's start as a workflow approval by the workflow's name, Allow its yes, the one after it held back a moment, and declines one still asked", async () => {
+    const page = await shown({
+      requests: [
+        startRequestOf("1", "Invoice intake"),
+        startRequestOf("2", "Email triage"),
+      ],
+    });
+    const before = {
+      rows: [
+        ...document.querySelectorAll("ul[aria-label='What waits on you'] a"),
+      ].map((row) => row.textContent.includes("Email trigger for")),
+      open: document.querySelector("aside h2")?.textContent,
+      binding: panelText().includes("as START"),
+    };
+    await press("Allow");
+    const arrived = {
+      open: document.querySelector("aside h2")?.textContent,
+      focus: focused(),
+      held: [...document.querySelectorAll<HTMLButtonElement>("aside button")]
+        .filter(({ textContent }) => ["Allow", "Decline"].includes(textContent))
+        .every(
+          (button) =>
+            button.disabled || button.getAttribute("aria-disabled") === "true"
+        ),
+      pause: panelText().includes("Its answers can be used in a moment"),
+    };
+    await act(async () => {
+      await sleep(1100);
+    });
+    await press("Decline");
+
+    expect({ before, arrived, answered: page.answered }).toStrictEqual({
+      before: {
+        rows: [true, true],
+        open: "Let Email triage start when an email arrives?",
+        binding: false,
+      },
+      arrived: {
+        open: "Let Invoice intake start when an email arrives?",
+        focus: "Let Invoice intake start when an email arrives?",
+        held: true,
+        pause: true,
+      },
+      answered: ["grant 2", "decline 1"],
     });
   });
 

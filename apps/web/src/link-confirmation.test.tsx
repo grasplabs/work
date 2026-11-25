@@ -11,7 +11,8 @@ import type { PendingLink } from "./link-confirmation.tsx";
 
 // Grasp's own link confirmation as the person reaches it: Open counts
 // once its delay passed, also for assistive technology, which activates
-// the button with a click alone, no pointer press or key before it.
+// the button with a click alone, no pointer press or key before it; and
+// it names where the link leads in ASCII, whatever it is handed.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -115,5 +116,21 @@ describe("a link's confirmation", () => {
     });
 
     expect(confirmed).toStrictEqual([]);
+  });
+
+  it("names where the link leads in ASCII, as the chat's question does: a look-alike host as its punycode", async () => {
+    // "paypal.com" with a Cyrillic a and y (U+0430, U+0443): another host.
+    await opened({
+      origin: "https://p\u0430\u0443pal.com",
+      url: "https://p\u0430\u0443pal.com/login",
+    });
+    const asked =
+      document.querySelector('[role="alertdialog"]')?.textContent ?? "";
+
+    expect({
+      origin: asked.includes("https://xn--ppal-53d8i.com"),
+      url: asked.includes("https://xn--ppal-53d8i.com/login"),
+      asWritten: asked.includes("p\u0430\u0443pal.com"),
+    }).toStrictEqual({ origin: true, url: true, asWritten: false });
   });
 });

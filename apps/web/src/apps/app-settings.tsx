@@ -186,13 +186,21 @@ const styles = stylex.create({
     gap: space[2],
     boxSizing: "border-box",
     // In from the pane's edges as the reference's app shell sets every
-    // page in (28px under the bar, 24px at the sides, 32px at the foot),
-    // then the sections' own room under it.
+    // page in (28px under the bar, 24px at the sides), then the sections'
+    // own room under it; at the foot what scrolls runs to the card's
+    // edge, as the reference's App settings do.
     paddingTop: `calc(${space[7]} + ${space[2]})`,
     paddingInline: space[6],
-    paddingBottom: space[8],
   },
-  scroll: { flexGrow: 1, minHeight: 0, minWidth: 0, overflowY: "auto" },
+  // What scrolls runs to the card's foot, its usual room at its own end,
+  // so the last section still scrolls clear of the chat's bar.
+  scroll: {
+    flexGrow: 1,
+    minHeight: 0,
+    minWidth: 0,
+    overflowY: "auto",
+    paddingBlockEnd: space[8],
+  },
   column: {
     display: "flex",
     flexDirection: "column",

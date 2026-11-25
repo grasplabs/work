@@ -276,16 +276,16 @@ test("a builder draws an approval with Grasp, an admin names who answers it, the
   await adder.getByRole("button", { name: "Add the trigger" }).click();
   await expect(page.getByText("Waiting for an admin")).toBeVisible(pageRead);
 
-  // Its start waits for an admin, who grants it from their inbox. The
-  // request names the trigger by its kind, and the workflow by its name.
-  const request = `start on Workflow ${name}`;
+  // Its start waits for an admin, who allows it from their inbox. The
+  // request names the trigger by its kind and source, and asks to let the
+  // workflow start.
   await asAdmin.goto("/inbox");
   const grant = await toItem(
     asAdmin,
-    new RegExp(sourceName, "u"),
-    new RegExp(`^Grant Webhook trigger .+: ${request}\\?$`, "u")
+    new RegExp(`^Webhook trigger for .+${sourceName}`, "u"),
+    /^Let .+ start when its webhook is called\?$/u
   );
-  await grant.getByRole("button", { name: "Grant it" }).click();
+  await grant.getByRole("button", { name: "Allow" }).click();
   await expect(grant).toHaveCount(0, pageRead);
   await page.goto(`/workflows/${workflow}?view=settings&section=triggers`);
   await expect(
