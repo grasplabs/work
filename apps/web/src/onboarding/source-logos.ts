@@ -10,7 +10,7 @@ import type { DocumentSource } from "./setup.ts";
 // theSVG (MIT). The trademarks stay with their owners; they are shown only
 // to name the place. Dropbox and Box from the same set. The HR platforms':
 // Personio and HiBob from theSVG (MIT); Nmbrs's mark from its own logo and
-// AFAS’s word from its own tile (afas.nl), traced.
+// AFAS’s word traced from the logo artwork Ruben sent.
 
 const logos: Readonly<Record<string, string>> = {
   sharepoint: "/logos/microsoft-sharepoint.svg",
