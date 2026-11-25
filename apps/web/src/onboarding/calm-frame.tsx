@@ -527,7 +527,15 @@ export const CalmStep = ({
   end,
   also,
   silent = false,
+  spoken,
 }: {
+  /**
+   * What Stephen says as the step arrives, in his own words: a tutor walking
+   * the admin through it and on from the step before, not the page read out
+   * (Ruben: "like a human would explain what's going on"). Without it he
+   * says the title and its line.
+   */
+  spoken?: string;
   /** Not said as it arrives: Stephen has just told it another way (the plan's story). */
   silent?: boolean;
   /** A third way (a `link`), on its own line under the buttons. */
@@ -541,8 +549,8 @@ export const CalmStep = ({
   children?: ReactNode;
   end?: ReactNode;
 }) => {
-  // Stephen says the step as it arrives: its title, and its line when it is words alone.
-  useSay(spokenStep(title, body), { delay: 250, when: !silent });
+  // Stephen says the step as it arrives: his own words for it, else its title and its line.
+  useSay(spoken ?? spokenStep(title, body), { delay: 250, when: !silent });
   return (
     <section
       {...stylex.props(styles.step, figure !== undefined && styles.stepCentred)}
