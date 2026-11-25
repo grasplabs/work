@@ -2,7 +2,7 @@
 // crisp square. Ruben's backdrop scenes (the product repo, grasp/field/shader-field.tsx), as he
 // made them, as far as the cards draw them (ground.tsx): a picture (cliffs, wave, aurora, starry,
 // fuji, wanderer), kept as its light alone (each from a work in the public domain, named where it
-// is listed below, served as `<scenes><kind>.jpg`), dithered all over from night to lime: every
+// is listed below, served as `<scenes><kind>.small.jpg`), dithered all over from night to lime: every
 // cell one of two neighbouring greens by Bayer's threshold, so no cell stands out alone, with the
 // silk's light drifting through it. Damsko's change, none to the look: the greens are read from
 // the tokens (brand-night to brand-paper), not written in. Where WebGL 2 can't run, nothing is
@@ -567,7 +567,8 @@ export const stillPictureOf = (
 ): void => {
   const still: Still = {
     scene,
-    address: `${options.scenes}${scene}.jpg`,
+    // The small picture, as the reference's cards draw theirs: a card is a small window.
+    address: `${options.scenes}${scene}.small.jpg`,
     width: Math.max(1, Math.round(options.width / cell)),
     height: Math.max(1, Math.round(options.height / cell)),
     palette: options.palette,

@@ -10,6 +10,7 @@ import {
   readTheme,
   readThemeId,
 } from "../frame/theme.ts";
+import { BackdropSettings } from "../settings/backdrop-settings.tsx";
 import { ComposerSettings } from "../settings/composer-settings.tsx";
 import { SettingsError, SettingsGroup } from "../settings/section.tsx";
 
@@ -17,7 +18,8 @@ import { SettingsError, SettingsGroup } from "../settings/section.tsx";
 // the device's, and the colours (Damsko's themes), with Damsko's Theme
 // toggle as tiles: each choice drawn in what it is, kept as it is pressed
 // (frame/theme.ts keeps it, as the person menu's Appearance does); then
-// how the chat box draws Grasp at work.
+// what stands behind Chat's start (settings/backdrop-settings.tsx) and how
+// the chat box draws Grasp at work (settings/composer-settings.tsx).
 
 /** The mode and the colours, as tiles. */
 const Theme = ({ userId }: { userId: string }) => {
@@ -55,6 +57,7 @@ const Appearance = () => {
   return (
     <>
       <Theme userId={identity.userId} />
+      <BackdropSettings userId={identity.userId} />
       <ComposerSettings userId={identity.userId} />
     </>
   );
