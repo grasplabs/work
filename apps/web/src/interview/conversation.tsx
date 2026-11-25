@@ -5,7 +5,7 @@ import { visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { duration, media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
 import { Composer, SaveTrouble } from "./composer.tsx";
@@ -13,8 +13,8 @@ import { Countdown, budgetMinutes } from "./countdown.tsx";
 import { keepNow, update, useInterviewer, useProgress } from "./kept.ts";
 import { sendTyped, useLoop } from "./loop.ts";
 import { micProblem } from "./mic.ts";
-import { withLineText, withoutLine } from "./progress.ts";
-import { ReadBack } from "./read-back-story.tsx";
+import { partAt, withLineText, withoutLine } from "./progress.ts";
+import { ReadBack, ReadBackBar } from "./read-back-story.tsx";
 import { say, stopSpeaking, useSaidOf } from "./speech.ts";
 import { shownAs, wordsOf } from "./spoken.tsx";
 import { Transcript } from "./transcript.tsx";
@@ -189,6 +189,19 @@ const AnswerBox = ({
   const loop = useLoop();
   const words = useInterviewWords();
   const { mode } = useProgress();
+  // In the read-back the bar stands here, until they want to change something.
+  const [changing, setChanging] = useState(false);
+  if (reading && !changing) {
+    return (
+      <div {...stylex.props(styles.composer)}>
+        <ReadBackBar
+          onChange={() => {
+            setChanging(true);
+          }}
+        />
+      </div>
+    );
+  }
   return (
     <div {...stylex.props(styles.composer)}>
       <SaveTrouble />
@@ -260,14 +273,20 @@ export const Conversation = ({
   transcript: boolean;
   alone: boolean;
   onTalk: () => void;
-}) => (
-  <Room alone={alone} transcript={transcript}>
-    <div {...stylex.props(styles.stage, reading && styles.reading)}>
-      {reading ? <ReadBack /> : <Asking />}
-    </div>
-    <AnswerBox onTalk={onTalk} reading={reading} />
-  </Room>
-);
+}) => {
+  const progress = useProgress();
+  // The bar again for each part, and once what they changed is sent.
+  const sent = progress.lines.filter(({ from }) => from === "person").length;
+  const answer = reading ? `reading-${partAt(progress).at}-${sent}` : "asking";
+  return (
+    <Room alone={alone} transcript={transcript}>
+      <div {...stylex.props(styles.stage, reading && styles.reading)}>
+        {reading ? <ReadBack /> : <Asking />}
+      </div>
+      <AnswerBox key={answer} onTalk={onTalk} reading={reading} />
+    </Room>
+  );
+};
 
 /**
  * The minutes are over: Stephen stops, says so out loud, and that nothing

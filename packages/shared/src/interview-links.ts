@@ -129,6 +129,8 @@ export const interviewLineSchema = z.strictObject({
   file: z.string().max(interviewLimits.file).optional(),
   /** How Stephen said his line. */
   tone: z.enum(voiceTags).optional(),
+  /** When it was said, in ms since the epoch: the read-back shows it with the words it comes from. */
+  at: z.number().nonnegative().optional(),
   /**
    * Removed by the person whose interview it is (GRA-1897): its words, its
    * marks and its file's name are gone, and it keeps only its place, so

@@ -623,7 +623,8 @@ const saidNow = (): InterviewLine | undefined => {
     return undefined;
   }
   const typed = floor.live === "" && floor.parts.every((part) => part.typed);
-  return { from: "person", text, ...(typed ? { typed } : {}) };
+  // Stamped as it is said: the read-back tells when it was.
+  return { from: "person", text, ...(typed ? { typed } : {}), at: Date.now() };
 };
 
 /** The stories asked for, by the lines they are of: each is asked for once. */
@@ -1197,6 +1198,7 @@ const askedFor = ({
     from: "person",
     text,
     ...(typed ? { typed } : {}),
+    at: Date.now(),
   };
   if (!isReading(progressNow())) {
     void ask(nudge ? "nudge" : "answer", said, turn);

@@ -197,6 +197,12 @@ const meaningful = (text: string): Set<string> =>
     )
   );
 
+/** A line they said that a sentence comes from, and when they said it, if that is known. */
+export interface Source {
+  said: string;
+  at: number | null;
+}
+
 /**
  * What they said in the conversation that a line of the read-back comes
  * from, as near as its words tell: their own line that shares the most
@@ -207,9 +213,9 @@ const meaningful = (text: string): Set<string> =>
 export const sourceOf = (
   text: string,
   lines: readonly InterviewLine[]
-): string | null => {
+): Source | null => {
   const wanted = meaningful(text);
-  let best: { said: string; score: number } | null = null;
+  let best: (Source & { score: number }) | null = null;
   for (const line of lines) {
     if (line.from !== "person" || line.removed === true) {
       continue;
@@ -223,8 +229,8 @@ export const sourceOf = (
           meaningful((line.marks ?? []).map(({ quote }) => quote).join(" "))
         );
     if (score > 0 && (best === null || score > best.score)) {
-      best = { said: line.text, score };
+      best = { said: line.text, at: line.at ?? null, score };
     }
   }
-  return best?.said ?? null;
+  return best === null ? null : { said: best.said, at: best.at };
 };
