@@ -9,24 +9,33 @@ import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 
+import { Flag } from "../frame/flag.tsx";
+import { languageOptions } from "../frame/language-options.ts";
 import { chooseLocale, isLocale, localeNames } from "../i18n.ts";
 import type { Locale } from "../i18n.ts";
-import { FlagMark } from "./flag-mark.tsx";
 import { useNarrow } from "./use-narrow.ts";
 
 // The language, in the setup's bar and the interview's header alike: the
 // library's Select in its quiet form (ghost, small), each language with its
 // flag before its name in its own words; closed, the chosen one's flag and
-// name, on a phone its flag and short code ("EN").
+// name, on a phone its flag and short code ("EN"). The flags are the ones
+// signing in and Settings show (frame/flag.tsx); the pixel flags stay on the
+// setup's first step only.
 
 const styles = stylex.create({
   // A flag and its name, on one line.
   named: { display: "inline-flex", alignItems: "center", gap: space["2"] },
 });
 
-const languages = Object.entries(localeNames).flatMap(([code, name]) =>
-  isLocale(code) ? [{ code, name }] : []
-);
+const languages = languageOptions;
+const flagOf = (locale: Locale) =>
+  languages.find(({ code }) => code === locale)?.flag;
+
+/** A language's flag, as the rest of the product draws it. */
+const FlagFor = ({ locale }: { locale: Locale }) => {
+  const flag = flagOf(locale);
+  return flag === undefined ? null : <Flag flag={flag} />;
+};
 
 export const LanguagePicker = () => {
   const { t, i18n } = useLingui();
@@ -54,7 +63,7 @@ export const LanguagePicker = () => {
         variant="ghost"
       >
         <span {...stylex.props(styles.named)}>
-          <FlagMark locale={locale} />
+          <FlagFor locale={locale} />
           <SelectValue />
         </span>
       </SelectTrigger>
@@ -62,7 +71,7 @@ export const LanguagePicker = () => {
         {languages.map(({ code, name }) => (
           <SelectItem key={code} label={name} value={code}>
             <span lang={code} {...stylex.props(styles.named)}>
-              <FlagMark locale={code} />
+              <FlagFor locale={code} />
               {name}
             </span>
           </SelectItem>
