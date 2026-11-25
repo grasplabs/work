@@ -6230,7 +6230,7 @@ msgstr "Documenten"
 msgid "Documents they or others shared with a team or the company stay, and their text can still name them."
 msgstr "Documenten die zij of anderen met een team of het bedrijf deelden blijven, en hun tekst kan hen nog steeds noemen."
 
-#: src/onboarding/documents-step.tsx
+#: src/onboarding/document-shelf.tsx
 msgid "Documents you shared"
 msgstr "Documenten die je hebt gedeeld"
 
@@ -14239,7 +14239,7 @@ msgstr "{model} uit favorieten verwijderen"
 #: src/activity/audit-event.tsx
 #: src/chat/chat-files.tsx
 #: src/frame/ui-words.tsx
-#: src/onboarding/documents-step.tsx
+#: src/onboarding/document-shelf.tsx
 msgid "Remove {name}"
 msgstr "{name} verwijderen"
 
@@ -18767,6 +18767,7 @@ msgstr "Proberen"
 #: src/inbox/inbox-page.tsx
 #: src/interview-routes.tsx
 #: src/interview/destination.tsx
+#: src/onboarding/document-shelf.tsx
 #: src/settings/sign-in-settings.tsx
 msgid "Try again"
 msgstr "Opnieuw proberen"

@@ -59,7 +59,7 @@ export const colourOf: Record<Kind, string> = {
 };
 
 /** The kind of a shared document, by its name's extension. */
-const kindOfName = (name: string): Kind => {
+export const kindOfName = (name: string): Kind => {
   const extension = extensionOf(name);
   if (extension === "pdf") {
     return "pdf";
