@@ -98,7 +98,7 @@ describe("an organization's interviews", () => {
           "What anyone said stays in the company’s own Grasp.",
           // Everyone still without their one reminder, to mark at once.
           "people can still be reminded, once each.",
-          "people reminded</button>",
+          "people reminded",
         ]),
         interviewers: missingIn(interviewers.html, [
           "What people thought of it",

@@ -6,15 +6,18 @@
  * until then. When they couldn't be read at all, it says so, with Try
  * again, in its place.
  */
-import { Button } from "@grasp-os/app-kit/components/button";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   Empty,
   EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyTitle,
-} from "@grasp-os/app-kit/components/empty";
-import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
+} from "@grasp-os/ui/components/empty";
+import { Skeleton } from "@grasp-os/ui/components/skeleton";
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { getRouteApi, rootRouteId, useRouter } from "@tanstack/react-router";
 import { Suspense } from "react";
 import type { ReactElement } from "react";
@@ -25,15 +28,21 @@ import type { Deferred } from "./settled.tsx";
 
 const adminRoute = getRouteApi(rootRouteId);
 
+const styles = stylex.create({
+  loading: { display: "flex", flexDirection: "column", gap: space["4"] },
+  summary: { height: "6rem" },
+  list: { height: "10rem" },
+});
+
 /** What a page shows of the organizations, given them. */
 type ShowAdmins = (admins: readonly ClientAdmin[]) => ReactElement;
 
 /** Where the organizations will be, until they are in. */
 export const AdminsLoading = () => (
-  <div aria-busy className="flex flex-col gap-4" data-loading>
-    <span className="sr-only">Reading every organization…</span>
-    <Skeleton className="h-24 w-full" />
-    <Skeleton className="h-40 w-full" />
+  <div aria-busy {...stylex.props(styles.loading)}>
+    <span {...stylex.props(visuallyHidden)}>Reading every organization…</span>
+    <Skeleton style={styles.summary} variant="rectangular" />
+    <Skeleton style={styles.list} variant="rectangular" />
   </div>
 );
 
@@ -41,7 +50,7 @@ export const AdminsLoading = () => (
 const AdminsUnread = () => {
   const router = useRouter();
   return (
-    <Empty role="alert">
+    <Empty variant="destructive">
       <EmptyHeader>
         <EmptyTitle>The organizations couldn’t be read</EmptyTitle>
         <EmptyDescription>
