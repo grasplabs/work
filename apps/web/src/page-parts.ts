@@ -1,11 +1,12 @@
 import { loadWholeCatalog } from "./i18n.ts";
-import { leanStylesMeta, wholeStylesMeta } from "./lean-pages.ts";
+import { partAt, stylesMeta } from "./lean-pages.ts";
+import type { Part } from "./lean-pages.ts";
 
-// The lean pages (lean-pages.ts) start with a lean copy of the stylesheet
-// and a lean part of their language's catalog. Any other page needs the
-// whole of both before it shows: the root route loads them as it goes
-// there (and only the first time), whether that is where the tab opened
-// or where a lean page leads, as the setup does into the app.
+// A lean page (lean-pages.ts) starts with its own part of the stylesheet
+// and of its language's catalog. Any other page needs the whole of both
+// before it shows: the root route loads them as it goes there (and only
+// the first time), whether that is where the tab opened or where a lean
+// page leads, as the setup does into the app.
 
 /**
  * Links the stylesheet a build's index.html names in the meta tag `meta`
@@ -44,19 +45,28 @@ const loadStyles = async (meta: string): Promise<void> => {
   });
 };
 
-/** The lean pages' stylesheet, before one of them first shows. */
-export const loadLeanStyles = async (): Promise<void> => {
-  await loadStyles(leanStylesMeta);
+/** The part the tab started with: the page's own, or the whole. */
+let started: Part = "whole";
+
+/**
+ * Before the first page shows: a lean page's own stylesheet. Any other
+ * page's comes with the whole, as the root route loads.
+ */
+export const loadStartStyles = async (part: Part): Promise<void> => {
+  started = part;
+  if (part !== "whole") {
+    await loadStyles(stylesMeta(part));
+  }
 };
 
 let loading: Promise<void> | undefined;
 
 /** Loads the whole stylesheet and catalog, once; again after a failure. */
 const loadWhole = async (): Promise<void> => {
-  await Promise.all([loadStyles(wholeStylesMeta), loadWholeCatalog()]);
+  await Promise.all([loadStyles(stylesMeta("whole")), loadWholeCatalog()]);
 };
 
-export const loadWholeApp = async (): Promise<void> => {
+const loadWholeApp = async (): Promise<void> => {
   loading ??= loadWhole();
   try {
     await loading;
@@ -64,5 +74,15 @@ export const loadWholeApp = async (): Promise<void> => {
     // Asked again, it tries again.
     loading = undefined;
     throw error;
+  }
+};
+
+/**
+ * What the page at `pathname` needs before it shows: nothing more on the
+ * lean page the tab started with, the whole anywhere else.
+ */
+export const loadPartsFor = async (pathname: string): Promise<void> => {
+  if (started === "whole" || partAt(pathname) !== started) {
+    await loadWholeApp();
   }
 };

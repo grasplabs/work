@@ -1,11 +1,13 @@
 import type { Plugin } from "vite-plus";
 
 import {
-  isLeanPath,
+  isLeanPage,
+  leanPageAt,
+  leanPages,
   leanPaths,
-  leanStylesMeta,
-  wholeStylesMeta,
+  stylesMeta,
 } from "./src/lean-pages.ts";
+import type { Part } from "./src/lean-pages.ts";
 import { localeCookie, pickLocale } from "./src/locale-choice.ts";
 
 // A language's catalog (src/locales/<locale>/messages.po) is a chunk of its
@@ -13,26 +15,17 @@ import { localeCookie, pickLocale } from "./src/locale-choice.ts";
 // before the first page can say anything. This adds a small script to
 // index.html that preloads the catalog of the language the page will
 // choose, so it comes alongside the app's own code: on a lean page
-// (src/lean-pages.ts) its lean part, elsewhere the whole. So too the
+// (src/lean-pages.ts) that page's part, elsewhere the whole. So too the
 // stylesheet, which the app links and waits for itself (src/page-parts.ts).
 //
 // A file under `/assets/`, not inline: the CSP allows no inline script
 // (core's src/security-headers.ts). `async`, so it never holds up the page.
 
 const catalogPath =
-  /^(?<lean>\0lean-catalog:)?.*\/locales\/(?<locale>[^/]+)\/messages\.po(?:\.lean)?$/u;
+  /^(?:\0lean-catalog:(?<page>\w+):)?.*\/locales\/(?<locale>[^/]+)\/messages\.po(?:\.lean)?$/u;
 
-/** A language's catalog files: its lean part and the whole. */
-export interface CatalogFiles {
-  lean: string;
-  whole: string;
-}
-
-/** The stylesheet's files: its lean copy and the whole (lean-parts.ts). */
-export interface StyleFiles {
-  lean: string;
-  whole: string;
-}
+/** A file of each part: each lean page's, and the whole. */
+export type PartFiles = Record<Part, string>;
 
 /**
  * The script, given each language's catalog files and the stylesheet's:
@@ -42,13 +35,14 @@ export interface StyleFiles {
  * path, with the same function (src/lean-pages.ts).
  */
 export const preloadScript = (
-  catalogs: Record<string, CatalogFiles>,
-  styles: StyleFiles
+  catalogs: Record<string, PartFiles>,
+  styles: PartFiles
 ): string => `{
   const catalogs = ${JSON.stringify(catalogs)};
   const pickLocale = ${pickLocale.toString()};
-  const isLeanPath = ${isLeanPath.toString()};
-  const lean = isLeanPath(location.pathname, ${JSON.stringify(leanPaths)});
+  const leanPageAt = ${leanPageAt.toString()};
+  const part =
+    leanPageAt(location.pathname, ${JSON.stringify(leanPaths)}) ?? "whole";
   const chosen = document.cookie
     .split("; ")
     .find((pair) => pair.startsWith("${localeCookie}="))
@@ -57,16 +51,30 @@ export const preloadScript = (
   const link = document.createElement("link");
   link.rel = "modulepreload";
   link.crossOrigin = "";
-  link.href = catalogs[locale][lean ? "lean" : "whole"];
+  link.href = catalogs[locale][part];
   document.head.append(link);
   const styles = ${JSON.stringify(styles)};
   const sheet = document.createElement("link");
   sheet.rel = "stylesheet";
   sheet.crossOrigin = "";
-  sheet.href = styles[lean ? "lean" : "whole"];
+  sheet.href = styles[part];
   document.head.append(sheet);
 }
 `;
+
+const parts: readonly Part[] = [
+  ...Object.keys(leanPages).filter(isLeanPage),
+  "whole",
+];
+
+/** `found`, when it has a file of every part. */
+const allParts = (found: Partial<PartFiles>, what: string): PartFiles => {
+  const { interview, setup, whole } = found;
+  if (interview === undefined || setup === undefined || whole === undefined) {
+    throw new Error(`locale-preload: the build lacks a part of the ${what}`);
+  }
+  return { interview, setup, whole };
+};
 
 export const localePreload = (): Plugin => {
   let base = "/";
@@ -80,7 +88,7 @@ export const localePreload = (): Plugin => {
       // After Vite wrote index.html, which this adds the script to.
       order: "post",
       handler(_options, bundle) {
-        const files: Record<string, Partial<CatalogFiles>> = {};
+        const files: Record<string, Partial<PartFiles>> = {};
         for (const output of Object.values(bundle)) {
           const groups =
             output.type === "chunk"
@@ -89,19 +97,13 @@ export const localePreload = (): Plugin => {
           if (groups?.locale !== undefined) {
             files[groups.locale] = {
               ...files[groups.locale],
-              [groups.lean === undefined ? "whole" : "lean"]:
-                `${base}${output.fileName}`,
+              [groups.page ?? "whole"]: `${base}${output.fileName}`,
             };
           }
         }
-        const catalogs: Record<string, CatalogFiles> = {};
-        for (const [locale, { lean, whole }] of Object.entries(files)) {
-          if (lean === undefined || whole === undefined) {
-            throw new Error(
-              `locale-preload: the build has no lean and whole ${locale} catalog`
-            );
-          }
-          catalogs[locale] = { lean, whole };
+        const catalogs: Record<string, PartFiles> = {};
+        for (const [locale, found] of Object.entries(files)) {
+          catalogs[locale] = allParts(found, `${locale} catalog`);
         }
         const html = bundle["index.html"];
         if (
@@ -125,10 +127,12 @@ export const localePreload = (): Plugin => {
           }
           return href;
         };
-        const styles = {
-          lean: named(leanStylesMeta),
-          whole: named(wholeStylesMeta),
-        };
+        const styles = allParts(
+          Object.fromEntries(
+            parts.map((part) => [part, named(stylesMeta(part))])
+          ),
+          "stylesheet"
+        );
         const script = this.getFileName(
           this.emitFile({
             type: "asset",
