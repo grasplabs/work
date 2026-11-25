@@ -14,6 +14,7 @@ import { Route as AskRouteImport } from './routes/ask'
 import { Route as ConnectorsRouteImport } from './routes/connectors'
 import { Route as LabRouteImport } from './routes/lab'
 import { Route as NewOrganizationRouteImport } from './routes/new-organization'
+import { Route as VoiceLabRouteImport } from './routes/voice-lab'
 import { Route as OrganizationsClientIdRouteImport } from './routes/organizations/$clientId'
 import { Route as PlatformIndexRouteImport } from './routes/platform/index'
 import { Route as PlatformMaintenanceRouteImport } from './routes/platform/maintenance'
@@ -55,6 +56,11 @@ const LabRoute = LabRouteImport.update({
 const NewOrganizationRoute = NewOrganizationRouteImport.update({
   id: '/new-organization',
   path: '/new-organization',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VoiceLabRoute = VoiceLabRouteImport.update({
+  id: '/voice-lab',
+  path: '/voice-lab',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OrganizationsClientIdRoute = OrganizationsClientIdRouteImport.update({
@@ -161,6 +167,7 @@ export interface FileRoutesByFullPath {
   '/connectors': typeof ConnectorsRoute
   '/lab': typeof LabRoute
   '/new-organization': typeof NewOrganizationRoute
+  '/voice-lab': typeof VoiceLabRoute
   '/organizations/$clientId': typeof OrganizationsClientIdRouteWithChildren
   '/platform/maintenance': typeof PlatformMaintenanceRoute
   '/platform/offboarded': typeof PlatformOffboardedRoute
@@ -185,6 +192,7 @@ export interface FileRoutesByTo {
   '/connectors': typeof ConnectorsRoute
   '/lab': typeof LabRoute
   '/new-organization': typeof NewOrganizationRoute
+  '/voice-lab': typeof VoiceLabRoute
   '/platform/maintenance': typeof PlatformMaintenanceRoute
   '/platform/offboarded': typeof PlatformOffboardedRoute
   '/platform': typeof PlatformIndexRoute
@@ -209,6 +217,7 @@ export interface FileRoutesById {
   '/connectors': typeof ConnectorsRoute
   '/lab': typeof LabRoute
   '/new-organization': typeof NewOrganizationRoute
+  '/voice-lab': typeof VoiceLabRoute
   '/organizations/$clientId': typeof OrganizationsClientIdRouteWithChildren
   '/platform/maintenance': typeof PlatformMaintenanceRoute
   '/platform/offboarded': typeof PlatformOffboardedRoute
@@ -235,6 +244,7 @@ export interface FileRouteTypes {
     | '/connectors'
     | '/lab'
     | '/new-organization'
+    | '/voice-lab'
     | '/organizations/$clientId'
     | '/platform/maintenance'
     | '/platform/offboarded'
@@ -259,6 +269,7 @@ export interface FileRouteTypes {
     | '/connectors'
     | '/lab'
     | '/new-organization'
+    | '/voice-lab'
     | '/platform/maintenance'
     | '/platform/offboarded'
     | '/platform'
@@ -282,6 +293,7 @@ export interface FileRouteTypes {
     | '/connectors'
     | '/lab'
     | '/new-organization'
+    | '/voice-lab'
     | '/organizations/$clientId'
     | '/platform/maintenance'
     | '/platform/offboarded'
@@ -307,6 +319,7 @@ export interface RootRouteChildren {
   ConnectorsRoute: typeof ConnectorsRoute
   LabRoute: typeof LabRoute
   NewOrganizationRoute: typeof NewOrganizationRoute
+  VoiceLabRoute: typeof VoiceLabRoute
   OrganizationsClientIdRoute: typeof OrganizationsClientIdRouteWithChildren
   PlatformMaintenanceRoute: typeof PlatformMaintenanceRoute
   PlatformOffboardedRoute: typeof PlatformOffboardedRoute
@@ -350,6 +363,13 @@ declare module '@tanstack/react-router' {
       path: '/new-organization'
       fullPath: '/new-organization'
       preLoaderRoute: typeof NewOrganizationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/voice-lab': {
+      id: '/voice-lab'
+      path: '/voice-lab'
+      fullPath: '/voice-lab'
+      preLoaderRoute: typeof VoiceLabRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/organizations/$clientId': {
@@ -513,6 +533,7 @@ const rootRouteChildren: RootRouteChildren = {
   ConnectorsRoute: ConnectorsRoute,
   LabRoute: LabRoute,
   NewOrganizationRoute: NewOrganizationRoute,
+  VoiceLabRoute: VoiceLabRoute,
   OrganizationsClientIdRoute: OrganizationsClientIdRouteWithChildren,
   PlatformMaintenanceRoute: PlatformMaintenanceRoute,
   PlatformOffboardedRoute: PlatformOffboardedRoute,
