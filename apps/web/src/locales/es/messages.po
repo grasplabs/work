@@ -2106,6 +2106,10 @@ msgctxt "what a decision is about, as its workflow run passed it"
 msgid "About"
 msgstr "Sobre"
 
+#: src/chat/saved-memory.tsx
+msgid "About {about}: {statement}"
+msgstr "Sobre {about}: {statement}"
+
 #: src/brain/memories-page.tsx
 msgid "About {aboutShown}"
 msgstr "Sobre {aboutShown}"
@@ -8107,22 +8111,6 @@ msgstr "Grasp lo vuelve a intentar cada cuarto de hora. Si sigue fallando, pide 
 msgid "Grasp was updated while this page was open. Try again to load the new version."
 msgstr "Grasp se actualizó mientras esta página estaba abierta. Vuelve a intentarlo para cargar la nueva versión."
 
-#: src/chat/saved-memory.tsx
-msgid "Grasp will remember about {about}: {statement}"
-msgstr "Grasp recordará sobre {about}: {statement}"
-
-#: src/chat/saved-memory.tsx
-msgid "Grasp will remember about {about}: {statement} (value: {value})"
-msgstr "Grasp recordará sobre {about}: {statement} (valor: {value})"
-
-#: src/chat/saved-memory.tsx
-msgid "Grasp will remember: {statement}"
-msgstr "Grasp recordará: {statement}"
-
-#: src/chat/saved-memory.tsx
-msgid "Grasp will remember: {statement} (value: {value})"
-msgstr "Grasp recordará: {statement} (valor: {value})"
-
 #: src/apps/app-code.tsx
 msgid "Grasp writes the first version in the chat."
 msgstr "Grasp escribe la primera versión en el chat."
@@ -8845,10 +8833,6 @@ msgstr "Entrada, en JSON"
 #: src/activity/audit-words.ts
 msgid "Installed Grasp's skills with a release"
 msgstr "Instaló las skills de Grasp con una versión"
-
-#: src/chat/saved-memory.tsx
-msgid "Instruction"
-msgstr "Instrucción"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -13439,10 +13423,6 @@ msgstr "Posición"
 msgid "Prague"
 msgstr "Praga"
 
-#: src/chat/saved-memory.tsx
-msgid "Preference"
-msgstr "Preferencia"
-
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Preference"
@@ -15064,6 +15044,18 @@ msgstr "Guardado"
 msgctxt "a setting saved"
 msgid "Saved"
 msgstr "Guardado"
+
+#: src/chat/saved-memory.tsx
+msgid "Saved a memory"
+msgstr "Recuerdo guardado"
+
+#: src/chat/saved-memory.tsx
+msgid "Saved a preference"
+msgstr "Preferencia guardada"
+
+#: src/chat/saved-memory.tsx
+msgid "Saved an instruction"
+msgstr "Instrucción guardada"
 
 #: src/apps/app-data-model.tsx
 #: src/apps/field-editor.tsx
