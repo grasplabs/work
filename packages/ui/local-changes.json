@@ -21,6 +21,11 @@
     "since": "2026-11-24"
   },
   {
+    "path": "src/components/prompt-input-voice-field.ts",
+    "reason": "Its grade, the brand's stops a voice is drawn in, is exported, so the voice composer's dither is drawn in the same light.",
+    "since": "2026-11-25"
+  },
+  {
     "path": "src/components/prompt-input.tsx",
     "reason": "In a compact card, a spoken conversation is one slim row: the time, the voice's field and its tools in the row, and the words over it only once there are any, so no empty room and no lone caret stand before the first word.",
     "since": "2026-11-25"
@@ -34,6 +39,16 @@
     "path": "src/components/theme-toggle.tsx",
     "reason": "The icon button's sizes under Button's names and at Button's heights (its sm was Button's xs), and a tooltip as Button's, its name by default.",
     "since": "2026-11-24"
+  },
+  {
+    "path": "src/components/voice-composer-dots.ts",
+    "reason": "New: the voice composer's dither along the card's foot, and the dots that carry each heard word up to its place in the text.",
+    "since": "2026-11-25"
+  },
+  {
+    "path": "src/components/voice-composer.tsx",
+    "reason": "New: one card to answer in, typed or spoken, with one round button (microphone, Stop, Send), the time behind a dot, and words that come through a blur.",
+    "since": "2026-11-25"
   },
   {
     "path": "src/lib/icons.ts",
