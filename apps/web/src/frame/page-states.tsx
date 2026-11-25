@@ -12,14 +12,21 @@ import { Skeleton } from "@grasp-os/ui/components/skeleton";
 import { Snippet } from "@grasp-os/ui/components/snippet";
 import type { IconData } from "@grasp-os/ui/lib/icons";
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
-import { colors, font, space } from "@grasp-os/ui/lib/tokens.stylex";
+import {
+  colors,
+  font,
+  media,
+  radius,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
-import { use, useEffect, useEffectEvent, useRef } from "react";
+import { use, useEffect, useEffectEvent, useSyncExternalStore } from "react";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
 import { Backdrop } from "../chat/backdrop/backdrop.tsx";
+import type { CoreConnection, CoreReach } from "../core-connection.ts";
 import { notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
@@ -43,12 +50,14 @@ const styles = stylex.create({
     flexGrow: 1,
   },
   // Not found keeps the page's room in the card, as #2503's shell gives a
-  // page (28px under its bar, 24px at the sides, 32px at the foot), so it
-  // stands in the middle of that; a page that failed has the whole card.
+  // page (28px under its bar, 24px at the sides, and at the foot the room
+  // for the chat's dock over it, 96px, its `roomForDock`, as Page's
+  // `pb-chat`), so it stands in the middle of that; a page that failed has
+  // the whole card.
   room: {
     paddingBlockStart: space["7"],
     paddingInline: space["6"],
-    paddingBlockEnd: space["8"],
+    paddingBlockEnd: space["24"],
   },
   // Outside the frame, it fills the window, in its middle.
   alone: {
@@ -70,9 +79,40 @@ const styles = stylex.create({
     paddingBlock: space["12"],
   },
   failedWhole: { minHeight: "100dvh" },
-  // Under a page's own heading (a section's): no page-sized room, only a
-  // section's.
-  failedSection: { minHeight: 0, paddingBlock: space["6"] },
+  // The one fact that can change by itself, said as it changes.
+  fact: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: space["2"],
+    margin: 0,
+    fontFamily: font.sans,
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+    color: colors.mutedForeground,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    flexShrink: 0,
+    borderRadius: radius.full,
+    // In forced colours a dot's fill is dropped: its edge stays.
+    borderWidth: { default: 0, [media.forcedColors]: 1 },
+    borderStyle: "solid",
+    borderColor: "CanvasText",
+  },
+  reachable: { backgroundColor: colors.success },
+  unreachable: { backgroundColor: colors.destructive },
+  checking: {
+    backgroundColor: colors.mutedForeground,
+    // A slow breath while it checks; still for anyone who asked for less motion.
+    animationName: stylex.keyframes({
+      "0%": { opacity: 1 },
+      "50%": { opacity: 0.35 },
+      "100%": { opacity: 1 },
+    }),
+    animationDuration: { default: "1.6s", [media.reducedMotion]: "0s" },
+    animationIterationCount: "infinite",
+  },
   words: {
     display: "grid",
     justifyItems: "center",
@@ -305,17 +345,18 @@ export const splitReference = (
  * the foot), a real heading, the one plain sentence it was given (said as
  * it appears), the reference to copy, Try again and the quiet way on
  * (`wayOn`), and anything folded under it (`children`, a frame's technical
- * details). It takes the page's room (in the card under the page's bar,
- * or in an App's frame), the `whole` window outside the frame, or only a
- * `section`'s under a page's own heading.
+ * details), with whether Grasp can be reached first (`reach`), as the
+ * tab's connection finds it. It takes the page's room (in the card under
+ * the page's bar, in an App's frame, or under a page's own heading), or
+ * the `whole` window outside the frame.
  */
 export const PageFailed = ({
   title,
   reason,
   heading = "h1",
   whole = false,
-  section = false,
   trying = false,
+  reach,
   onRetry,
   wayOn,
   children,
@@ -328,19 +369,24 @@ export const PageFailed = ({
   heading?: StateHeading;
   /** Whether it is the whole window: outside the frame, where nothing else stands. */
   whole?: boolean;
-  /** Whether it stands in a section under a page's own heading: a section's room, not the page's. */
-  section?: boolean;
   /** Whether it is being read again now: Try again waits, and the sentence goes until it is back. */
   trying?: boolean;
   /** Reads again what failed. */
   onRetry: () => void;
   /** A quiet way on beside Try again: Go to Chat, Fix with Grasp. */
   wayOn?: ReactNode;
+  /** Whether Grasp can be reached; the line is left out without it. */
+  reach?: CoreReach | undefined;
   children?: ReactNode;
 }) => {
   const { t } = useLingui();
-  const words = useRef<HTMLDivElement>(null);
   const Title = heading;
+  const facts: Record<CoreReach, string> = {
+    checking: t`Checking whether Grasp can be reached`,
+    // The connection keeps trying by itself: no answer yet, not none ever.
+    unreachable: t`No answer from Grasp yet`,
+    reachable: t`Grasp can be reached`,
+  };
   const split: { sentence?: string; reference?: string } =
     reason === undefined ? {} : splitReference(reason);
   const { reference } = split;
@@ -356,16 +402,21 @@ export const PageFailed = ({
       : said;
   return (
     <Backdrop
-      clear={words}
-      dither="dusk"
-      style={[
-        styles.failed,
-        whole && styles.failedWhole,
-        section && styles.failedSection,
-      ]}
-      tone="aurora"
+      style={[styles.failed, whole && styles.failedWhole]}
+      variant={{ backdrop: "dusk", pattern: "bayer", tone: "aurora" }}
     >
-      <div data-slot="page-failed" ref={words} {...stylex.props(styles.words)}>
+      <div data-slot="page-failed" {...stylex.props(styles.words)}>
+        {/* Whether Grasp can be reached, first: it says at a glance whether
+            the fault is this page's or Grasp's. */}
+        {reach === undefined ? null : (
+          <p {...stylex.props(styles.fact)}>
+            <span
+              aria-hidden="true"
+              {...stylex.props(styles.dot, styles[reach])}
+            />
+            {facts[reach]}
+          </p>
+        )}
         <Title {...stylex.props(styles.failedTitle)}>{title}</Title>
         {/* Said once as it appears; gone while trying, so it is said
             again if it fails again. */}
@@ -398,6 +449,29 @@ export const PageFailed = ({
         </p>
       )}
     </Backdrop>
+  );
+};
+
+const noWatching = () => () => {
+  // Nothing to stop.
+};
+
+/**
+ * Whether Grasp can be reached, as the tab's connection finds it, kept
+ * current; none where the page has no connection to ask (a stand-in in a
+ * test), so no line is said that isn't known.
+ */
+const useCoreReach = (): CoreReach | undefined => {
+  // Read as what it may be: a router with no context, or a test's
+  // stand-in, has none to ask.
+  const context:
+    | { core?: Partial<Pick<CoreConnection, "reach" | "watchReach">> }
+    | undefined = useRouter().options.context;
+  const core = context?.core ?? {};
+  const known = typeof core.watchReach === "function";
+  return useSyncExternalStore(
+    (changed) => core.watchReach?.(changed) ?? noWatching(),
+    () => (known ? core.reach : undefined)
   );
 };
 
@@ -435,10 +509,11 @@ export const ErrorState = ({
   // Only the page's own loaders say they are on their way.
   const trying = again === undefined && loading;
   const inFrame = use(InFrame);
+  const reach = useCoreReach();
   return (
     <PageFailed
       heading={heading}
-      section={heading !== "h1"}
+      reach={reach}
       whole={!inFrame}
       onRetry={() => {
         if (reload) {

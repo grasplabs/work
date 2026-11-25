@@ -133,7 +133,7 @@ const buttons = (): string[] =>
     )
     .filter((name) => name !== "More about this section");
 
-describe("an App's integrations in its settings", () => {
+describe("an App's connectors in its settings", () => {
   afterEach(() => {
     act(() => {
       root?.unmount();
@@ -146,7 +146,7 @@ describe("an App's integrations in its settings", () => {
     await shown(true, catalog);
 
     expect(buttons()).toStrictEqual([
-      "Add an integration",
+      "Add a connector",
       "Take Notion off Desk",
     ]);
   });
@@ -172,7 +172,7 @@ describe("an App's integrations in its settings", () => {
     const asked = await shown(true, catalog);
     const before = asked.loads;
     await act(async () => {
-      buttonNamed("Add an integration")?.click();
+      buttonNamed("Add a connector")?.click();
       await Promise.resolve();
     });
     // Only what is offered and not there yet is listed: Jira alone.
@@ -208,7 +208,7 @@ describe("an App's integrations in its settings", () => {
   it("offer nothing to add while the catalog can't be read, and say so", async () => {
     await shown(true, null);
     const add = [...document.querySelectorAll("button")].find(
-      (each) => each.textContent?.trim() === "Add an integration"
+      (each) => each.textContent?.trim() === "Add a connector"
     );
 
     expect({

@@ -268,7 +268,7 @@ describe("making something in a chat's thread", () => {
       ),
       connect: decodeURIComponent(
         card
-          ?.querySelector<HTMLAnchorElement>('a[href^="/integrations"]')
+          ?.querySelector<HTMLAnchorElement>('a[href^="/connectors"]')
           ?.getAttribute("href") ?? ""
       ),
       off: button("Build it")?.disabled,
@@ -300,7 +300,7 @@ describe("making something in a chat's thread", () => {
           "Runs on its ownLate reminderMails whoever is late.Needs Outlook connectedConnect",
           "Who gets itFinance teamOnly you see it while you try it. You share it when it's right.",
         ],
-        connect: "/integrations/native:microsoft",
+        connect: "/connectors/native:microsoft",
         off: true,
       },
       on: true,

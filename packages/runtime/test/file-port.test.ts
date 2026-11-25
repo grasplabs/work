@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { portFileTransport } from "../src/file-port.ts";
+import { portFileTransport } from "../src/app/file-port.ts";
 
 // The frame's side of its file port: a call the browser can't send never
 // becomes one the frame waits on or stops later, and a call the page

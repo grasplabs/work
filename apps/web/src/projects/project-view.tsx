@@ -583,7 +583,7 @@ const StoppedConnection = ({
       </Alert>
       {builds ? (
         <Button asChild size="sm" variant="outline">
-          <Link to="/integrations">{t`Reconnect`}</Link>
+          <Link to="/connectors">{t`Reconnect`}</Link>
         </Button>
       ) : null}
     </div>

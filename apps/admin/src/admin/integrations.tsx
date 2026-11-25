@@ -48,7 +48,7 @@ const AppRow = ({ app }: { app: AskedApp }) => (
         aria-label={`Open ${app.name}`}
         className="focus-visible:ring-ring/50 flex w-full min-w-0 flex-col rounded-sm outline-none after:absolute after:inset-0 focus-visible:ring-3"
         search={{ app: app.key }}
-        to="/integrations"
+        to="/connectors"
       >
         <span className="font-medium hover:underline">{app.name}</span>
         {/* Where there is no room for its own column, who asked goes under the name. */}
@@ -100,7 +100,7 @@ const AppSheet = ({
   apps: readonly AskedApp[];
   open: string | undefined;
 }) => {
-  const navigate = useNavigate({ from: "/integrations" });
+  const navigate = useNavigate({ from: "/connectors" });
   const shown = apps.find((app) => app.key === open);
   return (
     <Sheet
@@ -124,7 +124,7 @@ const AppSheet = ({
                   <Link
                     className="w-fit font-medium underline-offset-4 hover:underline"
                     params={{ clientId: ask.org }}
-                    to="/organizations/$clientId/integrations"
+                    to="/organizations/$clientId/connectors"
                   >
                     {ask.orgName}
                   </Link>

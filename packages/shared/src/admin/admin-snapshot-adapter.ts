@@ -140,9 +140,6 @@ const interviewOf = (
       startedAt: started ? Date.parse(interview.startedAt ?? "") : null,
       confirmed: interview.confirmed,
       ...(interview.rating === null ? {} : { rating: interview.rating }),
-      ...(interview.interviewer === null
-        ? {}
-        : { interviewer: interview.interviewer }),
     },
     version: 0,
     updated: interview.updatedAt,

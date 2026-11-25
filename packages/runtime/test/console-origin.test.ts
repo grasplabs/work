@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { calledByApp } from "../src/console-origin.ts";
+import { calledByApp } from "../src/app/console-origin.ts";
 
 // Whose code called `console.error` in a page's frame: the App's (a
 // problem that fails a draft's check) or the kit's, such as React's

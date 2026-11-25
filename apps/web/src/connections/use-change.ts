@@ -36,7 +36,7 @@ export const useChange = ({
           const left = params.toString();
           await router.navigate({
             href: leave
-              ? "/integrations"
+              ? "/connectors"
               : `${pathname}${left === "" ? "" : `?${left}`}`,
             replace: true,
           });

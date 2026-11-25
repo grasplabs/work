@@ -168,7 +168,7 @@ export const start = async (
     tools: allowed,
     consent: composioConsentText,
     origin: clientOrigin,
-    returnTo: "/integrations",
+    returnTo: "/connectors",
     ...options,
   });
   return url;

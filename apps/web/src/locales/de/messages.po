@@ -113,7 +113,7 @@ msgstr "{app}: Lauf von {workflowId}"
 msgid "{app}'s model can't be read, so its calls get no answer."
 msgstr "Das Modell von {app} kann nicht gelesen werden, daher erhalten seine Aufrufe keine Antwort."
 
-#: src/routes/_shell.integrations.$integration.tsx
+#: src/routes/_shell.connectors.$integration.tsx
 msgid "{app}'s tools"
 msgstr "Die Tools von {app}"
 
@@ -491,7 +491,7 @@ msgstr "{count, plural, one {einmal gesucht} other {# Mal gesucht}}"
 msgid "{count, plural, one {Show # unchanged line} other {Show # unchanged lines}}"
 msgstr "{count, plural, one {# unveränderte Zeile zeigen} other {# unveränderte Zeilen zeigen}}"
 
-#: src/routes/_shell.integrations.index.tsx
+#: src/routes/_shell.connectors.index.tsx
 msgid "{count, plural, one {Show the # app in {label}} other {Show all # in {label}}}"
 msgstr "{count, plural, one {Die # App in {label} zeigen} other {Alle # in {label} zeigen}}"
 
@@ -1415,9 +1415,9 @@ msgstr "{share} von {source}"
 msgid "{share} of questions answered · 30 days"
 msgstr "{share} der Fragen beantwortet · 30 Tage"
 
-#: src/routes/_shell.integrations.index.tsx
-msgid "{shown, plural, one {# integration shown} other {# integrations shown}}"
-msgstr "{shown, plural, one {# Integration angezeigt} other {# Integrationen angezeigt}}"
+#: src/routes/_shell.connectors.index.tsx
+msgid "{shown, plural, one {# connector shown} other {# connectors shown}}"
+msgstr "{shown, plural, one {# Konnektor angezeigt} other {# Konnektoren angezeigt}}"
 
 #: src/workflows/listed-count.tsx
 msgid "{shown} entries or more"
@@ -2299,8 +2299,9 @@ msgid "Add a connection"
 msgstr "Verbindung hinzufügen"
 
 #: src/agents/setup/apps-picker.tsx
+#: src/apps/app-integrations.tsx
 msgid "Add a connector"
-msgstr "Connector hinzufügen"
+msgstr "Konnektor hinzufügen"
 
 #: src/settings/ai-providers.tsx
 msgid "Add a fallback"
@@ -2350,7 +2351,7 @@ msgstr "Zeit hinzufügen"
 msgid "Add a trigger"
 msgstr "Einen Auslöser hinzufügen"
 
-#: src/routes/_shell.integrations.index.tsx
+#: src/routes/_shell.connectors.index.tsx
 msgctxt "apps that can still be connected"
 msgid "Add an app"
 msgstr "App hinzufügen"
@@ -2363,17 +2364,13 @@ msgstr "HTTP-Verbindung hinzufügen"
 msgid "Add an index"
 msgstr "Index hinzufügen"
 
-#: src/apps/app-integrations.tsx
-msgid "Add an integration"
-msgstr "Integration hinzufügen"
-
 #: src/settings/add-connection/words.ts
 msgid "Add another"
 msgstr "Weitere hinzufügen"
 
 #: src/agents/setup/apps-step.tsx
 msgid "Add connector"
-msgstr "Connector hinzufügen"
+msgstr "Konnektor hinzufügen"
 
 #: src/apps/field-editor.tsx
 msgid "Add field"
@@ -2493,7 +2490,7 @@ msgid "Added by hand"
 msgstr "Von Hand hinzugefügt"
 
 #: src/apps/app-integrations.tsx
-msgctxt "why an integration is one of an App's"
+msgctxt "why a connector is one of an App's"
 msgid "Added by hand"
 msgstr "Von Hand hinzugefügt"
 
@@ -3134,7 +3131,7 @@ msgstr "App {app}"
 
 #: src/routes/_shell.apps.$app_.settings.tsx
 #: src/routes/_shell.apps.$app.tsx
-#: src/routes/_shell.integrations.$integration.tsx
+#: src/routes/_shell.connectors.$integration.tsx
 msgid "App not found"
 msgstr "App nicht gefunden"
 
@@ -3471,6 +3468,10 @@ msgstr "Erneut fragen"
 msgid "Ask an admin"
 msgstr "Einen Admin fragen"
 
+#: src/chat/backdrop/preview.tsx
+msgid "Ask anything"
+msgstr "Etwas fragen"
+
 #: src/chat/chat-start.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Etwas fragen oder einen Prozess beschreiben"
@@ -3500,7 +3501,7 @@ msgstr "Zugriff für diese App anfragen"
 msgid "Ask for it"
 msgstr "Anfragen"
 
-#: src/routes/_shell.integrations.index.tsx
+#: src/routes/_shell.connectors.index.tsx
 msgid "Ask for the app you need, and an admin can add it."
 msgstr "Fragen Sie nach der App, die Sie brauchen, und ein Admin kann sie hinzufügen."
 
@@ -3700,6 +3701,10 @@ msgstr "Eine Datei an einen Chat angehängt"
 msgid "Audit trail"
 msgstr "Audit-Trail"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Aurora"
+msgstr "Polarlicht"
+
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Availability"
@@ -3754,9 +3759,21 @@ msgstr "Zurück zu Verweis {number}-{mark}"
 msgid "Back to your version"
 msgstr "Zurück zu Ihrer Version"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Background"
+msgstr "Hintergrund"
+
 #: src/onboarding/ai-step.tsx
 msgid "Base URL"
 msgstr "Basis-URL"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Bayer"
+msgstr "Bayer"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Bayer grid"
+msgstr "Bayer-Punktraster"
 
 #: src/frame/ui-words.tsx
 msgctxt "a change's old side"
@@ -4370,8 +4387,8 @@ msgid "Changed whether an App's data goes to code outside Grasp"
 msgstr "Geändert, ob die Daten einer App an Code außerhalb von Grasp gehen"
 
 #: src/activity/audit-words.ts
-msgid "Changed which integrations are offered"
-msgstr "Geändert, welche Integrationen angeboten werden"
+msgid "Changed which connectors are offered"
+msgstr "Geändert, welche Konnektoren angeboten werden"
 
 #: src/activity/audit-words.ts
 msgid "Changed who reaches Stephen in a place"
@@ -4453,6 +4470,10 @@ msgstr "Chat-Konten, Einladungen und Benachrichtigungen"
 #: src/settings/chat-accounts.tsx
 msgid "Chat apps"
 msgstr "Chat-Apps"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Chat background"
+msgstr "Chat-Hintergrund"
 
 #: src/settings/composer-settings.tsx
 msgid "Chat box"
@@ -4541,6 +4562,10 @@ msgstr "Stand Ihres Exports wird geladen…"
 #: src/chat/thread.tsx
 msgid "Checking the App…"
 msgstr "Die App wird geprüft…"
+
+#: src/frame/page-states.tsx
+msgid "Checking whether Grasp can be reached"
+msgstr "Prüfen, ob Grasp erreichbar ist"
 
 #: src/workflows/definition-editor.tsx
 #: src/workflows/workflow-flow.tsx
@@ -4663,7 +4688,7 @@ msgstr "Leeren"
 
 #: src/agents/setup/apps-picker.tsx
 #: src/frame/ui-words.tsx
-#: src/routes/_shell.integrations.index.tsx
+#: src/routes/_shell.connectors.index.tsx
 #: src/settings/add-connection/words.ts
 msgid "Clear search"
 msgstr "Suche löschen"
@@ -4687,6 +4712,10 @@ msgstr "Geleert"
 #: src/frame/ui-words.tsx
 msgid "Click or drop a picture."
 msgstr "Klicken oder ein Bild hierher ziehen."
+
+#: src/settings/backdrop-settings.tsx
+msgid "Cliffs"
+msgstr "Klippen"
 
 #: src/brain/forget.tsx
 #: src/connections/app/words.ts
@@ -4782,6 +4811,11 @@ msgstr "Kolleginnen und Kollegen gesprochen"
 msgid "Colour"
 msgstr "Farbe"
 
+#: src/settings/backdrop-settings.tsx
+msgctxt "a background's colour"
+msgid "Colour"
+msgstr "Farbe"
+
 #: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
 #: src/frame/ui-words.tsx
@@ -4843,7 +4877,7 @@ msgctxt "a tool's state"
 msgid "Completed"
 msgstr "Abgeschlossen"
 
-#: src/routes/_shell.integrations.index.tsx
+#: src/routes/_shell.connectors.index.tsx
 msgid "Composio's toolkits can't be listed right now. Try again shortly."
 msgstr "Die Toolkits von Composio können gerade nicht aufgelistet werden. Versuchen Sie es gleich noch einmal."
 
@@ -4986,7 +5020,7 @@ msgstr "Verbinden Sie die Apps, mit denen Sie arbeiten"
 msgid "Connected"
 msgstr "Verbunden"
 
-#: src/routes/_shell.integrations.index.tsx
+#: src/routes/_shell.connectors.index.tsx
 msgctxt "apps that are connected"
 msgid "Connected"
 msgstr "Verbunden"
@@ -4996,6 +5030,10 @@ msgstr "Verbunden"
 msgctxt "state of one app"
 msgid "Connected"
 msgstr "Verbunden"
+
+#: src/apps/app-settings.tsx
+msgid "Connected accounts in use"
+msgstr "Verwendete verbundene Konten"
 
 #: src/activity/audit-words.ts
 msgid "Connected an account"
@@ -5098,9 +5136,22 @@ msgctxt "an app's settings section"
 msgid "Connections"
 msgstr "Verbindungen"
 
-#: src/apps/app-settings.tsx
-msgid "Connections in use"
-msgstr "Verwendete Verbindungen"
+#: src/apps/resource-bindings.tsx
+#: src/routes/_shell.connectors.$integration.tsx
+msgid "Connector"
+msgstr "Konnektor"
+
+#: src/connections/integrations-sidebar.tsx
+#: src/connections/integrations-skeleton.tsx
+#: src/frame/app-sidebar.tsx
+#: src/routes/_shell.connectors.$integration.tsx
+#: src/routes/_shell.connectors.index.tsx
+msgid "Connectors"
+msgstr "Konnektoren"
+
+#: src/apps/app-integrations.tsx
+msgid "Connectors it needs"
+msgstr "Konnektoren, die sie braucht"
 
 #: src/connections/integration-item.tsx
 msgid "Connects with a key"
@@ -5539,6 +5590,10 @@ msgstr "Ausgeschnitten"
 msgid "Dark"
 msgstr "Dunkel"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Dark edge"
+msgstr "Dunkler Rand"
+
 #: src/drafts/share-with-team.tsx
 msgid "Data"
 msgstr "Daten"
@@ -5678,6 +5733,10 @@ msgstr "Abgelehnt: {title}"
 #: src/frame/ui-words.tsx
 msgid "Decrease"
 msgstr "Verringern"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Deep"
+msgstr "Tief"
 
 #: src/workflows/resource-params.tsx
 msgid "Default"
@@ -6259,6 +6318,14 @@ msgstr "In einem Lauf getan"
 msgid "Done right"
 msgstr "Richtig erledigt"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Door"
+msgstr "Tür"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Dots"
+msgstr "Punkte"
+
 #: src/chat/sidebar-chats.tsx
 #: src/frame/panels/rename.tsx
 msgid "Double-click or press F2 to rename"
@@ -6397,10 +6464,18 @@ msgstr "Ein Ereignis verworfen, das kein Workflow annehmen konnte"
 msgid "Dublin"
 msgstr "Dublin"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Dunes"
+msgstr "Dünen"
+
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Duration"
 msgstr "Dauer"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Dusk"
+msgstr "Dämmerung"
 
 #: src/connections/http-connections.tsx
 msgid "Each allows everything under it; / allows all paths."
@@ -7709,6 +7784,10 @@ msgstr "Aus Ihrem HR- oder Lohnsystem. Microsoft 365 oder Google lässt sich sp�
 msgid "From your interview, version {version}"
 msgstr "Aus Ihrem Interview, Version {version}"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Fuji"
+msgstr "Fuji"
+
 #: src/settings/staff-access.tsx
 msgid "Full access"
 msgstr "Voller Zugriff"
@@ -7918,6 +7997,10 @@ msgstr "Grasp fragt"
 msgid "Grasp asks what it should do, one question at a time."
 msgstr "Grasp fragt, was der Agent tun soll, eine Frage nach der anderen."
 
+#: src/frame/page-states.tsx
+msgid "Grasp can be reached"
+msgstr "Grasp ist erreichbar"
+
 #: src/chat/global-chat.tsx
 #: src/core.ts
 #: src/interview/api.ts
@@ -7941,7 +8024,7 @@ msgid "Grasp can’t say how far it got just now. It goes on all the same."
 msgstr "Grasp kann gerade nicht sagen, wie weit es ist. Es läuft trotzdem weiter."
 
 #: src/connections/request-app-dialog.tsx
-msgctxt "“Requested” is the name of a section on the Integrations page."
+msgctxt "“Requested” is the name of a section on the Connectors page."
 msgid "Grasp checks what it takes to connect it. You find it under Requested."
 msgstr "Grasp prüft, was es braucht, um sie zu verbinden. Sie finden sie unter Angefragt."
 
@@ -8095,7 +8178,7 @@ msgid "Grasp staff access"
 msgstr "Zugriff der Grasp-Mitarbeitenden"
 
 #: src/connections/integration-facts.ts
-#: src/routes/_shell.integrations.index.tsx
+#: src/routes/_shell.connectors.index.tsx
 msgid "Grasp staff can't connect accounts or change what is offered here: that is for the organization's own people."
 msgstr "Das Grasp-Team kann hier keine Konten verbinden und nicht ändern, was angeboten wird: Das ist Sache der eigenen Leute der Organisation."
 
@@ -8146,6 +8229,10 @@ msgstr "Grasps Chat"
 #: src/settings/staff-access.tsx
 msgid "Grasp's team can help here until then"
 msgstr "Bis dahin kann das Grasp-Team hier helfen"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Grid"
+msgstr "Punktraster"
 
 #: src/routes/_shell.settings.brain.tsx
 msgid "Group {number}"
@@ -8823,6 +8910,10 @@ msgctxt "an advisory's severity"
 msgid "Info"
 msgstr "Info"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Ink"
+msgstr "Tinte"
+
 #: src/frame/ui-words.tsx
 msgctxt "a model's tokens"
 msgid "Input"
@@ -8859,20 +8950,6 @@ msgstr "Anweisungen"
 #: src/apps/app-settings.tsx
 msgid "Instructions for this App"
 msgstr "Anweisungen für diese App"
-
-#: src/apps/resource-bindings.tsx
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "Integration"
-msgstr "Integration"
-
-#: src/apps/app-integrations.tsx
-#: src/connections/integrations-sidebar.tsx
-#: src/connections/integrations-skeleton.tsx
-#: src/frame/app-sidebar.tsx
-#: src/routes/_shell.integrations.$integration.tsx
-#: src/routes/_shell.integrations.index.tsx
-msgid "Integrations"
-msgstr "Integrationen"
 
 #: src/activity/audit-event.tsx
 msgid "Integrity"
@@ -9257,7 +9334,7 @@ msgstr "Ihr Zugriff ist abgelaufen und kann hier nicht neu verbunden werden."
 
 #: src/connections/connection-list.tsx
 msgid "Its access ran out. An admin must offer this connector again before it can be reconnected."
-msgstr "Ihr Zugriff ist abgelaufen. Ein Admin muss diesen Connector erneut anbieten, bevor sie neu verbunden werden kann."
+msgstr "Ihr Zugriff ist abgelaufen. Ein Admin muss diesen Konnektor erneut anbieten, bevor sie neu verbunden werden kann."
 
 #: src/connections/connection-list.tsx
 msgid "Its access ran out. An admin of your organization can reconnect it."
@@ -9297,9 +9374,9 @@ msgid "Its code can't be read"
 msgstr "Ihr Code kann nicht gelesen werden"
 
 #: src/apps/app-integrations.tsx
-msgctxt "why an integration is one of an App's"
+msgctxt "why a connector is one of an App's"
 msgid "Its code uses it"
-msgstr "Ihr Code nutzt sie"
+msgstr "Ihr Code nutzt ihn"
 
 #: src/connections/http-connections.tsx
 msgid "Its credential is deleted, and every App and workflow loses it. Add it again to use it again."
@@ -9896,10 +9973,19 @@ msgstr "Rechtliche Aufbewahrung {hold} von Version {label} aufheben?"
 msgid "Light"
 msgstr "Hell"
 
+#: src/settings/backdrop-settings.tsx
+msgctxt "a background's colour"
+msgid "Light"
+msgstr "Hell"
+
 #: src/settings/composer-settings.tsx
 msgctxt "Grasp's own working light"
 msgid "Light"
 msgstr "Licht"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Light edge"
+msgstr "Heller Rand"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Light up the dots"
@@ -9908,6 +9994,10 @@ msgstr "Punkte hervorheben"
 #: src/projects/project-dialog.tsx
 msgid "Lightbulb"
 msgstr "Glühbirne"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Lime"
+msgstr "Limette"
 
 #: src/frame/ui-words.tsx
 msgctxt "a change's lines"
@@ -10063,8 +10153,8 @@ msgid "Loading {many}"
 msgstr "{many} werden geladen"
 
 #: src/connections/integrations-skeleton.tsx
-msgid "Loading integrations"
-msgstr "Integrationen werden geladen"
+msgid "Loading connectors"
+msgstr "Konnektoren werden geladen"
 
 #: src/frame/ui-words.tsx
 msgid "Loading more {many}"
@@ -10436,8 +10526,8 @@ msgid "members of the team in {field}"
 msgstr "Mitgliedern des Teams in {field}"
 
 #: src/connections/app/words.ts
-msgid "Members see it in Integrations."
-msgstr "Mitglieder sehen es unter Integrationen."
+msgid "Members see it in Connectors."
+msgstr "Mitglieder sehen es unter Konnektoren."
 
 #: src/brain/brain-section.tsx
 #: src/brain/memories-page.tsx
@@ -10486,6 +10576,7 @@ msgstr "Erlaubte Methoden"
 msgid "Microphone: {name}"
 msgstr "Mikrofon: {name}"
 
+#: src/settings/backdrop-settings.tsx
 #: src/settings/composer-settings.tsx
 msgid "Mint"
 msgstr "Minze"
@@ -11120,6 +11211,10 @@ msgstr "Es ist kein KI-Anbieter verbunden."
 msgid "No answer by {date}: it closes."
 msgstr "Keine Antwort bis {date}: dann wird sie geschlossen."
 
+#: src/frame/page-states.tsx
+msgid "No answer from Grasp yet"
+msgstr "Noch keine Antwort von Grasp"
+
 #: src/agents/setup/apps-picker.tsx
 msgid "No app by that name."
 msgstr "Keine App mit diesem Namen."
@@ -11132,7 +11227,7 @@ msgstr "Keine App heißt „{asked}“"
 msgid "No apps added yet."
 msgstr "Noch keine Apps hinzugefügt."
 
-#: src/routes/_shell.integrations.index.tsx
+#: src/routes/_shell.connectors.index.tsx
 msgid "No apps match your search"
 msgstr "Keine Apps passen zu Ihrer Suche"
 
@@ -11182,7 +11277,15 @@ msgstr "Noch kein Code"
 
 #: src/brain/brain.ts
 msgid "No connector yet"
-msgstr "Noch kein Connector"
+msgstr "Noch kein Konnektor"
+
+#: src/apps/app-integrations.tsx
+msgid "No connectors match your search."
+msgstr "Kein Konnektor passt zu Ihrer Suche."
+
+#: src/apps/app-integrations.tsx
+msgid "No connectors yet."
+msgstr "Noch keine Konnektoren."
 
 #: src/frame/ui-words.tsx
 msgid "No date"
@@ -11235,14 +11338,6 @@ msgstr "Noch keine Ziele."
 #: src/routes/_shell.settings.brain.tsx
 msgid "No group"
 msgstr "Keine Gruppe"
-
-#: src/apps/app-integrations.tsx
-msgid "No integrations match your search."
-msgstr "Keine Integration passt zu Ihrer Suche."
-
-#: src/apps/app-integrations.tsx
-msgid "No integrations yet."
-msgstr "Noch keine Integrationen."
 
 #: src/agents/agents-overview.tsx
 msgid "No job written yet"
@@ -11553,13 +11648,18 @@ msgstr "Danach nutzt kein Agent mehr {name}. Seine Versionen bleiben als Verlauf
 msgid "None"
 msgstr "Keine"
 
+#: src/settings/backdrop-settings.tsx
+msgctxt "no background"
+msgid "None"
+msgstr "Keine"
+
 #: src/activity/pending.tsx
 msgid "None live"
 msgstr "Keine live"
 
 #: src/apps/resource-bindings.tsx
-msgid "None of the App's integration permissions serves {contract} with every action it declares. Grant one first."
-msgstr "Keine Integrationsberechtigung der App bedient {contract} mit allen deklarierten Aktionen. Erteile zuerst eine."
+msgid "None of the App's permissions on a connection serves {contract} with every action it declares. Grant one first."
+msgstr "Keine Berechtigung der App für eine Verbindung bedient {contract} mit allen deklarierten Aktionen. Erteile zuerst eine."
 
 #: src/interview/read-back.tsx
 msgid "None of this is right"
@@ -11694,7 +11794,7 @@ msgid "Not every choice could be checked: some may be missing from the list."
 msgstr "Nicht jede Auswahl konnte geprüft werden: Einige fehlen womöglich in der Liste."
 
 #: src/frame/page-states.tsx
-#: src/routes/_shell.integrations.$integration.tsx
+#: src/routes/_shell.connectors.$integration.tsx
 #: src/routes/decisions.$decision.tsx
 msgid "Not found"
 msgstr "Nicht gefunden"
@@ -13101,6 +13201,10 @@ msgstr "Erlaubte Pfadpräfixe, eines pro Zeile"
 msgid "Paths"
 msgstr "Pfade"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Pattern"
+msgstr "Muster"
+
 #: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
 #: src/frame/ui-words.tsx
@@ -13351,6 +13455,10 @@ msgstr "Am Ende anheften"
 msgid "Pin to the start"
 msgstr "Am Anfang anheften"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Pixel sand"
+msgstr "Pixelsand"
+
 #: src/apps/release-controls.tsx
 msgid "Place a legal hold"
 msgstr "Rechtliche Aufbewahrung anordnen"
@@ -13472,6 +13580,10 @@ msgstr "Vorschau"
 #: src/inbox/report-viewer.tsx
 msgid "Preview of {name}"
 msgstr "Vorschau von {name}"
+
+#: src/chat/backdrop/preview.tsx
+msgid "Preview of your chat background"
+msgstr "Vorschau Ihres Chat-Hintergrunds"
 
 #: src/inbox/report-viewer.tsx
 msgid "Preview or code"
@@ -13690,6 +13802,10 @@ msgstr "Nach Zeitplan gelaufen"
 #: src/workflows/figures.tsx
 msgid "ran without asking anyone"
 msgstr "liefen, ohne jemanden zu fragen"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Randomize"
+msgstr "Zufällig"
 
 #: src/interview/before.tsx
 msgid "Rather talk with {otherName}?"
@@ -14360,7 +14476,7 @@ msgstr "Erneut anfragen"
 msgid "Request an app"
 msgstr "Eine App anfragen"
 
-#: src/routes/_shell.integrations.index.tsx
+#: src/routes/_shell.connectors.index.tsx
 msgid "Request app"
 msgstr "App anfragen"
 
@@ -14652,6 +14768,10 @@ msgstr "Ziel umformulieren"
 #: src/frame/ui-words.tsx
 msgid "Right arrow for more"
 msgstr "Pfeil nach rechts für mehr"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Rings"
+msgstr "Ringe"
 
 #: src/workflows/business-process.tsx
 msgctxt "business process"
@@ -14982,6 +15102,10 @@ msgstr "Sam kann, wie alle, die die App nutzen, jeden Datensatz in {table} ände
 msgid "Sam, like everyone who uses the App, sees every record in {table}."
 msgstr "Sam sieht, wie alle, die die App nutzen, jeden Datensatz in {table}."
 
+#: src/settings/backdrop-settings.tsx
+msgid "Sand"
+msgstr "Sand"
+
 #: src/agents/agent-page.tsx
 #: src/apps/field-editor.tsx
 #: src/brain/goals-editor.tsx
@@ -15194,7 +15318,7 @@ msgid "Search {name}"
 msgstr "{name} durchsuchen"
 
 #: src/agents/setup/apps-picker.tsx
-#: src/routes/_shell.integrations.index.tsx
+#: src/routes/_shell.connectors.index.tsx
 msgid "Search apps"
 msgstr "Apps suchen"
 
@@ -15203,6 +15327,11 @@ msgstr "Apps suchen"
 msgid "Search chats"
 msgstr "Chats durchsuchen"
 
+#: src/apps/app-integrations.tsx
+#: src/routes/_shell.connectors.index.tsx
+msgid "Search connectors"
+msgstr "Konnektoren durchsuchen"
+
 #: src/activity/audit-log.tsx
 msgid "Search events by person or ID"
 msgstr "Ereignisse nach Person oder ID suchen"
@@ -15210,11 +15339,6 @@ msgstr "Ereignisse nach Person oder ID suchen"
 #: src/apps/indexes-view.tsx
 msgid "Search in {searched}"
 msgstr "Suche in {searched}"
-
-#: src/apps/app-integrations.tsx
-#: src/routes/_shell.integrations.index.tsx
-msgid "Search integrations"
-msgstr "Integrationen durchsuchen"
 
 #: src/routes/_shell.settings.members.tsx
 msgid "Search members"
@@ -16363,6 +16487,10 @@ msgstr "Stakeholder in Grasp eingeladen"
 msgid "Stakeholder named: the {role}"
 msgstr "Stakeholder benannt: {role}"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Starry night"
+msgstr "Sternennacht"
+
 #: src/interview/sound-check.tsx
 msgctxt "begin the interview"
 msgid "Start"
@@ -17209,8 +17337,8 @@ msgid "The App has no permission to read the platform's statistics. Grant one fi
 msgstr "Die App hat keine Berechtigung, die Plattformstatistiken zu lesen. Erteile zuerst eine."
 
 #: src/apps/resource-bindings.tsx
-msgid "The App has too many integrations to check them all on this page, so this binding wasn't checked. Its next request is checked as always."
-msgstr "Die App hat zu viele Integrationen, um sie auf dieser Seite alle zu prüfen, daher wurde diese Bindung nicht geprüft. Ihre nächste Anfrage wird wie immer geprüft."
+msgid "The App has too many connectors to check them all on this page, so this binding wasn't checked. Its next request is checked as always."
+msgstr "Die App hat zu viele Konnektoren, um sie auf dieser Seite alle zu prüfen, daher wurde diese Bindung nicht geprüft. Ihre nächste Anfrage wird wie immer geprüft."
 
 #: src/apps/app-workflows.tsx
 msgid "The App starts no workflow of its own."
@@ -17221,12 +17349,12 @@ msgid "The App's actions can't use it until an admin binds it."
 msgstr "Die Aktionen der App können sie erst nutzen, wenn ein Admin sie bindet."
 
 #: src/apps/resource-bindings.tsx
-msgid "The App's actions reach a model, an integration or knowledge only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
-msgstr "Die Aktionen der App erreichen ein Modell, eine Integration oder Wissen nur über eine Bindung, die ein Admin hier genehmigt. Eine Deklaration gewährt nichts, und das Widerrufen einer Bindung stoppt die nächste Anfrage darüber."
+msgid "The App's actions reach a model, a connector or knowledge only through a binding an admin approves here. Declaring one grants nothing, and revoking a binding stops the next request through it."
+msgstr "Die Aktionen der App erreichen ein Modell, einen Konnektor oder Wissen nur über eine Bindung, die ein Admin hier genehmigt. Eine Deklaration gewährt nichts, und das Widerrufen einer Bindung stoppt die nächste Anfrage darüber."
 
 #: src/apps/resource-bindings.tsx
-msgid "The App's actions reach a model, an integration or knowledge only through a binding an admin of your organization approves."
-msgstr "Die Aktionen der App erreichen ein Modell, eine Integration oder Wissen nur über eine Bindung, die ein Admin deiner Organisation genehmigt."
+msgid "The App's actions reach a model, a connector or knowledge only through a binding an admin of your organization approves."
+msgstr "Die Aktionen der App erreichen ein Modell, einen Konnektor oder Wissen nur über eine Bindung, die ein Admin deiner Organisation genehmigt."
 
 #: src/apps/access-view.tsx
 #: src/apps/draft-changes.tsx
@@ -17353,13 +17481,13 @@ msgstr "Der Geschäftsprozess, dem {name} dient"
 msgid "The catalog can’t be read right now, so nothing can be added. Try again in a moment."
 msgstr "Der Katalog kann gerade nicht gelesen werden, daher kann nichts hinzugefügt werden. Versuchen Sie es gleich noch einmal."
 
-#: src/routes/_shell.integrations.$integration.tsx
+#: src/routes/_shell.connectors.$integration.tsx
 msgid "The catalog doesn't list {app}, so its tools can't be shown."
 msgstr "Der Katalog führt {app} nicht, daher können die Tools nicht angezeigt werden."
 
-#: src/routes/_shell.integrations.$integration.tsx
-msgid "The catalog of integrations couldn't be read, so this page shows only what your accounts say about it."
-msgstr "Der Katalog der Integrationen konnte nicht gelesen werden, deshalb zeigt diese Seite nur, was Ihre Konten darüber sagen."
+#: src/routes/_shell.connectors.$integration.tsx
+msgid "The catalog of connectors couldn't be read, so this page shows only what your accounts say about it."
+msgstr "Der Katalog der Konnektoren konnte nicht gelesen werden, deshalb zeigt diese Seite nur, was Ihre Konten darüber sagen."
 
 #: src/apps/app-workflows.tsx
 msgid "The change goes into the App's draft, which declares what the workflow's live version has. Once you publish the draft, the App starts that workflow's live version by this name. Starting it still takes the App's own permission on the workflow, which an admin grants."
@@ -18341,7 +18469,7 @@ msgstr "Bis Eintrag {through}…"
 
 #: src/connections/connect-dialog.tsx
 msgid "Through Grasp's own connector, which keeps the access in your deployment. Your workflows can use it once it is connected, only for what you allow."
-msgstr "Über den eigenen Connector von Grasp, der den Zugriff in Ihrer Installation aufbewahrt. Ihre Workflows können es nach dem Verbinden nutzen, nur für das, was Sie erlauben."
+msgstr "Über den eigenen Konnektor von Grasp, der den Zugriff in Ihrer Installation aufbewahrt. Ihre Workflows können es nach dem Verbinden nutzen, nur für das, was Sie erlauben."
 
 #: src/brain/sources-page.tsx
 msgctxt "how search found a memory"
@@ -19356,6 +19484,10 @@ msgstr "Wartet bis"
 msgid "Walk into every meeting knowing who is coming and what is still open."
 msgstr "In jedes Meeting gehen und wissen, wer kommt und was noch offen ist."
 
+#: src/settings/backdrop-settings.tsx
+msgid "Wanderer"
+msgstr "Wanderer"
+
 #: src/frame/ui-words.tsx
 msgctxt "a badge's dot"
 msgid "Warning"
@@ -19405,6 +19537,10 @@ msgstr "Vorher: unbekannt"
 #: src/brain/brain.ts
 msgid "Was: {before}"
 msgstr "Vorher: {before}"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Wave"
+msgstr "Welle"
 
 #. A folder of sources: conversations, Pulse, documents or connections
 #: src/brain/brain.ts
@@ -19764,6 +19900,7 @@ msgstr "Wie sollen wir ihn nennen?"
 msgid "What should we call your agent?"
 msgstr "Wie sollen wir Ihren Agenten nennen?"
 
+#: src/chat/backdrop/preview.tsx
 #: src/chat/chat-start.tsx
 msgid "What should we look at today?"
 msgstr "Was sollen wir uns heute ansehen?"
@@ -20131,7 +20268,7 @@ msgstr "Welche KI"
 msgid "Which AI should I think with?"
 msgstr "Mit welcher KI soll ich denken?"
 
-#: src/routes/_shell.integrations.$integration.tsx
+#: src/routes/_shell.connectors.$integration.tsx
 msgid "Which Apps and agents hold permissions"
 msgstr "Welche Apps und Agenten Berechtigungen haben"
 

@@ -1,16 +1,16 @@
 import { FormApi } from "@tanstack/react-form";
 import { describe, expect, it } from "vite-plus/test";
 
-import { clientInternals, GraspClient } from "../src/client-core.ts";
-import { GraspError } from "../src/client-error.ts";
-import type { ClientTransport } from "../src/client-transport.ts";
-import { bindForm } from "../src/form-binding.ts";
-import type { FormBinding } from "../src/form-binding.ts";
-import type { FormApiOf, FormOptionsInput } from "../src/form-types.ts";
-import { v } from "../src/index.ts";
-import type { Id } from "../src/index.ts";
-import { readWorkflowReference } from "../src/workflow-reference-read.ts";
-import { respondToDecision } from "../src/workflow-respond.ts";
+import { clientInternals, GraspClient } from "../src/app/client-core.ts";
+import { GraspError } from "../src/app/client-error.ts";
+import type { ClientTransport } from "../src/app/client-transport.ts";
+import { bindForm } from "../src/app/form-binding.ts";
+import type { FormBinding } from "../src/app/form-binding.ts";
+import type { FormApiOf, FormOptionsInput } from "../src/app/form-types.ts";
+import { v } from "../src/app/index.ts";
+import type { Id } from "../src/app/index.ts";
+import { readWorkflowReference } from "../src/app/workflow-reference-read.ts";
+import { respondToDecision } from "../src/app/workflow-respond.ts";
 import { functions } from "./notes/.grasp/functions.ts";
 import { api, workflows } from "./notes/server/_generated/api.ts";
 

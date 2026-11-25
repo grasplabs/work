@@ -92,7 +92,7 @@ const Match = ({
         <Button asChild size="sm" variant="outline">
           <Link
             params={{ integration: integration.key }}
-            to="/integrations/$integration"
+            to="/connectors/$integration"
           >
             {own ? t`Open` : t`Connect`}
           </Link>
@@ -139,7 +139,7 @@ const Sent = () => {
             message:
               "Grasp checks what it takes to connect it. You find it under Requested.",
             context:
-              "“Requested” is the name of a section on the Integrations page.",
+              "“Requested” is the name of a section on the Connectors page.",
           })}
         </DialogDescription>
       </DialogHeader>

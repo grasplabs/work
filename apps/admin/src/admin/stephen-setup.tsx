@@ -1,7 +1,7 @@
 /**
- * Changing how Stephen and Claire are set up for one company, from its
- * Interviews: the languages they interview in, what they leave alone and
- * the words they have to know. Saved in the company's Grasp as a command
+ * Changing how Stephen is set up for one company, from its Interviews:
+ * the languages he interviews in, what he leaves alone and the words he
+ * has to know. Saved in the company's Grasp as a command
  * (commands.tsx), it holds from the next interview turn on; taking it
  * back leaves what the first conversation suggests.
  */
@@ -120,7 +120,7 @@ const SetupDialog = ({
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>How Stephen and Claire are set up</DialogTitle>
+          <DialogTitle>How Stephen is set up</DialogTitle>
           <DialogDescription>
             For this company only. It holds from the next interview turn on.
           </DialogDescription>
@@ -133,9 +133,9 @@ const SetupDialog = ({
           }}
         >
           <Field>
-            <FieldLabel>Languages they interview in</FieldLabel>
+            <FieldLabel>Languages he interviews in</FieldLabel>
             <ToggleGroup
-              aria-label="Languages they interview in"
+              aria-label="Languages he interviews in"
               multiple
               onValueChange={(value: string[]) => {
                 setLanguages(value);
@@ -156,7 +156,7 @@ const SetupDialog = ({
             </FieldDescription>
           </Field>
           <Field>
-            <FieldLabel htmlFor={limitsId}>What they leave alone</FieldLabel>
+            <FieldLabel htmlFor={limitsId}>What he leaves alone</FieldLabel>
             <Textarea
               id={limitsId}
               onChange={(event) => {
@@ -166,12 +166,12 @@ const SetupDialog = ({
               value={limits}
             />
             <FieldDescription>
-              One a line. They don’t ask about it, and move on when somebody
+              One a line. He doesn’t ask about it, and moves on when somebody
               brings it up.
             </FieldDescription>
           </Field>
           <Field>
-            <FieldLabel htmlFor={termsId}>Words they have to know</FieldLabel>
+            <FieldLabel htmlFor={termsId}>Words he has to know</FieldLabel>
             <Textarea
               id={termsId}
               onChange={(event) => {
@@ -181,8 +181,8 @@ const SetupDialog = ({
               value={terms}
             />
             <FieldDescription>
-              One a line: tools, products and the company’s own words, so they
-              hear them right.
+              One a line: tools, products and the company’s own words, so he
+              hears them right.
             </FieldDescription>
           </Field>
           {problem === null ? null : (

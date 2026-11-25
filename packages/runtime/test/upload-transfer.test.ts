@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { clientInternals, GraspClient } from "../src/client-core.ts";
-import { clientError, GraspError } from "../src/client-error.ts";
-import type { FileTransport, TransferProgress } from "../src/file-transport.ts";
-import { UploadTransfer } from "../src/upload-transfer.ts";
+import { clientInternals, GraspClient } from "../src/app/client-core.ts";
+import { clientError, GraspError } from "../src/app/client-error.ts";
+import type {
+  FileTransport,
+  TransferProgress,
+} from "../src/app/file-transport.ts";
+import { UploadTransfer } from "../src/app/upload-transfer.ts";
 
 // One `useUpload` hook's transfer (spec 10.7.5), against the page's side
 // of the file port, which these tests play: the page is outside the

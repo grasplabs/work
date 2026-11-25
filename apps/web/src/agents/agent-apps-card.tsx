@@ -559,7 +559,7 @@ const AgentApps = ({
                           params={{
                             integration: integrationKey(app.source, app.id),
                           }}
-                          to="/integrations/$integration"
+                          to="/connectors/$integration"
                         >
                           {t`Connect`}
                         </Link>

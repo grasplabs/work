@@ -5,7 +5,7 @@ import type { InterviewLocale } from "@grasp-os/shared/onboarding";
 // lines in each language Grasp speaks, as plain records like the
 // interviewer's (src/onboarding/interviewer-text.ts), not Lingui, which is
 // the web's. Each line is a whole sentence or more in every language, with
-// the same form of address the interviews use (stephen.ts): "je" in Dutch,
+// the same form of address the interviews use (@grasp-os/shared/interviewers/stephen): "je" in Dutch,
 // "Sie" in German, "vous" in French, "tú" in Spanish. A line may leave room
 // for a value (`{count}`); `say` fills it, and the types make every caller
 // give each value its line names. The cards (cards.tsx) put the lines on

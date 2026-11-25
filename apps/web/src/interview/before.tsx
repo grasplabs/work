@@ -303,7 +303,7 @@ const useWhatWeDo = (kind: InterviewKind): string => {
  * What this is, on one calm screen, in words a child of ten follows: what
  * happens, what becomes of their words, and that it is theirs to stop.
  * What it promises is what the interviewer says when asked, word for word
- * (core's onboarding/stephen.ts, `WHO`). Nothing is said out loud here:
+ * (`WHO` in @grasp-os/shared/interviewers/stephen). Nothing is said out loud here:
  * this is to be read at one's own pace. Whoever would rather talk with the
  * other one goes there with one quiet line.
  */

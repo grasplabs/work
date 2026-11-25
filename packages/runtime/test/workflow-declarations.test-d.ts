@@ -7,13 +7,13 @@
 // `@ts-expect-error` must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
-import { permission, v } from "../src/index.ts";
+import { permission, v } from "../src/app/index.ts";
 import type {
   WorkflowArgsOf,
   WorkflowReturnOf,
   WorkflowPermission,
-} from "../src/index.ts";
-import { useWorkflow } from "../src/react.ts";
+} from "../src/app/index.ts";
+import { useWorkflow } from "../src/app/react.ts";
 import type { archiveNotes } from "./notes/grasp.config.ts";
 import { summarizeNote } from "./notes/grasp.config.ts";
 import { workflows } from "./notes/server/_generated/api.ts";

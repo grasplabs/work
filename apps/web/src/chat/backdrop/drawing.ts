@@ -1,6 +1,5 @@
-// What Backdrop and its drawer share: how a drawing is started, run, held
-// and stopped. The drawer (sand.ts) is loaded only when the backdrop first
-// comes into view.
+// What Backdrop and its two drawers share: how a drawing is started, run, held and stopped. The
+// drawers themselves (sand.ts, shader.ts) are loaded only when a backdrop first comes into view.
 
 /** A backdrop being drawn on its canvas. */
 export interface Drawing {

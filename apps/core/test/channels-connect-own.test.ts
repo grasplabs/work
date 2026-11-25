@@ -79,7 +79,7 @@ const started = async (who: Member) => {
   const { url } = await who.api.connections.start({
     provider: "microsoft",
     scope: "personal",
-    returnTo: "/integrations",
+    returnTo: "/connectors",
   });
   return new URL(url);
 };
@@ -124,7 +124,7 @@ describe("a member's own Microsoft 365, from Teams", setUpTime, () => {
     );
 
     expect(response.headers.get("location")).toMatch(
-      new RegExp(`^${clientOrigin}/integrations\\?connection=`, "u")
+      new RegExp(`^${clientOrigin}/connectors\\?connection=`, "u")
     );
     const { lines, activities } = await reached(ann.teams.conversation);
     expect(lines).toContain(
@@ -171,8 +171,8 @@ describe("a member's own Microsoft 365, from Teams", setUpTime, () => {
       swapped.headers.get("location"),
       notHers.headers.get("location"),
     ]).toStrictEqual([
-      `${clientOrigin}/integrations?connectionError=connection.flow_invalid`,
-      `${clientOrigin}/integrations?connectionError=connection.not_own_account`,
+      `${clientOrigin}/connectors?connectionError=connection.flow_invalid`,
+      `${clientOrigin}/connectors?connectionError=connection.not_own_account`,
     ]);
     const after = await reached(ann.teams.conversation);
     expect(after.activities).toHaveLength(before.activities.length);

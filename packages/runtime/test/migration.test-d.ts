@@ -6,8 +6,8 @@
 // `@ts-expect-error` below must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
-import { defineMigration, v } from "../src/index.ts";
-import type { JsonValue } from "../src/index.ts";
+import { defineMigration, v } from "../src/app/index.ts";
+import type { JsonValue } from "../src/app/index.ts";
 
 const noteFields = {
   title: v.string(),

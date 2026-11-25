@@ -77,7 +77,7 @@ export const sectionTo = {
   interviews: "/organizations/$clientId/interviews",
   workflows: "/organizations/$clientId/workflows",
   setup: "/organizations/$clientId/setup",
-  integrations: "/organizations/$clientId/integrations",
+  integrations: "/organizations/$clientId/connectors",
   usage: "/organizations/$clientId/ai-use",
   value: "/organizations/$clientId/hours",
   brain: "/organizations/$clientId/brain",
@@ -104,8 +104,7 @@ export const sectionWords: Record<
   },
   interviews: {
     title: "Interviews",
-    about:
-      "Where every team stands, everyone by name, and how Stephen and Claire did.",
+    about: "Where every team stands, everyone by name, and how Stephen did.",
     icon: MessagesSquareIcon,
   },
   workflows: {
@@ -120,7 +119,7 @@ export const sectionWords: Record<
     icon: ServerIcon,
   },
   integrations: {
-    title: "Integrations",
+    title: "Connectors",
     about:
       "What the company connected, who connected it, and what Grasp may do there.",
     icon: PlugIcon,

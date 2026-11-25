@@ -1,5 +1,6 @@
 import { actorOf } from "@grasp-os/shared/audit";
 import { brainUploadErrors } from "@grasp-os/shared/brain-sources";
+import { NAMED } from "@grasp-os/shared/interviewers/stephen";
 import { log } from "@grasp-os/shared/log";
 import type { InterviewLocale } from "@grasp-os/shared/onboarding";
 import {
@@ -24,7 +25,6 @@ import {
 import { localExtractor } from "../files/extract.ts";
 import { signatures } from "../files/upload-checks.ts";
 import { modelSettings, modelForRole, models } from "../models.ts";
-import { NAMED } from "./stephen.ts";
 import { onboardingStore } from "./store.ts";
 
 // A document the company's admin shares in the onboarding (GRA-298), from

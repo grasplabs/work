@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { currencyDecimals } from "../src/index.ts";
+import { currencyDecimals } from "../src/app/index.ts";
 
 // A currency's minor-unit decimals (pure logic): ISO 4217's, pinned in the
 // SDK, never what `Intl` answers in one engine or another.

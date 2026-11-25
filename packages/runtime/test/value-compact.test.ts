@@ -4,8 +4,8 @@ import {
   compactDescriptor,
   CompactDescriptorError,
   descriptorFromCompact,
-} from "../src/value-compact.ts";
-import { v } from "../src/values.ts";
+} from "../src/app/value-compact.ts";
+import { v } from "../src/common/values.ts";
 
 // A descriptor's compact form (pure logic, from its threat model): it is
 // written by hand and read from stored text, so the reader takes nothing

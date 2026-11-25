@@ -374,7 +374,7 @@ describe("the connect dialog's steps", () => {
         connectToolkitWithKey: async (request: unknown) => {
           sent.push(request);
           return await Promise.resolve({
-            url: "/integrations/composio:pipedesk?connection=c1",
+            url: "/connectors/composio:pipedesk?connection=c1",
           });
         },
       }
@@ -399,10 +399,10 @@ describe("the connect dialog's steps", () => {
           tools: [{ name: "HUBSPOT_LIST_CONTACTS", read: true }],
           consent: composioKeyConsentText,
           values: { generic_api_key: "pd_secret", subdomain: "acme" },
-          returnTo: "/integrations/composio:pipedesk",
+          returnTo: "/connectors/composio:pipedesk",
         },
       ],
-      sentTo: [["/integrations/composio:pipedesk?connection=c1"]],
+      sentTo: [["/connectors/composio:pipedesk?connection=c1"]],
     });
   });
 

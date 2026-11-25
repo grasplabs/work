@@ -36,9 +36,8 @@ import { routed, signedInWithRole, unique, uniqueLetters } from "./sign-in.ts";
 //   own.
 // - A line said twice paid twice, or the voice running on past its budget.
 
-/** Stephen's voice and Claire's, by their Mistral IDs, the defaults. */
+/** Stephen's voice, by its Mistral ID. */
 const stephen = "voice_485";
-const claire = "voice_478";
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -291,10 +290,10 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
   });
 
   it.each([
-    ["Stephen's line in his voice", {}, stephen],
-    ["a quick line as any other", { quick: true }, stephen],
-    ["Claire's line in her voice", { speaker: "claire" }, claire],
-  ])("says %s", async (_, change, voice) => {
+    ["Stephen's line in his voice", {}],
+    ["a quick line as any other", { quick: true }],
+    ["a line asked for in Claire's voice in his", { speaker: "claire" }],
+  ])("says %s", async (_, change) => {
     const { link } = await opened();
     const text = newLine();
 
@@ -302,7 +301,7 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     await response.body?.cancel();
 
     await expect(askedFor(text)).resolves.toStrictEqual([
-      { input: text, model: "voxtral-mini-tts-3-0", voice_id: voice },
+      { input: text, model: "voxtral-mini-tts-3-0", voice_id: stephen },
     ]);
   });
 

@@ -32,10 +32,10 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 
-import { checkExpression } from "../src/expression-check.ts";
-import { own } from "../src/expression-runtime.ts";
-import { expressionMaxDepth } from "../src/oxc-parse.ts";
-import { parse } from "../src/workflow-generated.ts";
+import { own } from "../src/common/expression-runtime.ts";
+import { expressionMaxDepth } from "../src/common/oxc-parse.ts";
+import { checkExpression } from "../src/workflow/expression-check.ts";
+import { parse } from "../src/workflow/workflow-generated.ts";
 
 /** The code an expression runs as. */
 const generated = (source: string): string => {

@@ -2,14 +2,14 @@ import { appLimits } from "@grasp-os/shared/app-limits";
 import { appMaxFunctions } from "@grasp-os/shared/function-limits";
 import { describe, expect, test } from "vite-plus/test";
 
-import { emptyDefinition } from "../src/definition-types.ts";
-import { parseProgram } from "../src/oxc-parse.ts";
-import { declaredFunctionsIn } from "../src/server-modules.ts";
-import type { Declared } from "../src/server-modules.ts";
+import { emptyDefinition } from "../src/app/definition-types.ts";
+import { declaredFunctionsIn } from "../src/app/server-modules.ts";
+import type { Declared } from "../src/app/server-modules.ts";
 import {
   generatedServerSources,
   serverFunctionsIn,
-} from "../src/server-syntax.ts";
+} from "../src/app/server-syntax.ts";
+import { parseProgram } from "../src/common/oxc-parse.ts";
 
 // The functions an App's server modules declare, read from their syntax
 // alone, as `server/_generated/` is made from them on every save: a

@@ -8,10 +8,10 @@ import type {
   Doc,
   PaginationResult,
   Withheld,
-} from "../src/server.ts";
-import type { Id, Infer } from "../src/value-types.ts";
-import { defineSchema, defineTable, v } from "../src/values.ts";
-import type { paginationOptionsValidator } from "../src/values.ts";
+} from "../src/app/server.ts";
+import type { Id, Infer } from "../src/common/value-types.ts";
+import { defineSchema, defineTable, v } from "../src/common/values.ts";
+import type { paginationOptionsValidator } from "../src/common/values.ts";
 
 const schema = defineSchema({
   people: defineTable({ name: v.string() }),
