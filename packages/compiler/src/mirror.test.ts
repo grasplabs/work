@@ -413,11 +413,33 @@ describe("a tool with no spec to hold it to", () => {
     ]);
   });
 
-  it("takes the vendor's operation name only where its route can't name it", () => {
+  it("takes the vendor's operation name only where the rule can't read its path", () => {
     expect(
       messages(
         [
           tool("drive.getContent", "GET /drive/root:/{name}:/content"),
+          tool(
+            "drives.root.search",
+            "GET /drives/{drive}/root/search(q='{q}')"
+          ),
+          tool(
+            "drives.items.workbook.tables.rows.itemAt.range.update",
+            "PATCH /drives/{drive}/items/{workbook}/workbook/tables/{table}/rows/itemAt(index={index})/range"
+          ),
+          tool(
+            "me.chats.messages.list",
+            "GET /me/chats/19:{chat}/messages",
+            page(v.object({ id: v.string() }))
+          ),
+          {
+            ...tool("me.drive.root.content.upload", ""),
+            routes: [
+              "GET /me",
+              "GET /me/drive/root:/{folder}/{name}",
+              "GET /me/chats/19:{chat}",
+              "PUT /me/drive/root:/{folder}/{name}:/content",
+            ],
+          },
           tool("deals.getDeal", "GET /deals/{id}"),
           tool("deals.get", "GET /v2.0/deals/{id}"),
           tool("deals.delete", "DELETE /{collection}/{id}"),

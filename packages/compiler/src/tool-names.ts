@@ -51,8 +51,13 @@ export interface Route {
  */
 const literalSegment = /^[A-Za-z0-9._~-]+$/u;
 
-/** A parameter segment: the whole segment, one plain name. */
-const parameterSegment = /^\{(?<name>[A-Za-z_]\w{0,63})\}$/u;
+/**
+ * A parameter segment: one plain name, maybe after a literal prefix that
+ * ends in a colon, which the value never holds (`19:{chat}`, as every Teams
+ * chat's ID starts, the template's own as the SDK has it).
+ */
+const parameterSegment =
+  /^(?:[A-Za-z0-9._~-]+:)?\{(?<name>[A-Za-z_]\w{0,63})\}$/u;
 
 /**
  * A part of a tool's name: a family's segment or an action. What an MCP
