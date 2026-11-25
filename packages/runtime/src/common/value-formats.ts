@@ -67,13 +67,18 @@ export const isDateTime = (text: string): boolean => {
 // `//` and then a host: the parser reads `https:///host` as `https://host`.
 const webUrlStart = /^https?:\/\/[^/]/iu;
 
+// What IDNA drops from a host without a word (a zero-width space, a soft
+// hyphen), so the text would name another host than the one it reads as.
+const invisible = /\p{Default_Ignorable_Code_Point}/u;
+
 /**
  * An absolute `http` or `https` URL, read as the WHATWG URL parser reads
  * it: as an App's `new URL` and connect's fetch do, a host included
  * (percent-decoded, IDNA-mapped, IPv4 in its short forms). What that parser
  * would quietly mend in how the address is written is refused instead:
  * spaces and control characters, which it drops; a backslash, which it
- * reads as `/`; and a scheme without `//` and a host after it. So is
+ * reads as `/`; a character IDNA drops unseen; and a scheme without `//`
+ * and a host after it. So is
  * any user name or password, even an empty one (`@` before the host:
  * `https://good.example@evil.example`), which fetch refuses anyway.
  */
@@ -85,6 +90,9 @@ export const isWebUrl = (text: string): boolean => {
   }
   const [authority = ""] = text.slice(text.indexOf("//") + 2).split(/[/?#]/u);
   return (
-    webUrlStart.test(text) && !authority.includes("@") && URL.canParse(text)
+    webUrlStart.test(text) &&
+    !authority.includes("@") &&
+    !invisible.test(text) &&
+    URL.canParse(text)
   );
 };

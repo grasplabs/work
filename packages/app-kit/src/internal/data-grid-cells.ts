@@ -221,11 +221,17 @@ const showers: Readonly<
   // Any JSON, read as its own kinds: a list's items and an object's fields.
   json: (value, { descriptor, text, language }) => {
     if (Array.isArray(value)) {
+      // Objects and lists in a list each read as one, apart from the next.
+      const separator = value.some(
+        (each: unknown) => isRecord(each) || Array.isArray(each)
+      )
+        ? "; "
+        : ", ";
       return (
         value
           // oxlint-disable-next-line no-use-before-define -- each item shows as its own kind does
           .map((each: unknown) => shownCell(each, descriptor, text, language))
-          .join(", ")
+          .join(separator)
       );
     }
     return isRecord(value)

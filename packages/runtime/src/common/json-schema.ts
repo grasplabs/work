@@ -4,7 +4,8 @@ import type { JsonValue, ValueDescriptor } from "./value-descriptor.ts";
 // Schema: a model told the shape its answer must take, say. It describes;
 // it never decides. Every value is still checked by the descriptor itself
 // (`schemaFromDescriptor`), which holds rules JSON Schema can't say here
-// (trimming, canonical form), so this may be looser, never stricter.
+// (trimming, canonical form), so this may be looser, and is stricter only
+// where a format is (`date-time` and `iri`, see `scalarSchema`).
 
 /** A JSON Schema, as plain data. */
 export type JsonSchema = Record<string, JsonValue>;

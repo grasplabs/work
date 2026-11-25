@@ -15,11 +15,13 @@ describe("any JSON in a cell", () => {
     expect([
       shown({ stage: "won", probability: 90, tags: ["hot", "eu"] }),
       shown([1, true, "three"]),
+      shown([{ a: 1, b: 2 }, { a: 3 }]),
       shown("plain"),
       shown(null),
     ]).toStrictEqual([
       "stage: won, probability: 90, tags: hot, eu",
       "1, Yes, three",
+      "a: 1, b: 2; a: 3",
       "plain",
       "",
     ]);

@@ -373,7 +373,8 @@ const isRequired = (descriptor: ValueDescriptor | undefined): boolean => {
   if (descriptor.kind === "array") {
     return (descriptor.min ?? 0) > 0;
   }
-  return descriptor.kind !== "boolean";
+  // Any JSON takes null, so it is never missing.
+  return descriptor.kind !== "boolean" && descriptor.kind !== "json";
 };
 
 /**
