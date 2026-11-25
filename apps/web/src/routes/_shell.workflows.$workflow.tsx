@@ -152,6 +152,9 @@ const styles = stylex.create({
       default: "inline-flex",
       "@container bar (width < 51rem)": "none",
     },
+    // In the bar's small words, its "Allow it" too, as #2503's bar draws them.
+    fontSize: font.textXs,
+    lineHeight: font.textXsLine,
   },
 });
 
