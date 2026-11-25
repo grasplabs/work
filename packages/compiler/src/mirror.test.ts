@@ -127,9 +127,11 @@ const dealsList = (changes: Partial<MirrorTool> = {}): MirrorTool => ({
 });
 
 const messages = (tools: MirrorTool[], withSpec = true) =>
-  checkMirror(tools, withSpec ? spec : undefined).map(
-    (problem) => `${problem.tool}: ${problem.message}`
-  );
+  checkMirror(
+    tools,
+    ["api.example.test", "elsewhere.example.test"],
+    withSpec ? spec : undefined
+  ).map((problem) => `${problem.tool}: ${problem.message}`);
 
 describe("a tool held to the vendor's spec", () => {
   it("passes as the generator made it", () => {
@@ -237,7 +239,7 @@ describe("a tool held to the vendor's spec", () => {
     ]);
   });
 
-  it("is refused a route the spec doesn't have, and a second route of another family", () => {
+  it("is refused a route the spec doesn't have, or one on another host", () => {
     expect(
       messages([
         dealsList({
@@ -246,13 +248,11 @@ describe("a tool held to the vendor's spec", () => {
         }),
         dealsList({ routes: ["GET /deals", "GET /persons"] }),
         dealsList({ routes: ["GET elsewhere.example.test/deals"] }),
-        dealsList({ routes: ["GET /deals", "DELETE /deals/{id}"] }),
       ])
     ).toStrictEqual([
       "deals.archived.list: GET /deals/archived isn't an operation of the vendor's spec.",
       "deals.list: GET /persons isn't an operation of the vendor's spec.",
       "deals.list: GET elsewhere.example.test/deals isn't on the spec's host api.example.test.",
-      "deals.list: DELETE /deals/{id} isn't a read, as a tool's other routes are.",
     ]);
   });
 });
@@ -303,10 +303,6 @@ describe("a tool with no spec to hold it to", () => {
           tool("deals.change", "PATCH /deals/{id}"),
           tool("deals.get", "GET /v1/deals/{id}"),
           {
-            ...tool("deals.delete", "DELETE /deals/{id}"),
-            routes: ["DELETE /deals/{id}", "GET /persons/{id}"],
-          },
-          {
             name: "deals.get",
             routes: [],
             args: {},
@@ -325,8 +321,49 @@ describe("a tool with no spec to hold it to", () => {
       "deals.products.delete: DELETE /deals/{id}/products is named deals.products.<the vendor's operation name>.",
       "deals.change: PATCH /deals/{id} is named deals.update.",
       "deals.get: GET /v1/deals/{id} is named v1.deals.get.",
-      "deals.delete: GET /persons/{id} isn't of its family deals.",
       "deals.get: It declares no route it is named from.",
+    ]);
+  });
+
+  it("is named from its one write, read before it of any family on the connector's hosts", () => {
+    const writing = (name: string, routes: string[]): MirrorTool => ({
+      ...tool(name, routes[0] ?? ""),
+      routes,
+    });
+    expect(
+      messages(
+        [
+          writing("deals.update", [
+            "GET /me",
+            "GET /pipelines/{pipeline}",
+            "PATCH /deals/{id}",
+          ]),
+          writing("deals.delete", ["DELETE /deals/{id}", "PATCH /deals/{id}"]),
+          writing("deals.get", ["GET /deals/{id}", "HEAD /deals"]),
+          writing("deals.get", ["GET /deals/{id}", "GET stranger.test/me"]),
+        ],
+        false
+      )
+    ).toStrictEqual([
+      "deals.delete: It declares 2 writes, and a tool sends one.",
+      "deals.get: HEAD /deals isn't a GET, as a tool's other routes are.",
+      "deals.get: GET stranger.test/me isn't on the connector's hosts.",
+    ]);
+  });
+
+  it("takes the vendor's operation name only where its route can't name it", () => {
+    expect(
+      messages(
+        [
+          tool("driveItem.getContent", "GET /drive/root:/{name}:/content"),
+          tool("deals.getDeal", "GET /deals/{id}"),
+          tool("drive root", "GET /drive/root:/{name}:/content"),
+        ],
+        false
+      )
+    ).toStrictEqual([
+      "deals.getDeal: GET /deals/{id} is named deals.get.",
+      "drive root: GET /drive/root:/{name}:/content can't be named from its route: name it as the vendor names the operation.",
     ]);
   });
 });

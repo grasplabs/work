@@ -3,18 +3,27 @@ import type { ValueDescriptor } from "@grasp-os/runtime/app";
 import type { Spec, SpecOperation } from "./openapi.ts";
 import {
   isNamePart,
+  pathSegments,
   readRoute,
   routeName,
   standardActions,
 } from "./tool-names.ts";
-import type { Route } from "./tool-names.ts";
+import type { DeclaredRoute } from "./tool-names.ts";
 
 // The mirror rule, checked for every connector's tools whoever wrote them
-// (GRA-2319): a tool is one route of the vendor's API, named from that
-// route (tool-names.ts), with the vendor's own parameter and field names,
-// and a list answers `{ items, next }`. Narrowing is allowed: a tool may
-// take fewer arguments, fix values, and keep fewer fields of an answer.
-// Renaming and reshaping are refused.
+// (GRA-2319): a tool is one route of the vendor's API, its primary route,
+// named from that route (tool-names.ts), with the vendor's own parameter
+// and field names, and a list answers `{ items, next }`. Narrowing is
+// allowed: a tool may take fewer arguments, fix values, keep fewer fields
+// of an answer, and read before it writes.
+//
+// The primary route is the tool's one write, if it has one (sent last, as
+// the API holds it), else the read it declares first. Every other route is
+// a GET on the connector's hosts, of any family: a check before a write
+// (whose mailbox, whether a list is shared) or a write's `find`. A path the
+// naming rule can't name (`/drive/root:/{name}:/content`) takes the vendor's
+// operation name, and only such a path does. Renaming and reshaping are
+// refused.
 //
 // Every tool is held to the naming rule. Where the vendor's spec is known
 // (a generated connector, or one narrowed from it), each tool on one of its
@@ -24,7 +33,7 @@ import type { Route } from "./tool-names.ts";
 /** A tool as the check reads it: what its definition declares. */
 export interface MirrorTool {
   readonly name: string;
-  /** The first is the route the tool is: it is named from it. */
+  /** Its one write, or else its first read, is the route it is named from. */
   readonly routes: readonly string[];
   readonly args: Readonly<Record<string, ValueDescriptor>>;
   readonly returns: ValueDescriptor;
@@ -217,7 +226,7 @@ const answerAgainst = (
 /** A tool's name, path, arguments and answer against the vendor's operation. */
 const againstOperation = (
   tool: MirrorTool,
-  route: Route,
+  route: DeclaredRoute,
   operation: SpecOperation
 ): string[] => {
   const vendorArgs =
@@ -234,12 +243,25 @@ const againstOperation = (
   ].filter((problem) => problem !== undefined);
 };
 
+/** A vendor's operation name, as a tool takes it: dotted name parts. */
+const isOperationName = (name: string): boolean =>
+  name.length <= 128 && name.split(".").every(isNamePart);
+
 /** A tool's name against its route, where no spec says more. */
-const againstRoute = (tool: MirrorTool, route: Route): string[] => {
+const againstRoute = (tool: MirrorTool, route: DeclaredRoute): string[] => {
   const pages = pageItem(tool.returns) !== undefined;
-  const naming = routeName(route, pages);
-  if ("problem" in naming) {
-    return [naming.problem];
+  const segments = pathSegments(route.path);
+  const naming =
+    segments === undefined
+      ? undefined
+      : routeName({ ...route, segments }, pages);
+  if (naming === undefined || "problem" in naming) {
+    // The rule names no tool here: the vendor's operation name does.
+    return isOperationName(tool.name)
+      ? []
+      : [
+          `${route.method} ${route.path} can't be named from its route: name it as the vendor names the operation.`,
+        ];
   }
   const prefix = `${naming.family}.`;
   const action = tool.name.startsWith(prefix)
@@ -270,6 +292,7 @@ const againstRoute = (tool: MirrorTool, route: Route): string[] => {
  */
 export const checkMirror = (
   tools: readonly MirrorTool[],
+  hosts: readonly string[],
   spec?: Spec
 ): MirrorProblem[] => {
   const key = (method: string, path: string): string =>
@@ -290,61 +313,71 @@ export const checkMirror = (
     })
   );
   /** Why a route of a tool held to the spec is none of its operations. */
-  const missing = (route: Route): string => {
+  const missing = (route: DeclaredRoute): string => {
     const reason = skipped.get(key(route.method, route.path));
     return reason === undefined
       ? `${route.method} ${route.path} isn't an operation of the vendor's spec.`
       : `${route.method} ${route.path} makes no tool: ${reason}`;
   };
-  /** Why a route of a tool held to the spec calls another host. */
-  const offHost = (route: Route | undefined): string[] =>
-    spec === undefined || route?.host === undefined || route.host === spec.host
+  /** Why a route calls a host its connector, or its spec, doesn't. */
+  const offHost = ({ method, host, path }: DeclaredRoute): string[] => {
+    if (host === undefined) {
+      return [];
+    }
+    if (!hosts.includes(host)) {
+      return [`${method} ${host}${path} isn't on the connector's hosts.`];
+    }
+    return spec === undefined || host === spec.host
+      ? []
+      : [`${method} ${host}${path} isn't on the spec's host ${spec.host}.`];
+  };
+  /** The tool against the route it is named from. */
+  const againstPrimary = (tool: MirrorTool, route: DeclaredRoute): string[] => {
+    const operation = byShape.get(key(route.method, route.path));
+    if (operation !== undefined) {
+      return againstOperation(tool, route, operation);
+    }
+    return spec === undefined ? againstRoute(tool, route) : [missing(route)];
+  };
+  /** Why a route besides the primary one isn't a read the tool may make. */
+  const againstOther = (route: DeclaredRoute): string[] => {
+    if (route.method !== "GET") {
+      return [
+        `${route.method} ${route.path} isn't a GET, as a tool's other routes are.`,
+      ];
+    }
+    const shape = key(route.method, route.path);
+    return spec === undefined || byShape.has(shape) || skipped.has(shape)
       ? []
       : [
-          `${route.method} ${route.host}${route.path} isn't on the spec's host ${spec.host}.`,
+          `${route.method} ${route.path} isn't an operation of the vendor's spec.`,
         ];
+  };
   return tools.flatMap((tool) => {
-    const [route, ...more] = tool.routes.map(readRoute);
-    if (route === undefined) {
+    const declared = tool.routes.map(readRoute);
+    const routes = declared.filter((route) => route !== undefined);
+    const writes = routes.filter(
+      ({ method }) => method !== "GET" && method !== "HEAD"
+    );
+    const primary = writes[0] ?? routes[0];
+    if (primary === undefined) {
       return [
         { tool: tool.name, message: "It declares no route it is named from." },
       ];
     }
-    const operation = byShape.get(key(route.method, route.path));
-    let problems: string[];
-    if (operation !== undefined) {
-      problems = againstOperation(tool, route, operation);
-    } else if (spec === undefined) {
-      problems = againstRoute(tool, route);
-    } else {
-      problems = [missing(route)];
-    }
-    // Every other route (a write's `find`) is of the tool's own family,
-    // and of the spec where it holds.
-    const family = tool.name.slice(0, tool.name.lastIndexOf("."));
-    for (const other of more) {
-      if (other === undefined) {
-        problems.push("A route it declares can't be read.");
-      } else if (other.method !== "GET" && other.method !== "HEAD") {
-        // Only a write's `find` takes more routes, and it reads.
-        problems.push(
-          `${other.method} ${other.path} isn't a read, as a tool's other routes are.`
-        );
-      } else if (
-        spec !== undefined &&
-        !byShape.has(key(other.method, other.path))
-      ) {
-        problems.push(missing(other));
-      } else {
-        const naming = routeName(other, false);
-        if ("problem" in naming || naming.family !== family) {
-          problems.push(
-            `${other.method} ${other.path} isn't of its family ${family}.`
-          );
-        }
-      }
-    }
-    problems.push(...[route, ...more].flatMap(offHost));
+    const problems = [
+      ...(routes.length < declared.length
+        ? ["A route it declares can't be read."]
+        : []),
+      ...(writes.length > 1
+        ? [`It declares ${writes.length} writes, and a tool sends one.`]
+        : []),
+      ...againstPrimary(tool, primary),
+      ...routes
+        .filter((route) => route !== primary && !writes.includes(route))
+        .flatMap(againstOther),
+      ...routes.flatMap(offHost),
+    ];
     return problems.map((message) => ({ tool: tool.name, message }));
   });
 };
