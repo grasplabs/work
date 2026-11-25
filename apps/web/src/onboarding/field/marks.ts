@@ -2,10 +2,10 @@ import { BAYER_MATRIX, DITHER_LEVELS } from "@grasp-os/ui/lib/utils";
 
 // What Stephen does with a component he holds: he takes its own picture,
 // the brand logo it carries (a provider's, a source's), and
-// draws it small in his dither at the component's far end, in the logo's
-// own colours, so it reads as that logo (Ruben: large and in mint, nobody
-// knew what it was), building up while he is on it and fading where it is
-// when he leaves. Drawn on one canvas over the page, in cells as the flags
+// draws it large in his dither at the component's far end, nearly its
+// whole height as the language cards' flags are, in the logo's own colours
+// so it reads as that logo, building up while he is on it and fading where
+// it is when he leaves. Drawn on one canvas over the page, in cells as the flags
 // are; nothing is drawn over the component's words. A component that is too narrow for a picture beside its words, or
 // has none, or draws its own (a canvas), gets none.
 
@@ -15,11 +15,14 @@ const CELL = 4;
 /** A component this much wider than tall has room for a picture beside its words. */
 const ROOMY = 2.4;
 
-/** The picture's height, as times the component's: well inside it. */
-const SCALE = 0.6;
+/** The picture's height, as times the component's: all of it, as a flag fills its card. */
+const SCALE = 1;
 
-/** How far the picture stands in from the component's far edge, in CSS pixels. */
-const INSET = 16;
+/** How far the picture stands in from the component's far edge, in CSS pixels: none, it meets the edge as a flag does. */
+const INSET = 0;
+
+/** The part of the picture, from its near side, that thins out toward the words as a flag does. */
+const THINNING = 0.4;
 
 const bayerAt = (x: number, y: number): number =>
   ((BAYER_MATRIX[y % 4]?.[x % 4] ?? 0) + 0.5) / DITHER_LEVELS;
@@ -192,6 +195,14 @@ export const drawMarks = (
     const free = x + width - mark.room + CLEAR;
     context.save();
     context.beginPath();
+    // Inside the component's own corner, as a flag lies in its card's.
+    const radius =
+      Number(
+        getComputedStyle(element).borderTopRightRadius.replace("px", "")
+      ) || 0;
+    context.roundRect(x, y, width, height, radius);
+    context.clip();
+    context.beginPath();
     context.rect(free, y, x + width - free, height);
     context.clip();
     for (let row = 0; row < mark.rows; row += 1) {
@@ -202,7 +213,9 @@ export const drawMarks = (
         }
         // The whole logo builds up through the dither, a little alive while he is on it.
         const flicker = 0.06 * Math.sin(time * 2.2 + column * 0.7 + row * 1.3);
-        const much = on * 1.1 + flicker;
+        // Whole at the far edge, its near side thinning out toward the words.
+        const across = Math.min(1, (column + 0.5) / (mark.columns * THINNING));
+        const much = on * 1.1 * across ** 1.2 + flicker;
         if (bayerAt(column, row) >= much) {
           continue;
         }
