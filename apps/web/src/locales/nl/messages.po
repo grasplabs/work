@@ -3497,6 +3497,7 @@ msgid "Ask for the app you need, and an admin can add it."
 msgstr "Vraag de app aan die je nodig hebt, dan kan een beheerder hem toevoegen."
 
 #: src/chat/global-chat.tsx
+#: src/settings/composer-settings.tsx
 msgid "Ask Grasp"
 msgstr "Vraag het Grasp"
 
@@ -4441,6 +4442,10 @@ msgstr "Chataccounts, uitnodigingen en meldingen"
 msgid "Chat apps"
 msgstr "Chat-apps"
 
+#: src/settings/composer-settings.tsx
+msgid "Chat box"
+msgstr "Chatvak"
+
 #: src/chat/chat-window.tsx
 msgid "Chat name"
 msgstr "Naam van de chat"
@@ -4760,6 +4765,10 @@ msgstr "Munten"
 #: src/onboarding/interviews-progress.tsx
 msgid "colleagues talked"
 msgstr "collega’s gesproken"
+
+#: src/settings/composer-settings.tsx
+msgid "Colour"
+msgstr "Kleur"
 
 #: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
@@ -6101,6 +6110,11 @@ msgstr "Een kennissignaal genegeerd"
 msgid "Dismissed an opportunity"
 msgstr "Een kans afgewezen"
 
+#: src/settings/composer-settings.tsx
+msgctxt "the chat box's edge"
+msgid "Dither"
+msgstr "Dither"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Do this later"
 msgstr "Later doen"
@@ -6428,6 +6442,10 @@ msgstr "Eerdere mail, notities en bestanden over de mensen en het onderwerp."
 #: src/agents/agent-templates.ts
 msgid "Earlier reminders and replies from the client in the mailbox."
 msgstr "Eerdere herinneringen en antwoorden van de klant in de mailbox."
+
+#: src/settings/composer-settings.tsx
+msgid "Edge"
+msgstr "Rand"
 
 #: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
@@ -8392,6 +8410,10 @@ msgstr "Hoe moet {name} werken?"
 msgid "How sure"
 msgstr "Hoe zeker"
 
+#: src/settings/composer-settings.tsx
+msgid "How that light is drawn"
+msgstr "Hoe dat licht getekend wordt"
+
 #: src/brain/opportunity-drafts.ts
 msgid "How the team does it today:"
 msgstr "Zo doet het team het nu:"
@@ -9699,6 +9721,10 @@ msgstr "Tot slot de cijfers en het resultaat."
 msgid "Lasting facts"
 msgstr "Vaste feiten"
 
+#: src/settings/composer-settings.tsx
+msgid "Lavender"
+msgstr "Lavendel"
+
 #: src/workflows/workflow-flow.tsx
 msgid "Lay it out left to right"
 msgstr "Van links naar rechts schikken"
@@ -9875,6 +9901,11 @@ msgstr "Juridische bewaarplicht {hold} van versie {label} opheffen?"
 
 #: src/frame/person-menu.tsx
 #: src/frame/ui-words.tsx
+msgid "Light"
+msgstr "Licht"
+
+#: src/settings/composer-settings.tsx
+msgctxt "Grasp's own working light"
 msgid "Light"
 msgstr "Licht"
 
@@ -10462,6 +10493,10 @@ msgstr "Toegestane methoden"
 #: src/interview/sound-check.tsx
 msgid "Microphone: {name}"
 msgstr "Microfoon: {name}"
+
+#: src/settings/composer-settings.tsx
+msgid "Mint"
+msgstr "Mint"
 
 #: src/connections/app/words.ts
 msgctxt "what a tool may do"
@@ -15783,6 +15818,10 @@ msgstr "Wachtwoord tonen"
 msgid "Show payload"
 msgstr "Payload tonen"
 
+#: src/projects/file-item-dialog.tsx
+msgid "Show the apps and workflows"
+msgstr "De apps en workflows tonen"
+
 #: src/frame/ui-words.tsx
 msgid "Show the choices"
 msgstr "Toon de keuzes"
@@ -15818,10 +15857,6 @@ msgstr "Tonen wat {name} heeft ontvangen"
 #: src/frame/ui-words.tsx
 msgid "Showing {first} – {last} of {total} {unit}"
 msgstr "{first} – {last} van {total} {unit}"
-#: src/projects/file-item-dialog.tsx
-msgid "Show the apps and workflows"
-msgstr "De apps en workflows tonen"
-
 
 #: src/workflows/runs.tsx
 msgid "Showing the first {runsPageSize} runs of more."
@@ -16079,6 +16114,11 @@ msgstr "Overgeslagen, kan nog gegevens bevatten"
 msgctxt "what a carousel's slide is"
 msgid "slide"
 msgstr "dia"
+
+#: src/settings/composer-settings.tsx
+msgctxt "the chat box's edge"
+msgid "Smooth"
+msgstr "Zacht"
 
 #: src/onboarding/document-drop.tsx
 msgid "Some files weren’t added. I can read PDF, Word, Excel, PowerPoint and text."
@@ -17542,6 +17582,10 @@ msgstr "De laatste mail met elke lead."
 #: src/settings/directory-reads.tsx
 msgid "The last read couldn’t list the accounts deleted in the directory."
 msgstr "De laatste uitlezing kon de in de directory verwijderde accounts niet ophalen."
+
+#: src/settings/composer-settings.tsx
+msgid "The light around the box while Grasp works"
+msgstr "Het licht rond het vak terwijl Grasp werkt"
 
 #: src/interview/transcript.tsx
 msgid "The line is deleted now, and so is what I marked in it. What I wrote down from it is in what I read back to you at the end: take it out there, and it is deleted for good when our conversation is finished. This can’t be undone."
