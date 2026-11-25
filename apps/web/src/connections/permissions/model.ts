@@ -3,7 +3,7 @@ import type { CatalogTool } from "@grasp-os/shared/connect";
 import { toolWords } from "../tool-choices.ts";
 import type { AllowedTool } from "../tool-choices.ts";
 
-// What the connect dialog's permission concepts share: each tool sorted by
+// What the connect dialog's permission choice works on: each tool sorted by
 // how much harm it can do, and the choices an admin makes in bulk. Only the
 // provider's hint says a tool reads (`CatalogTool.readOnly`); a tool without
 // it changes things, and one whose action deletes, cancels, removes or
@@ -72,12 +72,6 @@ export const sortTools = (
         one.name.localeCompare(other.name)
     );
 
-/** The tools of one kind. */
-export const ofKind = (
-  sorted: readonly SortedTool[],
-  kind: ToolKind
-): SortedTool[] => sorted.filter((tool) => tool.kind === kind);
-
 /** Allowed as its provider says: Read where it says the tool only reads. */
 const asHinted = ({ tool }: SortedTool): AllowedTool => ({
   name: tool.name,
@@ -138,9 +132,19 @@ export const withChoice = (
   choice: Choice
 ): AllowedTool[] => {
   const others = allowed.filter((tool) => tool.name !== name);
-  return choice === "off"
-    ? others
-    : [...others, { name, read: choice === "read" }];
+  if (choice === "off") {
+    return others;
+  }
+  // A tool held to one resource keeps it as its choice changes.
+  const resource = allowed.find((tool) => tool.name === name)?.resource;
+  return [
+    ...others,
+    {
+      name,
+      read: choice === "read",
+      ...(resource === undefined ? {} : { resource }),
+    },
+  ];
 };
 
 /** How many of `tools` are on. */
@@ -159,7 +163,7 @@ export const tally = (
   asks: allowed.filter(({ read }) => !read).length,
 });
 
-/** A preset of concept A: what Grasp may do, in one choice. */
+/** A preset: what Grasp may do, in one choice. */
 export type Preset = "look" | "change" | "all" | "own";
 
 /** The kinds a preset turns on. */
@@ -200,22 +204,6 @@ export const presetOf = (
     (preset) => keyOf(presetChoice(sorted, preset)) === now
   );
   return found ?? "own";
-};
-
-/** A tool's choice once its box is ticked or cleared: on as its provider says. */
-export const ticked = (tool: CatalogTool, on: boolean): Choice => {
-  if (!on) {
-    return "off";
-  }
-  return tool.readOnly ? "read" : "write";
-};
-
-/** A box over `on` of `total`: ticked, clear, or a dash between. */
-export const boxOf = (on: number, total: number): boolean | "indeterminate" => {
-  if (on === 0) {
-    return false;
-  }
-  return on === total ? true : "indeterminate";
 };
 
 const presets: ReadonlySet<string> = new Set(["look", "change", "all", "own"]);

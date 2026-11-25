@@ -1,9 +1,9 @@
 import type { CatalogTool } from "@grasp-os/shared/connect";
 
 // Calendly's tools as Composio lists them (docs.composio.dev/toolkits/calendly,
-// version 20261120_00, read 2026-11-25), for the permission concepts in
+// version 20261120_00, read 2026-11-25), for the connect dialog in
 // development only: where core can't list a toolkit's tools here, the
-// concepts still show what an admin would see. A tool that gets or lists
+// dialog still shows what an admin would see. A tool that gets or lists
 // carries Composio's read-only hint, as it does there.
 
 const raw: readonly (readonly [string, string])[] = [

@@ -578,7 +578,7 @@ export const OfferSwitch = ({
 /** What the host does for the app's actions; each left out is not offered. */
 export interface AppActions {
   /**
-   * The Connect that opens the connect dialog (`<ConnectApp app={app} … />`, the connect-app block):
+   * A Connect of the host's own that opens its connect dialog:
    * in place of a plain Connect button, for an app not connected or to connect again, so the dialog
    * grows from it.
    */

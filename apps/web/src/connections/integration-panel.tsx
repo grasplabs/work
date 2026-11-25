@@ -88,10 +88,7 @@ export const IntegrationPanel = ({
   const { actions, dialogs } = useAppActions({
     integration,
     identity,
-    app,
-    tools,
     uses: used?.state === "ready" ? used.data : undefined,
-    size: "xs",
     accountRows: false,
   });
   const disconnect = useMenuDisconnect(integration, identity);
