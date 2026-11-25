@@ -1,4 +1,4 @@
-import { descriptionOf } from "../../connections/native-descriptions.ts";
+import { matchedDescriptionOf } from "../../connections/native-descriptions.ts";
 import type { CatalogApp, Setup } from "./model.ts";
 
 // Which of the company's apps suit a new agent (apps-step.tsx): the words
@@ -64,7 +64,7 @@ export const scoreOf = (
   >,
   words: readonly string[]
 ): number => {
-  const about = [app.id, app.name, ...app.categories, descriptionOf(app) ?? ""]
+  const about = [app.id, app.name, ...app.categories, matchedDescriptionOf(app)]
     .join(" ")
     .toLowerCase();
   return words.filter((word) => about.includes(word)).length;

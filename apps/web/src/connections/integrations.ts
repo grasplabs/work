@@ -11,7 +11,7 @@ import type {
   ConnectionWorkflows,
 } from "@grasp-os/shared/workflows";
 
-import { descriptionOf } from "./native-descriptions.ts";
+import { matchedDescriptionOf } from "./native-descriptions.ts";
 
 // Integrations, as the prototype lists them (`routes/integrations`): every
 // app Grasp can work in, one per catalog entry, each with the connections
@@ -308,7 +308,7 @@ export const find = (
   const byUse = integrations.filter(
     (integration) =>
       !named.has(integration) &&
-      [...integration.categories, descriptionOf(integration) ?? ""].some(
+      [...integration.categories, matchedDescriptionOf(integration)].some(
         (text) => text.toLocaleLowerCase().includes(needle)
       )
   );
