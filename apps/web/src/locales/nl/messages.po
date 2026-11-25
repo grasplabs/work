@@ -15818,6 +15818,10 @@ msgstr "Tonen wat {name} heeft ontvangen"
 #: src/frame/ui-words.tsx
 msgid "Showing {first} – {last} of {total} {unit}"
 msgstr "{first} – {last} van {total} {unit}"
+#: src/projects/file-item-dialog.tsx
+msgid "Show the apps and workflows"
+msgstr "De apps en workflows tonen"
+
 
 #: src/workflows/runs.tsx
 msgid "Showing the first {runsPageSize} runs of more."

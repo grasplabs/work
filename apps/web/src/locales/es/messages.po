@@ -15818,6 +15818,10 @@ msgstr "Mostrar lo que recibió {name}"
 #: src/frame/ui-words.tsx
 msgid "Showing {first} – {last} of {total} {unit}"
 msgstr "Mostrando {first} – {last} de {total} {unit}"
+#: src/projects/file-item-dialog.tsx
+msgid "Show the apps and workflows"
+msgstr "Mostrar las apps y los flujos de trabajo"
+
 
 #: src/workflows/runs.tsx
 msgid "Showing the first {runsPageSize} runs of more."
