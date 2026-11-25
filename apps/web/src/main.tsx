@@ -9,6 +9,8 @@ import { createRoot } from "react-dom/client";
 import { bootOf } from "./boot-path.ts";
 import { reportError } from "./error-reports.ts";
 import { startI18n } from "./i18n.ts";
+import { isLeanPath, leanPaths } from "./lean-pages.ts";
+import { loadLeanStyles } from "./page-parts.ts";
 
 // The one file every page loads: it asks for the page's routes at once,
 // alongside its language. At an interview link that is the interview
@@ -32,9 +34,9 @@ if (!root) {
 }
 
 /**
- * When not even English's words, or the page's own code, could be fetched
- * (the connection dropped as Grasp loaded), there is one thing left to
- * say, and only English to say it in.
+ * When not even English's words, the page's own code or a lean page's
+ * stylesheet could be fetched (the connection dropped as Grasp loaded),
+ * there is one thing left to say, and only English to say it in.
  */
 const NoWords = () => (
   <main className="flex min-h-svh flex-col items-center justify-center gap-4 p-6 text-center">
@@ -54,14 +56,20 @@ const NoWords = () => (
 
 /**
  * The language first, then the page: every message on it is looked up in
- * the language. A function, not a top-level `await`: a module that awaits
+ * the language. A lean page (lean-pages.ts) loads only its part of the
+ * catalog, and its stylesheet, here; any other, the whole of both as the
+ * root route loads (page-parts.ts). A function, not a top-level `await`: a module that awaits
  * at its top level keeps the bundler from merging the modules it imports,
  * and the build split into hundreds of tiny files.
  */
 const start = async (): Promise<void> => {
+  const lean = isLeanPath(window.location.pathname, leanPaths);
   let worded = true;
   try {
-    await startI18n();
+    await Promise.all([
+      startI18n({ lean }),
+      lean ? loadLeanStyles() : undefined,
+    ]);
   } catch {
     worded = false;
   }
