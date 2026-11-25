@@ -626,12 +626,10 @@ export const keepToolList = async (
 ): Promise<void> => {
   let connection: Connection | undefined;
   try {
-    // Signed in afresh: a read after an answer may start at once again.
     connection = await drizzle(env.DB)
-      .update(connections)
-      .set({ toolListTriedAt: null })
+      .select()
+      .from(connections)
       .where(eq(connections.id, connectionId))
-      .returning()
       .get();
   } catch (error) {
     log.warn("connections.tool_list_unread", {
