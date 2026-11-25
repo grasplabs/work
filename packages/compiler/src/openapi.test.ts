@@ -520,12 +520,21 @@ describe("a spec as tools", () => {
                 in: "query",
                 schema: { type: "string", enum: ["open", "won"] },
               },
+              {
+                name: "labels",
+                in: "query",
+                schema: {
+                  type: "array",
+                  items: { type: "string", nullable: true },
+                },
+              },
             ],
             responses: ok({
               type: "object",
               properties: {
                 visible_to: { allOf: [{ type: "integer", enum: [1, 3] }] },
                 status: { type: "string", enum: ["open", "won"] },
+                label: { allOf: [{ allOf: [{ type: "string" }] }] },
               },
             }),
           },
@@ -535,6 +544,7 @@ describe("a spec as tools", () => {
     );
     const [get] = spec.operations;
     expect({
+      args: get?.args.kind === "object" && Object.keys(get.args.fields),
       status: get?.args.kind === "object" && get.args.fields.status?.kind,
       answer:
         get?.returns.kind === "object" &&
@@ -543,10 +553,12 @@ describe("a spec as tools", () => {
           field.kind,
         ]),
     }).toStrictEqual({
+      args: ["id", "status"],
       status: "enum",
       answer: [
         ["visible_to", "number"],
         ["status", "string"],
+        ["label", "string"],
       ],
     });
   });
@@ -963,25 +975,34 @@ describe("a hostile spec", () => {
     ).rejects.toThrow("larger than 16 MiB");
   });
 
-  it("signs in only through HTTPS addresses", async () => {
-    const text = specText(pipedrivePaths, {
-      components: {
-        securitySchemes: {
-          oauth2: {
-            type: "oauth2",
-            flows: {
-              authorizationCode: {
-                authorizationUrl: "data:text/html,x",
-                tokenUrl: "http://oauth.example.test/token",
-                scopes: {},
+  it("signs in only through plain HTTPS endpoints", async () => {
+    const signingIn = async (authorizationUrl: string, tokenUrl: string) => {
+      const text = specText(pipedrivePaths, {
+        components: {
+          securitySchemes: {
+            oauth2: {
+              type: "oauth2",
+              flows: {
+                authorizationCode: { authorizationUrl, tokenUrl, scopes: {} },
               },
             },
           },
         },
-      },
-      security: [{ oauth2: [] }],
-    });
-    const spec = await readSpec(text, url);
-    expect(spec.auth).toBeUndefined();
+        security: [{ oauth2: [] }],
+      });
+      const spec = await readSpec(text, url);
+      return spec.auth;
+    };
+    expect([
+      await signingIn("data:text/html,x", "https://oauth.example.test/token"),
+      await signingIn(
+        "https://oauth.example.test/authorize",
+        "http://oauth.example.test/token"
+      ),
+      await signingIn(
+        "https://oauth.example.test/authorize?audience=crm",
+        "https://oauth.example.test/token"
+      ),
+    ]).toStrictEqual([undefined, undefined, undefined]);
   });
 });
