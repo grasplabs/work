@@ -284,17 +284,24 @@ const progressAt = (
       ...(jump === "done" ? { agreed: true as const } : {}),
     }));
   const now = Date.now();
+  const startedAt = now - before.size * minutesPerPhase * 60_000;
+  // Said one after the other over the minutes behind them, as the read-back shows.
+  const step = (now - startedAt) / (lines.length + 1);
+  const timed = lines.map((line, place) => ({
+    ...line,
+    at: Math.round(startedAt + step * (place + 1)),
+  }));
   return {
     ...freshProgress,
     interviewer: was.interviewer,
     person: jump === "done" ? "completed" : "progress",
     told: true,
     mode: was.mode ?? "type",
-    lines,
+    lines: timed,
     facts,
     phase,
     wants: wantsAt[jump] ?? "answer",
-    startedAt: now - before.size * minutesPerPhase * 60_000,
+    startedAt,
     seenAt: now,
     awayMs: 0,
     confirmed: jump === "done" ? facts.length : 0,

@@ -4265,6 +4265,7 @@ msgid "Change project"
 msgstr "Modifier le projet"
 
 #: src/chat/agent-draft-card.tsx
+#: src/interview/read-back-story.tsx
 msgid "Change something"
 msgstr "Changer quelque chose"
 

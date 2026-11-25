@@ -46,6 +46,11 @@ const ALIVE =
  */
 const aliveAt = (target: EventTarget | null): Element | null => {
   const press = target instanceof Element ? target.closest(ALIVE) : null;
+  // Words that act within a line of prose (a sentence of the read-back)
+  // light themselves: a box of light round their lines would cut the prose.
+  if (press?.closest("[data-field=still]") !== null && press !== null) {
+    return null;
+  }
   if (press?.closest("[data-slot=item-title]") === null || press === null) {
     return press;
   }
