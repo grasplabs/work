@@ -307,7 +307,7 @@ const say = async (
 ): Promise<Response> => {
   const model = speechModelOf();
   const voice = platformAi.speech.voices[asked.speaker];
-  const spoken = spokenOf(asked.text, asked.tone);
+  const spoken = spokenOf(asked.text, asked.tone, asked.language);
   const key: SpokenKey = {
     text: asked.text,
     spoken,
