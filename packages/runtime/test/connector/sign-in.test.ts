@@ -397,8 +397,21 @@ describe("a record pinned to a tenant, as a suite's", () => {
         idToken: undefined,
         account: { url: "https://api.example.test/me", id: "/id" },
       }),
-      // An ID token can't come without the openid scope.
+      // An ID token can't come without the openid scope, in every consent.
       noOpenid: accepts({ scopes: ["email", "Items.Read"] }),
+      openidByClass: accepts({
+        rights: {
+          signIn: ["email", "offline_access"],
+          classes: {
+            "read-own": ["openid", "Items.Read"],
+            "change-own": ["Items.ReadWrite"],
+            "read-company": [],
+            "change-company": [],
+            "reach-others": [],
+            "read-others": [],
+          },
+        },
+      }),
       // Neither an account nor an ID token, or both.
       neither: accepts({ idToken: undefined }),
       both: accepts({
@@ -421,6 +434,7 @@ describe("a record pinned to a tenant, as a suite's", () => {
       noClaim: false,
       lookup: false,
       noOpenid: false,
+      openidByClass: false,
       neither: false,
       both: false,
       unpinned: false,
@@ -485,7 +499,9 @@ describe("a record pinned to a tenant, as a suite's", () => {
     expect(beyond.filter((record) => accepts(record))).toStrictEqual([]);
   });
 
-  it("AP15: has a scope prefix only as a URL no scope of its starts with", () => {
+  it("AP15: has a scope prefix only as a URL no scope of its starts with, and no scope twice in another case", () => {
+    // Compared without case, two scopes would be one.
+    expect(accepts({ scopes: [...pinned.scopes, "items.read"] })).toBeFalsy();
     expect(accepts({ scopePrefix: "https://api.example.test/" })).toBeTruthy();
     expect(
       [
