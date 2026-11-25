@@ -12,7 +12,7 @@ import {
   SidePanelHeader,
 } from "@grasp-os/ui/components/side-panel";
 import { Skeleton } from "@grasp-os/ui/components/skeleton";
-import { radius, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 
@@ -36,18 +36,6 @@ const rows = 8;
 const paragraphs = [3, 2, 4];
 
 const styles = stylex.create({
-  // The bare icon's box: the placeholder fills it, so its ground is the
-  // icon's 16px and its pixels the 8px inside (Damsko's empty ItemMedia
-  // lets a control-tall placeholder run past it: registry gap of 25 Nov 2026).
-  icon: {
-    display: "flex",
-    flexShrink: 0,
-    width: size.iconSm,
-    height: size.iconSm,
-    overflow: "hidden",
-    borderRadius: radius.sm,
-  },
-  fill: { height: "100%" },
   // The item's text at the reference's inset inside the panel's content:
   // paragraphs a step apart.
   body: {
@@ -71,11 +59,7 @@ export const InboxPending = () => {
           <ItemGroup aria-label={t`What waits on you`}>
             {Array.from({ length: rows }, (_, index) => (
               <Item key={index} loading size="xs">
-                <ItemMedia>
-                  <span aria-hidden="true" {...stylex.props(styles.icon)}>
-                    <Skeleton style={styles.fill} variant="rectangular" />
-                  </span>
-                </ItemMedia>
+                <ItemMedia />
                 <ItemContent>
                   <ItemTitle />
                   <ItemDescription />

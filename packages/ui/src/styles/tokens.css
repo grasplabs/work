@@ -20,6 +20,10 @@
   --damsko-brand-night: oklch(0.173 0.028 169.36);
   /* How strongly the light shows as a faint dither behind the head of the one thing a page is about (a banner, a side panel's cover): a texture you find, not a pattern you see. */
   --damsko-texture-strength: 0.3;
+  /* One dot of that dither: the light shows through a fine grid of these, the original's. */
+  --damsko-texture-dot: 0.75px;
+  /* How far apart the dither's dots stand, each way. */
+  --damsko-texture-pitch: 3px;
   /* Colour: grounds. */
   /* The page: the ground most things stand on. */
   --damsko-background: light-dark(oklch(0.992 0.002 165.08), var(--damsko-brand-night));

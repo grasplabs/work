@@ -38,10 +38,11 @@
   src: url("./geist-common.woff2") format("woff2");
 }
 /* A local face sized to Geist, which the sans token names after it ("Geist Fallback"): the text
-   keeps its lines when the font arrives. */
+   keeps its lines when the font arrives. Arial, or where it is absent (most Linux machines) one of
+   its metric twins, so the same overrides hold and the face always loads. */
 @font-face {
   font-family: "Geist Fallback";
-  src: local("Arial");
+  src: local("Arial"), local("Liberation Sans"), local("Arimo");
   ascent-override: 95.94%;
   descent-override: 28.16%;
   line-gap-override: 0%;

@@ -10,12 +10,14 @@ import {
   readTheme,
   readThemeId,
 } from "../frame/theme.ts";
+import { ComposerSettings } from "../settings/composer-settings.tsx";
 import { SettingsError, SettingsGroup } from "../settings/section.tsx";
 
 // Settings → Appearance: how Grasp looks for this person. Light, dark or
 // the device's, and the colours (Damsko's themes), with Damsko's Theme
 // toggle as tiles: each choice drawn in what it is, kept as it is pressed
-// (frame/theme.ts keeps it, as the person menu's Appearance does).
+// (frame/theme.ts keeps it, as the person menu's Appearance does); then
+// how the chat box draws Grasp at work.
 
 /** The mode and the colours, as tiles. */
 const Theme = ({ userId }: { userId: string }) => {
@@ -50,7 +52,12 @@ const Theme = ({ userId }: { userId: string }) => {
 
 const Appearance = () => {
   const { identity } = Route.useRouteContext();
-  return <Theme userId={identity.userId} />;
+  return (
+    <>
+      <Theme userId={identity.userId} />
+      <ComposerSettings userId={identity.userId} />
+    </>
+  );
 };
 
 export const Route = createFileRoute("/_shell/settings/appearance")({

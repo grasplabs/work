@@ -472,6 +472,8 @@ export const duration = stylex.defineConsts({
 export const size = stylex.defineConsts({
   // Colour: the light.
   textureStrength: "var(--damsko-texture-strength)",
+  textureDot: "var(--damsko-texture-dot)",
+  texturePitch: "var(--damsko-texture-pitch)",
   // Elevation: edge and lifts.
   borderStrong: "var(--damsko-border-strong)",
   // Sizes: targets and controls.

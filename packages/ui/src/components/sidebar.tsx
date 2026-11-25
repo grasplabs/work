@@ -139,6 +139,21 @@ const iconSidebar = () =>
   stylex.when.ancestor('[data-collapsible="icon"]', sidebarMarker);
 const folded = () =>
   stylex.when.ancestor('[data-state="collapsed"]', sidebarMarker);
+// A row with an action of its own (SidebarMenuAction): while the pointer is anywhere on it, and
+// while the action's menu is open, the row keeps its hover and the action takes the ink, as the
+// original's row and its dots. A row holding a nested list does not light up from a nested row.
+const rowWithAction = () =>
+  stylex.when.ancestor(
+    ':hover:has(> [data-slot="sidebar-menu-action"])',
+    sidebarMenuItemMarker
+  );
+const rowMenuOpen = () =>
+  stylex.when.ancestor(
+    ':has(> [data-slot="sidebar-menu-action"][aria-expanded="true"])',
+    sidebarMenuItemMarker
+  );
+// In the sheet on a narrow window.
+const inSheet = () => stylex.when.ancestor("[data-mobile]", sidebarMarker);
 const onRail = () =>
   stylex.when.ancestor(
     '[data-state="collapsed"][data-collapsible="icon"]',
@@ -351,7 +366,12 @@ const styles = stylex.create({
     display: "flex",
     flexDirection: "column",
     gap: space["2"],
-    paddingBlockStart: space["4"],
+    // In the sheet, the sheet's own inset is taken from its room above, so the head stands as high
+    // in the window as beside the page, as the original's phone menu stood its head on the bar's row.
+    paddingBlockStart: {
+      default: space["4"],
+      [inSheet()]: `calc(${space["4"]} - ${size.sheetPadding})`,
+    },
     paddingBlockEnd: space["1"],
     paddingInline: space["2"],
   },
@@ -479,12 +499,29 @@ const styles = stylex.create({
     insetBlockStart: `calc((${ROW} - ${ACTION}) / 2)`,
     insetInlineEnd: `calc(${space["2"]} + (${ROW} - ${ACTION}) / 2)`,
   },
+  // A row's action: a space-1 from the row's end; in the ink while its row is pointed at or holds
+  // focus, or its menu is open; filled only under the pointer itself, as the original's dots.
   menuAction: {
     insetBlockStart: {
       default: `calc((${ROW} - ${ACTION}) / 2)`,
       [COARSE]: `calc((${size.tapTarget} - ${ACTION}) / 2)`,
     },
-    insetInlineEnd: `calc((${ROW} - ${ACTION}) / 2)`,
+    insetInlineEnd: space["1"],
+    color: {
+      default: colors.sidebarSecondaryForeground,
+      [HOVER]: { default: null, ":hover": colors.foreground },
+      [stylex.when.ancestor(":hover", sidebarMenuItemMarker)]: {
+        default: null,
+        [HOVER]: colors.foreground,
+      },
+      [stylex.when.ancestor(":focus-within", sidebarMenuItemMarker)]:
+        colors.foreground,
+      ":is([aria-expanded=true])": colors.foreground,
+    },
+    backgroundColor: {
+      default: "transparent",
+      [HOVER]: { default: null, ":hover": colors.accent },
+    },
   },
   // Shown while the pointer is on its row, focus is in the row or its menu is open; on a touch
   // screen, always.
@@ -547,10 +584,14 @@ const styles = stylex.create({
     color: {
       default: colors.sidebarSecondaryForeground,
       [HOVER]: { default: null, ":hover": colors.sidebarForeground },
+      [rowWithAction()]: { default: null, [HOVER]: colors.sidebarForeground },
+      [rowMenuOpen()]: colors.sidebarForeground,
     },
     backgroundColor: {
       default: "transparent",
       [HOVER]: { default: null, ":hover": colors.sidebarHover },
+      [rowWithAction()]: { default: null, [HOVER]: colors.sidebarHover },
+      [rowMenuOpen()]: colors.sidebarHover,
     },
     fontFamily: font.sans,
     fontSize: font.textSm,
@@ -617,6 +658,20 @@ const styles = stylex.create({
     },
     boxShadow: `inset 0 0 0 ${size.hairline} ${colors.border}`,
   },
+  // The trigger: on the page (a page's bar) in the page's ink, as the original's Menu button; in the
+  // sidebar itself (its head, by its place in the page, so a dialog opened from the sidebar is the
+  // page again) the sidebar's quiet ink, the ink under a pointer.
+  trigger: {
+    color: {
+      default: colors.foreground,
+      ":is([data-sidebar=sidebar] *)": colors.sidebarSecondaryForeground,
+      [HOVER]: {
+        default: null,
+        ":is([data-sidebar=sidebar] *):hover": colors.sidebarForeground,
+      },
+    },
+  },
+  quiet: { fontWeight: font.weightNormal },
   // A button that is only its icon (a search in the head, the trigger): round, the icon button's
   // size, a finger's on a touch screen.
   icon: {
@@ -1227,7 +1282,7 @@ export const Sidebar = ({
             data-sidebar="sidebar"
             data-mobile="true"
             data-side={side}
-            {...stylex.props(styles.ground, styles.sheet)}
+            {...stylex.props(sidebarMarker, styles.ground, styles.sheet)}
           >
             {children}
           </div>
@@ -1327,7 +1382,13 @@ export const SidebarTrigger = ({
         onClick?.(event);
         toggleSidebar();
       }}
-      {...stylex.props(styles.button, styles.icon, focusRingInset, style)}
+      {...stylex.props(
+        styles.button,
+        styles.icon,
+        styles.trigger,
+        focusRingInset,
+        style
+      )}
     >
       <Icon icon={PanelLeftIcon} />
     </button>
@@ -1841,10 +1902,12 @@ export interface SidebarMenuButtonProps extends SlotPartProps, Own<"button"> {
    */
   size?: "default" | "sm" | "lg" | "icon";
   /**
-   * `default` lies on the sidebar's ground; `outline` stands on the page's ground with a hairline.
+   * `default` lies on the sidebar's ground, a place's words in the medium weight; `quiet`, a thing
+   * in a list of them (a chat, a file), its words in the regular weight, cut and shown whole in a
+   * tooltip as any row's; `outline` stands on the page's ground with a hairline.
    * @default "default"
    */
-  variant?: "default" | "outline";
+  variant?: "default" | "quiet" | "outline";
 }
 
 /** A place: a link (with `asChild`) or a button, with its icon and its words. */
@@ -1870,6 +1933,7 @@ export const SidebarMenuButton = ({
       sized === "lg" && styles.lg,
       sized === "icon" && styles.icon,
       variant === "outline" && styles.outline,
+      variant === "quiet" && styles.quiet,
       isActive && styles.active,
       focusRingInset,
       style

@@ -32,6 +32,7 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@grasp-os/ui/components/toggle-group";
+import { texture, textureTint } from "@grasp-os/ui/lib/styles";
 import { colors, font, radius, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { useId, useRef, useState } from "react";
@@ -39,7 +40,6 @@ import { useId, useRef, useState } from "react";
 import type { App, AppConnection, AppTool, AppToolChoice } from "./model.ts";
 import { GroupRows } from "./page.tsx";
 import { AppMark, GroupSelect, useAppTint } from "./parts.tsx";
-import { Texture } from "./texture.tsx";
 import { groupTools } from "./tools.ts";
 import { useAppIntegrationWords, useConnectAppWords } from "./words.ts";
 import type { AppIntegrationWords, ConnectAppWords } from "./words.ts";
@@ -178,7 +178,14 @@ const Head = ({
   const tint = useAppTint(app);
   return (
     <>
-      <Texture style={styles.texture} tint={tint} />
+      <span
+        aria-hidden="true"
+        {...stylex.props(
+          texture,
+          tint !== undefined && textureTint(tint),
+          styles.texture
+        )}
+      />
       <div {...stylex.props(styles.mark)}>
         <AppMark app={app} size="default" />
       </div>

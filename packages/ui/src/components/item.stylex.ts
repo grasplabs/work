@@ -4,3 +4,12 @@
 import * as stylex from "@stylexjs/stylex";
 
 export const itemMarker = stylex.defineMarker();
+
+// What an Item reads from its list. `actionRoom`: the room a row in a side panel's card keeps at its
+// end for an action it does not have, an action's (a 28px button and its gap) where some row of its
+// list holds one, else none. `lineAbove`: a hairline's width when a separator stands before its
+// row, which in a side panel's card is the row's own top, else 0.
+export const itemVars = stylex.defineVars({
+  actionRoom: "0px",
+  lineAbove: "0px",
+});

@@ -258,6 +258,12 @@ export interface PromptInputProps {
    */
   accent?: Accent;
   /**
+   * How the working light's edge is drawn: `smooth`, a soft glow, or `dither`, the same light seen
+   * through the system's pixels, thinning outwards, as the light stands while a voice is heard.
+   * @default "smooth"
+   */
+  edge?: "smooth" | "dither";
+  /**
    * The card's surface: `glass` where the page scrolls behind it (a chat's foot), the card's colour
    * most of the way over a blur of what is behind.
    * @default "default"
@@ -927,11 +933,17 @@ const styles = stylex.create({
   lightListening: {
     opacity: `var(${LISTEN}, 0.2)`,
     transitionDuration: "0s",
+  },
+  // The dithered edge: the working light seen through the system's pixels, as while a voice is
+  // heard, its ends faded so the pixels never stop on a hard line; through the pixels it is drawn
+  // at full strength, as the original's.
+  lightDither: {
     maskImage: `${pixel.mask}, linear-gradient(90deg, transparent, #000 ${space["8"]}, #000 calc(100% - ${space["8"]}), transparent)`,
     maskSize: "3px 3px, 100% 100%",
     maskRepeat: "repeat, no-repeat",
     maskComposite: "intersect",
   },
+  lightDitherOn: { opacity: 1 },
   // The card's own box inside the layer: the beams are placed against it.
   lightFrame: {
     position: "absolute",
@@ -2537,6 +2549,7 @@ const cardLook = ({
 const Light = ({
   on,
   listening,
+  dither,
   still,
   accent,
   success,
@@ -2545,6 +2558,8 @@ const Light = ({
   on: boolean;
   /** A voice is heard: the light stands dithered over the card, and follows it. */
   listening: boolean;
+  /** The working light's edge drawn through the system's pixels (`edge="dither"`). */
+  dither: boolean;
   ref: Ref<HTMLSpanElement>;
   /** No light while the page loads. */
   still: boolean;
@@ -2577,6 +2592,8 @@ const Light = ({
           styles.light,
           colour,
           on && styles.lightOn,
+          (dither || listening) && styles.lightDither,
+          dither && on && styles.lightDitherOn,
           listening && !on && styles.lightListening
         )}
       >
@@ -2943,6 +2960,7 @@ export const PromptInput = ({
   onSubmit,
   status = "ready",
   accent = "default",
+  edge = "smooth",
   variant = "default",
   loading = false,
   value,
@@ -3234,6 +3252,7 @@ export const PromptInput = ({
               ref={light}
               on={busy}
               listening={dictating}
+              dither={edge === "dither"}
               still={loading}
               accent={accent}
               success={success}
