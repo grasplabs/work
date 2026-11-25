@@ -15,7 +15,7 @@ import {
   findMetaKey,
   notPerformedMetaKey,
   outcomeUnknownMetaKey,
-} from "../../src/connector/manifest.ts";
+} from "../../src/connector/protocol.ts";
 import type { Connector } from "../../src/connector/server.ts";
 
 // A connector as @grasp-os/sdk/connector writes it, and the MCP server it
@@ -748,6 +748,59 @@ describe("a call of a tool", () => {
           openWorldHint: true,
         },
       })
+    );
+  });
+});
+
+describe("its MCP server", () => {
+  it("refuses what isn't a JSON-RPC request, or a call of one of its tools", async () => {
+    const answer = async (body: unknown): Promise<unknown> => {
+      const response = await stock.fetch(
+        new Request("https://connector.internal/mcp", {
+          method: "POST",
+          body: JSON.stringify(body),
+        })
+      );
+      return await response.json();
+    };
+    const requests = [
+      [],
+      { jsonrpc: "1.0", id: 1, method: "ping" },
+      { jsonrpc: "2.0", id: null, method: "ping" },
+      { jsonrpc: "2.0", id: 1, method: 1 },
+      { jsonrpc: "2.0", id: 1, method: "ping", params: [] },
+    ];
+    await expect(Promise.all(requests.map(answer))).resolves.toStrictEqual(
+      requests.map(() => ({
+        jsonrpc: "2.0",
+        id: null,
+        error: { code: -32_600, message: "Not a JSON-RPC request" },
+      }))
+    );
+    const calls = [
+      { name: "stock.nothing" },
+      { name: "stock.get", arguments: null },
+      { name: "stock.get", arguments: [] },
+      { name: "stock.get", arguments: { sku: "a" }, _meta: "find" },
+    ];
+    await expect(
+      Promise.all(
+        calls.map(
+          async (params) =>
+            await answer({
+              jsonrpc: "2.0",
+              id: 7,
+              method: "tools/call",
+              params,
+            })
+        )
+      )
+    ).resolves.toStrictEqual(
+      calls.map(() => ({
+        jsonrpc: "2.0",
+        id: 7,
+        error: { code: -32_602, message: "No such tool" },
+      }))
     );
   });
 });

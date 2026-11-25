@@ -12,6 +12,11 @@
       "types": "./src/common/oxc-parse-module.ts",
       "workerd": "./src/common/oxc-parse-module.ts",
       "node": "./src/common/oxc-parse-module.node.ts"
+    },
+    "#connector-manifest": {
+      "types": "./src/connector/manifest-check.ts",
+      "connector-isolate": "./src/connector/manifest-check.isolate.ts",
+      "default": "./src/connector/manifest-check.ts"
     }
   },
   "exports": {
