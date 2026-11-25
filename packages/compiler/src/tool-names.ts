@@ -1,3 +1,5 @@
+import { httpMethods } from "@grasp-os/runtime/connector";
+
 // How a connector's tool is named: from its route, never by choice (the
 // mirror rule, GRA-2319). A tool is one route of the vendor's API, and its
 // name follows from that route, so two connectors for one API, written
@@ -19,18 +21,7 @@
 // The generator names what it generates with this, and the mirror check
 // holds every other tool to it.
 
-/** The methods OpenAPI names an operation by, in its own order. */
-export const httpMethods = [
-  "GET",
-  "PUT",
-  "POST",
-  "DELETE",
-  "OPTIONS",
-  "HEAD",
-  "PATCH",
-  "TRACE",
-] as const;
-
+/** The methods a connector's route may take, as the SDK has them. */
 export type HttpMethod = (typeof httpMethods)[number];
 
 /** The actions a route's method and shape name; any other is the vendor's. */
@@ -48,6 +39,8 @@ export type Segment =
 
 export interface Route {
   readonly method: HttpMethod;
+  /** The host a route names, where its connector has several. */
+  readonly host?: string | undefined;
   /** The path as the route declares it, under the API's base path. */
   readonly path: string;
   readonly segments: readonly Segment[];
@@ -61,7 +54,7 @@ export interface Route {
 const literalSegment = /^[A-Za-z0-9._~-]+$/u;
 
 /** A parameter segment: the whole segment, one plain name. */
-const parameterSegment = /^\{(?<name>[A-Za-z_][A-Za-z0-9_-]{0,63})\}$/u;
+const parameterSegment = /^\{(?<name>[A-Za-z_]\w{0,63})\}$/u;
 
 /**
  * A part of a tool's name: a family's segment or an action. What an MCP
@@ -74,7 +67,8 @@ const nameMaxLength = 128;
 
 const methods: ReadonlySet<string> = new Set(httpMethods);
 
-const isMethod = (text: string): text is HttpMethod => methods.has(text);
+export const isRouteMethod = (text: string): text is HttpMethod =>
+  methods.has(text);
 
 /** The action each method takes on an item. */
 const itemActions: Partial<Readonly<Record<HttpMethod, string>>> = {
@@ -129,11 +123,14 @@ export const readRoute = (route: string): Route | undefined => {
   const path = target.startsWith("/")
     ? target
     : target.slice(Math.max(target.indexOf("/"), 0));
-  if (space === -1 || !isMethod(method)) {
+  if (space === -1 || !isRouteMethod(method)) {
     return undefined;
   }
   const segments = pathSegments(path);
-  return segments === undefined ? undefined : { method, path, segments };
+  const host = target.startsWith("/")
+    ? undefined
+    : target.slice(0, -path.length);
+  return segments === undefined ? undefined : { method, host, path, segments };
 };
 
 /** What a route's name is made from, or why no name follows from it. */

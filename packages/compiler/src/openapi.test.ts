@@ -321,6 +321,102 @@ describe("a spec as tools", () => {
     ]);
   });
 
+  it("makes no tool of an operation a connector can't call or send as the spec has it", async () => {
+    const answered = { responses: ok({ type: "object", properties: {} }) };
+    const body = (schema: unknown) => ({
+      requestBody: {
+        required: true,
+        content: { "application/json": { schema } },
+      },
+      ...answered,
+    });
+    const spec = await readSpec(
+      specText({
+        "/deals": { options: answered, trace: answered },
+        "/deals/{deal-id}": {
+          get: {
+            parameters: [{ ...idParameter, name: "deal-id" }],
+            ...answered,
+          },
+        },
+        "/notes": { post: body({ type: "array", items: { type: "string" } }) },
+        "/labels": { post: body({ type: "object" }) },
+        "/stages": {
+          get: {
+            responses: ok({
+              type: "object",
+              nullable: true,
+              properties: { data: { type: "array", items: Deal } },
+            }),
+          },
+        },
+      }),
+      url
+    );
+    expect(spec.operations).toStrictEqual([]);
+    expect(spec.skipped).toStrictEqual([
+      {
+        operation: "OPTIONS /deals",
+        reason: "Its method isn't one a connector may call.",
+      },
+      {
+        operation: "TRACE /deals",
+        reason: "Its method isn't one a connector may call.",
+      },
+      {
+        operation: "GET /deals/{deal-id}",
+        reason: "Its path isn't one a route may take.",
+      },
+      {
+        operation: "POST /notes",
+        reason: "Its body can't be typed as an object.",
+      },
+      {
+        operation: "POST /labels",
+        reason: "Its body can't be typed as an object.",
+      },
+      { operation: "GET /stages", reason: "Its answer isn't an object." },
+    ]);
+  });
+
+  it("keeps a body's required fields required where the body itself is optional", async () => {
+    const spec = await readSpec(
+      specText({
+        "/deals": {
+          post: {
+            requestBody: {
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["title"],
+                    properties: {
+                      title: { type: "string" },
+                      value: { type: "number" },
+                    },
+                  },
+                },
+              },
+            },
+            responses: ok({ type: "object", properties: {} }),
+          },
+        },
+      }),
+      url
+    );
+    const [create] = spec.operations;
+    expect(
+      create?.args.kind === "object" &&
+        Object.entries(create.args.fields).map(([name, field]) => [
+          name,
+          field.presence,
+        ])
+    ).toStrictEqual([
+      ["title", "required"],
+      ["value", "optional"],
+    ]);
+  });
+
   it("reads an allOf of one schema as that schema, and an answer's enum as any value of its type", async () => {
     const spec = await readSpec(
       specText({
@@ -413,7 +509,7 @@ describe("a spec as tools", () => {
     expect(spec.skipped).toStrictEqual([]);
   });
 
-  it("writes source that records the spec's URL and hash", async () => {
+  it("writes source that records the spec's URL, its hash and the scheme it was read for", async () => {
     const text = specText(pipedrivePaths);
     const { source, spec } = await generateConnector(text, url);
     const digest = await crypto.subtle.digest(
@@ -428,6 +524,10 @@ describe("a spec as tools", () => {
       `export const openapi = { url: ${JSON.stringify(url)}, sha256: "${hash}" } as const;`
     );
     expect(statements(source)).toStrictEqual(sourceStatements);
+    const withKey = await generateConnector(text, url, { scheme: "api_key" });
+    expect(withKey.source).toContain(
+      `export const openapi = { url: ${JSON.stringify(url)}, sha256: "${hash}", scheme: "api_key" } as const;`
+    );
   });
 
   it("reads Swagger 2.0 as OpenAPI 3.1", async () => {

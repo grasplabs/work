@@ -222,8 +222,7 @@ export const schemaOf = (
 export const fieldsOf = (
   node: Node,
   reading: Reading,
-  depth: number,
-  optional: boolean
+  depth: number
 ): Record<string, Schema> | undefined => {
   const members = membersOf(node, new Set());
   if (members === undefined) {
@@ -233,7 +232,7 @@ export const fieldsOf = (
   const required = new Set<string>();
   for (const member of members) {
     for (const name of list(member.required)) {
-      if (typeof name === "string" && !optional) {
+      if (typeof name === "string") {
         required.add(name);
       }
     }
@@ -275,7 +274,7 @@ const objectOf = (
 ): Modifiable | undefined => {
   const members = membersOf(node, new Set()) ?? [];
   if (members.some((member) => isRecord(member.properties))) {
-    const fields = fieldsOf(node, reading, depth, false);
+    const fields = fieldsOf(node, reading, depth);
     return fields === undefined ? undefined : built(() => v.object(fields));
   }
   const values = node.additionalProperties;
