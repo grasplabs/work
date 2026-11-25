@@ -2,6 +2,8 @@ import { devResetPath } from "@grasp-os/shared/dev-reset";
 import { Button } from "@grasp-os/ui/components/button";
 import { Icon, RefreshCwIcon } from "@grasp-os/ui/lib/icons";
 
+import { forgetKeptSetups } from "./kept.ts";
+
 // On a local stack only (`vp run dev`): the onboarding started over, so
 // whoever works on it can walk the setup and an interview again from the
 // first screen as often as they like, without stopping the stack. Core
@@ -11,28 +13,13 @@ import { Icon, RefreshCwIcon } from "@grasp-os/ui/lib/icons";
 // it out, and core has no such route there. Its words are a developer's,
 // in English, and not in the catalogs.
 
-/** What this browser keeps of the setup, per admin (routes/setup.tsx `keptKey`). */
-const keptPrefix = "grasp.setup.";
-
-const forgetKept = (): void => {
-  try {
-    for (const key of Object.keys(localStorage)) {
-      if (key.startsWith(keptPrefix)) {
-        localStorage.removeItem(key);
-      }
-    }
-  } catch {
-    // Nothing kept here to forget.
-  }
-};
-
 const startOver = async (): Promise<void> => {
   const response = await fetch(devResetPath, { method: "POST" });
   if (!response.ok) {
     console.warn(`Starting the onboarding over failed: ${response.status}`);
     return;
   }
-  forgetKept();
+  forgetKeptSetups();
   window.location.assign("/setup?step=welcome");
 };
 
