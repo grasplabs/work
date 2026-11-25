@@ -150,13 +150,13 @@ export const ownValue = <T>(
 ): T | undefined => (Object.hasOwn(table, key) ? table[key] : undefined);
 
 /** The schemes a link may lead to. Any other (javascript:, data:, file:) leads nowhere. */
-const ALLOWED = new Set(["http:", "https:", "mailto:"]);
+const ALLOWED = new Set(["http:", "https:", "mailto:", "tel:"]);
 /** The site a relative address is read against, to tell a path on this site from another's. */
 const SAME_SITE = "https://same-site.invalid";
 
 /**
  * Where a link given as data may lead (an answer's, a source's), resolved; null when nowhere: any
- * scheme but http, https and mailto, or nothing. With `relative`, a path on the same site
+ * scheme but http, https, mailto and tel, or nothing. With `relative`, a path on the same site
  * (`/files/report`) leads there as written; one that leaves it (`//elsewhere.com`) never does.
  */
 export const safeHref = (
@@ -188,7 +188,7 @@ export interface CitedSource {
 }
 
 /**
- * A cited source's address as a link can take it (`safeHref`: http, https or mailto), with the
+ * A cited source's address as a link can take it (`safeHref`: http, https, mailto or tel), with the
  * host read from that checked address (without "www.") or, for mail, the address. Anything else
  * (`javascript:`, `data:`, a path, words) is null, and the source is shown as words.
  */

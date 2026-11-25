@@ -31,7 +31,10 @@
 
 import * as stylex from "@stylexjs/stylex";
 import type { ChangeDetails } from "@ui-sdk/core";
-import { MenuItem as MenuItemPrimitive } from "@ui-sdk/react/menu";
+import {
+  MenuItemIcon,
+  MenuItem as MenuItemPrimitive,
+} from "@ui-sdk/react/menu";
 import { mergeProps, renderElement } from "@ui-sdk/react/primitive";
 import {
   Tabs as TabsPrimitive,
@@ -1281,13 +1284,9 @@ const MenuLink = ({
     }
   >
     {icon !== undefined && (
-      <span
-        aria-hidden="true"
-        data-menu-icon=""
-        {...stylex.props(menuStyles.icon)}
-      >
+      <MenuItemIcon {...stylex.props(menuStyles.icon)}>
         <Icon icon={icon} />
-      </span>
+      </MenuItemIcon>
     )}
     <span
       {...stylex.props(menuStyles.text, icon === undefined && menuStyles.inset)}

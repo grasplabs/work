@@ -765,12 +765,6 @@ export const listStyles = stylex.create({
 // An item's corner nests inside the panel's, capped at half a control's height.
 const ITEM_CORNER = `min(${radius.lg}, calc(${size.controlDefault} / 2))`;
 
-// A panel one of whose own rows has an icon. A row stands in the panel, in a group or in a group in
-// a group; a submenu is a menu inside the panel, and the chain stops at it, so its rows' icons are
-// its own and never the parent's.
-const OWN = ":not([role=menu])";
-const OWN_ICON = `:has(> ${OWN} > [data-menu-icon], > ${OWN} > ${OWN} > [data-menu-icon], > ${OWN} > ${OWN} > ${OWN} > [data-menu-icon], > ${OWN} > ${OWN} > ${OWN} > ${OWN} > [data-menu-icon])`;
-
 /**
  * A menu: the panel and its items, for dropdown menu, context menu and menubar. A 4px padded panel
  * at high lift, items 36px tall with 8px round their icon and words, labels, and separators that run
@@ -782,10 +776,11 @@ export const menuStyles = stylex.create({
   panel: {
     [iconVars.size]: size.iconSm,
     [iconVars.stroke]: size.iconStroke,
-    // Its rows' words leave room for an icon only when one of its own rows has one.
+    // Its rows' words leave room for an icon only when one of its own rows has one: UI SDK marks
+    // the menu an icon's row stands in, at any depth of groups, and a submenu is a menu of its own.
     [menuVars.lead]: {
       default: "0px",
-      [OWN_ICON]: `calc(${size.iconSm} + ${space[2]})`,
+      ":is([data-has-icons])": `calc(${size.iconSm} + ${space[2]})`,
     },
     boxSizing: "border-box",
     minWidth: `min(${size.menuWidth}, 100vw - 2 * ${space.popupGutter})`,

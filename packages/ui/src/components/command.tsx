@@ -734,10 +734,7 @@ const RowActionsMenu = ({
                 }
               >
                 {action.icon && (
-                  <MenuItemIcon
-                    data-menu-icon=""
-                    {...stylex.props(menuStyles.icon)}
-                  >
+                  <MenuItemIcon {...stylex.props(menuStyles.icon)}>
                     <Icon icon={action.icon} />
                   </MenuItemIcon>
                 )}

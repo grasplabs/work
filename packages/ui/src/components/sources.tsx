@@ -122,7 +122,7 @@ export interface SourceProps {
   /** Its title, as the thing calls itself ("Churn by region, Q3"): the link's words. */
   title: string;
   /**
-   * Where it opens, in a new tab: an http, https or mailto address, or a path on this site. Any
+   * Where it opens, in a new tab: an http, https, mailto or tel address, or a path on this site. Any
    * other (`javascript:`, `data:`, `//elsewhere`) leads nowhere and the title is words, as a link
    * in Markdown is. Leave it out for a source with nowhere to go. An address on another site shows
    * its host after the title.

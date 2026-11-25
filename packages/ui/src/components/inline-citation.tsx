@@ -191,7 +191,7 @@ export interface InlineCitationSourceProps {
   /** Its title, as the source calls itself ("Linking and navigating"). */
   title?: string;
   /**
-   * Where it lives: an http, https or mailto address, linked by its host in a new tab. Any other
+   * Where it lives: an http, https, mailto or tel address, linked by its host in a new tab. Any other
    * (`javascript:`, `data:`, a path) is shown as its words, not a link.
    */
   url?: string;

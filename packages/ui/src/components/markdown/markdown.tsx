@@ -1,43 +1,37 @@
-// Markdown: an agent's answer, drawn from Markdown. Headings, paragraphs, lists and tasks, tables
-// (Table), quotes, rules (Separator), links (Link), code in a sentence, fenced code (CodeBlock) and
-// footnotes. From a syntax tree (parse.ts), never as HTML: raw HTML in the source shows as the text
-// it is, and a link of Markdown's own leads only to http, https or mailto.
-//
-//   <Markdown>{answer}</Markdown>
-//   <Markdown streaming>{partial}</Markdown>
-//   <Markdown renderLink={(link) => …}>{answer}</Markdown>     the host draws the links
-//   <Markdown components={{ code: MyCode }}>{answer}</Markdown>  the host draws elements, by name
-//
-// While it streams, what is half-written is made whole (repair.ts, repair): bold is bold from its
-// first letter, a table is a table from its row of dashes, an open fence is code still being written,
-// a link is its words until what follows can no longer make it anything else, then the link in
-// their place (handedOf), and a note's mark is its number from the start. Nothing shown is taken
-// back, but where a link's definition arrives (its references, shown as written, become the link)
-// and where an answer ends without a note it refers to (its mark is shown as written), and nothing
-// flickers or re-flows when a mark closes. The words come as they are
-// given: pacing them is the message's job.
-//
-// It knows no router and no citation: the host draws any link it wants to (`renderLink`, or a part
-// around it through MarkdownLinkProvider), and any element it wants to (`components`, keyed by HTML
-// element name), within the same safe defaults. Every value is a token. A
-// caller sets layout only.
+// Markdown: an agent's answer, drawn from micromark's syntax tree (parse.ts) with the system's parts,
+// never as HTML. While it streams, a finished block is read and drawn once, keyed by its place so
+// it never fades in again; only the block still being written is read again, made whole first, and
+// each new word fades in. Written here, a table keeps its even columns and lines break where they
+// fill (`greedy`), so nothing drawn moves; fenced code with no place is still coming in.
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
 import {
   createContext,
+  createElement,
   Fragment,
   use,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
-import type { ComponentProps, ComponentType, FC, ReactNode } from "react";
+import type {
+  ComponentProps,
+  ComponentType,
+  ReactElement,
+  ReactNode,
+} from "react";
 
 import { useI18n } from "../../lib/i18n";
 import { CheckIcon, ChevronRightIcon, Icon } from "../../lib/icons";
-import { choiceBoxStyles, focusRing, visuallyHidden } from "../../lib/styles";
+import {
+  choiceBoxStyles,
+  fadeIn,
+  focusRing,
+  visuallyHidden,
+} from "../../lib/styles";
 import {
   colors,
   duration,
@@ -50,14 +44,7 @@ import {
 import { announce, safeHref } from "../../lib/utils";
 import type { LayoutStyle } from "../../lib/utils";
 import { iconVars, motionVars } from "../../lib/vars.stylex";
-import {
-  CodeBlock,
-  CodeBlockActions,
-  CodeBlockContent,
-  CodeBlockCopyButton,
-  CodeBlockHeader,
-  CodeBlockTitle,
-} from "../code-block";
+import * as Code from "../code-block";
 import {
   Collapsible,
   CollapsibleContent,
@@ -65,47 +52,20 @@ import {
 } from "../collapsible";
 import { Link } from "../link";
 import { Separator } from "../separator";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../table";
+import * as Tables from "../table";
 import { tableVars } from "../table.stylex";
-import {
-  bounded,
-  encodedUrl,
-  groupSections,
-  NOTHING,
-  readBlocks,
-  schemeOf,
-  sectionSaid,
-} from "./parse";
-import type {
-  FootnoteDefinition,
-  Grouped,
-  List,
-  ListItem,
-  MarkdownNode,
-  Paragraph,
-  PhrasingContent,
-  Placed,
-  RootContent,
-  TableNode,
-} from "./parse";
-import { openFence, repair, tidy } from "./repair";
+import * as parse from "./parse";
+import type { Block, RootContent } from "./parse";
 
 /** A link in the answer, as the host's renderer sees it. */
 export interface MarkdownLink {
-  /** The address exactly as the source has it (never resolved against the page), any scheme. */
+  /** The address exactly as the source has it, any scheme. */
   href: string;
-  /** The address's scheme as a browser reads it, in lower case (`javascript`, `https`); empty for none. */
+  /** The address's scheme in lower case (`javascript`, `https`); empty for none. */
   scheme: string;
   /** The link's title, when the source gives one: `[words](url "title")`. */
   title?: string;
-  /** What the link says: its words, drawn as Markdown draws them; for a picture, its alt words. */
+  /** What the link says, drawn as Markdown draws it; for a picture, its alt words. */
   children: ReactNode;
   /** `link` for `[words](url)` and a reference, `autolink` for a bare address, `image` for a picture. */
   type: "link" | "image" | "autolink";
@@ -114,40 +74,29 @@ export interface MarkdownLink {
 /** Draws a link in Markdown's place, or gives undefined to leave it to Markdown. */
 export type MarkdownLinkRenderer = (link: MarkdownLink) => ReactNode;
 
+type Of<T extends RootContent["type"]> = Extract<RootContent, { type: T }>;
+type Phrase = Of<"paragraph">["children"][number];
+type Row = Of<"table">["children"][number];
+/** A node of the syntax tree Markdown draws: a block, a phrase, a list's item, a table's row or cell. */
+export type MarkdownNode =
+  | Block
+  | Phrase
+  | Of<"list">["children"][number]
+  | Row
+  | Row["children"][number];
+type Node = MarkdownNode;
+
 /** The elements Markdown draws that a caller may draw instead, by their HTML names. */
-type MarkdownElement =
-  | "a"
-  | "blockquote"
-  | "code"
-  | "del"
-  | "em"
-  | "h1"
-  | "h2"
-  | "h3"
-  | "h4"
-  | "h5"
-  | "h6"
-  | "hr"
-  | "img"
-  | "li"
-  | "ol"
-  | "p"
-  | "pre"
-  | "strong"
-  | "table"
-  | "tbody"
-  | "td"
-  | "th"
-  | "thead"
-  | "tr"
-  | "ul";
+type Blocks = "p" | "blockquote" | "ul" | "ol" | "li" | "hr" | "pre" | "code";
+type Cells = "table" | "thead" | "tbody" | "tr" | "th" | "td";
+type Phrases = "a" | "img" | "strong" | "em" | "del";
+type MarkdownElement = `h${1 | 2 | 3 | 4 | 5 | 6}` | Blocks | Cells | Phrases;
 
 /**
  * Elements drawn in Markdown's place, keyed by HTML element name (a map written for react-markdown
- * or Streamdown carries over): each is given the element's own props (its `children`; `href` and `title` for
- * `a`, `src`, `alt` and `title` for `img`, `className` `language-…` for fenced code, `start` for `ol`,
- * `align` for a cell) and the syntax tree's `node` it draws, which is internal (MarkdownProps'
- * `components`).
+ * or Streamdown carries over): each is given the element's own props (its `children`; `href` and
+ * `title` for `a`, `src`, `alt` and `title` for `img`, `className` `language-…` for fenced code,
+ * `start` for `ol`, `align` for a cell) and the syntax tree's `node` it draws, which is internal.
  */
 export type MarkdownComponents = {
   [Tag in MarkdownElement]?: ComponentType<
@@ -155,25 +104,13 @@ export type MarkdownComponents = {
   >;
 };
 
-/** How a single newline inside a paragraph is drawn: a space, a line break, or a break only in a paragraph of short lines. */
-export type MarkdownSoftBreaks = "space" | "line" | "auto";
-
 /** Every prop a Markdown takes. */
 export interface MarkdownProps {
   /** The Markdown: the agent's answer, or as much of it as has arrived. */
   children: string;
-  /**
-   * The answer is still being written: what is half-written at its end is shown whole. Once it
-   * turns false the answer is drawn as written, the same as when the page is opened again.
-   * @default false
-   */
+  /** Still being written: a half-written end is drawn whole, each new word fades in. @default false */
   streaming?: boolean;
-  /**
-   * The answer was cut off part way (stopped): a link still being written at its end goes, and
-   * bold or code left open is closed, so no raw mark shows. Set it when a stream is stopped, and
-   * for a cut answer drawn from history.
-   * @default false
-   */
+  /** Cut off part way: the end is made whole as while streaming, so no raw mark shows. @default false */
   truncated?: boolean;
   /**
    * How a screen reader hears it while it is written: `polite`, each block once it is finished;
@@ -182,30 +119,16 @@ export interface MarkdownProps {
    * @default "polite"
    */
   live?: "polite" | "off";
-  /**
-   * `default` for an answer on its own; `message` for an answer inside a chat message, at the
-   * message's words (14px on a 22px line), its tables too, its headings and gaps as `default`;
-   * `sm` for words in a card or a panel (an agent's instructions, a note), a step smaller, its
-   * headings too; `xs` a note beside the answer (an agent's thoughts), at the message's size in
-   * the muted ink.
-   * @default "default"
-   */
+  /** `message` in a chat message; `sm` a card or a panel; `xs` a muted note. @default "default" */
   size?: "default" | "message" | "sm" | "xs";
-  /**
-   * The outline level a `#` heading takes; `##` is one deeper, and so on, down to `h6`. Give the
-   * level under the heading the answer stands beneath, so the page's outline never skips.
-   * @default 1
-   */
+  /** The outline level of a `#` heading, so the page's outline never skips. @default 1 */
   headingLevel?: 1 | 2 | 3 | 4 | 5 | 6;
   /**
-   * How a single newline inside a paragraph is drawn. `space`: as CommonMark has it, a space, so a
-   * paragraph wrapped by hand reads as one. `line`: a line break, for answers written as short
-   * lines. `auto`: a line break only in a paragraph of short lines (two or more, each under 60
-   * characters or each "Label: value"); any other paragraph runs on. While it is written, a short
-   * line breaks as its newline comes, and nothing drawn apart is drawn back together.
-   * @default "space"
+   * A single newline inside a paragraph is a line break, for answers written as short lines; off,
+   * it is a space, as CommonMark has it, so a paragraph wrapped by hand reads as one.
+   * @default false
    */
-  softBreaks?: MarkdownSoftBreaks;
+  softBreaks?: boolean;
   /**
    * Fenced code past this many lines is folded under Show more, as CodeBlockContent's `maxLines`.
    * `false` never folds; a block still draws at most its first 2,000 lines (a line says how many
@@ -214,42 +137,24 @@ export interface MarkdownProps {
    */
   codeMaxLines?: number | false;
   /**
-   * The host draws the answer's links: called for every link and picture in the text, whatever its
-   * scheme, before Markdown's own filter, and what it returns is drawn in its place (a router's
-   * link through `<Link asChild>`, a button that asks before leaving, a citation). Return undefined
-   * for Markdown's own: http, https and mailto as a Link, anything else as its words; a picture is
-   * never loaded unless the host draws it. Footnote marks and their way back stay Markdown's own.
-   * While an answer streams, it is never handed a link or a picture whose address can still grow:
-   * until the stream has proven it whole, it is its words, and then the host's link in their place.
+   * Draws the answer's links and pictures, any scheme, before Markdown's own filter; undefined
+   * leaves one to Markdown (http, https, mailto, tel or a path here as a Link, else its words; a
+   * picture is never loaded). Never handed an address that is still being written.
    */
   renderLink?: MarkdownLinkRenderer;
   /**
    * Draws elements in Markdown's place, keyed by HTML element name (`{ code: MyCode, a: MyLink }`);
-   * any element left out is Markdown's own. The safe
-   * defaults hold: `a` is given only a link Markdown would draw (http, https or mailto, its address
-   * whole), its address encoded as CommonMark has it; any other link is its words. `img` draws a
-   * picture whose address is http or https, once that address is whole (while an answer is
-   * written, half of one is its words), which is never loaded otherwise: giving it is the
-   * choice to load pictures, and it checks the addresses it trusts. `code` draws code in a sentence
-   * and fenced code (its `node.type` is `code`, its `className` `language-…`), in CodeBlock's place;
-   * `pre`, when given, holds fenced code's `code`. Headings are named by the level they are drawn at
-   * (`headingLevel`). Task boxes and footnotes stay Markdown's own. `node` is internal: the
-   * parser's syntax tree node (mdast), to tell what is drawn by (`node.type`, a fence's
-   * `node.value`), shaped as the parser shapes it and holding the answer as written. Its `url` and
-   * raw HTML are unchecked, so draw from the checked `href` and `src`, never from `node.url`.
+   * any left out is Markdown's own. `a` is given only an address Markdown would lead to, whole;
+   * `img` only an http or https one, whole, and giving it is the choice to load pictures. `code`
+   * draws code in a sentence and fenced code (`node.type` is `code`), in CodeBlock's place; `pre`,
+   * when given, holds fenced code's `code`. Task boxes, notes and folding sections stay Markdown's
+   * own. `node` is internal: the parser's node, holding the answer as written (its `url` unchecked),
+   * to tell what is drawn by; draw from the checked `href` and `src`.
    */
   components?: MarkdownComponents;
   /** Layout only: where it sits and how much room it takes. */
   style?: LayoutStyle;
 }
-
-const REDUCED = media.reducedMotion;
-const HOVER = media.hover;
-const arrive = stylex.keyframes({ from: { opacity: 0 }, to: { opacity: 1 } });
-
-// The interface's own type, from the tokens only: body in text-base; headings a step or two up in
-// ink, never a page's sizes, as an answer sits inside a message; lists, quotes and rules spaced as
-// one column of reading.
 const styles = stylex.create({
   root: {
     display: "flex",
@@ -260,49 +165,26 @@ const styles = stylex.create({
     fontSize: font.textBase,
     lineHeight: font.textBaseLine,
     color: colors.bodyForeground,
-    // Its own white space, whatever the box round it sets.
     whiteSpace: "normal",
     overflowWrap: "anywhere",
   },
-  // Inside a chat message: at the message's words' size, its tables too, in the body's ink as
-  // any answer is (what is strong, a heading or a link stands out in ink); headings and gaps as
-  // the default's.
   message: {
     fontSize: size.messageText,
     lineHeight: size.messageTextLine,
     [tableVars.text]: size.messageText,
     [tableVars.line]: size.messageTextLine,
   },
-  // The smaller size, for words in a card or a panel: a step down, headings too.
-  small: {
-    gap: space["3"],
-    fontSize: font.textSm,
-    lineHeight: font.textSmLine,
-  },
-  // A note beside an answer (`size="xs"`), as an agent's thoughts: the message's size, set apart by
-  // the muted ink.
-  xsmall: {
+  sm: { gap: space["3"], fontSize: font.textSm, lineHeight: font.textSmLine },
+  xs: {
     gap: space["2"],
     fontSize: size.messageText,
     lineHeight: size.messageTextLine,
     color: colors.mutedForeground,
   },
-  // A block with a frame of its own that arrives while the answer is written fades in; at once with
-  // reduced motion.
-  arrives: {
-    animationName: { default: arrive, [REDUCED]: "none" },
-    animationDuration: duration.ui,
-    animationTimingFunction: duration.ease,
-  },
-  paragraph: {
-    margin: 0,
-    textWrap: "pretty",
-  },
-  // Written here, word by word: lines break where they fill, never weighed again as a word comes
-  // (pretty and balanced wrapping move earlier words to a new line as the last line grows).
-  greedy: {
-    textWrap: "wrap",
-  },
+  paragraph: { margin: 0, textWrap: "pretty" },
+  greedy: { textWrap: "wrap" },
+  // A word's fade ends with it: a finished one holds no animation the page keeps weighing.
+  word: { animationFillMode: "backwards" },
   heading: {
     margin: 0,
     color: colors.foreground,
@@ -311,20 +193,14 @@ const styles = stylex.create({
   },
   major: { fontSize: font.textLg, lineHeight: font.textLgLine },
   minor: { fontSize: font.textBase, lineHeight: font.textBaseLine },
-  smallMajor: { fontSize: font.textBase, lineHeight: font.textBaseLine },
   smallMinor: { fontSize: font.textSm, lineHeight: font.textSmLine },
-  xsmallHeading: {
-    fontSize: size.messageText,
-    lineHeight: size.messageTextLine,
-  },
+  xsHeading: { fontSize: size.messageText, lineHeight: size.messageTextLine },
   strong: { fontWeight: font.weightMedium, color: colors.foreground },
   emphasis: { fontStyle: "italic" },
   deleted: {
     textDecorationLine: "line-through",
     color: colors.mutedForeground,
   },
-  // Code in a sentence: the docs' own chip.
-  // Left to right in any language, set apart from the sentence's own direction.
   inlineCode: {
     direction: "ltr",
     unicodeBidi: "isolate",
@@ -336,8 +212,7 @@ const styles = stylex.create({
     fontSize: font.textSm,
     color: colors.foreground,
   },
-  // At the smallest size, a step under the words, as at the other sizes.
-  xsmallCode: { fontSize: `calc(${size.messageText} * 0.92)` },
+  xsCode: { fontSize: `calc(${size.messageText} * 0.92)` },
   list: {
     display: "flex",
     flexDirection: "column",
@@ -351,12 +226,7 @@ const styles = stylex.create({
     paddingInlineStart: space["1"],
     "::marker": { color: colors.mutedForeground },
   },
-  // A loose item's paragraphs stand apart, as blocks do.
-  itemBody: {
-    display: "flex",
-    flexDirection: "column",
-    gap: space["2"],
-  },
+  itemBody: { display: "flex", flexDirection: "column", gap: space["2"] },
   // A task: Checkbox's box, read only, before the words.
   task: {
     listStyleType: "none",
@@ -365,8 +235,8 @@ const styles = stylex.create({
     alignItems: "flex-start",
     gap: space["2"],
   },
-  // Round at the corner, not the system's squircle, and its tick at the icon's own size: a task
-  // in an answer is a mark that it is done, softer than a Checkbox someone presses.
+  // Round at the corner, not the system's squircle, and its tick at the icon's own size: a task in
+  // an answer is a mark that it is done, softer than a Checkbox someone presses. On the first line.
   box: {
     [iconVars.size]: size.iconSm,
     [iconVars.stroke]: size.iconStroke,
@@ -374,7 +244,6 @@ const styles = stylex.create({
     flexShrink: 0,
     width: size.checkboxBox,
     height: size.checkboxBox,
-    // On the first line of the words, whatever their size.
     marginBlock: `calc((1lh - ${size.checkboxBox}) / 2)`,
     marginInlineStart: space["1"],
     borderRadius: radius.sm,
@@ -392,22 +261,14 @@ const styles = stylex.create({
     borderInlineStartColor: colors.border,
     color: colors.mutedForeground,
   },
-  // The room a link still being written keeps for what the whole one will have: Link's quarter
-  // step before its words (its ring's room), and after them the arrow, its gap and the quarter step
-  // after. So neither its words nor what follows moves when the address is whole.
-  linkLead: {
-    display: "inline-block",
-    width: `calc(${space["1"]} / 4)`,
-  },
+  // The room a link still being written keeps for Link's quarter step before its words and its
+  // arrow after them, so neither its words nor what follows moves when the address is whole.
+  linkLead: { display: "inline-block", width: `calc(${space["1"]} / 4)` },
   arrowRoom: {
     display: "inline-block",
     width: `calc(${size.linkMarkGap} + ${size.linkMark} + ${space["1"]} / 4)`,
   },
-  // A footnote's mark in the sentence, and the notes at the foot.
-  footnoteMark: {
-    fontSize: font.textXs,
-    verticalAlign: "super",
-  },
+  footnoteMark: { fontSize: font.textXs, verticalAlign: "super" },
   footnotes: {
     display: "flex",
     flexDirection: "column",
@@ -419,7 +280,13 @@ const styles = stylex.create({
     color: colors.mutedForeground,
     listStyleType: "decimal",
   },
-  // Raw HTML in the source, shown as the text it is.
+  more: {
+    margin: 0,
+    marginBlockStart: `calc(-1 * ${space["2"]})`,
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+    color: colors.mutedForeground,
+  },
   raw: {
     direction: "ltr",
     unicodeBidi: "isolate",
@@ -430,19 +297,16 @@ const styles = stylex.create({
   },
 });
 
-// A section that folds inside prose, as a document's toggle: a Collapsible drawn as the section,
-// with a look of its own and none of a panel's. The chevron before the summary, pointing along the
-// line while closed and turned down while open; the summary at the body's size in the medium
-// weight; the body indented to the summary's first letter.
+// A section that folds inside prose, as a document's toggle: the chevron before the summary,
+// pointing along the line while closed and down while open; the body under the summary's first
+// letter. A Collapsible with a look of its own and none of a panel's.
 const sectionStyles = stylex.create({
-  // Toggle and summary on the first row, the body under the summary on the second.
   section: {
     display: "grid",
     gridTemplateColumns: "auto minmax(0, 1fr)",
     columnGap: space["1"],
     alignItems: "start",
   },
-  // The toggle: a square of the summary's line, the chevron in its middle.
   toggle: {
     gridColumn: "1",
     gridRow: "1",
@@ -459,17 +323,16 @@ const sectionStyles = stylex.create({
     cornerShape: radius.shape,
     backgroundColor: {
       default: "transparent",
-      ":hover": { default: null, [HOVER]: colors.accent },
+      ":hover": { default: null, [media.hover]: colors.accent },
       ":active": colors.accentActive,
     },
     color: colors.mutedForeground,
     font: "inherit",
     cursor: "pointer",
   },
-  // The chevron's holder turns (the drawing itself mirrors right to left, as a pointing icon does).
+  // The holder turns; the drawing itself mirrors right to left, as a pointing icon does.
   chevron: {
     display: "inline-flex",
-    // Open, it points down: a quarter turn from along the line, either way round.
     transform: {
       default: null,
       ":is([aria-expanded=true] > *)": {
@@ -481,7 +344,6 @@ const sectionStyles = stylex.create({
     transitionDuration: motionVars.ui,
     transitionTimingFunction: duration.ease,
   },
-
   summary: {
     gridColumn: "2",
     gridRow: "1",
@@ -491,14 +353,8 @@ const sectionStyles = stylex.create({
     fontWeight: font.weightMedium,
     color: colors.foreground,
   },
-  // Under the summary, from its first letter: the Collapsible's panel, drawn as this.
-  under: {
-    gridColumn: "2",
-    gridRow: "2",
-    minWidth: 0,
-  },
-  // The answer's own column of blocks, a step under the summary. Inside the panel: room on the
-  // panel itself would show while it is closed.
+  under: { gridColumn: "2", gridRow: "2", minWidth: 0 },
+  // Room inside the panel, as room on the panel itself would show while it is closed.
   body: {
     display: "flex",
     flexDirection: "column",
@@ -507,16 +363,9 @@ const sectionStyles = stylex.create({
     paddingBlockStart: space["2"],
   },
 });
+const Provided = createContext<MarkdownLinkRenderer | null>(null);
 
-/** The links a part around Markdown draws (a citation's chip): asked after the page's own `renderLink`. */
-const ProvidedLinks = createContext<MarkdownLinkRenderer | null>(null);
-
-/**
- * Draws some of the links of every Markdown inside it, so no page writes a `renderLink` for them: a
- * product's citations, its own scheme. A Markdown asks its own `renderLink` first, then this; a link
- * neither draws is Markdown's own. While an answer streams, a link inside it is its words until its
- * address is whole, and only then handed here, so it is never handed half of one.
- */
+/** Draws some of the links of every Markdown inside it (a product's citations, its own scheme). */
 export const MarkdownLinkProvider = ({
   renderLink,
   children,
@@ -525,1126 +374,496 @@ export const MarkdownLinkProvider = ({
   renderLink: MarkdownLinkRenderer;
   /** What holds the Markdown. */
   children: ReactNode;
-}) => <ProvidedLinks value={renderLink}>{children}</ProvidedLinks>;
-
-type Size = NonNullable<MarkdownProps["size"]>;
-
-interface Context {
-  /** Each link definition's target and title, and where it ends in the source, by its identifier. */
-  definitions: Map<
-    string,
-    { url: string; title: string | undefined; end: number }
-  >;
-  /** The page's own drawing of a link, when it has one. */
-  renderLink: MarkdownLinkRenderer | undefined;
-  /** The links a part around Markdown draws (MarkdownLinkProvider). */
+}) => <Provided value={renderLink}>{children}</Provided>;
+type Linked = Extract<Phrase, { url: string } | { referenceType: unknown }>;
+interface Shared {
   provided: MarkdownLinkRenderer | null;
-  /** While written: how much of the source is the stream's own (repair closed the rest). */
-  kept: number;
-  /**
-   * While written: the links and pictures whose source reaches past what is known complete, and
-   * the bare addresses in the word still being written (repair's `complete` and `word`): what
-   * follows may still make them something else, so none is handed on.
-   */
-  held: ReadonlySet<object>;
-  /** Where the block being drawn starts in the source: its nodes' places count from there. */
-  base: number;
-  footnotes: Map<string, number>;
-  prefix: string;
-  /** Still being written. */
-  streaming: boolean;
-  codeMaxLines: number | false;
-  /** The block still being written, at the end of an answer that is. */
-  writing: RootContent | undefined;
-  /** The fence still being written, at the end of an answer that is: the one CodeBlock that streams. */
-  openCode: RootContent | undefined;
-  /** Inside a link: a picture or a note's mark there is words, never a link in a link. */
-  inLink: boolean;
-  words: ReturnType<typeof useI18n>["markdown"];
-  /** How a single newline is drawn (`softBreaks`). */
-  softBreaks: MarkdownSoftBreaks;
-  /** This paragraph draws its single newlines as line breaks. */
-  lineBreaks: boolean;
-  size: Size;
-  /** The outline level of a `#` heading. */
-  headingLevel: number;
-  /** Written here: its lines break where they fill (styles.greedy). */
-  greedy: boolean;
-  /** Each reference to a note, and which of the note's references it is, for its own id. */
-  references: Map<RootContent, number>;
-  /** Each table's name: the words of the heading above it. */
-  tableNames: Map<RootContent, string>;
-  /** The caller's elements, by name (`components`). */
+  renderLink?: MarkdownLinkRenderer;
   components: MarkdownComponents;
-  /** The parts that draw a phrase and a block, handed down so the parts above can draw them. */
-  Inline: FC<{ node: PhrasingContent; context: Context }>;
-  Block: FC<{ node: RootContent; context: Context }>;
+  streaming: boolean;
+  size: NonNullable<MarkdownProps["size"]>;
+  headingLevel: number;
+  greedy: boolean;
+  softBreaks: boolean;
+  codeMaxLines: number | false;
+  inLink?: boolean;
+  phrase?: boolean;
+  notes?: boolean;
+}
+const PHRASE = { phrase: true };
+type Kids = (nodes: readonly Node[], within?: Partial<Shared>) => ReactNode;
+interface Part<T> {
+  node: T;
+  shared: Shared;
+  kids: Kids;
+  name?: string;
+  children?: ReactNode;
 }
 
-type Linked = Extract<PhrasingContent, { type: "link" | "linkReference" }>;
-type Pictured = Extract<PhrasingContent, { type: "image" | "imageReference" }>;
-type NoteReference = Extract<PhrasingContent, { type: "footnoteReference" }>;
-type HeadingNode = Extract<RootContent, { type: "heading" }>;
-
-/** A node of the tree, as far as walking it goes. */
-interface Walked {
-  type: string;
-  value?: string;
-  children?: readonly Walked[];
-  position?: { start: { offset?: number }; end: { offset?: number } };
+// What changes as the answer grows, read only by the nodes that need it: the link definitions; the
+// notes; the last word still being written (a bare address in it may still grow); how much of the
+// block drawn had been shown before (its words never fade again), and whether the block being
+// written has many words (what came since its last read then fades as one); and the place of the
+// block drawn (a note leads back to its first mark).
+const NO_DEFINITIONS: Of<"definition">[] = [];
+const Definitions = createContext(NO_DEFINITIONS);
+/** A note marked in the answer: its ids' prefix, its number, whether it has come, its marks' ids. */
+interface Marked {
+  prefix: string;
+  number: number;
+  come: boolean;
+  marks: readonly string[];
 }
-
-/**
- * A block's words as they are said: its phrases run together, its parts (a list's items) apart.
- * Walked with a stack of its own, not by recursion, so no depth of nesting can exhaust the stack.
- */
-const spokenOf = (node: Walked): string => {
-  const stack: { node: Walked; parts: string[]; next: number }[] = [
-    { node, parts: [], next: 0 },
-  ];
-  let said = "";
-  while (stack.length > 0) {
-    const top = stack.at(-1);
-    if (top === undefined) {
-      break;
-    }
-    const child = top.node.children?.[top.next];
-    if (child === undefined) {
-      stack.pop();
-      const { type, value, children } = top.node;
-      const runTogether =
-        type === "paragraph" || type === "heading" || type === "tableCell";
-      const words =
-        children === undefined
-          ? (value ?? "")
-          : top.parts.join(runTogether ? "" : " ");
-      const parent = stack.at(-1);
-      if (parent === undefined) {
-        said = words;
-      } else {
-        parent.parts.push(words);
-      }
-    } else {
-      top.next += 1;
-      stack.push({ node: child, parts: [], next: 0 });
-    }
-  }
-  return said;
-};
-
-/** Every node under `roots`, in reading order, and whether it stands inside a link; by a stack, not recursion. */
-const eachNode = (
-  roots: readonly RootContent[],
-  visit: (node: RootContent, inLink: boolean) => void
+const NO_NOTES: ReadonlyMap<string, Marked> = new Map();
+const Notes = createContext(NO_NOTES);
+const Tail = createContext("");
+const Shown = createContext(0);
+const Many = createContext(false);
+const At = createContext("");
+// SAFETY: every node a node of the tree holds is a node of the tree.
+const kidsOf = (node: Node) =>
+  ("children" in node ? node.children : []) as Node[];
+const BLOCKY = /^(?:blockquote|list|listItem|table|tableRow|section)$/u;
+const textOf = (node: Node): string =>
+  "value" in node
+    ? node.value
+    : kidsOf(node)
+        .map(textOf)
+        .join(BLOCKY.test(node.type) ? " " : "");
+const linkOf = (
+  node: Linked,
+  url: string,
+  title: unknown,
+  children: ReactNode
 ) => {
-  const stack: { node: RootContent; inLink: boolean }[] = roots
-    .toReversed()
-    .map((node) => ({ node, inLink: false }));
-  while (stack.length > 0) {
-    const top = stack.pop();
-    if (top === undefined) {
-      break;
-    }
-    const { node, inLink } = top;
-    visit(node, inLink);
-    if ("children" in node) {
-      const within =
-        inLink || node.type === "link" || node.type === "linkReference";
-      for (const child of node.children.toReversed()) {
-        stack.push({ node: child, inLink: within });
-      }
-    }
+  const text = textOf(node);
+  const scheme = /^(?<s>[a-z][a-z\d+.-]*):/iu.exec(
+    url.replaceAll(/[\s\p{Cc}]/gu, "")
+  );
+  const link: MarkdownLink = {
+    href: url,
+    scheme: scheme?.groups?.s?.toLowerCase() ?? "",
+    children,
+    type: [text, `http://${text}`, `mailto:${text}`].includes(url)
+      ? "autolink"
+      : "link",
+    ...(typeof title === "string" && { title }),
+  };
+  if (node.type === "image" || node.type === "imageReference") {
+    link.type = "image";
   }
+  return link;
 };
-
-/** A table column's side, from the source's colons. */
-const sides = { left: "start", right: "end", center: "center" } as const;
-
-/** A text's single newlines as line breaks, its words between them as they are. */
-const withBreaks = (value: string): ReactNode => {
-  if (!value.includes("\n")) {
-    return value;
-  }
-  return value.split("\n").map((line, index) => (
-    <Fragment key={index}>
-      {index > 0 && <br />}
-      {line}
-    </Fragment>
-  ));
-};
-
-const SHORT_LINE = 60;
-// A labelled line: a few words, a colon, then its value ("Owner: Dana", "Due date: Friday").
-const LABELLED = /^[^\s:][^:]{0,30}:\s+\S/u;
-// The start of a labelled line still being written: a few words with no colon yet, or the colon.
-const LABEL_COMING = /^[^\s:][^:]{0,30}(?::\s*)?$/u;
 
 /**
- * Whether a paragraph's lines are short lines, not prose wrapped by hand (`softBreaks="auto"`): two
- * or more lines, every one under 60 characters or every one "Label: value". While the answer is
- * written, its last line still coming counts if it still may: so a paragraph breaks from its first
- * newline and never runs together again, and prose, whose first line passes 60 before its newline,
- * never breaks at all.
+ * The element `tag`: the caller's (`components`), given `props` and the node, else Markdown's own,
+ * `own` or the tag itself with `props` and its `looks`.
  */
-const shortLines = (text: string, writing: boolean) => {
-  const lines = text.split("\n").map((line) => line.trim());
-  if (lines.length < 2) {
-    return false;
-  }
-  const done = writing ? lines.slice(0, -1) : lines;
-  const coming = writing ? (lines.at(-1) ?? "") : "";
-  const short =
-    done.every((line) => line.length < SHORT_LINE) &&
-    coming.length < SHORT_LINE;
-  const labelled =
-    done.every((line) => LABELLED.test(line)) &&
-    (!writing || LABELLED.test(coming) || LABEL_COMING.test(coming));
-  return short || labelled;
-};
-
-/** The context for one paragraph: whether its single newlines are line breaks. */
-const inParagraph = (node: Paragraph, context: Context): Context => {
-  const lineBreaks =
-    context.softBreaks === "line" ||
-    (context.softBreaks === "auto" &&
-      shortLines(
-        spokenOf(node),
-        context.streaming && context.writing === node
-      ));
-  return lineBreaks === context.lineBreaks
-    ? context
-    : { ...context, lineBreaks };
-};
-
-/** The caller's element for `tag` (`components`), given its props and the node it draws, or Markdown's own. */
-const elementOf = <Tag extends MarkdownElement>(
-  context: Context,
-  tag: Tag,
-  node: MarkdownNode,
-  props: ComponentProps<Tag>,
-  own: ReactNode
-): ReactNode => {
-  // SAFETY: `components` maps each tag to a part that takes that tag's props and the node, which is
-  // what it is given here; TypeScript cannot follow a tag that is a type parameter through the map.
-  const Custom = context.components[tag] as
-    | ComponentType<ComponentProps<Tag> & { node: MarkdownNode }>
+const part = <T extends MarkdownElement>(
+  shared: Shared,
+  tag: T,
+  node: Node,
+  props: ComponentProps<T>,
+  looks: readonly (stylex.StyleXStyles | false)[],
+  own?: ReactElement
+): ReactElement => {
+  // SAFETY: `components` maps each tag to a part that takes that tag's props and the node.
+  const Custom = shared.components[tag] as
+    | ComponentType<ComponentProps<T> & { node: Node }>
     | undefined;
-  return Custom === undefined ? own : <Custom {...props} node={node} />;
+  if (Custom !== undefined) {
+    return <Custom {...props} node={node} />;
+  }
+  return own ?? createElement(tag, { ...props, ...stylex.props(...looks) });
 };
 
-const Phrasing = ({
-  nodes,
-  context,
-}: {
-  nodes: PhrasingContent[];
-  context: Context;
-}) =>
-  nodes.map((node, index) => (
-    <context.Inline key={index} node={node} context={context} />
-  ));
-
-/**
- * Whether a link still being written will get Link's arrow, as far as its address tells yet: none
- * so far (a reference whose definition is still to come, or the first letters of a web address),
- * or a web address. One that starts any other way (mailto:) gets none, so no room is kept.
- */
-const isComing = (url: string | undefined) =>
-  url === undefined ||
-  "https://".startsWith(url) ||
-  "http://".startsWith(url) ||
-  /^https?:\/\//u.test(url);
-
-/** A link node's address and title, from itself or the definition it refers to. */
-const targetOf = (node: Linked | Pictured, context: Context) => {
-  if (node.type === "link" || node.type === "image") {
-    return { url: node.url, title: node.title ?? undefined };
+/** A link or a picture at an address it may lead to, whole: the caller's `a` or `img`, else Link. */
+const leadTo = (
+  node: Linked,
+  link: MarkdownLink,
+  href: string,
+  { a: A, img: Img }: MarkdownComponents
+) => {
+  if (link.type === "image" && Img !== undefined && /^https?:/u.test(href)) {
+    const alt = "alt" in node ? (node.alt ?? "") : "";
+    return <Img node={node} src={href} alt={alt} title={link.title} />;
   }
-  const found = context.definitions.get(node.identifier);
-  return { url: found?.url, title: found?.title };
-};
-
-/** A bare address the text linked by itself (`<https://…>`, `www.…`, `name@host`). */
-const isAutolink = (node: Walked & { url?: string }) => {
-  if (node.type !== "link" || node.children?.length !== 1) {
-    return false;
+  if (link.type !== "image" && A !== undefined) {
+    return (
+      <A node={node} href={href} title={link.title}>
+        {link.children}
+      </A>
+    );
   }
-  const [only] = node.children;
   return (
-    only?.type === "text" &&
-    [only.value, `http://${only.value}`, `mailto:${only.value}`].includes(
-      node.url
-    )
+    <Link href={href} title={link.title} external={/^https?:/u.test(href)}>
+      {link.type === "image" && link.children === "" ? href : link.children}
+    </Link>
   );
 };
 
 /**
- * A link's or a picture's address and title, once the stream has proven the address whole, or
- * null: the one place an address is handed on, to the host's `renderLink`, a provider,
- * `components.a` or `components.img`, or Markdown's own Link. Half of one (`https://i`) is another
- * site's, so nothing that loads or leads anywhere is drawn from it. Proven means the node stands
- * wholly in what is known complete, whatever form it has (`held`: not in what is still open, a
- * link, a bracket, a tag or code, which what follows may make something else; a bare address not in
- * the word still being written, which it may run on into), and a reference's definition has its
- * line's end. Once written, every address is whole.
+ * A link or a picture whose address can still change: a picture is nothing yet; a link its words,
+ * keeping the room its arrow will take while it is Markdown's own and its address so far is
+ * nothing, the first letters of a web address, or one.
  */
-const handedOf = (
-  node: Linked | Pictured,
-  context: Context
-): { url: string; title: string | undefined } | null => {
-  const { url, title } = targetOf(node, context);
-  const target = url === undefined ? null : { url, title };
-  if (!context.streaming || target === null) {
-    return target;
-  }
-  if (context.held.has(node)) {
+const held = (
+  url: string | undefined,
+  shared: Shared,
+  tail: string,
+  children: ReactNode
+): ReactNode => {
+  if (url === "streamdown:incomplete-image") {
     return null;
   }
-  if (node.type === "linkReference" || node.type === "imageReference") {
-    const definition = context.definitions.get(node.identifier);
-    return (definition?.end ?? context.kept) < context.kept ? target : null;
-  }
-  return target;
+  const so = /\]\((?<url>[^\s)]*)$/u.exec(tail)?.groups?.url ?? "https://";
+  const own =
+    shared.renderLink === undefined &&
+    shared.provided === null &&
+    shared.components.a === undefined;
+  return shared.streaming &&
+    shared.inLink !== true &&
+    url === "streamdown:incomplete-link" &&
+    own &&
+    (/^https?:\/\//u.test(so) ||
+      ["http://", "https://"].some((web) => web.startsWith(so))) ? (
+    <>
+      <span aria-hidden="true" {...stylex.props(styles.linkLead)} />
+      {children}
+      <span aria-hidden="true" {...stylex.props(styles.arrowRoom)} />
+    </>
+  ) : (
+    children
+  );
 };
 
-/** What the host draws for a link: the page's own first, then the part around Markdown. */
-const hosted = (
-  context: Context,
-  link: Omit<MarkdownLink, "scheme" | "title"> & { title: string | undefined }
-): ReactNode => {
-  if (context.inLink) {
-    return undefined;
-  }
-  const { title, ...rest } = link;
-  const asked: MarkdownLink = {
-    ...rest,
-    scheme: schemeOf(link.href),
-    ...(title === undefined ? {} : { title }),
-  };
-  const drawn = context.renderLink?.(asked);
-  return drawn === undefined ? context.provided?.(asked) : drawn;
-};
-
-/** Whether Markdown draws its links itself, with Link: no host and no `components.a` may. */
-const drawsOwnLinks = (context: Context) =>
-  context.renderLink === undefined &&
-  context.provided === null &&
-  context.components.a === undefined;
-
-const LinkInline = ({
+/**
+ * A link or a picture: the host's, else the caller's `a` or `img`, else Markdown's own Link where
+ * the address may lead, else its words. Never while its address can change: a half link or picture,
+ * a reference not yet defined, a bare address (its words start where it does) in the word still
+ * being written; nor inside a link.
+ */
+const Anchor = ({
   node,
-  context,
-}: {
-  node: Linked;
-  context: Context;
-}): ReactNode => {
-  const words = (
-    <Phrasing nodes={node.children} context={{ ...context, inLink: true }} />
-  );
-  const handed = handedOf(node, context);
-  // Its address not yet whole: its words, and the link in their place once it is. Where Markdown
-  // draws the link itself, the room Link's arrow will take is kept, so nothing after it moves.
-  if (handed === null) {
-    return context.streaming &&
-      !context.inLink &&
-      drawsOwnLinks(context) &&
-      isComing(targetOf(node, context).url) ? (
-      <>
-        <span aria-hidden="true" {...stylex.props(styles.linkLead)} />
-        {words}
-        <span aria-hidden="true" {...stylex.props(styles.arrowRoom)} />
-      </>
-    ) : (
-      words
-    );
+  shared,
+  children,
+}: Omit<Part<Linked>, "kids">): ReactNode => {
+  const found =
+    "url" in node
+      ? node
+      : use(Definitions).find((each) => each.identifier === node.identifier);
+  const [first] = "children" in node ? node.children : [];
+  const bare = first?.position?.start.offset === node.position?.start.offset;
+  const tail = use(Tail);
+  const growing = bare && tail.includes(textOf(node));
+  if (
+    found === undefined ||
+    parse.HALF.has(found.url) ||
+    growing ||
+    shared.inLink === true
+  ) {
+    return held(found?.url, shared, tail, children);
   }
-  const { url, title } = handed;
-  const drawn = hosted(context, {
-    href: url,
-    title,
-    children: words,
-    type: isAutolink(node) ? "autolink" : "link",
-  });
-  if (drawn !== undefined) {
-    return drawn;
-  }
-  const href = safeHref(encodedUrl(url));
-  if (href === null || context.inLink) {
-    return words;
-  }
-  const Custom = context.components.a;
-  if (Custom !== undefined) {
-    return (
-      <Custom node={node} href={href} title={title}>
-        {words}
-      </Custom>
-    );
-  }
-  return (
-    <Link href={href} title={title} external={!href.startsWith("mailto:")}>
-      {words}
-    </Link>
-  );
+  const link = linkOf(node, found.url, found.title, children);
+  const drawn = shared.renderLink?.(link);
+  const hosted = drawn === undefined ? shared.provided?.(link) : drawn;
+  const href = safeHref(parse.encodedHref(found.url), { relative: true });
+  return hosted !== undefined || href === null
+    ? (hosted ?? children)
+    : leadTo(node, link, href, shared.components);
 };
-
-// A picture is never loaded (no request leaves for it) unless the host draws it (`renderLink`, type
-// `image`, or `components.img` for one at an http or https address); otherwise it is shown by its
-// words and leads to the picture when it may. Until its address is whole, it is its words.
-const PictureInline = ({
-  node,
-  context,
-}: {
-  node: Pictured;
-  context: Context;
-}): ReactNode => {
-  const alt = node.alt ?? "";
-  const handed = handedOf(node, context);
-  if (handed === null) {
-    return alt;
-  }
-  const { url, title } = handed;
-  if (url !== "") {
-    const drawn = hosted(context, {
-      href: url,
-      title,
-      children: alt,
-      type: "image",
-    });
-    if (drawn !== undefined) {
-      return drawn;
-    }
-  }
-  const href = safeHref(encodedUrl(url));
-  const Picture = context.components.img;
-  if (Picture !== undefined && href !== null && /^https?:/u.test(href)) {
-    return <Picture node={node} src={href} alt={alt} title={title} />;
-  }
-  const words = alt === "" ? (href ?? "") : alt;
-  if (href === null || context.inLink) {
-    return words;
-  }
-  return (
-    <Link href={href} title={title} external>
-      {words}
-    </Link>
-  );
-};
-
+/** Where a note's mark is: the place of its block and where it starts in it. */
+const markId = (prefix: string, place: string, node: Node) =>
+  `${prefix}-ref-${place}-${node.position?.start.offset ?? 0}`;
+/** A note in the answer's notes, by its name: number 0 while nothing marks it. */
+const useNote = (name: string) =>
+  use(Notes).get(name) ?? { prefix: "", number: 0, come: false, marks: [] };
+/** A note's mark: its number, leading to the note once the note has come. */
 const NoteMark = ({
   node,
-  context,
-}: {
-  node: NoteReference;
-  context: Context;
-}) => {
-  const number = context.footnotes.get(node.identifier);
-  if (number === undefined) {
+  shared,
+}: Omit<Part<Of<"footnoteReference">>, "kids">) => {
+  const words = useI18n().markdown;
+  const { prefix, number, come } = useNote(node.identifier);
+  const place = use(At);
+  if (number === 0) {
     return `[^${node.label ?? node.identifier}]`;
   }
-  if (context.inLink) {
-    return String(number);
-  }
-  // Each reference has its own id; the note leads back to the first.
-  const nth = context.references.get(node);
+  const shown = <span aria-label={words.footnote(number)}>{number}</span>;
   return (
     <sup {...stylex.props(styles.footnoteMark)}>
-      <span
-        id={
-          nth === undefined
-            ? undefined
-            : `${context.prefix}-ref-${number}-${nth}`
-        }
-      >
-        <Link href={`#${context.prefix}-fn-${number}`}>
-          <span aria-label={context.words.footnote(number)}>
-            {String(number)}
-          </span>
-        </Link>
+      <span id={markId(prefix, place, node)}>
+        {come && shared.inLink !== true ? (
+          <Link href={`#${prefix}-fn-${number}`}>{shown}</Link>
+        ) : (
+          shown
+        )}
       </span>
     </sup>
   );
 };
-
-const Inline = ({
+/** A list item's or a note's blocks: a paragraph is its words, followed by `after`. */
+const body = (nodes: readonly Node[], kids: Kids, after?: ReactElement) => (
+  <div {...stylex.props(styles.itemBody)}>
+    {nodes.map((child, at) => (
+      <Fragment key={at}>
+        {child.type === "paragraph" ? (
+          <span>
+            {kids(child.children, PHRASE)}
+            {after !== undefined && " "}
+            {after}
+          </span>
+        ) : (
+          kids([child])
+        )}
+      </Fragment>
+    ))}
+    {!nodes.some((child) => child.type === "paragraph") && after}
+  </div>
+);
+/** A note at the foot, leading back to each of its marks: `↩`, `↩²`. */
+const Note = ({
   node,
-  context,
-}: {
-  node: PhrasingContent;
-  context: Context;
-}): ReactNode => {
-  switch (node.type) {
-    case "text": {
-      return context.lineBreaks ? withBreaks(node.value) : node.value;
-    }
-    case "strong": {
-      const children = <Phrasing nodes={node.children} context={context} />;
-      return elementOf(
-        context,
-        "strong",
-        node,
-        { children },
-        <strong {...stylex.props(styles.strong)}>{children}</strong>
-      );
-    }
-    case "emphasis": {
-      const children = <Phrasing nodes={node.children} context={context} />;
-      return elementOf(
-        context,
-        "em",
-        node,
-        { children },
-        <em {...stylex.props(styles.emphasis)}>{children}</em>
-      );
-    }
-    case "delete": {
-      const children = <Phrasing nodes={node.children} context={context} />;
-      return elementOf(
-        context,
-        "del",
-        node,
-        { children },
-        <del {...stylex.props(styles.deleted)}>{children}</del>
-      );
-    }
-    case "inlineCode": {
-      return elementOf(
-        context,
-        "code",
-        node,
-        { children: node.value },
-        <code
-          {...stylex.props(
-            styles.inlineCode,
-            context.size === "xs" && styles.xsmallCode
-          )}
-        >
-          {node.value}
-        </code>
-      );
-    }
-    case "break": {
-      return <br />;
-    }
-    case "link":
-    case "linkReference": {
-      return <LinkInline node={node} context={context} />;
-    }
-    case "image":
-    case "imageReference": {
-      return <PictureInline node={node} context={context} />;
-    }
-    case "footnoteReference": {
-      return <NoteMark node={node} context={context} />;
-    }
-    case "html": {
-      return <span {...stylex.props(styles.raw)}>{node.value}</span>;
-    }
-    default: {
-      return null;
-    }
-  }
+  kids,
+}: Omit<Part<Of<"footnoteDefinition">>, "shared">) => {
+  const words = useI18n().markdown;
+  const { prefix, number, marks } = useNote(node.identifier);
+  const back = marks.length > 0 && (
+    <>
+      {marks.map((mark, at) => (
+        <Fragment key={mark}>
+          {at > 0 && " "}
+          <Link href={`#${mark}`} aria-label={words.back(number, at + 1)}>
+            ↩{at > 0 && <sup>{at + 1}</sup>}
+          </Link>
+        </Fragment>
+      ))}
+    </>
+  );
+  return (
+    <li value={number} id={`${prefix}-fn-${number}`}>
+      {body(node.children, kids, back === false ? undefined : back)}
+    </li>
+  );
 };
 
 /** A task's box: Checkbox's, read only, said by its words beside it. */
-const TaskBox = ({ done, said }: { done: boolean; said: string }) => (
-  <>
-    <span aria-hidden="true" {...stylex.props(styles.box)}>
-      <span
-        {...stylex.props(
-          choiceBoxStyles.face,
-          done ? choiceBoxStyles.full : choiceBoxStyles.empty
-        )}
-      >
-        {done && <Icon icon={CheckIcon} />}
-      </span>
-    </span>
-    <span {...stylex.props(visuallyHidden)}>{said}</span>
-  </>
-);
-
-const Item = ({
-  item,
-  context,
-}: {
-  item: ListItem;
-  context: Context;
-}): ReactNode => {
-  const body = (
-    <div {...stylex.props(styles.itemBody)}>
-      {item.children.map((child, index) =>
-        // A tight item's paragraph is its words, not a block of its own.
-        child.type === "paragraph" ? (
-          <span key={index}>
-            <Phrasing
-              nodes={child.children}
-              context={inParagraph(child, context)}
-            />
-          </span>
-        ) : (
-          <context.Block key={index} node={child} context={context} />
-        )
-      )}
-    </div>
-  );
-  if (item.checked === null || item.checked === undefined) {
-    return elementOf(
-      context,
-      "li",
-      item,
-      { children: body },
-      <li {...stylex.props(styles.item)}>{body}</li>
-    );
-  }
-  const children = (
+const TaskBox = ({ done }: { done: boolean }) => {
+  const words = useI18n().markdown;
+  return (
     <>
-      <TaskBox
-        done={item.checked}
-        said={item.checked ? context.words.done : context.words.notDone}
-      />
-      {body}
+      <span aria-hidden="true" {...stylex.props(styles.box)}>
+        <span
+          {...stylex.props(
+            choiceBoxStyles.face,
+            done ? choiceBoxStyles.full : choiceBoxStyles.empty
+          )}
+        >
+          {done && <Icon icon={CheckIcon} />}
+        </span>
+      </span>
+      <span {...stylex.props(visuallyHidden)}>
+        {done ? words.done : words.notDone}
+      </span>
     </>
   );
-  return elementOf(
-    context,
-    "li",
-    item,
-    { children },
-    <li {...stylex.props(styles.item, styles.task)}>{children}</li>
-  );
 };
+type Draw<T extends Node["type"]> = (
+  node: Extract<Node, { type: T }>,
+  shared: Shared,
+  kids: Kids
+) => ReactNode;
 
-const ListBlock = ({
-  node,
-  context,
-}: {
-  node: List;
-  context: Context;
-}): ReactNode => {
-  const items = node.children.map((item, index) => (
-    <Item key={index} item={item} context={context} />
-  ));
-  const start = node.start ?? undefined;
-  return node.ordered === true
-    ? elementOf(
-        context,
-        "ol",
-        node,
-        { start, children: items },
-        <ol start={start} {...stylex.props(styles.list, styles.ordered)}>
-          {items}
-        </ol>
-      )
-    : elementOf(
-        context,
-        "ul",
-        node,
-        { children: items },
-        <ul {...stylex.props(styles.list, styles.unordered)}>{items}</ul>
-      );
-};
-
-// A table scrolls sideways inside its own box, with no bar (Table's), so a wide one never widens the
-// answer. A row arrives whole, when its line has ended (repair), so its cells come in together. A
-// row draws its own cells, as many as the head at most: a long one's extra cells go, as GitHub
-// draws it, and a short one is not filled out with empty ones, so what is drawn grows with what
-// was written, never with the head's width times the rows.
-const TableBlock = ({
-  node,
-  context,
-}: {
-  node: TableNode;
-  context: Context;
-}): ReactNode => {
+// A table is named by the heading above it; a row draws its own cells, as many as the head's. One
+// from a model has no bound: at most 1,000 rows are drawn, and a line says how many more.
+const MOST_ROWS = 1000;
+const TableBlock = ({ node, shared, kids, name }: Part<Of<"table">>) => {
+  const words = useI18n().markdown;
   const [head, ...rows] = node.children;
-  // A table that was written here keeps the even columns it had as its rows came, for as long as
-  // it is on the page: its cells never move, not when a row comes and not when it is whole.
-  const [written, setWritten] = useState(node === context.writing);
-  if (node === context.writing && !written) {
-    setWritten(true);
-  }
-  const columns = Array.from(head?.children ?? [], (_, column) => {
-    const side = node.align?.[column];
-    return side === null || side === undefined ? "start" : sides[side];
-  });
-  const cellOf = (
-    cell: TableNode["children"][number]["children"][number],
-    tag: "th" | "td",
-    column: number
-  ): ReactNode => {
-    const align = columns[column];
-    const children = <Phrasing nodes={cell.children} context={context} />;
-    return (
-      <Fragment key={column}>
-        {elementOf(
-          context,
-          tag,
-          cell,
-          { align: node.align?.[column] ?? undefined, children },
-          tag === "th" ? (
-            <TableHead align={align}>{children}</TableHead>
-          ) : (
-            <TableCell align={align}>{children}</TableCell>
-          )
-        )}
-      </Fragment>
-    );
-  };
-  const rowOf = (
-    row: TableNode["children"][number],
-    tag: "th" | "td"
-  ): ReactNode => {
-    const cells = row.children
-      .slice(0, columns.length)
-      .map((cell, column): ReactNode => cellOf(cell, tag, column));
-    return elementOf(
-      context,
-      "tr",
-      row,
-      { children: cells },
-      <TableRow>{cells}</TableRow>
-    );
-  };
-  const headRow = head === undefined ? null : rowOf(head, "th");
-  const header =
-    headRow === null
-      ? null
-      : elementOf(
-          context,
-          "thead",
-          node,
-          { children: headRow },
-          <TableHeader>{headRow}</TableHeader>
-        );
-  const bodyRows = rows.map((row, index) => (
-    <Fragment key={index}>{rowOf(row, "td")}</Fragment>
-  ));
-  const body = elementOf(
-    context,
-    "tbody",
-    node,
-    { children: bodyRows },
-    <TableBody>{bodyRows}</TableBody>
+  const sides = { left: "start", right: "end", center: "center" } as const;
+  const align = (head?.children ?? []).map(
+    (_, at) => sides[node.align?.[at] ?? "left"]
   );
-  return elementOf(
-    context,
+  const row = (cells: Row | undefined, tag: "th" | "td") => {
+    const Cell = tag === "th" ? Tables.TableHead : Tables.TableCell;
+    const drawn = cells?.children.slice(0, align.length).map((cell, at) => {
+      const children = kids(cell.children, PHRASE);
+      const props = { align: node.align?.[at] ?? undefined, children };
+      const own = <Cell align={align[at]}>{children}</Cell>;
+      return (
+        <Fragment key={at}>{part(shared, tag, cell, props, [], own)}</Fragment>
+      );
+    });
+    const own = <Tables.TableRow>{drawn}</Tables.TableRow>;
+    return cells && part(shared, "tr", cells, { children: drawn }, [], own);
+  };
+  const top = row(head, "th");
+  const lines = rows
+    .slice(0, MOST_ROWS)
+    .map((cells, at) => <Fragment key={at}>{row(cells, "td")}</Fragment>);
+  const label = name ?? words.table;
+  const header = <Tables.TableHeader>{top}</Tables.TableHeader>;
+  const children = (
+    <>
+      {part(shared, "thead", node, { children: top }, [], header)}
+      {part(
+        shared,
+        "tbody",
+        node,
+        { children: lines },
+        [],
+        <Tables.TableBody>{lines}</Tables.TableBody>
+      )}
+    </>
+  );
+  const more =
+    Math.max(rows.length - MOST_ROWS, 0) +
+    ("more" in node ? Number(node.more) : 0);
+  const own = (
+    <>
+      <Tables.Table aria-label={label} streaming={shared.greedy}>
+        {children}
+      </Tables.Table>
+      {more > 0 && <p {...stylex.props(styles.more)}>{words.moreRows(more)}</p>}
+    </>
+  );
+  return part(
+    shared,
     "table",
     node,
-    {
-      "aria-label": context.tableNames.get(node) ?? context.words.table,
-      children: (
-        <>
-          {header}
-          {body}
-        </>
-      ),
-    },
-    <Table
-      aria-label={context.tableNames.get(node) ?? context.words.table}
-      streaming={written}
-    >
-      {header}
-      {body}
-    </Table>
+    { "aria-label": label, children },
+    [],
+    own
   );
 };
-
-/** Each heading's look, by its depth in the answer: the first two a step up, the rest the body's. */
-const headingLook = (depth: number, answerSize: Size) => {
-  const major = depth <= 2;
-  if (answerSize === "xs") {
-    return styles.xsmallHeading;
-  }
-  if (answerSize === "sm") {
-    return major ? styles.smallMajor : styles.smallMinor;
-  }
-  return major ? styles.major : styles.minor;
+const MARKS = {
+  strong: ["strong", styles.strong],
+  emphasis: ["em", styles.emphasis],
+  delete: ["del", styles.deleted],
+} as const;
+const mark = (
+  node: Extract<Phrase, { type: keyof typeof MARKS }>,
+  shared: Shared,
+  kids: Kids
+) => {
+  const [tag, look] = MARKS[node.type];
+  return part(shared, tag, node, { children: kids(node.children) }, [look]);
 };
-
-const headingTags = ["h1", "h2", "h3", "h4", "h5", "h6"] as const;
-
-const Heading = ({
-  node,
-  context,
-}: {
-  node: HeadingNode;
-  context: Context;
-}): ReactNode => {
-  // The fifth and sixth depths are drawn and placed as the fourth, from the caller's level on.
-  const depth = Math.min(node.depth, 4);
-  const Tag =
-    headingTags[Math.min(context.headingLevel - 1 + depth, 6) - 1] ?? "h6";
-  const children = <Phrasing nodes={node.children} context={context} />;
-  return elementOf(
-    context,
-    Tag,
-    node,
-    { children },
-    <Tag
-      {...stylex.props(
-        styles.heading,
-        headingLook(depth, context.size),
-        context.greedy && styles.greedy
-      )}
-    >
-      {children}
-    </Tag>
-  );
-};
-
-// Definitions are gathered (gather) and notes drawn at the foot; any other node is drawn inside a
-// block, so it draws nothing here.
-const Block = ({
-  node,
-  context,
-}: {
-  node: RootContent;
-  context: Context;
-}): ReactNode => {
-  switch (node.type) {
-    case "paragraph": {
-      const children = (
-        <Phrasing nodes={node.children} context={inParagraph(node, context)} />
-      );
-      return elementOf(
-        context,
-        "p",
-        node,
-        { children },
-        <p {...stylex.props(styles.paragraph, context.greedy && styles.greedy)}>
-          {children}
-        </p>
-      );
-    }
-    case "heading": {
-      return <Heading node={node} context={context} />;
-    }
-    case "list": {
-      return <ListBlock node={node} context={context} />;
-    }
-    case "blockquote": {
-      const children = node.children.map((child, index) => (
-        <Block key={index} node={child} context={context} />
-      ));
-      return elementOf(
-        context,
-        "blockquote",
-        node,
-        { children },
-        <blockquote {...stylex.props(styles.quote)}>{children}</blockquote>
-      );
-    }
-    case "thematicBreak": {
-      return elementOf(context, "hr", node, {}, <Separator />);
-    }
-    case "code": {
-      const { code: Code, pre: Pre } = context.components;
-      if (Code !== undefined || Pre !== undefined) {
-        const className =
-          node.lang === null || node.lang === undefined
-            ? undefined
-            : `language-${node.lang}`;
-        const code =
-          Code === undefined ? (
-            <code className={className}>{node.value}</code>
-          ) : (
-            <Code node={node} className={className}>
-              {node.value}
-            </Code>
-          );
-        return Pre === undefined ? code : <Pre node={node}>{code}</Pre>;
-      }
-      return (
-        <CodeBlock
-          language={node.lang ?? "text"}
-          // Still coming in while its fence is open at the end of an answer being written.
-          streaming={node === context.openCode}
-        >
-          <CodeBlockHeader>
-            <CodeBlockTitle />
-            <CodeBlockActions>
-              <CodeBlockCopyButton value={node.value} />
-            </CodeBlockActions>
-          </CodeBlockHeader>
-          <CodeBlockContent
-            lineNumbers
-            // Model output is never drawn without a bound: `false` never folds, yet an open block
-            // still draws at most its first 2,000 lines, as every opened block does.
-            maxLines={
-              context.codeMaxLines === false
-                ? Number.POSITIVE_INFINITY
-                : context.codeMaxLines
-            }
-          >
-            {node.value}
-          </CodeBlockContent>
-        </CodeBlock>
-      );
-    }
-    case "table": {
-      return <TableBlock node={node} context={context} />;
-    }
-    case "html": {
-      return (
-        <p {...stylex.props(styles.paragraph, styles.raw)}>{node.value}</p>
-      );
-    }
-    default: {
-      return null;
-    }
-  }
-};
-
+const anchor = (node: Linked, shared: Shared, kids: Kids) => (
+  <Anchor node={node} shared={shared}>
+    {"children" in node
+      ? kids(node.children, { inLink: true })
+      : (node.alt ?? "")}
+  </Anchor>
+);
+// A word with what follows it; in scripts written without spaces (Chinese, Japanese, Korean, and
+// their punctuation), each character, as Streamdown animates them.
+const WORDS =
+  /[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}\u3000-\u303F\uFF00-\uFFEF]\s*|[^\s\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}\u3000-\u303F\uFF00-\uFFEF]+\s*|\s+/gu;
 /**
- * What the tree refers to from anywhere in it: link targets and where each definition ends, the
- * notes in reading order, numbered by where each is first referred to (once written, only those
- * defined; while written, every one, as its note is to come at the end: so a mark shows the number
- * it will have), and each reference to a note counted in the order it is drawn (the answer, then
- * the notes at its foot), so each has its own id and drawing it twice (StrictMode) changes nothing.
+ * Words that may fade in: each its own fade while written, but not in a link (its words move into
+ * the link when it is whole, and would fade again there), nor once shown. Past many words in the
+ * block still being written, the words read since its last read fade as one, and the rest stand.
  */
-const gather = (placed: Placed[], streaming: boolean) => {
-  const definitions: Context["definitions"] = new Map();
-  const found = new Map<string, FootnoteDefinition>();
-  const order = new Set<string>();
-  for (const { node: block, base } of placed) {
-    eachNode([block], (node) => {
-      // The first to define a name does (CommonMark).
-      if (node.type === "definition" && !definitions.has(node.identifier)) {
-        definitions.set(node.identifier, {
-          url: node.url,
-          title: node.title ?? undefined,
-          end: base + (node.position?.end.offset ?? 0),
-        });
-      } else if (node.type === "footnoteDefinition") {
-        found.set(node.identifier, node);
-      } else if (node.type === "footnoteReference") {
-        order.add(node.identifier);
-      }
-    });
-  }
-  const notes = [...order].flatMap((id) => {
-    const note = found.get(id);
-    return note === undefined ? [] : [note];
+const Words = ({
+  value,
+  shared,
+  from,
+}: {
+  value: string;
+  shared: Shared;
+  from: number;
+}) => {
+  const shown = use(Shown) - from;
+  const many = use(Many);
+  // Drawn plain, never to fade: the parts of it shown before they were first drawn here (`plain`,
+  // ranges); past many words, all but what came since the last read (`shown`).
+  const [kept, setKept] = useState({
+    length: value.length,
+    plain: [0, Math.max(shown, 0)],
+    shown,
+    many,
   });
-  const footnotes = new Map(
-    (streaming ? [...order] : notes.map((note) => note.identifier)).map(
-      (id, index) => [id, index + 1]
-    )
-  );
-  // A reference inside a link is drawn as its number only, with no id: it is not counted.
-  const references = new Map<RootContent, number>();
-  const counted = new Map<string, number>();
-  const count = (node: RootContent, inLink: boolean) => {
-    if (node.type === "footnoteReference" && !inLink) {
-      const nth = (counted.get(node.identifier) ?? 0) + 1;
-      counted.set(node.identifier, nth);
-      references.set(node, nth);
+  let next = kept;
+  if (value.length > kept.length) {
+    const end = Math.min(Math.max(shown, kept.length), value.length);
+    const plain =
+      end > kept.length ? [...kept.plain, kept.length, end] : kept.plain;
+    next = { ...next, length: value.length, plain };
+  }
+  if (many && (!kept.many || shown > kept.shown)) {
+    next = { ...next, shown, many };
+  }
+  if (next !== kept) {
+    setKept(next);
+  }
+  if (!shared.streaming || shared.inLink === true) {
+    return value;
+  }
+  if (kept.many) {
+    const cut = Math.min(Math.max(kept.shown, 0), value.length);
+    return cut === value.length ? (
+      value
+    ) : (
+      <>
+        {value.slice(0, cut)}
+        <span key={kept.shown} {...stylex.props(fadeIn, styles.word)}>
+          {value.slice(cut)}
+        </span>
+      </>
+    );
+  }
+  // Each word not shown before its own fade, keyed by where it is, so it keeps it as more comes.
+  const parts: ReactNode[] = [];
+  const fading = (start: number, end: number) => {
+    for (const word of value.slice(start, end).matchAll(WORDS)) {
+      parts.push(
+        <span key={start + word.index} {...stylex.props(fadeIn, styles.word)}>
+          {word[0]}
+        </span>
+      );
     }
   };
-  eachNode(
-    placed
-      .map(({ node }) => node)
-      .filter((node) => node.type !== "footnoteDefinition"),
-    count
-  );
-  eachNode(notes, count);
-  return { definitions, notes, references, footnotes };
-};
-
-/** Each table's name: the words of the heading that stands above it. */
-const nameTables = (blocks: RootContent[]) => {
-  const names = new Map<RootContent, string>();
-  let heading = "";
-  for (const block of blocks) {
-    if (block.type === "heading") {
-      heading = spokenOf(block);
-    }
-    if (block.type === "table" && heading !== "") {
-      names.set(block, heading);
-    }
+  let at = 0;
+  for (let range = 0; range < kept.plain.length; range += 2) {
+    const [start = 0, end = 0] = kept.plain.slice(range, range + 2);
+    fading(at, start);
+    parts.push(value.slice(Math.max(start, at), Math.max(end, at)));
+    at = Math.max(at, end);
   }
-  return names;
+  fading(at, value.length);
+  return parts;
 };
-
-/** The notes at the foot, each leading back to where it was first used. */
-const Notes = ({
-  notes,
-  context,
-}: {
-  notes: FootnoteDefinition[];
-  context: Context;
-}) => (
-  <ol {...stylex.props(styles.footnotes)}>
-    {notes.map((note, index) => {
-      const number = context.footnotes.get(note.identifier) ?? index + 1;
-      return (
-        <li
-          key={note.identifier}
-          value={number}
-          id={`${context.prefix}-fn-${number}`}
-        >
-          {note.children.map((child, at) =>
-            child.type === "paragraph" ? (
-              <span key={at}>
-                <Phrasing nodes={child.children} context={context} />{" "}
-                <Link href={`#${context.prefix}-ref-${number}-1`}>
-                  {context.words.back(number)}
-                </Link>
-              </span>
-            ) : (
-              <Block key={at} node={child} context={context} />
-            )
-          )}
-        </li>
-      );
-    })}
-  </ol>
-);
-
-/** A bare address, no mark round it (`www.…`, `https://…`, `name@host`; `<https://…>` has two). */
-const isBare = (node: Walked & { url?: string }) => {
-  const [words] = node.children ?? [];
-  const start = node.position?.start.offset;
-  return (
-    isAutolink(node) &&
-    (start === undefined || words?.position?.start.offset === start)
-  );
-};
-
-/** The nodes that hold an address. */
-const ADDRESSED = new Set(["link", "linkReference", "image", "imageReference"]);
-
-/**
- * The links and pictures of `placed`, the block still being written, whose source reaches past
- * `complete`, and the bare addresses that reach past `word` (handedOf). A node the parser placed
- * nowhere (a bare address found in words after the parse) ends at most where the node after it
- * starts, less the words of those after it that have no place either, as no word is longer than
- * its source. Walked with a stack of its own, and only into nodes that reach that far.
- */
-const heldIn = (placed: Placed | undefined, complete: number, word: number) => {
-  const held = new Set<object>();
-  const stack: { node: Walked & { url?: string }; end: number }[] =
-    placed === undefined
-      ? []
-      : [{ node: placed.node, end: placed.node.position?.end.offset ?? 0 }];
-  for (let top = stack.pop(); top !== undefined; top = stack.pop()) {
-    const { node, end } = top;
-    const reach = (placed?.base ?? 0) + end;
-    if (reach > word) {
-      if (ADDRESSED.has(node.type) && (reach > complete || isBare(node))) {
-        held.add(node);
-      }
-      let next = end;
-      for (const child of (node.children ?? []).toReversed()) {
-        stack.push({ node: child, end: child.position?.end.offset ?? next });
-        next = child.position?.start.offset ?? next - spokenOf(child).length;
-      }
-    }
-  }
-  return held;
-};
-
-/**
- * What to draw of an answer: while it is written, made whole; once written, as it is, so a stream
- * that ends draws what the whole answer draws when the page is opened again. Tidied only when the
- * caller says it was cut off (`truncated`): an answer that ended whole may end in a mark.
- */
-const useAnswer = (source: string, streaming: boolean, truncated: boolean) => {
-  const [streamed, setStreamed] = useState(streaming);
-  if (streaming && !streamed) {
-    setStreamed(true);
-  }
-  if (!streaming) {
-    return {
-      shown: truncated ? tidy(source) : source,
-      kept: Number.POSITIVE_INFINITY,
-      complete: Number.POSITIVE_INFINITY,
-      word: Number.POSITIVE_INFINITY,
-      written: streamed,
-      tidied: truncated,
-    };
-  }
-  // `kept`: how much of it is the stream's own; past it, repair closed what was still open. Before
-  // `complete`, it reads as the whole answer will; from `word`, a bare address may still grow.
-  const { text, ...made } = repair(source);
-  return { shown: text, ...made, written: true, tidied: true };
-};
-
-/**
- * While an answer is written, a screen reader hears each block when it is finished (a paragraph,
- * a list, a heading), never each word. A table says its name; code says nothing here, as the
- * CodeBlock says it is being written. What was there when the answer was first drawn is not news.
- */
-const useSaidBlocks = (
-  blocks: RootContent[],
-  live: boolean,
-  said: boolean,
-  names: Map<RootContent, string>,
-  tableLabel: string
-) => {
-  const told = useRef<number | null>(null);
-  // The last block may still be growing while more is coming.
-  const finished = live ? Math.max(blocks.length - 1, 0) : blocks.length;
-  useEffect(() => {
-    const from = told.current;
-    told.current = finished;
-    if (!said || from === null || finished <= from) {
-      return;
-    }
-    const words = blocks
-      .slice(from, finished)
-      .map((node) => {
-        if (node.type === "code") {
-          return "";
-        }
-        if (node.type === "html") {
-          return sectionSaid(node.value);
-        }
-        return node.type === "table"
-          ? (names.get(node) ?? tableLabel)
-          : spokenOf(node).trim();
-      })
-      .filter((part) => part !== "")
-      .join(" ");
-    if (words !== "") {
-      announce(words);
-    }
-  }, [blocks, finished, said, names, tableLabel]);
-};
-
-/**
- * The answer's blocks. While it is written, only the block still being written is read again as
- * more of it comes (parse.ts, readBlocks): the blocks before it are finished and kept as they were
- * read, so a long answer costs no more to draw at its end than at its start.
- */
-const useBlocks = (shown: string, live: boolean): Placed[] => {
-  const [kept, setKept] = useState(NOTHING);
-  const read = readBlocks(shown, kept, live);
-  if (read.kept !== kept) {
-    setKept(read.kept);
-  }
-  return read.blocks;
-};
-
-/** Blocks with a frame of their own (code, a table, a rule) fade in whole; words come as words. */
-const framed = new Set<RootContent["type"]>(["code", "table", "thematicBreak"]);
-
-/**
- * A section (parse.ts, groupSections): the chevron before its summary, its blocks under the
- * summary's first letter, closed until it is opened. The toggle is named by the summary's words and
- * says whether it is open.
- */
-const Section = ({
-  grouped,
-  context,
+const framed = new Set(["code", "table", "thematicBreak"]);
+/** A block in the answer's column: a framed one fades in whole while written; a section is its own. */
+const Placed = ({
+  node,
+  shared,
   children,
 }: {
-  grouped: Extract<Grouped, { type: "section" }>;
-  context: Context;
-  children: ReactNode;
-}) => {
+  node: Node;
+  shared: Shared;
+  children: ReactElement;
+}) =>
+  node.type === "section" ? (
+    children
+  ) : (
+    <div {...stylex.props(shared.streaming && framed.has(node.type) && fadeIn)}>
+      {children}
+    </div>
+  );
+
+/**
+ * A section (parse.ts): the chevron before its summary, its blocks under the summary's first letter,
+ * closed until it is opened. The toggle is named by the summary's words and says whether it is open.
+ */
+const SectionBlock = ({ node, shared, kids }: Part<parse.Section>) => {
   const id = useId();
-  const { base } = grouped.key;
+  const place = use(At);
+  const shown = use(Shown);
+  const [words] = parse.readBlock(node.summary);
   return (
-    <Collapsible asChild defaultOpen={grouped.open}>
+    <Collapsible asChild defaultOpen={node.open}>
       <div
         data-slot="markdown-section"
         {...stylex.props(sectionStyles.section)}
@@ -1661,14 +880,24 @@ const Section = ({
           </button>
         </CollapsibleTrigger>
         <div id={id} {...stylex.props(sectionStyles.summary)}>
-          <Phrasing
-            nodes={grouped.summary}
-            context={base === 0 ? context : { ...context, base }}
-          />
+          <Shown value={shown - node.starts.summary}>
+            {words?.type === "paragraph" && kids(words.children, PHRASE)}
+          </Shown>
         </div>
         <CollapsibleContent asChild>
           <div {...stylex.props(sectionStyles.under)}>
-            <div {...stylex.props(sectionStyles.body)}>{children}</div>
+            <div {...stylex.props(sectionStyles.body)}>
+              {node.children.map((child, at) => (
+                <Placed key={at} node={child} shared={shared}>
+                  {/* oxlint-disable-next-line react/jsx-no-constructed-context-values -- a string */}
+                  <At value={`${place}.${at}`}>
+                    <Shown value={shown - (node.starts.children[at] ?? 0)}>
+                      {kids([child])}
+                    </Shown>
+                  </At>
+                </Placed>
+              ))}
+            </div>
           </div>
         </CollapsibleContent>
       </div>
@@ -1676,121 +905,557 @@ const Section = ({
   );
 };
 
-/** One block, or a section holding its own. */
-const GroupedBlock = ({
-  grouped,
-  context,
-}: {
-  grouped: Grouped;
-  context: Context;
-}): ReactNode => {
-  if (grouped.type === "section") {
-    return (
-      <Section grouped={grouped} context={context}>
-        {grouped.children.map((child, index) => (
-          <GroupedBlock key={index} grouped={child} context={context} />
-        ))}
-      </Section>
+const headings = ["h1", "h2", "h3", "h4", "h5", "h6"] as const;
+const headingLooks: Partial<
+  Record<Shared["size"], readonly stylex.StyleXStyles[]>
+> = {
+  sm: [styles.minor, styles.smallMinor],
+  xs: [styles.xsHeading, styles.xsHeading],
+};
+const draw: { [T in Node["type"]]?: Draw<T> } = {
+  text: (node, shared) => {
+    let from = node.position?.start.offset ?? 0;
+    const lines = shared.softBreaks ? node.value.split("\n") : [node.value];
+    return lines.map((line, at) => {
+      from += at > 0 ? (lines[at - 1]?.length ?? 0) + 1 : 0;
+      return (
+        <Fragment key={at}>
+          {at > 0 && <br />}
+          <Words value={line} shared={shared} from={from} />
+        </Fragment>
+      );
+    });
+  },
+  strong: mark,
+  emphasis: mark,
+  delete: mark,
+  inlineCode: (node, shared) =>
+    part(shared, "code", node, { children: node.value }, [
+      styles.inlineCode,
+      shared.size === "xs" && styles.xsCode,
+    ]),
+  break: () => <br />,
+  link: anchor,
+  linkReference: anchor,
+  image: anchor,
+  imageReference: anchor,
+  footnoteReference: (node, shared) => <NoteMark node={node} shared={shared} />,
+  footnoteDefinition: (node, shared, kids) =>
+    shared.notes === true && <Note node={node} kids={kids} />,
+  html: (node, shared) =>
+    shared.phrase === true ? (
+      <span {...stylex.props(styles.raw)}>{node.value}</span>
+    ) : (
+      <p {...stylex.props(styles.paragraph, styles.raw)}>{node.value}</p>
+    ),
+  paragraph: (node, shared, kids) =>
+    part(shared, "p", node, { children: kids(node.children, PHRASE) }, [
+      styles.paragraph,
+      shared.greedy && styles.greedy,
+    ]),
+  heading: (node, shared, kids) => {
+    // From the caller's level on; the look is a step up for the first two depths.
+    const { depth } = node;
+    const tag =
+      headings[Math.min(shared.headingLevel - 1 + depth, 6) - 1] ?? "h6";
+    const looks = headingLooks[shared.size] ?? [styles.major, styles.minor];
+    const look = looks[depth <= 2 ? 0 : 1];
+    return part(shared, tag, node, { children: kids(node.children, PHRASE) }, [
+      styles.heading,
+      look,
+      shared.greedy && styles.greedy,
+    ]);
+  },
+  list: (node, shared, kids) => {
+    const children = kids(node.children);
+    const start = node.start ?? undefined;
+    return node.ordered === true
+      ? part(shared, "ol", node, { start, children }, [
+          styles.list,
+          styles.ordered,
+        ])
+      : part(shared, "ul", node, { children }, [styles.list, styles.unordered]);
+  },
+  listItem: (node, shared, kids) => {
+    const task = typeof node.checked === "boolean";
+    const children = (
+      <>
+        {task && <TaskBox done={node.checked === true} />}
+        {body(node.children, kids)}
+      </>
     );
-  }
-  const { node, base } = grouped.placed;
-  return (
-    <div
-      {...stylex.props(
-        context.streaming && framed.has(node.type) && styles.arrives
-      )}
-    >
-      <Block
-        node={node}
-        context={base === 0 ? context : { ...context, base }}
+    return part(shared, "li", node, { children }, [
+      styles.item,
+      task && styles.task,
+    ]);
+  },
+  blockquote: (node, shared, kids) =>
+    part(shared, "blockquote", node, { children: kids(node.children) }, [
+      styles.quote,
+    ]),
+  thematicBreak: (node, shared) =>
+    part(shared, "hr", node, {}, [], <Separator />),
+  code: (node, shared) => {
+    const { code: Custom, pre: Pre } = shared.components;
+    if (Custom !== undefined || Pre !== undefined) {
+      const lang = node.lang ?? "";
+      const className = lang === "" ? undefined : `language-${lang}`;
+      const code =
+        Custom === undefined ? (
+          <code className={className}>{node.value}</code>
+        ) : (
+          <Custom node={node} className={className}>
+            {node.value}
+          </Custom>
+        );
+      return Pre === undefined ? code : <Pre node={node}>{code}</Pre>;
+    }
+    return (
+      <Code.CodeBlock
+        language={node.lang ?? "text"}
+        streaming={node.position === undefined}
+      >
+        <Code.CodeBlockHeader>
+          <Code.CodeBlockTitle />
+          <Code.CodeBlockActions>
+            <Code.CodeBlockCopyButton value={node.value} />
+          </Code.CodeBlockActions>
+        </Code.CodeBlockHeader>
+        {/* `false` never folds, yet still draws at most 2,000 lines: a model's code has no bound. */}
+        <Code.CodeBlockContent
+          lineNumbers
+          maxLines={
+            shared.codeMaxLines === false
+              ? Number.POSITIVE_INFINITY
+              : shared.codeMaxLines
+          }
+        >
+          {node.value}
+        </Code.CodeBlockContent>
+      </Code.CodeBlock>
+    );
+  },
+  section: (node, shared, kids) => (
+    <SectionBlock node={node} shared={shared} kids={kids} />
+  ),
+};
+const Drawn = ({ node, shared, name }: Omit<Part<Node>, "kids">): ReactNode => {
+  const kids: Kids = (nodes, within) =>
+    nodes.map((child, at) => (
+      <Drawn
+        key={at}
+        node={child}
+        shared={within ? { ...shared, ...within } : shared}
       />
-    </div>
+    ));
+  if (node.type === "table") {
+    return <TableBlock node={node} shared={shared} kids={kids} name={name} />;
+  }
+  // SAFETY: each entry of `draw` takes the node of its own type, which `node.type` picks.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+  const render = draw[node.type] as Draw<Node["type"]> | undefined;
+  return render?.(node, shared, kids) ?? null;
+};
+const useStarts = (source: string) => {
+  const [cut, setCut] = useState({ source: "", cut: parse.blockStarts("") });
+  if (cut.source === source) {
+    return cut.cut.starts;
+  }
+  const next = parse.blockStarts(
+    source,
+    source.startsWith(cut.source) ? cut.cut : undefined
   );
+  setCut({ source, cut: next });
+  return next.starts;
+};
+const FOUND = /^(?:definition|footnoteDefinition|footnoteReference)$/u;
+const found = new WeakMap<Node, Node[]>();
+/** The definitions, notes and notes' marks a block holds, in reading order: found once, by a stack. */
+const foundIn = (block: Node) => {
+  const known = found.get(block);
+  if (known !== undefined) {
+    return known;
+  }
+  const nodes: Node[] = [];
+  const stack = [block];
+  for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+    if (FOUND.test(node.type)) {
+      nodes.push(node);
+    }
+    for (const kid of kidsOf(node).toReversed()) {
+      stack.push(kid);
+    }
+  }
+  found.set(block, nodes);
+  return nodes;
+};
+/** Each block with its place (`3`, and `3.1` for the second block of a section in the fourth). */
+const placesOf = (
+  blocks: readonly Node[],
+  at = ""
+): (readonly [string, Node])[] =>
+  blocks.flatMap((block, index) => {
+    const place = at === "" ? String(index) : `${at}.${index}`;
+    return block.type === "section"
+      ? placesOf(block.children, place)
+      : [[place, block]];
+  });
+// A line that may start a definition, in a quote or a list item too: a link's, or (`^`) a note's.
+const DEFINED =
+  /^(?:[ \t>]|[-*+][ \t]|\d{1,9}[.)][ \t])*\[(?<note>\^?)(?<label>(?:[^[\]\\]|\\.){1,999})\]:/gmu;
+/** The names of the notes `text` defines. */
+const notesIn = (text: string) =>
+  [...text.matchAll(DEFINED)].flatMap(({ groups }) =>
+    groups?.note === "^"
+      ? [(groups.label ?? "").replaceAll(/\s+/gu, " ").trim().toLowerCase()]
+      : []
+  );
+/**
+ * While written, what a block says once it is finished: never each word, nor code (CodeBlock says
+ * it is being written); a table says its name, a section its summary.
+ */
+const useSaid = (
+  blocks: readonly Node[],
+  streaming: boolean,
+  live: boolean,
+  names: readonly (string | undefined)[]
+) => {
+  const words = useI18n().markdown;
+  const told = useRef<number | null>(null);
+  const finished = streaming ? Math.max(blocks.length - 1, 0) : blocks.length;
+  useEffect(() => {
+    const from = told.current;
+    told.current = finished;
+    if (!live || from === null || finished <= from) {
+      return;
+    }
+    const said = blocks
+      .slice(from, finished)
+      .map((node, at) => {
+        if (node.type === "table") {
+          return names[from + at] ?? words.table;
+        }
+        if (node.type === "section") {
+          return node.summary;
+        }
+        return FOUND.test(node.type) || node.type === "code"
+          ? ""
+          : textOf(node).trim();
+      })
+      .filter((text) => text !== "")
+      .join(" ");
+    if (said !== "") {
+      announce(said);
+    }
+  }, [blocks, finished, live, names, words.table]);
+};
+// While written, a table's head waits for its row of dashes. A last
+// line that is only the start of a block's mark waits for the characters that decide it: a list's
+// number or bullet, a task's box, a heading's, rule's or underline's marks, a note's start, a link's
+// definition (never drawn) or a bracket that may start one, the start of a section's `<details>` or
+// `</details>`. So do a mark of emphasis or code, a `!` or a `<`, at the very end.
+const PIPE = /^ {0,3}\|/u;
+const DASHES = /^ {0,3}\|?[ \t]*:?-+:?[ \t]*(?:\||$)/mu;
+const CONTAINERS = /^(?:[ \t>]|[-*+](?=[ \t])|\d{1,9}[.)](?=[ \t]))*/u;
+const UNDECIDED =
+  /^(?:[-*+]|\d{1,9}[.)]?|(?:[-*+=_][ \t]*)+|#{1,6}|\[[ xX]?\]?|\[\^[^\]\s]*\]?:?|\[(?!\^)(?:[^\]\\]|\\.){0,999}(?:\]:.*|\]?)|<\/?(?:d(?:e(?:t(?:a(?:i(?:ls?)?)?)?)?)?)?)?[ \t]*$/u;
+/** `end` less what waits; each pattern is anchored or found from the end, so none scans back. */
+const lessWaiting = (end: string) => {
+  const note = end.lastIndexOf("[^");
+  let to = note !== -1 && !/[\]\s]/u.test(end.slice(note)) ? note : end.length;
+  // In code still open, every character is code.
+  if (parse.inOpenFence(end)) {
+    return end;
+  }
+  while (to > 0 && "*_~`[!< \t".includes(end.charAt(to - 1))) {
+    to -= 1;
+  }
+  // A bracket's words, once shown, stay words until it is decided: `[words]`, `[words][name` and
+  // `[words][name]` are drawn as `[words`, a link still being written; a note's `[^name]` waits.
+  const bracket = end.lastIndexOf("[", to - 1);
+  const pair = end.slice(bracket, to);
+  const first = end.lastIndexOf("[", bracket - 2);
+  if (!/^\[[^\]]*\]?$/u.test(pair)) {
+    // Not a bracket at the end.
+  } else if (/^\[[^\]]*\]$/u.test(end.slice(first, bracket))) {
+    to = bracket - 1;
+  } else if (pair.endsWith("]")) {
+    to = pair.startsWith("[^") ? bracket : to - 1;
+  }
+  const line = end.lastIndexOf("\n", to - 1) + 1;
+  const last = end.slice(line, to);
+  const rest = last.replace(CONTAINERS, "");
+  const undecided = last.trim() !== "" && (rest === "" || UNDECIDED.test(rest));
+  let whole = end.slice(0, undecided ? line : to);
+  // A table's head waits for its whole row of dashes, and is never drawn as pipes.
+  for (let row = 0; row < 2; row += 1) {
+    const head = whole.lastIndexOf("\n", whole.length - 2) + 1;
+    const complete = whole.slice(0, whole.lastIndexOf("\n") + 1);
+    if (DASHES.test(complete) || !PIPE.test(whole.slice(head))) {
+      break;
+    }
+    whole = whole.slice(0, head);
+  }
+  return whole;
+};
+/** The last word of `text`: a bare address in it may still grow. */
+const lastWord = (text: string) =>
+  text.slice(
+    Math.max(...[" ", "\n", "\t"].map((c) => text.lastIndexOf(c))) + 1
+  );
+const MANY_WORDS = 1000;
+/**
+ * The block still being written, read again as it grows: at once while that is quick, and once it
+ * takes long, when four times its last read has passed since, so reading takes at most a fifth of
+ * the time and new words come about every 100 ms however big it is. Past 1,000 words (`many`), its
+ * words since the last read fade as one.
+ */
+const useEnding = (whole: string, paced: boolean, read: () => Block[]) => {
+  const [last, setLast] = useState<{
+    whole: string;
+    nodes: Block[];
+    next: number;
+    many: boolean;
+  }>({ whole: "", nodes: [], next: 0, many: false });
+  const goesOn = paced && last.whole !== "" && whole.startsWith(last.whole);
+  useLayoutEffect(() => {
+    const again = () => {
+      const start = performance.now();
+      const nodes = read();
+      const now = performance.now();
+      const many = whole.split(/\s+/u).length > MANY_WORDS;
+      setLast({ whole, nodes, next: now + (now - start) * 4, many });
+    };
+    const stale = goesOn && whole !== last.whole;
+    const wait = stale ? last.next - performance.now() : Number.NaN;
+    if (wait <= 0) {
+      again();
+    }
+    const timer = wait > 0 ? setTimeout(again, wait) : undefined;
+    return () => {
+      clearTimeout(timer);
+    };
+  });
+  if (goesOn) {
+    return last;
+  }
+  const now = { whole, nodes: read(), next: 0, many: false };
+  if (paced && whole !== last.whole) {
+    setLast(now);
+  }
+  return now;
 };
 
-const NO_NODES: ReadonlySet<object> = new Set();
+/**
+ * The answer's top-level blocks: the finished ones read once, the one still being written made
+ * whole (`ending`, how many), and the last word read; with how much of each had been shown before
+ * this read (`shown`). Each block is read with the names the answer defines so far, so a reference
+ * resolves as CommonMark says once its definition is finished (in a finished block: its address
+ * and title can no longer change), and a note's mark once its note's name is whole.
+ */
+const useBlocks = (
+  children: string,
+  streaming: boolean,
+  truncated: boolean
+) => {
+  const source = children.replaceAll(/\r\n?/gu, "\n");
+  const starts = useStarts(source);
+  parse.nextPass();
+  const open = streaming || truncated;
+  const last = open ? (starts.at(-1) ?? 0) : source.length;
+  let end = source.slice(last);
+  // Cut off, a link still being written goes.
+  const bracket = end.lastIndexOf("[");
+  end =
+    truncated && bracket > end.lastIndexOf("]") ? end.slice(0, bracket) : end;
+  const texts = (open ? starts.slice(0, -1) : starts).map((start, at) => {
+    const to = starts[at + 1] ?? source.length;
+    return { start, to, text: source.slice(start, to) };
+  });
+  // The definitions and notes in the finished blocks that may hold one, read without names.
+  const defined = texts
+    .filter(({ text }) => text.search(DEFINED) !== -1)
+    .flatMap(({ text }) => placesOf(parse.readBlock(text)))
+    .flatMap(([, block]) => foundIn(block));
+  const links = defined.flatMap((node) =>
+    node.type === "definition" ? [node] : []
+  );
+  const names = {
+    links: links.map((node) => node.identifier),
+    notes: [
+      ...defined.flatMap((node) =>
+        node.type === "footnoteDefinition" ? [node.identifier] : []
+      ),
+      ...notesIn(end),
+    ],
+  };
+  const blocks = texts.map(({ start, to, text }) => ({
+    start,
+    to,
+    nodes: parse.readBlock(text, { names }),
+  }));
+  const done = blocks.flatMap((block) => block.nodes);
+  const code = streaming ? parse.openCode(end) : null;
+  const whole = lessWaiting(end);
+  const ending = useEnding(whole, streaming && code === null, () =>
+    open && code === null ? parse.readBlock(whole, { open: true, names }) : []
+  );
+  const nodes = code ?? ending.nodes;
+  // Words shown before are never faded again: a block shown whole before is shown (Infinity).
+  const reach = last + ending.whole.length;
+  const [seen, setSeen] = useState({ reach: 0, before: 0 });
+  if (seen.reach !== reach) {
+    setSeen({ reach, before: seen.reach });
+  }
+  const shown = [
+    ...blocks.flatMap((block) =>
+      block.nodes.map(() =>
+        seen.before >= block.to
+          ? Number.POSITIVE_INFINITY
+          : seen.before - block.start
+      )
+    ),
+    ...nodes.map(() => seen.before - last),
+  ];
+  return {
+    all: [...done, ...nodes],
+    ending: nodes.length,
+    tail: lastWord(ending.whole),
+    many: ending.many,
+    shown,
+    definitions: links.length > 0 ? links : NO_DEFINITIONS,
+  };
+};
 
-/** No elements of the caller's: every one is Markdown's own. */
+/**
+ * The notes, numbered in the order they are first marked, each with its place and its marks
+ * outside the notes.
+ */
+const notesOf = (all: readonly Node[], prefix: string) => {
+  const notes = new Map<string, readonly [string, Of<"footnoteDefinition">]>();
+  const marks = new Map<string, string[]>();
+  for (const [place, block] of placesOf(all)) {
+    for (const node of foundIn(block)) {
+      if (node.type === "footnoteDefinition" && !notes.has(node.identifier)) {
+        notes.set(node.identifier, [place, node]);
+      } else if (node.type === "footnoteReference") {
+        const ids = marks.get(node.identifier) ?? [];
+        marks.set(node.identifier, ids);
+        if (block.type !== "footnoteDefinition") {
+          ids.push(markId(prefix, place, node));
+        }
+      }
+    }
+  }
+  const order = [...marks];
+  return {
+    listed: order.flatMap(([id]) => {
+      const note = notes.get(id);
+      return note === undefined ? [] : [note];
+    }),
+    value:
+      order.length === 0
+        ? NO_NOTES
+        : new Map(
+            order.map(([id, ids], at) => [
+              id,
+              { prefix, number: at + 1, come: notes.has(id), marks: ids },
+            ])
+          ),
+  };
+};
+
+/** Each table's name: the words of the heading above it. */
+const namesOf = (all: readonly Node[]) => {
+  let heading: string | undefined;
+  return all.map((node) => {
+    heading = node.type === "heading" ? textOf(node) : heading;
+    return node.type === "table" ? heading : undefined;
+  });
+};
+
 const NO_COMPONENTS: MarkdownComponents = {};
-
-/** An answer drawn from Markdown, safe while it streams. */
 export const Markdown = ({
-  children: source,
+  children,
   streaming = false,
   truncated = false,
   live = "polite",
-  size: answerSize = "default",
+  size: look = "default",
   headingLevel = 1,
-  softBreaks = "space",
+  softBreaks = false,
   codeMaxLines = 18,
   renderLink,
   components = NO_COMPONENTS,
   style,
 }: MarkdownProps) => {
-  const words = useI18n().markdown;
-  const prefix = useId().replaceAll(":", "");
-  const { shown, kept, complete, word, written, tidied } = useAnswer(
-    bounded(source),
+  const provided = use(Provided);
+  const [written, setWritten] = useState(streaming);
+  if (streaming && !written) {
+    setWritten(true);
+  }
+  // Before anything the answer changes, so a finished block is handed the same as before.
+  const shared: Shared = {
+    provided,
+    renderLink,
+    components,
+    streaming,
+    size: look,
+    headingLevel,
+    greedy: written,
+    softBreaks,
+    codeMaxLines,
+  };
+  const notesShared = { ...shared, notes: true };
+  const { all, ending, tail, many, shown, definitions } = useBlocks(
+    children,
     streaming,
     truncated
   );
-  const provided = use(ProvidedLinks);
-  const all = useBlocks(shown, streaming);
-  const { definitions, notes, references, footnotes } = gather(all, streaming);
-  const placed = all.filter(
-    ({ node }) =>
-      node.type !== "definition" && node.type !== "footnoteDefinition"
-  );
-  const blocks = placed.map(({ node }) => node);
-  const lastBlock = blocks.at(-1);
-  const tableNames = nameTables(blocks);
-  useSaidBlocks(blocks, streaming, live === "polite", tableNames, words.table);
-  const context: Context = {
-    definitions,
-    renderLink,
-    provided,
-    kept,
-    held: streaming ? heldIn(all.at(-1), complete, word) : NO_NODES,
-    base: 0,
-    footnotes,
-    components,
-    prefix,
-    streaming,
-    codeMaxLines,
-    writing: streaming ? lastBlock : undefined,
-    openCode:
-      streaming && lastBlock?.type === "code" && openFence(shown)
-        ? lastBlock
-        : undefined,
-    inLink: false,
-    words,
-    softBreaks,
-    lineBreaks: false,
-    size: answerSize,
-    headingLevel,
-    greedy: written,
-    references,
-    tableNames,
-    Inline,
-    Block,
-  };
+  const open = streaming || truncated;
+  const prefix = useId();
+  const notes = notesOf(all, prefix);
+  const names = namesOf(all);
+  useSaid(all, streaming, live === "polite", names);
   return (
     <div
       data-slot="markdown"
       aria-busy={streaming || undefined}
-      {...stylex.props(
-        styles.root,
-        answerSize === "message" && styles.message,
-        answerSize === "sm" && styles.small,
-        answerSize === "xs" && styles.xsmall,
-        style
-      )}
+      {...stylex.props(styles.root, look !== "default" && styles[look], style)}
     >
-      {groupSections(placed, tidied).map((grouped, index) => (
-        // A block keeps its place by its order, so one that is already shown never fades in again.
-        <GroupedBlock key={index} grouped={grouped} context={context} />
-      ))}
-      {notes.length > 0 && <Notes notes={notes} context={context} />}
+      <Definitions value={definitions}>
+        <Notes value={notes.value}>
+          {all.map((node, at) => {
+            const writing = open && at >= all.length - ending;
+            return FOUND.test(node.type) ? null : (
+              <Placed key={at} node={node} shared={shared}>
+                {/* oxlint-disable-next-line react/jsx-no-constructed-context-values -- a string */}
+                <At value={String(at)}>
+                  <Tail value={writing ? tail : ""}>
+                    <Shown value={shown[at] ?? 0}>
+                      <Many value={writing && many}>
+                        <Drawn node={node} shared={shared} name={names[at]} />
+                      </Many>
+                    </Shown>
+                  </Tail>
+                </At>
+              </Placed>
+            );
+          })}
+          {notes.listed.length > 0 && (
+            <Tail value={open ? tail : ""}>
+              <ol {...stylex.props(styles.footnotes)}>
+                {notes.listed.map(([place, note]) => (
+                  <At key={note.identifier} value={place}>
+                    <Shown value={shown[Number(place.split(".")[0])] ?? 0}>
+                      <Drawn node={note} shared={notesShared} />
+                    </Shown>
+                  </At>
+                ))}
+              </ol>
+            </Tail>
+          )}
+        </Notes>
+      </Definitions>
     </div>
   );
 };

@@ -379,6 +379,9 @@ catalogs:
     remark-gfm:
       specifier: 4.0.1
       version: 4.0.1
+    remend:
+      specifier: 1.5.0
+      version: 1.5.0
     resolve.exports:
       specifier: 2.0.4
       version: 2.0.4
@@ -1592,6 +1595,9 @@ importers:
       recharts:
         specifier: 'catalog:'
         version: 3.10.1(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.0)(react@19.3.0)(redux@5.0.1)
+      remend:
+        specifier: 'catalog:'
+        version: 1.5.0
     devDependencies:
       '@types/prismjs':
         specifier: 'catalog:'
@@ -9980,6 +9986,9 @@ packages:
 
   remend@1.4.0:
     resolution: {integrity: sha512-mHiYhhwphs1IgIZmkToKLwJn0U99IjPXuutkA2acrNcG0vlEq2G4TGnd2eT0saIHwh2KjaCpvleHcsd5SAz96A==}
+
+  remend@1.5.0:
+    resolution: {integrity: sha512-A65+1l1jPGiZZsLD6QqL7foG8KBK2xMIjlr5Vm8R3kGAnVinjxFhdhHf3/zU5wPHrrsC87KqHztG7p1TD5i1HQ==}
 
   request-light@0.5.8:
     resolution: {integrity: sha512-3Zjgh+8b5fhRJBQZoy+zbVKpAQGLyka0MPgW3zruTF4dFFJ8Fqcfu9YsAvi/rvdcaTeWG3MkbZv4WKxAn/84Lg==}
@@ -19733,6 +19742,8 @@ snapshots:
       unified: 11.0.5
 
   remend@1.4.0: {}
+
+  remend@1.5.0: {}
 
   request-light@0.5.8: {}
 

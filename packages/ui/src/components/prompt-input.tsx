@@ -1618,12 +1618,6 @@ const styles = stylex.create({
     lineHeight: font.textXsLine,
     fontWeight: font.weightNormal,
   },
-  // The chevron at a kind's end; it turns with the reading direction itself (Icon).
-  mentionInto: {
-    display: "flex",
-    marginInlineStart: "auto",
-    color: colors.mutedForeground,
-  },
   // The menu's words when it has no rows. It stays in the menu, wordless, while there are rows,
   // and takes no room then.
   mentionEmpty: {
@@ -4627,7 +4621,7 @@ export const PromptInputMentionItem = ({
     }
   >
     {icon !== undefined && (
-      <TriggerMenuItemIcon data-menu-icon="" {...stylex.props(menuStyles.icon)}>
+      <TriggerMenuItemIcon {...stylex.props(menuStyles.icon)}>
         <Icon icon={icon} />
       </TriggerMenuItemIcon>
     )}
@@ -4664,7 +4658,7 @@ const DataItem = ({ item }: { item: PromptInputMentionData }) => {
             </span>
           )}
         </span>
-        <span aria-hidden="true" {...stylex.props(styles.mentionInto)}>
+        <span aria-hidden="true" {...stylex.props(menuStyles.chevron)}>
           <Icon icon={ChevronRightIcon} />
         </span>
       </PromptInputMentionItem>
