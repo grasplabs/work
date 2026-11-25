@@ -469,6 +469,16 @@ describe("a connector made from the URL of a server inside the network", () => {
           key: companyNetworkKey,
         })
       ),
+      // The server's own address alone, never one the admin names.
+      elsewhere: await outcome(
+        exports.default.connectWithKey({
+          person,
+          provider,
+          scope: "shared",
+          key: companyNetworkKey,
+          companyNetwork: "http://10.0.0.9:8080",
+        })
+      ),
       tools: Object.keys(classes),
       entry: entries.find(({ id }) => id === provider)?.companyNetwork,
       row: await shownAddress(connectionId),
@@ -480,6 +490,7 @@ describe("a connector made from the URL of a server inside the network", () => {
         .map(({ detail }) => detail?.companyNetwork),
     }).toStrictEqual({
       personal: "connection.invalid",
+      elsewhere: "connection.invalid",
       tools: ["orders_list"],
       entry: address,
       row: address,
