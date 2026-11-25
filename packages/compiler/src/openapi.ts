@@ -659,6 +659,9 @@ const answeredBy = (
   return { answer, page, returns: answer };
 };
 
+/** Why an operation on a server of its own makes no tool, nor any route. */
+export const servedElsewhere = "It is served from a server of its own.";
+
 const candidateOf = (from: Source): Candidate => {
   const { method, item, operation } = from;
   const path = from.key;
@@ -667,7 +670,7 @@ const candidateOf = (from: Source): Candidate => {
     throw new OperationError("Its path isn't one a route may take.");
   }
   if (operation.servers !== undefined || item.servers !== undefined) {
-    throw new OperationError("It is served from a server of its own.");
+    throw new OperationError(servedElsewhere);
   }
   const request: Reading = {
     mode: "request",
