@@ -165,8 +165,9 @@ const styles = stylex.create({
     [cardLine.width]: size.hairline,
     // A box at the panels' foot (the chat's) rounds its corner no deeper
     // than this card's round it, as #2503's (its shell-panel-composer-corner):
-    // the card's own squircle, 22px against the box's own 24px.
-    "--damsko-prompt-input-radius": radius.md,
+    // 22px against the box's own 24px, in every browser. Not the card's
+    // corner token, which is 22px only where corner-shape draws a squircle.
+    "--damsko-prompt-input-radius": "22px",
   },
   headLine: {
     position: "absolute",
