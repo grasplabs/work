@@ -3469,6 +3469,10 @@ msgstr "Een beheerder vragen"
 msgid "Ask anything, or describe a process"
 msgstr "Vraag wat je wilt, of beschrijf een proces"
 
+#: src/onboarding/connector-search.tsx
+msgid "Ask for “{name}”"
+msgstr "‘{name}’ aanvragen"
+
 #: src/agents/agent-apps-card.tsx
 msgid "Ask for {app}"
 msgstr "{app} aanvragen"
@@ -11984,6 +11988,10 @@ msgstr "Nog niets geleerd. De eerste bevindingen komen morgen."
 msgid "Nothing matches “{query}”."
 msgstr "Niets komt overeen met ‘{query}’."
 
+#: src/onboarding/connector-search.tsx
+msgid "Nothing matches. Type its name to ask for it."
+msgstr "Niets gevonden. Typ de naam om het aan te vragen."
+
 #: src/agents/new-agent.tsx
 msgid "Nothing more"
 msgstr "Niets meer"
@@ -15101,9 +15109,14 @@ msgid "Search {name}"
 msgstr "{name} doorzoeken"
 
 #: src/agents/setup/apps-picker.tsx
+#: src/onboarding/connector-search.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "Search apps"
 msgstr "Apps zoeken"
+
+#: src/onboarding/connector-search.tsx
+msgid "Search apps, for example Dropbox"
+msgstr "Apps zoeken, bijvoorbeeld Dropbox"
 
 #: src/chat/chat-window.tsx
 #: src/frame/app-sidebar.tsx
@@ -20033,10 +20046,6 @@ msgstr "Waar je documenten staan"
 #: src/interview/destination.tsx
 msgid "Where your lines go"
 msgstr "Waar je regels naartoe gaan"
-
-#: src/onboarding/sources-step.tsx
-msgid "Where, for example Dropbox"
-msgstr "Waar, bijvoorbeeld Dropbox"
 
 #: src/settings/ai-providers.tsx
 msgid "Wherever your endpoint runs"

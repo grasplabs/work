@@ -3469,6 +3469,10 @@ msgstr "Ask an admin"
 msgid "Ask anything, or describe a process"
 msgstr "Ask anything, or describe a process"
 
+#: src/onboarding/connector-search.tsx
+msgid "Ask for “{name}”"
+msgstr "Ask for “{name}”"
+
 #: src/agents/agent-apps-card.tsx
 msgid "Ask for {app}"
 msgstr "Ask for {app}"
@@ -11984,6 +11988,10 @@ msgstr "Nothing learned yet. The first findings come tomorrow."
 msgid "Nothing matches “{query}”."
 msgstr "Nothing matches “{query}”."
 
+#: src/onboarding/connector-search.tsx
+msgid "Nothing matches. Type its name to ask for it."
+msgstr "Nothing matches. Type its name to ask for it."
+
 #: src/agents/new-agent.tsx
 msgid "Nothing more"
 msgstr "Nothing more"
@@ -15101,9 +15109,14 @@ msgid "Search {name}"
 msgstr "Search {name}"
 
 #: src/agents/setup/apps-picker.tsx
+#: src/onboarding/connector-search.tsx
 #: src/routes/_shell.integrations.index.tsx
 msgid "Search apps"
 msgstr "Search apps"
+
+#: src/onboarding/connector-search.tsx
+msgid "Search apps, for example Dropbox"
+msgstr "Search apps, for example Dropbox"
 
 #: src/chat/chat-window.tsx
 #: src/frame/app-sidebar.tsx
@@ -20033,10 +20046,6 @@ msgstr "Where your documents live"
 #: src/interview/destination.tsx
 msgid "Where your lines go"
 msgstr "Where your lines go"
-
-#: src/onboarding/sources-step.tsx
-msgid "Where, for example Dropbox"
-msgstr "Where, for example Dropbox"
 
 #: src/settings/ai-providers.tsx
 msgid "Wherever your endpoint runs"

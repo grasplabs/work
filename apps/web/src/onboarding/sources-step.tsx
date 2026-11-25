@@ -10,7 +10,7 @@ import {
 } from "@grasp-os/ui/components/item";
 import { FileIcon, Icon, PlusIcon } from "@grasp-os/ui/lib/icons";
 import { visuallyHidden } from "@grasp-os/ui/lib/styles";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
@@ -26,7 +26,7 @@ import { loadFromCore } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { CalmStep } from "./calm-frame.tsx";
-import { OtherRow } from "./other-row.tsx";
+import { ConnectorSearch } from "./connector-search.tsx";
 import { sourcesFor } from "./setup.ts";
 import type { DocumentSource } from "./setup.ts";
 import { namedPlaces, sourceLogo } from "./source-logos.ts";
@@ -36,13 +36,30 @@ import { SupportLink } from "./support-link.tsx";
 // Where the documents live: the places, those of the company's sign-in
 // and those the kickoff named first, each a tile pressed to note it; where
 // Grasp connects it through Integrations, its sign-in follows in the
-// connect dialog. Another place is asked for by name. Each choice goes to
-// core, which counts it in how much Grasp knows. The places stand as tiles,
-// three in a row, each with its own logo in its own colours.
+// connect dialog. "Something else" opens a search over every app Grasp
+// connects through Integrations; one picked there is noted by name and,
+// where it can be, connected; a name the catalog lacks is asked for. Each
+// choice goes to core, which counts it in how much Grasp knows. The places
+// stand as tiles, three in a row, each with its own logo, whole, in its
+// own colours.
 
 const styles = stylex.create({
   stack: { display: "grid", gap: space[3] },
+  // A logo whole, at the tile's size, never cut to a rounded square: Notion's corners went missing so.
+  logo: {
+    display: "block",
+    width: size.controlDefault,
+    height: size.controlDefault,
+    objectFit: "contain",
+  },
 });
+
+/** A place's logo, whole, on the middle of its tile. */
+const Logo = ({ src }: { src: string }) => (
+  <ItemMedia align="center">
+    <img alt="" src={src} {...stylex.props(styles.logo)} />
+  </ItemMedia>
+);
 
 /** Keeps what the admin chose, and reads core again so every step shows it. */
 export const useSaveChoices = () => {
@@ -119,6 +136,7 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
   const { save, busy, failure } = useSaveChoices();
   const integrations = useIntegrations();
   const [connecting, setConnecting] = useState<Integration | null>(null);
+  const [searching, setSearching] = useState(false);
   const kinds = kindsOf(useContextWords(data));
   const noted = choices.sources;
   const listed = sourcesFor(signIn, data.view.context, noted);
@@ -188,6 +206,20 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
     (each) =>
       !namedPlaces.some(({ name }) => name.toLowerCase() === each.toLowerCase())
   );
+  // An app asked for by name that the catalog holds: its logo, and its sign-in where it connects.
+  const integrationNamed = (name: string): Integration | undefined =>
+    integrations.find(
+      (each) => each.name.toLocaleLowerCase() === name.toLocaleLowerCase()
+    );
+  const connectableNamed = (name: string): Integration | undefined => {
+    const integration = integrationNamed(name);
+    return integration === undefined ||
+      stateOf(integration) === "shared" ||
+      stateOf(integration) === "personal" ||
+      !canConnect(integration, identity)
+      ? undefined
+      : integration;
+  };
   // What became of a place, said to a screen reader after its name; its tile glows with it.
   const stateOfRow = (source: DocumentSource): string | null => {
     if (!noted.includes(source.id)) {
@@ -236,11 +268,7 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
                     })}
                 variant="outline"
               >
-                {logo === null ? null : (
-                  <ItemMedia variant="image">
-                    <img alt="" src={logo} />
-                  </ItemMedia>
-                )}
+                {logo === null ? null : <Logo src={logo} />}
                 <ItemContent>
                   <ItemTitle>
                     {source.name}
@@ -263,9 +291,7 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
                 }}
                 variant="outline"
               >
-                <ItemMedia variant="image">
-                  <img alt="" src={logo} />
-                </ItemMedia>
+                <Logo src={logo} />
                 <ItemContent>
                   <ItemTitle>
                     {name}
@@ -279,33 +305,73 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
               </Item>
             );
           })}
-          {typed.map((name) => (
-            <Item done key={name} variant="outline">
-              <ItemMedia variant="icon">
-                <Icon icon={FileIcon} />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>
-                  {name}
-                  <span {...stylex.props(visuallyHidden)}>
-                    , {t`asked for`}
-                  </span>
-                </ItemTitle>
-              </ItemContent>
-            </Item>
-          ))}
-          <OtherRow
-            disabled={busy}
-            label={t`Something else`}
-            media={<Icon icon={PlusIcon} />}
-            onAdd={(name) => {
-              void ask(name);
+          {typed.map((name) => {
+            const integration = integrationNamed(name);
+            const toConnect = connectableNamed(name);
+            return (
+              <Item
+                done
+                key={name}
+                {...(toConnect === undefined
+                  ? {}
+                  : {
+                      onClick: () => {
+                        setConnecting(toConnect);
+                      },
+                    })}
+                variant="outline"
+              >
+                {integration?.logo === undefined ||
+                integration.logo === null ? (
+                  <ItemMedia variant="icon">
+                    <Icon icon={FileIcon} />
+                  </ItemMedia>
+                ) : (
+                  <Logo src={integration.logo} />
+                )}
+                <ItemContent>
+                  <ItemTitle>
+                    {name}
+                    <span {...stylex.props(visuallyHidden)}>
+                      , {t`asked for`}
+                    </span>
+                  </ItemTitle>
+                </ItemContent>
+              </Item>
+            );
+          })}
+          <Item
+            onClick={() => {
+              setSearching(true);
             }}
-            placeholder={t`Where, for example Dropbox`}
-          />
+            variant="outline"
+          >
+            <ItemMedia variant="icon">
+              <Icon icon={PlusIcon} />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>{t`Something else`}</ItemTitle>
+            </ItemContent>
+          </Item>
         </ItemGrid>
         <ErrorText>{failure}</ErrorText>
       </div>
+      <ConnectorSearch
+        integrations={integrations}
+        onAsk={ask}
+        onOpenChange={setSearching}
+        onPick={async (integration) => {
+          await ask(integration.name);
+          if (
+            stateOf(integration) !== "shared" &&
+            stateOf(integration) !== "personal" &&
+            canConnect(integration, identity)
+          ) {
+            setConnecting(integration);
+          }
+        }}
+        open={searching}
+      />
       {connecting === null ? null : (
         <ConnectDialog
           identity={identity}
