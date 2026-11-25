@@ -60,7 +60,10 @@ export interface TokenSet {
   /** Epoch milliseconds, counted from before the request. */
   expiresAt: number;
   idToken?: string;
-  /** The scopes the provider says it granted, as its answer lists them. */
+  /**
+   * The scopes the provider says it granted, joined with a space; none
+   * where its answer lists none (`grantedScope`).
+   */
   scope?: string;
 }
 
@@ -173,7 +176,30 @@ const lifetimeSeconds = (value: unknown): number => {
     : defaultLifetimeSeconds;
 };
 
+const whitespace = /\s+/u;
+
+/**
+ * The scopes a token answer lists (RFC 6749 §5.1), split on white space
+ * and on the separator `provider` joins its own with, joined with a space:
+ * read this one way, by every check and as stored. One that lists none is
+ * as absent.
+ */
+const grantedScope = (
+  { scopeSeparator }: OAuthProviderConfig,
+  scope: unknown
+): string | undefined => {
+  if (typeof scope !== "string") {
+    return undefined;
+  }
+  const listed = scope
+    .split(whitespace)
+    .flatMap((each) => each.split(scopeSeparator))
+    .filter((each) => each !== "");
+  return listed.length === 0 ? undefined : listed.join(" ");
+};
+
 const tokenSet = (
+  provider: OAuthProviderConfig,
   body: Record<string, unknown>,
   requestedAt: number
 ): TokenSet => {
@@ -195,7 +221,7 @@ const tokenSet = (
         : undefined,
     expiresAt: requestedAt + lifetimeSeconds(expiresIn) * 1000,
     idToken: typeof idToken === "string" ? idToken : undefined,
-    scope: typeof scope === "string" ? scope : undefined,
+    scope: grantedScope(provider, scope),
   };
 };
 
@@ -212,6 +238,7 @@ export const exchangeCode = async (
 ): Promise<TokenSet> => {
   const requestedAt = Date.now();
   return tokenSet(
+    provider,
     await post(provider.tokenEndpoint(tenant), provider, client, {
       grant_type: "authorization_code",
       code,
@@ -232,6 +259,7 @@ export const refreshTokens = async (
 ): Promise<TokenSet> => {
   const requestedAt = Date.now();
   return tokenSet(
+    provider,
     await post(provider.tokenEndpoint(tenant), provider, client, {
       grant_type: "refresh_token",
       refresh_token: refreshToken,
