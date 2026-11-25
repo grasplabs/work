@@ -111,11 +111,14 @@ const inputOf = ({
  * The form: what is typed, the client's secret above all, and why the
  * last try failed live only as long as it is open.
  */
-const AddConnectorForm = ({ onAdded }: { onAdded: () => void }) => {
+const AddConnectorForm = ({
+  onAdded,
+}: {
+  onAdded: (connectorId: string) => void;
+}) => {
   const { t } = useLingui();
   const id = useId();
   const action = useCoreAction();
-  const navigate = useNavigate();
   const [problem, setProblem] = useState<string>();
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
@@ -138,11 +141,7 @@ const AddConnectorForm = ({ onAdded }: { onAdded: () => void }) => {
     void action.run(async (session) => {
       const added = await session.connections.addConnector(input);
       setClientSecret("");
-      onAdded();
-      await navigate({
-        to: "/connectors/$integration",
-        params: { integration: integrationKey("connector", added.id) },
-      });
+      onAdded(added.id);
     });
   };
 
@@ -275,8 +274,9 @@ export const AddConnector = ({ identity }: { identity: Identity }) => {
   // the last time in it, not even while the dialog is still closing.
   const [opened, setOpened] = useState(0);
   // The opening now showing: an add that ends after its dialog was closed
-  // and opened again closes nothing.
+  // and opened again neither closes it nor leaves the page.
   const latest = useRef(0);
+  const navigate = useNavigate();
   if (!isMemberAdmin(identity)) {
     return null;
   }
@@ -304,10 +304,17 @@ export const AddConnector = ({ identity }: { identity: Identity }) => {
           </DialogHeader>
           <AddConnectorForm
             key={opened}
-            onAdded={() => {
-              if (latest.current === opened) {
-                setOpen(false);
+            onAdded={(connectorId) => {
+              if (latest.current !== opened) {
+                return;
               }
+              setOpen(false);
+              void navigate({
+                to: "/connectors/$integration",
+                params: {
+                  integration: integrationKey("connector", connectorId),
+                },
+              });
             }}
           />
         </DialogContent>
