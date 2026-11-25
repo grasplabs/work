@@ -389,8 +389,13 @@ const sayStreamed = async ({
       const speech = await speaking;
       streaming = true;
       begun.resolve(true);
-      await send({ words: speech.words });
-      await writer.close().catch(() => null);
+      // The end of the answer goes out as the page reads it. A page that
+      // stopped reading without going away never holds up keeping and
+      // counting the line, which is made and billed by now.
+      void (async () => {
+        await send({ words: speech.words });
+        await writer.close().catch(() => null);
+      })();
       const answer: SpeechAnswer = {
         audio: toBase64(speech.audio),
         mime: speech.mime,
