@@ -5,5 +5,5 @@
   },
   "include": ["src", "test"],
   // Node.js's, checked with Node's types by the repo's own tsconfig.json.
-  "exclude": ["src/oxc-parse-module.node.ts"]
+  "exclude": ["src/common/oxc-parse-module.node.ts"]
 }

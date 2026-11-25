@@ -946,7 +946,7 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     ],
     [
       "a path into the kit's packages, for its types",
-      'import type { runPage } from "../node_modules/@grasp-os/runtime/src/page-runtime.ts";\nexport type Reached = typeof runPage;\n',
+      'import type { runPage } from "../node_modules/@grasp-os/runtime/src/app/page-runtime.ts";\nexport type Reached = typeof runPage;\n',
     ],
     [
       "a module of the kit's pages, for its types",
@@ -958,7 +958,7 @@ describe("server code a seal type-checks", { timeout: 120_000 }, () => {
     ],
     [
       "a reference path into the kit",
-      '/// <reference path="../node_modules/@grasp-os/runtime/src/page.ts" />\nexport const extra = 1;\n',
+      '/// <reference path="../node_modules/@grasp-os/runtime/src/app/page.ts" />\nexport const extra = 1;\n',
     ],
     [
       "a lib it references, the DOM's",

@@ -8,14 +8,14 @@
 // `@ts-expect-error` below must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
-import type { GraspClient } from "../src/page.ts";
-import { useFile, useUpload } from "../src/react.ts";
+import type { GraspClient } from "../src/app/page.ts";
+import { useFile, useUpload } from "../src/app/react.ts";
 import type {
   FileRef,
   FileView,
   GraspError,
   UploadView,
-} from "../src/react.ts";
+} from "../src/app/react.ts";
 import { permissions } from "./notes/server/_generated/api.ts";
 
 declare const client: GraspClient;

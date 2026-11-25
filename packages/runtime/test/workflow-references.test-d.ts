@@ -23,14 +23,14 @@ import type {
   WorkflowArgsOf,
   WorkflowReturnOf,
   WorkflowWaitOf,
-} from "../src/index.ts";
+} from "../src/app/index.ts";
 import {
   useForm,
   useMutation,
   usePaginatedQuery,
   useQuery,
-} from "../src/react.ts";
-import type { DecisionAnswer } from "../src/react.ts";
+} from "../src/app/react.ts";
+import type { DecisionAnswer } from "../src/app/react.ts";
 import { workflows } from "./notes/server/_generated/api.ts";
 
 /**

@@ -1,5 +1,5 @@
 /**
- * Writes the SDK's connector catalog (packages/runtime/src/connector-catalog.gen.ts):
+ * Writes the SDK's connector catalog (packages/runtime/src/common/connector-catalog.gen.ts):
  * the type of every generated connector contract of this release, so an
  * App's `ctx.resources.<alias>.call(action, args)` infers the action's
  * arguments and answer from the contract its declaration names (spec 12).
@@ -35,7 +35,7 @@ import { readContractSchema } from "./src/connector-contracts.ts";
 
 const catalogFile = path.join(
   import.meta.dirname,
-  "../../packages/runtime/src/connector-catalog.gen.ts"
+  "../../packages/runtime/src/common/connector-catalog.gen.ts"
 );
 
 /**

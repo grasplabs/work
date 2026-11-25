@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { GraspClient } from "../src/client-core.ts";
+import { GraspClient } from "../src/app/client-core.ts";
 
 // Leaving the App while a form holds unsaved edits (spec 10.7.7): the
 // session client tells the host whether anything does, so the host
