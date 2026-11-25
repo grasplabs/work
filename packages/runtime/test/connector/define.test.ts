@@ -364,7 +364,7 @@ describe("a connector's definition", () => {
     );
   });
 
-  it("refuses what Grasp never runs, by name or by a DELETE, and a message declared as its author's own", () => {
+  it("refuses what Grasp never runs, by its name or a DELETE, and a message declared as its author's own", () => {
     const write = { readOnly: false, reach: "own" } as const;
     const addressed = declared({
       ...write,
@@ -377,9 +377,11 @@ describe("a connector's definition", () => {
     expect(
       named(
         "stock.clear",
+        // A connector written without types still can't declare a DELETE.
+        // @ts-expect-error -- DELETE is no route method
         declared({ ...write, routes: ["DELETE /v1/stock/{sku}"], args: {} })
       )
-    ).toThrow("stock.clear: Grasp never runs it");
+    ).toThrow("DELETE");
     expect(
       named(
         "notice.send",
