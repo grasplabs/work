@@ -2,6 +2,7 @@ import { agentErrors } from "@grasp-os/shared/agent";
 import { actorOf, delegateActorOf } from "@grasp-os/shared/audit";
 import type { AuditActor } from "@grasp-os/shared/audit";
 import type { ChatConnectionRequest } from "@grasp-os/shared/chat";
+import { connectErrors } from "@grasp-os/shared/connect";
 import type {
   ConnectionPerson,
   ConnectionSummary,
@@ -145,9 +146,30 @@ const decisionActions = {
 } as const;
 
 /**
+ * The tools of the connection to a connector made from a URL
+ * `connectionId` that Grasp runs, by the rules, from its server's list as
+ * it is now (connect's `connectorToolClasses`): none while the list can't
+ * be read, so one server down leaves the others askable.
+ */
+const connectorActionsOf = async (
+  env: Env,
+  connectionId: string
+): Promise<string[]> => {
+  try {
+    return Object.keys(await env.CONNECT.connectorToolClasses(connectionId));
+  } catch (error) {
+    if (connectErrors.codeOf(error) === "connect.server_unavailable") {
+      return [];
+    }
+    throw error;
+  }
+};
+
+/**
  * The actions of each connection in `offered`, by its ID: a native
- * provider's manifest's (one lookup per provider), a toolkit's those the
- * admin allowed as they connected it.
+ * provider's manifest's (one lookup per provider), a connector's tools
+ * its server lists now, a toolkit's those the admin allowed as they
+ * connected it.
  */
 const actionsOf = async (
   env: Env,
@@ -164,12 +186,20 @@ const actionsOf = async (
     await Promise.all(
       natives.map(async (provider) => {
         const tools = await env.CONNECT.catalogTools({
-          composio: false,
           source: "native",
           id: provider,
         });
         return [provider, tools.map(({ name }) => name)] as const;
       })
+    )
+  );
+  const connectors = new Map(
+    await Promise.all(
+      offered.flatMap(({ id, source }) =>
+        source === "connector"
+          ? [(async () => [id, await connectorActionsOf(env, id)] as const)()]
+          : []
+      )
     )
   );
   return new Map(
@@ -178,7 +208,7 @@ const actionsOf = async (
       id,
       source === "native"
         ? (manifests.get(provider) ?? [])
-        : (offeredTools ?? []),
+        : (connectors.get(id) ?? offeredTools ?? []),
     ])
   );
 };

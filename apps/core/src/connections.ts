@@ -10,6 +10,7 @@ import type {
 } from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
 import {
+  addConnectorSchema,
   catalogLogoPath,
   catalogSourceSchema,
   composioToolkitSchema,
@@ -19,6 +20,7 @@ import {
   connectionCallbackPath,
   connectionScopeSchema,
   connectorClientMetadataPath,
+  connectorIdSchema,
   oauthProviderSchema,
   returnPathMaxLength,
 } from "@grasp-os/shared/connect";
@@ -164,13 +166,28 @@ type ConnectToolkitWithKeyRequest = Parameters<
   ConnectionsApi["connectToolkitWithKey"]
 >[0];
 
-/** What the frontend sends to start: checked here, as it came over the wire. */
+/**
+ * What the frontend sends to start: checked here, as it came over the
+ * wire. A native suite, or a connector made from a URL by its ID.
+ */
 const startRequestSchema = z.strictObject({
-  provider: oauthProviderSchema,
+  provider: z.union([oauthProviderSchema, connectorIdSchema]),
   scope: connectionScopeSchema,
   returnTo: z.string().default("/"),
 });
 type StartRequest = Parameters<ConnectionsApi["start"]>[0];
+
+/**
+ * What the frontend sends to connect a connector with a key; the key's
+ * own form is connect's to check.
+ */
+const connectWithKeyRequestSchema = z.strictObject({
+  provider: connectorIdSchema,
+  scope: connectionScopeSchema,
+  key: z.string(),
+  returnTo: z.string().default("/"),
+});
+type ConnectWithKeyRequest = Parameters<ConnectionsApi["connectWithKey"]>[0];
 
 /**
  * The person as connect needs them: who, their role, and the accounts they
@@ -306,6 +323,11 @@ const offerSchema = z.discriminatedUnion("source", [
   z.strictObject({
     source: z.literal("composio"),
     id: composioToolkitSchema,
+    offered: z.boolean(),
+  }),
+  z.strictObject({
+    source: z.literal("connector"),
+    id: connectorIdSchema,
     offered: z.boolean(),
   }),
 ]);
@@ -500,15 +522,20 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       throw connectionErrors.create("connection.invalid");
     }
     const { provider, scope, returnTo } = parsed.data;
+    const suite = oauthProviderSchema.safeParse(provider);
     await requireOffered(this.#env, person, {
-      source: "native",
+      source: suite.success ? "native" : "connector",
       id: provider,
       scope,
     });
     const config = signInConfig(this.#env);
+    // A suite's sign-in is pinned to the organization's tenant there; a
+    // connector's names none.
     const tenant =
-      config === undefined ? undefined : tenantOf(config, provider);
-    if (config === undefined || tenant === undefined) {
+      config === undefined || !suite.success
+        ? undefined
+        : tenantOf(config, suite.data);
+    if (config === undefined || (suite.success && tenant === undefined)) {
       throw connectionErrors.create("connection.provider_unavailable");
     }
     const back = onOrigin(config.origin, returnTo);
@@ -519,7 +546,7 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       person,
       provider,
       scope,
-      tenant,
+      ...(tenant === undefined ? {} : { tenant }),
       returnTo: `${back.pathname}${back.search}`,
       classes: await classesOn(this.#env),
       sharedMailbox: await anyMailboxPointed(this.#env),
@@ -730,6 +757,69 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
     return await this.#env.CONNECT.createHttpConnection({
       person,
       connection: parsed.data,
+    });
+  }
+
+  /**
+   * Connects a connector whose server takes a key, with the key the
+   * person typed: core passes it on and keeps nothing of it; connect
+   * checks the rest (who may connect it for whom, the key with the
+   * server), and audits it.
+   */
+  async connectWithKey(
+    request: ConnectWithKeyRequest
+  ): Promise<{ url: string }> {
+    const person = await this.#person();
+    const parsed = connectWithKeyRequestSchema.safeParse(request);
+    const config = signInConfig(this.#env);
+    if (config === undefined) {
+      throw connectionErrors.create("connection.provider_unavailable");
+    }
+    const back = parsed.success
+      ? onOrigin(config.origin, parsed.data.returnTo)
+      : undefined;
+    if (!parsed.success || back === undefined) {
+      throw connectionErrors.create("connection.invalid");
+    }
+    const { provider, scope, key } = parsed.data;
+    await requireOffered(this.#env, person, {
+      source: "connector",
+      id: provider,
+      scope,
+    });
+    const { connectionId } = await this.#env.CONNECT.connectWithKey({
+      person,
+      provider,
+      scope,
+      key,
+    });
+    back.searchParams.set("connection", connectionId);
+    return { url: back.href };
+  }
+
+  /**
+   * Adds a connector by its MCP server's URL, as the signed-in person,
+   * with this deployment's origin from its config, where the server's
+   * sign-in returns: connect checks the rest (the role, staff, the URL
+   * and where it leads, the server's sign-in) and audits it (GRA-1375).
+   */
+  async addConnector(request: unknown): Promise<{ id: string }> {
+    const person = await this.#person();
+    const config = signInConfig(this.#env);
+    if (config === undefined) {
+      throw connectionErrors.create("connection.provider_unavailable");
+    }
+    // Read here to name what is wrong; connect reads it again.
+    const parsed = addConnectorSchema
+      .omit({ person: true, origin: true })
+      .safeParse(request);
+    if (!parsed.success) {
+      throw connectionErrors.create("connection.invalid");
+    }
+    return await this.#env.CONNECT.addConnector({
+      ...parsed.data,
+      person,
+      origin: config.origin,
     });
   }
 

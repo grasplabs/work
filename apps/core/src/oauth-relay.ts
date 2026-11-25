@@ -1,3 +1,4 @@
+import { connectorIdSchema } from "@grasp-os/shared/connect";
 import type { StartConnection } from "@grasp-os/shared/connect";
 import type { SignInConfig } from "@grasp-os/shared/deployment-config";
 import { relayedClientOf, relayState } from "@grasp-os/shared/oauth-relay";
@@ -41,13 +42,22 @@ export const relayedAuthorizationUrl = async (
  * Starts connecting an account through OAuth for the deployment `config`
  * describes: its provider returns to `config.origin`, or in relay mode to
  * the relay, with the state put through it. What every start of an OAuth
- * connection in core goes through, so none bypasses relay mode.
+ * connection in core goes through, so none bypasses relay mode. A
+ * connector made from a URL is the exception: connect registers this
+ * origin's own callback at its server (connect's mcp-discovery.ts), so its
+ * sign-in never goes through the relay.
  */
 export const startOAuthConnection = async (
   env: Pick<Env, "ROUTER_SECRET" | "CONNECT">,
   config: SignInConfig,
   request: Omit<StartConnection, "origin" | "callbackOrigin">
 ): Promise<{ url: string }> => {
+  if (connectorIdSchema.safeParse(request.provider).success) {
+    return await env.CONNECT.startConnection({
+      ...request,
+      origin: config.origin,
+    });
+  }
   const { callbackOrigin } = config;
   const { url } = await env.CONNECT.startConnection({
     ...request,
