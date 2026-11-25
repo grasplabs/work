@@ -29,7 +29,7 @@ import {
   requestBudget,
 } from "./event-kinds.ts";
 import type { ProviderAccess } from "./event-kinds.ts";
-import { accessTokenFor } from "./tokens.ts";
+import { accessTokenFor, pausedWait } from "./tokens.ts";
 
 // The documents' reads (GRA-370): where the company's documents live, in
 // SharePoint and OneDrive or in Google Drive, with the documents
@@ -618,6 +618,10 @@ const accessOf = async (
     // admin to reconnect; a renewal the provider didn't answer, a failure.
     if (connectErrors.codeOf(error) === "connect.connection_inactive") {
       throw placeErrors.create("place.inactive");
+    }
+    const paused = pausedWait(error);
+    if (paused !== undefined) {
+      throw placeErrors.create("place.throttled", paused);
     }
     if (connectionErrors.codeOf(error) !== undefined) {
       throw placeErrors.create("place.provider_failed");

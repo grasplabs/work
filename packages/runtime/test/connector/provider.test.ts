@@ -58,13 +58,36 @@ describe("a provider's failed answer", () => {
       retryAfterSeconds: 7,
       notPerformed: true,
     });
-    answers(
-      errorBody("tooMany", 429, {
-        "retry-after": new Date(Date.now() + 30_000).toUTCString(),
-      })
-    );
-    const { retryAfterSeconds } = await failureOf();
-    expect(Math.abs((retryAfterSeconds ?? 0) - 30)).toBeLessThanOrEqual(1);
+    // The three forms of an HTTP-date (RFC 9110): IMF-fixdate, the obsolete
+    // RFC 850 form and asctime's.
+    const at = new Date(Date.now() + 30_000);
+    const fixdate = at.toUTCString();
+    const weekday = at.toLocaleDateString("en-US", {
+      weekday: "long",
+      timeZone: "UTC",
+    });
+    const [day, month, year, time] = [
+      fixdate.slice(5, 7),
+      fixdate.slice(8, 11),
+      fixdate.slice(12, 16),
+      fixdate.slice(17, 25),
+    ];
+    const waits: number[] = [];
+    for (const date of [
+      fixdate,
+      `${weekday}, ${day}-${month}-${year.slice(2)} ${time} GMT`,
+      `${fixdate.slice(0, 3)} ${month} ${String(at.getUTCDate()).padStart(2, " ")} ${time} ${year}`,
+    ]) {
+      answers(errorBody("tooMany", 429, { "retry-after": date }));
+      // oxlint-disable-next-line no-await-in-loop -- one answer after another
+      const { retryAfterSeconds } = await failureOf();
+      waits.push(retryAfterSeconds ?? 0);
+    }
+    expect(waits.map((wait) => Math.abs(wait - 30) <= 1)).toStrictEqual([
+      true,
+      true,
+      true,
+    ]);
     answers(errorBody("tooMany", 429, { "retry-after": "86400" }));
     await expect(failureOf()).resolves.toMatchObject({
       retryAfterSeconds: 3600,
@@ -79,6 +102,12 @@ describe("a provider's failed answer", () => {
     answers(errorBody("slowDown", 403));
     await expect(failureOf()).resolves.toMatchObject({
       code: "throttled",
+      notPerformed: true,
+    });
+    answers(errorBody("forbidden", 403, { "retry-after": "25" }));
+    await expect(failureOf("POST")).resolves.toMatchObject({
+      code: "throttled",
+      retryAfterSeconds: 25,
       notPerformed: true,
     });
     answers(errorBody("forbidden", 403));

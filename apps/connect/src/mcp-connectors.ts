@@ -25,6 +25,7 @@ import {
 import type { Connection } from "./connections.ts";
 import { maxListedTools, secretContext } from "./connector-providers.ts";
 import { connections, connectionTools, connectors } from "./db/schema.ts";
+import { pauseAsked } from "./egress.ts";
 import { ownerErased } from "./erased-people.ts";
 import { clientFor, discoverSignIn, isPublicName } from "./mcp-discovery.ts";
 import { McpError, mcpHeaderValue, modernMcpServer } from "./mcp.ts";
@@ -350,7 +351,15 @@ const serverFor = async (
     }
     const headers = new Headers(request.headers);
     headers.set(credential.header, credential.value);
-    return await fetch(new Request(request, { headers, redirect: "manual" }));
+    const response = await fetch(
+      new Request(request, { headers, redirect: "manual" })
+    );
+    // A server that asks every caller to wait pauses the connection, as a
+    // native connector's provider does at the egress.
+    await pauseAsked(env.DB, connection.id, response, {
+      connector: connection.server,
+    });
+    return response;
   });
 };
 

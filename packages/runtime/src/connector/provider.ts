@@ -52,14 +52,37 @@ export const jsonBody = (body: unknown): RequestInit => ({
 const defaultRetryAfterSeconds = 60;
 
 /**
- * The seconds a `retry-after` header asks for, if it gives them: as
- * seconds, or as the HTTP date to wait until; at most an hour.
+ * An HTTP-date in IMF-fixdate and the obsolete RFC 850 form, which a
+ * recipient must accept too (RFC 9110, section 5.6.7), as asctime's.
  */
-const retryAfterOf = (response: Response): number | undefined => {
+const httpDates = [
+  /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT$/u,
+  /^(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), \d{2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2} \d{2}:\d{2}:\d{2} GMT$/u,
+];
+
+/** The asctime form, which names no zone: it is in GMT, as the others. */
+const asctimeDate =
+  /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (?:\d{2}| \d) \d{2}:\d{2}:\d{2} \d{4}$/u;
+
+/**
+ * The seconds a `retry-after` header asks for, if it gives them: as
+ * seconds, or as the HTTP date to wait until; at most an hour. A value
+ * that is neither is ignored, as RFC 9110 says.
+ */
+export const retryAfterOf = (response: Response): number | undefined => {
   const value = response.headers.get("retry-after")?.trim() ?? "";
-  const seconds = /^\d+$/u.test(value)
-    ? Number(value)
-    : Math.ceil((Date.parse(value) - Date.now()) / 1000);
+  if (/^\d+$/u.test(value)) {
+    return Math.min(Number(value), maxRetryAfterSeconds);
+  }
+  let date: string;
+  if (httpDates.some((form) => form.test(value))) {
+    date = value;
+  } else if (asctimeDate.test(value)) {
+    date = `${value} GMT`;
+  } else {
+    return undefined;
+  }
+  const seconds = Math.ceil((Date.parse(date) - Date.now()) / 1000);
   return Number.isNaN(seconds)
     ? undefined
     : Math.min(Math.max(seconds, 0), maxRetryAfterSeconds);
@@ -131,7 +154,13 @@ const failureOf = async (
   }
   const named = code === undefined ? "" : ` (${code})`;
   const { status } = response;
-  if (status === 429 || isThrottled?.(status, code) === true) {
+  // A 403 that names a wait is a rate limit, as connect's egress pauses
+  // the connection for it.
+  if (
+    status === 429 ||
+    (status === 403 && retryAfterSeconds !== undefined) ||
+    isThrottled?.(status, code) === true
+  ) {
     return new ToolError(
       `${name} is rate limiting requests: nothing was done. Try again later.`,
       {

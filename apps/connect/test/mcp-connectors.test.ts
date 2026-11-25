@@ -94,6 +94,35 @@ describe("a connector made from Linear's MCP server URL", () => {
     ]);
   });
 
+  it("pauses its connection for every caller when its server rate limits it, until the server's time passes", async () => {
+    const connector = await addLinear();
+    const anna = someone();
+    const connectionId = await connectLinear(connector, anna);
+    const agent = chatAgent(anna);
+    const read = async () =>
+      await outcome(
+        callAs(agent, { connectionId, action: "list_issues", input: {} })
+      );
+    await read();
+    linear.next = () =>
+      new Response("Too many requests", {
+        status: 429,
+        headers: { "retry-after": "30" },
+      });
+    const limited = await read();
+    const callsBefore = linear.calls.length;
+    const paused = await read();
+    expect({
+      limited,
+      paused,
+      sentWhilePaused: linear.calls.length - callsBefore,
+    }).toStrictEqual({
+      limited: "connect.server_unavailable",
+      paused: "connect.rate_limited",
+      sentWhilePaused: 0,
+    });
+  });
+
   it("connects again in place once it needs signing in again, and keeps no tool list once disconnected", async () => {
     const connector = await addLinear();
     const anna = someone();
