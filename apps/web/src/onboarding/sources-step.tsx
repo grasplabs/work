@@ -26,6 +26,7 @@ import { loadFromCore } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { CalmStep } from "./calm-frame.tsx";
+import { useConnectionReturn } from "./connection-return.ts";
 import { ConnectorSearch } from "./connector-search.tsx";
 import { sourcesFor } from "./setup.ts";
 import type { DocumentSource } from "./setup.ts";
@@ -134,6 +135,8 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
   const { t } = useLingui();
   const { choices, signIn, identity } = data;
   const { save, busy, failure } = useSaveChoices();
+  // An app's sign-in that came back without connecting.
+  const returned = useConnectionReturn();
   const integrations = useIntegrations();
   const [connecting, setConnecting] = useState<Integration | null>(null);
   const [searching, setSearching] = useState(false);
@@ -355,7 +358,7 @@ export const SourcesStep = ({ data, onward }: StepProps) => {
             </ItemContent>
           </Item>
         </ItemGrid>
-        <ErrorText>{failure}</ErrorText>
+        <ErrorText>{failure ?? returned ?? undefined}</ErrorText>
       </div>
       <ConnectorSearch
         integrations={integrations}

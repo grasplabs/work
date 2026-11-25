@@ -5149,6 +5149,10 @@ msgstr "Conectada, a través de Composio"
 msgid "Connecting"
 msgstr "Conectando"
 
+#: src/onboarding/connection-return.ts
+msgid "Connecting didn't work, so nothing was connected. Try again, or choose another way."
+msgstr "La conexión no funcionó, así que no se conectó nada. Inténtalo de nuevo o elige otra forma."
+
 #: src/connection-errors.ts
 msgid "Connecting didn't work. Try again, or ask an admin."
 msgstr "No se pudo conectar. Vuelve a intentarlo o pregunta a un administrador."
@@ -8776,6 +8780,10 @@ msgstr "No pude leer este archivo. Sirve un archivo CSV o Excel."
 #: src/onboarding/company-step.tsx
 msgid "I could not read who works where from {signIn}. Connect it again with an administrator’s account."
 msgstr "No pude leer en {signIn} quién trabaja dónde. Vuelve a conectarlo con una cuenta de administrador."
+
+#: src/onboarding/connection-return.ts
+msgid "I couldn't check your directory just now. Try again in a moment."
+msgstr "No he podido comprobar tu directorio ahora mismo. Inténtalo de nuevo en un momento."
 
 #: src/onboarding/documents-step.tsx
 msgid "I couldn’t read this one"
@@ -17392,6 +17400,14 @@ msgstr "Gracias por avisarnos"
 msgid "That account can't open this interview. Sign in with the work account your link was sent to."
 msgstr "Esa cuenta no puede abrir esta entrevista. Inicia sesión con la cuenta del trabajo a la que se envió tu enlace."
 
+#: src/onboarding/connection-return.ts
+msgid "That account can't read your company's directory. Try again with an admin account, or use a staff list."
+msgstr "Esa cuenta no puede leer el directorio de tu empresa. Inténtalo de nuevo con una cuenta de administrador o usa una lista de personal."
+
+#: src/onboarding/connection-return.ts
+msgid "That account isn't in your organization. Try again with your work account."
+msgstr "Esa cuenta no pertenece a tu organización. Inténtalo de nuevo con tu cuenta de trabajo."
+
 #: src/sign-in-errors.ts
 msgid "That account isn't part of your organization."
 msgstr "Esa cuenta no forma parte de tu organización."
@@ -17451,6 +17467,10 @@ msgstr "Este parámetro no acepta ese valor."
 #: src/settings/add-connection/words.ts
 msgid "That key didn't work."
 msgstr "Esa clave no ha funcionado."
+
+#: src/onboarding/connection-return.ts
+msgid "That sign-in can't be reached right now. Try again in a moment, or choose another way."
+msgstr "Ese inicio de sesión no está disponible ahora mismo. Inténtalo de nuevo en un momento o elige otra forma."
 
 #: src/sign-in-errors.ts
 msgid "That staff account hasn't been given access here."
@@ -18142,6 +18162,14 @@ msgstr "El secreto está revocado: nada de lo que envía esta fuente inicia un f
 #: src/settings/event-sources.tsx
 msgid "The sender must sign with the new secret, which you see only once."
 msgstr "Quien envía debe firmar con el secreto nuevo, que solo ves una vez."
+
+#: src/onboarding/connection-return.ts
+msgid "The sign-in didn't finish, so nothing was connected. Try again, or choose another way."
+msgstr "El inicio de sesión no terminó, así que no se conectó nada. Inténtalo de nuevo o elige otra forma."
+
+#: src/onboarding/connection-return.ts
+msgid "The sign-in took too long, so nothing was connected. Try again."
+msgstr "El inicio de sesión tardó demasiado, así que no se conectó nada. Inténtalo de nuevo."
 
 #: src/workflows/version-source.tsx
 msgid "The source files of version {sourceVersion}"

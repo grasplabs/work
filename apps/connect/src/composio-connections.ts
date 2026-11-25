@@ -779,6 +779,26 @@ export const takeToolkitFlow = async (
   return flow;
 };
 
+/** Who started the Composio flow `stateHash` names, where it goes back to and until when: read, never taken. */
+export const toolkitFlowReturnOf = async (
+  env: Env,
+  stateHash: string
+): Promise<
+  { userId: string; returnTo: string; expiresAt: Date } | undefined
+> => {
+  const [flow] = await drizzle(env.DB)
+    .select({
+      userId: composioFlows.userId,
+      returnTo: composioFlows.returnTo,
+      expiresAt: composioFlows.expiresAt,
+    })
+    .from(composioFlows)
+    .where(eq(composioFlows.stateHash, stateHash));
+  return flow === undefined
+    ? undefined
+    : { ...flow, expiresAt: new Date(flow.expiresAt) };
+};
+
 /**
  * Deletes at Composio what a flow taken for good made there (one that
  * came back but can't finish); its cleanup row keeps what can't be.

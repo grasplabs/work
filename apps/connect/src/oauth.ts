@@ -8,6 +8,7 @@ import {
   disconnectPersonalSchema,
   disconnectSchema,
   finishConnectionSchema,
+  flowReturnSchema,
   oauthFlowLifetimeMs,
   oauthProviderSchema,
   startConnectionSchema,
@@ -43,6 +44,7 @@ import {
   dropToolkitFlowsOf,
   revokeAtComposio,
   takeToolkitFlow,
+  toolkitFlowReturnOf,
 } from "./composio-connections.ts";
 import {
   auditRefusal,
@@ -386,6 +388,37 @@ const doneWith = async (env: Env, flow: FlowRow): Promise<void> => {
   await drizzle(env.DB)
     .delete(oauthFlows)
     .where(eq(oauthFlows.stateHash, flow.stateHash));
+};
+
+/**
+ * Where the live flow `request` names was going back to, if the same
+ * person started it: read, never taken, so finishing it is as before. A
+ * flow that fails sends its person back there with why.
+ */
+export const flowReturn = async (
+  env: Env,
+  request: unknown
+): Promise<string | undefined> => {
+  const parsed = flowReturnSchema.safeParse(request);
+  if (!parsed.success) {
+    return undefined;
+  }
+  const { person, state } = parsed.data;
+  const stateHash = await sha256Hex(state);
+  const [flow] = await drizzle(env.DB)
+    .select({
+      userId: oauthFlows.userId,
+      returnTo: oauthFlows.returnTo,
+      expiresAt: oauthFlows.expiresAt,
+    })
+    .from(oauthFlows)
+    .where(eq(oauthFlows.stateHash, stateHash));
+  const found = flow ?? (await toolkitFlowReturnOf(env, stateHash));
+  return found !== undefined &&
+    found.userId === person.userId &&
+    found.expiresAt.getTime() > Date.now()
+    ? found.returnTo
+    : undefined;
 };
 
 /**
