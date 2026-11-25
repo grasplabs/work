@@ -1015,9 +1015,17 @@ export interface CatalogEntry {
   logo: string | null;
   /**
    * What it is for, in its provider's words: the first sentence of its
-   * description ({@link firstSentence}), or `null` when it has none.
+   * description ({@link firstSentence}), or `null` when it has none. Always
+   * `null` for a native one: the web words Grasp's own connectors in each
+   * of its languages, by their ids.
    */
   description: string | null;
+  /**
+   * The products a native one reaches, by their own names, which are never
+   * translated: a routine naming one of them is in it. A Composio toolkit
+   * has none; its name is all it is known by.
+   */
+  products?: string[];
   /** Which of Grasp's kinds of app it is ({@link catalogGroupOf}). */
   group: CatalogGroup;
   /** Whose sign-in app connecting it takes ({@link CatalogAuth}). */

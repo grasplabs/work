@@ -69,7 +69,7 @@ const microsoft: OfferedCatalog["entries"][number] = {
   categories: ["Productivity"],
   toolCount: 0,
   logo: null,
-  description: "Mail and files.",
+  description: null,
   group: "Other",
   auth: "managed",
   offered: true,

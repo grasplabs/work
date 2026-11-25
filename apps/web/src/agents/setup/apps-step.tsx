@@ -12,6 +12,7 @@ import { Icon, PlusIcon } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
 import { useState } from "react";
 
+import { descriptionOf } from "../../connections/native-descriptions.ts";
 import { ProviderMark } from "../../connections/provider-mark.tsx";
 import { SectionCard } from "../section-card.tsx";
 import { AppsPicker } from "./apps-picker.tsx";
@@ -135,7 +136,7 @@ export const AppsStep = ({ setup, change, name, apps }: StepProps) => {
                   <ItemContent>
                     <ItemTitle>{appName}</ItemTitle>
                     <ItemDescription>
-                      {app.description ?? standing(app)}
+                      {descriptionOf(app) ?? standing(app)}
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>

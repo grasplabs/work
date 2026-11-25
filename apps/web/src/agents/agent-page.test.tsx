@@ -501,7 +501,7 @@ const Page = ({
             id: "google",
             name: "Google Workspace",
             categories: ["email"],
-            description: "Mail, calendar and documents",
+            description: null,
             logo: null,
           },
           {

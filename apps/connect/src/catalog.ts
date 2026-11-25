@@ -35,23 +35,23 @@ import { providers } from "./providers.ts";
 /**
  * How native providers are shown in the catalog. Both suites are first
  * mail and calendar to the people connecting them, so that is their group,
- * whatever their categories would say.
+ * whatever their categories would say. They carry no description: the web
+ * words them in each of its languages, by their ids.
  */
 const nativeShown: Record<
   OAuthProvider,
-  Pick<CatalogEntry, "name" | "categories" | "description" | "group">
+  Pick<CatalogEntry, "name" | "categories" | "products" | "group">
 > = {
   microsoft: {
     name: "Microsoft 365",
     categories: ["Productivity"],
-    description:
-      "Outlook mail and calendars, and files in OneDrive and SharePoint.",
+    products: ["Outlook", "OneDrive", "SharePoint"],
     group: "Email and calendar",
   },
   google: {
     name: "Google Workspace",
     categories: ["Productivity"],
-    description: "Gmail, Google Calendar, and files in Google Drive.",
+    products: ["Gmail", "Google Calendar", "Google Drive"],
     group: "Email and calendar",
   },
 };
@@ -90,6 +90,7 @@ const nativeEntries = (): CatalogEntry[] =>
         ...nativeShown[id],
         toolCount: Object.keys(connector.manifest.actions).length,
         logo: null,
+        description: null,
         // Connect holds the deployment's own app for each provider.
         auth: "managed",
       },
