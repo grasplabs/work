@@ -431,6 +431,7 @@ export const linkWords: Record<LinkState, string> = {
 /** The parts of an interview, as the person going through it sees them named. */
 export const interviewPhaseWords: Record<Phase, string> = {
   open: "Hello",
+  week: "Your week",
   you: "You and AI",
   anchor: "One real case",
   story: "Your story",

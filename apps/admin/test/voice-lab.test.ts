@@ -117,7 +117,7 @@ describe("the Voice Lab's session", () => {
       // He is Stephen, speaks German, and his first line is said for him.
       stephen: asked.includes("You are Stephen,"),
       german: asked.includes("Every word you say is German"),
-      welcome: asked.includes("Nutzen Sie in Ihrer Arbeit schon KI"),
+      welcome: asked.includes("Was machen Sie hier, in ein oder zwei Sätzen?"),
       voice: asked.includes('"voice_id":"voice_485"'),
       interrupts: asked.includes('"allow_interruptions":true'),
       // Nothing of what only core's own turns need.

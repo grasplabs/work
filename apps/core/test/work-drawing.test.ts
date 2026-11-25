@@ -4,6 +4,7 @@ import type {
   InterviewProgress,
   InterviewSaved,
 } from "@grasp-os/shared/interview-links";
+import { interviewTurnPath } from "@grasp-os/shared/interview-turn";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import type { Roster, SettleChoice } from "@grasp-os/shared/onboarding";
 import { runInDurableObject } from "cloudflare:test";
@@ -22,6 +23,7 @@ import {
   onLink,
   openLinkAs,
   participate,
+  postedOnLink,
   quick,
   signedInAs,
 } from "./interview-link.ts";
@@ -39,7 +41,8 @@ import { unique } from "./sign-in.ts";
 //
 // - People's numbers averaged into one, or made up where nobody gave any.
 // - What the lead said about the whole team told as if it were the work.
-// - What earlier interviews left open never reaching the next interview.
+// - What earlier interviews told and left open never reaching the next
+//   interview about the work, or reaching it with a colleague's name.
 // - A drawing that keeps failing being tried for good, or never again.
 
 const dayMs = 24 * 60 * 60 * 1000;
@@ -245,6 +248,8 @@ const ticketsReply = (ids: Ids): ProviderReply => ({
     open: [
       "Why do some look the customer up in Salesforce?",
       "How many tickets come in a busy week for the whole team?",
+      // A model that named a colleague after all.
+      "Why does Mo skip the client sheet?",
     ],
   }),
   inputTokens: 4000,
@@ -279,7 +284,7 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
   // store's own alarm, set whenever a team falls due, would try first.
   beforeEach(aloneInTheStore);
 
-  it("is drawn from three agreed interviews, keeps each person's numbers apart, and tells the next interview only what its routine lacks, never a colleague's words", async () => {
+  it("is drawn from three agreed interviews, keeps each person's numbers apart, and tells the next interview what the team told and left open, never who told it", async () => {
     const store = onboardingStore(env);
     const ids = await team();
     const { tickets } = await mapped(ids);
@@ -324,6 +329,34 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
     const due = await store.drawsDue();
     const usage = await store.usage();
     const after = await contextOf();
+    // Noor's next turn, over the endpoint: what her interviewer is told.
+    const turn = await answering(
+      [
+        {
+          text: "TONE: none\nSAY: Then?\nPART: anchor\nWANTS: answer\nMORE: no\nAGREED: no\n",
+          inputTokens: 1500,
+          outputTokens: 40,
+        },
+        {
+          text: JSON.stringify({ facts: [], changes: [] }),
+          inputTokens: 1600,
+          outputTokens: 120,
+        },
+      ],
+      async () => {
+        const response = await postedOnLink(interviewTurnPath, {
+          ...noor,
+          event: "answer",
+          locale: "en",
+          lines: [{ from: "person", text: "I answer tickets.", typed: true }],
+          facts: [],
+          phase: "week",
+          minutes: 1,
+        });
+        return await response.text();
+      }
+    );
+    const brief = sentOf(turn.requests[0]?.body);
     expect({
       drew: drew[1],
       models: requests.map(modelOf),
@@ -365,12 +398,25 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
       after: after
         .split("\n")
         .find((line) => line.startsWith("Nobody has said yet")),
-      // The drawing's open questions are written from what as few as one
-      // colleague said: none reaches another person's interview (GRA-330).
+      // What the team told of the work reaches her interviewer, and what
+      // its drawing left open: never a line that names a colleague, and
+      // never who told a step, their numbers or how some do it otherwise.
+      told: after
+        .split("\n")
+        .filter((line) => line.startsWith("- ") || line.startsWith("What the")),
       openQuestions: work?.drawn?.open.filter((question) =>
         after.includes(question)
       ),
-      saidByMo: after.includes("Salesforce"),
+      named: ["Lea", "Max", "Mia", "Mo", "Noor", "Agent"].filter((name) =>
+        new RegExp(String.raw`\b${name}\b`, "u").test(after)
+      ),
+      inTurn: {
+        told: brief.includes("- Open the ticket. (Zendesk)"),
+        open: brief.includes(
+          "Still open about it: Why do some look the customer up in Salesforce?"
+        ),
+        named: brief.includes("Why does Mo skip"),
+      },
       due: [ids.max, ids.mia, ids.mo].filter((id) => due.includes(id)),
       counted: usage.some(
         ({ purpose, model }) => purpose === "drawing" && model === quick
@@ -414,8 +460,19 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
       // shows only the whole team's, so it is still asked (GRA-1749).
       after:
         "Nobody has said yet, so ask when it comes up: how many the whole team does, in a week or a month; where it waits, and for what; what they look at to decide; who gets it after them.",
-      openQuestions: [],
-      saidByMo: false,
+      told: [
+        "What the team already told about nieuwe tickets afhandelen (how it goes, no names):",
+        "- A customer email arrives as a ticket in Zendesk.",
+        "- Open the ticket. (Zendesk)",
+        "- Look up the customer in the client sheet. (Excel)",
+        "- When the customer number is missing: Email the customer for it.",
+      ],
+      openQuestions: [
+        "Why do some look the customer up in Salesforce?",
+        "How many tickets come in a busy week for the whole team?",
+      ],
+      named: [],
+      inTurn: { told: true, open: true, named: false },
       due: [],
       counted: true,
     });

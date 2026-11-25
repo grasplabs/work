@@ -14128,6 +14128,10 @@ msgstr "Datensätze in {table} ohne {field} bekommen „{value}“."
 msgid "Records in {table} that lack {field} need a value before this can be published."
 msgstr "Datensätze in {table} ohne {field} brauchen einen Wert, bevor dies veröffentlicht werden kann."
 
+#: src/interview/words.ts
+msgid "Recurring work"
+msgstr "Wiederkehrende Arbeit"
+
 #: src/brain/gap-actions.tsx
 msgid "Redact it"
 msgstr "Schwärzen"
@@ -21252,6 +21256,10 @@ msgstr "Deine Auslöser empfangen keine neuen E-Mails von {name} mehr"
 #: src/routes/apps.$app.draft.tsx
 msgid "Your version of the App"
 msgstr "Ihre Version der App"
+
+#: src/interview/words.ts
+msgid "Your week"
+msgstr "Ihre Woche"
 
 #: src/inbox/report-row.tsx
 msgid "Your weekly report"

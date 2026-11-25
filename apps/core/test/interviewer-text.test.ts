@@ -18,16 +18,17 @@ import {
   marksDigest,
 } from "../src/onboarding/lab-marks.ts";
 
-// What the model that holds an interview is told (src/onboarding/): the
-// same text the Stephen Lab measures, in five languages, with a mark that
-// names it. How it can go wrong:
+// What the model that holds an interview is told (src/onboarding/), in
+// five languages, with a mark that names it, as the Stephen Lab names the
+// text it measures. How it can go wrong:
 //
 // - A language left half filled in: a placeholder said out loud, or the
 //   wrong form of address.
 // - A mark that doesn't name its text: two texts with one mark, or a mark
 //   the lab can't work out from the text alone.
-// - A word changed here and not in the lab: a text whose mark the lab
-//   never measured.
+// - A word changed without its mark: a text held under the name of
+//   another, so a measurement or an interview names a Stephen it never met.
+// - The interview starting with AI again, or asking for it twice.
 
 interface Which {
   kind: InterviewKind;
@@ -103,6 +104,42 @@ describe("the interview", () => {
     );
   });
 
+  it.each(everyText)(
+    "starts with the work and asks about AI last, before the read-back ($kind, $locale)",
+    (which) => {
+      const { text } = textOf(which);
+      const parts = [
+        ...text.matchAll(/^(?<part>\d+)\. (?<name>[a-z]+):/gmu),
+      ].map((found) => found.groups?.name);
+      expect(parts).toStrictEqual(
+        which.kind === "own"
+          ? [
+              "open",
+              "week",
+              "anchor",
+              "story",
+              "steps",
+              "exceptions",
+              "numbers",
+              "result",
+              "you",
+              "readback",
+            ]
+          : [
+              "open",
+              "anchor",
+              "story",
+              "steps",
+              "exceptions",
+              "numbers",
+              "result",
+              "you",
+              "readback",
+            ]
+      );
+    }
+  );
+
   it("is with a lead about the team's work", () => {
     const { text } = textOf({ kind: "lead", locale: "en" });
     expect(text).toContain("# The interview with a team lead, in order");
@@ -135,7 +172,7 @@ describe("the marks' digest", () => {
 
 describe("the mark", () => {
   it.each(everyText)(
-    "is one the lab measured, so no word changes outside the lab ($kind, $locale)",
+    "is the one kept for it, so no word changes without its mark and the version's name ($kind, $locale)",
     (which) => {
       expect(textOf(which).mark).toBe(labMarks[which.kind][which.locale]);
     }

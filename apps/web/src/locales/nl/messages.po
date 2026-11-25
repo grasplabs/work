@@ -14128,6 +14128,10 @@ msgstr "Records in {table} zonder {field} krijgen “{value}”."
 msgid "Records in {table} that lack {field} need a value before this can be published."
 msgstr "Records in {table} zonder {field} hebben een waarde nodig voordat dit gepubliceerd kan worden."
 
+#: src/interview/words.ts
+msgid "Recurring work"
+msgstr "Terugkerend werk"
+
 #: src/brain/gap-actions.tsx
 msgid "Redact it"
 msgstr "Weglakken"
@@ -21252,6 +21256,10 @@ msgstr "Je triggers ontvangen geen nieuwe e-mail van {name} meer"
 #: src/routes/apps.$app.draft.tsx
 msgid "Your version of the App"
 msgstr "Jouw versie van de App"
+
+#: src/interview/words.ts
+msgid "Your week"
+msgstr "Jouw week"
 
 #: src/inbox/report-row.tsx
 msgid "Your weekly report"

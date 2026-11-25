@@ -93,6 +93,7 @@ export const useInterviewWords = () => {
   const { t } = useLingui();
   const phase: Record<InterviewPhase, string> = {
     open: t`Hello`,
+    week: t`Your week`,
     you: t`You and AI`,
     anchor: t`One real case`,
     story: t`Your story`,
@@ -121,6 +122,7 @@ export const useInterviewWords = () => {
     next: t`Next person`,
     work: t`Work of the team`,
     who: t`Who does it`,
+    task: t`Recurring work`,
   };
   return { phase, tag };
 };

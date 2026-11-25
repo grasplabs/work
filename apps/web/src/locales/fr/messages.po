@@ -14128,6 +14128,10 @@ msgstr "Les enregistrements de {table} sans {field} reçoivent « {value} »."
 msgid "Records in {table} that lack {field} need a value before this can be published."
 msgstr "Les enregistrements de {table} sans {field} ont besoin d’une valeur avant de pouvoir publier."
 
+#: src/interview/words.ts
+msgid "Recurring work"
+msgstr "Travail récurrent"
+
 #: src/brain/gap-actions.tsx
 msgid "Redact it"
 msgstr "La caviarder"
@@ -21252,6 +21256,10 @@ msgstr "Vos déclencheurs ne reçoivent plus de nouveaux e-mails de {name}"
 #: src/routes/apps.$app.draft.tsx
 msgid "Your version of the App"
 msgstr "Votre version de l’App"
+
+#: src/interview/words.ts
+msgid "Your week"
+msgstr "Votre semaine"
 
 #: src/inbox/report-row.tsx
 msgid "Your weekly report"

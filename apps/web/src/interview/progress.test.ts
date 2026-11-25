@@ -78,6 +78,7 @@ describe("where a line goes", () => {
         "next: team",
         "work: anonymous",
         "who: anonymous",
+        "task: team",
       ],
       lead: [
         "step: team",
@@ -98,6 +99,7 @@ describe("where a line goes", () => {
         "next: team",
         "work: team",
         "who: anonymous",
+        "task: team",
       ],
     });
   });

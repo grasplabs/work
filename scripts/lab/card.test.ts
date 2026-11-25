@@ -127,7 +127,7 @@ describe("how he asked and what it cost", () => {
     line("person", "This morning."),
     line(
       "stephen",
-      "Thanks. What did you do first, and where do you keep the list of all the open ones now?"
+      "Thanks. What did you do first, and where do you keep the list of all the open ones that still wait for an answer now?"
     ),
     line("person", "I open the mail."),
     line("stephen", "Then?"),
@@ -157,7 +157,7 @@ describe("how he asked and what it cost", () => {
       minutes: null,
       takenOut: 1,
       addedInReadBack: 1,
-      stephenShare: Math.round((26 / 32) * 1000),
+      stephenShare: Math.round((32 / 38) * 1000),
     });
   });
 });

@@ -27,16 +27,21 @@ export const interviewSecretSchema = z
   .string()
   .regex(/^[A-Za-z0-9_-]{43}$/u, "An interview link's secret");
 
-/** The parts of an interview, in order. */
+/**
+ * The parts of an interview, in order: someone's work as a whole (`week`),
+ * then one piece of it up close (`anchor` to `result`), and them and AI
+ * (`you`) last before the read-back. A lead's interview has no `week`.
+ */
 export const interviewPhases = [
   "open",
-  "you",
+  "week",
   "anchor",
   "story",
   "steps",
   "exceptions",
   "numbers",
   "result",
+  "you",
   "readback",
 ] as const;
 
@@ -64,6 +69,11 @@ export const factTags = [
    * name they said: whom Grasp asks about it next (GRA-1285).
    */
   "who",
+  /**
+   * A piece of work that comes back, in their own words, with how often
+   * and about how long one takes, as they said: what their week is made of.
+   */
+  "task",
 ] as const;
 
 /** Where someone invited stands. */
@@ -209,6 +219,7 @@ const teamByDefault: ReadonlySet<FactTag> = new Set([
   "term",
   "next",
   "work",
+  "task",
 ]);
 
 /**

@@ -16,9 +16,10 @@ import { interviewerSchema, interviewLocaleSchema } from "./onboarding.ts";
 // through. The models write Stephen's line, but they don't get the last
 // word: a line with two questions, praise or filler, or a tone he doesn't
 // have is put right here before anyone hears it, and a fact whose words
-// weren't said is left out. Ported from the prototype (grasplabs/prototype,
-// packages/grasp: src/lib/interview-turn.ts), which the Stephen Lab
-// measures: change the rules there and here together.
+// weren't said is left out, and counted (`checkedTurn`). Ported from the
+// prototype (grasplabs/prototype, packages/grasp:
+// src/lib/interview-turn.ts), which the Stephen Lab measures: change the
+// rules there and here together.
 
 export const interviewTurnPath = "/api/interview/turn";
 
@@ -54,7 +55,7 @@ export const turnAnswerMax = 4000;
 /** The longest line Stephen says: what his voice takes in one go. */
 export const sayMax = 560;
 /** The most words a question of his has. */
-export const questionWordsMax = 15;
+export const questionWordsMax = 20;
 /** The most bytes one turn's request may carry. */
 export const interviewTurnMaxBytes = 768 * 1024;
 
@@ -424,6 +425,46 @@ const saidIn = (answer: string, quote: string): boolean => {
   return wanted.length >= 3 && plainWords(answer).includes(wanted);
 };
 
+const wordEnds = /^[.,;:!?"'…-]+|[.,;:!?"'…-]+$/gu;
+
+/** The words that carry a sentence, as they are compared: those of more than two letters, without punctuation. */
+const carryingWords = (said: string): string[] =>
+  plainWords(said)
+    .split(" ")
+    .map((word) => word.replace(wordEnds, ""))
+    .filter((word) => word.length > 2);
+
+/** How much of a quote must be heard in a spoken answer for it to count as said. */
+const heardShare = 0.8;
+
+/**
+ * Whether a quote was said in an answer given out loud. Speech recognition
+ * writes a word wrong here and there, and the model that quotes it spells
+ * it right, so letter for letter would lose what was really said: enough
+ * is that most of the quote's words stand in the answer, in the same
+ * order, with other words between them or not.
+ */
+const heardIn = (answer: string, quote: string): boolean => {
+  const wanted = carryingWords(quote);
+  if (wanted.length === 0) {
+    return false;
+  }
+  // The longest run of the quote's words the answer has in their order.
+  let row = Array.from({ length: wanted.length + 1 }, () => 0);
+  for (const word of carryingWords(answer)) {
+    const next = [0];
+    for (const [at, each] of wanted.entries()) {
+      next.push(
+        each === word
+          ? (row[at] ?? 0) + 1
+          : Math.max(row[at + 1] ?? 0, next[at] ?? 0)
+      );
+    }
+    row = next;
+  }
+  return (row.at(-1) ?? 0) >= Math.ceil(wanted.length * heardShare);
+};
+
 const looseObject = z.record(z.string(), z.unknown());
 
 /** Where a quote stands in what was said, whatever its capitals; none when the words aren't there. */
@@ -484,76 +525,118 @@ const asRecord = (value: unknown): Record<string, unknown> =>
 const listOf = (value: unknown): unknown[] =>
   Array.isArray(value) ? value : [];
 
+/** One answer of the person's, as a turn is checked against it. */
+export interface SaidAnswer {
+  text: string;
+  /** Typed, not heard: its words stand as they wrote them. */
+  typed?: boolean;
+}
+
+/** How many of the person's last answers a fact's words may come from. */
+export const quoteAnswers = 3;
+
 /**
- * What the models gave back, checked against what was said: his line as
- * he may say it, a tone he has, and only facts whose words are really in
- * the answer. A fact that names no words of the answer, or words that
- * aren't there, is left out: nothing is written down that the person
- * didn't say. The one fact that needs no words is the example they shared
- * without saying anything. `answer` is what they just said, `known` the
- * ids of the facts so far, and `phase` the part the interview was in,
- * which it stays in when the model names none.
+ * Why facts the model wrote were left out of a turn, as counts: a kind he
+ * doesn't have, no words to read back, or words that weren't said. Counts
+ * only: what was left out is nobody's to read.
+ */
+export interface NotesDropped {
+  unknownTag: number;
+  noText: number;
+  notSaid: number;
+}
+
+/** What a turn is checked against. */
+export interface TurnSaid {
+  /**
+   * The person's answers, oldest first; the last is what they just said.
+   * A fact's words may come from any of the last three (`quoteAnswers`):
+   * when they talked on, what the answer before held was not written down
+   * yet, and comes with this turn.
+   */
+  answers: readonly SaidAnswer[];
+  /** The ids of the facts so far. */
+  known: readonly string[];
+  /** The part the interview was in, which it stays in when the model names none. */
+  phase: InterviewPhase;
+}
+
+/**
+ * What the models gave back, checked against what was said, with how many
+ * facts were left out and why. His line as he may say it, a tone he has,
+ * and only facts whose words are really in what they said: nothing is
+ * written down that the person didn't say. A typed answer holds the words
+ * as they stand, but for capitals, quote marks and spaces; a spoken one is
+ * as speech recognition heard it, so most of the words in their order are
+ * enough (`heardIn`). The one fact that needs no words is the example they
+ * shared without saying anything.
  */
 export const checkedTurn = (
   value: unknown,
-  {
-    answer,
-    known,
-    phase,
-  }: { answer: string; known: readonly string[]; phase: InterviewPhase }
-): StephenTurn => {
+  { answers, known, phase }: TurnSaid
+): { turn: StephenTurn; dropped: NotesDropped } => {
   const body = asRecord(value);
   const more = body.more === true;
+  const answer = answers.at(-1)?.text ?? "";
+  const recent = answers.slice(-quoteAnswers);
+  const said = (quote: string): boolean =>
+    recent.some(
+      ({ text, typed }) =>
+        saidIn(text, quote) || (typed !== true && heardIn(text, quote))
+    );
+  const dropped: NotesDropped = { unknownTag: 0, noText: 0, notSaid: 0 };
+  const facts: StephenTurn["facts"] = [];
+  for (const each of more ? [] : listOf(body.facts)) {
+    const fact = asRecord(each);
+    const tag = factTags.find((known_) => known_ === fact.tag);
+    const text = textOf(fact.text, interviewLimits.fact);
+    const quote = textOf(fact.quote, interviewLimits.fact);
+    const shared = tag === "case" && answer.trim() === "";
+    if (tag === undefined) {
+      dropped.unknownTag += 1;
+    } else if (text === "") {
+      dropped.noText += 1;
+    } else if (said(quote) || shared) {
+      facts.push({
+        tag,
+        text,
+        record: textOf(fact.record, interviewLimits.fact) || text,
+        // Marked in the last answer only where it stands letter for letter.
+        quote: spanOf(answer, quote) === null ? "" : quote,
+      });
+    } else {
+      dropped.notSaid += 1;
+    }
+  }
   return {
-    say: more ? "" : asStephenSays(textOf(body.say, 2000)),
-    tone: isVoiceTag(body.tone) ? body.tone : null,
-    phase: phaseOf(body.phase) ?? phase,
-    facts: more
-      ? []
-      : listOf(body.facts).flatMap((each) => {
-          const fact = asRecord(each);
-          const tag = factTags.find((known_) => known_ === fact.tag);
-          const said = textOf(fact.text, interviewLimits.fact);
-          const quote = textOf(fact.quote, interviewLimits.fact);
-          const shared = tag === "case" && answer.trim() === "";
-          if (
-            tag === undefined ||
-            said === "" ||
-            !(saidIn(answer, quote) || shared)
-          ) {
-            return [];
-          }
-          return [
-            {
-              tag,
-              text: said,
-              record: textOf(fact.record, interviewLimits.fact) || said,
-              // Marked in the answer only where it stands letter for letter.
-              quote: spanOf(answer, quote) === null ? "" : quote,
-            },
-          ];
-        }),
-    changes: listOf(body.changes).flatMap((each) => {
-      const change = asRecord(each);
-      const id = textOf(change.id, 20);
-      if (!known.includes(id)) {
-        return [];
-      }
-      const said = textOf(change.text, interviewLimits.fact);
-      return [
-        {
-          id,
-          text: said === "" ? null : said,
-          record:
-            said === ""
-              ? null
-              : textOf(change.record, interviewLimits.fact) || said,
-        },
-      ];
-    }),
-    wants: wantsOf(body.wants) ?? "answer",
-    more,
-    approved: body.approved === true,
+    turn: {
+      say: more ? "" : asStephenSays(textOf(body.say, 2000)),
+      tone: isVoiceTag(body.tone) ? body.tone : null,
+      phase: phaseOf(body.phase) ?? phase,
+      facts,
+      changes: listOf(body.changes).flatMap((each) => {
+        const change = asRecord(each);
+        const id = textOf(change.id, 20);
+        if (!known.includes(id)) {
+          return [];
+        }
+        const text = textOf(change.text, interviewLimits.fact);
+        return [
+          {
+            id,
+            text: text === "" ? null : text,
+            record:
+              text === ""
+                ? null
+                : textOf(change.record, interviewLimits.fact) || text,
+          },
+        ];
+      }),
+      wants: wantsOf(body.wants) ?? "answer",
+      more,
+      approved: body.approved === true,
+    },
+    dropped,
   };
 };
 

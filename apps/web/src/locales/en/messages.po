@@ -14128,6 +14128,10 @@ msgstr "Records in {table} that lack {field} get “{value}”."
 msgid "Records in {table} that lack {field} need a value before this can be published."
 msgstr "Records in {table} that lack {field} need a value before this can be published."
 
+#: src/interview/words.ts
+msgid "Recurring work"
+msgstr "Recurring work"
+
 #: src/brain/gap-actions.tsx
 msgid "Redact it"
 msgstr "Redact it"
@@ -21252,6 +21256,10 @@ msgstr "Your triggers stopped hearing new mail at {name}"
 #: src/routes/apps.$app.draft.tsx
 msgid "Your version of the App"
 msgstr "Your version of the App"
+
+#: src/interview/words.ts
+msgid "Your week"
+msgstr "Your week"
 
 #: src/inbox/report-row.tsx
 msgid "Your weekly report"

@@ -248,6 +248,7 @@ import { interviewBrief, setupView } from "./stephen-setup.ts";
 import { onboardingStoreName } from "./store-name.ts";
 import { checksFor, teamClaims } from "./team-claims.ts";
 import { assignWork, companyName, drawTeamMap } from "./team-map.ts";
+import { toldAbout } from "./told-work.ts";
 import { drawWork, knownOf } from "./work-drawing.ts";
 import type { WorkBrief, WorkKnown } from "./work-drawing.ts";
 
@@ -933,11 +934,13 @@ const drawingOf = (stored: string | null): DrawnWork | null =>
  * answer in words of the store's own (GRA-330): what its routine lacks,
  * as a drawing shows a part from the first person who told it (GRA-1749,
  * GRA-1987). The next interview asks
- * about these when they come up. Never the drawing's own open questions,
- * which the model writes from what as few as one colleague said, so they
- * could carry that colleague's words, paraphrased, into someone else's
- * interview; what fewer than five people said reaches nobody but them.
- * Only that an answer is missing is told, never what anyone answered.
+ * about these when they come up. Beside it the interviewer is told what
+ * the team already said of the work and what its drawing left open
+ * (told-work.ts `toldAbout`), from as few as one colleague: he started
+ * every interview blind and asked each person the same things again. The
+ * interviewer knows what was said, never who said it: no name goes with
+ * it, and he is told never to hint at one. To anyone but him, what fewer
+ * than five people said still reaches nobody but them.
  */
 const unknownAnswers: readonly {
   missing: (told: Told[], routine: RoutineShows) => boolean;
@@ -1083,8 +1086,9 @@ export interface TurnContext {
   /** The piece of work Stephen learns about; empty until the team's map names it. */
   work: string;
   /**
-   * What Stephen knows beforehand: a lead's team, what earlier interviews
-   * about someone's work left open, his setup, the kickoff and the documents.
+   * What Stephen knows beforehand: a lead's team, what the team already
+   * told about someone's work (never who told it) and what earlier
+   * interviews about it left open, his setup, the kickoff and the documents.
    */
   known: string;
   /** Names and words to listen for. */
@@ -2678,14 +2682,28 @@ export class Onboarding extends DurableObject<Env> {
           )
         : [];
     const teamName = team?.name ?? "";
+    const work = kind === "lead" ? "" : this.#workOf(person.id);
+    const drawn = kind === "lead" ? null : this.#drawingAskedOf(person.id);
+    // Only what someone else told, their own words they know already; and
+    // only of work that is named to them (`#workOf`).
+    const toldByOthers =
+      work !== "" &&
+      drawn !== null &&
+      drawn.from.some((teller) => teller !== person.id);
     const known = [
       ...(kind === "lead" ? teamKnown(person.name, teamName, members) : []),
+      ...(drawn !== null && toldByOthers
+        ? [
+            toldAbout(
+              work,
+              drawn,
+              roster.people.map(({ name }) => name)
+            ),
+          ]
+        : []),
       ...(kind === "lead"
         ? []
-        : stillUnknown(
-            this.#drawingAskedOf(person.id),
-            this.#routineShows(routine)
-          )),
+        : stillUnknown(drawn, this.#routineShows(routine))),
       ...(kind === "lead" ? [] : this.#insteadKnown(person)),
       this.interviewBrief(),
       this.documentsBrief(teamName),
@@ -2703,7 +2721,7 @@ export class Onboarding extends DurableObject<Env> {
       name: firstName(person.name),
       team: teamName,
       lead: lead === undefined ? null : firstName(lead.name),
-      work: kind === "lead" ? "" : this.#workOf(person.id),
+      work,
       known: known.join("\n\n"),
       terms: [...new Set(terms)],
     };

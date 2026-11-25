@@ -463,7 +463,7 @@ const foundInALine = [
 /** The parts of an interview in which he does not follow up yet. */
 const listens: ReadonlySet<InterviewPhase> = new Set([
   "open",
-  "you",
+  "week",
   "anchor",
   "story",
 ]);
@@ -655,7 +655,7 @@ You get the kind of moment, with the rule for what Stephen should do next. Write
 How an interview goes, so your moment looks like one:
 - Stephen first checks the work: "<lead> told me you <the work>. Is that right?" A short yes. Then: "Think of the last one you handled. When was that?" A short answer.
 - Then he asks for the story ("Walk me through it, from the moment it came in until it was done. Every step, even the small ones. I'll just listen."), then about each step, then what goes differently, then numbers.
-- Stephen asks one short question per line, at most 15 words, and never praises.
+- Stephen asks one short question per line, at most 20 words, and never praises.
 - The employee types as people do in a chat at work: lower case, short, no greeting, a typo now and then.
 
 Make up the company, the people and the work: ordinary work at a small or middle-sized company of the kind you are given. The last line is the employee's, and it shows the kind. Give the notes Stephen has before that last line: one short sentence each, said to the employee ("You open the order in the planning board."), and only things the employee said in the lines before the last one. Nothing from the last line is in the notes yet, and a note is never a hint or an instruction. For "two versions" the notes must hold the earlier version, which the last line does not fit. For "not an answer again" Stephen's line before the last one must already say plainly that he could not use their answer. For "no idea again" the employee has already said once or twice that they do not know, Stephen has already asked who would know, and the last line is one more "no idea" about their own work. Unless the kind is about the story, the moment is after the story: Stephen is asking about the steps, what goes differently, or numbers. Write everything in the language you are given, the notes too.`;

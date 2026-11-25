@@ -174,6 +174,8 @@ const groupOf: Record<FactTag, (typeof readBackGroups)[number]> = {
   next: "steps",
   workaround: "steps",
   work: "steps",
+  // What comes back in their week is how the work goes: read with the steps.
+  task: "steps",
   who: "you",
   exception: "differently",
   wait: "differently",
