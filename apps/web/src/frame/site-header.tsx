@@ -6,6 +6,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@grasp-os/ui/components/breadcrumb";
+import { breadcrumbVars } from "@grasp-os/ui/components/breadcrumb.stylex";
 import { SidebarTrigger, useSidebar } from "@grasp-os/ui/components/sidebar";
 import { focusRingText } from "@grasp-os/ui/lib/styles";
 import {
@@ -221,12 +222,13 @@ const styles = stylex.create({
     minWidth: 0,
     overflow: "hidden",
     // The crumbs in the sidebar's greys, as the reference's bar: the steps
-    // back in its rows' words, the slashes quieter, the page in its ink.
-    // Damsko's Breadcrumb takes the page's tinted greys (registry gap of
-    // 24 Nov 2026).
-    "--damsko-muted-foreground": colors.sidebarSecondaryForeground,
-    "--damsko-subtle-foreground": colors.sidebarTertiaryForeground,
-    "--damsko-foreground": colors.sidebarForeground,
+    // back in its rows' words, the slashes quieter, the page in its ink,
+    // through the path's own inks, which a frame on another ground sets.
+    // What stands beside the crumbs (where the subject stands, its link)
+    // keeps the page's inks, as on the reference.
+    [breadcrumbVars.mutedForeground]: colors.sidebarSecondaryForeground,
+    [breadcrumbVars.subtleForeground]: colors.sidebarTertiaryForeground,
+    [breadcrumbVars.foreground]: colors.sidebarForeground,
   },
   // The button's empty rim hangs out past the bar's room, so its glyph
   // stands where the page's words begin, the crumbs 6px after its box, as
