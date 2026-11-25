@@ -1,6 +1,7 @@
 import { recallBudgetMax } from "@grasp-os/brain-next/contract";
 import { appFilesPath } from "@grasp-os/shared/app-file-limits";
 import { appLinksPath } from "@grasp-os/shared/app-link-limits";
+import { appPicturePath } from "@grasp-os/shared/apps";
 import { auditExportPath } from "@grasp-os/shared/audit-log";
 import { chatFilePath } from "@grasp-os/shared/chat";
 import { errorReportPath } from "@grasp-os/shared/error-reports";
@@ -143,6 +144,7 @@ const routeAnswers = async (cookie?: string) => ({
   brainExport: await got(brainOwnExportPath, cookie),
   organizationLogo: await got(organizationLogoPath("0".repeat(64)), cookie),
   chatPicture: await got(chatFilePath("chat-none", "file-none"), cookie),
+  appPicture: await got(appPicturePath("app-none", 1), cookie),
   errorReport: await posted(errorReportPath, cookie, {
     message: "Broken",
   }),

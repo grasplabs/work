@@ -255,3 +255,38 @@ export const imageEnded = (
   bytes: Uint8Array,
   type: ImageHeader["type"]
 ): boolean => endsOf[type](bytes);
+
+/**
+ * Whether an image of `type` says it moves: an animated PNG has an acTL
+ * chunk before its first IDAT (APNG §2), an animated WebP sets the
+ * animation flag of its VP8X chunk (WebP container §"Extended format").
+ * A JPEG never does; a GIF isn't asked. Read from its chunks, nothing
+ * decoded.
+ */
+export const imageAnimated = (
+  bytes: Uint8Array,
+  type: ImageHeader["type"]
+): boolean => {
+  if (type === "image/webp") {
+    // The flag is the byte's second-lowest bit.
+    return (
+      holds(bytes, ascii("VP8X"), 12) &&
+      Math.floor((bytes[20] ?? 0) / 2) % 2 === 1
+    );
+  }
+  if (type !== "image/png") {
+    return false;
+  }
+  const view = viewOf(bytes);
+  // Chunks after the eight-byte signature: length, type, data, CRC.
+  for (let at = 8; at + 8 <= bytes.length;) {
+    if (holds(bytes, ascii("acTL"), at + 4)) {
+      return true;
+    }
+    if (holds(bytes, ascii("IDAT"), at + 4)) {
+      return false;
+    }
+    at += 12 + view.getUint32(at);
+  }
+  return false;
+};
