@@ -480,6 +480,10 @@ msgid "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
 msgstr "{count, plural, one {Leyendo # flujo de trabajo} other {Leyendo # flujos de trabajo}}"
 
 #: src/chat/thread.tsx
+msgid "{count, plural, one {saved # memory} other {saved # memories}}"
+msgstr "{count, plural, one {guardó # recuerdo} other {guardó # recuerdos}}"
+
+#: src/chat/thread.tsx
 msgid "{count, plural, one {searched once} other {searched # times}}"
 msgstr "{count, plural, one {buscó una vez} other {buscó # veces}}"
 
@@ -2741,6 +2745,10 @@ msgstr "Ya están aquí, por si te refieres a una de estas"
 #: src/agents/agent-apps-card.tsx
 msgid "Already one of its schedules."
 msgstr "Ya es una de sus programaciones."
+
+#: src/chat/saved-memory.tsx
+msgid "Already removed"
+msgstr "Ya eliminado"
 
 #: src/onboarding/about-story.tsx
 msgid "Alright, here’s the plan."
@@ -8115,10 +8123,6 @@ msgstr "Grasp puede leer y escribir en {app}, solo para lo que permitas."
 #: src/connections/connected-dialog.tsx
 msgid "Grasp may use {app} only through the tools you allowed."
 msgstr "Grasp solo puede usar {app} con las herramientas que permitiste."
-
-#: src/chat/saved-memory.tsx
-msgid "Grasp no longer remembers this."
-msgstr "Grasp ya no recuerda esto."
 
 #: src/connections/integrations-band.tsx
 msgid "Grasp reaches only what you connect."
@@ -14379,6 +14383,10 @@ msgstr "Eliminado tras una semana"
 msgid "Removed by its uploader, {removed}"
 msgstr "Quitado por quien lo subió, {removed}"
 
+#: src/chat/saved-memory.tsx
+msgid "Removed from memory"
+msgstr "Eliminado de la memoria"
+
 #: src/brain/brain.ts
 #: src/brain/forget.tsx
 msgid "Removed from the brain"
@@ -14598,6 +14606,10 @@ msgstr "Restaura la cuenta en el directorio y Grasp levantará la suspensión en
 #: src/drafts/draft-history.tsx
 msgid "Restore this earlier state?"
 msgstr "¿Restaurar este estado anterior?"
+
+#: src/chat/saved-memory.tsx
+msgid "Restored: {replaced}"
+msgstr "Restaurado: {replaced}"
 
 #: src/chat/chat-markdown.ts
 #: src/chat/sources.tsx
@@ -15177,18 +15189,6 @@ msgctxt "a setting saved"
 msgid "Saved"
 msgstr "Guardado"
 
-#: src/chat/saved-memory.tsx
-msgid "Saved a memory"
-msgstr "Recuerdo guardado"
-
-#: src/chat/saved-memory.tsx
-msgid "Saved a preference"
-msgstr "Preferencia guardada"
-
-#: src/chat/saved-memory.tsx
-msgid "Saved an instruction"
-msgstr "Instrucción guardada"
-
 #: src/apps/app-data-model.tsx
 #: src/apps/field-editor.tsx
 msgid "Saved as {named}"
@@ -15214,9 +15214,10 @@ msgstr "Guardado el {date}"
 msgid "Saved the company's groups of teams"
 msgstr "Guardó los grupos de equipos de la empresa"
 
+#: src/chat/saved-memory.tsx
 #: src/chat/thread.tsx
-msgid "Saved to your memory"
-msgstr "Guardado en tu memoria"
+msgid "Saved to memory"
+msgstr "Guardado en la memoria"
 
 #: src/workflows/workflow-flow.tsx
 msgid "Saved, but it doesn't pass yet: Definition says what to fix."
@@ -15241,8 +15242,8 @@ msgid "Saving"
 msgstr "Guardando"
 
 #: src/chat/thread.tsx
-msgid "Saving to your memory"
-msgstr "Guardando en tu memoria"
+msgid "Saving to memory"
+msgstr "Guardando en la memoria"
 
 #: src/interview/composer.tsx
 #: src/interview/destination.tsx
@@ -18059,10 +18060,6 @@ msgstr "Ya hay un equipo con este nombre."
 #: src/onboarding/setup-steps.tsx
 msgid "There is nobody in this list."
 msgstr "No hay nadie en esta lista."
-
-#: src/chat/saved-memory.tsx
-msgid "There was nothing to undo: Grasp no longer uses this."
-msgstr "No había nada que deshacer: Grasp ya no usa esto."
 
 #: src/brain/forget.tsx
 msgid "These notes rest on nothing else and go too: {named} and {more} more."
