@@ -574,6 +574,18 @@ describe("Google Workspace", () => {
       ...(await stored(anna.connectionId)),
     }).toStrictEqual({ connectionId: anna.connectionId, ...active });
   });
+
+  it("asks again for a connection made before grants were kept: its connector declares no old set", async () => {
+    const kept = await connectGoogle(googleDefaultGrant);
+    const unkept = await connectGoogle(googleDefaultGrant);
+    await keptBeforeGrants(unkept.connectionId);
+
+    await exports.default.requireClassRights({ classes: ["reach-others"] });
+    expect({
+      kept: await stored(kept.connectionId),
+      unkept: await stored(unkept.connectionId),
+    }).toStrictEqual({ kept: active, unkept: askedAgain });
+  });
 });
 
 /** The revokes owed for connection `connectionId`, by why. */
