@@ -172,7 +172,9 @@ export default defineConfig(({ command }) => ({
   server: {
     // Core (wrangler dev) serves the API and Cap'n Web.
     proxy: {
-      "/api": "http://localhost:8787",
+      // With its WebSockets: the interview's live line to the transcriber
+      // (/api/transcription) is one, and without `ws` it never opens here.
+      "/api": { target: "http://localhost:8787", ws: true },
       "/rpc": { target: "ws://localhost:8787", ws: true },
       // The document pages run in, with its own policy, and the modules
       // it runs (core's page-frame.ts).
