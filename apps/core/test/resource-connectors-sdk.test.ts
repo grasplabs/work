@@ -71,7 +71,7 @@ const boardsFiles = () =>
     {
       name: "Boards",
       permissions: [
-        'permission.connection("boards", {\n  contract: "sample-key.items@1",\n  actions: ["list"],\n})',
+        'permission.connection("boards", {\n  contract: "sample-key.boards.items@1",\n  actions: ["list"],\n})',
       ],
     },
     {
@@ -135,7 +135,7 @@ const boardsApp = async () => {
   const requested = await builder.api.permissions.request({
     subject: { type: "app", appId: created.id },
     object: { type: "connection", connectionId },
-    actions: ["items.list"],
+    actions: ["boards.items.list"],
     binding: "BOARDS",
   });
   await admin.api.permissions.grant(requested.id, { version: 1 });
@@ -175,7 +175,7 @@ describe(
         answered,
         credentials: await credentialsOf(board),
       }).toStrictEqual({
-        answered: { items },
+        answered: { items, next: null },
         credentials: [{ "x-api-key": boards.key }],
       });
     });

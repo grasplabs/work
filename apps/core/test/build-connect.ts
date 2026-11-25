@@ -22,17 +22,19 @@ const wrangler = path.join(connect, "node_modules/wrangler/bin/wrangler.js");
 export const connectBundle = path.join(testRun, "connect.js");
 
 /**
- * The native connectors core's tests bundle: the release's, and two of
+ * The native connectors core's tests bundle: the release's, and three of
  * connect's sample connectors (its test/fixtures): the one that syncs,
  * whose items name what they are part of, as a mailbox's attachments do
- * (brain-sync.test.ts), and an app that signs in with an API key, written
- * on `@grasp-os/sdk/connector`, which an App calls
- * (resource-connectors-sdk.test.ts).
+ * (brain-sync.test.ts); an app that signs in with an API key, written on
+ * `@grasp-os/sdk/connector`, which an App calls
+ * (resource-connectors-sdk.test.ts); and Pipedrive, generated from its
+ * OpenAPI spec, which an App calls too (resource-connectors-openapi.test.ts).
  */
 export const testConnectorEntries = (): string[] => [
   ...connectorEntries(),
   path.join(connect, "test/fixtures/sample-sync-connector.ts"),
   path.join(connect, "test/fixtures/sample-key-connector.ts"),
+  path.join(connect, "test/fixtures/pipedrive/connector.ts"),
 ];
 
 /** Their bundle, beside connect's, never over connect's own build output. */
