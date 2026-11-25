@@ -497,6 +497,51 @@ describe("a record pinned to a tenant, as a suite's", () => {
       },
     ];
     expect(beyond.filter((record) => accepts(record))).toStrictEqual([]);
+    // What a scope takes in, it lists whole, as Microsoft's table does.
+    const files = {
+      scopes: [
+        ...rights.signIn,
+        "Files.Read",
+        "Files.ReadWrite",
+        "Files.Read.All",
+        "Files.ReadWrite.All",
+      ],
+      rights: {
+        ...rights,
+        classes: {
+          ...rights.classes,
+          "read-own": ["Files.Read"],
+          "change-own": ["Files.ReadWrite"],
+          "read-company": ["Files.Read.All"],
+          "change-company": ["Files.ReadWrite.All"],
+        },
+        implied: {
+          "Files.ReadWrite.All": [
+            "Files.ReadWrite",
+            "Files.Read.All",
+            "Files.Read",
+          ],
+          "Files.ReadWrite": ["Files.Read"],
+          "Files.Read.All": ["Files.Read"],
+        },
+      },
+    };
+    expect(accepts(files)).toBeTruthy();
+    const tangled = [
+      // A chain it leaves open: Files.Read only through Files.ReadWrite.
+      {
+        ...files.rights.implied,
+        "Files.ReadWrite.All": ["Files.ReadWrite", "Files.Read.All"],
+      },
+      // A cycle, and a scope that takes itself in.
+      { "Files.ReadWrite": ["Files.Read"], "Files.Read": ["Files.ReadWrite"] },
+      { "Files.Read": ["Files.Read"] },
+    ];
+    expect(
+      tangled.filter((implied) =>
+        accepts({ ...files, rights: { ...files.rights, implied } })
+      )
+    ).toStrictEqual([]);
   });
 
   it("AP15: has a scope prefix only as a URL no scope of its starts with, and no scope twice in another case", () => {
