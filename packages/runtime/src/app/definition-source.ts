@@ -123,7 +123,7 @@ const presenced = (made: Code, descriptor: ValueDescriptor): Code => {
 };
 
 /** The kinds `v` declares with no arguments and no constraints. */
-type PlainKind = "boolean" | "null" | SemanticKind;
+type PlainKind = "boolean" | "null" | "json" | SemanticKind;
 
 /** Whether `descriptor` is of a kind `v` declares with no arguments. */
 const isPlain = (
@@ -131,6 +131,7 @@ const isPlain = (
 ): descriptor is ValueDescriptor & { readonly kind: PlainKind } =>
   descriptor.kind === "boolean" ||
   descriptor.kind === "null" ||
+  descriptor.kind === "json" ||
   isSemanticKind(descriptor.kind);
 
 /** The `v` call that declares `descriptor`'s kind, before its presence. */
@@ -144,8 +145,10 @@ const kindOf = (descriptor: ValueDescriptor): Code => {
       if (descriptor.trim) {
         made = call(made, "trim");
       }
-      if (descriptor.email) {
-        made = call(made, "email");
+      for (const format of ["email", "datetime", "date", "url"] as const) {
+        if (descriptor[format] === true) {
+          made = call(made, format);
+        }
       }
       return bounded(made, descriptor);
     }

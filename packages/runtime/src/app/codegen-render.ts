@@ -18,56 +18,45 @@ const omittable = (descriptor: ValueDescriptor, mode: Mode): boolean =>
   descriptor.presence === "optional" ||
   (descriptor.presence === "default" && mode === "input");
 
+/**
+ * The TypeScript of each kind's type that takes nothing from its
+ * descriptor; `never` for the kinds that hold others, typed aside.
+ */
+const kindTypes: Readonly<Record<ValueDescriptor["kind"], string>> = {
+  string: "string",
+  person: "string",
+  model: "string",
+  template: "string",
+  number: "number",
+  timestamp: "number",
+  duration: "number",
+  boolean: "boolean",
+  null: "null",
+  json: "JsonValue",
+  file: "FileValue",
+  money: "MoneyValue",
+  schedule: "ScheduleValue",
+  literal: "never",
+  enum: "never",
+  id: "never",
+  object: "never",
+  array: "never",
+  union: "never",
+  record: "never",
+};
+
 /** The TypeScript of a kind's type, the kinds that hold others aside. */
 const scalarTypeOf = (descriptor: ValueDescriptor): string => {
-  switch (descriptor.kind) {
-    case "string":
-    case "person":
-    case "model":
-    case "template": {
-      return "string";
-    }
-    case "number":
-    case "timestamp":
-    case "duration": {
-      return "number";
-    }
-    case "boolean": {
-      return "boolean";
-    }
-    case "null": {
-      return "null";
-    }
-    case "literal": {
-      return JSON.stringify(descriptor.value);
-    }
-    case "enum": {
-      return descriptor.values
-        .map((value) => JSON.stringify(value))
-        .join(" | ");
-    }
-    case "id": {
-      return `Id<${JSON.stringify(descriptor.tableName)}>`;
-    }
-    case "file": {
-      return "FileValue";
-    }
-    case "money": {
-      return "MoneyValue";
-    }
-    case "schedule": {
-      return "ScheduleValue";
-    }
-    case "object":
-    case "array":
-    case "union":
-    case "record": {
-      return "never";
-    }
-    default: {
-      return "never";
-    }
+  if (descriptor.kind === "literal") {
+    return JSON.stringify(descriptor.value);
   }
+  if (descriptor.kind === "enum") {
+    return descriptor.values.map((value) => JSON.stringify(value)).join(" | ");
+  }
+  if (descriptor.kind === "id") {
+    return `Id<${JSON.stringify(descriptor.tableName)}>`;
+  }
+  return kindTypes[descriptor.kind];
 };
 
 /**
@@ -247,6 +236,7 @@ export const freezer = `const frozen = <Value>(value: Value): Value => {
 export const valueTypes = [
   "FileValue",
   "Id",
+  "JsonValue",
   "MoneyValue",
   "ScheduleValue",
 ] as const;

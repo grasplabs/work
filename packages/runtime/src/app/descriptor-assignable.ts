@@ -98,6 +98,9 @@ const scalarAssignable = (
       to.kind === "string" &&
       within(from, to) &&
       (from.email || !to.email) &&
+      (from.datetime === true || to.datetime !== true) &&
+      (from.date === true || to.date !== true) &&
+      (from.url === true || to.url !== true) &&
       (from.trim || !to.trim)
     );
   }
@@ -118,6 +121,11 @@ const scalarAssignable = (
  * constraints are compared; anything not proved is false.
  */
 export const assignable: Check = (from, to) => {
+  // Any JSON takes every value a descriptor normalizes to, null included:
+  // their keys and depth are held to the same rules.
+  if (to.kind === "json") {
+    return true;
+  }
   if (from.nullable && !to.nullable) {
     return false;
   }

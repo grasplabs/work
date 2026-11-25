@@ -148,8 +148,11 @@ const kindMethods = (descriptor: ValueDescriptor): object => {
   if (descriptor.kind === "string") {
     return {
       ...boundMethods(descriptor),
+      date: () => changed(descriptor, { date: true }),
+      datetime: () => changed(descriptor, { datetime: true }),
       email: () => changed(descriptor, { email: true }),
       trim: () => changed(descriptor, { trim: true }),
+      url: () => changed(descriptor, { url: true }),
     };
   }
   if (descriptor.kind === "number") {

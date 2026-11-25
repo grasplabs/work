@@ -34,9 +34,11 @@ import type {
 // constraints. The order a schema's modifiers were written in changes
 // nothing.
 //
-// It only walks down the descriptor, never down the value on its own, so a
+// It walks down the descriptor, never down the value on its own, so a
 // descriptor's depth bounds the recursion: a value that refers to itself
-// can't loop it. `valueLimits.steps` bounds the width.
+// can't loop it. The one exception is any JSON (`json`), which reads the
+// value as deep as it goes, up to `valueLimits.depth`, as deep as a
+// descriptor may nest. `valueLimits.steps` bounds the width.
 
 /** A copy of a default, so no two results share an array or an object. */
 const copyJson = (value: FrozenJson): JsonValue => {
@@ -148,7 +150,9 @@ const checkRecord = (
 };
 
 /**
- * The first member the value fits, in the order they were declared. What
+ * The first member the value fits, in the order they were declared; where
+ * unknown keys are dropped, the first of those that drops the fewest, so a
+ * member with fewer fields doesn't take a value another holds whole. What
  * the other members had against it is not reported: one issue says none fit.
  */
 const checkUnion = (
@@ -156,22 +160,35 @@ const checkUnion = (
   value: unknown,
   state: CheckState
 ): Checked => {
-  const { issues, issueLimit } = state;
+  const { issues, issueLimit, dropped } = state;
   let matched: Checked = invalid;
+  let fewestDropped = 0;
   for (const member of descriptor.members) {
     // A member is tried on its own: one issue is enough to rule it out.
     state.issues = [];
     state.issueLimit = 1;
+    state.dropped = 0;
     // oxlint-disable-next-line no-use-before-define -- the checks of nested values call each other
     const checked = check(member, value, state);
     state.stopped = state.exhausted;
-    if (checked !== invalid || state.exhausted) {
+    if (state.exhausted) {
       matched = checked;
+      break;
+    }
+    if (
+      checked !== invalid &&
+      (matched === invalid || state.dropped < fewestDropped)
+    ) {
+      matched = checked;
+      fewestDropped = state.dropped;
+    }
+    if (matched !== invalid && fewestDropped === 0) {
       break;
     }
   }
   state.issues = issues;
   state.issueLimit = issueLimit;
+  state.dropped = dropped + fewestDropped;
   if (matched === invalid && !state.exhausted) {
     return refuse(state, "value.no_union_match");
   }
@@ -190,6 +207,51 @@ const pass = (
   state: CheckState,
   code: ValueIssueCode = "value.invalid_type"
 ): Checked => (holds ? value : refuse(state, code));
+
+/** Any JSON value, as the arrays and records of JSON it nests. */
+const anyJson = {
+  descriptorVersion: 1,
+  kind: "json",
+  nullable: true,
+  presence: "required",
+} as const satisfies ValueDescriptor;
+const jsonArray = {
+  ...anyJson,
+  item: anyJson,
+  kind: "array",
+} as const satisfies ValueDescriptor;
+const jsonRecord = {
+  ...anyJson,
+  kind: "record",
+  value: anyJson,
+} as const satisfies ValueDescriptor;
+
+/**
+ * Any JSON value, copied. No descriptor bounds how deep it nests, so its
+ * own depth is held to `valueLimits.depth`, as a descriptor's is; past it,
+ * the check is refused whole, as one too large to read.
+ */
+const checkJson = (value: unknown, state: CheckState): Checked => {
+  if (state.path.length >= valueLimits.depth) {
+    state.exhausted = true;
+    state.stopped = true;
+    return invalid;
+  }
+  if (Array.isArray(value)) {
+    return checkArray(jsonArray, value, state);
+  }
+  if (isPlainObject(value)) {
+    return checkRecord(jsonRecord, value, state);
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : refuse(state, "value.not_finite");
+  }
+  return pass(
+    value === null || typeof value === "boolean" || typeof value === "string",
+    value,
+    state
+  );
+};
 
 const checkKind = (
   descriptor: ValueDescriptor,
@@ -211,6 +273,9 @@ const checkKind = (
     }
     case "null": {
       return pass(value === null, value, state);
+    }
+    case "json": {
+      return checkJson(value, state);
     }
     case "literal": {
       // The declared value, not the submitted one: `-0` equals a literal 0
@@ -290,6 +355,20 @@ const check = (
   return checkKind(descriptor, value, state);
 };
 
+/** How a value is checked, beyond its descriptor. */
+export interface ValueCheckOptions {
+  /**
+   * `drop`: an object's keys its schema doesn't name are left out of the
+   * value instead of refused, at any depth; everything else is checked as
+   * ever. How an answer from outside is read against what it should
+   * return, so a field the vendor adds never breaks a call. Arguments, and
+   * what Apps and workflows pass and return, keep `refuse`, the default.
+   * A union takes the member that drops the fewest keys, the first of
+   * those.
+   */
+  readonly unknownFields?: "refuse" | "drop";
+}
+
 const issue = (code: ValueIssueCode): ValueIssue => ({
   code,
   message: valueIssueMessages[code],
@@ -303,9 +382,12 @@ const issue = (code: ValueIssueCode): ValueIssue => ({
  */
 export const validateValue = (
   descriptor: ValueDescriptor,
-  value: unknown
+  value: unknown,
+  { unknownFields = "refuse" }: ValueCheckOptions = {}
 ): ValueResult<unknown> => {
   const state: CheckState = {
+    dropUnknownFields: unknownFields === "drop",
+    dropped: 0,
     exhausted: false,
     issueLimit: valueLimits.issues,
     issues: [],
@@ -318,7 +400,8 @@ export const validateValue = (
     checked = check(descriptor, value, state);
   } catch {
     // Swallowed on purpose. The interpreter itself throws nothing: its
-    // recursion is bounded by the descriptor and it calls no App code. So
+    // recursion is bounded (by the descriptor, or for any JSON by
+    // `valueLimits.depth`) and it calls no App code. So
     // what was thrown came from the value running code as it was read (a
     // proxy, a getter). That is the submitter's text, not a fault of ours,
     // so it is answered as an issue and never passed on or logged.
