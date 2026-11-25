@@ -113,8 +113,10 @@ export type {
 export {
   accountLookupSchema,
   endpointHost,
+  keyHeaderSchema,
   reservedAuthorizationParams,
   signInSchema,
+  signInScopesSchema,
 } from "./sign-in.ts";
 export { addressesOf } from "./mail-addresses.ts";
 export type { Address } from "./mail-addresses.ts";

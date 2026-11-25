@@ -212,24 +212,6 @@ const items = {
     billing_frequency_cycles: v.number().integer().nullable().optional(),
     billing_start_date: v.string().date().nullable().optional(),
   }),
-  "deals.discounts.list": v.object({
-    id: v.string().optional(),
-    type: v.string().optional(),
-    amount: v.number().optional(),
-    description: v.string().optional(),
-    deal_id: v.number().integer().optional(),
-    created_at: v.string().optional(),
-    created_by: v.number().integer().optional(),
-    updated_at: v.string().optional(),
-    updated_by: v.number().integer().optional(),
-  }),
-  "deals.installments.list": v.object({
-    id: v.number().integer().optional(),
-    amount: v.number().optional(),
-    billing_date: v.string().optional(),
-    description: v.string().optional(),
-    deal_id: v.number().integer().optional(),
-  }),
   "dealFields.list": v.object({
     field_name: v.string(),
     field_code: v.string(),
@@ -616,7 +598,6 @@ const items = {
     add_time: v.string().optional(),
     update_time: v.string().optional(),
   }),
-  "projects.permittedUsers.list": v.number().integer(),
   "projects.changelog.list": v.object({
     change_source: v.string().nullable().optional(),
     change_source_user_agent: v.string().nullable().optional(),
@@ -641,21 +622,6 @@ const items = {
     add_time: v.string().optional(),
     update_time: v.string().optional(),
     marked_as_done_time: v.string().nullable().optional(),
-  }),
-  "boards.list": v.object({
-    id: v.number().integer().optional(),
-    name: v.string().optional(),
-    order_nr: v.number().integer().optional(),
-    add_time: v.string().optional(),
-    update_time: v.string().optional(),
-  }),
-  "phases.list": v.object({
-    id: v.number().integer().optional(),
-    name: v.string().optional(),
-    board_id: v.number().integer().optional(),
-    order_nr: v.number().integer().optional(),
-    add_time: v.string().optional(),
-    update_time: v.string().optional(),
   }),
   "users.followers.list": v.object({
     user_id: v.number().integer().optional(),
@@ -1178,9 +1144,19 @@ const answers = {
       billing_start_date: v.string().date().nullable().optional(),
     })).optional(),
   }),
-  "deals.discounts.list": v.object({
+  "deals.discounts.getAdditionalDiscounts": v.object({
     success: v.boolean().optional(),
-    data: v.array(items["deals.discounts.list"]).optional(),
+    data: v.array(v.object({
+      id: v.string().optional(),
+      type: v.string().optional(),
+      amount: v.number().optional(),
+      description: v.string().optional(),
+      deal_id: v.number().integer().optional(),
+      created_at: v.string().optional(),
+      created_by: v.number().integer().optional(),
+      updated_at: v.string().optional(),
+      updated_by: v.number().integer().optional(),
+    })).optional(),
   }),
   "deals.discounts.create": v.object({
     success: v.boolean().optional(),
@@ -1216,9 +1192,15 @@ const answers = {
       updated_by: v.number().integer().optional(),
     }).optional(),
   }),
-  "deals.installments.list": v.object({
+  "deals.installments.getInstallments": v.object({
     success: v.boolean().optional(),
-    data: v.array(items["deals.installments.list"]).optional(),
+    data: v.array(v.object({
+      id: v.number().integer().optional(),
+      amount: v.number().optional(),
+      billing_date: v.string().optional(),
+      description: v.string().optional(),
+      deal_id: v.number().integer().optional(),
+    })).optional(),
   }),
   "deals.installments.create": v.object({
     success: v.boolean().optional(),
@@ -2829,9 +2811,9 @@ const answers = {
       custom_fields: v.record(v.json()).optional(),
     }).optional(),
   }),
-  "projects.permittedUsers.list": v.object({
+  "projects.permittedUsers.getProjectUsers": v.object({
     success: v.boolean().optional(),
-    data: v.array(items["projects.permittedUsers.list"]).optional(),
+    data: v.array(v.number().integer()).optional(),
   }),
   "projects.changelog.list": v.object({
     success: v.boolean().optional(),
@@ -2917,9 +2899,15 @@ const answers = {
     }).optional(),
     additional_data: v.record(v.json()).nullable().optional(),
   }),
-  "boards.list": v.object({
+  "boards.getProjectsBoards": v.object({
     success: v.boolean().optional(),
-    data: v.array(items["boards.list"]).optional(),
+    data: v.array(v.object({
+      id: v.number().integer().optional(),
+      name: v.string().optional(),
+      order_nr: v.number().integer().optional(),
+      add_time: v.string().optional(),
+      update_time: v.string().optional(),
+    })).optional(),
     additional_data: v.record(v.json()).nullable().optional(),
   }),
   "boards.create": v.object({
@@ -2958,9 +2946,16 @@ const answers = {
       update_time: v.string().optional(),
     }).optional(),
   }),
-  "phases.list": v.object({
+  "phases.getProjectsPhases": v.object({
     success: v.boolean().optional(),
-    data: v.array(items["phases.list"]).optional(),
+    data: v.array(v.object({
+      id: v.number().integer().optional(),
+      name: v.string().optional(),
+      board_id: v.number().integer().optional(),
+      order_nr: v.number().integer().optional(),
+      add_time: v.string().optional(),
+      update_time: v.string().optional(),
+    })).optional(),
     additional_data: v.record(v.json()).nullable().optional(),
   }),
   "phases.create": v.object({
@@ -3553,7 +3548,7 @@ export const tools = {
     returns: answers["deals.products.bulk.create"],
     handler: async (args, api) => await api.post("/deals/{id}/products/bulk", { path: { id: args.id }, body: { data: args.data }, returns: answers["deals.products.bulk.create"] }),
   }),
-  "deals.discounts.list": tool({
+  "deals.discounts.getAdditionalDiscounts": tool({
     description: "List discounts added to a deal",
     readOnly: true,
     reach: "company",
@@ -3561,11 +3556,8 @@ export const tools = {
     args: {
       id: v.number().integer(),
     },
-    returns: page(items["deals.discounts.list"]),
-    handler: async (args, api) => {
-      const answer = await api.get("/deals/{id}/discounts", { path: { id: args.id }, returns: answers["deals.discounts.list"] });
-      return { items: answer.data ?? [], next: null };
-    },
+    returns: answers["deals.discounts.getAdditionalDiscounts"],
+    handler: async (args, api) => await api.get("/deals/{id}/discounts", { path: { id: args.id }, returns: answers["deals.discounts.getAdditionalDiscounts"] }),
   }),
   "deals.discounts.create": tool({
     description: "Add a discount to a deal",
@@ -3608,7 +3600,7 @@ export const tools = {
     returns: answers["deals.discounts.update"],
     handler: async (args, api) => await api.patch("/deals/{id}/discounts/{discount_id}", { path: { id: args.id, discount_id: args.discount_id }, body: { description: args.description, amount: args.amount, type: args.type }, returns: answers["deals.discounts.update"] }),
   }),
-  "deals.installments.list": tool({
+  "deals.installments.getInstallments": tool({
     description: "List installments added to a list of deals",
     readOnly: true,
     reach: "company",
@@ -3620,11 +3612,8 @@ export const tools = {
       sort_by: v.enum(["id","billing_date","deal_id"]).optional(),
       sort_direction: v.enum(["asc","desc"]).optional(),
     },
-    returns: page(items["deals.installments.list"]),
-    handler: async (args, api) => {
-      const answer = await api.get("/deals/installments", { query: { deal_ids: args.deal_ids, cursor: args.cursor, limit: args.limit, sort_by: args.sort_by, sort_direction: args.sort_direction }, returns: answers["deals.installments.list"] });
-      return { items: answer.data ?? [], next: null };
-    },
+    returns: answers["deals.installments.getInstallments"],
+    handler: async (args, api) => await api.get("/deals/installments", { query: { deal_ids: args.deal_ids, cursor: args.cursor, limit: args.limit, sort_by: args.sort_by, sort_direction: args.sort_direction }, returns: answers["deals.installments.getInstallments"] }),
   }),
   "deals.installments.create": tool({
     description: "Add an installment to a deal",
@@ -5186,7 +5175,7 @@ export const tools = {
     returns: answers["projects.archive.create"],
     handler: async (args, api) => await api.post("/projects/{id}/archive", { path: { id: args.id }, returns: answers["projects.archive.create"] }),
   }),
-  "projects.permittedUsers.list": tool({
+  "projects.permittedUsers.getProjectUsers": tool({
     description: "List permitted users",
     readOnly: true,
     reach: "company",
@@ -5194,11 +5183,8 @@ export const tools = {
     args: {
       id: v.number().integer(),
     },
-    returns: page(items["projects.permittedUsers.list"]),
-    handler: async (args, api) => {
-      const answer = await api.get("/projects/{id}/permittedUsers", { path: { id: args.id }, returns: answers["projects.permittedUsers.list"] });
-      return { items: answer.data ?? [], next: null };
-    },
+    returns: answers["projects.permittedUsers.getProjectUsers"],
+    handler: async (args, api) => await api.get("/projects/{id}/permittedUsers", { path: { id: args.id }, returns: answers["projects.permittedUsers.getProjectUsers"] }),
   }),
   "projects.changelog.list": tool({
     description: "List updates about project field values",
@@ -5301,17 +5287,14 @@ export const tools = {
     returns: answers["tasks.update"],
     handler: async (args, api) => await api.patch("/tasks/{id}", { path: { id: args.id }, body: { title: args.title, project_id: args.project_id, parent_task_id: args.parent_task_id, description: args.description, done: args.done, milestone: args.milestone, due_date: args.due_date, start_date: args.start_date, assignee_id: args.assignee_id, assignee_ids: args.assignee_ids, priority: args.priority }, returns: answers["tasks.update"] }),
   }),
-  "boards.list": tool({
+  "boards.getProjectsBoards": tool({
     description: "Get all project boards",
     readOnly: true,
     reach: "company",
     routes: ["GET /boards"],
     args: {},
-    returns: page(items["boards.list"]),
-    handler: async (_args, api) => {
-      const answer = await api.get("/boards", { returns: answers["boards.list"] });
-      return { items: answer.data ?? [], next: null };
-    },
+    returns: answers["boards.getProjectsBoards"],
+    handler: async (_args, api) => await api.get("/boards", { returns: answers["boards.getProjectsBoards"] }),
   }),
   "boards.create": tool({
     description: "Add a project board",
@@ -5360,7 +5343,7 @@ export const tools = {
     returns: answers["boards.update"],
     handler: async (args, api) => await api.patch("/boards/{id}", { path: { id: args.id }, body: { name: args.name, order_nr: args.order_nr }, returns: answers["boards.update"] }),
   }),
-  "phases.list": tool({
+  "phases.getProjectsPhases": tool({
     description: "Get project phases",
     readOnly: true,
     reach: "company",
@@ -5368,11 +5351,8 @@ export const tools = {
     args: {
       board_id: v.number().integer(),
     },
-    returns: page(items["phases.list"]),
-    handler: async (args, api) => {
-      const answer = await api.get("/phases", { query: { board_id: args.board_id }, returns: answers["phases.list"] });
-      return { items: answer.data ?? [], next: null };
-    },
+    returns: answers["phases.getProjectsPhases"],
+    handler: async (args, api) => await api.get("/phases", { query: { board_id: args.board_id }, returns: answers["phases.getProjectsPhases"] }),
   }),
   "phases.create": tool({
     description: "Add a project phase",

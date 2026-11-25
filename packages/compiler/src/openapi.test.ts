@@ -339,6 +339,7 @@ describe("a spec as tools", () => {
             ...answered,
           },
         },
+        "/things/batch": { post: answered },
         "/notes": { post: body({ type: "array", items: { type: "string" } }) },
         "/labels": { post: body({ type: "object" }) },
         "/stages": {
@@ -368,6 +369,10 @@ describe("a spec as tools", () => {
         reason: "Its path isn't one a route may take.",
       },
       {
+        operation: "POST /things/batch",
+        reason: "Its path isn't one a route may take.",
+      },
+      {
         operation: "POST /notes",
         reason: "Its body can't be typed as an object.",
       },
@@ -377,6 +382,92 @@ describe("a spec as tools", () => {
       },
       { operation: "GET /stages", reason: "Its answer isn't an object." },
     ]);
+  });
+
+  it("pages only a whole list or an answer that names its cursor", async () => {
+    const spec = await readSpec(
+      specText({
+        "/users/me": {
+          get: {
+            operationId: "getCurrentUser",
+            responses: ok({
+              type: "object",
+              properties: {
+                id: { type: "integer" },
+                roles: { type: "array", items: { type: "string" } },
+              },
+            }),
+          },
+        },
+      }),
+      url
+    );
+    const [me] = spec.operations;
+    expect([me?.name, me?.page, me?.returns]).toStrictEqual([
+      "users.me.getCurrentUser",
+      undefined,
+      v.object({
+        id: v.number().integer().optional(),
+        roles: v.array(v.string()).optional(),
+      }).descriptor,
+    ]);
+  });
+
+  it("signs in with a header as a connector sends it, asking only for the scopes its tools need", async () => {
+    const signingIn = async (scheme: unknown, scopes: string[] = []) => {
+      const spec = await readSpec(
+        specText(
+          {
+            "/deals": {
+              get: {
+                security: [{ chosen: scopes }],
+                responses: ok({ type: "array", items: Deal }),
+              },
+            },
+          },
+          { components: { securitySchemes: { chosen: scheme } } }
+        ),
+        url
+      );
+      return spec.auth;
+    };
+    const oauth = {
+      type: "oauth2",
+      flows: {
+        authorizationCode: {
+          authorizationUrl: "https://oauth.example.test/authorize",
+          tokenUrl: "https://oauth.example.test/token",
+          scopes: { "deals:read": "Read deals", "admin:all": "Everything" },
+        },
+      },
+    };
+    expect([
+      await signingIn({ type: "apiKey", in: "header", name: "X-API-Key" }),
+      await signingIn({ type: "http", scheme: "bearer" }),
+      await signingIn({ type: "apiKey", in: "header", name: "Cookie" }),
+      await signingIn(oauth, ["deals:read"]),
+    ]).toStrictEqual([
+      { kind: "apiKey", header: "x-api-key" },
+      { kind: "apiKey", header: "authorization", prefix: "Bearer " },
+      undefined,
+      {
+        kind: "oauth2",
+        authorizeUrl: "https://oauth.example.test/authorize",
+        tokenUrl: "https://oauth.example.test/token",
+        scopes: { "deals:read": "Read deals" },
+      },
+    ]);
+    await expect(
+      signingIn({
+        ...oauth,
+        flows: {
+          authorizationCode: {
+            ...oauth.flows.authorizationCode,
+            scopes: {},
+          },
+        },
+      })
+    ).rejects.toThrow("can't ask for these 0 OAuth scopes");
   });
 
   it("keeps a body's required fields required where the body itself is optional", async () => {
@@ -595,14 +686,57 @@ describe("a hostile spec", () => {
     expect(statements(source)).toStrictEqual(sourceStatements);
   });
 
+  it("can't pass an argument named as an object's own", async () => {
+    const spec = await readSpec(
+      specText({
+        "/deals": {
+          get: {
+            parameters: [
+              { name: "toString", in: "query", schema: { type: "string" } },
+              { name: "limit", in: "query", schema: { type: "integer" } },
+            ],
+            responses: ok({ type: "array", items: Deal }),
+          },
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["valueOf"],
+                    properties: { valueOf: { type: "string" } },
+                  },
+                },
+              },
+            },
+            responses: ok({ type: "object", properties: {} }),
+          },
+        },
+      }),
+      url
+    );
+    const [list] = spec.operations;
+    expect(
+      list?.args.kind === "object" && Object.keys(list.args.fields)
+    ).toStrictEqual(["limit"]);
+    expect(spec.skipped).toStrictEqual([
+      {
+        operation: "POST /deals",
+        reason: "Its body can't be typed as an object.",
+      },
+    ]);
+  });
+
   it("can't write code through a description, a field or a scope", async () => {
     const quote = '"}); globalThis.pwned = 1; /*';
+    const scope = "'});globalThis.pwned=1;/*";
     const text = specText(
       {
         "/deals": {
           get: {
             summary: `*/ ${quote}\n</script>\u2028`,
-            security: [{ oauth2: [quote] }],
+            security: [{ oauth2: [scope] }],
             responses: ok({
               type: "array",
               items: {
@@ -628,7 +762,7 @@ describe("a hostile spec", () => {
                 authorizationCode: {
                   authorizationUrl: "https://oauth.example.test/authorize",
                   tokenUrl: "https://oauth.example.test/token",
-                  scopes: { [quote]: quote },
+                  scopes: { [scope]: quote },
                 },
               },
             },
@@ -813,18 +947,17 @@ describe("a hostile spec", () => {
         specText(pipedrivePaths, { servers: [{ url: server }] }),
         url
       );
-    await expect(serving("http://api.example.test")).rejects.toThrow(
-      "plain HTTPS"
-    );
-    await expect(
-      serving(["https://user", "secret@api.example.test"].join(":"))
-    ).rejects.toThrow("plain HTTPS");
-    await expect(serving("https://api.example.test/v1?key=1")).rejects.toThrow(
-      "plain HTTPS"
-    );
-    await expect(serving("https://api.example.test/v1/%20x")).rejects.toThrow(
-      "path no route may take"
-    );
+    const refusals = [
+      ["http://api.example.test", "plain HTTPS"],
+      [["https://user", "secret@api.example.test"].join(":"), "plain HTTPS"],
+      ["https://api.example.test/v1?key=1", "plain HTTPS"],
+      ["https://api.example.test/v1/%20x", "path no route may take"],
+      ["https://api.example.test:8443/v1", "isn't a host a connector may call"],
+    ] as const;
+    for (const [server, refusal] of refusals) {
+      // oxlint-disable-next-line no-await-in-loop -- one server at a time, each its own case
+      await expect(serving(server)).rejects.toThrow(refusal);
+    }
     await expect(
       readSpec(" ".repeat(16 * 1024 * 1024 + 1), url)
     ).rejects.toThrow("larger than 16 MiB");

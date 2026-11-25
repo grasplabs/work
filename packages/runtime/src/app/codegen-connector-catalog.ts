@@ -15,13 +15,6 @@ export interface CatalogAction {
 const byName = <Value>(map: ReadonlyMap<string, Value>): [string, Value][] =>
   [...map].toSorted(([a], [b]) => (a < b ? -1 : 1));
 
-/**
- * The SDK's connector catalog (`connector-catalog.gen.ts`): the type of
- * each generated connector contract of a Grasp release, each
- * action's arguments as a caller passes them and its answer as it comes
- * back, from the descriptors core checks calls against. Types only: what
- * a binding serves is still decided, and checked both ways, at run time.
- */
 /** Whether a value holds free-form JSON anywhere. */
 const holdsJson = (descriptor: ValueDescriptor): boolean => {
   if (descriptor.kind === "json") {
@@ -39,6 +32,13 @@ const holdsJson = (descriptor: ValueDescriptor): boolean => {
   return descriptor.kind === "union" && descriptor.members.some(holdsJson);
 };
 
+/**
+ * The SDK's connector catalog (`connector-catalog.gen.ts`): the type of
+ * each generated connector contract of a Grasp release, each
+ * action's arguments as a caller passes them and its answer as it comes
+ * back, from the descriptors core checks calls against. Types only: what
+ * a binding serves is still decided, and checked both ways, at run time.
+ */
 export const connectorCatalogSource = (
   catalog: ReadonlyMap<string, ReadonlyMap<string, CatalogAction>>
 ): string => {

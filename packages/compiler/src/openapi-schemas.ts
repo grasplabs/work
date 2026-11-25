@@ -219,6 +219,20 @@ export const schemaOf = (
  * An object's fields, each required as the schema says, or every one
  * optional. Undefined if a request's required field can't be typed.
  */
+/**
+ * A property's schema, or undefined for an argument named as an object's
+ * own (`toString`): left out, it would read as the inherited one.
+ */
+const propertyOf = (
+  name: string,
+  property: unknown,
+  reading: Reading,
+  depth: number
+): Modifiable | undefined =>
+  reading.mode === "request" && name in Object.prototype
+    ? undefined
+    : schemaOf(property, reading, depth + 1);
+
 export const fieldsOf = (
   node: Node,
   reading: Reading,
@@ -250,7 +264,9 @@ export const fieldsOf = (
       reading.mode === "request"
         ? record(property).readOnly === true
         : record(property).writeOnly === true;
-    const schema = hidden ? undefined : schemaOf(property, reading, depth + 1);
+    const schema = hidden
+      ? undefined
+      : propertyOf(name, property, reading, depth);
     const field = required.has(name) ? schema : schema?.optional();
     const named =
       field === undefined
@@ -343,10 +359,8 @@ const allOf = (
   const merged: Record<string, unknown> = {};
   for (const each of nodes) {
     for (const [key, value] of Object.entries(each)) {
-      if (
-        Object.hasOwn(merged, key) &&
-        JSON.stringify(merged[key]) !== JSON.stringify(value)
-      ) {
+      // Compared as they are: a schema the same only by its text is free.
+      if (Object.hasOwn(merged, key) && merged[key] !== value) {
         return free(reading);
       }
       merged[key] = value;
