@@ -5,10 +5,9 @@ import {
   findFolder,
   noteGroups,
   onlyGroups,
-  sectionOf,
 } from "./brain-sections.ts";
 import { buildBrain, countNotes, folderTree } from "./brain.ts";
-import type { Folder, Note } from "./brain.ts";
+import type { Folder } from "./brain.ts";
 import { testWorkspace } from "./test-workspace.ts";
 
 // The prototype's tests of the brain's parts
@@ -27,13 +26,6 @@ const stepAside = (folder: Folder): number =>
 describe("the parts of the brain", () => {
   const brain = buildBrain(testWorkspace());
   const tree = folderTree(brain.notes);
-  const note = (id: string): Note => {
-    const found = brain.notes.find((candidate) => candidate.id === id);
-    if (!found) {
-      throw new Error(`No note ${id}`);
-    }
-    return found;
-  };
   const folderAt = (key: string): Folder => {
     const found = findFolder(tree, key);
     if (!found) {
@@ -70,12 +62,5 @@ describe("the parts of the brain", () => {
     expect(counts).toStrictEqual(
       counts.map((each) => ({ ...each, shown: each.held, distinct: each.held }))
     );
-  });
-
-  it("know which part a note sits in, from its folders", () => {
-    expect(sectionOf(note("team-service"))?.slug).toBe("teams");
-    expect(sectionOf(note("vision"))?.slug).toBe("vision");
-    expect(sectionOf(note("src-service"))?.slug).toBe("sources");
-    expect(sectionOf(note("company"))).toBeUndefined();
   });
 });

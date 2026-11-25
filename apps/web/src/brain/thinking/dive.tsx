@@ -1,5 +1,15 @@
-import { Spinner } from "@grasp-os/app-kit/components/spinner";
-import { cn } from "@grasp-os/app-kit/lib/utils";
+import { Spinner } from "@grasp-os/ui/components/spinner";
+import { fadeIn, focusRing } from "@grasp-os/ui/lib/styles";
+import {
+  colors,
+  duration,
+  font,
+  media,
+  radius as radii,
+  shadow,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 
@@ -60,6 +70,126 @@ const FINE = 0.5;
 /** How far the pointer may be from a soma to count as over it. */
 const NEAR = 14;
 
+/** Hidden until the drawing says it shows (`data-shown`, set each frame by `settle`). */
+const hidden = ":is([data-shown=false])";
+
+const styles = stylex.create({
+  // The dive over the page's own ground; it fades as the thought goes.
+  dive: {
+    position: "absolute",
+    inset: 0,
+    overflow: "hidden",
+    backgroundColor: colors.background,
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+    opacity: { default: 1, [hidden]: 0 },
+    pointerEvents: { default: null, [hidden]: "none" },
+    transitionProperty: { default: "opacity", [media.reducedMotion]: "none" },
+    transitionDuration: duration.ui,
+    transitionTimingFunction: duration.ease,
+  },
+  pointing: { cursor: "pointer" },
+  canvas: {
+    position: "absolute",
+    inset: 0,
+    width: "100%",
+    height: "100%",
+    backgroundColor: `color-mix(in oklch, ${colors.muted} 30%, transparent)`,
+  },
+  // Where the drawing places a name or the line, by its transform; it shows as the drawing says.
+  placed: {
+    position: "absolute",
+    insetBlockStart: 0,
+    insetInlineStart: 0,
+    pointerEvents: "none",
+    opacity: { default: 1, [hidden]: 0 },
+    transitionProperty: "opacity",
+    transitionDuration: duration.mark,
+    transitionTimingFunction: duration.ease,
+  },
+  up: { zIndex: 10 },
+  name: {
+    maxWidth: "var(--cell)",
+    paddingBlock: 2,
+    paddingInline: space["1"],
+    borderRadius: radii.sm,
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    color: "inherit",
+    fontFamily: "inherit",
+    fontSize: "inherit",
+    lineHeight: 1.25,
+    fontWeight: font.weightMedium,
+    textAlign: "center",
+    translate: "-50% 0",
+    // Pressable while it shows; never while it is hidden.
+    pointerEvents: {
+      default: "auto",
+      [stylex.when.ancestor(hidden)]: "none",
+    },
+  },
+  // Words cut at their line (two, or four for what was said), the cut marked with an ellipsis.
+  clamp: {
+    display: "-webkit-box",
+    WebkitBoxOrient: "vertical",
+    overflow: "hidden",
+  },
+  clampTwo: { WebkitLineClamp: 2 },
+  clampFour: { WebkitLineClamp: 4 },
+  said: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    width: "var(--said)",
+    maxWidth: "var(--said)",
+    paddingBlock: space["1"],
+    paddingInline: 6,
+    fontWeight: font.weightNormal,
+  },
+  small: { fontSize: font.textXs, lineHeight: 1.25 },
+  waiting: { color: colors.mutedForeground },
+  column: { display: "flex", flexDirection: "column" },
+  saidWords: { paddingBlockEnd: space["1"], textWrap: "balance" },
+  shared: {
+    textDecorationLine: "underline",
+    textDecorationColor: colors.mutedForeground,
+    textUnderlineOffset: space["1"],
+  },
+  by: { color: colors.mutedForeground, textWrap: "balance" },
+  // What Grasp does now: the one dark thing on the canvas, as a tooltip is, its tail down.
+  thought: {
+    position: "relative",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: `calc(2.5 * ${space["1"]})`,
+    width: "max-content",
+    maxWidth: "var(--caption)",
+    paddingBlock: `calc(2.5 * ${space["1"]})`,
+    paddingInline: space["4"],
+    borderRadius: radii.base,
+    backgroundColor: colors.foreground,
+    color: colors.background,
+    boxShadow: shadow.md,
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+    fontWeight: font.weightMedium,
+    textAlign: "center",
+    translate: "-50% -50%",
+  },
+  tail: {
+    position: "absolute",
+    insetBlockEnd: -4,
+    insetInlineStart: "50%",
+    width: 10,
+    height: 10,
+    borderRadius: 2,
+    backgroundColor: colors.foreground,
+    transform: "translateX(-50%) rotate(45deg)",
+  },
+  thoughtWords: { textWrap: "balance" },
+});
+
 /** What the drawing reads each frame. */
 interface Latest {
   thought: Thought | undefined;
@@ -74,8 +204,10 @@ interface Latest {
 const NameWords = ({ neuron }: { neuron: ThinkingNeuron }) => {
   if (neuron.hours !== undefined) {
     return (
-      <span className="flex flex-col">
-        <span className="line-clamp-2">{neuron.label}</span>
+      <span {...stylex.props(styles.column)}>
+        <span {...stylex.props(styles.clamp, styles.clampTwo)}>
+          {neuron.label}
+        </span>
         <WorkHours hours={neuron.hours} />
       </span>
     );
@@ -85,13 +217,10 @@ const NameWords = ({ neuron }: { neuron: ThinkingNeuron }) => {
   }
   return (
     <>
-      <span className="line-clamp-4 pb-1 text-balance">
+      <span {...stylex.props(styles.clamp, styles.clampFour, styles.saidWords)}>
         {markShared(neuron.label, neuron.marks ?? []).map((piece, index) =>
           piece.shared ? (
-            <span
-              className="decoration-muted-foreground underline underline-offset-4"
-              key={index}
-            >
+            <span key={index} {...stylex.props(styles.shared)}>
               {piece.text}
             </span>
           ) : (
@@ -99,7 +228,7 @@ const NameWords = ({ neuron }: { neuron: ThinkingNeuron }) => {
           )
         )}
       </span>
-      <span className="text-muted-foreground line-clamp-2 text-balance">
+      <span {...stylex.props(styles.clamp, styles.clampTwo, styles.by)}>
         {neuron.by}
       </span>
     </>
@@ -125,22 +254,20 @@ const Name = ({
   onChoose: (at: number) => void;
 }) => (
   <div
-    className={cn(
-      "group pointer-events-none absolute top-0 left-0 transition-opacity duration-200 data-[shown=false]:opacity-0",
-      up && "z-10"
-    )}
+    {...stylex.props(styles.placed, stylex.defaultMarker(), up && styles.up)}
     data-quiet={neuron.quiet === true ? "true" : "false"}
     data-shown="false"
     ref={keep}
   >
     <button
-      className={cn(
-        "focus-visible:ring-ring/50 pointer-events-auto max-w-(--cell) -translate-x-1/2 rounded-md px-1 py-0.5 text-center leading-tight font-medium outline-none group-data-[shown=false]:pointer-events-none focus-visible:ring-3",
+      {...stylex.props(
+        styles.name,
         neuron.by === undefined
-          ? neuron.hours === undefined && "line-clamp-2"
-          : "flex w-(--said) max-w-(--said) flex-col gap-0.5 px-1.5 py-1 font-normal",
-        small && "text-xs",
-        neuron.state === "waiting" && "text-muted-foreground"
+          ? neuron.hours === undefined && [styles.clamp, styles.clampTwo]
+          : styles.said,
+        small && styles.small,
+        neuron.state === "waiting" && styles.waiting,
+        focusRing
       )}
       onClick={() => {
         onChoose(at);
@@ -160,22 +287,18 @@ const Name = ({
 );
 
 /** What Grasp does now, as a tooltip is, its tail down to the shape: the one dark thing on the canvas; Grasp's working sign before it while it is at it. */
-export const ThoughtLine = ({
-  text,
-  going,
-}: {
-  text: string;
-  going: boolean;
-}) => (
-  <output className="bg-foreground text-background relative flex w-max max-w-(--caption) -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-2.5 rounded-lg px-4 py-2.5 text-center text-sm font-medium shadow-md">
+const ThoughtLine = ({ text, going }: { text: string; going: boolean }) => (
+  <output {...stylex.props(styles.thought)}>
+    <span aria-hidden="true" {...stylex.props(styles.tail)} />
+    {going ? <Spinner /> : null}
     <span
-      aria-hidden="true"
-      className="bg-foreground absolute -bottom-1 left-1/2 size-2.5 -translate-x-1/2 rotate-45 rounded-xs"
-    />
-    {going ? <Spinner className="size-3.5" /> : null}
-    <span
-      className="animate-in fade-in line-clamp-2 text-balance duration-200 motion-reduce:animate-none"
       key={text}
+      {...stylex.props(
+        styles.clamp,
+        styles.clampTwo,
+        styles.thoughtWords,
+        fadeIn
+      )}
     >
       {text}
     </span>
@@ -615,17 +738,14 @@ export const ThinkingDive = ({
     };
   return (
     <div
-      className={cn(
-        "bg-background absolute inset-0 overflow-hidden text-sm transition-opacity duration-300 data-[shown=false]:pointer-events-none data-[shown=false]:opacity-0 motion-reduce:transition-none",
-        hovered >= 0 && "cursor-pointer"
-      )}
+      {...stylex.props(styles.dive, hovered >= 0 && styles.pointing)}
       data-shown={thought === undefined ? "false" : "true"}
       ref={box}
     >
       <canvas
         aria-hidden="true"
-        className="bg-muted/30 absolute inset-0 size-full"
         ref={canvas}
+        {...stylex.props(styles.canvas)}
       />
       {map?.neurons.map((neuron, at) => (
         <Name
@@ -641,7 +761,7 @@ export const ThinkingDive = ({
       ))}
       {map === null || shown === undefined ? null : (
         <div
-          className="pointer-events-none absolute top-0 left-0 z-10 transition-opacity duration-200 data-[shown=false]:opacity-0"
+          {...stylex.props(styles.placed, styles.up)}
           data-shown="false"
           ref={caption}
         >

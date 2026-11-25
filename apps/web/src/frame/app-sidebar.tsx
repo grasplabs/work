@@ -1,5 +1,4 @@
 import type { SidebarApp } from "@grasp-os/shared/pages";
-import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { useSidebar } from "@grasp-os/ui/components/sidebar";
 import {
@@ -34,7 +33,7 @@ import type { CoreConnection } from "../core-connection.ts";
 import type { InboxItem } from "../inbox/items.ts";
 import { useInboxGroups, useWaitingItems } from "../inbox/sidebar-inbox.tsx";
 import { appSplat } from "../pages/app-address.ts";
-import { groupsFor } from "../settings/sections.ts";
+import { groupedSectionsFor } from "../settings/sections.ts";
 import { shortcutLabel } from "../shortcuts.ts";
 import { useWorkflowsWaiting } from "../workflows/nav-item.tsx";
 import { GraspMark } from "./grasp-mark.ts";
@@ -244,19 +243,15 @@ const useSettingsSection = (
       label: t`Back`,
       render: (look) => <WayOut {...look} outside={outside} />,
     },
-    groups: groupsFor({
-      admin: isAdmin(identity.role),
-      staff: identity.staff,
-    }).map((group) => ({
+    groups: groupedSectionsFor(identity).map(({ group, sections }) => ({
       id: group.id,
       label: i18n._(group.title),
-      rows: group.items.map(({ label, to, icon }) => ({
-        id: to,
-        // Stephen is a name and stays as it is.
-        label: typeof label === "string" ? label : i18n._(label),
+      rows: sections.map(({ label, href, icon }) => ({
+        id: href,
+        label: i18n._(label),
         icon,
-        render: (look) => <Link {...look} to={to} />,
-        current: pathname.startsWith(to),
+        render: (look) => <Link {...look} to={href} />,
+        current: pathname.startsWith(href),
       })),
     })),
   };

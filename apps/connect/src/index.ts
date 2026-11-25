@@ -579,8 +579,12 @@ export default class Connect
     return await saveAiProviderKey(this.env, request, by);
   }
 
-  async removeAiProviderKey(provider: unknown, by: unknown): Promise<boolean> {
-    return await removeAiProviderKey(this.env, provider, by);
+  async removeAiProviderKey(
+    provider: unknown,
+    by: unknown,
+    savedAt?: unknown
+  ): Promise<boolean> {
+    return await removeAiProviderKey(this.env, provider, by, savedAt);
   }
 
   async aiProviderKeys(): Promise<AiProviderKey[]> {

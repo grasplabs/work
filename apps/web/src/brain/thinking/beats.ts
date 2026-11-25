@@ -34,7 +34,7 @@ export interface ThinkingBeat {
  * never less than `least` nor more than `most`. Thinking is work still
  * going on, so these are a reader's times, not a control's.
  */
-export const READ = { glance: 900, letter: 48, least: 1800, most: 5200 };
+const READ = { glance: 900, letter: 48, least: 1800, most: 5200 };
 
 /** How long a line of so many letters stays up. */
 export const readFor = (letters: number): number =>

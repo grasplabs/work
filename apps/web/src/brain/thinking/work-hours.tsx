@@ -1,5 +1,7 @@
+import { colors, font } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
+import * as stylex from "@stylexjs/stylex";
 
 import { roundHours } from "./hours.ts";
 
@@ -7,6 +9,15 @@ import { roundHours } from "./hours.ts";
 // (chat/thinking-card.tsx) say them under its name: its own module, so the
 // card never loads the dive for it. The words alone, for SVG text, which
 // paints no HTML element inside it, and in a span for the dive's HTML.
+
+const styles = stylex.create({
+  // Quieter than the name over it, in its size; the figures line up from one name to the next.
+  hours: {
+    color: colors.mutedForeground,
+    fontWeight: font.weightNormal,
+    fontVariantNumeric: "tabular-nums",
+  },
+});
 
 /** A workflow's hours a week, as the brain counts them; or that they are not known yet. */
 export const useWorkHoursText = (hours: number | null): string => {
@@ -19,7 +30,5 @@ export const useWorkHoursText = (hours: number | null): string => {
 
 /** A workflow's hours a week under its name, in HTML. */
 export const WorkHours = ({ hours }: { hours: number | null }) => (
-  <span className="text-muted-foreground font-normal tabular-nums">
-    {useWorkHoursText(hours)}
-  </span>
+  <span {...stylex.props(styles.hours)}>{useWorkHoursText(hours)}</span>
 );

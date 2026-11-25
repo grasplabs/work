@@ -1,5 +1,6 @@
 import {
   aiKeyErrors,
+  aiKeySavedAtSchema,
   aiModelChoiceSchema,
   aiProviderAddSchema,
   aiProviderErrors,
@@ -518,21 +519,28 @@ const setModels = async (
 
 /**
  * Removes the provider's key from connect, which audits it in the same
- * write when it had one, in the admin's name.
+ * write when it had one, in the admin's name. With `savedAt`, only the
+ * key that save wrote: one another admin saved since is kept.
  */
 const removeProvider = async (
   env: Env,
   by: Identity,
-  provider: unknown
+  provider: unknown,
+  savedAt: unknown
 ): Promise<void> => {
   await requireOwnAdminNow(env, by);
   const parsed = organizationProviderIdSchema.safeParse(provider);
-  if (!parsed.success) {
+  const saved = aiKeySavedAtSchema.optional().safeParse(savedAt);
+  if (!parsed.success || !saved.success) {
     throw aiProviderErrors.create("ai_provider.invalid");
   }
   let removed: boolean;
   try {
-    removed = await env.CONNECT.removeAiProviderKey(parsed.data, actorOf(by));
+    removed = await env.CONNECT.removeAiProviderKey(
+      parsed.data,
+      actorOf(by),
+      saved.data
+    );
   } catch (error) {
     throw refusalOf(error);
   }
@@ -644,9 +652,9 @@ export class AiProvidersRpc extends CoreRpcTarget implements AiProvidersApi {
     });
   }
 
-  async remove(provider: AiProviderId): Promise<void> {
+  async remove(provider: AiProviderId, savedAt?: number): Promise<void> {
     await withPerson(this.#check, async (person) => {
-      await removeProvider(this.#env, person, provider);
+      await removeProvider(this.#env, person, provider, savedAt);
     });
   }
 

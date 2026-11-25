@@ -8,7 +8,7 @@
  */
 
 /** Points, as two lists of coordinates. */
-export interface Points {
+interface Points {
   x: ArrayLike<number>;
   y: ArrayLike<number>;
 }
