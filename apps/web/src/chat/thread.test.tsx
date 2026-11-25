@@ -467,10 +467,11 @@ describe(ChatThread, () => {
       reasoning: "Add two to two.",
     });
 
+    // Whole words while it is written: the last waits for what follows it.
     expect(firstStep()).toStrictEqual({
       line: "Thinking",
       open: true,
-      shows: "Add two to two.",
+      shows: "Add two to",
     });
   });
 
@@ -491,10 +492,11 @@ describe(ChatThread, () => {
       { text: "", code: [], tools: [], reasoning: "Add two to two." }
     );
 
+    // Whole words while it is written: the last waits for what follows it.
     expect(firstStep()).toStrictEqual({
       line: "Thinking",
       open: true,
-      shows: "Add two to two.",
+      shows: "Add two to",
     });
   });
 
