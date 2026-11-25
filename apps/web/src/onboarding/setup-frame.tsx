@@ -18,6 +18,7 @@ import type { ReactNode } from "react";
 
 import { GraspLogo } from "../connections/brand-logos.ts";
 import { LanguageButton } from "../frame/language-button.tsx";
+import { OwnWords } from "../settings/section.tsx";
 import { SoundControls } from "../voice/sound-controls.tsx";
 import { KnowledgeCorner } from "./knowledge-bar.tsx";
 import type { Knowledge } from "./knowledge-bar.tsx";
@@ -133,18 +134,25 @@ const StepDots = ({
   };
   const wizard = wizardOf(path);
   return (
-    <Stepper
-      aria-label={t`Onboarding steps`}
-      onValueChange={(at) => {
-        const step = wizard[at];
-        if (step !== undefined) {
-          onGo(step);
-        }
-      }}
-      reached={reached}
-      steps={wizard.map((step) => ({ label: names[step] }))}
-      value={index}
-    />
+    // On a phone the step by its number alone, as #2503's steps count it.
+    <OwnWords
+      words={({ stepper }) => ({
+        stepper: { ...stepper, count: (step) => t`Step ${step}` },
+      })}
+    >
+      <Stepper
+        aria-label={t`Onboarding steps`}
+        onValueChange={(at) => {
+          const step = wizard[at];
+          if (step !== undefined) {
+            onGo(step);
+          }
+        }}
+        reached={reached}
+        steps={wizard.map((step) => ({ label: names[step] }))}
+        value={index}
+      />
+    </OwnWords>
   );
 };
 

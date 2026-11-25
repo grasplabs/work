@@ -8,12 +8,14 @@ import {
   requestNextRun,
   reviewedVersionText,
   noVersion,
+  triggerStartOf,
 } from "../activity/pending.tsx";
 import type { PendingRequests } from "../activity/pending.tsx";
 import { formatTime, personName } from "../directory.ts";
 
 // What a permission request asks, in full, under an Inbox approval's
-// Details: who asks, for what, on what, and since when.
+// Details, or on a trigger's ask to start its workflow: who asks, for
+// what, on what, and since when.
 
 const styles = stylex.create({
   details: {
@@ -27,7 +29,8 @@ const styles = stylex.create({
  * What has to be read of a permission request before deciding it: as
  * which binding its code asks, when a schedule next runs, the version of
  * its App the grant trusts, and who asked. A line with nothing to say is
- * left out.
+ * left out, and a trigger's name in code ("START") on its ask to start its
+ * workflow with it, as #2503 has it: its title says it starts the workflow.
  */
 export const RequestDetails = ({
   request,
@@ -43,9 +46,11 @@ export const RequestDetails = ({
   const date = formatTime(request.requestedAt);
   return (
     <div {...stylex.props(styles.details)}>
-      <Text size="sm" color="muted">
-        <Trans>as {binding}</Trans>
-      </Text>
+      {triggerStartOf(request) === undefined ? (
+        <Text size="sm" color="muted">
+          <Trans>as {binding}</Trans>
+        </Text>
+      ) : null}
       {nextRun === undefined ? null : (
         <Text size="sm" color="muted">
           {nextRun}

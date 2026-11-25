@@ -52,17 +52,25 @@ import type { WorkflowSettingsSection } from "./settings-sections.ts";
 
 const styles = stylex.create({
   // The room round it the reference's shell gives a page (28px above,
-  // 32px below, 24px at its sides): the item shell here gives none.
-  scroll: {
+  // 32px below, 24px at its sides): the item shell here gives none. The
+  // room below stands outside what scrolls, as the reference's shell keeps
+  // it, so the runs stop short of the card's foot.
+  room: {
     // The text the reference's shell gives a page, which what isn't sized
     // itself inherits (the item shell here sets a smaller one).
     fontSize: font.textBase,
     lineHeight: font.textBaseLine,
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+    paddingBlockEnd: space["8"],
+  },
+  scroll: {
     flexGrow: 1,
     minHeight: 0,
     overflowY: "auto",
     paddingBlockStart: space["7"],
-    paddingBlockEnd: space["8"],
     paddingInline: space["6"],
   },
   page: {
@@ -308,34 +316,36 @@ export const WorkflowHome = ({
   const router = useRouter();
   const count = runs.state === "ready" ? runs.data.length : undefined;
   return (
-    <div {...stylex.props(styles.scroll)}>
-      <Container size="lg">
-        <div {...stylex.props(styles.page)}>
-          <PageHeader description={status} title={name} />
-          {decisions.map((decision) => (
-            <DecisionCard
-              decision={decision}
-              key={decision.id}
-              onAnswered={() => {
-                void router.invalidate();
-              }}
-            />
-          ))}
-          <section {...stylex.props(styles.section)}>
-            <Heading level={2} size="xs">
-              {t({ message: "Runs", context: "a workflow's runs" })}{" "}
-              <ListedCount count={count} of="runs" />
-            </Heading>
-            <Runs
-              names={names}
-              own={!builder}
-              runs={runs}
-              workflow={workflow}
-            />
-          </section>
-          {builder ? <Workshop open={onOpen} rows={workshop} /> : null}
-        </div>
-      </Container>
+    <div {...stylex.props(styles.room)}>
+      <div {...stylex.props(styles.scroll)}>
+        <Container size="lg">
+          <div {...stylex.props(styles.page)}>
+            <PageHeader description={status} title={name} />
+            {decisions.map((decision) => (
+              <DecisionCard
+                decision={decision}
+                key={decision.id}
+                onAnswered={() => {
+                  void router.invalidate();
+                }}
+              />
+            ))}
+            <section {...stylex.props(styles.section)}>
+              <Heading level={2} size="xs">
+                {t({ message: "Runs", context: "a workflow's runs" })}{" "}
+                <ListedCount count={count} of="runs" />
+              </Heading>
+              <Runs
+                names={names}
+                own={!builder}
+                runs={runs}
+                workflow={workflow}
+              />
+            </section>
+            {builder ? <Workshop open={onOpen} rows={workshop} /> : null}
+          </div>
+        </Container>
+      </div>
     </div>
   );
 };

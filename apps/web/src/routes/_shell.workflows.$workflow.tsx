@@ -123,13 +123,16 @@ const styles = stylex.create({
     animationDuration: duration.open,
     animationTimingFunction: duration.ease,
   },
+  // The room below the reference's shell gives a page stands outside what
+  // scrolls, so the runs stop short of the card's foot.
   runs: {
     display: "flex",
     flexDirection: "column",
     flexGrow: 1,
     minHeight: 0,
-    overflowY: "auto",
+    paddingBlockEnd: space["8"],
   },
+  runsScroll: { flexGrow: 1, minHeight: 0, overflowY: "auto" },
   // As wide as the page, with the room round it the reference's shell
   // gives a page: the frame's item shell here gives none of its own.
   column: {
@@ -140,7 +143,6 @@ const styles = stylex.create({
     boxSizing: "border-box",
     width: "100%",
     paddingBlockStart: `calc(${space["7"]} + ${space["6"]})`,
-    paddingBlockEnd: space["8"],
     paddingInline: space["6"],
   },
   // Where it stands gives way where the bar is narrow, as on the
@@ -150,6 +152,9 @@ const styles = stylex.create({
       default: "inline-flex",
       "@container bar (width < 51rem)": "none",
     },
+    // In the bar's small words, its "Allow it" too, as #2503's bar draws them.
+    fontSize: font.textXs,
+    lineHeight: font.textXsLine,
   },
 });
 
@@ -557,16 +562,18 @@ const BuilderViews = ({
       )}
       {/* Kept while another view shows: a test going on stays followed. */}
       <div {...stylex.props(view === "runs" ? styles.runs : styles.away)}>
-        <div {...stylex.props(styles.column)}>
-          <Traces
-            activity={activity}
-            names={names}
-            onPartChange={setPart}
-            part={part}
-            runs={runs}
-            testable={testableOf(latest)}
-            workflow={workflow}
-          />
+        <div {...stylex.props(styles.runsScroll)}>
+          <div {...stylex.props(styles.column)}>
+            <Traces
+              activity={activity}
+              names={names}
+              onPartChange={setPart}
+              part={part}
+              runs={runs}
+              testable={testableOf(latest)}
+              workflow={workflow}
+            />
+          </div>
         </div>
       </div>
     </>
