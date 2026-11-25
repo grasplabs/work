@@ -12,6 +12,7 @@ import {
   ItemContent,
   ItemDescription,
   ItemGrid,
+  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -20,7 +21,9 @@ import { Text } from "@grasp-os/ui/components/text";
 import {
   ArrowRightIcon,
   Icon,
+  MicIcon,
   PlusIcon,
+  SendIcon,
   UsersIcon,
 } from "@grasp-os/ui/lib/icons";
 import { colors, size, space } from "@grasp-os/ui/lib/tokens.stylex";
@@ -113,10 +116,10 @@ const HrPlatformChoice = ({
   let body = t`It knows who leads which team, so I can talk to the leads first. We connect it with you.`;
   if (hr?.kind === "platform") {
     const { name } = hr;
-    body = t`Noted: ${name}. We’ll connect it with you. Meanwhile, check who leads which team.`;
+    body = t`Noted: ${name}. We’ll connect it with you.`;
   } else if (hr?.kind === "asked") {
     const { name } = hr;
-    body = t`Thank you. I’ve asked our team to connect ${name}. For now, check who leads which team.`;
+    body = t`Thank you. I’ve asked our team to connect ${name}.`;
   }
   return (
     <CalmStep
@@ -161,7 +164,21 @@ const HrPlatformChoice = ({
       }
       title={t`Which HR platform do you use?`}
     >
-      {chosen ? null : (
+      {/* The platform said, shown as said, so the step isn't left empty under its line. */}
+      {chosen ? (
+        <Item done variant="outline">
+          {hrLogoOf(hr.name) === null ? (
+            <ItemMedia variant="icon">
+              <Icon icon={UsersIcon} />
+            </ItemMedia>
+          ) : (
+            <Logo src={hrLogoOf(hr.name) ?? ""} />
+          )}
+          <ItemContent>
+            <ItemTitle>{hr.name}</ItemTitle>
+          </ItemContent>
+        </Item>
+      ) : (
         <div {...stylex.props(styles.stack)}>
           <ItemGrid aria-label={t`HR platforms`} columns={3}>
             {tiles.map(({ name, platform }) => {
@@ -422,7 +439,7 @@ export const LeadsStep = (props: StepProps) => {
   if (roster === null) {
     return (
       <CalmStep
-        body={t`Without a staff list I don’t know your teams yet. Grasp’s staff go through them with you, and then I talk to each lead first.`}
+        body={t`Without a staff list I don’t know your teams yet. That’s fine, this is how it goes:`}
         end={
           <>
             <Button
@@ -446,7 +463,28 @@ export const LeadsStep = (props: StepProps) => {
           </>
         }
         title={t`We’ll set up your teams together`}
-      />
+      >
+        {/* What happens without a list, so the step isn't left empty under its line. */}
+        <ItemGroup aria-label={t`What happens next`}>
+          {[
+            {
+              icon: UsersIcon,
+              said: t`Grasp’s team goes through your teams with you`,
+            },
+            { icon: MicIcon, said: t`I talk to each team lead first` },
+            { icon: SendIcon, said: t`Then everyone gets their link` },
+          ].map(({ icon, said }) => (
+            <Item key={said} variant="outline">
+              <ItemMedia variant="icon">
+                <Icon icon={icon} />
+              </ItemMedia>
+              <ItemContent>
+                <ItemTitle>{said}</ItemTitle>
+              </ItemContent>
+            </Item>
+          ))}
+        </ItemGroup>
+      </CalmStep>
     );
   }
   return <ConfirmOrg {...props} roster={roster} />;

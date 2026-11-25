@@ -8347,6 +8347,10 @@ msgstr "De chat van Grasp"
 msgid "Grasp's team can help here until then"
 msgstr "Tot dan kan het team van Grasp hier helpen"
 
+#: src/onboarding/leads-step.tsx
+msgid "Grasp’s team goes through your teams with you"
+msgstr "Het team van Grasp loopt je teams met je door"
+
 #: src/onboarding/campaign/concepts/canvas.tsx
 msgid "Green lines: new that day"
 msgstr "Groene lijnen: nieuw die dag"
@@ -8771,6 +8775,10 @@ msgstr "Ik heb in {signIn} niemand gevonden."
 #: src/interview/words.ts
 msgid "I lost the connection. Please check your internet. I have kept what you said, and I keep trying."
 msgstr "Ik ben de verbinding kwijt. Controleer je internet. Ik heb bewaard wat je zei en ik blijf het proberen."
+
+#: src/onboarding/leads-step.tsx
+msgid "I talk to each team lead first"
+msgstr "Ik praat eerst met elke teamleider"
 
 #: src/onboarding/leads-step.tsx
 msgid "I talk to each team lead first, so they hear about me before their team does. Check who leads which team, and which teams take part."
@@ -12158,8 +12166,8 @@ msgid "Noted a question asked in a chat, to keep in its person's own Brain"
 msgstr "Een vraag uit een chat genoteerd, om te bewaren in het eigen Brain van de persoon"
 
 #: src/onboarding/leads-step.tsx
-msgid "Noted: {name}. We’ll connect it with you. Meanwhile, check who leads which team."
-msgstr "Genoteerd: {name}. We koppelen het samen met jou. Controleer intussen wie welk team leidt."
+msgid "Noted: {name}. We’ll connect it with you."
+msgstr "Genoteerd: {name}. We koppelen het samen met jou."
 
 #: src/drafts/share-with-team.tsx
 msgid "Nothing changed since the live version."
@@ -17341,8 +17349,8 @@ msgid "Thank you, {name}."
 msgstr "Dank je, {name}."
 
 #: src/onboarding/leads-step.tsx
-msgid "Thank you. I’ve asked our team to connect {name}. For now, check who leads which team."
-msgstr "Dank je. Ik heb ons team gevraagd {name} te koppelen. Controleer voor nu wie welk team leidt."
+msgid "Thank you. I’ve asked our team to connect {name}."
+msgstr "Dank je. Ik heb ons team gevraagd {name} te koppelen."
 
 #: src/interview/start.tsx
 msgid "Thanks for letting us know"
@@ -18209,6 +18217,10 @@ msgstr "Dan"
 #: src/workflows/workflow-diagram.tsx
 msgid "Then {task}"
 msgstr "Daarna {task}"
+
+#: src/onboarding/leads-step.tsx
+msgid "Then everyone gets their link"
+msgstr "Daarna krijgt iedereen zijn link"
 
 #: src/onboarding/plan-story.tsx
 msgid "Then I read every conversation, and on {findings} you get what I learned, team by team."
@@ -19960,6 +19972,7 @@ msgid "What happened to this run"
 msgstr "Wat er met deze run gebeurde"
 
 #: src/onboarding/campaign/concepts/letter.tsx
+#: src/onboarding/leads-step.tsx
 msgid "What happens next"
 msgstr "Wat er nu komt"
 
@@ -20757,8 +20770,8 @@ msgid "Without a person"
 msgstr "Zonder een persoon"
 
 #: src/onboarding/leads-step.tsx
-msgid "Without a staff list I don’t know your teams yet. Grasp’s staff go through them with you, and then I talk to each lead first."
-msgstr "Zonder personeelslijst ken ik je teams nog niet. Het team van Grasp loopt ze met je door, en daarna praat ik eerst met elke teamleider."
+msgid "Without a staff list I don’t know your teams yet. That’s fine, this is how it goes:"
+msgstr "Zonder personeelslijst ken ik je teams nog niet. Dat is prima, zo gaat het:"
 
 #: src/activity/audit-words.ts
 msgid "Woke a waiting run whose wake hadn't got through"

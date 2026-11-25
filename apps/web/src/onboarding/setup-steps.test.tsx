@@ -302,7 +302,7 @@ describe("a setup without a staff list", () => {
       choices: { ...noChoices, hr: { kind: "none" } },
     });
     expect({
-      said: leads.includes("Grasp’s staff go through them with you"),
+      said: leads.includes("Grasp’s team goes through your teams with you"),
       on: leads.includes("Continue"),
       list: leads.includes("Share a staff list"),
     }).toStrictEqual({ said: true, on: true, list: true });
