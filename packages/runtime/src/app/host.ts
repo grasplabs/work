@@ -135,6 +135,12 @@ export type {
 export { jsonSchemaOf } from "../common/json-schema.ts";
 export type { JsonSchema } from "../common/json-schema.ts";
 
+// A value checked against a descriptor the host holds, as its schema's
+// `validate` checks it; with `unknownFields: "drop"`, how an answer from
+// outside is read against what it should return.
+export { validateValue } from "./value-interpreter.ts";
+export type { ValueCheckOptions } from "./value-interpreter.ts";
+
 // The session client as a host makes it: over the host's own
 // transport, one per App session, mounted for the pages it serves. App
 // code never makes one; it gets the platform's from `useClient()`.

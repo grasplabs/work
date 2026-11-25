@@ -63,6 +63,10 @@ const scalarSchema = (descriptor: ValueDescriptor): JsonSchema | undefined => {
         : { minLength: Math.ceil(descriptor.min / 2) }),
       ...(descriptor.max === undefined ? {} : { maxLength: descriptor.max }),
       ...(descriptor.email ? { format: "email" } : {}),
+      ...(descriptor.datetime === true ? { format: "date-time" } : {}),
+      ...(descriptor.date === true ? { format: "date" } : {}),
+      // Looser than the descriptor, which takes only http and https.
+      ...(descriptor.url === true ? { format: "uri" } : {}),
     };
   }
   if (descriptor.kind === "number") {
@@ -74,6 +78,9 @@ const scalarSchema = (descriptor: ValueDescriptor): JsonSchema | undefined => {
   }
   if (descriptor.kind === "boolean" || descriptor.kind === "null") {
     return { type: descriptor.kind };
+  }
+  if (descriptor.kind === "json") {
+    return {};
   }
   if (descriptor.kind === "literal") {
     return { const: descriptor.value };

@@ -191,6 +191,51 @@ const pass = (
   code: ValueIssueCode = "value.invalid_type"
 ): Checked => (holds ? value : refuse(state, code));
 
+/** Any JSON value, as the arrays and records of JSON it nests. */
+const anyJson = {
+  descriptorVersion: 1,
+  kind: "json",
+  nullable: true,
+  presence: "required",
+} as const satisfies ValueDescriptor;
+const jsonArray = {
+  ...anyJson,
+  item: anyJson,
+  kind: "array",
+} as const satisfies ValueDescriptor;
+const jsonRecord = {
+  ...anyJson,
+  kind: "record",
+  value: anyJson,
+} as const satisfies ValueDescriptor;
+
+/**
+ * Any JSON value, copied. No descriptor bounds how deep it nests, so its
+ * own depth is held to `valueLimits.depth`, as a descriptor's is; past it,
+ * the check is refused whole, as one too large to read.
+ */
+const checkJson = (value: unknown, state: CheckState): Checked => {
+  if (state.path.length >= valueLimits.depth) {
+    state.exhausted = true;
+    state.stopped = true;
+    return invalid;
+  }
+  if (Array.isArray(value)) {
+    return checkArray(jsonArray, value, state);
+  }
+  if (isPlainObject(value)) {
+    return checkRecord(jsonRecord, value, state);
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : refuse(state, "value.not_finite");
+  }
+  return pass(
+    value === null || typeof value === "boolean" || typeof value === "string",
+    value,
+    state
+  );
+};
+
 const checkKind = (
   descriptor: ValueDescriptor,
   value: unknown,
@@ -211,6 +256,9 @@ const checkKind = (
     }
     case "null": {
       return pass(value === null, value, state);
+    }
+    case "json": {
+      return checkJson(value, state);
     }
     case "literal": {
       // The declared value, not the submitted one: `-0` equals a literal 0
@@ -290,6 +338,18 @@ const check = (
   return checkKind(descriptor, value, state);
 };
 
+/** How a value is checked, beyond its descriptor. */
+export interface ValueCheckOptions {
+  /**
+   * `drop`: an object's keys its schema doesn't name are left out of the
+   * value instead of refused, at any depth; everything else is checked as
+   * ever. How an answer from outside is read against what it should
+   * return, so a field the vendor adds never breaks a call. Arguments, and
+   * what Apps and workflows pass and return, keep `refuse`, the default.
+   */
+  readonly unknownFields?: "refuse" | "drop";
+}
+
 const issue = (code: ValueIssueCode): ValueIssue => ({
   code,
   message: valueIssueMessages[code],
@@ -303,9 +363,11 @@ const issue = (code: ValueIssueCode): ValueIssue => ({
  */
 export const validateValue = (
   descriptor: ValueDescriptor,
-  value: unknown
+  value: unknown,
+  { unknownFields = "refuse" }: ValueCheckOptions = {}
 ): ValueResult<unknown> => {
   const state: CheckState = {
+    dropUnknownFields: unknownFields === "drop",
     exhausted: false,
     issueLimit: valueLimits.issues,
     issues: [],

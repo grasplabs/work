@@ -19,6 +19,27 @@ Grasp enforces this at run time, and the types enforce it as you write: a query 
 
 Every function declares its arguments (`args`) with `v`, and Grasp checks them before the handler runs, so a handler only ever sees valid input. What it returns (`returns`) is optional. When a function declares it, Grasp checks the return value after the handler runs, so a caller only ever gets what was declared, and a `DataGrid` takes its columns' kinds from it. Without it, callers get the type of whatever the handler returns.
 
+A string can be held to a format: `.email()`, `.date()` (a calendar day, such as `2026-11-25`), `.datetime()` (a date and time with its offset, as RFC 3339 writes it, such as `2026-11-25T14:30:00Z`) and `.url()` (an absolute `http` or `https` URL). Each checks the text and keeps it as it was, and a string has one format at most. A time you store, sort or compare is a `v.timestamp()`, in milliseconds: `Date.parse` turns a `.datetime()` into one. `v.json()` takes any JSON value, for what has no fixed shape, such as fields someone defines elsewhere. Nothing inside it is checked but that it is JSON, so declare the shape wherever you know it.
+
+```ts server/links.ts
+import { v } from "@grasp-os/sdk";
+import { query } from "@server/_generated/server";
+
+export const visit = query({
+  args: {
+    url: v.string().url(),
+    seenAt: v.string().datetime(),
+    due: v.string().date().optional(),
+    extra: v.json().optional(),
+  },
+  returns: v.object({ host: v.string(), seen: v.timestamp() }),
+  handler: async (_ctx, args) => ({
+    host: new URL(args.url).host,
+    seen: Date.parse(args.seenAt),
+  }),
+});
+```
+
 The types of `api` and `internal` come from your functions' own code. So when two functions call each other, or one reaches itself through `internal`, TypeScript can't infer their types: declare `returns`, or annotate the handler's return type.
 
 A function is registered by exporting it from a module under `server/`, declared as `export const list = query({ … })`: one of `query`, `mutation`, `action`, `internalQuery`, `internalMutation` and `internalAction` from `@server/_generated/server`, called by name. Grasp finds your functions by that form, so a function made through an alias of a constructor or a wrapper gets no reference in `api` or `internal`, and the App can't be published until it is declared that way. Its name is the module's path and the export: `list` in `server/tasks.ts` is `tasks.list`.

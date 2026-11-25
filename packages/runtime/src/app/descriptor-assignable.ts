@@ -98,6 +98,9 @@ const scalarAssignable = (
       to.kind === "string" &&
       within(from, to) &&
       (from.email || !to.email) &&
+      (from.datetime === true || to.datetime !== true) &&
+      (from.date === true || to.date !== true) &&
+      (from.url === true || to.url !== true) &&
       (from.trim || !to.trim)
     );
   }

@@ -9,12 +9,18 @@ import type {
   ValueIssue,
   ValueIssueCode,
 } from "./value-descriptor.ts";
+import { isDate, isDateTime, isWebUrl } from "./value-formats.ts";
 
 /** Returned in place of a value that was refused. */
 export const invalid = Symbol("invalid");
 export type Checked = unknown;
 
 export interface CheckState {
+  /**
+   * Whether an object's keys its schema doesn't name are dropped instead of
+   * refused: how an answer from outside is read (`ValueCheckOptions`).
+   */
+  readonly dropUnknownFields: boolean;
   /** Read past `valueLimits.steps`: the whole check is refused. */
   exhausted: boolean;
   /** Stop once this many issues are collected. */
@@ -58,8 +64,9 @@ const isReference = (value: unknown): value is string =>
 
 /**
  * Reads an object with a fixed set of keys: refuses anything that isn't a
- * JSON object or has a key outside the set, then checks each key with
- * `checkKey`. A key left out of the result is one whose value is absent.
+ * JSON object or has a key outside the set (or drops that key, with
+ * `dropUnknownFields`), then checks each key with `checkKey`. A key left
+ * out of the result is one whose value is absent.
  */
 export const checkStrictObject = (
   value: unknown,
@@ -71,7 +78,7 @@ export const checkStrictObject = (
     return refuse(state, "value.invalid_type");
   }
   let valid = true;
-  for (const key of Object.keys(value)) {
+  for (const key of state.dropUnknownFields ? [] : Object.keys(value)) {
     if (state.stopped) {
       break;
     }
@@ -215,6 +222,15 @@ export const checkString = (
     (text.length > emailMaxLength || !emailPattern.test(text))
   ) {
     return refuse(state, "value.invalid_email");
+  }
+  if (descriptor.datetime === true && !isDateTime(text)) {
+    return refuse(state, "value.invalid_datetime");
+  }
+  if (descriptor.date === true && !isDate(text)) {
+    return refuse(state, "value.invalid_date");
+  }
+  if (descriptor.url === true && !isWebUrl(text)) {
+    return refuse(state, "value.invalid_url");
   }
   return text;
 };

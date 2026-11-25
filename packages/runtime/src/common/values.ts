@@ -8,7 +8,7 @@ import { seal } from "./descriptor-seal.ts";
 import { descriptorOf, fieldDescriptors } from "./sealed-descriptors.ts";
 import type { DescriptorDraft } from "./sealed-descriptors.ts";
 import { descriptorVersion } from "./value-descriptor.ts";
-import type { SemanticKind } from "./value-descriptor.ts";
+import type { JsonValue, SemanticKind } from "./value-descriptor.ts";
 import { schemaOf } from "./value-schema.ts";
 import type { AnySchema } from "./value-schema.ts";
 import type {
@@ -30,8 +30,8 @@ import type {
 // a table's fields and a form's values are all declared with it, and checked
 // by the one interpreter behind `schema["~standard"].validate`.
 //
-// Values are JSON and nothing else. There is deliberately no `any`, no
-// bytes, vector or BigInt, no coercion, and no callback to transform or
+// Values are JSON and nothing else. There is deliberately no `any` (only
+// `v.json()`, any JSON value), no bytes, vector or BigInt, no coercion, and no callback to transform or
 // refine a value: a schema is data (its descriptor), so the browser and the
 // Worker check the same thing. A business rule belongs in the handler.
 
@@ -128,6 +128,13 @@ export const v = Object.freeze({
     value: Value
   ): SimpleSchema<Value, Value> =>
     schema({ ...required, kind: "literal", value }),
+  /**
+   * Any JSON value, for what has no fixed shape, such as a vendor's custom
+   * fields. Declare the shape wherever it is known: nothing inside is
+   * checked but that it is JSON.
+   */
+  json: (): SimpleSchema<JsonValue, JsonValue> =>
+    schema({ ...required, kind: "json" }),
   /** A model the host offers, by reference. */
   model: semantic<string>("model"),
   /** `{ minorUnits, currency }`: whole minor units of an ISO 4217 currency. */

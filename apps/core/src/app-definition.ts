@@ -382,6 +382,7 @@ const fieldKinds: Record<
   model: "other",
   schedule: "other",
   template: "other",
+  json: "other",
 };
 
 /** A field's kind, as a person picks it, with what it takes (`FieldType`). */
