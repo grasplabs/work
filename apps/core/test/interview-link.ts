@@ -12,6 +12,8 @@ import { vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { onboardingStore } from "../src/onboarding/store.ts";
+import { platformAi } from "../src/platform-ai.ts";
+import { platformMistralKey } from "./connect-providers.ts";
 import { createIdp } from "./fake-idp.ts";
 import { answeringProvider } from "./model-provider.ts";
 import type { ProviderReply, SentRequest } from "./model-provider.ts";
@@ -24,13 +26,20 @@ import { entraPerson, routed, signedIn, unique, whoami } from "./sign-in.ts";
 // provider with Stephen's two models, faked behind connect
 // (test/model-provider.ts).
 
-/** The organization's default: both roles resolve to it. */
-export const quick = "anthropic/claude-sonnet-4-5";
-/** Its fallback. */
-export const careful = "anthropic/claude-opus-4-8";
+/** The model his lines are written by: Grasp's own, on its Mistral key (src/platform-ai.ts). */
+export const quick = platformAi.interview.line;
+/** The model that writes down what was said: Grasp's own too. */
+export const careful = platformAi.interview.notes;
 
-/** The models the organization chose for these tests: its default first. */
-export const interviewModels = [quick, careful] as const;
+/**
+ * The models the organization chose for these tests, its default first:
+ * what reads and draws what an interview wrote down. The interview itself
+ * runs on neither.
+ */
+export const interviewModels = [
+  "anthropic/claude-sonnet-4-5",
+  "anthropic/claude-opus-4-8",
+] as const;
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -275,7 +284,7 @@ export const answeringWith = async <T>(
   let done = false;
   const fake = await answeringProvider(
     async (requests) => (done ? undefined : await respond(requests)),
-    { models: interviewModels }
+    { models: interviewModels, platformKeys: [platformMistralKey] }
   );
   try {
     return { requests: fake.requests, result: await run() };

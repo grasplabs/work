@@ -4,13 +4,18 @@ import type {
   StephenTurn,
   TurnEvent,
 } from "@grasp-os/shared/interview-turn";
+import { modelErrors } from "@grasp-os/shared/models";
+import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
+import { models } from "../src/models.ts";
+import { platformMistralKey } from "./connect-providers.ts";
 import {
   answering,
   codeOf,
   countedFor,
   holdAlarm,
+  interviewModels,
   modelOf,
   onLink,
   opened,
@@ -26,8 +31,9 @@ import { unique } from "./sign-in.ts";
 
 // One turn of someone's interview (src/onboarding/interview.ts), over the
 // endpoint, as the page asks for it. The model provider is the outside
-// system: a fake behind connect, answering for the organization's model:
-// his line (the quick role) and what he writes down (the careful one). The
+// system: a fake behind connect, answering for the interview's own models
+// on Grasp's Mistral key (src/platform-ai.ts): his line (the quick one) and
+// what he writes down (the careful one). The
 // ways it can fail, tried here:
 //
 // - The page saying who it is or what Stephen knows: the request takes no
@@ -36,6 +42,19 @@ import { unique } from "./sign-in.ts";
 // - A turn given up halfway going uncounted, or still running.
 // - A link that isn't open, nobody signed in, or someone else signed in,
 //   getting a turn.
+
+/** The code a gateway call was refused with; none when it wasn't. */
+const codeOfError = async (
+  call: Promise<unknown>
+): Promise<string | undefined> => {
+  let code: string | undefined = undefined;
+  try {
+    await call;
+  } catch (error) {
+    code = modelErrors.codeOf(error);
+  }
+  return code;
+};
 
 type Turn = Omit<InterviewTurnRequest, "secret" | "interviewer" | "adding"> &
   Partial<Pick<InterviewTurnRequest, "interviewer" | "adding">>;
@@ -71,7 +90,7 @@ describe("an interview turn", { timeout: 60_000 }, () => {
   // queued for the test's own call (`holdAlarm`).
   beforeEach(holdAlarm);
 
-  it("holds an interview over the endpoint: his line and what he wrote down from the organization's model, and who he talks with from the store", async () => {
+  it("holds an interview over the endpoint: his line and what he wrote down from the interview's own models, and who he talks with from the store", async () => {
     const link = await opened();
     const said = "I check the invoice in Exact and then I send it on.";
     const { requests, result } = await answering(
@@ -155,10 +174,10 @@ describe("an interview turn", { timeout: 60_000 }, () => {
       },
       // Both roles resolve to the organization's default.
       models: [
-        "claude-sonnet-4-5",
-        "claude-sonnet-4-5",
-        "claude-sonnet-4-5",
-        "claude-sonnet-4-5",
+        "mistral-small-latest",
+        "mistral-medium-latest",
+        "mistral-small-latest",
+        "mistral-medium-latest",
       ],
       toldName: true,
       noLead: true,
@@ -208,6 +227,47 @@ describe("an interview turn", { timeout: 60_000 }, () => {
     });
   });
 
+  it("runs on Grasp's own Mistral key, whatever the organization connected, and on no other model", async () => {
+    const link = await opened();
+    const { requests } = await answering(
+      [line("Which system is that?"), notes({ facts: [], changes: [] })],
+      async () =>
+        await eventsOf(
+          await ask(link, {
+            event: "answer",
+            locale: "en",
+            lines: [{ from: "person", text: "I look it up.", typed: true }],
+            facts: [],
+            phase: "steps",
+            minutes: 5,
+          })
+        )
+    );
+    // The gateway lets the interview's way through for its own models only.
+    const other = await codeOfError(
+      models(env).interview.call({
+        model: interviewModels[0],
+        purpose: "onboarding.interview",
+        trigger: { type: "system" },
+        work: { onboarding: true },
+        input: "Hello",
+      })
+    );
+    expect({
+      sentTo: requests.map(({ url, headers }) => [
+        new URL(url).host,
+        headers.get("authorization"),
+      ]),
+      other,
+    }).toStrictEqual({
+      sentTo: [
+        ["api.mistral.ai", `Bearer ${platformMistralKey}`],
+        ["api.mistral.ai", `Bearer ${platformMistralKey}`],
+      ],
+      other: "model.not_allowed",
+    });
+  });
+
   it("asks a line the model declines once more", async () => {
     const link = await opened();
     const { requests, result } = await answering(
@@ -233,7 +293,11 @@ describe("an interview turn", { timeout: 60_000 }, () => {
       models: requests.map(modelOf),
     }).toStrictEqual({
       say: "Which part of it takes longest?",
-      models: ["claude-sonnet-4-5", "claude-sonnet-4-5", "claude-sonnet-4-5"],
+      models: [
+        "mistral-small-latest",
+        "mistral-medium-latest",
+        "mistral-medium-latest",
+      ],
     });
   });
 
