@@ -32,6 +32,12 @@ const smokeBindings = Object.fromEntries(
     "GOOGLE_SMOKE_CALENDAR",
     "GOOGLE_SMOKE_DRIVE",
     "GOOGLE_SMOKE_WRITES",
+    "MCP_LIVE_URL",
+    "MCP_LIVE_CALLBACK",
+    "MCP_LIVE_READ",
+    "MCP_LIVE_READ_INPUT",
+    "MCP_LIVE_WRITE",
+    "MCP_LIVE_WRITE_INPUT",
   ].flatMap((name) => {
     const value = process.env[name];
     return value === undefined || value === "" ? [] : [[name, value]];

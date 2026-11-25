@@ -5,6 +5,7 @@ import type { SQL } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { recordEventIf } from "./audit.ts";
+import { providerConfigFor } from "./connector-providers.ts";
 import {
   connections,
   connectionTokens,
@@ -120,7 +121,7 @@ const revokeWith = async (
     { refreshToken: string } | "none" | "unavailable" | "unreadable"
   >
 ): Promise<RevokeOutcome> => {
-  const provider = providerFor(connection.provider);
+  const provider = await providerConfigFor(env, connection.provider);
   // An API key has no grant to revoke: the app's own settings do that.
   if (provider?.kind !== "oauth" || provider.revocationEndpoint === undefined) {
     return "nothing";

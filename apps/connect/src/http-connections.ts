@@ -199,7 +199,7 @@ type HostReach = "public" | "private" | "unresolved" | "unanswered";
  * it has none, `unanswered` if the resolver couldn't answer for its IPv4
  * addresses. A failed IPv6 lookup beside a good IPv4 one counts as none.
  */
-const resolvedPublic = async (host: string): Promise<HostReach> => {
+export const resolvedPublic = async (host: string): Promise<HostReach> => {
   const [v4, v6] = await Promise.all([
     addressesOf(host, "A"),
     addressesOf(host, "AAAA"),

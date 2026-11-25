@@ -8,6 +8,7 @@ import {
   reconcileUnsyncedTools,
   retryComposioCleanups,
 } from "./composio-connections.ts";
+import { resealConnectorSecrets } from "./connector-providers.ts";
 import { resealHttpCredentials } from "./http-connections.ts";
 import { purgeExpiredFlows, resealFlows } from "./oauth.ts";
 import { expireHeldActions } from "./pending.ts";
@@ -55,6 +56,11 @@ export const clockTasks: readonly ClockTask<Env>[] = [
   { name: "vault.ai_keys", period: "minute", run: resealAiProviderKeys },
   { name: "vault.http", period: "minute", run: resealHttpCredentials },
   { name: "vault.owed", period: "minute", run: resealOwedRevokes },
+  {
+    name: "vault.connectors",
+    period: "minute",
+    run: resealConnectorSecrets,
+  },
 ];
 
 /** How connect logs a task that failed: its name and the error, nothing it worked on. */
