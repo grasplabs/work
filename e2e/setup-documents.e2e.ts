@@ -6,9 +6,8 @@ import { peopleIn } from "./people.ts";
 import { answerSpeech } from "./speech.ts";
 
 // The documents step of the admin's onboarding: three documents dropped
-// are each read at once and kept as a chip each, Stephen asks his one
-// question about the first with what it is about, answered with a press,
-// and the way on leads to the HR platform. Core's reading is the model's,
+// are each read at once and kept as a chip each, with nothing asked
+// about them, and the way on leads to the HR platform. Core's reading is the model's,
 // which the local stack doesn't reach, so it is given here
 // (e2e/document-readings.ts), as is his voice (e2e/speech.ts).
 
@@ -17,32 +16,24 @@ test.use({
   launchOptions: { args: ["--autoplay-policy=no-user-gesture-required"] },
 });
 
-const onboarding = {
-  about: "How a new client is taken on, from the first call to the kickoff.",
-  tools: ["HubSpot", "DocuSign"],
-  teams: [],
-  unclear: [],
-  ask: {
-    question: "Is this still how new clients are taken on?",
-    options: ["Yes, still", "No, it changed"],
-  },
-};
-
 const readings = {
-  "client-onboarding.pdf": onboarding,
+  "client-onboarding.pdf": {
+    about: "How a new client is taken on, from the first call to the kickoff.",
+    tools: ["HubSpot", "DocuSign"],
+    teams: [],
+    unclear: [],
+  },
   "expenses.pdf": {
     about: "How expenses are claimed and approved.",
     tools: ["Exact Online"],
     teams: [],
     unclear: [],
-    ask: null,
   },
   "planning.pdf": {
     about: "How the week's jobs are planned.",
     tools: ["HubSpot", "Microsoft Teams"],
     teams: [],
     unclear: [],
-    ask: null,
   },
 };
 
@@ -52,7 +43,7 @@ const pdf = (name: string) => ({
   buffer: Buffer.from("%PDF-1.4\n"),
 });
 
-test("the admin drops three documents, answers Stephen's question, and goes on to the HR platform", async ({
+test("the admin drops three documents and goes on to the HR platform", async ({
   pageOf,
 }) => {
   const { admin } = peopleIn("setupDocuments");
@@ -78,13 +69,6 @@ test("the admin drops three documents, answers Stephen's question, and goes on t
       shared.getByRole("button", { name: `Remove ${name}` })
     ).toBeVisible();
   }
-
-  // His one question, said with what its document is about, answered with a press.
-  await expect(
-    page.getByText(`${onboarding.about} ${onboarding.ask.question}`)
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Yes, still" }).click();
-  await expect(page.getByRole("button", { name: "Yes, still" })).toBeHidden();
 
   // The way on: the HR platform, as Pulse is not on the admin's path.
   await page.getByRole("button", { name: "Continue" }).click();

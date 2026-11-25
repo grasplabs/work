@@ -420,6 +420,11 @@ export const documents = sqliteTable("documents", {
   at: text().notNull(),
   by: text().notNull(),
   reading: text().notNull(),
+  /**
+   * No longer written or read: the admin's answer to a document's question,
+   * when documents still asked one. Dropped in a later release: expand,
+   * then contract.
+   */
   answer: text(),
   /**
    * No longer written or read since GRA-1889 (a reading waited here to be

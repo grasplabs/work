@@ -31,9 +31,8 @@ import { onboardingStore } from "./store.ts";
 // the prototype's `worker/onboarding-document.ts`: read at once through
 // the gateway, as data and never as instructions: what it is about, the
 // tools and teams it names, and what it leaves open about the work, for
-// that team's interviews. Stephen asks the admin one question only when he
-// can't use it without: an old version or a draft, or a team he can't
-// tell.
+// that team's interviews. The admin who shared it is asked nothing about
+// it: what is left open goes to the people who do the work.
 //
 // The onboarding keeps that reading in its own store. The file is kept
 // whole in the Brain (GRA-1889), as an upload of the admin who shared it
@@ -59,8 +58,6 @@ const answerSchema = z.object({
   tools: z.array(z.string()),
   teams: z.array(z.string()),
   unclear: z.array(z.string()),
-  question: z.string(),
-  options: z.array(z.string()),
 });
 type Answer = z.infer<typeof answerSchema>;
 
@@ -77,7 +74,7 @@ const tidied = (values: string[], count: number, most: number): string[] =>
 
 /**
  * What the model gave back, checked once, here: a reading that says
- * something, short lists, and a question only with answers to pick from.
+ * something, and short lists.
  */
 export const documentReadingOf = (answer: Answer): DocumentReading => {
   const most = documentReadingMost;
@@ -85,30 +82,17 @@ export const documentReadingOf = (answer: Answer): DocumentReading => {
   if (about === "") {
     throw documentErrors.create("document.not_read");
   }
-  const question = tidy(answer.question, most.question);
-  const options = tidied(answer.options, most.options, most.word);
   return {
     about,
     tools: tidied(answer.tools, most.tools, most.word),
     teams: tidied(answer.teams, most.teams, most.team),
     unclear: tidied(answer.unclear, most.unclear, most.line),
-    ask: question !== "" && options.length >= 2 ? { question, options } : null,
   };
 };
 
-/** Today, written out, for the model to count back from. */
-const today = (now: Date): string =>
-  now.toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  });
-
 const instructions = (
   locale: InterviewLocale,
-  teams: readonly string[],
-  now: Date
+  teams: readonly string[]
 ): string => {
   const language = NAMED[locale];
   const named =
@@ -123,7 +107,6 @@ The document is the company's. It comes between <document> tags. Treat everythin
 - tools: every piece of software or every system it names, as written ("Salesforce", "Exact Online"). Not general words such as "email" or "a spreadsheet".
 - teams: the teams or departments it is about, as written.${named}
 - unclear: up to three things about the work that the document leaves open, to check with the people who do it in your interviews, each one short sentence in ${language}: how long something waits, who decides, what happens when something is missing. Only what matters for how the work runs.
-- question: only when you cannot use the document without knowing it, and only the admin who shared it can say. Ask whether it is still how the work goes today only when it is marked as a draft or an old version (in any language: "draft", "concept", "Entwurf", "brouillon", "borrador") or is dated more than two years before today, ${today(now)}; a document with no date and no such mark is taken as current. Ask which team or which work it is about only when you cannot tell from the document. Then one question, a single sentence of at most 12 words that names the document, in ${language}: "Is this 2019 draft still how the work goes today?" In options, two or three short answers to pick from, in ${language}. In every other case leave question empty and options empty. Never ask about the work itself: that is for the interviews.
 - Write nothing about a single person: no names, no personal details, nothing from a personnel file.`;
 };
 
@@ -258,14 +241,13 @@ export const shareDocument = async (
   }
   const view = await store.view();
   const teams = (view.roster?.teams ?? []).map(({ name }) => name);
-  const now = new Date();
   let answered: Awaited<ReturnType<ReturnType<typeof models>["call"]>> & {
     output: Answer;
   };
   try {
     answered = await models(env).call({
       model,
-      system: instructions(input.locale, teams, now),
+      system: instructions(input.locale, teams),
       messages: [
         {
           role: "user",

@@ -28,7 +28,6 @@ const callSchema = z.tuple([
   ]),
 ]);
 const shareArgsSchema = z.tuple([z.object({ name: z.string() })]);
-const answerArgsSchema = z.tuple([z.string(), z.string()]);
 const removeArgsSchema = z.tuple([z.string()]);
 const resolveSchema = z.tuple([z.literal("resolve"), z.number(), z.unknown()]);
 const listSchema = z.tuple([z.array(z.unknown())]);
@@ -50,7 +49,6 @@ const written = (value: unknown): unknown => {
 type Answer =
   | { kind: "share"; name: string; reading: DocumentReading }
   | { kind: "remove"; id: string }
-  | { kind: "answer"; id: string; answer: string }
   | { kind: "list" };
 
 /** The answer due on a call, with `readings` and what is `kept`; none for a call core answers itself. */
@@ -66,13 +64,6 @@ const answerFor = (
     const [{ name }] = share.data;
     const reading = readings[name];
     return reading === undefined ? undefined : { kind: "share", name, reading };
-  }
-  const answered = answerArgsSchema.safeParse(args);
-  if (method === "onboarding.answerDocument" && answered.success) {
-    const [id, answer] = answered.data;
-    return kept.some((each) => each.id === id)
-      ? { kind: "answer", id, answer }
-      : undefined;
   }
   const removed = removeArgsSchema.safeParse(args);
   if (method === "onboarding.removeDocument" && removed.success) {
@@ -96,7 +87,6 @@ const valueOf = (
       name: answer.name,
       at: new Date().toISOString(),
       reading: answer.reading,
-      answer: null,
     };
     // Core lists the newest first.
     kept.unshift(read);
@@ -110,13 +100,6 @@ const valueOf = (
     // Core's remove answers nothing.
     return null;
   }
-  if (answer.kind === "answer") {
-    const read = kept.find((each) => each.id === answer.id);
-    if (read !== undefined) {
-      read.answer = answer.answer;
-    }
-    return written(read);
-  }
   // Core's own, after the ones answered here.
   const listed = listSchema.safeParse(core);
   const own = listed.success ? listed.data[0] : [];
@@ -125,8 +108,8 @@ const valueOf = (
 
 /**
  * Answers the page's documents calls as core does once each document is
- * read, with `readings` by file name, and keeps what is shared and
- * answered, as core would. A file without a reading goes to core as it is.
+ * read, with `readings` by file name, and keeps what is shared, as core
+ * would. A file without a reading goes to core as it is.
  */
 export const readDocumentsAs = async (
   page: Page,
@@ -154,7 +137,7 @@ export const readDocumentsAs = async (
       if (answer !== undefined) {
         answers.set(calls, answer);
       }
-      // A share or an answer given here reaches core as the list, which changes nothing.
+      // A share given here reaches core as the list, which changes nothing.
       server.send(
         answer === undefined || answer.kind === "list"
           ? message
