@@ -36,23 +36,26 @@ for (const { manifest, code } of bundled) {
 }
 
 /**
- * The apps' records by provider. Two connectors claiming one app would
- * leave it unclear whose record signs in and whose code gets the token:
- * neither does (build.ts refuses such a release; this is in case one got
- * through).
+ * The apps' records by provider. Two connectors claiming one app, a record
+ * either way, would leave it unclear whose record signs in and whose code
+ * gets the token: no record does (build.ts refuses such a release; this is
+ * in case one got through).
  */
 const apps = new Map<string, AppRecord>();
-const claimed = new Set<string>();
-for (const { manifest } of connectors.values()) {
-  const { provider, signIn } = manifest;
-  if (signIn !== undefined) {
-    if (claimed.has(provider)) {
-      apps.delete(provider);
-      log.error("connectors.duplicate_app", { provider });
-    } else {
-      apps.set(provider, { provider, server: manifest.name, signIn });
-    }
-    claimed.add(provider);
+const claims = Map.groupBy(
+  [...connectors.values()].map(({ manifest }) => manifest),
+  ({ provider }) => provider
+);
+for (const [provider, claimed] of claims) {
+  const [manifest] = claimed;
+  if (claimed.length === 1 && manifest?.signIn !== undefined) {
+    apps.set(provider, {
+      provider,
+      server: manifest.name,
+      signIn: manifest.signIn,
+    });
+  } else if (claimed.some(({ signIn }) => signIn !== undefined)) {
+    log.error("connectors.duplicate_app", { provider });
   }
 }
 
@@ -68,3 +71,6 @@ export const nativeConnectors = (): readonly NativeConnector[] => [
 /** The record of the app `provider`, if this release has its connector. */
 export const appRecord = (provider: string): AppRecord | undefined =>
   apps.get(provider);
+
+/** Every app's record of this release. */
+export const appRecords = (): readonly AppRecord[] => [...apps.values()];
