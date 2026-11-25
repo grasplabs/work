@@ -2097,6 +2097,10 @@ msgstr "Un tipo que declara el código de la App"
 msgid "A version's definition and source"
 msgstr "Definición y código fuente de una versión"
 
+#: src/onboarding/document-visitors.tsx
+msgid "A work instruction, maybe?"
+msgstr "¿Una instrucción de trabajo, quizá?"
+
 #: src/apps/draft-changes.tsx
 #: src/settings/event-sources.tsx
 msgid "A workflow"
@@ -7869,6 +7873,10 @@ msgstr "Va bien, en general."
 msgid "Going well."
 msgstr "Va bien."
 
+#: src/onboarding/document-visitors.tsx
+msgid "Got a checklist? Toss it in!"
+msgstr "¿Una checklist? ¡Échala aquí!"
+
 #: src/interview/start.tsx
 msgid "Got it"
 msgstr "Entendido"
@@ -8184,6 +8192,14 @@ msgstr "Tiene acceso"
 #: src/activity/audit-event.tsx
 msgid "Hash"
 msgstr "Hash"
+
+#: src/onboarding/document-visitors.tsx
+msgid "Have a price list? Upload it!"
+msgstr "¿Tienes una lista de precios? ¡Súbela!"
+
+#: src/onboarding/document-visitors.tsx
+msgid "Have an invoice we can look at?"
+msgstr "¿Tienes una factura que podamos ver?"
 
 #: src/settings/stephen-card.tsx
 msgid "He stops answering everywhere outside Grasp, and says so once to whoever writes. Grasp’s chat keeps working."
@@ -17043,6 +17059,10 @@ msgstr "Esa clave no ha funcionado."
 msgid "That staff account hasn't been given access here."
 msgstr "Esa cuenta de personal no tiene acceso aquí."
 
+#: src/onboarding/document-visitors.tsx
+msgid "That training deck helps too"
+msgstr "Esa presentación de formación también ayuda"
+
 #: src/sign-in-errors.ts
 msgid "That way of signing in isn't set up here."
 msgstr "Esa forma de iniciar sesión no está configurada aquí."
@@ -20969,6 +20989,10 @@ msgstr "Los enlaces de entrevista de tu gente llegan por correo desde el dominio
 #: src/chat/composer.tsx
 msgid "Your question"
 msgstr "Tu pregunta"
+
+#: src/onboarding/document-visitors.tsx
+msgid "Your quote template, perhaps?"
+msgstr "¿Tu plantilla de presupuesto, quizá?"
 
 #: src/inbox/report-row.tsx
 msgid "Your report on week {week} is ready"

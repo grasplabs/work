@@ -2097,6 +2097,10 @@ msgstr "Ein Typ, den der Code der App festlegt"
 msgid "A version's definition and source"
 msgstr "Definition und Quelltext einer Version"
 
+#: src/onboarding/document-visitors.tsx
+msgid "A work instruction, maybe?"
+msgstr "Vielleicht eine Arbeitsanweisung?"
+
 #: src/apps/draft-changes.tsx
 #: src/settings/event-sources.tsx
 msgid "A workflow"
@@ -7869,6 +7873,10 @@ msgstr "Es läuft gut, größtenteils."
 msgid "Going well."
 msgstr "Es läuft gut."
 
+#: src/onboarding/document-visitors.tsx
+msgid "Got a checklist? Toss it in!"
+msgstr "Eine Checkliste? Einfach hier hinein!"
+
 #: src/interview/start.tsx
 msgid "Got it"
 msgstr "Verstanden"
@@ -8184,6 +8192,14 @@ msgstr "Hat Zugriff"
 #: src/activity/audit-event.tsx
 msgid "Hash"
 msgstr "Hash"
+
+#: src/onboarding/document-visitors.tsx
+msgid "Have a price list? Upload it!"
+msgstr "Eine Preisliste? Laden Sie sie hoch!"
+
+#: src/onboarding/document-visitors.tsx
+msgid "Have an invoice we can look at?"
+msgstr "Haben Sie eine Rechnung, die wir ansehen dürfen?"
 
 #: src/settings/stephen-card.tsx
 msgid "He stops answering everywhere outside Grasp, and says so once to whoever writes. Grasp’s chat keeps working."
@@ -17043,6 +17059,10 @@ msgstr "Dieser Schlüssel hat nicht funktioniert."
 msgid "That staff account hasn't been given access here."
 msgstr "Dieses Konto des Grasp-Teams hat hier keinen Zugang erhalten."
 
+#: src/onboarding/document-visitors.tsx
+msgid "That training deck helps too"
+msgstr "Die Schulungsfolien helfen auch"
+
 #: src/sign-in-errors.ts
 msgid "That way of signing in isn't set up here."
 msgstr "Diese Anmeldemethode ist hier nicht eingerichtet."
@@ -20969,6 +20989,10 @@ msgstr "Die Interview-Links Ihrer Leute kommen per E-Mail von der Absenderdomain
 #: src/chat/composer.tsx
 msgid "Your question"
 msgstr "Ihre Frage"
+
+#: src/onboarding/document-visitors.tsx
+msgid "Your quote template, perhaps?"
+msgstr "Vielleicht Ihre Angebotsvorlage?"
 
 #: src/inbox/report-row.tsx
 msgid "Your report on week {week} is ready"
