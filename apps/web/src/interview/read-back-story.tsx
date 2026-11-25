@@ -19,7 +19,7 @@ import {
 import { Switch } from "@grasp-os/ui/components/switch";
 import { Text } from "@grasp-os/ui/components/text";
 import { Textarea } from "@grasp-os/ui/components/textarea";
-import { EyeOffIcon, UsersIcon } from "@grasp-os/ui/lib/icons";
+import { EyeOffIcon, Icon, UsersIcon } from "@grasp-os/ui/lib/icons";
 import { fadeIn, focusRingText } from "@grasp-os/ui/lib/styles";
 import {
   colors,
@@ -29,12 +29,13 @@ import {
   radius,
   space,
 } from "@grasp-os/ui/lib/tokens.stylex";
+import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useLocation } from "@tanstack/react-router";
 import { useId, useState } from "react";
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 
 import type { Pose } from "../onboarding/field/engine.ts";
 import { voice } from "./interview.stylex.ts";
@@ -49,6 +50,7 @@ import {
   withShares,
 } from "./progress.ts";
 import { markedTerms, storyPieces } from "./read-back-terms.ts";
+import type { Term } from "./read-back-terms.ts";
 import { useSaidIn } from "./speech.ts";
 import { SpokenText } from "./spoken.tsx";
 import { usePromise } from "./words.ts";
@@ -110,15 +112,16 @@ const styles = stylex.create({
     alignItems: "center",
     gap: space["3"],
   },
-  // The story: one paragraph at a size to read, from its start.
+  // The story: one paragraph at the size of reading, from its start, with
+  // room between its lines for the pills. A new part fades in in its place.
   story: {
     margin: 0,
     width: "100%",
-    maxWidth: "34rem",
+    maxWidth: "36rem",
     textAlign: "start",
     fontFamily: font.sans,
-    fontSize: { default: font.textLg, [media.sm]: font.headingSm },
-    lineHeight: { default: font.headingSmLine, [media.sm]: font.headingMdLine },
+    fontSize: font.textLg,
+    lineHeight: 1.85,
     fontWeight: font.weightNormal,
     color: colors.foreground,
     textWrap: "pretty",
@@ -127,8 +130,12 @@ const styles = stylex.create({
   storyQuiet: { color: colors.mutedForeground },
   // A sentence: pressed to open what can be done with it. Its ground
   // follows its lines when it wraps.
+  // His line under the sentence he says draws in from its start and
+  // draws back as he goes on, on the library's curve; its colour comes and
+  // goes the same way, so nothing jumps.
   sentence: {
     borderRadius: radius.sm,
+    paddingBlockEnd: "0.2em",
     boxDecorationBreak: "clone",
     WebkitBoxDecorationBreak: "clone",
     cursor: "pointer",
@@ -136,22 +143,48 @@ const styles = stylex.create({
       default: "transparent",
       [media.hover]: { default: "transparent", ":hover": colors.secondary },
     },
+    backgroundImage: `linear-gradient(${voice.heat}, ${voice.heat})`,
+    backgroundRepeat: "no-repeat",
+    backgroundPosition: "0 100%",
+    backgroundSize: "0% 2px",
     transitionProperty: {
-      default: "background-color, color",
+      default: "background-color, background-size, color",
       [media.reducedMotion]: "none",
     },
-    transitionDuration: duration.hover,
+    transitionDuration: duration.ui,
+    transitionTimingFunction: duration.easeInOut,
   },
   open: { backgroundColor: colors.secondary },
   // Where he is in his telling: the sentence he says now carries his warmth
   // as a line under it; those still to come wait in grey.
-  saying: {
-    textDecorationLine: "underline",
-    textUnderlineOffset: "0.3em",
-    textDecorationColor: voice.heat,
-    textDecorationThickness: "2px",
-  },
+  saying: { backgroundSize: "100% 2px" },
   waiting: { color: colors.subtleForeground },
+  // A thing the line names: a quiet pill in the words' own size, its
+  // maker's mark whole at the height of a letter, sitting on the line.
+  pill: {
+    whiteSpace: "nowrap",
+    paddingInline: "0.4em",
+    paddingBlock: "0.08em",
+    borderRadius: radius.md,
+    backgroundColor: colors.secondary,
+    fontWeight: font.weightMedium,
+    boxDecorationBreak: "clone",
+    WebkitBoxDecorationBreak: "clone",
+  },
+  logo: {
+    display: "inline-block",
+    width: "0.95em",
+    height: "0.95em",
+    marginInlineEnd: "0.32em",
+    verticalAlign: "-0.13em",
+    [iconVars.size]: "0.95em",
+  },
+  logoFile: {
+    display: "block",
+    width: "100%",
+    height: "100%",
+    objectFit: "contain",
+  },
   // B: a line taken out stays where it was, struck through and faded.
   out: {
     color: colors.subtleForeground,
@@ -306,6 +339,30 @@ const LineEditor = ({
   );
 };
 
+/** A thing a line names, in the line: its maker's mark, if any, and its words. */
+const TermPill = ({ term, text }: { term: Term; text: string }) => {
+  let mark: ReactNode = null;
+  if (term.src !== null) {
+    mark = (
+      <span {...stylex.props(styles.logo)}>
+        <img alt="" src={term.src} {...stylex.props(styles.logoFile)} />
+      </span>
+    );
+  } else if (term.logo !== null) {
+    mark = (
+      <span {...stylex.props(styles.logo)}>
+        <Icon icon={term.logo} />
+      </span>
+    );
+  }
+  return (
+    <span {...stylex.props(styles.pill)}>
+      {mark}
+      {text}
+    </span>
+  );
+};
+
 /** Enter and Space press a sentence, as they press a button. */
 const pressWithKeys =
   (press: () => void) =>
@@ -368,13 +425,7 @@ const Sentence = ({
             piece.term === null ? (
               piece.text
             ) : (
-              <Badge
-                icon={piece.term.logo ?? undefined}
-                key={piece.at}
-                variant="secondary"
-              >
-                {piece.text}
-              </Badge>
+              <TermPill key={piece.at} term={piece.term} text={piece.text} />
             )
           )}
           {differs ? (
@@ -470,7 +521,12 @@ export const StoryReadBack = ({ concept }: { concept: ReadBackConcept }) => {
           </div>
         </div>
         <p
-          {...stylex.props(styles.story, concept === "b" && styles.storyQuiet)}
+          key={at}
+          {...stylex.props(
+            styles.story,
+            fadeIn,
+            concept === "b" && styles.storyQuiet
+          )}
         >
           {shown.map((fact, place) => {
             const going = goingOf(fact, kind);
