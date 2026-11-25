@@ -16,6 +16,11 @@ import { sampleHost } from "./fixtures/sample-connector.ts";
 import { fakeProviders } from "./oauth-provider.ts";
 import type { ProviderName } from "./oauth-provider.ts";
 import { fakeSampleApi } from "./sample-api.ts";
+import {
+  connectTenantApp,
+  fakeTenantApp,
+  tenantAccountOf,
+} from "./tenant-app.ts";
 import { callTool as call } from "./tool-calls.ts";
 
 // What connectors*.test.ts and native-tools-*.test.ts share: the fake
@@ -25,6 +30,7 @@ import { callTool as call } from "./tool-calls.ts";
 export const providers = fakeProviders();
 export const apps = fakeApps();
 export const api = fakeSampleApi();
+export const tenantApp = fakeTenantApp();
 
 /** A person's own Microsoft account, connected to `server`. */
 export const connectionTo = async (
@@ -53,12 +59,22 @@ export const isApp = (provider: string): provider is AppName =>
 
 /**
  * A person's own account at `provider`, connected to `server`: through
- * the app's own sign-in for an app, whose connector is the one it names.
+ * the app's own sign-in for an app, whose connector is the one it names,
+ * and the sample tenant app's at its own authorization server.
  */
 export const connectionOf = async (
   server: string,
   provider: string
 ): Promise<{ id: string; person: ConnectionPerson }> => {
+  if (provider === "sample-tenant") {
+    const person = someone();
+    const id = await connectTenantApp(
+      tenantApp,
+      person,
+      tenantAccountOf(person)
+    );
+    return { id, person };
+  }
   if (!isApp(provider)) {
     return await connectionTo(
       server,
