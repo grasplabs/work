@@ -223,6 +223,33 @@ describe("a spec as tools", () => {
     expect(spec.host).toBe("api.example.test");
   });
 
+  it("reads a parameter after a literal prefix that ends in a colon", async () => {
+    const spec = await readSpec(
+      specText({
+        "/chats/19:{chat}/messages": {
+          get: {
+            parameters: [
+              {
+                name: "chat",
+                in: "path",
+                required: true,
+                schema: { type: "string" },
+              },
+            ],
+            responses: ok({ type: "array", items: { type: "string" } }),
+          },
+        },
+      }),
+      url
+    );
+    const [list] = spec.operations;
+    expect([list?.name, list?.path, list?.parameters]).toStrictEqual([
+      "chats.messages.list",
+      "/chats/19:{chat}/messages",
+      [{ name: "chat", in: "path" }],
+    ]);
+  });
+
   it("keeps the vendor's names and pages a list as { items, next }", async () => {
     const spec = await readSpec(specText(pipedrivePaths), url);
     const list = spec.operations.find((tool) => tool.name === "deals.list");

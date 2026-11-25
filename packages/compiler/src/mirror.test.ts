@@ -445,6 +445,18 @@ describe("a tool with no spec to hold it to", () => {
           tool("deals.delete", "DELETE /{collection}/{id}"),
           tool("drive.get", "DELETE /drive/root:/{name}:"),
           tool("content", "GET /drive/root:/{name}:/content"),
+          tool(
+            "drives.list",
+            "GET /drives/{drive}/root/search(q='{q}')",
+            page(v.object({ id: v.string() }))
+          ),
+          tool("me.drive.get", "GET /me/drive/root:/{folder}/{name}"),
+          tool("drive.children.list", "GET /drive/root:/{name}:/children"),
+          tool(
+            "me.chats.listMessages",
+            "GET /me/chats/19:{chat}/messages",
+            page(v.object({ id: v.string() }))
+          ),
         ],
         false
       )
@@ -454,6 +466,10 @@ describe("a tool with no spec to hold it to", () => {
       "deals.delete: /{collection}/{id} names no collection.",
       "drive.get: DELETE /drive/root:/{name}: is named drive.<the vendor's operation name>.",
       "content: GET /drive/root:/{name}:/content is named drive.<the vendor's operation name>.",
+      "drives.list: GET /drives/{drive}/root/search(q='{q}') is named drives.<the vendor's operation name>.",
+      "me.drive.get: GET /me/drive/root:/{folder}/{name} is named me.drive.<the vendor's operation name>.",
+      "drive.children.list: A list answers page(item): { items, next }.",
+      "me.chats.listMessages: GET /me/chats/19:{chat}/messages is named me.chats.messages.list.",
     ]);
   });
 });

@@ -258,7 +258,8 @@ const impliedActions: Readonly<Record<HttpMethod, readonly string[]>> = {
 /**
  * A tool on a path the naming rule can't read (`/drive/root:/{name}:/content`):
  * named `<family>.<the vendor's operation name>`, the family its leading
- * segments. A standard action there is only the one its method takes.
+ * segments. A standard action there follows the vendor's operation name,
+ * and is only the one its method takes.
  */
 const againstUnreadable = (
   tool: MirrorTool,
@@ -283,7 +284,10 @@ const againstUnreadable = (
     tool.name.length <= nameMaxLength &&
     parts.length > 0 &&
     parts.every(isNamePart) &&
-    (!standardActions.has(action) || impliedActions[method].includes(action));
+    // A standard action follows a vendor's part: alone, it would name the
+    // family's own route.
+    (!standardActions.has(action) ||
+      (parts.length > 1 && impliedActions[method].includes(action)));
   if (!vendors) {
     return [
       `${method} ${path} is named ${prefix}<the vendor's operation name>.`,
