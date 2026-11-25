@@ -22,7 +22,7 @@ import type {
 } from "../common/value-types.ts";
 import { v } from "../common/values.ts";
 import { apiFor, routeOf } from "./api.ts";
-import type { Api, RouteText } from "./api.ts";
+import type { Api, RouteText, VendorErrors } from "./api.ts";
 import { fromBase64 } from "./content.ts";
 import {
   changeMetaKey,
@@ -293,7 +293,7 @@ export interface ConnectorTool {
   /** The tool as the runtime's server serves it, named `name` on `connector`. */
   readonly serve: (
     name: string,
-    connector: Pick<ConnectorDeclaration, "title" | "hosts" | "base">
+    connector: Pick<ConnectorDeclaration, "title" | "hosts" | "base" | "errors">
   ) => Tool;
 }
 
@@ -501,6 +501,13 @@ export interface ConnectorDeclaration {
     readonly scheme?: string;
   };
   auth: ConnectorAuth;
+  /**
+   * How its vendor's error answers read, where they differ from
+   * `{ error: { code } }` and 400 or 422 for a request refused as not
+   * valid: so a caller sees the vendor's code, and a rate limit the
+   * vendor answers with another status than 429 is one.
+   */
+  errors?: VendorErrors;
   tools: Readonly<Record<string, ConnectorTool>>;
   events?: Readonly<Record<string, ConnectorReader>>;
   syncs?: Readonly<Record<string, ConnectorReader>>;
@@ -734,7 +741,7 @@ const toolOf = <
   Returns extends AnySchema,
   Routes extends readonly RouteText[],
 >(
-  connector: Pick<ConnectorDeclaration, "title" | "hosts" | "base">,
+  connector: Pick<ConnectorDeclaration, "title" | "hosts" | "base" | "errors">,
   name: string,
   declaration: ToolDeclaration<Args, Returns, Routes>
 ): Tool => {
@@ -848,8 +855,13 @@ const toolOf = <
           : async (data: typeof parsed.value, effect: { key: string }) => {
               const found = await find(
                 data,
-                apiFor(connector.title, connector.hosts, reads, connector.base)
-                  .api,
+                apiFor(
+                  connector.title,
+                  connector.hosts,
+                  reads,
+                  connector.base,
+                  connector.errors
+                ).api,
                 { key: effect.key, stamp: meta.stamp, changed }
               );
               return found === null ? null : { output: found };
@@ -866,7 +878,8 @@ const toolOf = <
         connector.title,
         connector.hosts,
         routes,
-        connector.base
+        connector.base,
+        connector.errors
       );
       try {
         output = await handler(parsed.value, api, {

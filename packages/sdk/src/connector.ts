@@ -38,4 +38,5 @@ export type {
   ToolArgs,
   ToolCall,
   ToolDeclaration,
+  VendorErrors,
 } from "@grasp-os/runtime/connector";

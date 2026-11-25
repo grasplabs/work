@@ -42,6 +42,7 @@ export type {
   QueryValue,
   RouteMethod,
   RouteText,
+  VendorErrors,
 } from "./api.ts";
 export {
   ToolError,
