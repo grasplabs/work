@@ -24,6 +24,7 @@ import { NoteActions } from "../brain/note-actions.tsx";
 import { onArticle } from "../brain/note-page.tsx";
 import { NoteReveal } from "../brain/note-reveal.tsx";
 import { readBrain } from "../brain/read-brain.ts";
+import { useChatBarShown } from "../chat/global-chat.tsx";
 import { PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
@@ -104,6 +105,7 @@ const crumbsTo = (
 
 const BrainLayout = () => {
   const { t, i18n } = useLingui();
+  const chatBar = useChatBarShown();
   const loaded = Route.useLoaderData();
   const { noteId, sectionId } = useParams({ strict: false });
   const matchRoute = useMatchRoute();
@@ -164,7 +166,9 @@ const BrainLayout = () => {
         }
         crumbs={crumbs}
       />
-      <div {...stylex.props(brainStyles.body)}>
+      <div
+        {...stylex.props(brainStyles.body, chatBar && brainStyles.underChatBar)}
+      >
         {/* The brain, a part or a note; and over them, the layer that carries the brain's dots into a note's page. */}
         <div {...stylex.props(brainStyles.page)}>
           <Outlet />

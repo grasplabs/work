@@ -35,6 +35,9 @@ const styles = stylex.create({
   // Beside a card's title, a space-2 from it, as #2503's section header
   // sets its title row; beside a label, a space-1, as its setting row.
   ofTitle: { columnGap: space[2] },
+  // Beside a label the mark keeps to the label's line, and a long label
+  // wraps its words before it, as #2503's setting row keeps them.
+  ofLabel: { flexWrap: "nowrap" },
   // A box no taller than the title's line: the button may be taller, the
   // row never is.
   mark: {
@@ -86,7 +89,12 @@ export const WithInfo = ({
   /** What it stands beside: a label's (a field's, a setting's), or a card's title. */
   of?: "label" | "title";
 }) => (
-  <div {...stylex.props(styles.row, of === "title" && styles.ofTitle)}>
+  <div
+    {...stylex.props(
+      styles.row,
+      of === "title" ? styles.ofTitle : styles.ofLabel
+    )}
+  >
     {children}
     <span {...stylex.props(styles.mark)}>
       <InfoTip {...(label === undefined ? {} : { label })}>{info}</InfoTip>

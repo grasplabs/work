@@ -14,6 +14,7 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useMatchRoute } from "@tanstack/react-router";
 
+import { useChatBarShown } from "../chat/global-chat.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import type { Crumb } from "../frame/site-header.tsx";
 import { brainSections } from "./brain-sections.ts";
@@ -205,6 +206,7 @@ const BrainBody = ({ page }: { page: BrainPage }) => {
  */
 export const BrainPending = () => {
   const { t, i18n } = useLingui();
+  const chatBar = useChatBarShown();
   const { page, section } = useBrainPage();
   const brain = t`Brain`;
   const shown = brainSections.find((candidate) => candidate.slug === section);
@@ -242,7 +244,9 @@ export const BrainPending = () => {
   return (
     <>
       <SiteHeader crumbs={crumbsOf[page]} />
-      <div {...stylex.props(brainStyles.body)}>
+      <div
+        {...stylex.props(brainStyles.body, chatBar && brainStyles.underChatBar)}
+      >
         <div {...stylex.props(brainStyles.page)}>
           <BrainBody page={page} />
         </div>

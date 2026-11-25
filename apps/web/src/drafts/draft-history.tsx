@@ -29,8 +29,6 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
-  ItemGroup,
-  ItemSeparator,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import { Section, SectionHeader } from "@grasp-os/ui/components/section-header";
@@ -56,7 +54,7 @@ import { msg, plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useRouter } from "@tanstack/react-router";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { FileChanges } from "../apps/draft-changes.tsx";
@@ -76,6 +74,7 @@ import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { SeparatedItems } from "../workflows/separated-items.tsx";
 import { isConflict, publishFailureText, settled } from "./publish-errors.ts";
 import { hasChanges, useDraft } from "./use-draft.ts";
 
@@ -433,10 +432,10 @@ const DraftCheckpoints = ({
       ) : null}
       {checkpoints.length === 0 ? null : (
         <Card padding="none">
-          <ItemGroup>
-            {checkpoints.map((checkpoint, at) => (
-              <Fragment key={checkpoint.number}>
-                {at === 0 ? null : <ItemSeparator />}
+          <SeparatedItems
+            rows={checkpoints.map((checkpoint) => ({
+              key: String(checkpoint.number),
+              row: (
                 <CheckpointItem
                   busy={busy}
                   checkpoint={checkpoint}
@@ -452,9 +451,9 @@ const DraftCheckpoints = ({
                   }}
                   subject={subject}
                 />
-              </Fragment>
-            ))}
-          </ItemGroup>
+              ),
+            }))}
+          />
         </Card>
       )}
       <ConfirmChange
@@ -889,10 +888,10 @@ const VersionsView = ({
   return (
     <div {...stylex.props(styles.list)}>
       <ErrorText>{failure}</ErrorText>
-      <ItemGroup>
-        {versions.map((each, at) => (
-          <Fragment key={each.version}>
-            {at === 0 ? null : <ItemSeparator />}
+      <SeparatedItems
+        rows={versions.map((each) => ({
+          key: String(each.version),
+          row: (
             <VersionItem
               by={
                 each.author === identity.userId
@@ -921,9 +920,9 @@ const VersionsView = ({
               release={releases.get(each.version)}
               version={each}
             />
-          </Fragment>
-        ))}
-      </ItemGroup>
+          ),
+        }))}
+      />
       {next === null ? null : (
         <Button
           disabled={more}

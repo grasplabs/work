@@ -17,19 +17,17 @@ import { notLoadedText } from "../load-from-core.tsx";
 import { AgentName, agentModelOf } from "./agent-choice.tsx";
 import { AskOrCompose } from "./asked-questions.tsx";
 import { BuildsFailure, workOf } from "./builds.tsx";
-import { ConnectionRequests } from "./connection-requests.tsx";
 import { FailureLine } from "./failure-line.tsx";
 import type { GlobalChat } from "./global-chat.tsx";
-import { HeldWrites } from "./held-writes.tsx";
 import { pendingCard } from "./make-card.tsx";
 import {
   ModelsUnavailableNotice,
   unavailableText,
 } from "./models-unavailable.tsx";
-import { PackageRequests } from "./package-requests.tsx";
 import { ChatSources } from "./sources.tsx";
 import { useSubjectBar } from "./subject-bar.tsx";
 import type { ChatThread as ChatThreadType } from "./thread.tsx";
+import { WaitingForYou } from "./waiting-for-you.tsx";
 
 // One chat's conversation and the box to ask in under it, as the chat
 // beside a page (chat-panel.tsx) and a chat's own page (chat-page.tsx)
@@ -197,26 +195,23 @@ export const ChatConversation = ({
             ) : null}
           </div>
         )}
-        <HeldWrites
+        <WaitingForYou
           chatId={chatId}
-          // Confirmed, the agent reads how it ended and goes on, in a turn
-          // the person's own message starts, as for approved packages
-          // below: the decision itself reaches it as a note (GRA-2224).
-          onConfirmed={() => {
-            if (!view.running) {
-              void ask(t`Confirmed. Carry on.`);
-            }
-          }}
-          version={view.held}
-        />
-        <ConnectionRequests chatId={chatId} version={view.held} />
-        <PackageRequests
-          chatId={chatId}
+          // One pause per chat: what is answered in one never holds another's.
+          key={chatId}
           // Approved, the work the agent stopped for goes on, in a turn
           // the person's own message starts: the thread says why it did.
           onApproved={() => {
             if (!view.running) {
               void ask(t`The packages are approved. Carry on.`);
+            }
+          }}
+          // Confirmed, the agent reads how it ended and goes on, in a turn
+          // the person's own message starts, as for approved packages:
+          // the decision itself reaches it as a note (GRA-2224).
+          onConfirmed={() => {
+            if (!view.running) {
+              void ask(t`Confirmed. Carry on.`);
             }
           }}
           version={view.held}

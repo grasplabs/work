@@ -23,7 +23,9 @@ import { InterviewPage } from "./page.tsx";
 // against core's route faked as `fetch` answers it: each is done at once,
 // and the page says exactly what is true then. While what the Brain kept
 // of the interview is still being removed (core's answer says
-// `removing`), it says so, never that nothing is kept or used.
+// `removing`), it says so, never that nothing is kept or used. Someone
+// who can't hold the button deletes by two presses instead, each asking
+// first.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -92,6 +94,15 @@ const buttonNamed = (label: string): HTMLButtonElement | undefined =>
 
 const text = (): string => document.body.textContent ?? "";
 
+/** The yes of the delete button's own question, which a press let go at once opens. */
+const yes = (): HTMLElement | null =>
+  document.querySelector<HTMLElement>(
+    '[data-agent-confirm="Delete my interview"]'
+  );
+
+/** What the page asked core to do, in turn: its calls' actions. */
+const asked: unknown[] = [];
+
 /**
  * The page, on a faked core whose delete or withdrawal answers `removed`,
  * opened as `opened` says (the link's session, as core answered it).
@@ -111,6 +122,7 @@ const shown = async (
           typeof body === "object" && body !== null && "action" in body
             ? body.action
             : null;
+        asked.push(action);
         return action === "withdraw" || action === "delete"
           ? Response.json(removed)
           : Response.json({ saved: true, version: 2 });
@@ -184,6 +196,7 @@ describe("deleting and withdrawing on the interview page", () => {
     });
     root = undefined;
     releaseInterview();
+    asked.length = 0;
     document.body.replaceChildren();
     vi.unstubAllGlobals();
     vi.useRealTimers();
@@ -227,6 +240,43 @@ describe("deleting and withdrawing on the interview page", () => {
       ),
       nothingKept: text().includes("Nothing you said is kept."),
     }).toStrictEqual({ removing: true, nothingKept: false });
+  });
+
+  it("deletes by two presses for someone who can't hold the button, each asking first", async () => {
+    await shown({ deleted: true });
+    const deletes = (): number =>
+      asked.filter((action) => action === "delete").length;
+    // A press let go at once: it asks, and deletes nothing.
+    await act(async () => {
+      buttonNamed("Delete my interview")?.click();
+      await Promise.resolve();
+    });
+    await until(() => yes() !== null, "the button's question");
+    const first = deletes();
+    await act(async () => {
+      yes()?.click();
+      await Promise.resolve();
+    });
+    // Then the page's own question, with what is lost.
+    await until(
+      () => buttonNamed("Delete it") !== undefined,
+      "the page's question"
+    );
+    const second = {
+      deletes: deletes(),
+      asks: text().includes("Delete your interview?"),
+    };
+    await act(async () => {
+      buttonNamed("Delete it")?.click();
+      await Promise.resolve();
+    });
+    await until(() => text().includes("Deleted."), "the deletion");
+
+    expect({ first, second, deletes: deletes() }).toStrictEqual({
+      first: 0,
+      second: { deletes: 0, asks: true },
+      deletes: 1,
+    });
   });
 
   it("says nothing they said is kept once core removed it all", async () => {

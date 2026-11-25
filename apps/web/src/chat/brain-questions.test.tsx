@@ -11,7 +11,7 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
@@ -23,7 +23,9 @@ import { BrainQuestions } from "./brain-questions.tsx";
 // answers in their own words; only the company's admins ask the owner, or
 // close a question without an answer;
 // Grasp's staff do neither; a refusal is said and the draft kept, and an
-// ask nobody could receive is said and shows nothing as asked.
+// ask nobody could receive is said and shows nothing as asked. Once one is
+// dealt with, the questions that move up into its place hold Ask and
+// Close a moment.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -48,31 +50,54 @@ const closed: Gap = {
 
 type Who = Pick<Identity, "role" | "staff">;
 
-/** Shows `gaps` to `who`, on a core that refuses what `refusal` says. */
+/**
+ * Shows `gaps` to `who`, on a core that refuses what `refusal` says; read
+ * again once one changed, as the brain chat does.
+ */
 const shown = async (gaps: Gap[], who: Who, refusal?: string) => {
   const calls: string[] = [];
   const changed: number[] = [];
+  let current = gaps;
   const refuse = (): void => {
     if (refusal !== undefined) {
       throw new Error(refusal);
     }
+  };
+  const change = (id: string, to: Partial<Gap>): void => {
+    current = current.map((gap) => (gap.id === id ? { ...gap, ...to } : gap));
   };
   const brain = {
     answerGap: async (id: string, answer: string) => {
       await Promise.resolve();
       calls.push(`answer ${id}: ${answer}`);
       refuse();
+      change(id, { closedAt: "2026-11-25", answer });
     },
     askAboutGap: async (id: string) => {
       await Promise.resolve();
       calls.push(`ask ${id}`);
       refuse();
+      change(id, { askedAt: "2026-11-25" });
     },
     closeGap: async (id: string) => {
       await Promise.resolve();
       calls.push(`close ${id}`);
       refuse();
+      change(id, { closedAt: "2026-11-25" });
     },
+  };
+  const Questions = () => {
+    const [read, setRead] = useState(gaps);
+    return (
+      <BrainQuestions
+        gaps={read}
+        identity={who}
+        onChanged={() => {
+          changed.push(1);
+          setRead(current);
+        }}
+      />
+    );
   };
   const core = {
     withSession: async <T,>(
@@ -83,15 +108,7 @@ const shown = async (gaps: Gap[], who: Who, refusal?: string) => {
   const page = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: () => (
-      <BrainQuestions
-        gaps={gaps}
-        identity={who}
-        onChanged={() => {
-          changed.push(1);
-        }}
-      />
-    ),
+    component: Questions,
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
@@ -222,6 +239,51 @@ describe(BrainQuestions, () => {
     expect({ admin, member: buttons() }).toStrictEqual({
       admin: { calls: ["close gap-open"], changed: 1 },
       member: ["Answer"],
+    });
+  });
+
+  it("holds Ask and Close of the question that moved into the place of one just closed, a moment", async () => {
+    const next: Gap = {
+      ...open,
+      id: "gap-next",
+      question: "Who signs a quote?",
+    };
+    const { calls } = await shown([open, next], {
+      role: "admin",
+      staff: false,
+    });
+    await press("Close without an answer");
+    const close = [...document.querySelectorAll("button")].find(
+      (each) => each.textContent === "Close without an answer"
+    );
+    const moved = {
+      shown: document.body.textContent.includes(next.question),
+      held: close?.getAttribute("aria-disabled") === "true",
+      said: document.querySelector(
+        `[id="${close?.getAttribute("aria-describedby") ?? ""}"]`
+      )?.textContent,
+    };
+    // The second press of a double click, on what is now under the pointer.
+    await press("Close without an answer");
+    const pressedInThePause = [...calls];
+    await act(async () => {
+      const { promise, resolve } = Promise.withResolvers<boolean>();
+      // Longer than the pause (answer-pause.tsx).
+      setTimeout(() => {
+        resolve(true);
+      }, 1100);
+      await promise;
+    });
+    await press("Close without an answer");
+
+    expect({ moved, pressedInThePause, calls }).toStrictEqual({
+      moved: {
+        shown: true,
+        held: true,
+        said: "Its answers can be used in a moment, so a press meant for the one before doesn't answer it.",
+      },
+      pressedInThePause: ["close gap-open"],
+      calls: ["close gap-open", "close gap-next"],
     });
   });
 

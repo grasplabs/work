@@ -218,20 +218,19 @@ const styles = stylex.create({
     display: "flex",
     flexGrow: 1,
     alignItems: "center",
-    gap: space["2"],
+    // What trails the crumbs (where the subject stands) a space-3 after
+    // them, as the reference's bar sets them apart.
+    gap: space["3"],
     minWidth: 0,
     overflow: "hidden",
-    // The crumbs in the sidebar's neutral greys, as the reference's bar:
-    // the steps back in its rows' words, the slashes quieter, the page in
-    // its ink, through Damsko's Breadcrumb's own inks, which an app
-    // shell's bar sets; what else stands here (where the subject stands,
-    // a name being renamed) in the same greys.
+    // The crumbs in the sidebar's greys, as the reference's bar: the steps
+    // back in its rows' words, the slashes quieter, the page in its ink,
+    // through the path's own inks, which a frame on another ground sets.
+    // What stands beside the crumbs (where the subject stands, its link)
+    // keeps the page's inks, as on the reference.
     [breadcrumbVars.mutedForeground]: colors.sidebarSecondaryForeground,
     [breadcrumbVars.subtleForeground]: colors.sidebarTertiaryForeground,
     [breadcrumbVars.foreground]: colors.sidebarForeground,
-    "--damsko-muted-foreground": colors.sidebarSecondaryForeground,
-    "--damsko-subtle-foreground": colors.sidebarTertiaryForeground,
-    "--damsko-foreground": colors.sidebarForeground,
   },
   // The button's empty rim hangs out past the bar's room, so its glyph
   // stands where the page's words begin, the crumbs 6px after its box, as

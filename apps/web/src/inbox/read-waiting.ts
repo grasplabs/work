@@ -1,4 +1,5 @@
 import { expectedMessageOf } from "@grasp-os/shared/errors";
+import type { Permission } from "@grasp-os/shared/permissions";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type {
   WaitingFeed,
@@ -11,12 +12,14 @@ import { readRequestNames } from "../activity/pending.tsx";
 import type { CoreConnection } from "../core-connection.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { readWorkflowTitles, titledDecision } from "../workflows/reads.ts";
 import { markShownRead } from "./notifications-page.ts";
 import { decidesRequests } from "./waiting.ts";
 import type { Waiting } from "./waiting.ts";
 
 // What the inbox reads: what waits on the person, each part on its own so
-// one that fails leaves the rest. What happened is Settings' audit trail.
+// one that fails leaves the rest, with the workflows its items name by
+// the titles the reader may read. What happened is Settings' audit trail.
 
 /** The items of the feed of one kind. */
 const ofKind = <Kind extends WaitingKind>(
@@ -108,6 +111,32 @@ export const readWaiting = async (
           )
         : asked;
   }
+  // Workflows by the titles the reader may read, where any item names one.
+  const naming =
+    feed.state === "ready" &&
+    feed.data.items.some(
+      ({ kind }) =>
+        kind === "permissionRequest" ||
+        kind === "heldStart" ||
+        kind === "decision"
+    );
+  const overview = naming
+    ? await loadFromCore(core, readWorkflowTitles)
+    : undefined;
+  const titles: ReadonlyMap<string, string> =
+    overview?.state === "ready" ? overview.data : new Map();
+  const titled = (request: Permission): Permission =>
+    request.workflowNames === undefined
+      ? request
+      : {
+          ...request,
+          workflowNames: Object.fromEntries(
+            Object.entries(request.workflowNames).map(([id, name]) => [
+              id,
+              titles.get(id) ?? name,
+            ])
+          ),
+        };
   return {
     held: partOf(feed, "held", (read) =>
       ofKind(read, "heldWrite").map(({ action }) => action)
@@ -119,12 +148,26 @@ export const readWaiting = async (
     reconnect: partOf(feed, "connections", (read) =>
       ofKind(read, "signInAgain")
     ),
-    requests,
+    requests:
+      requests?.state === "ready"
+        ? {
+            state: "ready",
+            data: {
+              ...requests.data,
+              requests: requests.data.requests.map(titled),
+            },
+          }
+        : requests,
     heldStarts: partOf(feed, "heldStarts", (read) =>
-      ofKind(read, "heldStart").map(({ start }) => start)
+      ofKind(read, "heldStart").map(({ start }) => ({
+        ...start,
+        workflowName: titles.get(start.workflow) ?? start.workflowName,
+      }))
     ),
     decisions: partOf(feed, "decisions", (read) =>
-      ofKind(read, "decision").map(({ decision }) => decision)
+      ofKind(read, "decision").map(({ decision }) =>
+        titledDecision(decision, titles)
+      )
     ),
     ...(decidesRequests(identity)
       ? {
