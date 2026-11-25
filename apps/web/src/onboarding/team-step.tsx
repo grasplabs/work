@@ -34,9 +34,10 @@ import { planDraft } from "./visit.ts";
 
 const styles = stylex.create({
   stack: { display: "grid", gap: space[4] },
-  // Copy on the start edge, the postmark on the end, both on the letter's foot.
+  // Copy on the end edge, where the hand goes on (Ruben), the postmark before it; alone, copy is still on the end.
   foot: {
     display: "flex",
+    flexDirection: "row-reverse",
     alignItems: "center",
     justifyContent: "space-between",
     gap: space[3],
