@@ -339,7 +339,8 @@ const Track = ({
   const total = progress?.of ?? 0;
   return (
     <footer {...stylex.props(styles.foot)}>
-      <span {...stylex.props(styles.footStart)}>
+      {/* The way back, as the setup's steps are walked: named so it is found as one. */}
+      <nav aria-label={t`Steps`} {...stylex.props(styles.footStart)}>
         {onBack === undefined ? null : (
           <Button
             aria-label={t`Back`}
@@ -358,7 +359,7 @@ const Track = ({
             </Text>
           </span>
         )}
-      </span>
+      </nav>
       <div ref={setSlot} {...stylex.props(styles.footEnd)} />
       {progress === undefined ? null : (
         <span aria-hidden="true" {...stylex.props(styles.track)}>

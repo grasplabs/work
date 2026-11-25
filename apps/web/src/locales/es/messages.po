@@ -16835,6 +16835,7 @@ msgid "Stephen outside Grasp"
 msgstr "Stephen fuera de Grasp"
 
 #: src/agents/agent-brief.ts
+#: src/onboarding/calm-frame.tsx
 msgid "Steps"
 msgstr "Pasos"
 
