@@ -2698,18 +2698,43 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Whether enough people besides `listener` told how the work of `drawn`
-   * goes for it to be told on (`toldByEnough`): counted by the host from
-   * each one's own agreed, shared lines (`drawInput`), among those it was
-   * drawn from. Never from who the drawing's model says told a part
-   * (`told`): a line someone approved can steer it into naming everyone.
-   * It stops reading at the second.
+   * Whether enough people besides `listener` told how the work they are
+   * asked about goes, the work of `drawn`, for it to be told on
+   * (`toldByEnough`). Counted by the host: among those it was drawn from,
+   * the ones asked about this same work (`askedAbout`: someone's lines are
+   * of the work their interview was about, and a doer of this work who
+   * was asked about another told that one), whose own agreed, shared lines
+   * (`drawInput`) say how work goes. Never from who the drawing's model
+   * says told a part (`told`): a line someone approved can steer it into
+   * naming everyone. It stops reading at the second.
+   *
+   * What is told on is the Brain's standing drawing, which every member of
+   * the team can read in the Brain already. This rule is about how it
+   * sounds when the interviewer says it to a teammate: "I've heard that…"
+   * of what one colleague alone told is that colleague, quoted.
    */
   #toldByOthers(drawn: DrawnWork, listener: string): boolean {
+    const [own] = this.#db
+      .select({ work: askedAbout.work })
+      .from(askedAbout)
+      .where(eq(askedAbout.person, listener))
+      .all();
+    if (own === undefined) {
+      return false;
+    }
+    const aboutIt = new Set(
+      this.#db
+        .select({ person: askedAbout.person })
+        .from(askedAbout)
+        .where(eq(askedAbout.work, own.work))
+        .all()
+        .map(({ person }) => person)
+    );
     let tellers = 0;
     for (const teller of drawn.from) {
       if (
         teller !== listener &&
+        aboutIt.has(teller) &&
         tellsHowItGoes(this.drawInput(teller)?.facts ?? [])
       ) {
         tellers += 1;

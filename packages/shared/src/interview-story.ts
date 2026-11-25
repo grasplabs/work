@@ -189,7 +189,7 @@ const groupOf: Record<FactTag, (typeof readBackGroups)[number]> = {
   rule: "differently",
   judgment: "differently",
   ai: "you",
-  // What they would hand off is asked with their week.
+  // What they would hand off is asked with their week (`groupIn`).
   wish: "tasks",
   number: "result",
   done: "result",
@@ -222,9 +222,15 @@ export interface ReadBackPart {
 export const readBackParts = (facts: InterviewFact[]): ReadBackPart[] => {
   // One erased is read back nowhere: nothing of it is left to read.
   const open = facts.filter((fact) => fact.agreed !== true && !isErased(fact));
+  // A wish is read with their recurring work, where it was asked. In an
+  // interview with none, a lead's or one from before there was any, it is
+  // read where it was before: with what they said about AI.
+  const recurring = facts.some(({ tag }) => tag === "task");
+  const groupIn = ({ tag }: InterviewFact): (typeof readBackGroups)[number] =>
+    tag === "wish" && !recurring ? "you" : groupOf[tag];
   const parts: ReadBackPart[] = readBackGroups.flatMap((group) => {
     const own = open.filter(
-      (fact) => fact.pin === undefined && groupOf[fact.tag] === group
+      (fact) => fact.pin === undefined && groupIn(fact) === group
     );
     return Array.from(
       { length: Math.ceil(own.length / readBackLines) },

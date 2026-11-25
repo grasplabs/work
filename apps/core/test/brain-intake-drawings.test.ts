@@ -113,6 +113,16 @@ const drawingReply = (value: unknown): ProviderReply => ({
 });
 
 /** A team whose tickets are drawn as `reply` says, given to the brain. */
+/** A piece of work as the map's model names it, with who does it. */
+const mappedWork = (name: string, local: string, doers: string[]) => ({
+  name,
+  local,
+  one: "one",
+  many: "many",
+  doers,
+  share: 0.3,
+});
+
 const givenWith = async (
   reply: (ids: Ids) => ProviderReply,
   part?: PartJudge
@@ -692,6 +702,76 @@ describe("what a drawing gives the brain", { timeout: 120_000 }, () => {
       // For Max only Mo told it besides him.
       own: await toldTo(ids.max),
     }).toStrictEqual({ stands: true, one: false, two: true, own: false });
+  });
+
+  it("counts as a teller of a piece of work only someone asked about it: two who do it too and told other work leave one colleague's account untold", async () => {
+    const ids = await sevenTeam();
+    await mapped(ids, {
+      map: {
+        text: JSON.stringify({
+          does: "Answers customers' questions",
+          works: [
+            mappedWork("handling new tickets", "tickets", [
+              ids.max,
+              ids.mia,
+              ids.mo,
+            ]),
+            mappedWork("paying refunds", "refunds", [ids.mia]),
+            mappedWork("calling customers back", "callbacks", [ids.mo]),
+          ],
+        }),
+        inputTokens: 2000,
+        outputTokens: 300,
+      },
+    });
+    const store = onboardingStore(env);
+    const contextOf = async (person: string) => {
+      const context = await store.contextOf(person);
+      return {
+        work: context?.work ?? "",
+        told: context?.known.includes("What the team already told") ?? false,
+      };
+    };
+    const [max, mia, mo] = await Promise.all(
+      [ids.max, ids.mia, ids.mo].map(contextOf)
+    );
+    const asked = { max: max?.work, mia: mia?.work, mo: mo?.work };
+    // Max tells the tickets; Mia and Mo, who do them too, tell the work
+    // they were asked about instead.
+    await agree(ids.max, [fact("m1", "step", "Opens the ticket in Zendesk.")]);
+    await agree(ids.mia, [fact("i1", "step", "Checks the refund amount.")]);
+    await agree(ids.mo, [fact("o1", "step", "Calls the customer back.")]);
+    await answering(
+      [
+        ticketsReply(ids),
+        ticketsReply(ids),
+        ticketsReply(ids),
+        ticketsReply(ids),
+      ],
+      async () => [
+        await store.drawNext(),
+        await store.drawNext(),
+        await store.drawNext(),
+        await store.drawNext(),
+      ]
+    );
+    await intake(ids, []);
+    const others = await Promise.all(
+      [ids.noor, ids.pim, ids.rik, ids.sam].map(contextOf)
+    );
+    const standing = await store.standingDrawings();
+    expect({
+      asked,
+      stands: standing.length > 0,
+      // Whoever else is asked about the tickets hears nothing of them.
+      aboutTickets: others.some((each) => each.work === "tickets"),
+      told: others.filter((each) => each.work === "tickets" && each.told),
+    }).toStrictEqual({
+      asked: { max: "tickets", mia: "refunds", mo: "callbacks" },
+      stands: true,
+      aboutTickets: true,
+      told: [],
+    });
   });
 
   it("gives Grasp's staff no drawing, as they read no brain", async () => {

@@ -92,22 +92,17 @@ export const toldAbout = (
   ]
     .filter((line) => line.trim() !== "" && !named(line))
     .slice(0, toldLinesMost);
-  if (lines.length === 0) {
-    return "";
-  }
-  const told = [
-    `What the team already told about ${work} (how it goes, no names):`,
-    ...lines.map((line) => `- ${line}`),
-  ];
+  const heading = `What the team already told about ${work} (how it goes, no names):`;
   // Whole lines only, as many as fit: half a line says something else.
+  // When not one fits, nothing is told: a heading alone says nothing.
   const fitting: string[] = [];
-  let letters = 0;
-  for (const line of told) {
-    letters += line.length + 1;
+  let letters = heading.length + 1;
+  for (const line of lines) {
+    letters += line.length + 3;
     if (letters > toldLettersMost) {
       break;
     }
-    fitting.push(line);
+    fitting.push(`- ${line}`);
   }
-  return fitting.join("\n");
+  return fitting.length === 0 ? "" : [heading, ...fitting].join("\n");
 };
