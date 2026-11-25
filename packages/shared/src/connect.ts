@@ -2822,6 +2822,8 @@ export const connectErrors = defineErrorFamily({
     "This connection now reaches another account than when the action was asked for, so it wasn't run.",
   "connect.server_unavailable":
     "The connection's server didn't take the call, so nothing was done.",
+  "connect.rate_limited":
+    "The outside system asked Grasp to slow down on this connection, so nothing was sent. Try again after `retryAfterSeconds`.",
   "connect.catalog_entry_not_found": "There's no such entry in the catalog.",
   "connect.catalog_unavailable":
     "Composio's toolkits can't be listed right now. Try again shortly.",

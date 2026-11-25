@@ -145,6 +145,13 @@ export const graphSentUrl = "https://graph-control.test/sent";
 export const graphLoseUrl = "https://graph-control.test/lose";
 
 /**
+ * Where tests have Graph rate limit a mailbox's next requests: POST
+ * `{ mailbox, requests, retryAfter }`. Each is answered 429, asking callers
+ * to wait `retryAfter` seconds, and does nothing.
+ */
+export const graphThrottleUrl = "https://graph-control.test/throttle";
+
+/**
  * Where Stephen's eval sets a mailbox's calendar and mail, or a workbook's
  * table, and reads the writes that reached them (test/stephen-graph-fake.ts).
  */
@@ -545,6 +552,7 @@ const sampleSync = (${sampleSyncFake.toString()})();
 const sampleKey = (${sampleKeyFake.toString()})();
 const graphSent = [];
 const graphLosing = new Map();
+const graphThrottled = new Map();
 const graphDrafts = new Map();
 const graphAttachments = new Map();
 const graphAttachmentReads = new Map();
@@ -872,6 +880,14 @@ export default {
         });
       }
       const [, version, users, mailbox, ...rest] = decodeURIComponent(url.pathname).split("/");
+      const throttled = graphThrottled.get(mailbox);
+      if (users === "users" && throttled !== undefined && throttled.requests > 0) {
+        throttled.requests -= 1;
+        return Response.json(
+          { error: { code: "TooManyRequests" } },
+          { status: 429, headers: { "retry-after": String(throttled.retryAfter) } }
+        );
+      }
       const mailPath = version === "v1.0" && users === "users" && mailbox && rest.length === 1;
       if (request.method === "POST" && mailPath && rest[0] === "sendMail") {
         const { message } = await request.json();
@@ -944,6 +960,11 @@ export default {
     }
     if (url.href === ${JSON.stringify(graphSentUrl)}) {
       return Response.json(graphSent);
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(graphThrottleUrl)}) {
+      const { mailbox, requests, retryAfter } = await request.json();
+      graphThrottled.set(mailbox, { requests, retryAfter });
+      return new Response(null, { status: 204 });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(graphLoseUrl)}) {
       const { mailbox, writes } = await request.json();

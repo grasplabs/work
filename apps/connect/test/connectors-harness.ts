@@ -116,6 +116,7 @@ export const egressProps = (
   fields: Partial<EgressProps> = {}
 ): EgressProps => ({
   connector: "sample",
+  connectionId: "connection-1",
   callId: "call-1",
   hosts: [sampleHost],
   routes: [{ method: "GET", host: sampleHost, path: "/v1/probe/{case}" }],

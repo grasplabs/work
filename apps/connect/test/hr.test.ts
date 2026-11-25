@@ -10,6 +10,7 @@ import {
   callAs,
   outcome,
   someone,
+  whilePaused,
 } from "./connect.ts";
 import { fakeInternet } from "./internet.ts";
 import { fakeProviders } from "./oauth-provider.ts";
@@ -311,12 +312,17 @@ describe("an HR platform read", () => {
     hibob.answer = () => Response.json({ people: "none" });
     outcomes.nonsense = await codeOf(read(connectionId));
     hibob.answer = undefined;
+    outcomes.paused = await whilePaused(
+      connectionId,
+      async () => await codeOf(read(connectionId))
+    );
     hibob.keys.delete(key);
     outcomes.revoked = await codeOf(read(connectionId));
     expect(outcomes).toStrictEqual({
       flood: "hr.too_large",
       throttled: "hr.throttled",
       nonsense: "hr.provider_failed",
+      paused: "hr.throttled",
       revoked: "hr.inactive",
     });
   });

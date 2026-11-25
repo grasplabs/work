@@ -15,6 +15,7 @@ import {
   ownAccount,
   someone,
   startAs,
+  whilePaused,
 } from "./connect.ts";
 import { fakeInternet } from "./internet.ts";
 import { fakeProviders } from "./oauth-provider.ts";
@@ -636,6 +637,10 @@ describe("a read of a place", () => {
     places.answer = () => new Response("Not JSON", { status: 200 });
     const garbled = await codeOf(items(connectionId));
     places.answer = undefined;
+    const paused = await whilePaused(
+      connectionId,
+      async () => await codeOf(items(connectionId))
+    );
     expect({
       flooded,
       elsewhere,
@@ -643,6 +648,7 @@ describe("a read of a place", () => {
       throttled,
       unauthorized,
       garbled,
+      paused,
     }).toStrictEqual({
       flooded: "place.provider_failed",
       elsewhere: "place.provider_failed",
@@ -650,6 +656,7 @@ describe("a read of a place", () => {
       throttled: "place.throttled",
       unauthorized: "place.inactive",
       garbled: "place.provider_failed",
+      paused: "place.throttled",
     });
   });
 });

@@ -118,7 +118,7 @@ export {
 export { addressesOf } from "./mail-addresses.ts";
 export type { Address } from "./mail-addresses.ts";
 export type { AccountLookup, SignIn, SignInInput } from "./sign-in.ts";
-export { jsonBody, providerFetch, segment } from "./provider.ts";
+export { jsonBody, providerFetch, retryAfterOf, segment } from "./provider.ts";
 export type { Provider, ProviderDefinition } from "./provider.ts";
 export {
   checkReadable,

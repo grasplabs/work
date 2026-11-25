@@ -1,0 +1,1 @@
+ALTER TABLE `connection_tokens` ADD `paused_until` integer;

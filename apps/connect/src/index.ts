@@ -207,6 +207,7 @@ import {
   readSyncPage,
   syncPlaceChoices,
 } from "./sync.ts";
+import { requireUnpaused } from "./tokens.ts";
 import { webhookPost } from "./webhooks.ts";
 
 // The egress handler of native connectors' isolates (src/connectors.ts).
@@ -966,6 +967,7 @@ export default class Connect
       // person was shown, checked before the action is taken, so bytes
       // that differ leave it waiting. None are kept with it.
       await requireHeldFiles(connection, call, attachments);
+      await requireUnpaused(this.env.DB, connection.id);
     } catch (error) {
       await auditRefusedDecision(
         this.env,

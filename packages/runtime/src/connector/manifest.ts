@@ -38,7 +38,10 @@ export const provenanceMetaKey = "grasp-os/provenance";
  * provider rate limited it, say, before it sent any write. A connector
  * sets it with `new ToolError(message, { notPerformed: true })`. Connect
  * then frees the call's idempotency key and answers
- * `connect.server_unavailable`, which a workflow step retries. Without it
+ * `connect.server_unavailable`, which a workflow step retries; one whose
+ * code is `throttled` and names its `retryAfterSeconds` (as
+ * `providerFetch` always does) pauses the connection for that long first,
+ * so every other call waits with it. Without it
  * (or `outcomeUnknownMetaKey`), a tool's error is final: the action
  * failed, and its answer is kept for the key.
  *
