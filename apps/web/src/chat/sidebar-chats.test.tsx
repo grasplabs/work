@@ -258,6 +258,12 @@ const linkIn = (item: HTMLElement): HTMLElement => {
 const fieldIn = (item: HTMLElement): HTMLInputElement | null =>
   item.querySelector<HTMLInputElement>("input[data-row-rename]");
 
+/** What the page's live regions have said, as Damsko's `announce` says it. */
+const said = (): string[] =>
+  [...document.querySelectorAll("[data-slot=live-region]")].map((region) =>
+    region.textContent.trim()
+  );
+
 /** What the row says to a screen reader alone, never shown: its rename hint. */
 const unseen = new Set(["Double-click or press F2 to rename"]);
 
@@ -351,6 +357,10 @@ describe("renaming a recent chat from its row", () => {
     await vi.waitFor(() => {
       expect(document.activeElement).toBe(linkIn(itemOf("chat-1")));
     });
+    // Once core kept it, a screen reader hears the new name.
+    await vi.waitFor(() => {
+      expect(said()).toContain("Renamed to Board report");
+    });
     expect({
       atRest,
       renaming,
@@ -429,7 +439,10 @@ describe("renaming a recent chat from its row", () => {
         "The chat couldn't be renamed. Try again."
       );
     });
-    expect(shownNames(itemOf("chat-1"))).toStrictEqual(["Travel costs"]);
+    expect({
+      shown: shownNames(itemOf("chat-1")),
+      said: said().filter((words) => words.startsWith("Renamed")),
+    }).toStrictEqual({ shown: ["Travel costs"], said: [] });
   });
 
   it("shows a rename made elsewhere while the row is shown, and never a late answer over it", async () => {

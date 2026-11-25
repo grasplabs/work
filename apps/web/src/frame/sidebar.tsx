@@ -62,7 +62,6 @@ import {
   size,
   space,
 } from "@grasp-os/ui/lib/tokens.stylex";
-import { announce } from "@grasp-os/ui/lib/utils";
 import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
@@ -143,8 +142,6 @@ export interface SidebarRow extends SidebarSubRow {
   renameLabel?: string;
   /** Said of a row that renames, after its name ("Double-click or press F2 to rename"). */
   renameHint?: string;
-  /** What a screen reader hears once it is renamed ("Renamed to Board report"). */
-  renamedLabel?: (name: string) => string;
 }
 
 /** The last, quiet row of a group: the way to all of them ("All chats"). */
@@ -805,10 +802,8 @@ const useRename = (row: SidebarRow) => {
     setRenaming(false);
     const trimmed = next?.trim();
     if (trimmed !== undefined && trimmed !== "" && trimmed !== row.label) {
+      // The host says it once its change is saved, or that it was refused.
       row.onRename?.(trimmed);
-      if (row.renamedLabel !== undefined) {
-        announce(row.renamedLabel(trimmed));
-      }
     }
     if (byKey) {
       requestAnimationFrame(() => {

@@ -8,6 +8,7 @@ import {
   PencilIcon,
   TrashIcon,
 } from "@grasp-os/ui/lib/icons";
+import { announce } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import { Link, useMatchRoute, useRouter } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
@@ -93,6 +94,8 @@ const useRowChanges = () => {
           return true;
         }));
       if (renamed === true) {
+        // A screen reader hears it once core has kept it, never before.
+        announce(t`Renamed to ${name}`);
         await router.invalidate();
         return;
       }
@@ -164,7 +167,6 @@ export const useRecentChats = ({
       actionsLabel: t`More for ${title}`,
       renameLabel: t`Rename ${title}`,
       renameHint: t`Double-click or press F2 to rename`,
-      renamedLabel: (name: string) => t`Renamed to ${name}`,
       onAction: (value) => {
         if (value === "open") {
           goToChat(chat.id);
