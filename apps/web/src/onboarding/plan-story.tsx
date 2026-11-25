@@ -16,6 +16,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { createPortal } from "react-dom";
 
 import { readingTiming, saidBy, wordsOf } from "../voice/timing.ts";
 import {
@@ -29,21 +30,22 @@ import {
 } from "../voice/voice.ts";
 import { CalmStep } from "./calm-frame.tsx";
 import { poseField } from "./field/engine.ts";
-import type { Pose } from "./field/engine.ts";
 import { poses } from "./field/poses.ts";
-import { PlanFlight } from "./plan-flight.tsx";
-import type { Scene } from "./plan-flight.tsx";
+import { PlanPictures } from "./plan-pictures.tsx";
+import type { Scene } from "./plan-scenes.ts";
 import { dateOf, PlanBody, planDays, planStart } from "./plan.tsx";
 
 // "Here's the plan", told as a story before it is shown (as the first
 // onboarding told it, `about-story.tsx` before a955fb8). Stephen tells the
 // admin's own two weeks in one breath, one flowing narration with the
-// plan's own days in it, and the whole window tells it with him: his light
-// behind the page moves to a new place for every part of the story (the
-// field's pose), and over it the people of the campaign fly from figure to
-// figure in the same grain (plan-flight.tsx). Each part of the narration
-// streams in word by word as he says it, the part before it fading above.
-// Once told, the plan stands summed up (plan.tsx), and only then Continue.
+// plan's own days in it, and the whole window tells it with him in
+// pictures: it turns to night and becomes one of the Appearance page's
+// scenes, a picture dithered in the brand's greens by the same shader,
+// and every part of the story is a picture of its own that morphs into
+// the next as he goes on (plan-pictures.tsx, plan-scenes.ts). Under it,
+// on the picture's dark foot, each part streams in word by word as he
+// says it. Once told, the night fades and the plan stands summed up
+// (plan.tsx), and only then Continue.
 //
 // With his voice on, the story follows it; off, the pace of speech;
 // paused, it holds. Under reduced motion, and coming back to the step, the
@@ -51,28 +53,35 @@ import { dateOf, PlanBody, planDays, planStart } from "./plan.tsx";
 // while it is told. A screen reader hears each part whole, as it comes.
 
 const styles = stylex.create({
+  // The whole window, night, over the page and its bar while the story is told.
   stage: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 10,
+    isolation: "isolate",
     display: "grid",
-    placeItems: "center",
-    minHeight: { default: "calc(100svh - 18rem)", [media.maxSm]: "60svh" },
-  },
-  story: {
-    display: "grid",
-    gap: space[4],
+    alignContent: "end",
     justifyItems: "center",
-    textAlign: "center",
-    width: "100%",
-    maxWidth: "36rem",
+    paddingInline: space[6],
+    paddingBottom: { default: "12svh", [media.maxSm]: "8svh" },
+    backgroundColor: colors.brandNight,
+    color: colors.bodyForeground,
+    opacity: 1,
+    transitionProperty: "opacity",
+    transitionDuration: "900ms",
+    transitionTimingFunction: duration.ease,
   },
-  // The words: room for the part before and the part being told, so nothing moves.
+  leaving: { opacity: 0 },
+  // The words, on the picture's dark foot: room for three lines, so nothing moves.
   words: {
     display: "grid",
     alignContent: "end",
-    gap: space[3],
     width: "100%",
+    maxWidth: "40rem",
+    textAlign: "center",
     minHeight: {
-      default: "calc(4 * var(--damsko-heading-lg-line) + 2rem)",
-      [media.maxSm]: "calc(5 * var(--damsko-heading-md-line) + 2rem)",
+      default: "calc(3 * var(--damsko-heading-lg-line))",
+      [media.maxSm]: "calc(4 * var(--damsko-heading-md-line))",
     },
   },
   line: {
@@ -86,19 +95,9 @@ const styles = stylex.create({
       [media.maxSm]: font.headingMdLine,
     },
     letterSpacing: font.trackingTitle,
+    textAlign: "center",
     textWrap: "balance",
-  },
-  // The part before, said: smaller and quiet, on its way out.
-  before: {
-    margin: 0,
-    color: colors.mutedForeground,
-    fontSize: { default: font.headingSm, [media.maxSm]: font.textBase },
-    lineHeight: {
-      default: font.headingSmLine,
-      [media.maxSm]: font.textBaseLine,
-    },
-    opacity: 0.6,
-    textWrap: "balance",
+    textShadow: "0 0 24px var(--damsko-brand-night)",
   },
   word: {
     display: "inline-block",
@@ -111,8 +110,13 @@ const styles = stylex.create({
     transitionTimingFunction: duration.ease,
   },
   said: { opacity: 1, filter: "blur(0)", transform: "none" },
-  fresh: { color: colors.mintDeep },
-  skip: { opacity: 0.7 },
+  fresh: { color: colors.brandLime },
+  skip: {
+    position: "absolute",
+    top: space[4],
+    insetInlineEnd: space[4],
+    opacity: 0.7,
+  },
 });
 
 /** Told once in this visit: coming back to the step, the plan is there summed up. */
@@ -134,53 +138,6 @@ const useLessMotion = (): boolean =>
     () => window.matchMedia(lessMotion).matches,
     () => false
   );
-
-/** Where Stephen's light goes for each part of the story, the whole window his stage. */
-const storyPoses: Record<Scene, Pose> = {
-  you: {
-    at: [0.5, 0.26],
-    reach: [0.42, 0.4],
-    seed: 7.9,
-    tempo: 1,
-    strength: 0.6,
-  },
-  first: {
-    at: [0.5, 0.22],
-    reach: [0.3, 0.3],
-    seed: 8.4,
-    tempo: 1.5,
-    strength: 0.72,
-  },
-  everyone: {
-    at: [0.5, 0.5],
-    reach: [1.25, 1.05],
-    seed: 9.1,
-    tempo: 1.9,
-    strength: 0.5,
-  },
-  close: {
-    at: [0.5, 1],
-    reach: [1.2, 0.42],
-    seed: 10.2,
-    tempo: 0.9,
-    strength: 0.6,
-  },
-  learned: {
-    at: [0.5, 1],
-    reach: [0.75, 0.8],
-    seed: 6.6,
-    tempo: 1.3,
-    strength: 0.7,
-  },
-  finding: {
-    at: [0.5, 0.2],
-    reach: [0.5, 0.36],
-    seed: 5.3,
-    tempo: 0.8,
-    strength: 0.52,
-  },
-  rest: poses.about,
-};
 
 /** One part of the narration and the figure it is told over. */
 interface Part {
@@ -307,9 +264,10 @@ export const PlanStory = ({
   const narration = parts.map((part) => part.text).join(" ");
   const starts = startsOf(parts);
   const days = useMemo(() => planDays(planStart(today)), [today]);
-  const words = useRef<HTMLDivElement>(null);
   const [began, setBegan] = useState<number | null>(null);
   const [over, setOver] = useState(false);
+  // The night fading, the story told, before the plan stands.
+  const [leaving, setLeaving] = useState(false);
   const [told, setTold] = useState(toldBefore);
   // Told just now: the summary stands without Stephen saying it again.
   const [justTold, setJustTold] = useState(false);
@@ -344,6 +302,11 @@ export const PlanStory = ({
         }
         setOver(true);
         await hold(1400);
+        if (left) {
+          return;
+        }
+        setLeaving(true);
+        await hold(900);
         if (!left) {
           latest.current.finish();
         }
@@ -370,12 +333,7 @@ export const PlanStory = ({
     }
   }
   const part = parts[at] ?? parts[0];
-  const scene = part?.scene ?? "you";
-  useEffect(() => {
-    if (!shown) {
-      poseField(storyPoses[scene]);
-    }
-  }, [scene, shown]);
+  const scene: Scene = part?.scene ?? "you";
 
   if (shown) {
     return (
@@ -388,6 +346,7 @@ export const PlanStory = ({
                   toldBefore = false;
                   setBegan(null);
                   setOver(false);
+                  setLeaving(false);
                   setJustTold(false);
                   setTold(false);
                 }}
@@ -417,38 +376,26 @@ export const PlanStory = ({
       </div>
     );
   }
-  const before = parts[at - 1];
   const partSaid = said - (starts[at] ?? 0);
-  return (
-    <section {...stylex.props(styles.stage)}>
+  return createPortal(
+    <section
+      data-mode="dark"
+      {...stylex.props(styles.stage, fadeIn, leaving && styles.leaving)}
+    >
       <h1 {...stylex.props(visuallyHidden)}>{t`Here’s the plan`}</h1>
-      <PlanFlight days={days} scene={scene} words={words} />
-      <div {...stylex.props(styles.story)}>
-        <div ref={words} {...stylex.props(styles.words)}>
-          {before === undefined ? null : (
-            <p
-              aria-hidden="true"
-              key={`before-${at}`}
-              {...stylex.props(styles.before, fadeIn)}
-            >
-              {before.text}
-            </p>
-          )}
-          <Streamed
-            key={`part-${at}`}
-            said={partSaid}
-            text={part?.text ?? ""}
-          />
-          <span aria-live="polite" {...stylex.props(visuallyHidden)}>
-            {began === null ? "" : part?.text}
-          </span>
-        </div>
-        <span {...stylex.props(styles.skip)}>
-          <Button onClick={finish} size="sm" variant="link">
-            {t`Skip`}
-          </Button>
+      <PlanPictures days={days} scene={scene} />
+      <div {...stylex.props(styles.words)}>
+        <Streamed key={`part-${at}`} said={partSaid} text={part?.text ?? ""} />
+        <span aria-live="polite" {...stylex.props(visuallyHidden)}>
+          {began === null ? "" : part?.text}
         </span>
       </div>
-    </section>
+      <span {...stylex.props(styles.skip)}>
+        <Button onClick={finish} size="sm" variant="link">
+          {t`Skip`}
+        </Button>
+      </span>
+    </section>,
+    document.body
   );
 };
