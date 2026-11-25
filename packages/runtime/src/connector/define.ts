@@ -2,7 +2,7 @@ import type { ToolReach } from "@grasp-os/shared/connect";
 import { isRecord } from "@grasp-os/shared/json";
 
 import { jsonSchemaOf } from "../common/json-schema.ts";
-import type { JsonValue } from "../common/value-descriptor.ts";
+import type { JsonValue, ValueDescriptor } from "../common/value-descriptor.ts";
 import type { AnySchema } from "../common/value-schema.ts";
 import type {
   Infer,
@@ -128,10 +128,15 @@ export type ToolDeclaration<
 /** A tool, as `tool` declares it and `defineConnector` takes it. */
 export interface ConnectorTool {
   readonly scopes: readonly string[];
+  /** Its routes as declared, under the connector's `base`. */
+  readonly routes: readonly RouteText[];
+  /** Each argument's descriptor. */
+  readonly args: Readonly<Record<string, ValueDescriptor>>;
+  readonly returns: ValueDescriptor;
   /** The tool as the runtime's server serves it, named `name` on `connector`. */
   readonly serve: (
     name: string,
-    connector: Pick<ConnectorDeclaration, "title" | "hosts">
+    connector: Pick<ConnectorDeclaration, "title" | "hosts" | "base">
   ) => Tool;
 }
 
@@ -266,6 +271,22 @@ export interface ConnectorDeclaration {
   title: string;
   /** Every host it may reach, exactly. */
   hosts: readonly string[];
+  /**
+   * The path every route is under (`/api/v2`), or none: routes are
+   * declared without it and the API puts it in front, so a version or an
+   * `/api` prefix never names a tool.
+   */
+  base?: string;
+  /**
+   * The vendor's OpenAPI spec its tools are generated from: where it was
+   * read, its SHA-256, and the security scheme it was read for where the
+   * generator was given one. Connect's build holds the tools to it.
+   */
+  openapi?: {
+    readonly url: string;
+    readonly sha256: string;
+    readonly scheme?: string;
+  };
   auth: ConnectorAuth;
   tools: Readonly<Record<string, ConnectorTool>>;
   events?: Readonly<Record<string, ConnectorReader>>;
@@ -286,13 +307,13 @@ const asJsonObject = (schema: Record<string, JsonValue>): JsonObject => schema;
 
 /** A declared tool as the runtime's server serves it. */
 const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
-  connector: Pick<ConnectorDeclaration, "title" | "hosts">,
+  connector: Pick<ConnectorDeclaration, "title" | "hosts" | "base">,
   name: string,
   declaration: ToolDeclaration<Args, Returns>
 ): Tool => {
   const { readOnly, reach, resource, handler } = declaration;
   const routes: Route[] = declaration.routes.map((route) =>
-    routeOf(route, connector.hosts)
+    routeOf(route, connector.hosts, connector.base)
   );
   const args = v.object(declaration.args);
   const { returns } = declaration;
@@ -353,7 +374,8 @@ const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
           : async (data: typeof parsed.value, effect: { key: string }) => {
               const found = await find(
                 data,
-                apiFor(connector.title, connector.hosts, reads).api,
+                apiFor(connector.title, connector.hosts, reads, connector.base)
+                  .api,
                 effect
               );
               return found === null ? null : { output: found };
@@ -366,7 +388,12 @@ const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
       }
       ({ output } = looked);
     } else {
-      const { api, wrote } = apiFor(connector.title, connector.hosts, routes);
+      const { api, wrote } = apiFor(
+        connector.title,
+        connector.hosts,
+        routes,
+        connector.base
+      );
       try {
         output = await handler(parsed.value, api, { key: meta.key });
       } catch (error) {
@@ -443,9 +470,23 @@ export const tool = <
   recoveryOf("A tool", declaration);
   return {
     scopes: declaration.scopes ?? [],
+    routes: declaration.routes,
+    args: Object.fromEntries(
+      Object.entries(declaration.args).map(([name, schema]) => [
+        name,
+        schema.descriptor,
+      ])
+    ),
+    returns: declaration.returns.descriptor,
     serve: (name, connector) => toolOf(connector, name, declaration),
   };
 };
+
+/** A connector written on the SDK: its server, and what it declares. */
+export interface DefinedConnector extends Connector {
+  /** Read by connect's build, which holds its tools to the mirror rule. */
+  readonly declaration: ConnectorDeclaration;
+}
 
 /**
  * A connector: its manifest, and the MCP server connect runs it as. Throws
@@ -455,29 +496,40 @@ export const tool = <
  */
 export const defineConnector = (
   declaration: ConnectorDeclaration
-): Connector => {
-  const { name, title, hosts, tools, events = {}, syncs = {} } = declaration;
+): DefinedConnector => {
+  const {
+    name,
+    title,
+    hosts,
+    base,
+    tools,
+    events = {},
+    syncs = {},
+  } = declaration;
   for (const { routes } of [
     ...Object.values(events),
     ...Object.values(syncs),
   ]) {
     for (const route of routes) {
-      if (routeOf(route, hosts).method !== "GET") {
+      if (routeOf(route, hosts, base).method !== "GET") {
         throw new Error(`"${route}": an event or a sync only reads, by GET`);
       }
     }
   }
   const scopes = new Set(Object.values(tools).flatMap((each) => each.scopes));
-  return serveConnector(
-    {
-      name,
-      provider: name,
-      signIn: { ...declaration.auth.signIn, name: title },
-      scopes: [...scopes],
-      hosts,
-    },
-    Object.entries(tools).map(([toolName, each]) =>
-      each.serve(toolName, declaration)
-    )
-  );
+  return {
+    ...serveConnector(
+      {
+        name,
+        provider: name,
+        signIn: { ...declaration.auth.signIn, name: title },
+        scopes: [...scopes],
+        hosts,
+      },
+      Object.entries(tools).map(([toolName, each]) =>
+        each.serve(toolName, declaration)
+      )
+    ),
+    declaration,
+  };
 };

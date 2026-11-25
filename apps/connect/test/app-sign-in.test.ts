@@ -226,8 +226,11 @@ describe("an app that takes an API key", () => {
       accountId: account.id,
       accountEmail: account.email,
     });
-    const result = await listItems({ id: connectionId, person });
-    expect(JSON.parse(result.output)).toStrictEqual({ items });
+    const result = await listItems(
+      { id: connectionId, person },
+      "boards.items.list"
+    );
+    expect(JSON.parse(result.output)).toStrictEqual({ items, next: null });
     expect(internet.sent).toMatchObject([
       {
         host: sampleKeyApiHost,
@@ -240,7 +243,7 @@ describe("an app that takes an API key", () => {
       exports.default.disconnect({ person, connectionId })
     ).resolves.toStrictEqual({ revoked: false });
     await expect(
-      outcome(listItems({ id: connectionId, person }))
+      outcome(listItems({ id: connectionId, person }, "boards.items.list"))
     ).resolves.toBe("connect.connection_inactive");
   });
 
@@ -546,10 +549,10 @@ describe("threat model", () => {
         key,
       });
       const connection = { id: connectionId, person };
-      const answered = await listItems(connection);
+      const answered = await listItems(connection, "boards.items.list");
       // The connector sends a key and a token of its own: the egress
       // replaces the one and drops the other.
-      const forged = await listItems(connection, "items.forge");
+      const forged = await listItems(connection, "boards.items.forge");
       const listed = await exports.default.listConnections(person);
       const owners = await exports.default.connectionOwners([connectionId]);
       // A key the app refuses, and one that isn't a key, fail without it.
@@ -640,7 +643,9 @@ describe("threat model", () => {
     const connectionId = await connectApp(apps, person, account);
     const colleague = someone();
     await expect(
-      outcome(listItems({ id: connectionId, person: colleague }))
+      outcome(
+        listItems({ id: connectionId, person: colleague }, "boards.items.list")
+      )
     ).resolves.not.toBe("ok");
     expect(internet.sent).toStrictEqual([]);
   });
@@ -702,7 +707,7 @@ describe("threat model", () => {
     const first = await connectApp(apps, person, account);
     const second = await connectApp(apps, person, account);
     expect(second).toBe(first);
-    await listItems({ id: first, person });
+    await listItems({ id: first, person }, "boards.items.list");
     const keys = apps.issued.filter((token) => token.startsWith("app-key-"));
     expect(
       internet.sent.map(({ headers }) => headers[sampleKeyHeader])
@@ -717,7 +722,7 @@ describe("threat model", () => {
       colleague: "connection.not_own_account",
       asShared: "connection.already_connected",
     });
-    await listItems({ id: first, person });
+    await listItems({ id: first, person }, "boards.items.list");
     expect(internet.sent.at(-1)?.headers[sampleKeyHeader]).toBe(keys.at(-1));
   });
 
