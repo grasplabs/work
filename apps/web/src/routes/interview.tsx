@@ -101,8 +101,7 @@ const openDevAlias = async (core: CoreConnection): Promise<Page> => {
     return {
       state: "refused",
       secret: devAlias,
-      message:
-        "No interview link on this local stack yet: finish the setup first.",
+      message: "No interview link could be made on this local stack.",
       signedIn: false,
     };
   }

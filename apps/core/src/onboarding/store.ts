@@ -53,6 +53,7 @@ import { errorFields, log } from "@grasp-os/shared/log";
 import {
   agreementsSchema,
   minTeamShown,
+  planDays,
   planSchema,
   remindAfterWorkingDays,
 } from "@grasp-os/shared/onboarding";
@@ -800,6 +801,14 @@ const admissionSql = (person: string): SQL =>
 
 /** An address as `links.sent_to_email` keeps it, and a sign-in's is compared. */
 const foldedAddress = (email: string): string => email.trim().toLowerCase();
+
+/** Whose interview a local stack opens when nobody signed in is on the list (`devLinkFor`). */
+const devPerson = {
+  id: "dev-noor",
+  team: "dev-finance",
+  name: "Noor de Vries",
+  email: "noor@acme.test",
+} as const;
 
 /**
  * An erasure the onboarding still owes the new Brain (`owedErasures`), for
@@ -2159,19 +2168,119 @@ export class Onboarding extends DurableObject<Env> {
 
   /**
    * On a local stack only (`vp run dev`): the link path of whoever has
-   * `address` on the list, or else of noor@acme.test, or else of the
-   * first person on it (dev-reset.ts `devInterviewLinkResponse`). None
-   * anywhere else, or with nobody on the list.
+   * `address` on the list, or else of noor@acme.test, made ready to open
+   * whatever state the onboarding is in (dev-reset.ts
+   * `devInterviewLinkResponse`). What is missing for that is put in place:
+   * Noor in a team on the list, a plan running from today, the agreements
+   * in, the interviews not paused, and her link sent. None anywhere else.
    */
-  async devLinkFor(address: string): Promise<string | null> {
+  async devLinkFor(
+    address: string,
+    now: string = new Date().toISOString()
+  ): Promise<string | null> {
     if (this.env.DEV_SKIP_ROUTER_SECRET !== "true") {
       return null;
     }
     const listed = this.#roster()?.people ?? [];
     const named = (to: string) =>
       listed.find(({ email }) => foldedAddress(email) === foldedAddress(to));
-    const person = named(address) ?? named("noor@acme.test") ?? listed[0];
-    return person === undefined ? null : await this.linkOf(person.id);
+    const person = named(address) ?? named(devPerson.email);
+    const id = person?.id ?? devPerson.id;
+    this.ctx.storage.transactionSync(() => {
+      if (person === undefined) {
+        this.#devListNoor();
+      }
+      this.#devInterviewsRun(now);
+      const [link] = this.#db
+        .select({ erasedAt: links.erasedAt })
+        .from(links)
+        .where(eq(links.person, id))
+        .all();
+      if (link?.erasedAt !== null && link !== undefined) {
+        // Erased for good: a new start, as staff would give one.
+        this.#db.delete(links).where(eq(links.person, id)).run();
+        this.#db.delete(linkCodes).where(eq(linkCodes.person, id)).run();
+      }
+      this.#db
+        .insert(links)
+        .values({ person: id, sentAt: now })
+        .onConflictDoNothing()
+        .run();
+    });
+    return await this.linkOf(id);
+  }
+
+  /** On a local stack: Noor on the list, in a team of her own when there is none. */
+  #devListNoor(): void {
+    const team =
+      this.#db
+        .select({ id: teams.id })
+        .from(teams)
+        .orderBy(asc(teams.position))
+        .all()[0]?.id ?? devPerson.team;
+    if (team === devPerson.team) {
+      this.#db
+        .insert(teams)
+        .values({
+          id: devPerson.team,
+          position: 0,
+          name: "Finance",
+          lead: null,
+          does: "Pays the suppliers and closes the books.",
+          off: false,
+        })
+        .onConflictDoNothing()
+        .run();
+    }
+    const position = this.#db
+      .select({ id: people.id })
+      .from(people)
+      .all().length;
+    this.#db
+      .insert(people)
+      .values({
+        id: devPerson.id,
+        position,
+        name: devPerson.name,
+        email: devPerson.email,
+        team,
+        title: "Accounts payable",
+        away: false,
+      })
+      .onConflictDoNothing()
+      .run();
+  }
+
+  /** On a local stack: a plan running today, the agreements in, and not paused. */
+  #devInterviewsRun(now: string): void {
+    const start = startingFlowOf(this.env.ONBOARDING_START);
+    this.#db
+      .insert(onboarding)
+      .values({ id: 1, flow: start === null ? null : JSON.stringify(start) })
+      .onConflictDoNothing()
+      .run();
+    const row = this.#row();
+    const today = dayOf(now);
+    const plan =
+      row.plan !== null &&
+      today >= row.plan.start &&
+      today <= closesOn(row.plan)
+        ? row.plan
+        : { start: today, days: planDays.usual };
+    const agreements: Agreements = {
+      processing: true,
+      assessment: true,
+      council: "none",
+    };
+    this.#db
+      .update(onboarding)
+      .set({
+        plan: JSON.stringify(plan),
+        agreements: JSON.stringify(agreements),
+        pausedAt: null,
+      })
+      .where(eq(onboarding.id, 1))
+      .run();
   }
 
   /**
