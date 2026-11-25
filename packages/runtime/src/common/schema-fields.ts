@@ -67,9 +67,16 @@ export const relationOf = (
   return undefined;
 };
 
-/** Whether a field of this descriptor may hold an explicit null. */
+/**
+ * Whether a field of this descriptor may hold an explicit null: any JSON
+ * does, though sealed as not nullable (descriptor-seal.ts).
+ */
 export const allowsNull = (descriptor: ValueDescriptor): boolean => {
-  if (descriptor.nullable || isNullOnly(descriptor)) {
+  if (
+    descriptor.nullable ||
+    descriptor.kind === "json" ||
+    isNullOnly(descriptor)
+  ) {
     return true;
   }
   return descriptor.kind === "union" && descriptor.members.some(allowsNull);
