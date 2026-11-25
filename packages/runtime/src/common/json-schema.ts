@@ -66,11 +66,12 @@ const scalarSchema = (descriptor: ValueDescriptor): JsonSchema | undefined => {
       ...(descriptor.datetime === true ? { format: "date-time" } : {}),
       ...(descriptor.date === true ? { format: "date" } : {}),
       // An IRI, since the descriptor takes international addresses. The
-      // descriptor narrows it to http and https, and takes the few
-      // characters the WHATWG parser allows where RFC 3987 doesn't (`|`, an
-      // unpaired `%`). Of the formats, `date-time` is stricter where a
-      // reader refuses RFC 3339's lower-case `t` and `z` or a leap second
-      // (Zod does): an answer written so is asked for again.
+      // descriptor narrows it to http and https, but takes characters RFC
+      // 3987 refuses and the WHATWG parser percent-encodes (`|`, `{`, `^`,
+      // an unpaired `%`), so here `format` is stricter than the check, as
+      // `date-time` is for a reader that refuses RFC 3339's lower-case `t`
+      // and `z` or a leap second (Zod does). Both are rare in what a model
+      // writes, and `format` is an annotation most readers don't enforce.
       ...(descriptor.url === true ? { format: "iri" } : {}),
     };
   }

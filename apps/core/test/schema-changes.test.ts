@@ -600,6 +600,16 @@ describe(
       ]);
     });
 
+    it("applies a field made any JSON as widened, since it takes every value", async () => {
+      const { store } = await storeWith({ title: "Launch", category: "news" });
+      const widened = await store.applySchema(
+        change(notesText({ title, category: v.json().optional() }), v1Ids)
+      );
+      expect(widened.changes.widenedFields).toStrictEqual([
+        { table: "notes", field: "category" },
+      ]);
+    });
+
     it("refuses a required field records lack, changing nothing, until it has an answer", async () => {
       const { store } = await storeWith(
         { title: "Launch" },

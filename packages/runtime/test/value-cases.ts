@@ -499,6 +499,7 @@ add(
       "https:///example.com",
       "https://good.example@evil.example",
       "https://user:pw@example.com",
+      "https://@example.com",
       " https://example.com",
       "https://example.com\n",
       "/relative/path",
@@ -513,7 +514,7 @@ add(
     { value: "http://localhost:8080/a?b=c#d" },
     { value: "https://münchen.example/straße" },
     { value: "HTTPS://Example.com" },
-    ...Array.from({ length: 16 }, () => ({ issues: [["value.invalid_url"]] })),
+    ...Array.from({ length: 17 }, () => ({ issues: [["value.invalid_url"]] })),
   ]
 );
 add(

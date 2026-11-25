@@ -73,9 +73,9 @@ const webUrlStart = /^https?:\/\/[^/]/iu;
  * (percent-decoded, IDNA-mapped, IPv4 in its short forms). What that parser
  * would quietly mend in how the address is written is refused instead:
  * spaces and control characters, which it drops; a backslash, which it
- * reads as `/`; and a scheme without `//` and a host after it. So is a
- * user name or password (`https://good.example@evil.example`), which fetch
- * refuses anyway.
+ * reads as `/`; and a scheme without `//` and a host after it. So is
+ * any user name or password, even an empty one (`@` before the host:
+ * `https://good.example@evil.example`), which fetch refuses anyway.
  */
 export const isWebUrl = (text: string): boolean => {
   for (const char of text) {
@@ -83,9 +83,8 @@ export const isWebUrl = (text: string): boolean => {
       return false;
     }
   }
-  if (!(webUrlStart.test(text) && URL.canParse(text))) {
-    return false;
-  }
-  const { username, password } = new URL(text);
-  return username === "" && password === "";
+  const [authority = ""] = text.slice(text.indexOf("//") + 2).split(/[/?#]/u);
+  return (
+    webUrlStart.test(text) && !authority.includes("@") && URL.canParse(text)
+  );
 };
