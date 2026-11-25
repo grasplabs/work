@@ -11,25 +11,16 @@ import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { pixelCursor } from "./pixel-cursor.stylex.ts";
-import {
-  Arrow,
-  arrowCell,
-  arrowCells,
-  between,
-  bezier,
-  easeInOut,
-  frames,
-  isStill,
-} from "./pixel-cursor.tsx";
-import type { Point } from "./pixel-cursor.tsx";
+import { between, frames, isStill } from "./pixel-cursor.tsx";
 
 // The team step's message as a new email: a window with its title, who
 // it is for, the message and, on its foot, what the step puts there (copy,
 // the postmark). The first time the step opens, Stephen writes it: his
-// pixel cursor, the documents step's visitors' own (pixel-cursor.tsx),
-// comes in slowly and the words stream in after a caret it eases after,
-// a word at a time, each fading in, pausing at a comma and longer between
-// paragraphs, and then it drifts off, over the window's foot as well. The field holds the whole message all along, so it is read,
+// caret carries his name on a pixel flag hanging from it, as a collaborator's does in a
+// shared document (its stepped corners the documents step's visitors'
+// labels', pixel-cursor.stylex.ts), and the words stream in a word at a
+// time, each fading in, pausing at a comma and longer between paragraphs;
+// then the flag folds away. The field holds the whole message all along, so it is read,
 // copied and sent whole while he writes; a press, a key or focus in it
 // and he is done at once, the words theirs to change. Not again once
 // written or changed, and never under reduced motion.
@@ -37,7 +28,7 @@ import type { Point } from "./pixel-cursor.tsx";
 const styles = stylex.create({
   window: {
     display: "grid",
-    // His cursor lies over the whole window, its foot too, and nothing outside it.
+    // His flag lies over the whole window, and nothing outside it.
     isolation: "isolate",
     backgroundColor: colors.card,
     borderWidth: 1,
@@ -66,7 +57,7 @@ const styles = stylex.create({
     lineHeight: font.textSmLine,
     fontWeight: font.weightMedium,
   },
-  // A window's three lights, as squares: pixels, as Stephen's cursor is.
+  // A window's three lights, as squares: pixels, as Stephen's flag is.
   lights: { display: "flex", gap: 6 },
   light: {
     width: 8,
@@ -133,39 +124,25 @@ const styles = stylex.create({
     marginInlineStart: 1,
     marginInlineEnd: -3,
     verticalAlign: "-0.2em",
-    backgroundColor: colors.primary,
-  },
-  layer: {
-    position: "absolute",
-    inset: 0,
-    zIndex: 2,
-    pointerEvents: "none",
-  },
-  cursor: {
-    position: "absolute",
-    insetBlockStart: 0,
-    insetInlineStart: 0,
-    opacity: 0,
+    position: "relative",
     color: colors.primary,
-    willChange: "transform",
+    backgroundColor: "currentColor",
   },
-  arrow: {
-    display: "block",
-    transformOrigin: "0 0",
-    filter: "drop-shadow(2px 2px 0 rgb(0 0 0 / 0.16))",
-  },
+  // His name on a little flag hanging from the caret, as a collaborator's is in a shared document: under it, where
+  // nothing is written yet, so it never hides a word.
   label: {
     position: "absolute",
-    insetBlockStart: 26,
-    insetInlineStart: 16,
-    filter: "drop-shadow(2px 2px 0 rgb(0 0 0 / 0.14))",
+    zIndex: 2,
+    insetBlockStart: "100%",
+    insetInlineStart: -1,
+    filter: "drop-shadow(2px 2px 0 rgb(0 0 0 / 0.12))",
   },
   bubble: {
     display: "block",
     opacity: 0,
     transformOrigin: "0 0",
-    paddingBlock: 4,
-    paddingInline: 8,
+    paddingBlock: 2,
+    paddingInline: 6,
     whiteSpace: "nowrap",
     backgroundColor: "currentColor",
     clipPath: pixelCursor.steppedCorners,
@@ -191,52 +168,45 @@ let written = false;
 
 /** What his writing moves, found by their names. */
 interface Parts {
-  body: HTMLElement;
   typed: HTMLElement;
-  caret: HTMLElement;
   rest: HTMLElement;
-  cursor: HTMLElement;
   bubble: HTMLElement;
 }
 
 const partsIn = (body: HTMLElement): Parts | null => {
   const find = (name: string) => body.querySelector(`[data-part=${name}]`);
   const typed = find("typed");
-  const caret = find("caret");
   const rest = find("rest");
-  const cursor = find("cursor");
   const bubble = find("bubble");
   if (
     !(typed instanceof HTMLElement) ||
-    !(caret instanceof HTMLElement) ||
     !(rest instanceof HTMLElement) ||
-    !(cursor instanceof HTMLElement) ||
     !(bubble instanceof HTMLElement)
   ) {
     return null;
   }
-  return { body, typed, caret, rest, cursor, bubble };
+  return { typed, rest, bubble };
 };
 
 /** The message in the pieces it streams in: each word with the spaces or lines before it, so the caret stands right after the word. */
 const piecesOf = (text: string): string[] => text.match(/\s*\S+|\s+/gu) ?? [];
 
-/** When each piece of `pieces` appears, in ms from the first: an unhurried pace, a breath at a comma, longer at a full stop and between paragraphs. */
+/** When each piece of `pieces` appears, in ms from the first: a steady pace, a breath at a comma, longer at a full stop and between paragraphs. */
 const timesOf = (pieces: string[]): number[] => {
   const times: number[] = [];
   let total = 0;
   for (const [index, piece] of pieces.entries()) {
     const before = pieces[index - 1] ?? "";
-    let pause = between(110, 170);
+    let pause = between(65, 105);
     if (piece.includes("\n\n")) {
-      pause += between(550, 750);
+      pause += between(350, 480);
     } else if (/[.?!]$/u.test(before)) {
-      pause += between(280, 420);
+      pause += between(180, 260);
     } else if (before.endsWith(",")) {
-      pause += between(140, 220);
+      pause += between(80, 130);
     }
     // A long word takes a little longer.
-    pause += Math.min(80, piece.trim().length * 6);
+    pause += Math.min(50, piece.trim().length * 4);
     total += pause;
     times.push(total);
   }
@@ -253,84 +223,28 @@ const write = async (
   if (parts === null) {
     return;
   }
-  const { typed, caret, rest, cursor, bubble } = parts;
+  const { typed, rest, bubble } = parts;
   const pieces = piecesOf(text);
   typed.textContent = "";
   rest.textContent = text;
-  /** Where the tip rests: just after the caret, low on its line. */
-  const caretAt = (): Point => {
-    const box = body.getBoundingClientRect();
-    const mark = caret.getBoundingClientRect();
-    return {
-      x: mark.right - box.left + 3,
-      y: mark.top - box.top + mark.height * 0.7,
-    };
-  };
-  const phase = Math.random() * 6;
-  // From over the window's title, near its end corner: he never leaves the window, so the page never scrolls sideways for him.
-  let at: Point = {
-    x: body.clientWidth - between(40, 90),
-    y: -between(56, 72),
-  };
-  let calm = 0;
-  const paint = () => {
-    const now = performance.now();
-    const x = at.x + Math.sin(now / 640 + phase) * 1.4 * calm;
-    const y = at.y + Math.cos(now / 820 + phase) * 1.8 * calm;
-    cursor.style.transform = `translate3d(${String(x)}px, ${String(y)}px, 0)`;
-  };
-  const glide = async (to: () => Point, ms: number, bend: number) => {
-    const from = at;
-    await frames(ms, signal, (t) => {
-      const end = to();
-      const dx = end.x - from.x;
-      const dy = end.y - from.y;
-      const one = {
-        x: from.x + dx * 0.3 - dy * bend,
-        y: from.y + dy * 0.3 + dx * bend,
-      };
-      const two = {
-        x: from.x + dx * 0.75 - dy * bend * 0.4,
-        y: from.y + dy * 0.75 + dx * bend * 0.4,
-      };
-      at = bezier(from, one, two, end, easeInOut(t));
-      paint();
-    });
-  };
-  paint();
-  cursor.style.opacity = "1";
-  // In from the window's title, to the start of the message.
-  await glide(caretAt, between(1300, 1600), between(-0.2, 0.2));
-  calm = 1;
   bubble.animate(
     [
-      { opacity: 0, transform: "scale(0.4)" },
+      { opacity: 0, transform: "scale(0.5)" },
       { opacity: 1, transform: "scale(1)" },
     ],
     {
-      duration: 260,
+      duration: 240,
       easing: "cubic-bezier(0.2, 0.9, 0.3, 1.25)",
       fill: "forwards",
     }
   );
-  await frames(between(500, 700), signal, paint);
-  // The words, one at a time, each fading in; the cursor eases after the caret, as a hand follows
-  // its eye, and glides back along a line when it wraps rather than jumping.
+  await frames(between(350, 450), signal, () => {
+    // The flag opens before the first word.
+  });
+  // The words, one at a time, each fading in.
   const times = timesOf(pieces);
   const total = times.at(-1) ?? 0;
   let count = 0;
-  let last = performance.now();
-  const follow = () => {
-    const now = performance.now();
-    const ease = 1 - Math.exp(-(now - last) / 140);
-    last = now;
-    const target = caretAt();
-    at = {
-      x: at.x + (target.x - at.x) * ease,
-      y: at.y + (target.y - at.y) * ease,
-    };
-    paint();
-  };
   await frames(total, signal, (t) => {
     const next = times.filter((time) => time <= t * total).length;
     while (count < next) {
@@ -342,33 +256,23 @@ const write = async (
           { opacity: 0, filter: "blur(2px)" },
           { opacity: 1, filter: "blur(0)" },
         ],
-        { duration: 320, easing: "ease-out" }
+        { duration: 260, easing: "ease-out" }
       );
       count += 1;
       rest.textContent = pieces.slice(count).join("");
     }
-    follow();
   });
-  await frames(between(700, 900), signal, follow);
-  // Done: the label goes, and he drifts down toward the foot, fading as he goes.
-  bubble.animate([{ opacity: 1 }, { opacity: 0, transform: "scale(0.6)" }], {
-    duration: 220,
-    easing: "ease-in",
-    fill: "forwards",
+  await frames(between(500, 650), signal, () => {
+    // A last look at the words before the flag folds.
   });
-  calm = 0;
-  const away = {
-    x: Math.min(body.clientWidth - 40, at.x + 120),
-    y: body.clientHeight + 24,
-  };
-  const fade = cursor.animate([{ opacity: 1 }, { opacity: 0 }], {
-    duration: 900,
-    delay: 400,
-    easing: "ease-in",
-    fill: "forwards",
-  });
-  await glide(() => away, 1400, between(-0.15, 0.15));
-  fade.cancel();
+  // Done: his flag folds away.
+  await bubble.animate(
+    [
+      { opacity: 1, transform: "scale(1)" },
+      { opacity: 0, transform: "scale(0.6)" },
+    ],
+    { duration: 220, easing: "ease-in", fill: "forwards" }
+  ).finished;
 };
 
 /** Why the writing stopped when the window itself went (or React tried its effect twice): nobody to tell. */
@@ -457,7 +361,13 @@ export const MessageCompose = ({
         {writing ? (
           <div aria-hidden="true" key="writing" {...stylex.props(styles.words)}>
             <span data-part="typed" />
-            <span data-part="caret" {...stylex.props(styles.caret)} />
+            <span data-part="caret" {...stylex.props(styles.caret)}>
+              <span {...stylex.props(styles.label)}>
+                <span data-part="bubble" {...stylex.props(styles.bubble)}>
+                  <span {...stylex.props(styles.name)}>Stephen</span>
+                </span>
+              </span>
+            </span>
             <span data-part="rest" {...stylex.props(styles.rest)} />
             {"\n"}
           </div>
@@ -486,25 +396,6 @@ export const MessageCompose = ({
             writing && styles.writing
           )}
         />
-        {writing ? (
-          <div aria-hidden="true" {...stylex.props(styles.layer)}>
-            <div data-part="cursor" {...stylex.props(styles.cursor)}>
-              <svg
-                height={arrowCells.length * arrowCell}
-                shapeRendering="crispEdges"
-                width={10 * arrowCell}
-                {...stylex.props(styles.arrow)}
-              >
-                <Arrow />
-              </svg>
-              <div {...stylex.props(styles.label)}>
-                <span data-part="bubble" {...stylex.props(styles.bubble)}>
-                  <span {...stylex.props(styles.name)}>Stephen</span>
-                </span>
-              </div>
-            </div>
-          </div>
-        ) : null}
       </div>
       <div {...stylex.props(styles.foot)}>{foot}</div>
     </div>
