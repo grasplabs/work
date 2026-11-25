@@ -4201,6 +4201,7 @@ msgstr "Cases a week: {cases}."
 #: src/agents/new-agent.tsx
 #: src/apps/app-workflows.tsx
 #: src/drafts/share-with-team.tsx
+#: src/interview/transcript-looks.tsx
 #: src/routes/_shell.settings.outcomes.tsx
 #: src/settings/ai-providers.tsx
 msgid "Change"
@@ -4315,6 +4316,10 @@ msgstr "Change this line"
 #: src/apps/app-workflows.tsx
 msgid "Change what {alias} starts"
 msgstr "Change what {alias} starts"
+
+#: src/interview/transcript-looks.tsx
+msgid "Change your line: {words}"
+msgstr "Change your line: {words}"
 
 #: src/interview/read-back-story.tsx
 #: src/interview/read-back.tsx
@@ -4619,6 +4624,10 @@ msgstr "Checking on your export…"
 #: src/chat/thread.tsx
 msgid "Checking the App…"
 msgstr "Checking the App…"
+
+#: src/frame/page-states.tsx
+msgid "Checking whether Grasp can be reached"
+msgstr "Checking whether Grasp can be reached"
 
 #: src/workflows/definition-editor.tsx
 #: src/workflows/workflow-flow.tsx
@@ -6806,6 +6815,10 @@ msgstr "Enter the address to let in again."
 msgid "Enter the email of at least one person to invite."
 msgstr "Enter the email of at least one person to invite."
 
+#: src/interview/transcript-looks.tsx
+msgid "Enter to keep · Esc to leave it"
+msgstr "Enter to keep · Esc to leave it"
+
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
 msgid "Enter your endpoint's address."
@@ -8106,6 +8119,10 @@ msgstr "Grasp asks"
 #: src/agents/new-agent-start.tsx
 msgid "Grasp asks what it should do, one question at a time."
 msgstr "Grasp asks what it should do, one question at a time."
+
+#: src/frame/page-states.tsx
+msgid "Grasp can be reached"
+msgstr "Grasp can be reached"
 
 #: src/chat/global-chat.tsx
 #: src/core.ts
@@ -11335,6 +11352,10 @@ msgstr "No AI provider is connected."
 msgid "No answer by {date}: it closes."
 msgstr "No answer by {date}: it closes."
 
+#: src/frame/page-states.tsx
+msgid "No answer from Grasp yet"
+msgstr "No answer from Grasp yet"
+
 #: src/agents/setup/apps-picker.tsx
 msgid "No app by that name."
 msgstr "No app by that name."
@@ -14322,6 +14343,7 @@ msgstr "Remind me"
 #: src/apps/data-model-changes.tsx
 #: src/apps/field-editor.tsx
 #: src/drafts/share-access.tsx
+#: src/interview/transcript-looks.tsx
 #: src/interview/transcript.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/guests.tsx
@@ -21363,6 +21385,10 @@ msgstr "Your invitations reached all {invited} people. {talked, plural, one {# h
 #: src/onboarding/language-cards.tsx
 msgid "Your language"
 msgstr "Your language"
+
+#: src/interview/transcript-looks.tsx
+msgid "Your line"
+msgstr "Your line"
 
 #: src/onboarding/campaign/concepts/road.tsx
 msgid "Your look"

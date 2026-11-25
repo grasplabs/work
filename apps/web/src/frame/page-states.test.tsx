@@ -47,7 +47,7 @@ let root: Root | undefined;
 const reason = "Grasp can't be reached right now. Reference: req-1";
 
 /** The app at `path`, in the frame or not, counting the broken page's reads. */
-const opened = async (path: string, inFrame = true) => {
+const opened = async (path: string, inFrame = true, core?: object) => {
   const reads = { broken: 0 };
   const rootRoute = createRootRoute({ component: Outlet });
   const routeTree = rootRoute.addChildren([
@@ -79,6 +79,7 @@ const opened = async (path: string, inFrame = true) => {
     routeTree,
     history: createMemoryHistory({ initialEntries: [path] }),
     defaultNotFoundComponent: () => <NotFound />,
+    ...(core === undefined ? {} : { context: { core } }),
   });
   const host = document.createElement("div");
   document.body.append(host);
@@ -178,6 +179,32 @@ describe("where a page can't stand", () => {
       await click("Try again");
       expect(reads.broken).toBe(2);
       expect(router.state.location.pathname).toBe("/broken");
+    });
+
+    it("says whether Grasp can be reached, as the tab's connection finds it, as it changes", async () => {
+      const watchers = new Set<() => void>();
+      const core = {
+        reach: "unreachable",
+        watchReach: (changed: () => void) => {
+          watchers.add(changed);
+          return () => {
+            watchers.delete(changed);
+          };
+        },
+      };
+      await opened("/broken", true, core);
+      const before = document.body.textContent ?? "";
+      act(() => {
+        core.reach = "reachable";
+        for (const changed of watchers) {
+          changed();
+        }
+      });
+
+      expect({
+        before: before.includes("No answer from Grasp yet"),
+        after: document.body.textContent?.includes("Grasp can be reached"),
+      }).toStrictEqual({ before: true, after: true });
     });
 
     it("goes to Chat", async () => {

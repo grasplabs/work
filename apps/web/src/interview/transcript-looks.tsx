@@ -1,6 +1,6 @@
 import type { InterviewLine } from "@grasp-os/shared/interview-links";
 import { Button } from "@grasp-os/ui/components/button";
-import { Icon, TrashIcon } from "@grasp-os/ui/lib/icons";
+import { Icon, PencilIcon, TrashIcon } from "@grasp-os/ui/lib/icons";
 import {
   colors,
   duration,
@@ -12,6 +12,7 @@ import {
 import { pixel } from "@grasp-os/ui/lib/vars.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
+import { useState } from "react";
 
 import { Marked } from "./marked.tsx";
 import { lineRow } from "./transcript-looks.stylex.ts";
@@ -38,7 +39,7 @@ export type TranscriptLook = "a" | "b" | "c";
 export const useTranscriptLook = (): TranscriptLook => {
   // Read from the address itself, not the router's: the switch is set by hand and read once per open.
   const look = new URLSearchParams(window.location.search).get("transcript");
-  return look === "b" || look === "c" ? look : "a";
+  return look === "a" || look === "c" ? look : "b";
 };
 
 /** A line where it stands in the conversation: its place is how core removes it. */
@@ -109,7 +110,7 @@ const styles = stylex.create({
   // b: Chat.
   chatHis: {
     display: "grid",
-    gridTemplateColumns: "1.25rem minmax(0, 1fr) auto",
+    gridTemplateColumns: "minmax(0, 1fr) auto",
     columnGap: space["3"],
     alignItems: "start",
   },
@@ -131,7 +132,39 @@ const styles = stylex.create({
     maskImage: pixel.mask,
     maskSize: "3px 3px",
   },
-  chatHisText: { gridColumn: "2" },
+  chatHisText: { gridColumn: "1" },
+  // The bubble's tools, side by side, shown as the bin is.
+  tools: { display: "inline-flex", alignItems: "center" },
+  editing: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: space["1"],
+    paddingInlineStart: "15%",
+  },
+  bubbleEditing: {
+    width: "100%",
+    boxSizing: "border-box",
+    boxShadow: `inset 0 0 0 1px ${colors.border}`,
+  },
+  // The words typed where they stood: no box, no ring, the bubble round them.
+  field: {
+    display: "block",
+    width: "100%",
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    resize: "none",
+    outline: "none",
+    fieldSizing: "content",
+    caretColor: colors.foreground,
+  },
+  hint: {
+    fontFamily: font.sans,
+    fontSize: font.textXs,
+    lineHeight: font.textXsLine,
+    color: colors.mutedForeground,
+  },
   chatTheirs: {
     display: "flex",
     flexDirection: "row-reverse",
@@ -144,7 +177,9 @@ const styles = stylex.create({
     paddingBlock: space["2"],
     borderRadius: radius.xl,
     borderEndEndRadius: radius.sm,
-    backgroundColor: colors.secondary,
+    // The veil of ink on the page's own ground, so nothing behind shows through it.
+    backgroundColor: colors.background,
+    backgroundImage: `linear-gradient(${colors.secondary}, ${colors.secondary})`,
   },
 
   // c: Q&A.
@@ -304,6 +339,7 @@ export const ScriptLine = ({
   placed: Placed;
   who: string;
   onRemove: () => void;
+  onEdit?: (text: string) => void;
 }) => {
   const stephen = placed.line.from === "stephen";
   return (
@@ -315,22 +351,153 @@ export const ScriptLine = ({
   );
 };
 
+/**
+ * Their line, open to put right in its own bubble: the words as they
+ * stand, Enter keeps them, Escape leaves them as they were. No ring: the
+ * bubble's edge and the caret say where the words go.
+ */
+const LineEditor = ({
+  text,
+  onSave,
+  onCancel,
+}: {
+  text: string;
+  onSave: (text: string) => void;
+  onCancel: () => void;
+}) => {
+  const { t } = useLingui();
+  const [words, setWords] = useState(text);
+  const save = () => {
+    const kept = words.trim();
+    if (kept === "") {
+      onCancel();
+      return;
+    }
+    onSave(kept);
+  };
+  return (
+    <div {...stylex.props(styles.editing)}>
+      <div {...stylex.props(styles.bubble, styles.bubbleEditing)}>
+        <textarea
+          aria-label={t`Your line`}
+          autoFocus
+          onBlur={save}
+          onChange={(event) => {
+            setWords(event.target.value);
+          }}
+          onFocus={(event) => {
+            const end = event.currentTarget.value.length;
+            event.currentTarget.setSelectionRange(end, end);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              // Only the change is put away, not the transcript.
+              event.stopPropagation();
+              event.preventDefault();
+              onCancel();
+            } else if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              save();
+            }
+          }}
+          rows={1}
+          value={words}
+          {...stylex.props(styles.line, styles.theirs, styles.field)}
+        />
+      </div>
+      <span {...stylex.props(styles.hint)}>
+        {t`Enter to keep · Esc to leave it`}
+      </span>
+    </div>
+  );
+};
+
+/** b: a line of theirs, in a bubble at the end; under a resting pointer it can be put right or removed. */
+const TheirChatLine = ({
+  line,
+  onRemove,
+  onEdit,
+}: {
+  line: InterviewLine;
+  onRemove: () => void;
+  onEdit?: ((text: string) => void) | undefined;
+}) => {
+  const { t } = useLingui();
+  const [editing, setEditing] = useState(false);
+  if (line.removed === true) {
+    return (
+      <div {...stylex.props(styles.chatTheirs)}>
+        <Words line={line} />
+      </div>
+    );
+  }
+  if (editing && onEdit !== undefined) {
+    return (
+      <LineEditor
+        onCancel={() => {
+          setEditing(false);
+        }}
+        onSave={(text) => {
+          setEditing(false);
+          if (text !== line.text) {
+            onEdit(text);
+          }
+        }}
+        text={line.text}
+      />
+    );
+  }
+  const words = startOf(line.text);
+  return (
+    <div {...stylex.props(styles.chatTheirs, lineRow)}>
+      <div {...stylex.props(styles.bubble)}>
+        <Words line={line} />
+      </div>
+      <span {...stylex.props(styles.bin, styles.tools)}>
+        {onEdit === undefined ? null : (
+          <Button
+            aria-label={t`Change your line: ${words}`}
+            onClick={() => {
+              setEditing(true);
+            }}
+            size="icon-xs"
+            tooltip={t`Change`}
+            variant="ghost"
+          >
+            <Icon icon={PencilIcon} />
+          </Button>
+        )}
+        <Button
+          aria-label={t`Remove your line: ${words}`}
+          onClick={onRemove}
+          size="icon-xs"
+          tooltip={t`Remove`}
+          variant="ghost"
+        >
+          <Icon icon={TrashIcon} />
+        </Button>
+      </span>
+    </div>
+  );
+};
+
 /** b: a line of the chat, his at the start under his mark, theirs at the end in a bubble. */
 export const ChatLine = ({
   placed,
   who,
   onRemove,
+  onEdit,
 }: {
   placed: Placed;
   who: string;
   onRemove: () => void;
+  onEdit?: (text: string) => void;
 }) => {
   if (placed.line.from === "stephen") {
     return (
       <div {...stylex.props(styles.chatHis, lineRow)}>
         {placed.starts ? (
           <div {...stylex.props(styles.chatHead)}>
-            <span aria-hidden="true" {...stylex.props(styles.mark)} />
             <Who stephen who={who} />
           </div>
         ) : null}
@@ -340,16 +507,7 @@ export const ChatLine = ({
     );
   }
   return (
-    <div>
-      <div {...stylex.props(styles.chatTheirs, lineRow)}>
-        <div
-          {...stylex.props(placed.line.removed === true ? null : styles.bubble)}
-        >
-          <Words line={placed.line} />
-        </div>
-        <BinFor line={placed.line} onRemove={onRemove} who={who} />
-      </div>
-    </div>
+    <TheirChatLine line={placed.line} onEdit={onEdit} onRemove={onRemove} />
   );
 };
 

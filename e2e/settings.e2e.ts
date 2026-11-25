@@ -108,3 +108,20 @@ test("someone signs out a device of theirs from Security, and its session ends",
     core[Symbol.dispose]();
   }
 });
+
+test("someone chooses a scene in Appearance, and Chat draws it behind its start", async ({
+  pageOf,
+}) => {
+  const { admin } = peopleIn("settings");
+  const page = await pageOf(admin);
+  await page.goto("/settings/appearance");
+  // Chosen by sight: the tile's radio, in a row that scrolls sideways.
+  await page.getByRole("radio", { name: "Cliffs" }).check({ force: true });
+  await page.goto("/");
+  const canvas = page.locator(
+    '[data-slot="backdrop"][data-backdrop="cliffs"] [data-slot="backdrop-canvas"]'
+  );
+  await expect
+    .poll(async () => Number((await canvas.getAttribute("data-drawn")) ?? "0"))
+    .toBeGreaterThan(1);
+});

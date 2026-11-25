@@ -4201,6 +4201,7 @@ msgstr "Fälle pro Woche: {cases}."
 #: src/agents/new-agent.tsx
 #: src/apps/app-workflows.tsx
 #: src/drafts/share-with-team.tsx
+#: src/interview/transcript-looks.tsx
 #: src/routes/_shell.settings.outcomes.tsx
 #: src/settings/ai-providers.tsx
 msgid "Change"
@@ -4315,6 +4316,10 @@ msgstr "Diese Zeile ändern"
 #: src/apps/app-workflows.tsx
 msgid "Change what {alias} starts"
 msgstr "Ändern, was {alias} startet"
+
+#: src/interview/transcript-looks.tsx
+msgid "Change your line: {words}"
+msgstr "Deinen Beitrag ändern: {words}"
 
 #: src/interview/read-back-story.tsx
 #: src/interview/read-back.tsx
@@ -4619,6 +4624,10 @@ msgstr "Stand Ihres Exports wird geladen…"
 #: src/chat/thread.tsx
 msgid "Checking the App…"
 msgstr "Die App wird geprüft…"
+
+#: src/frame/page-states.tsx
+msgid "Checking whether Grasp can be reached"
+msgstr "Prüfen, ob Grasp erreichbar ist"
 
 #: src/workflows/definition-editor.tsx
 #: src/workflows/workflow-flow.tsx
@@ -6806,6 +6815,10 @@ msgstr "Geben Sie die Adresse ein, die wieder zugelassen werden soll."
 msgid "Enter the email of at least one person to invite."
 msgstr "Geben Sie die E-Mail-Adresse mindestens einer Person ein, die Sie einladen möchten."
 
+#: src/interview/transcript-looks.tsx
+msgid "Enter to keep · Esc to leave it"
+msgstr "Enter zum Behalten · Esc zum Verwerfen"
+
 #: src/settings/add-connection/words.ts
 #: src/settings/ai-providers.tsx
 msgid "Enter your endpoint's address."
@@ -8106,6 +8119,10 @@ msgstr "Grasp fragt"
 #: src/agents/new-agent-start.tsx
 msgid "Grasp asks what it should do, one question at a time."
 msgstr "Grasp fragt, was der Agent tun soll, eine Frage nach der anderen."
+
+#: src/frame/page-states.tsx
+msgid "Grasp can be reached"
+msgstr "Grasp ist erreichbar"
 
 #: src/chat/global-chat.tsx
 #: src/core.ts
@@ -11335,6 +11352,10 @@ msgstr "Es ist kein KI-Anbieter verbunden."
 msgid "No answer by {date}: it closes."
 msgstr "Keine Antwort bis {date}: dann wird sie geschlossen."
 
+#: src/frame/page-states.tsx
+msgid "No answer from Grasp yet"
+msgstr "Noch keine Antwort von Grasp"
+
 #: src/agents/setup/apps-picker.tsx
 msgid "No app by that name."
 msgstr "Keine App mit diesem Namen."
@@ -14322,6 +14343,7 @@ msgstr "Erinnere mich"
 #: src/apps/data-model-changes.tsx
 #: src/apps/field-editor.tsx
 #: src/drafts/share-access.tsx
+#: src/interview/transcript-looks.tsx
 #: src/interview/transcript.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/guests.tsx
@@ -21363,6 +21385,10 @@ msgstr "Ihre Einladungen haben alle {invited} Personen erreicht. {talked, plural
 #: src/onboarding/language-cards.tsx
 msgid "Your language"
 msgstr "Deine Sprache"
+
+#: src/interview/transcript-looks.tsx
+msgid "Your line"
+msgstr "Dein Beitrag"
 
 #: src/onboarding/campaign/concepts/road.tsx
 msgid "Your look"

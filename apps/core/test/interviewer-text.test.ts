@@ -1,4 +1,5 @@
 import { toHex } from "@grasp-os/shared/encoding";
+import { asClaire } from "@grasp-os/shared/interviewers/claire";
 import {
   interviewKinds,
   interviewLocales,
@@ -12,7 +13,6 @@ import type {
 } from "@grasp-os/shared/onboarding";
 import { describe, expect, it } from "vite-plus/test";
 
-import { asClaire } from "../src/onboarding/claire.ts";
 import { interviewerText } from "../src/onboarding/interviewer-text.ts";
 import type { InterviewerText } from "../src/onboarding/interviewer-text.ts";
 import {

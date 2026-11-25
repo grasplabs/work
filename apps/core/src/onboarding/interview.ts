@@ -26,6 +26,7 @@ import type {
   InterviewTurnRequest,
   TurnEvent,
 } from "@grasp-os/shared/interview-turn";
+import { NAMED } from "@grasp-os/shared/interviewers/stephen";
 import { log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
@@ -39,7 +40,6 @@ import { interviewCaller } from "./interview-caller.ts";
 import { interviewerText } from "./interviewer-text.ts";
 import { stephenVersion } from "./lab-marks.ts";
 import { linkHeaders, linkRefusal, noCallerRefusal } from "./links.ts";
-import { NAMED } from "./stephen.ts";
 import { onboardingStore } from "./store.ts";
 import type { Took, TurnContext } from "./store.ts";
 
