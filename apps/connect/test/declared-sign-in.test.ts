@@ -248,7 +248,7 @@ const fakeTenantApp = () => {
         calls.push(authorization);
         const token = authorization?.replace(/^Bearer /u, "") ?? "";
         return holders.has(token)
-          ? json({ items })
+          ? json({ items, next: null })
           : json({ message: "Unauthorized" }, 401);
       }
       if (url.hostname !== sampleTenantLoginHost) {
@@ -352,7 +352,7 @@ const connect = async (
 const listItems = async (id: string, person: ConnectionPerson) =>
   await callTool(
     { id, person },
-    "items.list",
+    "v1.boards.items.list",
     { board: "board-1" },
     { resource: "board-1" }
   );
@@ -484,7 +484,7 @@ describe("a connector's declared sign-in", () => {
     await listItems(id, person);
     await expire(id);
     const renewed = await listItems(id, person);
-    expect(JSON.parse(renewed.output)).toStrictEqual({ items });
+    expect(JSON.parse(renewed.output)).toStrictEqual({ items, next: null });
     expect(
       app.requests.map(({ url, form }) => `${form.get("grant_type")} ${url}`)
     ).toStrictEqual([
@@ -807,13 +807,24 @@ describe("threat model", () => {
   });
 
   it("AP18: a consent whose answer lists no grant is refused, and its grant revoked", async () => {
-    const person = someone();
-    const account = accountOf(person);
-    app.options.granted = null;
-    await expect(outcome(connect(person, account))).resolves.toBe(
-      "connection.scopes_refused"
-    );
-    expect(app.tokensOf(account)).toStrictEqual([]);
+    const refused: Record<string, string> = {};
+    const kept: Record<string, unknown> = {};
+    for (const granted of [null, "", "  "]) {
+      const person = someone();
+      const account = accountOf(person);
+      app.options.granted = granted;
+      // oxlint-disable-next-line no-await-in-loop -- each with its own grant
+      refused[String(granted)] = await outcome(connect(person, account));
+      kept[String(granted)] = app.tokensOf(account);
+    }
+    expect({ refused, kept }).toStrictEqual({
+      refused: {
+        null: "connection.scopes_refused",
+        "": "connection.scopes_refused",
+        "  ": "connection.scopes_refused",
+      },
+      kept: { null: [], "": [], "  ": [] },
+    });
   });
 
   it("AP18: a renewal that no longer holds what it requires asks its person to reconnect", async () => {

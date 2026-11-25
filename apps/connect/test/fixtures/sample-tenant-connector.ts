@@ -9,7 +9,7 @@
  * account's whole grant.
  * Its authorization server is test/declared-sign-in.test.ts's fake.
  */
-import { auth, defineConnector, tool, v } from "@grasp-os/sdk/connector";
+import { auth, defineConnector, page, tool, v } from "@grasp-os/sdk/connector";
 
 /** Where the app signs people in and issues tokens. */
 export const sampleTenantLoginHost = "login.sample-tenant.test";
@@ -23,7 +23,7 @@ export const sampleTenantScopePrefix = `https://${sampleTenantApiHost}/`;
 const login = `https://${sampleTenantLoginHost}`;
 
 const Item = v.object({ id: v.string(), title: v.string() });
-const Items = v.object({ items: v.array(Item) });
+const Items = page(Item);
 
 export default defineConnector({
   name: "sample-tenant",
@@ -76,7 +76,7 @@ export default defineConnector({
     grant: "account",
   }),
   tools: {
-    "items.list": tool({
+    "v1.boards.items.list": tool({
       description: "Lists the items on a board",
       readOnly: true,
       reach: "own",
