@@ -108,3 +108,54 @@ test("someone signs out a device of theirs from Security, and its session ends",
     core[Symbol.dispose]();
   }
 });
+
+test("a chosen scene stands on night behind Chat, and draws again once the browser gives its context back", async ({
+  pageOf,
+}) => {
+  const { admin } = peopleIn("settings");
+  const page = await pageOf(admin);
+  await page.goto("/settings/appearance");
+  // Chosen by sight: the tile's radio, in a row that scrolls sideways.
+  await page.getByRole("radio", { name: "Cliffs" }).check({ force: true });
+  await page.goto("/");
+  const box = page.locator('[data-slot="backdrop"][data-backdrop="cliffs"]');
+  const canvas = box.locator('[data-slot="backdrop-canvas"]');
+  // Night is the box's own ground, so the light words read before the
+  // scene has drawn, or where it can't.
+  const ground = await box.evaluate((element) => {
+    const probe = document.createElement("span");
+    probe.style.color = "var(--damsko-brand-night)";
+    element.append(probe);
+    const night = getComputedStyle(probe).color;
+    probe.remove();
+    return { own: getComputedStyle(element).backgroundColor, night };
+  });
+  expect(ground.own).toBe(ground.night);
+
+  const pictures = async () =>
+    Number((await canvas.getAttribute("data-drawn")) ?? "0");
+  await expect.poll(pictures).toBeGreaterThan(1);
+  // The browser takes the context away: nothing more is drawn into it for
+  // half a second; then it gives it back.
+  const { atLoss, whileLost } = await canvas.evaluate(
+    async (element: HTMLCanvasElement) => {
+      const count = () => Number(element.dataset.drawn ?? "0");
+      const lose = element
+        .getContext("webgl")
+        ?.getExtension("WEBGL_lose_context");
+      lose?.loseContext();
+      const lost = count();
+      const { promise, resolve } = Promise.withResolvers<boolean>();
+      setTimeout(() => {
+        resolve(true);
+      }, 500);
+      await promise;
+      const later = count();
+      lose?.restoreContext();
+      return { atLoss: lost, whileLost: later };
+    }
+  );
+  expect(whileLost).toBe(atLoss);
+  // Given back, it draws on.
+  await expect.poll(pictures).toBeGreaterThan(atLoss);
+});

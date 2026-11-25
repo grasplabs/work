@@ -37,8 +37,12 @@ const styles = stylex.create({
     backgroundColor: colors.card,
     boxShadow: tokens.previewShadow,
   },
-  // On a scene, which is night, what stands on it turns light.
-  onNight: { color: colors.bodyForeground },
+  // On a scene, which is night, what stands on it turns light, on night's
+  // own ground until the scene has drawn (or where it can't).
+  onNight: {
+    color: colors.bodyForeground,
+    backgroundColor: colors.brandNight,
+  },
   words: {
     position: "relative",
     display: "flex",
