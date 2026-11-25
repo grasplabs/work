@@ -26,7 +26,7 @@ import { font, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { PauseNote } from "../answer-pause.tsx";
@@ -884,6 +884,10 @@ const ChatHeldWrites = ({
   onConfirmed: () => void;
 }) => {
   const [held, setHeld] = useState<Held>({ state: "loading" });
+  const readBefore = useRef(false);
+  const holdAnswers = useEffectEvent(() => {
+    pause.hold();
+  });
   const core = useCore();
   const [reads, setReads] = useState(0);
   // Why the person's last decision of a held App write failed, if it did:
@@ -901,8 +905,15 @@ const ChatHeldWrites = ({
     let current = true;
     const read = async (): Promise<void> => {
       const found = await readHeld(core, chatId);
-      // A read for another chat, or an older one, doesn't show.
+      // A read for another chat, or an older one, doesn't show. Any read
+      // after the first may move the cards (one decided goes, often before
+      // its decision has answered: core says so as it takes it; another
+      // comes): every answer in the chat holds a moment.
       if (current) {
+        if (readBefore.current) {
+          holdAnswers();
+        }
+        readBefore.current = true;
         setHeld(found);
       }
     };

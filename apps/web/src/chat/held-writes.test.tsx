@@ -138,6 +138,11 @@ interface Held {
   refusingBefore?: Record<string, Error>;
   /** Each decision of these waits for its promise before it is taken. */
   waiting?: Record<string, Promise<unknown>>;
+  /**
+   * Each confirmation of these is taken at once, then waits for its
+   * promise before it answers: an App write core runs once it took it.
+   */
+  running?: Record<string, Promise<unknown>>;
   /** The npm packages the chat's agent asked for, under the writes. */
   packages?: readonly DependencyRequest[];
 }
@@ -148,12 +153,21 @@ const carriedOn: string[] = [];
 /** A chat's held writes, with a way to open another chat in the same place. */
 const Switching = () => {
   const [chatId, setChatId] = useState("chat-1");
+  const [version, setVersion] = useState(0);
   return (
     <>
       <button
         aria-label="Open chat-2"
         onClick={() => {
           setChatId("chat-2");
+        }}
+        type="button"
+      />
+      {/* Core telling the chat what it holds changed (`ChatUpdate.held`). */}
+      <button
+        aria-label="Held changed"
+        onClick={() => {
+          setVersion((was) => was + 1);
         }}
         type="button"
       />
@@ -165,7 +179,7 @@ const Switching = () => {
         onConfirmed={() => {
           carriedOn.push(chatId);
         }}
-        version={0}
+        version={version}
       />
     </>
   );
@@ -183,6 +197,7 @@ const shown = async ({
   refusing = {},
   refusingBefore = {},
   waiting: slow = {},
+  running = {},
   packages = [],
 }: Held = {}) => {
   const confirmed: { chatId: string; id: string; requestHash: string }[] = [];
@@ -240,6 +255,7 @@ const shown = async ({
         await Promise.resolve();
         confirmed.push({ chatId, id, requestHash });
         await decide(id);
+        await running[id];
       },
       declineHeldCall: async (chatId: string, id: string): Promise<void> => {
         await Promise.resolve();
@@ -771,6 +787,46 @@ describe("a write to an App held for the person", () => {
       },
       pressedInThePause: ["held-1"],
       later: { held: false, said: "" },
+      confirmed: ["held-1", "held-2"],
+    });
+  });
+
+  it("holds the answers of the write that moved up while the one confirmed still runs, once core says it was taken", async () => {
+    const second: HeldAppCall = {
+      ...held,
+      id: "held-2",
+      function: "notes.share",
+    };
+    const app = Promise.withResolvers<boolean>();
+    const { confirmed } = await shown({
+      calls: { "chat-1": [held, second] },
+      running: { [held.id]: app.promise },
+    });
+    await press("Confirm notes.create in Notes");
+    // Core took it and says so; the App still runs it.
+    await press("Held changed");
+    const moved = {
+      order: cards(),
+      answer: holding("Confirm notes.share in Notes"),
+    };
+    // The second press of a double click, on what is now under the pointer.
+    await press("Confirm notes.share in Notes");
+    const pressedInThePause = confirmed.map(({ id }) => id);
+    app.resolve(true);
+    await settled();
+    await pastThePause();
+    await press("Confirm notes.share in Notes");
+
+    expect({
+      moved,
+      pressedInThePause,
+      confirmed: confirmed.map(({ id }) => id),
+    }).toStrictEqual({
+      moved: {
+        order: ["notes.share in Notes"],
+        answer: { held: true, said: pauseSaid },
+      },
+      pressedInThePause: ["held-1"],
       confirmed: ["held-1", "held-2"],
     });
   });

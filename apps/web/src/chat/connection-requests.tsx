@@ -18,7 +18,7 @@ import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 
 import { PauseNote } from "../answer-pause.tsx";
 import type { AnswersPause } from "../answer-pause.tsx";
@@ -229,14 +229,25 @@ export const ConnectionRequests = ({
 }) => {
   const { t } = useLingui();
   const [read, setRead] = useState<Requests>({ state: "loading" });
+  const readBefore = useRef(false);
+  const holdAnswers = useEffectEvent(() => {
+    pause.hold();
+  });
   const core = useCore();
   const [reads, setReads] = useState(0);
   useEffect(() => {
     let current = true;
     const load = async (): Promise<void> => {
       const found = await readRequests(core, chatId);
-      // A read for another chat, or an older one, doesn't show.
+      // A read for another chat, or an older one, doesn't show. Any read
+      // after the first may move the cards (one decided goes, often before
+      // its decision has answered: core says so as it takes it; another
+      // comes): every answer in the chat holds a moment.
       if (current) {
+        if (readBefore.current) {
+          holdAnswers();
+        }
+        readBefore.current = true;
         setRead(found);
       }
     };

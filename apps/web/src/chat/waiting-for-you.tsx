@@ -8,10 +8,11 @@ import { PackageRequests } from "./package-requests.tsx";
 // each a card with its answers, one under the other. An answer takes its
 // card away, or says above the writes why it failed, and every card
 // under it, in any of the three, moves up into its place: so after each,
-// every answer here holds for a moment (answer-pause.tsx), as the Inbox's
-// next item does. The second press of a double click, meant for the card
-// answered, never confirms a write, grants a connection or approves
-// packages the person never read.
+// and each time a list is read again (core says it took a decision as it
+// takes it, before the decision answers), every answer here holds for a
+// moment (answer-pause.tsx), as the Inbox's next item does. The second
+// press of a double click, meant for the card answered, never confirms a
+// write, grants a connection or approves packages the person never read.
 
 export const WaitingForYou = ({
   chatId,
