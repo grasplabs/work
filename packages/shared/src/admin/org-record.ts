@@ -2,8 +2,6 @@ import { interviewLocales } from "../onboarding.ts";
 import type { InterviewLocale as Locale } from "../onboarding.ts";
 import type { DocumentReading } from "./document-reading.ts";
 import type { InterviewFact, InterviewLine } from "./interview-turn.ts";
-import { isInterviewer } from "./interviewer.ts";
-import type { Interviewer } from "./interviewer.ts";
 import { PHASES, TAGS } from "./interviews.ts";
 import type { PersonState, Phase } from "./interviews.ts";
 import type { Member, Unknown } from "./onboarding-admin.ts";
@@ -313,8 +311,6 @@ export interface InterviewProgress {
   addedAt: number;
   /** How they found talking to Stephen, from 1 to 5, when they said so at the end: it is theirs to give or not. */
   rating?: number;
-  /** Who they chose to talk with, once they chose; Stephen while it does not say. */
-  interviewer?: Interviewer;
 }
 
 export const NOTHING_SAID: InterviewProgress = {
@@ -464,7 +460,6 @@ export const parseProgress = (value: unknown): InterviewProgress | null => {
     ...(typeof raw.rating === "number" && raw.rating >= 1 && raw.rating <= 5
       ? { rating: Math.round(raw.rating) }
       : {}),
-    ...(isInterviewer(raw.interviewer) ? { interviewer: raw.interviewer } : {}),
   };
 };
 

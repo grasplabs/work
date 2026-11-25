@@ -1,5 +1,4 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
-import { WHO_CLAIRE } from "@grasp-os/shared/interviewers/claire";
 import {
   inLanguage,
   leadPartsOf,
@@ -11,14 +10,13 @@ import {
 import type {
   InterviewKind,
   InterviewLocale,
-  Interviewer,
 } from "@grasp-os/shared/onboarding";
 
-// What the model that holds an interview is told, whole: who Stephen or
-// Claire is and how they talk (@grasp-os/shared/interviewers), how the interview
-// goes, what they follow up on, and what they write down. Ported from the
-// prototype (grasplabs/prototype, packages/grasp: worker/stephen.ts,
-// worker/claire.ts, and WRITING and READ_BACK in worker/interview.ts),
+// What the model that holds an interview is told, whole: who Stephen is
+// and how he talks (@grasp-os/shared/interviewers/stephen), how the
+// interview goes, what he follows up on, and what he writes down. Ported
+// from the prototype (grasplabs/prototype, packages/grasp:
+// worker/stephen.ts, and WRITING and READ_BACK in worker/interview.ts),
 // word for word: the Stephen Lab measures this text, and a change made
 // here and not there (or the other way round) is a Stephen nobody
 // measured. It changes only through the lab, one change at a time.
@@ -62,16 +60,10 @@ const READ_BACK =
 const EXAMPLE =
   'Then ask for one real example to share, and set wants to "file".';
 
-/** Everything the model is told, for one interviewer, before the language goes in. */
-const systemsOf = (who: string): Record<InterviewKind, string> => ({
-  own: [who, partsOf(EXAMPLE, READ_BACK), LISTENING, WRITING].join("\n\n"),
-  lead: [who, leadPartsOf(READ_BACK), LISTENING, WRITING].join("\n\n"),
-});
-
-/** Stephen and Claire hold the same interview: only who they are and how they react differs. */
-const systems: Record<Interviewer, Record<InterviewKind, string>> = {
-  stephen: systemsOf(WHO),
-  claire: systemsOf(WHO_CLAIRE),
+/** Everything the model is told, before the language goes in. */
+const systems: Record<InterviewKind, string> = {
+  own: [WHO, partsOf(EXAMPLE, READ_BACK), LISTENING, WRITING].join("\n\n"),
+  lead: [WHO, leadPartsOf(READ_BACK), LISTENING, WRITING].join("\n\n"),
 };
 
 /** One text the model is told, and its mark. */
@@ -82,16 +74,14 @@ export interface InterviewerText {
 }
 
 /**
- * The text for an interview: who holds it (Stephen or Claire), whether it is
- * about someone's own work or a lead's about their team's, in the language
- * of the interview.
+ * The text for an interview: whether it is about someone's own work or a
+ * lead's about their team's, in the language of the interview.
  */
 export const interviewerText = async (
-  interviewer: Interviewer,
   kind: InterviewKind,
   locale: InterviewLocale
 ): Promise<InterviewerText> => {
-  const text = inLanguage(systems[interviewer][kind], locale);
+  const text = inLanguage(systems[kind], locale);
   return { text, mark: await sha256Hex(text) };
 };
 
@@ -108,16 +98,12 @@ The interview is at the read-back. You are given the lines of one part of what y
 - Say nothing before it and nothing after it: no hello, no "let me sum up", no question whether it is right. The screen says which part this is, and asks.
 - With each sentence, give the ids of the lines it tells. Every id once.`;
 
-const tellings: Record<Interviewer, string> = {
-  stephen: [WHO, TELLING].join("\n\n"),
-  claire: [WHO_CLAIRE, TELLING].join("\n\n"),
-};
+const telling = [WHO, TELLING].join("\n\n");
 
 /** The text for telling a part of the read-back back, in the language of the interview. */
 export const tellingText = async (
-  interviewer: Interviewer,
   locale: InterviewLocale
 ): Promise<InterviewerText> => {
-  const text = inLanguage(tellings[interviewer], locale);
+  const text = inLanguage(telling, locale);
   return { text, mark: await sha256Hex(text) };
 };

@@ -104,8 +104,7 @@ export const sectionWords: Record<
   },
   interviews: {
     title: "Interviews",
-    about:
-      "Where every team stands, everyone by name, and how Stephen and Claire did.",
+    about: "Where every team stands, everyone by name, and how Stephen did.",
     icon: MessagesSquareIcon,
   },
   workflows: {

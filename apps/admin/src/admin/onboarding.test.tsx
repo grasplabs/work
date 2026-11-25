@@ -131,7 +131,7 @@ const bakery = (): AdminSnapshot =>
         confirmed: 0,
         rating: null,
         typed: true,
-        interviewer: "claire",
+        interviewer: "stephen",
       },
     ],
     kickoff: { at: "2026-09-24T10:00:00.000Z", known: 0.6 },
