@@ -13290,6 +13290,10 @@ msgstr "Parte de lo que se enviará aparece recortado arriba. Muéstralo todo, o
 msgid "Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm."
 msgstr "Parte de lo que se enviará está recortado. Abre Detalles y muéstralo todo, o exactamente lo que se enviará, para confirmar."
 
+#: src/interview/read-back-story.tsx
+msgid "Parts"
+msgstr "Partes"
+
 #: src/brain/sources-page.tsx
 msgid "Passages"
 msgstr "Pasajes"

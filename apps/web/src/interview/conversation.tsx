@@ -14,7 +14,7 @@ import { keepNow, update, useInterviewer, useProgress } from "./kept.ts";
 import { sendTyped, useLoop } from "./loop.ts";
 import { micProblem } from "./mic.ts";
 import { partAt, withLineText, withoutLine } from "./progress.ts";
-import { ReadBack, ReadBackBar } from "./read-back-story.tsx";
+import { ReadBack, ReadBackFoot } from "./read-back-story.tsx";
 import { say, stopSpeaking, useSaidOf } from "./speech.ts";
 import { shownAs, wordsOf } from "./spoken.tsx";
 import { Transcript } from "./transcript.tsx";
@@ -189,19 +189,6 @@ const AnswerBox = ({
   const loop = useLoop();
   const words = useInterviewWords();
   const { mode } = useProgress();
-  // In the read-back the bar stands here, until they want to change something.
-  const [changing, setChanging] = useState(false);
-  if (reading && !changing) {
-    return (
-      <div {...stylex.props(styles.composer)}>
-        <ReadBackBar
-          onChange={() => {
-            setChanging(true);
-          }}
-        />
-      </div>
-    );
-  }
   return (
     <div {...stylex.props(styles.composer)}>
       <SaveTrouble />
@@ -275,16 +262,31 @@ export const Conversation = ({
   onTalk: () => void;
 }) => {
   const progress = useProgress();
-  // The bar again for each part, and once what they changed is sent.
+  // The foot again for each part, and once what they changed is sent.
   const sent = progress.lines.filter(({ from }) => from === "person").length;
   const answer = reading ? `reading-${partAt(progress).at}-${sent}` : "asking";
+  // The box comes back in the read-back once they want to change something there.
+  const [changingAt, setChangingAt] = useState<string | null>(null);
+  const footed = reading && changingAt !== answer;
   return (
-    <Room alone={alone} transcript={transcript}>
-      <div {...stylex.props(styles.stage, reading && styles.reading)}>
-        {reading ? <ReadBack /> : <Asking />}
-      </div>
-      <AnswerBox key={answer} onTalk={onTalk} reading={reading} />
-    </Room>
+    <>
+      <Room alone={alone} transcript={transcript}>
+        <div {...stylex.props(styles.stage, reading && styles.reading)}>
+          {reading ? <ReadBack /> : <Asking />}
+        </div>
+        {footed ? null : (
+          <AnswerBox key={answer} onTalk={onTalk} reading={reading} />
+        )}
+      </Room>
+      {/* The setup's own foot, across the window, as the admin's onboarding has it. */}
+      {footed ? (
+        <ReadBackFoot
+          onChange={() => {
+            setChangingAt(answer);
+          }}
+        />
+      ) : null}
+    </>
   );
 };
 
