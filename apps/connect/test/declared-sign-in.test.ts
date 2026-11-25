@@ -27,6 +27,7 @@ import {
   stateOf,
 } from "./connect.ts";
 import sampleTenant, {
+  sampleTenantApiHost,
   sampleTenantLoginHost,
   sampleTenantScopePrefix,
 } from "./fixtures/sample-tenant-connector.ts";
@@ -90,6 +91,11 @@ import { callTool } from "./tool-calls.ts";
 // AP18 A grant connect can't read counted as held: a consent whose answer
 //      lists no grant kept as holding nothing, forever; a renewal that
 //      dropped what it must hold.
+// AP19 An address counted as the account's at a renewal that didn't
+//      confirm it: a renewed ID token or a userinfo answer for another
+//      account, of another tenant, or without the claims its sign-in
+//      requires; a userinfo read that failed, or was redirected, counted
+//      as confirming the address it had.
 
 const login = `https://${sampleTenantLoginHost}`;
 const client = appClients["sample-tenant"];
@@ -727,6 +733,114 @@ describe("threat model", () => {
         )
       )
     ).resolves.toBe("connection.provider_unavailable");
+  });
+
+  it("AP19: confirms an address at a renewal only for the same account, with the claims its sign-in requires", async () => {
+    const userinfo = `https://${sampleTenantApiHost}/v1/userinfo`;
+    const workspace = declared("sample-userinfo", {
+      authorizeUrl: "https://accounts.example.test/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.example.test/token",
+      scopes: { openid: "", email: "" },
+      tenant: "domain",
+      idToken: {
+        issuer: "https://accounts.example.test",
+        subject: "sub",
+        email: ["email"],
+        claims: { hd: "{tenant}", email_verified: true },
+        userinfo,
+      },
+    });
+    const { confirmAddress } = workspace;
+    if (confirmAddress === undefined) {
+      throw new Error("A sign-in that confirms addresses");
+    }
+    const base = {
+      sub: "g-1",
+      hd: acmeDomain,
+      email: "Ada@acme.test",
+      email_verified: true,
+    };
+    const answers = new Map<string, Response>();
+    const sent: { url: string; authorization: string | null }[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const request = new Request(input, init);
+      sent.push({
+        url: request.url,
+        authorization: request.headers.get("authorization"),
+      });
+      return await Promise.resolve(
+        answers.get(request.headers.get("authorization") ?? "") ??
+          new Response("Not found", { status: 404 })
+      );
+    });
+    const renewed = async (claims: Record<string, unknown>) =>
+      await confirmAddress(
+        {
+          accessToken: "access",
+          expiresAt: Date.now() + 3_600_000,
+          idToken: unsignedJwt({
+            iss: "https://accounts.example.test",
+            aud: "client",
+            ...claims,
+          }),
+        },
+        acmeDomain,
+        "client",
+        "g-1"
+      );
+    const fromUserinfo = async (token: string, answer: Response) => {
+      answers.set(`Bearer ${token}`, answer);
+      return await confirmAddress(
+        { accessToken: token, expiresAt: Date.now() + 3_600_000 },
+        acmeDomain,
+        "client",
+        "g-1"
+      );
+    };
+    await expect(
+      Promise.all([
+        renewed(base),
+        renewed({ ...base, sub: "g-2" }),
+        renewed({ ...base, hd: "evil.test" }),
+        renewed({ ...base, email_verified: false }),
+      ])
+    ).resolves.toStrictEqual(["ada@acme.test", null, null, null]);
+    // A renewal without its ID token, or with one that isn't for Grasp's
+    // client, asks the userinfo endpoint for the token just renewed.
+    await expect(
+      Promise.all([
+        fromUserinfo("same", Response.json(base)),
+        fromUserinfo("other-account", Response.json({ ...base, sub: "g-2" })),
+        fromUserinfo(
+          "other-tenant",
+          Response.json({ ...base, hd: "evil.test" })
+        ),
+        fromUserinfo(
+          "unverified",
+          Response.json({ ...base, email_verified: "true" })
+        ),
+        fromUserinfo("not-json", new Response("<html>")),
+        fromUserinfo("failed", Response.json(base, { status: 500 })),
+        fromUserinfo(
+          "redirected",
+          new Response(null, {
+            status: 302,
+            headers: { location: "https://evil.test/userinfo" },
+          })
+        ),
+      ])
+    ).resolves.toStrictEqual([
+      "ada@acme.test",
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+    ]);
+    expect(new Set(sent.map(({ url }) => url))).toStrictEqual(
+      new Set([userinfo])
+    );
   });
 
   it("AP17: an owed revoke never ends the grant its account consented to again", async () => {

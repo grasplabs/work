@@ -372,6 +372,27 @@ describe("a record pinned to a tenant, as a suite's", () => {
     ).toStrictEqual([]);
   });
 
+  it("AP19: confirms an address again only at a userinfo endpoint on one of its connector's hosts, for an address its ID token names", () => {
+    const userinfo = `https://${apiHost}/v1/userinfo`;
+    expect(accepts({ idToken: { ...pinned.idToken, userinfo } })).toBeTruthy();
+    const { email: _email, ...withoutEmail } = pinned.idToken;
+    expect(accepts({ idToken: { ...withoutEmail, userinfo } })).toBeFalsy();
+    expect(
+      refusedEndpoints.filter((each) =>
+        accepts({ idToken: { ...pinned.idToken, userinfo: each } })
+      )
+    ).toStrictEqual([]);
+    const onHosts = (url: string): boolean =>
+      connectorManifestSchema.safeParse(
+        manifest({
+          signIn: { ...pinned, idToken: { ...pinned.idToken, userinfo: url } },
+          scopes: ["Items.Read"],
+        })
+      ).success;
+    expect(onHosts(userinfo)).toBeTruthy();
+    expect(onHosts("https://collector.evil.test/v1/userinfo")).toBeFalsy();
+  });
+
   it("AP12: checks its tenant in the ID token, and fills a tenant only where it has one", () => {
     const { tenant: _tenant, ...unpinned } = pinned;
     expect({
