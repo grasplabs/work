@@ -18348,6 +18348,11 @@ msgctxt "a date to pick"
 msgid "Today"
 msgstr "Heute"
 
+#: src/chat/thread.tsx
+msgctxt "a day line in a chat"
+msgid "Today"
+msgstr "Heute"
+
 #: src/chat/chat-window.tsx
 msgctxt "chats from today"
 msgid "Today"
@@ -20617,6 +20622,11 @@ msgstr "Ja, das stimmt."
 #: src/activity/audit-event.tsx
 msgid "Yes: it is unchanged and links to the event before it."
 msgstr "Ja: Es ist unverändert und mit dem vorherigen Ereignis verknüpft."
+
+#: src/chat/thread.tsx
+msgctxt "a day line in a chat"
+msgid "Yesterday"
+msgstr "Gestern"
 
 #: src/workflows/workflow-rows.tsx
 msgid "Yesterday {time}"
