@@ -39,8 +39,6 @@ export type Segment =
 
 export interface Route {
   readonly method: HttpMethod;
-  /** The host a route names, where its connector has several. */
-  readonly host?: string | undefined;
   /** The path as the route declares it, under the API's base path. */
   readonly path: string;
   readonly segments: readonly Segment[];
@@ -111,26 +109,32 @@ export const pathSegments = (path: string): Segment[] | undefined => {
   return segments;
 };
 
+/** A route as a tool declares it, its path whatever shape it takes. */
+export interface DeclaredRoute {
+  readonly method: HttpMethod;
+  /** The host it names, where its connector has several. */
+  readonly host: string | undefined;
+  readonly path: string;
+}
+
 /**
  * Reads a declared route, `GET /deals`, or undefined. A route that names
  * its host (`GET api.example.com/deals`, where a connector has several) is
  * read by its path.
  */
-export const readRoute = (route: string): Route | undefined => {
+export const readRoute = (route: string): DeclaredRoute | undefined => {
   const space = route.indexOf(" ");
   const method = route.slice(0, space);
   const target = route.slice(space + 1);
-  const path = target.startsWith("/")
-    ? target
-    : target.slice(Math.max(target.indexOf("/"), 0));
-  if (space === -1 || !isRouteMethod(method)) {
+  const slash = target.indexOf("/");
+  if (space === -1 || slash === -1 || !isRouteMethod(method)) {
     return undefined;
   }
-  const segments = pathSegments(path);
-  const host = target.startsWith("/")
-    ? undefined
-    : target.slice(0, -path.length);
-  return segments === undefined ? undefined : { method, host, path, segments };
+  return {
+    method,
+    host: slash === 0 ? undefined : target.slice(0, slash),
+    path: target.slice(slash),
+  };
 };
 
 /** What a route's name is made from, or why no name follows from it. */
