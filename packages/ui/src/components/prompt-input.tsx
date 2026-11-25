@@ -188,6 +188,7 @@ import type {
   DropdownMenuItemProps,
   DropdownMenuProps,
 } from "./dropdown-menu";
+import { PromptInputHeard } from "./prompt-input-heard";
 import { refitOf, stageOf } from "./prompt-input-limit";
 import type { VoiceField, VoiceFieldMode } from "./prompt-input-voice-field";
 import type { VoiceReading } from "./prompt-input-voice-motion";
@@ -1221,8 +1222,9 @@ const styles = stylex.create({
   typedQuiet: {
     "::highlight(prompt-input-typed)": { color: colors.mutedForeground },
   },
-  // What a dictation has heard but not yet settled on: lighter, after the words, never part of
-  // them, and after it the mark of where the next word lands.
+  // What a dictation has heard but not yet settled on: after the words, never part of them, and
+  // after it the mark of where the next word lands. Held here unseen, for the room it takes; it is
+  // drawn over the text word by word as it is heard (prompt-input-heard.tsx).
   interim: {
     "::after": {
       content: "' ' attr(data-interim)",
@@ -1230,7 +1232,7 @@ const styles = stylex.create({
       borderInlineEndWidth: "2px",
       borderInlineEndStyle: "solid",
       borderInlineEndColor: colors.foreground,
-      color: `color-mix(in oklch, ${colors.mutedForeground} 60%, transparent)`,
+      color: "transparent",
     },
   },
   // The resting row is one line at every width: a placeholder too long for it ends in an ellipsis.
@@ -3528,6 +3530,8 @@ export const PromptInputTextarea = ({
   const controller = form?.controller;
   const compact = form?.compact === true;
   const interim = form?.interim ?? "";
+  // The text's own element, for what a dictation hears to be drawn over it.
+  const [box, setBox] = useState<HTMLDivElement | null>(null);
   // Here, the text stands in the body; gone, a takeover does.
   useEffect(() => {
     setShown?.(true);
@@ -3556,6 +3560,7 @@ export const PromptInputTextarea = ({
       onKeyDown={onKeyDown}
       ref={(element: HTMLDivElement | null) => {
         assignRef(ref, element);
+        setBox(element);
       }}
       render={(props: Record<string, unknown>, state: { empty: boolean }) => (
         <div
@@ -3578,7 +3583,14 @@ export const PromptInputTextarea = ({
     />
   );
   if (form?.loading !== true) {
-    return editor;
+    return (
+      <>
+        {editor}
+        {form?.dictating === true ? (
+          <PromptInputHeard editor={box} interim={interim} />
+        ) : null}
+      </>
+    );
   }
   // While the page loads the text keeps its box, not drawn, a quiet line in its words' place.
   return (

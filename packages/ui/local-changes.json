@@ -21,6 +21,11 @@
     "since": "2026-11-24"
   },
   {
+    "path": "src/components/prompt-input-heard.tsx",
+    "reason": "New: what a dictation hears is written in the prompt input's text as it is heard, each word flown up from the voice's field in the bar and faded in where it lands.",
+    "since": "2026-11-25"
+  },
+  {
     "path": "src/components/prompt-input-voice-field.ts",
     "reason": "Its grade and the other voice's are exported: the voice's hill is drawn in the same light.",
     "since": "2026-11-25"
@@ -32,7 +37,7 @@
   },
   {
     "path": "src/components/prompt-input.tsx",
-    "reason": "In a compact card, a spoken conversation is one slim row: the time, the voice's field and its tools in the row, and the words over it only once there are any, so no empty room and no lone caret stand before the first word. And a voice is drawn as the hill (prompt-input-voice-hill.ts) in the field's place, on a canvas that reaches from the bar's foot to its top. And timed={false} on PromptInputVoice leaves the running time out, where the page keeps its own.",
+    "reason": "In a compact card, a spoken conversation is one slim row: the time, the voice's field and its tools in the row, and the words over it only once there are any, so no empty room and no lone caret stand before the first word. And a voice is drawn as the hill (prompt-input-voice-hill.ts) in the field's place, on a canvas that reaches from the bar's foot to its top. And timed={false} on PromptInputVoice leaves the running time out, where the page keeps its own. And what a dictation hears is drawn in the text word by word (prompt-input-heard.tsx), in place of the lighter words after it.",
     "since": "2026-11-25"
   },
   {
@@ -50,5 +55,10 @@
     "reason": "The filled forms of the message and pause icons, for a header whose icons are filled.",
     "since": "2026-11-24",
     "pullRequest": "https://github.com/grasplabs/damsko/pull/66"
+  },
+  {
+    "path": "src/lib/word-flight.ts",
+    "reason": "New: the small squares that carry a heard word from the voice's field to its place in the text, for the prompt input's dictation and the interview's composer.",
+    "since": "2026-11-25"
   }
 ]
