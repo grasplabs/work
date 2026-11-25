@@ -24,7 +24,6 @@ import type { StephenStats } from "@grasp-os/shared/admin/onboarding-admin-recor
  * version before (a change counts only beyond chance), and how many finish
  * with real people; what needs one of us; then the versions, every
  * organization and the lab's newest runs, one click from each other.
- * Claire is a switch for the whole page, not a second copy of it.
  *
  * Not here, by design: a switch to give one company another Stephen
  * (releases and channels do that, and roll back), flags on what someone
@@ -48,7 +47,6 @@ import type {
 import { meansOf, shown } from "@grasp-os/shared/lab-compare";
 import type { Verdict } from "@grasp-os/shared/lab-compare";
 import type { Result, Scores } from "@grasp-os/shared/lab-runs";
-import type { Interviewer } from "@grasp-os/shared/onboarding";
 import { Link } from "@tanstack/react-router";
 
 import { labResults, labScores } from "./lab-runs.ts";
@@ -75,10 +73,10 @@ interface Measured {
   stats: StephenStats;
 }
 
-/** Each organization's figures, side by side, opening its interviewers. */
+/** Each organization's figures, side by side, opening how Stephen did there. */
 const EveryOrganization = ({ measured }: { measured: readonly Measured[] }) => (
   <Section
-    description="Each company’s interviews as its own Grasp counts them. A company opens its interviewers."
+    description="Each company’s interviews as its own Grasp counts them. A company opens how Stephen did there."
     title="Every organization"
   >
     <div className="@container border-t">
@@ -625,17 +623,15 @@ const Live = ({ live }: { live: Lab["live"] }) => {
   );
 };
 
-/** The Lab for Stephen or Claire, across every organization and every run the lab kept. */
+/** The Lab, across every organization and every run the lab kept. */
 export const StephenLab = ({
   organizations,
-  interviewer,
   now,
   channel,
   results = labResults,
   scores = labScores,
 }: {
   organizations: readonly Organization[];
-  interviewer: Interviewer;
   now: string;
   /** Only the organizations on this release channel; every one without it. */
   channel?: string;
@@ -658,16 +654,10 @@ export const StephenLab = ({
     results,
     scores,
     organizations: read,
-    interviewer,
     now,
   });
   const measured: Measured[] = read.flatMap(({ clientId, name, view }) => {
-    const stats = stephenOf({
-      ...view,
-      interviews: view.interviews.filter(
-        (interview) => interview.interviewer === interviewer
-      ),
-    });
+    const stats = stephenOf(view);
     return stats.started === 0 ? [] : [{ clientId, name, stats }];
   });
   const unread = organizations.flatMap(({ admin }) =>

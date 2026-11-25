@@ -11,17 +11,15 @@ import type { Speaker } from "@grasp-os/shared/voice";
 
 /**
  * Each speaker's voice, by its Mistral ID: Voxtral 3's own preset voices,
- * each of which says any language the model does. Stephen's is "Rob",
- * Claire's "Sheila"; the sample speakers are three more, each clearly not
- * Stephen.
+ * each of which says any language the model does. Stephen's is "Rob"; the
+ * sample speakers are three more, each clearly not Stephen.
  */
 const voices = {
   stephen: "voice_485",
-  claire: "voice_478",
   lisa: "voice_590",
   mark: "voice_1788",
   tim: "voice_591",
-} as const satisfies Record<Speaker, string>;
+} as const satisfies Record<Exclude<Speaker, "claire">, string>;
 
 /**
  * Each speaker's voice in the admin's onboarding, by its ElevenLabs ID.

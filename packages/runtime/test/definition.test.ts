@@ -1,26 +1,29 @@
 import { describe, expect, test } from "vite-plus/test";
 
-import { AppDefinitionError } from "../src/app-definition-error.ts";
-import { definitionManifest, readDefinition } from "../src/definition-app.ts";
-import { evaluateExpression } from "../src/definition-expression.ts";
-import { definitionText } from "../src/definition-json.ts";
+import { AppDefinitionError } from "../src/app/app-definition-error.ts";
+import {
+  definitionManifest,
+  readDefinition,
+} from "../src/app/definition-app.ts";
+import { evaluateExpression } from "../src/app/definition-expression.ts";
+import { definitionText } from "../src/app/definition-json.ts";
 import {
   applyOperation,
   withExportedFunctions,
-} from "../src/definition-operations.ts";
-import type { DefinitionOperation } from "../src/definition-operations.ts";
+} from "../src/app/definition-operations.ts";
+import type { DefinitionOperation } from "../src/app/definition-operations.ts";
 import {
   definitionSources,
   schemaSource,
   validatorSource,
-} from "../src/definition-source.ts";
-import { emptyDefinition } from "../src/definition-types.ts";
-import type { AppDefinition } from "../src/definition-types.ts";
-import { expressionMaxDepth } from "../src/oxc-parse.ts";
-import { isWorkflowPermission } from "../src/permission-checks.ts";
-import { permission } from "../src/permission.ts";
-import { descriptorOf } from "../src/sealed-descriptors.ts";
-import { v } from "../src/values.ts";
+} from "../src/app/definition-source.ts";
+import { emptyDefinition } from "../src/app/definition-types.ts";
+import type { AppDefinition } from "../src/app/definition-types.ts";
+import { isWorkflowPermission } from "../src/app/permission-checks.ts";
+import { permission } from "../src/app/permission.ts";
+import { expressionMaxDepth } from "../src/common/oxc-parse.ts";
+import { descriptorOf } from "../src/common/sealed-descriptors.ts";
+import { v } from "../src/common/values.ts";
 
 // An App's definition (definition-types.ts): the operations that change it, the
 // code generated from it, and what a definition of unknown origin is

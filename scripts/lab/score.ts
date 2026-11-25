@@ -283,9 +283,6 @@ export const score = async (
       : []),
     surfacedLine(surfaced),
   ].join("\n");
-  const interviewer =
-    scored.find((each) => each.person.played)?.person.played?.interviewer ??
-    "stephen";
   const seed = scored.find((each) => each.person.played?.seed !== undefined)
     ?.person.played?.seed;
   const { result, file } = keepResult({
@@ -295,7 +292,7 @@ export const score = async (
     set: setOf(key.id),
     key: key.id,
     practice: practice.id,
-    stephen: await stephenVersion(interviewer, practice.locale),
+    stephen: await stephenVersion(practice.locale),
     via: practice.via,
     people: peopleOf(scored),
     ...(seed === undefined ? {} : { seed }),
@@ -372,10 +369,7 @@ export const keepTranscripts = async (
         : await judge(asker, sliceOf(key, employee), lines, facts);
     const { played } = person;
     const by = played === undefined ? "person" : "model";
-    const version = await stephenVersion(
-      played?.interviewer ?? "stephen",
-      practice.locale
-    );
+    const version = await stephenVersion(practice.locale);
     const transcript: Transcript = {
       id: `${practice.key}-${person.employee.toLowerCase()}-${practice.id.slice(-4)}`,
       key: practice.key,

@@ -17,8 +17,8 @@ import { oxcWasmPin } from "../packages/compiler/oxc-wasm/wasm.ts";
 import {
   generateModules,
   readAppManifest,
-} from "../packages/runtime/src/host.ts";
-import { serverFunctionsIn } from "../packages/runtime/src/server-syntax.ts";
+} from "../packages/runtime/src/app/host.ts";
+import { serverFunctionsIn } from "../packages/runtime/src/app/server-syntax.ts";
 import {
   ROOT,
   notesFiles,

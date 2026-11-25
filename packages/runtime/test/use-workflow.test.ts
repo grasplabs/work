@@ -8,16 +8,16 @@ import {
   vi,
 } from "vite-plus/test";
 
-import { clientInternals, GraspClient } from "../src/client-core.ts";
-import { GraspError } from "../src/client-error.ts";
-import type { ClientTransport } from "../src/client-transport.ts";
-import type { Id } from "../src/index.ts";
-import type { WorkflowViewOf } from "../src/react.ts";
-import { applyingAtMostMs, WorkflowCalls } from "../src/workflow-calls.ts";
-import { readWorkflowReference } from "../src/workflow-reference-read.ts";
-import { workflowReferenceLimits } from "../src/workflow-references.ts";
-import { workflowView } from "../src/workflow-view.ts";
-import type { RunSnapshot } from "../src/workflow-view.ts";
+import { clientInternals, GraspClient } from "../src/app/client-core.ts";
+import { GraspError } from "../src/app/client-error.ts";
+import type { ClientTransport } from "../src/app/client-transport.ts";
+import type { Id } from "../src/app/index.ts";
+import type { WorkflowViewOf } from "../src/app/react.ts";
+import { applyingAtMostMs, WorkflowCalls } from "../src/app/workflow-calls.ts";
+import { readWorkflowReference } from "../src/app/workflow-reference-read.ts";
+import { workflowReferenceLimits } from "../src/app/workflow-references.ts";
+import { workflowView } from "../src/app/workflow-view.ts";
+import type { RunSnapshot } from "../src/app/workflow-view.ts";
 import { functions as builtFunctions } from "./notes/.grasp/functions.ts";
 import { api, workflows } from "./notes/server/_generated/api.ts";
 

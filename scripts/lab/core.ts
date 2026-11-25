@@ -261,7 +261,9 @@ export interface Link {
   /** Keeps where the interview is; the version it was kept as. */
   save: (version: number, progress: InterviewProgress) => Promise<number>;
   /** One turn of Stephen's. */
-  turn: (request: Omit<InterviewTurnRequest, "secret">) => Promise<StephenTurn>;
+  turn: (
+    request: Omit<InterviewTurnRequest, "secret" | "interviewer">
+  ) => Promise<StephenTurn>;
 }
 
 /**
@@ -403,7 +405,7 @@ export const linkOn = (link: string, email: string): Link => {
 export const turnOn = async (
   core: Core,
   who: LabWho,
-  turn: Omit<InterviewTurnRequest, "secret">,
+  turn: Omit<InterviewTurnRequest, "secret" | "interviewer">,
   { lineOnly = false }: { lineOnly?: boolean } = {}
 ): Promise<StephenTurn> => {
   const taken = await whileBusy(

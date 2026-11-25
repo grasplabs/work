@@ -11,8 +11,8 @@ import {
   discard,
   refresh,
   register,
-} from "../../../../packages/runtime/src/preview-refresh.ts";
-import { previewReceiver } from "../../../../packages/runtime/src/preview-updates.ts";
+} from "../../../../packages/runtime/src/app/preview-refresh.ts";
+import { previewReceiver } from "../../../../packages/runtime/src/app/preview-updates.ts";
 
 // Loaded while the file loads, which no timeout holds, rather than in
 // the test, whose 5 s should time what it does: their first load is

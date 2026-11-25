@@ -1,9 +1,9 @@
 import { describe, expect, test } from "vite-plus/test";
 
-import { inspectApp, readAppManifest, registerApp } from "../src/host.ts";
-import { defineApp, defineMigration } from "../src/index.ts";
-import { runMigration } from "../src/runner.ts";
-import { defineSchema, defineTable, v } from "../src/values.ts";
+import { inspectApp, readAppManifest, registerApp } from "../src/app/host.ts";
+import { defineApp, defineMigration } from "../src/app/index.ts";
+import { runMigration } from "../src/app/runner.ts";
+import { defineSchema, defineTable, v } from "../src/common/values.ts";
 
 // How an App declares an explicit migration (spec 17.2), what its manifest
 // records of it, and how the runner calls its handler: pure checks of a
@@ -231,7 +231,7 @@ describe("an App's migrations", () => {
 });
 
 // Ways a transform's module code reaches the platform's clock or
-// randomness past what the runner takes away (src/determinism.ts): each
+// randomness past what the runner takes away (src/app/determinism.ts): each
 // answers what it reached, or reads the clock plainly when it reached
 // nothing, which the runner refuses.
 

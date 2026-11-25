@@ -3,7 +3,7 @@
  * the prototype (grasplabs/prototype `components/admin/org-progress.tsx`,
  * `org-people.tsx` and `org-transcripts.tsx`): two of the Interviews
  * section's tabs. The teams themselves, and one team whole, are in
- * teams.tsx; Stephen and Claire's own two tabs are in interviewers.tsx.
+ * teams.tsx; Stephen's own two tabs are in interviewers.tsx.
  *
  * Core sends an interview as numbers only, so what was said is nowhere
  * here: someone's interview is its minutes and how much they agreed to,
