@@ -14,6 +14,7 @@ export type {
   ConnectorDeclaration,
   ConnectorReader,
   ConnectorTool,
+  DefinedConnector,
   EventDeclaration,
   IdTokenDeclaration,
   OAuth2Declaration,
@@ -115,9 +116,11 @@ export type {
 export {
   accountLookupSchema,
   endpointHost,
+  keyHeaderSchema,
   reservedAuthorizationParams,
   scopeToken,
   signInSchema,
+  signInScopesSchema,
   tenantKinds,
   withTenant,
 } from "./sign-in.ts";
