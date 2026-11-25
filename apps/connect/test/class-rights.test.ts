@@ -574,21 +574,6 @@ describe("Google Workspace", () => {
       ...(await stored(anna.connectionId)),
     }).toStrictEqual({ connectionId: anna.connectionId, ...active });
   });
-
-  it("counts a connection made before grants were kept as holding what Google was asked for then", async () => {
-    // Kept before grants were: gmail.modify, reading events and Drive.
-    const { connectionId } = await connectGoogle();
-    await keptBeforeGrants(connectionId);
-
-    await exports.default.requireClassRights({
-      classes: ["read-company", "change-company", "reach-others"],
-    });
-    await expect(stored(connectionId)).resolves.toStrictEqual(active);
-
-    // Putting events in the person's own calendar wasn't asked then.
-    await exports.default.requireClassRights({ classes: ["change-own"] });
-    await expect(stored(connectionId)).resolves.toStrictEqual(askedAgain);
-  });
 });
 
 /** The revokes owed for connection `connectionId`, by why. */

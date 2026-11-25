@@ -39,7 +39,6 @@ import type {
   ConnectionsApi,
   ListedConnection,
   RevocationToDo,
-  OAuthProvider,
   OfferedCatalog,
   AppPointerSetting,
   SharedMailboxSetting,
@@ -123,6 +122,7 @@ import {
 import { inList } from "./db/d1.ts";
 import { errorResponse } from "./errors.ts";
 import { spendMonth } from "./model-spend.ts";
+import { nativeTenants } from "./native-tool-classes.gen.ts";
 import { startOAuthConnection } from "./oauth-relay.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
@@ -269,14 +269,30 @@ const eraseCapturesSoon = async (
   }
 };
 
-/** The organization's tenant at `provider`, from the sign-in config. */
+/**
+ * The organization's tenant at `provider`, from the sign-in config: its
+ * own of the kind the provider's connector pins its sign-in to
+ * (`nativeTenants`), its Entra tenant ID or its hosted domain; none for a
+ * provider whose sign-in isn't pinned. Microsoft 365's connector doesn't
+ * declare its sign-in yet (GRA-2324): until it does, its tenant is the
+ * Entra one here.
+ */
 export const tenantOf = (
   config: SignInConfig,
-  provider: OAuthProvider
-): string | undefined =>
-  provider === "microsoft"
-    ? config.entra?.tenantId
-    : config.google?.hostedDomain;
+  provider: string
+): string | undefined => {
+  if (provider === "microsoft") {
+    return config.entra?.tenantId;
+  }
+  const tenants = {
+    guid: config.entra?.tenantId,
+    domain: config.google?.hostedDomain,
+  };
+  const kind = Object.hasOwn(nativeTenants, provider)
+    ? nativeTenants[provider]
+    : undefined;
+  return kind === undefined ? undefined : tenants[kind];
+};
 
 /**
  * `path` as a URL on `origin`, or `undefined` when it would lead anywhere
