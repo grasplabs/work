@@ -223,24 +223,54 @@ export const zoomStep = (from: Zoom, direction: 1 | -1): number => {
   return ZOOMS.findLast((step) => step < now) ?? ZOOMS[0] ?? now;
 };
 
-/** Every place `query` stands in `root`'s words, case aside, within one run of text. */
+/** What a regular expression would read as its own syntax, written as plain characters. */
+const special = /[.*+?^${}()|[\]\\]/gu;
+
+/** Where `offset` of the joined text falls: its text node and its place in it. */
+const placeOf = (
+  nodes: readonly { node: Text; start: number }[],
+  offset: number,
+  end: boolean
+): { node: Text; at: number } | undefined => {
+  // The last node that starts at or before it (for an end, before it), so a
+  // match never ends at the start of the node after its last letter.
+  const found = nodes.findLast(({ start }) =>
+    end ? start < offset : start <= offset
+  );
+  return found === undefined
+    ? undefined
+    : { node: found.node, at: offset - found.start };
+};
+
+/**
+ * Every place `query` stands in `root`'s words, case aside, across the
+ * runs of text it is drawn in (code split into coloured parts): matched in
+ * the words as they are, so each range stands where its letters do, in any
+ * language.
+ */
 export const matchesIn = (root: HTMLElement, query: string): Range[] => {
-  const needle = query.trim().toLocaleLowerCase();
+  const needle = query.trim();
   if (needle === "") {
     return [];
   }
-  const ranges: Range[] = [];
+  const nodes: { node: Text; start: number }[] = [];
+  let text = "";
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
-    const text = (node.textContent ?? "").toLocaleLowerCase();
-    for (
-      let at = text.indexOf(needle);
-      at !== -1;
-      at = text.indexOf(needle, at + needle.length)
-    ) {
+    if (node instanceof Text) {
+      nodes.push({ node, start: text.length });
+      text += node.data;
+    }
+  }
+  const ranges: Range[] = [];
+  const pattern = new RegExp(needle.replaceAll(special, "\\$&"), "giu");
+  for (const match of text.matchAll(pattern)) {
+    const from = placeOf(nodes, match.index, false);
+    const to = placeOf(nodes, match.index + match[0].length, true);
+    if (from !== undefined && to !== undefined) {
       const range = document.createRange();
-      range.setStart(node, at);
-      range.setEnd(node, at + needle.length);
+      range.setStart(from.node, from.at);
+      range.setEnd(to.node, to.at);
       ranges.push(range);
     }
   }
