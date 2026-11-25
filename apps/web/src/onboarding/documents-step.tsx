@@ -28,10 +28,10 @@ import type { StepProps } from "./step-parts.ts";
 // Documents that explain how they work, on Damsko's File upload, the kinds
 // of file Grasp reads lying over its drop zone as pages (document-pages.tsx):
 // each is sent to core the moment it is added and read there for real.
-// Under the zone, one shelf of what was shared, on this visit or an earlier
-// one (document-shelf.tsx): a small chip each, its own pixel page filling
-// in as it is sent, then with Remove; a refusal said on its chip with Try
-// again. The step's words and the way on stand centred.
+// Over the zone, from its start edge, one shelf of what was shared, on this
+// visit or an earlier one (document-shelf.tsx): a small chip each, its own
+// pixel page filling in as it is sent, then ticked, with Remove; a refusal
+// said on its chip with Try again. The step's words and the way on stand centred.
 // What only the one who shared it can say, Stephen asks at once, with
 // the answers to pick from. The zone is the step's one way in and takes
 // the room: where documents live (SharePoint and OneDrive) is connected
@@ -199,6 +199,18 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
             </div>
           </Card>
         )}
+        <DocumentShelf
+          busy={busy}
+          coming={coming}
+          kept={kept}
+          onDismiss={(file) => {
+            change(file, null);
+          }}
+          onRemove={(id) => {
+            void remove(id);
+          }}
+          onRetry={retry}
+        />
         <DocumentPages shared={kept.map(({ name }) => name)}>
           <FileUpload
             accept={accepted}
@@ -212,18 +224,6 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
             value={[]}
           />
         </DocumentPages>
-        <DocumentShelf
-          busy={busy}
-          coming={coming}
-          kept={kept}
-          onDismiss={(file) => {
-            change(file, null);
-          }}
-          onRemove={(id) => {
-            void remove(id);
-          }}
-          onRetry={retry}
-        />
       </div>
       <DocumentVisitors paused={ask !== null} />
     </CalmStep>
