@@ -25,6 +25,7 @@ import {
 } from "@grasp-os/ui/components/empty";
 import { Spinner } from "@grasp-os/ui/components/spinner";
 import {
+  AppWindowIcon,
   ArchiveIcon,
   EllipsisIcon,
   Icon,
@@ -66,7 +67,6 @@ import { ItemBar, ItemShell } from "../frame/item-shell.tsx";
 import { LoadingLines } from "../frame/page-states.tsx";
 import { SettingUp, SettingUpBar, Updating } from "../frame/setting-up.tsx";
 import type { SetUp } from "../frame/setting-up.tsx";
-import { AppWindowIcon } from "../frame/sidebar-icons.ts";
 import type { Crumb } from "../frame/site-header.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { PageFrame } from "../pages/page-frame.tsx";

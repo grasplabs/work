@@ -11,12 +11,12 @@ import {
   SparklesIcon,
   StickyNoteIcon,
   UsersIcon,
+  ZapIcon,
 } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
 import { Link, useLocation, useMatch } from "@tanstack/react-router";
 
-import { ZapIcon } from "../frame/sidebar-icons.ts";
 import type {
   LinkLook,
   SidebarRow,

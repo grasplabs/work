@@ -10,8 +10,11 @@ import {
   PopoverTitle,
 } from "@grasp-os/ui/components/popover";
 import {
+  AppWindowIcon,
+  ArrowUpRightIcon,
   Icon,
   Maximize2Icon,
+  Minimize2Icon,
   PanelRightIcon,
   PencilIcon,
   XIcon,
@@ -24,13 +27,6 @@ import {
   size,
   space,
 } from "@grasp-os/ui/lib/tokens.stylex";
-// Damsko's icon module has no window, exit full screen or leave-for-a-page
-// arrow: Hugeicons' own drawings, as #2503 drew them, through Damsko's Icon.
-import {
-  AppWindowIcon,
-  ArrowShrink01Icon,
-  ArrowUpRight01Icon,
-} from "@hugeicons/core-free-icons";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import {
@@ -288,7 +284,7 @@ const HeadControls = ({
     page: page
       ? {
           label: t`Open as a page`,
-          icon: ArrowUpRight01Icon,
+          icon: ArrowUpRightIcon,
           ...(pageHref === undefined ? {} : { href: pageHref }),
           ...(pageRender === undefined ? {} : { render: pageRender }),
         }
@@ -311,7 +307,7 @@ const HeadControls = ({
           size="icon-sm"
           variant="ghost"
         >
-          <Icon icon={expanded ? ArrowShrink01Icon : Maximize2Icon} />
+          <Icon icon={expanded ? Minimize2Icon : Maximize2Icon} />
         </Button>
       )}
       {items.length > 0 && (
