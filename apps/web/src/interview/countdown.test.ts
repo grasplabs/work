@@ -1,7 +1,7 @@
 import type { InterviewProgress } from "@grasp-os/shared/interview-links";
 import { describe, expect, it } from "vite-plus/test";
 
-import { secondsLeft } from "./countdown.tsx";
+import { clockOf, secondsLeft } from "./countdown.tsx";
 import { freshProgress } from "./progress.ts";
 import { remindTimes } from "./start.tsx";
 
@@ -38,6 +38,18 @@ describe("the minutes left", () => {
 
   it("is never less than nothing", () => {
     expect(secondsLeft(talkedUntil(30), start + 30 * minute)).toBe(0);
+  });
+});
+
+describe("the clock", () => {
+  it("shows the minutes without a leading zero", () => {
+    expect([1200, 1182, 300, 59, 0].map(clockOf)).toStrictEqual([
+      "20:00",
+      "19:42",
+      "5:00",
+      "0:59",
+      "0:00",
+    ]);
   });
 });
 
