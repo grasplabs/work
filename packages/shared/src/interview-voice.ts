@@ -74,7 +74,9 @@ export const interviewVoiceRequestSchema = z.discriminatedUnion("action", [
   }),
   /**
    * Write down what was said since `noted` of their answers: once one more
-   * of theirs stands in Mistral's transcript.
+   * of theirs stands in Mistral's transcript. One at a time: the page sends
+   * the next once this one answered, with the `noted` it answered, or the
+   * same answers are written down twice.
    */
   z.strictObject({
     action: z.literal("answer"),
@@ -83,7 +85,11 @@ export const interviewVoiceRequestSchema = z.discriminatedUnion("action", [
     /** How many of their answers in this session were written down already. */
     noted: z.int().min(0).max(interviewLimits.lines),
   }),
-  /** Close the session at Mistral: the page left it, or the interview is at the read-back. */
+  /**
+   * Close the session at Mistral: the page left it, the interview is at the
+   * read-back, or they withdrew. Taken on the pass alone, whatever the
+   * link's state.
+   */
   z.strictObject({
     action: z.literal("close"),
     secret: interviewSecretSchema,

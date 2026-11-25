@@ -371,7 +371,7 @@ interface Heard {
 }
 
 /** What Mistral's answer says of a session; null when it isn't one. */
-export const heardOf = (answer: unknown): Heard | null => {
+const heardOf = (answer: unknown): Heard | null => {
   const kept = keptSchema.safeParse(answer);
   if (!kept.success) {
     return null;
@@ -533,23 +533,31 @@ const open = async (
     return failed("The interview could not start. Try again.", 503);
   }
   const { id, participant_token, server_url, expires_at } = opened.data;
-  await onboardingStore(env).turnRan(secretMark, {
-    mark: voice.mark,
-    interviewer: "stephen",
-    locale: asked.locale,
-    version: stephenVersion,
-  });
+  let pass: string;
+  try {
+    await onboardingStore(env).turnRan(secretMark, {
+      mark: voice.mark,
+      interviewer: "stephen",
+      locale: asked.locale,
+      version: stephenVersion,
+    });
+    pass = await passOf(env, {
+      session: id,
+      link: secretMark,
+      account,
+      until: Date.now() + passMs,
+    });
+  } catch (error) {
+    // Open at Mistral, with no pass the page could close it by.
+    await closeQuietly(env, id, requestId);
+    throw error;
+  }
   const join: VoiceSessionJoin = {
     id,
     participantToken: participant_token,
     serverUrl: server_url,
     expiresAt: expires_at,
-    pass: await passOf(env, {
-      session: id,
-      link: secretMark,
-      account,
-      until: Date.now() + passMs,
-    }),
+    pass,
   };
   return Response.json(join, { headers: linkHeaders });
 };
@@ -664,7 +672,18 @@ const answer = async (
   const { turn: checked, dropped } = checkedTurn(
     typeof noted === "object" && noted !== null ? noted : {},
     {
-      answers,
+      // What they said since the last notes, as one answer: Mistral may
+      // split a spoken answer at a pause, or several may come in while
+      // notes are written. Quotes stand in it or in the two before.
+      answers: [
+        ...answers.slice(0, asked.noted),
+        {
+          text: answers
+            .slice(asked.noted)
+            .map(({ text }) => text)
+            .join(" "),
+        },
+      ],
       known: asked.facts.map(({ id }) => id),
       phase,
     }
@@ -692,15 +711,6 @@ const answer = async (
     { facts: checked.facts, changes: checked.changes, phase },
     { ...asked, phase, facts: written }
   );
-};
-
-/** Closes the session at Mistral; one that is gone already is closed. */
-const close = async (
-  { env, requestId }: Asked,
-  session: string
-): Promise<Response> => {
-  await closeQuietly(env, session, requestId);
-  return new Response(null, { status: 204, headers: linkHeaders });
 };
 
 /** Someone's live voice session, as the page asks for it: open, after an answer, or close. */
@@ -735,6 +745,23 @@ export const interviewVoiceResponse = async (
   }
   const asked = parsed.data;
   const secretMark = await sha256Hex(asked.secret);
+  // A session is closed on its pass alone, signed for this link and this
+  // account: also once they withdrew or the interviews were paused, so
+  // nothing of theirs stays open at Mistral.
+  if (asked.action === "close") {
+    const session = await sessionOfPass(
+      env,
+      asked.pass,
+      secretMark,
+      caller.account
+    );
+    if (session === null) {
+      log.warn("interview.voice_pass_refused", { requestId });
+      return linkRefusal("interview.invalid", requestId);
+    }
+    await closeQuietly(env, session, requestId);
+    return new Response(null, { status: 204, headers: linkHeaders });
+  }
   const found = await onboardingStore(env).turnContext(
     secretMark,
     caller.account
@@ -766,7 +793,5 @@ export const interviewVoiceResponse = async (
     log.warn("interview.voice_pass_refused", { requestId });
     return linkRefusal("interview.invalid", requestId);
   }
-  return asked.action === "answer"
-    ? await answer(held, asked, session)
-    : await close(held, session);
+  return await answer(held, asked, session);
 };

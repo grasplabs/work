@@ -13,6 +13,7 @@ import {
   answering,
   codeOf,
   holdAlarm,
+  onLink,
   opened,
   openLinkAs,
   participate,
@@ -484,6 +485,89 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
       ],
       knows: true,
       welcomed: true,
+    });
+  });
+
+  it("closes the session on its pass once they withdrew, so nothing of theirs stays open at Mistral", async () => {
+    const link = await opened();
+    await plan(platformMistralKey, [
+      { status: 200, body: openedSession },
+      { status: 200, body: {} },
+    ]);
+    const { result } = await answering([], async () => {
+      const join = await ask(link, {
+        action: "open",
+        event: "start",
+        ...standing,
+      });
+      const joined: VoiceSessionJoin = await join.json();
+      await onLink({ action: "withdraw", ...link });
+      const closed = await ask(link, { action: "close", pass: joined.pass });
+      return closed.status;
+    });
+    const sent = await atMistral();
+    expect({
+      closed: result,
+      last: sent.map(({ method, path }) => ({ method, path })).at(-1),
+    }).toStrictEqual({
+      closed: 204,
+      last: { method: "DELETE", path: "/v1/audio/sessions/sess_7f3a" },
+    });
+  });
+
+  it("keeps a quote that runs across a pause Mistral split their answer at", async () => {
+    const link = await opened();
+    const split = kept("I check the invoices");
+    const transcripts = [
+      ...split.transcripts.slice(0, 2),
+      {
+        role: "user",
+        content: "in Exact every morning.",
+        timestamp: "2026-11-25T10:00:06.000Z",
+        latency: {},
+      },
+    ];
+    await plan(platformMistralKey, [
+      { status: 200, body: openedSession },
+      { status: 200, body: { ...split, transcripts } },
+    ]);
+    const { result } = await answering(
+      [
+        notes({
+          facts: [
+            {
+              tag: "step",
+              text: "You check the invoices in Exact every morning.",
+              record: "Check the invoices in Exact every morning.",
+              quote: "I check the invoices in Exact every morning",
+            },
+          ],
+          changes: [],
+        }),
+      ],
+      async () => {
+        const join = await ask(link, {
+          action: "open",
+          event: "start",
+          ...standing,
+        });
+        const joined: VoiceSessionJoin = await join.json();
+        const answered = await ask(link, {
+          action: "answer",
+          ...standing,
+          pass: joined.pass,
+          noted: 0,
+        });
+        const answer: VoiceAnswered = await answered.json();
+        return answer;
+      }
+    );
+    expect({
+      noted: result.noted,
+      kept: result.turn?.facts.map(({ text }) => text),
+    }).toStrictEqual({
+      noted: 2,
+      kept: ["You check the invoices in Exact every morning."],
     });
   });
 });
