@@ -41,13 +41,21 @@ import type { Vault } from "./vault.ts";
 // (threat model R1). A refresh token never leaves at all: only its token
 // endpoint sees it.
 
-/** What a connection's sealed value holds: OAuth tokens, or an API key. */
+/**
+ * What a connection's sealed value holds: OAuth tokens, or an API key and,
+ * for a shared connection reached through the company network, the one
+ * address its requests go to (company-network.ts): sealed with the key,
+ * so the address can't be changed apart from it.
+ */
 const storedTokensSchema = z.union([
   z.strictObject({
     accessToken: z.string().min(1),
     refreshToken: z.string().min(1),
   }),
-  z.strictObject({ apiKey: z.string().min(1) }),
+  z.strictObject({
+    apiKey: z.string().min(1),
+    companyNetwork: z.string().min(1).optional(),
+  }),
 ]);
 type StoredTokens = z.infer<typeof storedTokensSchema>;
 type StoredOAuthTokens = Extract<StoredTokens, { refreshToken: string }>;
@@ -126,7 +134,7 @@ export const firstTokens = async (
     vault,
     connectionId,
     "apiKey" in tokens
-      ? { apiKey: tokens.apiKey }
+      ? { apiKey: tokens.apiKey, companyNetwork: tokens.companyNetwork }
       : { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken }
   ),
   accessExpiresAt: new Date(tokens.expiresAt),
@@ -770,22 +778,49 @@ export const accessTokenFor = async (
 /**
  * What one call of an active connection's connector sends its requests
  * with: a fresh access token, or the API key, in the header the provider
- * takes it in. Only for connect's egress handler, for that call.
+ * takes it in; and, for a connection reached through the company network,
+ * the address sealed with its key, which its requests go to. Only for
+ * connect's own requests and its egress handler, for that call.
  */
-export const credentialFor = async (
+export const connectorCredentialFor = async (
   env: Env,
   connectionId: string
-): Promise<Credential> => {
+): Promise<{ credential: Credential; companyNetwork: string | undefined }> => {
   const active = await activeConnection(env, connectionId);
   const { provider, row, vault } = active;
   if (provider.kind === "oauth") {
-    return bearer(await freshAccessToken(env, active));
+    return {
+      credential: bearer(await freshAccessToken(env, active)),
+      companyNetwork: undefined,
+    };
   }
   const tokens = await openTokens(vault, row);
   if (!("apiKey" in tokens)) {
     throw connectErrors.create("connect.connection_inactive");
   }
-  return provider.credential(tokens.apiKey);
+  return {
+    credential: provider.credential(tokens.apiKey),
+    companyNetwork: tokens.companyNetwork,
+  };
+};
+
+/**
+ * `connectorCredentialFor`'s credential alone, for a request to the
+ * public internet: refused for a connection reached through the company
+ * network, whose requests go nowhere else.
+ */
+export const credentialFor = async (
+  env: Env,
+  connectionId: string
+): Promise<Credential> => {
+  const { credential, companyNetwork } = await connectorCredentialFor(
+    env,
+    connectionId
+  );
+  if (companyNetwork !== undefined) {
+    throw connectErrors.create("connect.connection_inactive");
+  }
+  return credential;
 };
 
 /**

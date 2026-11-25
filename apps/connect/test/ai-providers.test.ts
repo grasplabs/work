@@ -642,6 +642,30 @@ describe("AI providers in connect", () => {
         },
       ]);
     });
+
+    it("sends each request, on-prem, through the AI endpoints' network, never connect's own", async () => {
+      const reached: string[] = [];
+      const relayed = await throughRelay({
+        RUNTIME_PROFILE: "workerd",
+        AI_PRIVATE_HOSTS: "relay.acme.lan",
+        AI_PROVIDER_ORIGIN: "http://relay.acme.lan:8080",
+        AI_NETWORK: {
+          fetch: async (input, init) => {
+            reached.push(new Request(input, init).url);
+            return await nextAnswer();
+          },
+          connect: () => {
+            throw new Error("No sockets on the AI endpoints' network");
+          },
+        },
+      });
+
+      expect({ relayed, reached, sent }).toStrictEqual({
+        relayed: "sent",
+        reached: ["http://relay.acme.lan:8080/v1/chat/completions"],
+        sent: [],
+      });
+    });
   });
 
   describe("Grasp's own speech and transcription", () => {

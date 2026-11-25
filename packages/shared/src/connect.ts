@@ -256,10 +256,11 @@ export const addConnectorSchema = z.strictObject({
   /**
    * The server's own address: nothing but its origin and path, so no
    * query, fragment or credentials, not even empty ones. One that isn't a
-   * URL at all is `z.url`'s to refuse.
+   * URL at all is `z.url`'s to refuse. Plain HTTP only for a server
+   * reached through the company network, which connect checks.
    */
   url: z
-    .url({ protocol: /^https$/u })
+    .url({ protocol: /^https?$/u })
     .max(connectorUrlMaxLength)
     .refine((value) => {
       const parsed = URL.parse(value);
@@ -267,6 +268,14 @@ export const addConnectorSchema = z.strictObject({
         parsed === null || parsed.href === `${parsed.origin}${parsed.pathname}`
       );
     }),
+  /**
+   * Whether the server sits inside the company's own network, reached
+   * through the deployment's company network (GRA-2327): its URL's host
+   * and port are then the one address that route takes, plain HTTP is
+   * taken, its connections are shared ones only, and it signs in with a
+   * key in a header.
+   */
+  companyNetwork: z.boolean().optional(),
   /** The deployment's origin, from its config: its sign-in returns there. */
   origin: z.url(),
   auth: z.discriminatedUnion("kind", [
@@ -387,6 +396,15 @@ export const connectWithKeySchema = z.strictObject({
     .min(1)
     .max(apiKeyMaxLength)
     .regex(/^[\u0021-\u007E]+$/u, "Not an API key"),
+  /**
+   * For an app's shared connection to a system inside the company's own
+   * network: the one address its requests go to, through the
+   * deployment's company network, as an http or https origin with its
+   * port (`http://10.0.0.8:8080`). Sealed with the key, so another
+   * address takes the key again (GRA-2327). A connector made from a URL
+   * names its own (`AddConnector.companyNetwork`).
+   */
+  companyNetwork: z.string().max(connectorUrlMaxLength).optional(),
 });
 export type ConnectWithKey = z.input<typeof connectWithKeySchema>;
 
@@ -513,6 +531,11 @@ export interface ConnectionSummary {
   accountName: string | null;
   /** ISO 8601. */
   createdAt: string;
+  /**
+   * For a shared connection reached through the company network, the one
+   * address its requests go to, as an origin.
+   */
+  companyNetwork?: string;
   /**
    * How a Composio connection was made, and so which consent was given:
    * signing in (`managed`, {@link composioConsentText}) or with a key
@@ -1079,6 +1102,12 @@ export interface CatalogEntry {
   group: CatalogGroup;
   /** Whose sign-in app connecting it takes ({@link CatalogAuth}). */
   auth: CatalogAuth;
+  /**
+   * For a connector whose server sits inside the company's own network,
+   * the one address it is reached at through the company network, as an
+   * origin: only an admin connects it, as a shared connection.
+   */
+  companyNetwork?: string;
 }
 
 /**
@@ -2691,6 +2720,8 @@ export const connectionErrors = defineErrorFamily({
     "That server takes only clients registered with it. Enter the client ID its vendor issued for Grasp.",
   "connection.connector_exists":
     "A connector for that server was already added.",
+  "connection.company_network_unavailable":
+    "This deployment can't reach your company's network, so nothing can be connected through it yet.",
 });
 
 /** Which App's held actions of which binding to drop. */

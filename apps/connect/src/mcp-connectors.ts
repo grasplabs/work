@@ -25,6 +25,7 @@ import { and, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { recordEvents } from "./audit.ts";
+import { companyAddressOf, companyRoute, outbound } from "./company-network.ts";
 import {
   auditRefusal,
   connectionEvent,
@@ -45,7 +46,7 @@ import {
   servedSchema,
   textAnswer,
 } from "./served-schemas.ts";
-import { credentialFor, pausedWait } from "./tokens.ts";
+import { connectorCredentialFor, pausedWait } from "./tokens.ts";
 import { classesOf, keptToolClasses, storedSchema } from "./tool-rules.ts";
 import { vaultFor } from "./vault.ts";
 
@@ -140,14 +141,23 @@ export const addConnector = async (
   env: Env,
   request: unknown
 ): Promise<{ id: string }> => {
-  const { person, name, url, origin, auth } = connectionErrors.parse(
-    "connection.invalid",
-    addConnectorSchema,
-    request
-  );
-  // An https URL of its origin and path alone (`addConnectorSchema`).
+  const { person, name, url, companyNetwork, origin, auth } =
+    connectionErrors.parse("connection.invalid", addConnectorSchema, request);
+  // A URL of its origin and path alone (`addConnectorSchema`), https
+  // but inside the company's network.
   const server = new URL(url);
-  const detail = { host: server.host, auth: auth.kind };
+  if (companyNetwork !== true && server.protocol !== "https:") {
+    throw connectionErrors.create("connection.invalid");
+  }
+  // A server inside the company's own network is reached through the
+  // company network at its URL's origin alone (company-network.ts).
+  const address =
+    companyNetwork === true ? companyAddressOf(server.origin) : undefined;
+  const detail = {
+    host: server.host,
+    auth: auth.kind,
+    ...(address !== undefined && { companyNetwork: address }),
+  };
   await refuseStaff(env, person, detail);
   if (!isAdmin(person.role)) {
     await auditRefusal(env, person, "connector.added", {
@@ -157,7 +167,16 @@ export const addConnector = async (
     });
     throw roleErrors.create("role.forbidden");
   }
-  if (!(await isPublicName(server))) {
+  if (companyNetwork === true) {
+    // Its sign-in, discovered and registered at the server, would be read
+    // from the public internet: a key in a header only, for now.
+    if (address === undefined || auth.kind !== "header") {
+      throw connectionErrors.create("connection.invalid");
+    }
+    if (companyRoute(env, address) === undefined) {
+      throw connectionErrors.create("connection.company_network_unavailable");
+    }
+  } else if (!(await isPublicName(server))) {
     throw connectionErrors.create("connection.server_refused");
   }
   const vault = await vaultFor(env);
@@ -169,7 +188,13 @@ export const addConnector = async (
   const common = { id, name, createdBy: person.userId, createdAt: now };
   let row: typeof connectors.$inferInsert;
   if (auth.kind === "header") {
-    row = { ...common, url: server.href, auth: "header", header: auth.header };
+    row = {
+      ...common,
+      url: server.href,
+      auth: "header",
+      header: auth.header,
+      companyNetwork: address !== undefined,
+    };
   } else {
     const signIn = await discoverSignIn(server);
     const client = await clientFor(signIn, new URL(origin).origin, auth.client);
@@ -333,7 +358,11 @@ const serverFor = async (
   if (row === undefined) {
     throw connectErrors.create("connect.server_unavailable");
   }
-  const credential = await credentialFor(env, connection.id);
+  const { credential, companyNetwork } = await connectorCredentialFor(
+    env,
+    connection.id
+  );
+  const send = outbound(env, companyNetwork);
   return modernMcpServer(row.url, async (request) => {
     if (
       request.method !== "POST" ||
@@ -347,7 +376,7 @@ const serverFor = async (
     }
     const headers = new Headers(request.headers);
     headers.set(credential.header, credential.value);
-    const response = await fetch(
+    const response = await send(
       new Request(request, { headers, redirect: "manual" })
     );
     // A server that asks every caller to wait pauses the connection, as a

@@ -440,10 +440,16 @@ export const lastListedToolkits = async (
  */
 const connectorEntries = async (env: Env): Promise<CatalogEntry[]> => {
   const rows = await drizzle(env.DB)
-    .select({ id: connectors.id, name: connectors.name, auth: connectors.auth })
+    .select({
+      id: connectors.id,
+      name: connectors.name,
+      url: connectors.url,
+      auth: connectors.auth,
+      companyNetwork: connectors.companyNetwork,
+    })
     .from(connectors)
     .orderBy(connectors.name, connectors.id);
-  return rows.map(({ id, name, auth }) => ({
+  return rows.map(({ id, name, url, auth, companyNetwork }) => ({
     source: "connector",
     id,
     name,
@@ -453,6 +459,7 @@ const connectorEntries = async (env: Env): Promise<CatalogEntry[]> => {
     description: null,
     group: catalogGroupOf([]),
     auth: auth === "header" ? "key" : "managed",
+    ...(companyNetwork === true && { companyNetwork: new URL(url).origin }),
   }));
 };
 

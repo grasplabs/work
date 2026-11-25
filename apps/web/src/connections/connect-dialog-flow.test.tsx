@@ -245,6 +245,52 @@ describe("connecting a connector whose server takes a key", () => {
   });
 });
 
+describe("connecting a connector reached through the company network", () => {
+  afterEach(() => {
+    act(() => {
+      root?.unmount();
+    });
+    root = undefined;
+    document.body.innerHTML = "";
+  });
+
+  it("connects it for everyone, with no choice of who uses it, and says where it goes", async () => {
+    const id = `mcp_${"1".repeat(32)}`;
+    const [inside] = integrationsOf(
+      [
+        {
+          ...entry("connector", id, "Ledger"),
+          auth: "key",
+          companyNetwork: "http://10.0.0.8:8080",
+        },
+      ],
+      []
+    );
+    const asked: unknown[] = [];
+    await opened(inside, {
+      connectWithKey: async (request: unknown): Promise<{ url: string }> => {
+        asked.push(request);
+        return await Promise.reject(new Error("Not now"));
+      },
+    });
+    expect(document.body.textContent).not.toContain("Just for you");
+    expect(document.body.textContent).toContain(
+      "Grasp reaches it through your company network at http://10.0.0.8:8080."
+    );
+
+    await type(document.querySelector('input[type="password"]'), "key-0001");
+    await press(button("Connect Ledger"));
+    expect(asked).toStrictEqual([
+      {
+        provider: id,
+        scope: "shared",
+        key: "key-0001",
+        returnTo: `/connectors/connector:${id}`,
+      },
+    ]);
+  });
+});
+
 describe("choosing what Grasp may do in a toolkit", () => {
   afterEach(() => {
     act(() => {

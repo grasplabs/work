@@ -1,6 +1,6 @@
 import { connectorManifestSchema } from "@grasp-os/runtime/connector";
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
-import { env } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -10,6 +10,7 @@ import { connections } from "../src/db/schema.ts";
 import type { EgressProps } from "../src/egress.ts";
 import { connectApp, fakeApps } from "./app-provider.ts";
 import type { AppName } from "./app-provider.ts";
+import { companyNetworkKey } from "./company-network-fake.ts";
 import { connectAccount, ownAccount, someone } from "./connect.ts";
 import type { Call } from "./connect.ts";
 import { sampleHost } from "./fixtures/sample-connector.ts";
@@ -53,12 +54,26 @@ export const isApp = (provider: string): provider is AppName =>
 
 /**
  * A person's own account at `provider`, connected to `server`: through
- * the app's own sign-in for an app, whose connector is the one it names.
+ * the app's own sign-in for an app, whose connector is the one it names;
+ * the sample ERP's account through the company network.
  */
 export const connectionOf = async (
   server: string,
   provider: string
 ): Promise<{ id: string; person: ConnectionPerson }> => {
+  if (provider === "sample-erp") {
+    // The system inside the company's network (company-network.test.ts),
+    // connected for everyone by an admin.
+    const person = someone("admin");
+    const { connectionId } = await exports.default.connectWithKey({
+      person,
+      provider,
+      scope: "shared",
+      key: companyNetworkKey,
+      companyNetwork: String(Reflect.get(env, "COMPANY_NETWORK_TEST_ORIGIN")),
+    });
+    return { id: connectionId, person };
+  }
   if (!isApp(provider)) {
     return await connectionTo(
       server,
