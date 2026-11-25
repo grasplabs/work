@@ -117,9 +117,10 @@ export interface OAuthProviderConfig {
   /** How the scope parameter joins `scopes`. */
   scopeSeparator: string;
   /**
-   * Whether a consent's token answer must list the scopes it granted: a
-   * connector's own sign-in asked by class, whose connection holds only
-   * what its grant lists (provider-rights.ts `holdsClassRights`).
+   * Whether a consent's token answer must list the scopes it granted:
+   * every provider asked by class (a suite's, a connector's own sign-in
+   * with rights), whose connection holds only what its grant lists
+   * (provider-rights.ts `holdsClassRights`).
    */
   grantListed?: boolean;
   /**
@@ -326,6 +327,7 @@ const microsoft: OAuthProviderConfig = {
   // before can't, and is reconnected in place. Change own asks for it.
   renewalRequires: ["Files.ReadWrite.All"],
   scopeSeparator: " ",
+  grantListed: true,
   scopePrefix: graphScopePrefix,
   authorizationParams: () => ({ response_mode: "query" }),
   clientAuthentication: "client_secret_post",
@@ -424,6 +426,7 @@ const google: OAuthProviderConfig = {
   // first refused write (tokens.ts `markIfGrantLacks`).
   scopes: googleRights(classesOnByDefault),
   scopeSeparator: " ",
+  grantListed: true,
   authorizationParams: (tenant) => ({
     access_type: "offline",
     prompt: "consent",

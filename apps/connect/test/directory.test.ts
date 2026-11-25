@@ -184,7 +184,7 @@ const directoryAccount = (
 ): Account => ({
   ...ownAccount(admin, suiteOf[provider]),
   audience: clientOf(provider).id,
-  ...(granted === null ? {} : { granted }),
+  granted,
 });
 
 /**
