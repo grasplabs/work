@@ -1,3 +1,4 @@
+import { devInterviewLinkPath } from "@grasp-os/shared/dev-reset";
 import { interviewPagePath } from "@grasp-os/shared/interview-links";
 import type { SignInOption } from "@grasp-os/shared/rpc";
 import { Button } from "@grasp-os/ui/components/button";
@@ -52,8 +53,70 @@ type Page =
   | { state: "sign_in"; secret: string; options: SignInOption[] }
   | { state: "open"; secret: string; session: OpenSession };
 
+/**
+ * Asks to sign in, keeping `secret` in this tab while they are away; or
+ * says the link opens nothing when core can't say how to sign in.
+ */
+const askToSignIn = async (
+  secret: string,
+  core: CoreConnection
+): Promise<Page> => {
+  const { connected, signInOptions } = await loadCoreStatus(core);
+  if (!connected) {
+    return { state: "refused", secret, message: "", signedIn: false };
+  }
+  // Kept in this tab while they are away signing in, and taken back as
+  // the page opens again (`linkSecret`).
+  keepWhileSigningIn(secret);
+  // Grasp's staff open nobody's interview: only the company's sign-in.
+  return {
+    state: "sign_in",
+    secret,
+    options: signInOptions.filter(({ staff }) => !staff),
+  };
+};
+
+/**
+ * On a local stack only (`vp run dev`): `/interview#dev` opens the link
+ * of whoever is signed in, or else noor@acme.test's, as it is now, so one
+ * address keeps working however often the onboarding starts over (core's
+ * onboarding/dev-reset.ts). The address takes that link's secret, which
+ * opens the page again; `?jump=` stays. A build for anywhere else has no
+ * such alias: Vite leaves it out, and core has no such route there.
+ */
+const devAlias = "dev";
+
+const openDevAlias = async (core: CoreConnection): Promise<Page> => {
+  const response = await fetch(devInterviewLinkPath, { method: "POST" });
+  if (response.status === 401) {
+    return await askToSignIn(devAlias, core);
+  }
+  const found: unknown = response.ok ? await response.json() : null;
+  const path =
+    typeof found === "object" && found !== null && "path" in found
+      ? String(found.path)
+      : "";
+  const [, secret = ""] = path.split("#");
+  if (secret === "") {
+    return {
+      state: "refused",
+      secret: devAlias,
+      message:
+        "No interview link on this local stack yet: finish the setup first.",
+      signedIn: false,
+    };
+  }
+  window.location.replace(
+    `${window.location.pathname}${window.location.search}#${secret}`
+  );
+  return { state: "loading", secret: devAlias };
+};
+
 /** Opens the link for whoever is signed in, or asks them to sign in. */
 const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
+  if (import.meta.env.DEV && secret === devAlias) {
+    return await openDevAlias(core);
+  }
   if (secret === "") {
     return {
       state: "refused",
@@ -72,19 +135,7 @@ const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
         signedIn: answer.code === "interview.link_invalid",
       };
     }
-    const { connected, signInOptions } = await loadCoreStatus(core);
-    if (!connected) {
-      return { state: "refused", secret, message: "", signedIn: false };
-    }
-    // Kept in this tab while they are away signing in, and taken back as
-    // the page opens again (`linkSecret`).
-    keepWhileSigningIn(secret);
-    // Grasp's staff open nobody's interview: only the company's sign-in.
-    return {
-      state: "sign_in",
-      secret,
-      options: signInOptions.filter(({ staff }) => !staff),
-    };
+    return await askToSignIn(secret, core);
   }
   // Back on the link after stopping, it carries on where it was.
   holdInterview({
