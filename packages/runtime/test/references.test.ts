@@ -13,28 +13,28 @@ import {
   symbolicModules,
   workflowFingerprint,
   workflowFunctions,
-} from "../src/host.ts";
+} from "../src/app/host.ts";
 import type {
   AppManifest,
   BoundWorkflow,
   WorkflowBindingExtras,
   ServerModules,
-} from "../src/host.ts";
-import type { AnyFunctionReference } from "../src/index.ts";
-import { defineApp, permission, v } from "../src/index.ts";
-import { readPageBuild } from "../src/page-functions.ts";
-import { runFunction } from "../src/runner.ts";
-import type { FunctionChannel } from "../src/runner.ts";
-import { serverFunctionsIn } from "../src/server-syntax.ts";
-import { serverModule } from "../src/server.ts";
-import { valueLimits } from "../src/value-descriptor.ts";
-import { schemaOf } from "../src/value-schema.ts";
-import type { AnySchema } from "../src/value-schema.ts";
-import { defineSchema, defineTable } from "../src/values.ts";
-import { workflowReferenceLimits } from "../src/workflow-references.ts";
+} from "../src/app/host.ts";
+import type { AnyFunctionReference } from "../src/app/index.ts";
+import { defineApp, permission, v } from "../src/app/index.ts";
+import { readPageBuild } from "../src/app/page-functions.ts";
+import { runFunction } from "../src/app/runner.ts";
+import type { FunctionChannel } from "../src/app/runner.ts";
+import { serverFunctionsIn } from "../src/app/server-syntax.ts";
+import { serverModule } from "../src/app/server.ts";
+import { workflowReferenceLimits } from "../src/app/workflow-references.ts";
+import { valueLimits } from "../src/common/value-descriptor.ts";
+import { schemaOf } from "../src/common/value-schema.ts";
+import type { AnySchema } from "../src/common/value-schema.ts";
+import { defineSchema, defineTable } from "../src/common/values.ts";
 import notes from "./notes/.grasp/app.ts";
 import contractsText from "./notes/.grasp/contracts.json?raw";
-// oxlint-disable-next-line import/default -- a ?raw import is the file's text
+// oxlint-disable-next-line import/default, import/no-duplicates -- a ?raw import is the file's text
 import functionsText from "./notes/.grasp/functions.ts?raw";
 import { functions as builtFunctions } from "./notes/.grasp/functions.ts";
 import { archiveNotes, summarizeNote } from "./notes/grasp.config.ts";

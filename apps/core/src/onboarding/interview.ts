@@ -80,8 +80,12 @@ const lineTokens = 400;
 /** The most the notes' model writes: the facts of one answer. */
 const notesTokens = 4000;
 
-/** A turn as Stephen is asked for it: the page's request, without the link it came on. */
-export type TurnAsked = Omit<InterviewTurnRequest, "secret">;
+/**
+ * A turn as Stephen is asked for it: the page's request, without the link
+ * it came on, and without the interviewer it names. The onboarding's pages
+ * still send one until they drop the choice; Stephen holds every interview.
+ */
+export type TurnAsked = Omit<InterviewTurnRequest, "secret" | "interviewer">;
 
 /** What happened, as Stephen is told it, for someone called `name`. */
 const happenedOf = (
@@ -129,7 +133,7 @@ export const briefOf = (
   company: string
 ): string => {
   const { name, team, lead, work, kind, known } = context;
-  const self = interviewerNames[turn.interviewer];
+  const self = interviewerNames.stephen;
   const lines = turn.lines.slice(-turnLinesMax);
   const toLearn =
     work === ""
@@ -468,7 +472,7 @@ export const turnStream = async ({
 }: TurnInput): Promise<Response> => {
   const { line: quick, notes: careful } = platformAi.interview;
   const [{ text: system, mark }, name] = await Promise.all([
-    interviewerText(turn.interviewer, context.kind, turn.locale),
+    interviewerText(context.kind, turn.locale),
     company,
   ]);
   const cut = new AbortController();
@@ -598,7 +602,7 @@ export const interviewTurnResponse = async (
     ran: async (mark) => {
       await store.turnRan(secretMark, {
         mark,
-        interviewer: turn.interviewer,
+        interviewer: "stephen",
         locale: turn.locale,
         version: stephenVersion,
       });

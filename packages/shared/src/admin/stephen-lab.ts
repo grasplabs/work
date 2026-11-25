@@ -20,7 +20,6 @@
 import { compare, meansOf, noiseOf } from "../lab-compare.ts";
 import type { CaseScore, Verdict } from "../lab-compare.ts";
 import type { Bench, Result, Scores } from "../lab-runs.ts";
-import type { Interviewer } from "../onboarding.ts";
 import { stephenOf } from "./onboarding-admin-record.ts";
 import type { OrgView } from "./onboarding-admin.ts";
 import { liveGroupsOf, realFiguresOf, tallyOf } from "./stephen-live.ts";
@@ -50,11 +49,10 @@ export const UNRECORDED = "unrecorded";
 const versionOfRun = (run: Pick<Result, "stephen">): string =>
   run.stephen.talks;
 
-/** Two runs measured the same thing the same way: the same bench, interviewer, models and people. */
+/** Two runs measured the same thing the same way: the same bench, models and people. */
 const alikeKey = (run: Result | Scores): string =>
   [
     run.bench,
-    run.stephen.interviewer,
     run.via.quick ?? "",
     run.via.careful ?? "",
     run.people ?? "",
@@ -352,11 +350,7 @@ const releaseNameOf = (
 };
 
 /** What a version is called: by the order the lab measured it, or that it never was. */
-const nameFor = (
-  version: string,
-  measured: readonly string[],
-  interviewer: Interviewer
-): string => {
+const nameFor = (version: string, measured: readonly string[]): string => {
   if (version === UNRECORDED) {
     return "Not recorded";
   }
@@ -364,7 +358,7 @@ const nameFor = (
   if (at === -1) {
     return "Not measured";
   }
-  return `${interviewer === "claire" ? "Claire" : "Stephen"} ${at + 1}`;
+  return `Stephen ${at + 1}`;
 };
 
 /** What Live says needs one of us: a group that finishes less often, or rates him lower, with the Stephen in use than before him. */
@@ -599,49 +593,31 @@ const candidateNeeds = ({
 };
 
 /**
- * Everything the Stephen Lab page shows, for one interviewer: every version
+ * Everything the Stephen Lab page shows: every version
  * with the lab's numbers and the real ones, the number it leads with, and
  * what needs one of us. `now` is when it is read, as ISO time.
  */
 export const stephenLabOf = ({
   results,
-  scores,
+  scores: hidden,
   organizations,
-  interviewer,
   now,
   channel,
 }: {
   results: readonly Result[];
   scores: readonly Scores[];
   organizations: readonly LabOrganization[];
-  interviewer: Interviewer;
   now: string;
   /** Only the organizations on this release channel; all of them without it. */
   channel?: string;
 }): StephenLab => {
   const open = results
-    .filter(
-      (run) => run.set === "open" && run.stephen.interviewer === interviewer
-    )
+    .filter((run) => run.set === "open")
     .toSorted((a, b) => a.at.localeCompare(b.at));
-  const hidden = scores.filter(
-    (run) => run.stephen.interviewer === interviewer
+  // Real interviews, and by which Stephen, on the channel asked for.
+  const theirs = organizations.filter(
+    (organization) => channel === undefined || organization.channel === channel
   );
-  // Real interviews held by this interviewer, and by which Stephen, on the channel asked for.
-  const theirs = organizations
-    .filter(
-      (organization) =>
-        channel === undefined || organization.channel === channel
-    )
-    .map((organization) => ({
-      ...organization,
-      view: {
-        ...organization.view,
-        interviews: organization.view.interviews.filter(
-          (interview) => interview.interviewer === interviewer
-        ),
-      },
-    }));
   const realVersions = new Set(
     theirs.flatMap(({ view }) =>
       view.interviews.map((interview) => interview.stephen ?? UNRECORDED)
@@ -659,8 +635,7 @@ export const stephenLabOf = ({
     }
   }
   // Real interviews of a release join the newest lab Stephen run as that release, whatever else he
-  // was run as later (a change to Claire's texts alone is a new release with the same Stephen); the
-  // releases the lab never ran are rows of their own.
+  // was run as later; the releases the lab never ran are rows of their own.
   const rowOfRelease = new Map<string, string>();
   for (const run of [...open, ...hidden].toSorted((x, y) =>
     x.at.localeCompare(y.at)
@@ -691,7 +666,7 @@ export const stephenLabOf = ({
     (version) => ({
       version,
       release: releaseNameOf(version, measured, releaseOf),
-      name: nameFor(version, measured, interviewer),
+      name: nameFor(version, measured),
       firstRun: firstRun.get(version) ?? null,
       lab: Object.fromEntries(
         LAB_NUMBERS.flatMap((number) => {
@@ -715,11 +690,7 @@ export const stephenLabOf = ({
   // A candidate is one nobody talks with on any channel, whichever channel the page shows.
   const usedReleases = new Set(
     organizations.flatMap(({ view }) =>
-      view.interviews.flatMap((interview) =>
-        interview.interviewer === interviewer
-          ? [interview.stephen ?? UNRECORDED]
-          : []
-      )
+      view.interviews.map((interview) => interview.stephen ?? UNRECORDED)
     )
   );
   const candidate = candidateOf(

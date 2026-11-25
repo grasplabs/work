@@ -2,12 +2,12 @@ import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { clientInternals, GraspClient } from "../src/client-core.ts";
-import { GraspError } from "../src/client-error.ts";
-import type { ClientTransport } from "../src/client-transport.ts";
-import type { FileRef } from "../src/file-references.ts";
-import type { Id } from "../src/index.ts";
-import { GraspProvider, useFile } from "../src/react.ts";
+import { clientInternals, GraspClient } from "../src/app/client-core.ts";
+import { GraspError } from "../src/app/client-error.ts";
+import type { ClientTransport } from "../src/app/client-transport.ts";
+import type { FileRef } from "../src/app/file-references.ts";
+import type { Id } from "../src/app/index.ts";
+import { GraspProvider, useFile } from "../src/app/react.ts";
 import { api } from "./notes/server/_generated/api.ts";
 
 // The session client against the network and the page it reaches through:

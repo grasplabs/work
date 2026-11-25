@@ -6,7 +6,6 @@
  * the same key meets the same people. Ported from the prototype
  * (grasplabs/prototype, packages/grasp: playRest in lab/cli.ts).
  */
-import type { Interviewer } from "@grasp-os/shared/onboarding";
 
 import { inTurns, linkOn, linksOf } from "./core.ts";
 import type { Core, Link } from "./core.ts";
@@ -31,7 +30,6 @@ export interface SimulateOptions {
   ideal: boolean;
   /** People v2 (a mix and a state that drifts), or v1 (one temper each), when not ideal. */
   people: PeopleVersion;
-  interviewer: Interviewer;
   /** How many interviews at once. */
   parallel: number;
   log: (line: string) => void;
@@ -56,7 +54,7 @@ export const simulate = async (
   core: Core,
   practice: Practice,
   key: AnswerKey,
-  { only, seed, ideal, people, interviewer, parallel, log }: SimulateOptions
+  { only, seed, ideal, people, parallel, log }: SimulateOptions
 ): Promise<number> => {
   const tempers = tempersFor(practice.people.length, seed);
   const mixes = mixesFor(practice.people.length, seed);
@@ -141,14 +139,12 @@ export const simulate = async (
     log(`> ${person.id}`);
     const interview = await playInterview(onLink, player, {
       locale: practice.locale,
-      interviewer,
       ...(ideal ? {} : { clock: "talk" as const }),
       ...(v2 ? { events: timetableFor(place, mark) } : {}),
     });
     const { answers: _answers, ...kept } = interview;
     person.played = {
       ...kept,
-      interviewer,
       people: peopleOf(ideal, v2),
       ...(ideal ? {} : { temper, seed }),
       ...(playerV2 === null ? {} : { mix, states: playerV2.states, surface }),

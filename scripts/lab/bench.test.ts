@@ -63,7 +63,6 @@ const ignored = (): void => {
 
 const options = {
   set: "open",
-  interviewer: "stephen",
   keep: ignored,
 } as const;
 
@@ -147,7 +146,6 @@ describe("the notes bench", () => {
     const kept: string[] = [];
     const cases = await benchNotes(stand, [conversation], {
       set: "open",
-      interviewer: "stephen",
       keep: (id) => {
         kept.push(id);
       },
@@ -219,7 +217,6 @@ describe("the notes bench", () => {
       [conversation, { ...conversation, id: "01-p1-old", who: null }],
       {
         set: "hidden",
-        interviewer: "stephen",
         keep: (id) => {
           kept.push(id);
         },
@@ -257,14 +254,12 @@ describe("the next-question bench", () => {
     );
     await benchAsk(stand, [misheard], {
       set: "open",
-      interviewer: "claire",
       keep: ignored,
     });
     const [first] = asked;
     const lines = first?.turn.lines ?? [];
     expect({
       who: first?.who,
-      interviewer: first?.turn.interviewer,
       opensOnAi: lines[0]?.text.includes("AI"),
       lines: lines.length,
       typedLast: lines.at(-1)?.typed,
@@ -273,7 +268,6 @@ describe("the next-question bench", () => {
       lineOnly: first?.lineOnly,
     }).toStrictEqual({
       who: misheard.who,
-      interviewer: "claire",
       opensOnAi: true,
       lines: 6 + misheard.lines.length,
       typedLast: undefined,
@@ -338,7 +332,6 @@ describe("the next-question bench", () => {
       const { stand, asked } = standWith(() => turn, passing);
       const [found] = await benchAsk(stand, [momentNamed(moment)], {
         set: "open",
-        interviewer: "stephen",
         keep: ignored,
       });
       expect({
@@ -363,7 +356,6 @@ describe("the next-question bench", () => {
     );
     await benchAsk(stand, [back], {
       set: "open",
-      interviewer: "stephen",
       keep: ignored,
     });
     expect({
@@ -398,7 +390,6 @@ describe("the next-question bench", () => {
     const kept: string[] = [];
     const cases = await benchAsk(stand, [momentNamed("orders-hidden-actor")], {
       set: "hidden",
-      interviewer: "stephen",
       keep: (id) => {
         kept.push(id);
       },

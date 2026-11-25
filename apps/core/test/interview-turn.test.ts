@@ -40,6 +40,8 @@ import { unique } from "./sign-in.ts";
 //   such field, and the brief holds what the store knows.
 // - A line out that breaks his rules, or a fact whose words weren't said.
 // - A turn given up halfway going uncounted, or still running.
+// - A page that names another interviewer getting one: another text, or
+//   another name on record for who held it.
 // - A link that isn't open, nobody signed in, or someone else signed in,
 //   getting a turn.
 
@@ -299,6 +301,36 @@ describe("an interview turn", { timeout: 60_000 }, () => {
         "mistral-medium-latest",
       ],
     });
+  });
+
+  it("holds a turn that names Claire as Stephen: his text and his name", async () => {
+    const link = await opened();
+    const { requests } = await answering(
+      [line("", "yes", "steps")],
+      async () =>
+        await eventsOf(
+          await ask(link, {
+            event: "answer",
+            locale: "en",
+            interviewer: "claire",
+            lines: [
+              { from: "stephen", text: "Which system do you open first?" },
+              { from: "person", text: "And then I", typed: true },
+            ],
+            facts: [],
+            phase: "steps",
+            minutes: 5,
+          })
+        )
+    );
+    const told = JSON.stringify(requests[0]?.body);
+    expect({
+      his: told.includes(
+        "You are Stephen, an AI interviewer who works for Grasp."
+      ),
+      hisLine: told.includes("Stephen: Which system do you open first?"),
+      hers: told.includes("Claire"),
+    }).toStrictEqual({ his: true, hisLine: true, hers: false });
   });
 
   it("writes nothing down while he waits for the rest of what they say", async () => {

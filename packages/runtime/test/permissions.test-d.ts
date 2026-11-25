@@ -12,7 +12,7 @@
 // below must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
-import { defineApp, permission } from "../src/index.ts";
+import { defineApp, permission } from "../src/app/index.ts";
 import type {
   BrainCard,
   BrainPack,
@@ -20,11 +20,11 @@ import type {
   BrainSkillText,
   ConnectorAction,
   ConnectorContract,
-} from "../src/index.ts";
-import { serverModule } from "../src/server.ts";
-import type { ActionCtx } from "../src/server.ts";
-import type { JsonValue } from "../src/value-descriptor.ts";
-import { defineSchema, defineTable, v } from "../src/values.ts";
+} from "../src/app/index.ts";
+import { serverModule } from "../src/app/server.ts";
+import type { ActionCtx } from "../src/app/server.ts";
+import type { JsonValue } from "../src/common/value-descriptor.ts";
+import { defineSchema, defineTable, v } from "../src/common/values.ts";
 
 const mail = permission.connection("mail", {
   contract: "microsoft-365.mail@1",
