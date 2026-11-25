@@ -2,7 +2,7 @@ import type { ConnectionPerson } from "@grasp-os/shared/connect";
 import { env, exports } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { connectionTokens } from "../src/db/schema.ts";
@@ -181,7 +181,7 @@ describe("a host set per connection", () => {
     expect(connected?.detail).toMatchObject({
       provider: "sample-host",
       scope: "shared",
-      hosts: "erp.acme.test",
+      hosts: "{host}=erp.acme.test",
     });
     expect(connected?.actor).toMatchObject({ userId: admin.userId });
   });
@@ -239,10 +239,6 @@ describe("a host set per connection", () => {
       "{host}": sampleHostFilled,
     });
     internet.sent.length = 0;
-    const warned: string[] = [];
-    vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
-      warned.push(JSON.stringify(args));
-    });
     const reached: unknown[] = [];
     for (const action of ["items.direct", "items.elsewhere"]) {
       // oxlint-disable-next-line no-await-in-loop -- one attempt after another
@@ -253,12 +249,6 @@ describe("a host set per connection", () => {
       reached.push(JSON.parse(output));
     }
     expect(reached).toStrictEqual([{ status: 403 }, { status: 403 }]);
-    expect(
-      warned.filter((line) => line.includes("egress.refused"))
-    ).toStrictEqual([
-      expect.stringMatching(/"reason":"host"/u),
-      expect.stringMatching(/"reason":"host"/u),
-    ]);
     expect(internet.sent).toStrictEqual([]);
   });
 

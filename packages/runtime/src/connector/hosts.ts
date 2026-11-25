@@ -55,10 +55,14 @@ export const declaredHostSchema = z
     "Not a host, or a host template: {name}.<host> or {name}"
   );
 
+/** Names that never reach a host of a vendor's (RFC 6761). */
+const specialNames = /\.(?:invalid|localhost)$/u;
+
 /**
  * The host `value` names, a host or an HTTPS origin, as a URL parser
  * reads it (in lower case); none for anything else: a port, userinfo, a
- * path or a query. A filled host still has to fit its template.
+ * path, a query, or a special-use name. A filled host still has to fit
+ * its template.
  */
 export const hostOf = (value: string): string | undefined => {
   const url = URL.parse(value.includes("://") ? value : `https://${value}`);
@@ -68,7 +72,8 @@ export const hostOf = (value: string): string | undefined => {
     url.port === "" &&
     url.pathname === "/" &&
     url.search === "" &&
-    url.hash === ""
+    url.hash === "" &&
+    !specialNames.test(url.hostname)
     ? url.hostname
     : undefined;
 };

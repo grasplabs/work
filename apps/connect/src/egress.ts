@@ -36,8 +36,9 @@ import { pauseAsked } from "./pause.ts";
 // connection signed in with (GRA-2350). Answers reach the connector
 // without cookies and with any copy of the credential in their headers
 // replaced (`answerHeaders`), so a session a vendor hands out, or a
-// credential it echoes, never reaches connector code. Redirects aren't followed, except one from a route that names
-// the hosts it may lead to (a download), which the handler follows itself,
+// credential it echoes in a header, never reaches connector code.
+// Redirects aren't followed, except one from a route that names the hosts
+// it may lead to (a download), which the handler follows itself,
 // once, without the token or anything of the connector's request. A
 // response is cut off once its bytes pass a size limit. Raw sockets are
 // refused. Connect's `global_fetch_strictly_public` keeps an allowed name

@@ -497,7 +497,14 @@ interface Keeping {
 
 /** The hosts a connection signed in with, as its events record them. */
 const hostsDetail = ({ hosts }: Kept): { hosts?: string } =>
-  hosts === undefined ? {} : { hosts: Object.values(hosts).join(" ") };
+  hosts === undefined
+    ? {}
+    : {
+        hosts: Object.entries(hosts)
+          .toSorted(([one], [other]) => one.localeCompare(other))
+          .map(([template, host]) => `${template}=${host}`)
+          .join(" "),
+      };
 
 /** Stores a new connection with its tokens and its event, all or nothing. */
 const storeConnection = async (

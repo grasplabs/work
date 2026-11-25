@@ -205,7 +205,7 @@ A host that differs from one connection to the next is a template in `hosts`:
 - `{name}.<host>`: one DNS label in front of a fixed name, such as `{company}.boards.example`.
 - `{name}` alone: a whole host, such as a company's own server, with `auth.apiKey` only. Only an admin gives it: its connections are shared ones.
 
-Routes name a template like any other host, and the connector's code never learns the host it stands for: connect fills it in as each request leaves. Code that calls `fetch` itself sends to the template's stand-in, `company.boards.example.invalid` for `{company}.boards.example` and `host.invalid` for `{host}`. With `auth.apiKey`, whoever connects gives each template's host along with the key. With `auth.oauth2`, the token response names the host. `hostsFrom` maps each template to a JSON Pointer into that response, pointing at a host or an HTTPS origin, and the account is read with a lookup at that host, never from an ID token:
+Routes name a template like any other host, and the connector's code never learns the host it stands for: connect fills it in as each request leaves. Code that calls `fetch` itself sends to the template's stand-in, `company.boards.example.invalid` for `{company}.boards.example` and `host.invalid` for `{host}`. With `auth.apiKey`, whoever connects gives each template's host along with the key. With `auth.oauth2`, the token response names the host. `hostsFrom` maps each template to a JSON Pointer into that response, pointing at a host or an HTTPS origin, and the account is read with a lookup, never from an ID token:
 
 ```ts company.ts
 import { auth } from "@grasp-os/sdk/connector";

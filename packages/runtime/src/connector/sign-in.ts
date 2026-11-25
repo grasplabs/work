@@ -1,7 +1,7 @@
 import { companyToolClassSchema } from "@grasp-os/shared/connect";
 import { z } from "zod";
 
-import { hostTemplateOf } from "./hosts.ts";
+import { hostPattern, hostTemplateOf } from "./hosts.ts";
 
 // How a person signs in to an app that isn't one of the suites connect
 // handles itself (Microsoft 365, Google Workspace): its provider record.
@@ -80,13 +80,6 @@ export const withTenant = (value: string, tenant: string): string =>
 
 /** Two tenants a template is checked with: what changes between them is the tenant's. */
 const checkedTenants = ["tenant", "other-tenant"] as const;
-
-/**
- * A DNS name as a URL has it (lowercase): two labels or more and a
- * top-level label starting with a letter, so never an IP address.
- */
-const hostPattern =
-  /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 
 /** `value` as a URL, if it is one. */
 const urlOf = (value: string): URL | undefined => {
