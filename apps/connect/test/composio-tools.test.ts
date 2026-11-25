@@ -32,6 +32,8 @@ const neverTools = [
   "HUBSPOT_SHARE_LIST",
   "HUBSPOT_UPDATE_SETTINGS",
   "HUBSPOT_CREATE_PAYMENT",
+  // A word of the rule inside another is one too.
+  "HUBSPOT_LIST_SHAREHOLDERS",
 ];
 
 /** An owner the HubSpot read fails for. */
@@ -91,19 +93,13 @@ const composio = fakeComposioApi(
         inputs: ["owner_id"],
         run: () => ({ output: { ran: "refused" } }),
       },
-      // Tools Grasp never runs (src/never.ts), classed all the same.
+      // Tools Grasp never runs (isNeverTool), classed all the same.
       ...neverTools.map((name) => ({
         name,
         readOnly: true,
         inputs: ["owner_id"],
         run: () => ({ output: { ran: name } }),
       })),
-      {
-        name: "HUBSPOT_LIST_SHAREHOLDERS",
-        readOnly: true,
-        inputs: ["owner_id"],
-        run: () => ({ output: { ran: "shareholders" } }),
-      },
     ],
   }
 );
@@ -262,7 +258,7 @@ describe("a Composio tool Grasp never runs", () => {
       server: `https://backend.composio.dev/v3/mcp/${crypto.randomUUID()}?connected_account_id=ca_1`,
       tools: JSON.stringify([
         ...neverTools,
-        { name: "HUBSPOT_LIST_SHAREHOLDERS", read: true },
+        { name: "HUBSPOT_LIST_CONTACTS", read: true },
       ]),
     });
     const requestsBefore = composio.state.mcp.requests;
@@ -286,16 +282,16 @@ describe("a Composio tool Grasp never runs", () => {
       ran: composio.state.mcp.ran,
     }).toStrictEqual({
       ends: neverTools.map(() => "connect.never"),
-      offered: ["HUBSPOT_LIST_SHAREHOLDERS"],
+      offered: ["HUBSPOT_LIST_CONTACTS"],
       requests: 0,
       ran: [],
     });
-    // A word of the rule only inside another isn't one of its words.
+    // A tool named for none of it runs beside them.
     await expect(
       outcome(
         callAs(
           agentFor("user-anna"),
-          read(connectionId, "HUBSPOT_LIST_SHAREHOLDERS", { owner_id: owner })
+          read(connectionId, "HUBSPOT_LIST_CONTACTS", { owner_id: owner })
         )
       )
     ).resolves.toBe("ok");

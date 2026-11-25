@@ -38,6 +38,11 @@ const offered = async (connectionId: string): Promise<string[]> => {
   return offers[connectionId] ?? [];
 };
 
+/** A tool's changes that give it an input of `properties`. */
+const takes = (properties: Record<string, unknown>) => ({
+  inputSchema: { type: "object", properties },
+});
+
 /** Anna's connection to Linear, its list read once: its ID and agent. */
 const connected = async () => {
   const anna = someone();
@@ -462,6 +467,160 @@ describe("a connector's tools", () => {
       delete_issue: "connect.never",
       share_document: "connect.never",
       deleteSent: false,
+    });
+  });
+
+  it("are changes when a verb that reads is joined by one that changes, or by none the rules know", async () => {
+    linear.tools = [
+      ...linear.tools,
+      tool("search_replace"),
+      tool("findReplace"),
+      tool("list_mark_read"),
+      tool("get_lock"),
+      tool("get_set_x"),
+      tool("find_merge"),
+      tool("whoami", { annotations: { readOnlyHint: true } }),
+      tool("query_database"),
+    ];
+    const { connectionId, agent } = await connected();
+    const classes = await classesOf(connectionId);
+    const replaced = await callAs(agent, {
+      connectionId,
+      action: "search_replace",
+      input: {},
+    });
+
+    expect({
+      search_replace: classes.search_replace,
+      findReplace: classes.findReplace,
+      list_mark_read: classes.list_mark_read,
+      get_lock: classes.get_lock,
+      get_set_x: classes.get_set_x,
+      find_merge: classes.find_merge,
+      whoami: classes.whoami,
+      query_database: classes.query_database,
+      replaced: replaced.pending === undefined ? "ran" : "held",
+      sent: linear.calls.some(({ name }) => name === "search_replace"),
+    }).toStrictEqual({
+      search_replace: "change-own",
+      findReplace: "change-own",
+      list_mark_read: "change-own",
+      get_lock: "change-own",
+      get_set_x: "change-own",
+      find_merge: "change-own",
+      whoami: "reach-others",
+      query_database: "reach-others",
+      replaced: "held",
+      sent: false,
+    });
+  });
+
+  it("reach others where a change names the people or places it acts on, and where a name can't be read", async () => {
+    const text = { type: "string" };
+    linear.tools = [
+      ...linear.tools,
+      tool("post_to_channel", takes({ channel: text, text })),
+      tool("save_note", takes({ sendTo: text, body: text })),
+      tool("create_message", takes({ toAddress: text, body: text })),
+      tool("update_issue", takes({ assignee: text })),
+      tool(
+        "add_link",
+        takes({
+          links: { type: "array", items: takes({ url: text }).inputSchema },
+        })
+      ),
+      tool("register_hook", takes({ webhook_url: text })),
+      tool("set_reminder", takes({ phone: text, user: text })),
+      tool("get_status", takes({ "r\u0435cipients": text })),
+      tool("create_draft", takes({ to: text, cc: text, body: text })),
+      tool("send_draft", takes({ to: text, draftId: text })),
+      tool(
+        "list_events",
+        takes({
+          from: { type: "string", format: "date-time" },
+          to: { type: "string", format: "date-time" },
+        })
+      ),
+      tool("list_issues_by", takes({ assignee: text, channel: text })),
+    ];
+    const { connectionId } = await connected();
+    const classes = await classesOf(connectionId);
+
+    expect({
+      post_to_channel: classes.post_to_channel,
+      save_note: classes.save_note,
+      create_message: classes.create_message,
+      update_issue: classes.update_issue,
+      add_link: classes.add_link,
+      register_hook: classes.register_hook,
+      set_reminder: classes.set_reminder,
+      get_status: classes.get_status,
+      create_draft: classes.create_draft,
+      send_draft: classes.send_draft,
+      list_events: classes.list_events,
+      list_issues_by: classes.list_issues_by,
+    }).toStrictEqual({
+      post_to_channel: "reach-others",
+      save_note: "reach-others",
+      create_message: "reach-others",
+      update_issue: "reach-others",
+      add_link: "reach-others",
+      register_hook: "reach-others",
+      set_reminder: "reach-others",
+      get_status: "reach-others",
+      create_draft: "change-own",
+      send_draft: "reach-others",
+      list_events: "read-own",
+      list_issues_by: "read-own",
+    });
+  });
+
+  it("never run what Grasp never does, however its name is inflected, joined or cased", async () => {
+    const refused = [
+      "list_deleted_items",
+      "deletion_request",
+      "softdelete_issue",
+      "bulkDelete",
+      "getACLs",
+      "HTTPDelete",
+      "list_shares",
+      "get_shared_link",
+      "make_sharelink",
+      "list_grants",
+      "revokes_token",
+      "get_forwarded",
+      "set_autoforward",
+      "mark_paid",
+      "drop_table",
+      "truncate_table",
+      "purge_cache",
+      "update_role",
+      "add_collaborator",
+      "create_webhook",
+      "cancel_subscription",
+      "purchase_seats",
+      "create_invoice",
+      "withdraw_funds",
+      "invite_user",
+    ];
+    linear.tools = [...linear.tools, ...refused.map((name) => tool(name))];
+    const { connectionId, agent } = await connected();
+    const classes = await classesOf(connectionId);
+    const outcomes = await Promise.all(
+      refused.map(
+        async (action) =>
+          await outcome(callAs(agent, { connectionId, action, input: {} }))
+      )
+    );
+
+    expect({
+      classed: refused.filter((name) => Object.hasOwn(classes, name)),
+      outcomes,
+      sent: linear.calls.filter(({ name }) => refused.includes(name ?? "")),
+    }).toStrictEqual({
+      classed: [],
+      outcomes: refused.map(() => "connect.never"),
+      sent: [],
     });
   });
 });

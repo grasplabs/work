@@ -11,6 +11,7 @@ import { z } from "zod";
 
 import { httpMethods, isBatchSegment, parameterSegment } from "./protocol.ts";
 import { endpointHost, signInSchema } from "./sign-in.ts";
+import { declarationProblem } from "./tool-rules.ts";
 
 // A native connector's manifest: what connect knows of it without running
 // it. Connect's build reads it from the connector's module and ships it
@@ -399,7 +400,22 @@ export const connectorManifestSchema = z
     // "nothing done" (429) for the call holds for all of it (R7): a tool
     // with two write routes could have written with the first.
     "An action may declare at most one write (a method other than GET or HEAD)"
-  );
+  )
+  .superRefine(({ actions }, context) => {
+    // Its class is what it declares, so the declaration may claim no less
+    // than the rules find (GRA-2346): checked wherever a manifest is read,
+    // at build and when connect loads it.
+    for (const [name, action] of Object.entries(actions)) {
+      const problem = declarationProblem(name, action);
+      if (problem !== undefined) {
+        context.addIssue({
+          code: "custom",
+          path: ["actions", name],
+          message: `${name}: ${problem}`,
+        });
+      }
+    }
+  });
 export type ConnectorManifest = z.infer<typeof connectorManifestSchema>;
 
 /** One action of a generated connector contract, and the tool it calls. */

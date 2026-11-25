@@ -182,8 +182,8 @@ const throwAfterWrite = tool({
 });
 
 /** A write whose vendor answers it with text. */
-const deleteStock = tool({
-  description: "Deletes one product's stock",
+const clearStock = tool({
+  description: "Clears one product's stock",
   readOnly: false,
   reach: "company",
   routes: ["DELETE /v1/stock/{sku}"],
@@ -219,7 +219,7 @@ const stock = defineConnector({
     "stock.stray": strayRead,
     "stock.writeDuringRead": writeDuringRead,
     "stock.findByWriting": findByWriting,
-    "stock.delete": deleteStock,
+    "stock.clear": clearStock,
     "stock.throwAfterWrite": throwAfterWrite,
     "stock.readDuringWrite": readDuringWrite,
   },
@@ -308,6 +308,57 @@ describe("a connector's definition", () => {
         auth: keyAuth,
         tools: { "stock.get": each },
       });
+
+  it("refuses a tool that declares less than the rules find in it", () => {
+    const named = (name: string, each: ReturnType<typeof tool>) => () =>
+      defineConnector({
+        name: "stock",
+        title: "Stock",
+        hosts: [host],
+        auth: keyAuth,
+        tools: { [name]: each },
+      });
+    const postingRead = tool({
+      description: "Reads the stock by posting a query",
+      readOnly: true,
+      reach: "company",
+      routes: ["POST /v1/stock/query"],
+      args: {},
+      returns: Stock,
+      handler: async () => await Promise.resolve({ sku: "a", onHand: 1 }),
+    });
+    const ownRecipients = tool({
+      description: "Gets a report and tells its recipients",
+      readOnly: true,
+      reach: "own",
+      routes: ["GET /v1/stock/report"],
+      args: { recipients: v.array(v.string()) },
+      returns: Stock,
+      handler: async () => await Promise.resolve({ sku: "a", onHand: 1 }),
+    });
+    const sendingRead = tool({
+      description: "Sends a message",
+      readOnly: true,
+      reach: "own",
+      routes: ["GET /v1/stock/send"],
+      args: {},
+      returns: Stock,
+      handler: async () => await Promise.resolve({ sku: "a", onHand: 1 }),
+    });
+
+    expect(named("stock.get", postingRead)).toThrow(
+      "stock.get: it is read-only, so it sends only GET and HEAD requests"
+    );
+    expect(named("get_x", ownRecipients)).toThrow(
+      "get_x: its input names people or places it reaches, so it reaches others"
+    );
+    expect(named("send_message", sendingRead)).toThrow(
+      "send_message: it is read-only, but its name says it changes something"
+    );
+    expect(named("stock.softDelete", setStock)).toThrow(
+      "stock.softDelete: Grasp never runs it"
+    );
+  });
 
   it("refuses a route to a host it doesn't list, and a bare path among several hosts", () => {
     const elsewhere = tool({
@@ -632,7 +683,7 @@ describe("a call of a tool", () => {
   it("answers a write's text where the vendor answers with text", async () => {
     vendorAnswers(new Response("Deleted", { status: 200 }));
     const result = await call(
-      "stock.delete",
+      "stock.clear",
       { sku: "a" },
       { [effectKeyMetaKey]: key }
     );
