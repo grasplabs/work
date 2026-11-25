@@ -1,0 +1,201 @@
+// How a connector's tool is named: from its route, never by choice (the
+// mirror rule, GRA-2319). A tool is one route of the vendor's API, and its
+// name follows from that route, so two connectors for one API, written
+// apart, name their tools alike:
+//
+// - The family is the route's collection: its literal segments after the
+//   API's base path, joined by dots (`GET /api/v2/deals/{id}/followers` under
+//   `/api/v2` is the family `deals.followers`).
+// - The action is `list` for GET on a collection that answers a page, `get`
+//   for GET on an item, `create` for POST on a collection, `update` for
+//   PATCH or PUT on an item and `delete` for DELETE on an item. A route ends
+//   on an item when its last segment is a parameter.
+// - Any other route takes the vendor's operation name as its action. So do
+//   two operations that would otherwise take the same name (PATCH and PUT
+//   on one item), which only a spec can say.
+//
+// The generator names what it generates with this, and the mirror check
+// holds every other tool to it.
+
+/** The methods OpenAPI names an operation by, in its own order. */
+export const httpMethods = [
+  "GET",
+  "PUT",
+  "POST",
+  "DELETE",
+  "OPTIONS",
+  "HEAD",
+  "PATCH",
+  "TRACE",
+] as const;
+
+export type HttpMethod = (typeof httpMethods)[number];
+
+/** The actions a route's method and shape name; any other is the vendor's. */
+export const standardActions: ReadonlySet<string> = new Set([
+  "list",
+  "get",
+  "create",
+  "update",
+  "delete",
+]);
+
+export type Segment =
+  | { readonly kind: "literal"; readonly text: string }
+  | { readonly kind: "parameter"; readonly name: string };
+
+export interface Route {
+  readonly method: HttpMethod;
+  /** The path as the route declares it, base path included. */
+  readonly path: string;
+  readonly segments: readonly Segment[];
+}
+
+/**
+ * A literal segment: RFC 3986's unreserved characters, never `.` or `..`
+ * (checked apart), so no route can climb out of the API's base path or
+ * carry a query, a fragment or an encoded character.
+ */
+const literalSegment = /^[A-Za-z0-9._~-]+$/u;
+
+/** A parameter segment: the whole segment, one plain name. */
+const parameterSegment = /^\{(?<name>[A-Za-z_][A-Za-z0-9_-]{0,63})\}$/u;
+
+/**
+ * A part of a tool's name: a family's segment or an action. What an MCP
+ * tool's name may hold, less the dot that joins the parts.
+ */
+const namePart = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/u;
+
+/** A tool's whole name: MCP's own limit on its length. */
+const nameMaxLength = 128;
+
+const methods: ReadonlySet<string> = new Set(httpMethods);
+
+const isMethod = (text: string): text is HttpMethod => methods.has(text);
+
+/** The action each method takes on an item. */
+const itemActions: Partial<Readonly<Record<HttpMethod, string>>> = {
+  GET: "get",
+  PATCH: "update",
+  PUT: "update",
+  DELETE: "delete",
+};
+
+/** Whether `text` may be a part of a tool's name. */
+export const isNamePart = (text: string): boolean =>
+  namePart.test(text) && !(text in Object.prototype);
+
+/**
+ * Reads a path as segments, or undefined for one no route may take: not
+ * absolute, an empty, dot or encoded segment, a parameter beside text in
+ * one segment, or the same parameter twice.
+ */
+export const pathSegments = (path: string): Segment[] | undefined => {
+  if (!path.startsWith("/")) {
+    return undefined;
+  }
+  const parts = path === "/" ? [] : path.slice(1).split("/");
+  const segments: Segment[] = [];
+  const names = new Set<string>();
+  for (const part of parts) {
+    const parameter = parameterSegment.exec(part)?.groups?.name;
+    if (parameter !== undefined) {
+      if (names.has(parameter)) {
+        return undefined;
+      }
+      names.add(parameter);
+      segments.push({ kind: "parameter", name: parameter });
+    } else if (literalSegment.test(part) && part !== "." && part !== "..") {
+      segments.push({ kind: "literal", text: part });
+    } else {
+      return undefined;
+    }
+  }
+  return segments;
+};
+
+/** Reads a declared route, `GET /api/v2/deals`, or undefined. */
+export const readRoute = (route: string): Route | undefined => {
+  const space = route.indexOf(" ");
+  const method = route.slice(0, space);
+  const path = route.slice(space + 1);
+  if (space === -1 || !isMethod(method)) {
+    return undefined;
+  }
+  const segments = pathSegments(path);
+  return segments === undefined ? undefined : { method, path, segments };
+};
+
+/** What a route's name is made from, or why no name follows from it. */
+export type RouteName =
+  | {
+      readonly family: string;
+      /** Undefined where the vendor's operation name is the action. */
+      readonly action: string | undefined;
+    }
+  | { readonly problem: string };
+
+/**
+ * The family and the standard action of a route under the API's base path
+ * (`/api/v2`, or `` for none). `pages` says whether the route answers a
+ * page, which makes GET on a collection `list`.
+ */
+export const routeName = (
+  route: Route,
+  base: string,
+  pages: boolean
+): RouteName => {
+  const baseSegments = pathSegments(base === "" ? "/" : base);
+  if (baseSegments === undefined) {
+    return {
+      problem: `The API's base path ${JSON.stringify(base)} isn't a plain path.`,
+    };
+  }
+  const under = baseSegments.every((segment, index) => {
+    const own = route.segments[index];
+    return (
+      segment.kind === "literal" &&
+      own?.kind === "literal" &&
+      own.text === segment.text
+    );
+  });
+  if (!under) {
+    return {
+      problem: `${route.path} isn't under the API's base path ${base}.`,
+    };
+  }
+  const rest = route.segments.slice(baseSegments.length);
+  const family = rest.flatMap((segment) =>
+    segment.kind === "literal" ? [segment.text] : []
+  );
+  if (family.length === 0) {
+    return { problem: `${route.path} names no collection.` };
+  }
+  const unnamed = family.find((part) => !isNamePart(part));
+  if (unnamed !== undefined) {
+    return {
+      problem: `The segment ${JSON.stringify(unnamed)} of ${route.path} can't be part of a tool's name.`,
+    };
+  }
+  const item = rest.at(-1)?.kind === "parameter";
+  const { method } = route;
+  let action: string | undefined;
+  if (item) {
+    action = itemActions[method];
+  } else if (method === "GET" && pages) {
+    action = "list";
+  } else if (method === "POST") {
+    action = "create";
+  }
+  return { family: family.join("."), action };
+};
+
+/** A tool's name from its family and action, or undefined if too long. */
+export const toolName = (
+  family: string,
+  action: string
+): string | undefined => {
+  const name = `${family}.${action}`;
+  return name.length <= nameMaxLength ? name : undefined;
+};
