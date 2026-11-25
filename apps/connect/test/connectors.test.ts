@@ -1003,7 +1003,9 @@ describe("the egress handler", () => {
   it("sends nothing for a caller without a whole call's props", async () => {
     // As another Worker naming this entrypoint gets it: no call behind it.
     for (const props of [
-      egressProps({ credential: { header: "authorization", value: "" } }),
+      egressProps({
+        credential: { header: "authorization", value: "", secret: "" },
+      }),
       egressProps({ hosts: [] }),
       egressProps({ expiresAt: Number.NaN }),
     ]) {

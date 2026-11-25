@@ -325,6 +325,61 @@ describe("a connector's definition", () => {
     );
   });
 
+  it("sends its credential to its one host, and with several, only to those its sign-in names", () => {
+    const files = "files.stock.test";
+    expect(stock.manifest.credentialHosts).toStrictEqual([host]);
+    const several = (hosts?: string[]) => () =>
+      defineConnector({
+        name: "stock",
+        title: "Stock",
+        hosts: [host, files],
+        auth: auth.apiKey({
+          ...(hosts === undefined ? {} : { hosts }),
+          header: "x-api-key",
+          account: { url: `https://${host}/v1/account`, id: "/id" },
+        }),
+        tools: {},
+      });
+    expect(several()).toThrow("names those its credential goes to");
+    expect(several([host])().manifest.credentialHosts).toStrictEqual([host]);
+    expect(several(["evil.test"])).toThrow("only to hosts of the connector's");
+    // The account lookup carries the key: only where the key goes.
+    expect(several([files])).toThrow("one of the hosts the credential goes to");
+  });
+
+  it("takes a host set per connection as a template, and refuses one that isn't", () => {
+    const at = (template: string) => () =>
+      defineConnector({
+        name: "stock",
+        title: "Stock",
+        hosts: [host, template],
+        auth: auth.apiKey({
+          hosts: [host, template],
+          header: "x-api-key",
+          account: { url: `https://${template}/v1/account`, id: "/id" },
+        }),
+        tools: {},
+      });
+    expect(at("{host}")().manifest.credentialHosts).toStrictEqual([
+      host,
+      "{host}",
+    ]);
+    expect(at("{company}.stock.test")().manifest.hosts).toStrictEqual([
+      host,
+      "{company}.stock.test",
+    ]);
+    for (const template of [
+      "{company}.test",
+      "{company}.{region}.stock.test",
+      "{Company}.stock.test",
+      "{company}stock.test",
+      "x.{company}.stock.test",
+      "{}",
+    ]) {
+      expect(at(template)).toThrow("Not a host, or a host template");
+    }
+  });
+
   it("refuses args that let any key through", () => {
     const open = tool({
       description: "Open",

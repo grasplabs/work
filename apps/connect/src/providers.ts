@@ -1,4 +1,9 @@
-import { tenantKinds, withTenant } from "@grasp-os/runtime/connector";
+import {
+  filledHost,
+  hostTemplateOf,
+  tenantKinds,
+  withTenant,
+} from "@grasp-os/runtime/connector";
 import type { AccountLookup, IdTokenCheck } from "@grasp-os/runtime/connector";
 import {
   connectorProviderSchema,
@@ -223,9 +228,19 @@ export interface ApiKeyProviderConfig {
   credential: (key: string) => Credential;
   /**
    * The account the key is for, as the app says; `null` if it refused it.
-   * `owner` as for an OAuth provider's `account`.
+   * `owner` as for an OAuth provider's `account`; `hosts`, the host given
+   * for each of `hostTemplates`.
    */
-  account: (key: string, owner: string) => Promise<ProviderAccount | null>;
+  account: (
+    key: string,
+    owner: string,
+    hosts?: Readonly<Record<string, string>>
+  ) => Promise<ProviderAccount | null>;
+  /**
+   * Its connector's host templates (runtime's `filledHost`), each given a
+   * host when a connection signs in: none unless an app's connector has.
+   */
+  hostTemplates?: readonly string[];
   /** Only shared connections, never a person's own (the HR platform's). */
   sharedOnly?: boolean;
 }
@@ -718,11 +733,24 @@ const appClient = (
   return client.data;
 };
 
-/** The account an app's lookup names, with `credential`. */
-const lookedUp =
-  (lookup: AccountLookup) =>
-  async (credential: Credential): Promise<ProviderAccount | null> =>
-    await lookupAccount(lookup, credential);
+/**
+ * The account an app's lookup names, with `credential`, its host filled
+ * with the connection's (`hosts`) where it is a template; none if it has
+ * no host that fits.
+ */
+const accountAt = async (
+  lookup: AccountLookup,
+  credential: Credential,
+  hosts: Readonly<Record<string, string>> = {}
+): Promise<ProviderAccount | null> => {
+  const url = new URL(lookup.url);
+  const host = filledHost(url.hostname, hosts);
+  if (host === undefined) {
+    return null;
+  }
+  url.hostname = host;
+  return await lookupAccount({ ...lookup, url: url.href }, credential);
+};
 
 /** A claim's value, when it's there: `undefined` when it isn't. */
 const claimOf = (claims: Record<string, unknown>, name: string): unknown =>
@@ -792,9 +820,9 @@ export const appProvider = ({
   provider,
   server,
   signIn,
+  hosts,
 }: AppRecord): ProviderConfig => {
   if (signIn.kind === "api_key") {
-    const lookup = lookedUp(signIn.account);
     const credential = (key: string): Credential => ({
       header: signIn.header,
       value: `${signIn.prefix ?? ""}${key}`,
@@ -804,7 +832,9 @@ export const appProvider = ({
       id: provider,
       server,
       credential,
-      account: async (key) => await lookup(credential(key)),
+      account: async (key, _owner, given) =>
+        await accountAt(signIn.account, credential(key), given),
+      hostTemplates: hosts.filter((host) => hostTemplateOf(host) !== undefined),
     };
   }
   const { account, idToken, tenant } = signIn;
@@ -850,7 +880,7 @@ export const appProvider = ({
           account: async ({ accessToken }: TokenSet) =>
             account === undefined
               ? null
-              : await lookedUp(account)(bearer(accessToken)),
+              : await accountAt(account, bearer(accessToken)),
         }
       : {
           subject: ({ idToken: token }) => {
@@ -860,7 +890,11 @@ export const appProvider = ({
               : undefined;
             return typeof id === "string" && id !== "" ? id : undefined;
           },
-          account: async ({ idToken: token }, each, clientId) =>
+          account: async (
+            { idToken: token }: TokenSet,
+            each: string,
+            clientId: string
+          ) =>
             await Promise.resolve(
               idTokenAccount(idToken, token, each, clientId)
             ),

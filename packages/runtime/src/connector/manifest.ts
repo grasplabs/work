@@ -9,6 +9,12 @@ import { permissionActionSchema } from "@grasp-os/shared/permissions";
 import { syncCursorSchema, syncItemKindSchema } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
+import {
+  declaredHostSchema,
+  dnsLabel,
+  hostPattern,
+  hostTemplateOf,
+} from "./hosts.ts";
 import { endpointHost, signInSchema } from "./sign-in.ts";
 
 // A native connector's manifest: what connect knows of it without running
@@ -215,14 +221,6 @@ export const httpMethods = [
   "DELETE",
 ] as const;
 
-/**
- * A provider host, as the egress handler compares it: a lowercase DNS name
- * with at least two labels and a top-level label that starts with a letter,
- * so never an IP address, a port or userinfo.
- */
-const hostPattern =
-  /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
-
 /** A path segment an action names as it is, such as `v1.0` or `$value`. */
 const literalSegment = /^[\w.~$:@()'-]+$/u;
 
@@ -266,9 +264,6 @@ const isPathTemplate = (path: string): boolean => {
   );
 };
 
-/** A host a connector may reach (`hostPattern`). */
-export const hostSchema = z.string().regex(hostPattern);
-
 /**
  * Hosts a redirect may lead to, as `*.<host>`: the `*` stands for exactly
  * one DNS label, such as a SharePoint tenant's `contoso` in
@@ -280,9 +275,6 @@ const redirectHostSchema = z
     (pattern) => pattern.startsWith("*.") && hostPattern.test(pattern.slice(2)),
     "Not a redirect host: *.<host>"
   );
-
-/** One DNS label, as a redirect host's `*` stands for. */
-const dnsLabel = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 
 /** Whether `hostname` (lowercase, as a URL has it) is one `pattern` allows. */
 export const redirectHostMatches = (
@@ -313,7 +305,7 @@ export const redirectHostMatches = (
 export const routeSchema = z
   .strictObject({
     method: z.enum(httpMethods),
-    host: hostSchema,
+    host: declaredHostSchema,
     path: z.string().max(512).refine(isPathTemplate, "Not a path template"),
     redirects: z.array(redirectHostSchema).min(1).max(4).optional(),
   })
@@ -495,8 +487,14 @@ export const connectorManifestSchema = z
     signIn: signInSchema.optional(),
     /** The OAuth scopes its actions need, all among those connect asks for. */
     scopes: z.array(z.string().min(1).max(256)).max(64),
-    /** Every host it may reach, exactly. */
-    hosts: z.array(hostSchema).min(1).max(maxHosts),
+    /** Every host it may reach, exactly, or as a template (`filledHost`). */
+    hosts: z.array(declaredHostSchema).min(1).max(maxHosts),
+    /**
+     * Those of its hosts the connection's credential goes to: connect's
+     * egress adds it to a request for one of these alone, and sends one
+     * for any other host without it.
+     */
+    credentialHosts: z.array(declaredHostSchema).min(1).max(maxHosts),
     /** Each action (tool) by name, and the only requests it may send. */
     actions: z.record(permissionActionSchema, actionManifestSchema),
     /**
@@ -519,11 +517,23 @@ export const connectorManifestSchema = z
     "A connector's scopes are among those its record asks for; an API key has none"
   )
   .refine(
-    ({ signIn, hosts }) =>
+    ({ hosts, credentialHosts }) =>
+      credentialHosts.every((host) => hosts.includes(host)),
+    "The credential goes only to hosts of the connector's"
+  )
+  .refine(
+    ({ signIn, credentialHosts }) =>
       signIn?.account === undefined ||
-      hosts.includes(endpointHost(signIn.account.url) ?? ""),
-    // The lookup carries the token or key: only where the calls go.
-    "The account lookup goes to one of the connector's hosts"
+      credentialHosts.includes(endpointHost(signIn.account.url) ?? ""),
+    // The lookup carries the token or key: only where the credential goes.
+    "The account lookup goes to one of the hosts the credential goes to"
+  )
+  .refine(
+    ({ signIn, hosts }) =>
+      signIn?.kind === "api_key" ||
+      hosts.every((host) => hostTemplateOf(host) === undefined),
+    // Its values are given with the key, when the connection signs in.
+    "Only a connector that signs in with an API key has a host template"
   )
   .refine(
     ({ hosts, actions, syncs = {} }) =>

@@ -1,3 +1,4 @@
+import { fitsTemplate, hostTemplateOf } from "@grasp-os/runtime/connector";
 import type { AuditDetailValue } from "@grasp-os/shared/audit";
 import {
   connectErrors,
@@ -494,6 +495,10 @@ interface Keeping {
   vault: Vault;
 }
 
+/** The hosts a connection signed in with, as its events record them. */
+const hostsDetail = ({ hosts }: Kept): { hosts?: string } =>
+  hosts === undefined ? {} : { hosts: Object.values(hosts).join(" ") };
+
 /** Stores a new connection with its tokens and its event, all or nothing. */
 const storeConnection = async (
   env: Env,
@@ -545,6 +550,7 @@ const storeConnection = async (
         provider: provider.id,
         scope: flow.scope,
         outcome: "ok",
+        ...hostsDetail(tokens),
       }),
     ],
     writes
@@ -1314,7 +1320,7 @@ const replaceKey = async (
   scope: ConnectionScope,
   person: ConnectionPerson,
   account: ProviderAccount,
-  key: string
+  kept: Kept
 ): Promise<string | undefined> => {
   const held = await connectionHolding(env, provider.id, account.id);
   if (
@@ -1325,12 +1331,7 @@ const replaceKey = async (
     return undefined;
   }
   const now = new Date();
-  const row = await firstTokens(
-    vault,
-    held.id,
-    { apiKey: key, expiresAt: apiKeyExpiresAt },
-    now
-  );
+  const row = await firstTokens(vault, held.id, kept, now);
   const stillActive = sql`${connections.id} = ${held.id} AND ${connections.status} = 'active' AND NOT ${ownerErased(held.id)}`;
   const db = drizzle(env.DB);
   const replaced = await recordEventIf(
@@ -1397,6 +1398,7 @@ export const connectWithKey = async (
     provider: providerId,
     scope,
     key,
+    hosts = {},
   } = connectionErrors.parse(
     "connection.invalid",
     connectWithKeySchema,
@@ -1434,18 +1436,49 @@ export const connectWithKey = async (
       connectionId
     );
   };
-  const account = await provider.account(key, ownerOf({ scope }, person));
-  if (account === null) {
+  // A host for each of its connector's host templates, fitting it, and
+  // nothing else; a whole host (`{host}`) only for a shared connection,
+  // which only an admin connects. Each is sealed with the key (GRA-2350).
+  const templates = provider.hostTemplates ?? [];
+  const givenHosts =
+    Object.keys(hosts).length === templates.length &&
+    templates.every(
+      (template) =>
+        Object.hasOwn(hosts, template) &&
+        fitsTemplate(template, hosts[template] ?? "")
+    ) &&
+    (scope === "shared" ||
+      templates.every((template) => hostTemplateOf(template)?.suffix !== null));
+  if (!givenHosts) {
+    await refuse("connection.invalid");
+    throw connectionErrors.create("connection.invalid");
+  }
+  const found = await provider.account(key, ownerOf({ scope }, person), hosts);
+  if (found === null) {
     await refuse("connection.provider_refused", { outcome: "failed" });
     throw connectionErrors.create("connection.provider_refused");
   }
+  // An account at a host set per connection is that host's: one with the
+  // same ID at another host is another account, and another connection.
+  const account =
+    templates.length === 0
+      ? found
+      : {
+          ...found,
+          id: `${found.id}@${templates.map((template) => hosts[template]).join(",")}`,
+        };
+  const kept = {
+    apiKey: key,
+    expiresAt: apiKeyExpiresAt,
+    ...(templates.length === 0 ? {} : { hosts }),
+  };
   const replaced = await replaceKey(
     env,
     { provider, vault },
     scope,
     person,
     account,
-    key
+    kept
   );
   if (replaced !== undefined) {
     return { connectionId: replaced };
@@ -1459,7 +1492,7 @@ export const connectWithKey = async (
     { scope, tenant: "" },
     person,
     account,
-    { apiKey: key, expiresAt: apiKeyExpiresAt },
+    kept,
     undefined,
     refuse
   );

@@ -221,6 +221,17 @@ export const sync = <const Model extends AnySchema>(
 /** How a person signs in to the vendor, as connect runs it. */
 export interface ConnectorAuth {
   readonly signIn: DistributiveOmit<SignInInput, "name">;
+  /** The connector's hosts its credential goes to (`CredentialHosts`). */
+  readonly hosts?: readonly string[];
+}
+
+/**
+ * The hosts a sign-in's credential goes to: among the connector's hosts,
+ * as declared. Without them, the connector's one host; a connector with
+ * several names them.
+ */
+export interface CredentialHosts {
+  hosts?: readonly string[];
 }
 
 type DistributiveOmit<Value, Key extends PropertyKey> = Value extends unknown
@@ -291,8 +302,10 @@ export const auth = Object.freeze({
     scopes,
     params,
     renewalRequires,
+    hosts,
     ...rest
-  }: OAuth2Declaration): ConnectorAuth => ({
+  }: OAuth2Declaration & CredentialHosts): ConnectorAuth => ({
+    ...(hosts === undefined ? {} : { hosts }),
     signIn: {
       kind: "oauth2",
       authorizationEndpoint: authorizeUrl,
@@ -307,11 +320,15 @@ export const auth = Object.freeze({
     },
   }),
   /** A key the person pastes, sent in `header`, after `prefix` if it has one. */
-  apiKey: (declaration: {
+  apiKey: ({
+    hosts,
+    ...declaration
+  }: {
     header: string;
     prefix?: string;
     account: AccountDeclaration;
-  }): ConnectorAuth => ({
+  } & CredentialHosts): ConnectorAuth => ({
+    ...(hosts === undefined ? {} : { hosts }),
     signIn: { kind: "api_key", ...declaration },
   }),
 });
@@ -530,6 +547,16 @@ export const defineConnector = (
     }
   }
   const scopes = new Set(Object.values(tools).flatMap((each) => each.scopes));
+  const served = Object.entries(tools).map(([toolName, each]) =>
+    each.serve(toolName, declaration)
+  );
+  const credentialHosts =
+    declaration.auth.hosts ?? (hosts.length === 1 ? hosts : undefined);
+  if (credentialHosts === undefined) {
+    throw new Error(
+      "The connector has several hosts: its auth names those its credential goes to (hosts)"
+    );
+  }
   return serveConnector(
     {
       name,
@@ -537,9 +564,8 @@ export const defineConnector = (
       signIn: { ...declaration.auth.signIn, name: title },
       scopes: [...scopes],
       hosts,
+      credentialHosts,
     },
-    Object.entries(tools).map(([toolName, each]) =>
-      each.serve(toolName, declaration)
-    )
+    served
   );
 };

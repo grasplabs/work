@@ -74,7 +74,6 @@ export {
   forbiddenInValue,
   generatedContractMajor,
   generatedContracts,
-  hostSchema,
   httpMethods,
   maxChangeBytes,
   maxProvenanceItems,
@@ -121,6 +120,13 @@ export {
   tenantKinds,
   withTenant,
 } from "./sign-in.ts";
+export {
+  declaredHostSchema,
+  filledHost,
+  fitsTemplate,
+  hostTemplateOf,
+  requestHost,
+} from "./hosts.ts";
 export { addressesOf } from "./mail-addresses.ts";
 export type { Address } from "./mail-addresses.ts";
 export type {

@@ -491,7 +491,7 @@ describe("a connector", () => {
       "*.example.test",
       "user@api.example.test",
     ]) {
-      expect(() => connectorWith({ hosts: [host] })).toThrow("pattern");
+      expect(() => connectorWith({ hosts: [host] })).toThrow("Not a host");
     }
   });
 
@@ -530,6 +530,7 @@ describe("a connector", () => {
         provider: "microsoft",
         scopes: [],
         hosts: ["api.example.test"],
+        credentialHosts: ["api.example.test"],
         actions: {
           "items.list": {
             routes: [{ ...route, ...extra }],

@@ -409,6 +409,8 @@ export interface ConnectorBase {
   signIn?: SignInInput;
   scopes: readonly string[];
   hosts: readonly string[];
+  /** Those of `hosts` the connection's credential goes to. */
+  credentialHosts: readonly string[];
 }
 
 const requestSchema = z.object({

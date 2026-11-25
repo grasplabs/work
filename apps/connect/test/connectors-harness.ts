@@ -1,6 +1,6 @@
 import { connectorManifestSchema } from "@grasp-os/runtime/connector";
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
-import { env } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -15,7 +15,7 @@ import type { Call } from "./connect.ts";
 import { sampleHost } from "./fixtures/sample-connector.ts";
 import { fakeProviders } from "./oauth-provider.ts";
 import type { ProviderName } from "./oauth-provider.ts";
-import { fakeSampleApi } from "./sample-api.ts";
+import { fakeSampleApi, sampleHostHost } from "./sample-api.ts";
 import {
   connectTenantApp,
   fakeTenantApp,
@@ -60,7 +60,8 @@ export const isApp = (provider: string): provider is AppName =>
 /**
  * A person's own account at `provider`, connected to `server`: through
  * the app's own sign-in for an app, whose connector is the one it names,
- * and the sample tenant app's at its own authorization server.
+ * the sample tenant app's at its own authorization server, and an admin's
+ * shared one for an app on a host of its own.
  */
 export const connectionOf = async (
   server: string,
@@ -74,6 +75,21 @@ export const connectionOf = async (
       tenantAccountOf(person)
     );
     return { id, person };
+  }
+  // An app on a host of its own: a shared connection an admin gives the
+  // host of, with a key the sample API takes.
+  if (provider === "sample-host") {
+    const person = someone("admin");
+    const { connectionId } = await exports.default.connectWithKey({
+      person,
+      provider,
+      scope: "shared",
+      key: "a-key",
+      hosts: { "{host}": sampleHostHost },
+    });
+    // Its account lookup isn't what the test reads back.
+    api.sent.length = 0;
+    return { id: connectionId, person };
   }
   if (!isApp(provider)) {
     return await connectionTo(
@@ -135,9 +151,15 @@ export const egressProps = (
   connectionId: "connection-1",
   callId: "call-1",
   hosts: [sampleHost],
+  credentialHosts: [sampleHost],
+  connectionHosts: {},
   routes: [{ method: "GET", host: sampleHost, path: "/v1/probe/{case}" }],
   values: {},
-  credential: { header: "authorization", value: "Bearer a-token-for-one-call" },
+  credential: {
+    header: "authorization",
+    value: "Bearer a-token-for-one-call",
+    secret: "a-token-for-one-call",
+  },
   expiresAt: Date.now() + 30_000,
   ...fields,
 });

@@ -41,13 +41,22 @@ import type { Vault } from "./vault.ts";
 // (threat model R1). A refresh token never leaves at all: only its token
 // endpoint sees it.
 
+/**
+ * The host a connection signed in with for each of its connector's host
+ * templates (runtime's `filledHost`), sealed with its tokens or key: they
+ * can't be changed apart from the credential, so pointing a connection
+ * at another host takes signing in again (GRA-2350).
+ */
+const connectionHostsSchema = z.record(z.string(), z.string()).optional();
+
 /** What a connection's sealed value holds: OAuth tokens, or an API key. */
 const storedTokensSchema = z.union([
   z.strictObject({
     accessToken: z.string().min(1),
     refreshToken: z.string().min(1),
+    hosts: connectionHostsSchema,
   }),
-  z.strictObject({ apiKey: z.string().min(1) }),
+  z.strictObject({ apiKey: z.string().min(1), hosts: connectionHostsSchema }),
 ]);
 type StoredTokens = z.infer<typeof storedTokensSchema>;
 type StoredOAuthTokens = Extract<StoredTokens, { refreshToken: string }>;
@@ -126,8 +135,12 @@ export const firstTokens = async (
     vault,
     connectionId,
     "apiKey" in tokens
-      ? { apiKey: tokens.apiKey }
-      : { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken }
+      ? { apiKey: tokens.apiKey, hosts: tokens.hosts }
+      : {
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          hosts: tokens.hosts,
+        }
   ),
   accessExpiresAt: new Date(tokens.expiresAt),
   generation: now.getTime(),
@@ -422,6 +435,7 @@ const storeRefreshed = async (
   const next: StoredOAuthTokens = {
     accessToken: minted.accessToken,
     refreshToken: minted.refreshToken ?? current.refreshToken,
+    hosts: current.hosts,
   };
   const db = drizzle(env.DB);
   const tokensUpdate = db
@@ -770,22 +784,48 @@ export const accessTokenFor = async (
 /**
  * What one call of an active connection's connector sends its requests
  * with: a fresh access token, or the API key, in the header the provider
- * takes it in. Only for connect's egress handler, for that call.
+ * takes it in, with the token or key itself (`secret`); and the host the
+ * connection signed in with for each of its connector's host templates,
+ * which its egress fills them with. Only for connect's egress handler,
+ * for that call.
  */
+export const connectorCredentialFor = async (
+  env: Env,
+  connectionId: string
+): Promise<{
+  credential: Credential & { secret: string };
+  connectionHosts: Record<string, string>;
+}> => {
+  const active = await activeConnection(env, connectionId);
+  const { provider, row, vault } = active;
+  const tokens = await openTokens(vault, row);
+  const connectionHosts = tokens.hosts ?? {};
+  if (provider.kind === "oauth") {
+    const accessToken = await freshAccessToken(env, active);
+    return {
+      credential: { ...bearer(accessToken), secret: accessToken },
+      connectionHosts,
+    };
+  }
+  if (!("apiKey" in tokens)) {
+    throw connectErrors.create("connect.connection_inactive");
+  }
+  return {
+    credential: {
+      ...provider.credential(tokens.apiKey),
+      secret: tokens.apiKey,
+    },
+    connectionHosts,
+  };
+};
+
+/** `connectorCredentialFor`'s credential alone. */
 export const credentialFor = async (
   env: Env,
   connectionId: string
 ): Promise<Credential> => {
-  const active = await activeConnection(env, connectionId);
-  const { provider, row, vault } = active;
-  if (provider.kind === "oauth") {
-    return bearer(await freshAccessToken(env, active));
-  }
-  const tokens = await openTokens(vault, row);
-  if (!("apiKey" in tokens)) {
-    throw connectErrors.create("connect.connection_inactive");
-  }
-  return provider.credential(tokens.apiKey);
+  const { credential } = await connectorCredentialFor(env, connectionId);
+  return credential;
 };
 
 /**

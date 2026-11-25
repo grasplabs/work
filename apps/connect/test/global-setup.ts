@@ -76,6 +76,7 @@ const setup = async (): Promise<void> => {
       path.join(import.meta.dirname, "fixtures/sample-oauth-connector.ts"),
       path.join(import.meta.dirname, "fixtures/sample-key-connector.ts"),
       path.join(import.meta.dirname, "fixtures/sample-tenant-connector.ts"),
+      path.join(import.meta.dirname, "fixtures/sample-host-connector.ts"),
       path.join(import.meta.dirname, "fixtures/composio-named-connector.ts"),
     ],
     testConnectorsFile

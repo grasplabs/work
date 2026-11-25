@@ -1,6 +1,8 @@
 import { companyToolClassSchema } from "@grasp-os/shared/connect";
 import { z } from "zod";
 
+import { hostTemplateOf } from "./hosts.ts";
+
 // How a person signs in to an app that isn't one of the suites connect
 // handles itself (Microsoft 365, Google Workspace): its provider record.
 // A native connector for such an app carries the record in its manifest,
@@ -95,8 +97,11 @@ const urlOf = (value: string): URL | undefined => {
   }
 };
 
-/** Whether `value` is an HTTPS URL on a DNS name, as an endpoint must be. */
-const isEndpoint = (value: string): boolean => {
+/**
+ * Whether `value` is an HTTPS URL on a DNS name, as an endpoint must be,
+ * or on a host template too where `templates` says so.
+ */
+const isEndpoint = (value: string, templates = false): boolean => {
   const url = urlOf(value);
   return (
     url !== undefined &&
@@ -105,7 +110,8 @@ const isEndpoint = (value: string): boolean => {
     url.password === "" &&
     url.port === "" &&
     url.hash === "" &&
-    hostPattern.test(url.hostname) &&
+    (hostPattern.test(url.hostname) ||
+      (templates && hostTemplateOf(url.hostname) !== undefined)) &&
     // As written: no case, escapes or dot segments the parser would change.
     url.href === value
   );
@@ -114,7 +120,7 @@ const isEndpoint = (value: string): boolean => {
 const endpointSchema = z
   .string()
   .max(512)
-  .refine(isEndpoint, "Not an HTTPS endpoint on a DNS name");
+  .refine((value) => isEndpoint(value), "Not an HTTPS endpoint on a DNS name");
 
 /**
  * An endpoint that may hold `{tenant}`, past its host: filled with any
@@ -203,7 +209,14 @@ const pointerSchema = z.string().regex(/^(?:\/[\w.-]{1,64}){1,8}$/u);
  * are connected only as shared ones, by an admin.
  */
 export const accountLookupSchema = z.strictObject({
-  url: endpointSchema,
+  /** On a host template too, filled as the connection's calls are. */
+  url: z
+    .string()
+    .max(512)
+    .refine(
+      (value) => isEndpoint(value, true),
+      "Not an HTTPS endpoint on a DNS name or a host template"
+    ),
   id: pointerSchema,
   name: pointerSchema.optional(),
   email: pointerSchema.optional(),
