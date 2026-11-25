@@ -169,6 +169,14 @@ describe(connectionNames, () => {
     );
   });
 
+  it("leaves a connector known by nothing but its ID unnamed", () => {
+    const tracker = {
+      ...connection(connector, "shared", "active"),
+      source: "connector" as const,
+    };
+    expect(connectionNames([], [tracker]).has(tracker.id)).toBeFalsy();
+  });
+
   it("names an app the catalog doesn't list by its product, else by its vendor's own ID", () => {
     const directory = connection("microsoft-directory", "shared", "active");
     const gmail = {

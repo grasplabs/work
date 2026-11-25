@@ -14707,8 +14707,8 @@ msgstr "Diesen früheren Stand wiederherstellen?"
 msgid "Restored: {replaced}"
 msgstr "Wiederhergestellt: {replaced}"
 
+#: src/chat/chat-body.tsx
 #: src/chat/chat-markdown.ts
-#: src/chat/sources.tsx
 msgid "Restricted"
 msgstr "Eingeschränkt"
 

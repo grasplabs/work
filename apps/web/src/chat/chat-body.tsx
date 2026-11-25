@@ -1,3 +1,4 @@
+import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { MessageSkeleton } from "@grasp-os/ui/components/message";
 import {
@@ -188,7 +189,7 @@ export const ChatConversation = ({
         checking={view.checking}
         running={view.running}
         sources={
-          <ChatSources names={sourceNames} provenance={view.provenance} />
+          <ChatSources names={sourceNames} sources={view.provenance.sources} />
         }
         tools={view.tools}
         build={{
@@ -309,6 +310,13 @@ export const ChatFooter = ({
   return (
     <div {...stylex.props(styles.footer, inColumn && styles.footerInColumn)}>
       <BuildsFailure read={builds} />
+      {/* A restricted chat stays so for good: said over the box, where the
+        next question is asked, whatever the thread is doing. */}
+      {view.provenance.restricted ? (
+        <div>
+          <Badge variant="warning">{t`Restricted`}</Badge>
+        </div>
+      ) : null}
       <AskOrCompose
         {...composer}
         {...(unavailable === undefined ? {} : { unavailable })}

@@ -353,8 +353,21 @@ export const connectionLabel = (
     : `${integration.name} (${connection.accountName})`;
 
 /**
+ * Whether `integration`'s name is only its connector's ID: a connector the
+ * catalog doesn't list, whose connection connect didn't name either.
+ */
+const namedByConnectorId = (
+  integration: Integration,
+  connection: ListedConnection
+): boolean =>
+  integration.source === "connector" &&
+  !integration.listed &&
+  connection.connectorName === undefined;
+
+/**
  * Every live connection's name, by ID, as the Connectors page shows it:
- * a catalog entry's (`connectionLabel`), an HTTP connection's own.
+ * a catalog entry's (`connectionLabel`), an HTTP connection's own. A
+ * connector known by nothing but its ID is left unnamed.
  */
 export const connectionNames = (
   entries: readonly Entry[],
@@ -362,10 +375,11 @@ export const connectionNames = (
 ): Map<string, string> =>
   new Map([
     ...integrationsOf(entries, connections).flatMap((integration) =>
-      integration.connections.map((connection): [string, string] => [
-        connection.id,
-        connectionLabel(connection, integration),
-      ])
+      integration.connections.flatMap((connection): [string, string][] =>
+        namedByConnectorId(integration, connection)
+          ? []
+          : [[connection.id, connectionLabel(connection, integration)]]
+      )
     ),
     ...httpConnectionsOf(connections).map(
       ({ connection, http }): [string, string] => [connection.id, http.name]
