@@ -50,7 +50,7 @@ import { fadeIn, visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { size as sizes, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import type { Session } from "../core.ts";
@@ -59,6 +59,13 @@ import { loadFromCore, notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import type { Integration } from "./integrations.ts";
+import { calendlyTools } from "./permissions/calendly-tools.ts";
+import {
+  ConceptParts,
+  permissionConceptOf,
+} from "./permissions/concept-dialog.tsx";
+import type { PermissionConcept } from "./permissions/concept-dialog.tsx";
+import { sortTools, startingChoice } from "./permissions/model.ts";
 import { ToolChoice } from "./tool-choice.tsx";
 import { toolRules, withAllowed, withRead } from "./tool-choices.ts";
 import type { AllowedTool } from "./tool-choices.ts";
@@ -864,6 +871,112 @@ const ComposioFlow = ({
   );
 };
 
+/**
+ * Connecting a Composio toolkit as one of the permission concepts, in
+ * development only (permissions/concept-dialog.tsx): the same tools, rules
+ * and consent as `ComposioFlow`, chosen in one of three ways, viewing on
+ * from the start. Where core can't list Calendly's tools here, its sample
+ * from Composio's catalog stands in, said so over the choice.
+ */
+const ComposioConcept = ({
+  concept,
+  integration,
+  replacing,
+  returnTo,
+}: {
+  concept: PermissionConcept;
+  integration: Integration;
+  replacing: readonly ListedConnection[];
+  returnTo: string;
+}) => {
+  const { begin, busy, failure } = useSignInStart();
+  const core = useCore();
+  const { t, i18n } = useLingui();
+  const [listed, setListed] = useState<Loaded<CatalogTool[]>>();
+  const [chosen, setChosen] = useState<AllowedTool[]>();
+  const app = integration.name;
+  const { source, id } = integration;
+  useEffect(() => {
+    const left = new AbortController();
+    const read = async (): Promise<void> => {
+      const loaded = await loadFromCore(
+        core,
+        async (session) => await session.connections.catalogTools(source, id),
+        left.signal
+      );
+      if (!left.signal.aborted) {
+        setListed(loaded);
+      }
+    };
+    void read();
+    return () => {
+      left.abort();
+    };
+  }, [core, source, id]);
+  const sample =
+    import.meta.env.DEV &&
+    listed !== undefined &&
+    listed.state !== "ready" &&
+    id === "calendly";
+  const tools = listed?.state === "ready" ? listed.data : undefined;
+  const sorted = useMemo(() => {
+    const shown = tools ?? (sample ? calendlyTools : undefined);
+    return shown === undefined ? undefined : sortTools(shown, id);
+  }, [tools, sample, id]);
+  const allowed =
+    chosen ?? (sorted === undefined ? [] : startingChoice(sorted));
+  const connect = async (): Promise<void> => {
+    await begin(async (session) => {
+      await disconnectReplaced(session, replacing);
+      return await session.connections.connectToolkit({
+        toolkit: id,
+        tools: toolRules(allowed),
+        consent: composioConsentText,
+        returnTo,
+      });
+    });
+  };
+  const notLoaded =
+    listed === undefined || listed.state === "ready" || sample
+      ? undefined
+      : (notLoadedText(listed, i18n) ?? undefined);
+  return (
+    <ConceptParts
+      actions={
+        busy ? (
+          <Starting
+            app={app}
+            disabled={allowed.length === 0}
+            onRetry={() => {
+              void connect();
+            }}
+          />
+        ) : (
+          <Button
+            disabled={allowed.length === 0}
+            onClick={() => {
+              void connect();
+            }}
+          >
+            {t`Allow and sign in`}
+          </Button>
+        )
+      }
+      allowed={allowed}
+      app={app}
+      concept={concept}
+      failure={failure ?? notLoaded}
+      loading={<LoadingLines />}
+      logo={integration.logo}
+      note={
+        sample ? t`Sample: Calendly's tools as Composio lists them.` : undefined
+      }
+      onAllowed={setChosen}
+      sorted={sorted}
+    />
+  );
+};
+
 const noneReplaced: readonly ListedConnection[] = [];
 
 /**
@@ -894,6 +1007,27 @@ export const ConnectDialog = ({
 }) => {
   const { t } = useLingui();
   const app = integration.name;
+  // Development only: a permission concept in place of the steps.
+  const concept =
+    integration.source === "composio" && integration.auth !== "key"
+      ? permissionConceptOf(window.location.search)
+      : null;
+  if (concept !== null) {
+    return (
+      <Dialog onOpenChange={onOpenChange} open={open}>
+        <DialogContent>
+          {open ? (
+            <ComposioConcept
+              concept={concept}
+              integration={integration}
+              replacing={replacing}
+              returnTo={returnTo ?? returnToOf(integration.key)}
+            />
+          ) : null}
+        </DialogContent>
+      </Dialog>
+    );
+  }
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
       <DialogContent>
