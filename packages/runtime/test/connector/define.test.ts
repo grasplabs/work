@@ -182,7 +182,7 @@ const throwAfterWrite = tool({
 });
 
 /** A write whose vendor answers it with text. */
-const clearStock = tool({
+const zeroStock = tool({
   description: "Clears one product's stock",
   readOnly: false,
   reach: "company",
@@ -219,7 +219,7 @@ const stock = defineConnector({
     "stock.stray": strayRead,
     "stock.writeDuringRead": writeDuringRead,
     "stock.findByWriting": findByWriting,
-    "stock.clear": clearStock,
+    "stock.zero": zeroStock,
     "stock.throwAfterWrite": throwAfterWrite,
     "stock.readDuringWrite": readDuringWrite,
   },
@@ -359,9 +359,7 @@ describe("a connector's definition", () => {
           args: { recipients: v.array(v.string()) },
         })
       )
-    ).toThrow(
-      "get_x: its input names people or places it reaches, so it reaches others"
-    );
+    ).toThrow("get_x: its input names people or places it reaches");
   });
 
   it("refuses what Grasp never runs, by its name or a DELETE, and a message declared as its author's own", () => {
@@ -376,7 +374,7 @@ describe("a connector's definition", () => {
     );
     expect(
       named(
-        "stock.clear",
+        "stock.zero",
         // A connector written without types still can't declare a DELETE.
         // @ts-expect-error -- DELETE is no route method
         declared({ ...write, routes: ["DELETE /v1/stock/{sku}"], args: {} })
@@ -396,6 +394,40 @@ describe("a connector's definition", () => {
       "notice.submitDraft: its input names people or places it reaches"
     );
     expect(named("notice.createDraft", addressed)).not.toThrow();
+  });
+
+  it("refuses a draft that can send, and a message written where people talk, declared as its author's own", () => {
+    const write = { readOnly: false, reach: "own" } as const;
+    expect(
+      named(
+        "notice.createDraft",
+        declared({
+          ...write,
+          routes: ["POST /v1/notices"],
+          args: { to: v.string(), send: v.boolean() },
+        })
+      )
+    ).toThrow(
+      "notice.createDraft: its input names people or places it reaches"
+    );
+    expect(
+      named(
+        "chat.createMessage",
+        declared({
+          ...write,
+          routes: ["POST /v1/notices"],
+          args: { chatId: v.string(), content: v.string() },
+        })
+      )
+    ).toThrow(
+      "chat.createMessage: its input names people or places it reaches, or it writes where people talk"
+    );
+    expect(
+      named(
+        "mail.label",
+        declared({ ...write, routes: ["POST /v1/notices"], args: {} })
+      )
+    ).not.toThrow();
   });
 
   it("refuses a route to a host it doesn't list, and a bare path among several hosts", () => {
@@ -719,13 +751,13 @@ describe("a call of a tool", () => {
   });
 
   it("answers a write's text where the vendor answers with text", async () => {
-    vendorAnswers(new Response("Deleted", { status: 200 }));
+    vendorAnswers(new Response("Zeroed", { status: 200 }));
     const result = await call(
-      "stock.clear",
+      "stock.zero",
       { sku: "a" },
       { [effectKeyMetaKey]: key }
     );
-    expect(result.structuredContent).toStrictEqual({ answer: "Deleted" });
+    expect(result.structuredContent).toStrictEqual({ answer: "Zeroed" });
   });
 
   it("leaves the outcome unknown once its write went out, whatever it throws after", async () => {

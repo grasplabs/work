@@ -217,7 +217,7 @@ describe("a connector's tools", () => {
     }).toStrictEqual({
       read: true,
       status: "held",
-      get_status: "change-own",
+      get_status: "reach-others",
       create_issue: "change-own",
       deep: undefined,
       large: undefined,
@@ -429,6 +429,9 @@ describe("a connector's tools", () => {
       }),
       tool("find_and_send"),
       tool("read_messages"),
+      tool("list_sharepoint_sites"),
+      tool("get_payload"),
+      tool("dropbox_list_files"),
       tool("delete_issue"),
       tool("share_document"),
     ];
@@ -446,6 +449,9 @@ describe("a connector's tools", () => {
       list_rooms: classes.list_rooms,
       find_and_send: classes.find_and_send,
       read_messages: classes.read_messages,
+      list_sharepoint_sites: classes.list_sharepoint_sites,
+      get_payload: classes.get_payload,
+      dropbox_list_files: classes.dropbox_list_files,
       delete_issue: await outcome(
         callAs(agent, { connectionId, action: "delete_issue", input: {} })
       ),
@@ -464,6 +470,9 @@ describe("a connector's tools", () => {
       list_rooms: "reach-others",
       find_and_send: "reach-others",
       read_messages: "read-others",
+      list_sharepoint_sites: "read-own",
+      get_payload: "read-own",
+      dropbox_list_files: "read-own",
       delete_issue: "connect.never",
       share_document: "connect.never",
       deleteSent: false,
@@ -485,6 +494,7 @@ describe("a connector's tools", () => {
       tool("post_to_list"),
       tool("whoami", { annotations: { readOnlyHint: true } }),
       tool("query_database"),
+      tool("list_flagged", { annotations: { destructiveHint: true } }),
     ];
     const { connectionId, agent } = await connected();
     const classes = await classesOf(connectionId);
@@ -507,6 +517,7 @@ describe("a connector's tools", () => {
       post_to_list: classes.post_to_list,
       whoami: classes.whoami,
       query_database: classes.query_database,
+      list_flagged: classes.list_flagged,
       replaced: replaced.pending === undefined ? "ran" : "held",
       sent: linear.calls.some(({ name }) => name === "search_replace"),
     }).toStrictEqual({
@@ -522,6 +533,7 @@ describe("a connector's tools", () => {
       post_to_list: "reach-others",
       whoami: "reach-others",
       query_database: "reach-others",
+      list_flagged: "reach-others",
       replaced: "held",
       sent: false,
     });
@@ -541,7 +553,7 @@ describe("a connector's tools", () => {
           links: { type: "array", items: takes({ url: text }).inputSchema },
         })
       ),
-      tool("register_hook", takes({ webhook_url: text })),
+      tool("register_endpoint", takes({ webhook_url: text })),
       tool("set_reminder", takes({ phone: text, user: text })),
       tool("get_status", takes({ "r\u0435cipients": text })),
       tool("assign_issue", takes({ assignee_id: { type: "integer" } })),
@@ -566,6 +578,40 @@ describe("a connector's tools", () => {
         })
       ),
       tool("list_issues_by", takes({ assignee: text, channel: text })),
+      tool("get_report", takes({ from: text, to: text })),
+      tool(
+        "get_summary",
+        takes({ recipient: { type: "integer", format: "date" } })
+      ),
+      tool(
+        "update_event",
+        takes({ event_id: text, notify_attendees: { type: "boolean" } })
+      ),
+      tool("edit_draft", takes({ to: text, send: { type: "boolean" } })),
+      tool(
+        "update_draft",
+        takes({
+          draft_id: text,
+          scheduledSendTime: { type: "string", format: "date-time" },
+        })
+      ),
+      tool(
+        "create_issue_from_draft",
+        takes({ draft_id: text, assignee: text })
+      ),
+      tool("reply_draft", takes({ draft_id: text })),
+      tool("write_draft", takes({ to: text, autosend: { type: "boolean" } })),
+      tool(
+        "save_draft_for",
+        takes({
+          to: text,
+          schedule_date: { type: "string", format: "date-time" },
+        })
+      ),
+      tool(
+        "update_ticket",
+        takes({ id: text, shouldnotify: { type: "boolean" } })
+      ),
     ];
     const { connectionId } = await connected();
     const classes = await classesOf(connectionId);
@@ -576,7 +622,7 @@ describe("a connector's tools", () => {
       create_message: classes.create_message,
       update_issue: classes.update_issue,
       add_link: classes.add_link,
-      register_hook: classes.register_hook,
+      register_endpoint: classes.register_endpoint,
       set_reminder: classes.set_reminder,
       get_status: classes.get_status,
       assign_issue: classes.assign_issue,
@@ -595,13 +641,23 @@ describe("a connector's tools", () => {
       save_draft: classes.save_draft,
       list_events: classes.list_events,
       list_issues_by: classes.list_issues_by,
+      get_report: classes.get_report,
+      get_summary: classes.get_summary,
+      update_event: classes.update_event,
+      edit_draft: classes.edit_draft,
+      update_draft: classes.update_draft,
+      create_issue_from_draft: classes.create_issue_from_draft,
+      reply_draft: classes.reply_draft,
+      write_draft: classes.write_draft,
+      save_draft_for: classes.save_draft_for,
+      update_ticket: classes.update_ticket,
     }).toStrictEqual({
       post_to_channel: "reach-others",
       save_note: "reach-others",
       create_message: "reach-others",
       update_issue: "reach-others",
       add_link: "reach-others",
-      register_hook: "reach-others",
+      register_endpoint: "reach-others",
       set_reminder: "reach-others",
       get_status: "reach-others",
       assign_issue: "reach-others",
@@ -620,6 +676,16 @@ describe("a connector's tools", () => {
       save_draft: "reach-others",
       list_events: "read-own",
       list_issues_by: "read-own",
+      get_report: "reach-others",
+      get_summary: "reach-others",
+      update_event: "reach-others",
+      edit_draft: "reach-others",
+      update_draft: "reach-others",
+      create_issue_from_draft: "reach-others",
+      reply_draft: "reach-others",
+      write_draft: "reach-others",
+      save_draft_for: "reach-others",
+      update_ticket: "reach-others",
     });
   });
 
@@ -655,6 +721,34 @@ describe("a connector's tools", () => {
       "create_mailrule",
       "enable_autopay",
       "reshare_post",
+      "update_link_sharing",
+      "prune_branches",
+      "discard_changes",
+      "unlink_file",
+      "expunge_mailbox",
+      "set_out_of_office",
+      "set_automatic_replies",
+      "set_vacation_responder",
+      "create_hook",
+      "list_githooks",
+      "checkout_cart",
+      "empty_folder",
+      "clear_calendar",
+      "reset_account",
+      "uninstall_app",
+      "kv_del",
+      "fs_rm",
+      "rmdir",
+      "unset_value",
+      "update_access",
+      "add_editor",
+      "make_public",
+      "enable_link_sharing",
+      "sharefile",
+      "create_shareable_link",
+      "add_payee",
+      "update_ruleset",
+      "grantaccess",
     ];
     linear.tools = [...linear.tools, ...refused.map((name) => tool(name))];
     const { connectionId, agent } = await connected();

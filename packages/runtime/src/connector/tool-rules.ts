@@ -88,10 +88,8 @@ const changeWords: ReadonlySet<string> = new Set([
   "cancel",
   "capture",
   "change",
-  "checkout",
   "claim",
   "clean",
-  "clear",
   "clone",
   "close",
   "commit",
@@ -110,7 +108,6 @@ const changeWords: ReadonlySet<string> = new Set([
   "deploy",
   "detach",
   "disable",
-  "discard",
   "disconnect",
   "dismiss",
   "dispatch",
@@ -118,7 +115,6 @@ const changeWords: ReadonlySet<string> = new Set([
   "duplicate",
   "edit",
   "emit",
-  "empty",
   "enable",
   "enqueue",
   "enroll",
@@ -165,7 +161,6 @@ const changeWords: ReadonlySet<string> = new Set([
   "pin",
   "place",
   "provision",
-  "prune",
   "publish",
   "push",
   "put",
@@ -191,7 +186,6 @@ const changeWords: ReadonlySet<string> = new Set([
   "rerun",
   "reschedule",
   "reserve",
-  "reset",
   "resolve",
   "respond",
   "restart",
@@ -227,7 +221,6 @@ const changeWords: ReadonlySet<string> = new Set([
   "unblock",
   "undo",
   "unfollow",
-  "unlink",
   "unlock",
   "unmute",
   "unpin",
@@ -305,6 +298,22 @@ const sendingWords: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * What an input's property holds where it sends (`sendNow`, `autosend`,
+ * `shouldNotify`, `scheduleDate`), found anywhere in its name. Not
+ * `post`, which `postalCode` holds.
+ */
+const sendingStems: readonly string[] = [
+  "broadcast",
+  "deliver",
+  "dispatch",
+  "notif",
+  "publish",
+  "schedul",
+  "send",
+  "submit",
+];
+
+/**
  * Name words that answer people: a change named with one reaches them,
  * while a draft may name one as what it holds (`create_reply_draft`).
  */
@@ -355,12 +364,15 @@ const conversationWords: ReadonlySet<string> = new Set([
  * let through. `access` and `owner` aren't one: they name reading as
  * often as granting (an access token, the resources one can access, a
  * CRM's owners), and granting is caught by `grant`, `share`,
- * `permission`, `role`, `invit` and `transfer`.
+ * `permission`, `role`, `invit` and `transfer`, and by `grantingWords`.
  */
 const neverParts: readonly string[] = [
   // Deleting
   "delet",
   "destroy",
+  "discard",
+  "expung",
+  "prune",
   "purg",
   "remov",
   "trash",
@@ -374,10 +386,13 @@ const neverParts: readonly string[] = [
   "revok",
   "unshar",
   // Forwarding, mail rules and hooks
+  "automaticrepl",
   "autorepl",
   "filter",
   "forward",
+  "outofoffice",
   "redirect",
+  "vacationrespon",
   "webhook",
   // Settings
   "config",
@@ -395,31 +410,89 @@ const neverParts: readonly string[] = [
 /**
  * What Grasp never does, as the start of a word: words too short to find
  * inside others (`acl` in `oracle`, `eras` in `cameras`) are matched
- * where a word starts, so `dropTable`, `getACLs`, `shared` and
- * `payment` are refused.
+ * where a word starts, however it goes on, so `dropTable`, `getACLs`,
+ * `shared`, `payee` and `sharefile` are refused, but for the few words
+ * in `otherWordStarts`.
  */
 const neverStarts: readonly string[] = [
   "acl",
   "charge",
+  "charging",
+  "checkout",
+  "clear",
   "drop",
+  "empty",
   "eras",
   "grant",
+  "hook",
   "paid",
   "pay",
+  "reset",
   "role",
   "rule",
   "share",
+  "sharing",
+  "uninstall",
+  "unlink",
+  "unset",
 ];
+
+/**
+ * What, after one of `neverStarts`, makes a word another one that names
+ * none of it: `sharepoint`, `shareholder`, `payload`, `dropbox`,
+ * `dropdown`, `droplet`. Anything else after it is refused.
+ */
+const otherWordStarts: readonly string[] = [
+  "box",
+  "down",
+  "holder",
+  "let",
+  "load",
+  "point",
+];
+
+/**
+ * What Grasp never does, as a whole word: words so short they start many
+ * others (`del` starts `delay` and `deliver`).
+ */
+const neverWords: ReadonlySet<string> = new Set([
+  "del",
+  "dels",
+  "rm",
+  "rmdir",
+  "rmrf",
+]);
+
+/**
+ * Words for who may reach what: a name with one, led by a word that
+ * changes something (its first or second, after a namespace), changes
+ * who may reach it (`update_access`, `add_editor`, `make_public`), and
+ * is refused. A read of them (`list_owners_and_teams`) isn't.
+ */
+const grantingWords: ReadonlySet<string> = new Set([
+  "access",
+  "admin",
+  "admins",
+  "editor",
+  "editors",
+  "owner",
+  "owners",
+  "public",
+  "viewer",
+  "viewers",
+  "visibility",
+]);
 
 /**
  * What Grasp never does, as the end of a word, alone or plural: the
  * `neverStarts` a word may be joined after (`userRoles`, `mailrule`,
- * `autopay`, `reshare`, `objectacl`).
+ * `autopay`, `reshare`, `objectacl`, `githook`).
  */
 const neverEnds: readonly string[] = [
   "acl",
   "charge",
   "grant",
+  "hook",
   "pay",
   "role",
   "rule",
@@ -456,23 +529,6 @@ const wordsOf = (name: string): string[] =>
     .split(/[^a-z0-9]+/u)
     .filter((word) => word !== "");
 
-/**
- * Whether the tool `name` is one Grasp never runs. A name outside plain
- * ASCII can't be read (`dеlete` with a Cyrillic е), so it is one.
- */
-export const isNeverTool = (name: string): boolean => {
-  const joined = name.toLowerCase().replaceAll(/[^a-z0-9]/gu, "");
-  return (
-    !plainName.test(name) ||
-    neverParts.some((part) => joined.includes(part)) ||
-    wordsOf(name).some(
-      (word) =>
-        neverStarts.some((start) => word.startsWith(start)) ||
-        neverEnds.some((end) => word.endsWith(end) || word.endsWith(`${end}s`))
-    )
-  );
-};
-
 /** Whether `word` is one of `words`, or one after a prefix (`resend`). */
 const isOneOf = (words: ReadonlySet<string>, word: string): boolean =>
   words.has(word) ||
@@ -481,11 +537,34 @@ const isOneOf = (words: ReadonlySet<string>, word: string): boolean =>
   );
 
 /**
- * A property's name and its schema, as a schema's `properties` hold it,
- * and whether they hold `from` and `to` both: a range, of times or of
- * text, whose `to` names nobody.
+ * Whether the tool `name` is one Grasp never runs. A name outside plain
+ * ASCII can't be read (`dеlete` with a Cyrillic е), so it is one.
  */
-type Property = [name: string, schema: Json | undefined, ranged: boolean];
+export const isNeverTool = (name: string): boolean => {
+  const joined = name.toLowerCase().replaceAll(/[^a-z0-9]/gu, "");
+  const words = wordsOf(name);
+  return (
+    !plainName.test(name) ||
+    neverParts.some((part) => joined.includes(part)) ||
+    words.some(
+      (word) =>
+        neverWords.has(word) ||
+        neverStarts.some(
+          (start) =>
+            word.startsWith(start) &&
+            !otherWordStarts.some((other) =>
+              word.slice(start.length).startsWith(other)
+            )
+        ) ||
+        neverEnds.some((end) => word.endsWith(end) || word.endsWith(`${end}s`))
+    ) ||
+    (words.some((word) => grantingWords.has(word)) &&
+      words.slice(0, 2).some((word) => isOneOf(changeWords, word)))
+  );
+};
+
+/** A property's name and its schema, as a schema's `properties` hold it. */
+type Property = [name: string, schema: Json | undefined];
 
 /** Whether `value` is a JSON array (`Array.isArray` says only `any[]`). */
 export const isJsonArray = (
@@ -508,15 +587,7 @@ const allProperties = (schema: Json): Property[] => {
     } else if (isRecord(next)) {
       const { properties } = next;
       if (isRecord(properties)) {
-        const ranged =
-          Object.hasOwn(properties, "from") && Object.hasOwn(properties, "to");
-        found.push(
-          ...Object.entries(properties).map(([name, each]): Property => [
-            name,
-            each,
-            ranged,
-          ])
-        );
+        found.push(...Object.entries(properties));
       }
       for (const value of Object.values(next)) {
         if (value !== undefined) {
@@ -581,39 +652,42 @@ export const topNames = (schema: Json): string[] => {
 
 /**
  * Whether a property's value can name nobody: its schema says it is a
- * date or a time, or a flag. Anything else may hold an address or an ID,
- * numbers too (a chat's, a user's).
+ * string holding a date or a time, or a flag. Anything else may hold an
+ * address or an ID, numbers too (a chat's, a user's), whatever its
+ * `format` says.
  */
 const namesNobody = (schema: Json | undefined): boolean =>
   isRecord(schema) &&
-  ((typeof schema.format === "string" && timeFormats.has(schema.format)) ||
+  ((schema.type === "string" &&
+    typeof schema.format === "string" &&
+    timeFormats.has(schema.format)) ||
     schema.type === "boolean");
 
 /**
  * Whether a property names people by its words: one starting with one of
- * `starts`, or `to` where `to` says: as its first word (`to`,
- * `toAddress`), or as its first or last (`sendTo`), unless it ends a
- * range. A name outside plain ASCII can't be read by words (`rеcipients`
- * with a Cyrillic е), so it counts as naming people.
+ * `starts`, whatever its value, or `to` where `to` says: as its first
+ * word (`to`, `toAddress`), or as its first or last (`sendTo`), unless
+ * its value names nobody (a date range's `to`). A name outside plain
+ * ASCII can't be read by words (`rеcipients` with a Cyrillic е), so it
+ * counts as naming people.
  */
 const namesPeople = (
-  [name, schema, ranged]: Property,
+  [name, schema]: Property,
   starts: readonly string[],
   to: "none" | "first" | "either"
 ): boolean => {
   if (!plainName.test(name)) {
     return true;
   }
-  if (namesNobody(schema)) {
-    return false;
-  }
   const nameWords = wordsOf(name);
+  if (
+    nameWords.some((word) => starts.some((start) => word.startsWith(start)))
+  ) {
+    return true;
+  }
   const toFirst = to !== "none" && nameWords[0] === "to";
   const toLast = to === "either" && nameWords.at(-1) === "to";
-  return (
-    nameWords.some((word) => starts.some((start) => word.startsWith(start))) ||
-    (!ranged && (toFirst || toLast))
-  );
+  return (toFirst || toLast) && !namesNobody(schema);
 };
 
 /** What the rules find in a tool's name and input schema. */
@@ -626,11 +700,17 @@ interface Findings {
   recipients: boolean;
   /**
    * Its input names people or places a change of it acts on, or its name
-   * delivers to people.
+   * delivers to people, or one of its input's sends (`notify_attendees`).
    */
   targets: boolean;
   /** Its name reads or writes what people said. */
   conversations: boolean;
+  /**
+   * Its name writes where people talk, not a draft: a word for what they
+   * said with a word that writes (`create_chat_message`), not one that
+   * only sorts it (`label_email`).
+   */
+  writesConversations: boolean;
 }
 
 /** What the rules find in the tool `name` taking `inputSchema`. */
@@ -638,11 +718,15 @@ const findingsOf = (name: string, inputSchema: Json): Findings => {
   const words = wordsOf(name);
   const delivers = (word: string) =>
     isOneOf(sendingWords, word) || isOneOf(answeringWords, word);
-  // A draft is written for its person to send: whoever it names is
-  // reached only by the send, which is a tool of its own. Only a draft
+  const properties = allProperties(inputSchema);
+  // A draft is written for its person to send: whoever it is addressed to
+  // is reached only by the send, which is a tool of its own. Only a draft
   // that is written, not one that is sent, approved or acted on otherwise.
+  // What else it acts on (an assignee, a channel), or an input that sends
+  // it (`scheduledSendTime`), still reaches others.
   const draft =
     words.some((word) => word === "draft" || word === "drafts") &&
+    words.some((word) => writingWords.has(word)) &&
     words.every(
       (word) =>
         !isOneOf(sendingWords, word) &&
@@ -650,7 +734,6 @@ const findingsOf = (name: string, inputSchema: Json): Findings => {
           writingWords.has(word) ||
           answeringWords.has(word))
     );
-  const properties = allProperties(inputSchema);
   const names = (starts: readonly string[], to: "none" | "first" | "either") =>
     properties.some((property) => namesPeople(property, starts, to));
   return {
@@ -660,8 +743,18 @@ const findingsOf = (name: string, inputSchema: Json): Findings => {
     changes: words.some((word) => isOneOf(changeWords, word)),
     recipients:
       (!draft && names(recipientWords, "first")) || names(addressWords, "none"),
-    targets: !draft && (names(targetWords, "either") || words.some(delivers)),
+    targets:
+      names(targetWords, draft ? "none" : "either") ||
+      (!draft && words.some(delivers)) ||
+      properties.some(([property]) => {
+        const joined = property.toLowerCase();
+        return sendingStems.some((stem) => joined.includes(stem));
+      }),
     conversations: words.some((word) => conversationWords.has(word)),
+    writesConversations:
+      !draft &&
+      words.some((word) => conversationWords.has(word)) &&
+      words.some((word) => writingWords.has(word)),
   };
 };
 
@@ -705,14 +798,14 @@ export const classByRules = (
     return "never";
   }
   const found = findingsOf(name, inputSchema);
-  const changes =
-    found.changes ||
-    annotations.readOnlyHint === false ||
-    annotations.destructiveHint === true;
-  if (!found.reads && !found.changes) {
+  const hintedChange =
+    annotations.readOnlyHint === false || annotations.destructiveHint === true;
+  // A change its name doesn't say, known from nothing or only from a hint,
+  // is one the rules don't recognise: it may reach anyone.
+  if (!found.changes && (!found.reads || hintedChange)) {
     return "reach-others";
   }
-  const readOnly = found.reads && !changes && !found.recipients;
+  const readOnly = found.reads && !found.changes && !found.recipients;
   return toolClassOf({
     readOnly,
     reach: reachOf(found, readOnly, scope === "personal" ? "own" : "company"),
@@ -733,10 +826,12 @@ export interface DeclaredTool {
 /**
  * Why the declaration of tool `name` claims less than the rules find, if
  * it does: it is one Grasp never runs; it claims to read but sends a
- * request other than a GET or HEAD, or is named for a change; or its
- * input names people it reaches but it doesn't say it reaches others.
- * Whether what it reads is the person's own or others' conversations is
- * the declaration's to say: the rules only guess it from a name word.
+ * request other than a GET or HEAD, or is named for a change; or it
+ * doesn't say it reaches others where the rules find it does: its input
+ * names people it reaches, or it writes where people talk. Whether what
+ * it reads, or only sorts (`mail.label`), is the person's own or others'
+ * conversations is the declaration's to say: the rules only guess it from
+ * a name word.
  */
 export const declarationProblem = (
   name: string,
@@ -752,8 +847,11 @@ export const declarationProblem = (
   if (readOnly && found.changes) {
     return "it is read-only, but its name says it changes something";
   }
-  if (reach !== "others" && reachOf(found, readOnly, reach) === "others") {
-    return "its input names people or places it reaches, so it reaches others";
+  const reachesOthers =
+    reachOf(found, readOnly, reach) === "others" ||
+    (!readOnly && found.writesConversations);
+  if (reachesOthers && toolClassOf({ readOnly, reach }) !== "reach-others") {
+    return "its input names people or places it reaches, or it writes where people talk, so it reaches others";
   }
   return undefined;
 };

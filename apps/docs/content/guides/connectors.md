@@ -85,7 +85,7 @@ A tool's name is its family and its action: `items.list`. The tools of one famil
 `readOnly` and `reach` are checked against the rules that class every tool by its name and arguments, and a connector that claims less than they find isn't built:
 
 - A read-only tool sends only GET and HEAD requests, and its name says no change (`send_message` can't be read-only).
-- A tool whose arguments name people it may reach (`to`, `recipients`, `attendees`, `cc`, `email`, a callback) reaches `others`, and so does a write named for delivering (send, notify, reply, publish) or that acts on a channel, a user, an assignee, a watcher or a URL. A draft reaches nobody until someone sends it, so `createDraft` taking `to` is fine.
+- A tool whose arguments name people it may reach (`to`, `recipients`, `attendees`, `cc`, `email`, a callback) reaches `others`. So does a write named for delivering (send, notify, reply, publish), one with an argument that sends (`sendNow`, `notifyAttendees`), one that acts on a channel, a user, an assignee, a watcher or a URL, and one that writes in a chat or mail (`chat.createMessage`). A draft reaches nobody until someone sends it, so `mail.createDraft` taking `to` is fine. A write that only sorts mail or messages (`mail.label`) reaches whom the connector declares.
 - A tool named for what Grasp never does (deleting, sharing and permissions, forwarding and mail rules, settings, payments) is refused whatever it declares, and no route is a DELETE.
 
 ## The API

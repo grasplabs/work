@@ -31,8 +31,8 @@ export const composioClasses: Record<string, Record<string, ToolClass>> = {
     HUBSPOT_EXPORT_EVERYTHING: "read-company",
     HUBSPOT_REFUSED: "never",
     // Classed as a review could get them wrong: Never by their names
-    // (isNeverTool), whatever their class, the shareholders' list too,
-    // whose name holds a word of the rule inside another.
+    // (isNeverTool), whatever their class. The shareholders' list only
+    // has a word of the rule inside another, and runs.
     HUBSPOT_DELETE_COMPANY: "change-company",
     HUBSPOT_SHARE_LIST: "read-company",
     HUBSPOT_UPDATE_SETTINGS: "change-company",
