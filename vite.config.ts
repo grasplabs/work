@@ -45,7 +45,8 @@ const generated = [
   // spec as the vendor serves it, which they record the hash of
   // (scripts/connector-openapi.ts).
   "**/tools.gen.ts",
-  "apps/connect/test/fixtures/*/openapi.yaml",
+  "**/openapi.yaml",
+  "**/openapi.json",
 ];
 
 /** Why a target may not extend Cap'n Web's or workerd's RpcTarget itself. */

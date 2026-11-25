@@ -272,24 +272,66 @@ export const checkMirror = (
   tools: readonly MirrorTool[],
   spec?: Spec
 ): MirrorProblem[] => {
+  const key = (method: string, path: string): string =>
+    `${method} ${shapeOf(path)}`;
   const byShape = new Map(
     (spec?.operations ?? []).map((operation) => [
-      `${operation.method} ${shapeOf(operation.path)}`,
+      key(operation.method, operation.path),
       operation,
     ])
   );
+  const skipped = new Map(
+    (spec?.skipped ?? []).map(({ operation, reason }) => {
+      const space = operation.indexOf(" ");
+      return [
+        key(operation.slice(0, space), operation.slice(space + 1)),
+        reason,
+      ];
+    })
+  );
+  /** Why a route of a tool held to the spec is none of its operations. */
+  const missing = (route: Route): string => {
+    const reason = skipped.get(key(route.method, route.path));
+    return reason === undefined
+      ? `${route.method} ${route.path} isn't an operation of the vendor's spec.`
+      : `${route.method} ${route.path} makes no tool: ${reason}`;
+  };
   return tools.flatMap((tool) => {
-    const route = readRoute(tool.routes[0] ?? "");
+    const [route, ...more] = tool.routes.map(readRoute);
     if (route === undefined) {
       return [
         { tool: tool.name, message: "It declares no route it is named from." },
       ];
     }
-    const operation = byShape.get(`${route.method} ${shapeOf(route.path)}`);
-    const problems =
-      operation === undefined
-        ? againstRoute(tool, route)
-        : againstOperation(tool, route, operation);
+    const operation = byShape.get(key(route.method, route.path));
+    let problems: string[];
+    if (operation !== undefined) {
+      problems = againstOperation(tool, route, operation);
+    } else if (spec === undefined) {
+      problems = againstRoute(tool, route);
+    } else {
+      problems = [missing(route)];
+    }
+    // Every other route (a write's `find`) is of the tool's own family,
+    // and of the spec where it holds.
+    const family = tool.name.slice(0, tool.name.lastIndexOf("."));
+    for (const other of more) {
+      if (other === undefined) {
+        problems.push("A route it declares can't be read.");
+      } else if (
+        spec !== undefined &&
+        !byShape.has(key(other.method, other.path))
+      ) {
+        problems.push(missing(other));
+      } else {
+        const naming = routeName(other, false);
+        if ("problem" in naming || naming.family !== family) {
+          problems.push(
+            `${other.method} ${other.path} isn't of its family ${family}.`
+          );
+        }
+      }
+    }
     return problems.map((message) => ({ tool: tool.name, message }));
   });
 };

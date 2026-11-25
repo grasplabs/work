@@ -29,7 +29,7 @@ export const refuse: (message: string) => never = refuser(
 
 /**
  * A contract and its major version, e.g. `grasp.mail@1`; a connector's
- * families keep its tools' names (`pipedrive.dealFields@1`).
+ * families keep its tools' names (`crm.dealFields@1`).
  */
 const contractPattern = /^[a-z][a-z0-9_-]*(?:\.[A-Za-z][\w-]*)*@[1-9]\d{0,5}$/u;
 

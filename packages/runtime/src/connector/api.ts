@@ -70,8 +70,8 @@ export interface Api {
 
 const routeText = /^(?<method>[A-Z]+) (?<target>\S+)$/u;
 
-/** A base path: literal segments, each after a slash. */
-const basePath = /^(?:\/[\w.~-]+)+$/u;
+/** A base path: literal segments, each after a slash, none a dot segment. */
+const basePath = /^(?:\/(?!\.\.?(?:\/|$))[\w.~-]+)+$/u;
 
 const isRouteMethod = (method: string): method is RouteMethod =>
   httpMethods.some((each) => each === method);

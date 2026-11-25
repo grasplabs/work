@@ -68,7 +68,7 @@ const items = {
   "activityFields.list": v.object({
     field_name: v.string(),
     field_code: v.string(),
-    field_type: v.enum(["int","double","boolean","varchar","text","phone","varchar_options","varchar_auto","date","daterange","time","timerange","enum","set","address","monetary","deal","deals","lead","org","people","project","stage","user","activity","json","picture","status","visible_to","price_list","billing_frequency","projects_board","projects_phase","participants","attendees"]),
+    field_type: v.string(),
     options: v.array(v.object({
       id: v.union(v.number().integer(), v.string()).optional(),
       label: v.string().optional(),
@@ -180,12 +180,12 @@ const items = {
     comments: v.string().optional(),
     currency: v.string().optional(),
     discount: v.number().optional(),
-    discount_type: v.enum(["percentage","amount"]).optional(),
+    discount_type: v.string().optional(),
     quantity: v.number().optional(),
     item_price: v.number().optional(),
-    tax_method: v.enum(["exclusive","inclusive","none"]).optional(),
+    tax_method: v.string().optional(),
     is_enabled: v.boolean().optional(),
-    billing_frequency: v.enum(["one-time","annually","semi-annually","quarterly","monthly","weekly"]).optional(),
+    billing_frequency: v.string().optional(),
     billing_frequency_cycles: v.number().integer().nullable().optional(),
     billing_start_date: v.string().date().nullable().optional(),
   }),
@@ -203,18 +203,18 @@ const items = {
     comments: v.string().optional(),
     currency: v.string().optional(),
     discount: v.number().optional(),
-    discount_type: v.enum(["percentage","amount"]).optional(),
+    discount_type: v.string().optional(),
     quantity: v.number().optional(),
     item_price: v.number().optional(),
-    tax_method: v.enum(["exclusive","inclusive","none"]).optional(),
+    tax_method: v.string().optional(),
     is_enabled: v.boolean().optional(),
-    billing_frequency: v.enum(["one-time","annually","semi-annually","quarterly","monthly","weekly"]).optional(),
+    billing_frequency: v.string().optional(),
     billing_frequency_cycles: v.number().integer().nullable().optional(),
     billing_start_date: v.string().date().nullable().optional(),
   }),
   "deals.discounts.list": v.object({
     id: v.string().optional(),
-    type: v.enum(["percentage","amount"]).optional(),
+    type: v.string().optional(),
     amount: v.number().optional(),
     description: v.string().optional(),
     deal_id: v.number().integer().optional(),
@@ -234,7 +234,7 @@ const items = {
     field_name: v.string(),
     field_code: v.string(),
     description: v.string().optional(),
-    field_type: v.enum(["int","double","boolean","varchar","text","phone","varchar_options","varchar_auto","date","daterange","time","timerange","enum","set","address","monetary","deal","deals","lead","org","people","project","stage","user","activity","json","picture","status","visible_to","price_list","billing_frequency","projects_board","projects_phase"]),
+    field_type: v.string(),
     options: v.array(v.object({
       id: v.union(v.number().integer(), v.string()).optional(),
       label: v.string().optional(),
@@ -265,7 +265,7 @@ const items = {
     required_fields: v.object({
       enabled: v.boolean().optional(),
       stage_ids: v.array(v.number().integer()).optional(),
-      statuses: v.record(v.array(v.enum(["won","lost"]))).optional(),
+      statuses: v.record(v.array(v.string())).optional(),
     }).optional(),
   }),
   "persons.list": v.object({
@@ -311,8 +311,8 @@ const items = {
     })).optional(),
     birthday: v.string().optional(),
     job_title: v.string().optional(),
-    track_open: v.enum(["no_preference_set","consent_given","consent_declined"]).optional(),
-    track_click: v.enum(["no_preference_set","consent_given","consent_declined"]).optional(),
+    track_open: v.string().optional(),
+    track_click: v.string().optional(),
     custom_fields: v.record(v.json()).optional(),
   }),
   "persons.followers.list": v.object({
@@ -328,7 +328,7 @@ const items = {
   "personFields.list": v.object({
     field_name: v.string(),
     field_code: v.string(),
-    field_type: v.enum(["int","double","boolean","varchar","text","phone","varchar_options","varchar_auto","date","daterange","time","timerange","enum","set","address","monetary","deal","deals","lead","org","people","project","stage","user","activity","json","picture","status","visible_to","price_list","billing_frequency","projects_board","projects_phase"]),
+    field_type: v.string(),
     options: v.array(v.object({
       id: v.union(v.number().integer(), v.string()).optional(),
       label: v.string().optional(),
@@ -400,7 +400,7 @@ const items = {
   "organizationFields.list": v.object({
     field_name: v.string(),
     field_code: v.string(),
-    field_type: v.enum(["int","double","boolean","varchar","text","phone","varchar_options","varchar_auto","date","daterange","time","timerange","enum","set","address","monetary","deal","deals","lead","org","people","project","stage","user","activity","json","picture","status","visible_to","price_list","billing_frequency","projects_board","projects_phase"]),
+    field_type: v.string(),
     options: v.array(v.object({
       id: v.union(v.number().integer(), v.string()).optional(),
       label: v.string().optional(),
@@ -446,14 +446,14 @@ const items = {
     tax: v.number().optional(),
     is_deleted: v.boolean().optional(),
     is_linkable: v.boolean().optional(),
-    visible_to: v.record(v.json()).optional(),
+    visible_to: v.number().optional(),
     owner_id: v.number().integer().optional(),
     add_time: v.string().optional(),
     update_time: v.string().optional(),
     description: v.string().optional(),
     category: v.string().nullable().optional(),
     custom_fields: v.record(v.json()).optional(),
-    billing_frequency: v.enum(["one-time","annually","semi-annually","quarterly","monthly","weekly"]).optional(),
+    billing_frequency: v.string().optional(),
     billing_frequency_cycles: v.number().integer().nullable().optional(),
     prices: v.array(v.object({
       price: v.number().optional(),
@@ -490,7 +490,7 @@ const items = {
   "productFields.list": v.object({
     field_name: v.string(),
     field_code: v.string(),
-    field_type: v.enum(["int","double","boolean","varchar","text","phone","varchar_options","varchar_auto","date","daterange","time","timerange","enum","set","address","monetary","deal","deals","lead","org","people","project","stage","user","activity","json","picture","status","visible_to","price_list","billing_frequency","projects_board","projects_phase"]),
+    field_type: v.string(),
     options: v.array(v.object({
       id: v.union(v.number().integer(), v.string()).optional(),
       label: v.string().optional(),
@@ -538,7 +538,7 @@ const items = {
   "projectFields.list": v.object({
     field_name: v.string(),
     field_code: v.string(),
-    field_type: v.enum(["int","double","boolean","varchar","text","phone","varchar_options","varchar_auto","date","daterange","time","timerange","enum","set","address","monetary","deal","deals","lead","org","people","project","stage","user","activity","json","picture","status","visible_to","price_list","billing_frequency","projects_board","projects_phase","orgs"]),
+    field_type: v.string(),
     options: v.array(v.object({
       id: v.union(v.number().integer(), v.string()).optional(),
       label: v.string().optional(),
@@ -854,7 +854,7 @@ const answers = {
     data: v.object({
       field_name: v.string(),
       field_code: v.string(),
-      field_type: v.enum(["int","double","boolean","varchar","text","phone","varchar_options","varchar_auto","date","daterange","time","timerange","enum","set","address","monetary","deal","deals","lead","org","people","project","stage","user","activity","json","picture","status","visible_to","price_list","billing_frequency","projects_board","projects_phase","participants","attendees"]),
+      field_type: v.string(),
       options: v.array(v.object({
         id: v.union(v.number().integer(), v.string()).optional(),
         label: v.string().optional(),
@@ -1101,12 +1101,12 @@ const answers = {
       comments: v.string().optional(),
       currency: v.string().optional(),
       discount: v.number().optional(),
-      discount_type: v.enum(["percentage","amount"]).optional(),
+      discount_type: v.string().optional(),
       quantity: v.number().optional(),
       item_price: v.number().optional(),
-      tax_method: v.enum(["exclusive","inclusive","none"]).optional(),
+      tax_method: v.string().optional(),
       is_enabled: v.boolean().optional(),
-      billing_frequency: v.enum(["one-time","annually","semi-annually","quarterly","monthly","weekly"]).optional(),
+      billing_frequency: v.string().optional(),
       billing_frequency_cycles: v.number().integer().nullable().optional(),
       billing_start_date: v.string().date().nullable().optional(),
     }).optional(),
@@ -1142,12 +1142,12 @@ const answers = {
       comments: v.string().optional(),
       currency: v.string().optional(),
       discount: v.number().optional(),
-      discount_type: v.enum(["percentage","amount"]).optional(),
+      discount_type: v.string().optional(),
       quantity: v.number().optional(),
       item_price: v.number().optional(),
-      tax_method: v.enum(["exclusive","inclusive","none"]).optional(),
+      tax_method: v.string().optional(),
       is_enabled: v.boolean().optional(),
-      billing_frequency: v.enum(["one-time","annually","semi-annually","quarterly","monthly","weekly"]).optional(),
+      billing_frequency: v.string().optional(),
       billing_frequency_cycles: v.number().integer().nullable().optional(),
       billing_start_date: v.string().date().nullable().optional(),
     }).optional(),
@@ -1168,12 +1168,12 @@ const answers = {
       comments: v.string().optional(),
       currency: v.string().optional(),
       discount: v.number().optional(),
-      discount_type: v.enum(["percentage","amount"]).optional(),
+      discount_type: v.string().optional(),
       quantity: v.number().optional(),
       item_price: v.number().optional(),
-      tax_method: v.enum(["exclusive","inclusive","none"]).optional(),
+      tax_method: v.string().optional(),
       is_enabled: v.boolean().optional(),
-      billing_frequency: v.enum(["one-time","annually","semi-annually","quarterly","monthly","weekly"]).optional(),
+      billing_frequency: v.string().optional(),
       billing_frequency_cycles: v.number().integer().nullable().optional(),
       billing_start_date: v.string().date().nullable().optional(),
     })).optional(),
@@ -1186,7 +1186,7 @@ const answers = {
     success: v.boolean().optional(),
     data: v.object({
       id: v.string().optional(),
-      type: v.enum(["percentage","amount"]).optional(),
+      type: v.string().optional(),
       amount: v.number().optional(),
       description: v.string().optional(),
       deal_id: v.number().integer().optional(),
@@ -1206,7 +1206,7 @@ const answers = {
     success: v.boolean().optional(),
     data: v.object({
       id: v.string().optional(),
-      type: v.enum(["percentage","amount"]).optional(),
+      type: v.string().optional(),
       amount: v.number().optional(),
       description: v.string().optional(),
       deal_id: v.number().integer().optional(),
@@ -1266,7 +1266,7 @@ const answers = {
       field_name: v.string(),
       field_code: v.string(),
       description: v.string().optional(),
-      field_type: v.enum(["int","double","boolean","varchar","text","phone","varchar_options","varchar_auto","date","daterange","time","timerange","enum","set","address","monetary","deal","deals","lead","org","people","project","stage","user","activity","json","picture","status","visible_to","price_list","billing_frequency","projects_board","projects_phase"]),
+      field_type: v.string(),
       options: v.array(v.object({
         id: v.union(v.number().integer(), v.string()).optional(),
         label: v.string().optional(),
@@ -1297,7 +1297,7 @@ const answers = {
       required_fields: v.object({
         enabled: v.boolean().optional(),
         stage_ids: v.array(v.number().integer()).optional(),
-        statuses: v.record(v.array(v.enum(["won","lost"]))).optional(),
+        statuses: v.record(v.array(v.string())).optional(),
       }).optional(),
     }).optional(),
   }),
@@ -1344,7 +1344,7 @@ const answers = {
       lead_id: v.string().optional(),
       deal_id: v.number().integer().optional(),
       conversion_id: v.string(),
-      status: v.enum(["not_started","running","completed","failed","rejected"]),
+      status: v.string(),
     }),
     additional_data: v.record(v.json()).nullable().optional(),
   }),
@@ -1400,8 +1400,8 @@ const answers = {
       })).optional(),
       birthday: v.string().optional(),
       job_title: v.string().optional(),
-      track_open: v.enum(["no_preference_set","consent_given","consent_declined"]).optional(),
-      track_click: v.enum(["no_preference_set","consent_given","consent_declined"]).optional(),
+      track_open: v.string().optional(),
+      track_click: v.string().optional(),
       custom_fields: v.record(v.json()).optional(),
     }).optional(),
   }),
@@ -1450,8 +1450,8 @@ const answers = {
       })).optional(),
       birthday: v.string().optional(),
       job_title: v.string().optional(),
-      track_open: v.enum(["no_preference_set","consent_given","consent_declined"]).optional(),
-      track_click: v.enum(["no_preference_set","consent_given","consent_declined"]).optional(),
+      track_open: v.string().optional(),
+      track_click: v.string().optional(),
       custom_fields: v.record(v.json()).optional(),
     }).optional(),
   }),
@@ -1506,8 +1506,8 @@ const answers = {
       })).optional(),
       birthday: v.string().optional(),
       job_title: v.string().optional(),
-      track_open: v.enum(["no_preference_set","consent_given","consent_declined"]).optional(),
-      track_click: v.enum(["no_preference_set","consent_given","consent_declined"]).optional(),
+      track_open: v.string().optional(),
+      track_click: v.string().optional(),
       custom_fields: v.record(v.json()).optional(),
     }).optional(),
   }),
@@ -1565,7 +1565,7 @@ const answers = {
     data: v.object({
       field_name: v.string(),
       field_code: v.string(),
-      field_type: v.enum(["int","double","boolean","varchar","text","phone","varchar_options","varchar_auto","date","daterange","time","timerange","enum","set","address","monetary","deal","deals","lead","org","people","project","stage","user","activity","json","picture","status","visible_to","price_list","billing_frequency","projects_board","projects_phase"]),
+      field_type: v.string(),
       options: v.array(v.object({
         id: v.union(v.number().integer(), v.string()).optional(),
         label: v.string().optional(),
@@ -1602,7 +1602,7 @@ const answers = {
     data: v.object({
       field_name: v.string(),
       field_code: v.string(),
-      field_type: v.enum(["int","double","boolean","varchar","text","phone","varchar_options","varchar_auto","date","daterange","time","timerange","enum","set","address","monetary","deal","deals","lead","org","people","project","stage","user","activity","json","picture","status","visible_to","price_list","billing_frequency","projects_board","projects_phase"]),
+      field_type: v.string(),
       options: v.array(v.object({
         id: v.union(v.number().integer(), v.string()).optional(),
         label: v.string().optional(),
@@ -1651,7 +1651,7 @@ const answers = {
     data: v.object({
       field_name: v.string(),
       field_code: v.string(),
-      field_type: v.enum(["int","double","boolean","varchar","text","phone","varchar_options","varchar_auto","date","daterange","time","timerange","enum","set","address","monetary","deal","deals","lead","org","people","project","stage","user","activity","json","picture","status","visible_to","price_list","billing_frequency","projects_board","projects_phase"]),
+      field_type: v.string(),
       options: v.array(v.object({
         id: v.union(v.number().integer(), v.string()).optional(),
         label: v.string().optional(),
@@ -1852,7 +1852,7 @@ const answers = {
     data: v.object({
       field_name: v.string(),
       field_code: v.string(),
-      field_type: v.enum(["int","double","boolean","varchar","text","phone","varchar_options","varchar_auto","date","daterange","time","timerange","enum","set","address","monetary","deal","deals","lead","org","people","project","stage","user","activity","json","picture","status","visible_to","price_list","billing_frequency","projects_board","projects_phase"]),
+      field_type: v.string(),
       options: v.array(v.object({
         id: v.union(v.number().integer(), v.string()).optional(),
         label: v.string().optional(),
@@ -1896,7 +1896,7 @@ const answers = {
     data: v.object({
       field_name: v.string(),
       field_code: v.string(),
-      field_type: v.enum(["int","double","boolean","varchar","text","phone","varchar_options","varchar_auto","date","daterange","time","timerange","enum","set","address","monetary","deal","deals","lead","org","people","project","stage","user","activity","json","picture","status","visible_to","price_list","billing_frequency","projects_board","projects_phase"]),
+      field_type: v.string(),
       options: v.array(v.object({
         id: v.union(v.number().integer(), v.string()).optional(),
         label: v.string().optional(),
@@ -1952,7 +1952,7 @@ const answers = {
     data: v.object({
       field_name: v.string(),
       field_code: v.string(),
-      field_type: v.enum(["int","double","boolean","varchar","text","phone","varchar_options","varchar_auto","date","daterange","time","timerange","enum","set","address","monetary","deal","deals","lead","org","people","project","stage","user","activity","json","picture","status","visible_to","price_list","billing_frequency","projects_board","projects_phase"]),
+      field_type: v.string(),
       options: v.array(v.object({
         id: v.union(v.number().integer(), v.string()).optional(),
         label: v.string().optional(),
@@ -2032,14 +2032,14 @@ const answers = {
       tax: v.number().optional(),
       is_deleted: v.boolean().optional(),
       is_linkable: v.boolean().optional(),
-      visible_to: v.record(v.json()).optional(),
+      visible_to: v.number().optional(),
       owner_id: v.number().integer().optional(),
       add_time: v.string().optional(),
       update_time: v.string().optional(),
       description: v.string().optional(),
       category: v.string().nullable().optional(),
       custom_fields: v.record(v.json()).optional(),
-      billing_frequency: v.enum(["one-time","annually","semi-annually","quarterly","monthly","weekly"]).optional(),
+      billing_frequency: v.string().optional(),
       billing_frequency_cycles: v.number().integer().nullable().optional(),
       prices: v.array(v.object({
         price: v.number().optional(),
@@ -2110,14 +2110,14 @@ const answers = {
       tax: v.number().optional(),
       is_deleted: v.boolean().optional(),
       is_linkable: v.boolean().optional(),
-      visible_to: v.record(v.json()).optional(),
+      visible_to: v.number().optional(),
       owner_id: v.number().integer().optional(),
       add_time: v.string().optional(),
       update_time: v.string().optional(),
       description: v.string().optional(),
       category: v.string().nullable().optional(),
       custom_fields: v.record(v.json()).optional(),
-      billing_frequency: v.enum(["one-time","annually","semi-annually","quarterly","monthly","weekly"]).optional(),
+      billing_frequency: v.string().optional(),
       billing_frequency_cycles: v.number().integer().nullable().optional(),
       prices: v.array(v.object({
         price: v.number().optional(),
@@ -2145,14 +2145,14 @@ const answers = {
       tax: v.number().optional(),
       is_deleted: v.boolean().optional(),
       is_linkable: v.boolean().optional(),
-      visible_to: v.record(v.json()).optional(),
+      visible_to: v.number().optional(),
       owner_id: v.number().integer().optional(),
       add_time: v.string().optional(),
       update_time: v.string().optional(),
       description: v.string().optional(),
       category: v.string().nullable().optional(),
       custom_fields: v.record(v.json()).optional(),
-      billing_frequency: v.enum(["one-time","annually","semi-annually","quarterly","monthly","weekly"]).optional(),
+      billing_frequency: v.string().optional(),
       billing_frequency_cycles: v.number().integer().nullable().optional(),
       prices: v.array(v.object({
         price: v.number().optional(),
@@ -2174,14 +2174,14 @@ const answers = {
       tax: v.number().optional(),
       is_deleted: v.boolean().optional(),
       is_linkable: v.boolean().optional(),
-      visible_to: v.record(v.json()).optional(),
+      visible_to: v.number().optional(),
       owner_id: v.number().integer().optional(),
       add_time: v.string().optional(),
       update_time: v.string().optional(),
       description: v.string().optional(),
       category: v.string().nullable().optional(),
       custom_fields: v.record(v.json()).optional(),
-      billing_frequency: v.enum(["one-time","annually","semi-annually","quarterly","monthly","weekly"]).optional(),
+      billing_frequency: v.string().optional(),
       billing_frequency_cycles: v.number().integer().nullable().optional(),
       prices: v.array(v.object({
         price: v.number().optional(),
@@ -2286,7 +2286,7 @@ const answers = {
     data: v.object({
       field_name: v.string(),
       field_code: v.string(),
-      field_type: v.enum(["int","double","boolean","varchar","text","phone","varchar_options","varchar_auto","date","daterange","time","timerange","enum","set","address","monetary","deal","deals","lead","org","people","project","stage","user","activity","json","picture","status","visible_to","price_list","billing_frequency","projects_board","projects_phase"]),
+      field_type: v.string(),
       options: v.array(v.object({
         id: v.union(v.number().integer(), v.string()).optional(),
         label: v.string().optional(),
@@ -2312,7 +2312,7 @@ const answers = {
     data: v.object({
       field_name: v.string(),
       field_code: v.string(),
-      field_type: v.enum(["int","double","boolean","varchar","text","phone","varchar_options","varchar_auto","date","daterange","time","timerange","enum","set","address","monetary","deal","deals","lead","org","people","project","stage","user","activity","json","picture","status","visible_to","price_list","billing_frequency","projects_board","projects_phase"]),
+      field_type: v.string(),
       options: v.array(v.object({
         id: v.union(v.number().integer(), v.string()).optional(),
         label: v.string().optional(),
@@ -2350,7 +2350,7 @@ const answers = {
     data: v.object({
       field_name: v.string(),
       field_code: v.string(),
-      field_type: v.enum(["int","double","boolean","varchar","text","phone","varchar_options","varchar_auto","date","daterange","time","timerange","enum","set","address","monetary","deal","deals","lead","org","people","project","stage","user","activity","json","picture","status","visible_to","price_list","billing_frequency","projects_board","projects_phase"]),
+      field_type: v.string(),
       options: v.array(v.object({
         id: v.union(v.number().integer(), v.string()).optional(),
         label: v.string().optional(),
@@ -2443,7 +2443,7 @@ const answers = {
       lead_id: v.string().optional(),
       deal_id: v.number().integer().optional(),
       conversion_id: v.string(),
-      status: v.enum(["not_started","running","completed","failed","rejected"]),
+      status: v.string(),
     }),
     additional_data: v.record(v.json()).nullable().optional(),
   }),
@@ -2640,7 +2640,7 @@ const answers = {
     data: v.object({
       field_name: v.string(),
       field_code: v.string(),
-      field_type: v.enum(["int","double","boolean","varchar","text","phone","varchar_options","varchar_auto","date","daterange","time","timerange","enum","set","address","monetary","deal","deals","lead","org","people","project","stage","user","activity","json","picture","status","visible_to","price_list","billing_frequency","projects_board","projects_phase","orgs"]),
+      field_type: v.string(),
       options: v.array(v.object({
         id: v.union(v.number().integer(), v.string()).optional(),
         label: v.string().optional(),
@@ -2673,7 +2673,7 @@ const answers = {
     data: v.object({
       field_name: v.string(),
       field_code: v.string(),
-      field_type: v.enum(["int","double","boolean","varchar","text","phone","varchar_options","varchar_auto","date","daterange","time","timerange","enum","set","address","monetary","deal","deals","lead","org","people","project","stage","user","activity","json","picture","status","visible_to","price_list","billing_frequency","projects_board","projects_phase","orgs"]),
+      field_type: v.string(),
       options: v.array(v.object({
         id: v.union(v.number().integer(), v.string()).optional(),
         label: v.string().optional(),
@@ -2718,7 +2718,7 @@ const answers = {
     data: v.object({
       field_name: v.string(),
       field_code: v.string(),
-      field_type: v.enum(["int","double","boolean","varchar","text","phone","varchar_options","varchar_auto","date","daterange","time","timerange","enum","set","address","monetary","deal","deals","lead","org","people","project","stage","user","activity","json","picture","status","visible_to","price_list","billing_frequency","projects_board","projects_phase","orgs"]),
+      field_type: v.string(),
       options: v.array(v.object({
         id: v.union(v.number().integer(), v.string()).optional(),
         label: v.string().optional(),
@@ -4575,6 +4575,7 @@ export const tools = {
       category: v.number().optional(),
       owner_id: v.number().integer().optional(),
       is_linkable: v.boolean().optional(),
+      visible_to: v.union(v.literal(1), v.literal(3), v.literal(5), v.literal(7)).optional(),
       prices: v.array(v.object({
         price: v.number(),
         cost: v.number().optional(),
@@ -4586,7 +4587,7 @@ export const tools = {
       billing_frequency_cycles: v.number().integer().nullable().optional(),
     },
     returns: answers["products.create"],
-    handler: async (args, api) => await api.post("/products", { body: { name: args.name, code: args.code, description: args.description, unit: args.unit, tax: args.tax, category: args.category, owner_id: args.owner_id, is_linkable: args.is_linkable, prices: args.prices, billing_frequency: args.billing_frequency, billing_frequency_cycles: args.billing_frequency_cycles }, returns: answers["products.create"] }),
+    handler: async (args, api) => await api.post("/products", { body: { name: args.name, code: args.code, description: args.description, unit: args.unit, tax: args.tax, category: args.category, owner_id: args.owner_id, is_linkable: args.is_linkable, visible_to: args.visible_to, prices: args.prices, billing_frequency: args.billing_frequency, billing_frequency_cycles: args.billing_frequency_cycles }, returns: answers["products.create"] }),
   }),
   "products.followers.list": tool({
     description: "List followers of a product",
@@ -4697,6 +4698,7 @@ export const tools = {
       category: v.number().optional(),
       owner_id: v.number().integer().optional(),
       is_linkable: v.boolean().optional(),
+      visible_to: v.union(v.literal(1), v.literal(3), v.literal(5), v.literal(7)).optional(),
       prices: v.array(v.object({
         price: v.number(),
         cost: v.number().optional(),
@@ -4708,7 +4710,7 @@ export const tools = {
       billing_frequency_cycles: v.number().integer().nullable().optional(),
     },
     returns: answers["products.update"],
-    handler: async (args, api) => await api.patch("/products/{id}", { path: { id: args.id }, body: { name: args.name, code: args.code, description: args.description, unit: args.unit, tax: args.tax, category: args.category, owner_id: args.owner_id, is_linkable: args.is_linkable, prices: args.prices, billing_frequency: args.billing_frequency, billing_frequency_cycles: args.billing_frequency_cycles }, returns: answers["products.update"] }),
+    handler: async (args, api) => await api.patch("/products/{id}", { path: { id: args.id }, body: { name: args.name, code: args.code, description: args.description, unit: args.unit, tax: args.tax, category: args.category, owner_id: args.owner_id, is_linkable: args.is_linkable, visible_to: args.visible_to, prices: args.prices, billing_frequency: args.billing_frequency, billing_frequency_cycles: args.billing_frequency_cycles }, returns: answers["products.update"] }),
   }),
   "products.duplicate.create": tool({
     description: "Duplicate a product",

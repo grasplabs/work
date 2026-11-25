@@ -133,6 +133,33 @@ const enumOf = (values: readonly unknown[]): Modifiable | undefined => {
   return nullable ? schema?.nullable() : schema;
 };
 
+/**
+ * An enum in an answer: any value of its type, since a vendor adds values
+ * without a new spec, and an answer refused for one would fail every call.
+ * Arguments keep the enum.
+ */
+const answerEnumOf = (
+  values: readonly unknown[],
+  reading: Reading
+): Modifiable | undefined => {
+  const nullable = values.includes(null);
+  const kinds = new Set(
+    values.filter((value) => value !== null).map((value) => typeof value)
+  );
+  const [kind] = kinds;
+  let schema: Modifiable | undefined = free(reading);
+  if (kinds.size === 0) {
+    schema = v.null();
+  } else if (kinds.size === 1 && kind === "string") {
+    schema = v.string();
+  } else if (kinds.size === 1 && kind === "number") {
+    schema = v.number();
+  } else if (kinds.size === 1 && kind === "boolean") {
+    schema = v.boolean();
+  }
+  return nullable && kinds.size > 0 ? schema?.nullable() : schema;
+};
+
 /** A schema's own properties and those of every `allOf` member. */
 const membersOf = (node: Node, seen: Set<object>): Node[] | undefined => {
   if (seen.has(node)) {
@@ -294,6 +321,42 @@ const typedAs = (
   }
 };
 
+/** Whether a schema says it is an object. */
+const isObjectSchema = (node: Node): boolean =>
+  "properties" in node || typesOf(node).includes("object");
+
+/**
+ * `allOf`: an object of every member's properties, or, where no member is
+ * an object, one schema of all their keywords (`allOf: [{ $ref: Status }]`
+ * is a Status). Members that state one keyword differently ask for no
+ * value: it is free.
+ */
+const allOf = (
+  node: Node,
+  reading: Reading,
+  depth: number
+): Modifiable | undefined => {
+  const { allOf: members, ...own } = node;
+  const nodes = [own, ...list(members).map(record)];
+  if (nodes.some((each) => isObjectSchema(each) || "allOf" in each)) {
+    return objectOf(node, reading, depth);
+  }
+  const merged: Record<string, unknown> = {};
+  for (const each of nodes) {
+    for (const [key, value] of Object.entries(each)) {
+      if (
+        Object.hasOwn(merged, key) &&
+        JSON.stringify(merged[key]) !== JSON.stringify(value)
+      ) {
+        return free(reading);
+      }
+      merged[key] = value;
+    }
+  }
+  // oxlint-disable-next-line no-use-before-define -- a member is a schema
+  return schemaBody(merged, reading, depth);
+};
+
 const schemaBody = (
   node: Node,
   reading: Reading,
@@ -303,10 +366,12 @@ const schemaBody = (
     return literalOf(node.const);
   }
   if (Array.isArray(node.enum)) {
-    return enumOf(node.enum);
+    return reading.mode === "response"
+      ? answerEnumOf(node.enum, reading)
+      : enumOf(node.enum);
   }
   if (Array.isArray(node.allOf)) {
-    return objectOf(node, reading, depth);
+    return allOf(node, reading, depth);
   }
   const alternatives = Array.isArray(node.oneOf) ? node.oneOf : node.anyOf;
   if (Array.isArray(alternatives)) {

@@ -17,6 +17,7 @@ import {
   isNamePart,
   pathSegments,
   routeName,
+  standardActions,
   toolName,
 } from "./tool-names.ts";
 import type { HttpMethod, Segment } from "./tool-names.ts";
@@ -35,7 +36,7 @@ import type { HttpMethod, Segment } from "./tool-names.ts";
 // an answer is dropped, which makes a narrower tool, and an operation that
 // can't be called without it is skipped with the reason.
 
-/** The largest spec read: Stripe's, the largest public one, is about 7 MB. */
+/** The largest spec read: the largest public ones are about 7 MB. */
 const specMaxBytes = 16 * 1024 * 1024;
 
 /** How long a description may be; the rest is cut. */
@@ -252,7 +253,6 @@ const preference: Readonly<Record<SpecAuth["kind"], number>> = {
   apiKey: 1,
 };
 
-/** The scheme the connector signs in with, of those operations ask for. */
 /**
  * The scheme the connector signs in with: `wanted`, the name the spec
  * gives it, where the connector picks one, or else the one people sign in
@@ -474,7 +474,7 @@ const parametersOf = (
   return { fields, parameters };
 };
 
-const jsonMedia = /^application\/(?:[\w.+-]+\+)?json(?:\s*;.*)?$/u;
+const jsonMedia = /^application\/(?:[\w.-]+(?:\+[\w.-]+)*\+)?json(?:\s*;.*)?$/u;
 
 /** A request's or an answer's content: whether it has any, and its JSON schema. */
 const contentOf = (holder: unknown): { found: boolean; schema: unknown } => {
@@ -502,7 +502,6 @@ const bodyOf = (operation: Node, reading: Reading): Record<string, Schema> => {
   return fields ?? {};
 };
 
-/** The answer of the operation's first success; null when it has no content. */
 /** The success answer's schema, or undefined where it answers nothing. */
 const answerOf = (
   operation: Node,
@@ -694,8 +693,12 @@ const candidateOf = (from: Source): Candidate => {
       ...answered,
     },
     label: `${method} ${from.key}`,
+    // A vendor's name that is a standard action would name the route as
+    // one it isn't (a POST named `delete`): no name, as the mirror rule has it.
     operationId:
-      operationId !== undefined && isNamePart(operationId)
+      operationId !== undefined &&
+      isNamePart(operationId) &&
+      !standardActions.has(operationId)
         ? operationId
         : undefined,
     family: naming.family,

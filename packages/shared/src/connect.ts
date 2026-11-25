@@ -2651,7 +2651,8 @@ export type AppDropRequest = z.input<typeof appDropRequestSchema>;
  */
 export const connectorContractIdSchema = z
   .string()
-  .regex(/^[a-z][a-z0-9-]{0,62}\.[A-Za-z][\w.-]{0,62}@[1-9]\d{0,5}$/u);
+  .max(256)
+  .regex(/^[a-z][a-z0-9-]{0,62}(?:\.[A-Za-z][\w-]*)+@[1-9]\d{0,5}$/u);
 
 /** Which contract to read, and the connection that must serve it. */
 export const connectorContractRequestSchema = z.strictObject({
