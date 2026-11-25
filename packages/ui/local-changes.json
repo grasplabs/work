@@ -12,7 +12,7 @@
   },
   {
     "path": "src/components/file-upload.tsx",
-    "reason": "In the dropzone, Choose files is underlined words in its line, as a link in a sentence, not an outline button: the dropzone is already the place to act.",
+    "reason": "In the dropzone, Choose files is underlined words in its line, as a link in a sentence, not an outline button: the dropzone is already the place to act. Made taller by a minHeight on the upload, its icon and line stay together in its middle.",
     "since": "2026-11-25"
   },
   {

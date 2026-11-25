@@ -185,6 +185,8 @@ const styles = stylex.create({
     position: "relative",
     display: "grid",
     justifyItems: "center",
+    // Made taller by its caller (a minHeight on the upload), it keeps its icon and line together in its middle.
+    alignContent: "center",
     rowGap: space[2],
     boxSizing: "border-box",
     minWidth: 0,
