@@ -655,7 +655,7 @@ describe("a connector's server", () => {
       http: "connection.invalid",
       address: "connection.server_refused",
       v6: "connection.server_refused",
-      userInfo: "connection.server_refused",
+      userInfo: "connection.invalid",
       inside: "connection.server_refused",
       unknown: "connection.server_refused",
       registered: 0,

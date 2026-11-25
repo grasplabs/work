@@ -17359,8 +17359,8 @@ msgid "The address can sign in again."
 msgstr "L’adresse peut de nouveau se connecter."
 
 #: src/connections/add-connector.tsx
-msgid "The address is the server's own https:// URL, such as https://mcp.example.com/mcp."
-msgstr "L’adresse est l’URL https:// du serveur lui-même, comme https://mcp.example.com/mcp."
+msgid "The address is the server's own https:// URL, such as https://mcp.example.com/mcp, with no query."
+msgstr "L’adresse est l’URL https:// du serveur lui-même, comme https://mcp.example.com/mcp, sans requête."
 
 #: src/frame/page-states.tsx
 msgid "The address may be wrong, or the page was moved or removed."

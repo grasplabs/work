@@ -32,7 +32,7 @@ import { i18n } from "@lingui/core";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import { useId, useRef, useState } from "react";
 
 import { useCoreAction } from "../use-core-action.ts";
@@ -54,7 +54,7 @@ type ConnectorInput = Omit<AddConnectorRequest, "person" | "origin">;
 /** The field a refusal names, in words people read. */
 const problemTexts = {
   name: msg`Give it a name of at most 80 characters.`,
-  url: msg`The address is the server's own https:// URL, such as https://mcp.example.com/mcp.`,
+  url: msg`The address is the server's own https:// URL, such as https://mcp.example.com/mcp, with no query.`,
   header: msg`The header is a name of letters, digits and dashes, and not one Grasp sets itself.`,
   client: msg`The client ID is at most 512 characters, and its secret at most 4,096.`,
 } as const satisfies Record<string, MessageDescriptor>;
@@ -273,10 +273,11 @@ export const AddConnector = ({ identity }: { identity: Identity }) => {
   // One more each time it opens: the form mounts anew, with nothing of
   // the last time in it, not even while the dialog is still closing.
   const [opened, setOpened] = useState(0);
-  // The opening now showing: an add that ends after its dialog was closed
-  // and opened again neither closes it nor leaves the page.
+  // The opening now showing, none once it closed: an add that ends after
+  // its dialog was closed only shows in the list, and never leaves the page.
   const latest = useRef(0);
   const navigate = useNavigate();
+  const router = useRouter();
   if (!isMemberAdmin(identity)) {
     return null;
   }
@@ -294,7 +295,15 @@ export const AddConnector = ({ identity }: { identity: Identity }) => {
         <Icon icon={PlusIcon} />
         {t`Add connector`}
       </Button>
-      <Dialog onOpenChange={setOpen} open={open}>
+      <Dialog
+        onOpenChange={(next) => {
+          if (!next) {
+            latest.current += 1;
+          }
+          setOpen(next);
+        }}
+        open={open}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t`Add a connector by URL`}</DialogTitle>
@@ -306,6 +315,7 @@ export const AddConnector = ({ identity }: { identity: Identity }) => {
             key={opened}
             onAdded={(connectorId) => {
               if (latest.current !== opened) {
+                void router.invalidate();
                 return;
               }
               setOpen(false);

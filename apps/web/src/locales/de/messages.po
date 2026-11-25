@@ -3102,7 +3102,7 @@ msgstr "Jede App, die seine Arten von Arbeit erlauben"
 
 #: src/connections/add-connector.tsx
 msgid "Any app with its own MCP server. Grasp keeps the access in your deployment, and people connect it from its page."
-msgstr "Jede App mit eigenem MCP-Server. Grasp bewahrt den Zugang in deiner Bereitstellung auf, und alle verbinden sie auf ihrer Seite."
+msgstr "Jede App mit eigenem MCP-Server. Grasp bewahrt den Zugang in Ihrer Bereitstellung auf, und alle verbinden sie auf ihrer Seite."
 
 #: src/workflows/binding-approvals.tsx
 msgid "Any event its webhook source sends of the types its contract admits"
@@ -7889,7 +7889,7 @@ msgstr "Geben Sie ihr einen Namen mit höchstens {longest} Zeichen."
 
 #: src/connections/add-connector.tsx
 msgid "Give it a name of at most 80 characters."
-msgstr "Gib einen Namen mit höchstens 80 Zeichen an."
+msgstr "Geben Sie einen Namen mit höchstens 80 Zeichen an."
 
 #: src/agents/agent-form.tsx
 msgid "Give it a name."
@@ -17359,8 +17359,8 @@ msgid "The address can sign in again."
 msgstr "Mit der Adresse kann man sich wieder anmelden."
 
 #: src/connections/add-connector.tsx
-msgid "The address is the server's own https:// URL, such as https://mcp.example.com/mcp."
-msgstr "Die Adresse ist die eigene https://-URL des Servers, etwa https://mcp.example.com/mcp."
+msgid "The address is the server's own https:// URL, such as https://mcp.example.com/mcp, with no query."
+msgstr "Die Adresse ist die eigene https://-URL des Servers, etwa https://mcp.example.com/mcp, ohne Abfrage."
 
 #: src/frame/page-states.tsx
 msgid "The address may be wrong, or the page was moved or removed."
