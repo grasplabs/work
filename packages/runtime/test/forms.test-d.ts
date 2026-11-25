@@ -7,10 +7,10 @@
 // `@ts-expect-error` below must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
-import { v } from "../src/index.ts";
-import type { Id } from "../src/index.ts";
-import { useForm } from "../src/react.ts";
-import type { GraspForm, TextFieldName } from "../src/react.ts";
+import { v } from "../src/app/index.ts";
+import type { Id } from "../src/app/index.ts";
+import { useForm } from "../src/app/react.ts";
+import type { GraspForm, TextFieldName } from "../src/app/react.ts";
 import { api } from "./notes/server/_generated/api.ts";
 import { internal } from "./notes/server/_generated/internal.ts";
 

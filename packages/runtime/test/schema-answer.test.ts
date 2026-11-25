@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vite-plus/test";
 
-import { schemaManifest } from "../src/host.ts";
-import { readSchemaAnswers } from "../src/schema-answer.ts";
-import { defineSchema, defineTable, v } from "../src/values.ts";
+import { schemaManifest } from "../src/app/host.ts";
+import { readSchemaAnswers } from "../src/app/schema-answer.ts";
+import { defineSchema, defineTable, v } from "../src/common/values.ts";
 
 // An App's answers, as `defineApp({ answers })` and a manifest read back check
 // them: pure, so unit tests; the store giving the value to the records

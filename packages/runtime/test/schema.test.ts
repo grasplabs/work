@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vite-plus/test";
 
-import { managedFields, schemaLimits } from "../src/host.ts";
-import type { IndexDefinition } from "../src/schema-types.ts";
-import { defineSchema, defineTable, v } from "../src/values.ts";
+import { managedFields, schemaLimits } from "../src/app/host.ts";
+import type { IndexDefinition } from "../src/common/schema-types.ts";
+import { defineSchema, defineTable, v } from "../src/common/values.ts";
 
 // `defineSchema` and `defineTable`: what a declaration may say, refused as
 // it is built rather than when a store is handed it. Pure checks, so unit

@@ -3,9 +3,9 @@ import { runIdSchema } from "@grasp-os/shared/ids";
 import type { Json } from "@grasp-os/shared/json";
 import { describe, expect, it } from "vite-plus/test";
 
-import type { WorkflowEngine } from "../src/engine.ts";
-import { caughtError, parse } from "../src/workflow-generated.ts";
-import { AppError, defineWorkflow, v } from "../src/workflow.ts";
+import type { WorkflowEngine } from "../src/workflow/engine.ts";
+import { caughtError, parse } from "../src/workflow/workflow-generated.ts";
+import { AppError, defineWorkflow, v } from "../src/workflow/workflow.ts";
 
 // The workflow runtime, from its threat model (workflow.ts): data a
 // handler reads is frozen JSON with no prototype, on a first run and on a

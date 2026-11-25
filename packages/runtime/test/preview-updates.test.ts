@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import type { PreviewLoad } from "../src/page-bridge.ts";
+import type { PreviewLoad } from "../src/app/page-bridge.ts";
 import {
   ModuleNotLoadedError,
   notLoaded,
   previewReceiver,
-} from "../src/preview-updates.ts";
-import type { PreviewFrame } from "../src/preview-updates.ts";
+} from "../src/app/preview-updates.ts";
+import type { PreviewFrame } from "../src/app/preview-updates.ts";
 
 // A chat's preview's frame taking its draft's updates: the ways it can
 // fail, from its threat model (preview-updates.ts): a version that names

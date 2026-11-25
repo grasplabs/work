@@ -8,16 +8,16 @@
 // error.
 import { expectTypeOf } from "vite-plus/test";
 
-import type { Id, FunctionReference } from "../src/index.ts";
-import type { GraspClient } from "../src/page.ts";
+import type { Id, FunctionReference } from "../src/app/index.ts";
+import type { GraspClient } from "../src/app/page.ts";
 import {
   useAction,
   useClient,
   useMutation,
   usePaginatedQuery,
   useQuery,
-} from "../src/react.ts";
-import type { GraspError } from "../src/react.ts";
+} from "../src/app/react.ts";
+import type { GraspError } from "../src/app/react.ts";
 import { api } from "./notes/server/_generated/api.ts";
 import { internal } from "./notes/server/_generated/internal.ts";
 

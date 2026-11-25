@@ -18,7 +18,7 @@ const sharedDir = path.join(import.meta.dirname, "../packages/shared/src");
 const origin = "http://sdk-values.test";
 
 /** The SDK's source and test modules, and nothing else on disk. */
-const modulePath = /^\/(?:src|test)\/[\w-]+\.ts$/u;
+const modulePath = /^\/(?:src\/(?:app|common|workflow)|test)\/[\w-]+\.ts$/u;
 
 /**
  * A module of `@grasp-os/shared` the SDK imports, by its export name. Only

@@ -1,12 +1,12 @@
 import { describe, expect, test } from "vite-plus/test";
 
-import { registerApp } from "../src/host.ts";
-import { defineApp, defineMigration } from "../src/index.ts";
-import { runMigration } from "../src/runner.ts";
-import { defineSchema, defineTable, v } from "../src/values.ts";
+import { registerApp } from "../src/app/host.ts";
+import { defineApp, defineMigration } from "../src/app/index.ts";
+import { runMigration } from "../src/app/runner.ts";
+import { defineSchema, defineTable, v } from "../src/common/values.ts";
 
 // Module code that makes `Math.random` non-configurable before a transform
-// runs, so the runner can't take it away (src/determinism.ts). In a file
+// runs, so the runner can't take it away (src/app/determinism.ts). In a file
 // of its own: what it does lasts as long as the isolate, which is this
 // file's alone.
 

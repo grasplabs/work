@@ -4,9 +4,9 @@
 // (values.test.ts) and in a real browser (e2e/sdk-values.e2e.ts). A case
 // that passes in one and fails in the other is a value the browser and the
 // host would disagree about.
-import { schemaFromDescriptor } from "../src/descriptor-text.ts";
-import { ValueDefinitionError, v } from "../src/values.ts";
-import type { ValueSchema } from "../src/values.ts";
+import { schemaFromDescriptor } from "../src/app/descriptor-text.ts";
+import { ValueDefinitionError, v } from "../src/common/values.ts";
+import type { ValueSchema } from "../src/common/values.ts";
 
 type AnySchema = ValueSchema<unknown, unknown>;
 

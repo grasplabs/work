@@ -6,10 +6,9 @@
 // must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
-import type { BrainPack } from "../src/brain-recall.ts";
-import type { Callable } from "../src/function-references.ts";
-import { AppError, defineApp, permission } from "../src/index.ts";
-import { serverModule } from "../src/server.ts";
+import type { Callable } from "../src/app/function-references.ts";
+import { AppError, defineApp, permission } from "../src/app/index.ts";
+import { serverModule } from "../src/app/server.ts";
 import type {
   ActionCtx,
   AnyFunction,
@@ -20,16 +19,17 @@ import type {
   PeopleNotification,
   QueryCtx,
   RunHandle,
-} from "../src/server.ts";
-import type { Id } from "../src/value-types.ts";
+} from "../src/app/server.ts";
+import type { BrainPack } from "../src/common/brain-recall.ts";
+import type { Id } from "../src/common/value-types.ts";
 import {
   defineSchema,
   defineTable,
   paginationOptionsValidator,
   paginationResultValidator,
   v,
-} from "../src/values.ts";
-import type { WorkflowDefinition } from "../src/workflow.ts";
+} from "../src/common/values.ts";
+import type { WorkflowDefinition } from "../src/workflow/workflow.ts";
 import { summarizeNote } from "./notes/grasp.config.ts";
 import { workflows } from "./notes/server/_generated/api.ts";
 
