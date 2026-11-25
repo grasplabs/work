@@ -9221,8 +9221,7 @@ msgstr "Its access ran out. Grasp staff can't reconnect it: an admin of the orga
 msgid "Its account is out of credit."
 msgstr "Its account is out of credit."
 
-#: src/inbox/approval-request.tsx
-#: src/inbox/item-detail.tsx
+#: src/answer-pause.tsx
 msgid "Its answers can be used in a moment, so a press meant for the one before doesn't answer it."
 msgstr "Its answers can be used in a moment, so a press meant for the one before doesn't answer it."
 
@@ -16047,6 +16046,10 @@ msgstr "Someone no longer here"
 #: src/agents/own-agents-admin.tsx
 msgid "Someone no longer in the company"
 msgstr "Someone no longer in the company"
+
+#: src/settings/ai-providers.tsx
+msgid "Someone saved a new {label} key since you opened it, so nothing was deleted."
+msgstr "Someone saved a new {label} key since you opened it, so nothing was deleted."
 
 #: src/settings/instruction-file.tsx
 msgid "Someone saved this file since you started. Put your changes aside to see their version, then make yours again."

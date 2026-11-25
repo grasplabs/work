@@ -16,12 +16,14 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { useAnswersPause } from "../answer-pause.tsx";
 import { PackageRequests } from "./package-requests.tsx";
 
 // The npm packages a chat's agent asked for, against core's chats and
 // dependencies as the page reaches them over RPC, faked: approving them
 // carries the work on (the agent's turn ended asking), denying them
-// doesn't, and neither does an approval core refuses.
+// doesn't, and neither does an approval core refuses. A request that
+// moves up into the place of one decided holds its answers a moment.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -56,6 +58,16 @@ const request: DependencyRequest = {
 
 let root: Root | undefined;
 
+/** The requests with the pause the chat's answers share. */
+const Requests = ({ onApproved }: { onApproved: () => void }) => (
+  <PackageRequests
+    chatId="chat-1"
+    onApproved={onApproved}
+    pause={useAnswersPause()}
+    version={0}
+  />
+);
+
 const settled = async (): Promise<void> => {
   await act(async () => {
     const { promise, resolve } = Promise.withResolvers<boolean>();
@@ -66,18 +78,21 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** The chat's package card against a core that refuses decisions when `refuse` says so. */
-const shown = async (refuse = false) => {
+/** The chat's package cards, `asked`, against a core that refuses decisions when `refuse` says so. */
+const shown = async (refuse = false, asked = [request]) => {
   const decided: { approved: boolean }[] = [];
+  const decidedIds: string[] = [];
   let carriedOn = 0;
   const session = {
     chats: {
       packageRequests: async (): Promise<DependencyRequest[]> =>
-        await Promise.resolve(decided.length === 0 ? [request] : []),
+        await Promise.resolve(
+          asked.filter(({ id }) => !decidedIds.includes(id))
+        ),
     },
     dependencies: {
       decide: async (
-        _id: string,
+        id: string,
         decision: DependencyDecision
       ): Promise<DependencyRequest> => {
         await Promise.resolve();
@@ -85,6 +100,7 @@ const shown = async (refuse = false) => {
           throw new Error("Someone decided meanwhile.");
         }
         decided.push({ approved: decision.approved });
+        decidedIds.push(id);
         return request;
       },
     },
@@ -97,12 +113,10 @@ const shown = async (refuse = false) => {
   const router = createRouter({
     routeTree: createRootRoute({
       component: () => (
-        <PackageRequests
-          chatId="chat-1"
+        <Requests
           onApproved={() => {
             carriedOn += 1;
           }}
-          version={0}
         />
       ),
     }),
@@ -136,6 +150,44 @@ const press = async (label: string): Promise<void> => {
   await settled();
 };
 
+/** Waits out the moment the answers hold after a decision moved the cards. */
+const pastThePause = async (): Promise<void> => {
+  await act(async () => {
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    // Longer than the pause (answer-pause.tsx).
+    setTimeout(() => {
+      resolve(true);
+    }, 1100);
+    await promise;
+  });
+};
+
+/**
+ * Whether the button `label` is held, out of use, and what it is described
+ * by while it is, as a screen reader hears it.
+ */
+const holding = (label: string): { held: boolean; said: string } => {
+  const button = document.querySelector<HTMLButtonElement>(
+    `button[aria-label="${label}"]`
+  );
+  const said = (button?.getAttribute("aria-describedby") ?? "")
+    .split(" ")
+    .map((id) =>
+      id === "" ? "" : document.querySelector(`#${id}`)?.textContent
+    )
+    .join("");
+  return {
+    held:
+      button !== null &&
+      (button.disabled || button.getAttribute("aria-disabled") === "true"),
+    said,
+  };
+};
+
+/** The pause, as it is said. */
+const pauseSaid =
+  "Its answers can be used in a moment, so a press meant for the one before doesn't answer it.";
+
 describe("the chat's package requests", () => {
   afterEach(() => {
     act(() => {
@@ -154,6 +206,30 @@ describe("the chat's package requests", () => {
       decided: [{ approved: true }],
       carriedOn: 1,
     });
+  });
+
+  it("holds the answers of the request that moved into the place of one just approved, a moment", async () => {
+    const second: DependencyRequest = {
+      ...request,
+      id: "request-2",
+      subject: { type: "app", id: "app-2", name: "Expenses" },
+    };
+    const { decided } = await shown(false, [request, second]);
+    await press("Approve the packages for Invoice Manager");
+    const moved = holding("Approve the packages for Expenses");
+    // The second press of a double click, on what is now under the pointer.
+    await press("Approve the packages for Expenses");
+    const pressedInThePause = decided.length;
+    await pastThePause();
+    await press("Approve the packages for Expenses");
+
+    expect({ moved, pressedInThePause, decided: decided.length }).toStrictEqual(
+      {
+        moved: { held: true, said: pauseSaid },
+        pressedInThePause: 1,
+        decided: 2,
+      }
+    );
   });
 
   it("carries nothing on when the packages are denied, or the approval is refused", async () => {
