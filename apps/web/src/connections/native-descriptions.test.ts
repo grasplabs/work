@@ -2,7 +2,7 @@ import { i18n } from "@lingui/core";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { messages as german } from "../locales/de/messages.po";
-import { descriptionOf } from "./native-descriptions.ts";
+import { descriptionOf, matchedDescriptionOf } from "./native-descriptions.ts";
 
 // What an app in the catalog is for: Grasp's own connectors in the page's
 // language, whatever connect sends, and any other as connect sends it.
@@ -33,5 +33,18 @@ describe(descriptionOf, () => {
         "A toolkit.",
       ],
     });
+  });
+
+  it("matches a native connector in the English the English page shows, as well as in the page's language", () => {
+    const natives = ["microsoft", "google"].map((id) => ({
+      source: "native",
+      id,
+      description: null,
+    }));
+    const english = natives.map(descriptionOf);
+    i18n.loadAndActivate({ locale: "de", messages: german });
+    expect(natives.map(matchedDescriptionOf)).toStrictEqual(
+      natives.map((entry, at) => `${descriptionOf(entry)} ${english[at]}`)
+    );
   });
 });

@@ -176,7 +176,7 @@ describe("filters, search and sections", () => {
     expect(find(all, "sharepoint").map(({ id }) => id)).toStrictEqual([
       "microsoft",
     ]);
-    // Google by its name, Microsoft only by its kind (Email).
+    // Google by its name, Microsoft by its kind and what it is for.
     expect(find(all, "e").map(({ id }) => id)).toStrictEqual([
       "google",
       "microsoft",
