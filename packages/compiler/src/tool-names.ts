@@ -61,7 +61,7 @@ const parameterSegment = /^\{(?<name>[A-Za-z_]\w{0,63})\}$/u;
 const namePart = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/u;
 
 /** A tool's whole name: MCP's own limit on its length. */
-const nameMaxLength = 128;
+export const nameMaxLength = 128;
 
 const methods: ReadonlySet<string> = new Set(httpMethods);
 

@@ -3,6 +3,7 @@ import type { ValueDescriptor } from "@grasp-os/runtime/app";
 import type { Spec, SpecOperation } from "./openapi.ts";
 import {
   isNamePart,
+  nameMaxLength,
   pathSegments,
   readRoute,
   routeName,
@@ -19,7 +20,7 @@ import type { DeclaredRoute } from "./tool-names.ts";
 //
 // The primary route is the tool's one write, if it has one (sent last, as
 // the API holds it), else the read it declares first. Every other route is
-// a GET on the connector's hosts, of any family: a check before a write
+// a GET, of any family, on the connector's hosts: a check before a write
 // (whose mailbox, whether a list is shared) or a write's `find`. A path the
 // naming rule can't name (`/drive/root:/{name}:/content`) takes the vendor's
 // operation name, and only such a path does. Renaming and reshaping are
@@ -243,25 +244,49 @@ const againstOperation = (
   ].filter((problem) => problem !== undefined);
 };
 
-/** A vendor's operation name, as a tool takes it: dotted name parts. */
-const isOperationName = (name: string): boolean =>
-  name.length <= 128 && name.split(".").every(isNamePart);
+/**
+ * A tool on a path the naming rule can't read (`/drive/root:/{name}:/content`):
+ * named `<family>.<the vendor's operation name>`, the family its leading
+ * segments, and never by a standard action, which says what a route is.
+ */
+const againstUnreadable = (
+  tool: MirrorTool,
+  { method, path }: DeclaredRoute
+): string[] => {
+  const family: string[] = [];
+  for (const part of path.slice(1).split("/")) {
+    if (!isNamePart(part)) {
+      break;
+    }
+    family.push(part);
+  }
+  if (family.length === 0) {
+    return [`${path} names no collection.`];
+  }
+  const prefix = `${family.join(".")}.`;
+  const parts = tool.name.startsWith(prefix)
+    ? tool.name.slice(prefix.length).split(".")
+    : [];
+  const vendors =
+    tool.name.length <= nameMaxLength &&
+    parts.length > 0 &&
+    parts.every(isNamePart) &&
+    !standardActions.has(parts.at(-1) ?? "");
+  return vendors
+    ? []
+    : [`${method} ${path} is named ${prefix}<the vendor's operation name>.`];
+};
 
 /** A tool's name against its route, where no spec says more. */
 const againstRoute = (tool: MirrorTool, route: DeclaredRoute): string[] => {
-  const pages = pageItem(tool.returns) !== undefined;
   const segments = pathSegments(route.path);
-  const naming =
-    segments === undefined
-      ? undefined
-      : routeName({ ...route, segments }, pages);
-  if (naming === undefined || "problem" in naming) {
-    // The rule names no tool here: the vendor's operation name does.
-    return isOperationName(tool.name)
-      ? []
-      : [
-          `${route.method} ${route.path} can't be named from its route: name it as the vendor names the operation.`,
-        ];
+  if (segments === undefined) {
+    return againstUnreadable(tool, route);
+  }
+  const pages = pageItem(tool.returns) !== undefined;
+  const naming = routeName({ ...route, segments }, pages);
+  if ("problem" in naming) {
+    return [naming.problem];
   }
   const prefix = `${naming.family}.`;
   const action = tool.name.startsWith(prefix)
@@ -292,7 +317,6 @@ const againstRoute = (tool: MirrorTool, route: DeclaredRoute): string[] => {
  */
 export const checkMirror = (
   tools: readonly MirrorTool[],
-  hosts: readonly string[],
   spec?: Spec
 ): MirrorProblem[] => {
   const key = (method: string, path: string): string =>
@@ -319,18 +343,14 @@ export const checkMirror = (
       ? `${route.method} ${route.path} isn't an operation of the vendor's spec.`
       : `${route.method} ${route.path} makes no tool: ${reason}`;
   };
-  /** Why a route calls a host its connector, or its spec, doesn't. */
-  const offHost = ({ method, host, path }: DeclaredRoute): string[] => {
-    if (host === undefined) {
-      return [];
-    }
-    if (!hosts.includes(host)) {
-      return [`${method} ${host}${path} isn't on the connector's hosts.`];
-    }
-    return spec === undefined || host === spec.host
+  /**
+   * Why a route calls a host its spec doesn't. One its connector doesn't
+   * list, `defineConnector` already refuses.
+   */
+  const offHost = ({ method, host, path }: DeclaredRoute): string[] =>
+    spec === undefined || host === undefined || host === spec.host
       ? []
       : [`${method} ${host}${path} isn't on the spec's host ${spec.host}.`];
-  };
   /** The tool against the route it is named from. */
   const againstPrimary = (tool: MirrorTool, route: DeclaredRoute): string[] => {
     const operation = byShape.get(key(route.method, route.path));
