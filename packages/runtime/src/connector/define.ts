@@ -167,13 +167,22 @@ export interface EventDeclaration<
   };
 }
 
+/**
+ * An event or a sync, as `event` and `sync` declare it and
+ * `defineConnector` takes it: the routes it reads, so far. Its own types
+ * stay where it is declared, as a tool's do (`ConnectorTool`).
+ */
+export interface ConnectorReader {
+  readonly routes: readonly `GET ${string}`[];
+}
+
 /** An event type (`EventDeclaration`). */
 export const event = <
   const Filter extends ValueShape,
   const Payload extends AnySchema,
 >(
   declaration: EventDeclaration<Filter, Payload>
-): EventDeclaration<Filter, Payload> => declaration;
+): ConnectorReader => ({ routes: declaration.poll.routes });
 
 /**
  * Records kept in step with the vendor's: one page at a time from a
@@ -199,7 +208,7 @@ export interface SyncDeclaration<Model extends AnySchema> {
 /** A sync (`SyncDeclaration`). */
 export const sync = <const Model extends AnySchema>(
   declaration: SyncDeclaration<Model>
-): SyncDeclaration<Model> => declaration;
+): ConnectorReader => ({ routes: declaration.routes });
 
 /** How a person signs in to the vendor, as connect runs it. */
 export interface ConnectorAuth {
@@ -257,8 +266,8 @@ export interface ConnectorDeclaration {
   hosts: readonly string[];
   auth: ConnectorAuth;
   tools: Readonly<Record<string, ConnectorTool>>;
-  events?: Readonly<Record<string, EventDeclaration<ValueShape, AnySchema>>>;
-  syncs?: Readonly<Record<string, SyncDeclaration<AnySchema>>>;
+  events?: Readonly<Record<string, ConnectorReader>>;
+  syncs?: Readonly<Record<string, ConnectorReader>>;
 }
 
 /** Where a value didn't fit, without the value. */
@@ -436,12 +445,10 @@ export const defineConnector = (
   declaration: ConnectorDeclaration
 ): Connector => {
   const { name, title, hosts, tools, events = {}, syncs = {} } = declaration;
-  for (const { poll } of Object.values(events)) {
-    for (const route of poll.routes) {
-      routeOf(route, hosts);
-    }
-  }
-  for (const { routes } of Object.values(syncs)) {
+  for (const { routes } of [
+    ...Object.values(events),
+    ...Object.values(syncs),
+  ]) {
     for (const route of routes) {
       routeOf(route, hosts);
     }

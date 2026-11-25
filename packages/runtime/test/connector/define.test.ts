@@ -4,7 +4,9 @@ import { z } from "zod";
 import {
   auth,
   defineConnector,
+  event,
   page,
+  sync,
   tool,
   v,
 } from "../../src/connector/connector.ts";
@@ -345,6 +347,48 @@ describe("a connector's definition", () => {
         },
       })
     ).toThrow("scopes");
+  });
+
+  it("takes events and syncs as typed, and refuses one that reads off its hosts", () => {
+    const restocked = event({
+      description: "A product is back in stock",
+      filter: { location: v.string() },
+      payload: Stock,
+      id: ({ sku }) => sku,
+      poll: {
+        routes: ["GET /v1/restocks"],
+        handler: async (_filter, cursor) =>
+          await Promise.resolve({ events: [], cursor }),
+      },
+    });
+    const stockAt = (route: `GET ${string}`) =>
+      sync({
+        model: Stock,
+        id: ({ sku }) => sku,
+        mode: "full",
+        routes: [route],
+        handler: async () =>
+          await Promise.resolve({
+            upserts: [],
+            deletes: [],
+            checkpoint: {},
+            more: false,
+          }),
+      });
+    const products = stockAt("GET /v1/stock");
+    const offHosts = stockAt("GET evil.test/v1/stock");
+    const withSyncs = (syncs: Parameters<typeof defineConnector>[0]["syncs"]) =>
+      defineConnector({
+        name: "stock",
+        title: "Stock",
+        hosts: [host],
+        auth: keyAuth,
+        tools: { "stock.get": getStock },
+        events: { restocked },
+        syncs,
+      });
+    expect(() => withSyncs({ products })).not.toThrow();
+    expect(() => withSyncs({ products: offHosts })).toThrow("doesn't list");
   });
 
   it("makes the manifest connect decides by: its sign-in, routes, recovery and resource", () => {

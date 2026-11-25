@@ -18,6 +18,7 @@ export type {
   Checkpoint,
   ConnectorAuth,
   ConnectorDeclaration,
+  ConnectorReader,
   ConnectorTool,
   EventDeclaration,
   Infer,
