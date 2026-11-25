@@ -691,9 +691,6 @@ importers:
 
   apps/connect:
     dependencies:
-      '@grasp-os/connector-google-workspace':
-        specifier: workspace:*
-        version: link:../../packages/connectors/google-workspace
       '@grasp-os/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
@@ -716,12 +713,18 @@ importers:
       '@cloudflare/workers-types':
         specifier: 'catalog:'
         version: 5.20261113.1
+      '@grasp-os/connector-google-workspace':
+        specifier: workspace:*
+        version: link:../../packages/connectors/google-workspace
       '@grasp-os/connector-kit':
         specifier: workspace:*
         version: link:../../packages/connector-kit
       '@grasp-os/connector-microsoft-365':
         specifier: workspace:*
         version: link:../../packages/connectors/microsoft-365
+      '@grasp-os/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       '@modelcontextprotocol/sdk':
         specifier: 'catalog:'
         version: 1.32.2(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.6.7)
@@ -770,9 +773,6 @@ importers:
       '@grasp-os/compiler':
         specifier: workspace:*
         version: link:../../packages/compiler
-      '@grasp-os/connector-kit':
-        specifier: workspace:*
-        version: link:../../packages/connector-kit
       '@grasp-os/embed':
         specifier: workspace:*
         version: link:../../packages/embed

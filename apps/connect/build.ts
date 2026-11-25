@@ -55,6 +55,75 @@ const moduleSchema = z.object({
 
 const entryId = "\0connector-entry";
 
+/** What a connector imports, besides its own files. */
+const sdkConnector = "@grasp-os/sdk/connector";
+
+/**
+ * The code still written with the old kit, Zod and the runtime, which may
+ * import what it does until it moves to `sdkConnector` (GRA-2323,
+ * GRA-2324): the two packages, and the sample connectors of connect's
+ * tests written with them.
+ */
+const oldKit = [
+  path.join(packages, "google-workspace"),
+  path.join(packages, "microsoft-365"),
+  ...[
+    "sample-connector.ts",
+    "sample-sync-connector.ts",
+    "sample-oauth-connector.ts",
+    "composio-named-connector.ts",
+  ].map((file) => path.join(root, "test/fixtures", file)),
+];
+
+/** Whether `file` is `folder` or inside it. */
+const isWithin = (folder: string, file: string): boolean =>
+  file === folder || file.startsWith(`${folder}${path.sep}`);
+
+/** The folder of the package `file` is in: the nearest with a package.json. */
+const packageFolderOf = (file: string): string => {
+  const folder = path.dirname(file);
+  if (existsSync(path.join(folder, "package.json"))) {
+    return folder;
+  }
+  if (path.dirname(folder) === folder) {
+    throw new Error(`${file} is in no package`);
+  }
+  return packageFolderOf(folder);
+};
+
+/**
+ * Refuses, while bundling, any import a module of the connector's own
+ * package makes but of `sdkConnector` and of its own files: the build
+ * fails rather than ship a connector that reaches past what it is written
+ * with (GRA-1374). Type-only imports never get here: the transform erased
+ * them.
+ */
+const connectorImports = (folder: string): Plugin => ({
+  name: "connector-imports",
+  // Before Vite's own resolver, which would resolve the import first.
+  enforce: "pre",
+  resolveId: (source, importer) => {
+    if (
+      importer === undefined ||
+      source.startsWith("\0") ||
+      !isWithin(folder, importer) ||
+      importer.split(path.sep).includes("node_modules") ||
+      oldKit.some((each) => isWithin(each, importer))
+    ) {
+      return null;
+    }
+    const ownFile =
+      (source.startsWith("./") || source.startsWith("../")) &&
+      isWithin(folder, path.resolve(path.dirname(importer), source));
+    if (source === sdkConnector || ownFile) {
+      return null;
+    }
+    throw new Error(
+      `${importer} imports "${source}": a connector imports ${sdkConnector} and its own files, nothing else.`
+    );
+  },
+});
+
 /**
  * The isolate's main module: the connector's MCP server as its fetch
  * handler, and nothing else. Its env and context aren't passed on: the
@@ -86,7 +155,7 @@ const bundle = async (entry: string): Promise<string> => {
       root,
       logLevel: "warn",
       mode: "production",
-      plugins: [entryModule(entry)],
+      plugins: [connectorImports(packageFolderOf(entry)), entryModule(entry)],
       build: {
         write: false,
         minify: true,

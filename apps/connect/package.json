@@ -30,6 +30,7 @@
     "@grasp-os/connector-google-workspace": "workspace:*",
     "@grasp-os/connector-kit": "workspace:*",
     "@grasp-os/connector-microsoft-365": "workspace:*",
+    "@grasp-os/sdk": "workspace:*",
     "@modelcontextprotocol/sdk": "catalog:",
     "drizzle-kit": "catalog:",
     "fflate": "catalog:",

@@ -1,0 +1,16 @@
+{
+  "name": "@grasp-os/runtime",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#parse": {
+      "node": "./src/parse-node.js",
+      "default": "./src/parse.js"
+    }
+  },
+  "exports": {
+    "./connector": "./src/connector/connector.js",
+    "./host": "./src/host.js",
+    "./server": "./src/server.js"
+  }
+}
