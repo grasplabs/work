@@ -100,7 +100,11 @@ let devGiven: string | null = null;
  * interview that works now. Never the alias's own, nor in a build.
  */
 const fallsBackToDev = (secret: string): boolean =>
-  import.meta.env.DEV && secret !== devAlias && secret !== devGiven;
+  import.meta.env.DEV &&
+  // Tests hold the page to how it is for everyone else.
+  import.meta.env.MODE !== "test" &&
+  secret !== devAlias &&
+  secret !== devGiven;
 
 const openDevAlias = async (core: CoreConnection): Promise<Page> => {
   const response = await fetch(devInterviewLinkPath, { method: "POST" });

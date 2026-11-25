@@ -1,5 +1,12 @@
 import { onlyForAsking } from "@grasp-os/shared/interview-links";
-import type { InterviewFact } from "@grasp-os/shared/interview-links";
+import type {
+  InterviewFact,
+  InterviewProgress,
+} from "@grasp-os/shared/interview-links";
+import type {
+  ReadBackPart,
+  StorySentence,
+} from "@grasp-os/shared/interview-story";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -19,6 +26,11 @@ import {
 import { Switch } from "@grasp-os/ui/components/switch";
 import { Text } from "@grasp-os/ui/components/text";
 import { Textarea } from "@grasp-os/ui/components/textarea";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@grasp-os/ui/components/tooltip";
 import { EyeOffIcon, Icon, UsersIcon } from "@grasp-os/ui/lib/icons";
 import { fadeIn, focusRingText } from "@grasp-os/ui/lib/styles";
 import {
@@ -33,15 +45,14 @@ import { iconVars } from "@grasp-os/ui/lib/vars.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useLocation } from "@tanstack/react-router";
-import { useId, useState } from "react";
+import { useEffect, useEffectEvent, useId, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 
 import type { Pose } from "../onboarding/field/engine.ts";
 import { voice } from "./interview.stylex.ts";
 import { update, useKind, useProgress } from "./kept.ts";
 import { looks } from "./looks.ts";
-import { agreeToPart, changeLine, useLoop } from "./loop.ts";
+import { agreeToPart, changeLine, storyFor, useLoop } from "./loop.ts";
 import type { LoopState } from "./loop.ts";
 import {
   partAt,
@@ -49,35 +60,22 @@ import {
   withFactToggled,
   withShares,
 } from "./progress.ts";
-import { markedTerms, storyPieces } from "./read-back-terms.ts";
+import { markedTerms, sourceOf, storyPieces } from "./read-back-terms.ts";
 import type { Term } from "./read-back-terms.ts";
 import { useSaidIn } from "./speech.ts";
 import { SpokenText } from "./spoken.tsx";
 import { usePromise } from "./words.ts";
 
-// Concepts only, until one is picked (`?readback=a|b`): the read-back told
-// as a short story, one paragraph for the part they are at, each line a
-// sentence in it. The things a line names stand in it as pills
-// (read-back-terms.ts). Where the lines go is said once, under the story;
-// a sentence that goes somewhere else carries a pill that says so. A press
-// on a sentence opens what can be done with it, beside it: put its words
-// right, choose where it goes, or take it out. What they leave in is what
-// counts, as in the list (read-back.tsx).
-//
-// A, the story: the sentence is what is pressed; its tools are pills; a
-//    line taken out leaves the story, and one button puts them back.
-// B, the story with marked facts: every thing the line names is a pill
-//    (tools, and what Stephen marked in their words: tasks, wishes, what
-//    goes wrong); a line taken out stays, struck through, with a way back.
-
-export type ReadBackConcept = "a" | "b";
-
-/** The concept asked for in the address, if any: none is the list as it is. */
-export const useReadBackConcept = (): ReadBackConcept | null => {
-  const written = useLocation({ select: (location) => location.searchStr });
-  const concept = new URLSearchParams(written).get("readback");
-  return concept === "a" || concept === "b" ? concept : null;
-};
+// The read-back, told as a short story (prototype `interview-talk.tsx`,
+// `ReadBack`): one part at a time, a few lines each, so it is read,
+// checked and agreed to without scrolling. The paragraph is the story
+// Stephen tells of the part (`/api/interview/story`), a sentence for the
+// lines that belong together, or the lines as they stand until it is
+// there. The things a line names stand in it as pills (read-back-terms.ts);
+// resting on a sentence shows what they said that it comes from. Where the
+// lines go is said once, under the story. A press on a sentence opens what
+// can be done with its lines, beside it: put their words right, choose
+// where they go, or take them out. What they leave in is what counts.
 
 /** Stephen's light falling softly from the top while they read: over the title, never under the words. */
 export const readingPose: Pose = {
@@ -126,11 +124,8 @@ const styles = stylex.create({
     color: colors.foreground,
     textWrap: "pretty",
   },
-  // B's prose stands back, so the things it names come forward.
-  storyQuiet: { color: colors.mutedForeground },
   // A sentence: pressed to open what can be done with it. Its ground
-  // follows its lines when it wraps.
-  // His line under the sentence he says draws in from its start and
+  // follows its lines when it wraps. His line under the sentence he says draws in from its start and
   // draws back as he goes on, on the library's curve; its colour comes and
   // goes the same way, so nothing jumps.
   sentence: {
@@ -195,18 +190,13 @@ const styles = stylex.create({
     width: "auto",
     verticalAlign: "0",
   },
-  // B: a line taken out stays where it was, struck through and faded.
-  out: {
-    color: colors.subtleForeground,
-    textDecorationLine: "line-through",
-    textDecorationColor: colors.subtleForeground,
-  },
   actions: {
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
     gap: space["2"],
   },
+  choices: { display: "flex", flexDirection: "column", gap: space["2"] },
   editor: {
     display: "flex",
     flexDirection: "column",
@@ -245,27 +235,6 @@ const mostOf = (goings: Going[]): Going => {
     return "asking";
   }
   return count("team") > count("anonymous") ? "team" : "anonymous";
-};
-
-/** The pill on a sentence that goes somewhere else than the rest. */
-const GoingPill = ({ going }: { going: Going }) => {
-  const { t } = useLingui();
-  if (going === "asking") {
-    return (
-      <Badge size="sm" variant="outline">
-        {t`Only used to know whom to ask`}
-      </Badge>
-    );
-  }
-  return going === "team" ? (
-    <Badge icon={UsersIcon} size="sm" variant="outline">
-      {t`Shared with your team`}
-    </Badge>
-  ) : (
-    <Badge icon={EyeOffIcon} size="sm" variant="outline">
-      {t`Anonymous`}
-    </Badge>
-  );
 };
 
 /** What can be done with a line, beside it: its words, where it goes, or out. */
@@ -386,26 +355,132 @@ const pressWithKeys =
     }
   };
 
+/** Where a group of lines is in his telling: being told when any is, told when all are. */
+const toldOfAll = (
+  telling: LoopState["telling"],
+  ids: readonly string[]
+): Told | null => {
+  const each = ids.map((id) => toldOf(telling, id));
+  if (each.includes(null)) {
+    return null;
+  }
+  if (each.includes("saying")) {
+    return "saying";
+  }
+  return each.every((told) => told === "said") ? "said" : "waiting";
+};
+
+/** What can be done with the lines a sentence tells: the one line itself, or first which of them. */
+const LinesEditor = ({
+  facts,
+  goingOf: going,
+  onDone,
+}: {
+  facts: readonly InterviewFact[];
+  goingOf: (fact: InterviewFact) => Going;
+  onDone: () => void;
+}) => {
+  const { t } = useLingui();
+  const [chosen, setChosen] = useState<string | null>(
+    facts.length === 1 ? (facts[0]?.id ?? null) : null
+  );
+  const fact = facts.find(({ id }) => id === chosen);
+  if (fact !== undefined) {
+    return (
+      <LineEditor
+        asking={going(fact) === "asking"}
+        fact={fact}
+        onDone={onDone}
+      />
+    );
+  }
+  return (
+    <div {...stylex.props(styles.editor)}>
+      <PopoverHeader>
+        <PopoverTitle>{t`Which line do you want to change?`}</PopoverTitle>
+      </PopoverHeader>
+      <div {...stylex.props(styles.choices)}>
+        {facts.map(({ id, text }) => (
+          <Button
+            key={id}
+            onClick={() => {
+              setChosen(id);
+            }}
+            variant="outline"
+          >
+            {text.length > 56 ? `${text.slice(0, 55)}…` : text}
+          </Button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 /**
- * One line as a sentence of the story: its words, the things it names as
- * pills, and where it goes when that differs from the rest. Pressed, what
- * can be done with it opens beside it.
+ * One sentence of the story and the lines it tells: its words, the things
+ * it names as pills; resting on it shows what they said that it comes
+ * from, and where it goes when that differs from the rest. Pressed, what
+ * can be done with its lines opens beside it.
  */
 const Sentence = ({
-  fact,
+  text,
+  facts,
   marked,
   told,
-  going,
-  differs,
+  source,
+  elsewhere,
+  goingOf: going,
 }: {
-  fact: InterviewFact;
+  text: string;
+  facts: readonly InterviewFact[];
   marked: readonly string[];
   told: Told | null;
-  going: Going;
-  differs: boolean;
+  /** What they said that it comes from, as near as the page can tell. */
+  source: string | null;
+  /** Where its lines go, when that is not where the rest go. */
+  elsewhere: string | null;
+  goingOf: (fact: InterviewFact) => Going;
 }) => {
   const [open, setOpen] = useState(false);
-  const pieces = storyPieces(fact.text, marked);
+  const pieces = storyPieces(text, marked);
+  const hinted = source !== null || elsewhere !== null;
+  const sentence = (
+    <span
+      aria-expanded={open}
+      aria-haspopup="dialog"
+      onClick={() => {
+        setOpen(true);
+      }}
+      onKeyDown={pressWithKeys(() => {
+        setOpen(true);
+      })}
+      // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a <button> is drawn inline-block and can't wrap inside a line of prose; a sentence of the story has to, so it is a span that acts as one (focusable, Enter and Space)
+      role="button"
+      tabIndex={0}
+      {...stylex.props(
+        styles.sentence,
+        focusRingText,
+        open && styles.open,
+        told === "saying" && styles.saying,
+        told === "waiting" && styles.waiting
+      )}
+    >
+      {pieces.map((piece) =>
+        piece.term === null ? (
+          piece.text
+        ) : (
+          <TermPill key={piece.at} term={piece.term} text={piece.text} />
+        )
+      )}
+    </span>
+  );
+  // The anchor outside, the tooltip's trigger inside: the anchor passes on
+  // only its place, the trigger all it needs to open.
+  const anchored = (
+    <PopoverAnchor asChild>
+      {hinted ? <TooltipTrigger asChild>{sentence}</TooltipTrigger> : sentence}
+    </PopoverAnchor>
+  );
   return (
     <Popover
       onOpenChange={(next) => {
@@ -413,46 +488,22 @@ const Sentence = ({
       }}
       open={open}
     >
-      <PopoverAnchor asChild>
-        <span
-          aria-expanded={open}
-          aria-haspopup="dialog"
-          onClick={() => {
-            setOpen(true);
-          }}
-          onKeyDown={pressWithKeys(() => {
-            setOpen(true);
-          })}
-          // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a <button> is drawn inline-block and can't wrap inside a line of prose; a sentence of the story has to, so it is a span that acts as one (focusable, Enter and Space)
-          role="button"
-          tabIndex={0}
-          {...stylex.props(
-            styles.sentence,
-            focusRingText,
-            open && styles.open,
-            told === "saying" && styles.saying,
-            told === "waiting" && styles.waiting
-          )}
-        >
-          {pieces.map((piece) =>
-            piece.term === null ? (
-              piece.text
-            ) : (
-              <TermPill key={piece.at} term={piece.term} text={piece.text} />
-            )
-          )}
-          {differs ? (
-            <>
-              {" "}
-              <GoingPill going={going} />
-            </>
-          ) : null}
-        </span>
-      </PopoverAnchor>
+      {hinted ? (
+        <Tooltip>
+          {anchored}
+          <TooltipContent>
+            {source === null ? null : <q>{source}</q>}
+            {source !== null && elsewhere !== null ? <br /> : null}
+            {elsewhere}
+          </TooltipContent>
+        </Tooltip>
+      ) : (
+        anchored
+      )}
       <PopoverContent align="start">
-        <LineEditor
-          asking={going === "asking"}
-          fact={fact}
+        <LinesEditor
+          facts={facts}
+          goingOf={going}
           onDone={() => {
             setOpen(false);
           }}
@@ -462,29 +513,113 @@ const Sentence = ({
   );
 };
 
-/** B: a line taken out, where it stood, struck through, with the way to put it back. */
-const TakenOut = ({ fact }: { fact: InterviewFact }) => {
-  const { t } = useLingui();
-  const words = fact.text;
-  return (
-    <span {...stylex.props(fadeIn)}>
-      <span {...stylex.props(styles.out)}>{fact.text}</span>{" "}
-      <Button
-        aria-label={t`Put back: ${words}`}
-        onClick={() => {
-          update((progress) => withFactToggled(progress, fact.id));
-        }}
-        size="xs"
-        variant="ghost"
-      >
-        {t`Put back`}
-      </Button>
-    </span>
-  );
+/** The story of the part as he tells it, once it is there; none before, or when there is none. */
+const useStory = (part: ReadBackPart | undefined): StorySentence[] | null => {
+  const [story, setStory] = useState<{
+    key: string;
+    sentences: StorySentence[] | null;
+  } | null>(null);
+  const key =
+    part === undefined
+      ? ""
+      : part.facts
+          .filter(({ out }) => out !== true)
+          .map(({ id, text }) => `${id}\u0000${text}`)
+          .join("\u0001");
+  // The part as it is now, read when its lines change, not on every render.
+  const partNow = useEffectEvent(() => part);
+  useEffect(() => {
+    let current = true;
+    const load = async (): Promise<void> => {
+      const asked = partNow();
+      if (asked === undefined) {
+        return;
+      }
+      const sentences = await storyFor(asked);
+      if (current) {
+        setStory({ key, sentences });
+      }
+    };
+    void load();
+    return () => {
+      current = false;
+    };
+  }, [key]);
+  return story?.key === key ? story.sentences : null;
 };
 
-/** The read-back told as a story, in concept `concept`. */
-export const StoryReadBack = ({ concept }: { concept: ReadBackConcept }) => {
+/** A sentence on screen and the lines it tells. */
+interface Unit {
+  key: string;
+  text: string;
+  facts: InterviewFact[];
+  source: string | null;
+  elsewhere: string | null;
+}
+
+/** His sentences, each with the lines it tells; one that tells none of them is left out. */
+const storySentences = (
+  story: StorySentence[],
+  facts: InterviewFact[],
+  sourceFor: (told: InterviewFact[]) => string | null,
+  elsewhereOf: (facts: InterviewFact[]) => string | null
+): Unit[] =>
+  story.flatMap(({ say, ids }) => {
+    const told = facts.filter(({ id }) => ids.includes(id));
+    return told.length === 0
+      ? []
+      : [
+          {
+            key: ids.join(" "),
+            text: say,
+            facts: told,
+            source: sourceFor(told),
+            elsewhere: elsewhereOf(told),
+          },
+        ];
+  });
+
+/** What the story shows: his sentences when there are, else each line as it stands. */
+const storyUnits = ({
+  facts,
+  story,
+  lines,
+  elsewhereOf,
+}: {
+  facts: InterviewFact[];
+  story: StorySentence[] | null;
+  lines: InterviewProgress["lines"];
+  elsewhereOf: (facts: InterviewFact[]) => string | null;
+}): Unit[] => {
+  const sourceFor = (told: InterviewFact[]): string | null =>
+    sourceOf(told.map(({ text }) => text).join(" "), lines);
+  if (story !== null) {
+    // A line no sentence tells stands as it is, after them: nothing they
+    // agree to goes unseen.
+    const told = new Set(story.flatMap(({ ids }) => ids));
+    const untold = facts.filter(({ id }) => !told.has(id));
+    return [
+      ...storySentences(story, facts, sourceFor, elsewhereOf),
+      ...untold.map((fact) => ({
+        key: fact.id,
+        text: fact.text,
+        facts: [fact],
+        source: sourceFor([fact]),
+        elsewhere: elsewhereOf([fact]),
+      })),
+    ];
+  }
+  return facts.map((fact) => ({
+    key: fact.id,
+    text: fact.text,
+    facts: [fact],
+    source: sourceFor([fact]),
+    elsewhere: elsewhereOf([fact]),
+  }));
+};
+
+/** The read-back, told as a story. */
+export const ReadBack = () => {
   const { t } = useLingui();
   const promise = usePromise();
   const kind = useKind();
@@ -499,11 +634,18 @@ export const StoryReadBack = ({ concept }: { concept: ReadBackConcept }) => {
   const left = part?.facts.filter(({ out }) => out !== true) ?? [];
   const out = part?.facts.filter(({ out: taken }) => taken === true) ?? [];
   const agree = useAgree(left.length, out.length);
+  const story = useStory(part);
+  const goingWords: Record<Going, string> = {
+    team: t`Shared with your team`,
+    anonymous: t`Anonymous`,
+    asking: t`Only used to know whom to ask`,
+  };
   if (part === undefined) {
     return null;
   }
-  const marked = markedTerms(progress.lines, concept === "b");
-  const most = mostOf(left.map((fact) => goingOf(fact, kind)));
+  const marked = markedTerms(progress.lines, false);
+  const going = (fact: InterviewFact): Going => goingOf(fact, kind);
+  const most = mostOf(left.map(going));
   // Said once for the part; a sentence that goes elsewhere says so itself.
   let once = t`Only counted anonymously`;
   if (most === "team") {
@@ -514,8 +656,17 @@ export const StoryReadBack = ({ concept }: { concept: ReadBackConcept }) => {
   const n = at + 1;
   const count = parts.length;
   const taken = out.length;
-  // A: the lines left; B: every line, those taken out where they stood.
-  const shown = concept === "a" ? left : part.facts;
+  // The story he tells of the lines left, a sentence for the lines that
+  // belong together, or the lines as they stand until it is there.
+  const units = storyUnits({
+    facts: left,
+    story,
+    lines: progress.lines,
+    elsewhereOf: (facts) => {
+      const goes = facts.map(going).find((each) => each !== most);
+      return goes === undefined ? null : goingWords[goes];
+    },
+  });
   return (
     <div {...stylex.props(looks.screen)}>
       <div {...stylex.props(looks.body)}>
@@ -533,33 +684,24 @@ export const StoryReadBack = ({ concept }: { concept: ReadBackConcept }) => {
             </h1>
           </div>
         </div>
-        <p
-          key={at}
-          {...stylex.props(
-            styles.story,
-            fadeIn,
-            concept === "b" && styles.storyQuiet
-          )}
-        >
-          {shown.map((fact, place) => {
-            const going = goingOf(fact, kind);
-            return (
-              <span key={fact.id}>
-                {place > 0 ? " " : null}
-                {fact.out === true ? (
-                  <TakenOut fact={fact} />
-                ) : (
-                  <Sentence
-                    differs={going !== most}
-                    fact={fact}
-                    going={going}
-                    marked={marked}
-                    told={toldOf(loop.telling, fact.id)}
-                  />
+        <p key={at} {...stylex.props(styles.story, fadeIn)}>
+          {units.map((unit, place) => (
+            <span key={unit.key}>
+              {place > 0 ? " " : null}
+              <Sentence
+                elsewhere={unit.elsewhere}
+                facts={unit.facts}
+                goingOf={going}
+                marked={marked}
+                source={unit.source}
+                text={unit.text}
+                told={toldOfAll(
+                  loop.telling,
+                  unit.facts.map(({ id }) => id)
                 )}
-              </span>
-            );
-          })}
+              />
+            </span>
+          ))}
         </p>
         {left.length > 0 ? (
           <Badge
@@ -580,7 +722,7 @@ export const StoryReadBack = ({ concept }: { concept: ReadBackConcept }) => {
           >
             {agree}
           </Button>
-          {concept === "a" && out.length > 0 ? (
+          {out.length > 0 ? (
             <Button
               onClick={() => {
                 const ids = out.map(({ id }) => id);

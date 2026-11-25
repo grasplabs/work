@@ -25,11 +25,6 @@ msgctxt "a number that changed: what it was before"
 msgid "(was {before})"
 msgstr "(was {before})"
 
-#. placeholder {0}: out.length
-#: src/interview/read-back.tsx
-msgid "{0, plural, one {# line taken out.} other {# lines taken out.}}"
-msgstr "{0, plural, one {# regel weggehaald.} other {# regels weggehaald.}}"
-
 #. placeholder {0}: effect.statements
 #: src/brain/forget.tsx
 msgid "{0, plural, one {# thing that was said in it goes with it.} other {# things that were said in it go with it.}}"
@@ -4318,7 +4313,6 @@ msgid "Change your line: {words}"
 msgstr "Je beurt aanpassen: {words}"
 
 #: src/interview/read-back-story.tsx
-#: src/interview/read-back.tsx
 msgid "Change: {text}"
 msgstr "Aanpassen: {text}"
 
@@ -11799,7 +11793,6 @@ msgid "None of the App's permissions on a connection serves {contract} with ever
 msgstr "Geen van de rechten van de app op een verbinding bedient {contract} met elke actie die hij declareert. Verleen er eerst een."
 
 #: src/interview/read-back-story.tsx
-#: src/interview/read-back.tsx
 msgid "None of this is right"
 msgstr "Hier klopt niets van"
 
@@ -13277,7 +13270,6 @@ msgid "Paris"
 msgstr "Parijs"
 
 #: src/interview/read-back-story.tsx
-#: src/interview/read-back.tsx
 msgid "Part {n} of {count}"
 msgstr "Deel {n} van {count}"
 
@@ -13684,10 +13676,6 @@ msgctxt "ranges of dates to pick"
 msgid "Presets"
 msgstr "Snelkeuzes"
 
-#: src/interview/read-back.tsx
-msgid "Press a line to change it, take out what is wrong, or type what is missing. Choose where each line goes. What you leave in is what counts."
-msgstr "Druk op een regel om hem aan te passen, haal weg wat niet klopt, of typ wat er ontbreekt. Kies waar elke regel naartoe gaat. Wat je laat staan, telt."
-
 #: src/frame/ui-words.tsx
 msgid "Press and hold: {words}"
 msgstr "Ingedrukt houden: {words}"
@@ -13872,15 +13860,6 @@ msgstr "Purchase-to-Pay"
 msgctxt "what the Brain remembers about something"
 msgid "Purpose"
 msgstr "Doel"
-
-#: src/interview/read-back-story.tsx
-#: src/interview/read-back.tsx
-msgid "Put back"
-msgstr "Terugzetten"
-
-#: src/interview/read-back-story.tsx
-msgid "Put back: {words}"
-msgstr "Terugzetten: {words}"
 
 #: src/settings/instruction-file.tsx
 msgid "Put my changes aside"
@@ -17105,10 +17084,6 @@ msgstr "Overnemen"
 msgid "Take out"
 msgstr "Eruit halen"
 
-#: src/interview/read-back.tsx
-msgid "Take out: {text}"
-msgstr "Weghalen: {text}"
-
 #: src/onboarding/hr-leads.tsx
 msgid "Take the leads from {name}"
 msgstr "Teamleiders uit {name} halen"
@@ -18048,7 +18023,6 @@ msgid "The request failed."
 msgstr "Het verzoek is mislukt."
 
 #: src/interview/read-back-story.tsx
-#: src/interview/read-back.tsx
 msgid "The rest is correct"
 msgstr "De rest klopt"
 
@@ -20541,6 +20515,10 @@ msgstr "Welke kleuren moet hij hebben?"
 msgid "Which HR platform do you use?"
 msgstr "Welk hr-platform gebruik je?"
 
+#: src/interview/read-back-story.tsx
+msgid "Which line do you want to change?"
+msgstr "Welke regel wil je aanpassen?"
+
 #: src/activity/audit-event.tsx
 msgid "Who"
 msgstr "Wie"
@@ -21065,7 +21043,6 @@ msgid "Yes, skip it"
 msgstr "Ja, sla het over"
 
 #: src/interview/read-back-story.tsx
-#: src/interview/read-back.tsx
 msgid "Yes, that’s correct"
 msgstr "Ja, dat klopt"
 

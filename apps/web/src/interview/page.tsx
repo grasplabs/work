@@ -56,7 +56,7 @@ import {
   steered,
   ticked,
 } from "./progress.ts";
-import { readingPose, useReadBackConcept } from "./read-back-story.tsx";
+import { readingPose } from "./read-back-story.tsx";
 import { setSound } from "./speech.ts";
 import {
   Consent,
@@ -532,10 +532,6 @@ const Talking = ({
     />
   );
 
-/** Whether the read-back is on screen, told as a story (a concept, `?readback=a|b`). */
-const useStoryRead = (reading: boolean): boolean =>
-  useReadBackConcept() !== null && reading;
-
 /**
  * Every screen but the conversation stands on Stephen's field; the
  * conversation keeps its own room. The read-back told as a story stands
@@ -587,7 +583,6 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
     !(stopped || withdrawn || session.closed) &&
     deleted === "no";
   const reading = talking && isReading(progress);
-  const story = useStoryRead(reading);
   const { left, timeUp } = useClock(progress, talking && !reading);
 
   useWordsOnScreen();
@@ -677,7 +672,7 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
           }}
         />
       }
-      pose={poseOf(stage, story)}
+      pose={poseOf(stage, reading)}
       strip={!reading}
     >
       {stage}

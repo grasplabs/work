@@ -25,11 +25,6 @@ msgctxt "a number that changed: what it was before"
 msgid "(was {before})"
 msgstr "(antes: {before})"
 
-#. placeholder {0}: out.length
-#: src/interview/read-back.tsx
-msgid "{0, plural, one {# line taken out.} other {# lines taken out.}}"
-msgstr "{0, plural, one {# línea quitada.} other {# líneas quitadas.}}"
-
 #. placeholder {0}: effect.statements
 #: src/brain/forget.tsx
 msgid "{0, plural, one {# thing that was said in it goes with it.} other {# things that were said in it go with it.}}"
@@ -4318,7 +4313,6 @@ msgid "Change your line: {words}"
 msgstr "Cambiar tu respuesta: {words}"
 
 #: src/interview/read-back-story.tsx
-#: src/interview/read-back.tsx
 msgid "Change: {text}"
 msgstr "Cambiar: {text}"
 
@@ -11799,7 +11793,6 @@ msgid "None of the App's permissions on a connection serves {contract} with ever
 msgstr "Ninguno de los permisos de la aplicación sobre una conexión sirve {contract} con todas las acciones que declara. Concede uno primero."
 
 #: src/interview/read-back-story.tsx
-#: src/interview/read-back.tsx
 msgid "None of this is right"
 msgstr "Nada de esto es correcto"
 
@@ -13277,7 +13270,6 @@ msgid "Paris"
 msgstr "París"
 
 #: src/interview/read-back-story.tsx
-#: src/interview/read-back.tsx
 msgid "Part {n} of {count}"
 msgstr "Parte {n} de {count}"
 
@@ -13684,10 +13676,6 @@ msgctxt "ranges of dates to pick"
 msgid "Presets"
 msgstr "Rangos rápidos"
 
-#: src/interview/read-back.tsx
-msgid "Press a line to change it, take out what is wrong, or type what is missing. Choose where each line goes. What you leave in is what counts."
-msgstr "Pulsa una línea para cambiarla, quita lo que esté mal o escribe lo que falte. Elige adónde va cada línea. Lo que dejes es lo que cuenta."
-
 #: src/frame/ui-words.tsx
 msgid "Press and hold: {words}"
 msgstr "Mantén pulsado: {words}"
@@ -13872,15 +13860,6 @@ msgstr "Purchase-to-Pay"
 msgctxt "what the Brain remembers about something"
 msgid "Purpose"
 msgstr "Propósito"
-
-#: src/interview/read-back-story.tsx
-#: src/interview/read-back.tsx
-msgid "Put back"
-msgstr "Volver a poner"
-
-#: src/interview/read-back-story.tsx
-msgid "Put back: {words}"
-msgstr "Volver a poner: {words}"
 
 #: src/settings/instruction-file.tsx
 msgid "Put my changes aside"
@@ -17105,10 +17084,6 @@ msgstr "Adoptar"
 msgid "Take out"
 msgstr "Quitar"
 
-#: src/interview/read-back.tsx
-msgid "Take out: {text}"
-msgstr "Quitar: {text}"
-
 #: src/onboarding/hr-leads.tsx
 msgid "Take the leads from {name}"
 msgstr "Tomar los responsables de {name}"
@@ -18048,7 +18023,6 @@ msgid "The request failed."
 msgstr "La solicitud ha fallado."
 
 #: src/interview/read-back-story.tsx
-#: src/interview/read-back.tsx
 msgid "The rest is correct"
 msgstr "El resto es correcto"
 
@@ -20541,6 +20515,10 @@ msgstr "¿Qué colores debe tener?"
 msgid "Which HR platform do you use?"
 msgstr "¿Qué plataforma de RR. HH. usas?"
 
+#: src/interview/read-back-story.tsx
+msgid "Which line do you want to change?"
+msgstr "¿Qué línea quieres cambiar?"
+
 #: src/activity/audit-event.tsx
 msgid "Who"
 msgstr "Quién"
@@ -21065,7 +21043,6 @@ msgid "Yes, skip it"
 msgstr "Sí, saltarla"
 
 #: src/interview/read-back-story.tsx
-#: src/interview/read-back.tsx
 msgid "Yes, that’s correct"
 msgstr "Sí, es correcto"
 
