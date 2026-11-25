@@ -783,7 +783,7 @@ describe("A project's page", () => {
         reconnect: link("Reconnect"),
       },
     }).toStrictEqual({
-      builder: { said: true, reconnect: "/integrations", more: true },
+      builder: { said: true, reconnect: "/connectors", more: true },
       user: { asks: true, reconnect: undefined },
     });
   });

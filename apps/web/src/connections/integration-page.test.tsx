@@ -19,8 +19,8 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, beforeAll, describe, expect, it } from "vite-plus/test";
 
-import { Route } from "../routes/_shell.integrations.$integration.tsx";
-import { Route as ListRoute } from "../routes/_shell.integrations.index.tsx";
+import { Route } from "../routes/_shell.connectors.$integration.tsx";
+import { Route as ListRoute } from "../routes/_shell.connectors.index.tsx";
 
 // The Integrations pages as the browser comes back to them from a
 // sign-in, through their routes, against core faked: they never disconnect
@@ -219,13 +219,13 @@ const shown = async (
   });
   // Each page under the shell, as the generated route tree places it.
   const pageAt = {
-    id: "/integrations/$integration",
-    path: "/integrations/$integration",
+    id: "/connectors/$integration",
+    path: "/connectors/$integration",
     getParentRoute: () => shell,
   };
   const listAt = {
-    id: "/integrations/",
-    path: "/integrations/",
+    id: "/connectors/",
+    path: "/connectors/",
     getParentRoute: () => shell,
   };
   // SAFETY: a place in the tree, as routeTree.gen.ts gives each route.
@@ -294,14 +294,14 @@ const unmounted = (): void => {
   document.body.innerHTML = "";
 };
 
-describe("the Integrations pages, back from a sign-in", () => {
+describe("the Connectors pages, back from a sign-in", () => {
   // The router's plugin splits each page's code from its route: loaded
   // once here, as a browser does the first time it opens a page, and not
   // in any one test's time.
   beforeAll(async () => {
-    await shown("/integrations/composio:hubspot", [made]);
+    await shown("/connectors/composio:hubspot", [made]);
     unmounted();
-    await shown("/integrations", [made]);
+    await shown("/connectors", [made]);
     unmounted();
   }, 60_000);
 
@@ -309,7 +309,7 @@ describe("the Integrations pages, back from a sign-in", () => {
 
   it("keeps the accounts that loaded when the catalog didn't, saying beside them why it didn't", async () => {
     await shown(
-      "/integrations",
+      "/connectors",
       [mailbox("ada@example.com", "active")],
       person(),
       async () => {
@@ -335,7 +335,7 @@ describe("the Integrations pages, back from a sign-in", () => {
 
   it("disconnects nothing back from a sign-in that made a new connection beside a stopped one, and says it is connected again", async () => {
     const disconnected = await shown(
-      "/integrations/composio:hubspot?connection=c-new",
+      "/connectors/composio:hubspot?connection=c-new",
       [made, stopped]
     );
     const page = {
@@ -346,10 +346,7 @@ describe("the Integrations pages, back from a sign-in", () => {
     };
     unmounted();
     // Sent back to the list instead: the same.
-    const listed = await shown("/integrations?connection=c-new", [
-      made,
-      stopped,
-    ]);
+    const listed = await shown("/connectors?connection=c-new", [made, stopped]);
 
     expect({
       disconnected,
@@ -370,7 +367,7 @@ describe("the Integrations pages, back from a sign-in", () => {
   it("disconnects nothing back from a sign-in refused or cancelled, and says nothing of a disconnect", async () => {
     // Refused at the provider: core sends the browser back to the list, with its code.
     const refused = await shown(
-      "/integrations?connectionError=connection.provider_refused",
+      "/connectors?connectionError=connection.provider_refused",
       [stopped]
     );
     const refusedSays = document.body.textContent;
@@ -379,7 +376,7 @@ describe("the Integrations pages, back from a sign-in", () => {
       ?.textContent.includes("The provider didn't complete the connection.");
     unmounted();
     // Cancelled: the browser comes back to the page as it left it.
-    const cancelled = await shown("/integrations/composio:hubspot", [stopped]);
+    const cancelled = await shown("/connectors/composio:hubspot", [stopped]);
 
     expect({
       refused,
@@ -401,13 +398,13 @@ describe("the Integrations pages, back from a sign-in", () => {
 
   it("disconnects nothing from a crafted link naming a connection, with or without the old again", async () => {
     const named = await shown(
-      "/integrations/composio:hubspot?connection=c-new&again=1",
+      "/connectors/composio:hubspot?connection=c-new&again=1",
       [made, stopped]
     );
     unmounted();
     // The stopped one's own ID: no success page for a connection that doesn't work.
     const stoppedId = await shown(
-      "/integrations/composio:hubspot?connection=c-stopped",
+      "/connectors/composio:hubspot?connection=c-stopped",
       [made, stopped]
     );
 
@@ -419,14 +416,14 @@ describe("the Integrations pages, back from a sign-in", () => {
   });
 
   it("says a stopped row can go only beside a connection that works, and only to whoever may disconnect it", async () => {
-    await shown("/integrations/composio:hubspot", [made, stopped]);
+    await shown("/connectors/composio:hubspot", [made, stopped]);
     const admin = rows().map((each) => each.includes(notice));
     unmounted();
-    await shown("/integrations/composio:hubspot", [stopped]);
+    await shown("/connectors/composio:hubspot", [stopped]);
     const alone = document.body.textContent.includes(notice);
     unmounted();
     await shown(
-      "/integrations/composio:hubspot",
+      "/connectors/composio:hubspot",
       [made, stopped],
       person({ role: "user" })
     );
@@ -444,7 +441,7 @@ describe("the Integrations pages, back from a sign-in", () => {
   });
 
   it("opens the Disconnect question from the stopped row's notice, which says what goes, and disconnects only once confirmed", async () => {
-    const disconnected = await shown("/integrations/composio:hubspot", [
+    const disconnected = await shown("/connectors/composio:hubspot", [
       made,
       stopped,
     ]);
@@ -476,7 +473,7 @@ describe("the Integrations pages, back from a sign-in", () => {
   it("says nothing of a stopped mailbox beside another account's that works: it is signed in to again", async () => {
     const out = mailbox("sales@example.com", "needs_reauth");
     const working = mailbox("support@example.com", "active");
-    await shown("/integrations/native:microsoft", [working, out]);
+    await shown("/connectors/native:microsoft", [working, out]);
     const row = rows().find((each) => each.includes("sales@example.com"));
 
     expect({

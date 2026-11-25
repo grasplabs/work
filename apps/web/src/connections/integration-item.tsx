@@ -75,7 +75,7 @@ const ItemAction = ({
       <Button aria-label={t`Manage ${app}`} asChild size="sm" variant="ghost">
         <Link
           params={{ integration: integration.key }}
-          to="/integrations/$integration"
+          to="/connectors/$integration"
         >
           {t`Manage`}
         </Link>
@@ -137,7 +137,7 @@ export const IntegrationItem = ({
           <Link
             params={{ integration: integration.key }}
             title={integration.description ?? undefined}
-            to="/integrations/$integration"
+            to="/connectors/$integration"
           >
             {integration.name}
           </Link>

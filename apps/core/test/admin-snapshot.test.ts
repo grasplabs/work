@@ -696,7 +696,7 @@ describe("what the snapshot says the company connected and still needs", () => {
     const { url } = await annas.start({
       provider: "microsoft",
       scope: "personal",
-      returnTo: "/integrations",
+      returnTo: "/connectors",
     });
     const authorization = new URL(url);
     await backFromProvider(anna.session, {

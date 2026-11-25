@@ -39,7 +39,7 @@ const someone = (role: Identity["role"], staff = false): Identity => ({
   expiresAt: "2026-10-18T00:00:00.000Z",
 });
 
-describe("connecting from the Integrations page", () => {
+describe("connecting from the Connectors page", () => {
   it("is offered for a toolkit an admin connects with Composio's app, and a native provider for anyone", () => {
     expect([
       canConnect(

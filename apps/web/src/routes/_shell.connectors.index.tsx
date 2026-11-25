@@ -144,7 +144,7 @@ const styles = stylex.create({
 /** The search, in the address as it is typed. */
 const Search = ({ q }: { q: string | undefined }) => {
   const { t } = useLingui();
-  const navigate = useNavigate({ from: "/integrations/" });
+  const navigate = useNavigate({ from: "/connectors/" });
   const [text, setText] = useState(q ?? "");
   // The search the address had when the box last followed it: a new one
   // from elsewhere (back) replaces what the box shows.
@@ -161,7 +161,7 @@ const Search = ({ q }: { q: string | undefined }) => {
         <Icon icon={SearchIcon} />
       </InputGroupAddon>
       <InputGroupInput
-        aria-label={t`Search integrations`}
+        aria-label={t`Search connectors`}
         onValueChange={(typed) => {
           setText(typed);
           void navigate({
@@ -347,7 +347,7 @@ const Kinds = ({
         {count > shown.length ? (
           <Button style={styles.more} asChild size="sm" variant="ghost">
             <Link
-              from="/integrations/"
+              from="/connectors/"
               search={(last) => ({ ...last, group })}
               to="."
             >
@@ -426,7 +426,7 @@ const Returned = ({
   connection: string | undefined;
   integrations: readonly Integration[];
 }) => {
-  const navigate = useNavigate({ from: "/integrations/" });
+  const navigate = useNavigate({ from: "/connectors/" });
   const connectedTo =
     connection === undefined
       ? undefined
@@ -576,7 +576,7 @@ const shownOf = (
 const crumbsOf = (integrations: string, kind: string | undefined) =>
   kind === undefined
     ? [{ label: integrations }]
-    : [{ label: integrations, to: "/integrations" as const }, { label: kind }];
+    : [{ label: integrations, to: "/connectors" as const }, { label: kind }];
 
 const Integrations = () => {
   const { catalog, connections, known, requests, toRevoke, uses } =
@@ -597,7 +597,7 @@ const Integrations = () => {
   const [requesting, setRequesting] = useState(false);
   // The tile an app was opened from, so its panel grows from it.
   const [from, setFrom] = useState<HTMLElement | null>(null);
-  const navigate = useNavigate({ from: "/integrations/" });
+  const navigate = useNavigate({ from: "/connectors/" });
   const onOpen: OpenApp = (key, tile) => {
     setFrom(tile);
     void navigate({
@@ -609,7 +609,7 @@ const Integrations = () => {
   const overview = group === undefined && q === undefined;
   const recommended = overview ? recommendedOf(integrations, known) : [];
   const kind = group === undefined ? undefined : i18n._(groupLabel[group]);
-  const crumbs = crumbsOf(t`Integrations`, kind);
+  const crumbs = crumbsOf(t`Connectors`, kind);
   // The apps and the connections are the page: without both, it failed as
   // a whole, and says so across the card; with one, it shows what it has
   // and says beside it what didn't load.
@@ -642,7 +642,7 @@ const Integrations = () => {
               </Button>
             </div>
           }
-          title={kind ?? t`Integrations`}
+          title={kind ?? t`Connectors`}
         />
         <Returned connection={connection} integrations={integrations} />
         <Notices
@@ -658,7 +658,7 @@ const Integrations = () => {
         <output {...stylex.props(visuallyHidden)}>
           {q === undefined
             ? ""
-            : t`${plural(shown, { one: "# integration shown", other: "# integrations shown" })}`}
+            : t`${plural(shown, { one: "# connector shown", other: "# connectors shown" })}`}
         </output>
         <div {...stylex.props(styles.lists)}>
           {overview ? (
@@ -752,7 +752,7 @@ const textOf = (value: unknown): string | undefined => {
   return typeof text === "string" && text.trim() !== "" ? text : undefined;
 };
 
-export const Route = createFileRoute("/_shell/integrations/")({
+export const Route = createFileRoute("/_shell/connectors/")({
   validateSearch: (search: Record<string, unknown>): IntegrationsSearch => ({
     q: textOf(search.q),
     group: catalogGroups.find((each) => each === search.group),

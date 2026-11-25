@@ -60,11 +60,11 @@ type Entry = OfferedCatalog["entries"][number];
 const whyNames = {
   permission: msg({
     message: "Its code uses it",
-    context: "why an integration is one of an App's",
+    context: "why a connector is one of an App's",
   }),
   added: msg({
     message: "Added by hand",
-    context: "why an integration is one of an App's",
+    context: "why a connector is one of an App's",
   }),
 } as const;
 
@@ -101,7 +101,7 @@ const AddPicker = ({
       <PopoverTrigger asChild>
         <Button disabled={disabled} size="sm" variant="outline">
           <Icon icon={PlusIcon} />
-          {t`Add an integration`}
+          {t`Add a connector`}
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end">
@@ -120,10 +120,10 @@ const AddPicker = ({
           }}
         >
           <CommandInput
-            aria-label={t`Search integrations`}
-            placeholder={t`Search integrations`}
+            aria-label={t`Search connectors`}
+            placeholder={t`Search connectors`}
           />
-          <CommandEmpty>{t`No integrations match your search.`}</CommandEmpty>
+          <CommandEmpty>{t`No connectors match your search.`}</CommandEmpty>
           <CommandList />
         </Command>
       </PopoverContent>
@@ -195,13 +195,13 @@ export const AppIntegrations = ({
   const appName = app.name;
   return (
     <Card size="sm" asChild>
-      <section aria-label={t`Integrations`}>
+      <section aria-label={t`Connectors it needs`}>
         <CardHeader>
           <WithInfo
             of="title"
             info={t`Where the App’s data comes from. Those its code asks for are here by themselves; add any other it needs. Adding one connects nothing.`}
           >
-            <CardTitle level={3}>{t`Integrations`}</CardTitle>
+            <CardTitle level={3}>{t`Connectors it needs`}</CardTitle>
           </WithInfo>
           <CardAction>
             {builds ? (
@@ -221,10 +221,10 @@ export const AppIntegrations = ({
           <div {...stylex.props(styles.body)}>
             {lines.length === 0 ? (
               <Text size="sm" color="muted">
-                {t`No integrations yet.`}
+                {t`No connectors yet.`}
               </Text>
             ) : (
-              <ItemGroup aria-label={t`Integrations`}>
+              <ItemGroup aria-label={t`Connectors it needs`}>
                 {lines.map((line, at) => {
                   const integrationName = line.name;
                   const addedOnly =

@@ -202,7 +202,7 @@ export const useAppIntegrationWords = (): AppIntegrationWords => {
     showMore: t`Show more`,
     showLess: t`Show less`,
     offered: t`Available in your organization`,
-    offeredOn: t`Members see it in Integrations.`,
+    offeredOn: t`Members see it in Connectors.`,
     offeredOff: t`Hidden from members, and no one can connect it.`,
   };
 };

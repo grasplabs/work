@@ -65,7 +65,7 @@ import type { Organization } from "./views.ts";
 
 /** One of the admin's own places, down the top of its sidebar. */
 interface Place {
-  to: "/" | "/integrations" | "/platform" | "/ask" | "/lab";
+  to: "/" | "/connectors" | "/platform" | "/ask" | "/lab";
   label: string;
   icon: ComponentType<SVGProps<SVGSVGElement>>;
 }
@@ -73,7 +73,7 @@ interface Place {
 const places: readonly Place[] = [
   { to: "/", label: "Overview", icon: LayoutDashboardIcon },
   {
-    to: "/integrations",
+    to: "/connectors",
     label: "Apps asked for",
     icon: WrenchIcon,
   },
@@ -147,7 +147,7 @@ const badgeOf = (
   if (to === "/platform") {
     return platformBadge(platform);
   }
-  return to === "/integrations" ? integrationsBadge(asked) : null;
+  return to === "/connectors" ? integrationsBadge(asked) : null;
 };
 
 const PlaceItem = ({
