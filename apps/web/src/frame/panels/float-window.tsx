@@ -99,6 +99,7 @@ const styles = stylex.create({
     marginBlock: 0,
     marginInlineEnd: 0,
     borderRadius: { default: radius.md, [NARROW]: 0 },
+    cornerShape: radius.shape,
     // A layer over the page's content: the Dialog's lift, and in dark the shell's raised ground (a
     // step above the page's card, as its menus), so it reads as lying over the page, not beside it.
     backgroundColor: { default: SHELL_POPUP, [NARROW]: "transparent" },
@@ -134,6 +135,7 @@ const styles = stylex.create({
     zIndex: `calc(${SHELL_LAYER} + 1)`,
     boxSizing: "border-box",
     borderRadius: radius.md,
+    cornerShape: radius.shape,
     borderWidth: size.hairline,
     borderStyle: "solid",
     borderColor: {
