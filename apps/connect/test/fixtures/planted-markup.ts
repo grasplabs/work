@@ -57,7 +57,7 @@ export const plantedHtml: Readonly<
     shown: shownText,
   },
   notRendered: {
-    html: `<p>${shownText}<title>${plantedInstruction}</title></p><dialog>${plantedInstruction}</dialog><video>${plantedInstruction}</video><canvas>${plantedInstruction}</canvas><svg><desc>${plantedInstruction}</desc><title>${plantedInstruction}</title><defs><text>${plantedInstruction}</text></defs><symbol><text>${plantedInstruction}</text></symbol></svg><math><semantics><mi>x</mi><annotation>${plantedInstruction}</annotation></semantics></math>`,
+    html: `<p>${shownText}<title>${plantedInstruction}</title></p><dialog>${plantedInstruction}</dialog><video>${plantedInstruction}</video><canvas>${plantedInstruction}</canvas><svg><desc>${plantedInstruction}</desc><title>${plantedInstruction}</title><defs><text>${plantedInstruction}</text></defs><symbol><text>${plantedInstruction}</text></symbol><script>${plantedInstruction}</script><style>${plantedInstruction}</style></svg><math><semantics><mi>x</mi><annotation>${plantedInstruction}</annotation></semantics><script>${plantedInstruction}</script><style>${plantedInstruction}</style></math>`,
     shown: `${shownText}\nx`,
   },
   // What only an SVG drawing hides, a page shows.

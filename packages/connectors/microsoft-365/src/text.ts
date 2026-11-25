@@ -44,7 +44,8 @@ type Element = DefaultTreeAdapterTypes.Element;
 
 /**
  * Elements whose content a browser never shows, by their namespace: what
- * a page runs or is styled with, its head and title, what stands in for
+ * a page, a drawing or a formula runs or is styled with, a page's head and
+ * title, what stands in for
  * scripts, frames, embeds and media, a list of suggestions; a drawing's
  * own description and what it only refers to; a formula's annotations. A
  * template's content is outside the tree already.
@@ -65,6 +66,8 @@ const unread: Readonly<Record<string, ReadonlySet<string>>> = {
     "datalist",
   ]),
   [htmlSpec.NS.SVG]: new Set([
+    "script",
+    "style",
     "title",
     "desc",
     "metadata",
@@ -75,7 +78,12 @@ const unread: Readonly<Record<string, ReadonlySet<string>>> = {
     "pattern",
     "marker",
   ]),
-  [htmlSpec.NS.MATHML]: new Set(["annotation", "annotation-xml"]),
+  [htmlSpec.NS.MATHML]: new Set([
+    "script",
+    "style",
+    "annotation",
+    "annotation-xml",
+  ]),
 };
 
 const hasAttribute = ({ attrs }: Element, attribute: string): boolean =>
