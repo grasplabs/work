@@ -87,7 +87,7 @@ export const interviewStoryResponse = async (
   // The model that says his lines tells it, on Grasp's own key
   // (src/platform-ai.ts): someone is waiting for it.
   const model = platformAi.interview.line;
-  const { text: system } = await tellingText(asked.interviewer, asked.locale);
+  const { text: system } = await tellingText(asked.locale);
   try {
     const { output, usage } = await models(env).interview.call({
       model,

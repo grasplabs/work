@@ -2,17 +2,17 @@ import { queryRequestSchema } from "@grasp-os/shared/store-queries";
 import type { ReadRequest } from "@grasp-os/shared/store-queries";
 import { describe, expect, test } from "vite-plus/test";
 
-import { databaseReader } from "../src/host.ts";
-import { QueryDefinitionError } from "../src/server.ts";
-import type { QueryDefinitionCode } from "../src/server.ts";
-import type { Id } from "../src/value-types.ts";
+import { databaseReader } from "../src/app/host.ts";
+import { QueryDefinitionError } from "../src/app/server.ts";
+import type { QueryDefinitionCode } from "../src/app/server.ts";
+import type { Id } from "../src/common/value-types.ts";
 import {
   defineSchema,
   defineTable,
   paginationOptionsValidator,
   paginationResultValidator,
   v,
-} from "../src/values.ts";
+} from "../src/common/values.ts";
 
 // `ctx.db` for reading, as App code builds its reads: each read becomes one
 // request to the host, which these tests capture instead of a store. What

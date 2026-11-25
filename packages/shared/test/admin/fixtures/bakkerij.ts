@@ -158,7 +158,7 @@ export const answer = {
       confirmed: 0,
       rating: null,
       typed: true,
-      interviewer: "claire",
+      interviewer: "stephen",
     },
   ],
   works: { works: [], rules: STARTING_ORG_RULES, counted: [] },

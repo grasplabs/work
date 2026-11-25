@@ -23,14 +23,13 @@
  *                            people who tell all they know, --people v1 for
  *                            one temper each that never changes (people v2,
  *                            a mix and a state that drifts, is the default),
- *                            --only a,b,
- *                            --interviewer claire, --parallel 2
+ *                            --only a,b, --parallel 2
  *   score                    the score card of every interview that counts
  *                            (--label <name>)
  *   keep                     keeps its interviews as fixed input for the benches
  *   bench notes|ask|draw|all a bench on the Stephen you have, kept as a run:
  *                            --label <name>, --only a,b (ids or kinds),
- *                            --hidden, --interviewer claire; draw draws the
+ *                            --hidden; draw draws the
  *                            practice company in core again (--practice)
  *   compare <run> <run>      two runs side by side, with the noise and a
  *                            verdict for each number
@@ -89,7 +88,6 @@ const { positionals, values } = parseArgs({
     ideal: { type: "boolean", default: false },
     people: { type: "string" },
     only: { type: "string" },
-    interviewer: { type: "string" },
     parallel: { type: "string" },
     label: { type: "string" },
     hidden: { type: "boolean", default: false },
@@ -209,7 +207,6 @@ const playRest = async (): Promise<void> => {
       seed: countOf(values.seed, 1),
       ideal: values.ideal,
       people: peopleVersionOf(values.people),
-      interviewer: values.interviewer === "claire" ? "claire" : "stephen",
       parallel: countOf(values.parallel, 2),
       log,
     });
@@ -258,7 +255,6 @@ const roundArgs = (): RoundArgs => ({
       ? null
       : values.only.split(",").map((each) => each.trim()),
   hidden: values.hidden,
-  interviewer: values.interviewer === "claire" ? "claire" : "stephen",
   practice: values.practice,
   check: values.check,
   answers: values.answers,

@@ -6,14 +6,14 @@ import {
   inspectApp,
   readAppManifest,
   registerApp,
-} from "../src/host.ts";
-import type { ServerModules } from "../src/host.ts";
-import { AppError, defineApp, permission } from "../src/index.ts";
-import type { AppConfig, WorkflowEventReference } from "../src/index.ts";
-import { readPermissionDeclaration } from "../src/permission-read.ts";
-import { runFunction } from "../src/runner.ts";
-import { serverModule } from "../src/server.ts";
-import { defineSchema, defineTable, v } from "../src/values.ts";
+} from "../src/app/host.ts";
+import type { ServerModules } from "../src/app/host.ts";
+import { AppError, defineApp, permission } from "../src/app/index.ts";
+import type { AppConfig, WorkflowEventReference } from "../src/app/index.ts";
+import { readPermissionDeclaration } from "../src/app/permission-read.ts";
+import { runFunction } from "../src/app/runner.ts";
+import { serverModule } from "../src/app/server.ts";
+import { defineSchema, defineTable, v } from "../src/common/values.ts";
 
 // How an App registers itself from its parts (its config and schema, and
 // the server functions its modules under `server/` export),

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { appTest, maxAppTests, TestDefinitionError } from "../src/testing.ts";
+import {
+  appTest,
+  maxAppTests,
+  TestDefinitionError,
+} from "../src/app/testing.ts";
 import schema from "./notes/server/schema.ts";
 
 // How `appTest` reads a suite's declaration: pure checks, so unit tests.

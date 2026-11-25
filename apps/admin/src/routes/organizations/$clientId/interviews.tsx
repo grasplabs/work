@@ -17,10 +17,9 @@ import { useOrganization } from "../../../admin/organization.tsx";
  * The interviews from every side, as the prototype's tabs have them
  * (grasplabs/prototype `components/admin/org-interviews.tsx`): where every
  * team stands, with each team whole behind its name, everyone by name
- * with their interview's numbers, and Stephen and Claire, how they did
- * and how they are set up. Stephen is part of the
- * interviews: how people rate him and whether they finish is part of how
- * the interviews go.
+ * with their interview's numbers, and Stephen, how he did and how he is
+ * set up. Stephen is part of the interviews: how people rate him and
+ * whether they finish is part of how the interviews go.
  */
 const interviewTabs = ["teams", "people", "interviewers", "setup"] as const;
 type InterviewTab = (typeof interviewTabs)[number];
@@ -28,8 +27,8 @@ type InterviewTab = (typeof interviewTabs)[number];
 const tabWords: Record<InterviewTab, string> = {
   teams: "Teams",
   people: "People",
-  interviewers: "Interviewers",
-  setup: "Their setup",
+  interviewers: "Stephen",
+  setup: "His setup",
 };
 
 /** The tab in the address (the teams, the first, have none), and the team that is open there. */

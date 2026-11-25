@@ -487,8 +487,8 @@ describe("the admin snapshot", () => {
 
     await expect(versionOf()).resolves.toStrictEqual([null, null]);
     await store.turnRan(mark, {
-      mark: labMarks.claire.lead.nl,
-      interviewer: "claire",
+      mark: labMarks.lead.nl,
+      interviewer: "stephen",
       locale: "nl",
       version: stephenVersion,
     });

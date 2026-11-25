@@ -5,28 +5,28 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "sideEffects": [
-    "./src/preview-refresh.ts"
+    "./src/app/preview-refresh.ts"
   ],
   "imports": {
     "#oxc-parse": {
-      "types": "./src/oxc-parse-module.ts",
-      "workerd": "./src/oxc-parse-module.ts",
-      "node": "./src/oxc-parse-module.node.ts"
+      "types": "./src/common/oxc-parse-module.ts",
+      "workerd": "./src/common/oxc-parse-module.ts",
+      "node": "./src/common/oxc-parse-module.node.ts"
     }
   },
   "exports": {
-    "./app": "./src/index.ts",
-    "./server": "./src/server.ts",
-    "./react": "./src/react.ts",
-    "./workflow": "./src/workflow.ts",
-    "./testing": "./src/testing.ts",
-    "./host": "./src/host.ts",
-    "./definition": "./src/definition-entry.ts",
-    "./page": "./src/page.ts",
-    "./check": "./src/check.ts",
-    "./server-modules": "./src/server-modules.ts",
-    "./forms": "./src/forms.ts",
-    "./vitest": "./src/vitest.ts"
+    "./app": "./src/app/index.ts",
+    "./server": "./src/app/server.ts",
+    "./react": "./src/app/react.ts",
+    "./workflow": "./src/workflow/workflow.ts",
+    "./testing": "./src/app/testing.ts",
+    "./host": "./src/app/host.ts",
+    "./definition": "./src/app/definition-entry.ts",
+    "./page": "./src/app/page.ts",
+    "./check": "./src/workflow/check.ts",
+    "./server-modules": "./src/app/server-modules.ts",
+    "./forms": "./src/app/forms.ts",
+    "./vitest": "./src/app/vitest.ts"
   },
   "dependencies": {
     "@grasp-os/shared": "workspace:*",

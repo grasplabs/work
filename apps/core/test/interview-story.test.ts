@@ -139,7 +139,7 @@ describe(
     // queued for the test's own call (`holdAlarm`).
     beforeEach(holdAlarm);
 
-    it("tells the lines back in his sentences, from the quick model, and counts it", async () => {
+    it("tells the lines back in his sentences, also when the page names Claire, from the quick model, and counts it", async () => {
       const link = await opened();
       const before = await countedFor(quick);
       const sentences = [
@@ -151,22 +151,25 @@ describe(
       ];
       const { requests, result } = await answering(
         [told(sentences)],
-        async () => await tell(link)
+        async () => await tell(link, { interviewer: "claire" })
       );
       const after = await countedFor(quick);
+      const asked = JSON.stringify(requests[0]?.body);
       expect({
         status: result.status,
         body: await result.json(),
         models: requests.map(modelOf),
-        system: JSON.stringify(requests[0]?.body).includes(
-          "Telling back what you wrote down"
-        ),
+        system: asked.includes("Telling back what you wrote down"),
+        his: asked.includes("You are Stephen, an AI interviewer"),
+        hers: asked.includes("Claire"),
         counted: after.calls - before.calls,
       }).toStrictEqual({
         status: 200,
         body: { sentences },
         models: ["mistral-small-latest"],
         system: true,
+        his: true,
+        hers: false,
         counted: 1,
       });
     });

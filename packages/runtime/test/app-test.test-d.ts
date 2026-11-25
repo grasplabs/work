@@ -5,10 +5,10 @@
 // `@ts-expect-error` below must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
-import type { Id } from "../src/index.ts";
-import { appTest } from "../src/testing.ts";
-import type { LiveQuery, TestIdentity } from "../src/testing.ts";
-import { expect } from "../src/vitest.ts";
+import type { Id } from "../src/app/index.ts";
+import { appTest } from "../src/app/testing.ts";
+import type { LiveQuery, TestIdentity } from "../src/app/testing.ts";
+import { expect } from "../src/app/vitest.ts";
 import { api } from "./notes/server/_generated/api.ts";
 import schema from "./notes/server/schema.ts";
 

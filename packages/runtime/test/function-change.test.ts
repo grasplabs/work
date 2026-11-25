@@ -1,10 +1,10 @@
 import { describe, expect, test } from "vite-plus/test";
 
-import type { FunctionManifest } from "../src/app-types.ts";
-import { functionBreak } from "../src/function-change.ts";
-import { descriptorOf } from "../src/sealed-descriptors.ts";
-import type { AnySchema } from "../src/value-schema.ts";
-import { v } from "../src/values.ts";
+import type { FunctionManifest } from "../src/app/app-types.ts";
+import { functionBreak } from "../src/app/function-change.ts";
+import { descriptorOf } from "../src/common/sealed-descriptors.ts";
+import type { AnySchema } from "../src/common/value-schema.ts";
+import { v } from "../src/common/values.ts";
 
 // Whether a function still serves a workflow bound to it as another
 // version declared it (function-change.ts): what an App's publish checks

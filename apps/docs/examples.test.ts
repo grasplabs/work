@@ -205,7 +205,10 @@ const tsconfig = {
       // What an App's tests import as `vitest`: the runtime's module of
       // vitest's `expect`, as the compiler maps it (app-code.ts).
       vitest: [
-        path.join(import.meta.dirname, "../../packages/runtime/src/vitest.ts"),
+        path.join(
+          import.meta.dirname,
+          "../../packages/runtime/src/app/vitest.ts"
+        ),
       ],
     },
   },

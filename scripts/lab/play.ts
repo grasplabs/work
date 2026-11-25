@@ -19,7 +19,7 @@ import type {
   InterviewWants,
   StephenTurn,
 } from "@grasp-os/shared/interview-turn";
-import type { InterviewKind, Interviewer } from "@grasp-os/shared/onboarding";
+import type { InterviewKind } from "@grasp-os/shared/onboarding";
 
 import type { Link } from "./core.ts";
 import { askedFor, awayLine, misreadable, pasteOf, splitOf } from "./events.ts";
@@ -145,11 +145,9 @@ const agreesMost = 30;
 export const agrees = (reply: string): boolean =>
   agreesPattern.test(reply) && reply.length < agreesMost;
 
-/** How the interview is held: by whom, and on which clock. */
+/** How the interview is held: in which language, and on which clock. */
 export interface PlayOptions {
   locale: InterviewTurnRequest["locale"];
-  /** Who holds the interview, when not Stephen. */
-  interviewer?: Interviewer;
   /**
    * With "talk", the minutes Stephen is told are the time the words would
    * have taken two people, not the time a model took.
@@ -173,7 +171,7 @@ const opened = async (
 export const playInterview = async (
   link: Link,
   player: Player,
-  { locale, interviewer, clock, events = [] }: PlayOptions
+  { locale, clock, events = [] }: PlayOptions
 ): Promise<Played> => {
   const { version: opening, kind: interview } = await opened(link);
   let version = opening;
@@ -190,7 +188,6 @@ export const playInterview = async (
     confirmed: 0,
     adding: false,
     addedAt: 0,
-    ...(interviewer === "claire" ? { interviewer } : {}),
   };
   const played: Played = {
     answers: 0,
@@ -232,7 +229,6 @@ export const playInterview = async (
     await link.turn({
       event,
       locale,
-      interviewer: interviewer ?? "stephen",
       lines: progress.lines.map(({ from, text, typed, file }) => ({
         from,
         text,

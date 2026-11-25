@@ -124,6 +124,16 @@ const failed = (error: unknown, requestId: string): Response => {
   return refused(refusal.status, speechErrors.create(refusal.code), requestId);
 };
 
+/**
+ * The page's request, with Stephen as who says a line asked for in
+ * Claire's voice: the onboarding's pages still ask for hers until they
+ * drop the choice.
+ */
+const saidByStephen = (asked: z.output<typeof speechRequestSchema>) => ({
+  ...asked,
+  speaker: asked.speaker === "claire" ? "stephen" : asked.speaker,
+});
+
 /** The page's request, read no further than it may be; `undefined` when it isn't one. */
 const requestOf = async (request: Request) => {
   const length = Number(request.headers.get("content-length") ?? 0);
@@ -134,7 +144,7 @@ const requestOf = async (request: Request) => {
   const parsed = speechRequestSchema.safeParse(
     raw === undefined ? undefined : jsonOf(raw)
   );
-  return parsed.success ? parsed.data : undefined;
+  return parsed.success ? saidByStephen(parsed.data) : undefined;
 };
 
 type Asked = NonNullable<Awaited<ReturnType<typeof requestOf>>>;

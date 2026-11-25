@@ -17,7 +17,7 @@ import { meansOf, shown } from "@grasp-os/shared/lab-compare";
 import { markOf, resultSchema, scoresOf } from "@grasp-os/shared/lab-runs";
 import type { Result, StephenVersion } from "@grasp-os/shared/lab-runs";
 import { interviewLocales } from "@grasp-os/shared/onboarding";
-import type { InterviewLocale, Interviewer } from "@grasp-os/shared/onboarding";
+import type { InterviewLocale } from "@grasp-os/shared/onboarding";
 
 import { interviewerText } from "../../apps/core/src/onboarding/interviewer-text.ts";
 import { stephenVersion as releaseVersion } from "../../apps/core/src/onboarding/lab-marks.ts";
@@ -42,18 +42,17 @@ const markOfText = (parts: readonly string[]): string =>
 const sourcesOf = (files: readonly string[]): string[] =>
   files.map((file) => readFileSync(path.join(repoRoot, file), "utf-8"));
 
-/** The Stephen (or Claire) that holds the interviews of this checkout. */
+/** The Stephen that holds the interviews of this checkout. */
 export const stephenVersion = async (
-  interviewer: Interviewer,
   locale: InterviewLocale
 ): Promise<StephenVersion> => {
   const [own, lead, everyLanguage] = await Promise.all([
-    interviewerText(interviewer, "own", locale),
-    interviewerText(interviewer, "lead", locale),
+    interviewerText("own", locale),
+    interviewerText("lead", locale),
     Promise.all(
       interviewLocales.flatMap((each) => [
-        interviewerText(interviewer, "own", each),
-        interviewerText(interviewer, "lead", each),
+        interviewerText("own", each),
+        interviewerText("lead", each),
       ])
     ),
   ]);
@@ -67,7 +66,7 @@ export const stephenVersion = async (
     // Not a git checkout: the marks alone say which Stephen it was.
   }
   return {
-    interviewer,
+    interviewer: "stephen",
     own: own.mark,
     lead: lead.mark,
     talks: markOfText([
@@ -91,8 +90,7 @@ const stamp = /[-:T]/gu;
 export const keepResult = (
   result: Omit<Result, "id">
 ): { result: Result; file: string } => {
-  const claire = result.stephen.interviewer === "claire" ? "claire-" : "";
-  const id = `${result.at.slice(0, 16).replace(stamp, "")}-${result.bench}-${result.set}-${claire}${result.label.replace(idPart, "-").toLowerCase()}`;
+  const id = `${result.at.slice(0, 16).replace(stamp, "")}-${result.bench}-${result.set}-${result.label.replace(idPart, "-").toLowerCase()}`;
   const kept: Result = { id, ...result };
   const file = keepJson(
     path.join(setFolder("results", result.set), `${id}.json`),
@@ -135,7 +133,6 @@ export const resultNamed = (
 export const alike = (a: Result, b: Result): boolean =>
   a.bench === b.bench &&
   a.set === b.set &&
-  a.stephen.interviewer === b.stephen.interviewer &&
   a.via.quick === b.via.quick &&
   a.via.careful === b.via.careful &&
   (a.people ?? "") === (b.people ?? "") &&

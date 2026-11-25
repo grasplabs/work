@@ -8,11 +8,11 @@
 // `@ts-expect-error` must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
-import { v } from "../src/index.ts";
-import type { GraspClient } from "../src/page.ts";
-import { useStream } from "../src/react.ts";
-import type { GraspError } from "../src/react.ts";
-import { serverModule } from "../src/server.ts";
+import { v } from "../src/app/index.ts";
+import type { GraspClient } from "../src/app/page.ts";
+import { useStream } from "../src/app/react.ts";
+import type { GraspError } from "../src/app/react.ts";
+import { serverModule } from "../src/app/server.ts";
 import { api } from "./notes/server/_generated/api.ts";
 import schema from "./notes/server/schema.ts";
 

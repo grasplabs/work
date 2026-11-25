@@ -3,14 +3,14 @@
 /* oxlint-disable require-await -- stand-in handlers for an interface that takes async functions */
 import { expectTypeOf } from "vite-plus/test";
 
-import { defineWorkflow, v } from "../src/workflow.ts";
+import { defineWorkflow, v } from "../src/workflow/workflow.ts";
 import type {
   BrainCard,
   BrainSkill,
   ConnectionMembers,
   WorkflowCtx,
   WorkflowPermissions,
-} from "../src/workflow.ts";
+} from "../src/workflow/workflow.ts";
 
 const permissions = {
   ai: true,

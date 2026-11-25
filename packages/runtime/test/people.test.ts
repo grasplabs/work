@@ -2,10 +2,10 @@ import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
-import { GraspClient } from "../src/client-core.ts";
-import { peopleFunctions, peopleReferences } from "../src/people.ts";
-import type { PeopleDirectory } from "../src/people.ts";
-import { GraspProvider, usePeople } from "../src/react.ts";
+import { GraspClient } from "../src/app/client-core.ts";
+import { peopleFunctions, peopleReferences } from "../src/app/people.ts";
+import type { PeopleDirectory } from "../src/app/people.ts";
+import { GraspProvider, usePeople } from "../src/app/react.ts";
 
 // The reads a page makes through `useUser` and `usePeople` name their
 // read, and core checks what they take. And the directory a page holds
