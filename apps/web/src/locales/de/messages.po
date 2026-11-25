@@ -40,6 +40,12 @@ msgstr "{0, plural, one {# Aussage daraus geht mit.} other {# Aussagen daraus ge
 msgid "{0} actions"
 msgstr "{0} Aktionen"
 
+#. placeholder {0}: countOn(allowed, ofThis)
+#. placeholder {1}: ofThis.length
+#: src/connections/permissions/action-list.tsx
+msgid "{0} of {1} on"
+msgstr "{0} von {1} an"
+
 #: src/settings/event-source-activity.tsx
 msgid "{accepted, plural, one {# event accepted in the last 24 hours.} other {# events accepted in the last 24 hours.}}"
 msgstr "{accepted, plural, one {# Ereignis in den letzten 24 Stunden angenommen.} other {# Ereignisse in den letzten 24 Stunden angenommen.}}"
@@ -2238,7 +2244,6 @@ msgstr "Aktion"
 
 #: src/apps/app-workflows.tsx
 #: src/apps/resource-bindings.tsx
-#: src/connections/permissions/action-list.tsx
 msgid "Actions"
 msgstr "Aktionen"
 
@@ -2715,7 +2720,6 @@ msgctxt "inbox item kind"
 msgid "AI tool"
 msgstr "KI-Tool"
 
-#: src/connections/permissions/action-list.tsx
 #: src/routes/_shell.workflows.runs.tsx
 msgid "All"
 msgstr "Alle"
@@ -12496,11 +12500,6 @@ msgstr "An"
 msgid "On · for everyone with Grasp"
 msgstr "An · für alle mit Grasp"
 
-#. placeholder {0}: countOn(allowed, sorted)
-#: src/connections/permissions/action-list.tsx
-msgid "On {0}"
-msgstr "An {0}"
-
 #: src/onboarding/send-plan-form.tsx
 msgid "on {date} at {hour}"
 msgstr "am {date} um {hour}"
@@ -15999,7 +15998,6 @@ msgstr "Soll er selbstständig arbeiten?"
 
 #: src/apps/app-data-model.tsx
 #: src/brain/atlas-overlays.tsx
-#: src/connections/permissions/action-list.tsx
 msgid "Show"
 msgstr "Anzeigen"
 
@@ -18980,10 +18978,6 @@ msgstr "Ton einschalten"
 #: src/settings/member-suspension.tsx
 msgid "Turn the account back on in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
 msgstr "Aktivieren Sie das Konto im Verzeichnis wieder, dann hebt Grasp die Sperre beim nächsten täglichen Abgleich auf. Um den Zugang endgültig zu beenden, entfernen Sie die Person."
-
-#: src/connections/permissions/action-list.tsx
-msgid "Turn these off"
-msgstr "Diese ausschalten"
 
 #: src/activity/audit-words.ts
 msgid "Turned an agent on or off, or changed who may reach it"
