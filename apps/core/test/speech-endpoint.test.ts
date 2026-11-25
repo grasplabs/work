@@ -264,9 +264,7 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     await response.body?.cancel();
 
     expect(response.status).toBe(200);
-    await expect(askedFor(start)).resolves.toMatchObject([
-      { input: text },
-    ]);
+    await expect(askedFor(start)).resolves.toMatchObject([{ input: text }]);
   });
 
   it.each([
