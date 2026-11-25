@@ -16433,6 +16433,10 @@ msgctxt "what the Brain remembers about something"
 msgid "Step"
 msgstr "Étape"
 
+#: src/onboarding/setup-frame.tsx
+msgid "Step {step}"
+msgstr "Étape {step}"
+
 #: src/frame/ui-words.tsx
 msgid "Step {step} of {total}"
 msgstr "Étape {step} sur {total}"
