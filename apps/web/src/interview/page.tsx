@@ -27,6 +27,7 @@ import { Page, Words } from "./calm.tsx";
 import { Closed, DeleteInterview } from "./closed.tsx";
 import { besideQuery, Conversation, TimeUp } from "./conversation.tsx";
 import { secondsLeft, useCountdownMarks, useNow } from "./countdown.tsx";
+import { DevJump } from "./dev-jump.tsx";
 import { Frame, tool } from "./frame.tsx";
 import {
   forgetInterview,
@@ -630,7 +631,20 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
   }
 
   return (
-    <Frame actions={actions} pose={poseOf(stage, story)} strip={!reading}>
+    <Frame
+      actions={
+        <>
+          <DevJump
+            onJumped={() => {
+              setStopped(false);
+            }}
+          />
+          {actions}
+        </>
+      }
+      pose={poseOf(stage, story)}
+      strip={!reading}
+    >
       {stage}
       <Failed message={deleteFailed ?? withdrawFailed} />
     </Frame>
