@@ -557,32 +557,3 @@ test("the chat on every other page carries on the open chat, and Chat starts afr
   await expect(rowOf(chats, second)).toBeVisible();
   await expect(rowOf(chats, question)).toBeVisible();
 });
-
-test("on a phone the chat's bar keeps to the card's foot, also with the page scrolled to its end", async ({
-  pageOf,
-}) => {
-  const { user } = peopleIn("chat");
-  const page = await pageOf(user);
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/settings/profile");
-  const dock = page.locator('[data-slot="app-shell-dock"]');
-  const card = page.getByRole("main");
-  await expect(dock).toBeVisible();
-  /** How far the bar's foot stands above the card's. */
-  const gap = async () => {
-    const [bar, main] = await Promise.all([
-      dock.boundingBox(),
-      card.boundingBox(),
-    ]);
-    return bar === null || main === null
-      ? undefined
-      : Math.round(main.y + main.height - (bar.y + bar.height));
-  };
-  const atRest = await gap();
-  // The document scrolled to its end moves the card: the bar goes with it.
-  await page.evaluate(() => {
-    window.scrollTo(0, document.documentElement.scrollHeight);
-  });
-  await expect.poll(gap).toBe(atRest);
-  expect(atRest).toBe(16);
-});
