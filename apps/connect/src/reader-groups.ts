@@ -244,9 +244,18 @@ const pageOf: Record<
 };
 
 /**
- * A read of the account starting now: Microsoft's asks the token's own
- * account; Google's, the address its provider confirmed, or none without
- * one.
+ * Whether a provider's read asks about the account's address (Google's)
+ * rather than the token's own account (Microsoft's `/me`).
+ */
+const asksByAddress: Readonly<Record<GroupProvider, boolean>> = {
+  microsoft: false,
+  google: true,
+};
+
+/**
+ * A read of the account starting now: one asked by address starts from
+ * the address its provider confirmed, or none without one; any other,
+ * from the token's own account.
  */
 const readingFrom = (
   provider: GroupProvider,
@@ -254,7 +263,7 @@ const readingFrom = (
   address: string | null
 ): ReaderGroupsReading | undefined => {
   let start: string | undefined = me;
-  if (provider === "google") {
+  if (asksByAddress[provider]) {
     start = address === null ? undefined : keyOf(address);
   }
   return start === undefined
@@ -377,7 +386,8 @@ const countedDatabase = (
  * userinfo, so an address given to someone else since the turn's address
  * was confirmed keeps nothing of what was asked about it. A provider asked
  * about the token's own account (Microsoft's `/me`) has nothing to prove:
- * no one else's can become it.
+ * no one else's can become it. One asked by address with no userinfo to
+ * prove it by proves nothing.
  */
 const proved = async (
   provider: GroupProvider,
@@ -386,9 +396,12 @@ const proved = async (
   accountId: string,
   address: string | null
 ): Promise<boolean> => {
+  if (!asksByAddress[provider]) {
+    return true;
+  }
   const config = providerFor(provider);
   if (config?.kind !== "oauth" || config.userinfo === undefined) {
-    return true;
+    return false;
   }
   const now = await config.userinfo(token, tenant, accountId);
   return now !== null && address !== null && keyOf(now) === keyOf(address);

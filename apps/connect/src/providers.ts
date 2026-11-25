@@ -36,10 +36,11 @@ import {
 // generic OAuth flow (src/oauth.ts) runs them all, and one API-key sign-in
 // those that take a key.
 //
-// The suites, Microsoft 365 and Google Workspace, are configured here.
-// Grasp owns one multi-tenant app per suite; its client ID and secret are
-// Worker secrets on connect (threat model Q1), and a suite whose secrets
-// are unset can't be connected. Every suite is pinned to the
+// Microsoft 365 is configured here until its connector declares its
+// sign-in (GRA-2324); Google Workspace's connector declares its own, which
+// `appRecord` reads like any app's. Grasp owns one multi-tenant app per
+// suite; its client ID and secret are Worker secrets on connect (threat
+// model Q1), and a suite whose secrets are unset can't be connected. Every suite is pinned to the
 // organization's own tenant, from the deployment's sign-in config: the
 // flow asks the provider for that tenant only where the provider can do
 // so, and the account in the ID token must be in it (threat model CN5).
