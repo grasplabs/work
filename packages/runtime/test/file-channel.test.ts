@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { fileChannel } from "../src/file-channel.ts";
+import { fileChannel } from "../src/app/file-channel.ts";
 
 // A page's file channel, through the page's own fetch: its requests stop
 // when they're cancelled, also while they wait for the person to name.

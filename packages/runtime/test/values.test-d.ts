@@ -10,9 +10,9 @@ import type {
   InferInput,
   MoneyValue,
   ScheduleValue,
-} from "../src/value-types.ts";
-import { v } from "../src/values.ts";
-import type { ValueIssue } from "../src/values.ts";
+} from "../src/common/value-types.ts";
+import { v } from "../src/common/values.ts";
+import type { ValueIssue } from "../src/common/values.ts";
 
 // A caller may leave out a field with a default; a handler always gets it.
 const note = v.object({

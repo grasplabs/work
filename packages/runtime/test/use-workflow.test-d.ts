@@ -9,9 +9,9 @@
 // `vp check`, never run: every `@ts-expect-error` must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
-import type { DecisionValueOf, Id, RunHandle } from "../src/index.ts";
-import { useWorkflow } from "../src/react.ts";
-import type { AppErrorPayload, PendingControl } from "../src/react.ts";
+import type { DecisionValueOf, Id, RunHandle } from "../src/app/index.ts";
+import { useWorkflow } from "../src/app/react.ts";
+import type { AppErrorPayload, PendingControl } from "../src/app/react.ts";
 import { api, workflows } from "./notes/server/_generated/api.ts";
 
 declare const noteId: Id<"notes">;

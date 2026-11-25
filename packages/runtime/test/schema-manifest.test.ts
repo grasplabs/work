@@ -8,12 +8,16 @@ import {
   schemaHash,
   schemaLimits,
   schemaManifest,
-} from "../src/host.ts";
-import type { AccessMode, SchemaManifest, TableAccess } from "../src/host.ts";
-import type { AnySchema } from "../src/value-schema.ts";
-import type { StringSchema, ValueShape } from "../src/value-types.ts";
-import { defineSchema, defineTable, rows, v } from "../src/values.ts";
-import type { SchemaDefinition } from "../src/values.ts";
+} from "../src/app/host.ts";
+import type {
+  AccessMode,
+  SchemaManifest,
+  TableAccess,
+} from "../src/app/host.ts";
+import type { AnySchema } from "../src/common/value-schema.ts";
+import type { StringSchema, ValueShape } from "../src/common/value-types.ts";
+import { defineSchema, defineTable, rows, v } from "../src/common/values.ts";
+import type { SchemaDefinition } from "../src/common/values.ts";
 
 // A schema's canonical manifest, its hash, the diff of two versions and
 // the reading of a manifest of unknown origin. Pure, so unit tests; a

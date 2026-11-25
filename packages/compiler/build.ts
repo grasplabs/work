@@ -258,9 +258,9 @@ const ownSourceOf = (specifier: string): string | undefined => {
  * alone (`serverRunner`, kit.ts).
  */
 const runtimeFiles: Readonly<Record<string, string>> = {
-  [previewRuntime]: "src/preview-runtime.ts",
-  [previewRefresh]: "src/preview-refresh.ts",
-  [serverRunner]: "src/runner.ts",
+  [previewRuntime]: "src/app/preview-runtime.ts",
+  [previewRefresh]: "src/app/preview-refresh.ts",
+  [serverRunner]: "src/app/runner.ts",
 };
 
 /** The runtime file a kit module no package exports is built from, if it is one. */
@@ -1021,9 +1021,9 @@ const emitOwnDeclarations = (
 
 /**
  * Where a type chunk goes in the kit's types, under `/node_modules/`: at
- * the source of its main module (`@grasp-os/runtime/src/react` for the chunk
+ * the source of its main module (`@grasp-os/runtime/src/app/react` for the chunk
  * of `@grasp-os/runtime/react`), so a diagnostic that names a module
- * (`typeof import("/node_modules/@grasp-os/runtime/src/react")`) names it as
+ * (`typeof import("/node_modules/@grasp-os/runtime/src/app/react")`) names it as
  * a check of the sources did, with no hash that changes from release to
  * release. A chunk the entries share takes `.shared.d.ts` there.
  */
@@ -1083,7 +1083,7 @@ const ownDeclarations = (declarations: Map<string, string>): RolldownPlugin => {
 
 /**
  * The type chunks of the own modules among `specifiers`, by their path in
- * the kit's types (`/node_modules/@grasp-os/runtime/src/react.d.ts`), with a
+ * the kit's types (`/node_modules/@grasp-os/runtime/src/app/react.d.ts`), with a
  * package.json for each own package that exports its modules' chunks
  * and nothing else. Other packages stay imports, resolved among the
  * kit's types.
