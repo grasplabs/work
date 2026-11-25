@@ -17,6 +17,7 @@ import type { ReactNode } from "react";
 import type { RowAction, SidebarMore, SidebarRow } from "../frame/sidebar.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
+import { useTabShown } from "../use-tab-shown.ts";
 import { chatLink, useGoToChat } from "./chat-link.ts";
 import { useChatsWindow } from "./chat-switcher.tsx";
 import { onChatsChanged } from "./chats-changed.ts";
@@ -32,10 +33,16 @@ import { useChatOpenBeside } from "./global-chat.tsx";
 // an answer starts or ends or a chat is read (chats-changed.ts), so a
 // row's Working mark and unread dot come and go with it, and when the
 // person comes back to the tab, for what was answered while they were
-// away.
+// away. Core has no live word for a chat answering elsewhere (in the
+// background, on another device): while a listed chat works and the tab
+// is shown, the list is read again every few seconds, so its Working mark
+// turns into the dot without the person moving; it stops once none works.
 
 /** How many recent chats the sidebar lists. */
 const recentCount = 8;
+
+/** How often the list is read again while a listed chat works. */
+export const workingReadMs = 3000;
 
 /** The person's chats from core, the most recently used first; none while `enabled` is false. */
 const useChats = (enabled: boolean): ChatSummary[] => {
@@ -82,6 +89,20 @@ const useChats = (enabled: boolean): ChatSummary[] => {
       document.removeEventListener("visibilitychange", back);
     };
   }, [enabled, router]);
+  // A chat works, answering where no page of this tab follows it: read
+  // again until none does, while anyone can see it.
+  const working =
+    useTabShown() && enabled && chats.some(({ running }) => running);
+  useEffect(() => {
+    const timer = working
+      ? setInterval(() => {
+          read();
+        }, workingReadMs)
+      : undefined;
+    return () => {
+      clearInterval(timer);
+    };
+  }, [working]);
   return enabled ? chats : [];
 };
 

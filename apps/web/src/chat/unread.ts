@@ -6,10 +6,10 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  useSyncExternalStore,
 } from "react";
 
 import { useCore } from "../use-core.ts";
+import { useTabShown } from "../use-tab-shown.ts";
 import { tellChatsChanged } from "./chats-changed.ts";
 
 // Where the person has read a chat to, as Slack and Linear keep it: one
@@ -39,19 +39,6 @@ export const firstUnseenAnswer = (
     : messages.find(
         (message) => message.role === "assistant" && message.id > seenUpTo
       )?.id;
-
-/** Whether the tab is shown now, followed as it changes. */
-const useTabShown = (): boolean =>
-  useSyncExternalStore(
-    (onChange) => {
-      document.addEventListener("visibilitychange", onChange);
-      return () => {
-        document.removeEventListener("visibilitychange", onChange);
-      };
-    },
-    () => document.visibilityState === "visible",
-    () => false
-  );
 
 /** What the chat's open thread draws of where the person had read to. */
 export interface NewLine {
@@ -158,8 +145,16 @@ export const useNewLine = (
     tellChatsChanged();
     return before;
   });
+  // Only once the page has the chat's messages: a watch core refused
+  // (too many open, say) shows nothing, so nothing is read.
+  const { loaded } = view;
   useEffect(() => {
-    if (chatId === undefined || !looking || asked.current === count) {
+    if (
+      chatId === undefined ||
+      !looking ||
+      !loaded ||
+      asked.current === count
+    ) {
       return;
     }
     asked.current = count;
@@ -170,7 +165,7 @@ export const useNewLine = (
         setReply({ count, seenUpTo: false });
       }
     })();
-  }, [chatId, looking, count]);
+  }, [chatId, looking, loaded, count]);
   const next =
     line?.count === count
       ? undefined
@@ -233,20 +228,20 @@ export const opensAtNewLine = ({
 
 /**
  * Whether `row` is drawn, not skipped while out of view
- * (`content-visibility: auto`); drawn where the browser can't say.
+ * (`content-visibility: auto`): undefined for a row with nothing in it, or
+ * where the browser can't say.
  */
-const drawn = (row: Element | null | undefined): boolean =>
-  row?.firstElementChild?.checkVisibility({ contentVisibilityAuto: true }) ??
-  true;
+const drawn = (row: Element | null | undefined): boolean | undefined =>
+  row?.firstElementChild?.checkVisibility({ contentVisibilityAuto: true });
 
 /**
  * Opens the thread `logId` (its MessageScrollerViewport) at its New line,
  * near the top with the log's own room over it (its scroll padding), when
  * what is unread doesn't fit (`opensAtNewLine`); else it stays at the end,
- * where it opened. At once, never animated. Once the rows are laid out at
- * their size, not the size a row out of view is given before it is first
- * drawn, as their size changes: before the page is painted, so nothing
- * shows the end first. Each line once: a chat opened again in the dock
+ * where it opened. At once, never animated. Once the browser has drawn
+ * the rows in view, not while every row still has a skipped row's size,
+ * as their size changes: before the page is painted, so nothing shows the
+ * end first. Each line once: a chat opened again in the dock
  * with a new line is placed at it, one without stays where it was. Inside
  * the thread's MessageScrollerProvider.
  */
@@ -265,15 +260,17 @@ export const OpenAtNewLine = ({
     const rows = [...log.querySelectorAll<HTMLElement>("[data-message-id]")];
     const at = rows.findIndex((row) => row.dataset.messageId === newLineRow);
     const row = rows[at];
-    // Until the browser has drawn the rows in view, at the end, sizes are
-    // a skipped row's stand-in.
-    if (row === undefined || !drawn(rows.at(-1))) {
+    // Until the browser has drawn any row, sizes are a skipped row's
+    // stand-in: the first frame after the thread loads.
+    if (row === undefined || !rows.some((each) => drawn(each) === true)) {
       return false;
     }
-    // The answer under the line is drawn when it is near the view: then
-    // measured. Not drawn, it lies further up than that, so what is unread
-    // is taller than the view.
-    const near = drawn(rows[at + 1]);
+    // Measured when the rows from the line to the end are drawn: the view
+    // stands at the end, and the line is near it. Else the line lies
+    // further from the view than the browser draws, above the end or
+    // above a place the person scrolled back to before the dock closed:
+    // gone to at once. Where it fits after all, the log stops at its end.
+    const near = drawn(rows[at + 1]) !== false && drawn(rows.at(-1)) !== false;
     const lineTop =
       row.getBoundingClientRect().top -
       log.getBoundingClientRect().top +

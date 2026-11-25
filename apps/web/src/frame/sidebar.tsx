@@ -373,10 +373,12 @@ const styles = stylex.create({
     justifyContent: "center",
     marginInlineStart: "auto",
   },
-  // The unread dot: small, round, in the primary ink.
+  // The unread dot: small and round (the pill radius, no corner shape, so
+  // never a squircle), in the primary ink: two of the Working mark's
+  // pixels across, so it stands as large as that mark's light.
   unreadDot: {
-    width: space["2"],
-    height: space["2"],
+    width: `calc(${size.agentIndicatorDot} * 2)`,
+    height: `calc(${size.agentIndicatorDot} * 2)`,
     borderRadius: radius.full,
     backgroundColor: {
       default: colors.primary,

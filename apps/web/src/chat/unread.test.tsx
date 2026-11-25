@@ -274,6 +274,25 @@ describe("where the person has read a chat to", () => {
     });
   });
 
+  it("marks nothing read until the page has the chat's messages: a watch core refused shows nothing, so nothing is read", async () => {
+    showTab(true);
+    const messages = [question(1), answer(2)];
+    const chat = await opened(
+      { messages: [], running: false, loaded: false },
+      0
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const refused = chat.markRead.mock.calls.length;
+
+    await chat.show({ view: { messages, running: false, loaded: true } });
+    await vi.waitFor(() => {
+      expect(chat.line()).toStrictEqual({ decided: true, before: 2 });
+    });
+    expect(refused).toBe(0);
+  });
+
   it("opens with no New line when nothing is unread", async () => {
     showTab(true);
     const view = {

@@ -20,6 +20,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { answerAgentsOf, ChatThread } from "./thread.tsx";
+import { newLineRow } from "./unread.ts";
 
 // An answer's steps as one chain of thought in the thread. What the model
 // thought: while it thinks, its words stream in, open under "Thinking";
@@ -1167,6 +1168,73 @@ const cameBack = [
   answerBy(4, "About 3,500."),
 ];
 
+/** Whether `element` is the log that scrolls. */
+const isLog = (element: Element): boolean =>
+  element instanceof HTMLElement &&
+  element.dataset.slot === "message-scroller-viewport";
+
+// Where the thread opens with a New line, as the browser lays it out:
+// happy-dom lays nothing out, so the rows' sizes, which rows the browser
+// has drawn (the rest skipped while out of view) and the size changes
+// that place the line are given here. The view is 600px tall and the
+// line 900px down the rows.
+const laidOut = ({
+  height,
+  drawnRows,
+}: {
+  height: number;
+  drawnRows: readonly string[];
+}) => {
+  vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(
+    function scrollHeight(this: HTMLElement) {
+      return isLog(this) ? height : 0;
+    }
+  );
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(
+    function clientHeight(this: HTMLElement) {
+      return isLog(this) ? 600 : 0;
+    }
+  );
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+    function rect(this: HTMLElement) {
+      const top = this.dataset.messageId === newLineRow ? 900 : 0;
+      return DOMRect.fromRect({ x: 0, y: top, width: 600, height: 40 });
+    }
+  );
+  vi.spyOn(Element.prototype, "checkVisibility").mockImplementation(
+    function checkVisibility(this: Element) {
+      const row = this.parentElement?.dataset.messageId;
+      return row !== undefined && drawnRows.includes(row);
+    }
+  );
+  // Each size watch hears the sizes once, as the browser's first does.
+  vi.stubGlobal(
+    "ResizeObserver",
+    class implements ResizeObserver {
+      readonly #heard: ResizeObserverCallback;
+      #watching = false;
+      constructor(heard: ResizeObserverCallback) {
+        this.#heard = heard;
+      }
+      observe() {
+        this.#watching = true;
+        queueMicrotask(() => {
+          if (this.#watching) {
+            this.#heard([], this);
+          }
+        });
+      }
+      unobserve() {
+        this.#watching = false;
+      }
+      disconnect() {
+        this.#watching = false;
+      }
+    }
+  );
+  return vi.spyOn(HTMLElement.prototype, "scrollTo");
+};
+
 describe("a thread's New line", () => {
   afterEach(() => {
     act(() => {
@@ -1174,6 +1242,8 @@ describe("a thread's New line", () => {
     });
     root = undefined;
     document.body.replaceChildren();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("stands over the first answer the person hadn't seen, after their own question, as a separator named New that takes no focus", async () => {
@@ -1198,5 +1268,44 @@ describe("a thread's New line", () => {
   it("is not drawn when nothing was unread", async () => {
     await thread(cameBack);
     expect(newLine()).toBeNull();
+  });
+
+  /** The thread's rows' ids, in order: the line, and the answer under it. */
+  const cameBackRows = ["q1", "a2", "q3", newLineRow, "a4"];
+
+  it("goes to the New line when it lies further from the view than the browser draws: the end not drawn, as after scrolling back before the dock closed", async () => {
+    const scrolled = laidOut({ height: 2000, drawnRows: ["q1", "a2"] });
+    await thread(cameBack, null, [], undefined, undefined, undefined, 4);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // At once, never animated.
+    expect(scrolled).toHaveBeenCalledWith(
+      expect.objectContaining({ behavior: "auto" })
+    );
+  });
+
+  it("waits, going nowhere, while the browser has drawn no row yet, and stays at the end when what is unread fits", async () => {
+    const waiting = laidOut({ height: 2000, drawnRows: [] });
+    await thread(cameBack, null, [], undefined, undefined, undefined, 4);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const whileNoneDrawn = waiting.mock.calls.length;
+    act(() => {
+      root?.unmount();
+    });
+    document.body.replaceChildren();
+    vi.restoreAllMocks();
+    const fitting = laidOut({ height: 1400, drawnRows: cameBackRows });
+    await thread(cameBack, null, [], undefined, undefined, undefined, 4);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect({ whileNoneDrawn, fits: fitting.mock.calls.length }).toStrictEqual({
+      whileNoneDrawn: 0,
+      fits: 0,
+    });
   });
 });

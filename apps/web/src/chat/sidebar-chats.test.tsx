@@ -24,7 +24,7 @@ import { forgetActiveChats, setActiveChat } from "./active-chat.ts";
 import { closeChat, openChat } from "./chat-layout.ts";
 import { tellChatsChanged } from "./chats-changed.ts";
 import { GlobalChatProvider } from "./global-chat.tsx";
-import { useRecentChats } from "./sidebar-chats.tsx";
+import { useRecentChats, workingReadMs } from "./sidebar-chats.tsx";
 
 // The sidebar's recent chats on a phone, where the sidebar is a sheet over
 // the page: a chat is a link to its own page, which the frame's sheet
@@ -179,6 +179,15 @@ const chatNamed = (
   title,
   running,
 });
+
+/** Whether the tab is shown, as the page reads it. */
+const setShown = (visible: boolean) => {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    get: () => (visible ? "visible" : "hidden"),
+  });
+  document.dispatchEvent(new Event("visibilitychange"));
+};
 
 /** How many unread dots the sidebar shows. */
 const dots = () =>
@@ -626,5 +635,60 @@ describe("renaming a recent chat from its row", () => {
       forgetActiveChats();
     });
     expect(beside).toBe(0);
+  });
+
+  it("reads the list again every few seconds while a chat works and the tab is shown, so its Working mark turns into the dot, and stops once none works or the tab hides", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      let state = { running: true, unread: false };
+      const list = vi.fn<() => Promise<ChatSummary[]>>(
+        async () =>
+          await Promise.resolve([
+            { ...chatNamed("chat-1", "Month-end"), ...state },
+          ])
+      );
+      await shownWith({ list });
+      await vi.waitFor(() => {
+        expect(
+          document.querySelectorAll("[data-slot=sidebar-row-working]")
+        ).toHaveLength(1);
+      });
+      /** How many times the list is read over `ms`. */
+      const readsOver = async (ms: number): Promise<number> => {
+        const before = list.mock.calls.length;
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(ms);
+        });
+        return list.mock.calls.length - before;
+      };
+      const working = await readsOver(workingReadMs * 2);
+
+      // Hidden: nobody sees it, so nothing is read.
+      act(() => {
+        setShown(false);
+      });
+      const hidden = await readsOver(workingReadMs * 3);
+      // Shown again (read once for coming back), then the answer ends in
+      // the background: the next read turns the mark into the dot.
+      state = { running: false, unread: true };
+      act(() => {
+        setShown(true);
+      });
+      await vi.waitFor(() => {
+        expect(dots()).toBe(1);
+      });
+      const done = await readsOver(workingReadMs * 3);
+
+      expect({
+        working,
+        hidden,
+        done,
+        marks: document.querySelectorAll("[data-slot=sidebar-row-working]")
+          .length,
+      }).toStrictEqual({ working: 2, hidden: 0, done: 0, marks: 0 });
+    } finally {
+      setShown(true);
+      vi.useRealTimers();
+    }
   });
 });
