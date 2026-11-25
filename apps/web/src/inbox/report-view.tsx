@@ -18,6 +18,7 @@ import {
 import { Heading } from "@grasp-os/ui/components/heading";
 import { StatGroup } from "@grasp-os/ui/components/stat";
 import { Text } from "@grasp-os/ui/components/text";
+import { texture } from "@grasp-os/ui/lib/styles";
 import { radius, space } from "@grasp-os/ui/lib/tokens.stylex";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg, plural } from "@lingui/core/macro";
@@ -25,13 +26,12 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import type { ReactNode, Ref } from "react";
 
-import { Texture } from "../connections/app/texture.tsx";
 import { formatDay, formatPercent } from "../format.ts";
 
 // The weekly report as a page of its own, made only of Damsko's parts: a
 // StatGroup for its figures, a Chart for the runs per day, ChartBarList
 // for the workflows and what could be better, Card, Heading and Text for
-// the rest, the head on the product's faint dither (connections' Texture).
+// the rest, the head on the system's faint dither (Damsko's texture).
 // What it shows comes from `boardReport.read()`; a part core
 // couldn't read says so in its place, never as nothing that ran. It
 // downloads, and prints, as a snapshot of exactly this page
@@ -271,7 +271,7 @@ const Report = ({ week }: { week: Week }) => {
   return (
     <>
       <div {...stylex.props(styles.head)}>
-        <Texture />
+        <span aria-hidden="true" {...stylex.props(texture)} />
         {over === "" ? null : (
           <Text color="muted" size="sm" style={styles.over}>
             {over}

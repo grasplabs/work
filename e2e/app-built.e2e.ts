@@ -108,6 +108,8 @@ test("a builder makes an App from what they want done, shares it with their team
     .getByRole("option", { name: "Person" })
     .filter({ hasText: userIdEnd })
     .click(built);
+  // The list stays open for more picks; Escape closes it over the chip.
+  await page.keyboard.press("Escape");
   await sharing.getByRole("button", { name: "Add", exact: true }).click();
   // The share held: Share lists them, its one Person.
   await expect(

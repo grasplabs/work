@@ -72,16 +72,6 @@ const styles = stylex.create({
     paddingBlockEnd: space["8"],
   },
   section: { display: "flex", flexDirection: "column", gap: space["3"] },
-  // Why it stopped, as wide as the alert's words: Damsko's alert keeps an
-  // empty action column's 8px gap at its end where it is wide (the
-  // registry gap "Alert's empty action column"), which the reference's has
-  // not.
-  stopped: {
-    marginInlineEnd: {
-      default: 0,
-      "@container (width >= 24rem)": `calc(-1 * ${space["2"]})`,
-    },
-  },
   when: {
     display: "flex",
     flexWrap: "wrap",
@@ -267,7 +257,7 @@ export const RunPage = ({
             {run.error === undefined ? null : (
               <Alert variant="destructive">
                 <AlertTitle>{t`It stopped here`}</AlertTitle>
-                <AlertDescription style={styles.stopped}>
+                <AlertDescription>
                   <RunResultView builder={builder} run={run} seesResult />
                 </AlertDescription>
               </Alert>

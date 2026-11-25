@@ -269,17 +269,20 @@ describe("Sharing an App or a workflow", () => {
 
     await openPicker();
     const first = optionLines();
-    // Damsko's Combobox takes one at a time (share-access.tsx).
+    // Both picked at once, each a chip, then added at one level.
     await pickOption("Ann");
-    await press(button("Add"));
-    await openPicker();
     await pickOption("Sales");
+    const chips = [
+      button("Remove Ann") !== undefined,
+      button("Remove Sales (team)") !== undefined,
+    ];
     await press(button("Add"));
     await openPicker();
     const second = optionLines();
 
-    expect({ first, second, asked, listed: listed() }).toStrictEqual({
+    expect({ first, chips, second, asked, listed: listed() }).toStrictEqual({
       first: ["Ann", "Bo", "Sales (team)"],
+      chips: [true, true],
       second: ["AnnHas access", "Bo", "Sales (team)Has access"],
       asked: [
         ["add", "person", "user-ann", "user"],

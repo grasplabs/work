@@ -230,6 +230,14 @@ export interface I18nCatalog {
     /** Said in the list when nothing matches. */
     empty: string;
     notChoice: (value: string) => string;
+    /** The name of a chosen value's remove button, with several values ("Remove Amara Okafor"). */
+    remove: (label: string) => string;
+    /** Said when a chosen value is taken away, with several values ("Amara Okafor removed"). */
+    removed: (label: string) => string;
+    /** Said as the list narrows to what was typed ("3 results"); none is `empty`. */
+    results: (count: number) => string;
+    /** Said while the items are still loading. */
+    loading: string;
     /** The name of the button that opens the list. */
     trigger: string;
   };
@@ -1000,6 +1008,11 @@ const english: I18nCatalog = {
   combobox: {
     empty: "No results",
     notChoice: (value: string) => `${value} is not one of the choices`,
+    remove: (label: string) => `Remove ${label}`,
+    removed: (label: string) => `${label} removed`,
+    results: (count: number) =>
+      count === 1 ? "1 result" : `${String(count)} results`,
+    loading: "Loading",
     trigger: "Show the choices",
   },
   command: {

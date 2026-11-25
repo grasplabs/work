@@ -30,6 +30,7 @@ import * as stylex from "@stylexjs/stylex";
 import { Fragment, isValidElement, useState } from "react";
 import type { ReactNode } from "react";
 
+import { alertVars } from "../../components/alert.stylex";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -57,7 +58,7 @@ import {
 } from "../../components/sidebar";
 import { Icon, PanelRightIcon } from "../../lib/icons";
 import { colors, font, media, size, space } from "../../lib/tokens.stylex";
-import { listOf } from "../../lib/utils";
+import { isBlank, listOf } from "../../lib/utils";
 import type { LayoutStyle } from "../../lib/utils";
 
 /** The words an AppShell says, for a screen reader: English here; pass the product's as `labels`. */
@@ -199,6 +200,8 @@ const styles = stylex.create({
     marginInlineStart: "auto",
   },
   body: { flexGrow: 1, minHeight: 0 },
+  // Across the card's top a banner Alert is a band: no corner of its own (alertVars).
+  banner: { flexShrink: 0, [alertVars.bannerCorner]: "0px" },
   // The page's room, told to a banner PageHeader (pageBandVars), which takes it back to stand flush.
   page: {
     boxSizing: "border-box",
@@ -320,7 +323,11 @@ const ShellPage = ({
   return (
     <SidebarInset>
       <div {...stylex.props(styles.frame)}>
-        {banner}
+        {isBlank(banner) ? null : (
+          <div data-slot="app-shell-banner" {...stylex.props(styles.banner)}>
+            {banner}
+          </div>
+        )}
         <header data-slot="app-shell-header" {...stylex.props(styles.header)}>
           <SidebarTrigger />
           <div {...stylex.props(styles.where)}>{where}</div>

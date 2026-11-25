@@ -1088,6 +1088,10 @@ msgstr "{name} solo trabaja cuando se le pide."
 msgid "{name} reads only. Change to Write"
 msgstr "{name} solo lee. Cambiar a Escritura"
 
+#: src/frame/ui-words.tsx
+msgid "{name} removed"
+msgstr "{name} eliminado"
+
 #: src/drafts/draft-history.tsx
 msgid "{name} restored an earlier state"
 msgstr "{name} restauró un estado anterior"
@@ -3491,6 +3495,7 @@ msgid "Ask for the app you need, and an admin can add it."
 msgstr "Pide la app que necesitas y un administrador puede añadirla."
 
 #: src/chat/global-chat.tsx
+#: src/settings/composer-settings.tsx
 msgid "Ask Grasp"
 msgstr "Pregunta a Grasp"
 
@@ -4428,6 +4433,10 @@ msgstr "Cuentas de chat, invitaciones y notificaciones"
 msgid "Chat apps"
 msgstr "Aplicaciones de chat"
 
+#: src/settings/composer-settings.tsx
+msgid "Chat box"
+msgstr "Cuadro del chat"
+
 #: src/chat/chat-window.tsx
 msgid "Chat name"
 msgstr "Nombre del chat"
@@ -4744,6 +4753,10 @@ msgstr "Monedas"
 #: src/onboarding/interviews-progress.tsx
 msgid "colleagues talked"
 msgstr "compañeros han hablado"
+
+#: src/settings/composer-settings.tsx
+msgid "Colour"
+msgstr "Color"
 
 #: src/agents/agent-look.tsx
 #: src/agents/new-agent.tsx
@@ -6100,6 +6113,11 @@ msgstr "Descartó una señal de conocimiento"
 msgid "Dismissed an opportunity"
 msgstr "Descartó una oportunidad"
 
+#: src/settings/composer-settings.tsx
+msgctxt "the chat box's edge"
+msgid "Dither"
+msgstr "Tramado"
+
 #: src/onboarding/team-step.tsx
 msgid "Do this later"
 msgstr "Hacerlo más tarde"
@@ -6424,6 +6442,10 @@ msgstr "Correos, notas y archivos anteriores sobre las personas y el tema."
 #: src/agents/agent-templates.ts
 msgid "Earlier reminders and replies from the client in the mailbox."
 msgstr "Recordatorios anteriores y respuestas del cliente en el buzón."
+
+#: src/settings/composer-settings.tsx
+msgid "Edge"
+msgstr "Borde"
 
 #: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
@@ -8362,6 +8384,10 @@ msgstr "¿Cómo debe trabajar {name}?"
 msgid "How sure"
 msgstr "Qué tan seguro"
 
+#: src/settings/composer-settings.tsx
+msgid "How that light is drawn"
+msgstr "Cómo se dibuja esa luz"
+
 #: src/brain/opportunity-drafts.ts
 msgid "How the team does it today:"
 msgstr "Así lo hace el equipo hoy:"
@@ -9686,6 +9712,10 @@ msgstr "Datos duraderos"
 msgid "Later today"
 msgstr "Más tarde hoy"
 
+#: src/settings/composer-settings.tsx
+msgid "Lavender"
+msgstr "Lavanda"
+
 #: src/workflows/workflow-flow.tsx
 msgid "Lay it out left to right"
 msgstr "Disponer de izquierda a derecha"
@@ -9851,6 +9881,11 @@ msgstr "¿Levantar la retención legal {hold} de la versión {label}?"
 msgid "Light"
 msgstr "Claro"
 
+#: src/settings/composer-settings.tsx
+msgctxt "Grasp's own working light"
+msgid "Light"
+msgstr "Luz"
+
 #: src/interview/frame.tsx
 #: src/onboarding/calm-frame.tsx
 msgid "Light or dark"
@@ -10015,6 +10050,7 @@ msgstr "Cargado"
 
 #: src/brain/forget.tsx
 #: src/brain/learned-section.tsx
+#: src/frame/ui-words.tsx
 #: src/onboarding/place-picker.tsx
 msgid "Loading"
 msgstr "Cargando"
@@ -10442,6 +10478,10 @@ msgstr "Métodos"
 #: src/connections/http-connections.tsx
 msgid "Methods it allows"
 msgstr "Métodos que permite"
+
+#: src/settings/composer-settings.tsx
+msgid "Mint"
+msgstr "Menta"
 
 #: src/connections/app/words.ts
 msgctxt "what a tool may do"
@@ -15712,6 +15752,10 @@ msgstr "Mostrar contraseña"
 msgid "Show payload"
 msgstr "Mostrar contenido"
 
+#: src/projects/file-item-dialog.tsx
+msgid "Show the apps and workflows"
+msgstr "Mostrar las apps y los flujos de trabajo"
+
 #: src/frame/ui-words.tsx
 msgid "Show the choices"
 msgstr "Mostrar las opciones"
@@ -15997,6 +16041,11 @@ msgstr "Omitido, puede contener datos todavía"
 msgctxt "what a carousel's slide is"
 msgid "slide"
 msgstr "diapositiva"
+
+#: src/settings/composer-settings.tsx
+msgctxt "the chat box's edge"
+msgid "Smooth"
+msgstr "Suave"
 
 #: src/agents/setup/words.ts
 msgid "Some teams"
@@ -17443,6 +17492,10 @@ msgstr "El último correo con cada lead."
 #: src/settings/directory-reads.tsx
 msgid "The last read couldn’t list the accounts deleted in the directory."
 msgstr "La última lectura no pudo listar las cuentas eliminadas en el directorio."
+
+#: src/settings/composer-settings.tsx
+msgid "The light around the box while Grasp works"
+msgstr "La luz alrededor del cuadro mientras Grasp trabaja"
 
 #: src/interview/transcript.tsx
 msgid "The line is deleted now, and so is what I marked in it. What I wrote down from it is in what I read back to you at the end: take it out there, and it is deleted for good when our conversation is finished. This can’t be undone."
