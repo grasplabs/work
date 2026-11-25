@@ -13,6 +13,7 @@ import {
 } from "@grasp-os/ui/components/collapsible";
 import { Container } from "@grasp-os/ui/components/container";
 import { Heading } from "@grasp-os/ui/components/heading";
+import { ItemGroup } from "@grasp-os/ui/components/item";
 import { PageHeader } from "@grasp-os/ui/components/page-header";
 import { Stepper } from "@grasp-os/ui/components/stepper";
 import type { StepperStep } from "@grasp-os/ui/components/stepper";
@@ -39,7 +40,6 @@ import { FileRow, RunFilesReader } from "./run-files.tsx";
 import type { RunFilesRead } from "./run-files.tsx";
 import { runStatusLabels, runToneOf } from "./run-status.ts";
 import { WaitingForAiProvider } from "./runs.tsx";
-import { SeparatedItems } from "./separated-items.tsx";
 import { StopRun } from "./stop-run.tsx";
 import { RunTraceDetail } from "./traces.tsx";
 
@@ -172,13 +172,16 @@ const RunFiles = ({
           <Heading level={2} size="xs">
             {label}
           </Heading>
-          <SeparatedItems
-            aria-label={label}
-            rows={files.map((file) => ({
-              key: file.id,
-              row: <FileRow file={file} run={run.id} workflow={workflow} />,
-            }))}
-          />
+          <ItemGroup separated aria-label={label}>
+            {files.map((file) => (
+              <FileRow
+                key={file.id}
+                file={file}
+                run={run.id}
+                workflow={workflow}
+              />
+            ))}
+          </ItemGroup>
         </section>
       )}
     </>

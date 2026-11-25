@@ -169,6 +169,7 @@ const styles = stylex.create({
     paddingBlock: space["3"],
     paddingInline: space["3"],
     borderRadius: alertVars.bannerCorner,
+    cornerShape: radius.shape,
     boxShadow: size.borderStrong,
   },
   default: { backgroundColor: colors.alertBgDefault },
@@ -237,7 +238,13 @@ const styles = stylex.create({
     },
     marginBlockEnd: `calc(-1 * ${space["1"]})`,
   },
-  close: { display: "flex", marginInlineStart: space["4"] },
+  // A step off the words, whose own controls stand under them: its touch target reaches the
+  // words' edge, half that step.
+  close: {
+    display: "flex",
+    marginInlineStart: space["4"],
+    "--tap-room-inline": `calc(${space["4"]} / 2)`,
+  },
 });
 
 const icons: Record<AlertVariant, IconData> = {

@@ -424,6 +424,7 @@ const styles = stylex.create({
   foldLast: {
     borderEndStartRadius: BOX_CORNER,
     borderEndEndRadius: BOX_CORNER,
+    cornerShape: radius.shape,
   },
   // The fold's ring stands a ring's width in from its edges: drawn on them it lay on the box's own
   // border, a second square border inside a rounded box. Last, it follows the rounded foot.

@@ -41,6 +41,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -89,7 +90,6 @@ import { useCoreAction } from "../use-core-action.ts";
 import { useHeldDialog } from "../workflows/held-dialog.ts";
 import { stateOf } from "../workflows/overview.ts";
 import type { OverviewRow, WorkflowState } from "../workflows/overview.ts";
-import { SeparatedItems } from "../workflows/separated-items.tsx";
 import { EmptyLine } from "./empty-line.tsx";
 import { FileItemDialog } from "./file-item-dialog.tsx";
 import { AddChat, ProjectChatList } from "./project-chats.tsx";
@@ -300,35 +300,30 @@ const Items = ({
   const items = pages.all.filter(({ type }) => type === kind);
   return (
     <>
-      <SeparatedItems
-        rows={items.map((item) => ({
-          key: `${item.type}:${item.id}`,
-          row: (
-            <Item size="sm">
-              <ItemMedia variant="default">
-                <Icon
-                  icon={
-                    item.type === "app" ? LayoutDashboardIcon : WorkflowIcon
-                  }
-                />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>
-                  <ItemLink item={item} />
-                </ItemTitle>
-                <ItemDescription>
-                  <SharedWords role={item.sharedAs} />
-                </ItemDescription>
-              </ItemContent>
-              {builds ? (
-                <ItemActions>
-                  <RemoveItem item={item} project={project} />
-                </ItemActions>
-              ) : null}
-            </Item>
-          ),
-        }))}
-      />
+      <ItemGroup separated>
+        {items.map((item) => (
+          <Item key={`${item.type}:${item.id}`} size="sm">
+            <ItemMedia variant="default">
+              <Icon
+                icon={item.type === "app" ? LayoutDashboardIcon : WorkflowIcon}
+              />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>
+                <ItemLink item={item} />
+              </ItemTitle>
+              <ItemDescription>
+                <SharedWords role={item.sharedAs} />
+              </ItemDescription>
+            </ItemContent>
+            {builds ? (
+              <ItemActions>
+                <RemoveItem item={item} project={project} />
+              </ItemActions>
+            ) : null}
+          </Item>
+        ))}
+      </ItemGroup>
       {pages.more ? (
         <Button
           disabled={pages.busy}
@@ -923,18 +918,15 @@ const Overview = ({
             </EmptyLine>
           ) : null}
           {filedWorkflows.length === 0 ? null : (
-            <SeparatedItems
-              rows={filedWorkflows.slice(0, slice).map((item) => ({
-                key: item.id,
-                row: (
-                  <WorkflowRow
-                    item={item}
-                    key={item.id}
-                    row={rows.get(item.id)}
-                  />
-                ),
-              }))}
-            />
+            <ItemGroup separated>
+              {filedWorkflows.slice(0, slice).map((item) => (
+                <WorkflowRow
+                  item={item}
+                  key={item.id}
+                  row={rows.get(item.id)}
+                />
+              ))}
+            </ItemGroup>
           )}
         </section>
       )}
@@ -960,12 +952,11 @@ const Overview = ({
             {t`None of your chats are in this project yet.`}
           </EmptyLine>
         ) : (
-          <SeparatedItems
-            rows={chats.slice(0, slice).map((chat) => ({
-              key: chat.id,
-              row: <ChatRow chat={chat} key={chat.id} />,
-            }))}
-          />
+          <ItemGroup separated>
+            {chats.slice(0, slice).map((chat) => (
+              <ChatRow chat={chat} key={chat.id} />
+            ))}
+          </ItemGroup>
         )}
       </section>
       {askOwner ? null : (
@@ -1006,30 +997,22 @@ const Overview = ({
             {ownerIsYou ? t`Only you so far.` : t`Only ${owner} so far.`}
           </EmptyLine>
         ) : (
-          <SeparatedItems
-            rows={[
-              {
-                key: "owner",
-                row: (
-                  <PersonRow
-                    name={project.owner.name ?? project.owner.id}
-                    role={t({ message: "Owner", context: "a project's owner" })}
-                    team={false}
-                  />
-                ),
-              },
-              ...people.slice(0, slice - 1).map((member) => ({
-                key: `${member.type}:${member.id}`,
-                row: (
-                  <PersonRow
-                    name={member.name ?? member.id}
-                    role={roleLabel(member.role)}
-                    team={member.type === "team"}
-                  />
-                ),
-              })),
-            ]}
-          />
+          <ItemGroup separated>
+            <PersonRow
+              key="owner"
+              name={project.owner.name ?? project.owner.id}
+              role={t({ message: "Owner", context: "a project's owner" })}
+              team={false}
+            />
+            {people.slice(0, slice - 1).map((member) => (
+              <PersonRow
+                key={`${member.type}:${member.id}`}
+                name={member.name ?? member.id}
+                role={roleLabel(member.role)}
+                team={member.type === "team"}
+              />
+            ))}
+          </ItemGroup>
         )}
       </section>
     </>

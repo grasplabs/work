@@ -16,6 +16,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -43,7 +44,6 @@ import {
 } from "../settings/section.tsx";
 import { useCore } from "../use-core.ts";
 import { useHeldDialog } from "../workflows/held-dialog.ts";
-import { SeparatedItems } from "../workflows/separated-items.tsx";
 
 // Settings › Security, as the library's Settings pattern has it: the
 // Chat apps card, and the devices the person is signed in on, each with its
@@ -216,13 +216,11 @@ const Devices = ({ sessions }: { sessions: Loaded<OwnSession[]> }) => {
       }
       title={t`Devices`}
     >
-      <SeparatedItems
-        aria-label={t`Devices`}
-        rows={ordered.map((session) => ({
-          key: session.id,
-          row: <DeviceRow session={session} />,
-        }))}
-      />
+      <ItemGroup separated aria-label={t`Devices`}>
+        {ordered.map((session) => (
+          <DeviceRow key={session.id} session={session} />
+        ))}
+      </ItemGroup>
     </SettingsGroup>
   );
 };

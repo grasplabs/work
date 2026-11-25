@@ -82,7 +82,7 @@ export interface HoldButtonProps extends Omit<
    * Button follows its press: busy with a spinner, then a tick or the alert for a moment.
    */
   onConfirm?: () => unknown;
-  /** Said while its work runs, and shown in place of its words ("Deleting"). */
+  /** Said while its work runs ("Deleting"); the spinner shows it, and the words stay, as Button's. */
   loadingText?: string;
   /** Said once its work is done, and shown in place of its words for a moment ("Deleted"). */
   successText?: string;

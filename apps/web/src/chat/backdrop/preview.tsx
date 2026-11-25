@@ -34,6 +34,7 @@ const styles = stylex.create({
     margin: 0,
     overflow: "hidden",
     borderRadius: radius.md,
+    cornerShape: radius.shape,
     backgroundColor: colors.card,
     boxShadow: tokens.previewShadow,
   },

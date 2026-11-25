@@ -51,6 +51,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -88,7 +89,6 @@ import { useCore } from "../use-core.ts";
 import { useHeldDialog } from "./held-dialog.ts";
 import { workflowVersions } from "./reads.ts";
 import { SectionCard } from "./section-card.tsx";
-import { SeparatedItems } from "./separated-items.tsx";
 import { inputSketchOf } from "./start-input.ts";
 import { ExpectedInput } from "./start-run.tsx";
 import {
@@ -1103,20 +1103,18 @@ const TriggersRead = ({
             </EmptyHeader>
           </Empty>
         ) : (
-          <SeparatedItems
-            rows={read.triggers.map((trigger) => ({
-              key: trigger.id,
-              row: (
-                <TriggerRow
-                  builder={builder}
-                  connections={read.connections}
-                  me={me}
-                  onChanged={changed}
-                  trigger={trigger}
-                />
-              ),
-            }))}
-          />
+          <ItemGroup separated>
+            {read.triggers.map((trigger) => (
+              <TriggerRow
+                key={trigger.id}
+                builder={builder}
+                connections={read.connections}
+                me={me}
+                onChanged={changed}
+                trigger={trigger}
+              />
+            ))}
+          </ItemGroup>
         )}
       </SectionCard>
     </>

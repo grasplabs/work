@@ -474,8 +474,15 @@ const noteStyles = stylex.create({
     fontWeight: font.weightNormal,
     // A word too long for its line still breaks.
     overflowWrap: "anywhere",
-    // No word left alone on a last line.
-    textWrap: "pretty",
+    // No word left alone on a last line; a setting's help wraps as it falls, as the original's
+    // setting row did.
+    textWrap: {
+      default: "pretty",
+      [stylex.when.ancestor(
+        ":is([data-orientation=responsive])",
+        fieldControlMarker
+      )]: "wrap",
+    },
     justifySelf: "stretch",
   },
   description: {
@@ -798,10 +805,13 @@ const statusStyles = stylex.create({
   },
   failed: { color: colors.destructive },
   // Try again, in a box one line tall: its button may be taller, the row never is.
+  // Its button stands out of the line by half what it is taller, into the gap to the control above
+  // and the row's edge below: its touch target reaches the middle of what is left (tapTarget).
   retry: {
     display: "inline-flex",
     alignItems: "center",
     height: font.textSmLine,
+    "--tap-reach": `calc((${space[2]} - (${size.controlXs} - ${font.textSmLine}) / 2) / 2)`,
   },
 });
 

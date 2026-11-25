@@ -47,6 +47,7 @@ import { slotOf } from "../chat/chat-subject.ts";
 import { GlobalChatProvider } from "../chat/global-chat.tsx";
 import { typeInPrompt } from "../chat/test-typing.ts";
 import { socketsTo } from "../pages/test-socket.ts";
+import { wordsOf } from "../test-words.ts";
 import { OpenedApp } from "./app-page.tsx";
 import { AppWorkspace } from "./app-workspace.tsx";
 import type { ReadOnlyShown, WorkspaceEnv } from "./app-workspace.tsx";
@@ -474,7 +475,7 @@ const settled = async (): Promise<void> => {
 
 /** What a button or menu item is called: its text, or its label without one. */
 const nameOf = (element: HTMLElement): string => {
-  const text = element.textContent?.trim() ?? "";
+  const text = wordsOf(element);
   return text === "" ? (element.getAttribute("aria-label") ?? "") : text;
 };
 

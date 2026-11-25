@@ -1,11 +1,12 @@
 // What the layers share: dialog, alert dialog, command, drawer, sheet, popover and the pickers. A
-// panel that always finishes closing, the look of a panel, its title, its description and its
-// scrolling body, a body that knows its title and whether it scrolls, a popup that grows from the
-// trigger that opened it, and the row of a surface's top-end actions.
+// panel that always finishes closing, a shade that lets the next press through as it leaves, the
+// look of a panel, its title, its description and its scrolling body, a body that knows its title
+// and whether it scrolls, a popup that grows from the trigger that opened it, and the row of a
+// surface's top-end actions.
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
-import { useState } from "react";
+import { createElement, useState } from "react";
 
 import {
   colors,
@@ -203,6 +204,122 @@ export const watchPanel = (element: HTMLElement | null) => {
   };
 };
 
+// ---- The shade ----------------------------------------------------------------------------------
+//
+// While a modal layer leaves, UI SDK takes any press over its shade as the shade's (layers.js: an
+// exiting layer's `overBackdrop`). Closed by anything but a press on its shade (Escape, Cancel,
+// the close button, a close from code, a command chosen), that swallowed the person's next press
+// for the whole leave. UI SDK reads the shade's own box, so a shade that was not pressed leaves
+// with none: its scrim is drawn by its ::before, over the window whatever its box, and the next
+// press goes through. A shade whose press closed its layer keeps its box as it leaves, so a second
+// press there goes where it always went.
+//
+// The fix belongs in UI SDK: layers.js should record why a layer closed and swallow a press during
+// its leave only when an outside press closed it. Once it does, this whole section goes and every
+// shade is a plain fixed box again.
+
+// UI SDK marks a closing shade `data-closed` until it goes, and `data-ending-style` only while its own
+// fade runs, which may end before its panel's.
+const leavingUnpressed = ":is([data-closed]:not([data-shade-pressed]))";
+
+const shadeStyles = stylex.create({
+  shade: {
+    position: "fixed",
+    inset: { default: 0, [leavingUnpressed]: "0 auto auto 0" },
+    width: { default: null, [leavingUnpressed]: 0 },
+    height: { default: null, [leavingUnpressed]: 0 },
+    // Closed, it is no target for a press, though its fade may have ended (and its inert with it)
+    // before its panel's.
+    pointerEvents: { default: null, ":is([data-closed])": "none" },
+    "::before": {
+      content: '""',
+      position: "fixed",
+      inset: 0,
+      backgroundColor: colors.dialogScrim,
+    },
+  },
+});
+
+/**
+ * Marks the shade `data-shade-pressed` as its layer closes when a press on it is what closed it, so
+ * only that shade keeps its box as it leaves. A press on the shade that ends with the layer still
+ * open (an alert dialog's, which a press outside never closes) is forgotten once it is over, so a
+ * close that follows by any other road (a call, a screen reader's click, a phone's back) leaves no
+ * box behind. Returns the clean-up, as a ref callback's.
+ */
+const watchShade = (element: HTMLElement | null) => {
+  if (element === null) {
+    return keep;
+  }
+  const view = element.ownerDocument.defaultView;
+  let pressed = false;
+  let check: ReturnType<typeof setTimeout> | undefined;
+  const heard = (event: Event) => {
+    pressed = event.type === "pointerdown" && event.target === element;
+  };
+  // UI SDK closes on the press's down, its up or (by touch) its click; React marks the shade closed
+  // in a microtask after. A task later, a shade still open was pressed in vain. A touch's up comes
+  // before the click that may close, so only that click tells (Chromium makes the click itself a
+  // touch PointerEvent; WebKit a mouse one).
+  const over = (event: Event) => {
+    if (
+      event.type === "pointerup" &&
+      event instanceof PointerEvent &&
+      event.pointerType === "touch"
+    ) {
+      return;
+    }
+    clearTimeout(check);
+    check = setTimeout(() => {
+      if (element.dataset.closed === undefined) {
+        pressed = false;
+      }
+    }, 0);
+  };
+  const cancelled = () => {
+    pressed = false;
+  };
+  const settle = new MutationObserver(() => {
+    element.toggleAttribute(
+      "data-shade-pressed",
+      element.dataset.closed !== undefined && pressed
+    );
+  });
+  settle.observe(element, {
+    attributes: true,
+    attributeFilter: ["data-closed"],
+  });
+  const listened = [
+    ["pointerdown", heard],
+    ["keydown", heard],
+    ["pointerup", over],
+    ["click", over],
+    ["pointercancel", cancelled],
+  ] as const;
+  for (const [type, listener] of listened) {
+    view?.addEventListener(type, listener, true);
+  }
+  return () => {
+    clearTimeout(check);
+    settle.disconnect();
+    for (const [type, listener] of listened) {
+      view?.removeEventListener(type, listener, true);
+    }
+  };
+};
+
+/**
+ * Everything a layer's shade takes, for its Backdrop part, so no shade can have the look without
+ * the watch that lets the next press through: its element (named `slot`), the scrim and the
+ * caller's own styles after it (a fade).
+ *
+ *   <DialogBackdrop {...shadeProps("dialog-overlay", styles.fade)} />
+ */
+export const shadeProps = (slot: string, ...style: stylex.StyleXStyles[]) => ({
+  render: createElement("div", { ref: watchShade, "data-slot": slot }),
+  ...stylex.props(shadeStyles.shade, style),
+});
+
 // ---- The scrolling body -------------------------------------------------------------------------
 
 /**
@@ -350,7 +467,6 @@ export const layerStyles = stylex.create({
     color: colors.bodyForeground,
     backgroundColor: colors.card,
     boxShadow: shadow.lg,
-    cornerShape: radius.shape,
     fontFamily: font.sans,
     // A panel that opens inside its trigger's parent (it is not portalled) would take that parent's
     // text: an end-aligned table cell would line its words up on the right. It sets its own, and

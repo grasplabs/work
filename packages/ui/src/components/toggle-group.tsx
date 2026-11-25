@@ -16,7 +16,13 @@ import type { ToggleState } from "@ui-sdk/react/toggle";
 import { createContext, useContext } from "react";
 import type { ComponentProps, ReactNode } from "react";
 
-import { focusRing, segmentedStyles } from "../lib/styles";
+import {
+  focusRing,
+  segmentedStyles,
+  tapRows,
+  tapTarget,
+  watchRows,
+} from "../lib/styles";
 import {
   colors,
   media,
@@ -24,7 +30,7 @@ import {
   size as sizes,
   space,
 } from "../lib/tokens.stylex";
-import { className } from "../lib/utils";
+import { assignRef, className } from "../lib/utils";
 import type { LayoutStyle } from "../lib/utils";
 import { ringInsetMarker } from "../lib/vars.stylex";
 import { iconOnly, toggleVariants } from "./toggle";
@@ -128,12 +134,17 @@ const styles = stylex.create({
     flexWrap: "wrap",
     alignItems: "center",
     gap: sizes.toggleGap,
+    // Each item's touch target reaches the middle of the gap to the next (tapTarget), and once the
+    // items take more than one row, the middle of the gap to the row above or below (tapRows).
+    "--tap-room-inline": `calc(${sizes.toggleGap} / 2)`,
     boxSizing: "border-box",
     maxWidth: "100%",
   },
   vertical: {
     flexDirection: "column",
     alignItems: "stretch",
+    "--tap-room-inline": sizes.tapTarget,
+    "--tap-room-block": `calc(${sizes.toggleGap} / 2)`,
   },
   // Across its box (fullWidth). Its items share the width, each growing from its own words' width,
   // so every word shows while they fit (equal parts would cut "Extra high" beside "Low"), and each
@@ -172,6 +183,7 @@ const styles = stylex.create({
   },
   item: {
     borderRadius: `calc(${radius.xl} - ${space.toggleTrackPadding})`,
+    cornerShape: radius.shape,
   },
   // An icon alone: square.
   square: { paddingInline: 0 },
@@ -188,16 +200,6 @@ const styles = stylex.create({
     opacity: sizes.opacityDisabled,
     cursor: "not-allowed",
     transform: "none",
-  },
-  // A finger needs 44px: an invisible area inside the item reaches past its top and bottom on
-  // touch. Never past its sides, where it would lie over its neighbour and take that one's press.
-  target: {
-    position: "absolute",
-    insetInline: 0,
-    insetBlock: {
-      default: 0,
-      [media.pointerCoarse]: `calc((100% - ${sizes.tapTarget}) / 2)`,
-    },
   },
 });
 
@@ -225,18 +227,30 @@ export const ToggleGroup = ({
   size = "xs",
   fullWidth = false,
   style,
+  ref,
   ...rest
 }: ToggleGroupProps) => {
   const upright = rest.orientation === "vertical";
+  // The caller's ref gets the group, and a group side by side watches its rows (tapRows).
+  const attach = (group: HTMLDivElement | null) => {
+    assignRef(ref, group);
+    const stop = upright || fullWidth ? undefined : watchRows(group);
+    return () => {
+      stop?.();
+      assignRef(ref, null);
+    };
+  };
   return (
     <GroupSize value={size}>
       <GroupShared value={fullWidth && !upright}>
         <ToggleGroupPrimitive
           {...rest}
+          ref={attach}
           data-slot="toggle-group"
           {...stylex.props(
             segmentedStyles.track,
             styles.group,
+            tapRows,
             fullWidth && styles.fullWidth,
             upright && styles.vertical,
             ringInsetMarker,
@@ -279,7 +293,7 @@ const Item = ({
         )
       }
     >
-      <span aria-hidden="true" {...stylex.props(styles.target)} />
+      <span aria-hidden="true" {...stylex.props(tapTarget)} />
       {shared && !icon ? (
         <span {...stylex.props(styles.words)}>{children}</span>
       ) : (

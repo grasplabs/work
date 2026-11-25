@@ -23,7 +23,12 @@ import type { KeyboardEvent, ReactNode } from "react";
 import { useI18n } from "../lib/i18n";
 import { CheckIcon, Icon, MonitorIcon, MoonIcon, SunIcon } from "../lib/icons";
 import type { IconData } from "../lib/icons";
-import { focusRing, focusWithin, segmentedStyles } from "../lib/styles";
+import {
+  focusRing,
+  focusWithin,
+  segmentedStyles,
+  tapTarget,
+} from "../lib/styles";
 import {
   colors,
   duration,
@@ -165,7 +170,6 @@ const styles = stylex.create({
     borderWidth: { default: 0, [FORCED]: 1 },
     borderStyle: "solid",
     borderColor: "transparent",
-    cornerShape: radius.shape,
     color: colors.foreground,
     backgroundColor: {
       default: "transparent",
@@ -183,16 +187,13 @@ const styles = stylex.create({
     width: size.controlXs,
     height: size.controlXs,
     borderRadius: `min(${radius.xl}, calc(${size.controlXs} / 2))`,
+    cornerShape: radius.shape,
   },
   iconDefault: {
     width: size.controlSm,
     height: size.controlSm,
     borderRadius: `min(${radius.xl}, calc(${size.controlSm} / 2))`,
-  },
-  // A finger's 44px, unseen, on a touch screen, from the button's own size.
-  target: {
-    position: "absolute",
-    inset: { default: 0, [COARSE]: `calc((100% - ${size.tapTarget}) / 2)` },
+    cornerShape: radius.shape,
   },
   // The shown icon is sharp; the others blurred, a little small, and gone.
   swap: {
@@ -693,7 +694,7 @@ const IconButton = ({
         focusRing
       )}
     >
-      <span aria-hidden="true" {...stylex.props(styles.target)} />
+      <span aria-hidden="true" {...stylex.props(tapTarget)} />
       {themeModes.map((each) => (
         <span
           key={each}

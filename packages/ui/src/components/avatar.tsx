@@ -208,6 +208,7 @@ const styles = stylex.create({
     width: "100%",
     height: "100%",
     borderRadius: "inherit",
+    cornerShape: "inherit",
     objectFit: "cover",
     // A picture that failed gives way to the initials under it.
     display: { default: "block", ":is([data-loading-status=error])": "none" },
@@ -217,6 +218,7 @@ const styles = stylex.create({
     position: "absolute",
     inset: 0,
     borderRadius: "inherit",
+    cornerShape: "inherit",
     boxShadow: sizes.avatarBorder,
     pointerEvents: "none",
   },
@@ -227,6 +229,7 @@ const styles = stylex.create({
     width: "100%",
     height: "100%",
     borderRadius: "inherit",
+    cornerShape: "inherit",
   },
   // On the lower end corner, a third of the face, ringed in the page's ground so it stands clear
   // of the picture.

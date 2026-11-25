@@ -643,8 +643,8 @@ const withNewLine = (rows: readonly Row[], before: number | undefined) => {
 
 /**
  * The New line, over what the person hadn't seen: a separator named New,
- * its word in the middle of a hairline. Never focused: the thread opens
- * with it near the top instead.
+ * its word in the middle of a hairline, in the primary colour as news is.
+ * Never focused: the thread opens with it near the top instead.
  */
 const NewLine = () => {
   const { t } = useLingui();
@@ -653,12 +653,9 @@ const NewLine = () => {
     context: "the line in a chat over the answers the person hasn't read",
   });
   return (
-    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- an hr holds no words, and Marker draws its word between the rules
-    <div aria-label={words} role="separator">
-      <Marker variant="separator">
-        <MarkerContent>{words}</MarkerContent>
-      </Marker>
-    </div>
+    <Marker color="primary" decorative={false} variant="separator">
+      <MarkerContent>{words}</MarkerContent>
+    </Marker>
   );
 };
 

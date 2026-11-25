@@ -188,7 +188,6 @@ const styles = stylex.create({
       },
     },
     borderColor: "currentColor",
-    cornerShape: radius.shape,
     backgroundColor: colors.inputBg,
     boxShadow: {
       default: edge,
@@ -220,6 +219,7 @@ const styles = stylex.create({
       default: `min(${radius.xl}, calc(${sizes.controlDefault} / 2))`,
       [ROUND]: `calc(${sizes.controlDefault} * 0.3)`,
     },
+    cornerShape: radius.shape,
     fontSize: font.textBase,
   },
   lg: {
@@ -228,6 +228,7 @@ const styles = stylex.create({
       default: `min(${radius.xl}, calc(${sizes.controlLg} / 2))`,
       [ROUND]: `calc(${sizes.controlLg} * 0.3)`,
     },
+    cornerShape: radius.shape,
     fontSize: font.textLg,
   },
   // Settled, as Input's: the soft ground, a hairline, no lift, its characters a step quieter.

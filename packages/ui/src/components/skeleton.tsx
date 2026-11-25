@@ -235,59 +235,24 @@ const breathe = stylex.keyframes({
   "50%": { opacity: size.skeletonLow },
 });
 
-// ---- Where the field's pixels stand ----
+// ---- The field's pixels ----
 //
-// A pixel is a 2px square, as wide as the dot it is drawn for, and stands one in every 4px. As many
-// whole 4px tiles as fit stand along each side of the field, the first against one edge and the last
-// against the other, and the room left over is shared out between them: a 14px line holds three
-// rows, 1px clear above and below, and a circle's five by five stand in its middle. The room left
-// over is under a tile, so it is shared out in whole pixels, at up to three places a quarter, a half
-// and three quarters along: a square on part of a pixel is a smear, which is what sharing it out
-// evenly between every pair (`background-repeat: space`) draws.
-//
-// So a side is four runs of tiles, each a layer of its own that repeats inside its run and nowhere
-// else. The rows are the field's background and the columns its mask: where they cross is a pixel.
-// The sides are read from the field itself (`cqw`, `cqh`). Where a browser lacks the maths the
-// pixels stand in every 4px from the corner.
-
-// Along a side of `side`: the whole tiles that fit, and the pixels left over (none to three).
-const tiles = (side: string) => `round(down, ${side}, 4px)`;
-const over = (side: string) => `round(down, mod(${side}, 4px), 1px)`;
-// Of the pixels left over: one at the half when odd, one at each quarter from two.
-const quarter = (side: string) => `round(down, ${over(side)} / 2, 1px)`;
-const half = (side: string) => `mod(${over(side)}, 2px)`;
-// Where a run ends: after whole tiles, never before the first nor after the last but one.
-const end = (side: string) => `(${tiles(side)} - 4px)`;
-const first = (side: string) => `max(4px, round(down, ${side} / 4, 4px))`;
-const second = (side: string) =>
-  `clamp(4px, round(down, ${side} / 2, 4px), ${end(side)})`;
-const third = (side: string) =>
-  `min(round(down, ${side} * 3 / 4, 4px), ${end(side)})`;
-// How long each of the four runs is, and where it starts: a pixel stands in the middle of its
-// tile, 1px in.
-const run1 = (side: string) => first(side);
-const run2 = (side: string) => `calc(${second(side)} - ${first(side)})`;
-const run3 = (side: string) => `calc(${third(side)} - ${second(side)})`;
-const run4 = (side: string) => `calc(${tiles(side)} - ${third(side)})`;
-const start2 = (side: string) =>
-  `calc(${first(side)} + ${quarter(side)} + 1px)`;
-const start3 = (side: string) =>
-  `calc(${second(side)} + ${quarter(side)} + ${half(side)} + 1px)`;
-const start4 = (side: string) => `calc(${third(side)} + ${over(side)} + 1px)`;
-const ACROSS = "100cqw";
-const DOWN = "100cqh";
-
-/** A run's rows, and its columns: a 2px line in every 4px. */
-const rowsIn = (colour: string) =>
-  `repeating-linear-gradient(${colour} 0 2px, transparent 0 4px)`;
-const COLUMNS =
-  "repeating-linear-gradient(90deg, #000 0 2px, transparent 0 4px)";
-const four = (layer: string) => `${layer}, ${layer}, ${layer}, ${layer}`;
+// A pixel is a 2px square, one in every 4px tile, every one on whole pixels. The pixels stand in a
+// box of as many whole tiles as fit, the room left over even at its edges in whole pixels, so a
+// line runs unbroken from end to end and no half pixel is cut at its foot. The box is the pixels'
+// colour with the tiles as its mask (columns crossed with rows), so the light inside it shows on
+// the same pixels. A picture's or an avatar's box stands a space inside its ground, clear of the
+// corner.
+const PIXELS =
+  "linear-gradient(90deg, transparent 1px, #000 1px 3px, transparent 3px), linear-gradient(transparent 1px, #000 1px 3px, transparent 3px)";
 const REST = `color-mix(in oklab, ${colors.foreground} 20%, transparent)`;
-const ROW_SIZES = `100% ${run1(DOWN)}, 100% ${run2(DOWN)}, 100% ${run3(DOWN)}, 100% ${run4(DOWN)}`;
-const ROW_STARTS = `0 1px, 0 ${start2(DOWN)}, 0 ${start3(DOWN)}, 0 ${start4(DOWN)}`;
-const COLUMN_SIZES = `${run1(ACROSS)} 100%, ${run2(ACROSS)} 100%, ${run3(ACROSS)} 100%, ${run4(ACROSS)} 100%`;
-const COLUMN_STARTS = `1px 0, ${start2(ACROSS)} 0, ${start3(ACROSS)} 0, ${start4(ACROSS)} 0`;
+
+// The pixels' box, `inset` inside the field: whole tiles across and down, in the middle. Each
+// `100%` is the field's width for left and width, its height for top and height.
+const room = (inset: string) => `(100% - 2 * ${inset})`;
+const tiles = (inset: string) => `round(down, ${room(inset)}, 4px)`;
+const edge = (inset: string) =>
+  `calc(${inset} + round(down, (${room(inset)} - ${tiles(inset)}) / 2, 1px))`;
 
 const styles = stylex.create({
   skeleton: {
@@ -329,20 +294,22 @@ const styles = stylex.create({
     height: font.textLgLine,
     paddingBlock: `calc((${font.textLgLine} - ${font.textLg}) / 2)`,
   },
-  // A rectangle: as tall as a default control unless the layout says otherwise, with the one
-  // corner (the browser caps it at half the height, so a low one gets round ends).
+  // A rectangle: as tall as a default control unless the layout or the box that holds it says
+  // otherwise (skeletonVars), with the one corner (the browser caps it at half the height, so a
+  // low one gets round ends).
   rectangular: {
     width: "100%",
     flexShrink: 1,
-    height: skeletonVars.block,
+    height: skeletonVars.size,
     borderRadius: radius.xl,
     cornerShape: radius.shape,
   },
-  // An avatar: a circle as large as a default control. It keeps its size in a row.
+  // An avatar: a circle as large as a default control, or as the box that holds it says. It keeps
+  // its size in a row.
   circular: {
     flexShrink: 0,
-    width: size.controlDefault,
-    height: size.controlDefault,
+    width: skeletonVars.size,
+    height: skeletonVars.size,
     borderRadius: radius.circle,
   },
   // ---- The pixel field ----
@@ -353,74 +320,45 @@ const styles = stylex.create({
   field: {
     position: "relative",
     display: "block",
-    boxSizing: "border-box",
     height: "100%",
-    overflow: "hidden",
-    // Square: a line's pixels are its shape, and a rounded corner would cut them at its ends.
-    borderRadius: 0,
-    // What its pixels are placed by: its own content box.
-    containerType: "size",
-    // The pixels at rest, in a quiet foreground, in the content box.
-    "::before": {
-      content: '""',
-      position: "absolute",
-      inset: 0,
-      backgroundImage: {
-        default: four(rowsIn(REST)),
-        [media.forcedColors]: "none",
-      },
-      backgroundSize: ROW_SIZES,
-      backgroundPosition: ROW_STARTS,
-      backgroundRepeat: "no-repeat",
-      maskImage: four(COLUMNS),
-      maskSize: COLUMN_SIZES,
-      maskPosition: COLUMN_STARTS,
-      maskRepeat: "no-repeat",
-    },
     outlineWidth: { default: 0, [media.forcedColors]: 1 },
     outlineStyle: "solid",
     outlineColor: "GrayText",
     outlineOffset: -1,
   },
   // A picture or an avatar stands on the soft ground; text does not. The ground is the outer
-  // shape's, with its corner; the pixels stand space-1 inside it, where no corner reaches them.
+  // shape's, with its corner.
   groundOuter: {
     backgroundColor: colors.muted,
   },
-  ground: {
-    padding: space["1"],
-    "::before": { inset: space["1"] },
-  },
-  litInset: { inset: space["1"] },
-  // A circle's pixels keep to the square inside it, clear of its curve: from a space-1 inset the
-  // square grid's corner pixels stood on the rim.
-  groundCircle: {
-    padding: space["2"],
-    "::before": { inset: space["2"] },
-  },
-  litCircle: { inset: space["2"] },
-  // Where the light can show: the same pixels, so a lit one is its pixel at rest in the light's
-  // colour. Its columns here, its rows on the box inside.
-  lit: {
+  // The pixels at rest, in a quiet foreground; square, as a line's pixels are its shape.
+  pixels: {
     position: "absolute",
-    inset: 0,
-    display: {
-      default: "block",
-      [media.forcedColors]: "none",
-      [media.reducedMotion]: "none",
-    },
-    maskImage: four(COLUMNS),
-    maskSize: COLUMN_SIZES,
-    maskPosition: COLUMN_STARTS,
-    maskRepeat: "no-repeat",
+    overflow: "hidden",
+    backgroundColor: { default: REST, [media.forcedColors]: "transparent" },
+    maskImage: { default: PIXELS, [media.forcedColors]: "none" },
+    maskSize: "4px 4px",
+    maskComposite: "intersect",
   },
-  litRows: {
-    position: "absolute",
-    inset: 0,
-    maskImage: four(rowsIn("#000")),
-    maskSize: ROW_SIZES,
-    maskPosition: ROW_STARTS,
-    maskRepeat: "no-repeat",
+  // Where they stand: a line's across its letters' height; a picture's space-1 inside its ground,
+  // where no corner reaches them; a circle's in the square inside it, clear of its curve.
+  inText: {
+    left: edge("0px"),
+    top: edge("0px"),
+    width: tiles("0px"),
+    height: tiles("0px"),
+  },
+  inGround: {
+    left: edge(space["1"]),
+    top: edge(space["1"]),
+    width: tiles(space["1"]),
+    height: tiles(space["1"]),
+  },
+  inCircle: {
+    left: edge(space["2"]),
+    top: edge(space["2"]),
+    width: tiles(space["2"]),
+    height: tiles(space["2"]),
   },
   // The light: a soft band of mint into pine, slanted, moved by lightUp.
   band: {
@@ -432,8 +370,19 @@ const styles = stylex.create({
     backgroundImage: `linear-gradient(105deg, transparent 0%, color-mix(in oklab, ${colors.mint} 70%, transparent) 30%, ${colors.mint} 48%, color-mix(in oklab, ${colors.pine} 80%, transparent) 66%, transparent 100%)`,
     transform: `translateX(calc(-1 * ${size.skeletonBand}))`,
     willChange: "transform",
+    display: {
+      default: "block",
+      [media.forcedColors]: "none",
+      [media.reducedMotion]: "none",
+    },
   },
 });
+
+const placements = {
+  text: styles.inText,
+  rectangular: styles.inGround,
+  circular: styles.inCircle,
+};
 
 const shapes = {
   text: styles.text,
@@ -443,43 +392,24 @@ const shapes = {
 const lines = { sm: styles.sm, default: styles.default, lg: styles.lg };
 
 /**
- * The pixel field inside a Skeleton, and the light that crosses it. A line's pixels are its shape; a
- * rectangle's or a circle's stand inside its ground.
+ * The pixel field inside a Skeleton, and the light that crosses its pixels. A line's pixels are its
+ * shape; a rectangle's or a circle's stand inside its ground.
  */
 const Field = ({
   variant,
-  field,
+  pixels,
   band,
 }: {
   variant: SkeletonVariant;
-  field: RefObject<HTMLSpanElement | null>;
+  pixels: RefObject<HTMLSpanElement | null>;
   band: RefObject<HTMLSpanElement | null>;
-}) => {
-  const grounded = variant !== "text";
-  const round = variant === "circular";
-  return (
-    <span
-      ref={field}
-      {...stylex.props(
-        styles.field,
-        grounded && styles.ground,
-        round && styles.groundCircle
-      )}
-    >
-      <span
-        {...stylex.props(
-          styles.lit,
-          grounded && styles.litInset,
-          round && styles.litCircle
-        )}
-      >
-        <span {...stylex.props(styles.litRows)}>
-          <span ref={band} {...stylex.props(styles.band)} />
-        </span>
-      </span>
+}) => (
+  <span {...stylex.props(styles.field)}>
+    <span ref={pixels} {...stylex.props(styles.pixels, placements[variant])}>
+      <span ref={band} {...stylex.props(styles.band)} />
     </span>
-  );
-};
+  </span>
+);
 
 export const Skeleton = ({
   variant = "text",
@@ -530,7 +460,7 @@ export const Skeleton = ({
         style
       )}
     >
-      <Field variant={variant} field={field} band={band} />
+      <Field variant={variant} pixels={field} band={band} />
     </span>
   );
 };

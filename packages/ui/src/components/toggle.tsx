@@ -16,7 +16,7 @@ import { isValidElement } from "react";
 import type { ComponentProps, ReactNode } from "react";
 
 import { Icon } from "../lib/icons";
-import { focusRing } from "../lib/styles";
+import { focusRing, tapTarget } from "../lib/styles";
 import {
   colors,
   duration,
@@ -171,18 +171,6 @@ const styles = stylex.create({
     cursor: "not-allowed",
     transform: "none",
   },
-  // A finger needs 44px: an invisible area inside the toggle reaches past its edges on touch.
-  target: {
-    position: "absolute",
-    insetInline: {
-      default: 0,
-      [media.pointerCoarse]: `min(0px, calc((100% - ${sizes.tapTarget}) / 2))`,
-    },
-    insetBlock: {
-      default: 0,
-      [media.pointerCoarse]: `calc((100% - ${sizes.tapTarget}) / 2)`,
-    },
-  },
 });
 
 /** A size's height, from the ladder. */
@@ -244,7 +232,7 @@ const Pressable = ({
       )
     }
   >
-    <span aria-hidden="true" {...stylex.props(styles.target)} />
+    <span aria-hidden="true" {...stylex.props(tapTarget)} />
     {children}
   </TogglePrimitive>
 );

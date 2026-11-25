@@ -1,3 +1,5 @@
+import { setTimeout as sleep } from "node:timers/promises";
+
 // @vitest-environment happy-dom
 import type { ThinkingGround } from "@grasp-os/shared/brain";
 import type {
@@ -465,10 +467,15 @@ describe(ChatThread, () => {
       reasoning: "Add two to two.",
     });
 
-    expect(firstStep()).toStrictEqual({
-      line: "Thinking",
-      open: true,
-      shows: "Add two to two.",
+    // Whole words while it is written: the last waits for what follows it,
+    // then shows once nothing more has come for a moment.
+    const atFirst = firstStep();
+    await act(async () => {
+      await sleep(250);
+    });
+    expect({ atFirst, later: firstStep() }).toStrictEqual({
+      atFirst: { line: "Thinking", open: true, shows: "Add two to" },
+      later: { line: "Thinking", open: true, shows: "Add two to two." },
     });
   });
 
@@ -489,10 +496,15 @@ describe(ChatThread, () => {
       { text: "", code: [], tools: [], reasoning: "Add two to two." }
     );
 
-    expect(firstStep()).toStrictEqual({
-      line: "Thinking",
-      open: true,
-      shows: "Add two to two.",
+    // Whole words while it is written: the last waits for what follows it,
+    // then shows once nothing more has come for a moment.
+    const atFirst = firstStep();
+    await act(async () => {
+      await sleep(250);
+    });
+    expect({ atFirst, later: firstStep() }).toStrictEqual({
+      atFirst: { line: "Thinking", open: true, shows: "Add two to" },
+      later: { line: "Thinking", open: true, shows: "Add two to two." },
     });
   });
 
@@ -1165,9 +1177,16 @@ describe("a thread's day lines", () => {
 
 /** The thread's New line: the separator named New, if there is one. */
 const newLine = () =>
-  document.querySelector<HTMLElement>(
-    "[role='log'] [role='separator'][aria-label='New']"
-  );
+  [
+    ...document.querySelectorAll<HTMLElement>(
+      "[role='log'] [role='separator'][aria-labelledby]"
+    ),
+  ].find(
+    (line) =>
+      document.querySelector(
+        `[id="${line.getAttribute("aria-labelledby") ?? ""}"]`
+      )?.textContent === "New"
+  ) ?? null;
 
 /** Whether `first` stands before `second` in the thread. */
 const before = (first: Element | null, second: Element | null): boolean => {

@@ -192,11 +192,11 @@ const chosen = ":is([data-selected], [data-current])";
 const LEAD = `calc(${space.treeViewRowPadding} + (var(--tree-level, 1) - 1) * ${space.treeViewIndent})`;
 
 // The tree guide's measures (`showIndentGuides`), the Sidebar's own: a row's middle; the stem's
-// column, under the parent's chevron; the elbow, a space-3 round unless the indent is too short.
+// column, under the parent's chevron; the elbow, its own corner (tree-view-guide-elbow).
 const ROW_MIDDLE = `calc(${size.treeViewRow} / 2)`;
 const ROW_MIDDLE_TOUCH = `calc(${size.treeViewRowTouch} / 2)`;
 const GUIDE_X = `calc(${space.treeViewRowPadding} + (var(--tree-level, 2) - 2) * ${space.treeViewIndent} + ${size.iconSm} / 2 - ${size.treeViewGuide} / 2)`;
-const GUIDE_ELBOW = `min(${space["3"]}, calc(${space.treeViewIndent} - ${space["1"]}))`;
+const GUIDE_ELBOW = radius.treeViewGuideElbow;
 const guideLine = { default: colors.border, [FORCED]: "GrayText" };
 
 const styles = stylex.create({
@@ -360,6 +360,8 @@ const styles = stylex.create({
     display: "inline-flex",
     alignItems: "center",
     gap: space["1"],
+    // Each control's touch target reaches the middle of the gap to the next (tapTarget).
+    "--tap-room-inline": `calc(${space["1"]} / 2)`,
     flexShrink: 0,
   },
   // With no badge before them the buttons take the row's end themselves.
@@ -435,6 +437,7 @@ const styles = stylex.create({
     borderBlockStartColor: "transparent",
     borderInlineEndColor: "transparent",
     borderEndStartRadius: GUIDE_ELBOW,
+    cornerShape: radius.shape,
     pointerEvents: "none",
   },
   // Where the stem carries on, the elbow leaves the stem's column to it: one layer of line there.

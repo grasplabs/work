@@ -319,6 +319,8 @@ export const radius = stylex.defineConsts({
   // Sidebar: sidebar sizes.
   sidebarRowRadius: "var(--damsko-sidebar-row-radius)",
   sidebarRowRadiusLg: "var(--damsko-sidebar-row-radius-lg)",
+  // Tree: tree.
+  treeViewGuideElbow: "var(--damsko-tree-view-guide-elbow)",
 });
 
 export const shadow = stylex.defineConsts({
@@ -604,6 +606,8 @@ export const size = stylex.defineConsts({
   spinnerBreath: "var(--damsko-spinner-breath)",
   spinnerFaint: "var(--damsko-spinner-faint)",
   spinnerFade: "var(--damsko-spinner-fade)",
+  spinnerFadeOnFill: "var(--damsko-spinner-fade-on-fill)",
+  spinnerStrokeOnFill: "var(--damsko-spinner-stroke-on-fill)",
   // Agent indicator: agent indicator.
   agentIndicatorDot: "var(--damsko-agent-indicator-dot)",
   agentIndicatorGap: "var(--damsko-agent-indicator-gap)",
@@ -669,6 +673,7 @@ export const size = stylex.defineConsts({
   attachmentThumb: "var(--damsko-attachment-thumb)",
   promptInputMentionWidth: "var(--damsko-prompt-input-mention-width)",
   promptInputFieldMin: "var(--damsko-prompt-input-field-min)",
+  promptInputVoiceBand: "var(--damsko-prompt-input-voice-band)",
   promptInputPlaceholderMin: "var(--damsko-prompt-input-placeholder-min)",
   promptInputGlassBlur: "var(--damsko-prompt-input-glass-blur)",
   promptInputLightOpacity: "var(--damsko-prompt-input-light-opacity)",

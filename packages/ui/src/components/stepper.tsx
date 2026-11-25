@@ -463,6 +463,7 @@ const styles = stylex.create({
     width: size.stepperDotActive,
     height: size.stepperDotActive,
     borderRadius: radius.xs,
+    cornerShape: radius.shape,
     backgroundColor: { default: colors.destructive, [FORCED]: "CanvasText" },
     borderColor: { default: colors.destructive, [FORCED]: "CanvasText" },
   },
@@ -1167,6 +1168,8 @@ const navStyles = stylex.create({
     display: "flex",
     alignItems: "center",
     gap: space["2"],
+    // Each control's touch target reaches the middle of the gap to the next (tapTarget).
+    "--tap-room-inline": `calc(${space["2"]} / 2)`,
     minWidth: 0,
   },
   end: {
@@ -1174,6 +1177,8 @@ const navStyles = stylex.create({
     alignItems: "center",
     justifyContent: "flex-end",
     gap: space["2"],
+    // Each control's touch target reaches the middle of the gap to the next (tapTarget).
+    "--tap-room-inline": `calc(${space["2"]} / 2)`,
   },
   // On the first step Back is not there to press, but its room is: the nav stays where it stands.
   kept: { visibility: "hidden", opacity: 0, pointerEvents: "none" },
