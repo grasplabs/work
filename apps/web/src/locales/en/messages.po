@@ -3501,6 +3501,10 @@ msgstr "Ask again"
 msgid "Ask an admin"
 msgstr "Ask an admin"
 
+#: src/chat/backdrop/preview.tsx
+msgid "Ask anything"
+msgstr "Ask anything"
+
 #: src/chat/chat-start.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Ask anything, or describe a process"
@@ -3752,6 +3756,10 @@ msgstr "Attached a file to a chat"
 msgid "Audit trail"
 msgstr "Audit trail"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Aurora"
+msgstr "Aurora"
+
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Availability"
@@ -3798,6 +3806,18 @@ msgstr "Back to reference {number}"
 #: src/apps/app-workspace.tsx
 msgid "Back to your version"
 msgstr "Back to your version"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Background"
+msgstr "Background"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Bayer"
+msgstr "Bayer"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Bayer grid"
+msgstr "Bayer grid"
 
 #: src/frame/ui-words.tsx
 msgctxt "a change's old side"
@@ -4503,6 +4523,10 @@ msgstr "Chat accounts, invitations and notifications"
 msgid "Chat apps"
 msgstr "Chat apps"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Chat background"
+msgstr "Chat background"
+
 #: src/settings/composer-settings.tsx
 msgid "Chat box"
 msgstr "Chat box"
@@ -4737,6 +4761,10 @@ msgstr "Cleared"
 msgid "Click or drop a picture."
 msgstr "Click or drop a picture."
 
+#: src/settings/backdrop-settings.tsx
+msgid "Cliffs"
+msgstr "Cliffs"
+
 #: src/brain/forget.tsx
 #: src/connections/app/words.ts
 #: src/connections/connected-dialog.tsx
@@ -4833,6 +4861,11 @@ msgid "colleagues talked"
 msgstr "colleagues talked"
 
 #: src/settings/composer-settings.tsx
+msgid "Colour"
+msgstr "Colour"
+
+#: src/settings/backdrop-settings.tsx
+msgctxt "a background's colour"
 msgid "Colour"
 msgstr "Colour"
 
@@ -5620,6 +5653,10 @@ msgstr "Cut"
 msgid "Dark"
 msgstr "Dark"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Dark edge"
+msgstr "Dark edge"
+
 #: src/drafts/share-with-team.tsx
 msgid "Data"
 msgstr "Data"
@@ -5759,6 +5796,10 @@ msgstr "Declined: {title}"
 #: src/frame/ui-words.tsx
 msgid "Decrease"
 msgstr "Decrease"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Deep"
+msgstr "Deep"
 
 #: src/workflows/resource-params.tsx
 msgid "Default"
@@ -6346,6 +6387,14 @@ msgstr "Done in a run"
 msgid "Done right"
 msgstr "Done right"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Door"
+msgstr "Door"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Dots"
+msgstr "Dots"
+
 #: src/chat/sidebar-chats.tsx
 #: src/frame/panels/rename.tsx
 msgid "Double-click or press F2 to rename"
@@ -6480,10 +6529,18 @@ msgstr "Dropped an event no workflow could take"
 msgid "Dublin"
 msgstr "Dublin"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Dunes"
+msgstr "Dunes"
+
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Duration"
 msgstr "Duration"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Dusk"
+msgstr "Dusk"
 
 #: src/connections/http-connections.tsx
 msgid "Each allows everything under it; / allows all paths."
@@ -7819,6 +7876,10 @@ msgstr "From your interview, version {version}"
 msgid "From your staff list I can see {people} people in {teams} teams."
 msgstr "From your staff list I can see {people} people in {teams} teams."
 
+#: src/settings/backdrop-settings.tsx
+msgid "Fuji"
+msgstr "Fuji"
+
 #: src/settings/staff-access.tsx
 msgid "Full access"
 msgstr "Full access"
@@ -8272,6 +8333,10 @@ msgstr "Grasp's chat"
 #: src/settings/staff-access.tsx
 msgid "Grasp's team can help here until then"
 msgstr "Grasp's team can help here until then"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Grid"
+msgstr "Grid"
 
 #: src/routes/_shell.settings.brain.tsx
 msgid "Group {number}"
@@ -8946,6 +9011,10 @@ msgstr "Info"
 msgctxt "an advisory's severity"
 msgid "Info"
 msgstr "Info"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Ink"
+msgstr "Ink"
 
 #: src/frame/ui-words.tsx
 msgctxt "a model's tokens"
@@ -10003,10 +10072,19 @@ msgstr "Lift the legal hold {hold} from version {label}?"
 msgid "Light"
 msgstr "Light"
 
+#: src/settings/backdrop-settings.tsx
+msgctxt "a background's colour"
+msgid "Light"
+msgstr "Light"
+
 #: src/settings/composer-settings.tsx
 msgctxt "Grasp's own working light"
 msgid "Light"
 msgstr "Light"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Light edge"
+msgstr "Light edge"
 
 #: src/interview/frame.tsx
 #: src/onboarding/calm-frame.tsx
@@ -10024,6 +10102,10 @@ msgstr "Lightbulb"
 #: src/onboarding/plan-story.tsx
 msgid "Like this: new people wait two to three days for a laptop from IT."
 msgstr "Like this: new people wait two to three days for a laptop from IT."
+
+#: src/settings/backdrop-settings.tsx
+msgid "Lime"
+msgstr "Lime"
 
 #: src/frame/ui-words.tsx
 msgctxt "a change's lines"
@@ -10606,6 +10688,7 @@ msgstr "Methods"
 msgid "Methods it allows"
 msgstr "Methods it allows"
 
+#: src/settings/backdrop-settings.tsx
 #: src/settings/composer-settings.tsx
 msgid "Mint"
 msgstr "Mint"
@@ -11663,6 +11746,11 @@ msgid "Nobody's agents use {name} from then on. Its versions stay as history, an
 msgstr "Nobody's agents use {name} from then on. Its versions stay as history, and a new approved share of its name brings it back."
 
 #: src/workflows/workflow-settings.tsx
+msgid "None"
+msgstr "None"
+
+#: src/settings/backdrop-settings.tsx
+msgctxt "no background"
 msgid "None"
 msgstr "None"
 
@@ -13219,6 +13307,10 @@ msgstr "Path prefixes it allows, one per line"
 msgid "Paths"
 msgstr "Paths"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Pattern"
+msgstr "Pattern"
+
 #: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
 #: src/frame/ui-words.tsx
@@ -13471,6 +13563,10 @@ msgstr "Pin to the end"
 msgid "Pin to the start"
 msgstr "Pin to the start"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Pixel sand"
+msgstr "Pixel sand"
+
 #: src/apps/release-controls.tsx
 msgid "Place a legal hold"
 msgstr "Place a legal hold"
@@ -13588,6 +13684,10 @@ msgstr "Preview"
 #: src/inbox/report-viewer.tsx
 msgid "Preview of {name}"
 msgstr "Preview of {name}"
+
+#: src/chat/backdrop/preview.tsx
+msgid "Preview of your chat background"
+msgstr "Preview of your chat background"
 
 #: src/inbox/report-viewer.tsx
 msgid "Preview or code"
@@ -13815,6 +13915,10 @@ msgstr "Ran on its schedule"
 #: src/workflows/figures.tsx
 msgid "ran without asking anyone"
 msgstr "ran without asking anyone"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Randomize"
+msgstr "Randomize"
 
 #: src/settings/stephen-settings.tsx
 msgid "Reach others"
@@ -14771,6 +14875,10 @@ msgstr "Reword the goal"
 msgid "Right arrow for more"
 msgstr "Right arrow for more"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Rings"
+msgstr "Rings"
+
 #: src/workflows/business-process.tsx
 msgctxt "business process"
 msgid "Risk-to-Compliance"
@@ -15095,6 +15203,10 @@ msgstr "Sam, like everyone who uses the App, sees every record in {table}."
 #: src/connections/connect-dialog.tsx
 msgid "Sample: Calendly's tools as Composio lists them."
 msgstr "Sample: Calendly's tools as Composio lists them."
+
+#: src/settings/backdrop-settings.tsx
+msgid "Sand"
+msgstr "Sand"
 
 #: src/agents/agent-page.tsx
 #: src/apps/field-editor.tsx
@@ -16504,6 +16616,10 @@ msgstr "Stakeholder invited into Grasp"
 #: src/brain/brain.ts
 msgid "Stakeholder named: the {role}"
 msgstr "Stakeholder named: the {role}"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Starry night"
+msgstr "Starry night"
 
 #: src/inbox/items.ts
 msgid "Start {name}?"
@@ -19535,6 +19651,10 @@ msgstr "Waits until"
 msgid "Walk into every meeting knowing who is coming and what is still open."
 msgstr "Walk into every meeting knowing who is coming and what is still open."
 
+#: src/settings/backdrop-settings.tsx
+msgid "Wanderer"
+msgstr "Wanderer"
+
 #: src/frame/ui-words.tsx
 msgctxt "a badge's dot"
 msgid "Warning"
@@ -19584,6 +19704,10 @@ msgstr "Was unknown"
 #: src/brain/brain.ts
 msgid "Was: {before}"
 msgstr "Was: {before}"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Wave"
+msgstr "Wave"
 
 #. A folder of sources: conversations, Pulse, documents or connections
 #: src/brain/brain.ts
@@ -19988,6 +20112,7 @@ msgstr "What should we call it?"
 msgid "What should we call your agent?"
 msgstr "What should we call your agent?"
 
+#: src/chat/backdrop/preview.tsx
 #: src/chat/chat-start.tsx
 msgid "What should we look at today?"
 msgstr "What should we look at today?"

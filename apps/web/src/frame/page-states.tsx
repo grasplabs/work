@@ -359,13 +359,12 @@ export const PageFailed = ({
   return (
     <Backdrop
       clear={words}
-      dither="dusk"
       style={[
         styles.failed,
         whole && styles.failedWhole,
         section && styles.failedSection,
       ]}
-      tone="aurora"
+      variant={{ backdrop: "dusk", pattern: "bayer", tone: "aurora" }}
     >
       <div data-slot="page-failed" ref={words} {...stylex.props(styles.words)}>
         <Title {...stylex.props(styles.failedTitle)}>{title}</Title>

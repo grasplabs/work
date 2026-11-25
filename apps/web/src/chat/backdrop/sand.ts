@@ -1,10 +1,11 @@
-// The sand behind Chat's start (backdrop.tsx), as #2503 draws it: grains
-// on a plate that sings, settling along the lines where it rests (a
-// Chladni figure), its tone changing every few seconds, clear of the
-// words on it, parted by the pointer. Loaded only once the backdrop comes
-// into view.
+// The sand backdrops behind Chat's start, as #2503's library draws them:
+// grains on a plate that sings, settling along the lines where it rests (a
+// Chladni figure), its tone changing every few seconds, clear of the words
+// on it, parted by the pointer; dunes, rings and a pixel sand the same way.
+// Loaded only once the backdrop comes into view.
 import { drawn, nothingDrawn } from "./drawing.ts";
 import type { DrawOptions, Drawing } from "./drawing.ts";
+import type { BackdropSand } from "./look.ts";
 
 interface Box {
   left: number;
@@ -217,6 +218,43 @@ const plate: Plate = (now) => {
   };
 };
 
+const dunes: Plate = (now) => (x, y) => {
+  const u = (x / now.height) * 1.2;
+  const v = (y / now.height) * 1.2;
+  return Math.sin(
+    v * 26 +
+      2.2 * Math.sin(u * 3 + now.time * 0.05) +
+      1.2 * Math.sin(u * 7.3 - now.time * 0.03) -
+      now.time * 0.06
+  );
+};
+
+const rings: Plate = (now) => {
+  const { clear } = now;
+  const cx =
+    clear === undefined ? now.width / 2 : (clear.left + clear.right) / 2;
+  const cy =
+    clear === undefined ? now.height / 2 : (clear.top + clear.bottom) / 2;
+  return (x, y) => {
+    // Wider than tall, as what they stand round is.
+    const ax = (x - cx) * 0.78;
+    const ay = y - cy;
+    const away = length(ax, ay);
+    return Math.sin(away * 0.034 - now.time * 0.22);
+  };
+};
+
+const plates: Record<BackdropSand, Plate> = {
+  sand: plate,
+  dunes,
+  rings,
+  pixels: plate,
+};
+
+/** The dither's grid the pixel sand snaps to, and its mark, in CSS pixels. */
+const pixelGrid = 4;
+const pixelMark = 2;
+
 /** How many frames the sand takes to settle, for its first and its still picture. */
 const settleFrames = 150;
 
@@ -232,7 +270,7 @@ const mostGrains = 9000;
 const pixelsPerGrain = 140;
 
 /** The sand on `field`: its grains, a step of them, and drawing them. */
-const sandOn = (scene: Scene, field: Plate) => {
+const sandOn = (scene: Scene, field: Plate, pixel: boolean) => {
   const count = Math.min(
     mostGrains,
     Math.round((scene.width * scene.height) / pixelsPerGrain)
@@ -303,7 +341,16 @@ const sandOn = (scene: Scene, field: Plate) => {
           level = next;
           ctx.globalAlpha = (most * next) / alphaSteps;
         }
-        ctx.fillRect(grain.x, grain.y, grain.size, grain.size);
+        if (pixel) {
+          ctx.fillRect(
+            Math.floor(grain.x / pixelGrid) * pixelGrid,
+            Math.floor(grain.y / pixelGrid) * pixelGrid,
+            pixelMark,
+            pixelMark
+          );
+        } else {
+          ctx.fillRect(grain.x, grain.y, grain.size, grain.size);
+        }
       }
     }
   };
@@ -387,9 +434,10 @@ const settle = async (
   await promise;
 };
 
-/** Draws the sand on `element`, run and held by Backdrop, once it has settled. */
+/** Draws sand of `kind` on `element`, run and held by Backdrop, once it has settled. */
 export const startSand = async (
   element: HTMLCanvasElement,
+  kind: BackdropSand,
   options: DrawOptions
 ): Promise<Drawing> => {
   const ctx = element.getContext("2d");
@@ -446,7 +494,7 @@ export const startSand = async (
   scene.width = Math.max(1, first.width);
   scene.height = Math.max(1, first.height);
   place();
-  const sand = sandOn(scene, plate);
+  const sand = sandOn(scene, plates[kind], kind === "pixels");
   await settle(sand, scene);
   const paint = (): void => {
     sand.draw(ctx, scene, colours());
