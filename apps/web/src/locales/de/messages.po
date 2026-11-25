@@ -12190,10 +12190,6 @@ msgstr "notiert"
 msgid "Noted a question asked in a chat, to keep in its person's own Brain"
 msgstr "Eine im Chat gestellte Frage vermerkt, um sie im eigenen Brain der Person zu speichern"
 
-#: src/onboarding/leads-step.tsx
-msgid "Noted: {name}. We’ll connect it with you."
-msgstr "Notiert: {name}. Wir verbinden sie gemeinsam mit Ihnen."
-
 #: src/drafts/share-with-team.tsx
 msgid "Nothing changed since the live version."
 msgstr "Seit der Live-Version hat sich nichts geändert."
@@ -17390,10 +17386,6 @@ msgstr "Danke, {admin}"
 msgid "Thank you, {name}."
 msgstr "Danke, {name}."
 
-#: src/onboarding/leads-step.tsx
-msgid "Thank you. I’ve asked our team to connect {name}."
-msgstr "Danke. Ich habe unser Team gebeten, {name} zu verbinden."
-
 #: src/interview/start.tsx
 msgid "Thanks for letting us know"
 msgstr "Danke, dass du Bescheid gibst"
@@ -19312,10 +19304,6 @@ msgstr "Einen OpenAI-kompatiblen Endpunkt verwenden"
 #: src/onboarding/company-step.tsx
 msgid "Use another list"
 msgstr "Andere Liste verwenden"
-
-#: src/onboarding/leads-step.tsx
-msgid "Use another platform"
-msgstr "Andere Plattform wählen"
 
 #: src/onboarding/company-step.tsx
 msgid "Use another staff list"

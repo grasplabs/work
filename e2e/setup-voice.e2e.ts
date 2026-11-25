@@ -151,13 +151,8 @@ test("the admin connects SharePoint, notes Confluence and Personio", async ({
     await expect(
       page.getByRole("heading", { name: "Which HR platform do you use?" })
     ).toBeVisible();
+    // Picked is said: the step goes straight on.
     await page.getByRole("button", { name: "Personio" }).click();
-    await expect(
-      page.getByText(
-        "Noted: Personio. We’ll connect it with you. Meanwhile, check who leads which team."
-      )
-    ).toBeVisible();
-    await page.getByRole("button", { name: "Continue" }).click();
     await expect(
       page.getByRole("heading", { name: "We’ll set up your teams together" })
     ).toBeVisible();

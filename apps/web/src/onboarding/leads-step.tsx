@@ -95,13 +95,12 @@ const HrPlatformChoice = ({
   const { save, busy, failure } = useSaveChoices();
   const integrations = useIntegrations();
   const [searching, setSearching] = useState(false);
-  const { hr } = choices;
+  // A platform picked is said and done: the step goes straight on, no screen to confirm it (Ruben).
   const choose = async (next: SetupChoices["hr"]) => {
-    if (!busy) {
-      await save({ ...choices, hr: next });
+    if (!busy && (await save({ ...choices, hr: next }))) {
+      onDone();
     }
   };
-  const chosen = hr !== null && hr.kind !== "none";
   // Six tiles with the + one: the platform the kickoff named first, then those offered, the last
   // giving way when the one named is none of them.
   const namedOffered = hrPlatforms.find((each) => each === named);
@@ -113,123 +112,79 @@ const HrPlatformChoice = ({
       .filter((each) => each !== named)
       .map((each) => ({ name: each, platform: each })),
   ].slice(0, hrPlatforms.length);
-  let body = t`It knows who leads which team, so I can talk to the leads first. We connect it with you.`;
-  if (hr?.kind === "platform") {
-    const { name } = hr;
-    body = t`Noted: ${name}. We’ll connect it with you.`;
-  } else if (hr?.kind === "asked") {
-    const { name } = hr;
-    body = t`Thank you. I’ve asked our team to connect ${name}.`;
-  }
   return (
     <CalmStep
-      body={body}
+      body={t`It knows who leads which team, so I can talk to the leads first. We connect it with you.`}
       end={
-        chosen ? (
-          <>
-            <Button onClick={onDone} size="lg">
-              {t`Continue`}
-              <Icon icon={ArrowRightIcon} />
-            </Button>
-            <Button
-              onClick={() => {
-                void choose(null);
-              }}
-              size="lg"
-              variant="outline"
-            >
-              {t`Use another platform`}
-            </Button>
-          </>
-        ) : (
-          <Button
-            onClick={() => {
-              void (async () => {
-                if (await save({ ...choices, hr: { kind: "none" } })) {
-                  onDone();
-                }
-              })();
-            }}
-            size="lg"
-            variant="outline"
-          >
-            {t`We don’t use an HR platform`}
-          </Button>
-        )
+        <Button
+          onClick={() => {
+            void (async () => {
+              if (await save({ ...choices, hr: { kind: "none" } })) {
+                onDone();
+              }
+            })();
+          }}
+          size="lg"
+          variant="outline"
+        >
+          {t`We don’t use an HR platform`}
+        </Button>
       }
       also={
-        chosen ? null : (
-          <SupportLink page="hr">{t`More about this connection`}</SupportLink>
-        )
+        <SupportLink page="hr">{t`More about this connection`}</SupportLink>
       }
       title={t`Which HR platform do you use?`}
     >
-      {/* The platform said, shown as said, so the step isn't left empty under its line. */}
-      {chosen ? (
-        <Item done variant="outline">
-          {hrLogoOf(hr.name) === null ? (
+      <div {...stylex.props(styles.stack)}>
+        <ItemGrid aria-label={t`HR platforms`} columns={3}>
+          {tiles.map(({ name, platform }) => {
+            const logo = hrLogoOf(name);
+            const said = name === named;
+            return (
+              <Item
+                done={said}
+                key={name}
+                onClick={() => {
+                  void choose(
+                    platform === null
+                      ? { kind: "asked", name }
+                      : { kind: "platform", name: platform }
+                  );
+                }}
+                variant="outline"
+              >
+                {logo === null ? (
+                  <ItemMedia variant="icon">
+                    <Icon icon={UsersIcon} />
+                  </ItemMedia>
+                ) : (
+                  <Logo src={logo} />
+                )}
+                <ItemContent>
+                  <ItemTitle>{name}</ItemTitle>
+                  {said ? (
+                    <ItemDescription>{t`From our call`}</ItemDescription>
+                  ) : null}
+                </ItemContent>
+              </Item>
+            );
+          })}
+          <Item
+            onClick={() => {
+              setSearching(true);
+            }}
+            variant="outline"
+          >
             <ItemMedia variant="icon">
-              <Icon icon={UsersIcon} />
+              <Icon icon={PlusIcon} />
             </ItemMedia>
-          ) : (
-            <Logo src={hrLogoOf(hr.name) ?? ""} />
-          )}
-          <ItemContent>
-            <ItemTitle>{hr.name}</ItemTitle>
-          </ItemContent>
-        </Item>
-      ) : (
-        <div {...stylex.props(styles.stack)}>
-          <ItemGrid aria-label={t`HR platforms`} columns={3}>
-            {tiles.map(({ name, platform }) => {
-              const logo = hrLogoOf(name);
-              const said = name === named;
-              return (
-                <Item
-                  done={said}
-                  key={name}
-                  onClick={() => {
-                    void choose(
-                      platform === null
-                        ? { kind: "asked", name }
-                        : { kind: "platform", name: platform }
-                    );
-                  }}
-                  variant="outline"
-                >
-                  {logo === null ? (
-                    <ItemMedia variant="icon">
-                      <Icon icon={UsersIcon} />
-                    </ItemMedia>
-                  ) : (
-                    <Logo src={logo} />
-                  )}
-                  <ItemContent>
-                    <ItemTitle>{name}</ItemTitle>
-                    {said ? (
-                      <ItemDescription>{t`From our call`}</ItemDescription>
-                    ) : null}
-                  </ItemContent>
-                </Item>
-              );
-            })}
-            <Item
-              onClick={() => {
-                setSearching(true);
-              }}
-              variant="outline"
-            >
-              <ItemMedia variant="icon">
-                <Icon icon={PlusIcon} />
-              </ItemMedia>
-              <ItemContent>
-                <ItemTitle>{t`Another platform`}</ItemTitle>
-              </ItemContent>
-            </Item>
-          </ItemGrid>
-          <ErrorText>{failure}</ErrorText>
-        </div>
-      )}
+            <ItemContent>
+              <ItemTitle>{t`Another platform`}</ItemTitle>
+            </ItemContent>
+          </Item>
+        </ItemGrid>
+        <ErrorText>{failure}</ErrorText>
+      </div>
       {/* The catalog's HR apps; one offered as a row is chosen as that platform, any other asked for. */}
       <ConnectorSearch
         integrations={integrations.filter(({ group }) => group === "HR")}
