@@ -173,9 +173,13 @@ test("the admin signs in, gives the staff list, confirms and plans, and the link
   ).toBeVisible();
   await page.getByRole("button", { name: "Continue" }).click();
 
-  // The staff list: four people in three teams, Lea leading Sales.
+  // The staff list, dropped right on the step under any sign-in: four
+  // people in three teams, Lea leading Sales.
   await expect(
-    page.getByRole("heading", { name: "Who’s who at your company?" })
+    page.getByRole("heading", {
+      level: 1,
+      name: /^(?:Connect your .+ account|Share your staff list)$/u,
+    })
   ).toBeVisible();
   const run = crypto.randomUUID().slice(0, 8);
   const email = (name: string) => `${name}.${run}@acme.test`;

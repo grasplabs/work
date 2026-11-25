@@ -1882,6 +1882,10 @@ msgstr "A connection that works has taken its place, so this one can be disconne
 msgid "A copy of everything the Brain keeps for you alone: your own sources and what it remembers from them. Only you can make it and download it, and it is deleted when your data is erased."
 msgstr "A copy of everything the Brain keeps for you alone: your own sources and what it remembers from them. Only you can make it and download it, and it is deleted when your data is erased."
 
+#: src/onboarding/company-step.tsx
+msgid "A CSV or Excel file, a row per person"
+msgstr "A CSV or Excel file, a row per person"
+
 #: src/drafts/publish-errors.ts
 msgid "A data migration moved this App's records on since this version, so it can't be shared again. Share a new version instead."
 msgstr "A data migration moved this App's records on since this version, so it can't be shared again. Share a new version instead."
@@ -4960,12 +4964,12 @@ msgid "Connect the apps your work runs on"
 msgstr "Connect the apps your work runs on"
 
 #: src/onboarding/company-step.tsx
-msgid "Connect your {signIn} sign-in. I’ll only see names, teams and roles. No list at hand? Skip this, and we’ll sort it out with you."
-msgstr "Connect your {signIn} sign-in. I’ll only see names, teams and roles. No list at hand? Skip this, and we’ll sort it out with you."
+msgid "Connect your {signIn} account"
+msgstr "Connect your {signIn} account"
 
 #: src/onboarding/company-step.tsx
-msgid "Connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. No list at hand? Skip this, and we’ll sort it out with you."
-msgstr "Connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. No list at hand? Skip this, and we’ll sort it out with you."
+msgid "Connect your work account"
+msgstr "Connect your work account"
 
 #: src/onboarding/sources-step.tsx
 msgid "connected"
@@ -8210,6 +8214,10 @@ msgstr "Here’s the plan"
 #: src/chat/plan-card.tsx
 msgid "Here's what Grasp will make"
 msgstr "Here's what Grasp will make"
+
+#: src/onboarding/company-step.tsx
+msgid "Here’s your company"
+msgstr "Here’s your company"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Here’s your Grasp."
@@ -12751,6 +12759,10 @@ msgctxt "the settings an app offers itself"
 msgid "Options"
 msgstr "Options"
 
+#: src/onboarding/company-step.tsx
+msgid "Or use a staff list"
+msgstr "Or use a staff list"
+
 #: src/interview/closed.tsx
 msgid "Or withdraw: nothing you said is used from now on, and you can still read it here."
 msgstr "Or withdraw: nothing you said is used from now on, and you can still read it here."
@@ -15561,6 +15573,10 @@ msgstr "Share with the company"
 msgid "Share with your team"
 msgstr "Share with your team"
 
+#: src/onboarding/company-step.tsx
+msgid "Share your staff list"
+msgstr "Share your staff list"
+
 #: src/brain/memories-page.tsx
 msgid "Share…"
 msgstr "Share…"
@@ -16049,6 +16065,10 @@ msgstr "slide"
 msgctxt "the chat box's edge"
 msgid "Smooth"
 msgstr "Smooth"
+
+#: src/onboarding/company-step.tsx
+msgid "So I can see your teams, roles and directory. I only read names, email addresses, teams and jobs, nothing else."
+msgstr "So I can see your teams, roles and directory. I only read names, email addresses, teams and jobs, nothing else."
 
 #: src/agents/setup/words.ts
 msgid "Some teams"
@@ -18854,6 +18874,10 @@ msgstr "Use another list"
 msgid "Use another platform"
 msgstr "Use another platform"
 
+#: src/onboarding/company-step.tsx
+msgid "Use another staff list"
+msgstr "Use another staff list"
+
 #: src/agents/setup/words.ts
 msgid "Use Apps"
 msgstr "Use Apps"
@@ -20191,10 +20215,6 @@ msgstr "Who to share with couldn't be read. Try again in a moment."
 #: src/connections/connect-dialog.tsx
 msgid "Who uses it"
 msgstr "Who uses it"
-
-#: src/onboarding/company-step.tsx
-msgid "Who’s who at your company?"
-msgstr "Who’s who at your company?"
 
 #: src/apps/draft-changes.tsx
 msgid "whoever added the row"

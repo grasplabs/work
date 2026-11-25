@@ -1882,6 +1882,10 @@ msgstr "Una conexión que funciona ha ocupado su lugar, así que esta ya se pued
 msgid "A copy of everything the Brain keeps for you alone: your own sources and what it remembers from them. Only you can make it and download it, and it is deleted when your data is erased."
 msgstr "Una copia de todo lo que el Brain guarda solo para ti: tus propias fuentes y lo que recuerda de ellas. Solo tú puedes crearla y descargarla, y se elimina cuando se borran tus datos."
 
+#: src/onboarding/company-step.tsx
+msgid "A CSV or Excel file, a row per person"
+msgstr "Un archivo CSV o Excel, una fila por persona"
+
 #: src/drafts/publish-errors.ts
 msgid "A data migration moved this App's records on since this version, so it can't be shared again. Share a new version instead."
 msgstr "Una migración de datos ha hecho avanzar los registros de esta App desde esta versión, así que no se puede volver a compartir. Comparte una versión nueva en su lugar."
@@ -4960,12 +4964,12 @@ msgid "Connect the apps your work runs on"
 msgstr "Conecta las apps con las que trabajas"
 
 #: src/onboarding/company-step.tsx
-msgid "Connect your {signIn} sign-in. I’ll only see names, teams and roles. No list at hand? Skip this, and we’ll sort it out with you."
-msgstr "Conecta tu inicio de sesión de {signIn}. Solo veré nombres, equipos y funciones. ¿No tienes una lista a mano? Sáltate este paso y lo resolvemos contigo."
+msgid "Connect your {signIn} account"
+msgstr "Conecta tu cuenta de {signIn}"
 
 #: src/onboarding/company-step.tsx
-msgid "Connect your Microsoft or Google sign-in. I’ll only see names, teams and roles. No list at hand? Skip this, and we’ll sort it out with you."
-msgstr "Conecta tu inicio de sesión de Microsoft o Google. Solo veré nombres, equipos y funciones. ¿No tienes una lista a mano? Sáltate este paso y lo resolvemos contigo."
+msgid "Connect your work account"
+msgstr "Conecta tu cuenta de trabajo"
 
 #: src/onboarding/sources-step.tsx
 msgid "connected"
@@ -8210,6 +8214,10 @@ msgstr "Este es el plan"
 #: src/chat/plan-card.tsx
 msgid "Here's what Grasp will make"
 msgstr "Esto es lo que hará Grasp"
+
+#: src/onboarding/company-step.tsx
+msgid "Here’s your company"
+msgstr "Esta es tu empresa"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Here’s your Grasp."
@@ -12751,6 +12759,10 @@ msgctxt "the settings an app offers itself"
 msgid "Options"
 msgstr "Opciones"
 
+#: src/onboarding/company-step.tsx
+msgid "Or use a staff list"
+msgstr "O usa una lista de personal"
+
 #: src/interview/closed.tsx
 msgid "Or withdraw: nothing you said is used from now on, and you can still read it here."
 msgstr "O retírate: nada de lo que dijiste se usa a partir de ahora, y todavía puedes leerlo aquí."
@@ -15561,6 +15573,10 @@ msgstr "Compartir con la empresa"
 msgid "Share with your team"
 msgstr "Compartir con tu equipo"
 
+#: src/onboarding/company-step.tsx
+msgid "Share your staff list"
+msgstr "Comparte tu lista de personal"
+
 #: src/brain/memories-page.tsx
 msgid "Share…"
 msgstr "Compartir…"
@@ -16049,6 +16065,10 @@ msgstr "diapositiva"
 msgctxt "the chat box's edge"
 msgid "Smooth"
 msgstr "Suave"
+
+#: src/onboarding/company-step.tsx
+msgid "So I can see your teams, roles and directory. I only read names, email addresses, teams and jobs, nothing else."
+msgstr "Así veo tus equipos, roles y directorio. Solo leo nombres, correos electrónicos, equipos y puestos, nada más."
 
 #: src/agents/setup/words.ts
 msgid "Some teams"
@@ -18854,6 +18874,10 @@ msgstr "Usar otra lista"
 msgid "Use another platform"
 msgstr "Elegir otra plataforma"
 
+#: src/onboarding/company-step.tsx
+msgid "Use another staff list"
+msgstr "Usar otra lista de personal"
+
 #: src/agents/setup/words.ts
 msgid "Use Apps"
 msgstr "Usar Apps"
@@ -20191,10 +20215,6 @@ msgstr "No se pudo leer con quién compartir. Vuelve a intentarlo en un momento.
 #: src/connections/connect-dialog.tsx
 msgid "Who uses it"
 msgstr "Quién lo usa"
-
-#: src/onboarding/company-step.tsx
-msgid "Who’s who at your company?"
-msgstr "¿Quién es quién en tu empresa?"
 
 #: src/apps/draft-changes.tsx
 msgid "whoever added the row"
