@@ -24,7 +24,7 @@ import type { ReactNode } from "react";
 import { isFileGone } from "../error-reports.ts";
 import { WithInfo } from "../frame/info-tip.tsx";
 import { ErrorState } from "../frame/page-states.tsx";
-import { useRouteErrorReason } from "../route-error.tsx";
+import { useRouteErrorReason } from "../route-error-reason.ts";
 
 // Settings' own small parts, composed of Damsko's: a Settings page is its
 // name as the page's one header (the layout draws it), then a group per

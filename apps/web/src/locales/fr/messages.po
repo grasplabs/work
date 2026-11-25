@@ -2123,6 +2123,10 @@ msgctxt "what a decision is about, as its workflow run passed it"
 msgid "About"
 msgstr "Objet"
 
+#: src/chat/saved-memory.tsx
+msgid "About {about}: {statement}"
+msgstr "À propos de {about} : {statement}"
+
 #: src/brain/memories-page.tsx
 msgid "About {aboutShown}"
 msgstr "À propos de {aboutShown}"
@@ -8095,25 +8099,9 @@ msgstr "Grasp cesse d’y envoyer les événements de l’App. Son secret ne peu
 msgid "Grasp tries again every quarter of an hour. If it keeps failing, ask Grasp’s support to help."
 msgstr "Grasp réessaie tous les quarts d’heure. Si cela échoue encore, demandez de l’aide au support de Grasp."
 
-#: src/route-error.tsx
+#: src/route-error-reason.ts
 msgid "Grasp was updated while this page was open. Try again to load the new version."
 msgstr "Grasp a été mis à jour pendant que cette page était ouverte. Réessayez pour charger la nouvelle version."
-
-#: src/chat/saved-memory.tsx
-msgid "Grasp will remember about {about}: {statement}"
-msgstr "Grasp retiendra à propos de {about} : {statement}"
-
-#: src/chat/saved-memory.tsx
-msgid "Grasp will remember about {about}: {statement} (value: {value})"
-msgstr "Grasp retiendra à propos de {about} : {statement} (valeur : {value})"
-
-#: src/chat/saved-memory.tsx
-msgid "Grasp will remember: {statement}"
-msgstr "Grasp retiendra : {statement}"
-
-#: src/chat/saved-memory.tsx
-msgid "Grasp will remember: {statement} (value: {value})"
-msgstr "Grasp retiendra : {statement} (valeur : {value})"
 
 #: src/apps/app-code.tsx
 msgid "Grasp writes the first version in the chat."
@@ -8827,10 +8815,6 @@ msgstr "Entrée, en JSON"
 #: src/activity/audit-words.ts
 msgid "Installed Grasp's skills with a release"
 msgstr "A installé les skills de Grasp avec une version"
-
-#: src/chat/saved-memory.tsx
-msgid "Instruction"
-msgstr "Instruction"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -13378,10 +13362,6 @@ msgstr "Position"
 msgid "Prague"
 msgstr "Prague"
 
-#: src/chat/saved-memory.tsx
-msgid "Preference"
-msgstr "Préférence"
-
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Preference"
@@ -14981,6 +14961,18 @@ msgctxt "a setting saved"
 msgid "Saved"
 msgstr "Enregistré"
 
+#: src/chat/saved-memory.tsx
+msgid "Saved a memory"
+msgstr "Souvenir enregistré"
+
+#: src/chat/saved-memory.tsx
+msgid "Saved a preference"
+msgstr "Préférence enregistrée"
+
+#: src/chat/saved-memory.tsx
+msgid "Saved an instruction"
+msgstr "Instruction enregistrée"
+
 #: src/apps/app-data-model.tsx
 #: src/apps/field-editor.tsx
 msgid "Saved as {named}"
@@ -16138,7 +16130,7 @@ msgstr "Un problème est survenu à l’ouverture."
 
 #: src/connections/part-not-loaded.tsx
 #: src/frame/page-states.tsx
-#: src/route-error.tsx
+#: src/route-error-reason.ts
 msgid "Something went wrong."
 msgstr "Une erreur s’est produite."
 
@@ -18122,6 +18114,7 @@ msgid "This page couldn't load"
 msgstr "Cette page n’a pas pu se charger"
 
 #: src/frame/page-states.tsx
+#: src/interview-routes.tsx
 msgid "This page didn't load"
 msgstr "Cette page ne s’est pas chargée"
 
@@ -18506,6 +18499,7 @@ msgstr "Essayer"
 #: src/frame/ui-words.tsx
 #: src/inbox/decision-card.tsx
 #: src/inbox/inbox-page.tsx
+#: src/interview-routes.tsx
 #: src/interview/destination.tsx
 #: src/settings/sign-in-settings.tsx
 msgid "Try again"

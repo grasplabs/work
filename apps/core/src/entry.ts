@@ -39,6 +39,7 @@ import { adminSnapshotResponse } from "./admin-snapshot.ts";
 import { aiStatusReportResponse } from "./ai-status-report.ts";
 import { appFileResponse, fileRouteOf } from "./app-file-route.ts";
 import { appLinkResponse, linkRouteOf } from "./app-link-route.ts";
+import { appPictureResponse } from "./app-pictures.ts";
 import { auditExportResponse } from "./audit-rpc.ts";
 import { authBasePath } from "./auth/auth.ts";
 import { signInConfig } from "./auth/config.ts";
@@ -473,6 +474,15 @@ const route = async (
   const picture = await chatFileResponse(pathname, request, env, requestId);
   if (picture !== undefined) {
     return picture;
+  }
+  const appPicture = await appPictureResponse(
+    pathname,
+    request,
+    env,
+    requestId
+  );
+  if (appPicture !== undefined) {
+    return appPicture;
   }
   if (isUnder(pathname, "/api")) {
     return errorResponse(
