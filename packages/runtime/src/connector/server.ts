@@ -501,7 +501,7 @@ export const serveConnector = (
     }
     syncs.set(sync.name, sync);
   }
-  const manifest = checkedManifest({
+  const manifest = checkedManifest(() => ({
     ...base,
     actions: Object.fromEntries(
       toolList.map(({ name, action }) => [name, action])
@@ -516,7 +516,7 @@ export const serveConnector = (
             ])
           ),
         }),
-  });
+  }));
 
   const syncOf = ({ name }: JsonObject): Sync | undefined =>
     typeof name === "string" ? syncs.get(name) : undefined;
@@ -531,7 +531,7 @@ export const serveConnector = (
         return answer(id, {
           protocolVersion: mcpProtocolVersion,
           capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: manifest.name, version: "1.0.0" },
+          serverInfo: { name: base.name, version: "1.0.0" },
         });
       }
       case "ping": {
@@ -579,7 +579,9 @@ export const serveConnector = (
   };
 
   return {
-    manifest,
+    get manifest() {
+      return manifest();
+    },
     fetch: async (request) => {
       if (request.method !== "POST") {
         return new Response(null, { status: 405 });
