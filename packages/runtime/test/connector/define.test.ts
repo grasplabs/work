@@ -186,11 +186,11 @@ const clearStock = tool({
   description: "Clears one product's stock",
   readOnly: false,
   reach: "company",
-  routes: ["DELETE /v1/stock/{sku}"],
+  routes: ["POST /v1/stock/{sku}/clear"],
   args: { sku: v.string() },
   returns: v.object({ answer: v.string() }),
   handler: async ({ sku }, api) => ({
-    answer: String(await api.delete("/v1/stock/{sku}", { path: { sku } })),
+    answer: String(await api.post("/v1/stock/{sku}/clear", { path: { sku } })),
   }),
 });
 
@@ -309,55 +309,91 @@ describe("a connector's definition", () => {
         tools: { "stock.get": each },
       });
 
-  it("refuses a tool that declares less than the rules find in it", () => {
-    const named = (name: string, each: ReturnType<typeof tool>) => () =>
-      defineConnector({
-        name: "stock",
-        title: "Stock",
-        hosts: [host],
-        auth: keyAuth,
-        tools: { [name]: each },
-      });
-    const postingRead = tool({
-      description: "Reads the stock by posting a query",
-      readOnly: true,
-      reach: "company",
-      routes: ["POST /v1/stock/query"],
-      args: {},
-      returns: Stock,
-      handler: async () => await Promise.resolve({ sku: "a", onHand: 1 }),
+  const named = (name: string, each: ReturnType<typeof tool>) => () =>
+    defineConnector({
+      name: "stock",
+      title: "Stock",
+      hosts: [host],
+      auth: keyAuth,
+      tools: { [name]: each },
     });
-    const ownRecipients = tool({
-      description: "Gets a report and tells its recipients",
-      readOnly: true,
-      reach: "own",
-      routes: ["GET /v1/stock/report"],
-      args: { recipients: v.array(v.string()) },
-      returns: Stock,
-      handler: async () => await Promise.resolve({ sku: "a", onHand: 1 }),
-    });
-    const sendingRead = tool({
-      description: "Sends a message",
-      readOnly: true,
-      reach: "own",
-      routes: ["GET /v1/stock/send"],
-      args: {},
+
+  /** A tool that answers the stock, declared as `changes` say. */
+  const declared = (
+    changes: Pick<
+      Parameters<typeof tool>[0],
+      "readOnly" | "reach" | "routes" | "args"
+    >
+  ) =>
+    tool({
+      description: "Declared",
+      ...changes,
       returns: Stock,
       handler: async () => await Promise.resolve({ sku: "a", onHand: 1 }),
     });
 
-    expect(named("stock.get", postingRead)).toThrow(
+  it("refuses a read that sends a write, names a change, or tells people it calls its own", () => {
+    const read = { readOnly: true, reach: "own" } as const;
+    expect(
+      named(
+        "stock.get",
+        declared({ ...read, routes: ["POST /v1/stock/query"], args: {} })
+      )
+    ).toThrow(
       "stock.get: it is read-only, so it sends only GET and HEAD requests"
     );
-    expect(named("get_x", ownRecipients)).toThrow(
-      "get_x: its input names people or places it reaches, so it reaches others"
-    );
-    expect(named("send_message", sendingRead)).toThrow(
+    expect(
+      named(
+        "send_message",
+        declared({ ...read, routes: ["GET /v1/stock/send"], args: {} })
+      )
+    ).toThrow(
       "send_message: it is read-only, but its name says it changes something"
     );
+    expect(
+      named(
+        "get_x",
+        declared({
+          ...read,
+          routes: ["GET /v1/stock/report"],
+          args: { recipients: v.array(v.string()) },
+        })
+      )
+    ).toThrow(
+      "get_x: its input names people or places it reaches, so it reaches others"
+    );
+  });
+
+  it("refuses what Grasp never runs, by name or by a DELETE, and a message declared as its author's own", () => {
+    const write = { readOnly: false, reach: "own" } as const;
+    const addressed = declared({
+      ...write,
+      routes: ["POST /v1/notices"],
+      args: { to: v.string() },
+    });
     expect(named("stock.softDelete", setStock)).toThrow(
       "stock.softDelete: Grasp never runs it"
     );
+    expect(
+      named(
+        "stock.clear",
+        declared({ ...write, routes: ["DELETE /v1/stock/{sku}"], args: {} })
+      )
+    ).toThrow("stock.clear: Grasp never runs it");
+    expect(
+      named(
+        "notice.send",
+        declared({
+          ...write,
+          routes: ["POST /v1/notices"],
+          args: { username: v.string() },
+        })
+      )
+    ).toThrow("notice.send: its input names people or places it reaches");
+    expect(named("notice.submitDraft", addressed)).toThrow(
+      "notice.submitDraft: its input names people or places it reaches"
+    );
+    expect(named("notice.createDraft", addressed)).not.toThrow();
   });
 
   it("refuses a route to a host it doesn't list, and a bare path among several hosts", () => {

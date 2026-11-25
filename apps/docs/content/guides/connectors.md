@@ -82,9 +82,15 @@ A tool's name is its family and its action: `items.list`. The tools of one famil
 - `scopes`: the OAuth scopes it needs, among those its connector's `auth` asks for.
 - `handler`: the call, as `(args, api, call)`. It gets the arguments, already checked, and the vendor's API.
 
+`readOnly` and `reach` are checked against the rules that class every tool by its name and arguments, and a connector that claims less than they find isn't built:
+
+- A read-only tool sends only GET and HEAD requests, and its name says no change (`send_message` can't be read-only).
+- A tool whose arguments name people it may reach (`to`, `recipients`, `attendees`, `cc`, `email`, a callback) reaches `others`, and so does a write named for delivering (send, notify, reply, publish) or that acts on a channel, a user, an assignee or a URL. A draft reaches nobody until someone sends it, so `createDraft` taking `to` is fine.
+- A tool named for what Grasp never does (deleting, sharing and permissions, forwarding and mail rules, settings, payments), or that sends a DELETE, is refused whatever it declares.
+
 ## The API
 
-`api` sends a request to one of the tool's routes, as the route is declared: `api.get("/v1/boards/{board}/items", { path, query, body, returns })`, and `post`, `put`, `patch`, `delete` and `head` the same way. It fills in each path parameter from `path` as one segment of the path (a value can't be empty, `.` or `..`, or hold `/ \ ? # % ; :` or a control character; it's refused before anything is sent), adds `query` (leaving out undefined and null values) and sends `body` as JSON. A route the tool doesn't declare is refused before anything is sent.
+`api` sends a request to one of the tool's routes, as the route is declared: `api.get("/v1/boards/{board}/items", { path, query, body, returns })`, and `post`, `put`, `patch` and `head` the same way. It fills in each path parameter from `path` as one segment of the path (a value can't be empty, `.` or `..`, or hold `/ \ ? # % ; :` or a control character; it's refused before anything is sent), adds `query` (leaving out undefined and null values) and sends `body` as JSON. A route the tool doesn't declare is refused before anything is sent.
 
 `returns` is optional. With it, the answer is checked against it and typed by it, and one that doesn't fit fails the call. Fields it doesn't name are left out, so a field the vendor adds never breaks a call: name only what the connector reads. Without it, the answer is `unknown`: the JSON, or the text when the answer isn't JSON. Either way, the tool's own `returns` checks what the handler makes of it.
 

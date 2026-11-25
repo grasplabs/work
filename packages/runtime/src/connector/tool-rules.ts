@@ -17,7 +17,8 @@ import type { Json } from "@grasp-os/shared/json";
 // and GRA-2306), so every doubt falls on the side of change: a read held by
 // mistake is a nuisance, a change let through is a risk.
 // - A tool is a read only on positive evidence. A server's tool: its name
-//   holds a verb that reads and no verb that changes anything, its hints
+//   leads with a verb that reads (after at most one word, such as the
+//   server's own name) and holds no verb that changes anything, its hints
 //   don't say it changes anything, and its input names no recipients. A
 //   declared tool: it sends only GETs and HEADs, which egress holds it to,
 //   and its name holds no verb that changes anything.
@@ -26,19 +27,24 @@ import type { Json } from "@grasp-os/shared/json";
 //   admin turns it on (GRA-2345).
 // - It reaches others when its input names people it reaches: recipients,
 //   whatever it does; and for a change, also the people and places it acts
-//   on (a channel, an assignee, a URL it calls). A draft reaches nobody
+//   on (a channel, an assignee, a URL it calls), and whoever a change named
+//   for delivering (send, notify, reply) reaches. A draft reaches nobody
 //   until someone sends it. It reaches conversations when its name reads
 //   or writes what people said. Anything else reaches what its connection
 //   holds: the person's own, or the company's.
 // - Its description is never read: it is the vendor's text, written for
 //   the model, and may be written to steer it.
-// - What Grasp never does is refused by name, for every tool (GRA-717).
+// - What Grasp never does is refused by name, for every tool (GRA-717),
+//   and so is a declared tool that sends a DELETE.
 //
 // The rules bind a tool's name and schema, not what its server does: a
 // hostile server can implement `get_weather` as a write. Its token reaches
 // only that vendor, and adding a server is an admin's audited decision.
 
-/** Verbs that read: a server's tool is a read only if its name holds one. */
+/**
+ * Verbs that read: a server's tool is a read only if its name leads with
+ * one, or holds one as its second word (`vendor_list_items`).
+ */
 const readVerbs: ReadonlySet<string> = new Set([
   "fetch",
   "find",
@@ -54,10 +60,13 @@ const readVerbs: ReadonlySet<string> = new Set([
  * `findAndUpdate`). A noun that is also a verb and names what is read
  * (`comment`, `post`, `run`, `label`, `schedule`) isn't one: it
  * would make `get_comment` a change. Both lists err towards change: a
- * name with a verb from each is a change.
+ * name with a verb from each is a change. A word that is one of them
+ * after `un`, `de`, `re` or `dis` is one too (`unhide`, `deregister`,
+ * `resend`).
  */
 const changeWords: ReadonlySet<string> = new Set([
   "accept",
+  "ack",
   "acknowledge",
   "activate",
   "add",
@@ -73,11 +82,13 @@ const changeWords: ReadonlySet<string> = new Set([
   "ban",
   "block",
   "book",
+  "broadcast",
   "bump",
   "call",
   "cancel",
   "capture",
   "change",
+  "checkout",
   "claim",
   "clean",
   "clear",
@@ -92,10 +103,14 @@ const changeWords: ReadonlySet<string> = new Set([
   "create",
   "deactivate",
   "decline",
+  "decrement",
+  "dequeue",
+  "deliver",
   "deny",
   "deploy",
   "detach",
   "disable",
+  "discard",
   "disconnect",
   "dismiss",
   "dispatch",
@@ -143,6 +158,7 @@ const changeWords: ReadonlySet<string> = new Set([
   "mute",
   "notify",
   "or",
+  "overwrite",
   "patch",
   "pause",
   "perform",
@@ -157,6 +173,7 @@ const changeWords: ReadonlySet<string> = new Set([
   "reassign",
   "reboot",
   "rebuild",
+  "redeem",
   "refresh",
   "regenerate",
   "register",
@@ -190,7 +207,6 @@ const changeWords: ReadonlySet<string> = new Set([
   "set",
   "ship",
   "shutdown",
-  "sign",
   "snooze",
   "sort",
   "split",
@@ -200,6 +216,7 @@ const changeWords: ReadonlySet<string> = new Set([
   "submit",
   "subscribe",
   "suspend",
+  "swap",
   "sync",
   "then",
   "toggle",
@@ -228,12 +245,15 @@ const changeWords: ReadonlySet<string> = new Set([
 
 /**
  * Input property words that name people a call reaches, whatever it does:
- * a read that takes them may tell them (a read receipt, an invitation).
+ * a read that takes them may tell them (a read receipt, an invitation), or
+ * send what it read to an address it is given (a callback).
  */
 const recipientWords: ReadonlySet<string> = new Set([
   "attendee",
   "attendees",
   "bcc",
+  "callback",
+  "callbacks",
   "cc",
   "email",
   "emails",
@@ -243,6 +263,8 @@ const recipientWords: ReadonlySet<string> = new Set([
   "invitees",
   "recipient",
   "recipients",
+  "webhook",
+  "webhooks",
 ]);
 
 /**
@@ -253,8 +275,6 @@ const recipientWords: ReadonlySet<string> = new Set([
 const targetWords: ReadonlySet<string> = new Set([
   "assignee",
   "assignees",
-  "callback",
-  "callbacks",
   "channel",
   "channels",
   "member",
@@ -270,15 +290,33 @@ const targetWords: ReadonlySet<string> = new Set([
   "urls",
   "user",
   "users",
-  "webhook",
-  "webhooks",
 ]);
 
 /**
- * Name words that send what a draft holds: a draft named with one of them
- * reaches whoever it names.
+ * Name words that send something to people: a change named with one
+ * reaches others, and a draft named with one is sent, not written.
  */
-const deliveryWords: ReadonlySet<string> = new Set(["post", "publish", "send"]);
+const sendingWords: ReadonlySet<string> = new Set([
+  "broadcast",
+  "deliver",
+  "dispatch",
+  "notify",
+  "post",
+  "publish",
+  "send",
+  "submit",
+]);
+
+/**
+ * Name words that deliver to people, as a change: the sending words, and
+ * answering (`reply_to_thread`), which a draft may name as what it holds
+ * (`create_reply_draft`).
+ */
+const deliveryWords: ReadonlySet<string> = new Set([
+  ...sendingWords,
+  "reply",
+  "respond",
+]);
 
 /** Name words for what other people said where the person was. */
 const conversationWords: ReadonlySet<string> = new Set([
@@ -301,59 +339,68 @@ const conversationWords: ReadonlySet<string> = new Set([
 
 /**
  * What Grasp never does, as parts of words: a name holding one anywhere,
- * in any case and however its words are joined (`deleted`, `softDelete`,
- * `getACLs`, `HTTPDelete`), is refused. Deleting; permissions and
+ * in any case and however its words are joined (`deletion`, `softDelete`,
+ * `HTTPDelete`, `bulk_unshare`), is refused. Deleting; permissions and
  * sharing; forwarding, mail rules and hooks that send data out; settings;
  * payments. It errs towards refusing: a read named for one of them
- * (`list_mail_rules`, `get_shared_drives`, `sharepoint_search`) is
- * refused too, and that costs less than a change let through. `access`
- * and `owner` aren't: they name reading as often as granting (an access
- * token, the resources one can access, a CRM's owners), and granting is
- * caught by `grant`, `share`, `permission`, `role`, `invit` and
- * `transfer`.
+ * (`list_mail_rules`) is refused too, and that costs less than a change
+ * let through. `access` and `owner` aren't one: they name reading as
+ * often as granting (an access token, the resources one can access, a
+ * CRM's owners), and granting is caught by `grant`, `share`,
+ * `permission`, `role`, `invit` and `transfer`.
  */
 const neverParts: readonly string[] = [
   // Deleting
   "delet",
   "destroy",
-  "drop",
-  "eras",
   "purg",
   "remov",
   "trash",
   "truncat",
   "wipe",
   // Permissions and sharing
-  "acl",
   "collaborat",
-  "grant",
   "invit",
   "permission",
   "revoc",
   "revok",
-  "role",
-  "share",
+  "unshar",
   // Forwarding, mail rules and hooks
   "autorepl",
   "filter",
   "forward",
   "redirect",
-  "rule",
   "webhook",
   // Settings
   "config",
   "preference",
   "setting",
   // Payments
-  "charge",
   "invoice",
-  "paid",
-  "pay",
   "purchas",
   "refund",
   "subscription",
   "transfer",
   "withdraw",
+];
+
+/**
+ * What Grasp never does, as the start of a word: words too short to find
+ * inside others (`acl` in `oracle`, `grant` in `migrant`) are matched
+ * where a word starts, so `dropTable`, `getACLs`, `shared` and
+ * `payment` are refused.
+ */
+const neverStarts: readonly string[] = [
+  "acl",
+  "charge",
+  "drop",
+  "eras",
+  "grant",
+  "paid",
+  "pay",
+  "role",
+  "rule",
+  "share",
 ];
 
 /** A JSON Schema `format` whose value is a date, a time or a span. */
@@ -364,29 +411,50 @@ const timeFormats: ReadonlySet<string> = new Set([
   "time",
 ]);
 
-/** The JSON Schema types whose value can hold text that names someone. */
-const textTypes: ReadonlySet<string> = new Set(["string", "array", "object"]);
-
-/** A property name in plain ASCII letters, digits and separators. */
+/** A name in plain printable ASCII, which the rules can read by words. */
 const plainName = /^[ -~]*$/u;
+
+/** The prefixes that undo or repeat a change: `unhide`, `deregister`. */
+const changePrefixes: readonly string[] = ["dis", "de", "re", "un"];
 
 /**
  * A name's words, lowercase: split at anything not a letter or digit, at
- * camelCase, and at the end of an acronym (`HTTPDelete`).
+ * camelCase, and at the end of an acronym (`HTTPDelete`), keeping an
+ * acronym's plural whole (`getACLs`, `URLs`).
  */
 const wordsOf = (name: string): string[] =>
   name
     .replaceAll(/(?<lower>[a-z0-9])(?<upper>[A-Z])/gu, "$<lower> $<upper>")
-    .replaceAll(/(?<run>[A-Z])(?<word>[A-Z][a-z])/gu, "$<run> $<word>")
+    .replaceAll(
+      /(?<run>[A-Z])(?<word>[A-Z](?!s(?![a-z]))[a-z])/gu,
+      "$<run> $<word>"
+    )
     .toLowerCase()
     .split(/[^a-z0-9]+/u)
     .filter((word) => word !== "");
 
-/** Whether the tool `name` is one Grasp never runs. */
+/**
+ * Whether the tool `name` is one Grasp never runs. A name outside plain
+ * ASCII can't be read (`dеlete` with a Cyrillic е), so it is one.
+ */
 export const isNeverTool = (name: string): boolean => {
   const joined = name.toLowerCase().replaceAll(/[^a-z0-9]/gu, "");
-  return neverParts.some((part) => joined.includes(part));
+  return (
+    !plainName.test(name) ||
+    neverParts.some((part) => joined.includes(part)) ||
+    wordsOf(name).some((word) =>
+      neverStarts.some((start) => word.startsWith(start))
+    )
+  );
 };
+
+/** Whether `word` is a change word, or one after a prefix that undoes it. */
+const isChangeWord = (word: string): boolean =>
+  changeWords.has(word) ||
+  changePrefixes.some(
+    (prefix) =>
+      word.startsWith(prefix) && changeWords.has(word.slice(prefix.length))
+  );
 
 /** A property's name and its schema, as a schema's `properties` hold it. */
 type Property = [name: string, schema: Json | undefined];
@@ -480,18 +548,20 @@ export const topNames = (schema: Json): string[] =>
 
 /**
  * Whether a property's value can name nobody: its schema says it is a
- * date or a time, a number or a flag. Anything else may hold an address.
+ * date or a time, or a flag. Anything else may hold an address or an ID,
+ * numbers too (a chat's, a user's).
  */
 const namesNobody = (schema: Json | undefined): boolean =>
   isRecord(schema) &&
   ((typeof schema.format === "string" && timeFormats.has(schema.format)) ||
-    (typeof schema.type === "string" && !textTypes.has(schema.type)));
+    schema.type === "boolean");
 
 /**
  * Whether a property names people by its words: one of `words`, or, at
  * the input's top, `to` as its first or last word (`to`, `sendTo`,
- * `toAddress`). A name outside plain ASCII can't be read by words
- * (`rеcipients` with a Cyrillic е), so it counts as naming people.
+ * `toAddress`); a nested `{ from, to }` is a range, of times or of text.
+ * A name outside plain ASCII can't be read by words (`rеcipients` with a
+ * Cyrillic е), so it counts as naming people.
  */
 const namesPeople = (
   [name, schema]: Property,
@@ -513,13 +583,13 @@ const namesPeople = (
 
 /** What the rules find in a tool's name and input schema. */
 interface Findings {
-  /** Its name holds a verb that reads. */
+  /** Its name leads with a verb that reads. */
   reads: boolean;
   /** Its name holds a verb that changes something. */
   changes: boolean;
   /** Its input names people it reaches, whatever it does. */
   recipients: boolean;
-  /** Its input names people or places a change of it acts on. */
+  /** Its input names people or places a change of it acts on, or its name delivers to people. */
   targets: boolean;
   /** Its name reads or writes what people said. */
   conversations: boolean;
@@ -532,7 +602,7 @@ const findingsOf = (name: string, inputSchema: Json): Findings => {
   // reached only by the send, which is a tool of its own.
   const draft =
     words.some((word) => word === "draft" || word === "drafts") &&
-    !words.some((word) => deliveryWords.has(word));
+    !words.some((word) => sendingWords.has(word));
   const top = topProperties(inputSchema);
   const all = allProperties(inputSchema);
   const names = (each: ReadonlySet<string>) =>
@@ -540,10 +610,12 @@ const findingsOf = (name: string, inputSchema: Json): Findings => {
     (top.some((property) => namesPeople(property, each, true)) ||
       all.some((property) => namesPeople(property, each, false)));
   return {
-    reads: words.some((word) => readVerbs.has(word)),
-    changes: words.some((word) => changeWords.has(word)),
+    reads: words.slice(0, 2).some((word) => readVerbs.has(word)),
+    changes: words.some(isChangeWord),
     recipients: names(recipientWords),
-    targets: names(targetWords),
+    targets:
+      names(targetWords) ||
+      (!draft && words.some((word) => deliveryWords.has(word))),
     conversations: words.some((word) => conversationWords.has(word)),
   };
 };
@@ -615,7 +687,8 @@ export interface DeclaredTool {
 
 /**
  * Why the declaration of tool `name` claims less than the rules find, if
- * it does: it is one Grasp never runs; it claims to read but sends a
+ * it does: it is one Grasp never runs, by its name or because it sends a
+ * DELETE, whatever it is called; it claims to read but sends a
  * request other than a GET or HEAD, or is named for a change; or its
  * input names people it reaches but it doesn't say it reaches others.
  * Whether what it reads is the person's own or others' conversations is
@@ -625,7 +698,7 @@ export const declarationProblem = (
   name: string,
   { readOnly, reach, routes, contract }: DeclaredTool
 ): string | undefined => {
-  if (isNeverTool(name)) {
+  if (isNeverTool(name) || routes.some(({ method }) => method === "DELETE")) {
     return "Grasp never runs it";
   }
   const found = findingsOf(name, contract.input);

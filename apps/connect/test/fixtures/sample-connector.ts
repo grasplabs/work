@@ -127,7 +127,7 @@ export default defineConnector({
         subject: z.string().nullable(),
       }),
       readOnly: false,
-      reach: "own",
+      reach: "others",
       resource: "mailbox",
       routes: [
         {

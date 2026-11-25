@@ -462,7 +462,7 @@ describe("a connector's tools", () => {
       create_event: "reach-others",
       search_by: "reach-others",
       list_rooms: "reach-others",
-      find_and_send: "change-own",
+      find_and_send: "reach-others",
       read_messages: "read-others",
       delete_issue: "connect.never",
       share_document: "connect.never",
@@ -479,6 +479,10 @@ describe("a connector's tools", () => {
       tool("get_lock"),
       tool("get_set_x"),
       tool("find_merge"),
+      tool("get_overwrite"),
+      tool("list_unhide"),
+      tool("get_deregister"),
+      tool("post_to_list"),
       tool("whoami", { annotations: { readOnlyHint: true } }),
       tool("query_database"),
     ];
@@ -497,6 +501,10 @@ describe("a connector's tools", () => {
       get_lock: classes.get_lock,
       get_set_x: classes.get_set_x,
       find_merge: classes.find_merge,
+      get_overwrite: classes.get_overwrite,
+      list_unhide: classes.list_unhide,
+      get_deregister: classes.get_deregister,
+      post_to_list: classes.post_to_list,
       whoami: classes.whoami,
       query_database: classes.query_database,
       replaced: replaced.pending === undefined ? "ran" : "held",
@@ -508,6 +516,10 @@ describe("a connector's tools", () => {
       get_lock: "change-own",
       get_set_x: "change-own",
       find_merge: "change-own",
+      get_overwrite: "change-own",
+      list_unhide: "change-own",
+      get_deregister: "change-own",
+      post_to_list: "reach-others",
       whoami: "reach-others",
       query_database: "reach-others",
       replaced: "held",
@@ -515,7 +527,7 @@ describe("a connector's tools", () => {
     });
   });
 
-  it("reach others where a change names the people or places it acts on, and where a name can't be read", async () => {
+  it("reach others where a change delivers or names the people or places it acts on, and where a name can't be read", async () => {
     const text = { type: "string" };
     linear.tools = [
       ...linear.tools,
@@ -532,8 +544,13 @@ describe("a connector's tools", () => {
       tool("register_hook", takes({ webhook_url: text })),
       tool("set_reminder", takes({ phone: text, user: text })),
       tool("get_status", takes({ "r\u0435cipients": text })),
+      tool("assign_issue", takes({ assignee_id: { type: "integer" } })),
+      tool("reply_to_thread", takes({ thread_id: text, body: text })),
+      tool("send", takes({ id: text })),
+      tool("get_weather", takes({ city: text, callback_url: text })),
       tool("create_draft", takes({ to: text, cc: text, body: text })),
-      tool("send_draft", takes({ to: text, draftId: text })),
+      tool("send_draft", takes({ draftId: text })),
+      tool("submit_draft", takes({ to: text })),
       tool(
         "list_events",
         takes({
@@ -555,8 +572,13 @@ describe("a connector's tools", () => {
       register_hook: classes.register_hook,
       set_reminder: classes.set_reminder,
       get_status: classes.get_status,
+      assign_issue: classes.assign_issue,
+      reply_to_thread: classes.reply_to_thread,
+      send: classes.send,
+      get_weather: classes.get_weather,
       create_draft: classes.create_draft,
       send_draft: classes.send_draft,
+      submit_draft: classes.submit_draft,
       list_events: classes.list_events,
       list_issues_by: classes.list_issues_by,
     }).toStrictEqual({
@@ -568,8 +590,13 @@ describe("a connector's tools", () => {
       register_hook: "reach-others",
       set_reminder: "reach-others",
       get_status: "reach-others",
+      assign_issue: "reach-others",
+      reply_to_thread: "reach-others",
+      send: "reach-others",
+      get_weather: "reach-others",
       create_draft: "change-own",
       send_draft: "reach-others",
+      submit_draft: "reach-others",
       list_events: "read-own",
       list_issues_by: "read-own",
     });
@@ -602,6 +629,7 @@ describe("a connector's tools", () => {
       "create_invoice",
       "withdraw_funds",
       "invite_user",
+      "bulk_unshare",
     ];
     linear.tools = [...linear.tools, ...refused.map((name) => tool(name))];
     const { connectionId, agent } = await connected();
