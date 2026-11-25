@@ -226,7 +226,7 @@ export interface GenerateOptions {
 export const sourceOf = (
   spec: Spec,
   url: string,
-  reach: ToolReach = "others"
+  { scheme, reach = "others" }: GenerateOptions = {}
 ): string => {
   const pages = spec.operations.flatMap((operation) =>
     operation.page === undefined ? [] : [{ operation, page: operation.page }]
@@ -240,7 +240,12 @@ export const sourceOf = (
     )
   );
   const imports = [...(pages.length > 0 ? ["page"] : []), "tool", "v"];
-  const openapi = `{ url: ${json(url)}, sha256: ${json(spec.sha256)} }`;
+  const recorded = [
+    `url: ${json(url)}`,
+    `sha256: ${json(spec.sha256)}`,
+    ...(scheme === undefined ? [] : [`scheme: ${json(scheme)}`]),
+  ];
+  const openapi = `{ ${recorded.join(", ")} }`;
   const entries = (
     list: readonly { name: string; value: string }[]
   ): string[] => list.map(({ name, value }) => `  ${json(name)}: ${value},`);
@@ -299,5 +304,5 @@ export const generateConnector = async (
   options: GenerateOptions = {}
 ): Promise<{ source: string; spec: Spec }> => {
   const spec = await readSpec(input, url, options.scheme);
-  return { source: sourceOf(spec, url, options.reach), spec };
+  return { source: sourceOf(spec, url, options), spec };
 };

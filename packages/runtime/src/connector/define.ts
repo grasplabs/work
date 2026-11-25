@@ -279,9 +279,14 @@ export interface ConnectorDeclaration {
   base?: string;
   /**
    * The vendor's OpenAPI spec its tools are generated from: where it was
-   * read and its SHA-256. Connect's build holds the tools to it.
+   * read, its SHA-256, and the security scheme it was read for where the
+   * generator was given one. Connect's build holds the tools to it.
    */
-  openapi?: { readonly url: string; readonly sha256: string };
+  openapi?: {
+    readonly url: string;
+    readonly sha256: string;
+    readonly scheme?: string;
+  };
   auth: ConnectorAuth;
   tools: Readonly<Record<string, ConnectorTool>>;
   events?: Readonly<Record<string, ConnectorReader>>;

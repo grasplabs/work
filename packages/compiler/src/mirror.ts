@@ -296,6 +296,13 @@ export const checkMirror = (
       ? `${route.method} ${route.path} isn't an operation of the vendor's spec.`
       : `${route.method} ${route.path} makes no tool: ${reason}`;
   };
+  /** Why a route of a tool held to the spec calls another host. */
+  const offHost = (route: Route | undefined): string[] =>
+    spec === undefined || route?.host === undefined || route.host === spec.host
+      ? []
+      : [
+          `${route.method} ${route.host}${route.path} isn't on the spec's host ${spec.host}.`,
+        ];
   return tools.flatMap((tool) => {
     const [route, ...more] = tool.routes.map(readRoute);
     if (route === undefined) {
@@ -332,6 +339,7 @@ export const checkMirror = (
         }
       }
     }
+    problems.push(...[route, ...more].flatMap(offHost));
     return problems.map((message) => ({ tool: tool.name, message }));
   });
 };

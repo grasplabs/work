@@ -93,7 +93,11 @@ const specBeside = async (
   if (file === undefined) {
     throw new Error(`${entry} declares an OpenAPI spec, and none is beside it`);
   }
-  const spec = await readSpec(readFileSync(file, "utf-8"), openapi.url);
+  const spec = await readSpec(
+    readFileSync(file, "utf-8"),
+    openapi.url,
+    openapi.scheme
+  );
   if (spec.sha256 !== openapi.sha256) {
     throw new Error(`${file} isn't the spec ${entry} was generated from`);
   }

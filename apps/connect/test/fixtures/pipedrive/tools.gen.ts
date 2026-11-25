@@ -4,7 +4,7 @@
 
 import { page, tool, v } from "@grasp-os/sdk/connector";
 
-export const openapi = { url: "https://developers.pipedrive.com/docs/api/v1/openapi-v2.yaml", sha256: "69c949d06a1db47c78deba55a6c15038acea310bce7070d5194b01c7cc26bb2a" } as const;
+export const openapi = { url: "https://developers.pipedrive.com/docs/api/v1/openapi-v2.yaml", sha256: "69c949d06a1db47c78deba55a6c15038acea310bce7070d5194b01c7cc26bb2a", scheme: "api_key" } as const;
 
 export const hosts = ["api.pipedrive.com"];
 
@@ -1314,30 +1314,6 @@ const answers = {
       is_optional_response_field: v.boolean(),
     }).optional(),
   }),
-  "dealFields.options.create": v.object({
-    success: v.boolean().optional(),
-    data: v.array(v.object({
-      id: v.number().integer(),
-      label: v.string(),
-    })).optional(),
-    additional_data: v.record(v.json()).nullable().optional(),
-  }),
-  "dealFields.options.deleteDealFieldOptions": v.object({
-    success: v.boolean().optional(),
-    data: v.array(v.object({
-      id: v.number().integer(),
-      label: v.string(),
-    })).optional(),
-    additional_data: v.record(v.json()).nullable().optional(),
-  }),
-  "dealFields.options.updateDealFieldOptions": v.object({
-    success: v.boolean().optional(),
-    data: v.array(v.object({
-      id: v.number().integer(),
-      label: v.string(),
-    })).optional(),
-    additional_data: v.record(v.json()).nullable().optional(),
-  }),
   "deals.convert.status.get": v.object({
     success: v.boolean(),
     data: v.object({
@@ -1683,30 +1659,6 @@ const answers = {
       }).optional(),
     }).optional(),
   }),
-  "personFields.options.create": v.object({
-    success: v.boolean().optional(),
-    data: v.array(v.object({
-      id: v.number().integer(),
-      label: v.string(),
-    })).optional(),
-    additional_data: v.record(v.json()).nullable().optional(),
-  }),
-  "personFields.options.deletePersonFieldOptions": v.object({
-    success: v.boolean().optional(),
-    data: v.array(v.object({
-      id: v.number().integer(),
-      label: v.string(),
-    })).optional(),
-    additional_data: v.record(v.json()).nullable().optional(),
-  }),
-  "personFields.options.updatePersonFieldOptions": v.object({
-    success: v.boolean().optional(),
-    data: v.array(v.object({
-      id: v.number().integer(),
-      label: v.string(),
-    })).optional(),
-    additional_data: v.record(v.json()).nullable().optional(),
-  }),
   "organizations.list": v.object({
     success: v.boolean().optional(),
     data: v.array(items["organizations.list"]).optional(),
@@ -1990,30 +1942,6 @@ const answers = {
         enabled: v.boolean().optional(),
       }).optional(),
     }).optional(),
-  }),
-  "organizationFields.options.create": v.object({
-    success: v.boolean().optional(),
-    data: v.array(v.object({
-      id: v.number().integer(),
-      label: v.string(),
-    })).optional(),
-    additional_data: v.record(v.json()).nullable().optional(),
-  }),
-  "organizationFields.options.deleteOrganizationFieldOptions": v.object({
-    success: v.boolean().optional(),
-    data: v.array(v.object({
-      id: v.number().integer(),
-      label: v.string(),
-    })).optional(),
-    additional_data: v.record(v.json()).nullable().optional(),
-  }),
-  "organizationFields.options.updateOrganizationFieldOptions": v.object({
-    success: v.boolean().optional(),
-    data: v.array(v.object({
-      id: v.number().integer(),
-      label: v.string(),
-    })).optional(),
-    additional_data: v.record(v.json()).nullable().optional(),
   }),
   "products.list": v.object({
     success: v.boolean().optional(),
@@ -2371,30 +2299,6 @@ const answers = {
       }).optional(),
     }).optional(),
   }),
-  "productFields.options.create": v.object({
-    success: v.boolean().optional(),
-    data: v.array(v.object({
-      id: v.number().integer(),
-      label: v.string(),
-    })).optional(),
-    additional_data: v.record(v.json()).nullable().optional(),
-  }),
-  "productFields.options.deleteProductFieldOptions": v.object({
-    success: v.boolean().optional(),
-    data: v.array(v.object({
-      id: v.number().integer(),
-      label: v.string(),
-    })).optional(),
-    additional_data: v.record(v.json()).nullable().optional(),
-  }),
-  "productFields.options.updateProductFieldOptions": v.object({
-    success: v.boolean().optional(),
-    data: v.array(v.object({
-      id: v.number().integer(),
-      label: v.string(),
-    })).optional(),
-    additional_data: v.record(v.json()).nullable().optional(),
-  }),
   "leads.search.searchLeads": v.object({
     success: v.boolean().optional(),
     data: v.object({
@@ -2745,30 +2649,6 @@ const answers = {
         enabled: v.boolean().optional(),
       }).optional(),
     }).optional(),
-  }),
-  "projectFields.options.create": v.object({
-    success: v.boolean().optional(),
-    data: v.array(v.object({
-      id: v.number().integer(),
-      label: v.string(),
-    })).optional(),
-    additional_data: v.record(v.json()).nullable().optional(),
-  }),
-  "projectFields.options.deleteProjectFieldOptions": v.object({
-    success: v.boolean().optional(),
-    data: v.array(v.object({
-      id: v.number().integer(),
-      label: v.string(),
-    })).optional(),
-    additional_data: v.record(v.json()).nullable().optional(),
-  }),
-  "projectFields.options.updateProjectFieldOptions": v.object({
-    success: v.boolean().optional(),
-    data: v.array(v.object({
-      id: v.number().integer(),
-      label: v.string(),
-    })).optional(),
-    additional_data: v.record(v.json()).nullable().optional(),
   }),
   "projects.list": v.object({
     success: v.boolean().optional(),
@@ -3349,7 +3229,7 @@ export const tools = {
     reach: "company",
     routes: ["POST /deals"],
     args: {
-      title: v.string().optional(),
+      title: v.string(),
       owner_id: v.number().integer().optional(),
       person_id: v.number().integer().nullable().optional(),
       org_id: v.number().integer().nullable().optional(),
@@ -3486,7 +3366,7 @@ export const tools = {
     routes: ["POST /deals/{id}/followers"],
     args: {
       id: v.number().integer(),
-      user_id: v.number().integer().optional(),
+      user_id: v.number().integer(),
     },
     returns: answers["deals.followers.create"],
     handler: async (args, api) => await api.post("/deals/{id}/followers", { path: { id: args.id }, body: { user_id: args.user_id }, returns: answers["deals.followers.create"] }),
@@ -3581,9 +3461,9 @@ export const tools = {
     routes: ["POST /deals/{id}/products"],
     args: {
       id: v.number().integer(),
-      product_id: v.number().integer().optional(),
-      item_price: v.number().optional(),
-      quantity: v.number().optional(),
+      product_id: v.number().integer(),
+      item_price: v.number(),
+      quantity: v.number(),
       tax: v.number().optional(),
       comments: v.string().optional(),
       discount: v.number().optional(),
@@ -3668,7 +3548,7 @@ export const tools = {
         billing_frequency: v.enum(["one-time","annually","semi-annually","quarterly","monthly","weekly"]).optional(),
         billing_frequency_cycles: v.number().integer().nullable().optional(),
         billing_start_date: v.string().date().nullable().optional(),
-      })).optional(),
+      })),
     },
     returns: answers["deals.products.bulk.create"],
     handler: async (args, api) => await api.post("/deals/{id}/products/bulk", { path: { id: args.id }, body: { data: args.data }, returns: answers["deals.products.bulk.create"] }),
@@ -3694,9 +3574,9 @@ export const tools = {
     routes: ["POST /deals/{id}/discounts"],
     args: {
       id: v.number().integer(),
-      description: v.string().optional(),
-      amount: v.number().optional(),
-      type: v.enum(["percentage","amount"]).optional(),
+      description: v.string(),
+      amount: v.number(),
+      type: v.enum(["percentage","amount"]),
     },
     returns: answers["deals.discounts.create"],
     handler: async (args, api) => await api.post("/deals/{id}/discounts", { path: { id: args.id }, body: { description: args.description, amount: args.amount, type: args.type }, returns: answers["deals.discounts.create"] }),
@@ -3753,9 +3633,9 @@ export const tools = {
     routes: ["POST /deals/{id}/installments"],
     args: {
       id: v.number().integer(),
-      description: v.string().optional(),
-      amount: v.number().optional(),
-      billing_date: v.string().optional(),
+      description: v.string(),
+      amount: v.number(),
+      billing_date: v.string(),
     },
     returns: answers["deals.installments.create"],
     handler: async (args, api) => await api.post("/deals/{id}/installments", { path: { id: args.id }, body: { description: args.description, amount: args.amount, billing_date: args.billing_date }, returns: answers["deals.installments.create"] }),
@@ -3837,39 +3717,6 @@ export const tools = {
     returns: answers["dealFields.delete"],
     handler: async (args, api) => await api.delete("/dealFields/{field_code}", { path: { field_code: args.field_code }, returns: answers["dealFields.delete"] }),
   }),
-  "dealFields.options.create": tool({
-    description: "Add deal field options in bulk",
-    readOnly: false,
-    reach: "company",
-    routes: ["POST /dealFields/{field_code}/options"],
-    args: {
-      field_code: v.string(),
-    },
-    returns: answers["dealFields.options.create"],
-    handler: async (args, api) => await api.post("/dealFields/{field_code}/options", { path: { field_code: args.field_code }, returns: answers["dealFields.options.create"] }),
-  }),
-  "dealFields.options.deleteDealFieldOptions": tool({
-    description: "Delete deal field options in bulk",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /dealFields/{field_code}/options"],
-    args: {
-      field_code: v.string(),
-    },
-    returns: answers["dealFields.options.deleteDealFieldOptions"],
-    handler: async (args, api) => await api.delete("/dealFields/{field_code}/options", { path: { field_code: args.field_code }, returns: answers["dealFields.options.deleteDealFieldOptions"] }),
-  }),
-  "dealFields.options.updateDealFieldOptions": tool({
-    description: "Update deal field options in bulk",
-    readOnly: false,
-    reach: "company",
-    routes: ["PATCH /dealFields/{field_code}/options"],
-    args: {
-      field_code: v.string(),
-    },
-    returns: answers["dealFields.options.updateDealFieldOptions"],
-    handler: async (args, api) => await api.patch("/dealFields/{field_code}/options", { path: { field_code: args.field_code }, returns: answers["dealFields.options.updateDealFieldOptions"] }),
-  }),
   "deals.convert.status.get": tool({
     description: "Get Deal conversion status",
     readOnly: true,
@@ -3916,7 +3763,7 @@ export const tools = {
     reach: "company",
     routes: ["POST /persons"],
     args: {
-      name: v.string().optional(),
+      name: v.string(),
       owner_id: v.number().integer().optional(),
       org_id: v.number().integer().optional(),
       add_time: v.string().optional(),
@@ -4057,7 +3904,7 @@ export const tools = {
     routes: ["POST /persons/{id}/followers"],
     args: {
       id: v.number().integer(),
-      user_id: v.number().integer().optional(),
+      user_id: v.number().integer(),
     },
     returns: answers["persons.followers.create"],
     handler: async (args, api) => await api.post("/persons/{id}/followers", { path: { id: args.id }, body: { user_id: args.user_id }, returns: answers["persons.followers.create"] }),
@@ -4197,39 +4044,6 @@ export const tools = {
     returns: answers["personFields.update"],
     handler: async (args, api) => await api.patch("/personFields/{field_code}", { path: { field_code: args.field_code }, body: { field_name: args.field_name, ui_visibility: args.ui_visibility, important_fields: args.important_fields, required_fields: args.required_fields }, returns: answers["personFields.update"] }),
   }),
-  "personFields.options.create": tool({
-    description: "Add person field options in bulk",
-    readOnly: false,
-    reach: "company",
-    routes: ["POST /personFields/{field_code}/options"],
-    args: {
-      field_code: v.string(),
-    },
-    returns: answers["personFields.options.create"],
-    handler: async (args, api) => await api.post("/personFields/{field_code}/options", { path: { field_code: args.field_code }, returns: answers["personFields.options.create"] }),
-  }),
-  "personFields.options.deletePersonFieldOptions": tool({
-    description: "Delete person field options in bulk",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /personFields/{field_code}/options"],
-    args: {
-      field_code: v.string(),
-    },
-    returns: answers["personFields.options.deletePersonFieldOptions"],
-    handler: async (args, api) => await api.delete("/personFields/{field_code}/options", { path: { field_code: args.field_code }, returns: answers["personFields.options.deletePersonFieldOptions"] }),
-  }),
-  "personFields.options.updatePersonFieldOptions": tool({
-    description: "Update person field options in bulk",
-    readOnly: false,
-    reach: "company",
-    routes: ["PATCH /personFields/{field_code}/options"],
-    args: {
-      field_code: v.string(),
-    },
-    returns: answers["personFields.options.updatePersonFieldOptions"],
-    handler: async (args, api) => await api.patch("/personFields/{field_code}/options", { path: { field_code: args.field_code }, returns: answers["personFields.options.updatePersonFieldOptions"] }),
-  }),
   "organizations.list": tool({
     description: "Get all organizations",
     readOnly: true,
@@ -4262,7 +4076,7 @@ export const tools = {
     reach: "company",
     routes: ["POST /organizations"],
     args: {
-      name: v.string().optional(),
+      name: v.string(),
       owner_id: v.number().integer().optional(),
       add_time: v.string().optional(),
       visible_to: v.number().integer().optional(),
@@ -4369,7 +4183,7 @@ export const tools = {
     routes: ["POST /organizations/{id}/followers"],
     args: {
       id: v.number().integer(),
-      user_id: v.number().integer().optional(),
+      user_id: v.number().integer(),
     },
     returns: answers["organizations.followers.create"],
     handler: async (args, api) => await api.post("/organizations/{id}/followers", { path: { id: args.id }, body: { user_id: args.user_id }, returns: answers["organizations.followers.create"] }),
@@ -4506,39 +4320,6 @@ export const tools = {
     returns: answers["organizationFields.update"],
     handler: async (args, api) => await api.patch("/organizationFields/{field_code}", { path: { field_code: args.field_code }, body: { field_name: args.field_name, ui_visibility: args.ui_visibility, important_fields: args.important_fields, required_fields: args.required_fields }, returns: answers["organizationFields.update"] }),
   }),
-  "organizationFields.options.create": tool({
-    description: "Add organization field options in bulk",
-    readOnly: false,
-    reach: "company",
-    routes: ["POST /organizationFields/{field_code}/options"],
-    args: {
-      field_code: v.string(),
-    },
-    returns: answers["organizationFields.options.create"],
-    handler: async (args, api) => await api.post("/organizationFields/{field_code}/options", { path: { field_code: args.field_code }, returns: answers["organizationFields.options.create"] }),
-  }),
-  "organizationFields.options.deleteOrganizationFieldOptions": tool({
-    description: "Delete organization field options in bulk",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /organizationFields/{field_code}/options"],
-    args: {
-      field_code: v.string(),
-    },
-    returns: answers["organizationFields.options.deleteOrganizationFieldOptions"],
-    handler: async (args, api) => await api.delete("/organizationFields/{field_code}/options", { path: { field_code: args.field_code }, returns: answers["organizationFields.options.deleteOrganizationFieldOptions"] }),
-  }),
-  "organizationFields.options.updateOrganizationFieldOptions": tool({
-    description: "Update organization field options in bulk",
-    readOnly: false,
-    reach: "company",
-    routes: ["PATCH /organizationFields/{field_code}/options"],
-    args: {
-      field_code: v.string(),
-    },
-    returns: answers["organizationFields.options.updateOrganizationFieldOptions"],
-    handler: async (args, api) => await api.patch("/organizationFields/{field_code}/options", { path: { field_code: args.field_code }, returns: answers["organizationFields.options.updateOrganizationFieldOptions"] }),
-  }),
   "products.list": tool({
     description: "Get all products",
     readOnly: true,
@@ -4567,7 +4348,7 @@ export const tools = {
     reach: "company",
     routes: ["POST /products"],
     args: {
-      name: v.string().optional(),
+      name: v.string(),
       code: v.string().optional(),
       description: v.string().optional(),
       unit: v.string().optional(),
@@ -4612,7 +4393,7 @@ export const tools = {
     routes: ["POST /products/{id}/followers"],
     args: {
       id: v.number().integer(),
-      user_id: v.number().integer().optional(),
+      user_id: v.number().integer(),
     },
     returns: answers["products.followers.create"],
     handler: async (args, api) => await api.post("/products/{id}/followers", { path: { id: args.id }, body: { user_id: args.user_id }, returns: answers["products.followers.create"] }),
@@ -4746,7 +4527,7 @@ export const tools = {
     routes: ["POST /products/{id}/variations"],
     args: {
       id: v.number().integer(),
-      name: v.string().optional(),
+      name: v.string(),
       prices: v.array(v.object({
         price: v.number(),
         cost: v.number().optional(),
@@ -4908,39 +4689,6 @@ export const tools = {
     returns: answers["productFields.update"],
     handler: async (args, api) => await api.patch("/productFields/{field_code}", { path: { field_code: args.field_code }, body: { field_name: args.field_name, ui_visibility: args.ui_visibility }, returns: answers["productFields.update"] }),
   }),
-  "productFields.options.create": tool({
-    description: "Add product field options in bulk",
-    readOnly: false,
-    reach: "company",
-    routes: ["POST /productFields/{field_code}/options"],
-    args: {
-      field_code: v.string(),
-    },
-    returns: answers["productFields.options.create"],
-    handler: async (args, api) => await api.post("/productFields/{field_code}/options", { path: { field_code: args.field_code }, returns: answers["productFields.options.create"] }),
-  }),
-  "productFields.options.deleteProductFieldOptions": tool({
-    description: "Delete product field options in bulk",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /productFields/{field_code}/options"],
-    args: {
-      field_code: v.string(),
-    },
-    returns: answers["productFields.options.deleteProductFieldOptions"],
-    handler: async (args, api) => await api.delete("/productFields/{field_code}/options", { path: { field_code: args.field_code }, returns: answers["productFields.options.deleteProductFieldOptions"] }),
-  }),
-  "productFields.options.updateProductFieldOptions": tool({
-    description: "Update product field options in bulk",
-    readOnly: false,
-    reach: "company",
-    routes: ["PATCH /productFields/{field_code}/options"],
-    args: {
-      field_code: v.string(),
-    },
-    returns: answers["productFields.options.updateProductFieldOptions"],
-    handler: async (args, api) => await api.patch("/productFields/{field_code}/options", { path: { field_code: args.field_code }, returns: answers["productFields.options.updateProductFieldOptions"] }),
-  }),
   "leads.search.searchLeads": tool({
     description: "Search leads",
     readOnly: true,
@@ -5077,8 +4825,8 @@ export const tools = {
     reach: "company",
     routes: ["POST /stages"],
     args: {
-      name: v.string().optional(),
-      pipeline_id: v.number().integer().optional(),
+      name: v.string(),
+      pipeline_id: v.number().integer(),
       deal_probability: v.number().integer().optional(),
       is_deal_rot_enabled: v.boolean().optional(),
       days_to_rotten: v.number().integer().nullable().optional(),
@@ -5147,7 +4895,7 @@ export const tools = {
     reach: "company",
     routes: ["POST /pipelines"],
     args: {
-      name: v.string().optional(),
+      name: v.string(),
       is_deal_probability_enabled: v.boolean().optional(),
     },
     returns: answers["pipelines.create"],
@@ -5273,39 +5021,6 @@ export const tools = {
     },
     returns: answers["projectFields.update"],
     handler: async (args, api) => await api.patch("/projectFields/{field_code}", { path: { field_code: args.field_code }, body: { field_name: args.field_name, ui_visibility: args.ui_visibility, important_fields: args.important_fields, required_fields: args.required_fields }, returns: answers["projectFields.update"] }),
-  }),
-  "projectFields.options.create": tool({
-    description: "Add project field options in bulk",
-    readOnly: false,
-    reach: "company",
-    routes: ["POST /projectFields/{field_code}/options"],
-    args: {
-      field_code: v.string(),
-    },
-    returns: answers["projectFields.options.create"],
-    handler: async (args, api) => await api.post("/projectFields/{field_code}/options", { path: { field_code: args.field_code }, returns: answers["projectFields.options.create"] }),
-  }),
-  "projectFields.options.deleteProjectFieldOptions": tool({
-    description: "Delete project field options in bulk",
-    readOnly: false,
-    reach: "company",
-    routes: ["DELETE /projectFields/{field_code}/options"],
-    args: {
-      field_code: v.string(),
-    },
-    returns: answers["projectFields.options.deleteProjectFieldOptions"],
-    handler: async (args, api) => await api.delete("/projectFields/{field_code}/options", { path: { field_code: args.field_code }, returns: answers["projectFields.options.deleteProjectFieldOptions"] }),
-  }),
-  "projectFields.options.updateProjectFieldOptions": tool({
-    description: "Update project field options in bulk",
-    readOnly: false,
-    reach: "company",
-    routes: ["PATCH /projectFields/{field_code}/options"],
-    args: {
-      field_code: v.string(),
-    },
-    returns: answers["projectFields.options.updateProjectFieldOptions"],
-    handler: async (args, api) => await api.patch("/projectFields/{field_code}/options", { path: { field_code: args.field_code }, returns: answers["projectFields.options.updateProjectFieldOptions"] }),
   }),
   "projects.list": tool({
     description: "Get all projects",

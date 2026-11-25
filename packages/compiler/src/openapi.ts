@@ -13,14 +13,26 @@ import {
 } from "./openapi-schemas.ts";
 import type { Modifiable, Reading, Schema } from "./openapi-schemas.ts";
 import {
-  httpMethods,
   isNamePart,
+  isRouteMethod,
   pathSegments,
   routeName,
   standardActions,
   toolName,
 } from "./tool-names.ts";
 import type { HttpMethod, Segment } from "./tool-names.ts";
+
+/** The methods OpenAPI names an operation by, in its own order. */
+const specMethods = [
+  "GET",
+  "PUT",
+  "POST",
+  "DELETE",
+  "OPTIONS",
+  "HEAD",
+  "PATCH",
+  "TRACE",
+] as const;
 
 // The OpenAPI generator's reading of a spec (GRA-2319): a vendor's spec, read
 // by a conformant parser (Scalar's: validated, upgraded to 3.1 and
@@ -485,7 +497,10 @@ const contentOf = (holder: unknown): { found: boolean; schema: unknown } => {
     : { found: true, schema: record(content[media]).schema };
 };
 
-/** A JSON body's fields; an optional body's, each optional. */
+/**
+ * A JSON body's fields, each required as the body's schema has it: a body
+ * is sent with its required fields, never without them.
+ */
 const bodyOf = (operation: Node, reading: Reading): Record<string, Schema> => {
   const body = operation.requestBody;
   if (!isRecord(body)) {
@@ -493,10 +508,8 @@ const bodyOf = (operation: Node, reading: Reading): Record<string, Schema> => {
   }
   const required = body.required === true;
   const { schema } = contentOf(body);
-  const fields = isRecord(schema)
-    ? fieldsOf(schema, reading, 1, !required)
-    : undefined;
-  if (fields === undefined && required) {
+  const fields = isRecord(schema) ? fieldsOf(schema, reading, 1) : undefined;
+  if (required && (fields === undefined || Object.keys(fields).length === 0)) {
     throw new OperationError("Its body can't be typed as an object.");
   }
   return fields ?? {};
@@ -536,6 +549,9 @@ const cursorIn = (
 
 /** The page in a GET's answer: the one list it holds, and its cursor. */
 const pageOf = (answer: ValueDescriptor): SpecPage | undefined => {
+  if (answer.nullable) {
+    return undefined;
+  }
   if (answer.kind === "array") {
     return { item: answer.item, items: [], next: undefined };
   }
@@ -780,6 +796,7 @@ export const readSpec = async (
   const document = await documentOf(input);
   const { host, base } = serverOf(document, url);
   const global = list(document.security);
+  const skipped: SkippedOperation[] = [];
   const operations: {
     key: string;
     method: HttpMethod;
@@ -787,10 +804,18 @@ export const readSpec = async (
     operation: Node;
   }[] = [];
   for (const [key, item] of Object.entries(record(document.paths))) {
-    for (const method of httpMethods) {
+    for (const method of specMethods) {
       const operation = record(item)[method.toLowerCase()];
-      if (isRecord(operation)) {
+      if (!isRecord(operation)) {
+        continue;
+      }
+      if (isRouteMethod(method)) {
         operations.push({ key, method, item: record(item), operation });
+      } else {
+        skipped.push({
+          operation: `${method} ${key}`,
+          reason: "Its method isn't one a connector may call.",
+        });
       }
     }
   }
@@ -801,7 +826,6 @@ export const readSpec = async (
     operations.flatMap(({ operation }) => security(operation)),
     scheme
   );
-  const skipped: SkippedOperation[] = [];
   const candidates: Candidate[] = [];
   for (const { key, method, item, operation } of operations) {
     try {

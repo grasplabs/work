@@ -245,10 +245,12 @@ describe("a tool held to the vendor's spec", () => {
           routes: ["GET /deals/archived"],
         }),
         dealsList({ routes: ["GET /deals", "GET /persons"] }),
+        dealsList({ routes: ["GET elsewhere.example.test/deals"] }),
       ])
     ).toStrictEqual([
       "deals.archived.list: GET /deals/archived isn't an operation of the vendor's spec.",
       "deals.list: GET /persons isn't an operation of the vendor's spec.",
+      "deals.list: GET elsewhere.example.test/deals isn't on the spec's host api.example.test.",
     ]);
   });
 });
