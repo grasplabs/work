@@ -267,12 +267,18 @@ const bodyText = (xml: string): string => {
     inUnshown === 0 &&
     !runs.includes(true) &&
     !fields.includes(true);
-  /** A field's begin, separator or end, a run's `fldChar`. */
+  /**
+   * A field's begin, separator or end, a run's `fldChar`: one in what the
+   * document doesn't show (an unused fallback, a deletion) is no field's.
+   */
   const fieldChar = (tag: SaxesTagNS): void => {
+    if (inUnshown > 0) {
+      return;
+    }
     const type = wordAttribute(tag, "fldCharType");
     if (type === "begin") {
       fields.push(true);
-    } else if (type === "separate") {
+    } else if (type === "separate" && fields.length > 0) {
       fields[fields.length - 1] = false;
     } else if (type === "end") {
       fields.pop();

@@ -187,9 +187,10 @@ export const plantedWordXml: Readonly<
   // A tracked deletion, and a field's code: Word shows its result.
   deletedAndFieldCode: {
     xml: documentXml(
-      `<w:p><w:del w:id="3"><w:r><w:t>${plantedInstruction}</w:t></w:r></w:del><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:t>${plantedInstruction}</w:t></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>${shownText}</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r><w:r><w:t>.</w:t></w:r></w:p>`
+      `<w:p><w:del w:id="3"><w:r><w:t>${plantedInstruction}</w:t></w:r></w:del><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:t>${plantedInstruction}</w:t></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>${shownText}</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r><w:r><w:t>.</w:t></w:r></w:p><w:p><w:del w:id="4"><w:r><w:fldChar w:fldCharType="begin"/></w:r></w:del><w:r><mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Fallback><w:r><w:fldChar w:fldCharType="begin"/></w:r></mc:Fallback></mc:AlternateContent></w:r><w:r><w:t>${shownText}</w:t></w:r></w:p>`
     ),
-    shown: `${shownText}.`,
+    // A field begun where Word shows nothing hides nothing after it.
+    shown: `${shownText}.\n${shownText}`,
   },
   nestedDeepest: {
     xml: documentXml(
