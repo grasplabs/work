@@ -1,4 +1,4 @@
-import { connectorManifestSchema } from "@grasp-os/connector-kit/manifest";
+import { connectorManifestSchema } from "@grasp-os/runtime/connector";
 import type { ConnectionPerson } from "@grasp-os/shared/connect";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
@@ -115,7 +115,7 @@ export const refused = { status: 403, error: null };
 export const egressProps = (
   fields: Partial<EgressProps> = {}
 ): EgressProps => ({
-  connector: "sample@1.0.0",
+  connector: "sample",
   callId: "call-1",
   hosts: [sampleHost],
   routes: [{ method: "GET", host: sampleHost, path: "/v1/probe/{case}" }],

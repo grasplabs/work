@@ -124,6 +124,10 @@ export default defineConfig({
       // any App's (builtin-blueprints.test.ts). Its config and server code
       // are checked here (each built-in's own tsconfig.json).
       "apps/core/blueprints/*/files/src/**",
+      // The import boundary check's fixture workspace
+      // (scripts/check-runtime-boundary.test.ts): modules that import its
+      // own stand-in packages, which nothing here resolves.
+      "scripts/testdata/runtime-boundary/**",
     ],
     jsPlugins: [
       ...(shadcn.jsPlugins ?? []),
@@ -291,6 +295,80 @@ export default defineConfig({
                   group: ["@grasp-os/**", "**/apps/**", "../../*/**"],
                   message:
                     "Workerflow imports nothing of Grasp: core maps Grasp onto it.",
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        // A connector is written with @grasp-os/sdk/connector and its own
+        // files, nothing else (GRA-1374): no Zod, no Node, no other package
+        // of ours or npm's. Its own files: `./…` in its folder, or
+        // `../src/…` from another folder of the package (test/), and no
+        // `..` past that, so no path leaves the package. Connect's build
+        // refuses the rest too (apps/connect/build.ts). Google Workspace and Microsoft 365 keep
+        // the old kit, Zod and the runtime until they move to the SDK
+        // (GRA-2323, GRA-2324), as do connect's sample connectors written
+        // with the old kit.
+        files: [
+          "packages/connectors/**",
+          "apps/connect/test/fixtures/*-connector.ts",
+        ],
+        excludeFiles: [
+          "packages/connectors/google-workspace/**",
+          "packages/connectors/microsoft-365/**",
+          "apps/connect/test/fixtures/sample-connector.ts",
+          "apps/connect/test/fixtures/sample-sync-connector.ts",
+          "apps/connect/test/fixtures/sample-oauth-connector.ts",
+          "apps/connect/test/fixtures/composio-named-connector.ts",
+        ],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              patterns: [
+                brainStoreImports,
+                {
+                  group: [
+                    "*",
+                    "!@grasp-os/sdk/connector",
+                    "!./**",
+                    "!../src/**",
+                    "./**/../**",
+                    "../src/**/../**",
+                  ],
+                  message:
+                    "A connector imports @grasp-os/sdk/connector and its own files, nothing else.",
+                },
+              ],
+            },
+          ],
+        },
+      },
+      {
+        // Connect reaches the runtime through its connector entry alone,
+        // which carries no React, TanStack or App code
+        // (scripts/check-runtime-boundary.ts), and nothing of the SDK,
+        // which is App code's. Its sample connectors are connectors.
+        files: ["apps/connect/**"],
+        excludeFiles: ["apps/connect/test/fixtures/*-connector.ts"],
+        rules: {
+          "no-restricted-imports": [
+            "error",
+            {
+              patterns: [
+                brainStoreImports,
+                {
+                  group: [
+                    "@grasp-os/runtime",
+                    "@grasp-os/runtime/**",
+                    "!@grasp-os/runtime/connector",
+                    "@grasp-os/sdk",
+                    "@grasp-os/sdk/**",
+                  ],
+                  message:
+                    "Connect imports @grasp-os/runtime/connector of the runtime, and nothing of the SDK.",
                 },
               ],
             },

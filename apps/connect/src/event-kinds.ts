@@ -1,4 +1,4 @@
-import { stampHeader, stampPattern } from "@grasp-os/connector-kit/manifest";
+import { stampHeader, stampPattern } from "@grasp-os/runtime/connector";
 import type { Json } from "@grasp-os/shared/json";
 
 import type { Connection } from "./connections.ts";

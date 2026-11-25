@@ -1,4 +1,4 @@
-import type { RecoveryMode } from "@grasp-os/connector-kit/manifest";
+import type { RecoveryMode } from "@grasp-os/runtime/connector";
 import {
   auditOutboxTakeMax,
   auditProvenanceMaxItems,

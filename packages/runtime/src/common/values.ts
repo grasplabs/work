@@ -36,22 +36,6 @@ import type {
 // descriptor), so the browser and the Worker check the same thing. A
 // business rule belongs in the handler.
 
-export { defineSchema } from "./define-schema.ts";
-export { defineTable } from "./define-table.ts";
-export type {
-  IndexDefinition,
-  IndexField,
-  SchemaDefinition,
-  TableDefinition,
-} from "./schema-types.ts";
-export { rows } from "./table-access.ts";
-export type {
-  AccessMode,
-  RowRole,
-  RowRule,
-  RowRules,
-  TableAccess,
-} from "./table-access.ts";
 export { ValueDefinitionError } from "./value-descriptor.ts";
 export type {
   JsonValue,

@@ -6,7 +6,7 @@ import {
   outcomeUnknownMetaKey,
   provenanceMetaKey,
   provenanceSchema,
-} from "@grasp-os/connector-kit/manifest";
+} from "@grasp-os/runtime/connector";
 import type { Json } from "@grasp-os/shared/json";
 import { z } from "zod";
 

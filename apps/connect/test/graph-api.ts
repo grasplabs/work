@@ -1,3 +1,7 @@
+import {
+  effectPropertyId,
+  graphHost,
+} from "@grasp-os/connector-microsoft-365/graph";
 /**
  * Microsoft Graph and the tenant's SharePoint, as the Microsoft 365
  * connector reaches them through connect's egress, serving the recorded
@@ -13,11 +17,7 @@
  * as it answers a delegated `Tasks.ReadWrite` token. Teams chats and
  * meetings are graph-teams-fake.ts's.
  */
-import { egressHeader } from "@grasp-os/connector-kit/manifest";
-import {
-  effectPropertyId,
-  graphHost,
-} from "@grasp-os/connector-microsoft-365/graph";
+import { egressHeader } from "@grasp-os/runtime/connector";
 import { beforeEach } from "vite-plus/test";
 import { z } from "zod";
 

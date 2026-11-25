@@ -1,11 +1,15 @@
 import { isPlainObject } from "@grasp-os/shared/json";
 
+import { refuse } from "../common/schema-error.ts";
+import {
+  checkedName,
+  checkUnique,
+  schemaLimits,
+} from "../common/schema-limits.ts";
+import type { ValueDescriptor } from "../common/value-descriptor.ts";
+import type { Infer, ValueShape } from "../common/value-types.ts";
 import { snapshot, tableStates } from "./define-table.ts";
-import { refuse } from "./schema-error.ts";
-import { checkedName, checkUnique, schemaLimits } from "./schema-limits.ts";
 import type { AnyTable, SchemaDefinition, TableState } from "./schema-types.ts";
-import type { ValueDescriptor } from "./value-descriptor.ts";
-import type { Infer, ValueShape } from "./value-types.ts";
 
 // `defineSchema` and `defineTable`: how an App (or a store of its own)
 // declares its tables once. A schema is a value, like a `v` schema: frozen,

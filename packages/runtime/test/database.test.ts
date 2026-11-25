@@ -2,13 +2,13 @@ import { queryRequestSchema } from "@grasp-os/shared/store-queries";
 import type { ReadRequest } from "@grasp-os/shared/store-queries";
 import { describe, expect, test } from "vite-plus/test";
 
+import { defineSchema } from "../src/app/define-schema.ts";
+import { defineTable } from "../src/app/define-table.ts";
 import { databaseReader } from "../src/app/host.ts";
 import { QueryDefinitionError } from "../src/app/server.ts";
 import type { QueryDefinitionCode } from "../src/app/server.ts";
 import type { Id } from "../src/common/value-types.ts";
 import {
-  defineSchema,
-  defineTable,
   paginationOptionsValidator,
   paginationResultValidator,
   v,

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { connectorManifestSchema } from "../src/manifest.ts";
-import { signInSchema } from "../src/sign-in.ts";
-import type { SignInInput } from "../src/sign-in.ts";
+import { connectorManifestSchema } from "../../src/connector/manifest.ts";
+import { signInSchema } from "../../src/connector/sign-in.ts";
+import type { SignInInput } from "../../src/connector/sign-in.ts";
 
 // An app's provider record, as connect takes it: data that can't send a
 // secret, a code or a token anywhere but the app's own HTTPS endpoints,
@@ -32,7 +32,6 @@ const apiKey = {
 /** A manifest of an app's connector, with `fields` instead. */
 const manifest = (fields: Record<string, unknown>) => ({
   name: "example",
-  version: "1.0.0",
   provider: "example",
   signIn: oauth2,
   scopes: ["read"],

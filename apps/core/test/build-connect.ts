@@ -22,22 +22,25 @@ const wrangler = path.join(connect, "node_modules/wrangler/bin/wrangler.js");
 export const connectBundle = path.join(testRun, "connect.js");
 
 /**
- * The native connectors core's tests bundle: the release's, and connect's
- * sample connector that syncs (its test/fixtures), whose items name what
- * they are part of, as a mailbox's attachments do (brain-sync.test.ts).
- * Written beside the bundle, never over connect's own build output.
+ * The native connectors core's tests bundle: the release's, and two of
+ * connect's sample connectors (its test/fixtures): the one that syncs,
+ * whose items name what they are part of, as a mailbox's attachments do
+ * (brain-sync.test.ts), and an app that signs in with an API key, written
+ * on `@grasp-os/sdk/connector`, which an App calls
+ * (resource-connectors-sdk.test.ts).
  */
+export const testConnectorEntries = (): string[] => [
+  ...connectorEntries(),
+  path.join(connect, "test/fixtures/sample-sync-connector.ts"),
+  path.join(connect, "test/fixtures/sample-key-connector.ts"),
+];
+
+/** Their bundle, beside connect's, never over connect's own build output. */
 const testConnectors = path.join(testRun, "connectors.js");
 
 /** The connect Worker's bundle, as one ES module, its connectors in it. */
 export const bundleConnect = async (): Promise<string> => {
-  await buildConnectors(
-    [
-      ...connectorEntries(),
-      path.join(connect, "test/fixtures/sample-sync-connector.ts"),
-    ],
-    testConnectors
-  );
+  await buildConnectors(testConnectorEntries(), testConnectors);
   const out = mkdtempSync(path.join(tmpdir(), "grasp-os-connect-"));
   try {
     // Its output is only shown if bundling fails, in the error. The fake

@@ -5,6 +5,22 @@
 // module.
 
 export * from "../common/values.ts";
+export { defineSchema } from "./define-schema.ts";
+export { defineTable } from "./define-table.ts";
+export type {
+  IndexDefinition,
+  IndexField,
+  SchemaDefinition,
+  TableDefinition,
+} from "./schema-types.ts";
+export { rows } from "./table-access.ts";
+export type {
+  AccessMode,
+  RowRole,
+  RowRule,
+  RowRules,
+  TableAccess,
+} from "./table-access.ts";
 export type * from "../common/value-types.ts";
 export { defineApp } from "./app.ts";
 export type { App, AppConfig, AppPermissions } from "./app-types.ts";

@@ -1,4 +1,4 @@
-import type { AccountLookup } from "@grasp-os/connector-kit/sign-in";
+import type { AccountLookup } from "@grasp-os/runtime/connector";
 import { fromBase64Url } from "@grasp-os/shared/encoding";
 
 import type {

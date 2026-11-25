@@ -2,6 +2,8 @@ import { isPlainObject } from "@grasp-os/shared/json";
 import { sealedBuildLimits } from "@grasp-os/shared/sealed-builds";
 import { describe, expect, test } from "vite-plus/test";
 
+import { defineSchema } from "../src/app/define-schema.ts";
+import { defineTable } from "../src/app/define-table.ts";
 import {
   contractFingerprint,
   declaredWorkflows,
@@ -31,7 +33,6 @@ import { workflowReferenceLimits } from "../src/app/workflow-references.ts";
 import { valueLimits } from "../src/common/value-descriptor.ts";
 import { schemaOf } from "../src/common/value-schema.ts";
 import type { AnySchema } from "../src/common/value-schema.ts";
-import { defineSchema, defineTable } from "../src/common/values.ts";
 import notes from "./notes/.grasp/app.ts";
 import contractsText from "./notes/.grasp/contracts.json?raw";
 // oxlint-disable-next-line import/default, import/no-duplicates -- a ?raw import is the file's text

@@ -2,15 +2,15 @@ import type { SyncItem } from "@grasp-os/shared/sync";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { ToolError } from "../src/connector.ts";
-import type { InPage } from "../src/sync.ts";
+import { ToolError } from "../../src/connector/server.ts";
+import type { InPage } from "../../src/connector/sync.ts";
 import {
   defineSync,
   fillPage,
   fitItem,
   startOfPage,
   syncRoom,
-} from "../src/sync.ts";
+} from "../../src/connector/sync.ts";
 
 // How a sync page is filled (pure logic): a page that can take nothing
 // must never answer as if it had moved on.

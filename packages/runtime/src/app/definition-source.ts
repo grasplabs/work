@@ -1,6 +1,5 @@
 import { print } from "../common/code-print.ts";
 import type { Code } from "../common/code-print.ts";
-import type { RowRule } from "../common/table-access.ts";
 import { isSemanticKind } from "../common/value-descriptor.ts";
 import type {
   SemanticKind,
@@ -16,6 +15,7 @@ import type {
   PeoplePermission,
   WorkflowPermission,
 } from "./permission-types.ts";
+import type { RowRule } from "./table-access.ts";
 
 // The code an App's definition (definition-types.ts) generates: its config
 // (`grasp.config.ts`) and its schema (`server/schema.ts`), each built as

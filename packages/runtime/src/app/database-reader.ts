@@ -1,13 +1,8 @@
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import { rangeShapeIssue } from "@grasp-os/shared/store-reads";
 
-import { tablesOf } from "../common/define-schema.ts";
-import type {
-  AnyTable,
-  SchemaDefinition,
-  TableState,
-} from "../common/schema-types.ts";
 import type { Id } from "../common/value-types.ts";
+import { tablesOf } from "./define-schema.ts";
 import { rangeOf, ranges } from "./index-range.ts";
 import { queryOf } from "./query-builder.ts";
 import type {
@@ -26,6 +21,7 @@ import type {
   IndexRange,
   IndexRangeBuilder,
 } from "./query-types.ts";
+import type { AnyTable, SchemaDefinition, TableState } from "./schema-types.ts";
 
 // `ctx.db` for reading: a record by ID, and queries over a table, typed by
 // the App's schema. It is a facade and holds no authority: every read is

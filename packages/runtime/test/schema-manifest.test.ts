@@ -1,6 +1,8 @@
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { describe, expect, test } from "vite-plus/test";
 
+import { defineSchema } from "../src/app/define-schema.ts";
+import { defineTable } from "../src/app/define-table.ts";
 import {
   manifestMaxBytes,
   manifestText,
@@ -14,10 +16,11 @@ import type {
   SchemaManifest,
   TableAccess,
 } from "../src/app/host.ts";
+import type { SchemaDefinition } from "../src/app/schema-types.ts";
+import { rows } from "../src/app/table-access.ts";
 import type { AnySchema } from "../src/common/value-schema.ts";
 import type { StringSchema, ValueShape } from "../src/common/value-types.ts";
-import { defineSchema, defineTable, rows, v } from "../src/common/values.ts";
-import type { SchemaDefinition } from "../src/common/values.ts";
+import { v } from "../src/common/values.ts";
 
 // A schema's canonical manifest, its hash, the diff of two versions and
 // the reading of a manifest of unknown origin. Pure, so unit tests; a

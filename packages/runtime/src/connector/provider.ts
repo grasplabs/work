@@ -1,7 +1,7 @@
 import type { z } from "zod";
 
-import { invalidCode, ToolError } from "./connector.ts";
 import { egressHeader, egressKind, maxRetryAfterSeconds } from "./manifest.ts";
+import { invalidCode, isWriteMethod as isWrite, ToolError } from "./server.ts";
 
 // How a connector's tools reach their provider: plain `fetch` through
 // connect's egress, and a provider's answer that isn't a success turned
@@ -67,10 +67,6 @@ const retryAfterOf = (response: Response): number | undefined => {
 
 /** Providers' error codes and reasons are identifiers, such as `notFound`. */
 const providerErrorCode = /^[A-Za-z][\w.]{0,63}$/u;
-
-/** Whether a request may change something at the provider: not a GET or HEAD. */
-const isWrite = (method: string): boolean =>
-  method.toUpperCase() !== "GET" && method.toUpperCase() !== "HEAD";
 
 /**
  * The error connect's egress's own answer stands for. A refused request

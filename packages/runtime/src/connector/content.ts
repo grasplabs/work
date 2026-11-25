@@ -1,7 +1,7 @@
 import type { z } from "zod";
 
-import { ToolError } from "./connector.ts";
 import type { readAsSchema } from "./manifest.ts";
+import { ToolError } from "./server.ts";
 
 // What connectors share in reading a provider's answers: a file's or an
 // attachment's content as the caller asked for it, within the limits

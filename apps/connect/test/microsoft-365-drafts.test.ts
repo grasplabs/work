@@ -1,4 +1,4 @@
-import { effectKeyPattern } from "@grasp-os/connector-kit/manifest";
+import { effectKeyPattern } from "@grasp-os/runtime/connector";
 import { strFromU8, unzipSync } from "fflate";
 import { describe, expect, it } from "vite-plus/test";
 

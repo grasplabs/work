@@ -1,4 +1,4 @@
-import { maxChangeBytes } from "@grasp-os/connector-kit/manifest";
+import { maxChangeBytes } from "@grasp-os/runtime/connector";
 import type { CapabilityClaims } from "@grasp-os/shared/capability";
 import type { ConnectCall } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";

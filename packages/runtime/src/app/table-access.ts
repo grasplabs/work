@@ -1,7 +1,7 @@
 import { isPlainObject } from "@grasp-os/shared/json";
 
-import { refuse } from "./schema-error.ts";
-import { indexBase } from "./schema-fields.ts";
+import { refuse } from "../common/schema-error.ts";
+import { indexBase } from "../common/schema-fields.ts";
 import type { TableState } from "./schema-types.ts";
 
 /**
