@@ -57,6 +57,20 @@ export const composioClasses: Record<string, Record<string, ToolClass>> = {
     HUBSPOT_UPDATE_DEAL: "change-company",
   },
   acme_erp: { ACME_ERP_LIST_ORDERS: "read-company" },
+  // A toolkit as big as one generated connector makes, for core's tool
+  // search (core's test/tool-search.test.ts): `BULK_TOOL_0` to
+  // `BULK_TOOL_2999` and the few its tests look for, each a read.
+  bulk: Object.fromEntries(
+    [
+      ...Array.from({ length: 3000 }, (_, index) => `BULK_TOOL_${index}`),
+      "BULK_INVOICE_VOID",
+      "BULK_LEDGER_EXPORT",
+      ...Array.from({ length: 6 }, (_, index) => `BULK_LEDGER_READ_${index}`),
+      ...Array.from({ length: 21 }, (_, index) => `BULK_QUOKKA_READ_${index}`),
+      "BULK_WOMBAT_READ_0",
+      "BULK_WOMBAT_READ_1",
+    ].map((name) => [name, "read-company"] as const)
+  ),
   // The tests' own mail server (connect.ts). `mail.relay` fails on
   // demand (idempotency.test.ts), so it is classed a read, which lets a
   // test take a failing tool down the read path.

@@ -410,7 +410,10 @@ describe("a catalog entry's tools", () => {
       id: "microsoft",
     });
     expect(tools.length).toBeGreaterThan(0);
-    expect(tools.every(({ description }) => description === null)).toBeTruthy();
+    // Each described, as its connector's tool says.
+    expect(
+      tools.every(({ description }) => (description ?? "").length > 0)
+    ).toBeTruthy();
     // Its input properties, as its manifest declares them.
     expect(tools.some(({ inputs }) => inputs.length > 0)).toBeTruthy();
     // Read-only as its manifest says: its reads, and not its writes.

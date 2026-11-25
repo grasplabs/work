@@ -194,6 +194,12 @@ describe("a connector made from Linear's MCP server URL", () => {
     const connector = await addLinear();
     const anna = someone();
     const connectionId = await connectLinear(connector, anna);
+    // The list kept as Anna connected has gone stale.
+    await env.DB.prepare(
+      "UPDATE connections SET tool_list_fresh_until = NULL WHERE id = ?"
+    )
+      .bind(connectionId)
+      .run();
     // The server answers at once; its answer reaches connect only after
     // the person disconnected.
     linear.next = async (request) => {

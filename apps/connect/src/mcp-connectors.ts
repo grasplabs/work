@@ -2,6 +2,7 @@ import {
   addConnectorSchema,
   connectErrors,
   connectionErrors,
+  connectionOwnersSchema,
 } from "@grasp-os/shared/connect";
 import type {
   ActionShape,
@@ -12,8 +13,9 @@ import type {
 import { connectionIdSchema } from "@grasp-os/shared/ids";
 import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { isAdmin, roleErrors } from "@grasp-os/shared/roles";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { recordEvents } from "./audit.ts";
@@ -42,6 +44,7 @@ import {
   classByRules,
   classesOf,
   isJsonArray,
+  keptToolClasses,
   storedSchema,
   topNames,
 } from "./tool-rules.ts";
@@ -464,6 +467,127 @@ export const currentTools = async (
     read,
   ]);
   return tools;
+};
+
+/**
+ * Reads and keeps `connection`'s tool list as its server lists it now,
+ * if it can: a failure is logged, and the list is read at the next need.
+ */
+const readToolList = async (
+  env: Env,
+  connection: Connection
+): Promise<void> => {
+  try {
+    await currentTools(env, connection);
+  } catch (error) {
+    log.warn("connections.tool_list_unread", {
+      connectionId: connection.id,
+      ...errorFields(error),
+    });
+  }
+};
+
+/**
+ * Reads an active `connection`'s tool list again after an answer
+ * (`later`), when it is stale or was never read, for the next ask to see.
+ */
+const refreshLater = (
+  env: Env,
+  connection: Connection,
+  later: (work: Promise<unknown>) => void
+): void => {
+  if (
+    connection.status === "active" &&
+    (connection.toolListFreshUntil?.getTime() ?? 0) <= Date.now()
+  ) {
+    later(readToolList(env, connection));
+  }
+};
+
+/**
+ * `connection`'s tools as kept, answered at once, so no server holds up a
+ * search; a list stale or never read is read again after (`later`).
+ */
+export const keptToolsNow = async (
+  env: Env,
+  connection: Connection,
+  later: (work: Promise<unknown>) => void
+): Promise<ConnectorTool[]> => {
+  refreshLater(env, connection, later);
+  return await keptTools(env.DB, connection.id);
+};
+
+/**
+ * The tools each connection to a connector in `request` offers to ask
+ * for, by its ID: those of its list as kept that the rules class (tools
+ * Grasp never runs are left out), answered at once, so no server holds
+ * up what a chat is offered. A list gone stale, or never read (its read
+ * at connecting failed), is read again after the answer (`later`), for
+ * the next ask to see what its server lists now. Any other connection, an
+ * inactive one or an unknown ID is left out.
+ */
+export const offeredConnectorTools = async (
+  env: Env,
+  request: unknown,
+  later: (work: Promise<unknown>) => void
+): Promise<Record<string, string[]>> => {
+  const ids = connectErrors.parse(
+    "connect.invalid",
+    connectionOwnersSchema,
+    request
+  );
+  if (ids.length === 0) {
+    return {};
+  }
+  // By ID alone: D1 binds at most 100 to a statement, as many as `ids`.
+  const found = await drizzle(env.DB)
+    .select()
+    .from(connections)
+    .where(inArray(connections.id, ids));
+  const rows = found.filter(
+    ({ serverKind, status }) =>
+      serverKind === "connector" && status === "active"
+  );
+  const kept = await keptToolClasses(env.DB, rows);
+  for (const row of rows) {
+    refreshLater(env, row, later);
+  }
+  return Object.fromEntries(
+    rows.map((row) => [row.id, Object.keys(kept.get(row.id) ?? {})])
+  );
+};
+
+/**
+ * Reads and keeps the tool list of `connectionId` as it is connected, or
+ * connected again, when it is a connection to a connector: what it offers
+ * to ask for is then known before anyone calls it. A list that can't be
+ * read now is read again at the next ask. Awaited by the sign-in, so what
+ * the person just connected is offered at once.
+ */
+export const keepToolList = async (
+  env: Env,
+  connectionId: string
+): Promise<void> => {
+  let connection: Connection | undefined;
+  try {
+    connection = await drizzle(env.DB)
+      .select()
+      .from(connections)
+      .where(eq(connections.id, connectionId))
+      .get();
+  } catch (error) {
+    log.warn("connections.tool_list_unread", {
+      connectionId,
+      ...errorFields(error),
+    });
+    return;
+  }
+  if (
+    connection?.serverKind === "connector" &&
+    connection.status === "active"
+  ) {
+    await readToolList(env, connection);
+  }
 };
 
 /**

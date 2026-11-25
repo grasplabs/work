@@ -436,7 +436,7 @@ describe("a connector's definition", () => {
     expect(() => withSyncs({ products: writing })).toThrow("only reads");
   });
 
-  it("makes the manifest connect decides by: its sign-in, routes, recovery and resource", () => {
+  it("makes the manifest connect decides by: its sign-in, routes, recovery and resource, and what each tool says it does", () => {
     expect({
       provider: stock.manifest.provider,
       signIn: stock.manifest.signIn,
@@ -445,6 +445,7 @@ describe("a connector's definition", () => {
       provider: "stock",
       signIn: { kind: "api_key", name: "Stock", header: "x-api-key" },
       update: {
+        description: "Sets the stock of one product",
         readOnly: false,
         reach: "company",
         recovery: "find",

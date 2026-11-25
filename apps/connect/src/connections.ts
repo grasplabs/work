@@ -90,21 +90,37 @@ export const usableConnection = async (
 export const isComposioServerUrl = (url: string): boolean =>
   composioUrlSchema.safeParse(url).success;
 
+/** A tool the admin allowed, as stored: its name, or its rule. */
+type StoredTool = z.output<typeof composioToolsSchema>[number];
+
+/** Each connection's allowed tools as read, by the row they were read from. */
+const readTools = new WeakMap<
+  Pick<Connection, "tools">,
+  readonly StoredTool[]
+>();
+
 /**
  * The tools the admin allowed on a Composio connection, as stored: none
- * when they aren't recorded or can't be read.
+ * when they aren't recorded or can't be read. Read once for each row:
+ * a connection allows up to a thousand, and each of them is looked up
+ * here (`allowedTool`).
  */
-const storedTools = ({ tools }: Pick<Connection, "tools">) => {
-  if (tools === null) {
-    return [];
+const storedTools = (
+  connection: Pick<Connection, "tools">
+): readonly StoredTool[] => {
+  const known = readTools.get(connection);
+  if (known !== undefined) {
+    return known;
   }
-  let stored: unknown;
+  let stored: unknown = null;
   try {
-    stored = JSON.parse(tools);
+    stored = connection.tools === null ? null : JSON.parse(connection.tools);
   } catch {
-    return [];
+    // Unreadable: it allows none.
   }
-  return composioToolsSchema.safeParse(stored).data ?? [];
+  const read = composioToolsSchema.safeParse(stored).data ?? [];
+  readTools.set(connection, read);
+  return read;
 };
 
 /** The names of the tools the admin allowed on a Composio connection. */
@@ -276,8 +292,9 @@ const offeredToolClasses = (
  * was disconnected is still its owner's alone. With what it is (its
  * source and provider) and its account: its ID, name, email address and
  * the other addresses it receives mail at, which core records with the
- * mail a workflow run sends through it, and, for a Composio one, the
- * class of each tool it offers. Unknown IDs are left out.
+ * mail a workflow run sends through it, and, for a Composio one or one to
+ * a connector, the class of each tool it offers (a connector's by its list
+ * as kept). Unknown IDs are left out.
  */
 export const connectionOwners = async (
   db: D1Database,
