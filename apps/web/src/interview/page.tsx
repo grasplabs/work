@@ -235,6 +235,8 @@ const TalkActions = ({
       <Button
         aria-expanded={transcript}
         aria-label={t`Transcript`}
+        // Where what they said is seen going while the transcript is closed (heard.tsx).
+        data-transcript-button=""
         onClick={(event) => {
           onTranscript();
           // Pressed with a pointer, it lets go of focus: a key pressed later (Escape, to close it)

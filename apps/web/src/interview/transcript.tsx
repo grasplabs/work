@@ -148,7 +148,11 @@ const Rows = ({
   return placed.map((one) => (
     // The conversation only grows: a line's place is what it is, and core removes it by it.
     <MessageScrollerItem key={one.place} messageId={String(one.place)}>
-      <div {...stylex.props(one.place > 0 && one.starts && styles.turn)}>
+      <div
+        // Whose it is, for what they just said to find its line here (heard.tsx).
+        data-line-from={one.line.from}
+        {...stylex.props(one.place > 0 && one.starts && styles.turn)}
+      >
         <Line
           onEdit={(text) => {
             onEdit(one.place, text);

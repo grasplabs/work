@@ -1795,17 +1795,9 @@ msgstr "{who} couldn't be added to the team. Try again."
 msgid "{who} couldn't be taken off {name}. Try again."
 msgstr "{who} couldn't be taken off {name}. Try again."
 
-#: src/interview/composer.tsx
-msgid "{who} is talking"
-msgstr "{who} is talking"
-
 #: src/apps/app-data.tsx
 msgid "{who}, {when}"
 msgstr "{who}, {when}"
-
-#: src/interview/composer.tsx
-msgid "{who}, thinking."
-msgstr "{who}, thinking."
 
 #: src/frame/ui-words.tsx
 msgid "{words}?"

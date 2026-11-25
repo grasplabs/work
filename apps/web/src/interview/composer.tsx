@@ -1,7 +1,5 @@
 import { turnAnswerMax } from "@grasp-os/shared/interview-turn";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
-import { interviewerNames } from "@grasp-os/shared/onboarding";
-import { AgentIndicator } from "@grasp-os/ui/components/agent-indicator";
 import { Bubble, BubbleContent } from "@grasp-os/ui/components/bubble";
 import {
   PromptInput,
@@ -24,11 +22,10 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { Heard } from "./heard.tsx";
-import { useInterviewer, useSaveState } from "./kept.ts";
+import { useProgress, useSaveState } from "./kept.ts";
 import type { LoopState, Said } from "./loop.ts";
 import { Marked } from "./marked.tsx";
 import { micLevel, muteMic, useMicMuted } from "./mic.ts";
-import { voiceLevel } from "./speech.ts";
 
 // The box at the bottom (prototype `interview-view.tsx`, `Composer` and
 // `ChatBox`): Damsko's PromptInput, as in any chat. Enter sends,
@@ -98,9 +95,10 @@ const SaidWords = ({
   );
 
 /**
- * The conversation, spoken, in the card's place: their words while it is
- * their turn, his mark while it is his (thinking counts as his), the
- * microphone theirs to mute, and "Type instead" as the way out.
+ * The conversation, spoken, in the card's place: the microphone theirs to
+ * mute, and "Type instead" as the way out. The card answers their voice
+ * alone: while Stephen talks or thinks its field lies flat, and no time
+ * runs in it, for the minutes left stand in the header.
  */
 const Spoken = ({
   doing,
@@ -109,22 +107,16 @@ const Spoken = ({
   doing: LoopState["doing"];
   onType: () => void;
 }) => {
-  const { t } = useLingui();
-  const who = interviewerNames[useInterviewer()];
   const muted = useMicMuted();
   const listening = doing === "listening";
-  let speaker = t`${who}, thinking.`;
-  if (doing === "speaking") {
-    speaker = t`${who} is talking`;
-  }
   return (
     <PromptInputVoice
       muted={muted}
       onClose={onType}
       onMutedChange={muteMic}
-      sample={() => ({ level: listening ? micLevel() : voiceLevel() })}
-      speaker={<AgentIndicator aria-label={speaker} />}
+      sample={() => ({ level: listening ? micLevel() : 0 })}
       status={listening ? "listening" : "speaking"}
+      timed={false}
     />
   );
 };
@@ -160,6 +152,10 @@ export const Composer = ({
   // The line during which they asked to type instead: the box stays until his next, or "Talk".
   const [typing, setTyping] = useState<number | null>(null);
   const spoken = talking && !typed && typing !== line && doing !== "idle";
+  // How many lines of theirs the transcript holds: one more, and what stands over the card goes there.
+  const sent = useProgress().lines.filter(
+    ({ from }) => from === "person"
+  ).length;
   return (
     <div {...stylex.props(styles.root)}>
       <div {...stylex.props(styles.over)}>
@@ -180,11 +176,8 @@ export const Composer = ({
         )}
       </div>
       {spoken ? (
-        <Heard text={said?.text ?? ""}>
-          {said !== null && said.marks.length > 0 ? (
-            <Marked marks={said.marks} names={names} text={said.text} />
-          ) : null}
-        </Heard>
+        // Theirs while it is on its way; once kept it is the transcript's, and goes there.
+        <Heard sent={sent} text={said?.waiting === true ? said.text : ""} />
       ) : null}
       <PromptInput
         compact

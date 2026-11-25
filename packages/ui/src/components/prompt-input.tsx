@@ -818,6 +818,12 @@ export interface PromptInputVoiceProps {
   note?: string;
   /** The other voice's mark, in the time's place while it speaks. */
   speaker?: ReactNode;
+  /**
+   * Whether the time the voice has run stands at the row's start. Off where the page keeps its
+   * own time: the row is then the field and its two buttons.
+   * @default true
+   */
+  timed?: boolean;
   /** The microphone is off for a moment. Pair it with `onMutedChange`. */
   muted?: boolean;
   /** Runs as the microphone button turns it off or on again. */
@@ -4358,21 +4364,25 @@ const VoiceWords = ({
   </div>
 );
 
-/** What leads the foot row: the other voice's mark while it speaks, else the time. */
+/** What leads the foot row: the other voice's mark while it speaks, else the time, when it is kept. */
 const VoiceLead = ({
   speaker,
   seconds,
+  timed,
 }: {
   speaker: ReactNode;
   seconds: number;
-}) =>
-  isBlank(speaker) ? (
+  timed: boolean;
+}) => {
+  if (!isBlank(speaker)) {
+    return <span {...stylex.props(styles.speaker)}>{speaker}</span>;
+  }
+  return timed ? (
     <span role="timer" {...stylex.props(styles.time, styles.voiceTime)}>
       {clock(seconds)}
     </span>
-  ) : (
-    <span {...stylex.props(styles.speaker)}>{speaker}</span>
-  );
+  ) : null;
+};
 
 /** How the field stands in a conversation: the other voice's turn first, then the person's. */
 const voiceMode = (
@@ -4404,6 +4414,7 @@ export const PromptInputVoice = ({
   sample,
   note,
   speaker,
+  timed = true,
   muted,
   onMutedChange,
   onClose,
@@ -4471,6 +4482,7 @@ export const PromptInputVoice = ({
           <VoiceLead
             speaker={speaking ? speaker : undefined}
             seconds={seconds}
+            timed={timed}
           />
           <Level
             level={level}
