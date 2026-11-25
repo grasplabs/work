@@ -23,7 +23,6 @@
  * in), and with what a spoken session needs instead.
  */
 import "@tanstack/react-start/server-only";
-import { WHO_CLAIRE } from "@grasp-os/shared/interviewers/claire";
 import {
   inLanguage,
   LISTENING,
@@ -31,11 +30,8 @@ import {
   WHO,
 } from "@grasp-os/shared/interviewers/stephen";
 import { log } from "@grasp-os/shared/log";
-import {
-  interviewerSchema,
-  interviewLocaleSchema,
-} from "@grasp-os/shared/onboarding";
-import type { Interviewer, InterviewLocale } from "@grasp-os/shared/onboarding";
+import { interviewLocaleSchema } from "@grasp-os/shared/onboarding";
+import type { InterviewLocale } from "@grasp-os/shared/onboarding";
 import { z } from "zod";
 
 import type { Staff } from "../access.ts";
@@ -59,11 +55,8 @@ const models = {
   tts: "voxtral-mini-tts-3",
 } as const;
 
-/** Each interviewer's voice, by its Mistral ID, as core says their lines (apps/core/src/platform-ai.ts). */
-const voices: Record<Interviewer, string> = {
-  stephen: "voice_485",
-  claire: "voice_478",
-};
+/** Stephen's voice, by its Mistral ID, as core says his lines (apps/core/src/platform-ai.ts). */
+const voice = "voice_485";
 
 /**
  * The interviewer's first line, said as the session connects: the first
@@ -101,13 +94,10 @@ This is a try-out: a colleague at Grasp plays an employee of a practice company,
 - Your first line was said already: "${firstLine}" Their first answer is to that. Do not say it again.`;
 
 /** Everything the session's model is told, in the language of the conversation. */
-export const instructionsOf = (
-  interviewer: Interviewer,
-  locale: InterviewLocale
-): string =>
+export const instructionsOf = (locale: InterviewLocale): string =>
   inLanguage(
     [
-      interviewer === "claire" ? WHO_CLAIRE : WHO,
+      WHO,
       partsOf(EXAMPLE, READ_BACK),
       LISTENING,
       spokenOf(firstLines[locale]),
@@ -115,9 +105,8 @@ export const instructionsOf = (
     locale
   );
 
-/** Who holds the try-out, and in which language. */
+/** The language the try-out is held in. */
 export const voiceLabInputSchema = z.object({
-  interviewer: interviewerSchema,
   locale: interviewLocaleSchema,
 });
 export type VoiceLabInput = z.infer<typeof voiceLabInputSchema>;
@@ -151,13 +140,13 @@ const openedSchema = z.object({
 });
 
 /** What Mistral is asked for: the session, whole, as its API takes it. */
-export const sessionRequestOf = ({ interviewer, locale }: VoiceLabInput) => ({
-  instructions: instructionsOf(interviewer, locale),
+export const sessionRequestOf = ({ locale }: VoiceLabInput) => ({
+  instructions: instructionsOf(locale),
   llm: { model: models.llm },
   // Mistral's own end-of-turn detection, at its defaults: the try-out is
   // of the session as it comes.
   stt: { model: models.stt, language: locale, turn_detection: {} },
-  tts: { model: models.tts, voice_id: voices[interviewer] },
+  tts: { model: models.tts, voice_id: voice },
   welcome_message: firstLines[locale],
   turn: { allow_interruptions: true },
 });
@@ -172,8 +161,8 @@ const keyOf = async (env: Env): Promise<string | null> =>
   await ifStored(async () => await storeSecret(env, "MISTRAL_API_KEY"));
 
 /**
- * Opens a session for `staff`, on record as theirs: who held it and in
- * which language, never anything said in it.
+ * Opens a session for `staff`, on record as theirs, with its language:
+ * never anything said in it.
  */
 export const openVoiceSession = async (
   env: Env,
@@ -186,7 +175,7 @@ export const openVoiceSession = async (
   }
   await audit(adminDatabase(env.DB), staff, {
     action: "admin.voice_lab",
-    detail: { interviewer: input.interviewer, locale: input.locale },
+    detail: { locale: input.locale },
   });
   try {
     const response = await fetch(sessionsUrl, {

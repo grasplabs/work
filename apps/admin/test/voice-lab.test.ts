@@ -95,7 +95,7 @@ describe("the Voice Lab's session", () => {
   mockAccess();
   useStoreSecrets({ deployer: "test-deployer-token-voice-lab-5e1a90" });
 
-  it("opens a session at Mistral with Grasp's key, as the interviewer in the language asked, and hands the page only what it joins with", async () => {
+  it("opens a session at Mistral with Grasp's key, as Stephen in the language asked, and hands the page only what it joins with", async () => {
     await setStoreSecret(
       env.MISTRAL_API_KEY,
       "MISTRAL_API_KEY",
@@ -105,7 +105,7 @@ describe("the Voice Lab's session", () => {
       .delete(auditEvents)
       .where(eq(auditEvents.action, "admin.voice_lab"));
 
-    const session = await open({ interviewer: "claire", locale: "de" });
+    const session = await open({ locale: "de" });
     const [sent] = mistral.sent;
     const asked = JSON.stringify(sent?.body);
 
@@ -114,11 +114,11 @@ describe("the Voice Lab's session", () => {
       method: sent?.method,
       url: sent?.url,
       authorization: sent?.authorization,
-      // She is Claire, speaks German, and her first line is said for her.
-      claire: asked.includes("You are Claire,"),
+      // He is Stephen, speaks German, and his first line is said for him.
+      stephen: asked.includes("You are Stephen,"),
       german: asked.includes("Every word you say is German"),
       welcome: asked.includes("Nutzen Sie in Ihrer Arbeit schon KI"),
-      voice: asked.includes('"voice_id":"voice_478"'),
+      voice: asked.includes('"voice_id":"voice_485"'),
       interrupts: asked.includes('"allow_interruptions":true'),
       // Nothing of what only core's own turns need.
       notes: asked.includes("What you write down"),
@@ -135,22 +135,20 @@ describe("the Voice Lab's session", () => {
       method: "POST",
       url: sessionsUrl,
       authorization: "Bearer grasp-mistral-key",
-      claire: true,
+      stephen: true,
       german: true,
       welcome: true,
       voice: true,
       interrupts: true,
       notes: false,
       keyInAnswer: false,
-      events: [
-        { detail: JSON.stringify({ interviewer: "claire", locale: "de" }) },
-      ],
+      events: [{ detail: JSON.stringify({ locale: "de" }) }],
     });
   });
 
   it("says Grasp's Mistral key is missing, and asks nothing", async () => {
     expect({
-      session: await open({ interviewer: "stephen", locale: "en" }),
+      session: await open({ locale: "en" }),
       sent: mistral.sent.length,
     }).toStrictEqual({
       session: { id: null, refused: "no_key" },
@@ -173,9 +171,10 @@ describe("the Voice Lab's session", () => {
     );
     mistral.status = status;
     mistral.answer = answer;
-    await expect(
-      open({ interviewer: "stephen", locale: "en" })
-    ).resolves.toStrictEqual({ id: null, refused: "not_opened" });
+    await expect(open({ locale: "en" })).resolves.toStrictEqual({
+      id: null,
+      refused: "not_opened",
+    });
   });
 
   it("closes a session at Mistral by its ID, and takes none that reads as a path", async () => {

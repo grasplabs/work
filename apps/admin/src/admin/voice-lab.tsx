@@ -1,5 +1,5 @@
 /**
- * The Voice Lab: Grasp's staff talk with Stephen or Claire as one live
+ * The Voice Lab: Grasp's staff talk with Stephen as one live
  * voice session at Mistral (src/admin/voice-lab.ts), to hear how it
  * compares with the interview as core holds it. The page shows where the
  * call stands, what was said as Mistral wrote it down, and how long each
@@ -13,15 +13,8 @@ import {
   NativeSelectOption,
 } from "@grasp-os/app-kit/components/native-select";
 import { Stat } from "@grasp-os/app-kit/components/stat";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/app-kit/components/toggle-group";
-import {
-  interviewerNames,
-  interviewLocales,
-} from "@grasp-os/shared/onboarding";
-import type { Interviewer, InterviewLocale } from "@grasp-os/shared/onboarding";
+import { interviewLocales } from "@grasp-os/shared/onboarding";
+import type { InterviewLocale } from "@grasp-os/shared/onboarding";
 import { MicIcon, MicOffIcon, PhoneIcon, PhoneOffIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
@@ -35,7 +28,7 @@ import type {
 } from "./voice-lab-call.ts";
 import { medianOf, replyTimes } from "./voice-lab-heard.ts";
 
-/** Each language the interviewers speak, by its own name. */
+/** Each language Stephen speaks, by its own name. */
 const languageWords: Record<InterviewLocale, string> = {
   en: "English",
   nl: "Nederlands",
@@ -105,18 +98,12 @@ const Timing = ({ call }: { call: Call }) => {
 };
 
 /** What was said, as Mistral wrote it down: theirs on the right, his on the left. */
-const Conversation = ({
-  call,
-  interviewer,
-}: {
-  call: Call;
-  interviewer: Interviewer;
-}) => {
+const Conversation = ({ call }: { call: Call }) => {
   if (call.said.length === 0) {
     return (
       <EmptySection>
-        What you and {interviewerNames[interviewer]} say shows here as it is
-        said. Nothing of it is kept.
+        What you and Stephen say shows here as it is said. Nothing of it is
+        kept.
       </EmptySection>
     );
   }
@@ -146,57 +133,36 @@ const Conversation = ({
   );
 };
 
-/** Who holds the try-out and in which language, chosen before the call. */
-const Choices = ({
+/** The language of the try-out, chosen before the call. */
+const Language = ({
   busy,
-  interviewer,
   locale,
-  onInterviewer,
   onLocale,
 }: {
   busy: boolean;
-  interviewer: Interviewer;
   locale: InterviewLocale;
-  onInterviewer: (interviewer: Interviewer) => void;
   onLocale: (locale: InterviewLocale) => void;
 }) => (
-  <>
-    <ToggleGroup
-      aria-label="Who you talk with"
-      disabled={busy}
-      size="sm"
-      spacing={0}
-      variant="outline"
-      onValueChange={(value: string[]) => {
-        onInterviewer(value.includes("claire") ? "claire" : "stephen");
-      }}
-      value={[interviewer]}
-    >
-      <ToggleGroupItem value="stephen">Stephen</ToggleGroupItem>
-      <ToggleGroupItem value="claire">Claire</ToggleGroupItem>
-    </ToggleGroup>
-    <NativeSelect
-      aria-label="Language"
-      disabled={busy}
-      onChange={(event) => {
-        onLocale(
-          interviewLocales.find((each) => each === event.target.value) ?? "en"
-        );
-      }}
-      value={locale}
-    >
-      {interviewLocales.map((each) => (
-        <NativeSelectOption key={each} value={each}>
-          {languageWords[each]}
-        </NativeSelectOption>
-      ))}
-    </NativeSelect>
-  </>
+  <NativeSelect
+    aria-label="Language"
+    disabled={busy}
+    onChange={(event) => {
+      onLocale(
+        interviewLocales.find((each) => each === event.target.value) ?? "en"
+      );
+    }}
+    value={locale}
+  >
+    {interviewLocales.map((each) => (
+      <NativeSelectOption key={each} value={each}>
+        {languageWords[each]}
+      </NativeSelectOption>
+    ))}
+  </NativeSelect>
 );
 
-/** The Voice Lab: the choices, the call's controls, the conversation and its timing. */
+/** The Voice Lab: the language, the call's controls, the conversation and its timing. */
 export const VoiceLab = () => {
-  const [interviewer, setInterviewer] = useState<Interviewer>("stephen");
   const [locale, setLocale] = useState<InterviewLocale>("en");
   const [call, setCall] = useState<Call>(noCall);
   const calling = useRef<Calling | null>(null);
@@ -209,7 +175,7 @@ export const VoiceLab = () => {
   );
   const busy = call.stands === "connecting" || call.stands === "live";
   const start = () => {
-    calling.current = beginCall({ interviewer, locale }, setCall);
+    calling.current = beginCall({ locale }, setCall);
   };
   const end = () => {
     calling.current?.end();
@@ -220,16 +186,10 @@ export const VoiceLab = () => {
       <Section
         action={<Standing call={call} />}
         description="A try-out of the interview as one live voice session at Mistral: it listens, answers and speaks there, and you can talk over him. Play an employee; your audio goes from this browser to Mistral."
-        title="Talk with the interviewer"
+        title="Talk with Stephen"
       >
         <div className="flex flex-wrap items-center gap-3 p-4">
-          <Choices
-            busy={busy}
-            interviewer={interviewer}
-            locale={locale}
-            onInterviewer={setInterviewer}
-            onLocale={setLocale}
-          />
+          <Language busy={busy} locale={locale} onLocale={setLocale} />
           {busy ? (
             <>
               <Button
@@ -262,7 +222,7 @@ export const VoiceLab = () => {
         )}
       </Section>
       <Timing call={call} />
-      <Conversation call={call} interviewer={interviewer} />
+      <Conversation call={call} />
     </div>
   );
 };
