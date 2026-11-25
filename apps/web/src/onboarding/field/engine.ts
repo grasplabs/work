@@ -182,9 +182,28 @@ interface Hold {
   on: number;
   /** He is on it now. */
   held: boolean;
-  /** Its corner, read from the page: his line follows it. */
+  /** Its corner, read from the page: his light follows it. */
   radius: number;
+  /** It paints its own ground: his light runs on under its edge, and its own smooth corner covers it. */
+  solid: boolean;
 }
+
+/** A colour's alpha, as the browser writes a computed one: after a slash, or rgba's fourth. */
+const alphaPattern =
+  /(?:\/|^rgba\(.*,)\s*(?<alpha>[\d.]+)(?<percent>%?)\s*\)$/u;
+
+/** Whether a computed background colour hides what is under it. */
+const opaque = (colour: string): boolean => {
+  if (colour === "transparent") {
+    return false;
+  }
+  const groups = alphaPattern.exec(colour)?.groups;
+  if (groups === undefined) {
+    return true;
+  }
+  const alpha = Number(groups.alpha);
+  return groups.percent === "%" ? alpha >= 100 : alpha >= 1;
+};
 
 /** How many things he lights at once: the one he is on, and those still fading. */
 const HOLDS = 4;
@@ -255,7 +274,9 @@ const draw = (layer: Layer, colours: Colours) => {
   gl.uniform3fv(
     u("u_holdLooks[0]"),
     holds.flatMap((hold) =>
-      hold === undefined ? [0, 0, 0] : [hold.on, 0, hold.radius]
+      hold === undefined
+        ? [0, 0, 0]
+        : [hold.on, hold.solid ? 1 : 0, hold.radius]
     )
   );
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -430,16 +451,16 @@ const hold = (element: Element | null) => {
     kept.held = true;
     return;
   }
-  // His line follows the element's own corner, read from the page.
-  const corner = Number(
-    getComputedStyle(element).borderTopLeftRadius.replace("px", "")
-  );
+  // His light follows the element's own corner, read from the page.
+  const style = getComputedStyle(element);
+  const corner = Number(style.borderTopLeftRadius.replace("px", ""));
   him.holds.push({
     element,
     box: boxOf(element),
     on: 0,
     held: true,
     radius: Number.isFinite(corner) ? corner : 0,
+    solid: opaque(style.backgroundColor),
   });
   // The faintest that is fading makes room: never more than he can draw.
   while (him.holds.length > HOLDS) {
