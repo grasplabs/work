@@ -165,6 +165,11 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
     combobox: {
       empty: t({ message: "No results", context: "a search finds nothing" }),
       notChoice: (value) => t`${value} is not one of the choices`,
+      remove: (name) => t`Remove ${name}`,
+      removed: (name) => t`${name} removed`,
+      results: (count) =>
+        plural(count, { one: "# result", other: "# results" }),
+      loading: t`Loading`,
       trigger: t`Show the choices`,
     },
     command: {

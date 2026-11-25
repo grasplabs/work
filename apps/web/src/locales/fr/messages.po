@@ -1093,6 +1093,10 @@ msgstr "{name} ne travaille que lorsqu'on le lui demande."
 msgid "{name} reads only. Change to Write"
 msgstr "{name} ne fait que lire. Passer en Écriture"
 
+#: src/frame/ui-words.tsx
+msgid "{name} removed"
+msgstr "{name} retiré"
+
 #: src/drafts/draft-history.tsx
 msgid "{name} restored an earlier state"
 msgstr "{name} a restauré un état antérieur"
@@ -10026,6 +10030,7 @@ msgstr "Chargé"
 
 #: src/brain/forget.tsx
 #: src/brain/learned-section.tsx
+#: src/frame/ui-words.tsx
 #: src/onboarding/place-picker.tsx
 msgid "Loading"
 msgstr "Chargement"
