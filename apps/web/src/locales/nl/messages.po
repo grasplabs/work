@@ -480,6 +480,10 @@ msgid "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
 msgstr "{count, plural, one {# workflow lezen} other {# workflows lezen}}"
 
 #: src/chat/thread.tsx
+msgid "{count, plural, one {saved # memory} other {saved # memories}}"
+msgstr "{count, plural, one {# herinnering opgeslagen} other {# herinneringen opgeslagen}}"
+
+#: src/chat/thread.tsx
 msgid "{count, plural, one {searched once} other {searched # times}}"
 msgstr "{count, plural, one {één keer gezocht} other {# keer gezocht}}"
 
@@ -2741,6 +2745,10 @@ msgstr "Staat er al, voor het geval je een van deze bedoelt"
 #: src/agents/agent-apps-card.tsx
 msgid "Already one of its schedules."
 msgstr "Al een van zijn schema's."
+
+#: src/chat/saved-memory.tsx
+msgid "Already removed"
+msgstr "Al verwijderd"
 
 #: src/onboarding/about-story.tsx
 msgid "Alright, here’s the plan."
@@ -8119,10 +8127,6 @@ msgstr "Grasp mag lezen en schrijven in {app}, alleen voor wat je toestaat."
 #: src/connections/connected-dialog.tsx
 msgid "Grasp may use {app} only through the tools you allowed."
 msgstr "Grasp mag {app} alleen gebruiken via de tools die je hebt toegestaan."
-
-#: src/chat/saved-memory.tsx
-msgid "Grasp no longer remembers this."
-msgstr "Grasp onthoudt dit niet meer."
 
 #: src/connections/integrations-band.tsx
 msgid "Grasp reaches only what you connect."
@@ -14371,6 +14375,10 @@ msgstr "Na een week verwijderd"
 msgid "Removed by its uploader, {removed}"
 msgstr "Verwijderd door wie hem uploadde, {removed}"
 
+#: src/chat/saved-memory.tsx
+msgid "Removed from memory"
+msgstr "Uit het geheugen verwijderd"
+
 #: src/brain/brain.ts
 #: src/brain/forget.tsx
 msgid "Removed from the brain"
@@ -14590,6 +14598,10 @@ msgstr "Zet het account in de directory terug, dan heft Grasp de schorsing op bi
 #: src/drafts/draft-history.tsx
 msgid "Restore this earlier state?"
 msgstr "Deze eerdere stand herstellen?"
+
+#: src/chat/saved-memory.tsx
+msgid "Restored: {replaced}"
+msgstr "Hersteld: {replaced}"
 
 #: src/chat/chat-markdown.ts
 #: src/chat/sources.tsx
@@ -15169,18 +15181,6 @@ msgctxt "a setting saved"
 msgid "Saved"
 msgstr "Opgeslagen"
 
-#: src/chat/saved-memory.tsx
-msgid "Saved a memory"
-msgstr "Herinnering opgeslagen"
-
-#: src/chat/saved-memory.tsx
-msgid "Saved a preference"
-msgstr "Voorkeur opgeslagen"
-
-#: src/chat/saved-memory.tsx
-msgid "Saved an instruction"
-msgstr "Instructie opgeslagen"
-
 #: src/apps/app-data-model.tsx
 #: src/apps/field-editor.tsx
 msgid "Saved as {named}"
@@ -15206,9 +15206,10 @@ msgstr "Opgeslagen op {date}"
 msgid "Saved the company's groups of teams"
 msgstr "De teamgroepen van het bedrijf opgeslagen"
 
+#: src/chat/saved-memory.tsx
 #: src/chat/thread.tsx
-msgid "Saved to your memory"
-msgstr "Opgeslagen in je geheugen"
+msgid "Saved to memory"
+msgstr "Opgeslagen in het geheugen"
 
 #: src/workflows/workflow-flow.tsx
 msgid "Saved, but it doesn't pass yet: Definition says what to fix."
@@ -15233,8 +15234,8 @@ msgid "Saving"
 msgstr "Opslaan"
 
 #: src/chat/thread.tsx
-msgid "Saving to your memory"
-msgstr "Opslaan in je geheugen"
+msgid "Saving to memory"
+msgstr "Opslaan in het geheugen"
 
 #: src/interview/composer.tsx
 #: src/interview/destination.tsx
@@ -18043,10 +18044,6 @@ msgstr "Er is al een team met deze naam."
 #: src/onboarding/setup-steps.tsx
 msgid "There is nobody in this list."
 msgstr "Er staat niemand in deze lijst."
-
-#: src/chat/saved-memory.tsx
-msgid "There was nothing to undo: Grasp no longer uses this."
-msgstr "Er was niets om ongedaan te maken: Grasp gebruikt dit niet meer."
 
 #: src/brain/forget.tsx
 msgid "These notes rest on nothing else and go too: {named} and {more} more."
