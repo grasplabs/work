@@ -373,7 +373,6 @@ msgstr "{count, plural, one {# personne, dirigée par {lead}} other {# personnes
 
 #: src/onboarding/company-dots.tsx
 #: src/onboarding/company-rows.tsx
-#: src/onboarding/plan-demo.tsx
 #: src/settings/teams.tsx
 msgid "{count, plural, one {# person} other {# people}}"
 msgstr "{count, plural, one {# personne} other {# personnes}}"
@@ -3198,10 +3197,6 @@ msgstr "Applications"
 msgid "Apply it if the sender’s domain is {domain}."
 msgstr "Appliquez-la si le domaine de l’expéditeur est {domain}."
 
-#: src/onboarding/plan-demo.tsx
-msgid "Approvals wait on one person"
-msgstr "Les validations attendent une seule personne"
-
 #: src/apps/app-webhooks.tsx
 #: src/brain/skills-page.tsx
 #: src/chat/package-requests.tsx
@@ -3801,6 +3796,7 @@ msgstr "En attente d’approbation"
 #: src/guest-sign-in.tsx
 #: src/interview/start.tsx
 #: src/onboarding/calm-frame.tsx
+#: src/onboarding/plan-story.tsx
 msgid "Back"
 msgstr "Retour"
 
@@ -6584,10 +6580,6 @@ msgstr "Chaque préfixe de chemin commence par /, sur sa propre ligne, sans requ
 msgid "Each place only narrows who reaches him there, and whether he does things for people there or only answers."
 msgstr "Chaque lieu restreint seulement qui le joint là-bas, et s’il agit pour les gens ou se contente de répondre."
 
-#: src/onboarding/plan-demo.tsx
-msgid "Each theme, with the people who raised it"
-msgstr "Chaque thème, avec les personnes qui l’ont soulevé"
-
 #: src/brain/activity-page.tsx
 msgid "Earlier"
 msgstr "Plus tôt"
@@ -6706,10 +6698,6 @@ msgstr "E-mail et agenda"
 #: src/settings/erasures.tsx
 msgid "Email and sign-ins"
 msgstr "E-mail et connexions"
-
-#: src/onboarding/plan-demo.tsx
-msgid "Email eats the first hours of the day"
-msgstr "Les e-mails dévorent les premières heures de la journée"
 
 #: src/routes/_shell.settings.billing.tsx
 msgid "Email invoices"
@@ -7106,10 +7094,6 @@ msgstr "Toute l’équipe de {company}"
 #: src/brain/sources-page.tsx
 msgid "Everyone can read this upload."
 msgstr "Tout le monde peut lire ce fichier importé."
-
-#: src/onboarding/plan-demo.tsx
-msgid "Everyone else gets their own link"
-msgstr "Tous les autres reçoivent leur propre lien"
 
 #: src/settings/staff-access.tsx
 msgid "Everyone from Grasp is signed out at once, and nobody from Grasp can sign in again until a new window is opened."
@@ -8391,10 +8375,6 @@ msgstr "Les comptes invités ne peuvent pas se connecter. Utilisez un compte pro
 msgid "Had the Brain forget a record"
 msgstr "A fait oublier un enregistrement au Brain"
 
-#: src/onboarding/plan-demo.tsx
-msgid "Half of it is the same questions, answered again and again."
-msgstr "La moitié, ce sont les mêmes questions, auxquelles on répond encore et encore."
-
 #: src/activity/audit-words.ts
 msgid "Handed a file to a run"
 msgstr "A transmis un fichier à une exécution"
@@ -8789,10 +8769,6 @@ msgstr "Je n’ai trouvé personne dans {signIn}."
 msgid "I lost the connection. Please check your internet. I have kept what you said, and I keep trying."
 msgstr "J’ai perdu la connexion. Vérifiez votre connexion internet. J’ai gardé ce que vous avez dit et je continue d’essayer."
 
-#: src/onboarding/plan-demo.tsx
-msgid "I spend the first two hours just sorting email."
-msgstr "Je passe les deux premières heures à trier mes e-mails."
-
 #: src/onboarding/leads-step.tsx
 msgid "I talk to each team lead first"
 msgstr "Je parle d’abord à chaque responsable d’équipe"
@@ -9116,10 +9092,6 @@ msgstr "Entretien : {role}"
 #: src/brain/brain.ts
 msgid "Interviews"
 msgstr "Entretiens"
-
-#: src/onboarding/plan-demo.tsx
-msgid "Interviews closed"
-msgstr "Entretiens clos"
 
 #: src/onboarding/campaign/concepts/concept-words.ts
 msgid "Invitations went out"
@@ -11766,10 +11738,6 @@ msgstr "Personne n’est encore désigné pour approuver un nouvel outil."
 msgid "Nobody is waiting for you to decide a share."
 msgstr "Personne n'attend que vous décidiez d'un partage."
 
-#: src/onboarding/plan-demo.tsx
-msgid "Nobody knows where the latest file is"
-msgstr "Personne ne sait où est la dernière version du fichier"
-
 #: src/agents/agent-page.tsx
 msgid "Nobody outside it can ask it anything, in Grasp or a chat app."
 msgstr "Personne en dehors ne peut rien lui demander, dans Grasp ou une app de chat."
@@ -13022,10 +12990,6 @@ msgstr "Ouvre l’application pour les membres de l’espace de travail qui peuv
 #: src/apps/resource-bindings.tsx
 msgid "Operations"
 msgstr "Opérations"
-
-#: src/onboarding/plan-demo.tsx
-msgid "Operations lead"
-msgstr "Responsable des opérations"
 
 #: src/frame/ui-words.tsx
 msgctxt "a table filter"
@@ -17176,10 +17140,6 @@ msgstr "Abordé dans {source}"
 msgid "Talked today"
 msgstr "A parlé aujourd’hui"
 
-#: src/onboarding/plan-demo.tsx
-msgid "Talked with Stephen"
-msgstr "Ont parlé avec Stephen"
-
 #: src/projects/project-dialog.tsx
 msgid "Target"
 msgstr "Cible"
@@ -17903,7 +17863,6 @@ msgid "The interviews are over."
 msgstr "Les entretiens sont terminés."
 
 #: src/onboarding/campaign/concepts/concept-words.ts
-#: src/onboarding/plan-demo.tsx
 msgid "The interviews close"
 msgstr "Les entretiens se terminent"
 
@@ -18028,10 +17987,6 @@ msgstr "Les paquets sont approuvés. Continue."
 msgid "The passage around it"
 msgstr "Le passage qui l’entoure"
 
-#: src/onboarding/plan-demo.tsx
-msgid "The people who know the work best go first"
-msgstr "Ceux qui connaissent le mieux le travail passent en premier"
-
 #: src/apps/access-view.tsx
 #: src/apps/draft-changes.tsx
 msgid "the person in {field}"
@@ -18106,10 +18061,6 @@ msgstr "Les exécutions n’ont pas pu être lues."
 #: src/workflows/figures.tsx
 msgid "The runs, in figures"
 msgstr "Les exécutions, en chiffres"
-
-#: src/onboarding/plan-demo.tsx
-msgid "The same numbers are typed in twice"
-msgstr "Les mêmes chiffres sont saisis deux fois"
 
 #: src/brain/thinking/shapes.ts
 msgid "The same pain in more than one team"
@@ -19713,10 +19664,6 @@ msgstr "Attend jusqu'au"
 msgid "Walk into every meeting knowing who is coming and what is still open."
 msgstr "Fais en sorte qu’on arrive à chaque réunion en sachant qui vient et ce qui reste ouvert."
 
-#: src/onboarding/plan-demo.tsx
-msgid "Walk me through a normal morning."
-msgstr "Racontez-moi une matinée ordinaire."
-
 #: src/settings/backdrop-settings.tsx
 msgid "Wanderer"
 msgstr "Voyageur"
@@ -20021,10 +19968,6 @@ msgstr "Ce qu'il peut faire"
 #: src/settings/stephen-settings.tsx
 msgid "What he may do in {appName}, with each person's own sign-in: as for the whole company, or for fewer people."
 msgstr "Ce qu’il peut faire dans {appName}, avec la connexion de chaque personne : comme pour toute l’entreprise, ou pour moins de personnes."
-
-#: src/onboarding/plan-demo.tsx
-msgid "What I learned"
-msgstr "Ce que j’ai appris"
 
 #: src/interview/transcript.tsx
 msgid "What is marked is what I wrote down. You check it at the end."
@@ -21210,10 +21153,6 @@ msgstr "Tu choisis les personnes et équipes sur sa page"
 #: src/sign-in-errors.ts
 msgid "You don't have access to this organization. Ask an admin."
 msgstr "Vous n’avez pas accès à cette organisation. Demandez à un admin."
-
-#: src/onboarding/plan-demo.tsx
-msgid "You get what I learned"
-msgstr "Vous recevez ce que j’ai appris"
 
 #: src/projects/project-chats.tsx
 msgid "You have no chats to add."

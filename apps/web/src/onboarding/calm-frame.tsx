@@ -215,7 +215,7 @@ export interface Ways {
  * still holds sound back (until the page is first pressed), a press lets
  * him be heard and says the line he is on again.
  */
-const Sound = () => {
+export const Sound = () => {
   const { t } = useLingui();
   const { on, blocked } = useVoice();
   const heard = on && !blocked;
@@ -268,6 +268,12 @@ const Leave = () => {
 /** Where the frame keeps a step's way on: the track's end, on a page with steps. */
 const EndPlace = createContext<HTMLElement | null>(null);
 
+/** The frame's way back a step, for a step that covers the track with its own (the plan's story). */
+const BackWay = createContext<(() => void) | undefined>(undefined);
+
+/** The way back a step, where there is one. */
+export const useBackWay = (): (() => void) | undefined => useContext(BackWay);
+
 /** A key typed into a field, or pressed on a control, is that control's own. */
 const ownsEnter = (target: EventTarget | null): boolean =>
   target instanceof HTMLElement &&
@@ -279,7 +285,7 @@ const ownsEnter = (target: EventTarget | null): boolean =>
  * Enter goes on: it presses the step's main button (the first it names),
  * unless a field or a control has the key, or a dialog is open over the step.
  */
-const useEnterGoesOn = (): RefObject<HTMLDivElement | null> => {
+export const useEnterGoesOn = (): RefObject<HTMLDivElement | null> => {
   const ref = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     const press = (event: KeyboardEvent) => {
@@ -403,34 +409,36 @@ export const CalmFrame = ({
   const tracked = ways !== undefined || progress !== undefined;
   return (
     <EndPlace.Provider value={tracked ? slot : null}>
-      <div {...stylex.props(styles.window)}>
-        <StephenField pose={pose}>
-          <header {...stylex.props(styles.bar)}>
-            <span {...stylex.props(styles.mark)}>
-              <Icon icon={GraspLogo} label="Grasp" />
-            </span>
-            <div {...stylex.props(styles.tools)}>
-              {language ? <LanguagePicker /> : null}
-              <Sound />
-              <Appearance userId={userId} />
-              <StartOver size={tool.button} />
-              <Leave />
-            </div>
-          </header>
-          <main {...stylex.props(styles.main)}>
-            <div {...stylex.props(styles.column, centred && styles.centred)}>
-              {children}
-            </div>
-          </main>
-          {tracked ? (
-            <Track
-              onBack={ways?.onBack}
-              progress={progress}
-              setSlot={setSlot}
-            />
-          ) : null}
-        </StephenField>
-      </div>
+      <BackWay.Provider value={ways?.onBack}>
+        <div {...stylex.props(styles.window)}>
+          <StephenField pose={pose}>
+            <header {...stylex.props(styles.bar)}>
+              <span {...stylex.props(styles.mark)}>
+                <Icon icon={GraspLogo} label="Grasp" />
+              </span>
+              <div {...stylex.props(styles.tools)}>
+                {language ? <LanguagePicker /> : null}
+                <Sound />
+                <Appearance userId={userId} />
+                <StartOver size={tool.button} />
+                <Leave />
+              </div>
+            </header>
+            <main {...stylex.props(styles.main)}>
+              <div {...stylex.props(styles.column, centred && styles.centred)}>
+                {children}
+              </div>
+            </main>
+            {tracked ? (
+              <Track
+                onBack={ways?.onBack}
+                progress={progress}
+                setSlot={setSlot}
+              />
+            ) : null}
+          </StephenField>
+        </div>
+      </BackWay.Provider>
     </EndPlace.Provider>
   );
 };
