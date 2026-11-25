@@ -32,7 +32,7 @@ import {
 } from "@grasp-os/ui/components/side-panel";
 import { Icon, WandSparklesIcon, WorkflowIcon } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
-import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { texture, textureTint, visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { colors, size as sizes, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import { Fragment } from "react";
@@ -52,7 +52,6 @@ import {
   useAppTint,
 } from "./parts.tsx";
 import type { AppActions } from "./parts.tsx";
-import { Texture } from "./texture.tsx";
 import { groupTools } from "./tools.ts";
 import { useAppIntegrationWords } from "./words.ts";
 import type { AppIntegrationWords } from "./words.ts";
@@ -304,7 +303,15 @@ export const AppPanel = ({
         </div>
         <SidePanel
           aria-label={app.name}
-          cover={<Texture tint={tint} />}
+          cover={
+            <span
+              aria-hidden="true"
+              {...stylex.props(
+                texture,
+                tint !== undefined && textureTint(tint)
+              )}
+            />
+          }
           framed={false}
           style={styles.fill}
         >

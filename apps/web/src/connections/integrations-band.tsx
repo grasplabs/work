@@ -1,6 +1,7 @@
 import type { Identity } from "@grasp-os/shared/rpc";
 import { Heading } from "@grasp-os/ui/components/heading";
 import { Text } from "@grasp-os/ui/components/text";
+import { texture } from "@grasp-os/ui/lib/styles";
 import {
   colors,
   font,
@@ -17,7 +18,6 @@ import { useId } from "react";
 import { useAppOf } from "./app-of.tsx";
 import { AppsState } from "./app/parts.tsx";
 import { needsYou } from "./app/state.ts";
-import { Texture } from "./app/texture.tsx";
 import { useAppIntegrationWords } from "./app/words.ts";
 import { fixOf } from "./fix.ts";
 import type { Integration } from "./integrations.ts";
@@ -83,7 +83,7 @@ export const IntegrationsBand = ({
     waiting.every(({ integration }) => fixOf(integration, identity) === "none");
   return (
     <section aria-labelledby={id} {...stylex.props(styles.band)}>
-      <Texture style={styles.texture} />
+      <span aria-hidden="true" {...stylex.props(texture, styles.texture)} />
       <div {...stylex.props(styles.words)}>
         <Heading id={id} level={2} size="sm">
           {t`Connect the apps your work runs on`}
