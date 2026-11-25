@@ -325,6 +325,11 @@ export const checkMirror = (
     for (const other of more) {
       if (other === undefined) {
         problems.push("A route it declares can't be read.");
+      } else if (other.method !== "GET" && other.method !== "HEAD") {
+        // Only a write's `find` takes more routes, and it reads.
+        problems.push(
+          `${other.method} ${other.path} isn't a read, as a tool's other routes are.`
+        );
       } else if (
         spec !== undefined &&
         !byShape.has(key(other.method, other.path))

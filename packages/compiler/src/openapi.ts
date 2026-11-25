@@ -1,5 +1,11 @@
 import { v } from "@grasp-os/runtime/app";
 import type { ValueDescriptor } from "@grasp-os/runtime/app";
+import {
+  hostSchema,
+  keyHeaderSchema,
+  routeSchema,
+  signInScopesSchema,
+} from "@grasp-os/runtime/connector";
 import { isRecord } from "@grasp-os/shared/json";
 import { dereference, upgrade, validate } from "@scalar/openapi-parser";
 
@@ -208,6 +214,9 @@ const serverOf = (
   ) {
     throw new SpecError("The spec's server has a path no route may take.");
   }
+  if (!hostSchema.safeParse(address.host).success) {
+    throw new SpecError("The spec's server isn't a host a connector may call.");
+  }
   return { host: address.host, base };
 };
 
@@ -245,17 +254,16 @@ const authOf = (scheme: Node): SpecAuth | undefined => {
   if (scheme.type === "oauth2") {
     return oauthOf(scheme);
   }
-  const name = text(scheme.name);
-  if (
-    scheme.type === "apiKey" &&
-    scheme.in === "header" &&
-    name !== undefined
-  ) {
-    return { kind: "apiKey", header: name };
+  // HTTP header names are case-insensitive; a connector's are lowercase.
+  const header = text(scheme.name)?.toLowerCase();
+  if (scheme.type === "apiKey" && scheme.in === "header") {
+    return keyHeaderSchema.safeParse(header).success && header !== undefined
+      ? { kind: "apiKey", header }
+      : undefined;
   }
   const bearer = text(scheme.scheme)?.toLowerCase() === "bearer";
   return scheme.type === "http" && bearer
-    ? { kind: "apiKey", header: "Authorization", prefix: "Bearer " }
+    ? { kind: "apiKey", header: "authorization", prefix: "Bearer " }
     : undefined;
 };
 
@@ -464,7 +472,12 @@ const parametersOf = (
   const fields: Record<string, Schema> = {};
   const parameters: SpecParameter[] = [];
   for (const entry of byKey.values()) {
-    const typed = parameterOf(entry, segments, reading);
+    // An argument named as an object's own (`toString`) reads as it when
+    // left out: no tool takes one.
+    const typed =
+      entry.name in Object.prototype
+        ? undefined
+        : parameterOf(entry, segments, reading);
     const named =
       typed === undefined || Object.hasOwn(fields, entry.name)
         ? undefined
@@ -552,6 +565,8 @@ const pageOf = (answer: ValueDescriptor): SpecPage | undefined => {
   if (answer.nullable) {
     return undefined;
   }
+  // A whole list, or an envelope that names its cursor: one array field
+  // beside fields of its own is an item, not a page.
   if (answer.kind === "array") {
     return { item: answer.item, items: [], next: undefined };
   }
@@ -572,7 +587,9 @@ const pageOf = (answer: ValueDescriptor): SpecPage | undefined => {
       next = cursorIn(field.fields, [name]);
     }
   }
-  return { item: only.item, items: [only.name], next };
+  return next === undefined
+    ? undefined
+    : { item: only.item, items: [only.name], next };
 };
 
 /** `{ items, next }`: what every list answers, as `page(item)` declares it. */
@@ -783,6 +800,32 @@ const documentOf = async (input: string): Promise<Node> => {
   return record(dereference(specification).schema);
 };
 
+/** A sign-in that asks for the scopes its tools need, and no others. */
+const neededAuth = (
+  auth: SpecAuth,
+  operations: readonly SpecOperation[]
+): SpecAuth => {
+  if (auth.kind !== "oauth2") {
+    return auth;
+  }
+  const needed = new Set(operations.flatMap((operation) => operation.scopes));
+  // Where no operation names a scope, the spec says nothing of which are
+  // needed: the sign-in asks for every one it declares.
+  const scopes =
+    needed.size === 0
+      ? auth.scopes
+      : Object.fromEntries(
+          Object.entries(auth.scopes).filter(([scope]) => needed.has(scope))
+        );
+  const count = Object.keys(scopes).length;
+  if (!signInScopesSchema.safeParse(Object.keys(scopes)).success) {
+    throw new SpecError(
+      `A connector's sign-in can't ask for these ${count} OAuth scopes.`
+    );
+  }
+  return { ...auth, scopes };
+};
+
 /**
  * Reads a spec as tools: what both the generator and the mirror check work
  * from. `url` is where the spec was read from. Throws `SpecError` for a
@@ -809,12 +852,20 @@ export const readSpec = async (
       if (!isRecord(operation)) {
         continue;
       }
-      if (isRouteMethod(method)) {
+      const label = `${method} ${key}`;
+      if (!isRouteMethod(method)) {
+        skipped.push({
+          operation: label,
+          reason: "Its method isn't one a connector may call.",
+        });
+      } else if (
+        routeSchema.safeParse({ method, host, path: `${base}${key}` }).success
+      ) {
         operations.push({ key, method, item: record(item), operation });
       } else {
         skipped.push({
-          operation: `${method} ${key}`,
-          reason: "Its method isn't one a connector may call.",
+          operation: label,
+          reason: "Its path isn't one a route may take.",
         });
       }
     }
@@ -846,12 +897,13 @@ export const readSpec = async (
       skipped.push({ operation: `${method} ${key}`, reason: error.message });
     }
   }
+  const tools = named(candidates, skipped);
   return {
     sha256: await sha256(input),
     host,
     base,
-    auth: chosen?.auth,
-    operations: named(candidates, skipped),
+    auth: chosen === undefined ? undefined : neededAuth(chosen.auth, tools),
+    operations: tools,
     skipped,
   };
 };

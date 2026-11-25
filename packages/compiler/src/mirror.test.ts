@@ -246,11 +246,13 @@ describe("a tool held to the vendor's spec", () => {
         }),
         dealsList({ routes: ["GET /deals", "GET /persons"] }),
         dealsList({ routes: ["GET elsewhere.example.test/deals"] }),
+        dealsList({ routes: ["GET /deals", "DELETE /deals/{id}"] }),
       ])
     ).toStrictEqual([
       "deals.archived.list: GET /deals/archived isn't an operation of the vendor's spec.",
       "deals.list: GET /persons isn't an operation of the vendor's spec.",
       "deals.list: GET elsewhere.example.test/deals isn't on the spec's host api.example.test.",
+      "deals.list: DELETE /deals/{id} isn't a read, as a tool's other routes are.",
     ]);
   });
 });
@@ -302,7 +304,7 @@ describe("a tool with no spec to hold it to", () => {
           tool("deals.get", "GET /v1/deals/{id}"),
           {
             ...tool("deals.delete", "DELETE /deals/{id}"),
-            routes: ["DELETE /deals/{id}", "DELETE /persons/{id}"],
+            routes: ["DELETE /deals/{id}", "GET /persons/{id}"],
           },
           {
             name: "deals.get",
@@ -323,7 +325,7 @@ describe("a tool with no spec to hold it to", () => {
       "deals.products.delete: DELETE /deals/{id}/products is named deals.products.<the vendor's operation name>.",
       "deals.change: PATCH /deals/{id} is named deals.update.",
       "deals.get: GET /v1/deals/{id} is named v1.deals.get.",
-      "deals.delete: DELETE /persons/{id} isn't of its family deals.",
+      "deals.delete: GET /persons/{id} isn't of its family deals.",
       "deals.get: It declares no route it is named from.",
     ]);
   });
