@@ -58,14 +58,18 @@ export const Routes = () => {
   const { i18n: current } = useLingui();
   // Switching language re-runs the loaders, so what they put into words
   // (such as a source's name) is said in the new one. From the first
-  // render on: the language the page started in is active by then.
-  useEffect(
-    () =>
-      i18n.on("change", () => {
+  // render on: the language the page started in is active by then. Not
+  // the rest of a catalog joining its lean part (page-parts.ts), which
+  // changes no word.
+  useEffect(() => {
+    let spoken = i18n.locale;
+    return i18n.on("change", () => {
+      if (i18n.locale !== spoken) {
+        spoken = i18n.locale;
         void router.invalidate();
-      }),
-    []
-  );
+      }
+    });
+  }, []);
   return (
     <UiWords>
       <RouterProvider key={current.locale} router={router} />

@@ -18,6 +18,7 @@ import { defineConfig } from "vite-plus";
 import type { Plugin } from "vite-plus";
 
 import { bootPreload } from "./boot-preload.ts";
+import { leanParts } from "./lean-parts.ts";
 import { localePreload } from "./locale-preload.ts";
 
 // Lingui looks for its config from the working directory, which is the repo
@@ -144,6 +145,8 @@ export default defineConfig(({ command }) => ({
     }),
     // Compiles a `.po` catalog when the page imports it.
     lingui({ configPath: linguiConfigPath }),
+    // The lean pages' own part of the stylesheet and of each catalog.
+    leanParts({ linguiConfig }),
     localePreload(),
     bootPreload(),
     tailwindcss(),

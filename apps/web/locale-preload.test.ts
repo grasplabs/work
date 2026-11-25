@@ -8,18 +8,26 @@ import { pickLocale } from "./src/locale-choice.ts";
 // The script index.html runs before the app preloads the catalog of the
 // language the app then chooses (src/i18n.ts): run in a page of its own,
 // it asks for the file of the language `pickLocale` picks from the same
-// cookie and browser languages, and English's when nothing fits.
+// cookie and browser languages, and English's when nothing fits. On a lean
+// page (src/lean-pages.ts) it asks for that catalog's lean part and the
+// lean stylesheet, as the app then loads them; elsewhere for the whole.
 
 const catalogs = {
-  en: "/assets/messages-en.js",
-  de: "/assets/messages-de.js",
-  nl: "/assets/messages-nl.js",
+  en: { lean: "/assets/lean-en.js", whole: "/assets/messages-en.js" },
+  de: { lean: "/assets/lean-de.js", whole: "/assets/messages-de.js" },
+  nl: { lean: "/assets/lean-nl.js", whole: "/assets/messages-nl.js" },
 };
 
-/** What the script preloads in a page with `cookie` and `languages`. */
-const preloaded = (cookie: string, languages: string[]): unknown => {
+const styles = { lean: "/assets/lean.css", whole: "/assets/index.css" };
+
+/** What the script links in a page at `pathname`. */
+const linked = (
+  cookie: string,
+  languages: string[],
+  pathname = "/"
+): unknown[] => {
   const head: { href?: unknown; rel?: unknown }[] = [];
-  runInNewContext(preloadScript(catalogs), {
+  runInNewContext(preloadScript(catalogs, styles), {
     document: {
       cookie,
       createElement: () => ({}),
@@ -29,10 +37,19 @@ const preloaded = (cookie: string, languages: string[]): unknown => {
         },
       },
     },
+    location: { pathname },
     navigator: { languages },
   });
-  expect(head.map(({ rel }) => rel)).toStrictEqual(["modulepreload"]);
-  return head[0]?.href;
+  return head.map(({ rel, href }) => [rel, href]);
+};
+
+/** What the script preloads in a page with `cookie` and `languages`. */
+const preloaded = (cookie: string, languages: string[]): unknown => {
+  const [catalog, ...rest] = linked(cookie, languages);
+  expect(rest).toStrictEqual([["stylesheet", styles.whole]]);
+  return Array.isArray(catalog) && catalog[0] === "modulepreload"
+    ? catalog[1]
+    : undefined;
 };
 
 /** A page: its cookies, the browser's languages, and what it speaks. */
@@ -77,9 +94,31 @@ describe("the catalog preload", () => {
       expect({ picked, preloaded: preloaded(cookie, languages) }).toStrictEqual(
         {
           picked: speaks,
-          preloaded: catalogs[speaks],
+          preloaded: catalogs[speaks].whole,
         }
       );
+    }
+  );
+});
+
+describe("the lean pages' preload", () => {
+  it.each(["/interview", "/setup", "/Setup/"])(
+    "links the lean part of the catalog and the lean stylesheet on %s",
+    (pathname) => {
+      expect(linked("grasp-locale=de", [], pathname)).toStrictEqual([
+        ["modulepreload", catalogs.de.lean],
+        ["stylesheet", styles.lean],
+      ]);
+    }
+  );
+
+  it.each(["/", "/inbox", "/interviews", "/setup-later"])(
+    "links the whole of both on %s",
+    (pathname) => {
+      expect(linked("grasp-locale=de", [], pathname)).toStrictEqual([
+        ["modulepreload", catalogs.de.whole],
+        ["stylesheet", styles.whole],
+      ]);
     }
   );
 });
