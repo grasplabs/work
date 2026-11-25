@@ -452,7 +452,9 @@ const requestOf = (
   }
   const { id, method, params } = body;
   if (
-    (id !== undefined && typeof id !== "string" && typeof id !== "number") ||
+    (id !== undefined &&
+      typeof id !== "string" &&
+      !(typeof id === "number" && Number.isFinite(id))) ||
     typeof method !== "string" ||
     !isOptionalRecord(params)
   ) {
@@ -555,7 +557,8 @@ export const serveConnector = (
         return answer(id, await tool.call(args, meta));
       }
       case syncMethod: {
-        // The sync checks the rest of what it is asked (sync.ts).
+        // The sync checks the rest of what it is asked, and fails a request
+        // it can't take (sync.ts).
         const found = syncOf(params);
         if (found === undefined) {
           return refusal(id, invalidParams, "No such sync");

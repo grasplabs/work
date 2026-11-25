@@ -250,7 +250,7 @@ const chunksOf = (
 const isolateCondition = "connector-isolate";
 
 /** Part of the path of each of Zod's modules. */
-const zodModule = `${path.sep}node_modules${path.sep}zod${path.sep}`;
+const zodModule = /[\\/]node_modules[\\/]zod[\\/]/u;
 
 /**
  * Refuses a connector whose isolate would load Zod, unless code written
@@ -261,7 +261,7 @@ const zodModule = `${path.sep}node_modules${path.sep}zod${path.sep}`;
  */
 const checkLoads = (entry: string, modules: readonly string[]): void => {
   if (
-    modules.some((id) => id.includes(zodModule)) &&
+    modules.some((id) => zodModule.test(id)) &&
     !modules.some((id) => oldKit.some((each) => isWithin(each, id)))
   ) {
     throw new Error(

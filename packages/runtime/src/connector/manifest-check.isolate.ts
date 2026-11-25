@@ -11,5 +11,7 @@ import type { ConnectorManifest } from "./manifest.ts";
  */
 export const checkedManifest = (manifest: unknown): ConnectorManifest =>
   // SAFETY: checked by connect's build, which bundled this module (above).
+  // Unparsed here, so without the schema's defaults: the isolate reads only
+  // its `name`.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
   manifest as ConnectorManifest;

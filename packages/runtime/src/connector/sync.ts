@@ -345,15 +345,15 @@ export const defineSync = (definition: SyncDefinition): Sync => ({
     routes: definition.routes,
   }),
   places: async (params) => {
-    const asked = syncPlacesParamsSchema.parse(params);
+    const asked = syncPlacesParamsSchema.safeParse(params);
     const list = definition.places ?? definition.choices;
-    if (list === undefined) {
+    if (!asked.success || list === undefined) {
       return { failure: { code: "failed" } };
     }
     let places: unknown;
     try {
       places = await list({
-        cursor: asked.cursor,
+        cursor: asked.data.cursor,
         deadline: Date.now() + syncPageLimits.millis,
       });
     } catch (error) {
@@ -367,7 +367,11 @@ export const defineSync = (definition: SyncDefinition): Sync => ({
     return parsed.success ? parsed.data : { failure: { code: "failed" } };
   },
   call: async (params) => {
-    const asked = syncParamsSchema.parse(params);
+    const parsedParams = syncParamsSchema.safeParse(params);
+    if (!parsedParams.success) {
+      return { failure: { code: "failed" } };
+    }
+    const asked = parsedParams.data;
     let page: unknown;
     try {
       page = await definition.read({
