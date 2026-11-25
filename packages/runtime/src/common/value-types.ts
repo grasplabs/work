@@ -96,9 +96,9 @@ export interface StringSchema<
   readonly trim: () => StringSchema<Input, Output>;
   /**
    * An absolute `http` or `https` URL, as the WHATWG URL parser reads one
-   * (`new URL`), written out in full: `//` and a host, no spaces, control
-   * characters or backslashes. Kept as the text it was. A string has one
-   * format at most.
+   * (`new URL`), written out in full: `//` and a host, no user name or
+   * password, no spaces, control characters or backslashes. Kept as the
+   * text it was. A string has one format at most.
    */
   readonly url: () => StringSchema<Input, Output>;
 }

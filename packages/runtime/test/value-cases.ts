@@ -497,6 +497,8 @@ add(
       "https:\\\\evil.com\\@good.com",
       "https://example.com\\path",
       "https:///example.com",
+      "https://good.example@evil.example",
+      "https://user:pw@example.com",
       " https://example.com",
       "https://example.com\n",
       "/relative/path",
@@ -511,7 +513,7 @@ add(
     { value: "http://localhost:8080/a?b=c#d" },
     { value: "https://münchen.example/straße" },
     { value: "HTTPS://Example.com" },
-    ...Array.from({ length: 14 }, () => ({ issues: [["value.invalid_url"]] })),
+    ...Array.from({ length: 16 }, () => ({ issues: [["value.invalid_url"]] })),
   ]
 );
 add(
@@ -1860,6 +1862,37 @@ add(
     { value: { id: 2 } },
     { value: [{ id: 3, name: "Bo", team: "x" }, { id: 4 }] },
   ]
+);
+add(
+  "an answer read with unknownFields drop counts each key it drops towards the check's limit",
+  () => {
+    const answer: Record<string, number> = {};
+    for (let index = 0; index < 20_000; index += 1) {
+      answer[`extra${index}`] = index;
+    }
+    // Every member drops all the keys before its missing field refuses it.
+    const members = Array.from({ length: 64 }, (_entry, index) =>
+      v.object({ [`needed${index}`]: v.number() })
+    );
+    const [first, ...rest] = members;
+    if (first === undefined) {
+      return "no members";
+    }
+    return validateValue(v.union(first, ...rest).descriptor, answer, {
+      unknownFields: "drop",
+    }).issues?.map((issue) => issue.code);
+  },
+  ["value.too_complex"]
+);
+add(
+  "any JSON is already nullable, so .nullable() declares the same",
+  () => [
+    JSON.stringify(v.json().nullable().descriptor) ===
+      JSON.stringify(v.json().descriptor),
+    JSON.stringify(v.union(v.json(), v.null()).descriptor) ===
+      JSON.stringify(v.json().descriptor),
+  ],
+  [true, true]
 );
 add(
   "an answer read with unknownFields drop still refuses a wrong or missing value",

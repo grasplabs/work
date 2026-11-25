@@ -85,7 +85,14 @@ export const checkStrictObject = (
       break;
     }
     if (!keys.has(key) && state.dropUnknownFields) {
+      // Each key dropped is read, so it counts towards the check's limit:
+      // a union tries every member, and would read them all again.
       state.dropped += 1;
+      state.steps += 1;
+      if (state.steps > valueLimits.steps) {
+        state.exhausted = true;
+        state.stopped = true;
+      }
     } else if (!keys.has(key)) {
       // The path names the key only when it is short: an issue never
       // carries an unbounded piece of what was submitted.

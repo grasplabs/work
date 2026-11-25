@@ -361,7 +361,14 @@ const isRequired = (descriptor: ValueDescriptor | undefined): boolean => {
     return false;
   }
   if (descriptor.kind === "string") {
-    return (descriptor.min ?? 0) > 0;
+    // Text held to a format is never empty.
+    return (
+      (descriptor.min ?? 0) > 0 ||
+      descriptor.email ||
+      descriptor.datetime === true ||
+      descriptor.date === true ||
+      descriptor.url === true
+    );
   }
   if (descriptor.kind === "array") {
     return (descriptor.min ?? 0) > 0;

@@ -143,8 +143,9 @@ export const seal = (draft: DescriptorDraft): ValueDescriptor => {
   const nullable = flag(draft, "nullable");
   const base = {
     descriptorVersion,
-    // Null alone is null whether or not it is also nullable.
-    nullable: draft.kind !== "null" && nullable,
+    // Null alone, and any JSON, which holds null, are the same whether or
+    // not they are also nullable.
+    nullable: draft.kind !== "null" && draft.kind !== "json" && nullable,
     presence,
   } as const;
   const body = kindBody(draft);
