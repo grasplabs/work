@@ -58,7 +58,9 @@ const thread = async (
   /** Whether the turn runs on past its answer, checking its drafts. */
   checking?: boolean,
   /** The agents the person may ask, which name the answers. */
-  agents?: readonly ChatAgent[]
+  agents?: readonly ChatAgent[],
+  /** The answer the New line goes over, the first the person hadn't seen. */
+  newLineBefore?: number
 ): Promise<void> => {
   const core = {
     withSession: async <T,>(
@@ -103,6 +105,7 @@ const thread = async (
         running={partial !== null || checking !== undefined}
         checking={checking}
         tools={tools}
+        newLineBefore={newLineBefore}
       />
     ),
   });
@@ -1134,5 +1137,66 @@ describe("a thread's day lines", () => {
       earlier: ["Monday, October 26", "Yesterday", "Today"],
       today: [],
     });
+  });
+});
+
+/** The thread's New line: the separator named New, if there is one. */
+const newLine = () =>
+  document.querySelector<HTMLElement>(
+    "[role='log'] [role='separator'][aria-label='New']"
+  );
+
+/** Whether `first` stands before `second` in the thread. */
+const before = (first: Element | null, second: Element | null): boolean => {
+  const all = [...document.querySelectorAll("[role='log'] *")];
+  const at = first === null ? -1 : all.indexOf(first);
+  return at !== -1 && second !== null && all.indexOf(second) > at;
+};
+
+/** The element holding exactly `words`. */
+const said = (words: string): HTMLElement | null =>
+  [...document.querySelectorAll<HTMLElement>("[role='log'] *")].findLast(
+    (element) => element.textContent.trim() === words
+  ) ?? null;
+
+/** A chat answered while the person was away: their question, and the answer they hadn't seen. */
+const cameBack = [
+  questionOf(1, "What do we owe?"),
+  answerBy(2, "About 4,000."),
+  questionOf(3, "And next month?"),
+  answerBy(4, "About 3,500."),
+];
+
+describe("a thread's New line", () => {
+  afterEach(() => {
+    act(() => {
+      root?.unmount();
+    });
+    root = undefined;
+    document.body.replaceChildren();
+  });
+
+  it("stands over the first answer the person hadn't seen, after their own question, as a separator named New that takes no focus", async () => {
+    await thread(cameBack, null, [], undefined, undefined, undefined, 4);
+    const line = newLine();
+
+    expect({
+      after: before(said("And next month?"), line),
+      over: before(line, said("About 3,500.")),
+      words: line?.textContent,
+      focusable: line?.querySelector("[tabindex], a, button") ?? null,
+      focused: document.activeElement === document.body,
+    }).toStrictEqual({
+      after: true,
+      over: true,
+      words: "New",
+      focusable: null,
+      focused: true,
+    });
+  });
+
+  it("is not drawn when nothing was unread", async () => {
+    await thread(cameBack);
+    expect(newLine()).toBeNull();
   });
 });

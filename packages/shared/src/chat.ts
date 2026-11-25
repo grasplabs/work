@@ -146,6 +146,11 @@ export interface ChatSummary {
   lastAt: string;
   /** Whether its agent is working on a question now. */
   running: boolean;
+  /**
+   * Whether an answer came that its person hasn't seen (`markRead`), now
+   * that its agent is done working on it: never while `running`.
+   */
+  unread: boolean;
   /** What "Make something" started it to make, for good; null for any other chat. */
   make: ChatMake | null;
   /**
@@ -1380,6 +1385,15 @@ export interface ChatsApi {
   people: () => Promise<MentionablePerson[]>;
   /** Renames one of the person's chats. */
   rename: (chatId: string, title: string) => Promise<void>;
+  /**
+   * Marks one of the person's chats seen up to its latest message, while
+   * it is open in front of them: no answer in it is `unread` then. Answers
+   * the last message they had seen before, which the page draws its New
+   * line after; null when they had seen none. It only moves forward, so a
+   * device that shows less never takes it back. Not audited: it changes
+   * nothing but where the person has read to.
+   */
+  markRead: (chatId: string) => Promise<number | null>;
   /**
    * Archives one of the person's chats: out of `list`, kept whole, opened
    * and asked in as ever. Nothing where it is archived already.

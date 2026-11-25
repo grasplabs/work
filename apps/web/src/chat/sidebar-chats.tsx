@@ -27,9 +27,11 @@ import { DeleteChatDialog } from "./delete-chat-dialog.tsx";
 // each a link to its own page, with its menu (open, rename, archive,
 // delete) and renamed in place too; the search (⌘K) finds the rest. Read
 // from core when the sidebar first shows, again after each page the router
-// resolves (a rename, an archive or a delete reads the page again), and
-// when an answer starts or ends (chats-changed.ts), so a row's Working
-// mark comes and goes with it.
+// resolves (a rename, an archive or a delete reads the page again), when
+// an answer starts or ends or a chat is read (chats-changed.ts), so a
+// row's Working mark and unread dot come and go with it, and when the
+// person comes back to the tab, for what was answered while they were
+// away.
 
 /** How many recent chats the sidebar lists. */
 const recentCount = 8;
@@ -67,9 +69,16 @@ const useChats = (enabled: boolean): ChatSummary[] => {
     const unsubscribe = router.subscribe("onResolved", readIf);
     // An answer started or ended: its chat works, or no longer does.
     const unheard = onChatsChanged(readIf);
+    const back = (): void => {
+      if (document.visibilityState === "visible") {
+        readIf();
+      }
+    };
+    document.addEventListener("visibilitychange", back);
     return () => {
       unsubscribe();
       unheard();
+      document.removeEventListener("visibilitychange", back);
     };
   }, [enabled, router]);
   return enabled ? chats : [];
@@ -152,6 +161,7 @@ export const useRecentChats = ({
   ];
   const rows = chats.slice(0, recentCount).map((chat): SidebarRow => {
     const { title } = chat;
+    const current = matchRoute(chatLink(chat.id)) !== false;
     return {
       id: chat.id,
       label: title,
@@ -159,10 +169,14 @@ export const useRecentChats = ({
       quiet: true,
       // The chat's own page (chat-link.ts), marked while it is open.
       render: (look) => <Link {...look} {...chatLink(chat.id)} />,
-      current: matchRoute(chatLink(chat.id)) !== false,
+      current,
       // Its agent is still answering: the Working mark at the row's end.
       working: chat.running,
       workingLabel: t`Answering`,
+      // Answered while the person wasn't looking (chat/unread.ts): a dot,
+      // never on the chat open in front of them, which is read as it ends.
+      unread: chat.unread && !current,
+      unreadLabel: t`Unread`,
       actions,
       actionsLabel: t`More for ${title}`,
       renameLabel: t`Rename ${title}`,

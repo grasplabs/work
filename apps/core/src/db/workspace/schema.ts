@@ -103,6 +103,13 @@ export const chats = sqliteTable(
      * deleted since leaves it pointing at nothing, which lists nowhere.
      */
     projectId: text("project_id"),
+    /**
+     * The last message its person has seen (`ChatsApi.markRead`): an answer
+     * stored after it is unread, the list's dot and the thread's New line.
+     * Only moves forward, so a device showing less never takes it back.
+     * Null before they have seen any.
+     */
+    readUpTo: integer("read_up_to"),
   },
   // A person's list, most recently active first.
   (table) => [

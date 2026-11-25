@@ -37,6 +37,7 @@ const chat: ChatSummary = {
   createdAt: "2026-11-17T09:00:00.000Z",
   lastAt: "2026-11-17T09:00:00.000Z",
   running: false,
+  unread: false,
   make: null,
   archived: false,
 };
@@ -493,6 +494,45 @@ describe("renaming a recent chat from its row", () => {
       expect(
         document.querySelectorAll("[data-slot=sidebar-row-working]")
       ).toHaveLength(0);
+    });
+  });
+
+  it("shows a dot said as Unread once an answer the person hasn't seen ends, never while it works nor on the chat open in front of them", async () => {
+    let state = { running: true, unread: false };
+    const { router } = await shownWith({
+      list: async () =>
+        await Promise.resolve([
+          { ...chatNamed("chat-1", "Month-end"), ...state },
+        ]),
+    });
+    const marks = () => ({
+      working: document.querySelectorAll("[data-slot=sidebar-row-working]")
+        .length,
+      dot: document.querySelectorAll("[data-slot=sidebar-row-unread]").length,
+      said: linkIn(itemOf("chat-1")).textContent.includes("Unread"),
+    });
+    await vi.waitFor(() => {
+      expect(marks()).toStrictEqual({ working: 1, dot: 0, said: false });
+    });
+
+    state = { running: false, unread: true };
+    await act(async () => {
+      tellChatsChanged();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(marks()).toStrictEqual({ working: 0, dot: 1, said: true });
+    });
+
+    // Opened: no dot on the chat in front of them.
+    await act(async () => {
+      await router.navigate({
+        to: "/chats/$chatId",
+        params: { chatId: "chat-1" },
+      });
+    });
+    await vi.waitFor(() => {
+      expect(marks()).toStrictEqual({ working: 0, dot: 0, said: false });
     });
   });
 });

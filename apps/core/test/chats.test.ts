@@ -545,6 +545,104 @@ describe("chats", () => {
     );
   });
 
+  it("are unread once their agent answered while their person wasn't looking, and never while it works", async () => {
+    const ann = await person();
+    const { reply, release } = pausedReply(says("Here it is."), 3);
+    await answering(ann, reply);
+    const chat = await ann.chats.create("Away");
+    const follower = await follow(ann.chats, chat.id);
+    const before = await ann.chats.list();
+
+    await ann.chats.send(chat.id, { text: "Find the contract.", model });
+    await vi.waitFor(
+      () => {
+        expect(follower.now()?.running).toBeTruthy();
+      },
+      { timeout: 10_000 }
+    );
+    const working = await ann.chats.list();
+    release();
+    await settled(follower);
+
+    expect({
+      before,
+      working,
+      answered: await ann.chats.summary(chat.id),
+    }).toMatchObject({
+      // Nothing said yet: nothing to read.
+      before: [{ id: chat.id, unread: false }],
+      // While it works the list says so, never unread.
+      working: [{ id: chat.id, running: true, unread: false }],
+      // Answered while Ann never marked it seen.
+      answered: { running: false, unread: true },
+    });
+  });
+
+  it("are read by their person alone, up to where they had seen, and their own questions are never news", async () => {
+    const ann = await person();
+    const ben = await person();
+    await answering(ann, says("Here it is."), says("And here is more."));
+    const chat = await ann.chats.create("Away");
+    const follower = await follow(ann.chats, chat.id);
+    /** The last message the chat stored, the recall's steps too. */
+    const lastId = () =>
+      follower.updates.flatMap(({ messages }) => messages).at(-1)?.id;
+    const unread = async () => {
+      const summary = await ann.chats.summary(chat.id);
+      return summary.unread;
+    };
+    await ann.chats.send(chat.id, { text: "Find the contract.", model });
+    await settled(follower);
+
+    // Nobody else moves where she has read to, nor marks what isn't a chat.
+    const refused = await Promise.all([
+      outcome(ben.chats.markRead(chat.id)),
+      outcome(ann.chats.markRead("not-a-chat")),
+    ]);
+    const stillUnread = await unread();
+    // She opens it: she had seen none of it, and has now.
+    const first = await ann.chats.markRead(chat.id);
+    const read = await unread();
+    const seen = lastId();
+    // Opened again with nothing new: where she read to, which stays.
+    const again = await ann.chats.markRead(chat.id);
+
+    // She asks, and leaves before the answer: her own question isn't
+    // news, the answer is, and the New line goes after what she had seen.
+    await ann.chats.send(chat.id, { text: "Anything else?", model });
+    await vi.waitFor(
+      () => {
+        expect({
+          running: follower.now()?.running,
+          last: follower.messages().at(-1)?.text,
+        }).toStrictEqual({ running: false, last: "And here is more." });
+      },
+      { timeout: 10_000 }
+    );
+    const answered = await unread();
+    const second = await ann.chats.markRead(chat.id);
+
+    expect({
+      refused,
+      stillUnread,
+      first,
+      read,
+      again,
+      answered,
+      second,
+      done: await unread(),
+    }).toStrictEqual({
+      refused: ["agent.chat_not_found", "agent.chat_not_found"],
+      stillUnread: true,
+      first: null,
+      read: false,
+      again: seen,
+      answered: true,
+      second: seen,
+      done: false,
+    });
+  });
+
   it("are listed by their latest message: a chat just continued comes first", async () => {
     const ann = await person();
     const older = await ann.chats.create("Invoices");
@@ -1777,6 +1875,8 @@ describe("chats", () => {
       [
         "SELECT id, title, last_at FROM chats WHERE person_id = 'p' ORDER BY last_at DESC LIMIT 200",
         "SELECT * FROM chat_messages WHERE chat_id = 'c' AND id > 7 ORDER BY id",
+        // Whether a chat has an answer its person hasn't seen.
+        "SELECT id FROM chat_messages WHERE chat_id = 'c' AND id > 7 AND json_extract(message, '$.role') = 'assistant' LIMIT 1",
       ].map((query) =>
         state.storage.sql
           .exec<{ detail: string }>(`EXPLAIN QUERY PLAN ${query}`)
