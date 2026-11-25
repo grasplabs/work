@@ -448,45 +448,69 @@ export const edgeFade = edgeFadeStyles.edges;
 
 /**
  * The box a text field draws, the same for Input, Textarea and Select's closed control: its height,
- * padding and corner at each size, the 44px target a finger needs, and its states. Each field keeps
- * its own base and its read-only look, which differ.
+ * padding and corner at each size and its states; the 44px target a finger needs is `tapTarget`.
+ * Input, Select's closed control and Native select also share the box round the control and the
+ * control's base; each keeps its own padding, words and read-only look, which differ.
  */
 export const inputStyles = stylex.create({
+  // The box round a one-line field: as wide as the column it stands in, holding the control and
+  // its touch target.
+  box: {
+    position: "relative",
+    display: "flex",
+    alignItems: "stretch",
+    boxSizing: "border-box",
+    width: "100%",
+    minWidth: 0,
+    maxWidth: "100%",
+  },
+  // The control's base: the fill and ink, the words at a field's size (16px on a phone or a touch
+  // screen, or Safari zooms the page in when the field takes focus), and no border: the edge is a
+  // hairline drawn inside (enabled, below), which adds no size, and a real one in forced colours,
+  // where the shadow is dropped.
+  control: {
+    position: "relative",
+    boxSizing: "border-box",
+    width: "100%",
+    minWidth: 0,
+    margin: 0,
+    appearance: "none",
+    borderWidth: { default: 0, [FORCED]: 1 },
+    borderStyle: "solid",
+    borderColor: "currentColor",
+    backgroundColor: colors.inputBg,
+    color: colors.foreground,
+    fontFamily: font.sans,
+    fontSize: {
+      default: font.textSm,
+      [media.maxSmOrCoarse]: size.inputTextTouch,
+    },
+    lineHeight: font.textSmLine,
+    fontWeight: font.weightNormal,
+    textAlign: "start",
+    transitionProperty: "box-shadow, background-color",
+    transitionDuration: duration.hover,
+    transitionTimingFunction: duration.ease,
+  },
   // The height, the same as Button's, the words centred on it, the one corner capped at half.
   sm: {
     minHeight: size.controlSm,
     paddingBlock: `calc((${size.controlSm} - ${font.textSmLine}) / 2)`,
     borderRadius: `min(${radius.xl}, calc(${size.controlSm} / 2))`,
+    cornerShape: radius.shape,
   },
   default: {
     minHeight: size.controlDefault,
     paddingBlock: `calc((${size.controlDefault} - ${font.textSmLine}) / 2)`,
     borderRadius: `min(${radius.xl}, calc(${size.controlDefault} / 2))`,
+    cornerShape: radius.shape,
   },
   lg: {
     minHeight: size.controlLg,
     paddingBlock: `calc((${size.controlLg} - ${font.textSmLine}) / 2)`,
     borderRadius: `min(${radius.xl}, calc(${size.controlLg} / 2))`,
+    cornerShape: radius.shape,
   },
-  // A finger needs 44px: an invisible area inside the control reaches past its edges.
-  target: {
-    position: "absolute",
-    insetInline: 0,
-    insetBlock: 0,
-  },
-  targetSm: {
-    insetBlock: {
-      default: 0,
-      [COARSE]: `calc((${size.controlSm} - ${size.tapTarget}) / 2)`,
-    },
-  },
-  targetDefault: {
-    insetBlock: {
-      default: 0,
-      [COARSE]: `calc((${size.controlDefault} - ${size.tapTarget}) / 2)`,
-    },
-  },
-  targetLg: { insetBlock: 0 },
   // Can be typed in or opened: the hairline deepens under a pointer.
   enabled: {
     boxShadow: {
@@ -674,6 +698,7 @@ export const listStyles = stylex.create({
     minHeight: { default: size.controlDefault, [COARSE]: size.tapTarget },
     paddingBlock: `calc((${size.controlDefault} - ${font.textSmLine}) / 2)`,
     borderRadius: `min(${radius.lg}, calc(${size.controlDefault} / 2))`,
+    cornerShape: radius.shape,
     color: colors.foreground,
     fontSize: {
       default: font.textSm,
@@ -986,23 +1011,154 @@ export const menuStyles = stylex.create({
 //
 // A finger needs 44px. A small control holds an unseen box that, on a touch screen, grows round it
 // to 44px each way it is short of that, and never shrinks it. The control is `position: relative`
-// and the box its first child, hidden from screen readers:
+// and the box its child, hidden from screen readers:
 //
 //   <button {...stylex.props(styles.remove)}><span aria-hidden="true" {...stylex.props(tapTarget)} />…
 //
 // The inset is a share of the control's own box (`100%`), so one style fits every size.
+//
+// It never covers another control, and never takes a press on one. Towards a control right beside
+// it in a row (a sibling that is or holds a control, of the control or of a box round it whose end
+// it stands at), it reaches only as far as the part that sets them side by side allows; up and down,
+// as far as the column round it allows. A part says so with these custom properties, inherited by
+// every control inside it until a part inside sets its own (a product's CSS can set them too):
+//
+//   --tap-room-inline   towards a control before or after it in a row. Unset: 0px, its own edge.
+//   --tap-room-block    towards a control above or below it in a column. Unset: the full 44px.
+//   --tap-reach         the most it reaches past the control on any side. Unset: the full 44px. A
+//                       part that sets a control on another's box (a button inside a field, actions
+//                       on a card that opens) sets 0px, so it never takes the other's presses.
+//   --tap-rest-inline,  how far it reaches past the control without a touch screen, across and up
+//   --tap-rest-block    and down. Unset: nowhere; a button in an end square of its own sets them.
+//
+// A part that sets controls a gap apart sets half the gap, from the same token, so the two targets
+// meet in its middle:
+//
+//   row: { gap: space[1], "--tap-room-inline": `calc(${space[1]} / 2)` }
+//
+// Where no control stands beside it, it reaches the full 44px.
 
 const tapInset = `min(0px, calc((100% - ${size.tapTarget}) / 2))`;
 
-const tapStyles = stylex.create({
-  target: {
-    position: "absolute",
-    insetInline: { default: 0, [COARSE]: tapInset },
-    insetBlock: { default: 0, [COARSE]: tapInset },
+// What a press can land on: a control on the page, not a form's own hidden value.
+const CONTROL =
+  ":is(button, a[href], input:not([type=hidden]), select, textarea, summary, [role=button], [role=link], [role=tab], [role=checkbox], [role=radio], [role=switch], [role=slider], [role=combobox], [role=textbox]):not([aria-hidden=true])";
+const HOLDS = `:is(${CONTROL}, :has(${CONTROL}))`;
+// In a row: a control stands right before the control (with at most a separator, or a layer it
+// opens that is not drawn there, between), or before a box round it (up to two) that the control
+// starts; or right after it, or after a box it ends. In a column: anything round the control has a
+// control before it, or after it. Written for the control itself; a target inside it adds ` > *`.
+const BETWEEN =
+  ':is([role=separator], [data-slot$="separator"], hr, [role=tooltip], [data-slot$="-content"], [data-slot$="-positioner"], [hidden], [aria-hidden=true])';
+const PRECEDED = `:is(${HOLDS} + *, ${HOLDS} + ${BETWEEN} + *)`;
+// (`:has()` cannot hold another, so "holds a control" is written as a control inside it.)
+const FOLLOWED = `:has(+ ${CONTROL}, + * ${CONTROL}, + ${BETWEEN} + ${CONTROL}, + ${BETWEEN} + * ${CONTROL})`;
+const BEFORE = [
+  PRECEDED,
+  `${PRECEDED} > :first-child`,
+  `${PRECEDED} > :first-child > :first-child`,
+];
+const AFTER = [
+  FOLLOWED,
+  `${FOLLOWED} > :last-child`,
+  `${FOLLOWED} > :last-child > :last-child`,
+];
+const ABOVE = [`${HOLDS} ~ *`, `${HOLDS} ~ * *`];
+const LATER = `:has(~ ${CONTROL}, ~ * ${CONTROL})`;
+const BELOW = [LATER, `${LATER} *`];
+const onControl = (selectors: string[]) => `:is(${selectors.join(", ")})`;
+const inControl = (selectors: string[]) =>
+  `:is(${selectors.map((selector) => `${selector} > *`).join(", ")})`;
+
+// Where nothing is beside it: what the 44px needs, never more than it may reach.
+// Towards a neighbour: no further than the room it is given either.
+const reach = `var(--tap-reach, ${size.tapTarget})`;
+const free = `max(${tapInset}, calc(-1 * ${reach}))`;
+const toward = (room: string) => `max(${free}, calc(-1 * ${room}))`;
+
+// The target's four sides, its conditions written by `where` (inside the control, or on it).
+const sides = (where: (selectors: string[]) => string) => ({
+  position: "absolute",
+  insetInlineStart: {
+    default: `var(--tap-rest-inline, 0px)`,
+    [COARSE]: {
+      default: free,
+      [where(BEFORE)]: toward(`var(--tap-room-inline, 0px)`),
+    },
+  },
+  insetInlineEnd: {
+    default: `var(--tap-rest-inline, 0px)`,
+    [COARSE]: {
+      default: free,
+      [where(AFTER)]: toward(`var(--tap-room-inline, 0px)`),
+    },
+  },
+  insetBlockStart: {
+    default: `var(--tap-rest-block, 0px)`,
+    [COARSE]: {
+      default: free,
+      [where(ABOVE)]: toward(`var(--tap-room-block, ${size.tapTarget})`),
+    },
+  },
+  insetBlockEnd: {
+    default: `var(--tap-rest-block, 0px)`,
+    [COARSE]: {
+      default: free,
+      [where(BELOW)]: toward(`var(--tap-room-block, ${size.tapTarget})`),
+    },
   },
 });
 
+const tapStyles = stylex.create({
+  target: sides(inControl),
+  after: { "::after": { content: '""', ...sides(onControl) } },
+  rows: {
+    "--tap-room-block": {
+      default: null,
+      ":is([data-wrapped])": "var(--tap-room-inline)",
+    },
+  },
+});
+
+/** A control's touch target: an empty `aria-hidden` span inside it, `position: relative`. */
 export const tapTarget = tapStyles.target;
+
+/** The same target drawn as the control's own `::after`, for a control that draws its words alone. */
+export const tapTargetAfter = tapStyles.after;
+
+/**
+ * A row of controls that wraps (a toggle group's items, a layer footer's actions): once its
+ * controls take more than one row (watchRows marks it `data-wrapped`), each target stops at the
+ * middle of the gap to the row above or below, the same room as beside it. A row that fits keeps
+ * the full 44px up and down. The row sets `--tap-room-inline` to half its gap.
+ */
+export const tapRows = tapStyles.rows;
+
+const measureRows = (row: HTMLElement) => {
+  const measure = () => {
+    const items = [...row.children].filter(
+      (item) =>
+        item.getClientRects().length > 0 &&
+        !["absolute", "fixed"].includes(getComputedStyle(item).position)
+    );
+    const first = items.at(0)?.getBoundingClientRect();
+    const last = items.at(-1)?.getBoundingClientRect();
+    row.toggleAttribute(
+      "data-wrapped",
+      first !== undefined && last !== undefined && last.top >= first.bottom
+    );
+  };
+  measure();
+  const observer = new ResizeObserver(measure);
+  observer.observe(row);
+  return () => {
+    observer.disconnect();
+  };
+};
+
+/** The ref of a row that wears `tapRows`: marks it while it wraps, now and on each resize. */
+export const watchRows = (row: HTMLElement | null) =>
+  row === null ? undefined : measureRows(row);
 
 // ---- Disclosure ---------------------------------------------------------------------------------
 //
@@ -1105,8 +1261,14 @@ export const disclosureStyles = stylex.create({
   panel: {
     // A base stylesheet that hides [hidden] with !important (the docs' own) still wins over this.
     // Without script nothing opens a panel, so every panel shows open.
-    display: { default: null, [media.noScript]: "block" },
-    overflow: "hidden",
+    // It clips, never a box that scrolls, so a touch target at its edge adds no room to scroll.
+    // Shown, it lays its content out on its own, as a box that hid its overflow did.
+    display: {
+      default: null,
+      ":not([hidden])": "flow-root",
+      [media.noScript]: "block",
+    },
+    overflow: "clip",
     // The height UI SDK measures and writes, as a Collapsible's panel or an Accordion's.
     height: {
       default: "var(--collapsible-panel-height, var(--accordion-panel-height))",

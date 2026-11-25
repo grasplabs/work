@@ -353,7 +353,6 @@ const styles = stylex.create({
     flexShrink: 0,
     boxSizing: "border-box",
     overflow: "hidden",
-    cornerShape: radius.shape,
     color: colors.bodyForeground,
     backgroundColor: colors.card,
   },
@@ -364,6 +363,7 @@ const styles = stylex.create({
     width: size.controlSm,
     height: size.controlSm,
     borderRadius: `min(${radius.xl}, calc(${size.controlSm} / 3))`,
+    cornerShape: radius.shape,
   },
   tilePile: {
     [iconVars.size]: size.sourcesMarkInline,

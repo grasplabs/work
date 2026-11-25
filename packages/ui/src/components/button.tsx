@@ -40,7 +40,7 @@ import { useAction } from "../hooks/use-action";
 import type { ActionResult, ActionStatus } from "../hooks/use-action";
 import { useI18n } from "../lib/i18n";
 import { CheckIcon, CircleAlertIcon, Icon } from "../lib/icons";
-import { focusRing, hyphenate } from "../lib/styles";
+import { focusRing, hyphenate, tapTarget } from "../lib/styles";
 import {
   colors,
   duration,
@@ -199,7 +199,6 @@ export type ButtonProps = WithWords | IconOnly;
 
 // Hover only where a pointer can hover, so a tap never leaves a button lit.
 const HOVER = media.hover;
-const COARSE = media.pointerCoarse;
 const FORCED = media.forcedColors;
 
 // A Button group's own items: never a layer a trigger in it draws inline (a Dropdown menu's list
@@ -215,7 +214,6 @@ const LAST = `:nth-last-child(1 of ${ITEM})`;
 const FOOTERS =
   "[data-slot=dialog-footer], [data-slot=alert-dialog-footer], [data-slot=sheet-footer], [data-slot=drawer-footer]";
 const FOOTER_ACTION = `:is(:is(${FOOTERS}) > *)`;
-const IN_FOOTER_ACTION = `:is(:is(${FOOTERS}) > * > *)`;
 
 const styles = stylex.create({
   base: {
@@ -237,7 +235,6 @@ const styles = stylex.create({
     borderWidth: { default: 0, [FORCED]: 1 },
     borderStyle: "solid",
     borderColor: { default: "currentColor", [FORCED]: "ButtonText" },
-    cornerShape: radius.shape,
     fontFamily: font.sans,
     fontSize: font.textSm,
     lineHeight: font.textSmLine,
@@ -411,12 +408,6 @@ const styles = stylex.create({
       },
     },
   },
-  // A finger needs 44px: on a touch screen an unseen area makes up the difference.
-  target: {
-    position: "absolute",
-    insetInline: 0,
-    insetBlock: 0,
-  },
 });
 
 // Height comes from the line plus padding, so a wrapped label makes the button taller and never
@@ -428,6 +419,7 @@ const sizeStyles = stylex.create({
     paddingBlock: `calc((${sizes.controlXs} - ${font.textSmLine}) / 2)`,
     paddingInline: space["2"],
     borderRadius: `min(${radius.xl}, calc(${sizes.controlXs} / 2))`,
+    cornerShape: radius.shape,
   },
   sm: {
     minHeight: sizes.controlSm,
@@ -435,6 +427,7 @@ const sizeStyles = stylex.create({
     paddingBlock: `calc((${sizes.controlSm} - ${font.textSmLine}) / 2)`,
     paddingInline: space["3"],
     borderRadius: `min(${radius.xl}, calc(${sizes.controlSm} / 2))`,
+    cornerShape: radius.shape,
   },
   default: {
     minHeight: sizes.controlDefault,
@@ -442,6 +435,7 @@ const sizeStyles = stylex.create({
     paddingBlock: `calc((${sizes.controlDefault} - ${font.textSmLine}) / 2)`,
     paddingInline: space["3"],
     borderRadius: `min(${radius.xl}, calc(${sizes.controlDefault} / 2))`,
+    cornerShape: radius.shape,
   },
   lg: {
     // The large size's icon is the default one, with words or without.
@@ -451,6 +445,7 @@ const sizeStyles = stylex.create({
     paddingBlock: `calc((${sizes.controlLg} - ${font.textSmLine}) / 2)`,
     paddingInline: space["4"],
     borderRadius: `min(${radius.xl}, calc(${sizes.controlLg} / 2))`,
+    cornerShape: radius.shape,
   },
   "icon-xs": {
     minHeight: sizes.controlXs,
@@ -458,6 +453,7 @@ const sizeStyles = stylex.create({
     paddingBlock: `calc((${sizes.controlXs} - ${font.textSmLine}) / 2)`,
     paddingInline: 0,
     borderRadius: `min(${radius.xl}, calc(${sizes.controlXs} / 2))`,
+    cornerShape: radius.shape,
   },
   "icon-sm": {
     minHeight: sizes.controlSm,
@@ -465,6 +461,7 @@ const sizeStyles = stylex.create({
     paddingBlock: `calc((${sizes.controlSm} - ${font.textSmLine}) / 2)`,
     paddingInline: 0,
     borderRadius: `min(${radius.xl}, calc(${sizes.controlSm} / 2))`,
+    cornerShape: radius.shape,
   },
   icon: {
     minHeight: sizes.controlDefault,
@@ -472,6 +469,7 @@ const sizeStyles = stylex.create({
     paddingBlock: `calc((${sizes.controlDefault} - ${font.textSmLine}) / 2)`,
     paddingInline: 0,
     borderRadius: `min(${radius.xl}, calc(${sizes.controlDefault} / 2))`,
+    cornerShape: radius.shape,
   },
   "icon-lg": {
     [iconVars.size]: sizes.iconDefault,
@@ -480,6 +478,7 @@ const sizeStyles = stylex.create({
     paddingBlock: `calc((${sizes.controlLg} - ${font.textSmLine}) / 2)`,
     paddingInline: 0,
     borderRadius: `min(${radius.xl}, calc(${sizes.controlLg} / 2))`,
+    cornerShape: radius.shape,
   },
 });
 
@@ -504,59 +503,8 @@ const unsizedStyles = stylex.create({
       default: `min(${radius.xl}, calc(${sizes.controlDefault} / 2))`,
       [FOOTER_ACTION]: `min(${radius.xl}, calc(${sizes.controlSm} / 2))`,
     },
+    cornerShape: radius.shape,
   },
-  // Its touch target, a direct child of the button.
-  target: {
-    insetBlock: {
-      default: 0,
-      [COARSE]: {
-        default: `calc((${sizes.controlDefault} - ${sizes.tapTarget}) / 2)`,
-        [IN_FOOTER_ACTION]: `calc((${sizes.controlSm} - ${sizes.tapTarget}) / 2)`,
-      },
-    },
-  },
-});
-
-// The touch target of each size: as tall as a finger needs, and as wide for a square.
-const targetStyles = stylex.create({
-  xs: {
-    insetBlock: {
-      default: 0,
-      [COARSE]: `calc((${sizes.controlXs} - ${sizes.tapTarget}) / 2)`,
-    },
-  },
-  sm: {
-    insetBlock: {
-      default: 0,
-      [COARSE]: `calc((${sizes.controlSm} - ${sizes.tapTarget}) / 2)`,
-    },
-  },
-  default: {
-    insetBlock: {
-      default: 0,
-      [COARSE]: `calc((${sizes.controlDefault} - ${sizes.tapTarget}) / 2)`,
-    },
-  },
-  lg: { insetBlock: 0 },
-  "icon-xs": {
-    inset: {
-      default: 0,
-      [COARSE]: `calc((${sizes.controlXs} - ${sizes.tapTarget}) / 2)`,
-    },
-  },
-  "icon-sm": {
-    inset: {
-      default: 0,
-      [COARSE]: `calc((${sizes.controlSm} - ${sizes.tapTarget}) / 2)`,
-    },
-  },
-  icon: {
-    inset: {
-      default: 0,
-      [COARSE]: `calc((${sizes.controlDefault} - ${sizes.tapTarget}) / 2)`,
-    },
-  },
-  "icon-lg": { inset: 0 },
 });
 
 // Each variant at rest; its hover and press are in liveStyles, left out while it cannot be pressed.
@@ -841,12 +789,10 @@ const ownOf = (
 /** The sheen over a filled button, and the touch target. */
 const Inside = ({
   variant,
-  size,
   pressable,
   failed,
 }: {
   variant: ButtonVariant;
-  size: ButtonSize | undefined;
   pressable: boolean;
   failed: boolean;
 }) => (
@@ -857,13 +803,7 @@ const Inside = ({
         {...stylex.props(styles.sheen, pressable && styles.sheenLive)}
       />
     )}
-    <span
-      aria-hidden="true"
-      {...stylex.props(
-        styles.target,
-        size === undefined ? unsizedStyles.target : targetStyles[size]
-      )}
-    />
+    <span aria-hidden="true" {...stylex.props(tapTarget)} />
   </>
 );
 
@@ -1272,12 +1212,7 @@ const Pressable = ({
     { agentAsks, agentPresses }
   );
   const inside = (
-    <Inside
-      variant={variant}
-      size={size}
-      pressable={!off}
-      failed={hasFailed(extra)}
-    />
+    <Inside variant={variant} pressable={!off} failed={hasFailed(extra)} />
   );
   const element =
     asChild && isValidElement<{ children?: ReactNode }>(children)

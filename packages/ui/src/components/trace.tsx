@@ -324,6 +324,12 @@ const styles = stylex.create({
       default: 0,
       ":not(:only-child)": `calc(${space["2"]} - ${ROOM})`,
     },
+    // Among steps, its trigger's touch target reaches the edge of its row, where the next row's
+    // starts.
+    "--tap-room-block": {
+      default: null,
+      ":not(:only-child)": `calc(${space["2"]} - ${ROOM})`,
+    },
   },
   // The trigger: the original's activity line, only as wide as its line and chevron (a card's width
   // in a card), at the text's own weight and line, muted until the pointer is on it or it is open,
@@ -360,6 +366,7 @@ const styles = stylex.create({
     columnGap: space["2"],
     // A row's corner, in a card too: a trigger there is still a row, as a Sources trigger is.
     borderRadius: `min(${radius.lg}, calc(${size.controlSm} / 2))`,
+    cornerShape: radius.shape,
     lineHeight: font.textSmLine,
     fontWeight: font.weightNormal,
     color: {

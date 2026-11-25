@@ -85,7 +85,7 @@ import type {
 import { useI18n } from "../lib/i18n";
 import { EllipsisIcon, Icon, LoaderIcon, SearchIcon } from "../lib/icons";
 import type { IconData } from "../lib/icons";
-import { watchPanel } from "../lib/layer";
+import { shadeProps, watchPanel } from "../lib/layer";
 import {
   listStyles,
   menuStyles,
@@ -367,6 +367,9 @@ const styles = stylex.create({
   },
   // The list scrolls past popup-height.
   list: {
+    // Its items stand one under the other, never side by side: a control at an item's end reaches
+    // its full touch target across.
+    "--tap-room-inline": size.tapTarget,
     boxSizing: "border-box",
     maxHeight: size.popupHeight,
     overflowY: "auto",
@@ -1444,7 +1447,13 @@ export const CommandDialog = ({
           </Button>
         </DialogTrigger>
       )}
-      <DialogBackdrop {...stylex.props(dialogStyles.overlay, styles.fade)} />
+      <DialogBackdrop
+        {...shadeProps(
+          "command-dialog-overlay",
+          dialogStyles.overlay,
+          styles.fade
+        )}
+      />
       <DialogContentPrimitive
         ref={watchPalette}
         render={<div data-slot="command-dialog" />}

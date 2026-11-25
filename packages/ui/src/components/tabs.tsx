@@ -457,11 +457,12 @@ const styles = stylex.create({
     transitionProperty: "color, background-color",
     transitionDuration: duration.hover,
     transitionTimingFunction: duration.ease,
-    // A finger's target round it, 24px at least (WCAG 2.5.8), unseen.
+    // A pointer's target round it, 24px at least (WCAG 2.5.8), unseen. On a touch screen it stays
+    // its own box: it stands inside its tab, and a target past it would take the tab's presses.
     "::after": {
       content: '""',
       position: "absolute",
-      inset: `calc(-1 * ${space["1"]} / 2)`,
+      inset: { default: `calc(-1 * ${space["1"]} / 2)`, [COARSE]: 0 },
     },
   },
   closeSegment: {

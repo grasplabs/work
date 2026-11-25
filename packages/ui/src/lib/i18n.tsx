@@ -766,6 +766,18 @@ export interface I18nCatalog {
     /** The fold button's name. */
     toggle: string;
   };
+  sortableList: {
+    /** How to move an item from the keyboard: every handle's description. */
+    instructions: string;
+    /** Said as an item is picked up: its name, its place from 1 and how many there are. */
+    grabbed: (name: string, position: number, total: number) => string;
+    /** Said at each step of a move. */
+    moved: (name: string, position: number, total: number) => string;
+    /** Said as it is put down. */
+    dropped: (name: string, position: number, total: number) => string;
+    /** Said as it goes back where it was: Escape, Tab, or a change the host refused. */
+    cancelled: (name: string, position: number, total: number) => string;
+  };
   sources: {
     count: (count: number) => string;
     gone: string;
@@ -1434,6 +1446,18 @@ const english: I18nCatalog = {
     main: "Main",
     name: "Sidebar",
     toggle: "Show or hide the sidebar",
+  },
+  sortableList: {
+    instructions:
+      "Press Space or Enter to pick it up, the arrow keys to move it, Space or Enter to put it down, or Escape to put it back.",
+    grabbed: (name, position, total) =>
+      `Picked up ${name}, position ${position} of ${total}.`,
+    moved: (name, position, total) =>
+      `${name}, position ${position} of ${total}.`,
+    dropped: (name, position, total) =>
+      `Put ${name} down at position ${position} of ${total}.`,
+    cancelled: (name, position, total) =>
+      `Put ${name} back at position ${position} of ${total}.`,
   },
   sources: {
     count: (count) =>

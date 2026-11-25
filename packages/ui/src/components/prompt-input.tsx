@@ -842,6 +842,9 @@ const NARROW = "@container prompt-input (width < 30rem)";
 // Inside an Alert, where its action stands beside its words: its body 24rem wide or more. For the
 // banner's own box that is the form at 26.5rem (the body and the strip's insets).
 const WIDE = "@container (width >= 24rem)";
+// A one-row voice too narrow to give its words about 10rem beside the field's own band: the row's
+// time, two tools, the band and their gaps take 14rem, and the card's sides 1.5rem more.
+const VOICE_ROW_NARROW = "@container prompt-input (width < 25.5rem)";
 const BANNER_WIDE = "@container prompt-input (width >= 26.5rem)";
 // How bright the light over the card is while a voice is heard, set on the light at each frame.
 const LISTEN = "--prompt-input-listen";
@@ -1014,7 +1017,7 @@ const styles = stylex.create({
     zIndex: 0,
     display: { default: "block", [FORCED]: "none" },
     borderRadius: "inherit",
-    cornerShape: radius.shape,
+    cornerShape: "inherit",
     boxShadow: shadow.promptInputHalo,
     opacity: 0,
     pointerEvents: "none",
@@ -1096,6 +1099,8 @@ const styles = stylex.create({
   compactTall: {
     gridTemplateAreas:
       '"header header header" "field field field" "start . end"',
+    // The text a step above the row: each control's touch target reaches the middle between.
+    "--tap-room-block": `calc(${space["2"]} / 2)`,
   },
   // A file is dragged over the page: the card is a target, tinted in mint, its words say what a
   // drop does. Over the card itself the tint and the edge go a step stronger.
@@ -1116,6 +1121,7 @@ const styles = stylex.create({
     display: "grid",
     placeItems: "center",
     borderRadius: "inherit",
+    cornerShape: "inherit",
     backgroundColor: "inherit",
     color: colors.foreground,
     fontSize: font.textSm,
@@ -1275,6 +1281,8 @@ const styles = stylex.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: space["2"],
+    // Each control's touch target reaches the middle of the gap to the next (tapTarget).
+    "--tap-room-inline": `calc(${space["2"]} / 2)`,
     minWidth: 0,
     marginBlockStart: space["6"],
     paddingInline: space["2"],
@@ -1290,20 +1298,39 @@ const styles = stylex.create({
     flexWrap: "wrap",
     alignItems: "center",
     gap: space["1"],
+    // Each control's touch target reaches the middle of the gap to the next (tapTarget).
+    "--tap-room-inline": `calc(${space["1"]} / 2)`,
     minWidth: 0,
   },
-  compactTools: { gridArea: "start" },
+  // On one row with the text, a step from it: the tools' and Submit's touch targets stop at the
+  // middle of that step on every side.
+  compactTools: { gridArea: "start", "--tap-reach": `calc(${space["2"]} / 2)` },
   // The tools at the footer's end, with Submit: a space-2 apart, as the original's end side.
-  toolsEnd: { gap: space["2"], marginInlineStart: "auto" },
-  compactToolsEnd: { gridArea: "end", justifySelf: "end" },
+  toolsEnd: {
+    gap: space["2"],
+    // Each control's touch target reaches the middle of the gap to the next (tapTarget).
+    "--tap-room-inline": `calc(${space["2"]} / 2)`,
+    marginInlineStart: "auto",
+  },
+  compactToolsEnd: {
+    gridArea: "end",
+    justifySelf: "end",
+    "--tap-reach": `calc(${space["2"]} / 2)`,
+  },
   end: {
     position: "relative",
     display: "inline-flex",
     alignItems: "center",
     gap: space["2"],
+    // Each control's touch target reaches the middle of the gap to the next (tapTarget).
+    "--tap-room-inline": `calc(${space["2"]} / 2)`,
     marginInlineStart: "auto",
   },
-  compactEnd: { gridArea: "end", justifySelf: "end" },
+  compactEnd: {
+    gridArea: "end",
+    justifySelf: "end",
+    "--tap-reach": `calc(${space["2"]} / 2)`,
+  },
   count: {
     paddingInline: space["1"],
     color: colors.mutedForeground,
@@ -1444,6 +1471,8 @@ const styles = stylex.create({
   queueList: {
     display: "grid",
     gap: space["1"],
+    // Each control's touch target reaches the middle of the gap to the next (tapTarget).
+    "--tap-room-block": `calc(${space["1"]} / 2)`,
     margin: 0,
     padding: 0,
     paddingBlockEnd: space["2"],
@@ -1468,6 +1497,8 @@ const styles = stylex.create({
     alignItems: "center",
     flexShrink: 0,
     gap: space["1"],
+    // Each control's touch target reaches the middle of the gap to the next (tapTarget).
+    "--tap-room-inline": `calc(${space["1"]} / 2)`,
   },
   // While the page loads: a part kept in its room but not drawn, and the text's quiet line.
   kept: { display: "inline-flex", opacity: 0 },
@@ -1594,6 +1625,62 @@ const styles = stylex.create({
   },
   // The time starts where the words do: there is no Cancel before it.
   voiceTime: { paddingInlineStart: space["2"] },
+  // In one row, where the text starts in its row.
+  compactVoiceTime: { paddingInlineStart: space["1"] },
+  // In one row the words stand on the row's one line, after the time and before the field: from
+  // the start as typed words stand, and once they run past their room the latest stay in view at
+  // its end (the line keeps its width and is placed at the room's end) and the start fades.
+  spokenRow: {
+    display: "flex",
+    justifyContent: "flex-end",
+    alignItems: "center",
+    alignSelf: "stretch",
+    flexGrow: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    overflow: "hidden",
+    maskImage: {
+      default: "none",
+      ":is([data-over])": {
+        default: `linear-gradient(to right, transparent, black ${space["8"]})`,
+        ":dir(rtl)": `linear-gradient(to left, transparent, black ${space["8"]})`,
+      },
+    },
+  },
+  // Nothing heard yet: the words take no room, and the field has the row.
+  spokenRowEmpty: { flexGrow: 0 },
+  spokenLine: {
+    flexGrow: 1,
+    flexShrink: 0,
+    margin: 0,
+    color: colors.foreground,
+    fontSize: { default: size.messageText, [TYPING]: size.inputTextTouch },
+    lineHeight: size.messageTextLine,
+    whiteSpace: "nowrap",
+  },
+  // In one row the field has the room while nothing is heard; once words come, a short band of
+  // its own beside them, so a word never stands on the light, and on a narrow row none: the words
+  // are what matters, and the card's light still listens.
+  rowLevel: { flexBasis: size.promptInputVoiceBand },
+  rowLevelHeard: {
+    display: { default: "grid", [VOICE_ROW_NARROW]: "none" },
+    flexGrow: 0,
+  },
+  // A note's words in the band's place, from its start, and the band then never gives way: a stretch
+  // not made out is what the row must say.
+  rowLevelNoted: { display: "grid" },
+  rowNote: {
+    gridArea: "1 / 1",
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: colors.mutedForeground,
+    fontSize: font.textXs,
+    lineHeight: font.textXsLine,
+  },
+  // The field keeps the band's room under the note, unseen.
+  canvasUnder: { gridArea: "1 / 1", visibility: "hidden" },
   // The mention menu: a menu's panel under the caret, items with a mark, a name and a quiet line
   // under it.
   mentionPanel: {
@@ -4000,10 +4087,18 @@ const Level = ({
   level,
   sample,
   mode,
+  row = false,
+  written = false,
+  note,
 }: {
   level: number;
   sample: (() => VoiceReading | undefined) | undefined;
   mode: VoiceFieldMode;
+  /** In a one-row voice, beside its words once some are `written`. */
+  row?: boolean;
+  written?: boolean;
+  /** In a one-row voice, a note's words, shown in the field's place. */
+  note?: ReactNode;
 }) => {
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
   const [drawing, setDrawing] = useState<ReturnType<typeof drawVoice> | null>(
@@ -4030,9 +4125,29 @@ const Level = ({
   useEffect(() => {
     drawing?.mode(mode);
   }, [drawing, mode]);
+  const noted = row && !isBlank(note);
   return (
-    <span aria-hidden="true" {...stylex.props(styles.level)}>
-      <canvas ref={setCanvas} {...stylex.props(styles.canvas)} />
+    <span
+      {...stylex.props(
+        styles.level,
+        row && styles.rowLevel,
+        row && written && styles.rowLevelHeard,
+        noted && styles.rowLevelNoted
+      )}
+    >
+      <canvas
+        ref={setCanvas}
+        aria-hidden="true"
+        {...stylex.props(styles.canvas, noted && styles.canvasUnder)}
+      />
+      {noted && (
+        <span
+          data-slot="prompt-input-voice-note"
+          {...stylex.props(styles.rowNote)}
+        >
+          {note}
+        </span>
+      )}
     </span>
   );
 };
@@ -4282,9 +4397,23 @@ const resolving = (said: string) =>
       </Fragment>
     ));
 
+/** The turn's words, the unsettled ones lighter, then the mark of where the next lands. */
+const Spoken = ({
+  interim,
+  children,
+}: Pick<PromptInputVoiceProps, "children"> & { interim: string }) => (
+  <>
+    {typeof children === "string" ? resolving(children) : children}
+    {interim !== "" && (
+      <span {...stylex.props(styles.spokenInterim)}> {interim}</span>
+    )}
+    <span aria-hidden="true" {...stylex.props(styles.spokenCaret)} />
+  </>
+);
+
 /**
- * The words of the turn where the text stood, the unsettled ones lighter with the mark of where
- * the next lands, and a note in the room under them, so the card keeps its height.
+ * The words of the turn where the text stood, and a note in the room under them, so the card
+ * keeps its height.
  */
 const VoiceWords = ({
   note,
@@ -4299,11 +4428,7 @@ const VoiceWords = ({
       data-slot="prompt-input-voice-words"
       {...stylex.props(styles.spoken, scrollbarHidden)}
     >
-      {typeof children === "string" ? resolving(children) : children}
-      {interim !== "" && (
-        <span {...stylex.props(styles.spokenInterim)}> {interim}</span>
-      )}
-      <span aria-hidden="true" {...stylex.props(styles.spokenCaret)} />
+      <Spoken interim={interim}>{children}</Spoken>
     </p>
     {!isBlank(note) && (
       <span
@@ -4317,16 +4442,65 @@ const VoiceWords = ({
   </div>
 );
 
+/** A one-line room's ref: `data-over` while its line runs past it, for the fade at its start. */
+const watchOver = (room: HTMLElement | null) => {
+  const line = room?.firstElementChild;
+  if (room === null || room === undefined || !(line instanceof HTMLElement)) {
+    return nothing;
+  }
+  const read = () => {
+    room.toggleAttribute("data-over", line.scrollWidth > room.clientWidth + 1);
+  };
+  // The line keeps its own width once its words outgrow the room, so its size says when.
+  const observer = new ResizeObserver(read);
+  observer.observe(room);
+  observer.observe(line);
+  return () => {
+    observer.disconnect();
+  };
+};
+
+/** In one row, the turn's words on its one line beside the field (styles.spokenRow). */
+const VoiceLine = ({
+  heard,
+  interim,
+  children,
+  style,
+}: Pick<PromptInputVoiceProps, "children" | "style"> & {
+  heard: boolean;
+  interim: string;
+}) => (
+  <div
+    ref={watchOver}
+    {...stylex.props(styles.spokenRow, !heard && styles.spokenRowEmpty, style)}
+  >
+    <p
+      data-slot="prompt-input-voice-words"
+      {...stylex.props(styles.spokenLine)}
+    >
+      <Spoken interim={interim}>{children}</Spoken>
+    </p>
+  </div>
+);
+
 /** What leads the foot row: the other voice's mark while it speaks, else the time. */
 const VoiceLead = ({
   speaker,
   seconds,
+  compact,
 }: {
   speaker: ReactNode;
   seconds: number;
+  compact: boolean;
 }) =>
   isBlank(speaker) ? (
-    <span role="timer" {...stylex.props(styles.time, styles.voiceTime)}>
+    <span
+      role="timer"
+      {...stylex.props(
+        styles.time,
+        compact ? styles.compactVoiceTime : styles.voiceTime
+      )}
+    >
       {clock(seconds)}
     </span>
   ) : (
@@ -4352,8 +4526,10 @@ const voiceMode = (
  * A spoken conversation, written in the PromptInput in place of its body and footer while it
  * runs: the words of the turn where the text stood, and under them the time (or, while the other
  * voice speaks, its mark), the voice's level as a field of light, the microphone and a close
- * button. The turns pass by themselves, so there is no Done and no Cancel. The product listens and
- * speaks; this part draws what it is told, and says each turn once.
+ * button. In a `compact` PromptInput it is one row: the words on its line between the time and the
+ * field, the latest in view, and a note in the field's place. The turns pass by
+ * themselves, so there is no Done and no Cancel. The product listens and speaks; this part draws
+ * what it is told, and says each turn once.
  */
 export const PromptInputVoice = ({
   status = "listening",
@@ -4371,9 +4547,11 @@ export const PromptInputVoice = ({
 }: PromptInputVoiceProps) => {
   const words = useI18n().promptInput;
   const form = usePromptInput();
+  const compact = form?.compact === true;
   const [ownMuted, setOwnMuted] = useState(false);
   const off = muted ?? ownMuted;
   const speaking = status === "speaking";
+  const heard = !isBlank(children) || interim !== "";
   const seconds = useSeconds(!off);
   const turn = speaking ? words.voice.speaking : words.voice.listening;
   useEffect(() => {
@@ -4405,19 +4583,38 @@ export const PromptInputVoice = ({
       data-status={status}
       {...stylex.props(styles.conversation)}
     >
-      <VoiceWords note={note} interim={interim} style={style}>
-        {children}
-      </VoiceWords>
-      <div data-slot="prompt-input-footer" {...stylex.props(styles.footer)}>
-        <div {...stylex.props(styles.dictation)}>
+      {!compact && (
+        <VoiceWords note={note} interim={interim} style={style}>
+          {children}
+        </VoiceWords>
+      )}
+      <div
+        data-slot="prompt-input-footer"
+        {...stylex.props(styles.footer, compact && styles.compactFooter)}
+      >
+        <div
+          {...stylex.props(
+            styles.dictation,
+            compact && styles.compactDictation
+          )}
+        >
           <VoiceLead
             speaker={speaking ? speaker : undefined}
             seconds={seconds}
+            compact={compact}
           />
+          {compact && (
+            <VoiceLine heard={heard} interim={interim} style={style}>
+              {children}
+            </VoiceLine>
+          )}
           <Level
             level={level}
             sample={sample}
             mode={voiceMode(speaking, off, !isBlank(note))}
+            row={compact}
+            written={heard}
+            note={note}
           />
           {toolButton({
             "aria-label": words.speechButton.mute,

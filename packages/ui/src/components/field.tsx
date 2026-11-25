@@ -798,10 +798,13 @@ const statusStyles = stylex.create({
   },
   failed: { color: colors.destructive },
   // Try again, in a box one line tall: its button may be taller, the row never is.
+  // Its button stands out of the line by half what it is taller, into the gap to the control above
+  // and the row's edge below: its touch target reaches the middle of what is left (tapTarget).
   retry: {
     display: "inline-flex",
     alignItems: "center",
     height: font.textSmLine,
+    "--tap-reach": `calc((${space[2]} - (${size.controlXs} - ${font.textSmLine}) / 2) / 2)`,
   },
 });
 

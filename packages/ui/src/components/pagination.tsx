@@ -48,7 +48,7 @@ import {
   Icon,
   LoaderIcon,
 } from "../lib/icons";
-import { focusRing, visuallyHidden } from "../lib/styles";
+import { focusRing, tapTarget, visuallyHidden } from "../lib/styles";
 import {
   colors,
   duration,
@@ -59,7 +59,7 @@ import {
   size,
   space,
 } from "../lib/tokens.stylex";
-import { className, listOf, slotted } from "../lib/utils";
+import { className, listOf, slotWords, slotted } from "../lib/utils";
 import type { LayoutStyle } from "../lib/utils";
 import { iconVars, motionVars } from "../lib/vars.stylex";
 import { buttonVariants } from "./button";
@@ -220,10 +220,15 @@ const styles = stylex.create({
   list: {
     display: "flex",
     alignItems: "center",
-    // On a touch screen the steps stand apart, so their 44px targets meet and never overlap.
+    // On a touch screen the steps stand apart, so their 44px targets meet and never overlap. A
+    // page link's target reaches the middle of the gap (tapTarget).
     columnGap: {
       default: space[1],
       [COARSE]: `calc(${size.tapTarget} - ${size.paginationStep})`,
+    },
+    "--tap-room-inline": {
+      default: `calc(${space[1]} / 2)`,
+      [COARSE]: `calc((${size.tapTarget} - ${size.paginationStep}) / 2)`,
     },
     marginInlineStart: "auto",
     padding: 0,
@@ -289,14 +294,6 @@ const styles = stylex.create({
     userSelect: "none",
     touchAction: "manipulation",
     WebkitTapHighlightColor: "transparent",
-  },
-  // A finger needs 44px: on a touch screen an invisible area makes up the difference.
-  target: {
-    position: "absolute",
-    inset: {
-      default: 0,
-      [COARSE]: `calc((${size.paginationStep} - ${size.tapTarget}) / 2)`,
-    },
   },
   // The chevrons point the way the row runs: right to left the icon turns round.
   chevron: {
@@ -465,10 +462,8 @@ export const PaginationLink = ({
   style,
 }: PaginationLinkProps) => {
   const standing = use(StandingContext);
-  const element =
-    asChild && isValidElement<Record<string, unknown>>(children)
-      ? children
-      : undefined;
+  // With asChild, the element given is drawn round the target and its own words.
+  const { render, children: words } = slotWords(asChild, children);
   return (
     <LinkPrimitive
       page={page}
@@ -476,7 +471,7 @@ export const PaginationLink = ({
       render={slotted(
         standing.linked ? "a" : "button",
         "pagination-link",
-        element
+        render
       )}
       className={(state: PaginationLinkState) =>
         className(
@@ -488,7 +483,9 @@ export const PaginationLink = ({
         )
       }
     >
-      {element === undefined ? children : undefined}
+      <span aria-hidden="true" {...stylex.props(tapTarget)} />
+      {/* Without words of its own, the page's number, as UI SDK draws it. */}
+      {words ?? page}
     </LinkPrimitive>
   );
 };
@@ -542,7 +539,7 @@ const Step = ({ way, name }: { way: "previous" | "next"; name: string }) => {
   const { standing } = useWords();
   return (
     <>
-      <span aria-hidden="true" {...stylex.props(styles.target)} />
+      <span aria-hidden="true" {...stylex.props(tapTarget)} />
       {standing.loading && standing.went === way ? (
         <Turning />
       ) : (

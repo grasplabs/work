@@ -898,6 +898,7 @@ const levelStyles = stylex.create({
     insetBlock: 0,
     insetInlineStart: 0,
     borderRadius: "inherit",
+    cornerShape: "inherit",
     display: { default: "none", [FORCED]: "block" },
     backgroundColor: "Highlight",
   },

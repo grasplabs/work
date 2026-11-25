@@ -21,21 +21,31 @@ const PLAIN = [...GFM, { disable: { null: OFF.split(" ") } }];
 const FROM = [gfmFromMarkdown()];
 /** The names an answer defines, as the tree has them. */
 export interface Names {
-  links: readonly string[];
-  notes: readonly string[];
+  links: ReadonlySet<string>;
+  notes: ReadonlySet<string>;
 }
-const NO_NAMES: Names = { links: [], notes: [] };
+const NO_NAMES: Names = { links: new Set(), notes: new Set() };
+/** A name a read asked the answer about, and whether the answer defined it then. */
+type Asked = readonly [kind: keyof Names, name: string, defined: boolean];
 // micromark reads `[label]` as a reference, and `[^label]` as a note's mark, only once it has read
 // the definition in the same read: its parse context's `defined` (micromark's own) and
 // `gfmFootnotes` (the footnote extension's) say which. No option sets them, so a block read alone
 // is told the names the whole answer defines by a construct that runs first at each `[` or `!`
-// and widens both lists. scripts/markdown.test.tsx ("a block read alone knows the answer's
-// names") pins this.
+// and widens both lists; each name it is asked about is noted in `asked`, all its tree depends on.
+// scripts/markdown.test.tsx ("a block read alone knows the answer's names") pins this.
 const toldParsers = new WeakSet<object>();
 const knows =
-  (names: readonly string[], own: readonly string[]) => (id: string) =>
-    names.includes(id.toLowerCase()) || own.includes(id);
-const told = ({ links, notes }: Names) => {
+  (names: Names, kind: keyof Names, own: readonly string[], asked: Asked[]) =>
+  (id: string) => {
+    if (own.includes(id)) {
+      return true;
+    }
+    const name = id.toLowerCase();
+    const defined = names[kind].has(name);
+    asked.push([kind, name, defined]);
+    return defined;
+  };
+const told = (names: Names, asked: Asked[]) => {
   const construct = {
     add: "before" as const,
     tokenize<State>(
@@ -48,9 +58,14 @@ const told = ({ links, notes }: Names) => {
       if (!toldParsers.has(parser)) {
         toldParsers.add(parser);
         const own = parser.gfmFootnotes ?? [];
-        parser.defined.includes = knows(links, [...parser.defined]);
+        parser.defined.includes = knows(
+          names,
+          "links",
+          [...parser.defined],
+          asked
+        );
         parser.gfmFootnotes = Object.assign(own, {
-          includes: knows(notes, [...own]),
+          includes: knows(names, "notes", [...own], asked),
         });
       }
       return nok;
@@ -101,10 +116,14 @@ const bounded = (source: string) => {
   }
   return { text: out.join(""), many };
 };
-const read = (source: string, names = NO_NAMES): MarkdownRoot => {
+const read = (
+  source: string,
+  names = NO_NAMES,
+  asked: Asked[] = []
+): MarkdownRoot => {
   const { text, many } = bounded(source);
   try {
-    const extensions = [...(many ? PLAIN : GFM), told(names)];
+    const extensions = [...(many ? PLAIN : GFM), told(names, asked)];
     return fromMarkdown(text, { extensions, mdastExtensions: FROM });
   } catch {
     // Nesting deep enough to exhaust the stack (thousands of `>` on a line): its words.
@@ -239,10 +258,12 @@ export const openCode = (block: string) => {
   return [{ type: "code" as const, lang: lang === "" ? null : lang, value }];
 };
 
+// A tag is drawn as its words (`html`), so one still open is too: remend would hide all after it.
 const REPAIR = {
   singleTilde: false,
   comparisonOperators: false,
   katex: false,
+  htmlTags: false,
 } as const;
 /**
  * The block still being written made whole (remend: bold from its first letter, a half link one to
@@ -374,49 +395,85 @@ const lessRows = (block: string) => {
   };
 };
 
-// Blocks read once, while the same, up to 2 MB of their source in all: past that, the ones used
-// longest ago go first, but never one used in this pass (since the answer being drawn began its
-// reads, `nextPass`), so an answer that needs more keeps what it reads now.
-const cache = new Map<string, { nodes: Block[]; pass: number }>();
-let cached = 0;
-let pass = 0;
-/** Starts a pass: an answer is about to read its blocks. */
-export const nextPass = () => {
-  pass += 1;
+interface Entry {
+  nodes: Block[];
+  asked: readonly Asked[];
+}
+/**
+ * One Markdown's readings of its blocks, each kept while the block is the same and each name its
+ * read asked about is defined or not as it was: those its last render read (`kept`), and those
+ * the render under way has read (`read`). `settle` keeps only the latter, so a Markdown holds the
+ * readings of the text it draws, and lets them go with it.
+ */
+export interface Reads {
+  kept: Map<string, Entry>;
+  read: Map<string, Entry>;
+}
+export const newReads = (): Reads => ({ kept: new Map(), read: new Map() });
+/** A render is drawn: what it did not read goes. */
+export const settle = (reads: Reads) => {
+  reads.kept = reads.read;
+  reads.read = new Map();
 };
 
-/** A block's nodes, read once while it is the same; the block still being written is not kept. */
-export const readBlock = (block: string, reading: Reading = {}): Block[] => {
+/** A section's reads ask what its blocks' reads asked. */
+const tell = (into: Asked[], asked: readonly Asked[]) => {
+  for (const one of asked) {
+    into.push(one);
+  }
+};
+const readInto = (
+  block: string,
+  reading: Reading,
+  reads: Reads | undefined,
+  into: Asked[]
+): Block[] => {
   const { open = false, names = NO_NAMES, depth = 0 } = reading;
   // A section read inside others stops at 32 deep, so how deep it is read is part of the key.
-  const key = `${depth} ${JSON.stringify(names)}${block}`;
-  const known = open ? undefined : cache.get(key);
-  if (known !== undefined) {
-    // Used again: the newest.
-    cache.delete(key);
-    cache.set(key, { nodes: known.nodes, pass });
+  const key = `${depth} ${block}`;
+  const known = open
+    ? undefined
+    : (reads?.read.get(key) ?? reads?.kept.get(key));
+  if (
+    known !== undefined &&
+    known.asked.every(([kind, name, was]) => names[kind].has(name) === was)
+  ) {
+    reads?.read.set(key, known);
+    tell(into, known.asked);
     return known.nodes;
   }
+  const asked: Asked[] = [];
   const { text, more } = lessRows(open ? repair(block) : block);
   const nodes =
-    sectionOf(text, reading, readBlock) ?? read(text, names).children;
+    sectionOf(text, reading, (child, inner) =>
+      readInto(child, inner, reads, asked)
+    ) ?? read(text, names, asked).children;
   const [table] = nodes;
   if (more > 0 && table?.type === "table") {
     Object.assign(table, { more });
   }
+  tell(into, asked);
   if (!open) {
-    cache.set(key, { nodes, pass });
-    cached += key.length;
-    for (const [old, entry] of cache) {
-      if (cached <= 2_000_000 || entry.pass === pass) {
-        break;
-      }
-      cache.delete(old);
-      cached -= old.length;
-    }
+    reads?.read.set(key, { nodes, asked });
   }
   return nodes;
 };
+/**
+ * A block's nodes, read once into `reads` while it is the same and the names it asked about are as
+ * they were; the block still being written is not kept.
+ */
+export const readBlock = (
+  block: string,
+  reading: Reading = {},
+  reads?: Reads
+): Block[] => readInto(block, reading, reads, []);
+/**
+ * A block's nodes for the definitions it holds, which no name changes: as last read, whatever names
+ * that read was told, so finding the answer's names reads no block again.
+ */
+export const readDefinitions = (block: string, reads: Reads) =>
+  (reads.read.get(`0 ${block}`) ?? reads.kept.get(`0 ${block}`))?.nodes ??
+  readBlock(block, {}, reads);
 
 /**
  * An address as CommonMark writes it into a page: a character outside an address's own set is

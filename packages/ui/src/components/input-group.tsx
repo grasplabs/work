@@ -29,7 +29,12 @@ import type { ComponentProps, ReactNode, Ref } from "react";
 
 import { useRunsLong } from "../hooks/use-runs-long";
 import { Icon, XIcon } from "../lib/icons";
-import { focusField, focusRing, scrollbarHidden } from "../lib/styles";
+import {
+  focusField,
+  focusRing,
+  scrollbarHidden,
+  tapTarget,
+} from "../lib/styles";
 import {
   colors,
   duration,
@@ -53,7 +58,6 @@ export type InputGroupSize = "sm" | "default" | "lg";
 const SizeContext = createContext<InputGroupSize>("default");
 
 const HOVER = media.hover;
-const COARSE = media.pointerCoarse;
 const FORCED = media.forcedColors;
 const TYPING = media.maxSmOrCoarse;
 
@@ -75,6 +79,13 @@ const groupStyles = stylex.create({
       default: "row",
       ":has(> [data-align=block-start], > [data-align=block-end])": "column",
     },
+    // The parts meet edge to edge, side by side or stacked: a target stops at its own edge towards
+    // the next.
+    "--tap-room-inline": "0px",
+    "--tap-room-block": {
+      default: null,
+      ":has(> [data-align=block-start], > [data-align=block-end])": "0px",
+    },
     // A textarea, or an addon above or below: the group grows with what it holds.
     alignItems: {
       default: "center",
@@ -93,7 +104,6 @@ const groupStyles = stylex.create({
       },
     },
     borderColor: "currentColor",
-    cornerShape: radius.shape,
     backgroundColor: {
       default: colors.inputBg,
       ":has(:is(input, textarea):read-only:not(:disabled))": colors.inputBgRead,
@@ -139,33 +149,17 @@ const groupStyles = stylex.create({
   sm: {
     minHeight: sizes.controlSm,
     borderRadius: `min(${radius.xl}, calc(${sizes.controlSm} / 2))`,
+    cornerShape: radius.shape,
   },
   default: {
     minHeight: sizes.controlDefault,
     borderRadius: `min(${radius.xl}, calc(${sizes.controlDefault} / 2))`,
+    cornerShape: radius.shape,
   },
   lg: {
     minHeight: sizes.controlLg,
     borderRadius: `min(${radius.xl}, calc(${sizes.controlLg} / 2))`,
-  },
-  // A finger needs 44px: on a touch screen an unseen area makes up the difference, as Input's. A
-  // press on it reaches the input through UI SDK's group.
-  target: {
-    position: "absolute",
-    insetInline: 0,
-    insetBlock: 0,
-  },
-  targetSm: {
-    insetBlock: {
-      default: 0,
-      [COARSE]: `calc((${sizes.controlSm} - ${sizes.tapTarget}) / 2)`,
-    },
-  },
-  targetDefault: {
-    insetBlock: {
-      default: 0,
-      [COARSE]: `calc((${sizes.controlDefault} - ${sizes.tapTarget}) / 2)`,
-    },
+    cornerShape: radius.shape,
   },
 });
 
@@ -206,11 +200,9 @@ export const InputGroup = ({
     >
       <span
         aria-hidden="true"
-        {...stylex.props(
-          groupStyles.target,
-          size === "sm" && groupStyles.targetSm,
-          size === "default" && groupStyles.targetDefault
-        )}
+        // A finger needs 44px, as Input's (tapTarget). A press on it reaches the input through UI
+        // SDK's group.
+        {...stylex.props(tapTarget)}
       />
       {children}
     </GroupPrimitive>
@@ -701,13 +693,11 @@ const clearStyles = stylex.create({
   sm: { width: `calc(${sizes.controlSm} - 2 * ${space[1]})` },
   default: { width: `calc(${sizes.controlDefault} - 2 * ${space[1]})` },
   lg: { width: `calc(${sizes.controlLg} - 2 * ${space[1]})` },
-  // A finger needs 44px round it too; at rest the press covers the whole end square.
+  // With a pointer the press covers the whole end square; a finger's 44px round it is the shared
+  // target's (tapTarget).
   target: {
-    position: "absolute",
-    inset: {
-      default: `calc(-1 * ${space[1]})`,
-      [COARSE]: `calc((100% - ${sizes.tapTarget}) / 2)`,
-    },
+    "--tap-rest-inline": `calc(-1 * ${space[1]})`,
+    "--tap-rest-block": `calc(-1 * ${space[1]})`,
   },
 });
 
@@ -740,7 +730,10 @@ export const InputGroupClear = ({
         focusRing
       )}
     >
-      <span aria-hidden="true" {...stylex.props(clearStyles.target)} />
+      <span
+        aria-hidden="true"
+        {...stylex.props(tapTarget, clearStyles.target)}
+      />
       <Icon icon={XIcon} />
     </ClearPrimitive>
   );

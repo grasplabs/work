@@ -177,8 +177,8 @@
   --damsko-radius-xs: 2px;
   /* Marks under 24px tall: a key, inline code, the box of a checkbox. */
   --damsko-radius-sm: 6px;
-  /* The page's card beside an inset sidebar: a plain round corner, as the app's main surface was drawn. */
-  --damsko-radius-md: 12px;
+  /* The page's card beside an inset sidebar, the app's main surface: the squircle that reads like the original's round 12px, which is what a browser with no squircle draws. */
+  --damsko-radius-md: 22px;
   /* A row: a menu or list item, a tree row, a trigger that runs the width. The base less the 4px a container keeps round its rows, capped at half the row's height. */
   --damsko-radius-lg: calc(var(--damsko-radius) - 4px);
   /* Controls and containers: buttons, fields, cards, menus, panels. Capped at half the height. */
@@ -189,7 +189,7 @@
   --damsko-radius-full: 999px;
   /* A circle that follows its box, which full cannot: half of each side, so an avatar or a dot stays round as it grows, and a dot can turn into a square. */
   --damsko-radius-circle: 50%;
-  /* The shape of every corner on the scale, written as corner-shape after the radius, so the curve meets the edge without a seam. A pill and a circle leave it out. */
+  /* The shape of every corner, written as corner-shape after the radius, so the curve meets the edge without a seam. A pill and a circle leave it out; a corner taken from the parent takes its shape too (inherit). */
   --damsko-radius-shape: squircle;
   /* Elevation: edge and lifts. */
   /* The colour of every edge: night at 6%. A control reads by its fill and lift, not by a line. */
@@ -895,6 +895,8 @@
   --damsko-prompt-input-mention-width: 18rem;
   /* The least width of a one-row prompt input's text: with less room beside the tools, the text takes the row and the tools go under it. The text never gives. */
   --damsko-prompt-input-field-min: 8rem;
+  /* The voice's field in a one-row prompt input once words are heard: short, beside the words, so no word stands on the light. */
+  --damsko-prompt-input-voice-band: 96px;
   /* The least width of a one-row prompt input's placeholder at rest: with less room, its model chip's level folds to the maker's mark, then the chip folds away until something is typed. Only then is the placeholder cut. */
   --damsko-prompt-input-placeholder-min: 6rem;
   /* The working light over a prompt input's top edge: lime, sea and mint in beams with gaps between, ending as it starts so it loops without a seam. */
@@ -962,10 +964,10 @@
   --damsko-sidebar-row-gap: 2px;
   /* A row's padding at its sides. */
   --damsko-sidebar-row-inline: 8px;
-  /* A row's corner, and a group's label's: a plain round corner, as the original's frame drew its rows. Its own token, not the row corner: the frame's rows are tighter than a list's. */
-  --damsko-sidebar-row-radius: 6px;
-  /* A large row's corner (the person at the sidebar's foot): the page card's corner and the rows' inset less the gutter, so it nests in the sidebar's foot. */
-  --damsko-sidebar-row-radius-lg: 10px;
+  /* A row's corner, and a group's label's: the squircle that reads like the original frame's round 6px, which is what a browser with no squircle draws. Its own token, not the row corner: the frame's rows are tighter than a list's. */
+  --damsko-sidebar-row-radius: 11px;
+  /* A large row's corner (the person at the sidebar's foot), so it nests in the sidebar's foot: the squircle that reads like the original's round 10px, which is what a browser with no squircle draws. */
+  --damsko-sidebar-row-radius-lg: 18px;
   /* The room between a row's icon and its words. */
   --damsko-sidebar-icon-gap: 10px;
   /* A row's icon. */
@@ -1098,6 +1100,8 @@
   --damsko-tree-view-row-touch: var(--damsko-tap-target);
   /* How far each level of a tree stands in from the one above it. */
   --damsko-tree-view-indent: var(--damsko-space-4);
+  /* The corner of a tree guide's elbow, which is also its height: as round as a row's middle and the gap above it allow, so it stays in its row. A browser with no squircle draws a round 12px. */
+  --damsko-tree-view-guide-elbow: 17px;
   /* Room at each end of a tree's row, inside its fill. */
   --damsko-tree-view-row-padding: var(--damsko-space-2);
   /* The room between two rows of a tree. */
@@ -1285,5 +1289,9 @@
     --damsko-radius: 9px;
     --damsko-radius-sm: 4px;
     --damsko-radius-2xl: 11px;
+    --damsko-radius-md: 12px;
+    --damsko-sidebar-row-radius: 6px;
+    --damsko-sidebar-row-radius-lg: 10px;
+    --damsko-tree-view-guide-elbow: 12px;
   }
 }

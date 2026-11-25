@@ -185,6 +185,8 @@ const styles = stylex.create({
     gridRow: 1,
     alignItems: "center",
     gap: space["1"],
+    // Each control's touch target reaches the middle of the gap to the next (tapTarget).
+    "--tap-room-inline": `calc(${space["1"]} / 2)`,
     // The last icon ends on the output's end edge, as the line's mark starts on its start edge; the
     // button's fill under the pointer reaches past it by the button's own padding.
     marginInlineEnd: `calc((${size.iconSm} - ${size.controlSm}) / 2)`,
