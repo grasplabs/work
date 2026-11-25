@@ -4,7 +4,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
-import type { Kind } from "./document-pages.tsx";
+import type { Kind, Toss } from "./document-pages.tsx";
 import { colourOf, kindNames } from "./document-pages.tsx";
 import { pixelCursor } from "./pixel-cursor.stylex.ts";
 import {
@@ -28,7 +28,8 @@ import type { Point } from "./pixel-cursor.tsx";
 // window's edge to beside the drop zone, types a short ask in its label
 // ("Have an invoice we can look at?"), takes a little pixel page of that
 // kind, and tosses it in an arc into the zone, which catches it as it would
-// a real drop (document-pages.tsx fans its pages). Then it drifts away and
+// a real drop (document-pages.tsx lays that page on its side, where it
+// stays). Then it drifts away and
 // another comes from the other side. Only where there is room beside the
 // zone, so they never lie over the step's words; never in the way of a
 // press or a drop; not at all under reduced motion; and none while a
@@ -462,7 +463,10 @@ const visit = async (
     await glideOut;
     // Caught: the page is gone into the zone in a puff of pixels, and its pages take it.
     page.style.opacity = "0";
-    zone.dispatchEvent(new CustomEvent("documentcaught", { bubbles: true }));
+    const toss: Toss = { kind: ask.kind, side };
+    zone.dispatchEvent(
+      new CustomEvent("documentcaught", { bubbles: true, detail: toss })
+    );
     const now = zone.getBoundingClientRect();
     const colourOfKind = colourOf[ask.kind];
     for (const [index, bit] of [...bits.children].entries()) {

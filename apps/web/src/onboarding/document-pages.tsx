@@ -10,12 +10,12 @@ import { extensionOf } from "./document-files.ts";
 // welcome's cards draw their flags (flag-picture.tsx): a PDF, a Word
 // document, a sheet, a slide and a plain text, each in its own colour and
 // with its own kind of content, fanned out at the zone's two edges and
-// thinning out toward its words, so the words stand clear. Each kind shared
-// already lies on a small pile of its own, a sheet for each, up to three.
-// At rest the zone is clear: the pages come up, dithering in, only when
-// something is thrown in, files dragged over it or dropped, or a visitor's
-// toss (document-visitors.tsx); they fan open as if to take it, and fade
-// away again a moment after. Under reduced motion they never show.
+// thinning out toward its words, so the words stand clear.
+// Empty at first. Each thing thrown in, a file dropped or a visitor's toss
+// (document-visitors.tsx), leaves a page of its kind on the side it came
+// from, dithering in, and it stays: two a side at most, so a third on a side
+// takes the oldest one's place, which dithers away. The documents shared
+// before lie there from the start. Under reduced motion they just appear.
 
 const styles = stylex.create({
   // The zone and the pages over it, in one box.
@@ -201,7 +201,7 @@ const inkAt = (
   return writing[kind]({ x, y, h, left, width: right - left, line });
 };
 
-/** One page as it lies: its kind, size in cells, where its middle is in CSS pixels, and how it turns. */
+/** One page as it lies: its kind, size in cells, where its middle is in CSS pixels, how it turns, and how much it is there (0 to 1). */
 interface Page {
   kind: Kind;
   w: number;
@@ -209,23 +209,31 @@ interface Page {
   x: number;
   y: number;
   turn: number;
-  /** Sheets of its kind already shared, lying under it. */
-  pile: number;
-}
-
-/** How much the pages are awake: shown (there at all) and taking (files over it, or a toss landing). */
-interface Life {
   shown: number;
-  taking: number;
 }
 
-/** The pages at each edge, the outer one first, each a little turned. */
-const sides: { kind: Kind; side: -1 | 1; inner: boolean; turn: number }[] = [
-  { kind: "word", side: -1, inner: false, turn: -0.07 },
-  { kind: "pdf", side: -1, inner: true, turn: 0.05 },
-  { kind: "sheet", side: 1, inner: false, turn: 0.07 },
-  { kind: "slides", side: 1, inner: true, turn: -0.05 },
-];
+/** A side of the zone: -1 its start, 1 its end. */
+export type Side = -1 | 1;
+
+/** The most pages a side holds: a third thrown in takes the oldest's place. */
+const perSide = 2;
+
+/**
+ * A page thrown in, as it settles: its kind and side, its place on its side
+ * (0 the outer, 1 the inner, eased toward where it belongs), how much it is
+ * there, and whether it is on its way out.
+ */
+interface Placed {
+  kind: Kind;
+  side: Side;
+  slot: number;
+  shown: number;
+  leaving: boolean;
+}
+
+/** Each place's turn: the outer and the inner page of each side, a little askew. */
+const turnOf = (side: Side, slot: number): number =>
+  side < 0 ? -0.07 + slot * 0.12 : 0.07 - slot * 0.12;
 
 /** Where the zone's words are: how far they reach either way from its middle, in CSS pixels. */
 interface Words {
@@ -235,13 +243,13 @@ interface Words {
 }
 
 /**
- * Where each page lies in the zone, as awake as `life`: whole, in the room
- * beside the words, as tall as fits; none where there is no room.
+ * Where each page thrown in lies, as much as the zone is `taking` one: in
+ * the room beside the words, as tall as fits; none where there is no room.
  */
 const lay = (
   { width, height, clear }: Words,
-  life: Life,
-  piles: Record<Kind, number>
+  taking: number,
+  placed: readonly Placed[]
 ): Page[] => {
   const room = width / 2 - clear;
   const margin = Math.min(room * 0.2, 28);
@@ -256,28 +264,31 @@ const lay = (
     return [];
   }
   const wide = Math.round(tall * 0.76) * cell;
-  const spread = life.taking * 0.5;
-  // They rise into place as they show, and a little more as they take.
-  const lift = life.taking * 0.1 * height - (1 - life.shown) * cell * 4;
-  return sides
-    .filter(({ inner }) => both || !inner)
-    .map(({ kind, side, inner, turn }) => {
+  const spread = taking * 0.3;
+  const lift = taking * 0.06 * height;
+  // The outer pages first, so an inner one lies over its neighbour.
+  return placed
+    .filter(({ slot }) => both || slot < 0.5)
+    .toSorted((one, other) => one.slot - other.slot)
+    .map(({ kind, side, slot, shown }) => {
       const landscape = kind === "slides";
       const h = landscape ? Math.round(tall * 0.68) : tall;
       const w = landscape ? Math.round(h * 1.4) : Math.round(tall * 0.76);
       // The outer page a step in from the edge; the inner one overlapping it, toward the words.
-      const fromEdge =
-        Math.min(room * 0.2, 28) +
-        wide * 0.5 +
-        (inner ? wide * (0.55 + spread) : 0);
+      const fromEdge = margin + wide * 0.5 + slot * wide * (0.55 + spread);
       return {
         kind,
         w,
         h,
         x: side < 0 ? fromEdge : width - fromEdge,
-        y: height / 2 + (inner ? cell : -cell) - lift * (inner ? 1.4 : 1),
-        turn: turn * (1 + life.taking * 1.6),
-        pile: piles[kind],
+        // Each rises into its place as it comes.
+        y:
+          height / 2 +
+          (slot > 0.5 ? cell : -cell) -
+          lift +
+          (1 - shown) * cell * 4,
+        turn: turnOf(side, slot) * (1 + taking * 1.6),
+        shown,
       };
     });
 };
@@ -299,8 +310,7 @@ const minAlpha = 0.18;
 const draw = (
   context: CanvasRenderingContext2D,
   words: Words,
-  pages: Page[],
-  shown: number
+  pages: Page[]
 ) => {
   const { width, height } = words;
   const columns = Math.ceil(width / cell);
@@ -310,19 +320,19 @@ const draw = (
   for (let row = 0; row < rows; row += 1) {
     for (let column = 0; column < columns; column += 1) {
       const px = (column + 0.5) * cell;
-      // Dithered in and out as they show: cell by cell, never a fade.
-      const much = presence(px, words) * shown;
+      const much = presence(px, words);
       if (much <= 0) {
         continue;
       }
       const threshold =
         bayerAt(column + 1, row + 2) * 0.8 + chance(column, row, 3) * 0.2;
-      if (threshold >= much * 1.15) {
-        continue;
-      }
       const py = (row + 0.5) * cell;
       let fill: string | null = null;
       for (const page of front) {
+        // Each page dithers in and out on its own: cell by cell, never a fade.
+        if (threshold >= much * page.shown * 1.15) {
+          continue;
+        }
         const cos = Math.cos(page.turn);
         const sin = Math.sin(page.turn);
         const dx = px - page.x;
@@ -343,24 +353,6 @@ const draw = (
           }
           break;
         }
-        // Under a page, the sheets of its kind already shared, each a step down and out.
-        for (let sheet = 1; sheet <= page.pile; sheet += 1) {
-          const offset = sheet * 1.5;
-          const under = inkAt(
-            "text",
-            u - offset * (page.x < width / 2 ? -1 : 1),
-            v - offset,
-            page.w,
-            page.h
-          );
-          if (under !== null) {
-            fill = mix(colour, 0, 0.18 + sheet * 0.1);
-            break;
-          }
-        }
-        if (fill !== null) {
-          break;
-        }
       }
       if (fill === null) {
         continue;
@@ -376,9 +368,61 @@ const draw = (
   context.globalAlpha = 1;
 };
 
+/** Each one's place on its side, the oldest outermost; the ones on their way out keep theirs. */
+const slotsOf = (
+  placed: readonly Placed[],
+  side: Side
+): Map<Placed, number> => {
+  const staying = placed.filter((each) => each.side === side && !each.leaving);
+  return new Map(staying.map((each, index) => [each, index]));
+};
+
+/** Puts a page of `kind` on `side`, the oldest there leaving when the side is full. */
+const placeOn = (placed: Placed[], kind: Kind, side: Side) => {
+  const staying = placed.filter((each) => each.side === side && !each.leaving);
+  if (staying.length >= perSide) {
+    const [oldest] = staying;
+    if (oldest !== undefined) {
+      oldest.leaving = true;
+    }
+  }
+  const before = slotsOf(placed, side).size;
+  placed.push({ kind, side, slot: before, shown: 0, leaving: false });
+};
+
+/** Where the pages lie from the start: the documents already shared, the newest last, a side each in turn. */
+const seeded = (shared: readonly string[]): Placed[] => {
+  const placed: Placed[] = [];
+  for (const [index, name] of shared.entries()) {
+    placeOn(placed, kindOfName(name), index % 2 === 0 ? -1 : 1);
+    const gone = placed.findIndex((each) => each.leaving);
+    if (gone !== -1) {
+      placed.splice(gone, 1);
+    }
+  }
+  for (const side of [-1, 1] as const) {
+    for (const [each, slot] of slotsOf(placed, side)) {
+      each.slot = slot;
+      each.shown = 1;
+    }
+  }
+  return placed;
+};
+
+const isKind = (value: unknown): value is Kind =>
+  kindNames.some((kind) => kind === value);
+
+/** What a toss carries: the kind of page and the side it came from (document-visitors.tsx). */
+export interface Toss {
+  kind: Kind;
+  side: Side;
+}
+
 /**
- * The drop zone (`children`) with the pages over it. `shared` are the
- * names of the documents shared so far, for the piles under each kind.
+ * The drop zone (`children`) with the pages thrown into it over it.
+ * `shared` are the names of the documents shared before, for the pages it
+ * starts with. A `documentcaught` event on the zone, its detail a `Toss`,
+ * puts the page tossed on its side.
  */
 export const DocumentPages = ({
   shared,
@@ -389,14 +433,11 @@ export const DocumentPages = ({
 }) => {
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
-  const wanted = useRef<Life>({ shown: 0, taking: 0 });
+  // How much the zone is taking a page: files over it, or one just landed.
+  const wantedTaking = useRef(0);
+  const placed = useRef<Placed[] | null>(null);
   const wake = useRef<(() => void) | null>(null);
-  const piles = { pdf: 0, word: 0, sheet: 0, slides: 0, text: 0 };
-  for (const name of shared) {
-    const kind = kindOfName(name);
-    piles[kind] = Math.min(3, piles[kind] + 1);
-  }
-  const pileKey = Object.values(piles).join(",");
+  const first = useRef(shared);
   useEffect(() => {
     const element = canvas.current;
     const context = element?.getContext("2d");
@@ -405,12 +446,10 @@ export const DocumentPages = ({
         // Nothing drawn.
       };
     }
-    const [pdf = 0, word = 0, sheet = 0, slides = 0, text = 0] = pileKey
-      .split(",")
-      .map(Number);
-    const own = { pdf, word, sheet, slides, text };
+    const pages = placed.current ?? seeded(first.current);
+    placed.current = pages;
     const still = matchMedia("(prefers-reduced-motion: reduce)");
-    const life: Life = { ...wanted.current };
+    let taking = wantedTaking.current;
     let frame = 0;
     let last = 0;
     const paint = () => {
@@ -428,7 +467,7 @@ export const DocumentPages = ({
       const zone = box.current?.querySelector(
         "[data-slot=file-input-dropzone]"
       );
-      if (zone === null || zone === undefined) {
+      if (zone === null || zone === undefined || pages.length === 0) {
         return;
       }
       const at = element.getBoundingClientRect();
@@ -461,36 +500,56 @@ export const DocumentPages = ({
         height: area.height,
         clear: clear + cell * 4,
       };
-      if (life.shown > 0.004) {
-        draw(context, words, lay(words, life, own), life.shown);
-      }
+      draw(context, words, lay(words, taking, pages));
       context.restore();
+    };
+    /** Every page where it belongs at once, the ones leaving gone: under reduced motion, or once settled. */
+    const settle = () => {
+      taking = wantedTaking.current;
+      for (const side of [-1, 1] as const) {
+        for (const [each, slot] of slotsOf(pages, side)) {
+          each.slot = slot;
+          each.shown = 1;
+        }
+      }
+      const gone = pages.filter((each) => each.leaving);
+      for (const each of gone) {
+        pages.splice(pages.indexOf(each), 1);
+      }
     };
     const step = (now: number) => {
       const elapsed = Math.min(now - last, 64);
       last = now;
-      // Halfway there every 60 ms: settled well within 300.
+      // Halfway there every 60 ms: settled well within 300; a page comes and goes a little slower.
       const toward = 0.5 ** (elapsed / 60);
-      // Shown comes up at the same pace, and goes slower.
-      const showing = wanted.current.shown > life.shown;
-      life.shown =
-        wanted.current.shown +
-        (life.shown - wanted.current.shown) *
-          (showing ? toward : 0.5 ** (elapsed / 160));
-      life.taking =
-        wanted.current.taking + (life.taking - wanted.current.taking) * toward;
-      const settled =
-        Math.abs(life.shown - wanted.current.shown) < 0.004 &&
-        Math.abs(life.taking - wanted.current.taking) < 0.004;
+      const slower = 0.5 ** (elapsed / 110);
+      taking = wantedTaking.current + (taking - wantedTaking.current) * toward;
+      let settled = Math.abs(taking - wantedTaking.current) < 0.004;
+      for (const side of [-1, 1] as const) {
+        const slots = slotsOf(pages, side);
+        for (const each of pages.filter((one) => one.side === side)) {
+          const slot = slots.get(each) ?? each.slot;
+          const shown = each.leaving ? 0 : 1;
+          each.slot = slot + (each.slot - slot) * slower;
+          each.shown = shown + (each.shown - shown) * slower;
+          if (
+            Math.abs(each.slot - slot) > 0.004 ||
+            Math.abs(each.shown - shown) > 0.004
+          ) {
+            settled = false;
+          }
+        }
+      }
       if (settled) {
-        life.shown = wanted.current.shown;
-        life.taking = wanted.current.taking;
+        settle();
       }
       paint();
       frame = settled ? 0 : requestAnimationFrame(step);
     };
     wake.current = () => {
       if (still.matches) {
+        settle();
+        paint();
         return;
       }
       if (frame === 0) {
@@ -513,69 +572,84 @@ export const DocumentPages = ({
       cancelAnimationFrame(frame);
       wake.current = null;
     };
-  }, [pileKey]);
-  const want = (life: Partial<Life>) => {
-    wanted.current = { ...wanted.current, ...life };
-    wake.current?.();
-  };
-  // Something thrown in: a visitor's toss (document-visitors.tsx) or a real drop. The pages show and
-  // open to take it, settle, and a moment later go again.
-  const dragging = useRef(false);
-  const later = useRef({ settle: 0, hide: 0 });
-  const landed = (taking: number) => {
-    clearTimeout(later.current.settle);
-    clearTimeout(later.current.hide);
-    want({ shown: 1, taking });
-    later.current.settle = window.setTimeout(() => {
-      if (!dragging.current) {
-        want({ taking: 0 });
-      }
+  }, []);
+  // Something thrown in: a visitor's toss or a real drop. Its page comes up on its side, the zone
+  // opening a little to take it, and stays.
+  const later = useRef(0);
+  const landed = (tosses: readonly Toss[]) => {
+    const pages = placed.current;
+    if (pages === null) {
+      return;
+    }
+    for (const { kind, side } of tosses) {
+      placeOn(pages, kind, side);
+    }
+    wantedTaking.current = 0.7;
+    clearTimeout(later.current);
+    later.current = window.setTimeout(() => {
+      wantedTaking.current = 0;
+      wake.current?.();
     }, 320);
-    later.current.hide = window.setTimeout(() => {
-      if (!dragging.current) {
-        want({ shown: 0 });
-      }
-    }, 1500);
+    wake.current?.();
   };
   useEffect(() => {
     const element = box.current;
-    const timers = later.current;
     if (element === null) {
       return () => {
         // Nothing to catch with.
       };
     }
-    const caught = () => {
-      if (!dragging.current) {
-        landed(0.7);
+    const caught = (event: Event) => {
+      const toss: unknown = event instanceof CustomEvent ? event.detail : null;
+      if (
+        typeof toss === "object" &&
+        toss !== null &&
+        "kind" in toss &&
+        "side" in toss &&
+        isKind(toss.kind) &&
+        (toss.side === -1 || toss.side === 1)
+      ) {
+        landed([{ kind: toss.kind, side: toss.side }]);
       }
     };
     element.addEventListener("documentcaught", caught);
     return () => {
-      clearTimeout(timers.settle);
-      clearTimeout(timers.hide);
       element.removeEventListener("documentcaught", caught);
     };
   });
+  useEffect(
+    () => () => {
+      clearTimeout(later.current);
+    },
+    []
+  );
   return (
     <div
       onDragEnter={() => {
-        dragging.current = true;
-        clearTimeout(later.current.hide);
-        want({ shown: 1, taking: 1 });
+        wantedTaking.current = 1;
+        wake.current?.();
       }}
       onDragLeave={(event) => {
         const into = event.relatedTarget;
         const inside =
           into instanceof Node && box.current?.contains(into) === true;
         if (!inside) {
-          dragging.current = false;
-          want({ shown: 0, taking: 0 });
+          wantedTaking.current = 0;
+          wake.current?.();
         }
       }}
-      onDrop={() => {
-        dragging.current = false;
-        landed(0.6);
+      onDrop={(event) => {
+        // Each file dropped lies on the side it was dropped on, as its kind.
+        const middle =
+          (box.current?.getBoundingClientRect().left ?? 0) +
+          (box.current?.getBoundingClientRect().width ?? 0) / 2;
+        const side: Side = event.clientX < middle ? -1 : 1;
+        landed(
+          Array.from(event.dataTransfer.files, (file) => ({
+            kind: kindOfName(file.name),
+            side,
+          }))
+        );
       }}
       ref={box}
       {...stylex.props(styles.box)}
