@@ -225,9 +225,9 @@ const ownGmail = async (person: Admin) => {
 };
 
 /**
- * A chat of `personId`'s whose code sends one mail from `mailbox`, through
- * `MAIL`, which the admin granted its agent, then says what the call
- * answered, or why it was refused.
+ * A chat of `personId`'s whose code sends one mail from the Gmail mailbox
+ * `mailbox`, through `MAIL`, which the admin granted its agent, then says
+ * what the call answered, or why it was refused.
  */
 const chatSending = async (
   admin: Admin,
@@ -236,7 +236,7 @@ const chatSending = async (
   connectionId: string
 ) => {
   const mail = {
-    mailbox,
+    userId: mailbox,
     to: ["ben@acme.test"],
     subject: `Invoice ${crypto.randomUUID()}`,
     body: "Attached.",
@@ -244,14 +244,14 @@ const chatSending = async (
   const chat = await chatOf(
     personId,
     codeStep(
-      `export default async (self, env) => { try { const { pending } = await env.connections.call("MAIL", "mail.send", ${JSON.stringify(mail)}); return pending === null ? "sent" : "held"; } catch (error) { return error.message; } };`
+      `export default async (self, env) => { try { const { pending } = await env.connections.call("MAIL", "gmail.users.messages.send.create", ${JSON.stringify(mail)}); return pending === null ? "sent" : "held"; } catch (error) { return error.message; } };`
     ),
     says("Done.")
   );
   await requestGranted(idp, admin, {
     subject: chat.agent,
     object: { type: "connection", connectionId },
-    actions: ["mail.send"],
+    actions: ["gmail.users.messages.send.create"],
     binding: "MAIL",
   });
   await chat.ask("Send Ben the invoice.");
@@ -270,8 +270,9 @@ const onByDefault = new Set(
 // may call before any admin chooses: reading and changing what is the
 // person's own, and nothing that reaches anyone else. A tool moving into
 // one of these classes, by what its manifest says it reaches, needs a
-// review here: for some, such as Google's mail.send (a token that may
-// change mail may send it too), the class is the only guard.
+// review here: for some, such as Google's
+// gmail.users.messages.send.create (a token that may change mail may send
+// it too), the class is the only guard.
 describe("the native tools on by default", () => {
   it("are exactly the reviewed ones, each checked as a class on for everyone until an admin changes it", () => {
     const tools = Object.entries(nativeToolClasses).flatMap(
@@ -289,14 +290,14 @@ describe("the native tools on by default", () => {
     }).toStrictEqual({
       classes: ["change-own", "read-own"],
       tools: [
-        "google calendar.create",
-        "google files.createDraft",
-        "google mail.createDraft",
-        "google mail.get",
-        "google mail.label",
-        "google mail.labels",
-        "google mail.list",
-        "google mail.readAttachment",
+        "google calendar.calendars.events.create",
+        "google gmail.users.drafts.create",
+        "google gmail.users.labels.list",
+        "google gmail.users.messages.attachments.get",
+        "google gmail.users.messages.get",
+        "google gmail.users.messages.list",
+        "google gmail.users.messages.modify.create",
+        "google upload.drive.files.create",
         "microsoft calendar.create",
         "microsoft calendar.freeTime",
         "microsoft calendar.update",
@@ -363,7 +364,9 @@ describe("the classes a company turned on", setUpTime, () => {
     );
     const calls = await connectCalls(id);
     expect(
-      calls.filter(({ detail }) => detail.action === "mail.send")
+      calls.filter(
+        ({ detail }) => detail.action === "gmail.users.messages.send.create"
+      )
     ).toStrictEqual([]);
   });
 

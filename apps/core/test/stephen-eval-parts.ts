@@ -117,10 +117,10 @@ const plantedReads: Record<StephenSuite, Readonly<Record<string, string>>> = {
     J5: crmTools.read,
   },
   google: {
-    J1: "mail.list",
-    J2: "sheets.read",
-    J3: "files.read",
-    J4: "calendar.get",
+    J1: "gmail.users.messages.list",
+    J2: "spreadsheets.get",
+    J3: "drive.files.get",
+    J4: "calendar.calendars.events.get",
     J5: crmTools.read,
   },
 };

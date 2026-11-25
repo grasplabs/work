@@ -648,14 +648,19 @@ describe(
           runId: crypto.randomUUID(),
         },
         captureConnection,
-        "mail.get",
-        { mailbox: `${holder}@acme.test`, message: capturedItem },
+        "gmail.users.messages.get",
+        { userId: `${holder}@acme.test`, id: capturedItem },
         {
           result: {
             output: JSON.stringify({
-              message: {
-                id: capturedItem,
-                subject: `Supplier quote ${sharedWord} ${captureMarker}`,
+              id: capturedItem,
+              payload: {
+                headers: [
+                  {
+                    name: "Subject",
+                    value: `Supplier quote ${sharedWord} ${captureMarker}`,
+                  },
+                ],
               },
             }),
             provenance: [capturedItem],
@@ -669,7 +674,7 @@ describe(
         id: await captureIdOf(
           captureConnection,
           holder,
-          "mail.get",
+          "gmail.users.messages.get",
           capturedItem
         ),
       };

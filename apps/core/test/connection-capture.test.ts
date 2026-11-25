@@ -216,6 +216,19 @@ const gmailMessage = (
   };
 };
 
+/** Gmail's answer to gmail.users.messages.get, as connect hands it on. */
+const gmailRead = (id: string, subject: string): string =>
+  JSON.stringify({
+    id,
+    threadId: id,
+    payload: {
+      mimeType: "text/plain",
+      headers: [{ name: "Subject", value: subject }],
+    },
+    body: { contentType: "text", content: subject },
+    attachments: [],
+  });
+
 /** A toolkit's answer naming the messages it read. */
 const messagesRead = (messages: { id: string; subject: string }[]) => ({
   content: [{ type: "text", text: JSON.stringify({ messages }) }],
@@ -302,15 +315,26 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     });
     const chat = await chatOf(
       person.userId,
-      step(calling("MAIL", "mail.get", { mailbox, message: quote })),
+      step(
+        calling("MAIL", "gmail.users.messages.get", {
+          userId: mailbox,
+          id: quote,
+        })
+      ),
       says("Read it."),
       // A search with exactly one hit: still a list, never kept.
       step(
-        calling("MAIL", "mail.list", { mailbox, search: `order-${marker}` })
+        calling("MAIL", "gmail.users.messages.list", {
+          userId: mailbox,
+          q: `order-${marker}`,
+        })
       ),
       says("Listed it.")
     );
-    await grant(chat, connectionId, "MAIL", ["mail.get", "mail.list"]);
+    await grant(chat, connectionId, "MAIL", [
+      "gmail.users.messages.get",
+      "gmail.users.messages.list",
+    ]);
 
     await chat.ask("Read the quote.");
     await chat.ask("List the order.");
@@ -350,7 +374,10 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     const [marker, inBody] = [markerOf(), markerOf()];
     const { connectionId, mailbox } = await ownGmail(person);
     const id = `quote-${marker}`;
-    const read = calling("MAIL", "mail.get", { mailbox, message: id });
+    const read = calling("MAIL", "gmail.users.messages.get", {
+      userId: mailbox,
+      id,
+    });
     const chat = await chatOf(
       person.userId,
       step(read),
@@ -358,7 +385,7 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
       step(read),
       says("Read it again.")
     );
-    await grant(chat, connectionId, "MAIL", ["mail.get"]);
+    await grant(chat, connectionId, "MAIL", ["gmail.users.messages.get"]);
 
     await worldHolds(stephenGoogleUrl, {
       mailbox,
@@ -390,7 +417,7 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     const { connectionId, mailbox } = await ownGmail(person);
     const id = `quote-${marker}`;
     const read = {
-      output: JSON.stringify({ message: { id, subject: `Quote ${marker}` } }),
+      output: gmailRead(id, `Quote ${marker}`),
       provenance: [id],
       keep: true as const,
     };
@@ -405,12 +432,17 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
           runId: crypto.randomUUID(),
         },
         connectionId,
-        "mail.get",
-        { mailbox, message: id },
+        "gmail.users.messages.get",
+        { userId: mailbox, id },
         { result: read, readAt }
       );
     };
-    const key = await captureIdOf(connectionId, person.userId, "mail.get", id);
+    const key = await captureIdOf(
+      connectionId,
+      person.userId,
+      "gmail.users.messages.get",
+      id
+    );
     /** The source as the person's Sources page lists it. */
     const listed = async () => {
       const { sources } = await person.api.brainSources.list();
@@ -590,10 +622,12 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     });
     const chat = await chatOf(
       person.userId,
-      step(calling("MAIL", "mail.get", { mailbox, message: id })),
+      step(
+        calling("MAIL", "gmail.users.messages.get", { userId: mailbox, id })
+      ),
       says("Read it.")
     );
-    await grant(chat, connectionId, "MAIL", ["mail.get"]);
+    await grant(chat, connectionId, "MAIL", ["gmail.users.messages.get"]);
 
     await chat.ask("Read it.");
     await captures(connectionId);
@@ -655,25 +689,42 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     await eraseSource(env, {
       source: {
         producer: "capture",
-        id: await captureIdOf(gmail, person.userId, "mail.get", erased),
+        id: await captureIdOf(
+          gmail,
+          person.userId,
+          "gmail.users.messages.get",
+          erased
+        ),
       },
       readers: { kind: "owner", personId: person.userId },
       reason: "deleted",
     });
-    const attachment = { mailbox, message: withFile, attachment: "1" };
+    const attachment = { userId: mailbox, messageId: withFile, partId: "1" };
     const calls = [
-      calling("MAIL", "mail.get", { mailbox, message: large }),
-      calling("MAIL", "mail.get", { mailbox, message: erased }),
+      calling("MAIL", "gmail.users.messages.get", {
+        userId: mailbox,
+        id: large,
+      }),
+      calling("MAIL", "gmail.users.messages.get", {
+        userId: mailbox,
+        id: erased,
+      }),
       // As base64, the default: a file's bytes.
-      calling("MAIL", "mail.readAttachment", attachment),
-      calling("MAIL", "mail.readAttachment", { ...attachment, as: "text" }),
+      calling("MAIL", "gmail.users.messages.attachments.get", attachment),
+      calling("MAIL", "gmail.users.messages.attachments.get", {
+        ...attachment,
+        as: "text",
+      }),
       calling("OUTLOOK", "todo.lists", { mailbox: outlookBox }),
     ];
     const chat = await chatOf(
       person.userId,
       ...calls.flatMap((call) => [step(call), says("Done.")])
     );
-    await grant(chat, gmail, "MAIL", ["mail.get", "mail.readAttachment"]);
+    await grant(chat, gmail, "MAIL", [
+      "gmail.users.messages.get",
+      "gmail.users.messages.attachments.get",
+    ]);
     await grant(chat, outlook, "OUTLOOK", ["todo.lists"]);
 
     for (const [index] of calls.entries()) {
@@ -764,7 +815,7 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
     // Two reads of one message, as connect answered them, a second apart.
     const readOf = (subject: string, at: number) => ({
       result: {
-        output: JSON.stringify({ message: { id, subject } }),
+        output: gmailRead(id, subject),
         provenance: [id],
         keep: true as const,
       },
@@ -776,8 +827,8 @@ describe("what a chat's agent reads through a connection", setUpTime, () => {
         env,
         scope,
         connectionId,
-        "mail.get",
-        { mailbox, message: id },
+        "gmail.users.messages.get",
+        { userId: mailbox, id },
         read
       );
     };
@@ -857,9 +908,10 @@ const scopeOf = (personId: string) => ({
 });
 
 /**
- * Captures the message `id` (`subject`) read with `mail.get` through
- * `connectionId` for `personId`, as connect answered it, through `withEnv`:
- * the key of the source it is kept as, if it is.
+ * Captures the message `id` (`subject`) read with
+ * `gmail.users.messages.get` through `connectionId` for `personId`, as
+ * connect answered it, through `withEnv`: the key of the source it is kept
+ * as, if it is.
  */
 const capturedRead = async (
   personId: string,
@@ -873,18 +925,18 @@ const capturedRead = async (
     withEnv,
     scopeOf(personId),
     connectionId,
-    "mail.get",
-    { mailbox, message: id },
+    "gmail.users.messages.get",
+    { userId: mailbox, id },
     {
       result: {
-        output: JSON.stringify({ message: { id, subject } }),
+        output: gmailRead(id, subject),
         provenance: [id],
         keep: true,
       },
       readAt: new Date(),
     }
   );
-  return `capture:${await captureIdOf(connectionId, personId, "mail.get", id)}`;
+  return `capture:${await captureIdOf(connectionId, personId, "gmail.users.messages.get", id)}`;
 };
 
 /** The keys of the sources `personId`'s own chat recalls for `question`. */

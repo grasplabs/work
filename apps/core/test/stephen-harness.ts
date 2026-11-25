@@ -137,19 +137,19 @@ export const registerActions = [
  * no labels.
  */
 export const googleActions = [
-  "calendar.list",
-  "calendar.get",
-  "calendar.create",
-  "mail.list",
-  "mail.get",
-  "mail.createDraft",
+  "calendar.calendars.events.list",
+  "calendar.calendars.events.get",
+  "calendar.calendars.events.create",
+  "gmail.users.messages.list",
+  "gmail.users.messages.get",
+  "gmail.users.drafts.create",
 ];
 
 /** What her agent may do in her team's shared drive: read it. */
-export const teamDriveActions = ["files.list", "files.search", "files.read"];
+export const teamDriveActions = ["drive.files.list", "drive.files.get"];
 
 /** What her agent may do in the register's drive on Google: read its sheets. */
-export const googleRegisterActions = ["sheets.read"];
+export const googleRegisterActions = ["spreadsheets.get"];
 
 export interface StephenCompany {
   /** The suite Noordkade runs on. */

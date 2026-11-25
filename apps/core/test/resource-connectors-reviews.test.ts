@@ -6,6 +6,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { permissions as permissionRows } from "../src/db/core/schema.ts";
 import { confirmPendingAction } from "../src/pending-actions.ts";
 import { reviewResourceBindings } from "../src/resource-bindings.ts";
+import { withFiles } from "./app-definitions.ts";
 import { commitApp } from "./apps.ts";
 import { mockIdpWith } from "./idp.ts";
 import {
@@ -13,11 +14,13 @@ import {
   askCountingEnv,
   call,
   choicesOf,
+  connectionTo,
   failure,
   heldSend,
   idp,
   mailFiles,
   mailerApp,
+  mailerDefinition,
   outcomeOf,
   sentCount,
   servingEnv,
@@ -39,6 +42,37 @@ mockIdpWith(idp);
 
 const refusal = async ({ admin, approval }: Mailer) =>
   await failure(async () => await admin.api.resourceBindings.approve(approval));
+
+/** The Mailer listing a mailbox's messages through Gmail instead. */
+const gmailFiles = () =>
+  withFiles(
+    mailerDefinition([
+      connectionTo(
+        "mail",
+        "google-workspace.gmail.users.messages@1",
+        `["list"]`
+      ),
+    ]),
+    {
+      "server/mail.ts": `import { v } from "@grasp-os/sdk";
+import { action } from "@server/_generated/server";
+import { permissions } from "../grasp.config.ts";
+
+export const mail = permissions.mail;
+
+export const inbox = action({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    const listed = await ctx.connections.mail.list({ userId: "team@acme.test" });
+    return typeof listed === "object" && listed !== null && !Array.isArray(listed) && Array.isArray(listed.items)
+      ? listed.items.length
+      : -1;
+  },
+});
+`,
+    }
+  );
 
 describe("connector resource bindings", { timeout: 120_000 }, () => {
   it("refuse to confirm a held side effect once a version widened its declaration", async () => {
@@ -189,10 +223,7 @@ describe("connector resource bindings", { timeout: 120_000 }, () => {
 
   it("bind only a contract the connection serves, for tools it allows", async () => {
     const narrow = await mailerApp({ tools: ["mail.list"], bind: false });
-    const google = await mailerApp({
-      contract: "google-workspace.mail@1",
-      bind: false,
-    });
+    const google = await mailerApp({ files: gmailFiles(), bind: false });
     expect({
       // The permission doesn't allow `mail.send`.
       narrow: await refusal(narrow),

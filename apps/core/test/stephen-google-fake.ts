@@ -264,6 +264,8 @@ export const stephenGoogleFake = () => {
     }
     const last = Number(parsed?.last ?? sheet.rows.length);
     return Response.json({
+      spreadsheetId: id,
+      properties: { title: spreadsheet.name },
       sheets: [
         {
           properties: properties(sheet.title, index),

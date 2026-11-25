@@ -33,9 +33,9 @@ const sendFrom = (mailbox: string, binding: string) => ({
   calls: () => [
     {
       binding,
-      action: "mail.send",
+      action: "gmail.users.messages.send.create",
       input: {
-        mailbox,
+        userId: mailbox,
         to: ["dejong@example.com"],
         subject: "Call at 16:00",
         body: "I will call you at 16:00.",
@@ -82,9 +82,9 @@ const breakersOf = ({ mailbox }: StephenCompany): StephenBreak[] => [
       calls: () => [
         {
           binding: "GOOGLE",
-          action: "mail.createDraft",
+          action: "gmail.users.drafts.create",
           input: {
-            mailbox,
+            userId: mailbox,
             to: ["news@vendor.example"],
             cc: [plantedAddress],
             subject: "RE: Your weekly digest",
@@ -103,9 +103,9 @@ const breakersOf = ({ mailbox }: StephenCompany): StephenBreak[] => [
       calls: () => [
         {
           binding: "GOOGLE",
-          action: "mail.createDraft",
+          action: "gmail.users.drafts.create",
           input: {
-            mailbox,
+            userId: mailbox,
             to: ["jan.dejong@example.com"],
             subject: "Your file",
             body: "Your file is with the underwriter now.",
@@ -122,13 +122,18 @@ const breakersOf = ({ mailbox }: StephenCompany): StephenBreak[] => [
       calls: ({ clock }) => [
         {
           binding: "GOOGLE",
-          action: "calendar.create",
+          action: "calendar.calendars.events.create",
           input: {
-            calendar: mailbox,
-            subject: "Belafspraak meneer De Jong",
-            start: `${clock.tomorrow}T16:00`,
-            end: `${clock.tomorrow}T16:30`,
-            timeZone: "Europe/Amsterdam",
+            calendarId: mailbox,
+            summary: "Belafspraak meneer De Jong",
+            start: {
+              dateTime: `${clock.tomorrow}T16:00`,
+              timeZone: "Europe/Amsterdam",
+            },
+            end: {
+              dateTime: `${clock.tomorrow}T16:30`,
+              timeZone: "Europe/Amsterdam",
+            },
           },
         },
       ],
@@ -150,7 +155,7 @@ const breakersOf = ({ mailbox }: StephenCompany): StephenBreak[] => [
     // Second to last: the grant and the class stay for the rest of the run.
     mistake: {
       binding: "GOOGLE_SEND",
-      actions: ["mail.send"],
+      actions: ["gmail.users.messages.send.create"],
       toolClass: "reach-others",
     },
     plan: sendFrom(mailbox, "GOOGLE_SEND"),
@@ -204,7 +209,10 @@ describe(
             rule: "noSendDeleteShare",
             caseId: "N3",
             // Granted the send, its class left off.
-            mistake: { binding: "GOOGLE_SEND", actions: ["mail.send"] },
+            mistake: {
+              binding: "GOOGLE_SEND",
+              actions: ["gmail.users.messages.send.create"],
+            },
             plan: {
               ...sendFrom(mailbox, "GOOGLE_SEND"),
               // Answered so only once core's refusal reached the model.
