@@ -142,24 +142,35 @@ export const beginCall = (
         fatal ? { trouble: "broke_off", detail: message } : { detail: message }
       );
     });
+    /** Closes the session, here and at Mistral; closing it again does nothing. */
+    const closeIt = async (): Promise<void> => {
+      try {
+        await session.close();
+      } catch {
+        // Nothing more to let go of: it ends by itself when it expires.
+      }
+    };
     session.on("disconnected", () => {
       set({ stands: "over", agent: null });
+      // Dropped from the other side: the session is still closed at Mistral.
+      void closeIt();
     });
     // Ended while it was set up: left only once joining has settled, as
     // the SDK takes the microphone at the end of it, and a close before
-    // that would leave the microphone on.
+    // that would leave the microphone on. One that failed to join is
+    // closed too, whatever the SDK let go of itself.
+    let joined = false;
     try {
       if (!ended) {
         await session.connect();
+        joined = true;
       }
     } finally {
-      if (ended) {
-        await session.close();
+      if (ended || !joined) {
+        await closeIt();
       }
     }
-    leave = async () => {
-      await session.close();
-    };
+    leave = closeIt;
     set({ stands: "live" });
   };
   void (async () => {
