@@ -34,7 +34,11 @@ import { auditedBatch, outboxedIfChanged } from "./audit-outbox.ts";
 import { identify } from "./auth/identity.ts";
 import { appVersions } from "./db/core/schema.ts";
 import { errorResponse } from "./errors.ts";
-import { imageEnded, imageHeaderOf } from "./files/image-header.ts";
+import {
+  imageAnimated,
+  imageEnded,
+  imageHeaderOf,
+} from "./files/image-header.ts";
 import { routeMember } from "./staff-audit.ts";
 
 // A picture of each published App version, for the Apps overview's cards
@@ -88,7 +92,7 @@ import { routeMember } from "./staff-audit.ts";
 const isPictureType = (type: string): type is AppPictureType =>
   appPictureTypes.some((allowed) => allowed === type);
 
-/** `image`, checked: a whole PNG, JPEG or WebP within the limits, and its type. */
+/** `image`, checked: a whole, still PNG, JPEG or WebP within the limits, and its type. */
 const checkedPicture = (
   image: unknown
 ): { bytes: Uint8Array; type: AppPictureType } => {
@@ -103,7 +107,8 @@ const checkedPicture = (
     header.height < 1 ||
     header.width > appPictureMaxPixels ||
     header.height > appPictureMaxPixels ||
-    !imageEnded(image, header.type)
+    !imageEnded(image, header.type) ||
+    imageAnimated(image, header.type)
   ) {
     throw appErrors.create("app.picture_invalid");
   }

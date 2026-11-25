@@ -92,13 +92,44 @@ const png = ({ width = 64, height = 64, size = 88 } = {}): Uint8Array => {
   return bytes;
 };
 
-/**
- * A JPEG's start of image, a baseline frame header of three components,
- * 3 by 2 pixels, and its end of image: what core reads of one.
- */
-const jpeg = new Uint8Array([
-  0xff, 0xd8, 0xff, 0xc0, 0, 17, 8, 0, 2, 0, 3, 3, 1, 0x11, 0, 2, 0x11, 1, 3,
-  0x11, 1, 0xff, 0xd9,
+/** A real JPEG, 3 by 2 pixels, from Pillow. */
+const jpeg = fromBase64(
+  "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDABALDA4MChAODQ4SERATGCgaGBYWGDEjJR0oOjM9PDkzODdASFxOQERXRTc4UG1RV19iZ2hnPk1xeXBkeFxlZ2P/2wBDARESEhgVGC8aGi9jQjhCY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2P/wAARCAACAAMDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDHooorhPqD/9k="
+);
+
+/** `realPng` as an animated PNG: an acTL chunk (one frame) after its IHDR. */
+const animatedPng = new Uint8Array([
+  ...realPng.subarray(0, 33),
+  ...be32(8),
+  ...utf8("acTL"),
+  ...be32(1),
+  ...be32(0),
+  ...be32(0),
+  ...realPng.subarray(33),
+]);
+
+/** An extended WebP, 2 by 2 pixels, whose VP8X chunk sets the animation flag. */
+const animatedWebp = new Uint8Array([
+  ...utf8("RIFF"),
+  22,
+  0,
+  0,
+  0,
+  ...utf8("WEBPVP8X"),
+  10,
+  0,
+  0,
+  0,
+  0x02,
+  0,
+  0,
+  0,
+  1,
+  0,
+  0,
+  1,
+  0,
+  0,
 ]);
 
 /** A GIF's header and logical screen, 2 by 1 pixels. */
@@ -253,6 +284,9 @@ describe("an App version's picture", slow, () => {
       noPixels: await set(owner.api, 1, png({ height: 0 })),
       // Its header, then an upload cut short.
       cutShort: await set(owner.api, 1, realPng.subarray(0, 40)),
+      // A card's picture stands still.
+      animatedPng: await set(owner.api, 1, animatedPng),
+      animatedWebp: await set(owner.api, 1, animatedWebp),
       // Nothing refused was kept.
       overview: await overviewPicture(owner, app),
       read: await served(appPicturePath(app, 1), owner.session),
@@ -281,6 +315,8 @@ describe("an App version's picture", slow, () => {
       tooWide: "app.picture_invalid",
       noPixels: "app.picture_invalid",
       cutShort: "app.picture_invalid",
+      animatedPng: "app.picture_invalid",
+      animatedWebp: "app.picture_invalid",
       overview: null,
       read: guardedAnswer(404),
       jpeg: "ok",
