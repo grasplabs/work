@@ -7,7 +7,7 @@
 import { schemaFromDescriptor } from "../src/app/descriptor-text.ts";
 import { validateValue } from "../src/common/value-interpreter.ts";
 import { ValueDefinitionError, v } from "../src/common/values.ts";
-import type { ValueSchema } from "../src/common/values.ts";
+import type { JsonValue, ValueSchema } from "../src/common/values.ts";
 
 type AnySchema = ValueSchema<unknown, unknown>;
 
@@ -40,6 +40,15 @@ const stored = (schema: AnySchema): unknown => {
 };
 
 const base = { descriptorVersion: 1, nullable: false, presence: "required" };
+
+/** A number inside arrays, `levels` deep, the number included. */
+const nest = (levels: number): JsonValue => {
+  let value: JsonValue = 1;
+  for (let level = 1; level < levels; level += 1) {
+    value = [value];
+  }
+  return value;
+};
 
 /**
  * Cron expressions `v.schedule()` accepts. Each must also be one the parser
@@ -1800,6 +1809,20 @@ add(
     { issues: [["value.too_complex"]] },
     { value: { data: [[["fine"]]] } },
   ]
+);
+add(
+  "a JSON default counts its own depth, so a schema around it never fills in a value too deep to check",
+  () => {
+    const fits = v.object({ payload: v.json().default(nest(31)) });
+    const filled = fits["~standard"].validate({});
+    return [
+      declare(() => v.json().default(nest(32))),
+      declare(() => v.object({ payload: v.json().default(nest(32)) })),
+      "value" in filled &&
+        fits["~standard"].validate(filled.value).issues === undefined,
+    ];
+  },
+  ["declared", "definition.too_large", true]
 );
 add(
   "an answer read with unknownFields drop loses the fields its schema doesn't name, at any depth",

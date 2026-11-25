@@ -82,6 +82,17 @@ const collapsedUnion = (
       };
 };
 
+/** How many levels `value` nests, its leaf included. */
+const jsonDepth = (value: FrozenJson): number => {
+  let deepest = 1;
+  if (typeof value === "object" && value !== null) {
+    for (const entry of Object.values(value)) {
+      deepest = Math.max(deepest, 1 + jsonDepth(entry));
+    }
+  }
+  return deepest;
+};
+
 const presences: ReadonlySet<unknown> = new Set<Presence>([
   "required",
   "optional",
@@ -171,6 +182,19 @@ export const seal = (draft: DescriptorDraft): ValueDescriptor => {
           ...body.kind,
         })
       : candidate;
-  sealed.set(descriptor, { depth, descriptor, weight });
+  // A default nests as deep as any JSON in it goes, which its kinds don't
+  // bound: counted, so a schema that nests this one can't fill in a value
+  // too deep for its own check.
+  const reach =
+    descriptor.defaultValue === undefined
+      ? depth
+      : Math.max(depth, jsonDepth(descriptor.defaultValue));
+  if (reach > valueLimits.depth) {
+    refuse(
+      "definition.too_large",
+      "The schema nests too deep or declares too much."
+    );
+  }
+  sealed.set(descriptor, { depth: reach, descriptor, weight });
   return descriptor;
 };
