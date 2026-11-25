@@ -86,6 +86,21 @@ const askToSignIn = async (
  */
 const devAlias = "dev";
 
+/**
+ * The secret the alias last led to, in this tab: if even that one is
+ * refused, the page says why instead of going round again.
+ */
+let devGiven: string | null = null;
+
+/**
+ * On a local stack, whether a refusal of `secret` goes to the alias
+ * instead: a link from before the onboarding started over, one made up,
+ * none at all, or one paused, closed or not yet open, all open the
+ * interview that works now. Never the alias's own, nor in a build.
+ */
+const fallsBackToDev = (secret: string): boolean =>
+  import.meta.env.DEV && secret !== devAlias && secret !== devGiven;
+
 const openDevAlias = async (core: CoreConnection): Promise<Page> => {
   const response = await fetch(devInterviewLinkPath, { method: "POST" });
   if (response.status === 401) {
@@ -105,6 +120,7 @@ const openDevAlias = async (core: CoreConnection): Promise<Page> => {
       signedIn: false,
     };
   }
+  devGiven = secret;
   window.location.replace(
     `${window.location.pathname}${window.location.search}#${secret}`
   );
@@ -114,6 +130,9 @@ const openDevAlias = async (core: CoreConnection): Promise<Page> => {
 /** Opens the link for whoever is signed in, or asks them to sign in. */
 const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
   if (import.meta.env.DEV && secret === devAlias) {
+    return await openDevAlias(core);
+  }
+  if (secret === "" && fallsBackToDev(secret)) {
     return await openDevAlias(core);
   }
   if (secret === "") {
@@ -126,6 +145,9 @@ const opened = async (secret: string, core: CoreConnection): Promise<Page> => {
   }
   const answer = await openSession(secret);
   if (isRefused(answer)) {
+    if (answer.code !== "interview.sign_in" && fallsBackToDev(secret)) {
+      return await openDevAlias(core);
+    }
     if (answer.code !== "interview.sign_in") {
       return {
         state: "refused",
