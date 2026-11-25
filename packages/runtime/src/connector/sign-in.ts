@@ -285,14 +285,35 @@ const scopeListSchema = z
  * asks for while one is pointed at, to read it, and to send from it with
  * Reach others on.
  */
-const rightsSchema = z.strictObject({
-  signIn: scopeListSchema,
-  classes: z.record(companyToolClassSchema, scopeListSchema),
-  implied: z.record(scopeSchema, scopeListSchema).optional(),
-  sharedMailbox: z
-    .strictObject({ read: scopeListSchema, reach: scopeListSchema })
-    .optional(),
-});
+const rightsSchema = z
+  .strictObject({
+    signIn: scopeListSchema,
+    classes: z.record(companyToolClassSchema, scopeListSchema),
+    implied: z.record(scopeSchema, scopeListSchema).optional(),
+    sharedMailbox: z
+      .strictObject({ read: scopeListSchema, reach: scopeListSchema })
+      .optional(),
+  })
+  .refine(
+    ({ implied = {} }) => {
+      const takesIn = new Map(
+        Object.entries(implied).map(([scope, each]) => [
+          scope.toLowerCase(),
+          new Set(each.map((one) => one.toLowerCase())),
+        ])
+      );
+      return [...takesIn].every(
+        ([scope, own]) =>
+          !own.has(scope) &&
+          [...own].every((each) =>
+            [...(takesIn.get(each) ?? [])].every((further) => own.has(further))
+          )
+      );
+    },
+    // Connect follows one step of it: closed, that step is the whole of
+    // what a scope takes in, and no scope reaches itself.
+    "A scope lists everything it takes in, through the scopes it takes in, and never itself"
+  );
 export type DeclaredRights = z.infer<typeof rightsSchema>;
 
 /** Every scope `rights` names. */

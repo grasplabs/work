@@ -946,20 +946,24 @@ export const renewalHolds = (
  * where it must hold no more (`granted`): every scope the provider's
  * answer lists among those allowed, and every one required among them.
  * An answer that lists none is refused there, and where the grant must be
- * listed (`grantListed`): nobody can tell what it holds.
+ * listed (`grantListed`), as is one whose list is empty there: nobody can
+ * tell what it holds.
  */
 export const grantedAsAsked = (
   provider: OAuthProviderConfig,
   { scope }: TokenSet
 ): boolean => {
   const { granted, grantListed = false } = provider;
+  const scopes = scopesOf(provider, scope ?? "");
+  if (grantListed && scopes.size === 0) {
+    return false;
+  }
   if (scope === undefined) {
-    return granted === undefined && !grantListed;
+    return granted === undefined;
   }
   if (granted === undefined) {
     return true;
   }
-  const scopes = scopesOf(provider, scope);
   return (
     [...scopes].every((each) => granted.allowed.has(each)) &&
     granted.required.every((each) => scopes.has(rightKey(each)))
