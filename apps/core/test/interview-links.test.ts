@@ -20,6 +20,7 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { adminCommands } from "./admin-command.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInAs } from "./interview-link.ts";
+import { clientOrigin } from "./sign-in-config.ts";
 import {
   auditedDuring,
   routed,
@@ -624,6 +625,29 @@ describe("someone's own link", () => {
     ]).toStrictEqual([
       [403, "request.forbidden"],
       [401, "interview.sign_in"],
+    ]);
+  });
+
+  it("drives nothing for a request that says neither where it comes from nor that it is from this site", async () => {
+    const { secrets, me } = await running();
+    /** The page's call, as a browser that sends no `Sec-Fetch-Site` makes it. */
+    const unmarked = async (headers: Record<string, string>) =>
+      await routed(interviewApiPath, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: me, ...headers },
+        body: JSON.stringify({ action: "session", secret: secrets.oli }),
+      });
+    const bare = await unmarked({});
+    const elsewhere = await unmarked({ origin: "https://elsewhere.example" });
+    const own = await unmarked({ origin: clientOrigin });
+    expect([
+      [bare.status, await codeOf(bare)],
+      [elsewhere.status, await codeOf(elsewhere)],
+      own.status,
+    ]).toStrictEqual([
+      [403, "request.forbidden"],
+      [403, "request.forbidden"],
+      200,
     ]);
   });
 
