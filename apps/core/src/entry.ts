@@ -344,6 +344,7 @@ const pathHandlers: ReadonlyMap<
   [auditExportPath, auditExportResponse],
   [errorReportPath, errorReportResponse],
   [onboardingSummaryPath, onboardingSummaryResponse],
+  [devResetPath, devResetResponse],
   [aiStatusReportPath, aiStatusReportResponse],
   [brainReportPath, brainReportResponse],
   [brainActionPath, brainActionResponse],
@@ -451,9 +452,6 @@ const route = async (
   }
   if (pathname === labPath) {
     return await labResponse(request, env, requestId, ctx);
-  }
-  if (pathname === devResetPath) {
-    return await devResetResponse(request, env, requestId);
   }
   const linked = await linkResponse(pathname, request, env, requestId, ctx);
   if (linked !== undefined) {
