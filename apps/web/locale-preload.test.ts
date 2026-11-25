@@ -9,16 +9,22 @@ import { pickLocale } from "./src/locale-choice.ts";
 // language the app then chooses (src/i18n.ts): run in a page of its own,
 // it asks for the file of the language `pickLocale` picks from the same
 // cookie and browser languages, and English's when nothing fits. On a lean
-// page (src/lean-pages.ts) it asks for that catalog's lean part and the
-// lean stylesheet, as the app then loads them; elsewhere for the whole.
+// page (src/lean-pages.ts) it asks for that page's part of the catalog and
+// of the stylesheet, as the app then loads them; elsewhere for the whole.
 
-const catalogs = {
-  en: { lean: "/assets/lean-en.js", whole: "/assets/messages-en.js" },
-  de: { lean: "/assets/lean-de.js", whole: "/assets/messages-de.js" },
-  nl: { lean: "/assets/lean-nl.js", whole: "/assets/messages-nl.js" },
+const partsOf = (locale: string) => ({
+  interview: `/assets/interview-${locale}.js`,
+  setup: `/assets/setup-${locale}.js`,
+  whole: `/assets/messages-${locale}.js`,
+});
+
+const catalogs = { en: partsOf("en"), de: partsOf("de"), nl: partsOf("nl") };
+
+const styles = {
+  interview: "/assets/interview.css",
+  setup: "/assets/setup.css",
+  whole: "/assets/index.css",
 };
-
-const styles = { lean: "/assets/lean.css", whole: "/assets/index.css" };
 
 /** What the script links in a page at `pathname`. */
 const linked = (
@@ -102,12 +108,17 @@ describe("the catalog preload", () => {
 });
 
 describe("the lean pages' preload", () => {
-  it.each(["/interview", "/setup", "/Setup/"])(
-    "links the lean part of the catalog and the lean stylesheet on %s",
-    (pathname) => {
+  it.each([
+    ["/interview", "interview"],
+    ["/interview/", "interview"],
+    ["/setup", "setup"],
+    ["/Setup/", "setup"],
+  ] as const)(
+    "links the page's own part of the catalog and stylesheet on %s",
+    (pathname, page) => {
       expect(linked("grasp-locale=de", [], pathname)).toStrictEqual([
-        ["modulepreload", catalogs.de.lean],
-        ["stylesheet", styles.lean],
+        ["modulepreload", catalogs.de[page]],
+        ["stylesheet", styles[page]],
       ]);
     }
   );
