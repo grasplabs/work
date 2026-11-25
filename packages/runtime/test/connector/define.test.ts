@@ -1081,11 +1081,19 @@ describe("what a tool declares of items, files and confirmation", () => {
     ).toThrow("describes only its own input properties");
   });
 
-  it("takes provenance only from a field its answer has", () => {
+  it("takes provenance only from a string field its answer has", () => {
     expect(withNotes(declared(aRead, { idField: "name" }))).not.toThrow();
     expect(withNotes(declared(aRead, { idField: "sheetId" }))).toThrow(
-      "its idField is a field of its answer"
+      "its idField is a string field of its answer"
     );
+    expect(
+      withNotes(
+        declared(
+          { ...aRead, returns: v.object({ id: v.number() }) },
+          { idField: "id" }
+        )
+      )
+    ).toThrow("its idField is a string field of its answer");
   });
 
   it("lets only a read answer an item or a file, and only a write take files", () => {

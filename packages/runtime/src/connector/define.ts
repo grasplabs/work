@@ -646,15 +646,19 @@ const checkedFilesOf = async (
 
 /**
  * The field of a tool's answer that is its provenance: `id`, or the one it
- * declares, which must be among the answer's fields.
+ * declares, which must be a string field of the answer.
  */
 const idFieldOf = (
   name: string,
   declared: string | undefined,
-  answer: { fields: Readonly<Record<string, unknown>> }
+  answer: { fields: Readonly<Record<string, { kind: string }>> }
 ): string => {
-  if (declared !== undefined && !Object.hasOwn(answer.fields, declared)) {
-    throw new Error(`${name}: its idField is a field of its answer`);
+  if (
+    declared !== undefined &&
+    (!Object.hasOwn(answer.fields, declared) ||
+      answer.fields[declared]?.kind !== "string")
+  ) {
+    throw new Error(`${name}: its idField is a string field of its answer`);
   }
   return declared ?? "id";
 };
