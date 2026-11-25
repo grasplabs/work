@@ -13,6 +13,8 @@ export interface OfferedApp {
   app: string;
   name: string;
   description: string | null;
+  /** The products a native app reaches (`CatalogEntry.products`). */
+  products?: string[];
 }
 
 /** The apps the company offers now, by key. */
@@ -30,9 +32,21 @@ export const offeredApps = async (
   ]);
   const off = new Set(hidden.map(({ source, id }) => agentAppOf(source, id)));
   return new Map(
-    catalog.entries.flatMap(({ source, id, name, description }) => {
+    catalog.entries.flatMap(({ source, id, name, description, products }) => {
       const app = agentAppOf(source, id);
-      return off.has(app) ? [] : [[app, { app, name, description }] as const];
+      return off.has(app)
+        ? []
+        : [
+            [
+              app,
+              {
+                app,
+                name,
+                description,
+                ...(products === undefined ? {} : { products }),
+              },
+            ] as const,
+          ];
     })
   );
 };

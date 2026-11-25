@@ -195,6 +195,10 @@ describe("an agent's apps", slow, () => {
       toldTheModel: provider.requests.map(({ body }) =>
         JSON.stringify(body).includes(word)
       ),
+      // What Google Workspace reaches, which the instructions don't name.
+      toldWhatGoogleReaches: provider.requests.map(({ body }) =>
+        JSON.stringify(body).includes("Google Calendar")
+      ),
       byUser,
       recorded,
       worked,
@@ -204,6 +208,7 @@ describe("an agent's apps", slow, () => {
         .map(({ toolClass }) => toolClass),
     }).toStrictEqual({
       toldTheModel: [true],
+      toldWhatGoogleReaches: [true],
       byUser: "role.forbidden",
       // Each change it made, and none it didn't.
       recorded: [

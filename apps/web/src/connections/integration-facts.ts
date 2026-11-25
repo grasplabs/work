@@ -4,14 +4,15 @@ import { useLingui } from "@lingui/react/macro";
 
 import { canConnect } from "./connect-dialog.tsx";
 import type { Integration } from "./integrations.ts";
+import { descriptionOf } from "./native-descriptions.ts";
 
 // What the Integrations pages say about one app, in the same words
 // wherever they say it: what it is for, and why this person can't connect
 // it.
 
-/** What the app is for: in a sentence where the catalog says, else its kind. */
+/** What the app is for: in a sentence where there is one, else its kind. */
 export const aboutOf = (integration: Integration): string | undefined =>
-  integration.description ?? integration.categories[0];
+  descriptionOf(integration) ?? integration.categories[0];
 
 /**
  * Why this person can't connect it, where they can't: staff, an entry not
