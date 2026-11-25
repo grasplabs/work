@@ -33,13 +33,12 @@ const styles = stylex.create({
   ground: { backgroundColor: colors.background },
   // On a scene, which is night, what stands on it turns light. The text
   // colour is set again here: inherited, it would stay the one worked out
-  // for the page's own scheme. Night is the box's own ground too, as a
-  // scene's tile has it until its picture comes: with no WebGL, a context
-  // the browser took away or the picture not yet drawn, the light words
-  // still stand on night, never on the page's paper.
+  // for the page's own scheme. The night's own ground stands under the
+  // drawing, so the light text reads before the drawing is there and
+  // where it can't be drawn at all.
   onNight: {
-    color: colors.bodyForeground,
     backgroundColor: colors.brandNight,
+    color: colors.bodyForeground,
   },
   // The drawing, whole down to a band over the foot, faded out across it, then clear.
   foot: {
