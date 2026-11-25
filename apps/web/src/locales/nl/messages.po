@@ -7775,6 +7775,10 @@ msgstr "Uit Google Drive. Ik lees alleen de bestanden die je toevoegt."
 msgid "From how a team works, version {version}"
 msgstr "Uit hoe een team werkt, versie {version}"
 
+#: src/onboarding/leads-step.tsx
+msgid "From our call"
+msgstr "Uit ons gesprek"
+
 #: src/onboarding/place-picker.tsx
 msgid "From SharePoint or OneDrive. I read only the files you add."
 msgstr "Uit SharePoint of OneDrive. Ik lees alleen de bestanden die je toevoegt."
