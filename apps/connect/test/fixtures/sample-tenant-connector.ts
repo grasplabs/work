@@ -76,7 +76,7 @@ export default defineConnector({
     grant: "account",
   }),
   tools: {
-    "v1.boards.items.list": tool({
+    "boards.items.list": tool({
       description: "Lists the items on a board",
       readOnly: true,
       reach: "own",

@@ -111,7 +111,7 @@ const connect = async (
 const listItems = async (id: string, person: ConnectionPerson) =>
   await callTool(
     { id, person },
-    "v1.boards.items.list",
+    "boards.items.list",
     { board: "board-1" },
     { resource: "board-1" }
   );
