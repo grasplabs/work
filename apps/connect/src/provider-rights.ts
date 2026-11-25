@@ -4,6 +4,9 @@ import {
 } from "@grasp-os/shared/connect";
 import type { CompanyToolClass } from "@grasp-os/shared/connect";
 
+import { appRecords } from "./bundled-connectors.ts";
+import type { AppRecord } from "./bundled-connectors.ts";
+
 // What the suites, Microsoft 365 and Google Workspace, are asked for, by
 // the classes a company turned on (GRA-717, GRA-756): least privilege at
 // any breadth. A consent asks only the
@@ -20,7 +23,9 @@ import type { CompanyToolClass } from "@grasp-os/shared/connect";
 //
 // Each connector's manifest (packages/connectors/microsoft-365,
 // google-workspace) names the most any class asks for; these tables say
-// which class asks which.
+// which class asks which. A connector's own sign-in may say the same
+// (`rights`, runtime/connector's sign-in.ts), and is asked by class as these
+// are.
 
 /** Asked whatever is on: the sign-in, and a refresh token. */
 const microsoftSignIn = [
@@ -164,9 +169,15 @@ const googleImpliedRights: Readonly<Record<string, readonly string[]>> = {
 /** How Entra may prefix a Microsoft Graph right in a token's answer. */
 const graphPrefix = "https://graph.microsoft.com/";
 
-/** A right as compared: lower case, without Graph's prefix. */
-export const rightKey = (right: string): string =>
-  right.toLowerCase().replace(graphPrefix, "");
+/**
+ * A right as compared: lower case, without `prefix` (a provider's
+ * `scopePrefix`) at its start.
+ */
+export const rightKey = (right: string, prefix = ""): string => {
+  const key = right.toLowerCase();
+  const start = prefix.toLowerCase();
+  return start !== "" && key.startsWith(start) ? key.slice(start.length) : key;
+};
 
 /**
  * Shared mailboxes' rights, asked only while the company points Stephen at
@@ -189,11 +200,14 @@ interface SuiteRights {
   implied: Readonly<Record<string, readonly string[]>>;
   /** Asked besides the classes' while a shared mailbox is pointed at. */
   sharedMailbox: (classes: readonly CompanyToolClass[]) => readonly string[];
+  /** What a token answer may put before a right (`rightKey`). */
+  scopePrefix?: string;
   /**
    * What a connection made before its grant was kept was asked for: one
-   * wide set, whatever was on.
+   * wide set, whatever was on. None for a connector's own sign-in, whose
+   * connections always kept theirs: one that didn't holds nothing.
    */
-  before: readonly string[];
+  before?: readonly string[];
 }
 
 const microsoftSuite: SuiteRights = {
@@ -201,6 +215,7 @@ const microsoftSuite: SuiteRights = {
   classRights: microsoftClassRights,
   implied: microsoftImpliedRights,
   sharedMailbox: sharedMailboxRights,
+  scopePrefix: graphPrefix,
   before: [
     ...microsoftSignIn,
     "Mail.ReadWrite",
@@ -236,21 +251,71 @@ const suites: Readonly<Record<string, SuiteRights>> = {
   google: googleSuite,
 };
 
+/**
+ * How a connector's own sign-in asks by class, if it says (`rights`), and
+ * connect has no table of its own for its provider.
+ */
+const declaredSuite = ({
+  provider,
+  signIn,
+}: AppRecord): SuiteRights | undefined => {
+  if (
+    Object.hasOwn(suites, provider) ||
+    signIn.kind !== "oauth2" ||
+    signIn.rights === undefined
+  ) {
+    return undefined;
+  }
+  const { rights, scopePrefix } = signIn;
+  const key = (right: string): string => rightKey(right, scopePrefix);
+  return {
+    signIn: rights.signIn,
+    classRights: rights.classes,
+    implied: Object.fromEntries(
+      Object.entries(rights.implied ?? {}).map(([right, takesIn]) => [
+        key(right),
+        takesIn.map(key),
+      ])
+    ),
+    sharedMailbox: (classes) =>
+      rights.sharedMailbox === undefined
+        ? []
+        : [
+            ...rights.sharedMailbox.read,
+            ...(classes.includes("reach-others")
+              ? rights.sharedMailbox.reach
+              : []),
+          ],
+    ...(scopePrefix === undefined ? {} : { scopePrefix }),
+  };
+};
+
+/** The connectors' own sign-ins asked by class, by provider. */
+const declared: ReadonlyMap<string, SuiteRights> = new Map(
+  appRecords().flatMap((record) => {
+    const suite = declaredSuite(record);
+    return suite === undefined ? [] : [[record.provider, suite] as const];
+  })
+);
+
 /** The providers whose connections are asked by class. */
-export const classRightsProviders = Object.keys(suites);
+export const classRightsProviders = [
+  ...Object.keys(suites),
+  ...declared.keys(),
+];
 
 /** The suite `provider` names, if it is asked by class. */
 const suiteOf = (provider: string): SuiteRights | undefined =>
-  Object.hasOwn(suites, provider) ? suites[provider] : undefined;
+  Object.hasOwn(suites, provider) ? suites[provider] : declared.get(provider);
 
 /** `rights` with every one they take in, each by its key. */
 const heldWith = (
-  { implied }: SuiteRights,
+  { implied, scopePrefix }: SuiteRights,
   rights: Iterable<string>
 ): Set<string> => {
   const held = new Set<string>();
   for (const right of rights) {
-    const key = rightKey(right);
+    const key = rightKey(right, scopePrefix);
     held.add(key);
     for (const each of implied[key] ?? []) {
       held.add(each);
@@ -274,7 +339,9 @@ const suiteRights = (
     ...classes.flatMap((toolClass) => suite.classRights[toolClass]),
     ...(sharedMailbox ? suite.sharedMailbox(classes) : []),
   ];
-  const unique = [...new Map(wanted.map((each) => [rightKey(each), each]))];
+  const unique = [
+    ...new Map(wanted.map((each) => [rightKey(each, suite.scopePrefix), each])),
+  ];
   return unique
     .filter(
       ([key]) =>
@@ -314,7 +381,7 @@ export const grantedRights = (scope: string | undefined): string[] | null =>
 /**
  * Whether a `provider` connection granted `granted` (a token answer's
  * `scope`; null for one kept before grants were, which holds the suite's
- * old wide set) holds every right `classes` ask for, but the sign-in's:
+ * old wide set, or nothing) holds every right `classes` ask for, but the sign-in's:
  * the provider's answer may leave those out, or name them otherwise. A
  * provider not asked by class holds what it holds.
  */
@@ -330,12 +397,13 @@ export const holdsClassRights = (
   }
   const held = heldWith(
     suite,
-    grantedRights(granted ?? undefined) ?? suite.before
+    grantedRights(granted ?? undefined) ?? suite.before ?? []
   );
-  const signInKeys = new Set(suite.signIn.map(rightKey));
+  const key = (right: string): string => rightKey(right, suite.scopePrefix);
+  const signInKeys = new Set(suite.signIn.map(key));
   return suiteRights(suite, classes, sharedMailbox)
-    .map(rightKey)
-    .every((key) => signInKeys.has(key) || held.has(key));
+    .map(key)
+    .every((each) => signInKeys.has(each) || held.has(each));
 };
 
 /**

@@ -15,6 +15,9 @@ export type {
   ConnectorReader,
   ConnectorTool,
   EventDeclaration,
+  IdTokenDeclaration,
+  OAuth2Declaration,
+  RightsDeclaration,
   SyncDeclaration,
   ToolArgs,
   ToolCall,
@@ -114,10 +117,19 @@ export {
   endpointHost,
   reservedAuthorizationParams,
   signInSchema,
+  tenantKinds,
+  withTenant,
 } from "./sign-in.ts";
 export { addressesOf } from "./mail-addresses.ts";
 export type { Address } from "./mail-addresses.ts";
-export type { AccountLookup, SignIn, SignInInput } from "./sign-in.ts";
+export type {
+  AccountLookup,
+  DeclaredRights,
+  IdTokenCheck,
+  SignIn,
+  SignInInput,
+  TenantKind,
+} from "./sign-in.ts";
 export { jsonBody, providerFetch, retryAfterOf, segment } from "./provider.ts";
 export type { Provider, ProviderDefinition } from "./provider.ts";
 export {

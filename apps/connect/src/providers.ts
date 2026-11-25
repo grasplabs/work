@@ -1,6 +1,7 @@
-import type { AccountLookup } from "@grasp-os/runtime/connector";
+import { tenantKinds, withTenant } from "@grasp-os/runtime/connector";
+import type { AccountLookup, IdTokenCheck } from "@grasp-os/runtime/connector";
 import {
-  appProviderSchema,
+  connectorProviderSchema,
   oauthProviderSchema,
 } from "@grasp-os/shared/connect";
 import type { OAuthProvider } from "@grasp-os/shared/connect";
@@ -10,6 +11,7 @@ import { placesProviderSchema } from "@grasp-os/shared/document-places";
 import type { PlacesProvider } from "@grasp-os/shared/document-places";
 import { hrProviderSchema } from "@grasp-os/shared/hr";
 import type { HrProvider } from "@grasp-os/shared/hr";
+import { isRecord } from "@grasp-os/shared/json";
 import { log } from "@grasp-os/shared/log";
 import { z } from "zod";
 
@@ -22,6 +24,8 @@ import {
   classesOnByDefault,
   googleRights,
   microsoftRights,
+  rightKey,
+  rightsFor,
 } from "./provider-rights.ts";
 
 // The providers people connect accounts from, as config records: one
@@ -42,8 +46,9 @@ import {
 // connector carries (runtime/connector's sign-in.ts), and nothing here
 // changes for a new one. Its client ID and secret, for OAuth, are its
 // entry in `APP_OAUTH_CLIENTS`, found by its provider's name alone, so no
-// record reaches another app's secret (AP6). An app has no tenant: the
-// account is the one the app's own lookup names.
+// record reaches another app's secret (AP6). Its account is the one the
+// app's own lookup names, or its OpenID ID token; a record may pin its flow
+// to the organization's tenant as the suites' are (AP10 to AP18).
 
 /** The client credentials of Grasp's app at a provider. */
 export interface OAuthClientCredentials {
@@ -107,6 +112,18 @@ export interface OAuthProviderConfig {
   scopes: readonly string[];
   /** How the scope parameter joins `scopes`. */
   scopeSeparator: string;
+  /**
+   * Whether a consent's token answer must list the scopes it granted: a
+   * connector's own sign-in asked by class, whose connection holds only
+   * what its grant lists (provider-rights.ts `holdsClassRights`).
+   */
+  grantListed?: boolean;
+  /**
+   * A prefix the provider's token answer may put on a scope, which is
+   * stripped from its start as scopes are compared: Graph's
+   * `https://graph.microsoft.com/`.
+   */
+  scopePrefix?: string;
   /**
    * The access a token must be granted, exactly: tokens granted more than
    * `allowed`, or less than `required`, are refused
@@ -216,10 +233,6 @@ const credentials = (
     ? undefined
     : { id, secret };
 
-const guidPattern =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
-const domainPattern = /^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/u;
-
 /** Just the subject of an ID token, however the rest of it looks. */
 const oidOnly = z.object({ oid: z.string().min(1) });
 const subOnly = z.object({ sub: z.string().min(1) });
@@ -250,6 +263,9 @@ const googleIssuers = new Set([
 ]);
 
 const microsoftLogin = "https://login.microsoftonline.com";
+
+/** How Entra may prefix a Microsoft Graph scope in a token's answer. */
+const graphScopePrefix = "https://graph.microsoft.com/";
 
 /**
  * The Entra account an ID token is for, if it comes from Entra for the
@@ -295,7 +311,7 @@ const microsoft: OAuthProviderConfig = {
   id: "microsoft",
   server: "microsoft-365",
   pinned: true,
-  isTenant: (tenant) => guidPattern.test(tenant),
+  isTenant: (tenant) => tenantKinds.guid.test(tenant),
   authorizationEndpoint: (tenant) =>
     `${microsoftLogin}/${tenant}/oauth2/v2.0/authorize`,
   tokenEndpoint: (tenant) => `${microsoftLogin}/${tenant}/oauth2/v2.0/token`,
@@ -306,6 +322,7 @@ const microsoft: OAuthProviderConfig = {
   // before can't, and is reconnected in place. Change own asks for it.
   renewalRequires: ["Files.ReadWrite.All"],
   scopeSeparator: " ",
+  scopePrefix: graphScopePrefix,
   authorizationParams: () => ({ response_mode: "query" }),
   clientAuthentication: "client_secret_post",
   client: (env) =>
@@ -391,7 +408,7 @@ const google: OAuthProviderConfig = {
   id: "google",
   server: "google-workspace",
   pinned: true,
-  isTenant: (tenant) => domainPattern.test(tenant),
+  isTenant: (tenant) => tenantKinds.domain.test(tenant),
   authorizationEndpoint: () => "https://accounts.google.com/o/oauth2/v2/auth",
   tokenEndpoint: () => "https://oauth2.googleapis.com/token",
   revocationEndpoint: "https://oauth2.googleapis.com/revoke",
@@ -698,14 +715,71 @@ const lookedUp =
   async (credential: Credential): Promise<ProviderAccount | null> =>
     await lookupAccount(lookup, credential);
 
+/** A claim's value, when it's there: `undefined` when it isn't. */
+const claimOf = (claims: Record<string, unknown>, name: string): unknown =>
+  Object.hasOwn(claims, name) ? claims[name] : undefined;
+
+/**
+ * The account an ID token names as `check` says (`IdTokenCheck`), if it
+ * comes from its issuer for the client `clientId` and holds its claims,
+ * `{tenant}` filled with `tenant`; `null` otherwise. A claim it reads
+ * a name or an address from that isn't text refuses the token.
+ */
+const idTokenAccount = (
+  check: IdTokenCheck,
+  idToken: string | undefined,
+  tenant: string,
+  clientId: string
+): ProviderAccount | null => {
+  const claims = idTokenClaims(idToken);
+  if (!isRecord(claims)) {
+    return null;
+  }
+  const iss = claimOf(claims, "iss");
+  const id = claimOf(claims, check.subject);
+  const read = [...(check.name ?? []), ...(check.email ?? [])].map((name) =>
+    claimOf(claims, name)
+  );
+  const firstOf = (names: readonly string[] = []): string | null => {
+    const found = names
+      .map((name) => claimOf(claims, name))
+      .find((value) => value !== undefined);
+    return typeof found === "string" ? found : null;
+  };
+  const issued =
+    typeof iss === "string" &&
+    [check.issuer]
+      .flat()
+      .some((issuer) => withTenant(issuer, tenant) === iss) &&
+    claimOf(claims, "aud") === clientId &&
+    typeof id === "string" &&
+    id !== "" &&
+    read.every((value) => value === undefined || typeof value === "string");
+  const holds = Object.entries(check.claims ?? {}).every(([name, wanted]) => {
+    const value = claimOf(claims, name);
+    return wanted === true
+      ? value === true
+      : typeof value === "string" &&
+          value.toLowerCase() === withTenant(wanted, tenant).toLowerCase();
+  });
+  // Entra's B2B guest is signed in by another tenant's issuer (`idp`).
+  const ownIssuer = (check.sameIssuer ?? []).every((name) => {
+    const value = claimOf(claims, name);
+    return value === undefined || value === iss;
+  });
+  return issued && holds && ownIssuer
+    ? { id, name: firstOf(check.name), email: firstOf(check.email) }
+    : null;
+};
+
 /** An app, as its record describes it. */
-const appProvider = ({
+export const appProvider = ({
   provider,
   server,
   signIn,
 }: AppRecord): ProviderConfig => {
-  const lookup = lookedUp(signIn.account);
   if (signIn.kind === "api_key") {
+    const lookup = lookedUp(signIn.account);
     const credential = (key: string): Credential => ({
       header: signIn.header,
       value: `${signIn.prefix ?? ""}${key}`,
@@ -718,25 +792,64 @@ const appProvider = ({
       account: async (key) => await lookup(credential(key)),
     };
   }
+  const { account, idToken, tenant } = signIn;
   return {
     kind: "oauth",
     id: provider,
     server,
-    pinned: false,
-    isTenant: (tenant) => tenant === "",
-    authorizationEndpoint: () => signIn.authorizationEndpoint,
-    tokenEndpoint: () => signIn.tokenEndpoint,
+    pinned: tenant !== undefined,
+    isTenant: (each) =>
+      tenant === undefined ? each === "" : tenantKinds[tenant].test(each),
+    // Only a tenant `isTenant` takes fills them (sign-in.ts).
+    authorizationEndpoint: (each) =>
+      withTenant(signIn.authorizationEndpoint, each),
+    tokenEndpoint: (each) => withTenant(signIn.tokenEndpoint, each),
     ...(signIn.revocationEndpoint === undefined
       ? {}
       : { revocationEndpoint: signIn.revocationEndpoint }),
-    scopes: signIn.scopes,
+    ...(signIn.grant === "account" ? { accountWideGrant: provider } : {}),
+    // Without rights by class, all of its scopes; with them, as a suite's,
+    // those of the classes on by default (`rightsFor`).
+    scopes: rightsFor(provider, classesOnByDefault) ?? signIn.scopes,
     scopeSeparator: signIn.scopeSeparator,
-    authorizationParams: () => ({ ...signIn.authorizationParams }),
+    grantListed: signIn.rights !== undefined,
+    ...(signIn.scopePrefix === undefined
+      ? {}
+      : { scopePrefix: signIn.scopePrefix }),
+    ...(signIn.renewalRequires === undefined
+      ? {}
+      : { renewalRequires: signIn.renewalRequires }),
+    authorizationParams: (each) =>
+      Object.fromEntries(
+        Object.entries(signIn.authorizationParams).map(([name, value]) => [
+          name,
+          withTenant(value, each),
+        ])
+      ),
     clientAuthentication: signIn.clientAuthentication,
     client: (env) => appClient(env, provider),
-    // No ID token is trusted from an app: its lookup names the account,
-    // and it has no subject apart from that.
-    account: async ({ accessToken }) => await lookup(bearer(accessToken)),
+    ...(idToken === undefined
+      ? {
+          // No ID token is trusted from an app with a lookup: its lookup
+          // names the account, and it has no subject apart from that.
+          account: async ({ accessToken }: TokenSet) =>
+            account === undefined
+              ? null
+              : await lookedUp(account)(bearer(accessToken)),
+        }
+      : {
+          subject: ({ idToken: token }) => {
+            const claims = idTokenClaims(token);
+            const id = isRecord(claims)
+              ? claimOf(claims, idToken.subject)
+              : undefined;
+            return typeof id === "string" && id !== "" ? id : undefined;
+          },
+          account: async ({ idToken: token }, each, clientId) =>
+            await Promise.resolve(
+              idTokenAccount(idToken, token, each, clientId)
+            ),
+        }),
   };
 };
 
@@ -761,23 +874,27 @@ export const providerFor = (id: string): ProviderConfig | undefined => {
   if (hr.success) {
     return hrProviders[hr.data];
   }
-  const record = appProviderSchema.safeParse(id).success
+  // A suite's own config, above, is never replaced by a record: one for
+  // its name is read only once connect has none for it.
+  const record = connectorProviderSchema.safeParse(id).success
     ? appRecord(id)
     : undefined;
   return record === undefined ? undefined : appProvider(record);
 };
 
-/** How Entra may prefix a Microsoft Graph scope in a token's answer. */
-const graphScopePrefix = "https://graph.microsoft.com/";
-
-/** The scopes a token answer lists, lowercase, Graph's by their short name. */
-const scopesOf = (scope: string): Set<string> =>
+/**
+ * The scopes a token answer lists, as compared (`rightKey`): without the
+ * provider's prefix, as Entra may name Graph's scopes by their full URI.
+ */
+const scopesOf = (
+  { scopePrefix }: Pick<OAuthProviderConfig, "scopePrefix">,
+  scope: string
+): Set<string> =>
   new Set(
     scope
       .split(" ")
       .filter((each) => each !== "")
-      // Entra may name Graph's scopes by their full URI.
-      .map((each) => each.toLowerCase().replace(graphScopePrefix, ""))
+      .map((each) => rightKey(each, scopePrefix))
   );
 
 /**
@@ -786,36 +903,40 @@ const scopesOf = (scope: string): Set<string> =>
  * says it lacks one.
  */
 export const renewalHolds = (
-  { renewalRequires = [] }: OAuthProviderConfig,
+  provider: OAuthProviderConfig,
   { scope }: TokenSet
 ): boolean => {
   if (scope === undefined) {
     return true;
   }
-  const scopes = scopesOf(scope);
-  return renewalRequires.every((each) => scopes.has(each.toLowerCase()));
+  const scopes = scopesOf(provider, scope);
+  return (provider.renewalRequires ?? []).every((each) =>
+    scopes.has(rightKey(each))
+  );
 };
 
 /**
  * Whether `tokens` were granted exactly the access `provider` asks for,
  * where it must hold no more (`granted`): every scope the provider's
  * answer lists among those allowed, and every one required among them.
- * An answer that lists none is refused: nobody can tell what it holds.
+ * An answer that lists none is refused there, and where the grant must be
+ * listed (`grantListed`): nobody can tell what it holds.
  */
 export const grantedAsAsked = (
-  { granted }: OAuthProviderConfig,
+  provider: OAuthProviderConfig,
   { scope }: TokenSet
 ): boolean => {
+  const { granted, grantListed = false } = provider;
+  if (scope === undefined) {
+    return granted === undefined && !grantListed;
+  }
   if (granted === undefined) {
     return true;
   }
-  if (scope === undefined) {
-    return false;
-  }
-  const scopes = scopesOf(scope);
+  const scopes = scopesOf(provider, scope);
   return (
     [...scopes].every((each) => granted.allowed.has(each)) &&
-    granted.required.every((each) => scopes.has(each.toLowerCase()))
+    granted.required.every((each) => scopes.has(rightKey(each)))
   );
 };
 
@@ -842,10 +963,11 @@ const signInScopes: ReadonlySet<string> = new Set([
  * answer that lists none is refused.
  */
 export const renewedAsGranted = (
-  { granted }: OAuthProviderConfig,
+  provider: OAuthProviderConfig,
   { scope }: TokenSet,
   before: string | null
 ): boolean => {
+  const { granted } = provider;
   if (granted === undefined) {
     return true;
   }
@@ -854,17 +976,23 @@ export const renewedAsGranted = (
   if (scope === undefined || before === null) {
     return false;
   }
-  const scopes = scopesOf(scope);
-  const held = [...scopesOf(before)];
+  const scopes = scopesOf(provider, scope);
+  const held = [...scopesOf(provider, before)];
   return (
     [...scopes].every((each) => granted.allowed.has(each)) &&
     held.every((each) => signInScopes.has(each) || scopes.has(each))
   );
 };
 
-/** Whether a grant of `scope` (a token answer's, as kept) holds `wanted`. */
-export const grantHolds = (scope: string, wanted: string): boolean =>
-  scopesOf(scope).has(wanted.toLowerCase());
+/**
+ * Whether a grant of `scope` (a token answer's, as kept) at `provider`
+ * holds `wanted`.
+ */
+export const grantHolds = (
+  provider: OAuthProviderConfig,
+  scope: string,
+  wanted: string
+): boolean => scopesOf(provider, scope).has(rightKey(wanted));
 
 /**
  * The scopes `provider` asks for now that a grant of `scope` (a token
@@ -872,12 +1000,12 @@ export const grantHolds = (scope: string, wanted: string): boolean =>
  * ask for after the connection was made.
  */
 export const scopesLacking = (
-  { scopes }: OAuthProviderConfig,
+  provider: OAuthProviderConfig,
   scope: string
 ): string[] => {
-  const granted = scopesOf(scope);
-  return scopes.filter((each) => {
-    const asked = each.toLowerCase();
+  const granted = scopesOf(provider, scope);
+  return provider.scopes.filter((each) => {
+    const asked = rightKey(each);
     return !(signInScopes.has(asked) || granted.has(asked));
   });
 };
