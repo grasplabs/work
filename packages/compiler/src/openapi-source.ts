@@ -28,12 +28,19 @@ const read = (name: string, maybe: boolean): string => {
 /** A scalar's builder call, or undefined for a kind that holds values. */
 const scalarOf = (descriptor: ValueDescriptor): string | undefined => {
   if (descriptor.kind === "string") {
-    return descriptor.email ? "v.string().email()" : "v.string()";
+    const format = (["email", "datetime", "date", "url"] as const).find(
+      (name) => descriptor[name] === true
+    );
+    return format === undefined ? "v.string()" : `v.string().${format}()`;
   }
   if (descriptor.kind === "number") {
     return descriptor.integer ? "v.number().integer()" : "v.number()";
   }
-  if (descriptor.kind === "boolean" || descriptor.kind === "null") {
+  if (
+    descriptor.kind === "boolean" ||
+    descriptor.kind === "null" ||
+    descriptor.kind === "json"
+  ) {
     return `v.${descriptor.kind}()`;
   }
   if (descriptor.kind === "literal") {
