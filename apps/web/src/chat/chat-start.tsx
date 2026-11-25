@@ -265,39 +265,47 @@ export const ChatStart = ({
     }
   });
   return (
-    <Backdrop clear={column} variant={look}>
+    <>
+      {/* The frame's control, outside the backdrop, as #2503's frame draws
+          its menu button over the page: in the page's own mode, never
+          turned dark with what stands on a scene. */}
       {away ? (
         <span {...stylex.props(styles.trigger)}>
           <SidebarTrigger />
         </span>
       ) : null}
-      <section aria-labelledby="new-chat" {...stylex.props(styles.screen)}>
-        <div
-          ref={column}
-          {...stylex.props(styles.column, make === undefined && styles.bare)}
-        >
-          <Greeting making={make !== undefined} />
-          <div {...stylex.props(styles.ask)}>
-            <Composer
-              placeholder={t`Ask anything, or describe a process`}
-              agentModel={agentModelOf(agents, answering)}
-              running={false}
-              style={styles.box}
-              {...(unavailable === undefined ? {} : { unavailable })}
-              {...composer}
-            />
-            <ModelsUnavailableNotice onRetry={retry} why={modelsUnavailable} />
+      <Backdrop clear={column} variant={look}>
+        <section aria-labelledby="new-chat" {...stylex.props(styles.screen)}>
+          <div
+            ref={column}
+            {...stylex.props(styles.column, make === undefined && styles.bare)}
+          >
+            <Greeting making={make !== undefined} />
+            <div {...stylex.props(styles.ask)}>
+              <Composer
+                placeholder={t`Ask anything, or describe a process`}
+                agentModel={agentModelOf(agents, answering)}
+                running={false}
+                style={styles.box}
+                {...(unavailable === undefined ? {} : { unavailable })}
+                {...composer}
+              />
+              <ModelsUnavailableNotice
+                onRetry={retry}
+                why={modelsUnavailable}
+              />
+            </div>
+            {make === undefined ? null : (
+              <Making
+                ideas={ideas}
+                onPick={(text) => {
+                  composer.onText(text);
+                }}
+              />
+            )}
           </div>
-          {make === undefined ? null : (
-            <Making
-              ideas={ideas}
-              onPick={(text) => {
-                composer.onText(text);
-              }}
-            />
-          )}
-        </div>
-      </section>
-    </Backdrop>
+        </section>
+      </Backdrop>
+    </>
   );
 };
