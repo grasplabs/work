@@ -12859,6 +12859,10 @@ msgctxt "the settings an app offers itself"
 msgid "Options"
 msgstr "Options"
 
+#: src/onboarding/calm-frame.tsx
+msgid "or press"
+msgstr "ou appuyez sur"
+
 #: src/onboarding/company-step.tsx
 msgid "Or use a staff list"
 msgstr "Ou utilisez une liste du personnel"
@@ -16547,6 +16551,7 @@ msgid "Step"
 msgstr "Étape"
 
 #: src/frame/ui-words.tsx
+#: src/onboarding/calm-frame.tsx
 msgid "Step {step} of {total}"
 msgstr "Étape {step} sur {total}"
 
