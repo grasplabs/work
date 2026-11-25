@@ -180,7 +180,7 @@ export const drawMarks = (
     const top = y + (height - mark.rows * CELL) / 2;
     const free = x + width - mark.room + CLEAR;
     const fadeFrom = Math.max(x + width * (1 - REACH), free);
-    // Kept inside the component, clear of its edge and of its words, so his ring and the words stay clean.
+    // Kept inside the component, clear of its edge and of its words, so its edge and the words stay clean.
     context.save();
     context.beginPath();
     context.rect(free, y + 3, x + width - 3 - free, height - 6);
