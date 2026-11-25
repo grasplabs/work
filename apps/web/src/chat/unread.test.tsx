@@ -60,9 +60,12 @@ const showTab = (shown: boolean) => {
   document.dispatchEvent(new Event("visibilitychange"));
 };
 
-/** The chat's view as the page shows it now, and who reads it. */
-const shownChat: { view: View; listeners: Set<() => void> } = {
-  view: { messages: [], running: false, loaded: false },
+/** The chat's view as the page shows it now, whether it is in front of the person, and who reads it. */
+const shownChat: {
+  state: { view: View; seen: boolean };
+  listeners: Set<() => void>;
+} = {
+  state: { view: { messages: [], running: false, loaded: false }, seen: true },
   listeners: new Set(),
 };
 
@@ -78,8 +81,8 @@ const lines: ReturnType<typeof useNewLine>[] = [];
 
 /** Chat `chat-1` open with what the page shows of it. */
 const Page = () => {
-  const view = useSyncExternalStore(subscribe, () => shownChat.view);
-  lines.push(useNewLine("chat-1", view));
+  const { view, seen } = useSyncExternalStore(subscribe, () => shownChat.state);
+  lines.push(useNewLine("chat-1", view, seen));
   return null;
 };
 
@@ -88,15 +91,15 @@ const Page = () => {
  * where the person had read to, `seenUpTo`, the first time, and the latest
  * message after: what the hook gives, and each mark.
  */
-const opened = async (view: View, seenUpTo: number | null) => {
-  shownChat.view = view;
+const opened = async (view: View, seenUpTo: number | null, seen = true) => {
+  shownChat.state = { view, seen };
   lines.length = 0;
   let latestMarked: number | null = seenUpTo;
   const markRead = vi.fn<(chatId: string) => Promise<number | null>>(
     async (chatId) => {
       await Promise.resolve();
       const before = latestMarked;
-      latestMarked = shownChat.view.messages.at(-1)?.id ?? before;
+      latestMarked = shownChat.state.view.messages.at(-1)?.id ?? before;
       return chatId === "chat-1" ? before : null;
     }
   );
@@ -121,8 +124,8 @@ const opened = async (view: View, seenUpTo: number | null) => {
   return {
     markRead,
     line: () => lines.at(-1),
-    show: async (next: View) => {
-      shownChat.view = next;
+    show: async (next: Partial<{ view: View; seen: boolean }>) => {
+      shownChat.state = { ...shownChat.state, ...next };
       await act(async () => {
         for (const listener of shownChat.listeners) {
           listener();
@@ -213,14 +216,18 @@ describe("where the person has read a chat to", () => {
 
     // They ask, and watch the answer come and end.
     await chat.show({
-      ...view,
-      messages: [...view.messages, question(3)],
-      running: true,
+      view: {
+        ...view,
+        messages: [...view.messages, question(3)],
+        running: true,
+      },
     });
     await chat.show({
-      ...view,
-      messages: [...view.messages, question(3), answer(4)],
-      running: false,
+      view: {
+        ...view,
+        messages: [...view.messages, question(3), answer(4)],
+        running: false,
+      },
     });
 
     await vi.waitFor(() => {
@@ -255,7 +262,7 @@ describe("where the person has read a chat to", () => {
     });
   });
 
-  it("marks nothing read in a hidden tab, opening at once with no line, and marks it read once the tab is shown", async () => {
+  it("marks nothing read in a hidden tab, and opens it once the tab is shown, with the line over what was unread", async () => {
     showTab(false);
     const view = {
       messages: [question(1), answer(2)],
@@ -274,11 +281,50 @@ describe("where the person has read a chat to", () => {
     });
 
     await vi.waitFor(() => {
-      expect(chat.markRead).toHaveBeenCalledWith("chat-1");
+      expect(chat.line()).toStrictEqual({ decided: true, before: 2 });
     });
-    expect({ hidden, shown: chat.line() }).toStrictEqual({
-      hidden: { line: { decided: true, before: undefined }, marks: 0 },
-      shown: { decided: true, before: undefined },
+    expect(hidden).toStrictEqual({
+      line: { decided: false, before: undefined },
+      marks: 0,
+    });
+  });
+
+  it("marks nothing read while the chat beside the page is closed to its bar, an answer ending there included, and opens it afresh each time it opens", async () => {
+    showTab(true);
+    const view = {
+      messages: [question(1), answer(2)],
+      running: true,
+      loaded: true,
+    };
+    const chat = await opened(view, 1, false);
+    // The answer ends while it is closed.
+    await chat.show({
+      view: {
+        ...view,
+        messages: [...view.messages, answer(3)],
+        running: false,
+      },
+    });
+    const closed = {
+      line: chat.line(),
+      marks: chat.markRead.mock.calls.length,
+    };
+
+    // Opened: read now, with the line over what came while it was closed.
+    await chat.show({ seen: true });
+    await vi.waitFor(() => {
+      expect(chat.line()).toStrictEqual({ decided: true, before: 2 });
+    });
+    // Closed and opened again: nothing unread now, so no line.
+    await chat.show({ seen: false });
+    const closedAgain = chat.line();
+    await chat.show({ seen: true });
+    await vi.waitFor(() => {
+      expect(chat.line()).toStrictEqual({ decided: true, before: undefined });
+    });
+    expect({ closed, closedAgain }).toStrictEqual({
+      closed: { line: { decided: false, before: undefined }, marks: 0 },
+      closedAgain: { decided: false, before: undefined },
     });
   });
 });

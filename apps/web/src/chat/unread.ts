@@ -61,12 +61,16 @@ export interface NewLine {
 }
 
 /**
- * Marks `chatId` read while it is open here and the tab is shown, and
- * gives the New line its thread draws: over the first answer the person
- * hadn't seen as it opened (`view`, once loaded), for as long as it stays
- * open. A chat whose agent works as it opens, and a tab hidden as it
- * opens, decide no line; the hidden tab marks it read once it is shown. A
- * failed mark draws none, and the chat stays unread.
+ * Marks `chatId` read while the person looks at it, and gives the New line
+ * its thread draws: over the first answer they hadn't seen as it opened
+ * (`view`, once loaded), for as long as it stays open. They look at it
+ * while it is `seen` (a chat's page; the dock while it is open, never
+ * while it is closed to its bar) and the tab is shown: until then nothing
+ * is marked and nothing decided, and the thread stays loading, unseen.
+ * Closed (`seen` false), it is opened afresh the next time. A chat whose
+ * agent works as it opens decides no line: the person watches that answer
+ * come, and it is read as it ends. A failed mark draws none, and the chat
+ * stays unread. One chat a mount: its caller keys it by chat.
  */
 export const useNewLine = (
   chatId: string | undefined,
@@ -74,24 +78,20 @@ export const useNewLine = (
     messages: readonly ChatMessage[];
     running: boolean;
     loaded: boolean;
-  }
+  },
+  seen: boolean
 ): NewLine => {
   const core = useCore();
-  const shown = useTabShown();
-  // Where core said they had read to as the chat opened, by chat: a
-  // number or null, or `false` when it couldn't say.
-  const [opened, setOpened] = useState<{
-    chatId: string;
-    seenUpTo: number | null | false;
-  }>();
-  // The line, decided once for each chat as it opens.
-  const [line, setLine] = useState<{
-    chatId: string;
-    before: number | undefined;
-  }>();
-  // The chat marked as it opened, and the latest answer marked since.
-  const asked = useRef<string | null>(null);
-  const marked = useRef<{ chatId: string; upTo: number } | null>(null);
+  const looking = useTabShown() && seen;
+  // Where core said they had read to as the chat opened: a number or
+  // null, or `false` when it couldn't say; undefined until it answered.
+  const [opened, setOpened] = useState<number | null | false>();
+  // The answer the line goes over, decided once as the chat opens; null
+  // for none, undefined until decided.
+  const [line, setLine] = useState<number | null>();
+  // Whether it was marked as it opened, and the latest answer marked since.
+  const asked = useRef(false);
+  const marked = useRef(0);
   const mark = useEffectEvent(async (id: string): Promise<number | null> => {
     const before = await core.withSession(
       async (session) => await session.chats.markRead(id)
@@ -100,56 +100,53 @@ export const useNewLine = (
     tellChatsChanged();
     return before;
   });
+  // Closed: the next time it is seen, it opens afresh.
+  if (!seen && (opened !== undefined || line !== undefined)) {
+    setOpened(undefined);
+    setLine(undefined);
+  }
   useEffect(() => {
-    if (chatId === undefined || !shown || asked.current === chatId) {
+    if (!seen) {
+      asked.current = false;
+      marked.current = 0;
+    }
+    if (chatId === undefined || !looking || asked.current) {
       return;
     }
-    asked.current = chatId;
+    asked.current = true;
     void (async () => {
       try {
-        setOpened({ chatId, seenUpTo: await mark(chatId) });
+        setOpened(await mark(chatId));
       } catch {
-        setOpened({ chatId, seenUpTo: false });
+        setOpened(false);
       }
     })();
-  }, [chatId, shown]);
-  const decided = chatId !== undefined && line?.chatId === chatId;
-  const answered =
-    opened !== undefined && opened.chatId === chatId
-      ? opened.seenUpTo
-      : undefined;
-  // Decided once the thread has loaded and core has answered, or at once
-  // in a hidden tab, which waits for nobody. None while the agent works as
-  // it opens: the person watches that answer come (a question they just
-  // asked here, which opened the chat), and it is read as it ends.
-  if (
-    chatId !== undefined &&
-    !decided &&
-    view.loaded &&
-    (answered !== undefined || !shown)
-  ) {
-    setLine({
-      chatId,
-      before:
-        answered === undefined || answered === false || view.running
-          ? undefined
-          : firstUnseenAnswer(view.messages, answered),
-    });
+  }, [chatId, looking, seen]);
+  // Decided once the thread has loaded and core has answered.
+  if (line === undefined && view.loaded && opened !== undefined) {
+    setLine(
+      opened === false || view.running
+        ? null
+        : (firstUnseenAnswer(view.messages, opened) ?? null)
+    );
   }
-  // An answer that ends while the chat is open and the tab shown is read
-  // at once: no dot, no line.
+  const decided = line !== undefined;
+  // An answer that ends while the person looks is read at once: no dot,
+  // no line.
   const latest = view.running
     ? undefined
     : view.messages.findLast(({ role }) => role === "assistant")?.id;
   useEffect(() => {
-    if (chatId === undefined || !decided || !shown || latest === undefined) {
+    if (
+      chatId === undefined ||
+      !decided ||
+      !looking ||
+      latest === undefined ||
+      latest <= marked.current
+    ) {
       return;
     }
-    const done = marked.current?.chatId === chatId ? marked.current.upTo : 0;
-    if (latest <= done) {
-      return;
-    }
-    marked.current = { chatId, upTo: latest };
+    marked.current = latest;
     void (async () => {
       try {
         await mark(chatId);
@@ -158,10 +155,8 @@ export const useNewLine = (
         // the next time the chat opens.
       }
     })();
-  }, [chatId, decided, shown, latest]);
-  return decided && line !== undefined
-    ? { decided, before: line.before }
-    : { decided: false, before: undefined };
+  }, [chatId, decided, looking, latest]);
+  return { decided, before: line ?? undefined };
 };
 
 /** The New line's row in the thread (`MessageScrollerItem`'s `messageId`). */
@@ -184,7 +179,10 @@ export const opensAtNewLine = ({
   view: number;
 }): boolean => height - lineTop > view;
 
-/** Whether `row` is drawn, not skipped while out of view (`content-visibility: auto`). */
+/**
+ * Whether `row` is drawn, not skipped while out of view
+ * (`content-visibility: auto`); drawn where the browser can't say.
+ */
 const drawn = (row: Element | null | undefined): boolean =>
   row?.firstElementChild?.checkVisibility({ contentVisibilityAuto: true }) ??
   true;
@@ -210,14 +208,23 @@ export const OpenAtNewLine = ({
   const placed = useRef(false);
   const place = useEffectEvent((log: HTMLElement): boolean => {
     const row = log.querySelector(`[data-message-id="${newLineRow}"]`);
-    if (row === null || !drawn(row.nextElementSibling)) {
+    // Until the browser has drawn the rows in view, at the end, sizes are
+    // a skipped row's stand-in.
+    const items = [...(log.firstElementChild?.children ?? [])];
+    const last = items.findLast((item) => item.firstElementChild !== null);
+    if (row === null || !drawn(last)) {
       return false;
     }
+    // The answer under the line is drawn when it is near the view: then
+    // measured. Not drawn, it lies further up than that, so what is unread
+    // is taller than the view.
+    const near = drawn(row.nextElementSibling);
     const lineTop =
       row.getBoundingClientRect().top -
       log.getBoundingClientRect().top +
       log.scrollTop;
     if (
+      !near ||
       opensAtNewLine({
         lineTop,
         height: log.scrollHeight,
@@ -234,6 +241,10 @@ export const OpenAtNewLine = ({
     return true;
   });
   useLayoutEffect(() => {
+    // Placed again once the thread has a line again (closed and opened).
+    if (!line) {
+      placed.current = false;
+    }
     const log = document.querySelector<HTMLElement>(`#${CSS.escape(logId)}`);
     const rows = log?.firstElementChild;
     const sizes = new ResizeObserver(() => {

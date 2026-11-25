@@ -21,6 +21,7 @@ import { chatLink, useGoToChat } from "./chat-link.ts";
 import { useChatsWindow } from "./chat-switcher.tsx";
 import { onChatsChanged } from "./chats-changed.ts";
 import { DeleteChatDialog } from "./delete-chat-dialog.tsx";
+import { useChatOpenBeside } from "./global-chat.tsx";
 
 // The person's recent chats in the sidebar, as the reference's (#2503's
 // chat/sidebar-chats.tsx): the most recently used first, a few of them,
@@ -143,6 +144,7 @@ export const useRecentChats = ({
   const openChats = useChatsWindow();
   const { setOpenMobile } = useSidebar();
   const changes = useRowChanges();
+  const beside = useChatOpenBeside();
   const [deleting, setDeleting] = useState<ChatSummary>();
   // The window doesn't navigate, so the phone's sheet would stay over it: it goes first.
   const more: SidebarMore = {
@@ -174,8 +176,9 @@ export const useRecentChats = ({
       working: chat.running,
       workingLabel: t`Answering`,
       // Answered while the person wasn't looking (chat/unread.ts): a dot,
-      // never on the chat open in front of them, which is read as it ends.
-      unread: chat.unread && !current,
+      // never on the chat open in front of them, on its page or beside
+      // this one, which is read as it ends.
+      unread: chat.unread && !current && chat.id !== beside,
       unreadLabel: t`Unread`,
       actions,
       actionsLabel: t`More for ${title}`,

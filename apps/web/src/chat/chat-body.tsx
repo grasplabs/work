@@ -104,22 +104,33 @@ const Loading = () => {
   );
 };
 
-/** The conversation, or what to ask before there is one; `focusBox` takes the person to the box. */
+/**
+ * The conversation, or what to ask before there is one; `focusBox` takes
+ * the person to the box. One chat a mount: its caller keys it by chat, so
+ * each chat opens afresh, with its own New line.
+ */
 export const ChatConversation = ({
   chat,
   compact,
   focusBox,
+  seen,
 }: {
   chat: GlobalChat;
   /** Narrow, beside the page: the thread's own reading column is left out. */
   compact: boolean;
   focusBox: () => void;
+  /**
+   * Whether it is in front of the person: on a chat's page, and in the
+   * dock while it is open, never while it is closed to its bar. Only then
+   * is it read (unread.ts).
+   */
+  seen: boolean;
 }) => {
   const { t, i18n } = useLingui();
   const { chatId, finding, view, failure, empty, ask, composer, offered } =
     chat;
   // Read as it opens here; the New line over what the person hadn't seen.
-  const newLine = useNewLine(chatId, view);
+  const newLine = useNewLine(chatId, view, seen);
   // A subject's chat, while core finds it, or why it gave none.
   if (finding.searching || finding.failure !== undefined) {
     return finding.failure === undefined ? (
