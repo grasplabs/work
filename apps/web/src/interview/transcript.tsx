@@ -10,13 +10,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@grasp-os/ui/components/alert-dialog";
-import { Bubble, BubbleContent } from "@grasp-os/ui/components/bubble";
-import {
-  Message,
-  MessageAction,
-  MessageActions,
-  MessageContent,
-} from "@grasp-os/ui/components/message";
 import {
   MessageScroller,
   MessageScrollerContent,
@@ -25,7 +18,6 @@ import {
   MessageScrollerViewport,
 } from "@grasp-os/ui/components/message-scroller";
 import { Text } from "@grasp-os/ui/components/text";
-import { Icon, XIcon } from "@grasp-os/ui/lib/icons";
 import { fadeIn } from "@grasp-os/ui/lib/styles";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { announce } from "@grasp-os/ui/lib/utils";
@@ -34,9 +26,16 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
 
 import { useInterviewer } from "./kept.ts";
-import { Marked } from "./marked.tsx";
 import { soundIsOn } from "./speech.ts";
-import { useInterviewWords } from "./words.ts";
+import {
+  ChatLine,
+  exchangesOf,
+  QaExchange,
+  QaLegend,
+  ScriptLine,
+  useTranscriptLook,
+} from "./transcript-looks.tsx";
+import type { Placed, TranscriptLook } from "./transcript-looks.tsx";
 
 // The transcript, from the button top right (prototype
 // `interview-view.tsx`, `Transcript`): the conversation as a normal chat,
@@ -62,17 +61,9 @@ const styles = stylex.create({
   },
   note: { flexShrink: 0, paddingBlockEnd: space["2"] },
   thread: { display: "flex", flexGrow: 1, minHeight: 0 },
+  // A new turn stands apart from the one before; lines of one turn keep the scroller's own rhythm.
+  turn: { paddingBlockStart: space["2"] },
 });
-
-/** How many words of a line its remove button names it by. */
-const namingWords = 6;
-
-/** The first words of `text`, to name its line by. */
-const startOf = (text: string): string => {
-  const words = text.trim().split(/\s+/u);
-  const start = words.slice(0, namingWords).join(" ");
-  return words.length > namingWords ? `${start}…` : start;
-};
 
 /** Removes a line of the transcript, once confirmed: it can't be undone. */
 const RemoveLine = ({
@@ -115,63 +106,57 @@ const RemoveLine = ({
   );
 };
 
-/** One line of the conversation: the interviewer's at the start, theirs at the end; one removed, as removed. */
-const Line = ({
-  line,
+/** The lines where they stand, each told whether it starts a turn. */
+const placedOf = (lines: InterviewLine[]): Placed[] =>
+  lines.map((line, place) => ({
+    line,
+    place,
+    starts: place === 0 || lines[place - 1]?.from !== line.from,
+  }));
+
+/** The rows of the transcript in its look, each scrolled to as it comes. */
+const Rows = ({
+  look,
+  lines,
   onRemove,
 }: {
-  line: InterviewLine;
-  onRemove: () => void;
+  look: TranscriptLook;
+  lines: InterviewLine[];
+  onRemove: (place: number) => void;
 }) => {
-  const { t } = useLingui();
-  const names = useInterviewWords().tag;
   const who = interviewerNames[useInterviewer()];
-  const stephen = line.from === "stephen";
-  const words = startOf(line.text);
-  let said = (
-    <Bubble align="end" variant="secondary">
-      <BubbleContent>
-        <Marked marks={line.marks ?? []} names={names} text={line.text} />
-      </BubbleContent>
-    </Bubble>
-  );
-  if (line.removed === true) {
-    said = (
-      <Text color="muted" size="sm">
-        {stephen ? t`A line of mine, removed.` : t`Removed.`}
-      </Text>
-    );
-  } else if (stephen) {
-    said = (
-      <Bubble variant="ghost">
-        <BubbleContent>{line.text}</BubbleContent>
-      </Bubble>
-    );
+  const placed = placedOf(lines);
+  if (look === "c") {
+    return exchangesOf(placed).map((exchange, index) => {
+      const first = exchange.lines[0]?.place ?? index;
+      return (
+        // An exchange is known by its first line, whose place never changes.
+        <MessageScrollerItem key={first} messageId={String(first)}>
+          <QaExchange
+            exchange={exchange}
+            number={index + 1}
+            onRemove={onRemove}
+            who={who}
+          />
+        </MessageScrollerItem>
+      );
+    });
   }
-  return (
-    <Message
-      align={stephen ? "start" : "end"}
-      {...(stephen ? { "aria-label": who } : {})}
-    >
-      <MessageContent>
-        {said}
-        {line.removed === true ? null : (
-          <MessageActions>
-            <MessageAction
-              aria-label={
-                stephen
-                  ? t`Remove ${who}’s line: ${words}`
-                  : t`Remove your line: ${words}`
-              }
-              onClick={onRemove}
-            >
-              <Icon icon={XIcon} />
-            </MessageAction>
-          </MessageActions>
-        )}
-      </MessageContent>
-    </Message>
-  );
+  const Line = look === "b" ? ChatLine : ScriptLine;
+  return placed.map((one) => (
+    // The conversation only grows: a line's place is what it is, and core removes it by it.
+    <MessageScrollerItem key={one.place} messageId={String(one.place)}>
+      <div {...stylex.props(one.place > 0 && one.starts && styles.turn)}>
+        <Line
+          onRemove={() => {
+            onRemove(one.place);
+          }}
+          placed={one}
+          who={who}
+        />
+      </div>
+    </MessageScrollerItem>
+  ));
 };
 
 /**
@@ -211,6 +196,8 @@ export const Transcript = ({
 }) => {
   const { t } = useLingui();
   const [removing, setRemoving] = useState<number | null>(null);
+  const look = useTranscriptLook();
+  const interviewer = useInterviewer();
   useHisNewLinesSaid(alone, lines);
   if (!open) {
     return null;
@@ -222,6 +209,9 @@ export const Transcript = ({
       id={transcriptId}
       {...stylex.props(styles.aside, fadeIn)}
     >
+      {look === "c" && lines.length > 0 ? (
+        <QaLegend who={interviewerNames[interviewer]} />
+      ) : null}
       {marked ? (
         <div {...stylex.props(styles.note)}>
           <Text color="muted" size="xs">
@@ -237,17 +227,13 @@ export const Transcript = ({
             <MessageScroller>
               <MessageScrollerViewport aria-label={t`Transcript`}>
                 <MessageScrollerContent>
-                  {lines.map((line, place) => (
-                    // The conversation only grows: a line's place is what it is, and core removes it by it.
-                    <MessageScrollerItem key={place} messageId={String(place)}>
-                      <Line
-                        line={line}
-                        onRemove={() => {
-                          setRemoving(place);
-                        }}
-                      />
-                    </MessageScrollerItem>
-                  ))}
+                  <Rows
+                    lines={lines}
+                    look={look}
+                    onRemove={(place) => {
+                      setRemoving(place);
+                    }}
+                  />
                 </MessageScrollerContent>
               </MessageScrollerViewport>
             </MessageScroller>
