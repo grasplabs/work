@@ -6210,6 +6210,7 @@ msgstr "Gedaan in een run"
 msgid "Done right"
 msgstr "Wanneer het goed is"
 
+#: src/chat/sidebar-chats.tsx
 #: src/frame/panels/rename.tsx
 msgid "Double-click or press F2 to rename"
 msgstr "Dubbelklik of druk op F2 om de naam te wijzigen"
@@ -12559,6 +12560,10 @@ msgstr "Openstaande taken en hun deadlines."
 msgid "Open the App"
 msgstr "De App openen"
 
+#: src/chat/chat-bar.tsx
+msgid "Open the chat"
+msgstr "De chat openen"
+
 #: src/apps/app-workspace.tsx
 msgid "Open the chat in Chat"
 msgstr "De chat openen in Chat"
@@ -13848,6 +13853,7 @@ msgid "Redone"
 msgstr "Opnieuw gedaan"
 
 #: src/connections/part-not-loaded.tsx
+#: src/frame/page-states.tsx
 msgid "Reference for support"
 msgstr "Referentie voor support"
 
@@ -14112,6 +14118,10 @@ msgstr "Chat hernoemen"
 #: src/activity/audit-words.ts
 msgid "Renamed the organization"
 msgstr "Heeft de organisatie hernoemd"
+
+#: src/chat/sidebar-chats.tsx
+msgid "Renamed to {name}"
+msgstr "Hernoemd tot {name}"
 
 #: src/apps/data-model-changes.tsx
 msgid "Renames the table {from} to {to}; its records go with it."
@@ -15987,6 +15997,7 @@ msgid "Something went wrong while it opened."
 msgstr "Er ging iets mis bij het openen."
 
 #: src/connections/part-not-loaded.tsx
+#: src/frame/page-states.tsx
 #: src/route-error.tsx
 msgid "Something went wrong."
 msgstr "Er ging iets mis."
@@ -18343,7 +18354,6 @@ msgstr "Proberen"
 #: src/inbox/decision-card.tsx
 #: src/inbox/inbox-page.tsx
 #: src/interview/destination.tsx
-#: src/pages/frame-failure.tsx
 #: src/settings/sign-in-settings.tsx
 msgid "Try again"
 msgstr "Opnieuw proberen"

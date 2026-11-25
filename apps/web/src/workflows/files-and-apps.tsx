@@ -40,7 +40,7 @@ import {
   TableRow,
 } from "@grasp-os/ui/components/table";
 import { Text } from "@grasp-os/ui/components/text";
-import { Icon } from "@grasp-os/ui/lib/icons";
+import { CableIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -66,7 +66,6 @@ import {
   targetWords,
 } from "./binding-approvals.tsx";
 import { useHeldDialog } from "./held-dialog.ts";
-import { CableIcon } from "./icons.ts";
 import { SectionCard } from "./section-card.tsx";
 import { SeparatedItems } from "./separated-items.tsx";
 import { workflowAppsOf } from "./workflow-apps.ts";
@@ -333,7 +332,6 @@ const RevokeBinding = ({
             onClick={async () => {
               await dialog.hold(revoke);
             }}
-            size="sm"
             variant="destructive"
           >
             {t`Revoke`}

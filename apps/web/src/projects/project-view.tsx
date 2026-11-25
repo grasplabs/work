@@ -246,7 +246,6 @@ const RemoveItem = ({
               onClick={async () => {
                 await dialog.hold(takeOut);
               }}
-              size="sm"
               variant="destructive"
             >
               {t`Take out`}
@@ -409,7 +408,6 @@ const DeleteProject = ({
                 setWorking(false);
               });
             }}
-            size="sm"
             variant="destructive"
           >
             {t`Delete project`}

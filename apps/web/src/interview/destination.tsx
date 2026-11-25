@@ -201,9 +201,7 @@ const SendFoot = ({
           {note}
         </p>
       )}
-      <SheetClose size="default">
-        {sending === "choosing" ? t`Cancel` : t`Close`}
-      </SheetClose>
+      <SheetClose>{sending === "choosing" ? t`Cancel` : t`Close`}</SheetClose>
       {sending === "not_kept" ? (
         <Button onClick={saveAgainNow}>{t`Try again`}</Button>
       ) : (

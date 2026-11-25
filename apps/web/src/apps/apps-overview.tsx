@@ -25,6 +25,7 @@ import {
 } from "@grasp-os/ui/components/tabs";
 import { toast } from "@grasp-os/ui/components/toast";
 import {
+  AppWindowIcon,
   ArchiveIcon,
   Icon,
   Maximize2Icon,
@@ -40,7 +41,6 @@ import { Link, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { changeThenRefresh } from "../change-then-refresh.ts";
-import { AppWindowIcon } from "../frame/sidebar-icons.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { ProcessTile } from "../workflows/business-process.tsx";
 import { AppCard, AppCardGrid } from "./app-card/app-card.tsx";

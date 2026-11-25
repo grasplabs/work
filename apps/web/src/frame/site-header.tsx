@@ -6,12 +6,21 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@grasp-os/ui/components/breadcrumb";
+import { breadcrumbVars } from "@grasp-os/ui/components/breadcrumb.stylex";
 import { SidebarTrigger, useSidebar } from "@grasp-os/ui/components/sidebar";
-import { colors, media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { focusRingText } from "@grasp-os/ui/lib/styles";
+import {
+  colors,
+  font,
+  media,
+  radius,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
-import { Fragment, useLayoutEffect, useRef } from "react";
+import { Fragment, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 
 import type { RegionId } from "../brain/brain-atlas.ts";
@@ -85,60 +94,102 @@ const CrumbName = ({ crumb }: { crumb: Crumb }) => {
   );
 };
 
+/** A router link's look: none (Damsko's BreadcrumbLink gives it), or the phone trail's. */
+type LinkLook = Partial<ReturnType<typeof stylex.props>>;
+
 /** Where a crumb leads, as a router link holding its name. */
-const CrumbLink = ({ crumb }: { crumb: Extract<Crumb, { to: string }> }) => {
+const CrumbLink = ({
+  crumb,
+  look,
+}: {
+  crumb: Extract<Crumb, { to: string }>;
+  look?: LinkLook;
+}) => {
   const { label } = crumb;
   // A place on the brain's atlas: a region, a folder in it, a note there.
   if ("search" in crumb) {
     return (
-      <Link search={crumb.search} to="/brain">
+      <Link search={crumb.search} to="/brain" {...look}>
         {label}
       </Link>
     );
   }
   if (!("params" in crumb)) {
-    return <Link to={crumb.to}>{label}</Link>;
+    return (
+      <Link to={crumb.to} {...look}>
+        {label}
+      </Link>
+    );
   }
   if (crumb.to === "/workflows/$workflow") {
     return (
-      <Link params={crumb.params} to="/workflows/$workflow">
+      <Link params={crumb.params} to="/workflows/$workflow" {...look}>
         {label}
       </Link>
     );
   }
   if (crumb.to === "/projects/$projectId") {
     return (
-      <Link params={crumb.params} to="/projects/$projectId">
+      <Link params={crumb.params} to="/projects/$projectId" {...look}>
         {label}
       </Link>
     );
   }
   if (crumb.to === "/brain/$noteId") {
     return (
-      <Link params={crumb.params} to="/brain/$noteId">
+      <Link params={crumb.params} to="/brain/$noteId" {...look}>
         {label}
       </Link>
     );
   }
   if (crumb.to === "/brain/sections/$sectionId") {
     return (
-      <Link params={crumb.params} to="/brain/sections/$sectionId">
+      <Link params={crumb.params} to="/brain/sections/$sectionId" {...look}>
         {label}
       </Link>
     );
   }
   return (
-    <Link params={crumb.params} to="/apps/$app">
+    <Link params={crumb.params} to="/apps/$app" {...look}>
       {label}
     </Link>
   );
 };
 
+/**
+ * A phone's window, under 40rem, as #2503's shell reads it (its card is
+ * the whole window there): where its bar keeps only the page and the step
+ * before it.
+ */
+const phoneQuery = "(width < 40rem)";
+
+const onPhoneChange = (changed: () => void): (() => void) => {
+  const list = matchMedia(phoneQuery);
+  list.addEventListener("change", changed);
+  return () => {
+    list.removeEventListener("change", changed);
+  };
+};
+
+/** Whether the window is a phone's now, followed as it changes; never on the server. */
+const usePhone = (): boolean =>
+  useSyncExternalStore(
+    onPhoneChange,
+    () => matchMedia(phoneQuery).matches,
+    () => false
+  );
+
+// The room a crumb's link keeps round its words for its focus ring, given
+// back by a negative margin, and the reach of that ring past the words,
+// which the trail's clip keeps clear of, as #2503's bar has them.
+const CRUMB_ROOM = `calc(${space["1"]} - ${size.hairline})`;
+const RING_REACH = `calc(${size.ringWidth} + ${size.ringOffsetText} + ${CRUMB_ROOM})`;
+
 const styles = stylex.create({
   // One row the shell's bar height, across the page's card from edge to
   // edge, at the top of the page, which scrolls under it: on the card's
-  // own ground (Damsko's SidebarInset: the page's ground under the lg
-  // breakpoint, the sidebar's card from it), with a hairline at its foot.
+  // own ground at every width (app-frame.tsx), as #2503's bar on its
+  // card's (shell-card), with a hairline at its foot.
   bar: {
     position: "sticky",
     insetBlockStart: 0,
@@ -151,13 +202,15 @@ const styles = stylex.create({
     minWidth: 0,
     height: size.appShellBar,
     paddingInline: size.appShellPageInline,
-    backgroundColor: {
-      default: colors.background,
-      [media.lg]: colors.sidebarCard,
-    },
+    backgroundColor: colors.sidebarCard,
     borderBlockEndWidth: size.hairline,
     borderBlockEndStyle: "solid",
-    borderBlockEndColor: colors.border,
+    // On a phone #2503's bar line is the frame's own neutral rule (the
+    // card's edge, shell-rule's step), not the page's tinted one.
+    borderBlockEndColor: {
+      default: colors.border,
+      [media.maxSm]: colors.sidebarCardBorder,
+    },
   },
   // Where the page is, then where its subject stands: they give way to the
   // actions, never the other way round.
@@ -168,10 +221,14 @@ const styles = stylex.create({
     gap: space["2"],
     minWidth: 0,
     overflow: "hidden",
-    // The crumbs in the sidebar's greys, as the reference's bar: the steps
-    // back in its rows' words, the slashes quieter, the page in its ink.
-    // Damsko's Breadcrumb takes the page's tinted greys (registry gap of
-    // 24 Nov 2026).
+    // The crumbs in the sidebar's neutral greys, as the reference's bar:
+    // the steps back in its rows' words, the slashes quieter, the page in
+    // its ink, through Damsko's Breadcrumb's own inks, which an app
+    // shell's bar sets; what else stands here (where the subject stands,
+    // a name being renamed) in the same greys.
+    [breadcrumbVars.mutedForeground]: colors.sidebarSecondaryForeground,
+    [breadcrumbVars.subtleForeground]: colors.sidebarTertiaryForeground,
+    [breadcrumbVars.foreground]: colors.sidebarForeground,
     "--damsko-muted-foreground": colors.sidebarSecondaryForeground,
     "--damsko-subtle-foreground": colors.sidebarTertiaryForeground,
     "--damsko-foreground": colors.sidebarForeground,
@@ -183,9 +240,102 @@ const styles = stylex.create({
     marginInlineStart: `calc((${size.sidebarIcon} - ${size.sidebarIconButton}) / 2)`,
     marginInlineEnd: "-2px",
   },
+  // On a phone the button is #2503's Menu button, a ghost Button: in its
+  // ink, the chat button's at the bar's other end, not the sidebar's
+  // greys.
+  triggerInk: {
+    display: "contents",
+    "--damsko-sidebar-secondary-foreground": {
+      default: null,
+      [media.maxSm]: colors.foreground,
+    },
+  },
   // The slashes stand a step apart from the steps, as the reference's.
   separator: { marginInline: space["1"] },
-  trailing: { display: "flex", flexShrink: 0, alignItems: "center" },
+  // A phone's trail, as #2503's bar draws it (grasp/app-shell/bar.tsx,
+  // `phoneCrumbs="last-two"`): the page and the step before it, a slash
+  // between, on one line. Laid end to start, the page first to take its
+  // room and the step after it, whole or not at all: a step that does not
+  // fit beside the page at its least wraps onto a second line, which the
+  // trail's clip hides, so the page stands alone.
+  phoneTrail: {
+    display: "flex",
+    minWidth: `calc(${space["8"]} + 2 * ${RING_REACH})`,
+    overflow: "clip",
+    padding: RING_REACH,
+    margin: `calc(-1 * ${RING_REACH})`,
+    // #2503's bar keeps two of its gaps (space3) between the crumbs and
+    // the actions, where this bar has one of its own (space2).
+    marginInlineEnd: `calc(2 * ${space["3"]} - ${space["2"]} - ${RING_REACH})`,
+    fontFamily: font.sans,
+    fontSize: font.textSm,
+    lineHeight: font.textSmLine,
+  },
+  phoneCrumbs: {
+    display: "flex",
+    flexDirection: "row-reverse",
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    alignItems: "center",
+    alignContent: "flex-start",
+    columnGap: space["2"],
+    rowGap: RING_REACH,
+    blockSize: {
+      default: font.textSmLine,
+      [media.pointerCoarse]: size.tapTarget,
+    },
+    minWidth: 0,
+    margin: 0,
+    padding: 0,
+    listStyle: "none",
+  },
+  // The step: its link, then the slash before the page, whole.
+  phoneStep: {
+    display: "flex",
+    flexShrink: 0,
+    alignItems: "center",
+    gap: space["2"],
+    minBlockSize: { default: null, [media.pointerCoarse]: size.tapTarget },
+    color: colors.sidebarSecondaryForeground,
+  },
+  phoneSlash: {
+    display: "flex",
+    flexShrink: 0,
+    color: colors.sidebarTertiaryForeground,
+  },
+  // The step's link: the sidebar's secondary words, its own ink under the
+  // pointer, a finger's height on a touch screen.
+  phoneLink: {
+    display: "inline-flex",
+    minWidth: 0,
+    alignItems: "center",
+    minHeight: { default: null, [media.pointerCoarse]: size.tapTarget },
+    borderRadius: radius.sm,
+    color: {
+      default: colors.sidebarSecondaryForeground,
+      ":hover": { default: null, [media.hover]: colors.sidebarForeground },
+    },
+    textDecoration: "none",
+    whiteSpace: "nowrap",
+    paddingInline: CRUMB_ROOM,
+    marginInline: `calc(-1 * ${CRUMB_ROOM})`,
+  },
+  // The page: first on the line, whole beside its step, cut to fit alone,
+  // never under a stub of its first letters.
+  phonePage: {
+    order: -100,
+    display: "flex",
+    flexShrink: 1,
+    minWidth: space["8"],
+  },
+  phonePageWords: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: colors.sidebarForeground,
+    fontWeight: font.weightMedium,
+  },
   actions: {
     display: "flex",
     flexShrink: 0,
@@ -201,12 +351,90 @@ const styles = stylex.create({
 });
 
 /**
+ * Puts a phone trail's step away while it wrapped out of sight: out of the
+ * tab order and the accessibility tree too (`inert`), as #2503's bar puts
+ * it away (`thinSteps`). It stays laid out, so the next resize finds
+ * whether it fits again.
+ */
+const watchStep = (item: HTMLLIElement | null): (() => void) | undefined => {
+  const list = item?.parentElement;
+  if (item === null || list === null || list === undefined) {
+    return undefined;
+  }
+  const place = () => {
+    item.inert =
+      item.getBoundingClientRect().top >= list.getBoundingClientRect().bottom;
+  };
+  place();
+  const observer = new ResizeObserver(place);
+  observer.observe(list);
+  return () => {
+    observer.disconnect();
+  };
+};
+
+/**
+ * Where the page is on a phone, as #2503's bar says it: the page and the
+ * step before it (`phoneCrumbs="last-two"`), the step dropped where both
+ * don't fit (`phoneCrumbs` in phoneTrail's styles). Composed here, not
+ * with Damsko's Breadcrumb, which under 640px keeps only the step back
+ * and leaves the page out (registry gap of 24 Nov 2026).
+ */
+const PhoneTrail = ({
+  crumbs,
+  label,
+}: {
+  crumbs: readonly Crumb[];
+  label: string;
+}) => {
+  const page = crumbs.at(-1);
+  const step = crumbs.at(-2);
+  if (page === undefined) {
+    return null;
+  }
+  return (
+    <nav
+      aria-label={label}
+      data-slot="breadcrumb"
+      {...stylex.props(styles.phoneTrail)}
+    >
+      <ol {...stylex.props(styles.phoneCrumbs)}>
+        {step === undefined ? null : (
+          <li ref={watchStep} {...stylex.props(styles.phoneStep)}>
+            {"to" in step ? (
+              <CrumbLink
+                crumb={step}
+                look={stylex.props(styles.phoneLink, focusRingText)}
+              />
+            ) : (
+              step.label
+            )}
+            <span aria-hidden="true" {...stylex.props(styles.phoneSlash)}>
+              /
+            </span>
+          </li>
+        )}
+        <li {...stylex.props(styles.phonePage)}>
+          <span
+            aria-current="page"
+            title={page.label}
+            {...stylex.props(styles.phonePageWords)}
+          >
+            <CrumbName crumb={page} />
+          </span>
+        </li>
+      </ol>
+    </nav>
+  );
+};
+
+/**
  * The bar above every signed-in page, the one way a page heads itself, so
  * the frame changes every page's bar here: Damsko's SidebarTrigger at its
  * start while the sidebar is away (folded, or a sheet on a narrow window;
  * otherwise the sidebar's head holds it), then where the page is (Damsko's
- * Breadcrumb, which under 640px keeps only the step back; its steps parted
- * by a slash, as the product's bar has them), with where its
+ * Breadcrumb, its steps parted by a slash, as the product's bar has them;
+ * on a phone the page and the step before it, `PhoneTrail`), with where its
  * subject stands after it (`trailing`), and at its end the page's actions.
  * It is app-shell-01's header, drawn by the page: the block draws its own
  * from props (the crumbs, the title, the actions), which the pages here
@@ -219,6 +447,11 @@ export const SiteHeader = ({
 }: {
   crumbs: readonly Crumb[];
   actions?: ReactNode;
+  /**
+   * Where its subject stands, an item of the row after the crumbs: one
+   * that gives way where the bar is narrow takes no room, nor the gap
+   * before it, once it has (`display: none`), so the crumbs keep it.
+   */
   trailing?: ReactNode;
 }) => {
   const { t } = useLingui();
@@ -230,6 +463,7 @@ export const SiteHeader = ({
   const chatFloats =
     placements.includes("floating") || placements.includes("docked");
   const away = isMobile || state === "collapsed";
+  const phone = usePhone();
   const last = crumbs.length - 1;
   const bar = useRef<HTMLElement>(null);
   // This bar's trigger opened the sidebar (pressed, or held focus as the
@@ -287,44 +521,48 @@ export const SiteHeader = ({
       {...stylex.props(styles.bar, chatFloats && styles.roomForChat)}
     >
       {away ? (
-        <SidebarTrigger
-          aria-label={t`Show or hide the sidebar`}
-          style={styles.trigger}
-          onClick={() => {
-            // The sheet takes focus itself, and gives it back on closing.
-            handing.current = !isMobile;
-          }}
-        />
+        <span {...stylex.props(styles.triggerInk)}>
+          <SidebarTrigger
+            aria-label={t`Show or hide the sidebar`}
+            style={styles.trigger}
+            onClick={() => {
+              // The sheet takes focus itself, and gives it back on closing.
+              handing.current = !isMobile;
+            }}
+          />
+        </span>
       ) : null}
       <div {...stylex.props(styles.where)}>
-        <Breadcrumb aria-label={t`Breadcrumb`}>
-          <BreadcrumbList>
-            {crumbs.map((crumb, index) => (
-              // A path's steps don't move: each stands at its own place.
-              <Fragment key={index}>
-                {index === 0 ? null : (
-                  <BreadcrumbSeparator style={styles.separator}>
-                    /
-                  </BreadcrumbSeparator>
-                )}
-                <BreadcrumbItem>
-                  {index !== last && "to" in crumb ? (
-                    <BreadcrumbLink asChild>
-                      <CrumbLink crumb={crumb} />
-                    </BreadcrumbLink>
-                  ) : (
-                    <BreadcrumbPage>
-                      <CrumbName crumb={crumb} />
-                    </BreadcrumbPage>
+        {phone ? (
+          <PhoneTrail crumbs={crumbs} label={t`Breadcrumb`} />
+        ) : (
+          <Breadcrumb aria-label={t`Breadcrumb`}>
+            <BreadcrumbList>
+              {crumbs.map((crumb, index) => (
+                // A path's steps don't move: each stands at its own place.
+                <Fragment key={index}>
+                  {index === 0 ? null : (
+                    <BreadcrumbSeparator style={styles.separator}>
+                      /
+                    </BreadcrumbSeparator>
                   )}
-                </BreadcrumbItem>
-              </Fragment>
-            ))}
-          </BreadcrumbList>
-        </Breadcrumb>
-        {trailing === undefined ? null : (
-          <div {...stylex.props(styles.trailing)}>{trailing}</div>
+                  <BreadcrumbItem>
+                    {index !== last && "to" in crumb ? (
+                      <BreadcrumbLink asChild>
+                        <CrumbLink crumb={crumb} />
+                      </BreadcrumbLink>
+                    ) : (
+                      <BreadcrumbPage>
+                        <CrumbName crumb={crumb} />
+                      </BreadcrumbPage>
+                    )}
+                  </BreadcrumbItem>
+                </Fragment>
+              ))}
+            </BreadcrumbList>
+          </Breadcrumb>
         )}
+        {trailing}
       </div>
       {actions === undefined ? null : (
         <div {...stylex.props(styles.actions)}>{actions}</div>

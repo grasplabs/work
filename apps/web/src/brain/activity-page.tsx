@@ -3,6 +3,7 @@ import { isMemberAdmin } from "@grasp-os/shared/roles";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   AudioWaveformIcon,
+  CircleHelpIcon,
   FileIcon,
   SearchIcon,
 } from "@grasp-os/ui/lib/icons";
@@ -19,7 +20,6 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import { formatDay } from "../format.ts";
-import { CircleHelpIcon } from "../frame/sidebar-icons.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import {
   BrainActivityInspector,

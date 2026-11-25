@@ -47,6 +47,7 @@ import {
 import { Switch } from "@grasp-os/ui/components/switch";
 import { Text } from "@grasp-os/ui/components/text";
 import {
+  AppWindowIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   CircleUserIcon,
@@ -77,7 +78,6 @@ import {
   readDirectory,
 } from "../directory.ts";
 import type { Directory } from "../directory.ts";
-import { AppWindowIcon } from "../frame/sidebar-icons.ts";
 import { RowAlert } from "../settings/section.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { actionWords } from "./audit-words.ts";

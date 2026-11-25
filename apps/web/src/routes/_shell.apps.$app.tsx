@@ -1,3 +1,4 @@
+import { AppWindowIcon } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
 import { createFileRoute } from "@tanstack/react-router";
 
@@ -42,6 +43,7 @@ const AppRoute = () => {
     return (
       <PageNotLoaded
         crumbs={[{ label: t`Apps`, to: "/apps" }, { label: t`App` }]}
+        icon={AppWindowIcon}
         notFound={t`App not found`}
         page={page}
       />
