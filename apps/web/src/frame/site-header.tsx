@@ -6,6 +6,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@grasp-os/ui/components/breadcrumb";
+import { breadcrumbVars } from "@grasp-os/ui/components/breadcrumb.stylex";
 import { SidebarTrigger, useSidebar } from "@grasp-os/ui/components/sidebar";
 import { focusRingText } from "@grasp-os/ui/lib/styles";
 import {
@@ -220,10 +221,14 @@ const styles = stylex.create({
     gap: space["2"],
     minWidth: 0,
     overflow: "hidden",
-    // The crumbs in the sidebar's greys, as the reference's bar: the steps
-    // back in its rows' words, the slashes quieter, the page in its ink.
-    // Damsko's Breadcrumb takes the page's tinted greys (registry gap of
-    // 24 Nov 2026).
+    // The crumbs in the sidebar's neutral greys, as the reference's bar:
+    // the steps back in its rows' words, the slashes quieter, the page in
+    // its ink, through Damsko's Breadcrumb's own inks, which an app
+    // shell's bar sets; what else stands here (where the subject stands,
+    // a name being renamed) in the same greys.
+    [breadcrumbVars.mutedForeground]: colors.sidebarSecondaryForeground,
+    [breadcrumbVars.subtleForeground]: colors.sidebarTertiaryForeground,
+    [breadcrumbVars.foreground]: colors.sidebarForeground,
     "--damsko-muted-foreground": colors.sidebarSecondaryForeground,
     "--damsko-subtle-foreground": colors.sidebarTertiaryForeground,
     "--damsko-foreground": colors.sidebarForeground,
@@ -331,7 +336,6 @@ const styles = stylex.create({
     color: colors.sidebarForeground,
     fontWeight: font.weightMedium,
   },
-  trailing: { display: "flex", flexShrink: 0, alignItems: "center" },
   actions: {
     display: "flex",
     flexShrink: 0,
@@ -443,6 +447,11 @@ export const SiteHeader = ({
 }: {
   crumbs: readonly Crumb[];
   actions?: ReactNode;
+  /**
+   * Where its subject stands, an item of the row after the crumbs: one
+   * that gives way where the bar is narrow takes no room, nor the gap
+   * before it, once it has (`display: none`), so the crumbs keep it.
+   */
   trailing?: ReactNode;
 }) => {
   const { t } = useLingui();
@@ -553,9 +562,7 @@ export const SiteHeader = ({
             </BreadcrumbList>
           </Breadcrumb>
         )}
-        {trailing === undefined ? null : (
-          <div {...stylex.props(styles.trailing)}>{trailing}</div>
-        )}
+        {trailing}
       </div>
       {actions === undefined ? null : (
         <div {...stylex.props(styles.actions)}>{actions}</div>
