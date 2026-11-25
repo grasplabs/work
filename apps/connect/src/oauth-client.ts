@@ -297,7 +297,7 @@ export const idTokenClaims = (idToken: string | undefined): unknown => {
 };
 
 /** Longest account ID, name or address taken from an app's lookup. */
-const maxAccountField = 256;
+export const maxAccountField = 256;
 
 /** What `pointer` (RFC 6901, plain names and indexes) names in `value`. */
 const at = (value: unknown, pointer: string): unknown => {

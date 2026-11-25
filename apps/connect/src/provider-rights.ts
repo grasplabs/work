@@ -308,16 +308,23 @@ export const classRightsProviders = [
 const suiteOf = (provider: string): SuiteRights | undefined =>
   Object.hasOwn(suites, provider) ? suites[provider] : declared.get(provider);
 
+/**
+ * What the right `key` takes in, by key. Own entries only: a token
+ * answer names its rights, and `constructor` is no right.
+ */
+const takenIn = ({ implied }: SuiteRights, key: string): readonly string[] =>
+  Object.hasOwn(implied, key) ? (implied[key] ?? []) : [];
+
 /** `rights` with every one they take in, each by its key. */
 const heldWith = (
-  { implied, scopePrefix }: SuiteRights,
+  suite: SuiteRights,
   rights: Iterable<string>
 ): Set<string> => {
   const held = new Set<string>();
   for (const right of rights) {
-    const key = rightKey(right, scopePrefix);
+    const key = rightKey(right, suite.scopePrefix);
     held.add(key);
-    for (const each of implied[key] ?? []) {
+    for (const each of takenIn(suite, key)) {
       held.add(each);
     }
   }
@@ -346,8 +353,7 @@ const suiteRights = (
     .filter(
       ([key]) =>
         !unique.some(
-          ([other]) =>
-            other !== key && (suite.implied[other]?.includes(key) ?? false)
+          ([other]) => other !== key && takenIn(suite, other).includes(key)
         )
     )
     .map(([, right]) => right);

@@ -65,6 +65,13 @@ export const tenantKinds = {
 } as const;
 export type TenantKind = keyof typeof tenantKinds;
 
+// SAFETY: the keys of `tenantKinds`, a constant with two, as its type has them.
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
+const tenantKindNames = Object.keys(tenantKinds) as [
+  TenantKind,
+  ...TenantKind[],
+];
+
 /** `value` with `tenant` for each `{tenant}`. */
 export const withTenant = (value: string, tenant: string): string =>
   value.replaceAll(tenantPlaceholder, tenant);
@@ -337,7 +344,7 @@ const oauth2SignInSchema = z
     account: accountLookupSchema.optional(),
     idToken: idTokenSchema.optional(),
     /** The kind of the organization's own tenant, which pins the flow to it. */
-    tenant: z.enum(["guid", "domain"]).optional(),
+    tenant: z.enum(tenantKindNames).optional(),
     /** What a consent asks for by tool class; without it, all of `scopes`. */
     rights: rightsSchema.optional(),
     /** A prefix a token answer may put on a scope, stripped as they're compared. */
@@ -359,8 +366,17 @@ const oauth2SignInSchema = z
     "An account lookup or an ID token, one of them"
   )
   .refine(
-    ({ idToken, scopes }) => idToken === undefined || scopes.includes("openid"),
-    "An ID token is asked for with the openid scope"
+    ({ scopes }) =>
+      new Set(scopes.map((scope) => scope.toLowerCase())).size ===
+      scopes.length,
+    // Compared without case, they would be one.
+    "A scope twice, in another case"
+  )
+  .refine(
+    ({ idToken, scopes, rights }) =>
+      idToken === undefined || (rights?.signIn ?? scopes).includes("openid"),
+    // Asked by class, every consent asks for its sign-in.
+    "An ID token is asked for with the openid scope, in every consent"
   )
   .refine(
     ({ tenant, idToken }) =>

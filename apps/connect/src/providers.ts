@@ -20,7 +20,11 @@ import type { AppRecord } from "./bundled-connectors.ts";
 import { publicOutbound } from "./company-network.ts";
 import type { Outbound } from "./company-network.ts";
 import { hibobAccount, hibobCredential } from "./hibob.ts";
-import { idTokenClaims, lookupAccount } from "./oauth-client.ts";
+import {
+  idTokenClaims,
+  lookupAccount,
+  maxAccountField,
+} from "./oauth-client.ts";
 import type { TokenSet } from "./oauth-client.ts";
 import {
   classesOnByDefault,
@@ -739,7 +743,8 @@ const claimOf = (claims: Record<string, unknown>, name: string): unknown =>
  * The account an ID token names as `check` says (`IdTokenCheck`), if it
  * comes from its issuer for the client `clientId` and holds its claims,
  * `{tenant}` filled with `tenant`; `null` otherwise. A claim it reads
- * a name or an address from that isn't text refuses the token.
+ * a name or an address from that isn't text, or any of them longer than a
+ * lookup's field may be (`maxAccountField`), refuses the token.
  */
 const idTokenAccount = (
   check: IdTokenCheck,
@@ -770,7 +775,12 @@ const idTokenAccount = (
     claimOf(claims, "aud") === clientId &&
     typeof id === "string" &&
     id !== "" &&
-    read.every((value) => value === undefined || typeof value === "string");
+    id.length <= maxAccountField &&
+    read.every(
+      (value) =>
+        value === undefined ||
+        (typeof value === "string" && value.length <= maxAccountField)
+    );
   const holds = Object.entries(check.claims ?? {}).every(([name, wanted]) => {
     const value = claimOf(claims, name);
     return wanted === true

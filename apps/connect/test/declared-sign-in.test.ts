@@ -548,6 +548,9 @@ describe("threat model", () => {
       emptySubject: { claims: { oid: "" } },
       numberSubject: { claims: { oid: 42 } },
       numberEmail: { claims: { email: 42 } },
+      // Longer than any account field connect keeps.
+      longSubject: { id: "o".repeat(257) },
+      longEmail: { claims: { email: `${"a".repeat(250)}@acme.test` } },
     };
     const outcomes = Object.fromEntries(
       await Promise.all(
@@ -773,11 +776,13 @@ describe("threat model", () => {
     ).not.toContain("Items.Send.Shared");
   });
 
-  it("AP15: rights are read past the prefix at their start only", async () => {
+  it("AP15: rights are read past the prefix at their start only, and only by their own names", async () => {
     const grants = {
       prefixed: `openid ${sampleTenantScopePrefix}Items.ReadWrite`,
       // The prefix anywhere but at the start is part of another name.
       inside: `openid Items.${sampleTenantScopePrefix}ReadWrite`,
+      // Names an object has of its own: no right, and nothing they take in.
+      inherited: "openid constructor __proto__ hasOwnProperty",
     };
     const ids: Record<string, string> = {};
     for (const [name, granted] of Object.entries(grants)) {
@@ -790,9 +795,11 @@ describe("threat model", () => {
     expect({
       prefixed: await statusOf(ids.prefixed ?? ""),
       inside: await statusOf(ids.inside ?? ""),
+      inherited: await statusOf(ids.inherited ?? ""),
     }).toStrictEqual({
       prefixed: "active",
       inside: "needs_reauth",
+      inherited: "needs_reauth",
     });
     // A class whose rights it was never granted asks it again too.
     await exports.default.requireClassRights({ classes: ["reach-others"] });
@@ -826,34 +833,34 @@ describe("threat model", () => {
     await expect(outcome(listItems(kept, other))).resolves.toBe("ok");
   });
 
-  it("AP16: a declared provider never takes a suite's config or client, and finds its client by its own name", async () => {
+  it("AP16: a suite's own config stands, and a declared provider's client is its own entry", async () => {
     const person = someone();
-    // A record under a suite's name gets the client the deployment gives
-    // that name among the apps', never the suite's secrets.
-    const named = appProvider({
-      provider: "microsoft",
-      server: "microsoft-365",
-      signIn: signInSchema.parse({
-        ...auth.oauth2({
-          authorizeUrl: "https://login.example.test/authorize",
-          tokenUrl: "https://login.example.test/token",
-          scopes: { openid: "" },
-          idToken: { issuer: "https://login.example.test", subject: "sub" },
-        }).signIn,
-        name: "Microsoft 365",
-      }),
-    });
-    const own = { id: "apps-microsoft", secret: "apps-microsoft-secret" };
+    const request = {
+      person,
+      scope: "personal",
+      origin: clientOrigin,
+      returnTo: "/",
+      tenant: acmeTenant,
+    } as const;
+    // An apps' entry under a suite's name changes nothing of the suite's
+    // flow: connect's own config, its endpoint and its client.
+    const { url } = await startConnection(
+      {
+        ...env,
+        APP_OAUTH_CLIENTS: JSON.stringify({
+          microsoft: { id: "apps-microsoft", secret: "apps-microsoft-secret" },
+        }),
+      },
+      { ...request, provider: "microsoft" }
+    );
+    const suite = new URL(url);
     expect({
-      without: named.kind === "oauth" ? named.client(env) : "not oauth",
-      with:
-        named.kind === "oauth"
-          ? named.client({
-              ...env,
-              APP_OAUTH_CLIENTS: JSON.stringify({ microsoft: own }),
-            })
-          : "not oauth",
-    }).toStrictEqual({ without: undefined, with: own });
+      endpoint: suite.origin + suite.pathname,
+      client: suite.searchParams.get("client_id"),
+    }).toStrictEqual({
+      endpoint: `https://login.microsoftonline.com/${acmeTenant}/oauth2/v2.0/authorize`,
+      client: clients.microsoft.id,
+    });
     // The fixture's client is its own entry, found by its name only.
     await expect(
       outcome(
@@ -865,14 +872,7 @@ describe("threat model", () => {
               microsoft: client,
             }),
           },
-          {
-            person,
-            provider: "sample-tenant",
-            scope: "personal",
-            origin: clientOrigin,
-            returnTo: "/",
-            tenant: acmeTenant,
-          }
+          { ...request, provider: "sample-tenant" }
         )
       )
     ).resolves.toBe("connection.provider_unavailable");
