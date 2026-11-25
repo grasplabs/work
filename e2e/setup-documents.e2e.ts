@@ -6,10 +6,10 @@ import { peopleIn } from "./people.ts";
 import { answerSpeech } from "./speech.ts";
 
 // The documents step of the admin's onboarding: three documents dropped
-// are each read at once, a row each says what it is about, Stephen sums
-// up the first out loud and asks his one question, answered with a press,
-// and the tools named across them open the next step. Core's reading is
-// the model's, which the local stack doesn't reach, so it is given here
+// are each read at once and kept as a chip each, Stephen asks his one
+// question about the first with what it is about, answered with a press,
+// and the way on leads to the HR platform. Core's reading is the model's,
+// which the local stack doesn't reach, so it is given here
 // (e2e/document-readings.ts), as is his voice (e2e/speech.ts).
 
 // Sound plays without a press first, as once the admin has clicked their way in.
@@ -52,12 +52,12 @@ const pdf = (name: string) => ({
   buffer: Buffer.from("%PDF-1.4\n"),
 });
 
-test("the admin drops three documents, answers Stephen's question, and sees their tools on the next step", async ({
+test("the admin drops three documents, answers Stephen's question, and goes on to the HR platform", async ({
   pageOf,
 }) => {
   const { admin } = peopleIn("setupDocuments");
   const page = await pageOf(admin);
-  const asked = await answerSpeech(page);
+  await answerSpeech(page);
   await readDocumentsAs(page, readings);
   await page.goto("/setup?step=documents");
   await expect(
@@ -69,48 +69,31 @@ test("the admin drops three documents, answers Stephen's question, and sees thei
   await page
     .locator('input[type="file"]')
     .setInputFiles(Object.keys(readings).map(pdf));
-  await expect(
-    page.getByText(
-      "Thank you. I’m reading them now, and you can add more at any time."
-    )
-  ).toBeVisible();
 
-  // A row each says what its document is about.
-  for (const { about } of Object.values(readings)) {
-    // oxlint-disable-next-line no-await-in-loop -- one row at a time
-    await expect(page.getByText(about)).toBeVisible();
+  // Each, once read, is kept as a chip of what was shared.
+  const shared = page.getByRole("list", { name: "Documents you shared" });
+  for (const name of Object.keys(readings)) {
+    // oxlint-disable-next-line no-await-in-loop -- one chip at a time
+    await expect(
+      shared.getByRole("button", { name: `Remove ${name}` })
+    ).toBeVisible();
   }
 
   // His one question, said with what its document is about, answered with a press.
   await expect(
-    page.getByText(`${onboarding.ask.question} client-onboarding.pdf`)
+    page.getByText(`${onboarding.about} ${onboarding.ask.question}`)
   ).toBeVisible();
-  await expect
-    .poll(() =>
-      asked.some(
-        (line) => line.text === `${onboarding.about} ${onboarding.ask.question}`
-      )
-    )
-    .toBe(true);
   await page.getByRole("button", { name: "Yes, still" }).click();
   await expect(page.getByRole("button", { name: "Yes, still" })).toBeHidden();
-  await expect
-    .poll(() => asked.some((line) => line.text === "Got it."))
-    .toBe(true);
 
-  // The tools named across them, each once, open the next step.
+  // The way on: the HR platform, as Pulse is not on the admin's path.
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(
-    page.getByRole("heading", { name: "Which tools do people actually use?" })
+    page.getByRole("heading", { name: "Which HR platform do you use?" })
   ).toBeVisible();
-  await expect(page.getByText(/^In your documents I saw /u)).toHaveText(
-    /^In your documents I saw (?=.*HubSpot)(?=.*DocuSign)(?=.*Exact Online)(?=.*Microsoft Teams)/u
-  );
 });
 
-test("the admin removes a document that was read, once they confirm it", async ({
-  pageOf,
-}) => {
+test("the admin removes a document that was read", async ({ pageOf }) => {
   const { admin } = peopleIn("setupDocuments");
   const page = await pageOf(admin);
   await answerSpeech(page);
@@ -118,13 +101,11 @@ test("the admin removes a document that was read, once they confirm it", async (
   await readDocumentsAs(page, { [name]: readings[name] });
   await page.goto("/setup?step=documents");
   await page.locator('input[type="file"]').setInputFiles([pdf(name)]);
-  const row = page.getByRole("listitem").filter({ hasText: name });
-  await expect(row.getByText(readings[name].about)).toBeVisible();
+  const remove = page
+    .getByRole("list", { name: "Documents you shared" })
+    .getByRole("button", { name: `Remove ${name}` });
+  await expect(remove).toBeVisible();
 
-  await row.getByRole("button", { name: `Remove ${name}` }).click();
-  await page
-    .getByRole("alertdialog", { name: `Remove ${name}?` })
-    .getByRole("button", { name: "Remove" })
-    .click();
-  await expect(row).toHaveCount(0);
+  await remove.click();
+  await expect(remove).toHaveCount(0);
 });
