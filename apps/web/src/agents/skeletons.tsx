@@ -258,7 +258,11 @@ export const SetupSkeleton = ({
 }) => {
   const column = useRef<HTMLDivElement>(null);
   return (
-    <Backdrop clear={column} dither="dots" style={setup.underBar}>
+    <Backdrop
+      clear={column}
+      style={setup.underBar}
+      variant={{ backdrop: "dots", pattern: "bayer", tone: "mint" }}
+    >
       <div {...stylex.props(setup.ground)}>
         <div aria-busy="true" {...stylex.props(setup.stage)}>
           <div {...stylex.props(setup.top)}>

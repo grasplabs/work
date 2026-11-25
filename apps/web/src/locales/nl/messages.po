@@ -3464,6 +3464,10 @@ msgstr "Opnieuw vragen"
 msgid "Ask an admin"
 msgstr "Een beheerder vragen"
 
+#: src/chat/backdrop/preview.tsx
+msgid "Ask anything"
+msgstr "Vraag wat je wilt"
+
 #: src/chat/chat-start.tsx
 msgid "Ask anything, or describe a process"
 msgstr "Vraag wat je wilt, of beschrijf een proces"
@@ -3693,6 +3697,10 @@ msgstr "Een bestand aan een chat toegevoegd"
 msgid "Audit trail"
 msgstr "Audittrail"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Aurora"
+msgstr "Noorderlicht"
+
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Availability"
@@ -3743,9 +3751,21 @@ msgstr "Terug naar verwijzing {number}"
 msgid "Back to your version"
 msgstr "Terug naar jouw versie"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Background"
+msgstr "Achtergrond"
+
 #: src/onboarding/ai-step.tsx
 msgid "Base URL"
 msgstr "Basis-URL"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Bayer"
+msgstr "Bayer"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Bayer grid"
+msgstr "Bayer met stippen"
 
 #: src/frame/ui-words.tsx
 msgctxt "a change's old side"
@@ -4443,6 +4463,10 @@ msgstr "Chataccounts, uitnodigingen en meldingen"
 msgid "Chat apps"
 msgstr "Chat-apps"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Chat background"
+msgstr "Chatachtergrond"
+
 #: src/settings/composer-settings.tsx
 msgid "Chat box"
 msgstr "Chatvak"
@@ -4677,6 +4701,10 @@ msgstr "Gewist"
 msgid "Click or drop a picture."
 msgstr "Klik of sleep een afbeelding hierheen."
 
+#: src/settings/backdrop-settings.tsx
+msgid "Cliffs"
+msgstr "Kliffen"
+
 #: src/brain/forget.tsx
 #: src/connections/app/words.ts
 #: src/connections/connected-dialog.tsx
@@ -4768,6 +4796,11 @@ msgid "colleagues talked"
 msgstr "collega’s gesproken"
 
 #: src/settings/composer-settings.tsx
+msgid "Colour"
+msgstr "Kleur"
+
+#: src/settings/backdrop-settings.tsx
+msgctxt "a background's colour"
 msgid "Colour"
 msgstr "Kleur"
 
@@ -5545,6 +5578,10 @@ msgstr "Geknipt"
 msgid "Dark"
 msgstr "Donker"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Dark edge"
+msgstr "Donkere rand"
+
 #: src/drafts/share-with-team.tsx
 msgid "Data"
 msgstr "Gegevens"
@@ -5684,6 +5721,10 @@ msgstr "Afgewezen: {title}"
 #: src/frame/ui-words.tsx
 msgid "Decrease"
 msgstr "Verlagen"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Deep"
+msgstr "Diep"
 
 #: src/workflows/resource-params.tsx
 msgid "Default"
@@ -6265,6 +6306,14 @@ msgstr "Gedaan in een run"
 msgid "Done right"
 msgstr "Wanneer het goed is"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Door"
+msgstr "Deur"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Dots"
+msgstr "Stippen"
+
 #: src/chat/sidebar-chats.tsx
 #: src/frame/panels/rename.tsx
 msgid "Double-click or press F2 to rename"
@@ -6403,10 +6452,18 @@ msgstr "Een gebeurtenis laten vallen die geen workflow kon aannemen"
 msgid "Dublin"
 msgstr "Dublin"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Dunes"
+msgstr "Duinen"
+
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Duration"
 msgstr "Duur"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Dusk"
+msgstr "Schemer"
 
 #: src/connections/http-connections.tsx
 msgid "Each allows everything under it; / allows all paths."
@@ -7715,6 +7772,10 @@ msgstr "Uit je HR- of salarissysteem. Microsoft 365 of Google kan later worden g
 msgid "From your interview, version {version}"
 msgstr "Uit je interview, versie {version}"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Fuji"
+msgstr "Fuji"
+
 #: src/settings/staff-access.tsx
 msgid "Full access"
 msgstr "Volledige toegang"
@@ -8152,6 +8213,10 @@ msgstr "De chat van Grasp"
 #: src/settings/staff-access.tsx
 msgid "Grasp's team can help here until then"
 msgstr "Tot dan kan het team van Grasp hier helpen"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Grid"
+msgstr "Raster van stippen"
 
 #: src/routes/_shell.settings.brain.tsx
 msgid "Group {number}"
@@ -8828,6 +8893,10 @@ msgstr "Info"
 msgctxt "an advisory's severity"
 msgid "Info"
 msgstr "Info"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Ink"
+msgstr "Inkt"
 
 #: src/frame/ui-words.tsx
 msgctxt "a model's tokens"
@@ -9888,10 +9957,19 @@ msgstr "Juridische bewaarplicht {hold} van versie {label} opheffen?"
 msgid "Light"
 msgstr "Licht"
 
+#: src/settings/backdrop-settings.tsx
+msgctxt "a background's colour"
+msgid "Light"
+msgstr "Licht"
+
 #: src/settings/composer-settings.tsx
 msgctxt "Grasp's own working light"
 msgid "Light"
 msgstr "Licht"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Light edge"
+msgstr "Lichte rand"
 
 #: src/brain/atlas-overlays.tsx
 msgid "Light up the dots"
@@ -9900,6 +9978,10 @@ msgstr "Stippen oplichten"
 #: src/projects/project-dialog.tsx
 msgid "Lightbulb"
 msgstr "Gloeilamp"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Lime"
+msgstr "Limoen"
 
 #: src/frame/ui-words.tsx
 msgctxt "a change's lines"
@@ -10478,6 +10560,7 @@ msgstr "Toegestane methoden"
 msgid "Microphone: {name}"
 msgstr "Microfoon: {name}"
 
+#: src/settings/backdrop-settings.tsx
 #: src/settings/composer-settings.tsx
 msgid "Mint"
 msgstr "Mint"
@@ -11542,6 +11625,11 @@ msgid "Nobody's agents use {name} from then on. Its versions stay as history, an
 msgstr "Daarna gebruikt geen enkele agent {name} meer. De versies blijven als geschiedenis bewaard, en een nieuw goedgekeurd deelverzoek met deze naam brengt hem terug."
 
 #: src/workflows/workflow-settings.tsx
+msgid "None"
+msgstr "Geen"
+
+#: src/settings/backdrop-settings.tsx
+msgctxt "no background"
 msgid "None"
 msgstr "Geen"
 
@@ -13093,6 +13181,10 @@ msgstr "Toegestane padprefixen, één per regel"
 msgid "Paths"
 msgstr "Paden"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Pattern"
+msgstr "Patroon"
+
 #: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
 #: src/frame/ui-words.tsx
@@ -13343,6 +13435,10 @@ msgstr "Aan het eind vastzetten"
 msgid "Pin to the start"
 msgstr "Aan het begin vastzetten"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Pixel sand"
+msgstr "Pixelzand"
+
 #: src/apps/release-controls.tsx
 msgid "Place a legal hold"
 msgstr "Juridische bewaarplicht instellen"
@@ -13464,6 +13560,10 @@ msgstr "Voorbeeld"
 #: src/inbox/report-viewer.tsx
 msgid "Preview of {name}"
 msgstr "Voorbeeld van {name}"
+
+#: src/chat/backdrop/preview.tsx
+msgid "Preview of your chat background"
+msgstr "Voorbeeld van je chatachtergrond"
 
 #: src/inbox/report-viewer.tsx
 msgid "Preview or code"
@@ -13682,6 +13782,10 @@ msgstr "Volgens schema gedraaid"
 #: src/workflows/figures.tsx
 msgid "ran without asking anyone"
 msgstr "draaiden zonder iemand iets te vragen"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Randomize"
+msgstr "Willekeurig"
 
 #: src/interview/before.tsx
 msgid "Rather talk with {otherName}?"
@@ -14645,6 +14749,10 @@ msgstr "Doel herformuleren"
 msgid "Right arrow for more"
 msgstr "Pijl naar rechts voor meer"
 
+#: src/settings/backdrop-settings.tsx
+msgid "Rings"
+msgstr "Ringen"
+
 #: src/workflows/business-process.tsx
 msgctxt "business process"
 msgid "Risk-to-Compliance"
@@ -14973,6 +15081,10 @@ msgstr "Sam kan, net als iedereen die de App gebruikt, elk record in {table} wij
 #: src/apps/access-view.tsx
 msgid "Sam, like everyone who uses the App, sees every record in {table}."
 msgstr "Sam ziet, net als iedereen die de App gebruikt, elk record in {table}."
+
+#: src/settings/backdrop-settings.tsx
+msgid "Sand"
+msgstr "Zand"
 
 #: src/agents/agent-page.tsx
 #: src/apps/field-editor.tsx
@@ -16354,6 +16466,10 @@ msgstr "Stakeholder uitgenodigd in Grasp"
 #: src/brain/brain.ts
 msgid "Stakeholder named: the {role}"
 msgstr "Stakeholder aangewezen: de {role}"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Starry night"
+msgstr "Sterrennacht"
 
 #: src/interview/sound-check.tsx
 msgctxt "begin the interview"
@@ -19348,6 +19464,10 @@ msgstr "Wacht tot"
 msgid "Walk into every meeting knowing who is coming and what is still open."
 msgstr "Weet bij elke vergadering wie er komt en wat nog openstaat."
 
+#: src/settings/backdrop-settings.tsx
+msgid "Wanderer"
+msgstr "Wandelaar"
+
 #: src/frame/ui-words.tsx
 msgctxt "a badge's dot"
 msgid "Warning"
@@ -19397,6 +19517,10 @@ msgstr "Eerder onbekend"
 #: src/brain/brain.ts
 msgid "Was: {before}"
 msgstr "Eerder: {before}"
+
+#: src/settings/backdrop-settings.tsx
+msgid "Wave"
+msgstr "Golf"
 
 #. A folder of sources: conversations, Pulse, documents or connections
 #: src/brain/brain.ts
@@ -19756,6 +19880,7 @@ msgstr "Hoe zullen we hem noemen?"
 msgid "What should we call your agent?"
 msgstr "Hoe zullen we je agent noemen?"
 
+#: src/chat/backdrop/preview.tsx
 #: src/chat/chat-start.tsx
 msgid "What should we look at today?"
 msgstr "Waar kijken we vandaag naar?"

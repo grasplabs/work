@@ -492,7 +492,11 @@ export const ManualAgent = ({
   const Asked = questions[step];
   const stepCount = asked.length;
   return (
-    <Backdrop clear={column} dither="dots" style={styles.underBar}>
+    <Backdrop
+      clear={column}
+      style={styles.underBar}
+      variant={{ backdrop: "dots", pattern: "bayer", tone: "mint" }}
+    >
       <div {...stylex.props(styles.ground)}>
         {phase === "setup" ? null : (
           <Birth made={phase === "made"} name={name} />
