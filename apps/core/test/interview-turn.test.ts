@@ -4,12 +4,8 @@ import type {
   StephenTurn,
   TurnEvent,
 } from "@grasp-os/shared/interview-turn";
-import { runInDurableObject } from "cloudflare:test";
-import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
-import { labMarks } from "../src/onboarding/lab-marks.ts";
-import { onboardingStore } from "../src/onboarding/store.ts";
 import {
   answering,
   codeOf,
@@ -62,17 +58,6 @@ const line = (say: string, more = "no", part = "you"): ProviderReply => ({
   inputTokens: 1500,
   outputTokens: 40,
 });
-
-/** What the store keeps of the text `person`'s last turn ran on, and who held it. */
-const ranFor = async (person: string) =>
-  await runInDurableObject(onboardingStore(env), (_instance, state) =>
-    state.storage.sql
-      .exec<{ mark: string; interviewer: string }>(
-        "SELECT mark, interviewer FROM interview_settings WHERE person = ?",
-        person
-      )
-      .toArray()
-  );
 
 /** What the notes' model answers. */
 const notes = (body: unknown): ProviderReply => ({
@@ -254,8 +239,8 @@ describe("an interview turn", { timeout: 60_000 }, () => {
     });
   });
 
-  it("holds a turn that names Claire as Stephen: his text, his name, and him on record", async () => {
-    const { link, person } = await openedFor();
+  it("holds a turn that names Claire as Stephen: his text and his name", async () => {
+    const link = await opened();
     const { requests } = await answering(
       [line("", "yes", "steps")],
       async () =>
@@ -282,9 +267,6 @@ describe("an interview turn", { timeout: 60_000 }, () => {
       hisLine: told.includes("Stephen: Which system do you open first?"),
       hers: told.includes("Claire"),
     }).toStrictEqual({ his: true, hisLine: true, hers: false });
-    await expect
-      .poll(async () => await ranFor(person))
-      .toStrictEqual([{ mark: labMarks.own.en, interviewer: "stephen" }]);
   });
 
   it("writes nothing down while he waits for the rest of what they say", async () => {

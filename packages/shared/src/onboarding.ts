@@ -15,8 +15,8 @@ import type {
 import type { onboardingStages } from "./onboarding-summary.ts";
 
 // The onboarding's interviews: Stephen talks with every team lead and
-// then with everyone else, in the language they choose. Shared by core, which holds the interviews, and the web
-// app, which shows them.
+// then with everyone else, in the language they choose. Shared by core,
+// which holds the interviews, and the web app, which shows them.
 
 /** The languages an interview is held in: the ones the frontend speaks. */
 export const interviewLocales = ["en", "nl", "de", "fr", "es"] as const;

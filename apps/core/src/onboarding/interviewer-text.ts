@@ -13,10 +13,11 @@ import type {
 } from "@grasp-os/shared/onboarding";
 
 // What the model that holds an interview is told, whole: who Stephen is
-// and how he talks (@grasp-os/shared/interviewers/stephen), how the interview goes, what he follows
-// up on, and what he writes down. Ported from the prototype
-// (grasplabs/prototype, packages/grasp: worker/stephen.ts, and WRITING and
-// READ_BACK in worker/interview.ts), word for word: the Stephen Lab measures this text, and a change made
+// and how he talks (@grasp-os/shared/interviewers/stephen), how the
+// interview goes, what he follows up on, and what he writes down. Ported
+// from the prototype (grasplabs/prototype, packages/grasp:
+// worker/stephen.ts, and WRITING and READ_BACK in worker/interview.ts),
+// word for word: the Stephen Lab measures this text, and a change made
 // here and not there (or the other way round) is a Stephen nobody
 // measured. It changes only through the lab, one change at a time.
 //
