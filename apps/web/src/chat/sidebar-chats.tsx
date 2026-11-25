@@ -8,6 +8,7 @@ import {
   PencilIcon,
   TrashIcon,
 } from "@grasp-os/ui/lib/icons";
+import { announce } from "@grasp-os/ui/lib/utils";
 import { useLingui } from "@lingui/react/macro";
 import { Link, useMatchRoute, useRouter } from "@tanstack/react-router";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
@@ -18,15 +19,17 @@ import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { chatLink, useGoToChat } from "./chat-link.ts";
 import { useChatsWindow } from "./chat-switcher.tsx";
+import { onChatsChanged } from "./chats-changed.ts";
 import { DeleteChatDialog } from "./delete-chat-dialog.tsx";
 
 // The person's recent chats in the sidebar, as the reference's (#2503's
 // chat/sidebar-chats.tsx): the most recently used first, a few of them,
-// each with its menu (open, rename, archive, delete) and renamed in place
-// too; the search (⌘K) finds the rest. A row opens its chat in Grasp's chat
-// beside the page, where chats open here. Read from core when the sidebar
-// first shows and again after each page the router resolves (a rename,
-// an archive or a delete reads the page again).
+// each a link to its own page, with its menu (open, rename, archive,
+// delete) and renamed in place too; the search (⌘K) finds the rest. Read
+// from core when the sidebar first shows, again after each page the router
+// resolves (a rename, an archive or a delete reads the page again), and
+// when an answer starts or ends (chats-changed.ts), so a row's Working
+// mark comes and goes with it.
 
 /** How many recent chats the sidebar lists. */
 const recentCount = 8;
@@ -55,15 +58,19 @@ const useChats = (enabled: boolean): ChatSummary[] => {
     })();
   });
   useEffect(() => {
-    if (!enabled) {
-      return () => {
-        // Nothing was read.
-      };
-    }
-    read();
-    return router.subscribe("onResolved", () => {
-      read();
-    });
+    const readIf = (): void => {
+      if (enabled) {
+        read();
+      }
+    };
+    readIf();
+    const unsubscribe = router.subscribe("onResolved", readIf);
+    // An answer started or ended: its chat works, or no longer does.
+    const unheard = onChatsChanged(readIf);
+    return () => {
+      unsubscribe();
+      unheard();
+    };
   }, [enabled, router]);
   return enabled ? chats : [];
 };
@@ -87,6 +94,8 @@ const useRowChanges = () => {
           return true;
         }));
       if (renamed === true) {
+        // A screen reader hears it once core has kept it, never before.
+        announce(t`Renamed to ${name}`);
         await router.invalidate();
         return;
       }
@@ -157,6 +166,7 @@ export const useRecentChats = ({
       actions,
       actionsLabel: t`More for ${title}`,
       renameLabel: t`Rename ${title}`,
+      renameHint: t`Double-click or press F2 to rename`,
       onAction: (value) => {
         if (value === "open") {
           goToChat(chat.id);
