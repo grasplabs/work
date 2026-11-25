@@ -43,12 +43,14 @@ const styles = stylex.create({
     flexGrow: 1,
   },
   // Not found keeps the page's room in the card, as #2503's shell gives a
-  // page (28px under its bar, 24px at the sides, 32px at the foot), so it
-  // stands in the middle of that; a page that failed has the whole card.
+  // page (28px under its bar, 24px at the sides, and at the foot the room
+  // for the chat's dock over it, 96px, its `roomForDock`, as Page's
+  // `pb-chat`), so it stands in the middle of that; a page that failed has
+  // the whole card.
   room: {
     paddingBlockStart: space["7"],
     paddingInline: space["6"],
-    paddingBlockEnd: space["8"],
+    paddingBlockEnd: space["24"],
   },
   // Outside the frame, it fills the window, in its middle.
   alone: {
