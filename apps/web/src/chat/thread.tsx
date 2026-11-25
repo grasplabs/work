@@ -782,7 +782,7 @@ const Question = ({
         {message.files === undefined || message.files.length === 0 ? null : (
           <FileCards files={message.files} />
         )}
-        <Bubble align="end" variant="muted">
+        <Bubble align="end" variant="secondary">
           <BubbleContent>
             {answered === undefined ? (
               message.text
