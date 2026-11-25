@@ -106,13 +106,10 @@ const arrivingStyles = stylex.create({ base: { minWidth: 0 } });
 /** The steps of the wizard, each named, a way back to those done. */
 const StepDots = ({
   index,
-  reached,
   path,
   onGo,
 }: {
   index: number;
-  /** The furthest step reached: every step up to it is a way there, forward as well as back. */
-  reached: number;
   /** The screens this company's admin goes through. */
   path: SetupPath;
   onGo: (step: SetupStep) => void;
@@ -148,7 +145,6 @@ const StepDots = ({
             onGo(step);
           }
         }}
-        reached={reached}
         steps={wizard.map((step) => ({ label: names[step] }))}
         value={index}
       />
@@ -320,7 +316,7 @@ export const SetupFrame = ({
         </span>
         <div {...stylex.props(styles.where)}>
           {word === undefined ? (
-            <StepDots index={index} onGo={onGo} path={path} reached={reached} />
+            <StepDots index={index} onGo={onGo} path={path} />
           ) : (
             <span key={word} {...stylex.props(motion.rise)}>
               <Text as="span" size="sm" color="muted">
