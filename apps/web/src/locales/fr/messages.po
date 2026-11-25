@@ -13290,6 +13290,10 @@ msgstr "Une partie de ce qui sera envoyé est tronquée ci-dessus. Affichez tout
 msgid "Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm."
 msgstr "Une partie de ce qui sera envoyé est tronquée. Ouvrez Détails et affichez tout, ou exactement ce qui sera envoyé, pour confirmer."
 
+#: src/interview/read-back-story.tsx
+msgid "Parts"
+msgstr "Parties"
+
 #: src/brain/sources-page.tsx
 msgid "Passages"
 msgstr "Passages"

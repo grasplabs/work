@@ -52,6 +52,7 @@ import * as stylex from "@stylexjs/stylex";
 import { useEffect, useEffectEvent, useId, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 
+import { StepFoot } from "../onboarding/calm-frame.tsx";
 import type { Pose } from "../onboarding/field/engine.ts";
 import { update, useKind, useProgress } from "./kept.ts";
 import { looks } from "./looks.ts";
@@ -195,20 +196,6 @@ const styles = stylex.create({
     gap: space["2"],
   },
   choices: { display: "flex", flexDirection: "column", gap: space["2"] },
-  // The way on at the end of the row, the lesser way before it.
-  bar: {
-    display: "flex",
-    flexDirection: "row-reverse",
-    flexWrap: "wrap",
-    alignItems: "center",
-    gap: space["3"],
-    // As wide as the story over it, its end at the story's end.
-    boxSizing: "border-box",
-    width: "100%",
-    maxWidth: "36rem",
-    marginInline: "auto",
-    paddingBlock: space["3"],
-  },
   editor: {
     display: "flex",
     flexDirection: "column",
@@ -675,7 +662,7 @@ export const ReadBack = () => {
   const kind = useKind();
   const loop = useLoop();
   const progress = useProgress();
-  const { parts, at, part } = partAt(progress);
+  const { at, part } = partAt(progress);
   const saidIn = useSaidIn(loop.line, loop.from);
   const said =
     loop.doing === "speaking" && loop.telling === null
@@ -702,8 +689,6 @@ export const ReadBack = () => {
   } else if (most === "asking") {
     once = t`Only used to know whom to ask`;
   }
-  const n = at + 1;
-  const count = parts.length;
   const taken = out.length;
   // The story he tells of the lines left, a sentence for the lines that
   // belong together, or the lines as they stand until it is there.
@@ -721,13 +706,6 @@ export const ReadBack = () => {
     <div {...stylex.props(looks.screen)}>
       <div {...stylex.props(looks.body)}>
         <div {...stylex.props(styles.head)}>
-          {/* How much there is still to check: nobody agrees with care to pages without an end in sight. */}
-          {count > 1 ? (
-            <Badge
-              size="sm"
-              variant="outline"
-            >{t`Part ${n} of ${count}`}</Badge>
-          ) : null}
           <div aria-live="polite">
             <h1 {...stylex.props(looks.said)}>
               <SpokenText said={said} text={loop.line} />
@@ -785,35 +763,51 @@ export const ReadBack = () => {
 };
 
 /**
- * The bar at the read-back's foot, where the box stands in the
- * conversation: agreeing to the part, its main way on, and changing
- * something before it, which brings the box back to say what.
+ * The read-back's foot, the setup's own (StepFoot): which part of how many
+ * at its start, with the line along the edge, and at its end agreeing to
+ * the part, its main way on, and changing something before it, which
+ * brings the box back to say what.
  */
-export const ReadBackBar = ({ onChange }: { onChange: () => void }) => {
+export const ReadBackFoot = ({ onChange }: { onChange: () => void }) => {
   const { t } = useLingui();
   const loop = useLoop();
   const progress = useProgress();
-  const { part } = partAt(progress);
+  const { parts, at, part } = partAt(progress);
   const left = part?.facts.filter(({ out }) => out !== true) ?? [];
   const out = part?.facts.filter(({ out: taken }) => taken === true) ?? [];
   const agree = useAgree(left.length, out.length);
   if (part === undefined) {
     return null;
   }
+  const n = at + 1;
+  const count = parts.length;
   return (
-    <div {...stylex.props(styles.bar, fadeIn)}>
-      <Button
-        disabled={loop.doing === "idle"}
-        onClick={() => {
-          agreeToPart(out.length > 0 ? `${agree}.` : undefined);
-        }}
-        size="lg"
-      >
-        {agree}
-      </Button>
-      <Button onClick={onChange} size="lg" variant="outline">
-        {t`Change something`}
-      </Button>
-    </div>
+    <StepFoot
+      end={
+        <>
+          <Button
+            disabled={loop.doing === "idle"}
+            onClick={() => {
+              agreeToPart(out.length > 0 ? `${agree}.` : undefined);
+            }}
+            size="lg"
+          >
+            {agree}
+          </Button>
+          <Button onClick={onChange} size="lg" variant="outline">
+            {t`Change something`}
+          </Button>
+        </>
+      }
+      label={t`Parts`}
+      share={at / count}
+      start={
+        count > 1 ? (
+          <Text as="span" color="muted" size="sm">
+            {t`Part ${n} of ${count}`}
+          </Text>
+        ) : null
+      }
+    />
   );
 };

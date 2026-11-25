@@ -329,6 +329,55 @@ export interface SetupProgress {
   share: number;
 }
 
+/**
+ * The page's foot, as the setup has it: what is at its start (back, the
+ * part they're in), the step's way on at its end, its main button last,
+ * and how far along as one line along the window's bottom edge. The
+ * interview's read-back stands on the same foot.
+ */
+export const StepFoot = ({
+  label,
+  start,
+  end,
+  endRef,
+  share,
+}: {
+  /** What the start is named, so it is found as one. */
+  label: string;
+  start: ReactNode;
+  /** The way on, main button first; or a place for it (`endRef`). */
+  end?: ReactNode;
+  endRef?: (slot: HTMLElement | null) => void;
+  /** How much of the whole is done, from 0 to 1; no line without it. */
+  share?: number;
+}) => {
+  const enter = useEnterGoesOn();
+  return (
+    <footer {...stylex.props(styles.foot)}>
+      <nav aria-label={label} {...stylex.props(styles.footStart)}>
+        {start}
+      </nav>
+      <div ref={endRef} {...stylex.props(styles.footEnd)}>
+        {end === undefined ? null : (
+          <div ref={enter} {...stylex.props(styles.slot, fadeIn)}>
+            {end}
+          </div>
+        )}
+      </div>
+      {share === undefined ? null : (
+        <span aria-hidden="true" {...stylex.props(styles.track)}>
+          <span
+            {...stylex.props(
+              styles.trackFill,
+              styles.trackWidth(`${Math.round(share * 100)}%`)
+            )}
+          />
+        </span>
+      )}
+    </footer>
+  );
+};
+
 /** The track along the page's foot: back and the part they're in, the step's way on, the line. */
 const Track = ({
   onBack,
@@ -344,40 +393,34 @@ const Track = ({
   const step = part + 1;
   const total = progress?.of ?? 0;
   return (
-    <footer {...stylex.props(styles.foot)}>
-      {/* The way back, as the setup's steps are walked: named so it is found as one. */}
-      <nav aria-label={t`Steps`} {...stylex.props(styles.footStart)}>
-        {onBack === undefined ? null : (
-          <Button
-            aria-label={t`Back`}
-            onClick={onBack}
-            size={tool.button}
-            tooltip={t`Back`}
-            variant="ghost"
-          >
-            <Icon icon={ArrowLeftIcon} />
-          </Button>
-        )}
-        {progress === undefined ? null : (
-          <span {...stylex.props(styles.part)}>
-            <Text as="span" color="muted" size="sm">
-              {t`Step ${step} of ${total}`} · {progress.name}
-            </Text>
-          </span>
-        )}
-      </nav>
-      <div ref={setSlot} {...stylex.props(styles.footEnd)} />
-      {progress === undefined ? null : (
-        <span aria-hidden="true" {...stylex.props(styles.track)}>
-          <span
-            {...stylex.props(
-              styles.trackFill,
-              styles.trackWidth(`${Math.round(progress.share * 100)}%`)
-            )}
-          />
-        </span>
-      )}
-    </footer>
+    <StepFoot
+      endRef={setSlot}
+      label={t`Steps`}
+      share={progress?.share}
+      start={
+        <>
+          {/* The way back, as the setup's steps are walked. */}
+          {onBack === undefined ? null : (
+            <Button
+              aria-label={t`Back`}
+              onClick={onBack}
+              size={tool.button}
+              tooltip={t`Back`}
+              variant="ghost"
+            >
+              <Icon icon={ArrowLeftIcon} />
+            </Button>
+          )}
+          {progress === undefined ? null : (
+            <span {...stylex.props(styles.part)}>
+              <Text as="span" color="muted" size="sm">
+                {t`Step ${step} of ${total}`} · {progress.name}
+              </Text>
+            </span>
+          )}
+        </>
+      }
+    />
   );
 };
 

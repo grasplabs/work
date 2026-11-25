@@ -13290,6 +13290,10 @@ msgstr "Part of what will be sent is cut short above. Show it all, or exactly wh
 msgid "Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm."
 msgstr "Part of what will be sent is cut short. Open Details and show it all, or exactly what will be sent, to confirm."
 
+#: src/interview/read-back-story.tsx
+msgid "Parts"
+msgstr "Parts"
+
 #: src/brain/sources-page.tsx
 msgid "Passages"
 msgstr "Passages"
