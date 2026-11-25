@@ -1556,6 +1556,13 @@ const styles = stylex.create({
   },
   // The words' box, which the note is placed against.
   spokenRoom: { position: "relative", minWidth: 0 },
+  // In one row, the words take the whole width over the row, from where the row's words start.
+  compactSpoken: {
+    gridArea: "header",
+    marginBlockEnd: space["1"],
+  },
+  // In one row, the voice's own row is the card's only row: the time, the field and the tools.
+  compactVoiceRow: { gridColumn: "1 / -1", gridRowStart: "start" },
   // Where the next word lands: a fine upright mark after the words.
   spokenCaret: {
     display: "inline-block",
@@ -4296,11 +4303,16 @@ const VoiceWords = ({
   note,
   interim,
   children,
+  compact = false,
   style,
 }: Pick<PromptInputVoiceProps, "note" | "children" | "style"> & {
   interim: string;
+  /** In one row: the words over the row, its whole width. */
+  compact?: boolean;
 }) => (
-  <div {...stylex.props(styles.spokenRoom, style)}>
+  <div
+    {...stylex.props(styles.spokenRoom, compact && styles.compactSpoken, style)}
+  >
     <p
       data-slot="prompt-input-voice-words"
       {...stylex.props(styles.spoken, scrollbarHidden)}
@@ -4377,6 +4389,7 @@ export const PromptInputVoice = ({
 }: PromptInputVoiceProps) => {
   const words = useI18n().promptInput;
   const form = usePromptInput();
+  const compact = form?.compact === true;
   const [ownMuted, setOwnMuted] = useState(false);
   const off = muted ?? ownMuted;
   const speaking = status === "speaking";
@@ -4411,11 +4424,27 @@ export const PromptInputVoice = ({
       data-status={status}
       {...stylex.props(styles.conversation)}
     >
-      <VoiceWords note={note} interim={interim} style={style}>
-        {children}
-      </VoiceWords>
-      <div data-slot="prompt-input-footer" {...stylex.props(styles.footer)}>
-        <div {...stylex.props(styles.dictation)}>
+      {/* In one row, the words stand over it only once there are any: no room and no lone caret before. */}
+      {compact &&
+      isBlank(children) &&
+      interim === "" &&
+      isBlank(note) ? null : (
+        <VoiceWords
+          note={note}
+          interim={interim}
+          compact={compact}
+          style={style}
+        >
+          {children}
+        </VoiceWords>
+      )}
+      <div
+        data-slot="prompt-input-footer"
+        {...stylex.props(styles.footer, compact && styles.compactFooter)}
+      >
+        <div
+          {...stylex.props(styles.dictation, compact && styles.compactVoiceRow)}
+        >
           <VoiceLead
             speaker={speaking ? speaker : undefined}
             seconds={seconds}

@@ -18,6 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@grasp-os/ui/components/dropdown-menu";
 import { Icon, WrenchIcon } from "@grasp-os/ui/lib/icons";
+import { i18n } from "@lingui/core";
 import { Fragment, useEffect } from "react";
 
 import { isRefused, participate } from "./api.ts";
@@ -125,6 +126,60 @@ const said: { phase: InterviewPhase; lines: [string, string] }[] = [
   },
 ];
 
+/** The same in Dutch, for an interview held in Dutch: his lines and theirs, and how he reads back what he noted. */
+const inDutch: {
+  lines: Partial<Record<InterviewPhase, [string, string]>>;
+  noted: Record<string, string>;
+} = {
+  lines: {
+    open: [
+      "Hoi Noor, ik ben Stephen. Twintig minuten over hoe je werk loopt. Klaar?",
+      "Ja, laten we beginnen.",
+    ],
+    you: [
+      "Wat doe je bij Acme, in één zin?",
+      "Ik doe de crediteurenadministratie, dus elke leveranciersfactuur gaat via mij.",
+    ],
+    anchor: [
+      "Welk deel daarvan kost je de meeste tijd in een week?",
+      "Facturen matchen met inkooporders voordat ze betaald worden.",
+    ],
+    story: [
+      "Neem me mee naar de laatste keer. Waar begon het?",
+      "Gisteren kwam er een pdf binnen in de crediteureninbox van onze verpakkingsleverancier.",
+    ],
+    steps: [
+      "En wat deed je er toen mee?",
+      "Ik boek hem in Exact, zoek de inkooporder op en check de bedragen regel voor regel.",
+    ],
+    exceptions: [
+      "Wat gebeurt er als het niet klopt?",
+      "Dan mail ik de inkoper en blijft hij liggen, soms een week, in een spreadsheet die ik bijhoud.",
+    ],
+    numbers: [
+      "Hoeveel komen er ongeveer binnen?",
+      "Zo'n 400 facturen per maand, en misschien één op de tien klopt niet.",
+    ],
+    result: [
+      "Wanneer is er één klaar, voor jou?",
+      "Als hij goedgekeurd is en in de betaalrun van vrijdag zit.",
+    ],
+  },
+  noted: {
+    f1: "Je doet de crediteurenadministratie.",
+    f2: "Facturen komen als pdf binnen in de crediteureninbox.",
+    f3: "Je boekt elke factuur in Exact.",
+    f4: "Je checkt de bedragen regel voor regel tegen de inkooporder.",
+    f5: "Klopt het niet, dan mail je de inkoper.",
+    f6: "Openstaande verschillen wachten in een spreadsheet die je bijhoudt.",
+    f7: "Zo'n 400 facturen per maand, één op de tien wijkt af.",
+    f8: "Klaar is goedgekeurd en in de betaalrun van vrijdag.",
+  },
+};
+
+/** Whether the page is in Dutch: the sample is then too. */
+const dutchNow = (): boolean => i18n.locale.startsWith("nl");
+
 /** What he wrote down from it, in the order it was said. */
 const noted: (Omit<InterviewFact, "record"> & { phase: InterviewPhase })[] = [
   {
@@ -202,7 +257,12 @@ const progressAt = (
   const ended = jump === "readback" || jump === "done";
   const phase: InterviewPhase = ended ? "readback" : jump;
   const before = phasesBefore(phase);
-  const lines: InterviewLine[] = said.flatMap((part) => {
+  const dutch = dutchNow();
+  const lines: InterviewLine[] = said.flatMap((sample) => {
+    const part = {
+      phase: sample.phase,
+      lines: (dutch ? inDutch.lines[sample.phase] : undefined) ?? sample.lines,
+    };
     if (before.has(part.phase)) {
       return [
         { from: "stephen" as const, text: part.lines[0] },
@@ -218,6 +278,8 @@ const progressAt = (
     .filter((fact) => before.has(fact.phase))
     .map(({ phase: _phase, ...fact }) => ({
       ...fact,
+      // As he reads it back, in their language; the record keeps English.
+      text: (dutch ? inDutch.noted[fact.id] : undefined) ?? fact.text,
       record: fact.text,
       ...(jump === "done" ? { agreed: true as const } : {}),
     }));
