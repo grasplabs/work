@@ -532,6 +532,7 @@ describe("a connector", () => {
         hosts: ["api.example.test"],
         actions: {
           "items.list": {
+            description: "Lists the items",
             routes: [{ ...route, ...extra }],
             readOnly: true,
             reach: "own",

@@ -611,9 +611,9 @@ export const catalogTools = async (
       throw connectErrors.create("connect.catalog_entry_not_found");
     }
     return Object.entries(connector.manifest.actions).map(
-      ([name, { input, readOnly }]) => ({
+      ([name, { description, input, readOnly }]) => ({
         name,
-        description: null,
+        description,
         inputs: input,
         readOnly,
       })

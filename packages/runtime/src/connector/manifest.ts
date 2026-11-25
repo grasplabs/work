@@ -166,6 +166,8 @@ const jsonSchemaObject = z.record(z.string(), z.json());
  * (`describe`), if the tool says.
  */
 const actionManifestSchema = z.strictObject({
+  /** What it does, as the tool says: what the chat's agent searches. */
+  description: z.string(),
   routes: z.array(routeSchema).max(maxRoutes),
   readOnly: z.boolean(),
   /**
