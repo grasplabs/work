@@ -351,9 +351,9 @@ const allOf = (
   reading: Reading,
   depth: number
 ): Modifiable | undefined => {
-  const { allOf: members, ...own } = node;
-  const nodes = [own, ...list(members).map(record)];
-  if (nodes.some((each) => isObjectSchema(each) || "allOf" in each)) {
+  const members = membersOf(node, new Set());
+  const nodes = members?.map(({ allOf: _nested, ...own }) => own);
+  if (nodes === undefined || nodes.some(isObjectSchema)) {
     return objectOf(node, reading, depth);
   }
   const merged: Record<string, unknown> = {};

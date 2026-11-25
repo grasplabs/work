@@ -114,6 +114,7 @@ export {
   accountLookupSchema,
   endpointHost,
   keyHeaderSchema,
+  plainEndpointSchema,
   reservedAuthorizationParams,
   signInSchema,
   signInScopesSchema,
