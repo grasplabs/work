@@ -634,13 +634,38 @@ describe("chats", () => {
     }).toStrictEqual({
       refused: ["agent.chat_not_found", "agent.chat_not_found"],
       stillUnread: true,
-      first: null,
+      first: 0,
       read: false,
       again: seen,
       answered: true,
       second: seen,
       done: false,
     });
+  });
+
+  it("count as read when made before chats kept where their person read to, until they are next read", async () => {
+    const ann = await person();
+    await answering(ann, says("Here it is."));
+    const chat = await ann.chats.create("From before");
+    const follower = await follow(ann.chats, chat.id);
+    await ann.chats.send(chat.id, { text: "Find the contract.", model });
+    await settled(follower);
+    // As a chat kept before the column was: no read position at all.
+    await runInDurableObject(objectOf(ann), (_instance, state) => {
+      state.storage.sql.exec(
+        "UPDATE chats SET read_up_to = NULL WHERE id = ?",
+        chat.id
+      );
+    });
+    const before = await ann.chats.summary(chat.id);
+    const seenUpTo = await ann.chats.markRead(chat.id);
+    const after = await ann.chats.summary(chat.id);
+
+    expect({
+      before: before.unread,
+      seenUpTo,
+      after: after.unread,
+    }).toStrictEqual({ before: false, seenUpTo: null, after: false });
   });
 
   it("are listed by their latest message: a chat just continued comes first", async () => {

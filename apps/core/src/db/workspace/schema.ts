@@ -107,7 +107,8 @@ export const chats = sqliteTable(
      * The last message its person has seen (`ChatsApi.markRead`): an answer
      * stored after it is unread, the list's dot and the thread's New line.
      * Only moves forward, so a device showing less never takes it back.
-     * Null before they have seen any.
+     * 0 for a new chat, nothing seen yet; null for one made before it was
+     * kept, which counts as read.
      */
     readUpTo: integer("read_up_to"),
   },

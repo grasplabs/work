@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import type { ChatSummary } from "@grasp-os/shared/chat";
+import type { Identity } from "@grasp-os/shared/rpc";
 import { SidebarProvider, useSidebar } from "@grasp-os/ui/components/sidebar";
 import { Toaster } from "@grasp-os/ui/components/toast";
 import { i18n } from "@lingui/core";
@@ -9,6 +10,7 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
 import type { AnyRouter } from "@tanstack/react-router";
@@ -18,7 +20,10 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import { FrameSidebar } from "../frame/sidebar.tsx";
+import { forgetActiveChats, setActiveChat } from "./active-chat.ts";
+import { closeChat, openChat } from "./chat-layout.ts";
 import { tellChatsChanged } from "./chats-changed.ts";
+import { GlobalChatProvider } from "./global-chat.tsx";
 import { useRecentChats } from "./sidebar-chats.tsx";
 
 // The sidebar's recent chats on a phone, where the sidebar is a sheet over
@@ -174,6 +179,10 @@ const chatNamed = (
   title,
   running,
 });
+
+/** How many unread dots the sidebar shows. */
+const dots = () =>
+  document.querySelectorAll("[data-slot=sidebar-row-unread]").length;
 
 /** The sidebar with the recent chats alone, and the toasts. */
 const RenameFrame = () => {
@@ -534,5 +543,88 @@ describe("renaming a recent chat from its row", () => {
     await vi.waitFor(() => {
       expect(marks()).toStrictEqual({ working: 0, dot: 0, said: false });
     });
+  });
+
+  it("shows no dot on the chat open beside the page, and shows it again once that chat is closed to its bar", async () => {
+    const chats = {
+      list: async () =>
+        await Promise.resolve([
+          { ...chatNamed("chat-1", "Month-end"), unread: true },
+        ]),
+      models: async () => await Promise.resolve(["openai/gpt-5"]),
+      efforts: async () => await Promise.resolve({}),
+      agents: async () => await Promise.resolve([]),
+      names: async () => await Promise.resolve({}),
+      summary: async () =>
+        await Promise.resolve(chatNamed("chat-1", "Month-end")),
+      heldCalls: async () => await Promise.resolve([]),
+      worked: async () => await Promise.resolve([]),
+      watch: async () => await Promise.withResolvers<never>().promise,
+      markRead: async () => await Promise.withResolvers<never>().promise,
+    };
+    const core = {
+      withSession: async <T,>(
+        action: (reached: { chats: typeof chats }) => Promise<T>
+      ): Promise<T> => await action({ chats }),
+    };
+    const identity: Identity = {
+      userId: "user-1",
+      email: "user-1@acme.test",
+      name: "user-1",
+      role: "builder",
+      teams: [],
+      staff: false,
+      expiresAt: "2026-11-01T09:00:00.000Z",
+    };
+    const rootRoute = createRootRoute({ component: Outlet });
+    const shell = createRoute({
+      getParentRoute: () => rootRoute,
+      id: "_shell",
+      beforeLoad: () => ({ identity }),
+      component: () => (
+        <GlobalChatProvider>
+          <RenameFrame />
+        </GlobalChatProvider>
+      ),
+    });
+    const router: AnyRouter = createRouter({
+      routeTree: rootRoute.addChildren([
+        shell.addChildren([
+          createRoute({ getParentRoute: () => shell, path: "/apps" }),
+        ]),
+      ]),
+      history: createMemoryHistory({ initialEntries: ["/apps"] }),
+      context: { core },
+    });
+    setActiveChat("chat-1", "chat");
+    openChat("floating");
+    const host = document.createElement("div");
+    document.body.append(host);
+    await act(async () => {
+      root = createRoot(host);
+      root.render(
+        <I18nProvider i18n={i18n}>
+          <SidebarProvider>
+            <RouterProvider router={router} />
+          </SidebarProvider>
+        </I18nProvider>
+      );
+      await router.load();
+    });
+    await vi.waitFor(() => {
+      expect(linkIn(itemOf("chat-1"))).toBeDefined();
+    });
+    const beside = dots();
+
+    act(() => {
+      closeChat();
+    });
+    await vi.waitFor(() => {
+      expect(dots()).toBe(1);
+    });
+    act(() => {
+      forgetActiveChats();
+    });
+    expect(beside).toBe(0);
   });
 });

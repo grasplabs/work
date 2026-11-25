@@ -1502,7 +1502,7 @@ export const ChatThread = ({
         <MessageScrollerProvider autoScroll loading={!loaded}>
           {/* It opens at its end, as ever, or at the New line (unread.ts). */}
           <OpenAtNewLine
-            line={loaded && newLineBefore !== undefined}
+            line={loaded ? newLineBefore : undefined}
             logId={logId}
           />
           <MessageScroller>

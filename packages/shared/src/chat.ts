@@ -1389,7 +1389,8 @@ export interface ChatsApi {
    * Marks one of the person's chats seen up to its latest message, while
    * it is open in front of them: no answer in it is `unread` then. Answers
    * the last message they had seen before, which the page draws its New
-   * line after; null when they had seen none. It only moves forward, so a
+   * line after: 0 when they had seen none, null for a chat made before
+   * chats kept it, which counts as read. It only moves forward, so a
    * device that shows less never takes it back. Not audited: it changes
    * nothing but where the person has read to.
    */

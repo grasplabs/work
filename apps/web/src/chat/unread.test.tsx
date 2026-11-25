@@ -89,15 +89,19 @@ const Page = () => {
 /**
  * Chat `chat-1` open with `view`, against a core whose `markRead` answers
  * where the person had read to, `seenUpTo`, the first time, and the latest
- * message after: what the hook gives, and each mark.
+ * message after (never, with `hold`): what the hook gives, and each mark.
  */
-const opened = async (view: View, seenUpTo: number | null, seen = true) => {
+const opened = async (
+  view: View,
+  seenUpTo: number | null,
+  { seen = true, hold = false }: { seen?: boolean; hold?: boolean } = {}
+) => {
   shownChat.state = { view, seen };
   lines.length = 0;
   let latestMarked: number | null = seenUpTo;
   const markRead = vi.fn<(chatId: string) => Promise<number | null>>(
     async (chatId) => {
-      await Promise.resolve();
+      await (hold ? Promise.withResolvers<never>().promise : Promise.resolve());
       const before = latestMarked;
       latestMarked = shownChat.state.view.messages.at(-1)?.id ?? before;
       return chatId === "chat-1" ? before : null;
@@ -146,10 +150,11 @@ describe("where the person has read a chat to", () => {
     showTab(true);
   });
 
-  it("finds the first answer after what was seen, never the person's own question", () => {
+  it("finds the first answer after what was seen, never the person's own question, and none in a chat made before chats kept it", () => {
     const messages = [question(1), answer(2), question(3), answer(4)];
     expect({
-      none: firstUnseenAnswer(messages, null),
+      none: firstUnseenAnswer(messages, 0),
+      fromBefore: firstUnseenAnswer(messages, null),
       afterAnswer: firstUnseenAnswer(messages, 2),
       afterOwnQuestion: firstUnseenAnswer(messages, 3),
       allSeen: firstUnseenAnswer(messages, 4),
@@ -159,6 +164,7 @@ describe("where the person has read a chat to", () => {
       ),
     }).toStrictEqual({
       none: 2,
+      fromBefore: undefined,
       afterAnswer: 4,
       afterOwnQuestion: 4,
       allSeen: undefined,
@@ -190,13 +196,14 @@ describe("where the person has read a chat to", () => {
     });
     unheard();
     // Loading until core answered, so the thread opens where the line is.
+    // Marked once: core read it as it answered.
     expect({
       first: lines[0],
-      marked: chat.markRead.mock.calls[0],
+      marks: chat.markRead.mock.calls,
       told: told.mock.calls.length > 0,
     }).toStrictEqual({
       first: { decided: false, before: undefined },
-      marked: ["chat-1"],
+      marks: [["chat-1"]],
       told: true,
     });
   });
@@ -208,7 +215,7 @@ describe("where the person has read a chat to", () => {
       running: false,
       loaded: true,
     };
-    const chat = await opened(view, null);
+    const chat = await opened(view, 0);
     await vi.waitFor(() => {
       expect(chat.line()).toStrictEqual({ decided: true, before: 2 });
     });
@@ -236,11 +243,29 @@ describe("where the person has read a chat to", () => {
     expect(chat.line()).toStrictEqual({ decided: true, before: 2 });
   });
 
-  it("draws no New line for a chat whose agent works as it opens: a question just asked here, whose answer the person watches come", async () => {
+  it("draws no New line for a chat whose agent works as it opens, and waits for nothing: a question just asked here, whose answer the person watches come", async () => {
     showTab(true);
     const view = {
       messages: [question(1), answer(2)],
       running: true,
+      loaded: true,
+    };
+    // Core hasn't answered, and never does here.
+    const chat = await opened(view, 0, { hold: true });
+    expect({
+      line: chat.line(),
+      asked: chat.markRead.mock.calls.length,
+    }).toStrictEqual({
+      line: { decided: true, before: undefined },
+      asked: 1,
+    });
+  });
+
+  it("draws no New line for a chat made before chats kept where their person read to: it counts as read", async () => {
+    showTab(true);
+    const view = {
+      messages: [question(1), answer(2)],
+      running: false,
       loaded: true,
     };
     const chat = await opened(view, null);
@@ -269,7 +294,7 @@ describe("where the person has read a chat to", () => {
       running: false,
       loaded: true,
     };
-    const chat = await opened(view, null);
+    const chat = await opened(view, 0);
     const hidden = {
       line: chat.line(),
       marks: chat.markRead.mock.calls.length,
@@ -289,14 +314,14 @@ describe("where the person has read a chat to", () => {
     });
   });
 
-  it("marks nothing read while the chat beside the page is closed to its bar, an answer ending there included, and opens it afresh each time it opens", async () => {
+  it("marks nothing read while the chat beside the page is closed to its bar, an answer ending there included, and draws the line again each time it opens, its thread kept", async () => {
     showTab(true);
     const view = {
       messages: [question(1), answer(2)],
       running: true,
       loaded: true,
     };
-    const chat = await opened(view, 1, false);
+    const chat = await opened(view, 1, { seen: false });
     // The answer ends while it is closed.
     await chat.show({
       view: {
@@ -315,16 +340,26 @@ describe("where the person has read a chat to", () => {
     await vi.waitFor(() => {
       expect(chat.line()).toStrictEqual({ decided: true, before: 2 });
     });
-    // Closed and opened again: nothing unread now, so no line.
+    // Closed and opened again with nothing new: the thread stays loaded,
+    // and the line is gone.
+    const from = lines.length;
     await chat.show({ seen: false });
-    const closedAgain = chat.line();
     await chat.show({ seen: true });
     await vi.waitFor(() => {
       expect(chat.line()).toStrictEqual({ decided: true, before: undefined });
     });
-    expect({ closed, closedAgain }).toStrictEqual({
-      closed: { line: { decided: false, before: undefined }, marks: 0 },
-      closedAgain: { decided: false, before: undefined },
+
+    expect({
+      closed,
+      // The thread never went back to loading.
+      loading: lines.slice(from).some(({ decided }) => !decided),
+      // Once each time it opened.
+      marks: chat.markRead.mock.calls.length,
+    }).toStrictEqual({
+      // It worked as it was shown: nothing to wait for.
+      closed: { line: { decided: true, before: undefined }, marks: 0 },
+      loading: false,
+      marks: 2,
     });
   });
 });

@@ -1473,6 +1473,8 @@ export class Workspace extends DurableObject<Env> {
           thread: thread ?? null,
           makeKind: make?.kind ?? null,
           makeProject: make?.project ?? null,
+          // Nothing seen yet: every answer is news until its person looks.
+          readUpTo: 0,
         })
         .returning()
         .get();
@@ -4506,11 +4508,15 @@ export class Workspace extends DurableObject<Env> {
 
   /**
    * Whether the chat holds an answer stored after `readUpTo`, the last
-   * message its person saw (any, for null). Only the agent's answers: the
-   * person's own questions and a step's result are never news to them. By
-   * the chat's index, stopping at the first.
+   * message its person saw. None for a chat with no read position, made
+   * before chats kept one: read, so they don't all light up at once. Only
+   * the agent's answers: the person's own questions and a step's result
+   * are never news to them. By the chat's index, stopping at the first.
    */
   #hasUnseenAnswer(chatId: ChatId, readUpTo: number | null): boolean {
+    if (readUpTo === null) {
+      return false;
+    }
     return (
       this.#db
         .select({ id: chatMessages.id })
@@ -4518,7 +4524,7 @@ export class Workspace extends DurableObject<Env> {
         .where(
           and(
             eq(chatMessages.chatId, chatId),
-            gt(chatMessages.id, readUpTo ?? 0),
+            gt(chatMessages.id, readUpTo),
             sql`json_extract(${chatMessages.message}, '$.role') = 'assistant'`
           )
         )
@@ -4531,7 +4537,8 @@ export class Workspace extends DurableObject<Env> {
    * Marks `personId`'s chat `chatId` seen up to its latest message
    * (`ChatsApi.markRead`), never back: a page that shows less, on another
    * device, leaves it where a newer one put it. The last message they had
-   * seen before, or null for none. Only their own chat in Grasp
+   * seen before: 0 for none, null for a chat made before chats kept it,
+   * which counts as read. Only their own chat in Grasp
    * (`#graspChat`): anyone else's is refused as if there were none.
    */
   markChatRead(chatId: unknown, personId: string): number | null {
