@@ -30,14 +30,27 @@ const emotions: Readonly<Record<(typeof voiceTags)[number], string | null>> = {
 };
 
 /**
+ * The languages whose lines are led by their emotion tag: only English,
+ * the one language Mistral has tested its tags in (https://docs.mistral.ai/
+ * studio/audio/text-to-speech/emotion-tags). In Dutch a tag pulls the
+ * line toward English delivery, so Stephen sounds English; the model
+ * takes the emotion from the words themselves, untagged.
+ */
+const taggedLanguages: ReadonlySet<string> = new Set(["en"]);
+
+/**
  * What the voice is sent: the line led by its tone, as an emotion tag,
- * which isn't said and is no English word, so it leads a line in any
- * language; the bare line for no tone.
+ * which isn't said, in a language whose tags were tested
+ * (`taggedLanguages`); the bare line in any other, or for no tone.
  */
 export const spokenOf = (
   text: string,
-  tone: (typeof voiceTags)[number] | undefined
+  tone: (typeof voiceTags)[number] | undefined,
+  language: string
 ): string => {
-  const emotion = tone === undefined ? null : emotions[tone];
+  const emotion =
+    tone === undefined || !taggedLanguages.has(language)
+      ? null
+      : emotions[tone];
   return emotion === null ? text : `[emotion=${emotion}]${text}`;
 };
