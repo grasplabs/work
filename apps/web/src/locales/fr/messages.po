@@ -8099,7 +8099,7 @@ msgstr "Grasp cesse d’y envoyer les événements de l’App. Son secret ne peu
 msgid "Grasp tries again every quarter of an hour. If it keeps failing, ask Grasp’s support to help."
 msgstr "Grasp réessaie tous les quarts d’heure. Si cela échoue encore, demandez de l’aide au support de Grasp."
 
-#: src/route-error.tsx
+#: src/route-error-reason.ts
 msgid "Grasp was updated while this page was open. Try again to load the new version."
 msgstr "Grasp a été mis à jour pendant que cette page était ouverte. Réessayez pour charger la nouvelle version."
 
@@ -16130,7 +16130,7 @@ msgstr "Un problème est survenu à l’ouverture."
 
 #: src/connections/part-not-loaded.tsx
 #: src/frame/page-states.tsx
-#: src/route-error.tsx
+#: src/route-error-reason.ts
 msgid "Something went wrong."
 msgstr "Une erreur s’est produite."
 
@@ -18114,6 +18114,7 @@ msgid "This page couldn't load"
 msgstr "Cette page n’a pas pu se charger"
 
 #: src/frame/page-states.tsx
+#: src/interview-routes.tsx
 msgid "This page didn't load"
 msgstr "Cette page ne s’est pas chargée"
 
@@ -18498,6 +18499,7 @@ msgstr "Essayer"
 #: src/frame/ui-words.tsx
 #: src/inbox/decision-card.tsx
 #: src/inbox/inbox-page.tsx
+#: src/interview-routes.tsx
 #: src/interview/destination.tsx
 #: src/settings/sign-in-settings.tsx
 msgid "Try again"

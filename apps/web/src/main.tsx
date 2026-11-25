@@ -2,64 +2,29 @@ import "./styles.css";
 import { CSPProvider } from "@base-ui/react/csp-provider";
 import { Button } from "@grasp-os/app-kit/components/button";
 import { i18n } from "@lingui/core";
-import { I18nProvider, useLingui } from "@lingui/react";
-import { createRouter, RouterProvider } from "@tanstack/react-router";
+import { I18nProvider } from "@lingui/react";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
-import { CoreConnection } from "./core-connection.ts";
-import { reportError, reportUncaughtErrors } from "./error-reports.ts";
-import { NotFound } from "./frame/page-states.tsx";
-import { UiWords } from "./frame/ui-words.tsx";
+import { bootOf } from "./boot-path.ts";
+import { reportError } from "./error-reports.ts";
 import { startI18n } from "./i18n.ts";
-import { RouteError } from "./route-error.tsx";
-import { routeTree } from "./routeTree.gen.ts";
 
-// The tab's one connection to core, made once and handed to every route
-// and every App frame. When the person's session ends, the frames stop and
-// the page loads again: the shell finds
-// nobody signed in, and sends them to sign in and back to where they were.
-const core = new CoreConnection({
-  onSessionEnded: () => {
-    window.location.reload();
-  },
-});
-
-// Every route shows a failure the same way, and reports a fault of the
-// page's own to core (route-error.tsx), the root route included: the
-// boundary around the whole app. What isn't there shows the same
-// not-found, and each page under the shell its skeleton while it loads
-// (frame/page-states.tsx).
-const router = createRouter({
-  routeTree,
-  context: { core },
-  // The page's card scrolls on its own (frame/app-frame.tsx), so a new
-  // page starts at the top of it, not only of the window.
-  scrollToTopSelectors: ['[data-slot="app-shell-page"]'],
-  defaultErrorComponent: RouteError,
-  defaultNotFoundComponent: () => <NotFound />,
-});
-
-// What the page throws and never catches, reported with the route's
-// pattern (such as `/apps/$app`), never its URL.
-reportUncaughtErrors(() => router.state.matches.at(-1)?.fullPath);
-
-declare module "@tanstack/react-router" {
-  interface Register {
-    router: typeof router;
+// The one file every page loads: it asks for the page's routes at once,
+// alongside its language. At an interview link that is the interview
+// alone (interview-routes.tsx), so the people who take one wait for
+// nothing of the app they never see; everywhere else, the whole app
+// (app-routes.tsx). What fails to arrive is said as words that do not.
+const loadRoutes = async () => {
+  try {
+    return bootOf(window.location.pathname) === "interview"
+      ? await import("./interview-routes.tsx")
+      : await import("./app-routes.tsx");
+  } catch {
+    return null;
   }
-}
-
-/**
- * The routes, mounted afresh in each language. The React Compiler caches
- * what a component computed from its props, and a label read with
- * `i18n._()` changes with the language, not with the props: without the
- * remount it would stay in the old language until the page reloads.
- */
-const Routes = () => {
-  const { i18n: current } = useLingui();
-  return <RouterProvider key={current.locale} router={router} />;
 };
+const routes = loadRoutes();
 
 const root = document.querySelector("#root");
 if (!root) {
@@ -67,9 +32,9 @@ if (!root) {
 }
 
 /**
- * When not even English's words could be fetched (the connection dropped
- * as Grasp loaded), there is one thing left to say, and only English to
- * say it in.
+ * When not even English's words, or the page's own code, could be fetched
+ * (the connection dropped as Grasp loaded), there is one thing left to
+ * say, and only English to say it in.
  */
 const NoWords = () => (
   <main className="flex min-h-svh flex-col items-center justify-center gap-4 p-6 text-center">
@@ -100,12 +65,7 @@ const start = async (): Promise<void> => {
   } catch {
     worded = false;
   }
-
-  // Switching language re-runs the loaders, so what they put into words
-  // (such as a source's name) is said in the new one.
-  i18n.on("change", () => {
-    void router.invalidate();
-  });
+  const loaded = await routes;
 
   // What no route's boundary caught, such as a fault in the router itself.
   createRoot(root, {
@@ -118,11 +78,9 @@ const start = async (): Promise<void> => {
           carries the rule it held. */}
       <CSPProvider disableStyleElements>
         {/* Lingui draws nothing until a language is active. */}
-        {worded ? (
+        {worded && loaded !== null ? (
           <I18nProvider i18n={i18n}>
-            <UiWords>
-              <Routes />
-            </UiWords>
+            <loaded.Routes />
           </I18nProvider>
         ) : (
           <NoWords />
