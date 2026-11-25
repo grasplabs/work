@@ -629,8 +629,12 @@ const saidNow = (): InterviewLine | undefined => {
 /** The stories asked for, by the lines they are of: each is asked for once. */
 const stories = new Map<string, Promise<StorySentence[] | null>>();
 
-/** A part of the read-back as he tells it; none for a part of one line, which is said as it stands. */
-const storyFor = async (
+/**
+ * A part of the read-back as he tells it; none for a part of one line,
+ * which is said as it stands. Asked for once per part and its lines: the
+ * page shows the same story he tells (read-back-story.tsx).
+ */
+export const storyFor = async (
   part: ReadBackPart
 ): Promise<StorySentence[] | null> => {
   const lines = part.facts

@@ -52,17 +52,18 @@ interface Tool {
 
 /**
  * The tools named most in work, as they are written, with their maker's
- * mark. Microsoft's own apps carry Microsoft's mark: the product has no
- * file of Excel's, Outlook's, Word's or PowerPoint's own.
+ * mark. Excel, Outlook, Word and PowerPoint carry their own app icons
+ * (public/logos/microsoft-*.svg, from vscode-icons, MIT); Copilot and
+ * Microsoft 365, Microsoft's.
  */
 const tools: readonly Tool[] = [
   { name: "Microsoft 365", logo: MicrosoftLogo },
   { name: "Copilot", logo: MicrosoftLogo },
-  { name: "Excel", logo: MicrosoftLogo },
-  { name: "Outlook", logo: MicrosoftLogo },
+  { name: "Excel", src: "/logos/microsoft-excel.svg" },
+  { name: "Outlook", src: "/logos/microsoft-outlook.svg" },
   { name: "Teams", src: "/logos/microsoft-teams.svg", word: true },
-  { name: "Word", logo: MicrosoftLogo, word: true },
-  { name: "PowerPoint", logo: MicrosoftLogo },
+  { name: "Word", src: "/logos/microsoft-word.svg", word: true },
+  { name: "PowerPoint", src: "/logos/microsoft-powerpoint.svg" },
   { name: "SharePoint", src: "/logos/microsoft-sharepoint.svg" },
   { name: "OneDrive", src: "/logos/microsoft-onedrive.svg" },
   { name: "ChatGPT", logo: OpenAiLogo },
@@ -186,4 +187,44 @@ export const storyPieces = (
     pieces.push({ at, text: text.slice(at), term: null });
   }
   return pieces;
+};
+
+/** The words of a text that carry its meaning: four letters or more, in lower case. */
+const meaningful = (text: string): Set<string> =>
+  new Set(
+    (text.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) ?? []).filter(
+      (word) => word.length >= 4
+    )
+  );
+
+/**
+ * What they said in the conversation that a line of the read-back comes
+ * from, as near as its words tell: their own line that shares the most
+ * words with it (what Stephen marked in it counting double), or none when
+ * no line shares a word. Core keeps no link from a line to what was said,
+ * so this is the page's best guess, shown as a hint, never as a record.
+ */
+export const sourceOf = (
+  text: string,
+  lines: readonly InterviewLine[]
+): string | null => {
+  const wanted = meaningful(text);
+  let best: { said: string; score: number } | null = null;
+  for (const line of lines) {
+    if (line.from !== "person" || line.removed === true) {
+      continue;
+    }
+    const shared = (words: Set<string>) =>
+      [...words].filter((word) => wanted.has(word)).length;
+    const score =
+      shared(meaningful(line.text)) +
+      2 *
+        shared(
+          meaningful((line.marks ?? []).map(({ quote }) => quote).join(" "))
+        );
+    if (score > 0 && (best === null || score > best.score)) {
+      best = { said: line.text, score };
+    }
+  }
+  return best?.said ?? null;
 };

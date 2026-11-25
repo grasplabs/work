@@ -25,11 +25,6 @@ msgctxt "a number that changed: what it was before"
 msgid "(was {before})"
 msgstr "(avant : {before})"
 
-#. placeholder {0}: out.length
-#: src/interview/read-back.tsx
-msgid "{0, plural, one {# line taken out.} other {# lines taken out.}}"
-msgstr "{0, plural, one {# ligne retirée.} other {# lignes retirées.}}"
-
 #. placeholder {0}: effect.statements
 #: src/brain/forget.tsx
 msgid "{0, plural, one {# thing that was said in it goes with it.} other {# things that were said in it go with it.}}"
@@ -4318,7 +4313,6 @@ msgid "Change your line: {words}"
 msgstr "Modifier votre réponse : {words}"
 
 #: src/interview/read-back-story.tsx
-#: src/interview/read-back.tsx
 msgid "Change: {text}"
 msgstr "Modifier : {text}"
 
@@ -11799,7 +11793,6 @@ msgid "None of the App's permissions on a connection serves {contract} with ever
 msgstr "Aucune des autorisations de l’application sur une connexion ne sert {contract} avec toutes les actions qu’elle déclare. Accordez-en une d’abord."
 
 #: src/interview/read-back-story.tsx
-#: src/interview/read-back.tsx
 msgid "None of this is right"
 msgstr "Rien de tout cela n’est exact"
 
@@ -13277,7 +13270,6 @@ msgid "Paris"
 msgstr "Paris"
 
 #: src/interview/read-back-story.tsx
-#: src/interview/read-back.tsx
 msgid "Part {n} of {count}"
 msgstr "Partie {n} sur {count}"
 
@@ -13684,10 +13676,6 @@ msgctxt "ranges of dates to pick"
 msgid "Presets"
 msgstr "Raccourcis"
 
-#: src/interview/read-back.tsx
-msgid "Press a line to change it, take out what is wrong, or type what is missing. Choose where each line goes. What you leave in is what counts."
-msgstr "Appuyez sur une ligne pour la modifier, retirez ce qui est faux, ou tapez ce qui manque. Choisissez où va chaque ligne. Ce que vous laissez, c’est ce qui compte."
-
 #: src/frame/ui-words.tsx
 msgid "Press and hold: {words}"
 msgstr "Maintenir appuyé : {words}"
@@ -13872,15 +13860,6 @@ msgstr "Purchase-to-Pay"
 msgctxt "what the Brain remembers about something"
 msgid "Purpose"
 msgstr "Objet"
-
-#: src/interview/read-back-story.tsx
-#: src/interview/read-back.tsx
-msgid "Put back"
-msgstr "Remettre"
-
-#: src/interview/read-back-story.tsx
-msgid "Put back: {words}"
-msgstr "Remettre : {words}"
 
 #: src/settings/instruction-file.tsx
 msgid "Put my changes aside"
@@ -17105,10 +17084,6 @@ msgstr "Reprendre"
 msgid "Take out"
 msgstr "Retirer"
 
-#: src/interview/read-back.tsx
-msgid "Take out: {text}"
-msgstr "Retirer : {text}"
-
 #: src/onboarding/hr-leads.tsx
 msgid "Take the leads from {name}"
 msgstr "Reprendre les responsables depuis {name}"
@@ -18048,7 +18023,6 @@ msgid "The request failed."
 msgstr "La requête a échoué."
 
 #: src/interview/read-back-story.tsx
-#: src/interview/read-back.tsx
 msgid "The rest is correct"
 msgstr "Le reste est exact"
 
@@ -20541,6 +20515,10 @@ msgstr "Quelles couleurs doit-il avoir ?"
 msgid "Which HR platform do you use?"
 msgstr "Quelle plateforme RH utilisez-vous ?"
 
+#: src/interview/read-back-story.tsx
+msgid "Which line do you want to change?"
+msgstr "Quelle ligne voulez-vous modifier ?"
+
 #: src/activity/audit-event.tsx
 msgid "Who"
 msgstr "Qui"
@@ -21065,7 +21043,6 @@ msgid "Yes, skip it"
 msgstr "Oui, passer"
 
 #: src/interview/read-back-story.tsx
-#: src/interview/read-back.tsx
 msgid "Yes, that’s correct"
 msgstr "Oui, c’est exact"
 
