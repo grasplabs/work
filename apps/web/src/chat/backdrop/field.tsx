@@ -134,8 +134,6 @@ const watch = (
   const options: DrawOptions = {
     clear: () => clear?.current?.getBoundingClientRect(),
     still: matchMedia(REDUCED).matches,
-    // Nothing in the product moves a backdrop with the page.
-    progress: () => 0,
   };
   let drawing: Drawing | undefined;
   let loading = false;

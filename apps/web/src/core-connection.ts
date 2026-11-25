@@ -92,6 +92,13 @@ const onPageBack = (back: () => void): void => {
 };
 
 /**
+ * Whether core answers, as the connection last found: trying to reach it,
+ * reached, or not reached on the last try (it tries again by itself). For
+ * a page that failed, to say truthfully whether Grasp can be reached.
+ */
+export type CoreReach = "checking" | "reachable" | "unreachable";
+
+/**
  * How a caller waits for the connection. A person waiting (the shell's
  * calls, which give up in a few seconds) cuts a reconnect pause short; an
  * App frame is patient: it waits for the next attempt the backoff makes,
@@ -170,6 +177,9 @@ export class CoreConnection {
   readonly #frames = new Set<(why: SessionEnded) => void>();
   /** Told each time core refuses a call for the person's role. */
   readonly #roleRefusals = new Set<() => void>();
+  #reach: CoreReach = "checking";
+  /** Told each time `reach` changes. */
+  readonly #reachWatchers = new Set<() => void>();
   /** Told each time a connection answers. */
   readonly #answered = new Set<() => void>();
 
@@ -181,6 +191,29 @@ export class CoreConnection {
     this.#onSessionEnded = onSessionEnded;
     this.#connectCore = connect;
     this.#watchPage = watchPage;
+  }
+
+  /** Whether core answers, as the connection last found ({@link CoreReach}). */
+  get reach(): CoreReach {
+    return this.#reach;
+  }
+
+  /** Tells `changed` each time `reach` changes. Returns what stops it listening. */
+  watchReach(changed: () => void): () => void {
+    this.#reachWatchers.add(changed);
+    return () => {
+      this.#reachWatchers.delete(changed);
+    };
+  }
+
+  #setReach(next: CoreReach): void {
+    if (next === this.#reach) {
+      return;
+    }
+    this.#reach = next;
+    for (const changed of this.#reachWatchers) {
+      changed();
+    }
   }
 
   /**
@@ -414,6 +447,7 @@ export class CoreConnection {
         // Closed while waiting: a new connection would never be closed.
         throw closedError();
       }
+      this.#setReach("checking");
       const api = this.#connectCore();
       let connected: Connected;
       try {
@@ -421,6 +455,7 @@ export class CoreConnection {
         connected = await answered(api);
       } catch {
         disposeQuietly(api);
+        this.#setReach("unreachable");
         continue;
       }
       if (this.#closed) {
@@ -440,6 +475,7 @@ export class CoreConnection {
       }
       this.#person ??= person;
       this.#live = api;
+      this.#setReach("reachable");
       // Registered after the answer, it still hears of a break before it.
       api.onRpcBroken(() => {
         this.#lost(api);
@@ -460,6 +496,7 @@ export class CoreConnection {
       return;
     }
     this.#live = undefined;
+    this.#setReach("unreachable");
     this.#connected = this.#connect(0);
     void settled(this.#connected);
   }

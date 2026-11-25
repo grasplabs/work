@@ -43,9 +43,6 @@ uniform vec4 u_grade;
 uniform float u_invert;
 // How far the picture has arrived, 0 to 1: it comes up from night as arrive.in fades content in.
 uniform float u_arrive;
-// How far the page has gone, 0 to 1 (Backdrop's progress): a dither travels through its silk, its
-// cells gather closer and its ink lays stronger as it rises. 0 draws as before.
-uniform float u_progress;
 // The light's seven stops, night to paper, read from the tokens (light-night to light-paper).
 uniform vec3 u_palette[7];
 // A flat tone's colour and strength, read from its token (backdrop-tone-*), in this scheme.
@@ -159,10 +156,8 @@ vec4 toneOf(float light) {
 // is the canvas's mask (styles.dithered), in strength, never in how many
 // cells there are.
 vec4 finish(float light) {
-  // Progress gathers the cells (more of them lit) and lays the ink stronger.
-  float lit = clamp(light + u_progress * 0.28, 0.0, 1.0);
+  float lit = clamp(light, 0.0, 1.0);
   vec4 tone = toneOf(lit);
-  tone.a = min(1.0, tone.a * (1.0 + u_progress * 1.2));
   float on = shapeOf(gl_FragCoord.xy, lit);
   float alpha = on * tone.a;
   vec3 colour = tone.rgb * alpha;
@@ -179,8 +174,7 @@ vec4 finish(float light) {
   return vec4(colour, alpha);
 }
 vec2 field() {
-  // Progress travels down through the silk, so the field moves with the page.
-  return (v_uv - 0.5 + vec2(0.0, u_progress * 0.9)) * vec2(u_res.x / u_res.y, 1.0);
+  return (v_uv - 0.5) * vec2(u_res.x / u_res.y, 1.0);
 }
 `;
 
@@ -428,9 +422,6 @@ const ditherPace = 0.3;
 /** Where the shader's clock starts, so the first picture is already a settled one. */
 const startAt = 8;
 
-/** How much further the silk turns over the whole of `progress`, in the shader's seconds. */
-const progressTurn = 6;
-
 /** How fast the door's lamp eases towards the pointer, per second. */
 const lampPull = 1.6;
 
@@ -464,6 +455,100 @@ const rgbaOf = (() => {
   };
 })();
 
+/** The program `kind` draws with on `gl`, and where its uniforms are. */
+interface Gpu {
+  at: (name: string) => WebGLUniformLocation | null;
+  res: WebGLUniformLocation | null;
+  time: WebGLUniformLocation | null;
+  lamp: WebGLUniformLocation | null;
+  cell: WebGLUniformLocation | null;
+  pattern: WebGLUniformLocation | null;
+  tone: WebGLUniformLocation | null;
+  palette: WebGLUniformLocation | null;
+  flat: WebGLUniformLocation | null;
+  clear: WebGLUniformLocation | null;
+  hasClear: WebGLUniformLocation | null;
+}
+
+/**
+ * Links `kind`'s program on `gl` and sets what stays the same between pictures: a scene's picture
+ * (night until `image` has come, or as the browser gave it back after losing the context) and its
+ * grade. None where WebGL won't draw it.
+ */
+const setUp = (
+  gl: WebGLRenderingContext,
+  kind: BackdropScene | BackdropDither,
+  image: HTMLImageElement | undefined
+): Gpu | undefined => {
+  const program = programOf(gl, kind);
+  if (program === null) {
+    return undefined;
+  }
+  const at = (name: string) => gl.getUniformLocation(program, name);
+  const { picture } = KINDS[kind];
+  if (picture !== undefined) {
+    gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    if (image === undefined) {
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.LUMINANCE,
+        1,
+        1,
+        0,
+        gl.LUMINANCE,
+        gl.UNSIGNED_BYTE,
+        new Uint8Array([picture.invert ? 255 : 0])
+      );
+    } else {
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.LUMINANCE,
+        gl.LUMINANCE,
+        gl.UNSIGNED_BYTE,
+        image
+      );
+    }
+    for (const side of [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T]) {
+      gl.texParameteri(gl.TEXTURE_2D, side, gl.CLAMP_TO_EDGE);
+    }
+    for (const filter of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) {
+      gl.texParameteri(gl.TEXTURE_2D, filter, gl.LINEAR);
+    }
+    gl.uniform1i(at("u_image"), 0);
+    gl.uniform2f(
+      at("u_imageRes"),
+      image?.naturalWidth ?? 1,
+      image?.naturalHeight ?? 1
+    );
+    gl.uniform2f(at("u_focus"), picture.focus[0], picture.focus[1]);
+    gl.uniform4f(
+      at("u_grade"),
+      picture.gamma,
+      picture.gain,
+      picture.sway,
+      picture.drift
+    );
+    gl.uniform1f(at("u_invert"), picture.invert ? 1 : 0);
+    gl.uniform1f(at("u_arrive"), image === undefined ? 0 : 1);
+  }
+  return {
+    at,
+    res: at("u_res"),
+    time: at("u_time"),
+    lamp: at("u_lamp"),
+    cell: at("u_cell"),
+    pattern: at("u_pattern"),
+    tone: at("u_tone"),
+    palette: at("u_palette"),
+    flat: at("u_flat"),
+    clear: at("u_clear"),
+    hasClear: at("u_hasClear"),
+  };
+};
+
 /** Draws the shader backdrop `kind` on `element` (a dither with its pattern and tone), run and held by Backdrop. */
 export const startShader = (
   element: HTMLCanvasElement,
@@ -476,7 +561,6 @@ export const startShader = (
     small?: boolean;
   }
 ): Drawing => {
-  const nothing = nothingDrawn;
   const scene = isScene(kind);
   const { picture } = KINDS[kind];
   // As the shader numbers them: patterns from 1, none for a scene.
@@ -490,59 +574,15 @@ export const startShader = (
     preserveDrawingBuffer: true,
   });
   if (gl === null) {
-    return nothing;
+    return nothingDrawn;
   }
-  const program = programOf(gl, kind);
-  if (program === null) {
-    return nothing;
+  // A scene's picture, once it has come: given to the program again if the context is restored.
+  let image: HTMLImageElement | undefined;
+  let gpu = setUp(gl, kind, image);
+  if (gpu === undefined) {
+    return nothingDrawn;
   }
-  const at = (name: string) => gl.getUniformLocation(program, name);
-  const res = at("u_res");
-  const time = at("u_time");
-  const lampAt = at("u_lamp");
-  const cellAt = at("u_cell");
-  const patternAt = at("u_pattern");
-  const toneAt = at("u_tone");
-  const paletteAt = at("u_palette");
-  const flatAt = at("u_flat");
-  const clearAt = at("u_clear");
-  const hasClearAt = at("u_hasClear");
-  const progressAt = at("u_progress");
-  // A scene's picture: night until it has loaded, then its light.
   const loading = picture === undefined ? undefined : new Image();
-  if (picture !== undefined) {
-    gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-    gl.texImage2D(
-      gl.TEXTURE_2D,
-      0,
-      gl.LUMINANCE,
-      1,
-      1,
-      0,
-      gl.LUMINANCE,
-      gl.UNSIGNED_BYTE,
-      new Uint8Array([picture.invert ? 255 : 0])
-    );
-    for (const side of [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T]) {
-      gl.texParameteri(gl.TEXTURE_2D, side, gl.CLAMP_TO_EDGE);
-    }
-    for (const filter of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) {
-      gl.texParameteri(gl.TEXTURE_2D, filter, gl.LINEAR);
-    }
-    gl.uniform1i(at("u_image"), 0);
-    gl.uniform2f(at("u_imageRes"), 1, 1);
-    gl.uniform2f(at("u_focus"), picture.focus[0], picture.focus[1]);
-    gl.uniform4f(
-      at("u_grade"),
-      picture.gamma,
-      picture.gain,
-      picture.sway,
-      picture.drift
-    );
-    gl.uniform1f(at("u_invert"), picture.invert ? 1 : 0);
-    gl.uniform1f(at("u_arrive"), 0);
-  }
   const { still } = options;
   // A scene: one canvas pixel to a cell. A dither: one to a CSS pixel, whatever the screen's
   // density, so a sharp screen costs no more. Both scaled up crisp.
@@ -555,6 +595,9 @@ export const startShader = (
   let frame = 0;
   // The frame of a scene's picture coming up, while it does.
   let rising = 0;
+  // Whether Backdrop wants it drawn (in view, the tab seen), and whether the loop runs: never into
+  // a context the browser has taken away.
+  let wanted = false;
   let running = false;
   /**
    * The colours, read from the tokens as they resolve here: they follow the theme. Read once, and
@@ -572,7 +615,7 @@ export const startShader = (
   });
   const scheme = matchMedia("(prefers-color-scheme: dark)");
   scheme.addEventListener("change", recolour);
-  const colour = (): void => {
+  const colour = (on: Gpu): void => {
     if (coloured) {
       return;
     }
@@ -582,30 +625,30 @@ export const startShader = (
       const [r, g, b] = rgbaOf(style.getPropertyValue(stop).trim());
       return [r, g, b];
     });
-    gl.uniform3fv(paletteAt, palette);
+    gl.uniform3fv(on.palette, palette);
     const [r, g, b, a] = rgbaOf(style.color);
-    gl.uniform4f(flatAt, r, g, b, a);
+    gl.uniform4f(on.flat, r, g, b, a);
   };
   /** What stands on a scene, in the canvas's pixels from its foot. */
-  const keepClear = (): void => {
+  const keepClear = (on: Gpu): void => {
     // Only a preview tile keeps its words' ground dark; a full scene dims softly round the middle,
     // as the product's Chat page does, with no band under the question and the box.
     const kept = scene && options.small === true ? options.clear() : undefined;
     if (kept === undefined || kept.width === 0) {
-      gl.uniform1f(hasClearAt, 0);
+      gl.uniform1f(on.hasClear, 0);
       return;
     }
     const box = element.getBoundingClientRect();
     const across = element.width / Math.max(1, box.width);
     const down = element.height / Math.max(1, box.height);
     gl.uniform4f(
-      clearAt,
+      on.clear,
       (kept.left - box.left) * across,
       (box.bottom - kept.bottom) * down,
       (kept.right - box.left) * across,
       (box.bottom - kept.top) * down
     );
-    gl.uniform1f(hasClearAt, 1);
+    gl.uniform1f(on.hasClear, 1);
   };
   const fit = (): void => {
     const box = element.getBoundingClientRect();
@@ -614,25 +657,30 @@ export const startShader = (
     gl.viewport(0, 0, element.width, element.height);
   };
   const draw = (now: number): void => {
+    // Nothing is drawn into a lost context: the browser would only warn at every picture.
+    if (gpu === undefined || gl.isContextLost()) {
+      return;
+    }
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     lamp.x += (lamp.tx - lamp.x) * Math.min(1, lampPull * dt);
     lamp.y += (lamp.ty - lamp.y) * Math.min(1, lampPull * dt);
-    colour();
-    keepClear();
-    gl.uniform2f(res, element.width, element.height);
-    gl.uniform1f(cellAt, 1 / ratio);
-    gl.uniform1f(patternAt, pattern);
-    gl.uniform1f(toneAt, tone);
-    const progress = Math.min(1, Math.max(0, options.progress()));
-    gl.uniform1f(progressAt, progress);
-    // The silk's own drift, and a stretch more for the way the page has gone: scrolling turns it.
-    // With reduced motion the silk stands at one moment: the same picture however often it is drawn
-    // (resized, a scene's picture arriving).
+    colour(gpu);
+    keepClear(gpu);
+    gl.uniform2f(gpu.res, element.width, element.height);
+    gl.uniform1f(gpu.cell, 1 / ratio);
+    gl.uniform1f(gpu.pattern, pattern);
+    gl.uniform1f(gpu.tone, tone);
+    // The silk's own drift. With reduced motion it stands at one moment: the same picture however
+    // often it is drawn (resized, a scene's picture arriving).
     const elapsed = still ? 0 : (now - begun) / 1000;
-    gl.uniform1f(time, startAt + elapsed * pace + progress * progressTurn);
+    gl.uniform1f(gpu.time, startAt + elapsed * pace);
     // The lamp in the canvas's pixels, its y from the foot, as WebGL counts.
-    gl.uniform2f(lampAt, lamp.x * element.width, (1 - lamp.y) * element.height);
+    gl.uniform2f(
+      gpu.lamp,
+      lamp.x * element.width,
+      (1 - lamp.y) * element.height
+    );
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     drawn(element);
   };
@@ -647,6 +695,21 @@ export const startShader = (
     lamp.tx = (event.clientX - box.left) / box.width;
     lamp.ty = (event.clientY - box.top) / box.height;
   };
+  /** Runs the loop while it is wanted and there is a context to draw into. */
+  const loopWhileWanted = (): void => {
+    const on = wanted && !still && !gl.isContextLost();
+    if (on === running) {
+      return;
+    }
+    running = on;
+    if (on) {
+      frame = requestAnimationFrame(loop);
+      window.addEventListener("pointermove", point);
+    } else {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("pointermove", point);
+    }
+  };
   // Sizing the canvas clears it: drawn again at once, so no frame is bare while what it fills is
   // resized (the sidebar folding, say).
   const resized = new ResizeObserver(() => {
@@ -657,6 +720,11 @@ export const startShader = (
   fit();
   if (loading !== undefined) {
     loading.addEventListener("load", () => {
+      image = loading;
+      if (gpu === undefined || gl.isContextLost()) {
+        // Given to the program when the context comes back.
+        return;
+      }
       gl.texImage2D(
         gl.TEXTURE_2D,
         0,
@@ -666,14 +734,14 @@ export const startShader = (
         loading
       );
       gl.uniform2f(
-        at("u_imageRes"),
+        gpu.at("u_imageRes"),
         loading.naturalWidth,
         loading.naturalHeight
       );
       // It comes up from night over duration-mark, as arrive.in fades content in; with reduced
       // motion it is there at once. Drawn frame by frame until it has, even while held or still.
       const arrivedAt = performance.now();
-      const arriveAt = at("u_arrive");
+      const arriveAt = gpu.at("u_arrive");
       const rise = (now: number): void => {
         const done = still
           ? 1
@@ -690,25 +758,27 @@ export const startShader = (
   }
   draw(begun);
   const run = (on: boolean): void => {
-    if (still || on === running) {
-      return;
-    }
-    running = on;
-    if (on) {
-      frame = requestAnimationFrame(loop);
-      window.addEventListener("pointermove", point);
-    } else {
-      cancelAnimationFrame(frame);
-      window.removeEventListener("pointermove", point);
-    }
+    wanted = on;
+    loopWhileWanted();
   };
-  // A context the browser takes away (the GPU reset, too many contexts) draws nothing more: the
-  // loop stops rather than drawing into nothing at every frame.
-  const lost = (): void => {
-    run(false);
+  // A context the browser takes away (the GPU reset, too many contexts): the loop stops rather than
+  // drawing into nothing, and the default is prevented so the browser may give it back. Until it
+  // does, the backdrop's own ground stands (a scene's night, the page's paper). Given back, the
+  // program and the picture are set again and the drawing goes on as before.
+  const lost = (event: Event): void => {
+    event.preventDefault();
     cancelAnimationFrame(rising);
+    loopWhileWanted();
+  };
+  const restored = (): void => {
+    gpu = setUp(gl, kind, image);
+    coloured = false;
+    fit();
+    draw(performance.now());
+    loopWhileWanted();
   };
   element.addEventListener("webglcontextlost", lost);
+  element.addEventListener("webglcontextrestored", restored);
   return {
     run,
     stop: () => {
@@ -718,6 +788,7 @@ export const startShader = (
       scheme.removeEventListener("change", recolour);
       cancelAnimationFrame(rising);
       element.removeEventListener("webglcontextlost", lost);
+      element.removeEventListener("webglcontextrestored", restored);
       // A picture still on its way is let go.
       loading?.removeAttribute("src");
       // A canvas that has left the page lets its context go now, not when it is collected: a
@@ -729,4 +800,379 @@ export const startShader = (
       }
     },
   };
+};
+
+/** Calls `then` once `done` says so, asking again a task later each time, so the page runs on meanwhile. */
+const whenDone = (done: () => boolean, then: () => void): void => {
+  if (done()) {
+    then();
+    return;
+  }
+  setTimeout(() => {
+    whenDone(done, then);
+  }, 0);
+};
+
+/** Hands on a still picture: a PNG data address, or none where it couldn't be drawn. */
+type KeepPicture = (picture: string | null) => void;
+
+/** The scenes' pictures, each loaded and decoded once for every still drawn from it. */
+const scenePictures = new Map<string, HTMLImageElement | null>();
+const withScenePicture = (
+  address: string,
+  then: (image: HTMLImageElement | null) => void
+): void => {
+  const kept = scenePictures.get(address);
+  if (kept !== undefined) {
+    then(kept);
+    return;
+  }
+  const image = new Image();
+  image.src = address;
+  const load = async () => {
+    try {
+      await image.decode();
+      scenePictures.set(address, image);
+      then(image);
+    } catch {
+      then(null);
+    }
+  };
+  void load();
+};
+
+/**
+ * The one context the stills are drawn on while any is waiting, with each kind's program; let go once
+ * none is. They are drawn into `target`, a framebuffer of its own, so presenting the canvas never
+ * clears a picture before it is read back.
+ */
+interface StillCanvas {
+  gl: WebGL2RenderingContext;
+  scene: boolean;
+  programs: Map<BackdropScene | BackdropDither, WebGLProgram | null>;
+  texture: WebGLTexture | null;
+  target: WebGLRenderbuffer | null;
+}
+let stillCanvas: StillCanvas | undefined;
+const letStillCanvasGo = (): void => {
+  stillCanvas?.gl.getExtension("WEBGL_lose_context")?.loseContext();
+  stillCanvas = undefined;
+};
+const stillCanvasFor = (scene: boolean): StillCanvas | undefined => {
+  if (stillCanvas?.scene === scene && !stillCanvas.gl.isContextLost()) {
+    return stillCanvas;
+  }
+  letStillCanvasGo();
+  const gl = document
+    .createElement("canvas")
+    .getContext("webgl2", { alpha: !scene, antialias: false });
+  if (gl === null) {
+    return undefined;
+  }
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  const texture = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  for (const side of [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T]) {
+    gl.texParameteri(gl.TEXTURE_2D, side, gl.CLAMP_TO_EDGE);
+  }
+  for (const filter of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) {
+    gl.texParameteri(gl.TEXTURE_2D, filter, gl.LINEAR);
+  }
+  const target = gl.createRenderbuffer();
+  gl.bindRenderbuffer(gl.RENDERBUFFER, target);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, gl.createFramebuffer());
+  gl.framebufferRenderbuffer(
+    gl.FRAMEBUFFER,
+    gl.COLOR_ATTACHMENT0,
+    gl.RENDERBUFFER,
+    target
+  );
+  stillCanvas = { gl, scene, programs: new Map(), texture, target };
+  return stillCanvas;
+};
+
+/**
+ * Hands `then` the program of `kind` on `canvas` once it has linked: waited for a task at a time where
+ * the browser can say when it has (KHR_parallel_shader_compile), rather than by asking at once.
+ */
+const withProgram = (
+  canvas: StillCanvas,
+  kind: BackdropScene | BackdropDither,
+  then: (program: WebGLProgram | null) => void
+): void => {
+  const { gl, programs } = canvas;
+  const kept = programs.get(kind);
+  if (kept !== undefined) {
+    then(kept);
+    return;
+  }
+  const program = linking(gl, kind);
+  const parallel = gl.getExtension("KHR_parallel_shader_compile");
+  whenDone(
+    () =>
+      program === null ||
+      parallel === null ||
+      gl.isContextLost() ||
+      gl.getProgramParameter(program, parallel.COMPLETION_STATUS_KHR) === true,
+    () => {
+      const ready = linked(gl, program);
+      programs.set(kind, ready);
+      then(ready);
+    }
+  );
+};
+
+/** What a still picture is of: its look, its colours as the tokens resolve where it stands, and its size in canvas pixels. */
+interface Still {
+  kind: BackdropScene | BackdropDither;
+  dither: { pattern: BackdropPattern; tone: BackdropTone };
+  address: string | undefined;
+  width: number;
+  height: number;
+  palette: readonly string[];
+  flat: string;
+}
+
+/** Sets what `program` draws `still` with, as the running drawing's settled picture has it (Backdrop's `still`). */
+const setUniforms = (
+  canvas: StillCanvas,
+  program: WebGLProgram,
+  still: Still,
+  image: HTMLImageElement | undefined
+): void => {
+  const { gl, scene } = canvas;
+  const { width, height, dither } = still;
+  const { picture } = KINDS[still.kind];
+  const uniform = (name: string) => gl.getUniformLocation(program, name);
+  gl.uniform3fv(
+    uniform("u_palette"),
+    still.palette.flatMap((colour) => {
+      const [r, g, b] = rgbaOf(colour);
+      return [r, g, b];
+    })
+  );
+  const [r, g, b, a] = rgbaOf(still.flat);
+  gl.uniform4f(uniform("u_flat"), r, g, b, a);
+  gl.uniform1f(uniform("u_hasClear"), 0);
+  gl.uniform2f(uniform("u_res"), width, height);
+  gl.uniform1f(uniform("u_cell"), scene ? sceneCell : 1);
+  gl.uniform1f(
+    uniform("u_pattern"),
+    scene ? 0 : ditherPatterns.indexOf(dither.pattern) + 1
+  );
+  gl.uniform1f(uniform("u_tone"), scene ? 0 : ditherTones.indexOf(dither.tone));
+  gl.uniform1f(uniform("u_time"), startAt);
+  gl.uniform2f(uniform("u_lamp"), width / 2, height / 2);
+  if (picture === undefined || image === undefined) {
+    return;
+  }
+  gl.bindTexture(gl.TEXTURE_2D, canvas.texture);
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    0,
+    gl.LUMINANCE,
+    gl.LUMINANCE,
+    gl.UNSIGNED_BYTE,
+    image
+  );
+  gl.uniform1i(uniform("u_image"), 0);
+  gl.uniform2f(uniform("u_imageRes"), image.naturalWidth, image.naturalHeight);
+  gl.uniform2f(uniform("u_focus"), picture.focus[0], picture.focus[1]);
+  gl.uniform4f(
+    uniform("u_grade"),
+    picture.gamma,
+    picture.gain,
+    picture.sway,
+    picture.drift
+  );
+  gl.uniform1f(uniform("u_invert"), picture.invert ? 1 : 0);
+  gl.uniform1f(uniform("u_arrive"), 1);
+};
+
+/** The picture on `gl`'s canvas, `width` by `height`, as a PNG data address. */
+const pictureOn = (
+  gl: WebGL2RenderingContext,
+  width: number,
+  height: number,
+  scene: boolean
+): string => {
+  const row = width * 4;
+  const read = new Uint8Array(row * height);
+  gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, read);
+  // Read from the foot up, as WebGL counts; a picture runs from the top. With alpha (a dither) the
+  // channels come back multiplied by it, as a canvas keeps them, and a picture wants them without.
+  const pixels = new ImageData(width, height);
+  for (let line = 0; line < height; line += 1) {
+    pixels.data.set(
+      read.subarray((height - 1 - line) * row, (height - line) * row),
+      line * row
+    );
+  }
+  if (!scene) {
+    for (let pixel = 0; pixel < pixels.data.length; pixel += 4) {
+      const alpha = pixels.data[pixel + 3] ?? 255;
+      if (alpha > 0 && alpha < 255) {
+        for (let channel = pixel; channel < pixel + 3; channel += 1) {
+          pixels.data[channel] = Math.round(
+            ((pixels.data[channel] ?? 0) * 255) / alpha
+          );
+        }
+      }
+    }
+  }
+  const flat = document.createElement("canvas");
+  flat.width = width;
+  flat.height = height;
+  flat.getContext("2d")?.putImageData(pixels, 0, 0);
+  return flat.toDataURL("image/png");
+};
+
+/**
+ * Draws `still` with the scene's picture `image` (none for a dither), and hands its picture to
+ * `keepPicture`, read back only once the GPU has signalled that it has finished: read back at once,
+ * the page would wait for the drawing itself, tens of ms where it is drawn in software.
+ */
+const drawWith = (
+  still: Still,
+  image: HTMLImageElement | undefined,
+  keepPicture: KeepPicture
+): void => {
+  const canvas = stillCanvasFor(isScene(still.kind));
+  if (canvas === undefined) {
+    keepPicture(null);
+    return;
+  }
+  withProgram(canvas, still.kind, (program) => {
+    const { gl } = canvas;
+    if (program === null || gl.isContextLost()) {
+      keepPicture(null);
+      return;
+    }
+    gl.useProgram(program);
+    const position = gl.getAttribLocation(program, "a_pos");
+    gl.enableVertexAttribArray(position);
+    gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+    gl.renderbufferStorage(
+      gl.RENDERBUFFER,
+      canvas.scene ? gl.RGB8 : gl.RGBA8,
+      still.width,
+      still.height
+    );
+    gl.viewport(0, 0, still.width, still.height);
+    setUniforms(canvas, program, still, image);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    gl.flush();
+    whenDone(
+      () =>
+        fence === null ||
+        gl.isContextLost() ||
+        gl.getSyncParameter(fence, gl.SYNC_STATUS) === gl.SIGNALED,
+      () => {
+        gl.deleteSync(fence);
+        keepPicture(
+          gl.isContextLost()
+            ? null
+            : pictureOn(gl, still.width, still.height, canvas.scene)
+        );
+      }
+    );
+  });
+};
+
+/** Draws `still` and hands its picture to `keepPicture`; none where WebGL 2 won't draw it. */
+const drawStill = (still: Still, keepPicture: KeepPicture): void => {
+  if (still.address === undefined) {
+    drawWith(still, undefined, keepPicture);
+    return;
+  }
+  withScenePicture(still.address, (image) => {
+    if (image === null) {
+      keepPicture(null);
+      return;
+    }
+    drawWith(still, image, keepPicture);
+  });
+};
+
+/** Each still, by what it is of: its picture once drawn, and who waits on it until then. */
+const stills = new Map<
+  string,
+  { picture?: string | null; waiting: KeepPicture[] }
+>();
+/** The stills still to draw, drawn one after another on the one context. */
+const stillLine: { key: string; still: Still }[] = [];
+let drawingStill = false;
+const drawNextStill = (): void => {
+  const next = stillLine.shift();
+  drawingStill = next !== undefined;
+  if (next === undefined) {
+    letStillCanvasGo();
+    return;
+  }
+  const drawStillDone = (picture: string | null) => {
+    const entry = stills.get(next.key);
+    const waiting = entry?.waiting ?? [];
+    stills.set(next.key, { picture, waiting: [] });
+    for (const keep of waiting) {
+      keep(picture);
+    }
+    drawNextStill();
+  };
+  try {
+    drawStill(next.still, drawStillDone);
+  } catch {
+    drawStillDone(null);
+  }
+};
+
+/**
+ * Hands `keepPicture` the settled picture of the shader backdrop `kind` on a box `width` by `height`
+ * CSS pixels, in `palette` (the light's seven stops, night to paper) and `flat` (the flat tone's
+ * colour), as a PNG data address: drawn the first time it is asked for, the page never waiting on
+ * the GPU, and the same address for each box after; none where WebGL 2 won't draw it. Its context is
+ * let go once no still waits.
+ */
+export const stillPictureOf = (
+  kind: BackdropScene | BackdropDither,
+  dither: { pattern: BackdropPattern; tone: BackdropTone },
+  options: {
+    scenes: string;
+    small: boolean;
+    width: number;
+    height: number;
+    palette: readonly string[];
+    flat: string;
+  },
+  keepPicture: KeepPicture
+): void => {
+  const scene = isScene(kind);
+  const ratio = scene ? 1 / sceneCell : 1;
+  const still: Still = {
+    kind,
+    dither: scene ? { pattern: "bayer", tone: "light" } : dither,
+    address:
+      KINDS[kind].picture === undefined
+        ? undefined
+        : `${options.scenes}${kind}${options.small ? ".small" : ""}.jpg`,
+    width: Math.max(1, Math.round(options.width * ratio)),
+    height: Math.max(1, Math.round(options.height * ratio)),
+    palette: options.palette,
+    flat: options.flat,
+  };
+  const key = JSON.stringify(still);
+  const entry = stills.get(key);
+  if (entry?.picture !== undefined) {
+    keepPicture(entry.picture);
+    return;
+  }
+  if (entry !== undefined) {
+    entry.waiting.push(keepPicture);
+    return;
+  }
+  stills.set(key, { waiting: [keepPicture] });
+  stillLine.push({ key, still });
+  if (!drawingStill) {
+    drawNextStill();
+  }
 };
