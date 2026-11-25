@@ -3,8 +3,10 @@ import type {
   OfferedCatalog,
 } from "@grasp-os/shared/connect";
 import type { ConnectionWorkflow } from "@grasp-os/shared/workflows";
+import { i18n } from "@lingui/core";
 import { describe, expect, it } from "vite-plus/test";
 
+import { messages as german } from "../locales/de/messages.po";
 import {
   beyond,
   find,
@@ -105,6 +107,31 @@ describe(integrationsOf, () => {
     ]);
   });
 
+  it("words Grasp's own connectors in the page's language, and a Composio toolkit as the catalog describes it, whatever its slug", () => {
+    const entries = [
+      entry("microsoft", []),
+      entry("google", [], { source: "composio", description: "A toolkit." }),
+    ];
+    const english = integrationsOf(entries, []);
+    i18n.loadAndActivate({ locale: "de", messages: german });
+    const inGerman = integrationsOf(entries, []);
+    i18n.loadAndActivate({ locale: "en", messages: {} });
+    expect(
+      [english, inGerman].map((listed) =>
+        listed.map(({ description }) => description)
+      )
+    ).toStrictEqual([
+      [
+        "Outlook mail and calendars, and files in OneDrive and SharePoint.",
+        "A toolkit.",
+      ],
+      [
+        "Outlook-Mail und -Kalender sowie Dateien in OneDrive und SharePoint.",
+        "A toolkit.",
+      ],
+    ]);
+  });
+
   it("leaves out disconnected connections", () => {
     const [microsoft] = integrationsOf(
       [entry("microsoft", [])],
@@ -148,10 +175,7 @@ describe("filters, search and sections", () => {
   const [microsoft, google, hubspot] = integrationsOf(
     [
       entry("microsoft", ["Email"], { group: "Email and calendar" }),
-      entry("google", ["Email"], {
-        group: "Email and calendar",
-        description: "Mail and files from Google.",
-      }),
+      entry("google", ["Email"], { group: "Email and calendar" }),
       entry("hubspot", ["CRM"], { group: "CRM" }),
     ],
     [connection("google", "personal", "needs_reauth")]
@@ -176,7 +200,9 @@ describe("filters, search and sections", () => {
 
   it("finds by name before what an app is for, whatever the case", () => {
     expect(find(all, "GOO").map(({ id }) => id)).toStrictEqual(["google"]);
-    expect(find(all, "files").map(({ id }) => id)).toStrictEqual(["google"]);
+    expect(find(all, "sharepoint").map(({ id }) => id)).toStrictEqual([
+      "microsoft",
+    ]);
     // Google by its name, Microsoft only by its kind (Email).
     expect(find(all, "e").map(({ id }) => id)).toStrictEqual([
       "google",

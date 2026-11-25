@@ -11,6 +11,8 @@ import type {
   ConnectionWorkflows,
 } from "@grasp-os/shared/workflows";
 
+import { descriptionOf } from "./native-descriptions.ts";
+
 // Integrations, as the prototype lists them (`routes/integrations`): every
 // app Grasp can work in, one per catalog entry, each with the connections
 // made to it. A connection whose entry the catalog no longer lists to this
@@ -120,7 +122,7 @@ export const integrationsOf = (
     name: entry.name,
     categories: entry.categories,
     group: entry.group,
-    description: entry.description,
+    description: descriptionOf(entry),
     auth: entry.auth,
     logo: entry.logo,
     toolCount: entry.toolCount,

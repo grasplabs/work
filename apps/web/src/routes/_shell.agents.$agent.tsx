@@ -9,6 +9,7 @@ import { SettingsSkeleton } from "../agents/skeletons.tsx";
 import { agentTabOf } from "../agents/tabs.tsx";
 import type { AgentTab } from "../agents/tabs.tsx";
 import { agentInstructionsFor } from "../agents/unsaved-instructions.ts";
+import { descriptionOf } from "../connections/native-descriptions.ts";
 import type { Session } from "../core.ts";
 import { PageNotLoaded } from "../frame/page-states.tsx";
 import { Page } from "../frame/page.tsx";
@@ -191,7 +192,12 @@ export const Route = createFileRoute("/_shell/agents/$agent")({
           apps: apps.status === "fulfilled" ? apps.value : undefined,
           offered:
             catalog.status === "fulfilled"
-              ? catalog.value.entries.filter(({ offered }) => offered)
+              ? catalog.value.entries
+                  .filter(({ offered }) => offered)
+                  .map((entry) => ({
+                    ...entry,
+                    description: descriptionOf(entry),
+                  }))
               : [],
           connected:
             linked.status === "fulfilled"

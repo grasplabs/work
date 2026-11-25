@@ -15,6 +15,7 @@ import {
   SetupSkeleton,
 } from "../agents/skeletons.tsx";
 import { chatPresence } from "../chat/chat-presence.ts";
+import { descriptionOf } from "../connections/native-descriptions.ts";
 import { PageNotLoaded } from "../frame/page-states.tsx";
 import { SiteHeader } from "../frame/site-header.tsx";
 import { loadFromCore } from "../load-from-core.tsx";
@@ -244,7 +245,7 @@ export const Route = createFileRoute("/_shell/agents/new")({
         source: entry.source,
         name: entry.name,
         logo: entry.logo,
-        description: entry.description,
+        description: descriptionOf(entry),
         categories: entry.categories,
         connected: connection !== undefined,
         account: connection?.accountName ?? null,

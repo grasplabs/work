@@ -388,7 +388,7 @@ describe("the catalog", () => {
     return await core.authenticate().connections;
   };
 
-  it("lists Composio's toolkits next to the native providers, each described, in one of Grasp's groups, and saying whose sign-in app it takes", async () => {
+  it("lists Composio's toolkits next to the native providers, each toolkit described, in one of Grasp's groups, and saying whose sign-in app it takes", async () => {
     const connections = await userConnections();
     const { entries, composio } = await connections.catalog();
     expect(composio).toBe("listed");
@@ -402,14 +402,13 @@ describe("the catalog", () => {
     ).toStrictEqual([
       {
         entry: "native:microsoft",
-        description:
-          "Outlook mail and calendars, and files in OneDrive and SharePoint.",
+        description: null,
         group: "Email and calendar",
         auth: "managed",
       },
       {
         entry: "native:google",
-        description: "Gmail, Google Calendar, and files in Google Drive.",
+        description: null,
         group: "Email and calendar",
         auth: "managed",
       },

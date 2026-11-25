@@ -7895,6 +7895,10 @@ msgstr "Ihrem Team diese Version geben?"
 msgid "Given up {date}"
 msgstr "Aufgegeben am {date}"
 
+#: src/connections/native-descriptions.ts
+msgid "Gmail, Google Calendar, and files in Google Drive."
+msgstr "Gmail, Google Calendar und Dateien in Google Drive."
+
 #: src/drafts/draft-history.tsx
 msgid "Go back"
 msgstr "Zurückgehen"
@@ -12973,6 +12977,10 @@ msgstr "Unser erstes Gespräch hat mir das große Bild gegeben. Jetzt brauche ic
 #: src/onboarding/forget-kickoff.tsx
 msgid "Our first conversation is deleted. I’m still erasing what I took from it, and I finish that by myself."
 msgstr "Unser erstes Gespräch ist gelöscht. Ich lösche noch, was ich daraus entnommen habe, und schließe das von selbst ab."
+
+#: src/connections/native-descriptions.ts
+msgid "Outlook mail and calendars, and files in OneDrive and SharePoint."
+msgstr "Outlook-Mail und -Kalender sowie Dateien in OneDrive und SharePoint."
 
 #: src/apps/resource-bindings.tsx
 msgid "Output"

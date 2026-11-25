@@ -295,20 +295,17 @@ export const eraseOpportunitiesOn = async (
   ]);
 };
 
-/** What a catalog entry says it is: its name and, for a native one, what its description says it covers (`connectedSystemsOf`). */
-const saysOf = ({ name, description, source }: CatalogEntry): string =>
-  source === "native" && description !== null
-    ? `${name}\n${description}`
-    : name;
+/** What a catalog entry says it is: its name and, for a native one, the products it reaches (`connectedSystemsOf`). */
+const saysOf = ({ name, products = [] }: CatalogEntry): string =>
+  [name, ...products].join("\n");
 
 /**
  * What the company has connected for everyone, as the catalog says it: a
  * shared connection, active, as connect lists it for `admin`, by its name
- * and, for a native one, what its description says it covers (Microsoft
- * 365's "Outlook mail ... OneDrive and SharePoint", Google Workspace's
- * "Gmail, Google Calendar, and files in Google Drive"). A Composio
- * toolkit's description is its provider's words about itself, which may
- * name other products it works with, so only its name counts.
+ * and, for a native one, the products it reaches (Microsoft 365's Outlook,
+ * OneDrive and SharePoint). A Composio toolkit's description is its
+ * provider's words about itself, which may name other products it works
+ * with, so only its name counts.
  */
 const connectedSystemsOf = async (
   env: Env,
