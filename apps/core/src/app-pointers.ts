@@ -81,7 +81,14 @@ export const pointApp = async (
   }
   const { connectionId, audience } = parsed.data;
   const [owner] = await env.CONNECT.connectionOwners([connectionId]);
-  if (owner?.source !== "composio") {
+  // A connector's server names no resource of a tool, so a pointer at a
+  // connection to one covers the whole app.
+  const pointable =
+    owner?.source === "composio" ||
+    (owner?.source === "connector" &&
+      owner.ownerUserId === null &&
+      parsed.data.resources.length === 0);
+  if (!pointable) {
     throw connectionErrors.create("connection.invalid");
   }
   const stored = storedOf(audience);

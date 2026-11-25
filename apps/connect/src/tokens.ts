@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { recordEventIf } from "./audit.ts";
 import { pastAddressesAfter } from "./connections.ts";
+import { providerConfigFor } from "./connector-providers.ts";
 import {
   connections,
   connectionTokens,
@@ -258,6 +259,9 @@ const markDead = async (
   reason: "invalid_grant" | "unreadable" | "scopes_changed" | "scopes_missing"
 ): Promise<boolean> => {
   const db = drizzle(env.DB);
+  const owesRevoke =
+    grantStillValid(reason) &&
+    revocable(await providerConfigFor(env, provider));
   return await recordEventIf(
     env,
     {
@@ -278,7 +282,7 @@ const markDead = async (
       // stay live with nothing left to revoke it, should the person never
       // connect again; one the provider refused, or that won't open, has
       // nothing to revoke.
-      ...(grantStillValid(reason) && revocable(provider)
+      ...(owesRevoke
         ? [
             oweRevoke(
               db,
@@ -613,7 +617,9 @@ const activeConnection = async (env: Env, connectionId: string) => {
     .where(eq(connections.id, connectionId))
     .get();
   const provider =
-    connection === undefined ? undefined : providerFor(connection.provider);
+    connection === undefined
+      ? undefined
+      : await providerConfigFor(env, connection.provider);
   const row = await readRow(env.DB, connectionId);
   if (
     connection?.status !== "active" ||

@@ -16,6 +16,7 @@ import type {
   ConnectionPerson,
   ConnectionScope,
   ConnectionSummary,
+  FinishConnection,
   OrganizationConnection,
 } from "@grasp-os/shared/connect";
 import {
@@ -56,9 +57,11 @@ import {
   readToolNames,
   toolResourcesOf,
 } from "./connections.ts";
+import { isConnectorId, providerConfigFor } from "./connector-providers.ts";
 import {
   connections,
   connectionTokens,
+  connectionTools,
   httpConnections,
   oauthFlows,
   pendingActions,
@@ -71,7 +74,7 @@ import type { TokenSet } from "./oauth-client.ts";
 import { oweRevoke } from "./owed-revokes.ts";
 import { dropPendingActions } from "./pending.ts";
 import { rightsFor } from "./provider-rights.ts";
-import { grantedAsAsked, providerFor, renewedAsGranted } from "./providers.ts";
+import { grantedAsAsked, renewedAsGranted } from "./providers.ts";
 import type {
   ApiKeyProviderConfig,
   OAuthClientCredentials,
@@ -128,6 +131,12 @@ const isOwnAccount = (
   provider: string,
   account: ProviderAccount
 ): boolean => {
+  // An MCP server's sign-in names no account connect can check
+  // (connector-providers.ts): what the person signs in to there is theirs
+  // to choose, as at any website, and no reader list counts it.
+  if (isConnectorId(provider)) {
+    return true;
+  }
   const signIns = person.accounts.filter((each) => each.provider === provider);
   if (signIns.length > 0) {
     return signIns.some(({ subject }) => subject === account.id);
@@ -139,6 +148,15 @@ type ConnectionRow = typeof connections.$inferSelect;
 type FlowRow = typeof oauthFlows.$inferSelect;
 
 /** The live connection that already holds `accountId`, if any. */
+/**
+ * Who a connection is for: the person, for their own connection; the
+ * company, for a shared one.
+ */
+const ownerOf = (
+  flow: Pick<FlowRow, "scope">,
+  person: ConnectionPerson
+): string => (flow.scope === "shared" ? "company" : `person:${person.userId}`);
+
 const connectionHolding = async (
   env: Env,
   provider: string,
@@ -206,7 +224,7 @@ interface Ready {
 
 /** The OAuth provider, with its client and the vault, or refused while unset. */
 const ready = async (env: Env, providerId: string): Promise<Ready> => {
-  const provider = providerFor(providerId);
+  const provider = await providerConfigFor(env, providerId);
   const client = provider?.kind === "oauth" ? provider.client(env) : undefined;
   const vault = await vaultFor(env);
   if (
@@ -293,12 +311,14 @@ export const startConnection = async (
   // A suite's flow is pinned to the organization's tenant; an app's has
   // none, so it is always "" (`isTenant`).
   const tenant = provider.pinned ? (rest.tenant ?? "").toLowerCase() : "";
+  // An MCP server's client is the deployment's own, registered with its
+  // own callback (mcp-discovery.ts): never through a relay.
+  const relay = isConnectorId(provider.id) ? undefined : callbackOrigin;
   if (
     !provider.isTenant(tenant) ||
     new URL(origin).origin !== origin ||
     // Only a stage's relay, for a client hosted in that same stage.
-    (callbackOrigin !== undefined &&
-      relayedClientOf(origin, callbackOrigin) === null)
+    (relay !== undefined && relayedClientOf(origin, relay) === null)
   ) {
     throw connectionErrors.create("connection.provider_unavailable");
   }
@@ -308,9 +328,9 @@ export const startConnection = async (
   const stateHash = await sha256Hex(state);
   // The flow keeps it, and its exchange names this same one (`finishConnection`).
   const redirectUri =
-    callbackOrigin === undefined
+    relay === undefined
       ? new URL(connectionCallbackPath, origin).href
-      : relayRedirectUri(callbackOrigin, "connections");
+      : relayRedirectUri(relay, "connections");
   await refusingErased(
     drizzle(env.DB)
       .insert(oauthFlows)
@@ -347,7 +367,10 @@ export const startConnection = async (
     code_challenge_method: "S256",
   };
   for (const [key, value] of Object.entries(params)) {
-    url.searchParams.set(key, value);
+    // A provider that names no scopes is asked for none.
+    if (key !== "scope" || value !== "") {
+      url.searchParams.set(key, value);
+    }
   }
   return { url: url.href };
 };
@@ -496,7 +519,7 @@ const storeConnection = async (
       scope: flow.scope,
       ownerUserId: flow.scope === "personal" ? person.userId : null,
       status: "active",
-      serverKind: "native",
+      serverKind: isConnectorId(provider.id) ? "connector" : "native",
       server: provider.server,
       tenant: tenantOf(flow),
       accountId: account.id,
@@ -550,6 +573,9 @@ const signedInAgain = (
         accountAddresses: addresses.receives,
         accountSenders: addresses.sends,
       }),
+  // Read again, for the account it holds now (mcp-connectors.ts).
+  toolListReadAt: null,
+  toolListFreshUntil: null,
   updatedAt: now,
 });
 
@@ -605,6 +631,12 @@ const reconnect = async (
           .from(connections)
           .where(stillWaiting)
       ),
+      // Its server's tool list was read for the account it held before.
+      db
+        .delete(connectionTools)
+        .where(
+          sql`${connectionTools.connectionId} = ${held.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${stillWaiting})`
+        ),
       db
         .update(connections)
         .set({
@@ -663,6 +695,12 @@ const renewInPlace = async (
         })
         .where(
           sql`${connectionTokens.connectionId} = ${held.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${stillActive})`
+        ),
+      // Its server's tool list was read for the account it held before.
+      db
+        .delete(connectionTools)
+        .where(
+          sql`${connectionTools.connectionId} = ${held.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${stillActive})`
         ),
       db
         .update(connections)
@@ -832,7 +870,12 @@ const keepTokens = async (
   refuse: Refuse
 ): Promise<string> => {
   const { provider, client } = setUp;
-  const account = await provider.account(tokens, flow.tenant, client.id);
+  const account = await provider.account(
+    tokens,
+    flow.tenant,
+    client.id,
+    ownerOf(flow, person)
+  );
   const drop = async (accountId: string | undefined): Promise<void> => {
     await dropMint(env, setUp, tokens, accountId);
   };
@@ -975,11 +1018,17 @@ const stop = async (
               ),
           ]
         : []),
-      // After the status: only a stopped connection's tokens go.
+      // After the status: only a stopped connection's tokens go, and the
+      // tool list its connector's server gave it.
       db
         .delete(connectionTokens)
         .where(
           sql`${connectionTokens.connectionId} = ${connection.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
+        ),
+      db
+        .delete(connectionTools)
+        .where(
+          sql`${connectionTools.connectionId} = ${connection.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${connections.id} = ${connection.id} AND ${connections.status} = 'disconnected')`
         ),
     ]
   );
@@ -1130,8 +1179,7 @@ const finishFlow = async (
   env: Env,
   person: ConnectionPerson,
   flow: FlowRow | undefined,
-  code: string | undefined,
-  error: string | undefined
+  { code, error, iss }: Pick<FinishConnection, "code" | "error" | "iss">
 ): Promise<{ connectionId: string; returnTo: string }> => {
   const refuse: Refuse = async (
     reason,
@@ -1173,6 +1221,15 @@ const finishFlow = async (
   }
   const setUp = await ready(env, flow.provider);
   const { provider, client, vault } = setUp;
+  // RFC 9207: the answer must come from the issuer the sign-in started at,
+  // or its code goes to no token endpoint (a mix-up of servers).
+  if (
+    provider.issuer !== undefined &&
+    (iss === undefined ? provider.issuer.inAnswers : iss !== provider.issuer.id)
+  ) {
+    await refuse("connection.provider_refused");
+    throw connectionErrors.create("connection.provider_refused");
+  }
 
   let tokens: TokenSet;
   try {
@@ -1230,10 +1287,10 @@ export const finishConnection = async (
     await abandonFlow(env, given);
     throw connectionErrors.create("connection.invalid");
   }
-  const { person, state, code, error } = parsed.data;
+  const { person, state, ...answer } = parsed.data;
   const flow = await takeFlow(env, state);
   try {
-    return await finishFlow(env, person, flow, code, error);
+    return await finishFlow(env, person, flow, answer);
   } finally {
     if (flow !== undefined) {
       await doneWith(env, flow);
@@ -1296,9 +1353,17 @@ const replaceKey = async (
         .where(
           sql`${connectionTokens.connectionId} = ${held.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${stillActive})`
         ),
+      // Its server's tool list was read for the account it held before.
+      db
+        .delete(connectionTools)
+        .where(
+          sql`${connectionTools.connectionId} = ${held.id} AND EXISTS (SELECT 1 FROM ${connections} WHERE ${stillActive})`
+        ),
       db
         .update(connections)
         .set({
+          toolListReadAt: null,
+          toolListFreshUntil: null,
           accountName: account.name,
           accountEmail: account.email?.toLowerCase() ?? null,
           pastVerifiedEmails: pastAddressesAfter(
@@ -1346,7 +1411,7 @@ export const connectWithKey = async (
     });
     throw roleErrors.create("role.forbidden");
   }
-  const provider = providerFor(providerId);
+  const provider = await providerConfigFor(env, providerId);
   const vault = await vaultFor(env);
   if (provider?.kind !== "api_key" || vault === undefined) {
     throw connectionErrors.create("connection.provider_unavailable");
@@ -1368,7 +1433,7 @@ export const connectWithKey = async (
       connectionId
     );
   };
-  const account = await provider.account(key);
+  const account = await provider.account(key, ownerOf({ scope }, person));
   if (account === null) {
     await refuse("connection.provider_refused", { outcome: "failed" });
     throw connectionErrors.create("connection.provider_refused");

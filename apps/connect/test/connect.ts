@@ -151,6 +151,7 @@ export type Signed = Partial<
     | "restricted"
     | "readOnly"
     | "unattended"
+    | "toolClass"
     | "origin"
     | "decision"
     | "heldUntil"

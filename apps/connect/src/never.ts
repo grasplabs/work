@@ -62,7 +62,7 @@ const neverWords: ReadonlySet<string> = new Set([
 ]);
 
 /** A name's words: split at anything not a letter or digit, and camelCase. */
-const wordsOf = (name: string): string[] =>
+export const wordsOf = (name: string): string[] =>
   name
     .replaceAll(/(?<lower>[a-z0-9])(?<upper>[A-Z])/gu, "$<lower> $<upper>")
     .toLowerCase()

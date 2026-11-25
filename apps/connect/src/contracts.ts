@@ -35,6 +35,11 @@ import {
   httpServedContract,
   httpTool,
 } from "./http-connections.ts";
+import {
+  connectorActionShape,
+  connectorContractId,
+  connectorContract as connectorServedContract,
+} from "./mcp-connectors.ts";
 
 // Generated connector contracts (spec 12). Which one a connection serves
 // is decided by the connection's kind, never by the name alone, so a
@@ -48,6 +53,9 @@ import {
 //   release's manifests alone: nothing is loaded and no token is read;
 // - a Composio connection serves `composio.<toolkit>@1`, its own toolkit's
 //   allowed tools, as its server lists them now (composio-contracts.ts);
+// - a connection to a connector made from a URL serves
+//   `connector.<connector>@1`, its server's tools as it lists them now,
+//   each with its class by the rules (mcp-connectors.ts);
 // - an HTTP connection serves `http.request@1` (GRA-1478): `get` and
 //   `send`, those its allowed methods use, with schemas of connect's own
 //   (`httpActionSchemas`). What it may reach is the connection's, checked
@@ -121,6 +129,12 @@ export const connectorContract = async (
     }
     return await composioContract(env, connection, contract);
   }
+  if (connection.serverKind === "connector") {
+    if (contract !== connectorContractId(connection.server)) {
+      throw connectErrors.create("connect.contract_not_found");
+    }
+    return await connectorServedContract(env, connection);
+  }
   if (connection.serverKind === "http") {
     const config = await httpConfigOf(env, connection.id);
     if (contract !== httpContract || config === undefined) {
@@ -164,6 +178,9 @@ export const connectorContracts = async (
     return (await httpConfigOf(env, connection.id)) === undefined
       ? []
       : [httpContract];
+  }
+  if (connection.serverKind === "connector") {
+    return [connectorContractId(connection.server)];
   }
   const connector =
     connection.server === composioContractPrefix
@@ -243,6 +260,9 @@ export const actionShape = async (
       }
     }
     return { readOnly: rule.read, inputs, provider };
+  }
+  if (connection.serverKind === "connector") {
+    return await connectorActionShape(env, connection, action);
   }
   if (connection.serverKind === "http") {
     const config = await httpConfigOf(env, connection.id);
