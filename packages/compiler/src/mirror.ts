@@ -10,7 +10,7 @@ import {
   routeName,
   standardActions,
 } from "./tool-names.ts";
-import type { DeclaredRoute } from "./tool-names.ts";
+import type { DeclaredRoute, HttpMethod } from "./tool-names.ts";
 
 // The mirror rule, checked for every connector's tools whoever wrote them
 // (GRA-2319): a tool is one route of the vendor's API, its primary route,
@@ -245,10 +245,20 @@ const againstOperation = (
   ].filter((problem) => problem !== undefined);
 };
 
+/** The standard actions a method may take, where the path can't say which. */
+const impliedActions: Readonly<Record<HttpMethod, readonly string[]>> = {
+  GET: ["get", "list"],
+  HEAD: [],
+  POST: ["create"],
+  PUT: ["update"],
+  PATCH: ["update"],
+  DELETE: ["delete"],
+};
+
 /**
  * A tool on a path the naming rule can't read (`/drive/root:/{name}:/content`):
  * named `<family>.<the vendor's operation name>`, the family its leading
- * segments, and never by a standard action, which says what a route is.
+ * segments. A standard action there is only the one its method takes.
  */
 const againstUnreadable = (
   tool: MirrorTool,
@@ -268,14 +278,20 @@ const againstUnreadable = (
   const parts = tool.name.startsWith(prefix)
     ? tool.name.slice(prefix.length).split(".")
     : [];
+  const action = parts.at(-1) ?? "";
   const vendors =
     tool.name.length <= nameMaxLength &&
     parts.length > 0 &&
     parts.every(isNamePart) &&
-    !standardActions.has(parts.at(-1) ?? "");
-  return vendors
-    ? []
-    : [`${method} ${path} is named ${prefix}<the vendor's operation name>.`];
+    (!standardActions.has(action) || impliedActions[method].includes(action));
+  if (!vendors) {
+    return [
+      `${method} ${path} is named ${prefix}<the vendor's operation name>.`,
+    ];
+  }
+  return action === "list" && pageItem(tool.returns) === undefined
+    ? [listShape]
+    : [];
 };
 
 /** A tool's name against its route, where no spec says more. */
