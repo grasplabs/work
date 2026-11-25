@@ -99,3 +99,13 @@ export const nativeSyncs: Readonly<Record<string, readonly string[]>> = {
   "google": ["calendar", "drive", "gmail", "shared-drives"],
   "microsoft": ["calendar", "drive", "libraries", "mail"],
 };
+
+/**
+ * The kind of tenant each native connector's sign-in is pinned to, by its
+ * provider: `guid`, an Entra tenant ID; `domain`, a hosted domain. Core
+ * gives its connections the organization's own (connections.ts
+ * `tenantOf`).
+ */
+export const nativeTenants: Readonly<Record<string, "guid" | "domain">> = {
+  "google": "domain",
+};
