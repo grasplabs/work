@@ -1131,9 +1131,16 @@ describe("a thread's day lines", () => {
 
 /** The thread's New line: the separator named New, if there is one. */
 const newLine = () =>
-  document.querySelector<HTMLElement>(
-    "[role='log'] [role='separator'][aria-label='New']"
-  );
+  [
+    ...document.querySelectorAll<HTMLElement>(
+      "[role='log'] [role='separator'][aria-labelledby]"
+    ),
+  ].find(
+    (line) =>
+      document.querySelector(
+        `[id="${line.getAttribute("aria-labelledby") ?? ""}"]`
+      )?.textContent === "New"
+  ) ?? null;
 
 /** Whether `first` stands before `second` in the thread. */
 const before = (first: Element | null, second: Element | null): boolean => {
