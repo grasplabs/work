@@ -9,7 +9,10 @@ import {
   brainReportPath,
 } from "@grasp-os/shared/brain-report";
 import { channelPlatformOf } from "@grasp-os/shared/channels";
-import { connectionCallbackPath } from "@grasp-os/shared/connect";
+import {
+  connectionCallbackPath,
+  connectorClientMetadataPath,
+} from "@grasp-os/shared/connect";
 import { errorReportPath } from "@grasp-os/shared/error-reports";
 import { internalErrors, requestErrors } from "@grasp-os/shared/errors";
 import { requestIdHeader } from "@grasp-os/shared/http";
@@ -61,6 +64,7 @@ import { chatFileResponse } from "./chat-file-route.ts";
 import { ensureClockOnce } from "./clock.ts";
 import {
   catalogLogoResponse,
+  clientMetadataResponse,
   handleConnectionCallback,
   isCatalogLogoPath,
 } from "./connections.ts";
@@ -282,6 +286,9 @@ const connectionRouteResponse = async (
       };
       ctx.waitUntil(carryOn());
     });
+  }
+  if (pathname === connectorClientMetadataPath) {
+    return clientMetadataResponse(request, env);
   }
   if (isCatalogLogoPath(pathname)) {
     return await catalogLogoResponse(request, env, pathname, requestId);

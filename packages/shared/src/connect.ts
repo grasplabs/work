@@ -211,6 +211,77 @@ export const companyToolClasses = [
 export const companyToolClassSchema = z.enum(companyToolClasses);
 export type CompanyToolClass = z.infer<typeof companyToolClassSchema>;
 
+/**
+ * A connector made from an MCP server's URL (connect's src/mcp-connectors.ts):
+ * `mcp_` and 32 random hex digits. Never an app's provider name, which
+ * takes no underscore.
+ */
+export const connectorIdSchema = z.string().regex(/^mcp_[0-9a-f]{32}$/u);
+
+/**
+ * Where a deployment serves its client metadata document (the client ID
+ * an MCP server's authorization server reads, where it takes one), on its
+ * own origin.
+ */
+export const connectorClientMetadataPath =
+  "/api/connections/client-metadata.json";
+
+/** Longest server URL an admin may enter. */
+export const connectorUrlMaxLength = 2048;
+
+/** Headers a connector's key may not go in: connect and HTTP set them. */
+const forbiddenKeyHeaders: ReadonlySet<string> = new Set([
+  "accept",
+  "connection",
+  "content-length",
+  "content-type",
+  "cookie",
+  "host",
+  "mcp-method",
+  "mcp-name",
+  "mcp-protocol-version",
+  "transfer-encoding",
+]);
+
+/**
+ * An admin adding a connector by its MCP server's URL: the one-line
+ * `defineConnector({ name, mcp: { url } })`, and how its server signs in.
+ * OAuth (MCP's authorization), with the client ID and secret its vendor
+ * issued where the server registers no clients itself; or a fixed key in
+ * a header, which each connection then gives.
+ */
+export const addConnectorSchema = z.strictObject({
+  person: connectionPersonSchema,
+  name: z.string().trim().min(1).max(80),
+  url: z.url({ protocol: /^https$/u }).max(connectorUrlMaxLength),
+  /** The deployment's origin, from its config: its sign-in returns there. */
+  origin: z.url(),
+  auth: z.discriminatedUnion("kind", [
+    z.strictObject({
+      kind: z.literal("oauth"),
+      client: z
+        .strictObject({
+          id: z.string().min(1).max(512),
+          secret: z.string().min(1).max(4096).optional(),
+        })
+        .optional(),
+    }),
+    z.strictObject({
+      kind: z.literal("header"),
+      header: z
+        .string()
+        .regex(/^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$/u)
+        .transform((header) => header.toLowerCase())
+        .refine(
+          (header) =>
+            !forbiddenKeyHeaders.has(header) && !header.startsWith("mcp-"),
+          "A header connect sets itself"
+        ),
+    }),
+  ]),
+});
+export type AddConnector = z.input<typeof addConnectorSchema>;
+
 /** Starts connecting an account through OAuth. */
 export const startConnectionSchema = z.strictObject({
   person: connectionPersonSchema,
@@ -223,6 +294,7 @@ export const startConnectionSchema = z.strictObject({
     connectorProviderSchema,
     directoryProviderSchema,
     placesProviderSchema,
+    connectorIdSchema,
   ]),
   scope: connectionScopeSchema,
   /** The deployment's origin, from its config: the provider returns there. */
@@ -270,6 +342,12 @@ export const finishConnectionSchema = z.strictObject({
   code: z.string().min(1).max(4096).optional(),
   /** The provider's error code, when it sent one instead of a code. */
   error: z.string().min(1).max(256).optional(),
+  /**
+   * The authorization server's `iss` on its answer (RFC 9207), as the
+   * browser brought it: an MCP server's sign-in checks it against the
+   * issuer it recorded before the code is redeemed.
+   */
+  iss: z.string().min(1).max(2048).optional(),
 });
 export type FinishConnection = z.input<typeof finishConnectionSchema>;
 
@@ -288,7 +366,7 @@ export const connectWithKeySchema = z.strictObject({
    * An app's provider, or an HR platform's read-only admin connection,
    * which no connector's calls use.
    */
-  provider: z.union([appProviderSchema, hrProviderSchema]),
+  provider: z.union([appProviderSchema, hrProviderSchema, connectorIdSchema]),
   scope: connectionScopeSchema,
   /** Printable ASCII only: it goes into a request header as it is. */
   key: z
@@ -602,7 +680,9 @@ export interface ConnectionOwner {
   /**
    * For a Composio connection: the class connect takes each tool it
    * offers to be (its review's, and the admin's rule: connect's
-   * `allowedTool`), by the tool's name. Core holds the chat's agent's calls
+   * `allowedTool`), by the tool's name. For a connection to a connector
+   * made from a URL: each tool's class by the rules, from its server's
+   * tool list as connect last read it. Core holds the chat's agent's calls
    * of them to the classes the company turned on. Absent for a native
    * connection, whose classes core reads from the release.
    */
@@ -894,10 +974,11 @@ export const catalogSourceSchema = z.enum(["native", "composio"]);
 export type CatalogSource = z.infer<typeof catalogSourceSchema>;
 
 /**
- * Who carries out a connection's actions: a catalog entry's source, or
- * connect itself for an HTTP connection (GRA-1478), which no catalog lists.
+ * Who carries out a connection's actions: a catalog entry's source,
+ * connect itself for an HTTP connection (GRA-1478), which no catalog lists,
+ * or a connector made from an MCP server's URL (GRA-1375).
  */
-export type ConnectionSource = CatalogSource | "http";
+export type ConnectionSource = CatalogSource | "http" | "connector";
 
 /** A Composio toolkit's slug, such as `hubspot`. */
 export const composioToolkitSchema = z
@@ -2511,6 +2592,14 @@ export const connectionErrors = defineErrorFamily({
     "That origin can't be approved: it must be an https origin whose name leads only to public internet addresses.",
   "connection.tools_changed":
     "Someone changed this connection's tools at the same time. Look at them again and make your change once more.",
+  "connection.server_refused":
+    "That server can't be added: its address must be an https URL with a name, not an IP address, that leads only to public internet addresses.",
+  "connection.sign_in_unsupported":
+    "That server's sign-in doesn't follow MCP's authorization (protected-resource and authorization-server metadata, PKCE with S256), so Grasp can't connect to it safely.",
+  "connection.client_required":
+    "That server takes only clients registered with it. Enter the client ID its vendor issued for Grasp.",
+  "connection.connector_exists":
+    "A connector for that server was already added.",
 });
 
 /** Which App's held actions of which binding to drop. */

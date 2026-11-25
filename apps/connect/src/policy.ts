@@ -14,6 +14,13 @@ import type { McpServerTool, McpTool, McpToolResult } from "./mcp.ts";
 
 type ServerKind = Connection["serverKind"];
 
+/**
+ * Whether a server of `kind` is someone else's, run where connect can't
+ * see: Composio's, or a connector's made from a URL (mcp-connectors.ts).
+ */
+const isRemote = (kind: ServerKind): boolean =>
+  kind === "composio" || kind === "connector";
+
 /** A plain identifier: no dots, brackets or other paths into the input. */
 const resourceFieldPattern = /^[A-Za-z_]\w*$/u;
 
@@ -90,7 +97,7 @@ export const checkResourceScope = (
  * side effect run twice.
  */
 export const didNothing = (kind: ServerKind, result: McpToolResult): boolean =>
-  kind !== "composio" && result.notPerformed;
+  !isRemote(kind) && result.notPerformed;
 
 /**
  * Whether a side effect's error result leaves open whether it acted, so it
@@ -100,7 +107,8 @@ export const didNothing = (kind: ServerKind, result: McpToolResult): boolean =>
  * connector's other errors are refusals its reviewed code made before
  * acting (the kit marks the rest unknown).
  *
- * Every error of a Composio tool that may act is unknown (GRA-539).
+ * Every error of a remote server's tool that may act is unknown (GRA-539,
+ * GRA-1375): a connector's server is as unseen as Composio's.
  * Composio runs the tool remotely and may answer a provider's 5xx, a
  * timeout or a dropped connection after the provider acted, in a result
  * that looks like any other error. Its documented answer (`successful`,
@@ -120,8 +128,7 @@ export const uncertainFailure = (
   tool: McpTool,
   result: McpToolResult
 ): boolean =>
-  result.outcomeUnknown ||
-  (kind === "composio" && result.isError && !tool.readOnly);
+  result.outcomeUnknown || (isRemote(kind) && result.isError && !tool.readOnly);
 
 /**
  * The result as connect passes it on, with the resources it read. A

@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { recordEventIf } from "./audit.ts";
 import { pastAddressesAfter } from "./connections.ts";
+import { providerConfigFor } from "./connector-providers.ts";
 import {
   connections,
   connectionTokens,
@@ -613,7 +614,9 @@ const activeConnection = async (env: Env, connectionId: string) => {
     .where(eq(connections.id, connectionId))
     .get();
   const provider =
-    connection === undefined ? undefined : providerFor(connection.provider);
+    connection === undefined
+      ? undefined
+      : await providerConfigFor(env, connection.provider);
   const row = await readRow(env.DB, connectionId);
   if (
     connection?.status !== "active" ||

@@ -136,8 +136,24 @@ export interface OAuthProviderConfig {
   sharedOnly?: boolean;
   /** Parameters the authorization request adds to the standard ones. */
   authorizationParams: (tenant: string) => Record<string, string>;
-  /** How the client authenticates at the token and revocation endpoints. */
-  clientAuthentication: "client_secret_post" | "client_secret_basic";
+  /**
+   * Parameters every token request adds to the standard ones: an MCP
+   * server's `resource` (RFC 8707), so its tokens are for it alone.
+   */
+  tokenParams?: Readonly<Record<string, string>>;
+  /**
+   * The authorization server a flow's answer must come from (RFC 9207):
+   * its issuer, and whether it says it puts `iss` on every answer. An
+   * answer with another `iss`, or with none when it promised one, is
+   * refused before its code is redeemed. Only an MCP server's sign-in.
+   */
+  issuer?: { id: string; inAnswers: boolean };
+  /**
+   * How the client authenticates at the token and revocation endpoints:
+   * `none` for a public client (an MCP server's, registered without a
+   * secret), which names itself and proves nothing but PKCE.
+   */
+  clientAuthentication: "none" | "client_secret_post" | "client_secret_basic";
   client: (env: Env) => OAuthClientCredentials | undefined;
   /**
    * The account subject the tokens name, whatever else they say: to tell

@@ -78,14 +78,15 @@ export const nativeClasses: ReadonlyMap<
 
 /**
  * The class connect and the release give the tool `action` of `owner`'s
- * connection: a Composio tool's from its review, a native one's from its
- * manifest. Undefined for one neither knows (an HTTP connection's).
+ * connection: a Composio tool's from its review, a connector's by the
+ * rules from its server's list, a native one's from its manifest.
+ * Undefined for one neither knows (an HTTP connection's).
  */
 export const classOf = (
   owner: Pick<ConnectionOwner, "source" | "provider" | "toolClasses">,
   action: string
 ): ToolClass | undefined =>
-  owner.source === "composio"
+  owner.source === "composio" || owner.source === "connector"
     ? owner.toolClasses?.[action]
     : nativeClasses.get(owner.provider)?.get(action);
 
@@ -549,7 +550,7 @@ export const requireToolClassOn = async (
     authority,
     agentAppOf(owner.source, owner.provider)
   );
-  if (owner.source === "composio") {
+  if (owner.source === "composio" || owner.source === "connector") {
     return await requireAppClassOn(env, authority, owner, action, unattended);
   }
   const toolClass = nativeClasses.get(owner.provider)?.get(action);

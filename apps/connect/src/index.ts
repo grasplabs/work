@@ -150,6 +150,7 @@ import {
 import { hrConnections, readHr } from "./hr.ts";
 import { createHttpConnection } from "./http-connections.ts";
 import { catalogLogo } from "./logos.ts";
+import { addConnector } from "./mcp-connectors.ts";
 import {
   npmAdvisories,
   npmMalwareReports,
@@ -562,6 +563,14 @@ export default class Connect
     request: unknown
   ): Promise<{ connectionId: string }> {
     return await createHttpConnection(this.env, request);
+  }
+
+  // An admin adds a connector by its MCP server's URL (GRA-1375): its
+  // sign-in learned and connect registered there. People then connect to
+  // it through `startConnection` or `connectWithKey`, naming its ID.
+
+  async addConnector(request: unknown): Promise<{ id: string }> {
+    return await addConnector(this.env, request);
   }
 
   async webhookPost(post: unknown): Promise<WebhookOutcome> {

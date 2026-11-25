@@ -62,6 +62,7 @@ import {
 } from "./idempotency.ts";
 import type { Repeat, Row, StoredAnswer } from "./idempotency.ts";
 import { requirePointedMailbox } from "./mailboxes.ts";
+import { connectorAction } from "./mcp-connectors.ts";
 import { McpError } from "./mcp.ts";
 import type {
   McpServer,
@@ -81,6 +82,9 @@ import {
   withProvenance,
 } from "./policy.ts";
 import { markIfGrantLacks } from "./tokens.ts";
+
+/** What a call's server is used for: calling its tool. */
+type CallServer = Pick<McpServer, "call">;
 
 const retryAfterSchema = z.object({
   error: z.object({
@@ -313,8 +317,8 @@ const actionFor = async (
   release: string | null;
   /** It attaches files (GRA-887): only a native connector's write does. */
   takesFiles: boolean;
-  open: () => Promise<McpServer>;
-  openLookup: () => Promise<McpServer>;
+  open: () => Promise<CallServer>;
+  openLookup: () => Promise<CallServer>;
 }> => {
   // Never, whatever is allowed: before anything else is looked up.
   if (isNeverTool(action)) {
@@ -355,6 +359,19 @@ const actionFor = async (
       takesFiles: false,
       open: async () => await Promise.resolve(server),
       openLookup: async () => await Promise.resolve(server),
+    };
+  }
+  if (connection.serverKind === "connector") {
+    // A tool its server lists now, taken to be what the rules make of it.
+    const { tool, open } = await connectorAction(env, connection, action);
+    // A remote server's call of unknown outcome is never recovered.
+    return {
+      tool,
+      recovery: "none",
+      release: null,
+      takesFiles: false,
+      open,
+      openLookup: open,
     };
   }
   // Only a tool the admin allowed and Grasp classed, asked for before
@@ -676,7 +693,7 @@ const readOnce = async (
   connection: Connection,
   tool: McpTool,
   input: Input,
-  open: () => Promise<McpServer>
+  open: () => Promise<CallServer>
 ): Promise<Omit<CallDone, "sideEffect">> => {
   // Every refusal is behind: only now may a token be read.
   const server = await open();
@@ -735,9 +752,9 @@ interface Sent {
    */
   files: AttachmentBytes;
   store: Store;
-  open: () => Promise<McpServer>;
+  open: () => Promise<CallServer>;
   /** Its server for a lookup (`find`): the action's GET routes only. */
-  openLookup: () => Promise<McpServer>;
+  openLookup: () => Promise<CallServer>;
 }
 
 /**
@@ -768,7 +785,7 @@ const withFiles = (
  */
 const sendClaimed = async (
   { env, callId, connection, tool, input, meta, files, store }: Sent,
-  server: McpServer,
+  server: CallServer,
   recovering = false
 ): Promise<Omit<CallDone, "sideEffect">> => {
   let done: McpToolResult;
@@ -848,7 +865,7 @@ const findEffect = async (
   tool: McpTool,
   input: Input,
   meta: Record<string, Json>,
-  server: McpServer,
+  server: CallServer,
   store: Store
 ): Promise<(StoredAnswer & { change?: CallChange }) | undefined> => {
   let found: McpToolResult;

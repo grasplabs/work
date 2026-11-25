@@ -26,7 +26,8 @@ export const connectionEvent = (
     | "connection.tools.added"
     | "connection.tools.removed"
     | "connection.tools.read_tools"
-    | "connection.sync_places",
+    | "connection.sync_places"
+    | "connector.added",
   connectionId: string | undefined,
   detail: Record<string, AuditDetailValue>
 ): AuditEntry => ({
@@ -106,7 +107,8 @@ export const auditRefusal = async (
     | "connection.connect"
     | "connection.disconnect"
     | "connection.tools"
-    | "connection.sync_places",
+    | "connection.sync_places"
+    | "connector.added",
   detail: Record<string, AuditDetailValue>,
   connectionId?: string
 ): Promise<void> => {

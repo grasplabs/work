@@ -86,8 +86,13 @@ export const listIntegrations = async (
     }
   };
   for (const { source, provider, status } of owners) {
-    // An HTTP connection is no catalog entry: nothing to name it by here.
-    if (status !== "disconnected" && source !== "http") {
+    // An HTTP connection, or one to a connector made from a URL, is no
+    // catalog entry: nothing to name it by here.
+    if (
+      status !== "disconnected" &&
+      source !== "http" &&
+      source !== "connector"
+    ) {
       note({ source, id: provider }, "permission");
     }
   }

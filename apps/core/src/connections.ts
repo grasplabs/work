@@ -16,7 +16,9 @@ import {
   connectErrors,
   connectionErrors,
   connectionOwnersMax,
+  connectionCallbackPath,
   connectionScopeSchema,
+  connectorClientMetadataPath,
   oauthProviderSchema,
   returnPathMaxLength,
 } from "@grasp-os/shared/connect";
@@ -1229,6 +1231,31 @@ const redirect = (to: URL): Response =>
   });
 
 /**
+ * The deployment's client metadata document (MCP 2026-07-28), where an
+ * MCP server's authorization server reads who connect is when connect
+ * signs in there without registering (connect's mcp-discovery.ts): a
+ * public client that returns to this origin's callback alone. Public, as
+ * the specification has it: it names no secret.
+ */
+export const clientMetadataResponse = (
+  request: Request,
+  env: Env
+): Response | undefined => {
+  const config = signInConfig(env);
+  if (request.method !== "GET" || config === undefined) {
+    return undefined;
+  }
+  return Response.json({
+    client_id: new URL(connectorClientMetadataPath, config.origin).href,
+    client_name: "Grasp",
+    redirect_uris: [new URL(connectionCallbackPath, config.origin).href],
+    grant_types: ["authorization_code", "refresh_token"],
+    response_types: ["code"],
+    token_endpoint_auth_method: "none",
+  });
+};
+
+/**
  * The provider's redirect back, on the client's origin. The session cookie
  * comes along (a top-level navigation sends `SameSite=Lax` cookies), and
  * connect finishes the flow only for the person who started it, so a
@@ -1278,6 +1305,9 @@ export const handleConnectionCallback = async (
       code: params.get("code") ?? undefined,
       // Only whether there is one matters; the provider's text isn't kept.
       error: params.get("error")?.slice(0, 64) ?? undefined,
+      // Which authorization server answered (RFC 9207), for connect to
+      // check against the one the sign-in started at.
+      iss: params.get("iss") ?? undefined,
     });
     // The accounts it proves are theirs, for the reader lists the Brain
     // copies (GRA-1761): failed, the flow fails, and connecting again in
