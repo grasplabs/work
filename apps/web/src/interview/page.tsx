@@ -235,7 +235,14 @@ const TalkActions = ({
       <Button
         aria-expanded={transcript}
         aria-label={t`Transcript`}
-        onClick={onTranscript}
+        onClick={(event) => {
+          onTranscript();
+          // Pressed with a pointer, it lets go of focus: a key pressed later (Escape, to close it)
+          // would otherwise turn the press into keyboard focus and draw the ring round it.
+          if (event.detail > 0) {
+            event.currentTarget.blur();
+          }
+        }}
         size={tool.button}
         tooltip={t`Transcript`}
         variant={transcript ? "secondary" : "ghost"}

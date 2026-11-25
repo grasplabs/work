@@ -1962,7 +1962,7 @@ msgstr "Un hueco: esta conexión no puede decirle a Grasp qué cambió en ella, 
 msgid "A JSON value"
 msgstr "Un valor JSON"
 
-#: src/interview/transcript.tsx
+#: src/interview/transcript-looks.tsx
 msgid "A line of mine, removed."
 msgstr "Una intervención mía, eliminada."
 
@@ -14389,7 +14389,7 @@ msgstr "¿Eliminar {what} del cerebro?"
 msgid "Remove {when}, for {person}"
 msgstr "Quitar {when}, para {person}"
 
-#: src/interview/transcript.tsx
+#: src/interview/transcript-looks.tsx
 msgid "Remove {who}’s line: {words}"
 msgstr "Quitar la intervención de {who}: {words}"
 
@@ -14454,7 +14454,7 @@ msgstr "Eliminar esto del cerebro"
 msgid "Remove this line?"
 msgstr "¿Quitar esta intervención?"
 
-#: src/interview/transcript.tsx
+#: src/interview/transcript-looks.tsx
 msgid "Remove your line: {words}"
 msgstr "Quitar tu intervención: {words}"
 
@@ -14509,7 +14509,7 @@ msgstr "Eliminado del cerebro"
 msgid "Removed the organization's logo"
 msgstr "Quitó el logotipo de la organización"
 
-#: src/interview/transcript.tsx
+#: src/interview/transcript-looks.tsx
 msgid "Removed."
 msgstr "Eliminada."
 
@@ -21082,6 +21082,7 @@ msgstr "Ayer {time}"
 
 #: src/connections/app-of.tsx
 #: src/drafts/draft-history.tsx
+#: src/interview/transcript-looks.tsx
 #: src/workflows/run-detail.tsx
 #: src/workflows/runs.tsx
 msgid "You"

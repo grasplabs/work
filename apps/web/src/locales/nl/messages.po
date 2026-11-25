@@ -1962,7 +1962,7 @@ msgstr "Een gat: deze verbinding kan Grasp niet vertellen wat er veranderd is, d
 msgid "A JSON value"
 msgstr "Een JSON-waarde"
 
-#: src/interview/transcript.tsx
+#: src/interview/transcript-looks.tsx
 msgid "A line of mine, removed."
 msgstr "Een beurt van mij, verwijderd."
 
@@ -14389,7 +14389,7 @@ msgstr "{what} uit het brein verwijderen?"
 msgid "Remove {when}, for {person}"
 msgstr "{when}, voor {person}, verwijderen"
 
-#: src/interview/transcript.tsx
+#: src/interview/transcript-looks.tsx
 msgid "Remove {who}’s line: {words}"
 msgstr "Beurt van {who} verwijderen: {words}"
 
@@ -14454,7 +14454,7 @@ msgstr "Dit uit het brein verwijderen"
 msgid "Remove this line?"
 msgstr "Deze beurt verwijderen?"
 
-#: src/interview/transcript.tsx
+#: src/interview/transcript-looks.tsx
 msgid "Remove your line: {words}"
 msgstr "Je beurt verwijderen: {words}"
 
@@ -14509,7 +14509,7 @@ msgstr "Uit het brein verwijderd"
 msgid "Removed the organization's logo"
 msgstr "Heeft het logo van de organisatie verwijderd"
 
-#: src/interview/transcript.tsx
+#: src/interview/transcript-looks.tsx
 msgid "Removed."
 msgstr "Verwijderd."
 
@@ -21082,6 +21082,7 @@ msgstr "Gisteren {time}"
 
 #: src/connections/app-of.tsx
 #: src/drafts/draft-history.tsx
+#: src/interview/transcript-looks.tsx
 #: src/workflows/run-detail.tsx
 #: src/workflows/runs.tsx
 msgid "You"
