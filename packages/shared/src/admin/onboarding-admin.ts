@@ -1,5 +1,4 @@
 import type { InterviewFact, InterviewLine } from "./interview-turn.ts";
-import type { Interviewer } from "./interviewer.ts";
 import {
   needsSplit,
   PHASES,
@@ -886,8 +885,6 @@ export interface Interview {
   toRead: boolean;
   /** How the person found talking to Stephen, from 1 to 5; none when they did not say. */
   rating: number | null;
-  /** Who held it: whoever the person chose on the way in, and Stephen where there was no choice yet. */
-  interviewer: Interviewer;
   /** Which Stephen held its last turn (`stephenVersion` in core's onboarding/lab-marks.ts); none where it isn't known. */
   stephen?: string;
   /** The language its last turn was held in; none where it isn't known. */

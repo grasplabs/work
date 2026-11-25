@@ -245,12 +245,12 @@ export const Route = createFileRoute("/")({ component: Notes });
     "never name the kit's own files for their types in %s, by any path",
     async (_case, file, up) => {
       const lines = [
-        `/// <reference path="${up}node_modules/@grasp-os/runtime/src/page.ts" />`,
+        `/// <reference path="${up}node_modules/@grasp-os/runtime/src/app/page.ts" />`,
         '/// <reference types="node" />',
-        `export type R = typeof import("${up}node_modules/@grasp-os/runtime/src/page-runtime.ts");`,
-        'import type * as C from "/node_modules/@grasp-os/runtime/src/client-core.ts";',
-        `import type { serverModule } from "${up}node_modules/@grasp-os/runtime/src/server.ts";`,
-        `import type { Doc } from "${up}node_modules/@grasp-os/runtime/src/query-types.ts";`,
+        `export type R = typeof import("${up}node_modules/@grasp-os/runtime/src/app/page-runtime.ts");`,
+        'import type * as C from "/node_modules/@grasp-os/runtime/src/app/client-core.ts";',
+        `import type { serverModule } from "${up}node_modules/@grasp-os/runtime/src/app/server.ts";`,
+        `import type { Doc } from "${up}node_modules/@grasp-os/runtime/src/app/query-types.ts";`,
         "export type Reached = typeof C | typeof serverModule | Doc<never>;",
       ].join("\n");
       const page =

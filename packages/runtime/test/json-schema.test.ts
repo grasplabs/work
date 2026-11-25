@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { v } from "../src/index.ts";
-import { jsonSchemaOf } from "../src/json-schema.ts";
+import { v } from "../src/app/index.ts";
+import { jsonSchemaOf } from "../src/common/json-schema.ts";
 
 // A descriptor as JSON Schema, for a model told its answer's shape (pure
 // logic): what fits the schema must fit the descriptor's own check.

@@ -24,7 +24,7 @@ import type {
   BrainPack,
   BrainPackItem,
   BrainRecall,
-} from "../src/brain-recall.ts";
+} from "../src/common/brain-recall.ts";
 
 type Request = z.input<typeof recallRequestSchema>;
 type Mutable<T> = { -readonly [Key in keyof T]: T[Key] };

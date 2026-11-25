@@ -14,7 +14,7 @@ import type {
   FunctionReference,
   ProgressOf,
   FunctionReturn,
-} from "../src/index.ts";
+} from "../src/app/index.ts";
 import type { workflows } from "./notes/server/_generated/api.ts";
 import { api, permissions } from "./notes/server/_generated/api.ts";
 import { internal } from "./notes/server/_generated/internal.ts";

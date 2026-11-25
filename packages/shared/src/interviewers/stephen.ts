@@ -18,29 +18,19 @@ export const SPEAKS: Record<Locale, string> = {
 };
 
 /**
- * The small words each of them says before a question, in every language they speak. They stand
- * here in the language itself: named in English only, an English one slipped into a Dutch line.
+ * The small words he says before a question, in every language he speaks. They stand here in the
+ * language itself: named in English only, an English one slipped into a Dutch line.
  */
-const SMALL_WORDS: Record<"stephen" | "claire", Record<Locale, string>> = {
-  stephen: {
-    en: '"Got it." "That\'s clear." "Right." "Okay."',
-    nl: '"Helder." "Duidelijk." "Juist." "Oké."',
-    de: '"Verstanden." "Alles klar." "Gut." "Okay."',
-    fr: '"Compris." "C’est clair." "D’accord." "Très bien."',
-    es: '"Entendido." "Está claro." "Vale." "De acuerdo."',
-  },
-  claire: {
-    en: '"Ah, okay." "Oh, right." "Mm, I see." "Got you." "Okay, clear."',
-    nl: '"Ah, oké." "O ja." "Mm, snap ik." "Helder." "Oké, duidelijk."',
-    de: '"Ah, okay." "Ach so." "Mm, verstehe." "Alles klar." "Okay, klar."',
-    fr: '"Ah, d’accord." "Ah oui." "Mm, je vois." "Compris." "D’accord, c’est clair."',
-    es: '"Ah, vale." "Ah, claro." "Mm, ya veo." "Entendido." "Vale, claro."',
-  },
+const SMALL_WORDS: Record<Locale, string> = {
+  en: '"Got it." "That\'s clear." "Right." "Okay."',
+  nl: '"Helder." "Duidelijk." "Juist." "Oké."',
+  de: '"Verstanden." "Alles klar." "Gut." "Okay."',
+  fr: '"Compris." "C’est clair." "D’accord." "Très bien."',
+  es: '"Entendido." "Está claro." "Vale." "De acuerdo."',
 };
 
-/** Where a text leaves room for his small words, and for Claire's (`claire.ts`). */
+/** Where a text leaves room for his small words. */
 const SMALL = "{small words}";
-export const SMALL_CLAIRE = "{small words of Claire}";
 
 /** The language by its name, for where Stephen has to be told which one a thing is written in. */
 export const NAMED: Record<Locale, string> = {
@@ -182,5 +172,4 @@ export const inLanguage = (text: string, locale: Locale): string =>
   text
     .replace(LANGUAGE, SPEAKS[locale])
     .replaceAll(NAME, NAMED[locale])
-    .replaceAll(SMALL, SMALL_WORDS.stephen[locale])
-    .replaceAll(SMALL_CLAIRE, SMALL_WORDS.claire[locale]);
+    .replaceAll(SMALL, SMALL_WORDS[locale]);

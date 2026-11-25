@@ -16,10 +16,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { interviewPhases } from "@grasp-os/shared/interview-links";
 import { interviewWants } from "@grasp-os/shared/interview-turn";
 import { labViaSchema } from "@grasp-os/shared/lab";
-import {
-  interviewLocaleSchema,
-  interviewerSchema,
-} from "@grasp-os/shared/onboarding";
+import { interviewLocaleSchema } from "@grasp-os/shared/onboarding";
 import type { InterviewLocale, Roster } from "@grasp-os/shared/onboarding";
 import { z } from "zod";
 
@@ -42,7 +39,12 @@ import { cardText, roleCardOf } from "./role-card.ts";
 
 /** What the lab kept of an interview a model played. */
 const playedSchema = z.object({
-  interviewer: interviewerSchema,
+  /**
+   * Who held it, as a practice kept while Claire still held interviews
+   * says. One of hers is no practice of Stephen's: it is refused, never
+   * scored and kept as his.
+   */
+  interviewer: z.literal("stephen").optional(),
   /** The first practice people, who tell all they know; people as they are, with a temper (v1); or with a mix and a state that drifts (v2, drift.ts). */
   people: z.enum(["ideal", "real", "v2"]),
   /** With v1, their temper; with v2, the temper that leads their mix. */

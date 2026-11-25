@@ -28,7 +28,7 @@ const generated = [
   "apps/core/test/fixtures/blueprints/*/files/server/_generated/**",
   // The SDK's connector catalog, from the release's connectors
   // (apps/core/build-connector-catalog.ts).
-  "packages/runtime/src/connector-catalog.gen.ts",
+  "packages/runtime/src/app/connector-catalog.gen.ts",
   // Each native tool's class, from the same connectors.
   "apps/core/src/native-tool-classes.gen.ts",
   // The names core's RPC targets give their parameters, from their source.

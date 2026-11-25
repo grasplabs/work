@@ -3,13 +3,13 @@ import type { OrgView } from "@grasp-os/shared/admin/onboarding-admin";
 import { stephenOf } from "@grasp-os/shared/admin/onboarding-admin-record";
 import { RATINGS } from "@grasp-os/shared/admin/org-record";
 /**
- * Stephen and Claire at one organization, ported from the prototype
+ * Stephen at one organization, ported from the prototype
  * (grasplabs/prototype `components/admin/org-stephen.tsx`): two of the
- * Interviews section's tabs. How they did there, as the model counts it
- * (`stephenOf`): what the people who talked to them thought of it, and how
- * many who started also finished. And how they are set up for the company.
+ * Interviews section's tabs. How he did there, as the model counts it
+ * (`stephenOf`): what the people who talked to him thought of it, and how
+ * many who started also finished. And how he is set up for the company.
  *
- * Their setup is changed from here (stephen-setup.tsx), kept in the
+ * His setup is changed from here (stephen-setup.tsx), kept in the
  * company's Grasp. Not here, as the prototype has it: what a review of
  * each interview found (core runs no such review, so the model says none
  * is `reviewed`).
@@ -30,11 +30,10 @@ const oneDecimal = new Intl.NumberFormat("en", {
 const decimal = (value: number): string => oneDecimal.format(value);
 
 /**
- * How Stephen and Claire did in this company's interviews, in short: what
- * people thought of it and how many who started also finished, as two
- * figures, then how many gave each rating. The rest (who people chose, how
- * long it takes, where they stop) is in Stephen Lab, organization by
- * organization.
+ * How Stephen did in this company's interviews, in short: what people
+ * thought of it and how many who started also finished, as two figures,
+ * then how many gave each rating. The rest (how long it takes, where they
+ * stop) is in Stephen Lab, organization by organization.
  */
 export const InterviewersDoing = ({ view }: { view: OrgView }) => {
   const stats = stephenOf(view);
@@ -129,7 +128,7 @@ const SetupPart = ({
   </div>
 );
 
-/** How the interviewers are set up for this company: a tab of the interviews. */
+/** How Stephen is set up for this company: a tab of the interviews. */
 export const InterviewersSetup = ({
   view,
   clientId,
@@ -149,43 +148,42 @@ export const InterviewersSetup = ({
         action={<SetupActions clientId={clientId} setup={setupRead} />}
         description={
           setupRead.changed
-            ? "As Grasp changed it. It holds for Stephen and Claire alike."
-            : "From the first conversation with the sponsor. It holds for Stephen and Claire alike."
+            ? "As Grasp changed it."
+            : "From the first conversation with the sponsor."
         }
-        title="How Stephen and Claire are set up here"
+        title="How Stephen is set up here"
       >
         <SetupPart
           description="Someone chooses their own language when they open their link."
           items={setup.languages.map(languageOf)}
-          label="Languages they interview in"
+          label="Languages he interviews in"
           none="None named yet: the company’s own Grasp doesn’t say which."
           short
         />
         {wanted === "" ? null : (
           <p className="border-t px-5 py-4">
             <Attention>
-              People there also need {wanted}, which Stephen and Claire don’t
-              speak yet.
+              People there also need {wanted}, which Stephen doesn’t speak yet.
             </Attention>
           </p>
         )}
         <SetupPart
-          description="They don’t ask about it, and move on when somebody brings it up."
+          description="He doesn’t ask about it, and moves on when somebody brings it up."
           items={setup.limits}
-          label="What they leave alone"
+          label="What he leaves alone"
           none="Nothing yet."
         />
         <SetupPart
-          description="Tools, products and the company’s own words, so they hear them right."
+          description="Tools, products and the company’s own words, so he hears them right."
           items={setup.terms}
-          label="Words they have to know"
+          label="Words he has to know"
           none="None yet."
           short
         />
       </Section>
       <Section
         description="A line each, from the first conversation, the research and what the company connected."
-        title="What they know before they say hello"
+        title="What he knows before he says hello"
       >
         {org.brief.length === 0 ? (
           <p className="text-muted-foreground border-t px-5 py-4">

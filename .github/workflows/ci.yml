@@ -436,7 +436,7 @@ jobs:
           else
             echo "embed.wasm and its source are main's: nothing to prove." >> "$GITHUB_STEP_SUMMARY"
           fi
-          if ! git diff --quiet HEAD^1 HEAD -- packages/compiler/oxc-wasm packages/runtime/src/oxc-parse.wasm .github/actions/oxc-wasm-build .github/workflows/build-oxc-wasm.yml; then
+          if ! git diff --quiet HEAD^1 HEAD -- packages/compiler/oxc-wasm packages/runtime/src/common/oxc-parse.wasm .github/actions/oxc-wasm-build .github/workflows/build-oxc-wasm.yml; then
             echo "oxc=true" >> "$GITHUB_OUTPUT"
           else
             echo "oxc.wasm's glue, build and pin are main's: nothing to prove." >> "$GITHUB_STEP_SUMMARY"

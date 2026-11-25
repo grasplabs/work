@@ -20,7 +20,7 @@ import type {
 } from "@grasp-os/shared/interview-turn";
 import type { LabWho } from "@grasp-os/shared/lab";
 import type { CaseScore } from "@grasp-os/shared/lab-compare";
-import type { InterviewLocale, Interviewer } from "@grasp-os/shared/onboarding";
+import type { InterviewLocale } from "@grasp-os/shared/onboarding";
 import { z } from "zod";
 
 import type { Transcript } from "./cases.ts";
@@ -43,7 +43,10 @@ import type { Asker, Said } from "./person.ts";
 import { notesAfter } from "./play.ts";
 
 /** A turn as Stephen is asked for it, without a link. */
-export type TurnAsked = Omit<InterviewTurnRequest, "secret" | "key">;
+export type TurnAsked = Omit<
+  InterviewTurnRequest,
+  "secret" | "key" | "interviewer"
+>;
 
 /** What a bench runs on: the local core's turns, drawings and gateway, or fakes of them. */
 export interface Stand {
@@ -62,7 +65,6 @@ export interface Stand {
 
 export interface BenchOptions {
   set: CaseSet;
-  interviewer: Interviewer;
   /** Keeps what one case wrote, and how it was judged, to read. Never for the hidden set. */
   keep: (id: string, value: unknown) => void;
 }
@@ -91,8 +93,7 @@ const beforeReadBack = (transcript: Transcript): Said[] =>
  */
 export const replayNotes = async (
   stand: Pick<Stand, "turn">,
-  transcript: Transcript & { who: LabWho },
-  interviewer: Interviewer
+  transcript: Transcript & { who: LabWho }
 ): Promise<InterviewFact[]> => {
   const lines = beforeReadBack(transcript);
   const theirs = lines.flatMap((line, at) =>
@@ -107,7 +108,6 @@ export const replayNotes = async (
       {
         event: "answer",
         locale: transcript.locale,
-        interviewer,
         lines: lines.slice(0, at + 1).map((line) => ({
           from: line.from,
           text: line.text,
@@ -138,7 +138,7 @@ const hasWho = (
 const notesCase = async (
   stand: Stand,
   transcript: Transcript & { who: LabWho },
-  { set, interviewer, keep }: BenchOptions
+  { set, keep }: BenchOptions
 ): Promise<CaseScore | null> => {
   const key = keyOf(transcript.key);
   const employee = key?.employees.find(
@@ -147,7 +147,7 @@ const notesCase = async (
   if (key === undefined || employee === undefined) {
     return null;
   }
-  const facts = await replayNotes(stand, transcript, interviewer);
+  const facts = await replayNotes(stand, transcript);
   const judged = await judge(
     stand.asker,
     sliceOf(key, employee),
@@ -372,16 +372,12 @@ const openingOf = (locale: InterviewLocale) =>
   locale === "nl" ? openings.nl : openings.en;
 
 /** The turn a moment asks for: the opening, then the moment, typed but for a last line said out loud. */
-export const momentTurn = (
-  moment: Moment,
-  interviewer: Interviewer
-): TurnAsked => {
+export const momentTurn = (moment: Moment): TurnAsked => {
   const opening = openingOf(moment.locale);
   const last = moment.lines.length - 1;
   return {
     event: moment.event ?? "answer",
     locale: moment.locale,
-    interviewer,
     lines: [
       ...opening.lines.map((line) => ({
         ...line,
@@ -406,10 +402,10 @@ export const momentTurn = (
 const askCase = async (
   stand: Stand,
   moment: Moment,
-  { set, interviewer, keep }: BenchOptions
+  { set, keep }: BenchOptions
 ): Promise<CaseScore> => {
   // Only his line is judged: what he would write down is never waited for, but where they stopped mid-sentence, since he then says nothing and the whole turn tells.
-  const turn = await stand.turn(moment.who, momentTurn(moment, interviewer), {
+  const turn = await stand.turn(moment.who, momentTurn(moment), {
     lineOnly: !waitsFor.has(moment.signal),
   });
   const { right, single, why } = await rightLine(stand.asker, moment, turn);

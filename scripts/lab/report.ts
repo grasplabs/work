@@ -349,7 +349,7 @@ const runsSection = (input: ReportInput): string =>
         each.bench,
         each.set,
         String(each.cases.length),
-        `${each.stephen.interviewer === "claire" ? "Claire " : ""}${markOf(each)}`,
+        markOf(each),
         meansLine(each),
       ])
   )}</section>`;

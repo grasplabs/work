@@ -369,7 +369,8 @@ const at = (ms: number) => new Date(ms).toISOString();
 
 /**
  * A company three days into its interviews, with one team of three: its
- * lead Ana talked to Claire for 12 minutes and gave it a 5; Ben typed to
+ * lead Ana talked for 12 minutes and gave it a 5, in an interview kept
+ * as held by Claire, from when she held interviews; Ben typed to
  * Stephen for 7 minutes and stopped at the steps; Cleo has her link; and
  * Dan has been talking to Stephen for 4 minutes, still at his story.
  * Its core also answers with what a core must never send (what was said,
