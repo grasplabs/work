@@ -37,6 +37,7 @@ import type { DriveWorld } from "./drive-sync-fake.ts";
 import { mockIdpWith } from "./idp.ts";
 import { acmeTenant } from "./sign-in-config.ts";
 import { signedInApi } from "./sign-in.ts";
+import { connectDb } from "./test-env.ts";
 
 const drive = (email: string, marker: string): DriveWorld => ({
   start: "60",
@@ -628,6 +629,15 @@ describe("native sync", () => {
         waiting: await finds(throttled.userId, waiting),
         going: await finds(other.userId, going),
       };
+      // connect paused the connection too, by its own clock, which the fake
+      // one doesn't move. Without that pause (one it couldn't store), core's
+      // own wait is what keeps the read off Drive until its time.
+      await connectDb()
+        .prepare(
+          "UPDATE connection_tokens SET paused_until = NULL WHERE connection_id = ?"
+        )
+        .bind(slow.connectionId)
+        .run();
       await driveHolds(slow.subject, drive(slow.email, waiting));
       later(pollMs);
       await sync();

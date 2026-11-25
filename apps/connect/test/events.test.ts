@@ -40,6 +40,7 @@ import { graphEventsFake } from "./graph-events-fake.ts";
 import type { GraphEventsFake } from "./graph-events-fake.ts";
 import { fakeInternet } from "./internet.ts";
 import { fakeProviders } from "./oauth-provider.ts";
+import { callTool } from "./tool-calls.ts";
 
 // Connector events, as core's clock drives them: it sends who
 // listens where, connect listens exactly there, reads what changed from
@@ -837,6 +838,29 @@ describe("connector events", () => {
       asked: 2,
     });
     await expect(sources()).resolves.toMatchObject([{ failures: 0 }]);
+  });
+
+  it("wait out a pause of the connection without counting a failure", async () => {
+    const outlook = await connected();
+    await sync([listener(outlook)]);
+    // A call on the connection is rate limited: it is paused for everyone.
+    instead = () =>
+      Response.json(
+        { error: { code: "TooManyRequests" } },
+        { status: 429, headers: { "retry-after": "600" } }
+      );
+    const pausedAt = Date.now();
+    await outcome(callTool(outlook, "mail.list", { mailbox: invoices }));
+    const asked = graphPaths().length;
+    later();
+    await sync([listener(outlook)]);
+    expect({
+      sources: await sources(),
+      askedWhilePaused: graphPaths().length - asked,
+    }).toMatchObject({
+      sources: [{ failures: 0, poll_at: pausedAt + 600_000 }],
+      askedWhilePaused: 0,
+    });
   });
 
   it("start mail over from the last read when Graph no longer has the cursor, losing nothing", async () => {

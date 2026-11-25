@@ -23,7 +23,7 @@ import {
 import type { AttachmentBytes } from "@grasp-os/shared/connector-attachments";
 import { toBase64 } from "@grasp-os/shared/encoding";
 import type { Json } from "@grasp-os/shared/json";
-import { log } from "@grasp-os/shared/log";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { redact } from "@grasp-os/shared/redact";
 import { eq } from "drizzle-orm";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -81,14 +81,15 @@ import {
   uncertainFailure,
   withProvenance,
 } from "./policy.ts";
-import { markIfGrantLacks } from "./tokens.ts";
+import { markIfGrantLacks, pauseFor } from "./tokens.ts";
 
 /** What a call's server is used for: calling its tool. */
 type CallServer = Pick<McpServer, "call">;
 
 const retryAfterSchema = z.object({
   error: z.object({
-    retryAfterSeconds: z.number().int().nonnegative().max(maxRetryAfterSeconds),
+    code: z.string().optional(),
+    retryAfterSeconds: z.number().nonnegative(),
   }),
 });
 
@@ -100,14 +101,21 @@ const httpRefusalSchema = z.object({
 /**
  * `connect.server_unavailable` for a call its tool says did nothing, with
  * the wait the tool passed on, if it did (`{ error: { retryAfterSeconds } }`,
- * as runtime/connector reports a provider's `retry-after`). An HTTP
- * connection's refusal of what it was answered (a redirect off what the
- * admin approved) is `connect.http_refused`: trying again won't help.
+ * as runtime/connector reports a provider's `retry-after`). A native
+ * connector's tool that says its provider rate limited it (`{ error: {
+ * code: "throttled" } }`, for a 429 or what its `isThrottled` says is a
+ * rate limit) pauses the connection for the wait first, so every other
+ * caller waits with it (`connect.rate_limited`), and names what the pause
+ * has left: the egress already paused it for a 429 it saw, and told the
+ * connector how long for. An HTTP connection's refusal
+ * of what it was answered (a redirect off what the admin approved) is
+ * `connect.http_refused`: trying again won't help.
  */
-const notPerformed = (
-  kind: Connection["serverKind"],
+const notPerformed = async (
+  env: Env,
+  { id, serverKind: kind }: Connection,
   { output }: McpToolResult
-): Error => {
+): Promise<Error> => {
   let parsed: unknown;
   try {
     parsed = JSON.parse(output);
@@ -120,7 +128,16 @@ const notPerformed = (
       reason: refusal.data.reason,
     });
   }
-  const wait = retryAfterSchema.safeParse(parsed).data?.error.retryAfterSeconds;
+  const error = retryAfterSchema.safeParse(parsed).data?.error;
+  // A vendor's 429 the egress saw is paused already; its time left comes
+  // back here and is stored again from now, longer by the call's latency
+  // at most, as the pause keeps the later end.
+  let wait: number | undefined;
+  if (kind === "native" && error?.code === "throttled") {
+    wait = await pauseFor(env.DB, id, error.retryAfterSeconds);
+  } else if (error !== undefined) {
+    wait = Math.min(Math.ceil(error.retryAfterSeconds), maxRetryAfterSeconds);
+  }
   return connectErrors.create(
     "connect.server_unavailable",
     wait === undefined ? undefined : { retryAfterSeconds: wait }
@@ -695,6 +712,7 @@ const keepOf = (
 
 /** One call of a read, its answer as the tool gave it. */
 const readOnce = async (
+  env: Env,
   connection: Connection,
   tool: McpTool,
   input: Input,
@@ -712,7 +730,7 @@ const readOnce = async (
   }
   const read = withProvenance(connection, tool.name, answered);
   if (didNothing(connection.serverKind, read)) {
-    throw notPerformed(connection.serverKind, read);
+    throw await notPerformed(env, connection, read);
   }
   const keep = keepOf(connection, answered);
   return {
@@ -833,7 +851,7 @@ const sendClaimed = async (
   // claim (and its connector build) afresh.
   if (didNothing(connection.serverKind, done)) {
     await (recovering ? store.spend() : store.release());
-    throw notPerformed(connection.serverKind, done);
+    throw await notPerformed(env, connection, done);
   }
   // ...or the provider refused it access, and the connection's grant lacks
   // a right its connector asks for now: it is marked for its person to
@@ -943,7 +961,25 @@ const recover = async (
     }
     // Claimed anew, while this call still holds it, right before it goes
     // out: a lookup that ran long sends nothing under a claim another took.
-    const fresh = await sent.open();
+    // Its credential refused meanwhile, the call stays unknown, its key
+    // spent as a failed lookup leaves it. A pause or an inactive
+    // connection is answered as itself, to wait out or connect again;
+    // anything else as unknown.
+    let fresh: CallServer;
+    try {
+      fresh = await sent.open();
+    } catch (error) {
+      await sent.store.spend();
+      const code = connectErrors.codeOf(error);
+      if (
+        code === "connect.rate_limited" ||
+        code === "connect.connection_inactive"
+      ) {
+        throw error;
+      }
+      log.error("call.recovery_failed", errorFields(error));
+      throw connectErrors.create("connect.outcome_unknown");
+    }
     await sent.store.restamp();
     return { ...(await sendClaimed(sent, fresh, true)), recovery };
   }
@@ -1128,7 +1164,10 @@ export const carryOut = async (
   }
 
   if (!sideEffect) {
-    return { ...(await readOnce(connection, tool, input, open)), sideEffect };
+    return {
+      ...(await readOnce(env, connection, tool, input, open)),
+      sideEffect,
+    };
   }
   if (store === undefined || scope === undefined) {
     throw connectErrors.create("connect.idempotency_key_required");

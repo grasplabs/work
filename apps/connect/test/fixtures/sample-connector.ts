@@ -19,6 +19,18 @@ const api = `https://${sampleHost}`;
 
 const itemSchema = z.object({ id: z.string(), subject: z.string().nullable() });
 
+/**
+ * A 429, as the kit's `providerFetch` reports one: nothing was done, and
+ * the provider asks callers to wait for as long as connect's egress told
+ * it in `retry-after`.
+ */
+const throttled = (response: Response): ToolError =>
+  new ToolError("The provider is rate limiting requests", {
+    code: "throttled",
+    retryAfterSeconds: Number(response.headers.get("retry-after") ?? "60"),
+    notPerformed: true,
+  });
+
 /** What each probe reports: how its attempt ended. */
 const attemptSchema = z.strictObject({
   status: z.number().nullable(),
@@ -88,6 +100,9 @@ export default defineConnector({
         );
         url.searchParams.set("top", String(top ?? 10));
         const response = await fetch(url);
+        if (response.status === 429) {
+          throw throttled(response);
+        }
         if (!response.ok) {
           // A read changes nothing: a provider's 5xx may pass.
           throw new ToolError(`The provider answered ${response.status}`, {
@@ -133,7 +148,7 @@ export default defineConnector({
         // Rate limited: the provider refused its one write, so nothing
         // happened, and connect may let the call be tried again.
         if (response.status === 429) {
-          throw new ToolError("The provider is busy", { notPerformed: true });
+          throw throttled(response);
         }
         if (!response.ok) {
           throw new ToolError(`The provider answered ${response.status}`);
