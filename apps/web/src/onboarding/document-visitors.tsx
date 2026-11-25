@@ -22,6 +22,7 @@ import {
   wait,
 } from "./pixel-cursor.tsx";
 import type { Point } from "./pixel-cursor.tsx";
+import { mix, PixelPage } from "./pixel-page.tsx";
 
 // Two visitors on the documents step, the way colleagues' cursors move over
 // a shared canvas: a pixel arrow in its own colour drifts in from the
@@ -130,116 +131,6 @@ const styles = stylex.create({
 
 /** The visitors' colours, one each, bright as colleagues' cursors are. */
 const colours = ["#7a5af8", "#e0457b", "#ef8a17", "#0e9f6e", "#2e78e6"];
-
-/** What each kind of page has written on it, a character a cell: paper (.), ink (#), its folded corner (/), its edge (_). */
-const pageCells: Record<Kind, string[]> = {
-  pdf: [
-    "......//",
-    ".####./",
-    "........_",
-    ".#######_",
-    "........_",
-    ".######._",
-    "........_",
-    ".#######_",
-    "........_",
-    ".####...._",
-    "_________",
-  ],
-  word: [
-    "......//",
-    ".#####./",
-    "........_",
-    ".#######_",
-    "........_",
-    ".#.####._",
-    "........_",
-    ".#.#####_",
-    "........_",
-    ".######._",
-    "_________",
-  ],
-  sheet: [
-    "......//",
-    "######./",
-    "#.#.#.#._",
-    "#######._",
-    "#.#.#.#._",
-    "#######._",
-    "#.#.#.#._",
-    "#######._",
-    "#.#.#.#._",
-    "........_",
-    "_________",
-  ],
-  slides: [
-    "............",
-    ".######.....",
-    "............",
-    "........#...",
-    "..#.....#...",
-    "..#..#..#...",
-    "..#..#..#.#.",
-    "..#..#..#.#.",
-    "____________",
-  ],
-  text: [
-    "......//",
-    ".####../",
-    "........_",
-    ".######._",
-    "...####._",
-    ".#####.._",
-    "...#####_",
-    ".####..._",
-    "........_",
-    ".###....._",
-    "_________",
-  ],
-};
-
-/** A cell's side in a page, in CSS pixels. */
-const pageCell = 3;
-
-const mix = (hex: string, toward: number, amount: number): string => {
-  const part = (at: number) => {
-    const own = Number.parseInt(hex.slice(at, at + 2), 16);
-    return Math.round(own + (toward - own) * amount);
-  };
-  return `rgb(${part(1)}, ${part(3)}, ${part(5)})`;
-};
-
-const PageArt = ({ kind }: { kind: Kind }) => {
-  const cells = pageCells[kind];
-  const colour = colourOf[kind];
-  const wide = Math.max(...cells.map((row) => row.length));
-  const fills: Record<string, string> = {
-    ".": colour,
-    "#": mix(colour, 255, 0.72),
-    "/": mix(colour, 255, 0.35),
-    _: mix(colour, 0, 0.3),
-  };
-  return (
-    <svg
-      height={cells.length * pageCell}
-      shapeRendering="crispEdges"
-      width={wide * pageCell}
-    >
-      {cells.flatMap((row, y) =>
-        keysOf(row).map((mark, x) => (
-          <rect
-            fill={fills[mark] ?? colour}
-            height={pageCell}
-            key={`${String(x)},${String(y)}`}
-            width={pageCell}
-            x={x * pageCell}
-            y={y * pageCell}
-          />
-        ))
-      )}
-    </svg>
-  );
-};
 
 /** One ask: what a visitor types, and the kind of page it tosses in. */
 interface Ask {
@@ -633,7 +524,7 @@ export const DocumentVisitors = ({ paused }: { paused: boolean }) => {
                   key={kind}
                   {...stylex.props(styles.hidden)}
                 >
-                  <PageArt kind={kind} />
+                  <PixelPage kind={kind} />
                 </span>
               ))}
             </span>

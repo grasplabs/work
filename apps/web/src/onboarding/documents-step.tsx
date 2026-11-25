@@ -1,21 +1,10 @@
 import type { InterviewLocale } from "@grasp-os/shared/onboarding";
 import { documentErrors } from "@grasp-os/shared/onboarding-documents";
-import type { OnboardingDocument } from "@grasp-os/shared/onboarding-documents";
-import { uploadExtensionOf, uploadTypes } from "@grasp-os/shared/uploads";
-import {
-  Attachment,
-  AttachmentAction,
-  AttachmentActions,
-  AttachmentContent,
-  AttachmentGroup,
-  AttachmentMedia,
-  AttachmentTitle,
-} from "@grasp-os/ui/components/attachment";
 import { Button } from "@grasp-os/ui/components/button";
 import { Card } from "@grasp-os/ui/components/card";
 import { FileUpload } from "@grasp-os/ui/components/file-upload";
 import { Text } from "@grasp-os/ui/components/text";
-import { ArrowRightIcon, Icon, XIcon } from "@grasp-os/ui/lib/icons";
+import { ArrowRightIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -29,6 +18,8 @@ import { useCore } from "../use-core.ts";
 import { CalmStep } from "./calm-frame.tsx";
 import { readable } from "./document-files.ts";
 import { DocumentPages } from "./document-pages.tsx";
+import { DocumentShelf } from "./document-shelf.tsx";
+import type { Sending } from "./document-shelf.tsx";
 import { DocumentVisitors } from "./document-visitors.tsx";
 import { kindsOf, useContextWords } from "./sources-step.tsx";
 import { useRefresh } from "./step-parts.ts";
@@ -36,11 +27,11 @@ import type { StepProps } from "./step-parts.ts";
 
 // Documents that explain how they work, on Damsko's File upload, the kinds
 // of file Grasp reads lying over its drop zone as pages (document-pages.tsx):
-// each is sent to core the moment it is added and read there for real, its
-// row showing how far it is, and a refusal said on its row with Try again.
-// Once read it leaves the upload's list for the one list of what was
-// shared, on this visit or an earlier one, above the zone: small chips
-// side by side (Damsko's Attachment), each with Remove. The step's words and the way on stand centred.
+// each is sent to core the moment it is added and read there for real.
+// Under the zone, one shelf of what was shared, on this visit or an earlier
+// one (document-shelf.tsx): a small chip each, its own pixel page filling
+// in as it is sent, then with Remove; a refusal said on its chip with Try
+// again. The step's words and the way on stand centred.
 // What only the one who shared it can say, Stephen asks at once, with
 // the answers to pick from. The zone is the step's one way in and takes
 // the room: where documents live (SharePoint and OneDrive) is connected
@@ -55,12 +46,6 @@ const styles = stylex.create({
   question: { display: "grid", gap: space[4] },
   options: { display: "flex", flexWrap: "wrap", gap: space[2] },
 });
-
-/** A shared document's media type, by its name, for the mark its chip wears. */
-const typeOf = (name: string): string | undefined => {
-  const extension = uploadExtensionOf(name);
-  return extension === undefined ? undefined : uploadTypes[extension];
-};
 
 /** Every kind of file core reads, as the upload takes them. */
 const accepted = readable.map((extension) => `.${extension}`);
@@ -99,9 +84,16 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
   const kinds = kindsOf(useContextWords(data));
   const locale: InterviewLocale = isLocale(i18n.locale) ? i18n.locale : "en";
   const kept = data.documents;
-  // The files on their way: once read, each leaves for the list of what was shared.
-  const [coming, setComing] = useState<File[]>([]);
+  // The files on their way: each sent the moment it is added, and once read, one of the documents shared.
+  const [coming, setComing] = useState<Sending[]>([]);
   const [removeProblem, setRemoveProblem] = useState<string>();
+  const change = (file: File, to: Partial<Sending> | null) => {
+    setComing((now) =>
+      to === null
+        ? now.filter((each) => each.file !== file)
+        : now.map((each) => (each.file === file ? { ...each, ...to } : each))
+    );
+  };
   const upload = async (file: File): Promise<void> => {
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
@@ -113,11 +105,28 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
             bytes,
           })
       );
+      change(file, { done: true });
       await refresh();
-      setComing((now) => now.filter((each) => each !== file));
+      // Its page fills to the end before it becomes one of the documents shared.
+      window.setTimeout(() => {
+        change(file, null);
+      }, 420);
     } catch (error) {
-      throw new Error(problemOf(error), { cause: error });
+      change(file, { problem: problemOf(error) });
     }
+  };
+  const send = (files: File[]) => {
+    setComing((now) => [
+      ...now,
+      ...files.map((file) => ({ file, done: false, problem: null })),
+    ]);
+    for (const file of files) {
+      void upload(file);
+    }
+  };
+  const retry = (file: File) => {
+    change(file, { problem: null });
+    void upload(file);
   };
   const remove = async (id: string): Promise<void> => {
     setRemoveProblem(undefined);
@@ -166,29 +175,6 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
       title={t`Do you have anything that explains how you work?`}
     >
       <div {...stylex.props(styles.stack)}>
-        {kept.length === 0 ? null : (
-          <AttachmentGroup aria-label={t`Documents you shared`}>
-            {kept.map(({ id, name }: OnboardingDocument) => (
-              <Attachment key={id}>
-                <AttachmentMedia type={typeOf(name)} />
-                <AttachmentContent>
-                  <AttachmentTitle>{name}</AttachmentTitle>
-                </AttachmentContent>
-                <AttachmentActions>
-                  <AttachmentAction
-                    aria-label={t`Remove ${name}`}
-                    disabled={busy}
-                    onClick={() => {
-                      void remove(id);
-                    }}
-                  >
-                    <Icon icon={XIcon} />
-                  </AttachmentAction>
-                </AttachmentActions>
-              </Attachment>
-            ))}
-          </AttachmentGroup>
-        )}
         <ErrorText>{removeProblem}</ErrorText>
         {open === undefined || ask === null ? null : (
           <Card padding="lg">
@@ -221,11 +207,23 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
             // What it takes is said in the step's own words, not in a smaller line under the zone.
             description=""
             multiple
-            onUpload={upload}
-            onValueChange={setComing}
-            value={coming}
+            // Its own list stays empty: the files show on the shelf under it, as pixel pages.
+            onValueChange={send}
+            value={[]}
           />
         </DocumentPages>
+        <DocumentShelf
+          busy={busy}
+          coming={coming}
+          kept={kept}
+          onDismiss={(file) => {
+            change(file, null);
+          }}
+          onRemove={(id) => {
+            void remove(id);
+          }}
+          onRetry={retry}
+        />
       </div>
       <DocumentVisitors paused={ask !== null} />
     </CalmStep>
