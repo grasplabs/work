@@ -21,8 +21,9 @@ import { toolWords } from "./tool-choices.ts";
 
 // The connect dialog against core's connections as the page reaches them
 // over RPC, faked: what an admin chooses for each tool of a Composio
-// toolkit is what connecting sends, and a native provider says where its
-// sign-in page is.
+// toolkit is what connecting sends, a native provider says where its
+// sign-in page is, and a connector whose server takes a key sends the key
+// typed.
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -51,7 +52,11 @@ const admin: Identity = {
   expiresAt: "2026-12-31T00:00:00.000Z",
 };
 
-const entry = (source: "native" | "composio", id: string, name: string) => ({
+const entry = (
+  source: "native" | "composio" | "connector",
+  id: string,
+  name: string
+) => ({
   source,
   id,
   name,
@@ -94,9 +99,13 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** The dialog open on `integration`, recording the tools connecting sends. */
+/**
+ * The dialog open on `integration`, recording the tools connecting sends;
+ * `more` of core's connections beside the toolkit's.
+ */
 const opened = async (
-  integration: Integration | undefined
+  integration: Integration | undefined,
+  more: Record<string, unknown> = {}
 ): Promise<(string | ComposioToolRule)[][]> => {
   if (integration === undefined) {
     throw new Error("No integration");
@@ -112,6 +121,7 @@ const opened = async (
       // Refused, so the browser stays here for the test to read.
       return await Promise.reject(new Error("Not now"));
     },
+    ...more,
   };
   const core = {
     withSession: async <T,>(
@@ -181,6 +191,59 @@ const button = (text: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll("button")].find(
     (each) => each.textContent?.trim() === text
   );
+
+/** Types `text` into `input`, as a person would. */
+const type = async (input: Element | null, text: string): Promise<void> => {
+  if (!(input instanceof HTMLInputElement)) {
+    throw new TypeError("Nothing to type into");
+  }
+  await act(async () => {
+    Reflect.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value"
+    )?.set?.call(input, text);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    await Promise.resolve();
+  });
+  await settled();
+};
+
+describe("connecting a connector whose server takes a key", () => {
+  afterEach(() => {
+    act(() => {
+      root?.unmount();
+    });
+    root = undefined;
+    document.body.innerHTML = "";
+  });
+
+  it("sends the key typed, for whom it was chosen, and nothing before one is typed", async () => {
+    const id = `mcp_${"0".repeat(32)}`;
+    const [keyed] = integrationsOf(
+      [{ ...entry("connector", id, "Keyed"), auth: "key" }],
+      []
+    );
+    const asked: unknown[] = [];
+    await opened(keyed, {
+      connectWithKey: async (request: unknown): Promise<{ url: string }> => {
+        asked.push(request);
+        return await Promise.reject(new Error("Not now"));
+      },
+    });
+    expect(button("Connect Keyed")?.disabled).toBeTruthy();
+
+    await type(document.querySelector('input[type="password"]'), "key-0001");
+    await press(button("Connect Keyed"));
+    expect(asked).toStrictEqual([
+      {
+        provider: id,
+        scope: "personal",
+        key: "key-0001",
+        returnTo: `/connectors/connector:${id}`,
+      },
+    ]);
+  });
+});
 
 describe("choosing what Grasp may do in a toolkit", () => {
   afterEach(() => {

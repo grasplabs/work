@@ -7,7 +7,7 @@ import type { OutboxedAuditEvent, OutboxRejected } from "./audit.ts";
 import type { HeldBinding } from "./capability.ts";
 import { chatPlatformSchema } from "./chat.ts";
 import { oauthProviderSchema } from "./connect-names.ts";
-import type { CatalogGroup, OAuthProvider } from "./connect-names.ts";
+import type { CatalogGroup } from "./connect-names.ts";
 import { attachmentBytesSchema } from "./connector-attachments.ts";
 import type { AttachmentEntry } from "./connector-attachments.ts";
 import { directoryProviderSchema } from "./directory.ts";
@@ -253,7 +253,20 @@ const forbiddenKeyHeaders: ReadonlySet<string> = new Set([
 export const addConnectorSchema = z.strictObject({
   person: connectionPersonSchema,
   name: z.string().trim().min(1).max(80),
-  url: z.url({ protocol: /^https$/u }).max(connectorUrlMaxLength),
+  /**
+   * The server's own address: nothing but its origin and path, so no
+   * query, fragment or credentials, not even empty ones. One that isn't a
+   * URL at all is `z.url`'s to refuse.
+   */
+  url: z
+    .url({ protocol: /^https$/u })
+    .max(connectorUrlMaxLength)
+    .refine((value) => {
+      const parsed = URL.parse(value);
+      return (
+        parsed === null || parsed.href === `${parsed.origin}${parsed.pathname}`
+      );
+    }),
   /** The deployment's origin, from its config: its sign-in returns there. */
   origin: z.url(),
   auth: z.discriminatedUnion("kind", [
@@ -585,15 +598,17 @@ export interface ListedConnection extends ConnectionSummary {
 /**
  * Whether a person can sign in again to `connection`: whoever may
  * disconnect it (its owner, or an admin for a shared one), never Grasp
- * staff, only a native one, and only while its catalog entry is offered.
+ * staff, only a native suite's or a connector's made from a URL, and only
+ * while its catalog entry is offered.
  */
 export const canSignInAgain = (
   connection: Pick<ListedConnection, "source" | "provider" | "scope">,
   offered: boolean,
   person: { role: string; staff: boolean }
 ): boolean =>
-  connection.source === "native" &&
-  oauthProviderSchema.safeParse(connection.provider).success &&
+  ((connection.source === "native" &&
+    oauthProviderSchema.safeParse(connection.provider).success) ||
+    connection.source === "connector") &&
   offered &&
   (connection.scope === "personal" || isAdmin(person.role)) &&
   !person.staff;
@@ -738,11 +753,36 @@ export const revocationsListed = 200;
  * finished with the account it holds, it is that connection again.
  */
 export interface ConnectionsApi extends StephenReachApi, AgentsApi {
+  /**
+   * Starts signing in to a native suite (`OAuthProvider`), or to a
+   * connector made from a URL whose server signs in with OAuth, by its ID:
+   * the provider's URL to send the browser to.
+   */
   start: (request: {
-    provider: OAuthProvider;
+    provider: string;
     scope: ConnectionScope;
     returnTo?: string;
   }) => Promise<{ url: string }>;
+  /**
+   * Connects a connector made from a URL whose server takes a key in a
+   * header, with the key the person typed: core passes it on to connect
+   * and keeps nothing of it. The answer is where to send the browser
+   * next, the connector's page by default, with the connection.
+   */
+  connectWithKey: (request: {
+    provider: string;
+    scope: ConnectionScope;
+    key: string;
+    returnTo?: string;
+  }) => Promise<{ url: string }>;
+  /**
+   * Adds a connector by its MCP server's URL (GRA-1375): connect learns
+   * how it signs in and registers there, and it is in the catalog,
+   * offered, from then on. Admins only, never Grasp staff; audited.
+   */
+  addConnector: (
+    request: Omit<AddConnector, "person" | "origin">
+  ) => Promise<{ id: string }>;
   list: () => Promise<ListedConnection[]>;
   disconnect: (connectionId: string) => Promise<{ revoked: boolean }>;
   /**
@@ -964,21 +1004,24 @@ export interface SharedSyncPlaces {
 }
 
 // The catalog: everything an admin can connect, in one list. Native
-// providers (our own connectors, whose tokens connect holds) and, next to
-// them, Composio's toolkits, whose tokens sit in Composio's cloud. Each
-// entry says which it is, so people can tell who holds the tokens before
-// they connect anything.
+// providers (our own connectors, whose tokens connect holds), the
+// connectors an admin made from an MCP server's URL (GRA-1375, whose
+// tokens connect holds too) and Composio's toolkits, whose tokens sit in
+// Composio's cloud. Each entry says which it is, so people can tell who
+// holds the tokens before they connect anything.
 
-/** Who carries out a catalog entry's actions: our connector, or Composio. */
-export const catalogSourceSchema = z.enum(["native", "composio"]);
+/**
+ * Who carries out a catalog entry's actions: our connector, a connector
+ * made from an MCP server's URL, or Composio.
+ */
+export const catalogSourceSchema = z.enum(["native", "composio", "connector"]);
 export type CatalogSource = z.infer<typeof catalogSourceSchema>;
 
 /**
- * Who carries out a connection's actions: a catalog entry's source,
- * connect itself for an HTTP connection (GRA-1478), which no catalog lists,
- * or a connector made from an MCP server's URL (GRA-1375).
+ * Who carries out a connection's actions: a catalog entry's source, or
+ * connect itself for an HTTP connection (GRA-1478), which no catalog lists.
  */
-export type ConnectionSource = CatalogSource | "http" | "connector";
+export type ConnectionSource = CatalogSource | "http";
 
 /** A Composio toolkit's slug, such as `hubspot`. */
 export const composioToolkitSchema = z
@@ -987,13 +1030,15 @@ export const composioToolkitSchema = z
 
 /**
  * A catalog entry by its source and its ID there, as something other than
- * a connection names it (an App's integrations): a native provider, or a
- * Composio toolkit's slug. Checked for form only, so it stays valid while
- * the catalog doesn't list it (Composio not answering, say).
+ * a connection names it (an App's integrations): a native provider, a
+ * Composio toolkit's slug, or a connector's ID. Checked for form only, so
+ * it stays valid while the catalog doesn't list it (Composio not
+ * answering, say).
  */
 export const catalogEntryRefSchema = z.discriminatedUnion("source", [
   z.strictObject({ source: z.literal("native"), id: connectorProviderSchema }),
   z.strictObject({ source: z.literal("composio"), id: composioToolkitSchema }),
+  z.strictObject({ source: z.literal("connector"), id: connectorIdSchema }),
 ]);
 export type CatalogEntryRef = z.infer<typeof catalogEntryRefSchema>;
 
@@ -1004,8 +1049,12 @@ export interface CatalogEntry {
   id: string;
   name: string;
   categories: string[];
-  /** How many tools it has; `catalogTools` lists them. */
-  toolCount: number;
+  /**
+   * How many tools it has; `catalogTools` lists them. `null` for a
+   * connector made from a URL, whose server lists its tools only to a
+   * connection.
+   */
+  toolCount: number | null;
   /**
    * Where its logo is, on the deployment's own origin
    * ({@link catalogLogoUrl}), or `null` when it has none: the page draws its
@@ -1034,10 +1083,12 @@ export interface CatalogEntry {
 
 /**
  * What connecting an entry takes. `managed`: signing in, with an app Grasp
- * or Composio holds, so connecting needs nothing but consent; every native
- * provider is. `key`: a Composio toolkit Composio connects with a key, a
- * token or a username and password, which an admin types into Grasp's own
- * form (`ConnectionsApi.keyFields`). `own`: a Composio toolkit that only
+ * or Composio holds, or one a connector's server registered, so connecting
+ * needs nothing but consent; every native provider is. `key`: a Composio
+ * toolkit Composio connects with a key, a token or a username and password,
+ * which an admin types into Grasp's own form (`ConnectionsApi.keyFields`),
+ * or a connector whose server takes a key in a header, which each person
+ * types as they connect it (`ConnectionsApi.connectWithKey`). `own`: a Composio toolkit that only
  * signs in with an OAuth app nobody registered for this deployment, which
  * Grasp can't take yet, so connecting it is refused
  * (`connection.own_auth_required`).
@@ -2325,9 +2376,9 @@ export interface ConnectApi
    */
   abandonFlow: (state: string) => Promise<void>;
   /**
-   * The catalog: the native providers, then Composio's toolkits if
-   * connect has a Composio key. Composio failing to answer leaves the
-   * native entries listed.
+   * The catalog: the native providers, the connectors admins made from a
+   * URL, then Composio's toolkits if connect has a Composio key. Composio
+   * failing to answer leaves the others listed.
    */
   catalog: () => Promise<Catalog>;
   /**
