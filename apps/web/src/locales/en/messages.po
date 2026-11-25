@@ -40,6 +40,12 @@ msgstr "{0, plural, one {# thing that was said in it goes with it.} other {# thi
 msgid "{0} actions"
 msgstr "{0} actions"
 
+#. placeholder {0}: countOn(allowed, ofThis)
+#. placeholder {1}: ofThis.length
+#: src/connections/permissions/action-list.tsx
+msgid "{0} of {1} on"
+msgstr "{0} of {1} on"
+
 #: src/settings/event-source-activity.tsx
 msgid "{accepted, plural, one {# event accepted in the last 24 hours.} other {# events accepted in the last 24 hours.}}"
 msgstr "{accepted, plural, one {# event accepted in the last 24 hours.} other {# events accepted in the last 24 hours.}}"
@@ -2238,7 +2244,6 @@ msgstr "Action"
 
 #: src/apps/app-workflows.tsx
 #: src/apps/resource-bindings.tsx
-#: src/connections/permissions/action-list.tsx
 msgid "Actions"
 msgstr "Actions"
 
@@ -2715,7 +2720,6 @@ msgctxt "inbox item kind"
 msgid "AI tool"
 msgstr "AI tool"
 
-#: src/connections/permissions/action-list.tsx
 #: src/routes/_shell.workflows.runs.tsx
 msgid "All"
 msgstr "All"
@@ -12496,11 +12500,6 @@ msgstr "On"
 msgid "On · for everyone with Grasp"
 msgstr "On · for everyone with Grasp"
 
-#. placeholder {0}: countOn(allowed, sorted)
-#: src/connections/permissions/action-list.tsx
-msgid "On {0}"
-msgstr "On {0}"
-
 #: src/onboarding/send-plan-form.tsx
 msgid "on {date} at {hour}"
 msgstr "on {date} at {hour}"
@@ -15999,7 +15998,6 @@ msgstr "Should it work on its own?"
 
 #: src/apps/app-data-model.tsx
 #: src/brain/atlas-overlays.tsx
-#: src/connections/permissions/action-list.tsx
 msgid "Show"
 msgstr "Show"
 
@@ -18980,10 +18978,6 @@ msgstr "Turn sound on"
 #: src/settings/member-suspension.tsx
 msgid "Turn the account back on in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
 msgstr "Turn the account back on in the directory, and Grasp lifts the suspension at its next daily read. To end their access for good, remove them."
-
-#: src/connections/permissions/action-list.tsx
-msgid "Turn these off"
-msgstr "Turn these off"
 
 #: src/activity/audit-words.ts
 msgid "Turned an agent on or off, or changed who may reach it"

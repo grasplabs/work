@@ -236,7 +236,7 @@ describe("choosing what Grasp may do in a toolkit", () => {
   it("can't connect with every tool off", async () => {
     await opened(hubspot);
     await press(radio("Choose myself"));
-    await press(button("Turn these off"));
+    await press(toggle("HUBSPOT_LIST_CONTACTS", "Off"));
     expect(document.body.textContent).toContain("Nothing turned on yet");
     expect(button("Allow and sign in")?.disabled).toBeTruthy();
   });
