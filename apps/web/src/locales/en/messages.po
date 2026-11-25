@@ -484,6 +484,10 @@ msgid "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
 msgstr "{count, plural, one {Reading # workflow} other {Reading # workflows}}"
 
 #: src/chat/thread.tsx
+msgid "{count, plural, one {saved # memory} other {saved # memories}}"
+msgstr "{count, plural, one {saved # memory} other {saved # memories}}"
+
+#: src/chat/thread.tsx
 msgid "{count, plural, one {searched once} other {searched # times}}"
 msgstr "{count, plural, one {searched once} other {searched # times}}"
 
@@ -2750,6 +2754,10 @@ msgstr "Already here, in case you mean one of these"
 msgid "Already one of its schedules."
 msgstr "Already one of its schedules."
 
+#: src/chat/saved-memory.tsx
+msgid "Already removed"
+msgstr "Already removed"
+
 #: src/onboarding/about-story.tsx
 msgid "Alright, here’s the plan."
 msgstr "Alright, here’s the plan."
@@ -3796,10 +3804,6 @@ msgstr "Before I reach out, let your team know"
 #: src/agents/agent-templates.ts
 msgid "Before meetings"
 msgstr "Before meetings"
-
-#: src/interview/words.ts
-msgid "Before the work: what you told me about AI."
-msgstr "Before the work: what you told me about AI."
 
 #: src/onboarding/setup-steps.tsx
 msgid "Before we start, which language do you prefer?"
@@ -7489,10 +7493,6 @@ msgstr "First I need your staff list."
 msgid "First run {when}"
 msgstr "First run {when}"
 
-#: src/interview/words.ts
-msgid "First, the steps."
-msgstr "First, the steps."
-
 #: src/inbox/report-viewer.tsx
 msgid "Fit"
 msgstr "Fit"
@@ -8135,10 +8135,6 @@ msgstr "Grasp may read and write in {app}, only for what you allow."
 #: src/connections/connected-dialog.tsx
 msgid "Grasp may use {app} only through the tools you allowed."
 msgstr "Grasp may use {app} only through the tools you allowed."
-
-#: src/chat/saved-memory.tsx
-msgid "Grasp no longer remembers this."
-msgstr "Grasp no longer remembers this."
 
 #: src/connections/integrations-band.tsx
 msgid "Grasp reaches only what you connect."
@@ -9791,8 +9787,8 @@ msgid "Last week"
 msgstr "Last week"
 
 #: src/interview/words.ts
-msgid "Last, the numbers and the result."
-msgstr "Last, the numbers and the result."
+msgid "Last: what you told me about AI."
+msgstr "Last: what you told me about AI."
 
 #: src/routes/_shell.settings.instructions.tsx
 msgid "Lasting facts"
@@ -10782,6 +10778,10 @@ msgstr "More of what you told me about AI."
 #: src/interview/words.ts
 msgid "More of when it goes differently."
 msgstr "More of when it goes differently."
+
+#: src/interview/words.ts
+msgid "More of your recurring work."
+msgstr "More of your recurring work."
 
 #: src/brain/work-knowledge.tsx
 msgid "More people are asked about it in the next interviews."
@@ -14164,6 +14164,10 @@ msgstr "Records in {table} that lack {field} get “{value}”."
 msgid "Records in {table} that lack {field} need a value before this can be published."
 msgstr "Records in {table} that lack {field} need a value before this can be published."
 
+#: src/interview/words.ts
+msgid "Recurring work"
+msgstr "Recurring work"
+
 #: src/brain/gap-actions.tsx
 msgid "Redact it"
 msgstr "Redact it"
@@ -14407,6 +14411,10 @@ msgstr "Removed after a week"
 msgid "Removed by its uploader, {removed}"
 msgstr "Removed by its uploader, {removed}"
 
+#: src/chat/saved-memory.tsx
+msgid "Removed from memory"
+msgstr "Removed from memory"
+
 #: src/brain/brain.ts
 #: src/brain/forget.tsx
 msgid "Removed from the brain"
@@ -14626,6 +14634,10 @@ msgstr "Restore the account in the directory, and Grasp lifts the suspension at 
 #: src/drafts/draft-history.tsx
 msgid "Restore this earlier state?"
 msgstr "Restore this earlier state?"
+
+#: src/chat/saved-memory.tsx
+msgid "Restored: {replaced}"
+msgstr "Restored: {replaced}"
 
 #: src/chat/chat-markdown.ts
 #: src/chat/sources.tsx
@@ -15205,18 +15217,6 @@ msgctxt "a setting saved"
 msgid "Saved"
 msgstr "Saved"
 
-#: src/chat/saved-memory.tsx
-msgid "Saved a memory"
-msgstr "Saved a memory"
-
-#: src/chat/saved-memory.tsx
-msgid "Saved a preference"
-msgstr "Saved a preference"
-
-#: src/chat/saved-memory.tsx
-msgid "Saved an instruction"
-msgstr "Saved an instruction"
-
 #: src/apps/app-data-model.tsx
 #: src/apps/field-editor.tsx
 msgid "Saved as {named}"
@@ -15242,9 +15242,10 @@ msgstr "Saved on {date}"
 msgid "Saved the company's groups of teams"
 msgstr "Saved the company's groups of teams"
 
+#: src/chat/saved-memory.tsx
 #: src/chat/thread.tsx
-msgid "Saved to your memory"
-msgstr "Saved to your memory"
+msgid "Saved to memory"
+msgstr "Saved to memory"
 
 #: src/workflows/workflow-flow.tsx
 msgid "Saved, but it doesn't pass yet: Definition says what to fix."
@@ -15269,8 +15270,8 @@ msgid "Saving"
 msgstr "Saving"
 
 #: src/chat/thread.tsx
-msgid "Saving to your memory"
-msgstr "Saving to your memory"
+msgid "Saving to memory"
+msgstr "Saving to memory"
 
 #: src/interview/composer.tsx
 #: src/interview/destination.tsx
@@ -17946,6 +17947,10 @@ msgstr "The source files of version {sourceVersion}"
 msgid "The step, as JSON"
 msgstr "The step, as JSON"
 
+#: src/interview/words.ts
+msgid "The steps."
+msgstr "The steps."
+
 #: src/settings/teams.tsx
 msgid "The team couldn't be created. Try again."
 msgstr "The team couldn't be created. Try again."
@@ -18052,6 +18057,10 @@ msgid "Then I talk to your team myself: short conversations, over two weeks. Tha
 msgstr "Then I talk to your team myself: short conversations, over two weeks. That’s where I learn the most."
 
 #: src/interview/words.ts
+msgid "Then, the numbers and the result."
+msgstr "Then, the numbers and the result."
+
+#: src/interview/words.ts
 msgid "Then, when it goes differently."
 msgstr "Then, when it goes differently."
 
@@ -18079,10 +18088,6 @@ msgstr "There is a team with this name already."
 #: src/onboarding/setup-steps.tsx
 msgid "There is nobody in this list."
 msgstr "There is nobody in this list."
-
-#: src/chat/saved-memory.tsx
-msgid "There was nothing to undo: Grasp no longer uses this."
-msgstr "There was nothing to undo: Grasp no longer uses this."
 
 #: src/brain/forget.tsx
 msgid "These notes rest on nothing else and go too: {named} and {more} more."
@@ -21207,6 +21212,10 @@ msgstr "Your platform is open."
 msgid "Your question"
 msgstr "Your question"
 
+#: src/interview/words.ts
+msgid "Your recurring work."
+msgstr "Your recurring work."
+
 #: src/inbox/report-row.tsx
 msgid "Your report on week {week} is ready"
 msgstr "Your report on week {week} is ready"
@@ -21288,6 +21297,10 @@ msgstr "Your triggers stopped hearing new mail at {name}"
 #: src/routes/apps.$app.draft.tsx
 msgid "Your version of the App"
 msgstr "Your version of the App"
+
+#: src/interview/words.ts
+msgid "Your week"
+msgstr "Your week"
 
 #: src/inbox/report-row.tsx
 msgid "Your weekly report"

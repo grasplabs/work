@@ -670,6 +670,13 @@ export const connectionTokens = sqliteTable("connection_tokens", {
   refreshUntil: timestamp("refresh_until"),
   grantedScopes: text("granted_scopes"),
   updatedAt: timestamp("updated_at").notNull(),
+  /**
+   * Until when the connection's vendor asked for no more calls: every call
+   * that reads the connection's credential before then is refused, as
+   * `connect.rate_limited`, and never reaches the vendor (tokens.ts
+   * `pauseFor`). Null until it first asks.
+   */
+  pausedUntil: timestamp("paused_until"),
 });
 
 /**

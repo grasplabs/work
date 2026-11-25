@@ -29,6 +29,7 @@ import { ownerErased } from "./erased-people.ts";
 import { clientFor, discoverSignIn, isPublicName } from "./mcp-discovery.ts";
 import { McpError, mcpHeaderValue, modernMcpServer } from "./mcp.ts";
 import type { ListedServerTool, McpServer, McpTool } from "./mcp.ts";
+import { pauseAsked } from "./pause.ts";
 import {
   actionNamePattern,
   isShallowJson,
@@ -36,7 +37,7 @@ import {
   servedSchema,
   textAnswer,
 } from "./served-schemas.ts";
-import { credentialFor } from "./tokens.ts";
+import { credentialFor, pausedWait } from "./tokens.ts";
 import {
   classByRules,
   classesOf,
@@ -350,7 +351,15 @@ const serverFor = async (
     }
     const headers = new Headers(request.headers);
     headers.set(credential.header, credential.value);
-    return await fetch(new Request(request, { headers, redirect: "manual" }));
+    const response = await fetch(
+      new Request(request, { headers, redirect: "manual" })
+    );
+    // A server that asks every caller to wait pauses the connection, as a
+    // native connector's provider does at the egress.
+    await pauseAsked(env.DB, connection.id, response, {
+      connector: connection.server,
+    });
+    return response;
   });
 };
 
@@ -404,6 +413,14 @@ export const currentTools = async (
   } catch (error) {
     if (error instanceof McpError) {
       throw connectErrors.create("connect.server_unavailable");
+    }
+    // Its server asked every caller to wait (the connection paused): the
+    // list can't be read until the wait is over.
+    const paused = pausedWait(error);
+    if (paused !== undefined) {
+      throw connectErrors.create("connect.server_unavailable", {
+        retryAfterSeconds: Math.ceil(paused.retryAfterMs / 1000),
+      });
     }
     throw error;
   }

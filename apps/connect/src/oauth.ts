@@ -627,6 +627,7 @@ const reconnect = async (
               "granted_scopes"
             ),
             updatedAt: sql<Date>`${now.getTime()}`.as("updated_at"),
+            pausedUntil: sql<null>`NULL`.as("paused_until"),
           })
           .from(connections)
           .where(stillWaiting)

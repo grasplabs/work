@@ -774,7 +774,7 @@ const SAID_IN: Record<string, Phase> = {
   differently: "exceptions",
   decides: "exceptions",
   own: "exceptions",
-  ai: "exceptions",
+  ai: "you",
   volume: "numbers",
   takes: "numbers",
   wrong: "numbers",

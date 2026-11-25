@@ -50,7 +50,7 @@ import type {
 } from "./event-kinds.ts";
 import { googleEventKinds } from "./google-events.ts";
 import { microsoftEventKinds } from "./graph-events.ts";
-import { accessTokenFor } from "./tokens.ts";
+import { accessTokenFor, pausedWait } from "./tokens.ts";
 
 // Events connections report, which start workflows (core's
 // workflows/connector-events.ts). Connect can't reach core, so core drives
@@ -458,6 +458,27 @@ const keepRead = async (
 };
 
 /**
+ * Puts off a source whose connection is paused (`connect.rate_limited`)
+ * until the pause ends, with no failure counted: its vendor asked every
+ * caller to wait, not this source alone. Whether it was paused.
+ */
+const waitedOutPause = async (
+  env: Env,
+  source: EventSource,
+  error: unknown
+): Promise<boolean> => {
+  const paused = pausedWait(error);
+  if (paused === undefined) {
+    return false;
+  }
+  await drizzle(env.DB)
+    .update(eventSources)
+    .set({ pollAt: new Date(Date.now() + paused.retryAfterMs) })
+    .where(sameCursor(source));
+  return true;
+};
+
+/**
  * A read that failed, or whose result couldn't be kept: the source waits
  * longer, or as long as the provider asked, and starts over when its
  * cursor is gone (from its last read, where the provider can). Its
@@ -585,6 +606,9 @@ const readSource = async (
         .where(eq(eventSources.id, source.id));
       return null;
     }
+    if (await waitedOutPause(env, source, error)) {
+      return 0;
+    }
     await failRead(env, source, error);
     return 0;
   }
@@ -691,6 +715,10 @@ const primeSources = async (env: Env, budget: RequestBudget): Promise<void> => {
           .set({ pollAt: source.pollAt })
           .where(eq(eventSources.id, source.id));
         return;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- sources in turn, bounded
+      if (await waitedOutPause(env, source, error)) {
+        continue;
       }
       // oxlint-disable-next-line no-await-in-loop -- sources in turn, bounded
       await failRead(env, source, error, primeMaxWaitMs);

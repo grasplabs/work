@@ -220,49 +220,6 @@ describe(ChatThread, () => {
     forgetAnswer = "done";
   });
 
-  it("says under a call of remember that it is an instruction, with the value it holds", async () => {
-    const at = "2026-10-27T09:00:05.000Z";
-    await thread([
-      asked,
-      {
-        id: 2,
-        role: "assistant",
-        text: "",
-        code: [],
-        tools: [
-          {
-            callId: "remember",
-            tool: "remember",
-            codeBefore: 0,
-            input: { statement: "Answer in Dutch" },
-          },
-        ],
-        end: "done",
-        at,
-      },
-      {
-        id: 3,
-        role: "result",
-        callId: "remember",
-        text: "Saved.",
-        failed: false,
-        at,
-        saved: {
-          memory: "3f1c4a8e-5d6b-4c2a-9e7f-1a2b3c4d5e6f",
-          type: "instruction",
-          statement: "Always answer in Dutch",
-          value: "Dutch",
-        },
-      },
-    ]);
-    const text = document.body.textContent;
-
-    expect({
-      kind: text.includes("Saved an instruction"),
-      saved: text.includes("Always answer in Dutch"),
-    }).toStrictEqual({ kind: true, saved: true });
-  });
-
   it("says under a call of remember who or what it is about, when it isn't the person", async () => {
     const at = "2026-10-27T09:00:05.000Z";
     await thread([
@@ -340,9 +297,23 @@ describe(ChatThread, () => {
       },
     ]);
 
-    expect(document.body.textContent).toContain(
-      "In place of: Loves pizza and Loves pasta"
-    );
+    const saying = document.body.textContent;
+    await act(async () => {
+      [...document.querySelectorAll("button")]
+        .find((button) => button.textContent === "Undo")
+        ?.click();
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => {
+      expect(document.body.textContent).toContain("Removed from memory");
+    });
+
+    expect({
+      saved: saying.includes("In place of: Loves pizza and Loves pasta"),
+      undone: document.body.textContent.includes(
+        "Restored: Loves pizza and Loves pasta"
+      ),
+    }).toStrictEqual({ saved: true, undone: true });
   });
 
   it("says when an undo found nothing to undo, never that it was forgotten", async () => {
@@ -392,14 +363,12 @@ describe(ChatThread, () => {
     const text = document.body.textContent;
 
     expect({
-      told: text.includes(
-        "There was nothing to undo: Grasp no longer uses this."
-      ),
-      claimedForgotten: text.includes("Grasp no longer remembers this."),
-    }).toStrictEqual({ told: true, claimedForgotten: false });
+      told: text.includes("Already removed"),
+      claimedRemoved: text.includes("Removed from memory"),
+    }).toStrictEqual({ told: true, claimedRemoved: false });
   });
 
-  it("says under a call of remember what Grasp will remember, in the person's words, and undoes it there", async () => {
+  it("says under a call of remember what it saved to memory, in the person's words, and undoes it there", async () => {
     const at = "2026-10-27T09:00:05.000Z";
     const memory = "3f1c4a8e-5d6b-4c2a-9e7f-1a2b3c4d5e6f";
     await thread([
@@ -431,33 +400,40 @@ describe(ChatThread, () => {
       },
     ]);
     // The steps are drawn once opened.
+    const summary = firstStep().line;
     await openSteps();
+    const steps = stepLines();
     const shown = document.body.textContent;
     const undo = [...document.querySelectorAll("button")].find(
       (button) => button.textContent === "Undo"
     );
     await act(async () => {
+      undo?.focus();
       undo?.click();
       await Promise.resolve();
     });
     await vi.waitFor(() => {
       expect(document.body.textContent).toContain(
-        "Grasp no longer remembers this."
+        "Removed from memory, Acme renews on 1 March"
       );
     });
 
     expect({
-      line: shown.includes("Saved to your memory"),
-      notice: shown.includes("Saved a memory, Acme renews on 1 March"),
+      summary,
+      line: steps,
+      notice: shown.includes("Saved to memory, Acme renews on 1 March"),
       forgotten,
       undoLeft: [...document.querySelectorAll("button")].some(
         (button) => button.textContent === "Undo"
       ),
+      focusInAnswer: document.activeElement === answer(),
     }).toStrictEqual({
-      line: true,
+      summary: "Saved 1 memory 5.0s",
+      line: ["Saved to memory"],
       notice: true,
       forgotten: [memory],
       undoLeft: false,
+      focusInAnswer: true,
     });
   });
 

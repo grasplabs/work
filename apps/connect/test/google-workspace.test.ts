@@ -2,7 +2,7 @@ import { connectorManifestSchema } from "@grasp-os/runtime/connector";
 import { env } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { nativeConnector } from "../src/bundled-connectors.ts";
@@ -1697,17 +1697,24 @@ describe("the Google Workspace connector's Sheets tools", () => {
 });
 
 describe("the Google Workspace connector's answers", () => {
-  it("say a read Drive refused with a rate limit's reason did nothing, so it may be retried", async () => {
+  it("say a read Drive refused with a rate limit's reason did nothing, so it may be retried once the connection's pause ends", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const connection = await connected();
     // Calendar and Drive rate limit with a 403 as often as a 429.
     google.rateLimit403();
-    await expect(
-      retryable(call(connection, "files.list", { drive: financeDrive }))
-    ).resolves.toStrictEqual({
-      code: "connect.server_unavailable",
-      retryAfterSeconds: 60,
+    const list = async () =>
+      await retryable(call(connection, "files.list", { drive: financeDrive }));
+    const throttled = await list();
+    // The connector's `isThrottled` said so: every caller waits with it.
+    const paused = await list();
+    expect({ throttled, paused, sent: google.sent.length }).toStrictEqual({
+      throttled: { code: "connect.server_unavailable", retryAfterSeconds: 60 },
+      paused: { code: "connect.rate_limited", retryAfterSeconds: 60 },
+      sent: 1,
     });
-    expect(google.sent).toHaveLength(1);
   });
 
   it("say an email Gmail sent is of unknown outcome when its answer was lost, and never send it again", async () => {

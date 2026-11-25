@@ -5,6 +5,7 @@ import type {
   ConnectorContractAction,
 } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { isExpectedError } from "@grasp-os/shared/errors";
 import { jsonOf, functionErrors } from "@grasp-os/shared/functions";
 import { connectionIdSchema, permissionIdSchema } from "@grasp-os/shared/ids";
 import type { ConnectionId, PermissionId } from "@grasp-os/shared/ids";
@@ -338,6 +339,24 @@ const refusalOf = (error: unknown): unknown => {
   }
   if (code === "connect.idempotency_conflict") {
     return functionErrors.create("permission.idempotency_conflict");
+  }
+  // A vendor that asked to wait, on this call (an outage or rate limit
+  // that names its wait) or before it (the connection paused): worth
+  // asking again once the wait is over.
+  const wait = isExpectedError(error)
+    ? error.details?.retryAfterSeconds
+    : undefined;
+  if (
+    code === "connect.rate_limited" ||
+    (code === "connect.server_unavailable" && typeof wait === "number")
+  ) {
+    // A wait of none (`Retry-After: 0`) is no wait to name.
+    return functionErrors.create(
+      "permission.rate_limited",
+      typeof wait === "number" && wait > 0
+        ? { retryAfterSeconds: wait }
+        : undefined
+    );
   }
   return error;
 };
