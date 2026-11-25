@@ -1,5 +1,5 @@
 import { env, exports } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
 import { auditEvents, callAs, outcome, someone } from "./connect.ts";
 import { linearMcpUrl } from "./linear-mcp-fake.ts";
@@ -11,6 +11,7 @@ import {
   linear,
   mcpInternet,
 } from "./mcp-connectors-harness.ts";
+import { retryable } from "./tool-calls.ts";
 
 // A connector made from an MCP server's URL (GRA-1375), end to end in
 // workerd against a faithful fake of Linear's server: an admin adds it by
@@ -95,12 +96,13 @@ describe("a connector made from Linear's MCP server URL", () => {
   });
 
   it("pauses its connection for every caller when its server rate limits it, until the server's time passes", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
     const connector = await addLinear();
     const anna = someone();
     const connectionId = await connectLinear(connector, anna);
     const agent = chatAgent(anna);
     const read = async () =>
-      await outcome(
+      await retryable(
         callAs(agent, { connectionId, action: "list_issues", input: {} })
       );
     await read();
@@ -112,14 +114,32 @@ describe("a connector made from Linear's MCP server URL", () => {
     const limited = await read();
     const callsBefore = linear.calls.length;
     const paused = await read();
+    // Its tool list, gone stale meanwhile, can't be read again until then.
+    await env.DB.prepare(
+      "UPDATE connections SET tool_list_fresh_until = 0 WHERE id = ?"
+    )
+      .bind(connectionId)
+      .run();
+    const contract = await retryable(
+      exports.default.connectorContract({
+        contract: `connector.${connector}@1`,
+        connectionId,
+      })
+    );
+    const sentWhilePaused = linear.calls.length - callsBefore;
+    vi.setSystemTime(Date.now() + 30_000);
     expect({
       limited,
       paused,
-      sentWhilePaused: linear.calls.length - callsBefore,
+      contract,
+      sentWhilePaused,
+      after: await read(),
     }).toStrictEqual({
-      limited: "connect.server_unavailable",
-      paused: "connect.rate_limited",
+      limited: { code: "connect.server_unavailable" },
+      paused: { code: "connect.rate_limited", retryAfterSeconds: 30 },
+      contract: { code: "connect.server_unavailable", retryAfterSeconds: 30 },
       sentWhilePaused: 0,
+      after: { code: "ok" },
     });
   });
 

@@ -25,11 +25,11 @@ import {
 import type { Connection } from "./connections.ts";
 import { maxListedTools, secretContext } from "./connector-providers.ts";
 import { connections, connectionTools, connectors } from "./db/schema.ts";
-import { pauseAsked } from "./egress.ts";
 import { ownerErased } from "./erased-people.ts";
 import { clientFor, discoverSignIn, isPublicName } from "./mcp-discovery.ts";
 import { McpError, mcpHeaderValue, modernMcpServer } from "./mcp.ts";
 import type { ListedServerTool, McpServer, McpTool } from "./mcp.ts";
+import { pauseAsked } from "./pause.ts";
 import {
   actionNamePattern,
   isShallowJson,
@@ -37,7 +37,7 @@ import {
   servedSchema,
   textAnswer,
 } from "./served-schemas.ts";
-import { credentialFor } from "./tokens.ts";
+import { credentialFor, pausedWait } from "./tokens.ts";
 import {
   classByRules,
   classesOf,
@@ -413,6 +413,14 @@ export const currentTools = async (
   } catch (error) {
     if (error instanceof McpError) {
       throw connectErrors.create("connect.server_unavailable");
+    }
+    // Its server asked every caller to wait (the connection paused): the
+    // list can't be read until the wait is over.
+    const paused = pausedWait(error);
+    if (paused !== undefined) {
+      throw connectErrors.create("connect.server_unavailable", {
+        retryAfterSeconds: Math.ceil(paused.retryAfterMs / 1000),
+      });
     }
     throw error;
   }
