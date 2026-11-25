@@ -23,9 +23,9 @@ import {
 
 // Removing an App (app-removal.ts), from its threat model: someone without
 // the right removes it; its work outlives it; it is reached afterwards;
-// its grants outlive it; it takes with it what it doesn't own (its store,
-// its records); a race with a restore; and its removal
-// goes unrecorded.
+// its grants outlive it, or its versions' pictures; it takes with it what
+// it doesn't own (its store, its records); a race with a restore; and its
+// removal goes unrecorded.
 
 const idp = mockIdp();
 
@@ -35,9 +35,17 @@ const slow = { timeout: 60_000 };
 const personApi = async (role: Role) => await signedInApi(idp, role);
 type Person = Awaited<ReturnType<typeof personApi>>;
 
+/** A real PNG, 8 by 8 pixels, from Pillow (organization-logo.test.ts). */
+const realPng = Uint8Array.from(
+  atob(
+    "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAGUlEQVR42mNkYGhQYGDARCwMCgxYweCUAABobwJednxjlwAAAABJRU5ErkJggg=="
+  ),
+  (char) => char.codePointAt(0) ?? 0
+);
+
 /**
- * A new App of `owner`'s, published, shared with `members`, then
- * archived.
+ * A new App of `owner`'s, published, with a picture of that version,
+ * shared with `members`, then archived.
  */
 const archivedApp = async (
   owner: Person,
@@ -45,6 +53,7 @@ const archivedApp = async (
 ): Promise<string> => {
   const { id } = await owner.api.apps.create({ name: `Desk ${unique()}` });
   await published(id);
+  await owner.api.apps.setVersionPicture(id, 1, realPng);
   for (const { person, role } of members) {
     // oxlint-disable-next-line no-await-in-loop -- one share at a time
     await owner.api.apps.members.add(id, {
@@ -247,6 +256,11 @@ describe("removing an App", slow, () => {
     )
       .bind(crypto.randomUUID(), app, owner.userId, Date.now())
       .run();
+    const pictures = async () => {
+      const listed = await env.FILES.list({ prefix: `apps/${app}/pictures/` });
+      return listed.objects.length;
+    };
+    const picturesBefore = await pictures();
     const events = await auditedDuring(async () => {
       await owner.api.apps.remove(app);
     });
@@ -277,6 +291,8 @@ describe("removing an App", slow, () => {
         store,
         app
       ),
+      // Its version's picture goes with it.
+      pictures: [picturesBefore, await pictures()],
     }).toStrictEqual({
       removed: [app],
       get: "app.not_found",
@@ -287,6 +303,7 @@ describe("removing an App", slow, () => {
       activeGrants: 0,
       store: 1,
       keyed: 1,
+      pictures: [1, 0],
     });
   });
 

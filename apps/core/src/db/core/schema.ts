@@ -1448,7 +1448,8 @@ export const appVersions = sqliteTable(
      * Where publishing left the version (src/app-publish.ts): `published`
      * once it was built, sealed and its tests passed, `failed` when its
      * last publish was refused, null for one never published. With
-     * `published_manifest_hash`, the only columns of a version that change.
+     * `published_manifest_hash` and `picture`, the only columns of a
+     * version that change.
      */
     status: text({ enum: ["published", "failed"] }),
     /**
@@ -1458,6 +1459,13 @@ export const appVersions = sqliteTable(
      * core, or sealed again, is published again. Null until it is.
      */
     publishedManifestHash: text("published_manifest_hash"),
+    /**
+     * The ID of the version's picture (src/app-pictures.ts): each set
+     * keeps its own object in the files bucket under the App (src/apps.ts,
+     * `pictureKey`), with the type its bytes told, and names it here once
+     * its write commits. Null while it has none.
+     */
+    picture: text(),
   },
   (table) => [
     primaryKey({ columns: [table.appId, table.version] }),

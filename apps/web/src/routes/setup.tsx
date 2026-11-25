@@ -37,6 +37,7 @@ import { CampaignFrame } from "../onboarding/campaign/campaign-page.tsx";
 import { isCampaignState } from "../onboarding/campaign/fixtures.ts";
 import type { CampaignState } from "../onboarding/campaign/fixtures.ts";
 import { poses } from "../onboarding/field/poses.ts";
+import { keptKey } from "../onboarding/kept.ts";
 import { todayInUtc } from "../onboarding/send-plan.ts";
 import { SetupStepBody } from "../onboarding/setup-steps.tsx";
 import {
@@ -72,9 +73,6 @@ const directorySuites = directorySuiteSchema.options;
  * Pulse, on the work laptops, is set up with the company outside it.
  */
 const dropped: ReadonlySet<SetupStep> = new Set(["pulse"]);
-
-/** Where this browser keeps how far its admin went, the message they wrote and what they settled: a convenience of this browser alone. */
-const keptKey = (userId: string): string => `grasp.setup.${userId}`;
 
 /** Which list of steps a kept place counts in: core keeps the place by the screens' names, this browser only the message and what was settled. */
 const keptSteps = 3;

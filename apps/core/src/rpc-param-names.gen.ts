@@ -81,6 +81,7 @@ export const rpcParamNames: ParamNames = {
     "restore": ["app"],
     "review": ["app"],
     "setLink": ["app","link"],
+    "setVersionPicture": ["app","version","image"],
     "update": ["app","changes"],
   },
   "AuditRpc": {

@@ -630,6 +630,7 @@ export const createFromBlueprint = async (
     label: null,
     status: null,
     publishedManifestHash: null,
+    picture: null,
   };
   const db = drizzle(env.DB);
   // The App, only while the blueprint is still there and, for a marked
@@ -1134,6 +1135,7 @@ export const acceptBlueprintUpdate = async (
     label: null,
     status: null,
     publishedManifestHash: null,
+    picture: null,
   };
   // Nothing of the App's files changes when each of the blueprint's
   // changes was the App's already, or conflicts: only its origin moves on.

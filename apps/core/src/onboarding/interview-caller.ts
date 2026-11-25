@@ -14,8 +14,11 @@ import type { LinkCaller } from "./store.ts";
 //   one it went to; the store answers as for a link that never was.
 // - Another site making a signed-in person's browser drive their
 //   interview: a request another site sent is refused before anything is
-//   read; the session's cookie is `SameSite=Lax` besides, so a POST from
-//   another site carries none.
+//   read. The browser says where it comes from (`Sec-Fetch-Site`); one
+//   that doesn't (a browser from before 2023, a tool) must name the
+//   deployment's own origin (`Origin`, which every browser sends with a
+//   POST and a WebSocket upgrade), or it is refused as from elsewhere:
+//   the session's cookie being `SameSite=Lax` is not all that holds.
 // - Grasp's staff: a staff session opens no interview here. Staff read
 //   interviews only through their own audited views.
 // - A session for someone's interview alone reaching anything else: this
@@ -28,6 +31,22 @@ import type { LinkCaller } from "./store.ts";
 
 /** Where a request may come from: the page itself, or a navigation typed in. */
 const sameSiteFetches = new Set(["same-origin", "none"]);
+
+/**
+ * Whether `headers` are of a request this deployment's own pages made: by
+ * `Sec-Fetch-Site` where the browser sends it, else by an `Origin` that is
+ * the deployment's own. A request with neither is from nowhere we know.
+ */
+export const fromOwnSite = (
+  headers: Headers,
+  origin: string | undefined
+): boolean => {
+  const fetchSite = headers.get("sec-fetch-site");
+  if (fetchSite !== null) {
+    return sameSiteFetches.has(fetchSite);
+  }
+  return origin !== undefined && headers.get("origin") === origin;
+};
 
 /** Why a request names nobody who may open an interview. */
 export type NoCaller = "cross_site" | "sign_in";
@@ -42,11 +61,11 @@ export const interviewCaller = async (
   env: Env,
   headers: Headers
 ): Promise<LinkCaller | NoCaller> => {
-  const fetchSite = headers.get("sec-fetch-site");
-  if (fetchSite !== null && !sameSiteFetches.has(fetchSite)) {
+  const config = signInConfig(env);
+  if (!fromOwnSite(headers, config?.origin)) {
     return "cross_site";
   }
-  const auth = await authFor(env, signInConfig(env));
+  const auth = await authFor(env, config);
   const found = await auth?.api.getSession({ headers });
   if (!found || found.session.staff || (await mayNotAct(env, found.user.id))) {
     return "sign_in";

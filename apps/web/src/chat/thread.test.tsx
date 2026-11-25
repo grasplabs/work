@@ -256,10 +256,8 @@ describe(ChatThread, () => {
     const text = document.body.textContent;
 
     expect({
-      kind: text.includes("Instruction"),
-      saved: text.includes(
-        "Grasp will remember: Always answer in Dutch (value: Dutch)"
-      ),
+      kind: text.includes("Saved an instruction"),
+      saved: text.includes("Always answer in Dutch"),
     }).toStrictEqual({ kind: true, saved: true });
   });
 
@@ -300,7 +298,7 @@ describe(ChatThread, () => {
     ]);
 
     expect(document.body.textContent).toContain(
-      "Grasp will remember about Bob: Prefers answers by mail"
+      "About Bob: Prefers answers by mail"
     );
   });
 
@@ -448,7 +446,7 @@ describe(ChatThread, () => {
 
     expect({
       line: shown.includes("Saved to your memory"),
-      notice: shown.includes("Grasp will remember: Acme renews on 1 March"),
+      notice: shown.includes("Saved a memory, Acme renews on 1 March"),
       forgotten,
       undoLeft: [...document.querySelectorAll("button")].some(
         (button) => button.textContent === "Undo"

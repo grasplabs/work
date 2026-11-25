@@ -14,6 +14,7 @@ import {
 import type { SpeechAnswer, SpokenWord } from "@grasp-os/shared/voice";
 import { z } from "zod";
 
+import { signInConfig } from "../auth/config.ts";
 import { identify } from "../auth/identity.ts";
 import { errorResponse } from "../errors.ts";
 import { platformAi } from "../platform-ai.ts";
@@ -22,7 +23,7 @@ import { keepLine, keptLine, storedKeyOf } from "../speech-cache.ts";
 import type { SpokenKey } from "../speech-cache.ts";
 import { platformSpeech, speechModelOf } from "../speech.ts";
 import { auditStaffRoute } from "../staff-audit.ts";
-import { interviewCaller } from "./interview-caller.ts";
+import { fromOwnSite, interviewCaller } from "./interview-caller.ts";
 import { linkHeaders, linkRefusal, noCallerRefusal } from "./links.ts";
 import { spokenOf } from "./spoken-lines.ts";
 import { adminWho, onboardingStore } from "./store.ts";
@@ -65,9 +66,6 @@ const purpose = "onboarding.speech";
  * pages over and over. A line said before costs none of them.
  */
 export const voiceBudgets = { link: 30 * 60, admin: 60 * 60 } as const;
-
-/** `Sec-Fetch-Site` values of a request this site's own pages made. */
-const sameSiteFetches = new Set(["same-origin", "none"]);
 
 /** Whom a line is said for: the key its voice counts under, and how it is counted. */
 interface Listener {
@@ -185,8 +183,7 @@ const forAdmin = async (
   stored: string,
   requestId: string
 ): Promise<Listener | Response> => {
-  const fetchSite = request.headers.get("sec-fetch-site");
-  if (fetchSite !== null && !sameSiteFetches.has(fetchSite)) {
+  if (!fromOwnSite(request.headers, signInConfig(env)?.origin)) {
     return refused(403, requestErrors.create("request.forbidden"), requestId);
   }
   // Grasp's staff, who may reach the onboarding alone, among them.

@@ -2123,6 +2123,10 @@ msgctxt "what a decision is about, as its workflow run passed it"
 msgid "About"
 msgstr "About"
 
+#: src/chat/saved-memory.tsx
+msgid "About {about}: {statement}"
+msgstr "About {about}: {statement}"
+
 #: src/brain/memories-page.tsx
 msgid "About {aboutShown}"
 msgstr "About {aboutShown}"
@@ -8095,25 +8099,9 @@ msgstr "Grasp stops sending the App's events there. Its secret can't be used aga
 msgid "Grasp tries again every quarter of an hour. If it keeps failing, ask Grasp’s support to help."
 msgstr "Grasp tries again every quarter of an hour. If it keeps failing, ask Grasp’s support to help."
 
-#: src/route-error.tsx
+#: src/route-error-reason.ts
 msgid "Grasp was updated while this page was open. Try again to load the new version."
 msgstr "Grasp was updated while this page was open. Try again to load the new version."
-
-#: src/chat/saved-memory.tsx
-msgid "Grasp will remember about {about}: {statement}"
-msgstr "Grasp will remember about {about}: {statement}"
-
-#: src/chat/saved-memory.tsx
-msgid "Grasp will remember about {about}: {statement} (value: {value})"
-msgstr "Grasp will remember about {about}: {statement} (value: {value})"
-
-#: src/chat/saved-memory.tsx
-msgid "Grasp will remember: {statement}"
-msgstr "Grasp will remember: {statement}"
-
-#: src/chat/saved-memory.tsx
-msgid "Grasp will remember: {statement} (value: {value})"
-msgstr "Grasp will remember: {statement} (value: {value})"
 
 #: src/apps/app-code.tsx
 msgid "Grasp writes the first version in the chat."
@@ -8827,10 +8815,6 @@ msgstr "Input, as JSON"
 #: src/activity/audit-words.ts
 msgid "Installed Grasp's skills with a release"
 msgstr "Installed Grasp's skills with a release"
-
-#: src/chat/saved-memory.tsx
-msgid "Instruction"
-msgstr "Instruction"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
@@ -13378,10 +13362,6 @@ msgstr "Position"
 msgid "Prague"
 msgstr "Prague"
 
-#: src/chat/saved-memory.tsx
-msgid "Preference"
-msgstr "Preference"
-
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Preference"
@@ -14981,6 +14961,18 @@ msgctxt "a setting saved"
 msgid "Saved"
 msgstr "Saved"
 
+#: src/chat/saved-memory.tsx
+msgid "Saved a memory"
+msgstr "Saved a memory"
+
+#: src/chat/saved-memory.tsx
+msgid "Saved a preference"
+msgstr "Saved a preference"
+
+#: src/chat/saved-memory.tsx
+msgid "Saved an instruction"
+msgstr "Saved an instruction"
+
 #: src/apps/app-data-model.tsx
 #: src/apps/field-editor.tsx
 msgid "Saved as {named}"
@@ -16138,7 +16130,7 @@ msgstr "Something went wrong while it opened."
 
 #: src/connections/part-not-loaded.tsx
 #: src/frame/page-states.tsx
-#: src/route-error.tsx
+#: src/route-error-reason.ts
 msgid "Something went wrong."
 msgstr "Something went wrong."
 
@@ -18122,6 +18114,7 @@ msgid "This page couldn't load"
 msgstr "This page couldn't load"
 
 #: src/frame/page-states.tsx
+#: src/interview-routes.tsx
 msgid "This page didn't load"
 msgstr "This page didn't load"
 
@@ -18506,6 +18499,7 @@ msgstr "Try"
 #: src/frame/ui-words.tsx
 #: src/inbox/decision-card.tsx
 #: src/inbox/inbox-page.tsx
+#: src/interview-routes.tsx
 #: src/interview/destination.tsx
 #: src/settings/sign-in-settings.tsx
 msgid "Try again"

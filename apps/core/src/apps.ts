@@ -13,6 +13,7 @@ import { appLimits } from "@grasp-os/shared/app-limits";
 import { versionErrors } from "@grasp-os/shared/app-releases";
 import {
   appErrors,
+  appPicturePath,
   appVersionSchema,
   fileChangesSchema,
   newAppSchema,
@@ -50,6 +51,7 @@ import { versionMadeCurrent } from "./access-revocations.ts";
 import {
   appsBuiltBy,
   appsFoundBy,
+  appsReadableBy,
   requireAppRole,
   requireNotArchived,
   stillBuiltBy,
@@ -146,6 +148,19 @@ const versionsPerPage = 100;
 const treeKey = (app: AppId, tree: string): string =>
   `apps/${app}/trees/${tree}.json`;
 
+/** Where every picture of App `app`'s versions is kept (app-pictures.ts). */
+export const picturesPrefix = (app: AppId): string => `apps/${app}/pictures/`;
+
+/**
+ * Where picture `picture` of `version` of App `app` is kept: one object
+ * each time one is set (app-pictures.ts).
+ */
+export const pictureKey = (
+  app: AppId,
+  version: number,
+  picture: string
+): string => `${picturesPrefix(app)}${version}/${picture}`;
+
 /** A built-in blueprint's code (app-blueprints.ts), stored as a version's is. */
 const blueprintTreeKey = (blueprint: BlueprintId, tree: string): string =>
   `blueprints/${blueprint}/trees/${tree}.json`;
@@ -228,6 +243,7 @@ export const changeEntry = (
     | "app.version.built"
     | "app.version.publish_failed"
     | "app.version.unfinished"
+    | "app.version.picture_set"
     | "app.blueprint.marked"
     | "app.blueprint.unmarked"
     | "app.blueprint.updated",
@@ -975,8 +991,9 @@ export const appContents = async (
 
 /**
  * The Apps `by` has a role in, as `listApps` gives them, each with what
- * `appContents` says of it: one query, from its current version's row
- * (`app_versions.pages`), so no files are read.
+ * `appContents` says of it and where its current version's picture is
+ * read: one query, from its current version's row (`app_versions.pages`,
+ * `app_versions.picture`), so no files are read.
  */
 export const listAppOverviews = async (
   env: Env,
@@ -986,6 +1003,7 @@ export const listAppOverviews = async (
     .select({
       app: apps,
       pages: appVersions.pages,
+      picture: appVersions.picture,
     })
     .from(apps)
     .leftJoin(
@@ -1003,13 +1021,24 @@ export const listAppOverviews = async (
     by,
     found.map(({ app }) => app.id)
   );
-  return found.map(({ app, pages }) => ({
+  // A picture shows what the App showed: only to whoever may read what it
+  // read, as its route asks (app-pictures.ts). Asked only of those with one.
+  const readable = await appsReadableBy(
+    env,
+    by,
+    found.filter(({ picture }) => picture !== null).map(({ app }) => app.id)
+  );
+  return found.map(({ app, pages, picture }) => ({
     app: { ...app, role: builds.has(app.id) ? "builder" : "user" },
     // None without a current version, whose row the join doesn't find.
     contents: {
       version: app.currentVersion,
       pages: pages ?? false,
     },
+    picture:
+      picture === null || app.currentVersion === null || !readable.has(app.id)
+        ? null
+        : appPicturePath(app.id, app.currentVersion),
   }));
 };
 
@@ -1164,6 +1193,7 @@ export const commitDraft = async (
     label: null,
     status: null,
     publishedManifestHash: null,
+    picture: null,
   };
   const db = drizzle(env.DB);
   let undone: unknown;
