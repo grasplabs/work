@@ -1,4 +1,4 @@
-import { exports } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
@@ -61,6 +61,7 @@ const signInServer = (
     issuer?: string;
     challengeMethods?: string[];
     tokenEndpoint?: string;
+    challenge?: string;
   } = {}
 ) => {
   dns.set(new URL(origin).hostname, ["34.120.10.2"]);
@@ -70,7 +71,9 @@ const signInServer = (
       return new Response(null, {
         status: 401,
         headers: {
-          "www-authenticate": `Bearer resource_metadata="${changes.resourceMetadataAt ?? `${origin}/.well-known/oauth-protected-resource/mcp`}"`,
+          "www-authenticate":
+            changes.challenge ??
+            `Bearer resource_metadata="${changes.resourceMetadataAt ?? `${origin}/.well-known/oauth-protected-resource/mcp`}"`,
         },
       });
     }
@@ -399,6 +402,11 @@ describe("a connector's server", () => {
     const addressToken = signInServer("https://mcp.seven.example", {
       tokenEndpoint: "https://10.0.0.7/token",
     });
+    // Another scheme's token68 challenge first: Bearer's after it is read.
+    const afterToken68 = signInServer("https://mcp.eight.example", {
+      challenge:
+        'Negotiate abc==, Bearer resource_metadata="https://metadata.other.example/.well-known/oauth-protected-resource"',
+    });
     const fine = signInServer("https://mcp.five.example");
 
     expect({
@@ -408,6 +416,7 @@ describe("a connector's server", () => {
       plainPkce: await outcome(addServer(plainPkce)),
       insideToken: await outcome(addServer(insideToken)),
       addressToken: await outcome(addServer(addressToken)),
+      afterToken68: await outcome(addServer(afterToken68)),
       fine: await outcome(addServer(fine)),
       fetchedElsewhere: sent.some(({ url }) => url.includes("other.example")),
     }).toStrictEqual({
@@ -417,6 +426,7 @@ describe("a connector's server", () => {
       plainPkce: "connection.sign_in_unsupported",
       insideToken: "connection.sign_in_unsupported",
       addressToken: "connection.sign_in_unsupported",
+      afterToken68: "connection.sign_in_unsupported",
       fine: "ok",
       fetchedElsewhere: false,
     });
@@ -506,6 +516,52 @@ describe("a connector's server", () => {
       get_cycle: undefined,
       cycle: "connect.action_not_found",
     });
+  });
+
+  it("keeps no tool list read with a key that was replaced meanwhile", async () => {
+    const origin = "https://mcp.notes.example";
+    const notes = keyServer(origin, "notes-key");
+    const serve = servers.get(origin);
+    const bob = someone();
+    const { id: provider } = await exports.default.addConnector({
+      person: admin(),
+      name: "Notes",
+      url: notes,
+      origin: clientOrigin,
+      auth: { kind: "header", header: "X-Api-Key" },
+    });
+    const connect = async () =>
+      await exports.default.connectWithKey({
+        person: bob,
+        provider,
+        scope: "personal",
+        key: "notes-key",
+      });
+    const { connectionId } = await connect();
+    // The list is answered after Bob gave his key again.
+    let replaced = false;
+    servers.set(origin, async (request) => {
+      const answer = await serve?.(request);
+      const { method } = await rpcOf(request);
+      if (!replaced && method === "tools/list") {
+        replaced = true;
+        await connect();
+      }
+      return answer ?? new Response(null, { status: 404 });
+    });
+
+    const classes = await exports.default.connectorToolClasses(connectionId);
+    const kept = await env.DB.prepare(
+      "SELECT count(*) AS kept FROM connection_tools WHERE connection_id = ?"
+    )
+      .bind(connectionId)
+      .first<{ kept: number }>();
+
+    expect({
+      replaced,
+      readForTheCall: classes.list_notes,
+      kept: kept?.kept,
+    }).toStrictEqual({ replaced: true, readForTheCall: "read-own", kept: 0 });
   });
 
   it("serves a personal connection to its owner alone, and each connector's credential to its own server alone", async () => {

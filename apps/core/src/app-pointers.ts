@@ -85,7 +85,9 @@ export const pointApp = async (
   // connection to one covers the whole app.
   const pointable =
     owner?.source === "composio" ||
-    (owner?.source === "connector" && parsed.data.resources.length === 0);
+    (owner?.source === "connector" &&
+      owner.ownerUserId === null &&
+      parsed.data.resources.length === 0);
   if (!pointable) {
     throw connectionErrors.create("connection.invalid");
   }

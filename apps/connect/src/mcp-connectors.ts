@@ -42,6 +42,7 @@ import {
   classesOf,
   isJsonArray,
   storedSchema,
+  topNames,
 } from "./tool-rules.ts";
 import type { ToolHints } from "./tool-rules.ts";
 import { vaultFor } from "./vault.ts";
@@ -496,10 +497,9 @@ const reads = (toolClass: ToolClass): boolean =>
   toolClass === "read-others";
 
 /** The input properties a tool's schema names at its top. */
-const topProperties = (inputSchema: Json): string[] =>
-  isRecord(inputSchema) && isRecord(inputSchema.properties)
-    ? Object.keys(inputSchema.properties)
-    : [];
+const topProperties = (inputSchema: Json): string[] => [
+  ...new Set(topNames(inputSchema)),
+];
 
 /** `tools`' tool named exactly `name`, if any. */
 const named = (

@@ -141,37 +141,25 @@ export interface RuledTool {
 }
 
 /**
- * Every property name `schema` declares, nested ones too: in
- * `properties`, and through `items`, `additionalProperties` and the
- * composition keywords. Walked with a stack of its own; the schema was
- * checked for depth and size when its list was read.
+ * Every property name `schema` declares, at any depth and under any
+ * keyword (`$defs` and tuples too): the keys of every `properties` object
+ * in it. Reading too many only ever makes a tool count as reaching others.
+ * Walked with a stack of its own; the schema was checked for depth and size
+ * when its list was read.
  */
 const propertyNames = (schema: Json): string[] => {
   const names: string[] = [];
   const pending: Json[] = [schema];
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
-    if (!isRecord(next)) {
-      continue;
-    }
-    const { properties, items, additionalProperties, anyOf, oneOf, allOf } =
-      next;
-    if (isRecord(properties)) {
-      for (const [name, property] of Object.entries(properties)) {
-        names.push(name);
-        if (property !== undefined) {
-          pending.push(property);
-        }
+    if (isJsonArray(next)) {
+      pending.push(...next);
+    } else if (isRecord(next)) {
+      if (isRecord(next.properties)) {
+        names.push(...Object.keys(next.properties));
       }
-    }
-    for (const nested of [items, additionalProperties]) {
-      if (nested !== undefined) {
-        pending.push(nested);
-      }
-    }
-    for (const members of [anyOf, oneOf, allOf]) {
-      if (isJsonArray(members)) {
-        for (const member of members) {
-          pending.push(member);
+      for (const value of Object.values(next)) {
+        if (value !== undefined) {
+          pending.push(value);
         }
       }
     }
@@ -179,13 +167,19 @@ const propertyNames = (schema: Json): string[] => {
   return names;
 };
 
+/** A reference to one of the root's own definitions (`#/$defs/x`). */
+const localDefinitionPattern =
+  /^#\/(?<keyword>\$defs|definitions)\/(?<name>[^/]+)$/u;
+
 /**
- * The names of the input's own properties: at its top, and at the top of
- * every schema it is composed of (`anyOf`, `oneOf`, `allOf`).
+ * The names of the input's own properties: at its top, at the top of every
+ * schema it is composed of (`anyOf`, `oneOf`, `allOf`), and at the top of
+ * the root's definition a `$ref` there names (JSON Pointer, RFC 6901).
  */
-const topNames = (schema: Json): string[] => {
+export const topNames = (schema: Json): string[] => {
   const names: string[] = [];
   const pending: Json[] = [schema];
+  const followed = new Set<string>();
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
     if (!isRecord(next)) {
       continue;
@@ -196,6 +190,27 @@ const topNames = (schema: Json): string[] => {
     for (const members of [next.anyOf, next.oneOf, next.allOf]) {
       if (isJsonArray(members)) {
         pending.push(...members);
+      }
+    }
+    const ref =
+      typeof next.$ref === "string"
+        ? localDefinitionPattern.exec(next.$ref)?.groups
+        : undefined;
+    const definitions =
+      ref?.keyword === undefined || !isRecord(schema)
+        ? undefined
+        : schema[ref.keyword];
+    const name = ref?.name?.replaceAll("~1", "/").replaceAll("~0", "~");
+    if (
+      name !== undefined &&
+      isRecord(definitions) &&
+      Object.hasOwn(definitions, name) &&
+      !followed.has(name)
+    ) {
+      followed.add(name);
+      const definition = definitions[name];
+      if (definition !== undefined) {
+        pending.push(definition);
       }
     }
   }

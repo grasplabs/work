@@ -88,6 +88,9 @@ const metadata = async (
 const tokenPattern = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+/u;
 const spacePattern = /^[ \t]*/u;
 
+/** A token68 (RFC 9110 §11.2), the whole of a challenge that has one. */
+const token68Pattern = /^[A-Za-z0-9\-._~+/]+=*(?=[ \t]*(?:,|$))/u;
+
 /**
  * The parameters of the `Bearer` challenge in a WWW-Authenticate value,
  * by RFC 9110's grammar (§11.6.1): `challenge = auth-scheme [ 1*SP (
@@ -116,6 +119,11 @@ export const bearerChallenge = (
     }
     const params: Record<string, string> = {};
     challenges.push({ scheme: scheme.toLowerCase(), params });
+    // A challenge whose one value is a token68 (RFC 9110 §11.3) has no params.
+    skip(spacePattern);
+    if (skip(token68Pattern) !== "") {
+      continue;
+    }
     for (;;) {
       skip(spacePattern);
       // A name followed by "=" is a param; anything else ends the challenge.

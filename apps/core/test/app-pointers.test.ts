@@ -53,6 +53,27 @@ const mailApp = async (admin: Admin) => {
   return mail;
 };
 
+/** A connection to a connector made from a URL, shared unless `owner` is given. */
+const connectorConnection = async (owner: string | null): Promise<string> => {
+  const id = `connection-${crypto.randomUUID()}`;
+  const now = Date.now();
+  await connectDb()
+    .prepare(
+      "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', 'connector', ?, ?, ?)"
+    )
+    .bind(
+      id,
+      "mcp_0123456789abcdef",
+      owner === null ? "shared" : "personal",
+      owner,
+      "mcp_0123456789abcdef",
+      now,
+      now
+    )
+    .run();
+  return id;
+};
+
 /**
  * A chat of `personId`'s whose code searches the app for `invoice` and
  * `salary` and sends a mail from it, through `MAIL`, which the admin
@@ -186,21 +207,9 @@ describe("a company app", setUpTime, () => {
 
   it("is pointed at as a whole app when it is a connector made from a URL", async () => {
     const admin = await signedInApi(idp, "admin");
-    const connectionId = `connection-${crypto.randomUUID()}`;
-    const now = Date.now();
-    await connectDb()
-      .prepare(
-        "INSERT INTO connections (id, provider, scope, status, server_kind, server, created_at, updated_at) VALUES (?, ?, 'shared', 'active', 'connector', ?, ?, ?)"
-      )
-      .bind(
-        connectionId,
-        "mcp_0123456789abcdef",
-        "mcp_0123456789abcdef",
-        now,
-        now
-      )
-      .run();
-    const pointer = async (resources: string[]) => {
+    const shared = await connectorConnection(null);
+    const personal = await connectorConnection(admin.userId);
+    const pointer = async (connectionId: string, resources: string[]) => {
       await admin.api.connections.pointApp({
         connectionId,
         resources,
@@ -209,11 +218,13 @@ describe("a company app", setUpTime, () => {
     };
 
     expect({
-      withinResources: await outcome(pointer(["project-1"])),
-      wholeApp: await outcome(pointer([])),
+      withinResources: await outcome(pointer(shared, ["project-1"])),
+      wholeApp: await outcome(pointer(shared, [])),
+      someonesOwn: await outcome(pointer(personal, [])),
     }).toStrictEqual({
       withinResources: "connection.invalid",
       wholeApp: "ok",
+      someonesOwn: "connection.invalid",
     });
   });
 

@@ -308,6 +308,39 @@ describe("a connector's tools", () => {
           anyOf: [{ type: "object", properties: { to: { type: "string" } } }],
         },
       }),
+      tool("create_event", {
+        inputSchema: {
+          type: "object",
+          properties: { event: { $ref: "#/$defs/Event" } },
+          $defs: {
+            Event: {
+              type: "object",
+              properties: { attendees: { type: "array" } },
+            },
+          },
+        },
+      }),
+      tool("search_by", {
+        inputSchema: {
+          $ref: "#/definitions/Query",
+          definitions: {
+            Query: { type: "object", properties: { to: { type: "string" } } },
+          },
+        },
+      }),
+      tool("list_rooms", {
+        inputSchema: {
+          type: "object",
+          properties: {
+            slots: {
+              type: "array",
+              items: [
+                { type: "object", properties: { cc: { type: "string" } } },
+              ],
+            },
+          },
+        },
+      }),
       tool("find_and_send"),
       tool("read_messages"),
       tool("delete_issue"),
@@ -322,6 +355,9 @@ describe("a connector's tools", () => {
       list_and_archive: classes.list_and_archive,
       search: classes.search,
       search_notes: classes.search_notes,
+      create_event: classes.create_event,
+      search_by: classes.search_by,
+      list_rooms: classes.list_rooms,
       find_and_send: classes.find_and_send,
       read_messages: classes.read_messages,
       delete_issue: await outcome(
@@ -337,6 +373,9 @@ describe("a connector's tools", () => {
       list_and_archive: "change-own",
       search: "reach-others",
       search_notes: "reach-others",
+      create_event: "reach-others",
+      search_by: "reach-others",
+      list_rooms: "reach-others",
       find_and_send: "change-own",
       read_messages: "read-others",
       delete_issue: "connect.never",
