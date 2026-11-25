@@ -1,7 +1,7 @@
 import { syncErrors } from "@grasp-os/shared/sync";
 import type { SyncPage, SyncPageRequest } from "@grasp-os/shared/sync";
 import { exports } from "cloudflare:workers";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { connectAccount, ownAccount, someone } from "./connect.ts";
@@ -746,6 +746,10 @@ describe("syncing a person's own Drive", () => {
   });
 
   it("waits when Google rate limits, as it asks", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const connectionId = await connected();
     drive.answer = () =>
       Response.json(
@@ -755,8 +759,23 @@ describe("syncing a person's own Drive", () => {
     const limited = await read(connectionId, null).catch(
       (error: unknown) => error
     );
-    expect(syncErrors.codeOf(limited)).toBe("sync.throttled");
+    // The connector's `isThrottled` named it: the connection waits a
+    // minute, for every caller, without asking Google again.
+    const asked = sentToGoogle().length;
+    const paused = await read(connectionId, null).catch(
+      (error: unknown) => error
+    );
+    expect({
+      limited: syncErrors.codeOf(limited),
+      paused,
+      askedWhilePaused: sentToGoogle().length - asked,
+    }).toMatchObject({
+      limited: "sync.throttled",
+      paused: { code: "sync.throttled", details: { retryAfterMs: 60_000 } },
+      askedWhilePaused: 0,
+    });
 
+    vi.setSystemTime(Date.now() + 60_000);
     drive.answer = () =>
       new Response(null, { status: 429, headers: { "retry-after": "30" } });
     await expect(read(connectionId, null)).rejects.toMatchObject({

@@ -3,7 +3,7 @@ import type { SyncItem, SyncPageRequest } from "@grasp-os/shared/sync";
 import { env, exports } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 
 import { connections, erasedPeople } from "../src/db/schema.ts";
 import {
@@ -208,6 +208,10 @@ describe("reading a page of a sync", () => {
   });
 
   it("says when to list again, when to wait and when to reconnect, as the provider does", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const connectionId = await ownConnection();
     const request = {
       connectionId,
@@ -221,9 +225,24 @@ describe("reading a page of a sync", () => {
     feed.answer = () =>
       new Response(null, { status: 429, headers: { "retry-after": "30" } });
     const throttled = await read(request).catch((error: unknown) => error);
-    expect(syncErrors.codeOf(throttled)).toBe("sync.throttled");
-    expect(throttled).toMatchObject({ details: { retryAfterMs: 30_000 } });
+    // The connection waits the 30 seconds asked, without asking again.
+    const asked = sentToProvider().length;
+    const paused = await read(request).catch((error: unknown) => error);
+    expect({
+      throttled: syncErrors.codeOf(throttled),
+      paused: syncErrors.codeOf(paused),
+      askedWhilePaused: sentToProvider().length - asked,
+    }).toStrictEqual({
+      throttled: "sync.throttled",
+      paused: "sync.throttled",
+      askedWhilePaused: 0,
+    });
+    expect([throttled, paused]).toMatchObject([
+      { details: { retryAfterMs: 30_000 } },
+      { details: { retryAfterMs: 30_000 } },
+    ]);
 
+    vi.setSystemTime(Date.now() + 30_000);
     feed.answer = () => new Response(null, { status: 401 });
     await expect(outcomeOf(request)).resolves.toBe("sync.inactive");
   });

@@ -120,6 +120,7 @@ const isolateServer = async (
 ): Promise<NativeMcpServer> => {
   const props: EgressProps = {
     connector: manifest.name,
+    connectionId: connection.id,
     hosts: manifest.hosts,
     ...egress,
     credential: await credentialFor(env, connection.id),

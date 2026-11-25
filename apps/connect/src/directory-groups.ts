@@ -258,7 +258,8 @@ const groupsToken = async (env: Env, connectionId: string): Promise<string> => {
   try {
     token = await directoryToken(env, connectionId);
   } catch (error) {
-    if (heldBefore) {
+    // A pause its vendor asked for says nothing of the grant.
+    if (heldBefore || directoryErrors.codeOf(error) === "directory.throttled") {
       throw error;
     }
     throw directoryErrors.create("directory.groups_not_granted");

@@ -1,4 +1,11 @@
-import { describe, expect, it } from "vite-plus/test";
+import {
+  beforeEach,
+  describe,
+  expect,
+  it,
+  onTestFinished,
+  vi,
+} from "vite-plus/test";
 import { z } from "zod";
 
 import { connectAccount, mailboxAccount, outcome, someone } from "./connect.ts";
@@ -282,6 +289,13 @@ describe("the Microsoft 365 connector's To Do tools", () => {
 });
 
 describe("the Microsoft 365 connector's answers", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+  });
+
   it("free a move's key when a lookup before it is throttled, so a retry moves once", async () => {
     const { connection, own } = await connectedOwn();
     const move = async () =>
@@ -297,9 +311,12 @@ describe("the Microsoft 365 connector's answers", () => {
           { idempotencyKey: "run-8:move-lookup" }
         )
       );
-    // The first request, the lookup, is throttled: nothing is moved.
+    // The first request, the lookup, is throttled: nothing is moved, and
+    // the connection waits the 7 seconds Graph asked for.
     graph.throttle();
-    const outcomes = [await move(), await move(), await move()];
+    const throttled = await move();
+    vi.setSystemTime(Date.now() + 7000);
+    const outcomes = [throttled, await move(), await move()];
     expect(outcomes).toStrictEqual(["connect.server_unavailable", "ok", "ok"]);
     expect(graph.writesDone()).toBe(1);
   });
@@ -331,7 +348,9 @@ describe("the Microsoft 365 connector's answers", () => {
         )
       );
     graph.throttleWrite();
-    const outcomes = [await move(), await move(), await move()];
+    const throttled = await move();
+    vi.setSystemTime(Date.now() + 7000);
+    const outcomes = [throttled, await move(), await move()];
     expect(outcomes).toStrictEqual(["connect.server_unavailable", "ok", "ok"]);
     expect(graph.writesDone()).toBe(1);
   });

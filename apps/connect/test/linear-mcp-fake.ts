@@ -407,10 +407,21 @@ const isDocumentClientId = (clientId: string): boolean => {
   }
 };
 
-const isHttpsUrl = (value: string): boolean => {
+/** Where loopback redirects may go over plain http (RFC 8252 §7.3). */
+const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/**
+ * A redirect URI Linear takes: https, or http to a loopback host, as
+ * local MCP clients register (mcp-remote's http://localhost callback).
+ */
+const isRedirectUrl = (value: string): boolean => {
   try {
     const url = new URL(value);
-    return url.protocol === "https:" && url.hash === "";
+    return (
+      url.hash === "" &&
+      (url.protocol === "https:" ||
+        (url.protocol === "http:" && loopbackHosts.has(url.hostname)))
+    );
   } catch {
     return false;
   }
@@ -1911,10 +1922,10 @@ const registrationOf = (
     client_name: clientName,
   } = body;
   const uris = stringList(redirectUris);
-  if (uris === undefined || !uris.every(isHttpsUrl)) {
+  if (uris === undefined || !uris.every(isRedirectUrl)) {
     return oauthError(
       "invalid_redirect_uri",
-      "redirect_uris must be https URLs"
+      "redirect_uris must be https URLs or http to a loopback host"
     );
   }
   const grants = stringList(grantTypes) ?? [];
@@ -1971,8 +1982,8 @@ const checkClient = (
   ) {
     refuse(`redirect_uri ${redirectUri} isn't registered for the client`);
   }
-  if (registered === undefined && !isHttpsUrl(redirectUri)) {
-    refuse(`redirect_uri ${redirectUri} isn't an https URL`);
+  if (registered === undefined && !isRedirectUrl(redirectUri)) {
+    refuse(`redirect_uri ${redirectUri} isn't an https or loopback URL`);
   }
 };
 

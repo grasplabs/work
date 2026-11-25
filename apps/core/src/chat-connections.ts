@@ -145,9 +145,36 @@ const decisionActions = {
 } as const;
 
 /**
+ * The tools of the connection to a connector made from a URL
+ * `connectionId` that Grasp runs, by the rules, from its server's list as
+ * it is now (connect's `connectorToolClasses`): none while the list can't
+ * be read for any reason connect names (its server or its sign-in down, its
+ * access refused on refresh), so one connection failing leaves the others
+ * askable. Asking for its actions says why (`requestConnection`).
+ */
+const connectorActionsOf = async (
+  env: Env,
+  connectionId: string
+): Promise<string[]> => {
+  try {
+    return Object.keys(await env.CONNECT.connectorToolClasses(connectionId));
+  } catch (error) {
+    if (!isExpectedError(error)) {
+      throw error;
+    }
+    log.warn("chat.connector_tools_unreadable", {
+      connectionId,
+      ...errorFields(error),
+    });
+    return [];
+  }
+};
+
+/**
  * The actions of each connection in `offered`, by its ID: a native
- * provider's manifest's (one lookup per provider), a toolkit's those the
- * admin allowed as they connected it.
+ * provider's manifest's (one lookup per provider), a connector's tools
+ * its server lists now, a toolkit's those the admin allowed as they
+ * connected it.
  */
 const actionsOf = async (
   env: Env,
@@ -164,12 +191,20 @@ const actionsOf = async (
     await Promise.all(
       natives.map(async (provider) => {
         const tools = await env.CONNECT.catalogTools({
-          composio: false,
           source: "native",
           id: provider,
         });
         return [provider, tools.map(({ name }) => name)] as const;
       })
+    )
+  );
+  const connectors = new Map(
+    await Promise.all(
+      offered.flatMap(({ id, source }) =>
+        source === "connector"
+          ? [(async () => [id, await connectorActionsOf(env, id)] as const)()]
+          : []
+      )
     )
   );
   return new Map(
@@ -178,7 +213,7 @@ const actionsOf = async (
       id,
       source === "native"
         ? (manifests.get(provider) ?? [])
-        : (offeredTools ?? []),
+        : (connectors.get(id) ?? offeredTools ?? []),
     ])
   );
 };
@@ -396,8 +431,13 @@ export const askInChat = async (
       ],
     });
   }
-  const actionsOfIt = await actionsOf(env, [connection]);
-  const known = actionsOfIt.get(connection.id) ?? [];
+  // A connector's list as its server answers now, or why it can't.
+  const known =
+    connection.source === "connector"
+      ? Object.keys(await env.CONNECT.connectorToolClasses(connection.id))
+      : await actionsOf(env, [connection]).then(
+          (all) => all.get(connection.id) ?? []
+        );
   const unknown = actions.filter((action) => !known.includes(action));
   if (unknown.length > 0) {
     throw permissionErrors.create("permission.invalid", {

@@ -12,6 +12,7 @@
  */
 import { botFrameworkKeysFake } from "../../connect/test/bot-framework-keys-fake.ts";
 import { graphEventsFake } from "../../connect/test/graph-events-fake.ts";
+import { linearOrigin } from "../../connect/test/linear-mcp-fake.ts";
 import { npmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
 import { osvFake } from "../../connect/test/osv-fake.ts";
 import {
@@ -25,6 +26,7 @@ import { aiProvidersFake } from "./ai-providers-fake.ts";
 import { botConnectorFake } from "./bot-connector-fake.ts";
 import { composioApiScript, composioLogoScript } from "./composio-api.ts";
 import { driveSyncControlUrl, driveSyncFake } from "./drive-sync-fake.ts";
+import { linearConsentUrl } from "./linear-service.ts";
 import { mailServerScript } from "./mail-server.ts";
 import { sampleKeyControlUrl, sampleKeyFake } from "./sample-key-fake.ts";
 import { sampleSyncControlUrl, sampleSyncFake } from "./sample-sync-fake.ts";
@@ -143,6 +145,13 @@ export const graphSentUrl = "https://graph-control.test/sent";
  * carried out, then answered with a 502, as a gateway that lost it would.
  */
 export const graphLoseUrl = "https://graph-control.test/lose";
+
+/**
+ * Where tests have Graph rate limit a mailbox's next requests: POST
+ * `{ mailbox, requests, retryAfter }`. Each is answered 429, asking callers
+ * to wait `retryAfter` seconds, and does nothing.
+ */
+export const graphThrottleUrl = "https://graph-control.test/throttle";
 
 /**
  * Where Stephen's eval sets a mailbox's calendar and mail, or a workbook's
@@ -545,6 +554,7 @@ const sampleSync = (${sampleSyncFake.toString()})();
 const sampleKey = (${sampleKeyFake.toString()})();
 const graphSent = [];
 const graphLosing = new Map();
+const graphThrottled = new Map();
 const graphDrafts = new Map();
 const graphAttachments = new Map();
 const graphAttachmentReads = new Map();
@@ -756,8 +766,20 @@ const osv = (${osvFake.toString()})();
 const aiProviders = (${aiProvidersFake.toString()})();
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const url = new URL(request.url);
+    // Linear's MCP server, run in Node (test/linear-service.ts), at a
+    // public address as its name resolves.
+    if (url.origin === ${JSON.stringify(linearOrigin)} || url.href === ${JSON.stringify(linearConsentUrl)}) {
+      return await env.LINEAR.fetch(request);
+    }
+    if (url.hostname === "cloudflare-dns.com" && url.searchParams.get("name") === ${JSON.stringify(new URL(linearOrigin).hostname)}) {
+      const type = url.searchParams.get("type") === "AAAA" ? 28 : 1;
+      return Response.json({
+        Status: 0,
+        Answer: type === 1 ? [{ name: url.searchParams.get("name"), type, TTL: 60, data: "34.120.10.1" }] : [],
+      });
+    }
     if (aiProviders.handles(url)) {
       return await aiProviders.answer(request, url);
     }
@@ -872,6 +894,14 @@ export default {
         });
       }
       const [, version, users, mailbox, ...rest] = decodeURIComponent(url.pathname).split("/");
+      const throttled = graphThrottled.get(mailbox);
+      if (users === "users" && throttled !== undefined && throttled.requests > 0) {
+        throttled.requests -= 1;
+        return Response.json(
+          { error: { code: "TooManyRequests" } },
+          { status: 429, headers: { "retry-after": String(throttled.retryAfter) } }
+        );
+      }
       const mailPath = version === "v1.0" && users === "users" && mailbox && rest.length === 1;
       if (request.method === "POST" && mailPath && rest[0] === "sendMail") {
         const { message } = await request.json();
@@ -944,6 +974,11 @@ export default {
     }
     if (url.href === ${JSON.stringify(graphSentUrl)}) {
       return Response.json(graphSent);
+    }
+    if (request.method === "POST" && url.href === ${JSON.stringify(graphThrottleUrl)}) {
+      const { mailbox, requests, retryAfter } = await request.json();
+      graphThrottled.set(mailbox, { requests, retryAfter });
+      return new Response(null, { status: 204 });
     }
     if (request.method === "POST" && url.href === ${JSON.stringify(graphLoseUrl)}) {
       const { mailbox, writes } = await request.json();

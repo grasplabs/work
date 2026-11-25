@@ -3,7 +3,7 @@ import { companyToolClasses, toolClassOf } from "@grasp-os/shared/connect";
 import { env, exports } from "cloudflare:workers";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import { nativeConnector } from "../src/bundled-connectors.ts";
@@ -11,7 +11,13 @@ import { connectionTokens } from "../src/db/schema.ts";
 import { rightsFor } from "../src/provider-rights.ts";
 import { providers as providerConfigs } from "../src/providers.ts";
 import { accessTokenFor } from "../src/tokens.ts";
-import { agentFor, callAs, chatOrigin, outcome } from "./connect.ts";
+import {
+  agentFor,
+  callAs,
+  chatOrigin,
+  outcome,
+  whilePaused,
+} from "./connect.ts";
 import {
   api,
   connectionTo,
@@ -23,7 +29,7 @@ import {
 } from "./connectors-harness.ts";
 import { sampleHost, storageHost } from "./fixtures/sample-connector.ts";
 import { nativeToolsOf } from "./native-tool-checks.ts";
-import { callTool as call, claimedAgo } from "./tool-calls.ts";
+import { callTool as call, claimedAgo, retryable } from "./tool-calls.ts";
 
 // Native connectors run in isolates of their own, and reach their provider
 // only through connect's egress handler, which adds the connection's token.
@@ -35,6 +41,34 @@ import { callTool as call, claimedAgo } from "./tool-calls.ts";
 // response too large to hold; keeping state from one call for the next.
 // The sample connector's `probe.*` tools make each attempt from inside the
 // isolate, as connector code gone wrong would.
+
+/** A 429 that asks callers to wait `seconds`. */
+const rateLimited = (seconds: number): ResponseInit => ({
+  status: 429,
+  headers: { "retry-after": String(seconds) },
+});
+
+/**
+ * What a read of a new sample connection gets right after the provider
+ * answered its first read with `answer`.
+ */
+const pausedBy = async (answer: ResponseInit) => {
+  const connection = await connectionTo("sample");
+  const list = async () =>
+    await retryable(
+      call(connection, "items.list", { mailbox: "invoices@acme.test" })
+    );
+  api.holdingReads = 1;
+  const limited = list();
+  await vi.waitUntil(() => api.held.length === 1, { timeout: 10_000 });
+  const [read] = api.held.splice(0, 1);
+  if (read === undefined) {
+    throw new Error("The read is held");
+  }
+  read.answer = answer;
+  await limited;
+  return await list();
+};
 
 describe("a native connector", () => {
   // The files the check of every tool's input is split over, by name (Vite
@@ -176,6 +210,10 @@ describe("a native connector", () => {
   });
 
   it("that says its provider rate limited it frees its key, so a retry writes once", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const connection = await connectionTo("sample");
     const send = async () =>
       await outcome(
@@ -187,11 +225,151 @@ describe("a native connector", () => {
         )
       );
     api.rateLimited = 1;
-    const outcomes = [await send(), await send(), await send()];
+    const throttled = await send();
+    // The 429 named no wait: the connection is paused for a minute.
+    vi.setSystemTime(Date.now() + 60_000);
+    const outcomes = [throttled, await send(), await send()];
     expect({ outcomes, written: api.written }).toStrictEqual({
       // Retryable, then carried out, then the stored answer.
       outcomes: ["connect.server_unavailable", "ok", "ok"],
       written: 1,
+    });
+  });
+
+  it("pauses a connection its provider rate limits, for every caller, until the provider's time passes", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    const connection = await connectionTo("sample");
+    const list = async () =>
+      await retryable(
+        call(connection, "items.list", { mailbox: "invoices@acme.test" })
+      );
+    api.holdingReads = 2;
+    const calls = [list(), list()];
+    // Both reached the provider: each read the credential before either
+    // was rate limited.
+    await vi.waitUntil(() => api.held.length === 2, { timeout: 10_000 });
+    const [longer, shorter] = api.held;
+    // The longer wait is stored first, and the shorter one, answered
+    // once the first call has ended, doesn't cut it short.
+    if (longer === undefined || shorter === undefined) {
+      throw new Error("Both reads are held");
+    }
+    longer.answer = rateLimited(30);
+    const first = await Promise.race(calls);
+    shorter.answer = rateLimited(10);
+    const both = await Promise.all(calls);
+    const reached = api.sent.length;
+    vi.setSystemTime(Date.now() + 11_000);
+    const pastShorter = await list();
+    const reachedPaused = api.sent.length - reached;
+    vi.setSystemTime(Date.now() + 19_000);
+    const pastLonger = await list();
+    // Each was answered with what the pause in force has left.
+    const limited = {
+      code: "connect.server_unavailable",
+      retryAfterSeconds: 30,
+    };
+    expect({
+      first,
+      both,
+      pastShorter,
+      reachedPaused,
+      pastLonger,
+    }).toStrictEqual({
+      first: limited,
+      both: [limited, limited],
+      // A third caller is refused, with what is left of the pause,
+      // without reaching the provider.
+      pastShorter: { code: "connect.rate_limited", retryAfterSeconds: 19 },
+      reachedPaused: 0,
+      pastLonger: { code: "ok" },
+    });
+  });
+
+  it("pauses a connection for as long as its provider's rate limit reset, or a 503's wait, says", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
+    // On a whole second, so a reset given as a Unix time is whole seconds away.
+    const now = Math.floor(Date.now() / 1000);
+    vi.setSystemTime(now * 1000);
+    expect({
+      resetAt: await pausedBy({
+        status: 429,
+        headers: {
+          "x-ratelimit-reset": String(now + 90),
+          "x-ratelimit-remaining": "0",
+        },
+      }),
+      // A limit not used up isn't the one the 429 is for: a minute.
+      notUsedUp: await pausedBy({
+        status: 429,
+        headers: {
+          "x-ratelimit-reset": String(now + 3000),
+          "x-ratelimit-remaining": "12",
+        },
+      }),
+      resetIn: await pausedBy({
+        status: 429,
+        headers: { "X-HubSpot-RateLimit-Reset": "45" },
+      }),
+      // Of a vendor's limits per minute and per day, the earliest reset.
+      earliest: await pausedBy({
+        status: 429,
+        headers: [
+          ["x-ratelimit-reset-minute", "40"],
+          ["x-ratelimit-reset-day", String(now + 3000)],
+        ],
+      }),
+      // A reset in milliseconds, or one already past, isn't read: a minute.
+      inMilliseconds: await pausedBy({
+        status: 429,
+        headers: { "x-ratelimit-reset": String((now + 30) * 1000) },
+      }),
+      past: await pausedBy({
+        status: 429,
+        headers: { "x-ratelimit-reset": String(now - 5) },
+      }),
+      date: await pausedBy({
+        status: 429,
+        headers: {
+          "retry-after": new Date((now + 75) * 1000).toUTCString(),
+        },
+      }),
+      // Not an HTTP-date, so ignored, as RFC 9110 says: a minute.
+      notADate: await pausedBy({
+        status: 429,
+        headers: { "retry-after": "1.5" },
+      }),
+      unavailable: await pausedBy({
+        status: 503,
+        headers: { "retry-after": "20" },
+      }),
+      forbidden: await pausedBy({
+        status: 403,
+        headers: { "retry-after": "25" },
+      }),
+      // A 503 or 403 that names no wait is an outage or a refusal, not a
+      // rate limit.
+      outage: await pausedBy({ status: 503 }),
+      refusal: await pausedBy({ status: 403 }),
+    }).toStrictEqual({
+      resetAt: { code: "connect.rate_limited", retryAfterSeconds: 90 },
+      notUsedUp: { code: "connect.rate_limited", retryAfterSeconds: 60 },
+      resetIn: { code: "connect.rate_limited", retryAfterSeconds: 45 },
+      earliest: { code: "connect.rate_limited", retryAfterSeconds: 40 },
+      inMilliseconds: { code: "connect.rate_limited", retryAfterSeconds: 60 },
+      past: { code: "connect.rate_limited", retryAfterSeconds: 60 },
+      date: { code: "connect.rate_limited", retryAfterSeconds: 75 },
+      notADate: { code: "connect.rate_limited", retryAfterSeconds: 60 },
+      unavailable: { code: "connect.rate_limited", retryAfterSeconds: 20 },
+      forbidden: { code: "connect.rate_limited", retryAfterSeconds: 25 },
+      outage: { code: "ok" },
+      refusal: { code: "ok" },
     });
   });
 
@@ -231,16 +409,24 @@ describe("a native connector", () => {
       throw new Error("Expected the held action");
     }
     const keyed = { ...stated, idempotencyKey: held.idempotencyKey };
-    await exports.default.confirmAction({
-      person: connection.person,
-      id: held.id,
-      inputHash: held.inputHash,
-      capability: await signCapability(env.CAPABILITY_SIGNING_KEY, chat, {
-        ...keyed,
-        origin: chatOrigin,
-        decision: { kind: "confirm", pendingActionId: held.id },
-      }),
-    });
+    const confirm = async () =>
+      await exports.default.confirmAction({
+        person: connection.person,
+        id: held.id,
+        inputHash: held.inputHash,
+        capability: await signCapability(env.CAPABILITY_SIGNING_KEY, chat, {
+          ...keyed,
+          origin: chatOrigin,
+          decision: { kind: "confirm", pendingActionId: held.id },
+        }),
+      });
+    // A pause of its connection refuses the confirmation before it is
+    // taken: the action waits on, to be confirmed once the pause is over.
+    const paused = await whilePaused(
+      connection.id,
+      async () => await outcome(confirm())
+    );
+    await confirm();
     const ended = await exports.default.heldOutcome({
       ...keyed,
       capability: await signCapability(env.CAPABILITY_SIGNING_KEY, chat, {
@@ -248,9 +434,12 @@ describe("a native connector", () => {
         origin: chatOrigin,
       }),
     });
-    expect(
-      ended.state === "done" ? JSON.parse(ended.result.output) : ended
-    ).toMatchObject({ subject: "Paid" });
+    const answer: unknown =
+      ended.state === "done" ? JSON.parse(ended.result.output) : ended;
+    expect({ paused, ended: answer }).toMatchObject({
+      paused: "connect.rate_limited",
+      ended: { subject: "Paid" },
+    });
     // And a capability for the whole connection isn't one for this call.
     const whole = { ...keyed, resource: undefined };
     await expect(
@@ -720,6 +909,21 @@ describe("a connector's code", { timeout: 60_000 }, () => {
       [],
       [],
     ]);
+  });
+
+  it("pauses a connection for as long as its download's storage says, when it rate limits", async () => {
+    const connection = await connectionTo("sample");
+    await call(connection, "probe.download", {
+      url: `https://${sampleHost}/v1/downloads/limited`,
+    });
+    await expect(
+      retryable(
+        call(connection, "items.list", { mailbox: "invoices@acme.test" })
+      )
+    ).resolves.toStrictEqual({
+      code: "connect.rate_limited",
+      retryAfterSeconds: 45,
+    });
   });
 
   it("can't read a download past the size limit, after its redirect", async () => {

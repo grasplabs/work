@@ -192,7 +192,7 @@ const toolKinds: Readonly<Record<string, AnswerStep["kind"]>> = {
   editFile: "write",
   createApp: "write",
   editWorkflow: "write",
-  remember: "write",
+  remember: "remember",
   searchFiles: "search",
   searchBrain: "search",
   searchDocs: "search",
@@ -270,7 +270,7 @@ const useToolSummary = (): ((call: ChatToolCall, done: boolean) => string) => {
         return done ? t`Edited a workflow` : t`Editing a workflow`;
       }
       case "remember": {
-        return done ? t`Saved to your memory` : t`Saving to your memory`;
+        return done ? t`Saved to memory` : t`Saving to memory`;
       }
       default: {
         return done ? t`Used ${tool}` : t`Using ${tool}`;
@@ -405,6 +405,7 @@ const kindOrder: readonly AnswerStep["kind"][] = [
   "search",
   "read",
   "write",
+  "remember",
   "tool",
 ];
 
@@ -421,6 +422,7 @@ const useStepsSummary = (): ((steps: readonly AnswerStep[]) => string) => {
       search: t`${plural(count, { one: "searched once", other: "searched # times" })}`,
       read: t`${plural(count, { one: "read # file", other: "read # files" })}`,
       write: t`${plural(count, { one: "changed # file", other: "changed # files" })}`,
+      remember: t`${plural(count, { one: "saved # memory", other: "saved # memories" })}`,
       tool: t`${plural(count, { one: "ran # tool", other: "ran # tools" })}`,
     })[kind];
   return (steps) => {
@@ -798,10 +800,19 @@ const lastAnswerOf = (
   };
 };
 
-/** When a message was sent, at its foot: the time of day. */
-const SentAt = ({ at, style }: { at: string; style?: LayoutStyle }) => (
+/** When a message was sent, at its foot: the time of day, after what else stands there (an answer's actions). */
+const SentAt = ({
+  at,
+  children,
+  style,
+}: {
+  at: string | undefined;
+  children?: ReactNode;
+  style?: LayoutStyle;
+}) => (
   <MessageFooter {...(style === undefined ? {} : { style })}>
-    <time dateTime={at}>{formatTime(at)}</time>
+    {children}
+    {at === undefined ? null : <time dateTime={at}>{formatTime(at)}</time>}
   </MessageFooter>
 );
 
@@ -1174,39 +1185,53 @@ const useThoughtShown = (
 };
 
 /**
- * An answer's foot, as #2503's: its actions, then when it was given, on
- * one line; with no words to act on (its turn asked the person instead,
- * or it failed), the time alone. The actions are there from the start,
- * while it is written too: the Message keeps their room and shows them
- * once the answer is done, so the end moves nothing.
+ * An answer's foot: its actions, then when it was given, on one line;
+ * with no words to act on (its turn asked the person instead, or it
+ * failed), the time alone. The actions stand in the time's own
+ * MessageFooter, so they come and go exactly as it does: where a pointer
+ * hovers, while the message is hovered or holds the focus (so the
+ * keyboard reaches them, and they show as it does); on touch always;
+ * never hidden from a screen reader, and their room always kept. They
+ * are there from the start, while it is written too: the Message keeps
+ * them unseen and out of reach until the answer is done, so the end
+ * moves nothing. A stopped answer keeps them out of the footer, always
+ * shown: Damsko says Stopped on the actions' row, and that must not hide.
  */
 const AnswerFoot = ({
   at,
   copyText,
   retry,
+  stopped,
 }: {
   at: string | undefined;
   copyText: string;
   retry: (() => void) | undefined;
+  stopped: boolean;
 }) => {
   const { t } = useLingui();
   if (copyText === "") {
     return at === undefined ? null : <SentAt at={at} />;
   }
-  return (
-    <div {...stylex.props(styles.foot)}>
-      <MessageActions aria-label={t`Answer actions`}>
-        <CopyButton aria-label={t`Copy the answer`} value={copyText} />
-        {retry === undefined ? null : (
-          <MessageAction aria-label={t`Ask again`} onClick={retry}>
-            <Icon icon={RefreshCwIcon} />
-          </MessageAction>
-        )}
-      </MessageActions>
-      {/* Level with the actions, in the middle of their line. */}
-      {at === undefined ? null : <SentAt at={at} style={styles.beside} />}
-    </div>
+  const actions = (
+    <MessageActions aria-label={t`Answer actions`}>
+      <CopyButton aria-label={t`Copy the answer`} value={copyText} />
+      {retry === undefined ? null : (
+        <MessageAction aria-label={t`Ask again`} onClick={retry}>
+          <Icon icon={RefreshCwIcon} />
+        </MessageAction>
+      )}
+    </MessageActions>
   );
+  if (stopped) {
+    return (
+      <div {...stylex.props(styles.foot)}>
+        {actions}
+        {/* Level with the actions, in the middle of their line. */}
+        {at === undefined ? null : <SentAt at={at} style={styles.beside} />}
+      </div>
+    );
+  }
+  return <SentAt at={at}>{actions}</SentAt>;
 };
 
 /** One answer of Grasp's: what it thought, its steps, its words, and what came of them, as one Message. */
@@ -1282,6 +1307,7 @@ const AnswerRow = ({
           at={last?.at}
           copyText={status === "error" ? "" : copyText}
           retry={retry}
+          stopped={status === "stopped"}
         />
       </MessageContent>
     </Message>

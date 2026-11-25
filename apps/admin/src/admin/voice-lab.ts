@@ -64,11 +64,11 @@ const voice = "voice_485";
  * instructions give it in English.
  */
 const firstLines: Record<InterviewLocale, string> = {
-  en: "First a few questions about you and AI, then your work. Do you already use AI in your work, like ChatGPT or Copilot?",
-  nl: "Eerst een paar vragen over jou en AI, daarna je werk. Gebruik je al AI in je werk, zoals ChatGPT of Copilot?",
-  de: "Zuerst ein paar Fragen zu Ihnen und KI, dann zu Ihrer Arbeit. Nutzen Sie in Ihrer Arbeit schon KI, etwa ChatGPT oder Copilot?",
-  fr: "D’abord quelques questions sur vous et l’IA, puis sur votre travail. Utilisez-vous déjà l’IA dans votre travail, comme ChatGPT ou Copilot ?",
-  es: "Primero unas preguntas sobre ti y la IA, luego tu trabajo. ¿Ya usas IA en tu trabajo, como ChatGPT o Copilot?",
+  en: "First your work as a whole, then one part of it up close. What do you do here, in a sentence or two?",
+  nl: "Eerst je werk als geheel, daarna één onderdeel ervan van dichtbij. Wat doe je hier, in een of twee zinnen?",
+  de: "Zuerst Ihre Arbeit als Ganzes, dann ein Teil davon aus der Nähe. Was machen Sie hier, in ein oder zwei Sätzen?",
+  fr: "D’abord votre travail dans son ensemble, puis une partie de plus près. Que faites-vous ici, en une ou deux phrases ?",
+  es: "Primero tu trabajo en conjunto, luego una parte de cerca. ¿Qué haces aquí, en una o dos frases?",
 };
 
 /** How he asks for an example where nothing can be shared. */
@@ -90,7 +90,7 @@ This is a try-out: a colleague at Grasp plays an employee of a practice company,
 - They can talk over you. When they do, stop, take what they said, and go on from there. Do not repeat the line you were cut off in unless they ask.
 - There is no screen, no button and no file: where these instructions point to one, say in a few words that it is not there in this try-out, and go on.
 - You write nothing down here, so nothing carries a mark. What you learned is what was said in this conversation.
-- You do not know their name, their team or their team lead: say "I was told" where a lead would be named. The work to learn about is not named yet: in part 3, ask which work comes back most often or takes most of their time, and learn that one.
+- You do not know their name, their team or their team lead: say "I was told" where a lead would be named. The work to learn about is not named yet: in part 3, take the piece that repeats most and costs them most time, by what they said in part 2, and learn that one. Nothing is told to you each turn about what is still open or what the team already told: keep track of what you still miss yourself.
 - Your first line was said already: "${firstLine}" Their first answer is to that. Do not say it again.`;
 
 /** Everything the session's model is told, in the language of the conversation. */

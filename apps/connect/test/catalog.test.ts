@@ -245,7 +245,7 @@ describe("the catalog", () => {
         .filter(({ source }) => source === "native")
         .map(async ({ source, id, toolCount }) => {
           const tools = await exports.default.catalogTools({ source, id });
-          return toolCount > 0 && tools.length === toolCount;
+          return (toolCount ?? 0) > 0 && tools.length === toolCount;
         })
     );
     expect(counts).toStrictEqual([true, true]);

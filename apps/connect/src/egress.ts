@@ -12,6 +12,8 @@ import { log } from "@grasp-os/shared/log";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { z } from "zod";
 
+import { pauseAsked } from "./pause.ts";
+
 // A native connector's only way out. Connect loads each call's connector
 // isolate with this as its `globalOutbound`, so every request the
 // connector's code sends, by `fetch` or by following a redirect, arrives
@@ -38,7 +40,13 @@ import { z } from "zod";
 // did nothing (`notPerformedMetaKey`) is the connector's to say: this
 // handler sees one request at a time, can't tell whether an earlier
 // request of the same call already wrote, and can't cheaply tell connect's
-// side of the call.
+// side of the call. But a rate limit is the account's, not the call's: the
+// handler pauses the connection for as long as the provider asks
+// (`pauseAsked`), on the row every call reads its credential from, so
+// every caller waits with it instead of each finding out on its own. The
+// answer passed on says how long the pause has left, in `retry-after`.
+// Calls already past the credential read still go out; their provider
+// refuses them as it refused this one.
 
 /**
  * Largest provider response a connector may read, in bytes: room for the
@@ -102,6 +110,8 @@ const responseHeadersDropped = [
 const egressPropsSchema = z.strictObject({
   /** Which connector, for the log: its name and version. */
   connector: z.string().min(1),
+  /** The connection the call is on, which a rate limit pauses. */
+  connectionId: z.string().min(1),
   /** Which call, for the log: its capability's ID. */
   callId: z.string().min(1),
   /** The connector's hosts. */
@@ -258,12 +268,16 @@ const throughDownload = async (
  * The response with its body cut off once its bytes pass the size limit:
  * the connector's read fails there, and nothing past it is held in memory.
  * The bytes are counted as they arrive (decoded), never taken from what
- * `content-length` claims.
+ * `content-length` claims. A rate limit's answer says in `retry-after`
+ * how long its connection's pause has left (`pausedSeconds`).
  */
-const capped = (response: Response): Response => {
+const capped = (response: Response, pausedSeconds?: number): Response => {
   const headers = new Headers(response.headers);
   for (const name of responseHeadersDropped) {
     headers.delete(name);
+  }
+  if (pausedSeconds !== undefined) {
+    headers.set("retry-after", String(pausedSeconds));
   }
   const { body, status, statusText } = response;
   if (body === null) {
@@ -402,7 +416,14 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
       });
       return egressAnswer(egressKind.failed);
     }
-    return capped(response);
+    // The provider's answer, or its storage host's for a download.
+    const pausedSeconds = await pauseAsked(
+      this.env.DB,
+      call.connectionId,
+      response,
+      { connector, callId }
+    );
+    return capped(response, pausedSeconds);
   }
 
   /** Raw TCP (`cloudflare:sockets`) never leaves: only HTTPS requests. */

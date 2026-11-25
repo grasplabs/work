@@ -185,7 +185,32 @@ describe("the read-back", () => {
       ids: idsOf(parts),
     }).toStrictEqual({
       groups: ["together"],
-      ids: [["e", "b", "d", "c", "a"]],
+      ids: [["b", "d", "c", "a", "e"]],
+    });
+  });
+
+  it("reads a wish with their recurring work, and with what they said about AI when they named none", () => {
+    const groupsOf = (tags: InterviewFact["tag"][]) =>
+      readBackParts([
+        ...tags.map((tag, index) => fact(`f${index}`, tag)),
+        // Enough steps that no part joins another.
+        ...Array.from({ length: 10 }, (_, index) => fact(`s${index}`, "step")),
+      ]).map(({ group, facts }) => [group, facts.map(({ tag }) => tag).length]);
+    expect({
+      own: groupsOf(["task", "task", "task", "wish", "ai", "ai", "ai"]),
+      lead: groupsOf(["wish", "ai", "ai", "ai"]),
+    }).toStrictEqual({
+      own: [
+        ["tasks", 4],
+        ["steps", 5],
+        ["steps", 5],
+        ["you", 3],
+      ],
+      lead: [
+        ["steps", 5],
+        ["steps", 5],
+        ["you", 4],
+      ],
     });
   });
 
@@ -228,7 +253,7 @@ describe("the read-back", () => {
       fact("k", "number"),
       fact("l", "done"),
     ]);
-    expect(parts.map(({ facts }) => facts.length)).toStrictEqual([7, 5]);
+    expect(parts.map(({ facts }) => facts.length)).toStrictEqual([6, 6]);
   });
 
   it("has nothing to read when nothing was written down", () => {

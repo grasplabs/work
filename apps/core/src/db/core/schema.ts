@@ -1090,7 +1090,7 @@ export const appIntegrations = sqliteTable(
     appId: text("app_id")
       .notNull()
       .references(() => apps.id),
-    source: text({ enum: ["native", "composio"] }).notNull(),
+    source: text({ enum: ["native", "composio", "connector"] }).notNull(),
     connectorId: text("connector_id").notNull(),
     addedBy: text("added_by").notNull(),
     addedAt: timestamp("added_at").notNull(),
@@ -3739,7 +3739,7 @@ export const dependencyAdmissionRefusals = sqliteTable(
 export const hiddenConnectors = sqliteTable(
   "hidden_connectors",
   {
-    source: text({ enum: ["native", "composio"] }).notNull(),
+    source: text({ enum: ["native", "composio", "connector"] }).notNull(),
     connectorId: text("connector_id").notNull(),
     hiddenBy: text("hidden_by").notNull(),
     hiddenAt: timestamp("hidden_at").notNull(),

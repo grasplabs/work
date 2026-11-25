@@ -413,6 +413,8 @@ export const runOfStepKey = (key: string): string | undefined => {
  */
 const workflowRetryableCodes: ReadonlySet<unknown> = new Set([
   "connect.server_unavailable",
+  // Nothing was sent; the connection's pause ends when its vendor said.
+  "connect.rate_limited",
   "connect.call_in_progress",
   "model.failed",
   // A request its provider refused: retried as `model.failed` was before.

@@ -1,7 +1,7 @@
 import { effectPropertyId } from "@grasp-os/connector-microsoft-365/graph";
 import { effectKeyPattern } from "@grasp-os/runtime/connector";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, onTestFinished, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import {
@@ -266,6 +266,10 @@ describe("a Microsoft 365 write of unknown outcome", () => {
   });
 
   it("stays unknown when its lookup is throttled or unavailable: a lookup that did nothing finds nothing", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const connection = await connected();
     const outcomes: string[] = [];
     for (const [key, failLookup] of [
@@ -290,6 +294,8 @@ describe("a Microsoft 365 write of unknown outcome", () => {
       failLookup();
       // oxlint-disable-next-line no-await-in-loop -- Graph fails one request at a time
       outcomes.push(await outcome(draft(connection, key)));
+      // Past the pause Graph's 429 asked for, the next call goes out.
+      vi.setSystemTime(Date.now() + 7000);
     }
     expect({
       outcomes,

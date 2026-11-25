@@ -157,12 +157,19 @@ export const storyOf = (
 export const storyKey = (lines: StoryLine[]): string =>
   lines.map(({ id, text }) => `${id}\u0000${text}`).join("\u0001");
 
-/** Which part of the read-back a fact is read in: what they said about AI, the steps, what goes differently, or the numbers and the result. */
+/**
+ * Which part of the read-back a fact is read in, in the order of the
+ * interview: the work that comes back in their week, the steps of the one
+ * piece, what goes differently, the numbers and the result, and last what
+ * they said about AI. Their other work has a part of its own, so it is not
+ * read as steps of the one piece.
+ */
 export const readBackGroups = [
-  "you",
+  "tasks",
   "steps",
   "differently",
   "result",
+  "you",
 ] as const;
 /** A part of the read-back is of one group, or of several small ones read `together`. */
 export type ReadBackGroup = (typeof readBackGroups)[number] | "together";
@@ -174,13 +181,16 @@ const groupOf: Record<FactTag, (typeof readBackGroups)[number]> = {
   next: "steps",
   workaround: "steps",
   work: "steps",
-  who: "you",
+  task: "tasks",
+  // Who does the work they were asked about: read with the work itself.
+  who: "steps",
   exception: "differently",
   wait: "differently",
   rule: "differently",
   judgment: "differently",
   ai: "you",
-  wish: "you",
+  // What they would hand off is asked with their week (`groupIn`).
+  wish: "tasks",
   number: "result",
   done: "result",
   stop: "result",
@@ -201,8 +211,9 @@ export interface ReadBackPart {
 }
 
 /**
- * The read-back in parts: what they said about AI, the steps, what goes
- * differently, then the numbers and the result, each a few lines at a
+ * The read-back in parts: their recurring work, the steps, what goes
+ * differently, the numbers and the result, then what they said about AI,
+ * each a few lines at a
  * time. Small parts are read together, so five short answers are not five
  * pages to agree to. A line the person added stays in the part they added
  * it to. What was agreed to in an earlier read-back is not read again:
@@ -211,9 +222,15 @@ export interface ReadBackPart {
 export const readBackParts = (facts: InterviewFact[]): ReadBackPart[] => {
   // One erased is read back nowhere: nothing of it is left to read.
   const open = facts.filter((fact) => fact.agreed !== true && !isErased(fact));
+  // A wish is read with their recurring work, where it was asked. In an
+  // interview with none, a lead's or one from before there was any, it is
+  // read where it was before: with what they said about AI.
+  const recurring = facts.some(({ tag }) => tag === "task");
+  const groupIn = ({ tag }: InterviewFact): (typeof readBackGroups)[number] =>
+    tag === "wish" && !recurring ? "you" : groupOf[tag];
   const parts: ReadBackPart[] = readBackGroups.flatMap((group) => {
     const own = open.filter(
-      (fact) => fact.pin === undefined && groupOf[fact.tag] === group
+      (fact) => fact.pin === undefined && groupIn(fact) === group
     );
     return Array.from(
       { length: Math.ceil(own.length / readBackLines) },

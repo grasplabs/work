@@ -13,7 +13,11 @@ import { loadRelease } from "../src/app-releases.ts";
 import { testApp, withFiles } from "./app-definitions.ts";
 import type { TestApp, TestSource } from "./app-definitions.ts";
 import { commitApp } from "./apps.ts";
-import { consentCode, graphSentUrl } from "./connect-providers.ts";
+import {
+  consentCode,
+  graphSentUrl,
+  graphThrottleUrl,
+} from "./connect-providers.ts";
 import { createIdp } from "./fake-idp.ts";
 import { mailControlUrl, mailServerUrl } from "./mail-server.ts";
 import type { ToolkitServer } from "./mail-server.ts";
@@ -225,6 +229,22 @@ export const graphSent = async (): Promise<unknown[]> => {
   }
   const response = await providers.fetch(graphSentUrl);
   return z.array(z.unknown()).parse(await response.json());
+};
+
+/** Has Graph rate limit `mailbox`'s next `requests`, asking a wait. */
+export const throttleGraph = async (
+  mailbox: string,
+  requests: number,
+  retryAfter: number
+): Promise<void> => {
+  const providers = testBinding("CONNECT_PROVIDERS");
+  if (!isFetcher(providers)) {
+    throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
+  }
+  await providers.fetch(graphThrottleUrl, {
+    method: "POST",
+    body: JSON.stringify({ mailbox, requests, retryAfter }),
+  });
 };
 
 /** How many messages Graph sent with `subject` (each test's own). */
