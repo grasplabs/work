@@ -35,7 +35,12 @@ import { useI18n, useLocale } from "../lib/i18n";
 import type { I18nCatalog } from "../lib/i18n";
 import { FileIcon, Icon, UploadIcon, XIcon, fileMark } from "../lib/icons";
 import type { IconData } from "../lib/icons";
-import { fadeIn, focusRing, visuallyHidden } from "../lib/styles";
+import {
+  fadeIn,
+  focusRing,
+  focusRingText,
+  visuallyHidden,
+} from "../lib/styles";
 import {
   colors,
   duration,
@@ -237,7 +242,37 @@ const styles = stylex.create({
     flexWrap: "wrap",
     alignItems: "center",
     justifyContent: "center",
-    gap: space[2],
+    gap: space[1],
+  },
+  // In the dropzone the picker opens from words in its line, underlined as a link in a sentence,
+  // not from a button: the dropzone is already the place to act.
+  choose: {
+    padding: 0,
+    margin: 0,
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    color: "inherit",
+    fontFamily: "inherit",
+    fontSize: "inherit",
+    fontWeight: "inherit",
+    lineHeight: "inherit",
+    borderRadius: radius.sm,
+    cornerShape: radius.shape,
+    textDecorationLine: "underline",
+    textDecorationThickness: size.linkUnderlineWidth,
+    textUnderlineOffset: size.linkUnderlineOffset,
+    textDecorationColor: {
+      default: colors.linkUnderline,
+      [media.hover]: {
+        default: colors.linkUnderline,
+        ":hover": "currentColor",
+      },
+      [media.forcedColors]: "LinkText",
+    },
+    transitionProperty: "text-decoration-color",
+    transitionDuration: motionVars.hover,
+    transitionTimingFunction: duration.ease,
+    cursor: "pointer",
   },
   description: {
     margin: 0,
@@ -421,7 +456,7 @@ const Native = ({
   />
 );
 
-/** The button that opens the picker: unseen to the keys and a screen reader until the script runs. */
+/** What opens the picker, a button beside the list or underlined words in the dropzone's line: unseen to the keys and a screen reader until the script runs. */
 const Trigger = ({
   mounted,
   icon,
@@ -435,16 +470,28 @@ const Trigger = ({
 }) => (
   <FileInputTrigger
     render={
-      <Button
-        variant="outline"
-        size="sm"
-        aria-describedby={describedBy}
-        aria-hidden={mounted ? undefined : true}
-        tabIndex={mounted ? undefined : -1}
-      >
-        {icon ? <Icon icon={UploadIcon} /> : null}
-        {label}
-      </Button>
+      icon ? (
+        <Button
+          variant="outline"
+          size="sm"
+          aria-describedby={describedBy}
+          aria-hidden={mounted ? undefined : true}
+          tabIndex={mounted ? undefined : -1}
+        >
+          <Icon icon={UploadIcon} />
+          {label}
+        </Button>
+      ) : (
+        <button
+          type="button"
+          aria-describedby={describedBy}
+          aria-hidden={mounted ? undefined : true}
+          tabIndex={mounted ? undefined : -1}
+          {...stylex.props(styles.choose, focusRingText)}
+        >
+          {label}
+        </button>
+      )
     }
   />
 );
