@@ -27,13 +27,13 @@ import {
   useVoice,
   voiceClock,
 } from "../voice/voice.ts";
-import { CalmStep } from "./calm-frame.tsx";
+import { StepEnd } from "./calm-frame.tsx";
 import { poseField } from "./field/engine.ts";
 import { poses } from "./field/poses.ts";
 import { PlanDemo } from "./plan-demo.tsx";
 import type { Scene } from "./plan-demo.tsx";
-import { dateOf, PlanBody, planDateFormat, planStart } from "./plan.tsx";
-import type { Moment } from "./plan.tsx";
+import { dateOf, planDateFormat, planStart } from "./plan.ts";
+import type { Moment } from "./plan.ts";
 
 // "Here's the plan", told as a story before it is shown (as the first
 // onboarding told it, `about-story.tsx` before a955fb8). Stephen tells the
@@ -43,8 +43,8 @@ import type { Moment } from "./plan.tsx";
 // with someone who knows the work, then the whole company talking until
 // the interviews close, and the report they get filling in team by team,
 // the finding he names lifting out of the interview's own words. His
-// words stream in above it as he says them. Once told, it fades and the
-// plan stands summed up (plan.tsx), and only then Continue.
+// words stream in above it as he says them. Once told, the last scene
+// stays as it is, the plan's summary, and only then Continue fades in.
 //
 // With his voice on, the story follows it; off, the pace of speech;
 // paused, it holds. Under reduced motion, and coming back to the step, the
@@ -60,12 +60,7 @@ const styles = stylex.create({
     width: "min(62rem, calc(100vw - 2rem))",
     marginInline: "calc((100% - min(62rem, calc(100vw - 2rem))) / 2)",
     paddingTop: space[4],
-    opacity: 1,
-    transitionProperty: "opacity",
-    transitionDuration: "700ms",
-    transitionTimingFunction: duration.ease,
   },
-  leaving: { opacity: 0 },
   // His words: room for two lines, so nothing below them moves.
   words: {
     display: "grid",
@@ -106,7 +101,7 @@ const styles = stylex.create({
   skip: { opacity: 0.7 },
 });
 
-/** Told once in this visit: coming back to the step, the plan is there summed up. */
+/** Told once in this visit: coming back to the step, the story's last scene stands at once. */
 let toldBefore = false;
 
 const lessMotion = "(prefers-reduced-motion: reduce)";
@@ -162,11 +157,11 @@ const useParts = (today: string): Part[] => {
     },
     {
       scene: "learned",
-      text: t`Then I read every conversation, and on ${findings} you get what I learned, team by team.`,
+      text: t`Then I read every conversation, and on ${findings} you get what I learned, theme by theme.`,
     },
     {
       scene: "finding",
-      text: t`Like this: new people wait two to three days for a laptop from IT.`,
+      text: t`Like this: most people lose the first hours of their day to email.`,
     },
     { scene: "rest", text: t`Small things like that add up. Let’s find them.` },
   ];
@@ -237,6 +232,94 @@ const Streamed = ({ text, said }: { text: string; said: number }) => (
   </p>
 );
 
+/** His words over the story: the part being told streaming in, or the step's title once it is told. */
+const Caption = ({
+  shown,
+  began,
+  at,
+  text,
+  said,
+  narration,
+}: {
+  shown: boolean;
+  began: boolean;
+  at: number;
+  text: string;
+  said: number;
+  narration: string;
+}) => {
+  const { t } = useLingui();
+  // What a screen reader hears: each part whole as it comes, or the whole story once told.
+  let heard = began ? text : "";
+  if (shown) {
+    heard = narration;
+  }
+  return (
+    <div {...stylex.props(styles.words)}>
+      {shown ? (
+        <h1 {...stylex.props(styles.line, fadeIn)}>{t`Here’s the plan`}</h1>
+      ) : (
+        <>
+          <h1 {...stylex.props(visuallyHidden)}>{t`Here’s the plan`}</h1>
+          <Streamed key={`part-${String(at)}`} said={said} text={text} />
+        </>
+      )}
+      <span aria-live="polite" {...stylex.props(visuallyHidden)}>
+        {heard}
+      </span>
+    </div>
+  );
+};
+
+/** The ways on: Skip while the story is told; once it is, Continue and to be told again. */
+const Ways = ({
+  shown,
+  reduce,
+  onward,
+  skip,
+  again,
+}: {
+  shown: boolean;
+  reduce: boolean;
+  onward: () => Promise<void>;
+  skip: () => void;
+  again: () => void;
+}) => {
+  const { t } = useLingui();
+  if (!shown) {
+    return (
+      <span {...stylex.props(styles.skip)}>
+        <Button onClick={skip} size="sm" variant="link">
+          {t`Skip`}
+        </Button>
+      </span>
+    );
+  }
+  return (
+    <>
+      <StepEnd
+        end={
+          <Button
+            onClick={() => {
+              void onward();
+            }}
+            size="lg"
+          >
+            {t`Continue`}
+          </Button>
+        }
+      />
+      {reduce ? null : (
+        <span {...stylex.props(styles.skip)}>
+          <Button onClick={again} size="sm" variant="link">
+            {t`Tell me again`}
+          </Button>
+        </span>
+      )}
+    </>
+  );
+};
+
 export const PlanStory = ({
   today,
   onward,
@@ -245,7 +328,6 @@ export const PlanStory = ({
   today: string;
   onward: () => Promise<void>;
 }) => {
-  const { t } = useLingui();
   const reduce = useLessMotion();
   const parts = useParts(today);
   const narration = parts.map((part) => part.text).join(" ");
@@ -264,11 +346,7 @@ export const PlanStory = ({
   }, [today, i18n.locale]);
   const [began, setBegan] = useState<number | null>(null);
   const [over, setOver] = useState(false);
-  // The night fading, the story told, before the plan stands.
-  const [leaving, setLeaving] = useState(false);
   const [told, setTold] = useState(toldBefore);
-  // Told just now: the summary stands without Stephen saying it again.
-  const [justTold, setJustTold] = useState(false);
   const shown = told || reduce;
   usePrepare(narration);
 
@@ -276,7 +354,6 @@ export const PlanStory = ({
     toldBefore = true;
     stopSpeaking();
     poseField(poses.about);
-    setJustTold(true);
     setTold(true);
   };
   const latest = useRef({ narration, finish });
@@ -299,12 +376,7 @@ export const PlanStory = ({
           return;
         }
         setOver(true);
-        await hold(1400);
-        if (left) {
-          return;
-        }
-        setLeaving(true);
-        await hold(700);
+        await hold(900);
         if (!left) {
           latest.current.finish();
         }
@@ -333,67 +405,40 @@ export const PlanStory = ({
   const part = parts[at] ?? parts[0];
   const scene: Scene = part?.scene ?? "you";
 
-  if (shown) {
-    return (
-      <div {...stylex.props(justTold && fadeIn)}>
-        <CalmStep
-          also={
-            reduce ? null : (
-              <Button
-                onClick={() => {
-                  toldBefore = false;
-                  setBegan(null);
-                  setOver(false);
-                  setLeaving(false);
-                  setJustTold(false);
-                  setTold(false);
-                }}
-                size="lg"
-                variant="link"
-              >
-                {t`Tell me again`}
-              </Button>
-            )
-          }
-          body={t`I talk with your team for one week. Then you get what I learned, team by team.`}
-          end={
-            <Button
-              onClick={() => {
-                void onward();
-              }}
-              size="lg"
-            >
-              {t`Continue`}
-            </Button>
-          }
-          silent={justTold}
-          title={t`Here’s the plan`}
-        >
-          <PlanBody today={today} />
-        </CalmStep>
-      </div>
-    );
-  }
   const partSaid = said - (starts[at] ?? 0);
   const progress = Math.min(
     1,
     Math.max(0, partSaid / Math.max(1, part?.text.length ?? 1))
   );
+  // Told, or not to be told: the story's last scene stands, and the way on fades in under it.
+  const last = parts.at(-1);
   return (
-    <section {...stylex.props(styles.stage, fadeIn, leaving && styles.leaving)}>
-      <h1 {...stylex.props(visuallyHidden)}>{t`Here’s the plan`}</h1>
-      <div {...stylex.props(styles.words)}>
-        <Streamed key={`part-${at}`} said={partSaid} text={part?.text ?? ""} />
-        <span aria-live="polite" {...stylex.props(visuallyHidden)}>
-          {began === null ? "" : part?.text}
-        </span>
-      </div>
-      <PlanDemo dates={dates} progress={progress} scene={scene} />
-      <span {...stylex.props(styles.skip)}>
-        <Button onClick={finish} size="sm" variant="link">
-          {t`Skip`}
-        </Button>
-      </span>
+    <section {...stylex.props(styles.stage, fadeIn)}>
+      <Caption
+        at={at}
+        began={began !== null}
+        narration={narration}
+        said={partSaid}
+        shown={shown}
+        text={part?.text ?? ""}
+      />
+      <PlanDemo
+        dates={dates}
+        progress={shown ? 1 : progress}
+        scene={shown ? (last?.scene ?? "rest") : scene}
+      />
+      <Ways
+        again={() => {
+          toldBefore = false;
+          setBegan(null);
+          setOver(false);
+          setTold(false);
+        }}
+        onward={onward}
+        reduce={reduce}
+        shown={shown}
+        skip={finish}
+      />
     </section>
   );
 };
