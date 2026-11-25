@@ -16413,10 +16413,6 @@ msgstr "So far: {works, plural, one {# piece of work} other {# pieces of work}} 
 msgid "So far: {works, plural, one {# piece of work} other {# pieces of work}}, {tools, plural, one {# tool} other {# tools}} and {handoffs, plural, one {# hand-over between teams} other {# hand-overs between teams}}."
 msgstr "So far: {works, plural, one {# piece of work} other {# pieces of work}}, {tools, plural, one {# tool} other {# tools}} and {handoffs, plural, one {# hand-over between teams} other {# hand-overs between teams}}."
 
-#: src/onboarding/company-step.tsx
-msgid "So I can see your teams, roles and directory. I only read names, email addresses, teams and jobs, nothing else."
-msgstr "So I can see your teams, roles and directory. I only read names, email addresses, teams and jobs, nothing else."
-
 #: src/agents/setup/words.ts
 msgid "Some teams"
 msgstr "Some teams"

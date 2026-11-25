@@ -16413,10 +16413,6 @@ msgstr "Hasta ahora: {works, plural, one {# tarea} other {# tareas}} y {tools, p
 msgid "So far: {works, plural, one {# piece of work} other {# pieces of work}}, {tools, plural, one {# tool} other {# tools}} and {handoffs, plural, one {# hand-over between teams} other {# hand-overs between teams}}."
 msgstr "Hasta ahora: {works, plural, one {# tarea} other {# tareas}}, {tools, plural, one {# herramienta} other {# herramientas}} y {handoffs, plural, one {# traspaso entre equipos} other {# traspasos entre equipos}}."
 
-#: src/onboarding/company-step.tsx
-msgid "So I can see your teams, roles and directory. I only read names, email addresses, teams and jobs, nothing else."
-msgstr "Así veo tus equipos, roles y directorio. Solo leo nombres, correos electrónicos, equipos y puestos, nada más."
-
 #: src/agents/setup/words.ts
 msgid "Some teams"
 msgstr "Algunos equipos"

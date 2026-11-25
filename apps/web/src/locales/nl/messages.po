@@ -16413,10 +16413,6 @@ msgstr "Tot nu toe: {works, plural, one {# stuk werk} other {# stukken werk}} en
 msgid "So far: {works, plural, one {# piece of work} other {# pieces of work}}, {tools, plural, one {# tool} other {# tools}} and {handoffs, plural, one {# hand-over between teams} other {# hand-overs between teams}}."
 msgstr "Tot nu toe: {works, plural, one {# stuk werk} other {# stukken werk}}, {tools, plural, one {# tool} other {# tools}} en {handoffs, plural, one {# overdracht tussen teams} other {# overdrachten tussen teams}}."
 
-#: src/onboarding/company-step.tsx
-msgid "So I can see your teams, roles and directory. I only read names, email addresses, teams and jobs, nothing else."
-msgstr "Zo zie ik je teams, rollen en adresboek. Ik lees alleen namen, e-mailadressen, teams en functies, verder niets."
-
 #: src/agents/setup/words.ts
 msgid "Some teams"
 msgstr "Sommige teams"
