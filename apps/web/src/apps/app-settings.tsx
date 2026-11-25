@@ -192,7 +192,15 @@ const styles = stylex.create({
     paddingTop: `calc(${space[7]} + ${space[2]})`,
     paddingInline: space[6],
   },
-  scroll: { flexGrow: 1, minHeight: 0, minWidth: 0, overflowY: "auto" },
+  // What scrolls runs to the card's foot, its usual room at its own end,
+  // so the last section still scrolls clear of the chat's bar.
+  scroll: {
+    flexGrow: 1,
+    minHeight: 0,
+    minWidth: 0,
+    overflowY: "auto",
+    paddingBlockEnd: space[8],
+  },
   column: {
     display: "flex",
     flexDirection: "column",
