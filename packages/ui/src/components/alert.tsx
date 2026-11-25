@@ -42,6 +42,7 @@ import { hyphenate } from "../lib/styles";
 import { colors, font, media, radius, size, space } from "../lib/tokens.stylex";
 import type { LayoutStyle } from "../lib/utils";
 import { iconVars } from "../lib/vars.stylex";
+import { alertVars } from "./alert.stylex";
 import { Button } from "./button";
 
 /** What the note means: something to know, done, worth a look, gone wrong, or a plain note. */
@@ -159,12 +160,15 @@ const styles = stylex.create({
     borderRadius: 0,
     borderWidth: 0,
   },
-  // The banner: 12px all round, the system's soft edge, the smaller icon, 8px to the words.
+  // The banner: 12px all round (long forms, as the alert's own, which a short `padding` would not
+  // replace), the system's soft edge, the smaller icon, 8px to the words; its corner the system's,
+  // or none as a shell's band (alertVars).
   banner: {
     [iconVars.size]: size.iconSm,
     columnGap: 0,
-    padding: space["3"],
-    borderRadius: radius.xl,
+    paddingBlock: space["3"],
+    paddingInline: space["3"],
+    borderRadius: alertVars.bannerCorner,
     boxShadow: size.borderStrong,
   },
   default: { backgroundColor: colors.alertBgDefault },
@@ -192,9 +196,13 @@ const styles = stylex.create({
   body: { containerType: "inline-size", minWidth: 0 },
   content: {
     display: "grid",
+    // A second column only for an AlertAction: without one the words run to the alert's end.
     gridTemplateColumns: {
       default: "minmax(0, 1fr)",
-      [WIDE]: "minmax(0, 1fr) auto",
+      [WIDE]: {
+        default: "minmax(0, 1fr)",
+        ":has(> [data-slot=alert-action])": "minmax(0, 1fr) auto",
+      },
     },
     columnGap: space["2"],
     rowGap: space["1"],

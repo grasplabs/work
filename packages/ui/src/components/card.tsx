@@ -298,7 +298,8 @@ const styles = stylex.create({
     lineHeight: cardVars.descriptionLine,
     letterSpacing: font.trackingUi,
     color: colors.mutedForeground,
-    textWrap: "pretty",
+    // Its lines break as the browser breaks them, as the original's: a "pretty" wrap moved a word
+    // to the next line where the original's did not.
   },
   // A card that is one link: the card's own look, no underline of its own, the card's focus ring.
   // It answers a pointer through its parts (the media dims, the title is underlined): no lift, no
