@@ -1,4 +1,4 @@
-import { connectorIsolateRequests } from "@grasp-os/connector-kit/manifest";
+import { connectorIsolateRequests } from "@grasp-os/runtime/connector";
 import { auditActorSchema, createAuditEvent } from "@grasp-os/shared/audit";
 import type { AuditActor, AuditEvent } from "@grasp-os/shared/audit";
 import type {

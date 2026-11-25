@@ -1,4 +1,4 @@
-import { generatedContracts } from "@grasp-os/connector-kit/manifest";
+import { generatedContracts } from "@grasp-os/runtime/connector";
 import {
   actionShapeRequestSchema,
   connectErrors,
@@ -49,7 +49,7 @@ import {
 // - a native connection serves its connector's actions of one family, such
 //   as its `mail.*` tools, as `<connector>.<family>@1`, with the JSON
 //   Schemas the connector's own schemas make of each action's input and
-//   output (connector-kit's manifest, `generatedContracts`). Read from the
+//   output (runtime/connector's manifest, `generatedContracts`). Read from the
 //   release's manifests alone: nothing is loaded and no token is read;
 // - a Composio connection serves `composio.<toolkit>@1`, its own toolkit's
 //   allowed tools, as its server lists them now (composio-contracts.ts);

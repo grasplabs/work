@@ -1,6 +1,4 @@
-import { ToolError } from "@grasp-os/connector-kit/connector";
 import {
-  RestartSyncError,
   cursorPart,
   defineSync,
   fetchInRoom,
@@ -8,11 +6,13 @@ import {
   fromCursorPart,
   fromInPagePart,
   inPagePart,
+  RestartSyncError,
   startOfPage,
   syncRoom,
   takeContent,
-} from "@grasp-os/connector-kit/sync";
-import type { InPage, SyncRoom } from "@grasp-os/connector-kit/sync";
+  ToolError,
+} from "@grasp-os/runtime/connector";
+import type { InPage, SyncRoom } from "@grasp-os/runtime/connector";
 import type { SyncItem, SyncPage, SyncReader } from "@grasp-os/shared/sync";
 import { ownPlace } from "@grasp-os/shared/sync";
 import { z } from "zod";

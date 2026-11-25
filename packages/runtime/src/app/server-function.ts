@@ -1,4 +1,3 @@
-import type { AnyTable } from "../common/schema-types.ts";
 import type { AnySchema } from "../common/value-schema.ts";
 import type {
   Infer,
@@ -12,6 +11,7 @@ import type {
   ReferenceKind,
   ReferenceVisibility,
 } from "./function-references.ts";
+import type { AnyTable } from "./schema-types.ts";
 
 /** The three kinds of server function. */
 export type FunctionKind = ReferenceKind;

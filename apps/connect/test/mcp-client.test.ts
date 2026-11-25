@@ -1,7 +1,7 @@
 import {
   notPerformedMetaKey,
   outcomeUnknownMetaKey,
-} from "@grasp-os/connector-kit/manifest";
+} from "@grasp-os/runtime/connector";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 

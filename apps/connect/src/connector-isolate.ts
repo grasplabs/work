@@ -1,4 +1,4 @@
-import { connectorIsolateRequests } from "@grasp-os/connector-kit/manifest";
+import { connectorIsolateRequests } from "@grasp-os/runtime/connector";
 import { quietLoader } from "@grasp-os/shared/quiet-loader";
 import { isolateBase } from "@grasp-os/shared/runtime";
 

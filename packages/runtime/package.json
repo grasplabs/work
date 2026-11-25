@@ -26,7 +26,8 @@
     "./check": "./src/workflow/check.ts",
     "./server-modules": "./src/app/server-modules.ts",
     "./forms": "./src/app/forms.ts",
-    "./vitest": "./src/app/vitest.ts"
+    "./vitest": "./src/app/vitest.ts",
+    "./connector": "./src/connector/connector.ts"
   },
   "dependencies": {
     "@grasp-os/shared": "workspace:*",

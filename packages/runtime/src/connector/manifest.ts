@@ -479,7 +479,6 @@ export type SyncParams = z.infer<typeof syncParamsSchema>;
 export const connectorManifestSchema = z
   .strictObject({
     name: connectorNameSchema,
-    version: z.string().regex(/^\d{1,4}\.\d{1,4}\.\d{1,4}$/u),
     /**
      * Whose token or key a call gets: a connection with this provider's.
      * A suite (`microsoft`, `google`) or an app with its own record.

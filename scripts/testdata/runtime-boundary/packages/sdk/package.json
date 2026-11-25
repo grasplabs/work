@@ -1,0 +1,9 @@
+{
+  "name": "@grasp-os/sdk",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./connector": "./src/connector.js",
+    "./server": "./src/server.js"
+  }
+}

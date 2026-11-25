@@ -1,4 +1,4 @@
-import { providerFetch } from "@grasp-os/connector-kit/provider";
+import { providerFetch } from "@grasp-os/runtime/connector";
 import { z } from "zod";
 
 // Google's APIs, as this connector's tools reach them: plain `fetch` to

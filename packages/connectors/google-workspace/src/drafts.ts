@@ -1,5 +1,6 @@
-import { defineTool, ToolError } from "@grasp-os/connector-kit/connector";
+import { defineTool } from "@grasp-os/connector-kit/connector";
 import type { Effect } from "@grasp-os/connector-kit/connector";
+import { ToolError } from "@grasp-os/runtime/connector";
 import { z } from "zod";
 
 import { apisHost, googleJson, googleUrl } from "./google.ts";

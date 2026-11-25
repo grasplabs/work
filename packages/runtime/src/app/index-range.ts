@@ -4,10 +4,10 @@ import type {
   RangeOperator,
 } from "@grasp-os/shared/store-reads";
 
-import type { IndexDefinition, TableState } from "../common/schema-types.ts";
 import { refuse } from "./query-error.ts";
 import type { IndexRange } from "./query-types.ts";
 import { baseOf, fits, nullableField } from "./query-values.ts";
+import type { IndexDefinition, TableState } from "./schema-types.ts";
 
 /** What a range builder recorded, and the table and index it was made for. */
 interface RecordedRange {

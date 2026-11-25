@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { ToolError } from "../src/connector.ts";
-import { egressHeader, egressKind } from "../src/manifest.ts";
-import { providerFetch } from "../src/provider.ts";
+import { egressHeader, egressKind } from "../../src/connector/manifest.ts";
+import { providerFetch } from "../../src/connector/provider.ts";
+import { ToolError } from "../../src/connector/server.ts";
 
 // How every connector turns its provider's failed answers into errors a
 // caller can act on: once here, for all of them. What sets one provider

@@ -1,29 +1,24 @@
-import { ToolError } from "@grasp-os/connector-kit/connector";
 import {
-  fromBase64,
-  maxReadBytes,
-  toBase64,
-} from "@grasp-os/connector-kit/content";
-import { segment } from "@grasp-os/connector-kit/provider";
-import {
-  RestartSyncError,
+  addressesOf,
   cursorPart,
   defineSync,
   fetchInRoom,
   fillPage,
+  fromBase64,
   fromCursorPart,
   fromInPagePart,
   inPagePart,
+  maxReadBytes,
   mayRequest,
+  RestartSyncError,
+  segment,
   startOfPage,
   syncRoom,
   takeContent,
-} from "@grasp-os/connector-kit/sync";
-import type {
-  EntryItems,
-  InPage,
-  SyncRoom,
-} from "@grasp-os/connector-kit/sync";
+  toBase64,
+  ToolError,
+} from "@grasp-os/runtime/connector";
+import type { EntryItems, InPage, SyncRoom } from "@grasp-os/runtime/connector";
 import type {
   SyncContent,
   SyncItem,
@@ -34,13 +29,7 @@ import { ownPlace } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
 import { gmailHost, googleFailure, googleUrl } from "./google.ts";
-import {
-  addressesOf,
-  attachmentsOf,
-  headerOf,
-  partSchema,
-  textOf,
-} from "./mime.ts";
+import { attachmentsOf, headerOf, partSchema, textOf } from "./mime.ts";
 import type { Part } from "./mime.ts";
 
 // Native sync of a person's own mailbox (GRA-1758): every message in it,

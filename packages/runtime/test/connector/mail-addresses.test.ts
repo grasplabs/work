@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { addressesOf } from "../src/mime.ts";
+import { addressesOf } from "../../src/connector/mail-addresses.ts";
 
 // Address headers as senders write them: parsed in full, in one pass, so
 // no header is cut short or stalls whatever reads it.

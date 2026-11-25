@@ -1,4 +1,4 @@
-import type { AccountLookup } from "@grasp-os/connector-kit/sign-in";
+import type { AccountLookup } from "@grasp-os/runtime/connector";
 import {
   appProviderSchema,
   oauthProviderSchema,
@@ -39,7 +39,7 @@ import {
 // included.
 //
 // Every other app is described by the provider record its native
-// connector carries (the connector kit's sign-in.ts), and nothing here
+// connector carries (runtime/connector's sign-in.ts), and nothing here
 // changes for a new one. Its client ID and secret, for OAuth, are its
 // entry in `APP_OAUTH_CLIENTS`, found by its provider's name alone, so no
 // record reaches another app's secret (AP6). An app has no tenant: the

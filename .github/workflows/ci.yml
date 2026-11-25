@@ -167,6 +167,7 @@ jobs:
       - run: vp run check:product-name
       - run: vp run check:wrangler-configs
       - run: vp run check:vite-plus-oxc
+      - run: vp run check:runtime-boundary
       - run: vp run check:snowball
       # packages/ui against Damsko at its pinned commit, fetched from
       # GitHub (scripts/ui-sync.ts).

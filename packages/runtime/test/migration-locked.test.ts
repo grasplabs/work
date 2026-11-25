@@ -1,9 +1,11 @@
 import { describe, expect, test } from "vite-plus/test";
 
+import { defineSchema } from "../src/app/define-schema.ts";
+import { defineTable } from "../src/app/define-table.ts";
 import { registerApp } from "../src/app/host.ts";
 import { defineApp, defineMigration } from "../src/app/index.ts";
 import { runMigration } from "../src/app/runner.ts";
-import { defineSchema, defineTable, v } from "../src/common/values.ts";
+import { v } from "../src/common/values.ts";
 
 // Module code that makes `Math.random` non-configurable before a transform
 // runs, so the runner can't take it away (src/app/determinism.ts). In a file

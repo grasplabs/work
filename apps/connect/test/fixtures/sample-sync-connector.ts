@@ -8,9 +8,13 @@
  * for whatever path the cursor `probe-<path>` names, so the tests show
  * what connect refuses of a connector's sync.
  */
-import { ToolError, defineConnector } from "@grasp-os/connector-kit/connector";
-import { egressHeader } from "@grasp-os/connector-kit/manifest";
-import { RestartSyncError, defineSync } from "@grasp-os/connector-kit/sync";
+import { defineConnector } from "@grasp-os/connector-kit/connector";
+import {
+  defineSync,
+  egressHeader,
+  RestartSyncError,
+  ToolError,
+} from "@grasp-os/runtime/connector";
 import { syncItemSchema } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
@@ -29,7 +33,6 @@ const probePrefix = "probe-";
 
 export default defineConnector({
   name: "sample-sync",
-  version: "1.0.0",
   provider: "microsoft",
   scopes: ["Files.Read"],
   hosts: [sampleHost],

@@ -42,7 +42,6 @@ import { workbookTools } from "./workbook.ts";
  */
 export default defineConnector({
   name: "microsoft-365",
-  version: "0.5.0",
   provider: "microsoft",
   // The most any class asks for: connect asks only the rights of the
   // classes a company turned on (apps/connect/src/provider-rights.ts).

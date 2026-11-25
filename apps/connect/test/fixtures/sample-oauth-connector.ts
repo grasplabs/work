@@ -3,11 +3,8 @@
  * connector, its provider record (`signIn`) included, and no change to
  * connect. Its provider is test/app-provider.ts's fake.
  */
-import {
-  defineConnector,
-  defineTool,
-  ToolError,
-} from "@grasp-os/connector-kit/connector";
+import { defineConnector, defineTool } from "@grasp-os/connector-kit/connector";
+import { ToolError } from "@grasp-os/runtime/connector";
 import { z } from "zod";
 
 /** Where the app signs people in and issues tokens. */
@@ -22,7 +19,6 @@ const itemSchema = z.object({ id: z.string(), title: z.string() });
 
 export default defineConnector({
   name: "sample-oauth",
-  version: "1.0.0",
   provider: "sample-oauth",
   signIn: {
     kind: "oauth2",

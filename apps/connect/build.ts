@@ -16,8 +16,8 @@ import {
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import { connectorManifestSchema } from "@grasp-os/connector-kit/manifest";
-import type { ConnectorManifest } from "@grasp-os/connector-kit/manifest";
+import { connectorManifestSchema } from "@grasp-os/runtime/connector";
+import type { ConnectorManifest } from "@grasp-os/runtime/connector";
 import { build } from "vite-plus";
 import type { Plugin, Rolldown } from "vite-plus";
 import { z } from "zod";
@@ -30,30 +30,112 @@ export const connectorsFile = path.join(root, "dist/connectors.js");
 
 const packageSchema = z.object({
   exports: z.object({ ".": z.string() }),
+  dependencies: z.record(z.string(), z.string()).optional(),
 });
 
-/** Every connector package's entry module. */
-export const connectorEntries = (): string[] =>
+/** A connector package's folder and its package.json. */
+const connectorPackages = (): {
+  dir: string;
+  manifest: z.infer<typeof packageSchema>;
+}[] =>
   readdirSync(packages)
     .map((dir) => path.join(packages, dir))
     .filter((dir) => existsSync(path.join(dir, "package.json")))
-    .map((dir) => {
-      const manifest = packageSchema.parse(
+    .map((dir) => ({
+      dir,
+      manifest: packageSchema.parse(
         JSON.parse(readFileSync(path.join(dir, "package.json"), "utf-8"))
-      );
-      const entry = path.resolve(dir, manifest.exports["."]);
-      // A package builds only its own code, never a file outside its folder.
-      if (!entry.startsWith(`${dir}${path.sep}`)) {
-        throw new Error(`${dir}'s entry is outside its folder`);
-      }
-      return entry;
-    });
+      ),
+    }));
+
+/** Every connector package's entry module. */
+export const connectorEntries = (): string[] =>
+  connectorPackages().map(({ dir, manifest }) => {
+    const entry = path.resolve(dir, manifest.exports["."]);
+    // A package builds only its own code, never a file outside its folder.
+    if (!entry.startsWith(`${dir}${path.sep}`)) {
+      throw new Error(`${dir}'s entry is outside its folder`);
+    }
+    return entry;
+  });
 
 const moduleSchema = z.object({
   default: z.object({ manifest: z.unknown() }),
 });
 
 const entryId = "\0connector-entry";
+
+/** What a connector imports, besides its own files. */
+const sdkConnector = "@grasp-os/sdk/connector";
+
+/**
+ * The code still written with the old kit, Zod and the runtime, which may
+ * import what it does until it moves to `sdkConnector` (GRA-2323,
+ * GRA-2324, GRA-2329): every connector package that depends on the kit,
+ * and the sample connectors of connect's tests written with it.
+ */
+const oldKit = [
+  ...connectorPackages()
+    .filter(({ manifest }) =>
+      Object.hasOwn(manifest.dependencies ?? {}, "@grasp-os/connector-kit")
+    )
+    .map(({ dir }) => dir),
+  ...[
+    "sample-connector.ts",
+    "sample-sync-connector.ts",
+    "sample-oauth-connector.ts",
+    "composio-named-connector.ts",
+  ].map((file) => path.join(root, "test/fixtures", file)),
+];
+
+/** Whether `file` is `folder` or inside it. */
+const isWithin = (folder: string, file: string): boolean =>
+  file === folder || file.startsWith(`${folder}${path.sep}`);
+
+/**
+ * The folder of a connector's own files, from its `entry`: its package's,
+ * for a package in packages/connectors, and else the entry's own folder,
+ * so a sample connector of connect's tests reaches none of connect's code.
+ */
+const ownFolderOf = (entry: string): string => {
+  const [name] = path.relative(packages, entry).split(path.sep);
+  return isWithin(packages, entry) && name !== undefined
+    ? path.join(packages, name)
+    : path.dirname(entry);
+};
+
+/**
+ * Refuses, while bundling, any import a module of the connector's own
+ * package makes but of `sdkConnector` and of its own files: the build
+ * fails rather than ship a connector that reaches past what it is written
+ * with (GRA-1374). Type-only imports never get here: the transform erased
+ * them.
+ */
+const connectorImports = (folder: string): Plugin => ({
+  name: "connector-imports",
+  // Before Vite's own resolver, which would resolve the import first.
+  enforce: "pre",
+  resolveId: (source, importer) => {
+    if (
+      importer === undefined ||
+      source.startsWith("\0") ||
+      !isWithin(folder, importer) ||
+      importer.split(path.sep).includes("node_modules") ||
+      oldKit.some((each) => isWithin(each, importer))
+    ) {
+      return null;
+    }
+    const ownFile =
+      (source.startsWith("./") || source.startsWith("../")) &&
+      isWithin(folder, path.resolve(path.dirname(importer), source));
+    if (source === sdkConnector || ownFile) {
+      return null;
+    }
+    throw new Error(
+      `${importer} imports "${source}": a connector imports ${sdkConnector} and its own files, nothing else.`
+    );
+  },
+});
 
 /**
  * The isolate's main module: the connector's MCP server as its fetch
@@ -86,7 +168,7 @@ const bundle = async (entry: string): Promise<string> => {
       root,
       logLevel: "warn",
       mode: "production",
-      plugins: [entryModule(entry)],
+      plugins: [connectorImports(ownFolderOf(entry)), entryModule(entry)],
       build: {
         write: false,
         minify: true,
@@ -150,7 +232,7 @@ export const buildConnectors = async (
   writeFileSync(outFile, `export default ${JSON.stringify(connectors)};\n`);
   for (const { manifest, code } of connectors) {
     console.info(
-      `Connector ${manifest.name} ${manifest.version}: ${(code.length / 1e3).toFixed(0)} kB`
+      `Connector ${manifest.name}: ${(code.length / 1e3).toFixed(0)} kB`
     );
   }
 };

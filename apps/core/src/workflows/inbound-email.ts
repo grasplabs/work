@@ -1,4 +1,4 @@
-import { stampHeader, stampPattern } from "@grasp-os/connector-kit/manifest";
+import { stampHeader, stampPattern } from "@grasp-os/runtime/connector";
 import { fileErrors } from "@grasp-os/shared/app-files";
 import { auditEventSchema } from "@grasp-os/shared/audit";
 import { sha256Hex, sha256HexOfBytes, toHex } from "@grasp-os/shared/encoding";

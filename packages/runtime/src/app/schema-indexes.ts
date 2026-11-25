@@ -1,6 +1,6 @@
-import { refuse } from "./schema-error.ts";
-import { indexBase } from "./schema-fields.ts";
-import { schemaLimits } from "./schema-limits.ts";
+import { refuse } from "../common/schema-error.ts";
+import { indexBase } from "../common/schema-fields.ts";
+import { schemaLimits } from "../common/schema-limits.ts";
 import type { TableState } from "./schema-types.ts";
 
 /** The managed fields an index may name: the commit times. */

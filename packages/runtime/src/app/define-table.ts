@@ -1,14 +1,18 @@
 import { isPlainObject } from "@grasp-os/shared/json";
 
-import { seal } from "./descriptor-seal.ts";
-import { refuse } from "./schema-error.ts";
+import { seal } from "../common/descriptor-seal.ts";
+import { refuse } from "../common/schema-error.ts";
+import {
+  checkedName,
+  checkUnique,
+  schemaLimits,
+} from "../common/schema-limits.ts";
+import { fieldDescriptors } from "../common/sealed-descriptors.ts";
+import { descriptorVersion } from "../common/value-descriptor.ts";
+import type { ValueShape } from "../common/value-types.ts";
 import { checkedIndexFields, checkedSearchFields } from "./schema-indexes.ts";
-import { checkedName, checkUnique, schemaLimits } from "./schema-limits.ts";
 import type { AnyTable, TableDefinition, TableState } from "./schema-types.ts";
-import { fieldDescriptors } from "./sealed-descriptors.ts";
 import { checkedAccess } from "./table-access.ts";
-import { descriptorVersion } from "./value-descriptor.ts";
-import type { ValueShape } from "./value-types.ts";
 
 /**
  * The keys of a query filter's logic (`AND`, `OR`, `NOT`): never a field,
