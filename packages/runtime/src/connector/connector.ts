@@ -6,9 +6,20 @@
 
 export { v } from "../common/values.ts";
 export type { Infer, InferInput } from "../common/value-types.ts";
-export { auth, defineConnector, event, page, sync, tool } from "./define.ts";
+export {
+  attachedFiles,
+  attachments,
+  auth,
+  defineConnector,
+  event,
+  page,
+  sync,
+  tool,
+  withNativeSyncs,
+} from "./define.ts";
 export type {
   AccountDeclaration,
+  AttachedFile,
   Checkpoint,
   ConnectorAuth,
   ConnectorDeclaration,
@@ -80,7 +91,6 @@ export {
   generatedContractMajor,
   generatedContracts,
   hostSchema,
-  maxProvenanceItems,
   mcpServerKey,
   provenanceSchema,
   readAsSchema,
@@ -119,6 +129,7 @@ export {
   forbiddenInValue,
   httpMethods,
   maxChangeBytes,
+  maxProvenanceItems,
   maxRetryAfterSeconds,
   mcpProtocolVersion,
   notPerformedMetaKey,

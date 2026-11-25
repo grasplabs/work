@@ -170,6 +170,15 @@ export const mcpProtocolVersion = "2025-06-18";
 export const maxRetryAfterSeconds = 3600;
 
 /**
+ * How a caller wants a file's content, in a tool that answers a file
+ * (`answersFile`): as text, or base64 for extraction.
+ */
+export const readAs = ["text", "base64"] as const;
+
+/** Most resource IDs one call may report reading. */
+export const maxProvenanceItems = 1000;
+
+/**
  * The methods an action may declare. Never DELETE: deleting is what Grasp
  * never does (tool-rules.ts), whatever a tool is called.
  */
