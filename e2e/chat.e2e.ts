@@ -321,9 +321,7 @@ test("a person asks, and reads the agent's answer once its turn ends", async ({
   await expect(messages.getByText(answer.text)).toBeVisible({
     timeout: 30_000,
   });
-  // The turn ended: what only a finished answer offers, shown as a pointer
-  // rests on the answer, and no failure.
-  await messages.getByRole("article", { name: "Grasp" }).hover();
+  // The turn ended: what only a finished answer offers, and no failure.
   await expect(
     messages.getByRole("button", { name: "Ask again" })
   ).toBeVisible();

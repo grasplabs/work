@@ -83,14 +83,20 @@ export const SavedMemoryLine = ({ saved }: { saved: ChatSavedMemory }) => {
     done: t`Removed from memory`,
     nothing: t`Already removed`,
   };
-  const undo = async () => {
+  const undo = async (button: HTMLElement) => {
     const answered = await run(
       async (session) => await session.brainMemories.forget(saved.memory)
     );
-    if (answered !== undefined) {
-      setOutcome(answered);
-      announce(titles[answered]);
+    if (answered === undefined) {
+      return;
     }
+    // Undo goes with the answer; the focus it held stays in the answer
+    // (the message, as MessageError gives it back), never the page.
+    if (button.contains(document.activeElement)) {
+      button.closest<HTMLElement>('[data-slot="message"]')?.focus();
+    }
+    setOutcome(answered);
+    announce(titles[answered]);
   };
   // Gone before Undo: whatever it replaced isn't its to bring back.
   const replaced = outcome === "nothing" ? undefined : saved.replaced;
@@ -110,9 +116,11 @@ export const SavedMemoryLine = ({ saved }: { saved: ChatSavedMemory }) => {
                 <SavedText saved={saved} />
               </Text>{" "}
               <Button
-                onClick={() => {
+                onClick={(event) => {
+                  // Given its status, the Button leaves a press to the
+                  // page: a second one while Undo works does nothing.
                   if (!busy) {
-                    void undo();
+                    void undo(event.currentTarget);
                   }
                 }}
                 size="xs"

@@ -757,10 +757,19 @@ const lastAnswerOf = (
   };
 };
 
-/** When a message was sent, at its foot: the time of day. */
-const SentAt = ({ at, style }: { at: string; style?: LayoutStyle }) => (
+/** When a message was sent, at its foot: the time of day, after what else stands there (an answer's actions). */
+const SentAt = ({
+  at,
+  children,
+  style,
+}: {
+  at: string | undefined;
+  children?: ReactNode;
+  style?: LayoutStyle;
+}) => (
   <MessageFooter {...(style === undefined ? {} : { style })}>
-    <time dateTime={at}>{formatTime(at)}</time>
+    {children}
+    {at === undefined ? null : <time dateTime={at}>{formatTime(at)}</time>}
   </MessageFooter>
 );
 
@@ -1179,12 +1188,7 @@ const AnswerFoot = ({
       </div>
     );
   }
-  return (
-    <MessageFooter>
-      {actions}
-      {at === undefined ? null : <time dateTime={at}>{formatTime(at)}</time>}
-    </MessageFooter>
-  );
+  return <SentAt at={at}>{actions}</SentAt>;
 };
 
 /** One answer of Grasp's: what it thought, its steps, its words, and what came of them, as one Message. */

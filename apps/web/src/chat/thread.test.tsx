@@ -406,6 +406,7 @@ describe(ChatThread, () => {
       (button) => button.textContent === "Undo"
     );
     await act(async () => {
+      undo?.focus();
       undo?.click();
       await Promise.resolve();
     });
@@ -423,12 +424,14 @@ describe(ChatThread, () => {
       undoLeft: [...document.querySelectorAll("button")].some(
         (button) => button.textContent === "Undo"
       ),
+      focusInAnswer: document.activeElement === answer(),
     }).toStrictEqual({
       summary: "Saved 1 memory 5.0s",
       line: ["Saved to memory"],
       notice: true,
       forgotten: [memory],
       undoLeft: false,
+      focusInAnswer: true,
     });
   });
 
