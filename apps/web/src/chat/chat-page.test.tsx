@@ -22,6 +22,7 @@ import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
 import { loadFromCore } from "../load-from-core.tsx";
+import { wordsOf } from "../test-words.ts";
 import { activeChat, setActiveChat } from "./active-chat.ts";
 import { LoadedChatPage } from "./chat-page.tsx";
 import { GlobalChatProvider, useGlobalChat } from "./global-chat.tsx";
@@ -198,7 +199,7 @@ const sent = async (): Promise<void> => {
 /** A button by its name. */
 const buttonNamed = (name: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll("button")].find(
-    (each) => each.textContent.trim() === name
+    (each) => wordsOf(each) === name
   );
 
 describe("a chat's own page", () => {

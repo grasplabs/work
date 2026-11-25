@@ -10141,6 +10141,7 @@ msgid "Live, being measured"
 msgstr "En production, en cours de mesure"
 
 #: src/brain/part-not-loaded.tsx
+#: src/frame/page-states.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Loaded"
 msgstr "Chargé"
@@ -11753,6 +11754,10 @@ msgstr "Non vérifié"
 msgid "Not checked yet"
 msgstr "Pas encore vérifié"
 
+#: src/activity/audit-log.tsx
+msgid "Not cleared"
+msgstr "Non effacé"
+
 #: src/brain/brain-atlas.ts
 msgid "Not confirmed by the board yet"
 msgstr "Pas encore confirmée par la direction"
@@ -11860,6 +11865,7 @@ msgid "Not live yet"
 msgstr "Pas encore en service"
 
 #: src/brain/part-not-loaded.tsx
+#: src/frame/page-states.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Not loaded"
 msgstr "Non chargé"
@@ -11958,6 +11964,7 @@ msgstr "Non partagé avec le projet"
 msgid "Not shared yet"
 msgstr "Pas encore partagé"
 
+#: src/activity/audit-log.tsx
 #: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
 msgid "Not shown"
@@ -18777,9 +18784,12 @@ msgstr "Réessaie de préparer {name}."
 msgid "Try the search again"
 msgstr "Relancer la recherche"
 
+#: src/frame/page-states.tsx
+msgid "Trying again"
+msgstr "Nouvel essai"
+
 #: src/brain/part-not-loaded.tsx
 #: src/chat/builds.tsx
-#: src/frame/page-states.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Trying again…"
 msgstr "Nouvel essai…"

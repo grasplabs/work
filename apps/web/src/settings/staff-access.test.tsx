@@ -13,6 +13,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vite-plus/test";
 
+import { wordsOf } from "../test-words.ts";
 import { StaffAccessSection } from "./staff-access.tsx";
 
 // Settings › Workspace › Grasp staff access against core's onboarding gate
@@ -97,21 +98,9 @@ const settled = async (): Promise<void> => {
   });
 };
 
-/** A button's words as people get them: not the ones it hides from them. */
-const nameOf = (each: HTMLButtonElement): string => {
-  const copy = each.cloneNode(true);
-  if (!(copy instanceof HTMLElement)) {
-    return "";
-  }
-  for (const hidden of copy.querySelectorAll("[aria-hidden='true']")) {
-    hidden.remove();
-  }
-  return copy.textContent.trim();
-};
-
 const button = (name: string): HTMLButtonElement | undefined =>
   [...document.querySelectorAll("button")].find(
-    (each) => nameOf(each) === name
+    (each) => wordsOf(each) === name
   );
 
 const press = async (name: string) => {

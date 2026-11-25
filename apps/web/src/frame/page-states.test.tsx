@@ -24,6 +24,7 @@ import { WorkKnowledgeTab } from "../brain/work-knowledge.tsx";
 import { CoreConnection } from "../core-connection.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
+import { wordsOf } from "../test-words.ts";
 import { InFrame } from "./in-frame.ts";
 import {
   ErrorState,
@@ -113,7 +114,7 @@ const settled = async (): Promise<void> => {
 /** The link or button whose text is `name`, if there is one. */
 const control = (name: string): HTMLElement | undefined =>
   [...document.querySelectorAll<HTMLElement>("a, button")].find(
-    (element) => element.textContent?.trim() === name
+    (element) => wordsOf(element) === name
   );
 
 /** Clicks the control named `name`, then lets it settle. */

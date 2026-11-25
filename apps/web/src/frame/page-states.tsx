@@ -369,10 +369,13 @@ export const PageFailed = ({
   heading?: StateHeading;
   /** Whether it is the whole window: outside the frame, where nothing else stands. */
   whole?: boolean;
-  /** Whether it is being read again now: Try again waits, and the sentence goes until it is back. */
+  /** Whether it is being read again now: the sentence goes until it is back. */
   trying?: boolean;
-  /** Reads again what failed. */
-  onRetry: () => void;
+  /**
+   * Reads again what failed. Given a Promise, Try again works until it
+   * settles and says Loaded, or Not loaded when it rejects.
+   */
+  onRetry: () => Promise<void> | void;
   /** A quiet way on beside Try again: Go to Chat, Fix with Grasp. */
   wayOn?: ReactNode;
   /** Whether Grasp can be reached; the line is left out without it. */
@@ -434,8 +437,15 @@ export const PageFailed = ({
           />
         )}
         <div {...stylex.props(styles.actions)}>
-          <Button disabled={trying} onClick={onRetry}>
-            {trying ? t`Trying again…` : t`Try again`}
+          {/* Its words for each state keep their room, so the button is as
+              wide at rest as while it works (#2503's "Not loaded"). */}
+          <Button
+            errorText={t`Not loaded`}
+            loadingText={t`Trying again`}
+            onClick={onRetry}
+            successText={t`Loaded`}
+          >
+            {t`Try again`}
           </Button>
           {wayOn}
         </div>
@@ -515,16 +525,20 @@ export const ErrorState = ({
       heading={heading}
       reach={reach}
       whole={!inFrame}
-      onRetry={() => {
+      onRetry={async () => {
         if (reload) {
           window.location.reload();
           return;
         }
-        if (again === undefined) {
-          void router.invalidate();
+        if (again !== undefined) {
+          again();
           return;
         }
-        again();
+        await router.invalidate();
+        // Read again and failed again: Try again says so.
+        if (router.state.matches.some((match) => match.status === "error")) {
+          throw new Error("The page still didn't load.");
+        }
       }}
       reason={reason}
       title={title ?? t`This page didn't load`}

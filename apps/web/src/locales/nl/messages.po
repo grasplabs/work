@@ -10141,6 +10141,7 @@ msgid "Live, being measured"
 msgstr "Live, wordt gemeten"
 
 #: src/brain/part-not-loaded.tsx
+#: src/frame/page-states.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Loaded"
 msgstr "Geladen"
@@ -11753,6 +11754,10 @@ msgstr "Niet gecontroleerd"
 msgid "Not checked yet"
 msgstr "Nog niet gecontroleerd"
 
+#: src/activity/audit-log.tsx
+msgid "Not cleared"
+msgstr "Niet gewist"
+
 #: src/brain/brain-atlas.ts
 msgid "Not confirmed by the board yet"
 msgstr "Nog niet bevestigd door het bestuur"
@@ -11860,6 +11865,7 @@ msgid "Not live yet"
 msgstr "Nog niet live"
 
 #: src/brain/part-not-loaded.tsx
+#: src/frame/page-states.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Not loaded"
 msgstr "Niet geladen"
@@ -11958,6 +11964,7 @@ msgstr "Niet met het project gedeeld"
 msgid "Not shared yet"
 msgstr "Nog niet gedeeld"
 
+#: src/activity/audit-log.tsx
 #: src/agents/agent-overview.tsx
 #: src/agents/agent-page.tsx
 msgid "Not shown"
@@ -18777,9 +18784,12 @@ msgstr "Probeer {name} opnieuw op te zetten."
 msgid "Try the search again"
 msgstr "Zoek opnieuw"
 
+#: src/frame/page-states.tsx
+msgid "Trying again"
+msgstr "Opnieuw proberen"
+
 #: src/brain/part-not-loaded.tsx
 #: src/chat/builds.tsx
-#: src/frame/page-states.tsx
 #: src/inbox/inbox-page.tsx
 msgid "Trying again…"
 msgstr "Opnieuw proberen…"
