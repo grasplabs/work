@@ -81,7 +81,7 @@ const smooth = (edge0: number, edge1: number, value: number) => {
 };
 
 /** The grade, from no dot to the core, as the brand's light resolves here. */
-export const gradeOf = (canvas: HTMLCanvasElement): string[] => {
+const gradeOf = (canvas: HTMLCanvasElement): string[] => {
   const style = getComputedStyle(canvas);
   // Forced colours: one colour, the canvas's own, which is the system's text there.
   if (matchMedia("(forced-colors: active)").matches) {

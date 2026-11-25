@@ -3,34 +3,46 @@ import type { FactTag } from "@grasp-os/shared/interview-turn";
 import { interviewerNames } from "@grasp-os/shared/onboarding";
 import { AgentIndicator } from "@grasp-os/ui/components/agent-indicator";
 import { Bubble, BubbleContent } from "@grasp-os/ui/components/bubble";
+import {
+  PromptInput,
+  PromptInputBanner,
+  PromptInputBody,
+  PromptInputButton,
+  PromptInputFooter,
+  PromptInputSubmit,
+  PromptInputTextarea,
+  PromptInputTools,
+  PromptInputVoice,
+} from "@grasp-os/ui/components/prompt-input";
 import { Text } from "@grasp-os/ui/components/text";
-import { VoiceComposer } from "@grasp-os/ui/components/voice-composer";
+import { AudioWaveformIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { fadeIn } from "@grasp-os/ui/lib/styles";
 import { colors, font, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { ReactNode } from "react";
 
+import { Heard } from "./heard.tsx";
 import { useInterviewer, useSaveState } from "./kept.ts";
 import type { LoopState, Said } from "./loop.ts";
 import { Marked } from "./marked.tsx";
-import { micLevel, muteMic } from "./mic.ts";
+import { micLevel, muteMic, useMicMuted } from "./mic.ts";
 import { voiceLevel } from "./speech.ts";
 
-// The box at the bottom: Damsko's VoiceComposer, one card to answer in,
-// typed or spoken. Enter sends, Shift+Enter starts a new line, and an
-// answer stops at the most one turn takes. For whoever chose to talk the
-// card listens while Stephen listens: the time runs, the dither along its
-// foot rises with their voice, and each word they say is carried up from
-// it into the text. While he talks or thinks the dither follows his voice
-// and his mark stands where the time was. The round button stops the
-// listening (the microphone is off and the box is there to type in, for
-// the rest of his line) and starts it again. The product hears and speaks
-// (mic.ts, speech.ts); the card only draws what it is told. Typed, what
-// they just said shows over the box, as their side of the chat, with what
-// Stephen marked in it; when it is long, its newest words stay and its top
-// fades out under the stage.
+// The box at the bottom (prototype `interview-view.tsx`, `Composer` and
+// `ChatBox`): Damsko's PromptInput, as in any chat. Enter sends,
+// Shift+Enter starts a new line, and an answer stops at the most one turn
+// takes. For whoever chose to talk, the card is a spoken conversation
+// (PromptInputVoice) while Stephen talks or thinks and while he listens:
+// what they say written over it as it is heard (heard.tsx), the card one
+// slim row with the sound as a field of light, the
+// way to mute themselves for a moment, and the way to type instead, which
+// brings the box back at once for the rest of his line. The product hears
+// and speaks (mic.ts, speech.ts); the card only draws what it is told.
+// Typed, what they just said shows over the box, as their side of the
+// chat, with what Stephen marked in it; when it is long, its newest words
+// stay and its top fades out under the stage.
 
 const styles = stylex.create({
   root: { position: "relative", display: "flex", flexDirection: "column" },
@@ -56,14 +68,6 @@ const styles = stylex.create({
     overflow: "hidden",
     maskImage: "linear-gradient(to bottom, transparent 0, black 3.5rem)",
   },
-  // The browser refused the microphone: one quiet line over the card.
-  blocked: {
-    paddingInline: space["5"],
-    paddingBlockEnd: space["2"],
-    color: colors.warning,
-    fontSize: font.textXs,
-    lineHeight: font.textXsLine,
-  },
   trouble: {
     paddingInline: space["5"],
     paddingBlockEnd: space["2"],
@@ -74,6 +78,10 @@ const styles = stylex.create({
     lineHeight: font.textXsLine,
   },
 });
+
+/** Whether a PromptInput's value holds anything but spaces. */
+const holdsWords = (value: readonly unknown[]): boolean =>
+  value.some((part) => typeof part !== "string" || part.trim() !== "");
 
 /** What they said, with what Stephen marked in it: plain words resolve one by one as they come. */
 const SaidWords = ({
@@ -88,6 +96,38 @@ const SaidWords = ({
   ) : (
     <Marked marks={said.marks} names={names} text={said.text} />
   );
+
+/**
+ * The conversation, spoken, in the card's place: their words while it is
+ * their turn, his mark while it is his (thinking counts as his), the
+ * microphone theirs to mute, and "Type instead" as the way out.
+ */
+const Spoken = ({
+  doing,
+  onType,
+}: {
+  doing: LoopState["doing"];
+  onType: () => void;
+}) => {
+  const { t } = useLingui();
+  const who = interviewerNames[useInterviewer()];
+  const muted = useMicMuted();
+  const listening = doing === "listening";
+  let speaker = t`${who}, thinking.`;
+  if (doing === "speaking") {
+    speaker = t`${who} is talking`;
+  }
+  return (
+    <PromptInputVoice
+      muted={muted}
+      onClose={onType}
+      onMutedChange={muteMic}
+      sample={() => ({ level: listening ? micLevel() : voiceLevel() })}
+      speaker={<AgentIndicator aria-label={speaker} />}
+      status={listening ? "listening" : "speaking"}
+    />
+  );
+};
 
 export const Composer = ({
   placeholder,
@@ -115,22 +155,11 @@ export const Composer = ({
   onTalk: () => void;
 }) => {
   const { t } = useLingui();
-  const who = interviewerNames[useInterviewer()];
   // Whether something is typed: the card is spoken only while the box is empty.
   const [typed, setTyped] = useState(false);
-  // The line during which they stopped the listening: the box stays until his next, or the microphone.
+  // The line during which they asked to type instead: the box stays until his next, or "Talk".
   const [typing, setTyping] = useState<number | null>(null);
   const spoken = talking && !typed && typing !== line && doing !== "idle";
-  const listening = doing === "listening";
-  // Stopped, the microphone is off; it is theirs again as the card listens again.
-  const stopped = talking && typing === line;
-  useEffect(() => {
-    muteMic(stopped);
-  }, [stopped]);
-  let voice: "off" | "listening" | "speaking" = "off";
-  if (spoken) {
-    voice = listening ? "listening" : "speaking";
-  }
   return (
     <div {...stylex.props(styles.root)}>
       <div {...stylex.props(styles.over)}>
@@ -150,53 +179,71 @@ export const Composer = ({
           </div>
         )}
       </div>
-      {blocked ? (
-        <p aria-live="polite" {...stylex.props(styles.blocked)}>
-          {t`Your browser blocked the microphone.`}
-        </p>
+      {spoken ? (
+        <Heard text={said?.text ?? ""}>
+          {said !== null && said.marks.length > 0 ? (
+            <Marked marks={said.marks} names={names} text={said.text} />
+          ) : null}
+        </Heard>
       ) : null}
-      <VoiceComposer
-        // The cursor is in the box, so typing is all it takes.
-        autoFocus
-        heard={said?.text ?? ""}
-        labels={{
-          text: t`Your answer`,
-          listening: t`Listening…`,
-          hint: t`Tap and speak`,
-          talk: t`Switch back to voice`,
-          stop: t`Stop listening`,
-          send: t`Send`,
-        }}
+      <PromptInput
+        compact
+        style={styles.card}
         maxLength={turnAnswerMax}
-        onSubmit={onSend}
-        onValueChange={(text) => {
-          setTyped(text.trim() !== "");
-        }}
-        onVoiceChange={(on) => {
-          if (!on) {
-            setTyping(line);
-          } else if (talking) {
-            setTyping(null);
-          } else {
-            onTalk();
+        onSubmit={({ text }) => {
+          const trimmed = text.trim();
+          if (trimmed !== "") {
+            onSend(trimmed);
           }
         }}
-        placeholder={placeholder}
-        sample={() => ({ level: listening ? micLevel() : voiceLevel() })}
-        speaker={
-          <AgentIndicator
-            aria-label={
-              doing === "speaking" ? t`${who} is talking` : t`${who}, thinking.`
-            }
-          />
-        }
-        style={styles.card}
-        voice={voice}
+        onValueChange={(value) => {
+          setTyped(holdsWords(value));
+        }}
       >
-        {said !== null && said.marks.length > 0 ? (
-          <Marked marks={said.marks} names={names} text={said.text} />
-        ) : undefined}
-      </VoiceComposer>
+        {blocked ? (
+          // One line, the banner's most compact honest form on a phone; "Talk" in the card asks again.
+          <PromptInputBanner variant="warning">
+            {t`Your browser blocked the microphone.`}
+          </PromptInputBanner>
+        ) : null}
+        {spoken ? (
+          <Spoken
+            doing={doing}
+            onType={() => {
+              setTyping(line);
+            }}
+          />
+        ) : (
+          <>
+            <PromptInputBody>
+              <PromptInputTextarea
+                aria-label={t`Your answer`}
+                // The cursor is in the box, so typing is all it takes.
+                autoFocus
+                placeholder={placeholder}
+              />
+            </PromptInputBody>
+            <PromptInputFooter>
+              <PromptInputTools>
+                <PromptInputButton
+                  onClick={() => {
+                    if (talking) {
+                      setTyping(null);
+                    } else {
+                      onTalk();
+                    }
+                  }}
+                  tooltip={t`Switch back to voice`}
+                >
+                  <Icon icon={AudioWaveformIcon} />
+                  {t`Talk`}
+                </PromptInputButton>
+              </PromptInputTools>
+              <PromptInputSubmit />
+            </PromptInputFooter>
+          </>
+        )}
+      </PromptInput>
     </div>
   );
 };
