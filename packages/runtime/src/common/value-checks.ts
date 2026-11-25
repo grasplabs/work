@@ -49,7 +49,14 @@ export const refuse = (
   return invalid;
 };
 
-const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
+/**
+ * An email address as RFC 5321's Mailbox has it, ASCII and unquoted: a
+ * dot-atom local part, `@`, and a domain of two or more LDH labels. No
+ * space, control, angle bracket, comma or quote gets through, so an
+ * address goes into a mail header as it is.
+ */
+const emailPattern =
+  /^[\w!#$%&'*+/=?^`{|}~-]+(?:\.[\w!#$%&'*+/=?^`{|}~-]+)*@(?:[A-Za-z\d](?:[A-Za-z\d-]{0,61}[A-Za-z\d])?\.)+[A-Za-z\d](?:[A-Za-z\d-]{0,61}[A-Za-z\d])?$/u;
 const emailMaxLength = 254;
 
 /**
