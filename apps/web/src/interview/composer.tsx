@@ -169,7 +169,7 @@ export const Composer = ({
       <div {...stylex.props(styles.over)}>
         {said === null || spoken ? null : (
           <div key={said.text} {...stylex.props(styles.said, fadeIn)}>
-            <Bubble align="end" variant="muted">
+            <Bubble align="end" variant="secondary">
               <BubbleContent>
                 <SaidWords names={names} said={said} />
                 {said.waiting ? (

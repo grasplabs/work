@@ -844,6 +844,7 @@ describe("A project's page", () => {
         role: "user",
       },
       contents: { version: 1, pages: true },
+      picture: null,
     };
     await shown(
       session,

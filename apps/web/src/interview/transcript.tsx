@@ -129,7 +129,7 @@ const Line = ({
   const stephen = line.from === "stephen";
   const words = startOf(line.text);
   let said = (
-    <Bubble align="end" variant="muted">
+    <Bubble align="end" variant="secondary">
       <BubbleContent>
         <Marked marks={line.marks ?? []} names={names} text={line.text} />
       </BubbleContent>

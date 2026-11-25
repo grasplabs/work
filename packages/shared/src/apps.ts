@@ -276,7 +276,44 @@ export interface AppContents {
 export interface AppOverview {
   app: ViewedApp;
   contents: AppContents;
+  /**
+   * Where its current version's picture is read (`appPicturePath`); null
+   * while that version has none, whatever an older one has.
+   */
+  picture: string | null;
 }
+
+// A picture of each published App version, for the Apps overview's cards:
+// the builder's browser takes it from the preview as they publish and
+// hands it to core (`AppsApi.setVersionPicture`), which keeps it as its
+// bytes say it is, never as a name or a type anyone gives. No SVG: it can
+// carry script. No GIF: a card shows one still picture.
+
+/** The types an App's picture may be, told by its header. */
+export const appPictureTypes = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+] as const;
+export type AppPictureType = (typeof appPictureTypes)[number];
+
+/** Largest picture of an App version, in bytes: 2 MB. */
+export const appPictureMaxBytes = 2 * 1024 * 1024;
+
+/** The most pixels an App's picture may be on either side. */
+export const appPictureMaxPixels = 4000;
+
+/** The path App versions' pictures are served under (`appPicturePath`). */
+export const appPicturesPrefix = "/api/app-pictures/";
+
+/**
+ * Where the page reads the picture of `version` of App `app`, as a
+ * signed-in member who may open the App: an image of its type, never kept
+ * by the browser (access can be taken away). Not found
+ * for anyone else, and for a version without one.
+ */
+export const appPicturePath = (app: string, version: number): string =>
+  `${appPicturesPrefix}${encodeURIComponent(app)}/${version}`;
 
 /** An App's files by path. */
 export type AppFiles = Record<string, string>;
@@ -618,6 +655,20 @@ export interface AppsApi {
    */
   setLink: (app: string, link: string | null) => Promise<App>;
   /**
+   * Keeps `image` as the picture of `version` of the App, a published
+   * one, for whoever may publish the App, in place of any it had: a PNG,
+   * JPEG or WebP, told by its bytes, of at most {@link appPictureMaxBytes}
+   * and {@link appPictureMaxPixels} pixels a side, refused with
+   * `app.picture_invalid` otherwise, and `version.unpublished` for a
+   * version not published. Audited. Answers where it is read
+   * (`appPicturePath`).
+   */
+  setVersionPicture: (
+    app: string,
+    version: number,
+    image: Uint8Array
+  ) => Promise<string>;
+  /**
    * The App link `link` opens, for the person: only one that is live
    * and that they may use; any other is answered as no App at all
    * (`app.not_found`), so a link tells nothing of an App they can't open.
@@ -754,6 +805,8 @@ export const appErrors = defineErrorFamily({
     "The changes don't pass their checks yet. Ask Grasp in the chat to fix them, then publish.",
   "app.preview_outdated":
     "The draft changed since this preview loaded it. Load the preview again.",
+  "app.picture_invalid":
+    "An App's picture is a whole PNG, JPEG or WebP image of at most 2 MB and 4000 pixels a side.",
   "app.preview_side_effect":
     "A preview changes nothing and reaches nothing outside it: no connections, no other Apps, no workflows and no writes to the Brain.",
 });
