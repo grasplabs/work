@@ -1,20 +1,18 @@
-import { defineTool } from "@grasp-os/connector-kit/connector";
-import type { Effect } from "@grasp-os/connector-kit/connector";
-import { ToolError } from "@grasp-os/runtime/connector";
-import { z } from "zod";
+import { tool, ToolError, v } from "@grasp-os/sdk/connector";
+import type { Api, ConnectorTool, Infer } from "@grasp-os/sdk/connector";
 
-import { apisHost, googleJson, googleUrl } from "./google.ts";
+import { apisHost, googleScope } from "./google.ts";
 
 // Drafts in a person's own Google Drive: a letter or a summary Stephen
 // wrote, as a new Google Doc or text file, for them to finish and send, as
 // OneDrive's `files.createDraft` does for Microsoft 365. The tool names no
 // drive and no folder: a file it makes goes at the top of the person's own
-// My Drive, so it reaches `own`. One upload makes it (an action declares
-// one write), its name saying who wrote it ("Draft from Stephen: ...").
+// My Drive, so it reaches `own`. One upload makes it (a tool sends one
+// write), its name saying who wrote it ("Draft from Stephen: ...").
 //
 // It works under `drive.file`, which reaches only the files this app made
 // or the person opened with it, never anything else in their drive,
-// whatever its input says. A new file never replaces another: Drive makes
+// whatever its args say. A new file never replaces another: Drive makes
 // a new one whatever its name.
 //
 // Recovery `find`: a draft carries the call's effect key as a private app
@@ -24,147 +22,109 @@ import { apisHost, googleJson, googleUrl } from "./google.ts";
 /** What a draft's name starts with, so the person knows who wrote it. */
 export const draftPrefix = "Draft from Stephen: ";
 
-const files = "/drive/v3/files";
-const uploads = "/upload/drive/v3/files";
+const files = `${apisHost}/drive/v3/files`;
+const uploads = `${apisHost}/upload/drive/v3/files`;
 
-/** What each format is made as: Google converts text to a Doc. */
-const mimeTypes = {
-  doc: "application/vnd.google-apps.document",
-  text: "text/plain",
-} as const;
+/** What a draft is made as: Google converts text to a Doc. */
+const mimeType = v.enum(["application/vnd.google-apps.document", "text/plain"]);
 
-/** A file name: any text, but no controls, and not blank at either end. */
-const nameSchema = z
-  .string()
-  .min(1)
-  .max(200)
-  // oxlint-disable-next-line no-control-regex -- controls are refused
-  .regex(/^(?! )[^\u0000-\u001F\u007F]+(?<! )$/u, {
-    message: "Not a file name",
-  });
+/** A name with a control character, or blank at either end, is no file name. */
+// oxlint-disable-next-line no-control-regex -- controls are refused
+const notAName = /[\u0000-\u001F\u007F]|^ | $/u;
 
-const input = z.strictObject({
-  name: nameSchema,
-  format: z.enum(["doc", "text"]),
-  text: z
-    .string()
-    .min(1)
-    .max(1024 * 1024),
+const driveFile = v.object({
+  id: v.string(),
+  name: v.string(),
+  mimeType: v.string(),
+  webViewLink: v.string().optional(),
 });
-type Input = z.output<typeof input>;
-
-const driveFile = z.object({
-  id: z.string(),
-  name: z.string(),
-  mimeType: z.string(),
-  webViewLink: z.string().nullish(),
-});
-type DriveFile = z.infer<typeof driveFile>;
-
-const fileList = z.object({ files: z.array(driveFile).nullish() });
-
-const output = z.strictObject({
-  id: z.string(),
-  name: z.string(),
-  mimeType: z.string(),
-  webUrl: z.string().nullable(),
-});
+type DriveFile = Infer<typeof driveFile>;
 
 const fields = "id,name,mimeType,webViewLink";
-
-const outputOf = (file: DriveFile): z.input<typeof output> => ({
-  id: file.id,
-  name: file.name,
-  mimeType: file.mimeType,
-  webUrl: file.webViewLink ?? null,
-});
 
 /**
  * The file of the person's own Drive the call with `key` made, not
  * trashed, if this app can see one. The key is 64 hex characters (connect
- * derives it, the kit checks it): it can't break out of its quotes.
+ * derives it, the runtime checks it): it can't break out of its quotes.
  */
-const madeWith = async (key: string): Promise<DriveFile | undefined> => {
-  const { files: found } = await googleJson(
-    googleUrl(apisHost, files, {
+const madeWith = async (
+  api: Api,
+  key: string
+): Promise<DriveFile | undefined> => {
+  const { files: found } = await api.get(files, {
+    query: {
       spaces: "drive",
       q: `appProperties has { key='graspEffect' and value='${key}' } and trashed = false`,
-      pageSize: "1",
+      pageSize: 1,
       fields: `files(${fields})`,
-    }),
-    fileList
-  );
+    },
+    returns: v.object({ files: v.array(driveFile).optional() }),
+  });
   return found?.[0];
 };
 
-/** One upload of the draft's metadata and its text (`multipart/related`). */
-const upload = (
-  { name, format, text }: Input,
-  { key }: Effect
-): RequestInit => {
-  const boundary = `grasp-${crypto.randomUUID()}`;
-  const metadata = {
-    name: `${draftPrefix}${name}`,
-    mimeType: mimeTypes[format],
-    parents: ["root"],
-    ...(key === null ? {} : { appProperties: { graspEffect: key } }),
-  };
-  return {
-    method: "POST",
-    headers: { "content-type": `multipart/related; boundary=${boundary}` },
-    body: [
-      `--${boundary}`,
-      "Content-Type: application/json; charset=UTF-8",
-      "",
-      JSON.stringify(metadata),
-      `--${boundary}`,
-      "Content-Type: text/plain; charset=UTF-8",
-      "",
-      text,
-      `--${boundary}--`,
-      "",
-    ].join("\r\n"),
-  };
-};
-
-const createDraft = defineTool({
-  name: "files.createDraft",
-  description: `Writes a new draft document (a Google Doc or plain text) to the person's own Google Drive, named "${draftPrefix}<name>", for them to finish and send. Never replaces a file.`,
-  input,
-  output,
-  readOnly: false,
-  reach: "own",
-  destructive: false,
-  routes: [
-    { method: "GET", host: apisHost, path: files },
-    { method: "POST", host: apisHost, path: uploads },
-  ],
-  describe: {
-    title: "Write a draft document in your Google Drive",
-    fields: [
-      { label: "File name", input: "name" },
-      { label: "Format", input: "format" },
-      { label: "Text", input: "text" },
-    ],
-  },
-  run: async (call, effect) => {
-    const file = await googleJson(
-      googleUrl(apisHost, uploads, { uploadType: "multipart", fields }),
-      driveFile,
-      upload(call, effect)
-    );
-    if (file.mimeType !== mimeTypes[call.format]) {
-      throw new ToolError("Drive made the draft as something else", {
-        outcomeUnknown: true,
+export const draftTools: Readonly<Record<string, ConnectorTool>> = {
+  "upload.drive.files.create": tool({
+    description: `Writes a new draft document (a Google Doc, or plain text as text/plain) to the person's own Google Drive, named "${draftPrefix}<name>", for them to finish and send. Never replaces a file.`,
+    args: {
+      name: v.string().min(1).max(200),
+      mimeType,
+      text: v
+        .string()
+        .min(1)
+        .max(1024 * 1024),
+    },
+    returns: driveFile,
+    readOnly: false,
+    reach: "own",
+    scopes: [googleScope("drive.file")],
+    routes: [`GET ${files}`, `POST ${uploads}`],
+    describe: {
+      title: "Write a draft document in your Google Drive",
+      fields: [
+        { label: "File name", arg: "name" },
+        { label: "Format", arg: "mimeType" },
+        { label: "Text", arg: "text" },
+      ],
+    },
+    handler: async ({ name, mimeType: type, text }, api, { key }) => {
+      if (notAName.test(name)) {
+        throw new ToolError("Not a file name", { code: "invalid" });
+      }
+      // One upload of the draft's metadata and its text
+      // (`multipart/related`).
+      const boundary = `grasp-${crypto.randomUUID()}`;
+      const metadata = {
+        name: `${draftPrefix}${name}`,
+        mimeType: type,
+        parents: ["root"],
+        ...(key === null ? {} : { appProperties: { graspEffect: key } }),
+      };
+      const made = await api.post(uploads, {
+        query: { uploadType: "multipart", fields },
+        contentType: `multipart/related; boundary=${boundary}`,
+        body: [
+          `--${boundary}`,
+          "Content-Type: application/json; charset=UTF-8",
+          "",
+          JSON.stringify(metadata),
+          `--${boundary}`,
+          "Content-Type: text/plain; charset=UTF-8",
+          "",
+          text,
+          `--${boundary}--`,
+          "",
+        ].join("\r\n"),
+        returns: driveFile,
       });
-    }
-    return { output: outputOf(file) };
-  },
-  // Made, if a file of the person's carries the call's key.
-  find: async (_call, { key }) => {
-    const made = await madeWith(key);
-    return made === undefined ? null : { output: outputOf(made) };
-  },
-});
-
-export const draftTools = [createDraft];
+      if (made.mimeType !== type) {
+        throw new ToolError("Drive made the draft as something else", {
+          outcomeUnknown: true,
+        });
+      }
+      return made;
+    },
+    // Made, if a file of the person's carries the call's key.
+    find: async (_args, api, { key }) => (await madeWith(api, key)) ?? null,
+  }),
+};

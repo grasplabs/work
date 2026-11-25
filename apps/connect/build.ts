@@ -152,9 +152,11 @@ const sdkConnector = "@grasp-os/sdk/connector";
 
 /**
  * The code still written with the old kit, Zod and the runtime, which may
- * import what it does until it moves to `sdkConnector` (GRA-2323,
- * GRA-2324, GRA-2329): every connector package that depends on the kit,
- * and the sample connectors of connect's tests written with it.
+ * import what it does until it moves to `sdkConnector` (GRA-2324,
+ * GRA-2329): every connector package that depends on the kit, the sample
+ * connectors of connect's tests written with it, and Google Workspace's
+ * native syncs, with the entry that serves them (`withNativeSyncs`), until
+ * they are declared syncs (GRA-2311).
  */
 const oldKit = [
   ...connectorPackages()
@@ -162,6 +164,14 @@ const oldKit = [
       Object.hasOwn(manifest.dependencies ?? {}, "@grasp-os/connector-kit")
     )
     .map(({ dir }) => dir),
+  ...[
+    "index.ts",
+    "calendar-sync.ts",
+    "drive-sync.ts",
+    "gmail-sync.ts",
+    "google-sync.ts",
+    "shared-drive-sync.ts",
+  ].map((file) => path.join(packages, "google-workspace/src", file)),
   ...[
     "sample-connector.ts",
     "sample-sync-connector.ts",

@@ -1,66 +1,45 @@
-import { defineTool } from "@grasp-os/connector-kit/connector";
 import {
   checkReadable,
   contentAs,
-  readAsSchema,
-  segment,
+  page,
+  tool,
   ToolError,
-} from "@grasp-os/runtime/connector";
-import { z } from "zod";
+  v,
+} from "@grasp-os/sdk/connector";
+import type { Api, ConnectorTool, Infer } from "@grasp-os/sdk/connector";
 
-import {
-  apisHost,
-  googleFetch,
-  googleJson,
-  googleUrl,
-  idSchema,
-  nextPageOf,
-  pageSchema,
-  topSchema,
-} from "./google.ts";
+import { apisHost, googleScope, nextOf } from "./google.ts";
 
 // Drive, one shared drive per call. Google's Drive API has no path per
 // drive: a file is `/drive/v3/files/{id}` whichever drive holds it, so
 // the egress can't bind a request to the drive, and this code holds each
 // call to it:
 //
-// - Lists and searches ask for the drive's corpus in the query
-//   (`corpora=drive&driveId=...`), which Google holds them to. Only items
-//   Google says are in that drive (`driveId`) are passed on.
+// - A list asks for the drive's corpus in the query
+//   (`corpora=drive&driveId=...`), which Google holds it to, whatever its
+//   `q` says. Only items Google says are in that drive (`driveId`) are
+//   passed on.
 // - A file read addresses the file by its ID alone. The tool reads the
-//   file's metadata first and goes no further unless it is in the bound
-//   drive, not trashed and has content.
-//
-// A person's My Drive isn't a shared drive and has no drive ID to hold a
-// call to, or to check a file against: it is left out. An organization's
-// files live in shared drives, so these tools reach `company`. Scoping is
-// per drive, not per folder.
+//   file's metadata first (`fileIn`) and goes no further unless it is in
+//   the bound drive and not trashed.
 //
 // Content: Google serves a stored file's bytes from www.googleapis.com
 // itself (`alt=media`, no redirect, so the egress follows none). Google's
 // own documents, spreadsheets and presentations have no bytes of their
 // own; they are exported as text (`/export`), in one request, too.
+//
+// A person's My Drive isn't a shared drive and has no drive ID to hold a
+// call to, or to check a file against: it is left out. An organization's
+// files live in shared drives, so these tools reach `company`. Scoping is
+// per drive, not per folder.
 
-const files = "/drive/v3/files";
+const files = `${apisHost}/drive/v3/files`;
 
-/** A file's metadata route: its drive is checked from what it answers. */
-export const fileRoute = {
-  method: "GET",
-  host: apisHost,
-  path: `${files}/{item}`,
-} as const;
+/** A file's metadata: its drive is checked from what it answers. */
+const file = `${files}/{fileId}`;
 
-/** Lists and searches of one shared drive (in the query, `driveId`). */
-const driveListRoute = { method: "GET", host: apisHost, path: files } as const;
-
-/** A shared drive's ID. */
-export const driveSchema = z
-  .string()
-  .min(1)
-  .max(256)
-  .regex(/^[\w-]+$/u);
-
-const folderMimeType = "application/vnd.google-apps.folder";
+/** A Google document, spreadsheet or presentation, as text. */
+const fileExport = `${file}/export`;
 
 /** Google's own formats, as the text each is exported to. */
 const exportAs: Readonly<Record<string, string>> = {
@@ -69,258 +48,171 @@ const exportAs: Readonly<Record<string, string>> = {
   "application/vnd.google-apps.presentation": "text/plain",
 };
 
-const googleFile = z.object({
-  id: z.string(),
-  name: z.string(),
-  mimeType: z.string(),
+/** The route of a file's metadata, which a tool reads to check its drive. */
+export const fileRoute = `GET ${file}` as const;
+
+/** A shared drive's ID, as Drive's `driveId` names it. */
+export const driveIdArg = v.string().min(1).max(256);
+
+/** A file as Drive gives it, narrowed to `fileFields`. */
+const driveFile = v.object({
+  id: v.string(),
+  name: v.string(),
+  mimeType: v.string(),
   /** In bytes, as a string (an int64); none for Google's own formats. */
-  size: z.string().regex(/^\d+$/u).nullish(),
-  modifiedTime: z.string().nullish(),
-  webViewLink: z.string().nullish(),
-  parents: z.array(z.string()).nullish(),
-  driveId: z.string().nullish(),
-  trashed: z.boolean().nullish(),
+  size: v.string().optional(),
+  modifiedTime: v.string().optional(),
+  webViewLink: v.string().optional(),
+  parents: v.array(v.string()).optional(),
+  driveId: v.string().optional(),
+  trashed: v.boolean().optional(),
 });
-type GoogleFile = z.infer<typeof googleFile>;
+type DriveFile = Infer<typeof driveFile>;
 
 const fileFields =
   "id,name,mimeType,size,modifiedTime,webViewLink,parents,driveId,trashed";
 
-const itemSchema = z.strictObject({
-  drive: z.string(),
-  id: z.string(),
-  name: z.string(),
-  kind: z.enum(["file", "folder", "other"]),
-  mimeType: z.string(),
-  size: z.number().nullable(),
-  parentId: z.string().nullable(),
-  lastModifiedAt: z.string().nullable(),
-  webUrl: z.string().nullable(),
-});
-
 /**
- * The file `id`'s metadata, only when Google says it is in `drive`, is the
- * file asked for and isn't trashed: anything else is refused as not found,
- * before anything of its content is asked for.
+ * The file `fileId`'s metadata, only when Google says it is in `driveId`,
+ * is the file asked for and isn't trashed: anything else is refused as not
+ * found, before anything of its content is asked for.
  */
 export const fileIn = async (
-  drive: string,
-  id: string
-): Promise<GoogleFile> => {
-  const file = await googleJson(
-    googleUrl(apisHost, `${files}/${segment(id)}`, {
-      supportsAllDrives: "true",
-      fields: fileFields,
-    }),
-    googleFile
-  );
-  if (file.driveId !== drive || file.id !== id || file.trashed === true) {
-    throw new ToolError("This drive has no such file", {
-      code: "not_found",
-    });
+  api: Api,
+  driveId: string,
+  fileId: string
+): Promise<DriveFile> => {
+  const found = await api.get(file, {
+    path: { fileId },
+    query: { supportsAllDrives: true, fields: fileFields },
+    returns: driveFile,
+  });
+  if (
+    found.driveId !== driveId ||
+    found.id !== fileId ||
+    found.trashed === true
+  ) {
+    throw new ToolError("This drive has no such file", { code: "not_found" });
   }
-  return file;
+  return found;
 };
 
-/** Whether a file has content to read: its own bytes, or an export. */
-const isReadable = (file: GoogleFile): boolean =>
-  !file.mimeType.startsWith("application/vnd.google-apps.") ||
-  Object.hasOwn(exportAs, file.mimeType);
-
-const kindOf = (file: GoogleFile): "file" | "folder" | "other" => {
-  if (file.mimeType === folderMimeType) {
-    return "folder";
-  }
-  return isReadable(file) ? "file" : "other";
-};
-
-const itemOf = (
-  drive: string,
-  file: GoogleFile
-): z.infer<typeof itemSchema> => ({
-  drive,
-  id: file.id,
-  name: file.name,
-  kind: kindOf(file),
-  mimeType: file.mimeType,
-  size: typeof file.size === "string" ? Number(file.size) : null,
-  parentId: file.parents?.[0] ?? null,
-  lastModifiedAt: file.modifiedTime ?? null,
-  webUrl: file.webViewLink ?? null,
+const filePage = v.object({
+  files: v.array(driveFile).optional(),
+  nextPageToken: v.string().optional(),
 });
-
-const pageOutput = z.strictObject({
-  drive: z.string(),
-  items: z.array(itemSchema),
-  nextPage: z.string().nullable(),
-});
-
-const filePage = z.object({
-  files: z.array(googleFile).nullish(),
-  nextPageToken: z.string().nullish(),
-});
-
-/** A value inside a Drive query's quotes: `\` and `'` escaped. */
-const quoted = (value: string): string =>
-  `'${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
 
 /**
- * One page of the drive's items matching `q`, as a tool returns it: only
- * those Google says are in the drive.
+ * What a file's content is read as: its own bytes (`null`), or the text
+ * Google exports it to; `undefined` for a folder, a form, a shortcut or
+ * anything else of Google's own with nothing to read.
  */
-const itemsOf = async (
-  drive: string,
-  q: string,
-  top: number,
-  page: string | undefined,
-  orderBy?: string
-) => {
-  const { files: found, nextPageToken } = await googleJson(
-    googleUrl(
-      apisHost,
-      files,
-      {
-        corpora: "drive",
-        driveId: drive,
-        includeItemsFromAllDrives: "true",
-        supportsAllDrives: "true",
-        q,
-        orderBy,
-        pageSize: String(top),
-        fields: `nextPageToken,files(${fileFields})`,
-      },
-      page
-    ),
-    filePage
-  );
-  const items = (found ?? []).filter((file) => file.driveId === drive);
-  return {
-    output: {
-      drive,
-      items: items.map((file) => itemOf(drive, file)),
-      nextPage: nextPageOf(nextPageToken ?? undefined),
-    },
-    provenance: items.map(({ id }) => id),
-  };
+const contentOf = (mimeType: string): string | null | undefined => {
+  if (Object.hasOwn(exportAs, mimeType)) {
+    return exportAs[mimeType];
+  }
+  return mimeType.startsWith("application/vnd.google-apps.") ? undefined : null;
 };
 
-const listFolder = defineTool({
-  name: "files.list",
-  description:
-    "Lists the files and folders in a folder of a shared drive, or at its top when no folder is given.",
-  input: z.strictObject({
-    drive: driveSchema,
-    folder: idSchema.optional(),
-    top: topSchema(100),
-    page: pageSchema,
-  }),
-  output: pageOutput,
-  readOnly: true,
-  reach: "company",
-  resource: "drive",
-  routes: [driveListRoute],
-  run: async ({ drive, folder, top, page }) =>
-    // A shared drive's top folder has the drive's own ID.
-    await itemsOf(
-      drive,
-      `${quoted(folder ?? drive)} in parents and trashed = false`,
-      top ?? 50,
-      page,
-      "folder,name"
-    ),
-});
+const readAs = v.enum(["text", "base64"]);
 
-/** Search text: any, but no control characters. */
-const querySchema = z
-  .string()
-  .min(1)
-  .max(256)
-  // oxlint-disable-next-line no-control-regex -- control characters are refused
-  .regex(/^[^\u0000-\u001F\u007F]+$/u);
-
-const searchFiles = defineTool({
-  name: "files.search",
-  description:
-    "Searches a shared drive for files and folders by name and content, most relevant first.",
-  input: z.strictObject({
-    drive: driveSchema,
-    query: querySchema,
-    top: topSchema(100),
-    page: pageSchema,
-  }),
-  output: pageOutput,
-  readOnly: true,
-  reach: "company",
-  resource: "drive",
-  routes: [driveListRoute],
-  run: async ({ drive, query, top, page }) =>
-    await itemsOf(
-      drive,
-      `fullText contains ${quoted(query)} and trashed = false`,
-      top ?? 50,
-      page
-    ),
-});
-
-const readFile = defineTool({
-  name: "files.read",
-  description:
-    "Reads a file of a shared drive: as text, or as base64 to extract its content (a PDF, say). Google Docs and Slides come as plain text, Sheets as CSV (the first sheet). Up to 4 MiB.",
-  input: z.strictObject({
-    drive: driveSchema,
-    item: idSchema,
-    as: readAsSchema.optional(),
-  }),
-  output: z.strictObject({
-    drive: z.string(),
-    id: z.string(),
-    name: z.string(),
-    mimeType: z.string(),
-    /** The content's type: the file's own, or what it was exported to. */
-    contentType: z.string(),
-    size: z.number(),
-    encoding: readAsSchema,
-    content: z.string().nullable(),
-  }),
-  readOnly: true,
-  reach: "company",
-  resource: "drive",
-  // A file has no drive in its path: `run` checks it before its content.
-  routes: [
-    fileRoute,
-    { method: "GET", host: apisHost, path: `${files}/{item}/export` },
-  ],
-  run: async ({ drive, item: id, as }) => {
-    const path = `${files}/${segment(id)}`;
-    const file = await fileIn(drive, id);
-    if (kindOf(file) !== "file") {
-      throw new ToolError("This isn't a file with content to read", {
-        code: "not_a_file",
+export const driveTools: Readonly<Record<string, ConnectorTool>> = {
+  "drive.files.list": tool({
+    description:
+      "Lists the files and folders of a shared drive that match q, Drive's search query: \"'<folder ID>' in parents\" for a folder's (the drive's own ID for its top folder), \"fullText contains 'invoice'\" to search by name and content, most relevant first. Trashed items are left out.",
+    args: {
+      driveId: driveIdArg,
+      q: v.string().min(1).max(2048).optional(),
+      orderBy: v.string().min(1).max(256).optional(),
+      pageSize: v.number().integer().min(1).max(100).optional(),
+      pageToken: v.string().min(1).max(4096).optional(),
+    },
+    returns: page(driveFile),
+    readOnly: true,
+    reach: "company",
+    resource: "driveId",
+    scopes: [googleScope("drive.readonly")],
+    routes: [`GET ${files}`],
+    handler: async ({ driveId, q, orderBy, pageSize, pageToken }, api) => {
+      const answered = await api.get(files, {
+        query: {
+          corpora: "drive",
+          driveId,
+          includeItemsFromAllDrives: true,
+          supportsAllDrives: true,
+          q: q === undefined ? "trashed = false" : `(${q}) and trashed = false`,
+          orderBy,
+          pageSize: pageSize ?? 50,
+          pageToken,
+          fields: `nextPageToken,files(${fileFields})`,
+        },
+        returns: filePage,
       });
-    }
-    const exportType = Object.hasOwn(exportAs, file.mimeType)
-      ? exportAs[file.mimeType]
-      : undefined;
-    checkReadable(Number(file.size ?? 0));
-    const response = await googleFetch(
-      exportType === undefined
-        ? googleUrl(apisHost, path, { alt: "media", supportsAllDrives: "true" })
-        : googleUrl(apisHost, `${path}/export`, { mimeType: exportType })
-    );
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    return {
-      output: {
-        drive,
-        id: file.id,
-        name: file.name,
-        mimeType: file.mimeType,
-        contentType: exportType ?? file.mimeType,
-        size: bytes.byteLength,
-        ...contentAs(bytes, as ?? "text"),
-      },
-      provenance: [file.id],
-    };
-  },
-});
-
-export const driveTools = [listFolder, searchFiles, readFile];
+      return {
+        items: (answered.files ?? []).filter(
+          (each) => each.driveId === driveId && each.trashed !== true
+        ),
+        next: nextOf(answered.nextPageToken),
+      };
+    },
+  }),
+  "drive.files.get": tool({
+    description:
+      "Reads a file of a shared drive: as text, or as base64 to extract its content (a PDF, say). Google Docs and Slides come as plain text, Sheets as CSV (the first sheet). Up to 4 MiB.",
+    args: {
+      driveId: driveIdArg,
+      fileId: v.string().min(1).max(1024),
+      as: readAs.optional(),
+    },
+    returns: v.object({
+      id: v.string(),
+      name: v.string(),
+      mimeType: v.string(),
+      /** The content's type: the file's own, or what it was exported to. */
+      contentType: v.string(),
+      /** The content's size in bytes, as Drive gives a size: a string. */
+      size: v.string(),
+      encoding: readAs,
+      content: v.string(),
+    }),
+    readOnly: true,
+    // A workflow action may keep it as a file of its run (GRA-886).
+    answersFile: true,
+    reach: "company",
+    resource: "driveId",
+    scopes: [googleScope("drive.readonly")],
+    // A file has no drive in its path: the handler checks its metadata
+    // before its content.
+    routes: [`GET ${file}`, `GET ${fileExport}`],
+    handler: async ({ driveId, fileId, as = "text" }, api) => {
+      const found = await fileIn(api, driveId, fileId);
+      const exportType = contentOf(found.mimeType);
+      if (exportType === undefined) {
+        throw new ToolError("This isn't a file with content to read", {
+          code: "not_a_file",
+        });
+      }
+      checkReadable(Number(found.size ?? 0));
+      const bytes =
+        exportType === null
+          ? await api.get(file, {
+              path: { fileId },
+              query: { alt: "media", supportsAllDrives: true },
+              as: "bytes",
+            })
+          : await api.get(fileExport, {
+              path: { fileId },
+              query: { mimeType: exportType },
+              as: "bytes",
+            });
+      return {
+        id: found.id,
+        name: found.name,
+        mimeType: found.mimeType,
+        contentType: exportType ?? found.mimeType,
+        size: String(bytes.byteLength),
+        ...contentAs(bytes, as),
+      };
+    },
+  }),
+};

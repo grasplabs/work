@@ -38,8 +38,8 @@ import {
   reportText,
   sentId,
   sheetCsv,
+  sheetGrid,
   sheetNames,
-  sheetRows,
   signaturePng,
   teamCalendar,
   threadId,
@@ -109,36 +109,48 @@ const manifest = connectorManifestSchema.parse(
 
 /** Input for each Gmail tool, but its mailbox. */
 const mailboxInputs: Record<string, Input> = {
-  "mail.list": {},
-  "mail.get": { message: messageId(ceo, 1) },
-  "mail.readAttachment": { message: messageId(ceo, 1), attachment: "1" },
-  "mail.labels": {},
-  "mail.label": { message: messageId(ceo, 1), remove: ["INBOX"] },
-  "mail.send": { subject: "Hi", body: "Hi", to: ["a@example.com"] },
-  "mail.createDraft": { subject: "Hi", body: "Hi", to: ["a@example.com"] },
+  "gmail.users.messages.list": {},
+  "gmail.users.messages.get": { id: messageId(ceo, 1) },
+  "gmail.users.messages.attachments.get": {
+    messageId: messageId(ceo, 1),
+    partId: "1",
+  },
+  "gmail.users.labels.list": {},
+  "gmail.users.messages.modify.create": {
+    id: messageId(ceo, 1),
+    removeLabelIds: ["INBOX"],
+  },
+  "gmail.users.messages.send.create": {
+    subject: "Hi",
+    body: "Hi",
+    to: ["a@example.com"],
+  },
+  "gmail.users.drafts.create": {
+    subject: "Hi",
+    body: "Hi",
+    to: ["a@example.com"],
+  },
 };
 
 /** Input for each Calendar tool, but its calendar. */
 const calendarInputs: Record<string, Input> = {
-  "calendar.list": {
-    start: "2026-09-28T00:00:00Z",
-    end: "2026-10-05T00:00:00Z",
+  "calendar.calendars.events.list": {
+    timeMin: "2026-09-28T00:00:00Z",
+    timeMax: "2026-10-05T00:00:00Z",
   },
-  "calendar.get": { event: eventId(teamCalendar, 1) },
-  "calendar.create": {
-    subject: "Focus time",
-    start: "2026-10-26T14:00",
-    end: "2026-10-26T15:00",
-    timeZone: "Europe/Amsterdam",
+  "calendar.calendars.events.get": { eventId: eventId(teamCalendar, 1) },
+  "calendar.calendars.events.create": {
+    summary: "Focus time",
+    start: { dateTime: "2026-10-26T14:00", timeZone: "Europe/Amsterdam" },
+    end: { dateTime: "2026-10-26T15:00", timeZone: "Europe/Amsterdam" },
   },
 };
 
 /** Input for each Drive tool, but its drive. */
 const driveInputs: Record<string, Input> = {
-  "files.list": {},
-  "files.search": { query: "invoice" },
-  "files.read": { item: fileIds.report },
-  "sheets.read": { spreadsheet: fileIds.sheet },
+  "drive.files.list": {},
+  "drive.files.get": { fileId: fileIds.report },
+  "spreadsheets.get": { spreadsheetId: fileIds.sheet },
 };
 
 describe("the Google Workspace connector's scoping", () => {
@@ -154,16 +166,16 @@ describe("the Google Workspace connector's scoping", () => {
       .filter(
         ({ name, resource, path }) =>
           !(
-            (name === "files.createDraft" && resource === null) ||
-            (resource === "mailbox" &&
-              path.startsWith("/gmail/v1/users/{mailbox}/")) ||
-            (resource === "calendar" &&
-              (path.startsWith("/calendar/v3/calendars/{calendar}/") ||
+            (name === "upload.drive.files.create" && resource === null) ||
+            (resource === "userId" &&
+              path.startsWith("/gmail/v1/users/{userId}/")) ||
+            (resource === "calendarId" &&
+              (path.startsWith("/calendar/v3/calendars/{calendarId}/") ||
                 // The person's own entry for that same calendar.
-                path === "/calendar/v3/users/me/calendarList/{calendar}")) ||
-            (resource === "drive" &&
+                path === "/calendar/v3/users/me/calendarList/{calendarId}")) ||
+            (resource === "driveId" &&
               (path.startsWith("/drive/v3/files") ||
-                path.startsWith("/v4/spreadsheets/{spreadsheet}")))
+                path.startsWith("/v4/spreadsheets/{spreadsheetId}")))
           )
       )
       .map(({ name, path }) => `${name} ${path}`);
@@ -176,13 +188,14 @@ describe("the Google Workspace connector's scoping", () => {
         ...Object.keys(mailboxInputs),
         ...Object.keys(calendarInputs),
         ...Object.keys(driveInputs),
-        "files.createDraft",
+        "upload.drive.files.create",
       ].toSorted()
     );
     expect(manifest.hosts).toStrictEqual([
       "gmail.googleapis.com",
       "www.googleapis.com",
       "sheets.googleapis.com",
+      "openidconnect.googleapis.com",
     ]);
     // No batch endpoint, and no redirect is ever followed.
     expect(
@@ -198,7 +211,7 @@ describe("the Google Workspace connector's scoping", () => {
     // alias for the person's own, or a spelling Gmail would take for
     // invoices@ that isn't exactly it.
     await expect(
-      refusalsFor(connection, mailboxInputs, "mailbox", invoices, [
+      refusalsFor(connection, mailboxInputs, "userId", invoices, [
         ceo,
         "me",
         "Invoices@example.com",
@@ -208,8 +221,8 @@ describe("the Google Workspace connector's scoping", () => {
     expect(google.sent).toStrictEqual([]);
     await call(
       connection,
-      "mail.labels",
-      { mailbox: invoices },
+      "gmail.users.labels.list",
+      { userId: invoices },
       { resource: invoices }
     );
     expect(paths()).toStrictEqual([`${mailboxPath}/labels`]);
@@ -218,7 +231,7 @@ describe("the Google Workspace connector's scoping", () => {
   it("keeps a call for one calendar out of every other", async () => {
     const connection = await connected();
     await expect(
-      refusalsFor(connection, calendarInputs, "calendar", teamCalendar, [
+      refusalsFor(connection, calendarInputs, "calendarId", teamCalendar, [
         invoices,
         "primary",
         holidayCalendar,
@@ -230,7 +243,7 @@ describe("the Google Workspace connector's scoping", () => {
   it("keeps a call for one shared drive out of every other", async () => {
     const connection = await connected();
     await expect(
-      refusalsFor(connection, driveInputs, "drive", financeDrive, [
+      refusalsFor(connection, driveInputs, "driveId", financeDrive, [
         otherDrive,
         financeDrive.toLowerCase(),
       ])
@@ -245,22 +258,28 @@ describe("the Google Workspace connector's scoping", () => {
     const event = eventId(invoices, 1);
     const refusals = await Promise.all(
       [
-        { action: "mail.labels", resource: "me", input: { mailbox: "me" } },
-        ...["primary", holidayCalendar].map((calendar) => ({
-          action: "calendar.get",
-          resource: calendar,
-          input: { calendar, event },
+        {
+          action: "gmail.users.labels.list",
+          resource: "me",
+          input: { userId: "me" },
+        },
+        ...["primary", holidayCalendar].map((calendarId) => ({
+          action: "calendar.calendars.events.get",
+          resource: calendarId,
+          input: { calendarId, eventId: event },
         })),
       ].map(
         async ({ action, resource, input }) =>
           await toolError(call(connection, action, input, { resource }))
       )
     );
-    expect(refusals).toStrictEqual([
-      "Invalid input: invalid_format at mailbox",
-      "Invalid input: invalid_format at calendar",
-      "Invalid input: invalid_format at calendar",
+    const [mailbox, primary, holiday] = refusals;
+    expect([mailbox, primary]).toStrictEqual([
+      "Invalid input: value.invalid_email at userId",
+      "Invalid input: value.invalid_email at calendarId",
     ]);
+    // An address, but with a `#`, which no path parameter may hold.
+    expect(holiday).toMatchObject({ error: { code: "egress_refused" } });
     expect(google.sent).toStrictEqual([]);
   });
 });
@@ -285,37 +304,50 @@ describe("the Google Workspace connector's Gmail tools", () => {
     const connection = await connected();
     const token = await accessTokenFor(env, connection.id);
     const result = await resultOf(
-      call(connection, "mail.list", { mailbox: invoices, top: 2 })
+      call(connection, "gmail.users.messages.list", {
+        userId: invoices,
+        maxResults: 2,
+      })
     );
     expect(result).toStrictEqual({
       output: {
-        mailbox: invoices,
-        messages: [
+        items: [
           {
-            mailbox: invoices,
             id: messageId(invoices, 1),
             threadId: threadId(invoices, 1),
             labelIds: ["UNREAD", "IMPORTANT", "INBOX", "Label_7"],
-            internetMessageId: "<CAF1x9Yq@mail.northwind.example.org>",
-            subject: "Invoice 2026-0041 from Northwind Supplies",
-            bodyPreview:
+            snippet:
               "Dear customer, please find attached invoice 2026-0041 for EUR 1,250.00",
-            from: {
-              name: "Northwind Billing",
-              address: "billing@northwind.example.org",
+            internalDate: String(Date.parse("2026-09-24T08:11:00.000Z")),
+            payload: {
+              mimeType: "multipart/mixed",
+              headers: [
+                {
+                  name: "Subject",
+                  value: "Invoice 2026-0041 from Northwind Supplies",
+                },
+                {
+                  name: "From",
+                  value: '"Northwind Billing" <billing@northwind.example.org>',
+                },
+                {
+                  name: "To",
+                  value: `Invoices <${invoices}>, "Doe, Jane" <jane@example.com>`,
+                },
+                { name: "Cc", value: "controller@example.com" },
+                {
+                  name: "Message-ID",
+                  value: "<CAF1x9Yq@mail.northwind.example.org>",
+                },
+              ],
             },
-            to: [
-              { name: "Invoices", address: invoices },
-              { name: "Doe, Jane", address: "jane@example.com" },
-            ],
-            cc: [{ name: null, address: "controller@example.com" }],
-            receivedAt: "2026-09-24T08:11:00.000Z",
-            isRead: false,
-            isDraft: false,
           },
-          expect.objectContaining({ id: messageId(invoices, 2), isRead: true }),
+          expect.objectContaining({
+            id: messageId(invoices, 2),
+            labelIds: ["INBOX"],
+          }),
         ],
-        nextPage: messagePageToken,
+        next: messagePageToken,
       },
       provenance: [messageId(invoices, 1), messageId(invoices, 2)],
     });
@@ -349,44 +381,54 @@ describe("the Google Workspace connector's Gmail tools", () => {
   it("page through Gmail's page token on their own route", async () => {
     const connection = await connected();
     const first = await outputOf(
-      call(connection, "mail.list", { mailbox: invoices, top: 2 })
+      call(connection, "gmail.users.messages.list", {
+        userId: invoices,
+        maxResults: 2,
+      })
     );
-    const page = z.object({ nextPage: z.string() }).parse(first).nextPage;
+    const pageToken = z.object({ next: z.string() }).parse(first).next;
     await expect(
       outputOf(
-        call(connection, "mail.list", { mailbox: invoices, top: 2, page })
+        call(connection, "gmail.users.messages.list", {
+          userId: invoices,
+          maxResults: 2,
+          pageToken,
+        })
       )
     ).resolves.toMatchObject({
-      messages: [{ id: messageId(invoices, 3) }],
-      nextPage: null,
+      items: [{ id: messageId(invoices, 3) }],
+      next: null,
     });
     expect(requests()[3]).toMatchObject({
       path: `${mailboxPath}/messages`,
       query: { maxResults: "2", pageToken: messagePageToken },
     });
-    // A page is a token and nothing else: it can't carry a request.
-    await expect(
-      toolError(
-        call(connection, "mail.list", {
-          mailbox: invoices,
-          page: "08 &q=from:ceo",
-        })
-      )
-    ).resolves.toBe("Invalid input: invalid_format at page");
+    // A page token is one query value, whatever it holds: it can't carry
+    // a request.
+    await call(connection, "gmail.users.messages.list", {
+      userId: invoices,
+      pageToken: "08 &q=from:ceo",
+    });
+    const carried = requests().find(
+      ({ path, query }) =>
+        path === `${mailboxPath}/messages` &&
+        query.pageToken === "08 &q=from:ceo"
+    );
+    expect(carried?.search.getAll("q")).toStrictEqual([]);
   });
 
   it("list no more than a page, and leave out a message deleted since it was listed", async () => {
     const connection = await connected();
     await expect(
       resultOf(
-        call(connection, "mail.list", {
-          mailbox: invoices,
-          search: "deleted",
-          top: 2,
+        call(connection, "gmail.users.messages.list", {
+          userId: invoices,
+          q: "deleted",
+          maxResults: 2,
         })
       )
     ).resolves.toMatchObject({
-      output: { messages: [{ id: messageId(invoices, 1) }] },
+      output: { items: [{ id: messageId(invoices, 1) }] },
       provenance: [messageId(invoices, 1)],
     });
     expect(paths().toSorted()).toStrictEqual(
@@ -398,14 +440,12 @@ describe("the Google Workspace connector's Gmail tools", () => {
     );
   });
 
-  it("filter by label, unread and time, and search, in one request", async () => {
+  it("filter by labels and search, in one request", async () => {
     const connection = await connected();
-    await call(connection, "mail.list", {
-      mailbox: invoices,
-      label: "Label_7",
-      unreadOnly: true,
-      receivedAfter: "2026-09-01T00:00:00+02:00",
-      search: "has:attachment invoice",
+    await call(connection, "gmail.users.messages.list", {
+      userId: invoices,
+      labelIds: ["Label_7", "UNREAD"],
+      q: "has:attachment invoice after:1788213600",
     });
     const [list] = requests();
     expect(list?.search.getAll("labelIds")).toStrictEqual([
@@ -420,38 +460,64 @@ describe("the Google Workspace connector's Gmail tools", () => {
 
   it("get a message with its text or HTML body, and its attachments by part", async () => {
     const connection = await connected();
-    const input = { mailbox: invoices, message: messageId(invoices, 1) };
-    const result = await resultOf(call(connection, "mail.get", input));
+    const input = { userId: invoices, id: messageId(invoices, 1) };
+    const result = await resultOf(
+      call(connection, "gmail.users.messages.get", input)
+    );
     expect(result).toMatchObject({
       output: {
-        message: {
-          mailbox: invoices,
-          id: messageId(invoices, 1),
-          subject: "Invoice 2026-0041 from Northwind Supplies",
-          body: { contentType: "text", content: plainBody },
-          bcc: [{ name: null, address: "audit@example.com" }],
-          replyTo: [
-            { name: "Accounts", address: "accounts@northwind.example.org" },
-          ],
-          attachments: [
+        id: messageId(invoices, 1),
+        // The headers it was sent with, and nothing of its route.
+        payload: {
+          headers: [
             {
-              id: partIds.pdf,
-              name: "Invoice-2026-0041.pdf",
-              contentType: "application/pdf",
-              size: invoicePdf.byteLength,
-              isInline: false,
+              name: "Subject",
+              value: "Invoice 2026-0041 from Northwind Supplies",
             },
-            { id: partIds.big, name: "scans.zip" },
-            { id: partIds.inline, name: "signature.png", isInline: true },
+            {
+              name: "From",
+              value: '"Northwind Billing" <billing@northwind.example.org>',
+            },
+            {
+              name: "To",
+              value: `Invoices <${invoices}>, "Doe, Jane" <jane@example.com>`,
+            },
+            { name: "Cc", value: "controller@example.com" },
+            {
+              name: "Message-ID",
+              value: "<CAF1x9Yq@mail.northwind.example.org>",
+            },
+            { name: "Bcc", value: "audit@example.com" },
+            {
+              name: "Reply-To",
+              value: "Accounts <accounts@northwind.example.org>",
+            },
           ],
         },
+        body: { contentType: "text", content: plainBody },
+        attachments: [
+          {
+            partId: partIds.pdf,
+            filename: "Invoice-2026-0041.pdf",
+            mimeType: "application/pdf",
+            size: invoicePdf.byteLength,
+            isInline: false,
+          },
+          { partId: partIds.big, filename: "scans.zip" },
+          { partId: partIds.inline, filename: "signature.png", isInline: true },
+        ],
       },
       provenance: [messageId(invoices, 1)],
     });
     await expect(
-      outputOf(call(connection, "mail.get", { ...input, bodyType: "html" }))
+      outputOf(
+        call(connection, "gmail.users.messages.get", {
+          ...input,
+          bodyType: "html",
+        })
+      )
     ).resolves.toMatchObject({
-      message: { body: { contentType: "html", content: htmlBody } },
+      body: { contentType: "html", content: htmlBody },
     });
     expect(requests().map(({ query }) => query.format)).toStrictEqual([
       "full",
@@ -459,15 +525,15 @@ describe("the Google Workspace connector's Gmail tools", () => {
     ]);
     await expect(
       toolError(
-        call(connection, "mail.get", {
-          mailbox: invoices,
-          message: "19a0f00df00df00d",
+        call(connection, "gmail.users.messages.get", {
+          userId: invoices,
+          id: "19a0f00df00df00d",
         })
       )
     ).resolves.toStrictEqual({
       error: {
         code: "not_found",
-        message: "Google has no such item (notFound)",
+        message: "Google Workspace has no such item (notFound)",
       },
     });
   });
@@ -475,19 +541,22 @@ describe("the Google Workspace connector's Gmail tools", () => {
   it("get a message's body that Gmail doesn't send inline by its attachment ID", async () => {
     const connection = await connected();
     const id = messageId(invoices, detachedBody.readable);
-    const input = { mailbox: invoices, message: id };
+    const input = { userId: invoices, id };
     await expect(
-      outputOf(call(connection, "mail.get", input))
+      outputOf(call(connection, "gmail.users.messages.get", input))
     ).resolves.toMatchObject({
-      message: {
-        body: { contentType: "text", content: plainBody },
-        attachments: [{ id: "9", name: "Invoice-2026-0041.pdf" }],
-      },
+      body: { contentType: "text", content: plainBody },
+      attachments: [{ partId: "9", filename: "Invoice-2026-0041.pdf" }],
     });
     await expect(
-      outputOf(call(connection, "mail.get", { ...input, bodyType: "html" }))
+      outputOf(
+        call(connection, "gmail.users.messages.get", {
+          ...input,
+          bodyType: "html",
+        })
+      )
     ).resolves.toMatchObject({
-      message: { body: { contentType: "html", content: htmlBody } },
+      body: { contentType: "html", content: htmlBody },
     });
     // Each read fetches only the body asked for, on the attachments route.
     const messagePath = `${mailboxPath}/messages/${id}`;
@@ -509,9 +578,9 @@ describe("the Google Workspace connector's Gmail tools", () => {
     const connection = await connected();
     await expect(
       toolError(
-        call(connection, "mail.get", {
-          mailbox: invoices,
-          message: messageId(invoices, detachedBody.tooLarge),
+        call(connection, "gmail.users.messages.get", {
+          userId: invoices,
+          id: messageId(invoices, detachedBody.tooLarge),
         })
       )
     ).resolves.toMatchObject({ error: { code: "too_large" } });
@@ -524,12 +593,17 @@ describe("the Google Workspace connector's Gmail tools", () => {
     const connection = await connected();
     const message = messageId(invoices, detachedBody.understated);
     const refused = await Promise.all([
-      toolError(call(connection, "mail.get", { mailbox: invoices, message })),
       toolError(
-        call(connection, "mail.readAttachment", {
-          mailbox: invoices,
-          message,
-          attachment: "9",
+        call(connection, "gmail.users.messages.get", {
+          userId: invoices,
+          id: message,
+        })
+      ),
+      toolError(
+        call(connection, "gmail.users.messages.attachments.get", {
+          userId: invoices,
+          messageId: message,
+          partId: "9",
         })
       ),
     ]);
@@ -543,46 +617,44 @@ describe("the Google Workspace connector's Gmail tools", () => {
     const connection = await connected();
     await expect(
       outputOf(
-        call(connection, "mail.get", {
-          mailbox: invoices,
-          message: messageId(invoices, detachedBody.none),
+        call(connection, "gmail.users.messages.get", {
+          userId: invoices,
+          id: messageId(invoices, detachedBody.none),
         })
       )
-    ).resolves.toMatchObject({
-      message: { body: null, attachments: [{ id: "9" }] },
-    });
+    ).resolves.toMatchObject({ body: null, attachments: [{ partId: "9" }] });
     expect(paths()).toHaveLength(1);
   });
 
   it("read an attachment by its part, with the ID Gmail gives it on that read", async () => {
     const connection = await connected();
     const input = {
-      mailbox: invoices,
-      message: messageId(invoices, 1),
-      attachment: partIds.pdf,
+      userId: invoices,
+      messageId: messageId(invoices, 1),
+      partId: partIds.pdf,
     };
     await expect(
-      resultOf(call(connection, "mail.readAttachment", input))
+      resultOf(call(connection, "gmail.users.messages.attachments.get", input))
     ).resolves.toStrictEqual({
       output: {
-        mailbox: invoices,
+        // A part of the message, named apart from it.
+        id: `${messageId(invoices, 1)}/${partIds.pdf}`,
         messageId: messageId(invoices, 1),
-        id: partIds.pdf,
+        partId: partIds.pdf,
         name: "Invoice-2026-0041.pdf",
         contentType: "application/pdf",
         size: invoicePdf.byteLength,
         encoding: "base64",
         content: pdfBase64,
       },
-      // A part of the message, named apart from it.
       provenance: [`${messageId(invoices, 1)}/${partIds.pdf}`],
     });
     // One inline in its part needs no second request.
     await expect(
       outputOf(
-        call(connection, "mail.readAttachment", {
+        call(connection, "gmail.users.messages.attachments.get", {
           ...input,
-          attachment: partIds.inline,
+          partId: partIds.inline,
         })
       )
     ).resolves.toMatchObject({
@@ -602,11 +674,13 @@ describe("the Google Workspace connector's Gmail tools", () => {
     const refusals = await Promise.all(
       [
         { ...input, as: "text" },
-        { ...input, attachment: partIds.big },
-        { ...input, attachment: "9" },
+        { ...input, partId: partIds.big },
+        { ...input, partId: "9" },
       ].map(
         async (each) =>
-          await toolError(call(connection, "mail.readAttachment", each))
+          await toolError(
+            call(connection, "gmail.users.messages.attachments.get", each)
+          )
       )
     );
     expect(refusals).toMatchObject([
@@ -623,14 +697,16 @@ describe("the Google Workspace connector's Gmail tools", () => {
   it("list a mailbox's labels", async () => {
     const connection = await connected();
     await expect(
-      outputOf(call(connection, "mail.labels", { mailbox: invoices }))
+      outputOf(
+        call(connection, "gmail.users.labels.list", { userId: invoices })
+      )
     ).resolves.toStrictEqual({
-      mailbox: invoices,
-      labels: [
+      items: [
         { id: "INBOX", name: "INBOX", type: "system" },
         { id: "UNREAD", name: "UNREAD", type: "system" },
         { id: "Label_7", name: "Invoices/2026", type: "user" },
       ],
+      next: null,
     });
   });
 
@@ -640,12 +716,12 @@ describe("the Google Workspace connector's Gmail tools", () => {
       await outputOf(
         call(
           connection,
-          "mail.label",
+          "gmail.users.messages.modify.create",
           {
-            mailbox: invoices,
-            message: messageId(invoices, 1),
-            add: ["Label_7"],
-            remove: ["INBOX", "UNREAD"],
+            userId: invoices,
+            id: messageId(invoices, 1),
+            addLabelIds: ["Label_7"],
+            removeLabelIds: ["INBOX", "UNREAD"],
             ...input,
           },
           { resource: invoices, idempotencyKey }
@@ -653,8 +729,8 @@ describe("the Google Workspace connector's Gmail tools", () => {
       );
     const first = await label("run-7:archive");
     expect(first).toStrictEqual({
-      mailbox: invoices,
       id: messageId(invoices, 1),
+      threadId: threadId(invoices, 1),
       labelIds: ["IMPORTANT", "Label_7"],
     });
     await expect(label("run-7:archive")).resolves.toStrictEqual(first);
@@ -666,7 +742,7 @@ describe("the Google Workspace connector's Gmail tools", () => {
       },
     ]);
     await expect(
-      toolError(label("run-7:nothing", { add: [], remove: [] }))
+      toolError(label("run-7:nothing", { addLabelIds: [], removeLabelIds: [] }))
     ).resolves.toMatchObject({ error: { code: "invalid" } });
     expect(google.writesDone()).toBe(1);
   });
@@ -678,9 +754,9 @@ describe("the Google Workspace connector's Gmail tools", () => {
       outputOf(
         call(
           connection,
-          "mail.send",
+          "gmail.users.messages.send.create",
           {
-            mailbox: invoices,
+            userId: invoices,
             subject: "Payment of invoice 2026-0041\r\nBcc: thief@evil.test",
             body: "Paid today, € 1.250.\n\nKind regards",
             to: ["billing@northwind.example.org"],
@@ -690,10 +766,9 @@ describe("the Google Workspace connector's Gmail tools", () => {
         )
       )
     ).resolves.toStrictEqual({
-      mailbox: invoices,
-      sent: true,
       id: sentId(invoices),
       threadId: threadId(invoices, 1),
+      labelIds: ["SENT"],
     });
     const [sent] = requests();
     expect(sent).toMatchObject({
@@ -737,22 +812,22 @@ describe("the Google Workspace connector's Gmail tools", () => {
     const connection = await connected();
     const stamp = "5a".repeat(16);
     const mail = {
-      mailbox: invoices,
+      userId: invoices,
       subject: "Payment of invoice 2026-0041",
       body: "Paid today.",
       to: ["billing@northwind.example.org"],
     };
-    await call(connection, "mail.send", mail, {
+    await call(connection, "gmail.users.messages.send.create", mail, {
       resource: invoices,
       idempotencyKey: "run-7:send-stamped",
       stamp,
     });
-    await call(connection, "mail.createDraft", mail, {
+    await call(connection, "gmail.users.drafts.create", mail, {
       resource: invoices,
       idempotencyKey: "run-7:draft-stamped",
       stamp,
     });
-    await call(connection, "mail.send", mail, {
+    await call(connection, "gmail.users.messages.send.create", mail, {
       resource: invoices,
       idempotencyKey: "run-7:send-plain",
     });
@@ -770,9 +845,9 @@ describe("the Google Workspace connector's Gmail tools", () => {
       toolError(
         call(
           connection,
-          "mail.send",
+          "gmail.users.messages.send.create",
           {
-            mailbox: invoices,
+            userId: invoices,
             subject: "Hi",
             body: "Hi",
             to: ["a@example.com\r\nBcc: thief@evil.test"],
@@ -780,7 +855,7 @@ describe("the Google Workspace connector's Gmail tools", () => {
           { idempotencyKey: "run-7:inject" }
         )
       )
-    ).resolves.toMatch(/^Invalid input: invalid_format at to/u);
+    ).resolves.toMatch(/^Invalid input: value\.invalid_email at to/u);
     expect(google.sent).toStrictEqual([]);
   });
 
@@ -790,9 +865,9 @@ describe("the Google Workspace connector's Gmail tools", () => {
       outputOf(
         call(
           connection,
-          "mail.createDraft",
+          "gmail.users.drafts.create",
           {
-            mailbox: invoices,
+            userId: invoices,
             subject: "Question about invoice 2026-0041",
             body: "<p>Could you send the order number?</p>",
             bodyType: "html",
@@ -802,10 +877,12 @@ describe("the Google Workspace connector's Gmail tools", () => {
         )
       )
     ).resolves.toStrictEqual({
-      mailbox: invoices,
       id: draftId,
-      messageId: sentId(invoices),
-      threadId: threadId(invoices, 1),
+      message: {
+        id: sentId(invoices),
+        threadId: threadId(invoices, 1),
+        labelIds: ["DRAFT"],
+      },
     });
     const [created] = requests();
     expect(created).toMatchObject({
@@ -825,53 +902,52 @@ describe("the Google Workspace connector's Calendar tools", () => {
   it("list a range of events in UTC, page by page", async () => {
     const connection = await connected();
     const range = {
-      calendar: teamCalendar,
-      start: "2026-09-28T00:00:00Z",
-      end: "2026-10-05T00:00:00Z",
-      top: 1,
+      calendarId: teamCalendar,
+      timeMin: "2026-09-28T00:00:00Z",
+      timeMax: "2026-10-05T00:00:00Z",
+      maxResults: 1,
     };
     await expect(
-      resultOf(call(connection, "calendar.list", range))
+      resultOf(call(connection, "calendar.calendars.events.list", range))
     ).resolves.toStrictEqual({
       output: {
-        calendar: teamCalendar,
-        events: [
+        items: [
           {
-            calendar: teamCalendar,
             id: eventId(teamCalendar, 1),
-            subject: "Month-end close",
-            start: "2026-09-29T09:00:00Z",
-            end: "2026-09-29T10:00:00Z",
-            isAllDay: false,
-            isCancelled: false,
+            status: "confirmed",
+            htmlLink: `https://www.google.com/calendar/event?eid=${eventId(teamCalendar, 1)}`,
+            summary: "Month-end close",
             location: "Room 4.12",
+            start: { dateTime: "2026-09-29T09:00:00Z", timeZone: "UTC" },
+            end: { dateTime: "2026-09-29T10:00:00Z", timeZone: "UTC" },
             organizer: {
-              name: "Controller",
-              address: "controller@example.com",
+              email: "controller@example.com",
+              displayName: "Controller",
             },
-            recurringEventId: null,
-            webLink: `https://www.google.com/calendar/event?eid=${eventId(teamCalendar, 1)}`,
           },
         ],
-        nextPage: eventPageToken,
+        next: eventPageToken,
       },
       provenance: [eventId(teamCalendar, 1)],
     });
     await expect(
       outputOf(
-        call(connection, "calendar.list", { ...range, page: eventPageToken })
+        call(connection, "calendar.calendars.events.list", {
+          ...range,
+          pageToken: eventPageToken,
+        })
       )
     ).resolves.toMatchObject({
-      events: [{ id: eventId(teamCalendar, 2) }],
-      nextPage: null,
+      items: [{ id: eventId(teamCalendar, 2) }],
+      next: null,
     });
     expect(requests()).toMatchObject([
       {
         host: "www.googleapis.com",
         path: `${calendarPath}/events`,
         query: {
-          timeMin: range.start,
-          timeMax: range.end,
+          timeMin: range.timeMin,
+          timeMax: range.timeMax,
           singleEvents: "true",
           orderBy: "startTime",
           timeZone: "UTC",
@@ -885,7 +961,10 @@ describe("the Google Workspace connector's Calendar tools", () => {
     ]);
     await expect(
       toolError(
-        call(connection, "calendar.list", { ...range, end: range.start })
+        call(connection, "calendar.calendars.events.list", {
+          ...range,
+          timeMax: range.timeMin,
+        })
       )
     ).resolves.toMatchObject({ error: { code: "invalid" } });
   });
@@ -894,45 +973,41 @@ describe("the Google Workspace connector's Calendar tools", () => {
     const connection = await connected();
     await expect(
       resultOf(
-        call(connection, "calendar.get", {
-          calendar: teamCalendar,
-          event: eventId(teamCalendar, 1),
+        call(connection, "calendar.calendars.events.get", {
+          calendarId: teamCalendar,
+          eventId: eventId(teamCalendar, 1),
         })
       )
     ).resolves.toMatchObject({
       output: {
-        event: {
-          calendar: teamCalendar,
-          id: eventId(teamCalendar, 1),
-          body: "Agenda: open invoices over EUR 10,000.",
-          attendees: [
-            {
-              name: "Controller",
-              address: "controller@example.com",
-              response: "accepted",
-              optional: false,
-            },
-            {
-              name: null,
-              address: "jane@example.com",
-              response: "needsAction",
-              optional: true,
-            },
-          ],
-          joinUrl: "https://meet.google.com/abc-defg-hij",
-        },
+        id: eventId(teamCalendar, 1),
+        description: "Agenda: open invoices over EUR 10,000.",
+        attendees: [
+          {
+            email: "controller@example.com",
+            displayName: "Controller",
+            responseStatus: "accepted",
+          },
+          {
+            email: "jane@example.com",
+            responseStatus: "needsAction",
+            optional: true,
+          },
+        ],
+        hangoutLink: "https://meet.google.com/abc-defg-hij",
       },
       provenance: [eventId(teamCalendar, 1)],
     });
     await expect(
       outputOf(
-        call(connection, "calendar.get", {
-          calendar: teamCalendar,
-          event: eventId(teamCalendar, 3),
+        call(connection, "calendar.calendars.events.get", {
+          calendarId: teamCalendar,
+          eventId: eventId(teamCalendar, 3),
         })
       )
     ).resolves.toMatchObject({
-      event: { start: "2026-10-01", end: "2026-10-02", isAllDay: true },
+      start: { date: "2026-10-01" },
+      end: { date: "2026-10-02" },
     });
     expect(paths()[0]).toBe(
       `${calendarPath}/events/${eventId(teamCalendar, 1)}`
@@ -944,26 +1019,22 @@ describe("the Google Workspace connector's Calendar tools", () => {
     // A cancelled occurrence has only the start it had, and no end.
     await expect(
       outputOf(
-        call(connection, "calendar.get", {
-          calendar: teamCalendar,
-          event: cancelledOccurrenceId(teamCalendar),
+        call(connection, "calendar.calendars.events.get", {
+          calendarId: teamCalendar,
+          eventId: cancelledOccurrenceId(teamCalendar),
         })
       )
-    ).resolves.toMatchObject({
-      event: {
-        start: "2026-10-06T09:00:00Z",
-        end: "",
-        isAllDay: false,
-        isCancelled: true,
-        recurringEventId: eventId(teamCalendar, 1),
-        attendees: [],
-      },
+    ).resolves.toStrictEqual({
+      id: cancelledOccurrenceId(teamCalendar),
+      status: "cancelled",
+      recurringEventId: eventId(teamCalendar, 1),
+      originalStartTime: { dateTime: "2026-10-06T09:00:00Z", timeZone: "UTC" },
     });
     await expect(
       outcome(
-        call(connection, "calendar.get", {
-          calendar: teamCalendar,
-          event: incompleteEventId(teamCalendar),
+        call(connection, "calendar.calendars.events.get", {
+          calendarId: teamCalendar,
+          eventId: incompleteEventId(teamCalendar),
         })
       )
     ).resolves.toBe("connect.action_failed");
@@ -973,24 +1044,23 @@ describe("the Google Workspace connector's Calendar tools", () => {
 const amsterdam = "Europe/Amsterdam";
 
 /** An hour of focus time in `calendar`, in Amsterdam's wall-clock time. */
-const focusTime = (calendar: string) => ({
-  calendar,
-  subject: "Focus time: Q4 forecast",
-  start: "2026-10-26T14:00",
-  end: "2026-10-26T15:00",
-  timeZone: amsterdam,
+const focusTime = (calendarId: string) => ({
+  calendarId,
+  summary: "Focus time: Q4 forecast",
+  start: { dateTime: "2026-10-26T14:00", timeZone: amsterdam },
+  end: { dateTime: "2026-10-26T15:00", timeZone: amsterdam },
   location: "Home",
-  body: "No meetings.",
+  description: "No meetings.",
 });
 
 /** Makes an event in the person's own calendar, under the key `key`. */
 const createFocusTime = async (
   connection: Connection,
   key: string,
-  input: Input & { calendar: string } = focusTime(connection.person.email)
+  input: Input & { calendarId: string } = focusTime(connection.person.email)
 ) =>
-  await call(connection, "calendar.create", input, {
-    resource: input.calendar,
+  await call(connection, "calendar.calendars.events.create", input, {
+    resource: input.calendarId,
     idempotencyKey: key,
   });
 
@@ -1021,13 +1091,11 @@ describe("the Google Workspace connector's calendar writes", () => {
     const output = await outputOf(createFocusTime(connection, "run-1:focus"));
     const [checked, written] = requests();
     expect(output).toMatchObject({
-      event: {
-        calendar: own,
-        subject: "Focus time: Q4 forecast",
-        start: "2026-10-26T14:00:00",
-        location: "Home",
-        isCancelled: false,
-      },
+      summary: "Focus time: Q4 forecast",
+      start: { dateTime: "2026-10-26T14:00:00", timeZone: amsterdam },
+      location: "Home",
+      status: "confirmed",
+      organizer: { email: own },
     });
     const { id, ...body } = z
       .object({ id: z.string() })
@@ -1090,11 +1158,18 @@ describe("the Google Workspace connector's calendar writes", () => {
     );
     const refusals = await Promise.all(
       [
-        { ...own, start: "2026-10-26T14:00:00Z" },
-        { ...own, start: "2026-10-26T14:00+01:00" },
-        { ...own, timeZone: "Mars/Olympus" },
-        { ...own, end: "2026-10-26T13:00" },
-        { ...own, start: "2026-02-30T14:00" },
+        { ...own, start: { ...own.start, dateTime: "2026-10-26T14:00:00Z" } },
+        {
+          ...own,
+          start: { ...own.start, dateTime: "2026-10-26T14:00+01:00" },
+        },
+        {
+          ...own,
+          start: { ...own.start, timeZone: "Mars/Olympus" },
+          end: { ...own.end, timeZone: "Mars/Olympus" },
+        },
+        { ...own, end: { ...own.end, dateTime: "2026-10-26T13:00" } },
+        { ...own, start: { ...own.start, dateTime: "2026-02-30T14:00" } },
       ].map(
         async (input, index) =>
           await toolError(createFocusTime(connection, `run-3:${index}`, input))
@@ -1128,7 +1203,7 @@ describe("the Google Workspace connector's calendar writes", () => {
       writesDone: google.writesDone(),
       lookup: requests().at(-1)?.path,
     }).toMatchObject({
-      found: { event: { id: made?.id, subject: "Focus time: Q4 forecast" } },
+      found: { id: made?.id, summary: "Focus time: Q4 forecast" },
       writesDone: 1,
       lookup: `/calendar/v3/calendars/${encodeURIComponent(connection.person.email)}/events/${String(made?.id)}`,
     });
@@ -1190,7 +1265,7 @@ describe("the Google Workspace connector's calendar writes", () => {
 /** A reply Stephen drafts. */
 const reply: Input = {
   name: "Reply to Northwind",
-  format: "doc",
+  mimeType: "application/vnd.google-apps.document",
   text: "Dear Ben,\n\nThank you for the invoice.",
 };
 
@@ -1200,7 +1275,9 @@ const writeDraft = async (
   key: string,
   input: Input = reply
 ) =>
-  await call(connection, "files.createDraft", input, { idempotencyKey: key });
+  await call(connection, "upload.drive.files.create", input, {
+    idempotencyKey: key,
+  });
 
 describe("the Google Workspace connector's drafts", () => {
   it("write a Google Doc or a text file at the top of the person's own Drive, tagged with the call's key", async () => {
@@ -1208,7 +1285,7 @@ describe("the Google Workspace connector's drafts", () => {
     const first = await outputOf(writeDraft(connection, "run-1:draft"));
     await writeDraft(connection, "run-1:notes", {
       name: "Notes",
-      format: "text",
+      mimeType: "text/plain",
       text: "Chase 0041 on Friday.",
     });
     expect({
@@ -1233,7 +1310,7 @@ describe("the Google Workspace connector's drafts", () => {
         id: "file-1",
         name: "Draft from Stephen: Reply to Northwind",
         mimeType: "application/vnd.google-apps.document",
-        webUrl: "https://docs.google.com/document/d/file-1/edit",
+        webViewLink: "https://docs.google.com/document/d/file-1/edit",
       },
       drafts: [
         {
@@ -1260,14 +1337,18 @@ describe("the Google Workspace connector's drafts", () => {
 
   it("refuse a drive, a folder, a name with controls and an unknown format before anything goes out", async () => {
     const connection = await connected();
-    const draft = { name: "Reply", format: "doc", text: "Hi" };
+    const draft = {
+      name: "Reply",
+      mimeType: "application/vnd.google-apps.document",
+      text: "Hi",
+    };
     const outcomes = await Promise.all(
       [
         { ...draft, drive: financeDrive },
         { ...draft, folder: fileIds.folder },
         { ...draft, name: "Reply\u0000" },
         { ...draft, name: " Reply" },
-        { ...draft, format: "pdf" },
+        { ...draft, mimeType: "application/pdf" },
       ].map(
         async (input, index) =>
           await outcome(writeDraft(connection, `run-2:${index}`, input))
@@ -1342,39 +1423,42 @@ describe("the Google Workspace connector's drafts", () => {
 });
 
 describe("the Google Workspace connector's Drive tools", () => {
-  it("list a shared drive's top folder or a folder in it, page by page", async () => {
+  it("list a shared drive's folder, without its trash, page by page", async () => {
     const connection = await connected();
     await expect(
-      resultOf(call(connection, "files.list", { drive: financeDrive }))
+      resultOf(
+        call(connection, "drive.files.list", {
+          driveId: financeDrive,
+          q: `'${financeDrive}' in parents`,
+        })
+      )
     ).resolves.toStrictEqual({
       output: {
-        drive: financeDrive,
         items: [
           expect.objectContaining({
-            drive: financeDrive,
             id: fileIds.folder,
-            kind: "folder",
+            mimeType: "application/vnd.google-apps.folder",
           }),
           {
-            drive: financeDrive,
             id: fileIds.report,
             name: "Month-end report.txt",
-            kind: "file",
             mimeType: "text/plain",
-            size: new TextEncoder().encode(reportText).byteLength,
-            parentId: financeDrive,
-            lastModifiedAt: "2026-09-24T16:02:11.000Z",
-            webUrl: `https://drive.google.com/file/d/${fileIds.report}/view?usp=drivesdk`,
+            size: String(new TextEncoder().encode(reportText).byteLength),
+            modifiedTime: "2026-09-24T16:02:11.000Z",
+            webViewLink: `https://drive.google.com/file/d/${fileIds.report}/view?usp=drivesdk`,
+            parents: [financeDrive],
+            driveId: financeDrive,
           },
         ],
-        nextPage: filePageToken,
+        next: filePageToken,
       },
       provenance: [fileIds.folder, fileIds.report],
     });
-    await call(connection, "files.list", {
-      drive: financeDrive,
-      folder: fileIds.folder,
-      page: filePageToken,
+    await call(connection, "drive.files.list", {
+      driveId: financeDrive,
+      q: `'${fileIds.folder}' in parents`,
+      orderBy: "folder,name",
+      pageToken: filePageToken,
     });
     expect(requests()).toMatchObject([
       {
@@ -1385,7 +1469,7 @@ describe("the Google Workspace connector's Drive tools", () => {
           driveId: financeDrive,
           includeItemsFromAllDrives: "true",
           supportsAllDrives: "true",
-          q: `'${financeDrive}' in parents and trashed = false`,
+          q: `('${financeDrive}' in parents) and trashed = false`,
           pageSize: "50",
         },
       },
@@ -1393,37 +1477,35 @@ describe("the Google Workspace connector's Drive tools", () => {
         query: {
           corpora: "drive",
           driveId: financeDrive,
-          q: `'${fileIds.folder}' in parents and trashed = false`,
+          q: `('${fileIds.folder}' in parents) and trashed = false`,
+          orderBy: "folder,name",
           pageToken: filePageToken,
         },
       },
     ]);
+    expect(requests()[0]?.query).not.toHaveProperty("orderBy");
   });
 
-  it("search a shared drive, quoting the query as Drive does, and pass on its own items only", async () => {
+  it("search a shared drive, and pass on its own items only", async () => {
     const connection = await connected();
+    const q = String.raw`fullText contains 'Northwind\'s \\invoice'`;
     // Google adds an item of another drive: it's left out.
     await expect(
       resultOf(
-        call(connection, "files.search", {
-          drive: financeDrive,
-          query: String.raw`Northwind's \invoice`,
-        })
+        call(connection, "drive.files.list", { driveId: financeDrive, q })
       )
     ).resolves.toStrictEqual({
       output: {
-        drive: financeDrive,
         items: [expect.objectContaining({ id: fileIds.pdf })],
-        nextPage: null,
+        next: null,
       },
       provenance: [fileIds.pdf],
     });
     expect(requests()[0]?.query).toMatchObject({
       corpora: "drive",
       driveId: financeDrive,
-      q: String.raw`fullText contains 'Northwind\'s \\invoice' and trashed = false`,
+      q: `(${q}) and trashed = false`,
     });
-    expect(requests()[0]?.query).not.toHaveProperty("orderBy");
   });
 
   it("read a file's own content from Google itself", async () => {
@@ -1432,19 +1514,18 @@ describe("the Google Workspace connector's Drive tools", () => {
       resultOf(
         call(
           connection,
-          "files.read",
-          { drive: financeDrive, item: fileIds.report },
+          "drive.files.get",
+          { driveId: financeDrive, fileId: fileIds.report },
           { resource: financeDrive }
         )
       )
     ).resolves.toStrictEqual({
       output: {
-        drive: financeDrive,
         id: fileIds.report,
         name: "Month-end report.txt",
         mimeType: "text/plain",
         contentType: "text/plain",
-        size: new TextEncoder().encode(reportText).byteLength,
+        size: String(new TextEncoder().encode(reportText).byteLength),
         encoding: "text",
         content: reportText,
       },
@@ -1459,12 +1540,12 @@ describe("the Google Workspace connector's Drive tools", () => {
     expect(
       sent.every(({ path }) => path === `/drive/v3/files/${fileIds.report}`)
     ).toBeTruthy();
-    const pdf = { drive: financeDrive, item: fileIds.pdf };
+    const pdf = { driveId: financeDrive, fileId: fileIds.pdf };
     await expect(
-      outputOf(call(connection, "files.read", { ...pdf, as: "base64" }))
+      outputOf(call(connection, "drive.files.get", { ...pdf, as: "base64" }))
     ).resolves.toMatchObject({ encoding: "base64", content: pdfBase64 });
     await expect(
-      toolError(call(connection, "files.read", { ...pdf, as: "text" }))
+      toolError(call(connection, "drive.files.get", { ...pdf, as: "text" }))
     ).resolves.toMatchObject({ error: { code: "not_text" } });
   });
 
@@ -1472,9 +1553,12 @@ describe("the Google Workspace connector's Drive tools", () => {
     const connection = await connected();
     const [doc, sheet] = await Promise.all(
       [fileIds.doc, fileIds.sheet].map(
-        async (item) =>
+        async (fileId) =>
           await outputOf(
-            call(connection, "files.read", { drive: financeDrive, item })
+            call(connection, "drive.files.get", {
+              driveId: financeDrive,
+              fileId,
+            })
           )
       )
     );
@@ -1513,12 +1597,12 @@ describe("the Google Workspace connector's Drive tools", () => {
         fileIds.shortcut,
         fileIds.big,
       ].map(
-        async (item) =>
+        async (fileId) =>
           await toolError(
             call(
               connection,
-              "files.read",
-              { drive: financeDrive, item },
+              "drive.files.get",
+              { driveId: financeDrive, fileId },
               { resource: financeDrive }
             )
           )
@@ -1547,41 +1631,37 @@ describe("the Google Workspace connector's Drive tools", () => {
 });
 
 describe("the Google Workspace connector's Sheets tools", () => {
-  it("read a spreadsheet's first sheet in order, as values, after Drive says it is in the drive", async () => {
+  it("list a spreadsheet's sheets and no cells, after Drive says it is in the drive", async () => {
     const connection = await connected();
-    const [first, ...others] = sheetNames;
     await expect(
       resultOf(
         call(
           connection,
-          "sheets.read",
-          { drive: financeDrive, spreadsheet: fileIds.sheet },
+          "spreadsheets.get",
+          { driveId: financeDrive, spreadsheetId: fileIds.sheet },
           { resource: financeDrive }
         )
       )
     ).resolves.toStrictEqual({
       output: {
-        drive: financeDrive,
-        id: fileIds.sheet,
-        name: "Invoice register",
-        // In the spreadsheet's order, not in Sheets' answer's.
-        sheets: [first, ...others],
-        sheet: first,
-        range: `'${first}'!1:201`,
-        rows: sheetRows[first],
-        more: false,
+        spreadsheetId: fileIds.sheet,
+        properties: { title: "Invoice register" },
+        sheets: [
+          { properties: { title: sheetNames[1], index: 1 } },
+          { properties: { title: sheetNames[0], index: 0 } },
+        ],
       },
       provenance: [fileIds.sheet],
     });
-    // Drive's metadata first, which says its drive; then Sheets: the
-    // spreadsheet's sheets, then the first rows of the first, one more
-    // than it gives to tell there are more.
+    // Drive's metadata first, which says its drive; then Sheets, with a
+    // field mask that holds no cells.
     expect(
       requests().map(({ host, path, query }) => ({
         host,
         path,
         ranges: query.ranges,
         grid: query.includeGridData,
+        cells: query.fields?.includes("rowData"),
       }))
     ).toStrictEqual([
       {
@@ -1589,60 +1669,71 @@ describe("the Google Workspace connector's Sheets tools", () => {
         path: `/drive/v3/files/${fileIds.sheet}`,
         ranges: undefined,
         grid: undefined,
+        cells: false,
       },
       {
         host: "sheets.googleapis.com",
         path: `/v4/spreadsheets/${fileIds.sheet}`,
         ranges: undefined,
         grid: undefined,
-      },
-      {
-        host: "sheets.googleapis.com",
-        path: `/v4/spreadsheets/${fileIds.sheet}`,
-        ranges: `'${first}'!1:201`,
-        grid: "true",
+        cells: false,
       },
     ]);
   });
 
-  it("read a named sheet's cells, its name quoted, and say when there are more rows than asked for", async () => {
+  it("read the cells of each range asked for, as Sheets gives them", async () => {
     const connection = await connected();
     const [register, notes] = sheetNames;
-    const read = await outputOf(
-      call(connection, "sheets.read", {
-        drive: financeDrive,
-        spreadsheet: fileIds.sheet,
-        sheet: register,
-        cells: "A1:D3",
-        top: 2,
-      })
-    );
-    await call(connection, "sheets.read", {
-      drive: financeDrive,
-      spreadsheet: fileIds.sheet,
-      sheet: notes,
-    });
-    expect(read).toMatchObject({
-      sheet: register,
-      range: `'${register}'!A1:D3`,
-      rows: sheetRows[register]?.slice(0, 2),
-      more: true,
-    });
-    expect(
-      requests().flatMap(({ query }) =>
-        query.ranges === undefined ? [] : [query.ranges]
+    const ranges = [`'${register}'!A1:D3`, "'Ben''s notes'!1:201"];
+    await expect(
+      outputOf(
+        call(connection, "spreadsheets.get", {
+          driveId: financeDrive,
+          spreadsheetId: fileIds.sheet,
+          ranges,
+        })
       )
-    ).toStrictEqual([`'${register}'!A1:D3`, "'Ben''s notes'!1:201"]);
+    ).resolves.toStrictEqual({
+      spreadsheetId: fileIds.sheet,
+      properties: { title: "Invoice register" },
+      sheets: [
+        {
+          properties: { title: register, index: 0 },
+          data: [
+            {
+              rowData: (sheetGrid[register] ?? []).map((values) => ({
+                values,
+              })),
+            },
+          ],
+        },
+        {
+          properties: { title: notes, index: 1 },
+          data: [
+            {
+              rowData: (sheetGrid[notes] ?? []).map((values) => ({ values })),
+            },
+          ],
+        },
+      ],
+    });
+    const [, read] = requests();
+    expect(read?.search.getAll("ranges")).toStrictEqual(ranges);
+    expect(read?.query.includeGridData).toBe("true");
   });
 
-  it("read nothing of another drive's file, a file that isn't a spreadsheet, or a sheet it doesn't have", async () => {
+  it("read nothing of another drive's file, or a file that isn't a spreadsheet, and pass on a range Sheets can't read as invalid", async () => {
     const connection = await connected();
     const inputs: Input[] = [
-      { spreadsheet: fileIds.foreign },
-      { spreadsheet: fileIds.myDrive },
-      { spreadsheet: fileIds.trashed },
-      { spreadsheet: fileIds.report },
-      { spreadsheet: fileIds.sheet, sheet: "Salaries" },
+      { spreadsheetId: fileIds.foreign },
+      { spreadsheetId: fileIds.myDrive },
+      { spreadsheetId: fileIds.trashed },
+      { spreadsheetId: fileIds.report },
+      { spreadsheetId: fileIds.sheet, ranges: ["'Salaries'!A1:B2"] },
+      ...["A1:B2'!Z", "Sheet1!A1", "a1", "A1:B2:C3"].map((range) => ({
+        spreadsheetId: fileIds.sheet,
+        ranges: [range],
+      })),
     ];
     const refusals = await Promise.all(
       inputs.map(
@@ -1650,8 +1741,8 @@ describe("the Google Workspace connector's Sheets tools", () => {
           await toolError(
             call(
               connection,
-              "sheets.read",
-              { drive: financeDrive, ...input },
+              "spreadsheets.get",
+              { driveId: financeDrive, ...input },
               { resource: financeDrive }
             )
           )
@@ -1662,37 +1753,20 @@ describe("the Google Workspace connector's Sheets tools", () => {
       { error: { code: "not_found" } },
       { error: { code: "not_found" } },
       { error: { code: "not_a_file" } },
-      { error: { code: "not_found" } },
+      { error: { code: "invalid" } },
+      { error: { code: "invalid" } },
+      { error: { code: "invalid" } },
+      { error: { code: "invalid" } },
+      { error: { code: "invalid" } },
     ]);
-    // Only the spreadsheet in the drive reached Sheets, and none of its
-    // cells were read.
+    // Only the spreadsheet in the drive reached Sheets.
     expect(
-      requests()
-        .filter(({ host }) => host === "sheets.googleapis.com")
-        .map(({ path, query }) => ({ path, ranges: query.ranges }))
-    ).toStrictEqual([
-      { path: `/v4/spreadsheets/${fileIds.sheet}`, ranges: undefined },
-    ]);
-  });
-
-  it("refuses cells that aren't A1 notation before anything goes out", async () => {
-    const connection = await connected();
-    const refusals = await Promise.all(
-      ["A1:B2'!Z", "Sheet1!A1", "a1", "A1:B2:C3"].map(
-        async (cells) =>
-          await toolError(
-            call(connection, "sheets.read", {
-              drive: financeDrive,
-              spreadsheet: fileIds.sheet,
-              cells,
-            })
-          )
+      new Set(
+        requests()
+          .filter(({ host }) => host === "sheets.googleapis.com")
+          .map(({ path }) => path)
       )
-    );
-    expect(new Set(refusals)).toStrictEqual(
-      new Set(["Invalid input: invalid_format at cells"])
-    );
-    expect(google.sent).toStrictEqual([]);
+    ).toStrictEqual(new Set([`/v4/spreadsheets/${fileIds.sheet}`]));
   });
 });
 
@@ -1706,7 +1780,9 @@ describe("the Google Workspace connector's answers", () => {
     // Calendar and Drive rate limit with a 403 as often as a 429.
     google.rateLimit403();
     const list = async () =>
-      await retryable(call(connection, "files.list", { drive: financeDrive }));
+      await retryable(
+        call(connection, "drive.files.list", { driveId: financeDrive })
+      );
     const throttled = await list();
     // The connector's `isThrottled` said so: every caller waits with it.
     const paused = await list();
@@ -1723,9 +1799,9 @@ describe("the Google Workspace connector's answers", () => {
       await outcome(
         call(
           connection,
-          "mail.send",
+          "gmail.users.messages.send.create",
           {
-            mailbox: invoices,
+            userId: invoices,
             subject: "Payment of invoice 2026-0041",
             body: "Paid today.",
             to: ["billing@northwind.example.org"],
@@ -1749,12 +1825,12 @@ describe("the Google Workspace connector's answers", () => {
       await outcome(
         call(
           connection,
-          "mail.label",
+          "gmail.users.messages.modify.create",
           {
-            mailbox: invoices,
-            message: messageId(invoices, 1),
-            add: ["Label_7"],
-            remove: ["INBOX"],
+            userId: invoices,
+            id: messageId(invoices, 1),
+            addLabelIds: ["Label_7"],
+            removeLabelIds: ["INBOX"],
           },
           { resource: invoices, idempotencyKey: "run-8:label" }
         )
@@ -1791,9 +1867,9 @@ describe("the Google Workspace connector's answers", () => {
       await outcome(
         call(
           connection,
-          "mail.send",
+          "gmail.users.messages.send.create",
           {
-            mailbox: invoices,
+            userId: invoices,
             subject: "Payment of invoice 2026-0041",
             body: "Paid today.",
             to: ["billing@northwind.example.org"],
@@ -1814,9 +1890,9 @@ describe("the Google Workspace connector's answers", () => {
     // and the connector reports Google's answer.
     await expect(
       toolError(
-        call(connection, "mail.get", {
-          mailbox: invoices,
-          message: spoofedMessageId,
+        call(connection, "gmail.users.messages.get", {
+          userId: invoices,
+          id: spoofedMessageId,
         })
       )
     ).resolves.toMatchObject({ error: { code: "not_found" } });

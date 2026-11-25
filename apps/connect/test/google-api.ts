@@ -278,7 +278,7 @@ export const fakeGoogle = (holderOf: (token: string) => string | undefined) => {
         });
       }
       return json(
-        q.startsWith("fullText")
+        q.includes("fullText contains")
           ? searchResults
           : filePage(query.get("pageToken"))
       );
@@ -338,8 +338,9 @@ export const fakeGoogle = (holderOf: (token: string) => string | undefined) => {
           headers: { "content-type": query.get("mimeType") ?? "" },
         })
     ),
-    // Its metadata, or with `ranges` its grid data: the rows of the sheet
-    // the range names, quoted, whichever cells it names.
+    // Its metadata, or with `ranges` its grid data: for each range, the
+    // rows of the sheet it names, quoted, whichever cells it names. A range
+    // it can't read refuses the whole request, as Sheets does.
     route(
       sheetsHost,
       "GET",
@@ -348,28 +349,30 @@ export const fakeGoogle = (holderOf: (token: string) => string | undefined) => {
         if (files[id]?.mimeType !== "application/vnd.google-apps.spreadsheet") {
           return json(notFound, 404);
         }
-        const range = query.get("ranges");
-        if (range === null) {
-          return json(spreadsheet(id));
+        const metadata = spreadsheet(id);
+        const ranges = query.getAll("ranges");
+        if (ranges.length === 0) {
+          return json(metadata);
         }
-        const title = /^'(?<name>(?:[^']|'')+)'!/u
-          .exec(range)
-          ?.groups?.name?.replaceAll("''", "'");
-        const rows = title === undefined ? undefined : sheetGrid[title];
-        if (title === undefined || rows === undefined) {
+        const sheets = ranges.map((range) => {
+          const title = /^'(?<name>(?:[^']|'')+)'!/u
+            .exec(range)
+            ?.groups?.name?.replaceAll("''", "'");
+          const rows = title === undefined ? undefined : sheetGrid[title];
+          const sheet = metadata.sheets.find(
+            ({ properties }) => properties.title === title
+          );
+          return rows === undefined || sheet === undefined
+            ? undefined
+            : {
+                properties: sheet.properties,
+                data: [{ rowData: rows.map((values) => ({ values })) }],
+              };
+        });
+        if (sheets.includes(undefined)) {
           return json(googleError(400, "INVALID_ARGUMENT", "badRequest"), 400);
         }
-        const index = spreadsheet(id).sheets.find(
-          ({ properties }) => properties.title === title
-        )?.properties.index;
-        return json({
-          sheets: [
-            {
-              properties: { title, index },
-              data: [{ rowData: rows.map((values) => ({ values })) }],
-            },
-          ],
-        });
+        return json({ ...metadata, sheets });
       }
     ),
   ];

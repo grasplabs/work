@@ -28,8 +28,9 @@ import type {
 import { ownPlace } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
-import { gmailHost, googleFailure, googleUrl } from "./google.ts";
-import { attachmentsOf, headerOf, partSchema, textOf } from "./mime.ts";
+import { googleFailure, googleUrl } from "./google-sync.ts";
+import { gmailHost } from "./google.ts";
+import { attachmentsOf, headerOf, textOf } from "./mime.ts";
 import type { Part } from "./mime.ts";
 
 // Native sync of a person's own mailbox (GRA-1758): every message in it,
@@ -96,6 +97,26 @@ const historySchema = z.object({
   nextPageToken: z.string().nullish(),
   historyId: z.string().min(1),
 });
+
+/** One MIME part of a message, as Gmail's `payload` gives it. */
+const partSchema: z.ZodType<Part> = z.lazy(() =>
+  z.object({
+    partId: z.string().optional(),
+    mimeType: z.string().optional(),
+    filename: z.string().optional(),
+    headers: z
+      .array(z.object({ name: z.string(), value: z.string() }))
+      .optional(),
+    body: z
+      .object({
+        attachmentId: z.string().optional(),
+        size: z.number().int().nonnegative().optional(),
+        data: z.string().optional(),
+      })
+      .optional(),
+    parts: z.array(partSchema).optional(),
+  })
+);
 
 const messageSchema = z.object({
   id: z.string(),

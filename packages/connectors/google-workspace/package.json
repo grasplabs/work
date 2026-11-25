@@ -9,7 +9,6 @@
     "./google": "./src/google.ts"
   },
   "dependencies": {
-    "@grasp-os/connector-kit": "workspace:*",
     "@grasp-os/runtime": "workspace:*",
     "@grasp-os/sdk": "workspace:*",
     "zod": "catalog:"

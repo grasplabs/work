@@ -16,7 +16,8 @@ import { z } from "zod";
 
 import { fileRoutes, readFiles } from "./drive-sync.ts";
 import type { DriveFile, Scope } from "./drive-sync.ts";
-import { apisHost, googleFailure, googleUrl } from "./google.ts";
+import { googleFailure, googleUrl } from "./google-sync.ts";
+import { apisHost } from "./google.ts";
 
 // Native sync of a shared connection's picked shared drives (GRA-1758):
 // each shared drive an admin picked, as a place of its own, read through

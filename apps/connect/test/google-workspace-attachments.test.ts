@@ -33,7 +33,7 @@ const writes = () =>
   parsedRequests(google.sent).filter(({ method }) => method !== "GET");
 
 const mail = (files: readonly Attached[]) => ({
-  mailbox: invoices,
+  userId: invoices,
   subject: "Invoice 2026-0041",
   body: "Attached.",
   to: ["billing@northwind.example.org"],
@@ -44,7 +44,7 @@ const send = async (
   connection: Connection,
   files: readonly Attached[],
   key: string,
-  action = "mail.send"
+  action = "gmail.users.messages.send.create"
 ) =>
   await call(connection, action, mail(files), {
     resource: invoices,
@@ -94,7 +94,12 @@ describe("a Gmail write that attaches files", () => {
     const notes = await attach("notes.txt", "text/plain", "Paid in full.");
     const report = await attach("report.json", "application/json", '{"a":1}');
     await send(connection, [notes, report], "run-1:send");
-    await send(connection, [report], "run-1:draft", "mail.createDraft");
+    await send(
+      connection,
+      [report],
+      "run-1:draft",
+      "gmail.users.drafts.create"
+    );
     const [sent, drafted] = writes();
     const message = partsOf(rawOf(sent?.body));
     expect({
@@ -206,20 +211,20 @@ describe("a Gmail write that attaches files", () => {
     const other = await attach("b.txt", "text/plain", "beta");
     const outcomes = [
       await outcome(
-        call(connection, "mail.send", mail([file]), {
+        call(connection, "gmail.users.messages.send.create", mail([file]), {
           resource: invoices,
           idempotencyKey: "run-3:none",
         })
       ),
       await outcome(
-        call(connection, "mail.send", mail([file]), {
+        call(connection, "gmail.users.messages.send.create", mail([file]), {
           resource: invoices,
           idempotencyKey: "run-3:extra",
           attachments: bytesOf([file, other]),
         })
       ),
       await outcome(
-        call(connection, "mail.send", mail([file]), {
+        call(connection, "gmail.users.messages.send.create", mail([file]), {
           resource: invoices,
           idempotencyKey: "run-3:other",
           attachments: { [file.entry.sha256]: other.bytes },

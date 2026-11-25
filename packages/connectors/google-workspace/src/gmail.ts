@@ -1,155 +1,115 @@
 import {
   attachedFiles,
-  attachmentsInput,
-  defineTool,
-} from "@grasp-os/connector-kit/connector";
-import type { Effect } from "@grasp-os/connector-kit/connector";
-import {
-  addressesOf,
+  attachments,
   checkReadable,
   contentAs,
   fromBase64,
-  invalidCode,
-  jsonBody,
-  readAsSchema,
-  segment,
+  page,
+  tool,
   ToolError,
-} from "@grasp-os/runtime/connector";
-import { z } from "zod";
+  v,
+} from "@grasp-os/sdk/connector";
+import type {
+  Api,
+  ConnectorTool,
+  Infer,
+  ToolArgs,
+  ToolCall,
+} from "@grasp-os/sdk/connector";
 
-import {
-  gmailHost,
-  googleJson,
-  googleUrl,
-  idSchema,
-  nextPageOf,
-  pageSchema,
-  topSchema,
-} from "./google.ts";
+import { gmailHost, googleScope, nextOf } from "./google.ts";
 import {
   attachmentsOf,
   bodyPartOf,
-  headerOf,
+  headerSchema,
   partSchema,
   rawMessage,
   textOf,
 } from "./mime.ts";
 import type { Part } from "./mime.ts";
 
-// Gmail, one mailbox per call, always as `/gmail/v1/users/{mailbox}` with
+// Gmail, one mailbox per call, always as `/gmail/v1/users/{userId}` with
 // the mailbox's address, never `me`, so a call's capability binds every
 // request to its mailbox. Google lets a person's token reach their own
 // mailbox only; the binding still holds each call to the one a permission
-// names. Each result names its mailbox and the IDs of the messages it came
-// from. Labels aren't a scope: a permission is for a whole mailbox.
+// names. Labels aren't a scope: a permission is for a whole mailbox.
 // Reading, labelling and drafting stay in the person's own mailbox
 // (`own`), unlike Microsoft's shared mailboxes; sending reaches whoever the
 // message goes to (`others`).
 
-const users = "/gmail/v1/users/{mailbox}";
-
-const get = (path: string) =>
-  ({ method: "GET", host: gmailHost, path: `${users}${path}` }) as const;
-const post = (path: string) =>
-  ({ method: "POST", host: gmailHost, path: `${users}${path}` }) as const;
+const users = `${gmailHost}/gmail/v1/users/{userId}`;
+const messages = `${users}/messages`;
+const message = `${messages}/{id}`;
+const attachment = `${messages}/{messageId}/attachments/{id}`;
+const labels = `${users}/labels`;
+const modify = `${message}/modify`;
+const send = `${messages}/send`;
+const drafts = `${users}/drafts`;
 
 /** A mailbox: its address. Google's `me` alias isn't one. */
-const mailboxSchema = z.email().max(256);
+const userIdArg = v.string().max(256).email();
 
-/** Gmail's path to a mailbox, encoded. */
-const mailboxPath = (mailbox: string, path = ""): string =>
-  `/gmail/v1/users/${segment(mailbox)}${path}`;
+/** An ID Gmail gives a message. */
+const idArg = v.string().min(1).max(1024);
 
-const gmailMessage = z.object({
-  id: z.string(),
-  threadId: z.string().nullish(),
-  labelIds: z.array(z.string()).nullish(),
-  snippet: z.string().nullish(),
-  internalDate: z.string().nullish(),
-  payload: partSchema.nullish(),
-});
-type GmailMessage = z.infer<typeof gmailMessage>;
+/** Label IDs: system ones (`INBOX`, `UNREAD`) or the mailbox's own (`Label_12`). */
+const labelIdsArg = v.array(v.string().min(1).max(128)).max(100).optional();
 
-/** The headers a summary asks Gmail for. */
+/** The headers a message's metadata is read with. */
 const summaryHeaders = ["Subject", "From", "To", "Cc", "Message-ID"];
 
-const addressSchema = z.strictObject({
-  name: z.string().nullable(),
-  address: z.string().nullable(),
+/** The headers a read of a whole message passes on. */
+const messageHeaders = new Set(
+  [...summaryHeaders, "Bcc", "Reply-To"].map((name) => name.toLowerCase())
+);
+
+/** A message as Gmail gives it, narrowed to what a summary says. */
+const listedMessage = v.object({
+  id: v.string(),
+  threadId: v.string().optional(),
+  labelIds: v.array(v.string()).optional(),
+  snippet: v.string().optional(),
+  internalDate: v.string().optional(),
+  payload: v
+    .object({
+      mimeType: v.string().optional(),
+      headers: v.array(headerSchema).optional(),
+    })
+    .optional(),
+});
+type ListedMessage = Infer<typeof listedMessage>;
+
+/** A message as Gmail gives it with all its parts. */
+const fullMessage = v.object({
+  id: v.string(),
+  threadId: v.string().optional(),
+  labelIds: v.array(v.string()).optional(),
+  snippet: v.string().optional(),
+  internalDate: v.string().optional(),
+  payload: partSchema.optional(),
 });
 
-const summarySchema = z.strictObject({
-  mailbox: z.string(),
-  id: z.string(),
-  threadId: z.string().nullable(),
-  labelIds: z.array(z.string()),
-  internetMessageId: z.string().nullable(),
-  subject: z.string().nullable(),
-  bodyPreview: z.string().nullable(),
-  from: addressSchema.nullable(),
-  to: z.array(addressSchema),
-  cc: z.array(addressSchema),
-  receivedAt: z.string().nullable(),
-  isRead: z.boolean(),
-  isDraft: z.boolean(),
-});
-
-/** When Gmail received a message, from its `internalDate` (ms), in ISO. */
-const receivedAtOf = (internalDate: string | null | undefined) => {
-  const ms = Number(internalDate ?? Number.NaN);
-  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
-};
-
-const summaryOf = (
-  mailbox: string,
-  message: GmailMessage
-): z.infer<typeof summarySchema> => {
-  const headers = message.payload?.headers;
-  const labelIds = message.labelIds ?? [];
-  const [from] = addressesOf(headerOf(headers, "From"));
-  return {
-    mailbox,
-    id: message.id,
-    threadId: message.threadId ?? null,
-    labelIds,
-    internetMessageId: headerOf(headers, "Message-ID") ?? null,
-    subject: headerOf(headers, "Subject") ?? null,
-    bodyPreview: message.snippet ?? null,
-    from: from ?? null,
-    to: addressesOf(headerOf(headers, "To")),
-    cc: addressesOf(headerOf(headers, "Cc")),
-    receivedAt: receivedAtOf(message.internalDate),
-    isRead: !labelIds.includes("UNREAD"),
-    isDraft: labelIds.includes("DRAFT"),
-  };
-};
-
-/** A label's ID: a system one (`INBOX`, `UNREAD`) or the mailbox's own (`Label_12`). */
-const labelIdSchema = z
-  .string()
-  .min(1)
-  .max(128)
-  .regex(/^[\w-]+$/u);
+/** How a message's body comes back: as its text part, or its HTML part. */
+const bodyType = v.enum(["text", "html"]);
 
 /** Messages a list returns unless asked for more. */
-const defaultTop = 10;
+const defaultMaxResults = 10;
 
 /** Message reads a list sends at once. */
 const concurrentReads = 5;
 
 /** A message's metadata, or `null` if it's gone since it was listed. */
 const metadataOf = async (
-  mailbox: string,
+  api: Api,
+  userId: string,
   id: string
-): Promise<GmailMessage | null> => {
+): Promise<ListedMessage | null> => {
   try {
-    return await googleJson(
-      googleUrl(gmailHost, mailboxPath(mailbox, `/messages/${segment(id)}`), {
-        format: "metadata",
-        metadataHeaders: summaryHeaders,
-      }),
-      gmailMessage
-    );
+    return await api.get(message, {
+      path: { userId, id },
+      query: { format: "metadata", metadataHeaders: summaryHeaders },
+      returns: listedMessage,
+    });
   } catch (error) {
     if (error instanceof ToolError && error.details?.code === "not_found") {
       return null;
@@ -158,116 +118,6 @@ const metadataOf = async (
   }
 };
 
-const messageList = z.object({
-  messages: z.array(z.object({ id: z.string() })).nullish(),
-  nextPageToken: z.string().nullish(),
-});
-
-const listMessages = defineTool({
-  name: "mail.list",
-  description:
-    "Lists messages in a mailbox, newest first, optionally only those with a label (a label ID from mail.labels, or a system one such as INBOX), unread, received after a time, or matching a Gmail search.",
-  input: z.strictObject({
-    mailbox: mailboxSchema,
-    label: labelIdSchema.optional(),
-    search: z.string().min(1).max(512).optional(),
-    unreadOnly: z.boolean().optional(),
-    receivedAfter: z.iso.datetime({ offset: true }).optional(),
-    top: topSchema(25),
-    page: pageSchema,
-  }),
-  output: z.strictObject({
-    mailbox: z.string(),
-    messages: z.array(summarySchema),
-    nextPage: z.string().nullable(),
-  }),
-  readOnly: true,
-  reach: "own",
-  resource: "mailbox",
-  // Gmail lists IDs only; each message's metadata is one more request.
-  routes: [get("/messages"), get("/messages/{message}")],
-  run: async ({
-    mailbox,
-    label,
-    search,
-    unreadOnly,
-    receivedAfter,
-    top,
-    page,
-  }) => {
-    const after =
-      receivedAfter === undefined
-        ? undefined
-        : `after:${Math.floor(Date.parse(receivedAfter) / 1000)}`;
-    const q = [search, after].filter((each) => each !== undefined).join(" ");
-    const labelIds = [
-      ...(label === undefined ? [] : [label]),
-      ...(unreadOnly === true ? ["UNREAD"] : []),
-    ];
-    const { messages, nextPageToken } = await googleJson(
-      googleUrl(
-        gmailHost,
-        mailboxPath(mailbox, "/messages"),
-        {
-          maxResults: String(top ?? defaultTop),
-          q: q === "" ? undefined : q,
-          labelIds,
-        },
-        page
-      ),
-      messageList
-    );
-    // No more than a page, a few at a time; one deleted since it was
-    // listed (404) is left out.
-    const ids = (messages ?? [])
-      .slice(0, top ?? defaultTop)
-      .map(({ id }) => id);
-    const found: GmailMessage[] = [];
-    for (let start = 0; start < ids.length; start += concurrentReads) {
-      // oxlint-disable-next-line no-await-in-loop -- a few reads at a time
-      const read = await Promise.all(
-        ids
-          .slice(start, start + concurrentReads)
-          .map(async (id) => await metadataOf(mailbox, id))
-      );
-      found.push(...read.filter((message) => message !== null));
-    }
-    return {
-      output: {
-        mailbox,
-        messages: found.map((message) => summaryOf(mailbox, message)),
-        nextPage: nextPageOf(nextPageToken ?? undefined),
-      },
-      provenance: found.map(({ id }) => id),
-    };
-  },
-});
-
-const attachmentSchema = z.strictObject({
-  id: z.string(),
-  name: z.string(),
-  contentType: z.string().nullable(),
-  size: z.number(),
-  isInline: z.boolean(),
-});
-
-/** How a message's body comes back: as its text part, or its HTML part. */
-const bodyTypeSchema = z.enum(["text", "html"]);
-
-/** A message with all its parts. */
-const fullMessage = async (mailbox: string, id: string) =>
-  await googleJson(
-    googleUrl(gmailHost, mailboxPath(mailbox, `/messages/${segment(id)}`), {
-      format: "full",
-    }),
-    gmailMessage
-  );
-
-const gmailAttachment = z.object({
-  size: z.number().int().nonnegative().nullish(),
-  data: z.string(),
-});
-
 /**
  * A part's bytes: inline, or fetched by the attachment ID this read of the
  * message gave it. Within the read limit by the size Gmail reports before
@@ -275,292 +125,67 @@ const gmailAttachment = z.object({
  * word, not the content.
  */
 const partBytes = async (
-  mailbox: string,
-  message: string,
+  api: Api,
+  userId: string,
+  messageId: string,
   part: Part
 ): Promise<Uint8Array> => {
-  const { attachmentId, data, size } = part.body ?? {};
+  const { attachmentId = "", data, size } = part.body ?? {};
   let encoded = data;
   if (encoded === undefined) {
     checkReadable(size ?? 0);
-    const fetched = await googleJson(
-      googleUrl(
-        gmailHost,
-        mailboxPath(
-          mailbox,
-          `/messages/${segment(message)}/attachments/${segment(attachmentId ?? "")}`
-        )
-      ),
-      gmailAttachment
-    );
-    encoded = fetched.data;
+    ({ data: encoded } = await api.get(attachment, {
+      path: { userId, messageId, id: attachmentId },
+      returns: v.object({ data: v.string() }),
+    }));
   }
   const bytes = fromBase64(encoded);
   checkReadable(bytes.byteLength);
   return bytes;
 };
 
-const getMessage = defineTool({
-  name: "mail.get",
-  description:
-    "Gets one message of a mailbox with its body, and its attachments' names, types and sizes (read one with mail.readAttachment). The body is null when the message has no text or HTML body.",
-  input: z.strictObject({
-    mailbox: mailboxSchema,
-    message: idSchema,
-    bodyType: bodyTypeSchema.optional(),
-  }),
-  output: z.strictObject({
-    message: summarySchema.extend({
-      body: z
-        .strictObject({ contentType: bodyTypeSchema, content: z.string() })
-        .nullable(),
-      bcc: z.array(addressSchema),
-      replyTo: z.array(addressSchema),
-      attachments: z.array(attachmentSchema),
-    }),
-  }),
-  readOnly: true,
-  // One item's content: what the Brain keeps of a person's own (GRA-1730).
-  answersItem: true,
-  reach: "own",
-  resource: "mailbox",
-  routes: [
-    get("/messages/{message}"),
-    get("/messages/{message}/attachments/{attachment}"),
-  ],
-  run: async ({ mailbox, message: id, bodyType }) => {
-    const message = await fullMessage(mailbox, id);
-    const headers = message.payload?.headers;
-    // A body too large for Gmail to send inline is fetched as its
-    // attachments are, up to the same limit.
-    const found = bodyPartOf(message.payload ?? undefined, bodyType ?? "text");
-    const body =
-      found === null
-        ? null
-        : {
-            contentType: found.contentType,
-            content: textOf(
-              found.part,
-              await partBytes(mailbox, id, found.part)
-            ),
-          };
-    return {
-      output: {
-        message: {
-          ...summaryOf(mailbox, message),
-          body,
-          bcc: addressesOf(headerOf(headers, "Bcc")),
-          replyTo: addressesOf(headerOf(headers, "Reply-To")),
-          attachments: attachmentsOf(message.payload ?? undefined).map(
-            ({ part: _part, ...attachment }) => attachment
-          ),
-        },
-      },
-      provenance: [message.id],
-    };
-  },
+/** A message Gmail sent, made or relabelled, as it answers. */
+const writtenMessage = v.object({
+  id: v.string(),
+  threadId: v.string().optional(),
+  labelIds: v.array(v.string()).optional(),
 });
 
-const readAttachment = defineTool({
-  name: "mail.readAttachment",
-  description:
-    "Reads an attachment of a message (its ID from mail.get): as text, or as base64 to extract its content (a PDF, say). Up to 4 MiB.",
-  input: z.strictObject({
-    mailbox: mailboxSchema,
-    message: idSchema,
-    attachment: z
-      .string()
-      .max(64)
-      .regex(/^\d+(?:\.\d+)*$/u),
-    as: readAsSchema.optional(),
-  }),
-  output: z.strictObject({
-    mailbox: z.string(),
-    messageId: z.string(),
-    id: z.string(),
-    name: z.string(),
-    contentType: z.string().nullable(),
-    size: z.number(),
-    encoding: readAsSchema,
-    content: z.string().nullable(),
-  }),
-  readOnly: true,
-  // One item's content: what the Brain keeps of a person's own (GRA-1730).
-  answersItem: true,
-  reach: "own",
-  // A workflow action may keep it as a file of its run (GRA-886).
-  answersFile: true,
-  resource: "mailbox",
-  routes: [
-    get("/messages/{message}"),
-    get("/messages/{message}/attachments/{attachment}"),
-  ],
-  run: async ({ mailbox, message: id, attachment: partId, as }) => {
-    // The message first, for the part's name, size and current attachment
-    // ID: Gmail's attachment IDs change on every read, its part IDs don't.
-    const message = await fullMessage(mailbox, id);
-    const found = attachmentsOf(message.payload ?? undefined).find(
-      (each) => each.id === partId
-    );
-    if (found === undefined) {
-      throw new ToolError("This message has no such attachment", {
-        code: "not_found",
-      });
-    }
-    checkReadable(found.size);
-    const bytes = await partBytes(mailbox, id, found.part);
-    return {
-      output: {
-        mailbox,
-        messageId: message.id,
-        id: found.id,
-        name: found.name,
-        contentType: found.contentType,
-        size: bytes.byteLength,
-        ...contentAs(bytes, as ?? "base64"),
-      },
-      // A part of the message, named apart from it.
-      provenance: [`${message.id}/${found.id}`],
-    };
-  },
-});
+const draft = v.object({ id: v.string(), message: writtenMessage });
 
-const listLabels = defineTool({
-  name: "mail.labels",
-  description:
-    "Lists a mailbox's labels, system ones (INBOX, UNREAD) and its own, with the IDs mail.list and mail.label take.",
-  input: z.strictObject({ mailbox: mailboxSchema }),
-  output: z.strictObject({
-    mailbox: z.string(),
-    labels: z.array(
-      z.strictObject({
-        id: z.string(),
-        name: z.string(),
-        type: z.string().nullable(),
-      })
-    ),
-  }),
-  readOnly: true,
-  reach: "own",
-  resource: "mailbox",
-  routes: [get("/labels")],
-  run: async ({ mailbox }) => {
-    const { labels } = await googleJson(
-      googleUrl(gmailHost, mailboxPath(mailbox, "/labels")),
-      z.object({
-        labels: z
-          .array(
-            z.object({
-              id: z.string(),
-              name: z.string(),
-              type: z.string().nullish(),
-            })
-          )
-          .nullish(),
-      })
-    );
-    return {
-      output: {
-        mailbox,
-        labels: (labels ?? []).map(({ id, name, type }) => ({
-          id,
-          name,
-          type: type ?? null,
-        })),
-      },
-    };
-  },
-});
-
-const labelMessage = defineTool({
-  name: "mail.label",
-  description:
-    "Adds labels to a message of a mailbox and removes others: to label it, mark it read (remove UNREAD) or move it (add a label, remove INBOX to archive). Adding SPAM also reports the message to Google as spam.",
-  input: z.strictObject({
-    mailbox: mailboxSchema,
-    message: idSchema,
-    add: z.array(labelIdSchema).max(100).optional(),
-    remove: z.array(labelIdSchema).max(100).optional(),
-  }),
-  output: z.strictObject({
-    mailbox: z.string(),
-    id: z.string(),
-    labelIds: z.array(z.string()),
-  }),
-  readOnly: false,
-  reach: "own",
-  destructive: true,
-  // Adding labels a message has and removing ones it lacks changes
-  // nothing: sent again, it leaves the same labels (within the recovery
-  // horizon, before people relabel it).
-  repeatable: true,
-  resource: "mailbox",
-  routes: [post("/messages/{message}/modify")],
-  describe: {
-    title: "Change an email's labels",
-    fields: [
-      { label: "Mailbox", input: "mailbox" },
-      { label: "Message", input: "message" },
-      { label: "Add labels", input: "add" },
-      { label: "Remove labels", input: "remove" },
-    ],
-  },
-  run: async ({ mailbox, message: id, add = [], remove = [] }) => {
-    if (add.length === 0 && remove.length === 0) {
-      throw new ToolError("Name a label to add or to remove", {
-        code: invalidCode,
-      });
-    }
-    const modified = await googleJson(
-      googleUrl(
-        gmailHost,
-        mailboxPath(mailbox, `/messages/${segment(id)}/modify`)
-      ),
-      gmailMessage,
-      jsonBody({ addLabelIds: add, removeLabelIds: remove })
-    );
-    return {
-      output: {
-        mailbox,
-        id: modified.id,
-        labelIds: modified.labelIds ?? [],
-      },
-    };
-  },
-});
-
-const recipientsSchema = z.array(z.email().max(256)).max(100);
+const recipients = v.array(v.string().max(256).email()).max(100);
 
 /** A message to send or keep as a draft. */
-const draftInput = z.strictObject({
-  mailbox: mailboxSchema,
-  subject: z.string().max(1024),
-  body: z.string().max(1024 * 1024),
-  bodyType: bodyTypeSchema.optional(),
-  to: recipientsSchema.min(1),
-  cc: recipientsSchema.optional(),
-  bcc: recipientsSchema.optional(),
-  replyTo: recipientsSchema.optional(),
-  // Run files a workflow attaches (GRA-887), each by digest; their bytes
-  // come beside the input, checked by the kit before the tool runs.
-  attachments: attachmentsInput,
-});
+const outgoingArgs = {
+  userId: userIdArg,
+  subject: v.string().max(1024),
+  body: v.string().max(1024 * 1024),
+  bodyType: bodyType.optional(),
+  to: recipients.min(1),
+  cc: recipients.optional(),
+  bcc: recipients.optional(),
+  replyTo: recipients.optional(),
+  attachments,
+};
 
 /**
- * A message as the person asked to confirm it reads it: every property of
- * {@link draftInput}, so nothing it sends goes unshown.
+ * A message as the person asked to confirm it reads it: every one of
+ * {@link outgoingArgs}, so nothing it sends goes unshown.
  */
-const draftFields = [
-  { label: "From", input: "mailbox" },
-  { label: "To", input: "to" },
-  { label: "Cc", input: "cc" },
-  { label: "Bcc", input: "bcc" },
-  { label: "Reply to", input: "replyTo" },
-  { label: "Subject", input: "subject" },
-  { label: "Body", input: "body" },
-  { label: "Body format", input: "bodyType" },
-  { label: "Attachments", input: "attachments" },
+const outgoingFields = [
+  { label: "From", arg: "userId" },
+  { label: "To", arg: "to" },
+  { label: "Cc", arg: "cc" },
+  { label: "Bcc", arg: "bcc" },
+  { label: "Reply to", arg: "replyTo" },
+  { label: "Subject", arg: "subject" },
+  { label: "Body", arg: "body" },
+  { label: "Body format", arg: "bodyType" },
+  { label: "Attachments", arg: "attachments" },
 ] as const;
+
+/** Who a message goes to: what core records with a run's stamp. */
+const outgoingMail = { recipients: ["to", "cc", "bcc"] } as const;
 
 /**
  * The message as Gmail's `raw` takes it, from the mailbox itself, with
@@ -568,100 +193,314 @@ const draftFields = [
  * keeps it, so the copy a watched mailbox receives names the run that sent
  * it (core's workflows/mail-stamps.ts).
  */
-const rawOf = (input: z.output<typeof draftInput>, effect: Effect): string =>
+const rawOf = (
+  args: ToolArgs<typeof outgoingArgs>,
+  call: Pick<ToolCall, "stamp" | "files">
+): string =>
   rawMessage({
-    from: input.mailbox,
-    subject: input.subject,
-    body: input.body,
-    bodyType: input.bodyType ?? "text",
-    to: input.to,
-    cc: input.cc ?? [],
-    bcc: input.bcc ?? [],
-    replyTo: input.replyTo ?? [],
-    stamp: effect.stamp,
-    attachments: attachedFiles(input.attachments, effect),
+    from: args.userId,
+    subject: args.subject,
+    body: args.body,
+    bodyType: args.bodyType ?? "text",
+    to: args.to,
+    cc: args.cc ?? [],
+    bcc: args.bcc ?? [],
+    replyTo: args.replyTo ?? [],
+    stamp: call.stamp,
+    attachments: attachedFiles(args.attachments, call),
   });
 
-const sentMessage = z.object({
-  id: z.string(),
-  threadId: z.string().nullish(),
-});
-
-const sendMail = defineTool({
-  name: "mail.send",
-  description:
-    "Sends a message from a mailbox, keeping a copy in its Sent label.",
-  input: draftInput,
-  output: z.strictObject({
-    mailbox: z.string(),
-    sent: z.literal(true),
-    id: z.string(),
-    threadId: z.string().nullable(),
+export const gmailTools: Readonly<Record<string, ConnectorTool>> = {
+  "gmail.users.messages.list": tool({
+    description:
+      "Lists messages in a mailbox, newest first, with their metadata: those with every label in labelIds (a label ID from gmail.users.labels.list, or a system one such as INBOX or UNREAD) and matching q, a Gmail search such as 'from:billing has:attachment after:2026/09/01'.",
+    args: {
+      userId: userIdArg,
+      labelIds: labelIdsArg,
+      q: v.string().min(1).max(512).optional(),
+      maxResults: v.number().integer().min(1).max(25).optional(),
+      pageToken: v.string().min(1).max(4096).optional(),
+    },
+    returns: page(listedMessage),
+    readOnly: true,
+    mail: true,
+    reach: "own",
+    resource: "userId",
+    scopes: [googleScope("gmail.readonly")],
+    // Gmail lists IDs only; each message's metadata is one more request.
+    routes: [`GET ${messages}`, `GET ${message}`],
+    handler: async (
+      { userId, labelIds, q, maxResults = defaultMaxResults, pageToken },
+      api
+    ) => {
+      const listed = await api.get(messages, {
+        path: { userId },
+        query: { maxResults, q, labelIds, pageToken },
+        returns: v.object({
+          messages: v.array(v.object({ id: v.string() })).optional(),
+          nextPageToken: v.string().optional(),
+        }),
+      });
+      // No more than a page, a few at a time; one deleted since it was
+      // listed (404) is left out.
+      const ids = (listed.messages ?? [])
+        .slice(0, maxResults)
+        .map(({ id }) => id);
+      const items: ListedMessage[] = [];
+      for (let start = 0; start < ids.length; start += concurrentReads) {
+        // oxlint-disable-next-line no-await-in-loop -- a few reads at a time
+        const read = await Promise.all(
+          ids
+            .slice(start, start + concurrentReads)
+            .map(async (id) => await metadataOf(api, userId, id))
+        );
+        items.push(...read.filter((each) => each !== null));
+      }
+      return { items, next: nextOf(listed.nextPageToken) };
+    },
   }),
-  readOnly: false,
-  reach: "others",
-  destructive: false,
-  takesFiles: true,
-  resource: "mailbox",
-  routes: [post("/messages/send")],
-  describe: { title: "Send an email", fields: draftFields },
-  run: async (input, effect) => {
-    const sent = await googleJson(
-      googleUrl(gmailHost, mailboxPath(input.mailbox, "/messages/send")),
-      sentMessage,
-      jsonBody({ raw: rawOf(input, effect) })
-    );
-    return {
-      output: {
-        mailbox: input.mailbox,
-        sent: true as const,
-        id: sent.id,
-        threadId: sent.threadId ?? null,
-      },
-    };
-  },
-});
-
-const createDraft = defineTool({
-  name: "mail.createDraft",
-  description: "Creates a draft in a mailbox, for a person to review and send.",
-  input: draftInput,
-  output: z.strictObject({
-    mailbox: z.string(),
-    id: z.string(),
-    messageId: z.string(),
-    threadId: z.string().nullable(),
+  "gmail.users.messages.get": tool({
+    description:
+      "Gets one message of a mailbox with its headers, its body as text (bodyType html for its HTML part), and its attachments' parts, names, types and sizes (read one with gmail.users.messages.attachments.get). The body is null when the message has no text or HTML body.",
+    args: { userId: userIdArg, id: idArg, bodyType: bodyType.optional() },
+    returns: listedMessage.extend({
+      body: v.object({ contentType: bodyType, content: v.string() }).nullable(),
+      attachments: v.array(
+        v.object({
+          partId: v.string(),
+          filename: v.string(),
+          mimeType: v.string().nullable(),
+          size: v.number(),
+          isInline: v.boolean(),
+        })
+      ),
+    }),
+    readOnly: true,
+    // One item's content: what the Brain keeps of a person's own (GRA-1730).
+    answersItem: true,
+    mail: true,
+    reach: "own",
+    resource: "userId",
+    scopes: [googleScope("gmail.readonly")],
+    routes: [`GET ${message}`, `GET ${attachment}`],
+    handler: async ({ userId, id, bodyType: prefer = "text" }, api) => {
+      const { payload, ...read } = await api.get(message, {
+        path: { userId, id },
+        query: { format: "full" },
+        returns: fullMessage,
+      });
+      // A body too large for Gmail to send inline is fetched as its
+      // attachments are, up to the same limit.
+      const found = bodyPartOf(payload, prefer);
+      const body =
+        found === null
+          ? null
+          : {
+              contentType: found.contentType,
+              content: textOf(
+                found.part,
+                await partBytes(api, userId, read.id, found.part)
+              ),
+            };
+      return {
+        ...read,
+        payload: {
+          mimeType: payload?.mimeType,
+          headers: payload?.headers?.filter(({ name }) =>
+            messageHeaders.has(name.toLowerCase())
+          ),
+        },
+        body,
+        attachments: attachmentsOf(payload).map(
+          ({ id: partId, name, contentType, size, isInline }) => ({
+            partId,
+            filename: name,
+            mimeType: contentType,
+            size,
+            isInline,
+          })
+        ),
+      };
+    },
   }),
-  readOnly: false,
-  reach: "own",
-  destructive: false,
-  takesFiles: true,
-  resource: "mailbox",
-  routes: [post("/drafts")],
-  describe: { title: "Create a draft email", fields: draftFields },
-  run: async (input, effect) => {
-    const draft = await googleJson(
-      googleUrl(gmailHost, mailboxPath(input.mailbox, "/drafts")),
-      z.object({ id: z.string(), message: sentMessage }),
-      jsonBody({ message: { raw: rawOf(input, effect) } })
-    );
-    return {
-      output: {
-        mailbox: input.mailbox,
-        id: draft.id,
-        messageId: draft.message.id,
-        threadId: draft.message.threadId ?? null,
-      },
-    };
-  },
-});
-
-export const gmailTools = [
-  listMessages,
-  getMessage,
-  readAttachment,
-  listLabels,
-  labelMessage,
-  sendMail,
-  createDraft,
-];
+  "gmail.users.messages.attachments.get": tool({
+    description:
+      "Reads an attachment of a message by its partId (from gmail.users.messages.get): as text, or as base64 to extract its content (a PDF, say). Up to 4 MiB.",
+    args: {
+      userId: userIdArg,
+      messageId: idArg,
+      partId: v.string().min(1).max(64),
+      as: v.enum(["text", "base64"]).optional(),
+    },
+    returns: v.object({
+      /** The part, named apart from its message: `<messageId>/<partId>`. */
+      id: v.string(),
+      messageId: v.string(),
+      partId: v.string(),
+      name: v.string(),
+      contentType: v.string().nullable(),
+      size: v.number(),
+      encoding: v.enum(["text", "base64"]),
+      content: v.string(),
+    }),
+    readOnly: true,
+    // One item's content: what the Brain keeps of a person's own (GRA-1730).
+    answersItem: true,
+    // A workflow action may keep it as a file of its run (GRA-886).
+    answersFile: true,
+    mail: true,
+    reach: "own",
+    resource: "userId",
+    scopes: [googleScope("gmail.readonly")],
+    routes: [`GET ${attachment}`, `GET ${message}`],
+    handler: async ({ userId, messageId, partId, as = "base64" }, api) => {
+      // The message first, for the part's name, size and current attachment
+      // ID: Gmail's attachment IDs change on every read, its part IDs don't.
+      const read = await api.get(message, {
+        path: { userId, id: messageId },
+        query: { format: "full" },
+        returns: fullMessage,
+      });
+      const found = attachmentsOf(read.payload).find(
+        (each) => each.id === partId
+      );
+      if (found === undefined) {
+        throw new ToolError("This message has no such attachment", {
+          code: "not_found",
+        });
+      }
+      checkReadable(found.size);
+      const bytes = await partBytes(api, userId, read.id, found.part);
+      return {
+        id: `${read.id}/${found.id}`,
+        messageId: read.id,
+        partId: found.id,
+        name: found.name,
+        contentType: found.contentType,
+        size: bytes.byteLength,
+        ...contentAs(bytes, as),
+      };
+    },
+  }),
+  "gmail.users.labels.list": tool({
+    description:
+      "Lists a mailbox's labels, system ones (INBOX, UNREAD) and its own, with the IDs gmail.users.messages.list and gmail.users.messages.modify.create take.",
+    args: { userId: userIdArg },
+    returns: page(
+      v.object({
+        id: v.string(),
+        name: v.string(),
+        type: v.string().optional(),
+      })
+    ),
+    readOnly: true,
+    mail: true,
+    reach: "own",
+    resource: "userId",
+    scopes: [googleScope("gmail.readonly")],
+    routes: [`GET ${labels}`],
+    handler: async ({ userId }, api) => {
+      const listed = await api.get(labels, {
+        path: { userId },
+        returns: v.object({
+          labels: v
+            .array(
+              v.object({
+                id: v.string(),
+                name: v.string(),
+                type: v.string().optional(),
+              })
+            )
+            .optional(),
+        }),
+      });
+      // Gmail answers every label at once.
+      return { items: listed.labels ?? [], next: null };
+    },
+  }),
+  "gmail.users.messages.modify.create": tool({
+    description:
+      "Adds labels to a message of a mailbox and removes others: to label it, mark it read (remove UNREAD) or move it (add a label, remove INBOX to archive). Adding SPAM also reports the message to Google as spam.",
+    args: {
+      userId: userIdArg,
+      id: idArg,
+      addLabelIds: labelIdsArg,
+      removeLabelIds: labelIdsArg,
+    },
+    returns: writtenMessage,
+    readOnly: false,
+    mail: true,
+    reach: "own",
+    // Adding labels a message has and removing ones it lacks changes
+    // nothing: sent again, it leaves the same labels (within the recovery
+    // horizon, before people relabel it).
+    repeatable: true,
+    resource: "userId",
+    scopes: [googleScope("gmail.modify")],
+    routes: [`POST ${modify}`],
+    describe: {
+      title: "Change an email's labels",
+      fields: [
+        { label: "Mailbox", arg: "userId" },
+        { label: "Message", arg: "id" },
+        { label: "Add labels", arg: "addLabelIds" },
+        { label: "Remove labels", arg: "removeLabelIds" },
+      ],
+    },
+    handler: async (
+      { userId, id, addLabelIds = [], removeLabelIds = [] },
+      api
+    ) => {
+      if (addLabelIds.length === 0 && removeLabelIds.length === 0) {
+        throw new ToolError("Name a label to add or to remove", {
+          code: "invalid",
+        });
+      }
+      return await api.post(modify, {
+        path: { userId, id },
+        body: { addLabelIds, removeLabelIds },
+        returns: writtenMessage,
+      });
+    },
+  }),
+  "gmail.users.messages.send.create": tool({
+    description:
+      "Sends a message from a mailbox, keeping a copy in its Sent label.",
+    args: outgoingArgs,
+    returns: writtenMessage,
+    readOnly: false,
+    takesFiles: true,
+    mail: outgoingMail,
+    reach: "others",
+    resource: "userId",
+    scopes: [googleScope("gmail.send")],
+    routes: [`POST ${send}`],
+    describe: { title: "Send an email", fields: outgoingFields },
+    handler: async (args, api, call) =>
+      await api.post(send, {
+        path: { userId: args.userId },
+        body: { raw: rawOf(args, call) },
+        returns: writtenMessage,
+      }),
+  }),
+  "gmail.users.drafts.create": tool({
+    description:
+      "Creates a draft in a mailbox, for a person to review and send.",
+    args: outgoingArgs,
+    returns: draft,
+    readOnly: false,
+    takesFiles: true,
+    mail: outgoingMail,
+    reach: "own",
+    resource: "userId",
+    scopes: [googleScope("gmail.modify")],
+    routes: [`POST ${drafts}`],
+    describe: { title: "Create a draft email", fields: outgoingFields },
+    handler: async (args, api, call) =>
+      await api.post(drafts, {
+        path: { userId: args.userId },
+        body: { message: { raw: rawOf(args, call) } },
+        returns: draft,
+      }),
+  }),
+};

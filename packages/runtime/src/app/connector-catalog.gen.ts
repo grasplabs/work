@@ -6,72 +6,80 @@
  * actions: the arguments a call passes and the answer it gets back.
  */
 export interface ConnectorCatalog {
-  readonly "google-workspace.calendar@1": {
+  readonly "google-workspace.calendar.calendars.events@1": {
     readonly create: {
-      readonly input: { body?: string; calendar: string; end: string; location?: string; showAs?: "busy" | "free"; start: string; subject: string; timeZone: string };
-      readonly output: { event: { calendar: string; end: string; id: string; isAllDay: boolean; isCancelled: boolean; location: string | null; organizer: { address: string | null; name: string | null } | null; recurringEventId: string | null; start: string; subject: string | null; webLink: string | null } };
+      readonly input: { calendarId: string; description?: string; end: { dateTime: string; timeZone: string }; location?: string; start: { dateTime: string; timeZone: string }; summary: string; transparency?: "opaque" | "transparent" };
+      readonly output: { end?: { date?: string; dateTime?: string; timeZone?: string }; htmlLink?: string; id: string; location?: string; organizer?: { displayName?: string; email?: string }; originalStartTime?: { date?: string; dateTime?: string; timeZone?: string }; recurringEventId?: string; start?: { date?: string; dateTime?: string; timeZone?: string }; status?: string; summary?: string };
     };
     readonly get: {
-      readonly input: { calendar: string; event: string };
-      readonly output: { event: { attendees: Array<{ address: string | null; name: string | null; optional: boolean; response: string | null }>; body: string | null; calendar: string; end: string; id: string; isAllDay: boolean; isCancelled: boolean; joinUrl: string | null; location: string | null; organizer: { address: string | null; name: string | null } | null; recurringEventId: string | null; start: string; subject: string | null; webLink: string | null } };
+      readonly input: { calendarId: string; eventId: string };
+      readonly output: { attendees?: Array<{ displayName?: string; email?: string; optional?: boolean; responseStatus?: string }>; description?: string; end?: { date?: string; dateTime?: string; timeZone?: string }; hangoutLink?: string; htmlLink?: string; id: string; location?: string; organizer?: { displayName?: string; email?: string }; originalStartTime?: { date?: string; dateTime?: string; timeZone?: string }; recurringEventId?: string; start?: { date?: string; dateTime?: string; timeZone?: string }; status?: string; summary?: string };
     };
     readonly list: {
-      readonly input: { calendar: string; end: string; page?: string; start: string; top?: number };
-      readonly output: { calendar: string; events: Array<{ calendar: string; end: string; id: string; isAllDay: boolean; isCancelled: boolean; location: string | null; organizer: { address: string | null; name: string | null } | null; recurringEventId: string | null; start: string; subject: string | null; webLink: string | null }>; nextPage: string | null };
+      readonly input: { calendarId: string; maxResults?: number; pageToken?: string; timeMax: string; timeMin: string };
+      readonly output: { items: Array<{ end?: { date?: string; dateTime?: string; timeZone?: string }; htmlLink?: string; id: string; location?: string; organizer?: { displayName?: string; email?: string }; originalStartTime?: { date?: string; dateTime?: string; timeZone?: string }; recurringEventId?: string; start?: { date?: string; dateTime?: string; timeZone?: string }; status?: string; summary?: string }>; next: string | null };
     };
   };
-  readonly "google-workspace.files@1": {
-    readonly createDraft: {
-      readonly input: { format: "doc" | "text"; name: string; text: string };
-      readonly output: { id: string; mimeType: string; name: string; webUrl: string | null };
-    };
-    readonly list: {
-      readonly input: { drive: string; folder?: string; page?: string; top?: number };
-      readonly output: { drive: string; items: Array<{ drive: string; id: string; kind: "file" | "folder" | "other"; lastModifiedAt: string | null; mimeType: string; name: string; parentId: string | null; size: number | null; webUrl: string | null }>; nextPage: string | null };
-    };
-    readonly read: {
-      readonly input: { as?: "text" | "base64"; drive: string; item: string };
-      readonly output: { content: string | null; contentType: string; drive: string; encoding: "text" | "base64"; id: string; mimeType: string; name: string; size: number };
-    };
-    readonly search: {
-      readonly input: { drive: string; page?: string; query: string; top?: number };
-      readonly output: { drive: string; items: Array<{ drive: string; id: string; kind: "file" | "folder" | "other"; lastModifiedAt: string | null; mimeType: string; name: string; parentId: string | null; size: number | null; webUrl: string | null }>; nextPage: string | null };
-    };
-  };
-  readonly "google-workspace.mail@1": {
-    readonly createDraft: {
-      readonly input: { attachments?: Array<{ file: string }>; bcc?: Array<string>; body: string; bodyType?: "text" | "html"; cc?: Array<string>; mailbox: string; replyTo?: Array<string>; subject: string; to: Array<string> };
-      readonly output: { id: string; mailbox: string; messageId: string; threadId: string | null };
-    };
+  readonly "google-workspace.drive.files@1": {
     readonly get: {
-      readonly input: { bodyType?: "text" | "html"; mailbox: string; message: string };
-      readonly output: { message: { attachments: Array<{ contentType: string | null; id: string; isInline: boolean; name: string; size: number }>; bcc: Array<{ address: string | null; name: string | null }>; body: { content: string; contentType: "text" | "html" } | null; bodyPreview: string | null; cc: Array<{ address: string | null; name: string | null }>; from: { address: string | null; name: string | null } | null; id: string; internetMessageId: string | null; isDraft: boolean; isRead: boolean; labelIds: Array<string>; mailbox: string; receivedAt: string | null; replyTo: Array<{ address: string | null; name: string | null }>; subject: string | null; threadId: string | null; to: Array<{ address: string | null; name: string | null }> } };
-    };
-    readonly label: {
-      readonly input: { add?: Array<string>; mailbox: string; message: string; remove?: Array<string> };
-      readonly output: { id: string; labelIds: Array<string>; mailbox: string };
-    };
-    readonly labels: {
-      readonly input: { mailbox: string };
-      readonly output: { labels: Array<{ id: string; name: string; type: string | null }>; mailbox: string };
+      readonly input: { as?: "text" | "base64"; driveId: string; fileId: string };
+      readonly output: { content: string; contentType: string; encoding: "text" | "base64"; id: string; mimeType: string; name: string; size: string };
     };
     readonly list: {
-      readonly input: { label?: string; mailbox: string; page?: string; receivedAfter?: string; search?: string; top?: number; unreadOnly?: boolean };
-      readonly output: { mailbox: string; messages: Array<{ bodyPreview: string | null; cc: Array<{ address: string | null; name: string | null }>; from: { address: string | null; name: string | null } | null; id: string; internetMessageId: string | null; isDraft: boolean; isRead: boolean; labelIds: Array<string>; mailbox: string; receivedAt: string | null; subject: string | null; threadId: string | null; to: Array<{ address: string | null; name: string | null }> }>; nextPage: string | null };
-    };
-    readonly readAttachment: {
-      readonly input: { as?: "text" | "base64"; attachment: string; mailbox: string; message: string };
-      readonly output: { content: string | null; contentType: string | null; encoding: "text" | "base64"; id: string; mailbox: string; messageId: string; name: string; size: number };
-    };
-    readonly send: {
-      readonly input: { attachments?: Array<{ file: string }>; bcc?: Array<string>; body: string; bodyType?: "text" | "html"; cc?: Array<string>; mailbox: string; replyTo?: Array<string>; subject: string; to: Array<string> };
-      readonly output: { id: string; mailbox: string; sent: true; threadId: string | null };
+      readonly input: { driveId: string; orderBy?: string; pageSize?: number; pageToken?: string; q?: string };
+      readonly output: { items: Array<{ driveId?: string; id: string; mimeType: string; modifiedTime?: string; name: string; parents?: Array<string>; size?: string; trashed?: boolean; webViewLink?: string }>; next: string | null };
     };
   };
-  readonly "google-workspace.sheets@1": {
-    readonly read: {
-      readonly input: { cells?: string; drive: string; sheet?: string; spreadsheet: string; top?: number };
-      readonly output: { drive: string; id: string; more: boolean; name: string; range: string; rows: Array<Array<(string) | (number) | (boolean) | null>>; sheet: string; sheets: Array<string> };
+  readonly "google-workspace.gmail.users.drafts@1": {
+    readonly create: {
+      readonly input: { attachments?: Array<{ file: string }>; bcc?: Array<string>; body: string; bodyType?: "text" | "html"; cc?: Array<string>; replyTo?: Array<string>; subject: string; to: Array<string>; userId: string };
+      readonly output: { id: string; message: { id: string; labelIds?: Array<string>; threadId?: string } };
+    };
+  };
+  readonly "google-workspace.gmail.users.labels@1": {
+    readonly list: {
+      readonly input: { userId: string };
+      readonly output: { items: Array<{ id: string; name: string; type?: string }>; next: string | null };
+    };
+  };
+  readonly "google-workspace.gmail.users.messages.attachments@1": {
+    readonly get: {
+      readonly input: { as?: "text" | "base64"; messageId: string; partId: string; userId: string };
+      readonly output: { content: string; contentType: string | null; encoding: "text" | "base64"; id: string; messageId: string; name: string; partId: string; size: number };
+    };
+  };
+  readonly "google-workspace.gmail.users.messages.modify@1": {
+    readonly create: {
+      readonly input: { addLabelIds?: Array<string>; id: string; removeLabelIds?: Array<string>; userId: string };
+      readonly output: { id: string; labelIds?: Array<string>; threadId?: string };
+    };
+  };
+  readonly "google-workspace.gmail.users.messages.send@1": {
+    readonly create: {
+      readonly input: { attachments?: Array<{ file: string }>; bcc?: Array<string>; body: string; bodyType?: "text" | "html"; cc?: Array<string>; replyTo?: Array<string>; subject: string; to: Array<string>; userId: string };
+      readonly output: { id: string; labelIds?: Array<string>; threadId?: string };
+    };
+  };
+  readonly "google-workspace.gmail.users.messages@1": {
+    readonly get: {
+      readonly input: { bodyType?: "text" | "html"; id: string; userId: string };
+      readonly output: { attachments: Array<{ filename: string; isInline: boolean; mimeType: string | null; partId: string; size: number }>; body: { content: string; contentType: "text" | "html" } | null; id: string; internalDate?: string; labelIds?: Array<string>; payload?: { headers?: Array<{ name: string; value: string }>; mimeType?: string }; snippet?: string; threadId?: string };
+    };
+    readonly list: {
+      readonly input: { labelIds?: Array<string>; maxResults?: number; pageToken?: string; q?: string; userId: string };
+      readonly output: { items: Array<{ id: string; internalDate?: string; labelIds?: Array<string>; payload?: { headers?: Array<{ name: string; value: string }>; mimeType?: string }; snippet?: string; threadId?: string }>; next: string | null };
+    };
+  };
+  readonly "google-workspace.spreadsheets@1": {
+    readonly get: {
+      readonly input: { driveId: string; ranges?: Array<string>; spreadsheetId: string };
+      readonly output: { properties: { title: string }; sheets?: Array<{ data?: Array<{ rowData?: Array<{ values?: Array<{ effectiveFormat?: { numberFormat?: { type?: string } }; effectiveValue?: { boolValue?: boolean; errorValue?: { message?: string; type?: string }; numberValue?: number; stringValue?: string }; formattedValue?: string }> }>; startColumn?: number; startRow?: number }>; properties: { index?: number; title: string } }>; spreadsheetId: string };
+    };
+  };
+  readonly "google-workspace.upload.drive.files@1": {
+    readonly create: {
+      readonly input: { mimeType: "application/vnd.google-apps.document" | "text/plain"; name: string; text: string };
+      readonly output: { id: string; mimeType: string; name: string; webViewLink?: string };
     };
   };
   readonly "microsoft-365.calendar@1": {

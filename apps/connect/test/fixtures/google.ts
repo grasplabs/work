@@ -508,11 +508,14 @@ export const sheetNames = ["Invoices", "Ben's notes"] as const;
 /** The spreadsheet `id`'s metadata, as Sheets answers it. */
 export const spreadsheet = (id: string) => ({
   spreadsheetId: id,
-  properties: { title: "Invoice register" },
+  properties: { title: "Invoice register", locale: "en_GB" },
   sheets: [
-    { properties: { title: sheetNames[1], index: 1 } },
-    { properties: { title: sheetNames[0], index: 0 } },
+    {
+      properties: { sheetId: 712_904_388, title: sheetNames[1], index: 1 },
+    },
+    { properties: { sheetId: 0, title: sheetNames[0], index: 0 } },
   ],
+  spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${id}/edit`,
 });
 
 /** A cell as Sheets' grid data gives it. */
@@ -560,18 +563,6 @@ export const sheetGrid: Record<string, object[][]> = {
   ],
   [sheetNames[1]]: [[textCell("Chase 0041 on Friday")]],
 };
-
-/** The same rows, as the tool gives them. */
-export const sheetRows: Record<string, (string | number | boolean | null)[][]> =
-  {
-    [sheetNames[0]]: [
-      ["Invoice", "Amount", "Due", "Paid"],
-      ["2026-0041", 1250, "30/09/2026", false],
-      ["2026-0042", 980.5, null, true],
-      ["2026-0043", "#DIV/0!"],
-    ],
-    [sheetNames[1]]: [["Chase 0041 on Friday"]],
-  };
 
 /** Google's error answers. */
 export const googleError = (code: number, status: string, reason: string) => ({

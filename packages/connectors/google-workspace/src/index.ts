@@ -1,5 +1,5 @@
-import { defineConnector } from "@grasp-os/connector-kit/connector";
-import { auth } from "@grasp-os/sdk/connector";
+import { withNativeSyncs } from "@grasp-os/runtime/connector";
+import { auth, defineConnector } from "@grasp-os/sdk/connector";
 
 import { calendarSync } from "./calendar-sync.ts";
 import { calendarTools } from "./calendar.ts";
@@ -8,13 +8,15 @@ import { driveSync } from "./drive-sync.ts";
 import { driveTools } from "./drive.ts";
 import { gmailSync } from "./gmail-sync.ts";
 import { gmailTools } from "./gmail.ts";
-import { apisHost, gmailHost, sheetsHost } from "./google.ts";
+import {
+  apisHost,
+  gmailHost,
+  googleErrors,
+  googleScope,
+  sheetsHost,
+} from "./google.ts";
 import { sharedDriveSync } from "./shared-drive-sync.ts";
 import { sheetsTools } from "./sheets.ts";
-
-/** A Google OAuth scope, by its name under Google's prefix. */
-const scope = (name: string): string =>
-  `https://www.googleapis.com/auth/${name}`;
 
 /**
  * Google's sign-in: OpenID Connect with Grasp's Workspace app, pinned to
@@ -63,44 +65,50 @@ const googleAuth = auth.oauth2({
     openid: "Sign in",
     email: "Your address",
     profile: "Your name",
-    [scope("cloud-identity.groups.readonly")]: "The groups you are in",
-    [scope("gmail.readonly")]: "Read your mail",
-    [scope("gmail.modify")]: "Label, draft and send your mail",
-    [scope("gmail.send")]: "Send mail as you",
-    [scope("calendar.events")]: "Put events in your calendar",
-    [scope("calendar.events.readonly")]: "Read calendars",
-    [scope("calendar.calendarlist.readonly")]: "Know which calendar is yours",
-    [scope("drive.readonly")]: "Read files and spreadsheets",
-    [scope("drive.file")]: "Make drafts in your Drive",
+    [googleScope("cloud-identity.groups.readonly")]: "The groups you are in",
+    [googleScope("gmail.readonly")]: "Read your mail",
+    [googleScope("gmail.modify")]: "Label, draft and send your mail",
+    [googleScope("gmail.send")]: "Send mail as you",
+    [googleScope("calendar.events")]: "Put events in your calendar",
+    [googleScope("calendar.events.readonly")]: "Read calendars",
+    [googleScope("calendar.calendarlist.readonly")]:
+      "Know which calendar is yours",
+    [googleScope("drive.readonly")]: "Read files and spreadsheets",
+    [googleScope("drive.file")]: "Make drafts in your Drive",
   },
   rights: {
     signIn: [
       "openid",
       "email",
       "profile",
-      scope("cloud-identity.groups.readonly"),
+      googleScope("cloud-identity.groups.readonly"),
     ],
     classes: {
-      "read-own": [scope("gmail.readonly")],
+      "read-own": [googleScope("gmail.readonly")],
       "change-own": [
-        scope("gmail.modify"),
-        scope("calendar.events"),
-        scope("calendar.calendarlist.readonly"),
-        scope("drive.file"),
+        googleScope("gmail.modify"),
+        googleScope("calendar.events"),
+        googleScope("calendar.calendarlist.readonly"),
+        googleScope("drive.file"),
       ],
       "read-company": [
-        scope("calendar.events.readonly"),
-        scope("drive.readonly"),
+        googleScope("calendar.events.readonly"),
+        googleScope("drive.readonly"),
       ],
       "change-company": [],
-      "reach-others": [scope("gmail.send")],
+      "reach-others": [googleScope("gmail.send")],
       "read-others": [],
     },
     // Modifying mail reads and sends it, and writing events reads them.
     // `drive.file` reads only Grasp's own files: it takes in no reading.
     implied: {
-      [scope("gmail.modify")]: [scope("gmail.readonly"), scope("gmail.send")],
-      [scope("calendar.events")]: [scope("calendar.events.readonly")],
+      [googleScope("gmail.modify")]: [
+        googleScope("gmail.readonly"),
+        googleScope("gmail.send"),
+      ],
+      [googleScope("calendar.events")]: [
+        googleScope("calendar.events.readonly"),
+      ],
     },
   },
 });
@@ -110,14 +118,16 @@ const googleAuth = auth.oauth2({
  * mailbox, one calendar, and the files and spreadsheets of one shared
  * drive, per call, and drafts in the person's own Drive.
  *
- * Scopes, the least the tools need: `gmail.modify` (read, label, draft
- * and send; applying labels to a message needs it, and it can't delete
- * for good), `calendar.events` (events only, not calendar settings or
- * sharing; it writes, and calendar.ts holds writes to the person's own
- * calendar), `calendar.calendarlist.readonly` (which calendar is their
- * own), `drive.readonly` (reading a file's content needs it, and Sheets
- * takes it to read a spreadsheet's cells) and `drive.file` (drafts: only
- * the files this app made).
+ * Scopes, the least each tool needs (its `scopes`): reading mail on
+ * `gmail.readonly`, labelling and drafting it on `gmail.modify` (applying
+ * labels needs it, and it can't delete for good), sending on
+ * `gmail.send`; reading calendars on `calendar.events.readonly`, and
+ * putting an event in the person's own on `calendar.events` (events only,
+ * not calendar settings or sharing; calendar.ts holds writes to their own
+ * calendar) with `calendar.calendarlist.readonly` (which calendar is
+ * theirs); `drive.readonly` for shared drives' files (Sheets takes it to
+ * read a spreadsheet's cells) and `drive.file` for drafts (only the files
+ * this app made).
  *
  * It syncs the person's own Drive (drive-sync.ts), on `drive.readonly`,
  * mailbox (gmail-sync.ts), on `gmail.modify`, and primary calendar
@@ -125,24 +135,21 @@ const googleAuth = auth.oauth2({
  * shared connection, the shared drives an admin picked
  * (shared-drive-sync.ts), on `drive.readonly`.
  */
-export default defineConnector({
-  name: "google-workspace",
-  provider: "google",
-  signIn: { ...googleAuth.signIn, name: "Google Workspace" },
-  scopes: [
-    "https://www.googleapis.com/auth/gmail.modify",
-    "https://www.googleapis.com/auth/calendar.events",
-    "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
-    "https://www.googleapis.com/auth/drive.readonly",
-    "https://www.googleapis.com/auth/drive.file",
-  ],
-  hosts: [gmailHost, apisHost, sheetsHost, "openidconnect.googleapis.com"],
-  tools: [
-    ...gmailTools,
-    ...calendarTools,
-    ...driveTools,
-    ...sheetsTools,
-    ...draftTools,
-  ],
-  syncs: [driveSync, gmailSync, calendarSync, sharedDriveSync],
-});
+export default withNativeSyncs(
+  defineConnector({
+    name: "google-workspace",
+    provider: "google",
+    title: "Google Workspace",
+    auth: googleAuth,
+    hosts: [gmailHost, apisHost, sheetsHost, "openidconnect.googleapis.com"],
+    errors: googleErrors,
+    tools: {
+      ...gmailTools,
+      ...calendarTools,
+      ...driveTools,
+      ...sheetsTools,
+      ...draftTools,
+    },
+  }),
+  [driveSync, gmailSync, calendarSync, sharedDriveSync]
+);

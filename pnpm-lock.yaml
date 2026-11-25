@@ -1450,9 +1450,6 @@ importers:
 
   packages/connectors/google-workspace:
     dependencies:
-      '@grasp-os/connector-kit':
-        specifier: workspace:*
-        version: link:../../connector-kit
       '@grasp-os/runtime':
         specifier: workspace:*
         version: link:../../runtime

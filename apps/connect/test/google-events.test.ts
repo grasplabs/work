@@ -187,7 +187,7 @@ describe("Google Workspace connector events", () => {
         id: gmailId(4),
         connection: gmail.id,
         owner: gmail.person.userId,
-        action: "mail.list",
+        action: "gmail.users.messages.list",
         type: "google.mail.received",
         payload: {
           mailbox: gmail.address,
@@ -590,7 +590,7 @@ describe("Google Workspace connector events", () => {
         connection: gmail.id,
         owner: gmail.person.userId,
         resource: financeDrive,
-        action: "files.list",
+        action: "drive.files.list",
         type: "google.file.created",
         payload: {
           drive: financeDrive,

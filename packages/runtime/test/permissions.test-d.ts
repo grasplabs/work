@@ -38,13 +38,17 @@ const { action } = serverModule(
   defineApp({ name: "Mail", permissions: { connections: [mail] } })
 );
 const gmail = permission.connection("gmail", {
-  contract: "google-workspace.mail@1",
-  actions: ["send", "labels"],
+  contract: "google-workspace.gmail.users.messages.send@1",
+  actions: ["create"],
+});
+const labels = permission.connection("labels", {
+  contract: "google-workspace.gmail.users.labels@1",
+  actions: ["list"],
 });
 
 // The catalog names the release's contracts and their actions.
 expectTypeOf<"microsoft-365.mail@1">().toExtend<ConnectorContract>();
-expectTypeOf<"google-workspace.files@1">().toExtend<ConnectorContract>();
+expectTypeOf<"google-workspace.drive.files@1">().toExtend<ConnectorContract>();
 expectTypeOf<"grasp.mail@1">().not.toExtend<ConnectorContract>();
 expectTypeOf<ConnectorAction<"microsoft-365.mail@1">>().toEqualTypeOf<
   | "categorise"
@@ -59,7 +63,7 @@ expectTypeOf<ConnectorAction<"microsoft-365.mail@1">>().toEqualTypeOf<
   | "thread"
 >();
 
-declare const ctx: ActionCtx<typeof mail | typeof gmail>;
+declare const ctx: ActionCtx<typeof mail | typeof gmail | typeof labels>;
 
 // Arguments as the contract takes them: optional fields may be left out.
 const sent = await ctx.connections.mail.send({
@@ -88,18 +92,18 @@ expectTypeOf(listed.nextPage).toEqualTypeOf<string | null>();
 expectTypeOf(listed.messages[0]?.subject).toEqualTypeOf<
   string | null | undefined
 >();
-const gmailSent = await ctx.connections.gmail.send({
-  mailbox: "me",
+const gmailSent = await ctx.connections.gmail.create({
+  userId: "me",
   subject: "Hello",
   body: "Hi.",
   to: ["ada@acme.test"],
 });
-expectTypeOf(gmailSent.threadId).toEqualTypeOf<string | null>();
+expectTypeOf(gmailSent.threadId).toEqualTypeOf<string | undefined>();
 expectTypeOf(
-  ctx.connections.gmail.labels({ mailbox: "me" })
+  ctx.connections.labels.list({ userId: "me" })
 ).resolves.toEqualTypeOf<{
-  labels: { id: string; name: string; type: string | null }[];
-  mailbox: string;
+  items: { id: string; name: string; type?: string }[];
+  next: string | null;
 }>();
 
 // The same through an action of an App that declares it: its handler's

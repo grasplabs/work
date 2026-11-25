@@ -1,9 +1,4 @@
-import {
-  stampHeader,
-  stampPattern,
-  toBase64,
-} from "@grasp-os/runtime/connector";
-import { z } from "zod";
+import { stampHeader, toBase64, v } from "@grasp-os/sdk/connector";
 
 // Mail as Gmail sends and stores it: RFC 5322 messages. Gmail takes a new
 // message as one raw message, which this builds from plain values: every
@@ -56,10 +51,11 @@ interface OutgoingMessage {
   replyTo: readonly string[];
   /**
    * The stamp core recorded for the run that sends it, as the
-   * `stampHeader` header; none for no stamp. Only a stamp
-   * (`stampPattern`), never text a caller wrote, so it can't add headers.
+   * `stampHeader` header; none for no stamp. Only the call's stamp
+   * (`ToolCall.stamp`, which the runtime checks is one), never text a
+   * caller wrote, so it can't add headers.
    */
-  stamp?: string | null;
+  stamp: string | null;
   /**
    * Files to attach (GRA-887): the name and type of a run file, and its
    * bytes. The name has no control, invisible-formatting or folder
@@ -202,9 +198,7 @@ export const rawMessage = ({
     ...addresses("Cc", cc),
     ...addresses("Bcc", bcc),
     ...addresses("Reply-To", replyTo),
-    ...(typeof stamp === "string" && stampPattern.test(stamp)
-      ? [`${stampHeader}: ${stamp}`]
-      : []),
+    ...(stamp === null ? [] : [`${stampHeader}: ${stamp}`]),
     subject === "" ? "Subject: " : `Subject: ${encodedWords(subject)}`,
     "MIME-Version: 1.0",
     ...content,
@@ -212,14 +206,15 @@ export const rawMessage = ({
   return toBase64Url(new TextEncoder().encode(lines.join(crlf)));
 };
 
-const headerSchema = z.object({ name: z.string(), value: z.string() });
+/** A header of a message or a part, as Gmail gives it. */
+export const headerSchema = v.object({ name: v.string(), value: v.string() });
 
 /** One MIME part of a message, as Gmail's `payload` gives it. */
 export interface Part {
   partId?: string | undefined;
   mimeType?: string | undefined;
   filename?: string | undefined;
-  headers?: z.infer<typeof headerSchema>[] | undefined;
+  headers?: { name: string; value: string }[] | undefined;
   body?:
     | {
         attachmentId?: string | undefined;
@@ -233,26 +228,42 @@ export interface Part {
 /** Deepest part tree read: Gmail's are a handful of levels at most. */
 const maxDepth = 16;
 
-export const partSchema: z.ZodType<Part> = z.lazy(() =>
-  z.object({
-    partId: z.string().optional(),
-    mimeType: z.string().optional(),
-    filename: z.string().optional(),
-    headers: z.array(headerSchema).optional(),
-    body: z
-      .object({
-        attachmentId: z.string().optional(),
-        size: z.number().int().nonnegative().optional(),
-        data: z.string().optional(),
-      })
-      .optional(),
-    parts: z.array(partSchema).optional(),
-  })
-);
+const partFields = {
+  partId: v.string().optional(),
+  mimeType: v.string().optional(),
+  filename: v.string().optional(),
+  headers: v.array(headerSchema).optional(),
+  body: v
+    .object({
+      attachmentId: v.string().optional(),
+      size: v.number().integer().min(0).optional(),
+      data: v.string().optional(),
+    })
+    .optional(),
+};
+
+/** A part whose parts are `child`. */
+const withParts = <const Child extends Parameters<typeof v.array>[0]>(
+  child: Child
+) => v.object({ ...partFields, parts: v.array(child).optional() });
+
+/** Four levels of parts above `child`. */
+const fourAbove = <const Child extends Parameters<typeof v.array>[0]>(
+  child: Child
+) => withParts(withParts(withParts(withParts(child))));
+
+/**
+ * A message's part tree, as Gmail's `payload` gives it, twelve levels
+ * down: `v` has no recursive schema, and nests no deeper than a value may
+ * (`valueDepth`), so the parts of a part below are dropped as a field the
+ * schema doesn't name. Gmail's trees are a handful of levels deep, a
+ * forwarded message adding two.
+ */
+export const partSchema = fourAbove(fourAbove(fourAbove(v.object(partFields))));
 
 /** A header's value, by its name in any case, if the part has it. */
 export const headerOf = (
-  headers: readonly z.infer<typeof headerSchema>[] | undefined,
+  headers: readonly { name: string; value: string }[] | undefined,
   name: string
 ): string | undefined =>
   headers?.find((header) => header.name.toLowerCase() === name.toLowerCase())

@@ -161,7 +161,7 @@ Each goes into the connector's `tools` under its name, such as `"items.finish": 
 
 Connect records what each call read, by the vendor's IDs, from its answer: the string `id` of each of its `items`, or else the answer's own `id`, or else nothing. A handler never reports it.
 
-A read that answers one item, such as a message or a page, says `answersItem: true`. Its answer's own `id` then names exactly that item, and one without it fails the call. Core may keep what such a tool reads of the person's own things as a source in the Brain.
+A read that answers one item, such as a message or a page, says `answersItem: true`. Its answer's own `id` then names exactly that item, and one without it fails the call. Core may keep what such a tool reads of the person's own things as a source in the Brain. Where the vendor names an answer's ID otherwise (a Google spreadsheet's `spreadsheetId`), the tool says which field it is with `idField: "spreadsheetId"`.
 
 A write reports what it changed with `call.changed({ before, after })`, once, for the audit's record of old and new values. A change past 256 KiB of JSON, or a second one, leaves the call's outcome unknown, as does any answer that isn't what the tool declares once its write went out.
 
@@ -210,7 +210,7 @@ export const writeNotes = tool({
 
 ## Files
 
-A read that answers a file says `answersFile: true`. It takes an `as` arg of `"text"` or `"base64"` and answers `name`, `contentType`, `encoding` and `content`, as `contentAs(bytes, as)` makes the last two. A workflow may then keep the answer as a file of its run instead of passing the bytes on.
+A read that answers a file says `answersFile: true`. It takes an `as` arg of `"text"` or `"base64"` and answers `name`, `contentType`, `encoding` and `content`, as `contentAs(bytes, as)` makes the last two. A workflow may then keep the answer as a file of its run instead of passing the bytes on. `contentAs` refuses content past the read limit (`too_large`); `checkReadable(size)` refuses it by the size the vendor reports, before any of it is fetched. `fromBase64` reads base64 or base64url, as some vendors send content inside JSON, and `toBase64` writes it.
 
 A write that attaches files says `takesFiles: true` and has exactly the SDK's `attachments` as its `attachments` arg: each file by name, type, size and SHA-256. A workflow names its run's files, and connect hands the call their bytes beside its args. They are checked against the digests before the handler runs, with none missing or extra, and `attachedFiles(args.attachments, call)` gives each file with its bytes. A handler refuses a call it can't carry out by throwing a `ToolError` before its write.
 

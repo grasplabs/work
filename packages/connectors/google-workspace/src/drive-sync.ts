@@ -26,7 +26,8 @@ import type {
 import { ownPlace } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
-import { apisHost, googleFailure, googleUrl } from "./google.ts";
+import { googleFailure, googleUrl } from "./google-sync.ts";
+import { apisHost } from "./google.ts";
 
 // Native sync of a person's own Drive (GRA-1758): every file they own in
 // My Drive, then what changed, what went away, and who may open each. A

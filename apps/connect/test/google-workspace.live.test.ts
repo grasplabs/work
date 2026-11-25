@@ -54,45 +54,72 @@ describe.runIf(smoke.success)("Google Workspace, live", () => {
     const calendar = config?.GOOGLE_SMOKE_CALENDAR ?? mailbox;
     const mail = z
       .object({
-        mailbox: z.string(),
-        messages: z.array(z.object({ id: z.string() })),
-        nextPage: z.string().nullable(),
+        items: z.array(z.object({ id: z.string() })),
+        next: z.string().nullable(),
       })
-      .parse(await run(id, "mail.list", { mailbox, top: 2 }, mailbox));
-    expect(mail.mailbox).toBe(mailbox);
-    if (mail.nextPage !== null) {
+      .parse(
+        await run(
+          id,
+          "gmail.users.messages.list",
+          { userId: mailbox, maxResults: 2 },
+          mailbox
+        )
+      );
+    if (mail.next !== null) {
       await run(
         id,
-        "mail.list",
-        { mailbox, top: 2, page: mail.nextPage },
+        "gmail.users.messages.list",
+        { userId: mailbox, maxResults: 2, pageToken: mail.next },
         mailbox
       );
     }
-    const [first] = mail.messages;
+    const [first] = mail.items;
     if (first !== undefined) {
-      await run(id, "mail.get", { mailbox, message: first.id }, mailbox);
+      await run(
+        id,
+        "gmail.users.messages.get",
+        { userId: mailbox, id: first.id },
+        mailbox
+      );
     }
     const now = Date.now();
     await run(
       id,
-      "calendar.list",
+      "calendar.calendars.events.list",
       {
-        calendar,
-        start: new Date(now).toISOString(),
-        end: new Date(now + 7 * 24 * 3600 * 1000).toISOString(),
+        calendarId: calendar,
+        timeMin: new Date(now).toISOString(),
+        timeMax: new Date(now + 7 * 24 * 3600 * 1000).toISOString(),
       },
       calendar
     );
     const files = z
       .object({
-        items: z.array(z.object({ id: z.string(), kind: z.string() })),
+        items: z.array(z.object({ id: z.string(), mimeType: z.string() })),
       })
-      .parse(await run(id, "files.list", { drive }, drive));
+      .parse(
+        await run(
+          id,
+          "drive.files.list",
+          { driveId: drive, q: `'${drive}' in parents` },
+          drive
+        )
+      );
     // The drive's top folder must hold a file (its own, or a Google Doc).
-    const item = files.items.find(({ kind }) => kind === "file")?.id ?? "";
+    const fileId =
+      files.items.find(
+        ({ mimeType }) =>
+          !mimeType.startsWith("application/vnd.google-apps.") ||
+          mimeType === "application/vnd.google-apps.document"
+      )?.id ?? "";
     await expect(
-      run(id, "files.read", { drive, item, as: "base64" }, drive)
-    ).resolves.toMatchObject({ id: item, encoding: "base64" });
+      run(
+        id,
+        "drive.files.get",
+        { driveId: drive, fileId, as: "base64" },
+        drive
+      )
+    ).resolves.toMatchObject({ id: fileId, encoding: "base64" });
   });
 
   it.runIf(config?.GOOGLE_SMOKE_WRITES === "1")(
@@ -100,12 +127,12 @@ describe.runIf(smoke.success)("Google Workspace, live", () => {
     async () => {
       const id = await connection();
       const key = crypto.randomUUID();
-      const draft = z.object({ messageId: z.string() }).parse(
+      const draft = z.object({ message: z.object({ id: z.string() }) }).parse(
         await run(
           id,
-          "mail.createDraft",
+          "gmail.users.drafts.create",
           {
-            mailbox,
+            userId: mailbox,
             subject: "Grasp OS smoke test",
             body: "Created by the connector's smoke test.",
             to: [mailbox],
@@ -114,14 +141,14 @@ describe.runIf(smoke.success)("Google Workspace, live", () => {
           `${key}:draft`
         )
       );
-      const message = { mailbox, message: draft.messageId };
+      const message = { userId: mailbox, id: draft.message.id };
       const starred = z
         .object({ labelIds: z.array(z.string()) })
         .parse(
           await run(
             id,
-            "mail.label",
-            { ...message, add: ["STARRED"] },
+            "gmail.users.messages.modify.create",
+            { ...message, addLabelIds: ["STARRED"] },
             mailbox,
             `${key}:star`
           )
@@ -129,8 +156,8 @@ describe.runIf(smoke.success)("Google Workspace, live", () => {
       expect(starred.labelIds).toContain("STARRED");
       await run(
         id,
-        "mail.label",
-        { ...message, remove: ["STARRED"] },
+        "gmail.users.messages.modify.create",
+        { ...message, removeLabelIds: ["STARRED"] },
         mailbox,
         `${key}:unstar`
       );

@@ -10,21 +10,20 @@ export const nativeToolClasses: Readonly<
   Record<string, Readonly<Record<string, string>>>
 > = {
   "google": {
-    "calendar.create": "change-own",
-    "calendar.get": "read-company",
-    "calendar.list": "read-company",
-    "files.createDraft": "change-own",
-    "files.list": "read-company",
-    "files.read": "read-company",
-    "files.search": "read-company",
-    "mail.createDraft": "change-own",
-    "mail.get": "read-own",
-    "mail.label": "change-own",
-    "mail.labels": "read-own",
-    "mail.list": "read-own",
-    "mail.readAttachment": "read-own",
-    "mail.send": "reach-others",
-    "sheets.read": "read-company",
+    "calendar.calendars.events.create": "change-own",
+    "calendar.calendars.events.get": "read-company",
+    "calendar.calendars.events.list": "read-company",
+    "drive.files.get": "read-company",
+    "drive.files.list": "read-company",
+    "gmail.users.drafts.create": "change-own",
+    "gmail.users.labels.list": "read-own",
+    "gmail.users.messages.attachments.get": "read-own",
+    "gmail.users.messages.get": "read-own",
+    "gmail.users.messages.list": "read-own",
+    "gmail.users.messages.modify.create": "change-own",
+    "gmail.users.messages.send.create": "reach-others",
+    "spreadsheets.get": "read-company",
+    "upload.drive.files.create": "change-own",
   },
   "microsoft": {
     "calendar.create": "change-own",
@@ -82,8 +81,8 @@ export const nativeItemReads: Readonly<
   Record<string, Readonly<Record<string, string>>>
 > = {
   "google": {
-    "mail.get": "item",
-    "mail.readAttachment": "file",
+    "gmail.users.messages.attachments.get": "file",
+    "gmail.users.messages.get": "item",
   },
   "microsoft": {
     "onenote.read": "item",

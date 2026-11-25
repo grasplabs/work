@@ -313,17 +313,19 @@ export default defineConfig({
         // of ours or npm's. Its own files: `./…` in its folder, or
         // `../src/…` from another folder of the package (test/), and no
         // `..` past that, so no path leaves the package. Connect's build
-        // refuses the rest too (apps/connect/build.ts). Google Workspace and Microsoft 365 keep
-        // the old kit, Zod and the runtime until they move to the SDK
-        // (GRA-2323, GRA-2324), as do connect's sample connectors written
-        // with the old kit.
+        // refuses the rest too (apps/connect/build.ts). Microsoft 365 keeps
+        // the old kit, Zod and the runtime until it moves to the SDK
+        // (GRA-2324), as do connect's sample connectors written with the
+        // old kit, and Google Workspace's native syncs and the entry that
+        // serves them, until they are declared syncs (GRA-2311).
         files: [
           "packages/connectors/**",
           "apps/connect/test/fixtures/*-connector.ts",
           "apps/connect/test/fixtures/*/**",
         ],
         excludeFiles: [
-          "packages/connectors/google-workspace/**",
+          "packages/connectors/google-workspace/src/index.ts",
+          "packages/connectors/google-workspace/src/*-sync.ts",
           "packages/connectors/microsoft-365/**",
           "apps/connect/test/fixtures/sample-connector.ts",
           "apps/connect/test/fixtures/sample-sync-connector.ts",
