@@ -2,7 +2,6 @@ import { planDays } from "@grasp-os/shared/onboarding";
 import { Button } from "@grasp-os/ui/components/button";
 import { CopyButton } from "@grasp-os/ui/components/copy-button";
 import { Text } from "@grasp-os/ui/components/text";
-import { Textarea } from "@grasp-os/ui/components/textarea";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
@@ -13,6 +12,7 @@ import { useState } from "react";
 import { ErrorText } from "../error-text.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import { CalmStep } from "./calm-frame.tsx";
+import { MessageCompose } from "./message-compose.tsx";
 import { Postmark } from "./postmark.tsx";
 import { SendPlanForm, useSendWords } from "./send-plan-form.tsx";
 import { choiceHolds, choiceShown, replanOf } from "./send-plan.ts";
@@ -22,7 +22,8 @@ import type { StepProps } from "./step-parts.ts";
 import { planDraft } from "./visit.ts";
 
 // Tell the team, and plan the interviews: the message the admin sends
-// themselves, as a letter, written here and copied, postmarked
+// themselves, as a new email Stephen writes for them the first time
+// (message-compose.tsx), theirs to change and copy, postmarked
 // with the day the interviews start (postmark.tsx); then that day, and
 // which teams, on one card of its own. The leads get their link that
 // morning; everyone else once their lead talked. Not ready yet, the admin
@@ -33,9 +34,6 @@ import { planDraft } from "./visit.ts";
 
 const styles = stylex.create({
   stack: { display: "grid", gap: space[4] },
-  letter: { display: "grid", gap: space[3] },
-  // The whole message, however narrow the page: it grows with its text, never scrolls inside.
-  message: { maxHeight: "none" },
   // Copy on the start edge, the postmark on the end, both on the letter's foot.
   foot: {
     display: "flex",
@@ -54,7 +52,7 @@ export const TeamStep = ({
 }: StepProps) => {
   const { t } = useLingui();
   const navigate = useNavigate();
-  const { admin, view } = data;
+  const { admin, company, view } = data;
   const { run, busy, failure } = useCoreAction();
   const refresh = useRefresh();
   const written = [
@@ -168,21 +166,24 @@ export const TeamStep = ({
       title={t`Before I reach out, let your team know`}
     >
       <div {...stylex.props(styles.stack)}>
-        <div {...stylex.props(styles.letter)}>
-          <Textarea
-            aria-label={t`The message`}
-            onValueChange={onMessage}
-            rows={6}
-            style={styles.message}
-            value={message}
-          />
-          <div {...stylex.props(styles.foot)}>
-            <CopyButton size="lg" value={message} variant="outline">
-              {t`Copy the message`}
-            </CopyButton>
-            {planned ? <Postmark day={choice.day} /> : null}
-          </div>
-        </div>
+        <MessageCompose
+          changed={kept !== null}
+          foot={
+            <div {...stylex.props(styles.foot)}>
+              <CopyButton size="lg" value={message} variant="outline">
+                {t`Copy the message`}
+              </CopyButton>
+              {planned ? <Postmark day={choice.day} /> : null}
+            </div>
+          }
+          onValueChange={onMessage}
+          to={
+            company === null
+              ? t`Everyone on your team`
+              : t`Everyone at ${company}`
+          }
+          value={message}
+        />
         {planned ? (
           <SendPlanForm
             choice={choice}

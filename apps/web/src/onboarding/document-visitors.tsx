@@ -1,11 +1,27 @@
 import { font } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
 import type { Kind } from "./document-pages.tsx";
 import { colourOf, kindNames } from "./document-pages.tsx";
+import { pixelCursor } from "./pixel-cursor.stylex.ts";
+import {
+  Arrow,
+  arrowCell,
+  arrowCells,
+  between,
+  bezier,
+  easeIn,
+  easeInOut,
+  easeOut,
+  frames,
+  keysOf,
+  useStill,
+  wait,
+} from "./pixel-cursor.tsx";
+import type { Point } from "./pixel-cursor.tsx";
 
 // Two visitors on the documents step, the way colleagues' cursors move over
 // a shared canvas: a pixel arrow in its own colour drifts in from the
@@ -55,8 +71,7 @@ const styles = stylex.create({
     paddingBlock: 6,
     paddingInline: 10,
     backgroundColor: "currentColor",
-    clipPath:
-      "polygon(0 4px, 2px 4px, 2px 2px, 4px 2px, 4px 0, calc(100% - 4px) 0, calc(100% - 4px) 2px, calc(100% - 2px) 2px, calc(100% - 2px) 4px, 100% 4px, 100% calc(100% - 4px), calc(100% - 2px) calc(100% - 4px), calc(100% - 2px) calc(100% - 2px), calc(100% - 4px) calc(100% - 2px), calc(100% - 4px) 100%, 4px 100%, 4px calc(100% - 2px), 2px calc(100% - 2px), 2px calc(100% - 4px), 0 calc(100% - 4px))",
+    clipPath: pixelCursor.steppedCorners,
   },
   line: {
     gridArea: "1 / 1",
@@ -114,30 +129,6 @@ const styles = stylex.create({
 
 /** The visitors' colours, one each, bright as colleagues' cursors are. */
 const colours = ["#7a5af8", "#e0457b", "#ef8a17", "#0e9f6e", "#2e78e6"];
-
-/** The arrow, a cell to each character: the outline (o), its colour (x). Its tip at the top left. */
-const arrowCells = [
-  "o",
-  "oo",
-  "oxo",
-  "oxxo",
-  "oxxxo",
-  "oxxxxo",
-  "oxxxxxo",
-  "oxxxxxxo",
-  "oxxxxxxxo",
-  "oxxxxxxxxo",
-  "oxxxxxoooo",
-  "oxxoxxo",
-  "oxo.oxxo",
-  "oo..oxxo",
-  "o....oxxo",
-  ".....oxxo",
-  "......oo",
-];
-
-/** A cell's side in the arrow, in CSS pixels. */
-const arrowCell = 2;
 
 /** What each kind of page has written on it, a character a cell: paper (.), ink (#), its folded corner (/), its edge (_). */
 const pageCells: Record<Kind, string[]> = {
@@ -209,11 +200,6 @@ const pageCells: Record<Kind, string[]> = {
 /** A cell's side in a page, in CSS pixels. */
 const pageCell = 3;
 
-/** A line's characters as a reader sees them, accents and all: what is typed a key at a time, or a drawing's cells. */
-const segments = new Intl.Segmenter();
-const keysOf = (text: string): string[] =>
-  Array.from(segments.segment(text), ({ segment }) => segment);
-
 const mix = (hex: string, toward: number, amount: number): string => {
   const part = (at: number) => {
     const own = Number.parseInt(hex.slice(at, at + 2), 16);
@@ -221,26 +207,6 @@ const mix = (hex: string, toward: number, amount: number): string => {
   };
   return `rgb(${part(1)}, ${part(3)}, ${part(5)})`;
 };
-
-/** The arrow's cells, drawn into the visitor's own drawing. */
-const Arrow = () => (
-  <>
-    {arrowCells.flatMap((row, y) =>
-      keysOf(row).map((mark, x) =>
-        mark === "." ? null : (
-          <rect
-            fill={mark === "o" ? "white" : "currentColor"}
-            height={arrowCell}
-            key={`${String(x)},${String(y)}`}
-            width={arrowCell}
-            x={x * arrowCell}
-            y={y * arrowCell}
-          />
-        )
-      )
-    )}
-  </>
-);
 
 const PageArt = ({ kind }: { kind: Kind }) => {
   const cells = pageCells[kind];
@@ -291,96 +257,6 @@ const useAsks = (): Ask[] => {
     { words: t`Your quote template, perhaps?`, kind: "pdf" },
   ];
 };
-
-const stillQuery = "(prefers-reduced-motion: reduce)";
-
-const onStill = (changed: () => void): (() => void) => {
-  const query = matchMedia(stillQuery);
-  query.addEventListener("change", changed);
-  return () => {
-    query.removeEventListener("change", changed);
-  };
-};
-
-const useStill = (): boolean =>
-  useSyncExternalStore(
-    onStill,
-    () => matchMedia(stillQuery).matches,
-    () => true
-  );
-
-interface Point {
-  x: number;
-  y: number;
-}
-
-/** Runs `each` on every frame for `ms`, with how far along it is, 0 to 1. */
-const frames = async (
-  ms: number,
-  signal: AbortSignal,
-  each: (t: number) => void
-): Promise<void> => {
-  // oxlint-disable-next-line promise/avoid-new -- requestAnimationFrame has no promise form
-  await new Promise<void>((resolve, reject) => {
-    const start = performance.now();
-    let id = 0;
-    const stop = () => {
-      cancelAnimationFrame(id);
-      reject(new Error("The visitors left"));
-    };
-    const tick = (now: number) => {
-      const t = Math.min(1, (now - start) / ms);
-      each(t);
-      if (t < 1) {
-        id = requestAnimationFrame(tick);
-      } else {
-        signal.removeEventListener("abort", stop);
-        resolve();
-      }
-    };
-    if (signal.aborted) {
-      stop();
-      return;
-    }
-    signal.addEventListener("abort", stop, { once: true });
-    id = requestAnimationFrame(tick);
-  });
-};
-
-const wait = async (ms: number, signal: AbortSignal): Promise<void> => {
-  // oxlint-disable-next-line promise/avoid-new -- setTimeout has no promise form in browsers
-  await new Promise<void>((resolve, reject) => {
-    let id = 0;
-    const stop = () => {
-      clearTimeout(id);
-      reject(new Error("The visitors left"));
-    };
-    id = window.setTimeout(() => {
-      signal.removeEventListener("abort", stop);
-      resolve();
-    }, ms);
-    if (signal.aborted) {
-      stop();
-      return;
-    }
-    signal.addEventListener("abort", stop, { once: true });
-  });
-};
-
-const easeInOut = (t: number): number =>
-  t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
-const easeOut = (t: number): number => 1 - (1 - t) ** 3;
-const easeIn = (t: number): number => t * t * t;
-
-const bezier = (a: Point, b: Point, c: Point, d: Point, t: number): Point => {
-  const u = 1 - t;
-  const at = (p: number, q: number, r: number, s: number) =>
-    u * u * u * p + 3 * u * u * t * q + 3 * u * t * t * r + t * t * t * s;
-  return { x: at(a.x, b.x, c.x, d.x), y: at(a.y, b.y, c.y, d.y) };
-};
-
-const between = (low: number, high: number): number =>
-  low + Math.random() * (high - low);
 
 /** The zone the visitors toss pages into: Damsko's drop zone on this step. */
 const zoneOf = (): Element | null =>
