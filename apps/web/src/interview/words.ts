@@ -52,6 +52,7 @@ export const useLoopWords = (locale: Locale): LoopWords => {
       t`Before the work: what you told me about AI.`,
       t`More of what you told me about AI.`,
     ],
+    tasks: [t`Your recurring work.`, t`More of your recurring work.`],
     steps: [t`First, the steps.`, t`More of the steps.`],
     differently: [
       t`Then, when it goes differently.`,

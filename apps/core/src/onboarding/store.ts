@@ -198,7 +198,7 @@ import {
 import type { MailState, MailToQueue } from "../mail-outbox.ts";
 import { mailDomain, mailSends, sendMail } from "../mail.ts";
 import { forgetStored } from "../speech-cache.ts";
-import { intakeIds, intakeOf, withoutNames } from "./brain-intake.ts";
+import { intakeIds, intakeOf } from "./brain-intake.ts";
 import type { IntakeClaim, IntakeDrawing, TeamIntake } from "./brain-intake.ts";
 import {
   candidateId,
@@ -228,6 +228,7 @@ import {
 } from "./kickoff.ts";
 import { linkSecretOf } from "./link-secret.ts";
 import { linkMail, reminderMail, updateMail } from "./mail-text.ts";
+import { withoutNames } from "./names.ts";
 import type { Proposer } from "./proposals.ts";
 import { referralOf, referred } from "./referral.ts";
 import {
@@ -248,7 +249,7 @@ import { interviewBrief, setupView } from "./stephen-setup.ts";
 import { onboardingStoreName } from "./store-name.ts";
 import { checksFor, teamClaims } from "./team-claims.ts";
 import { assignWork, companyName, drawTeamMap } from "./team-map.ts";
-import { toldAbout } from "./told-work.ts";
+import { toldAbout, toldByEnough } from "./told-work.ts";
 import { drawWork, knownOf } from "./work-drawing.ts";
 import type { WorkBrief, WorkKnown } from "./work-drawing.ts";
 
@@ -936,11 +937,12 @@ const drawingOf = (stored: string | null): DrawnWork | null =>
  * GRA-1987). The next interview asks
  * about these when they come up. Beside it the interviewer is told what
  * the team already said of the work and what its drawing left open
- * (told-work.ts `toldAbout`), from as few as one colleague: he started
- * every interview blind and asked each person the same things again. The
- * interviewer knows what was said, never who said it: no name goes with
- * it, and he is told never to hint at one. To anyone but him, what fewer
- * than five people said still reaches nobody but them.
+ * (told-work.ts `toldAbout`), once two people besides the listener told
+ * it: he started every interview blind and asked each person the same
+ * things again. The interviewer knows what was said, never who said it:
+ * no line is one known colleague's, no name goes with it, and he is told
+ * never to hint at one. To anyone but him, what fewer than five people
+ * said still reaches nobody but them.
  */
 const unknownAnswers: readonly {
   missing: (told: Told[], routine: RoutineShows) => boolean;
@@ -2684,12 +2686,15 @@ export class Onboarding extends DurableObject<Env> {
     const teamName = team?.name ?? "";
     const work = kind === "lead" ? "" : this.#workOf(person.id);
     const drawn = kind === "lead" ? null : this.#drawingAskedOf(person.id);
-    // Only what someone else told, their own words they know already; and
-    // only of work that is named to them (`#workOf`).
+    // Only of work that is named to them (`#workOf`), and only once two
+    // people besides them told it: with one, every line would be that one
+    // colleague's, and their teammate would know whose. Their own words
+    // they know already. What the drawing left open goes by the same rule.
     const toldByOthers =
       work !== "" &&
       drawn !== null &&
-      drawn.from.some((teller) => teller !== person.id);
+      drawn.from.filter((teller) => teller !== person.id).length >=
+        toldByEnough;
     const known = [
       ...(kind === "lead" ? teamKnown(person.name, teamName, members) : []),
       ...(drawn !== null && toldByOthers

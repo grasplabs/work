@@ -10767,6 +10767,10 @@ msgstr "Mehr von dem, was Sie mir über KI erzählt haben."
 msgid "More of when it goes differently."
 msgstr "Noch mehr dazu, was anders läuft."
 
+#: src/interview/words.ts
+msgid "More of your recurring work."
+msgstr "Weitere wiederkehrende Arbeit."
+
 #: src/brain/work-knowledge.tsx
 msgid "More people are asked about it in the next interviews."
 msgstr "In den nächsten Interviews werden mehr Menschen danach gefragt."
@@ -21174,6 +21178,10 @@ msgstr "Ihre Plattform ist offen."
 #: src/chat/composer.tsx
 msgid "Your question"
 msgstr "Ihre Frage"
+
+#: src/interview/words.ts
+msgid "Your recurring work."
+msgstr "Ihre wiederkehrende Arbeit."
 
 #: src/inbox/report-row.tsx
 msgid "Your report on week {week} is ready"

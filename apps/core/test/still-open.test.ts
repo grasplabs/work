@@ -2,6 +2,7 @@ import type { DrawnWork } from "@grasp-os/shared/admin/org-record";
 import type { FactTag } from "@grasp-os/shared/interview-turn";
 import { describe, expect, it } from "vite-plus/test";
 
+import { withoutNames } from "../src/onboarding/names.ts";
 import { stillOpen } from "../src/onboarding/still-open.ts";
 import { toldAbout } from "../src/onboarding/told-work.ts";
 
@@ -11,10 +12,13 @@ import { toldAbout } from "../src/onboarding/told-work.ts";
 // The ways they can fail, tried here:
 //
 // - Asking for what is written down, or never for what is not.
-// - Asking again for what someone had nothing to say about: their week once
-//   the interview moved on, AI once it was asked.
+// - Asking again for what someone had nothing to say about: a thing stays
+//   open after the interview has passed its part, so a "no" is asked twice
+//   and the list never empties.
 // - A colleague's name reaching someone else's interviewer: in a line a
-//   model wrote, as the one who does a step, or as whose numbers they are.
+//   model wrote, as the one who does a step, or as whose numbers they are;
+//   written without its accent, with an "s", or as a short form.
+// - Ordinary words lost because someone is called Will or An.
 // - More of it than a brief should carry.
 
 const facts = (...tags: FactTag[]) => tags.map((tag) => ({ tag }));
@@ -55,43 +59,48 @@ describe("what an employee's interview still misses", () => {
       "system",
       "handoff",
       "wait",
-      "exception",
       "number"
     );
-    expect(stillOpen("own", written, "numbers")).toStrictEqual([
+    expect(stillOpen("own", written, "exceptions")).toStrictEqual([
+      "when it does not go like that, how many out of ten",
+      "how they decide, and what tells them it is okay",
       // One number is not the two he never leaves without.
       "how many in a normal week, and how long one takes",
-      "how they decide, and what tells them it is okay",
       "how they know it is done right",
       "when they would stop and ask someone",
-      "whether they use AI for any of this (one short question)",
     ]);
   });
 
-  it("has nothing left once it is all there, and asks about AI once: not again of someone who had nothing to say", () => {
-    const all = facts(
-      "task",
-      "wish",
-      "step",
-      "step",
-      "step",
-      "system",
-      "next",
-      "wait",
-      "exception",
-      "number",
-      "number",
-      "rule",
-      "done",
-      "stop"
-    );
+  it("lets go of what its part has passed: an answer that left no fact is not asked for again", () => {
+    expect({
+      atNumbers: stillOpen("own", [], "numbers"),
+      atResult: stillOpen("own", [], "result"),
+      afterAi: stillOpen("own", [], "you"),
+    }).toStrictEqual({
+      atNumbers: [
+        "how many in a normal week, and how long one takes",
+        "how they know it is done right",
+        "when they would stop and ask someone",
+        "one real example to share",
+        "whether they use AI for any of this (one short question)",
+      ],
+      atResult: [
+        "how they know it is done right",
+        "when they would stop and ask someone",
+        "one real example to share",
+        "whether they use AI for any of this (one short question)",
+      ],
+      afterAi: [],
+    });
+  });
+
+  it("asks about AI once, and not of someone a fact says uses it", () => {
+    const all = facts("done", "stop", "case");
     expect({
       beforeAi: stillOpen("own", all, "result"),
-      afterAi: stillOpen("own", all, "you"),
       used: stillOpen("own", [...all, ...facts("ai")], "result"),
     }).toStrictEqual({
       beforeAi: ["whether they use AI for any of this (one short question)"],
-      afterAi: [],
       used: [],
     });
   });
@@ -155,7 +164,59 @@ const step = (text: string, who = "Clerk", tool = "") => ({
   documented: false,
 });
 
-const staff = ["Inge de Vries", "Mo Mertens", "Anne-Marie O'Neil", "Jo Li"];
+const staff = [
+  "Inge de Vries",
+  "Mo Mertens",
+  "Anne-Marie O'Neil",
+  "Jo Li",
+  "José Peña",
+  "Alexander Berg",
+  "Will Hart",
+  "An Peeters",
+];
+
+describe("a name from the staff list in a text", () => {
+  const clean = withoutNames(staff);
+
+  it("goes, whole or in part, without its accent, with an s, or as a short form", () => {
+    expect(
+      [
+        "Ask Inge de Vries.",
+        "Ask José, or Jose's lead.",
+        "It lies on Inges desk.",
+        "Check with Alex first.",
+        "Marie and Mo sign it.",
+        "Send it to PEETERS.",
+      ].map((text) => clean(text))
+    ).toStrictEqual([
+      "Ask someone someone someone.",
+      "Ask someone, or someone's lead.",
+      "It lies on someone desk.",
+      "Check with someone first.",
+      "Someone and someone sign it.",
+      "Send it to someone.",
+    ]);
+  });
+
+  it("leaves the words a short name is also: only written as a name it goes", () => {
+    const plain = [
+      "It will go out the same day.",
+      "Attach an order to it.",
+      "The order follows in the same mo.",
+      "Take it to heart.",
+    ];
+    expect({
+      plain: plain.map((text) => clean(text)),
+      named: clean("Then Will takes it to An."),
+      // With a capital it can't be told from the name: better a word lost.
+      first: clean("An order follows."),
+    }).toStrictEqual({
+      plain,
+      named: "Then someone takes it to someone.",
+      first: "Someone order follows.",
+    });
+  });
+});
 
 describe("what the team already told about a piece of work", () => {
   it("tells how the work goes and what is still open, without who does a step, anyone's own list or what they use AI for", () => {
@@ -178,7 +239,7 @@ describe("what the team already told about a piece of work", () => {
           next: "Finance, which pays it.",
           open: ["Who approves above the limit?"],
         }),
-        staff
+        ["Inge de Vries", "Mo Mertens"]
       )
     ).toBe(
       [
@@ -195,33 +256,40 @@ describe("what the team already told about a piece of work", () => {
     );
   });
 
-  it("leaves out every line that holds a word of anyone's name on the staff list", () => {
-    const told = toldAbout(
-      "incoming invoices",
-      drawn({
-        steps: [
-          step("Open the invoice."),
-          step("Ask inge when the number is missing."),
-          step("Send it to Mo."),
-          step("Forward it to Marie's inbox."),
-          step("Mrs O'Neil signs it."),
-          step("Put it in Jo's tray."),
-          // "de" is a word of a name as it is written, so its line goes;
-          // "mo" in small letters is no name.
-          step("Book it under de minimis."),
-          step("File it the same mo as it came."),
-        ],
-        open: ["Why does De Vries check each one?", "What does Li do then?"],
-      }),
-      staff
-    );
-    expect(told).toBe(
-      [
+  it("leaves out every line in which a name from the staff list is found, and names the work when only what is open is left", () => {
+    expect({
+      lines: toldAbout(
+        "incoming invoices",
+        drawn({
+          steps: [
+            step("Open the invoice."),
+            step("Ask Inge when the number is missing."),
+            step("Send it to Mo."),
+            step("Forward it to Marie's inbox."),
+            step("Put it on Joses tray."),
+            step("Check with Alex first."),
+            step("It will go out the same day."),
+          ],
+          open: ["Why does De Vries check each one?", "What does Li do then?"],
+        }),
+        staff
+      ),
+      open: toldAbout(
+        "incoming invoices",
+        drawn({
+          steps: [step("Inge books it.")],
+          open: ["Who approves above the limit?"],
+        }),
+        staff
+      ),
+    }).toStrictEqual({
+      lines: [
         "What the team already told about incoming invoices (how it goes, no names):",
         "- Open the invoice.",
-        "- File it the same mo as it came.",
-      ].join("\n")
-    );
+        "- It will go out the same day.",
+      ].join("\n"),
+      open: "Still open about incoming invoices: Who approves above the limit?",
+    });
   });
 
   it("tells nothing when nothing may be told, and no more than a brief should carry", () => {

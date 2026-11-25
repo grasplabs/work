@@ -1,47 +1,33 @@
 import type { DrawnWork } from "@grasp-os/shared/admin/org-record";
 
+import { withoutNames } from "./names.ts";
+
 // What the team already told about a piece of work, as the next interview
 // about it is given it (store.ts `#contextOf`): how the work goes, from its
 // drawing, so Stephen builds on it instead of starting blind. The
-// interviewer knows what was said, never who said it. How a name could get
-// through, and what stops it:
+// interviewer knows what was said, never who said it. How a colleague
+// could be pointed at all the same, and what stops it:
 //
+// - One colleague's account told to a teammate, who knows whose it is: the
+//   store tells nothing until two people besides the listener told the
+//   work (`toldByEnough`), so no line is one known person's.
 // - The drawing says who told what (`from`, `told`, `heard`): none of it is
 //   read here.
 // - A step's `who` is meant to be a role, but a model wrote it: left out.
-// - A model wrote a colleague's name into a line ("Ask Noor when the number
-//   is missing."): a line that holds a word of anyone's name on the staff
-//   list is left out whole.
 // - Someone's own list and what they use AI for (`own`, `ai`) can point at
 //   the one person who has them: left out.
 // - Each person's own numbers stay theirs: no number is read here.
-//
-// A name that is not on the staff list (a customer, someone who left) is
-// not known here and is not stopped: the drawing's own rule, roles and
-// never names, is all that holds it back.
+// - A model wrote a colleague's name into a line ("Ask Noor when the number
+//   is missing."): a line in which the one filter of names (names.ts) finds
+//   one is left out whole. That filter is a backstop behind the rules above
+//   and the drawing's own "roles, never names", not a guarantee.
+
+/** How many people besides the listener must have told a piece of work before any of it is told on. */
+export const toldByEnough = 2;
 
 /** The most lines and letters the brief gets of it: it is context, not the interview. */
 const toldLinesMost = 12;
 const toldLettersMost = 1200;
-
-const notWord = /[^\p{L}\p{N}]+/u;
-
-/**
- * Whether a line holds a word of someone's name. A name of three letters
- * or more counts in any capitals; one of two ("Mo", "Jo") only as it is
- * written, or half of all lines would hold one; a single letter never.
- */
-const namesIn = (names: readonly string[]): ((line: string) => boolean) => {
-  const parts = names.flatMap((name) => name.split(notWord));
-  const long = new Set(
-    parts.filter((part) => part.length > 2).map((part) => part.toLowerCase())
-  );
-  const short = new Set(parts.filter((part) => part.length === 2));
-  return (line) =>
-    line
-      .split(notWord)
-      .some((word) => long.has(word.toLowerCase()) || short.has(word));
-};
 
 /**
  * What the team already told about `work`, for the brief of the next
@@ -54,9 +40,9 @@ export const toldAbout = (
   drawn: DrawnWork,
   names: readonly string[]
 ): string => {
-  const named = namesIn(names);
+  const clean = withoutNames(names);
   const kept = (lines: readonly string[]): string[] =>
-    lines.filter((line) => line.trim() !== "" && !named(line));
+    lines.filter((line) => line.trim() !== "" && clean(line) === line);
   const lines = kept([
     drawn.starts,
     ...drawn.steps.map(({ text, tool }) =>
@@ -75,15 +61,16 @@ export const toldAbout = (
   if (lines.length === 0 && open.length === 0) {
     return "";
   }
-  const told = [
-    ...(lines.length === 0
-      ? []
+  const told =
+    lines.length === 0
+      ? [`Still open about ${work}: ${open.join(" ")}`]
       : [
           `What the team already told about ${work} (how it goes, no names):`,
           ...lines.map((line) => `- ${line}`),
-        ]),
-    ...(open.length === 0 ? [] : [`Still open about it: ${open.join(" ")}`]),
-  ];
+          ...(open.length === 0
+            ? []
+            : [`Still open about it: ${open.join(" ")}`]),
+        ];
   // Whole lines only, as many as fit: half a line says something else.
   const fitting: string[] = [];
   let letters = 0;

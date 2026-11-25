@@ -478,6 +478,53 @@ describe("a piece of work, drawn", { timeout: 60_000 }, () => {
     });
   });
 
+  it("tells the next interview what the team told only once two others told it: never one colleague's account, their own, or anything to the lead", async () => {
+    const store = onboardingStore(env);
+    const ids = await team();
+    await mapped(ids);
+    const rotaReply: ProviderReply = {
+      text: JSON.stringify({ steps: [], open: [] }),
+      inputTokens: 100,
+      outputTokens: 10,
+    };
+    /** Who is told what the team told, and who what the drawing left open. */
+    const toldTo = async () => {
+      const known = await Promise.all(
+        (["lea", "max", "mia", "noor"] as const).map(async (key) => {
+          const context = await store.contextOf(ids[key]);
+          return [key, context?.known ?? ""] as const;
+        })
+      );
+      return {
+        told: known
+          .filter(([, text]) => text.includes("What the team already told"))
+          .map(([key]) => key),
+        open: known
+          .filter(([, text]) => text.includes("Still open about"))
+          .map(([key]) => key),
+      };
+    };
+    await agree(await openLink(ids.max), 0, [
+      fact("m1", "step", "Max opens the ticket and looks the customer up."),
+    ]);
+    await answering([rotaReply, ticketsReply(ids)], async () => [
+      await store.drawNext(),
+      await store.drawNext(),
+    ]);
+    // Max alone told it: to Noor every line would be his, and he knows his own.
+    const one = await toldTo();
+    await agree(await openLink(ids.mia), 0, [
+      fact("i1", "step", "Mia opens the ticket."),
+    ]);
+    await answering([ticketsReply(ids)], async () => await store.drawNext());
+    // Max and Mia told it: two others for Noor, one other for each of them.
+    const two = await toldTo();
+    expect({ one, two }).toStrictEqual({
+      one: { told: [], open: [] },
+      two: { told: ["noor"], open: ["noor"] },
+    });
+  });
+
   it("is the lead's own work drawn from the lead alone, while work others do waits for them", async () => {
     const store = onboardingStore(env);
     const ids = await team();

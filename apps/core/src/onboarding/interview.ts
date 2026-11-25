@@ -110,14 +110,20 @@ const weekPartMinutes = 4;
 
 /**
  * What the record still misses, as Stephen is told it each turn
- * (`stillOpen`). Not once the interview is at the read-back or they are
- * back to add something: nothing more is asked for then.
+ * (`stillOpen`), as what was said about the work, never an order to him.
+ * Not once the interview is at the read-back or they are back to add
+ * something: nothing more is asked for then.
  */
 const openOf = (turn: TurnAsked, kind: TurnContext["kind"]): string[] => {
   if (turn.phase === "readback" || turn.adding) {
     return [];
   }
   const open = stillOpen(kind, turn.facts, turn.phase);
+  // In the part about AI nothing is listed, and he is not sent on either:
+  // the one follow-up his script allows there is his to ask.
+  if (open.length === 0 && turn.phase === "you") {
+    return [];
+  }
   return [
     "",
     "What is still open, most important first:",

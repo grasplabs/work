@@ -157,9 +157,15 @@ export const storyOf = (
 export const storyKey = (lines: StoryLine[]): string =>
   lines.map(({ id, text }) => `${id}\u0000${text}`).join("\u0001");
 
-/** Which part of the read-back a fact is read in: what they said about AI, the steps, what goes differently, or the numbers and the result. */
+/**
+ * Which part of the read-back a fact is read in: what they said about AI,
+ * the work that comes back in their week, the steps of the one piece, what
+ * goes differently, or the numbers and the result. Their other work has a
+ * part of its own, so it is not read as steps of the one piece.
+ */
 export const readBackGroups = [
   "you",
+  "tasks",
   "steps",
   "differently",
   "result",
@@ -174,8 +180,7 @@ const groupOf: Record<FactTag, (typeof readBackGroups)[number]> = {
   next: "steps",
   workaround: "steps",
   work: "steps",
-  // What comes back in their week is how the work goes: read with the steps.
-  task: "steps",
+  task: "tasks",
   who: "you",
   exception: "differently",
   wait: "differently",
@@ -203,7 +208,7 @@ export interface ReadBackPart {
 }
 
 /**
- * The read-back in parts: what they said about AI, the steps, what goes
+ * The read-back in parts: what they said about AI, their recurring work, the steps, what goes
  * differently, then the numbers and the result, each a few lines at a
  * time. Small parts are read together, so five short answers are not five
  * pages to agree to. A line the person added stays in the part they added

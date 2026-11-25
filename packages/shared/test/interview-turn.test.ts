@@ -286,43 +286,67 @@ describe("a turn from the model", () => {
     ]);
   });
 
-  it("takes a spoken answer as it was heard: most of a fact's words in their order are enough, in a typed one only the words as they stand", () => {
-    const heard =
-      "so the invoice comes in by mail and then I book it in exact online";
-    const facts = [
-      {
-        tag: "step",
-        text: "You book the invoice in Exact Online.",
-        record: "Book the invoice in Exact Online.",
-        // Spelled right by the model where one word was heard as another.
-        quote: "the invoice comes in by email and then I book it",
-      },
-      {
-        tag: "step",
-        text: "You book it before it comes in.",
-        record: "Book it before it comes in.",
-        // The same words in another order were not said.
-        quote: "book it and then the invoice comes in",
-      },
-      {
-        tag: "number",
-        text: "You handle forty a week.",
-        record: "About 40 a week.",
-        quote: "forty invoices a week",
-      },
+  it("takes a spoken answer as it was heard: a quote's words in one stretch, but for a word heard as another; a typed one only as it stands", () => {
+    const answers = [
+      "I do check the invoice number",
+      "the first thing every morning is that an invoice from a supplier comes in and much later in exact I book whatever is approved",
+      "so the invoice comes in by mail and then I book it in exact on line and I do not check the amount every time",
+    ];
+    const quotes = [
+      // One word heard as another, in a long quote.
+      "the invoice comes in by email and then I book it",
+      // One word heard as two, in a short one.
+      "Exact Online",
+      // The same words in another order.
+      "book it and then the invoice comes in",
+      // Never said.
+      "forty invoices a week",
+      // Its words are there, spread over a long sentence two answers back.
+      "the first invoice is approved",
+      // The opposite of what was said, either way round.
+      "I do not check the invoice number",
+      "I check the amount every time",
     ];
     const kept = (typed: boolean) =>
       checked(
-        { say: "Then?", facts },
+        { say: "Then?", facts: quotes.map((quote) => stepFrom(quote)) },
         {
           ...context,
-          answers: [typed ? { text: heard, typed } : { text: heard }],
+          answers: answers.map((text) => (typed ? { text, typed } : { text })),
         }
-      ).facts.map(({ text }) => text);
-    expect({ spoken: kept(false), typed: kept(true) }).toStrictEqual({
-      spoken: ["You book the invoice in Exact Online."],
-      typed: [],
+      ).facts.length;
+    const keptOf = (quote: string) =>
+      checked(
+        { say: "Then?", facts: [stepFrom(quote)] },
+        { ...context, answers: answers.map((text) => ({ text })) }
+      ).facts.length === 1;
+    expect({
+      spoken: quotes.filter((quote) => keptOf(quote)),
+      typed: kept(true),
+    }).toStrictEqual({
+      spoken: [
+        "the invoice comes in by email and then I book it",
+        "Exact Online",
+      ],
+      typed: 0,
     });
+  });
+
+  it("hears a word written with or without a hyphen, and a short quote only word for word", () => {
+    const said = (heard: string, quote: string) =>
+      checked(
+        { say: "Then?", facts: [stepFrom(quote)] },
+        { ...context, answers: [{ text: heard }] }
+      ).facts.length === 1;
+    expect({
+      hyphen: said(
+        "then I send an email to the supplier",
+        "an e-mail to the supplier"
+      ),
+      // Two words allow no miss: "the list" is not "the sheet".
+      short: said("I check it in the list", "the sheet"),
+      three: said("I check it in our sheet", "in the sheet"),
+    }).toStrictEqual({ hyphen: true, short: false, three: true });
   });
 
   it("counts what it leaves out, by why", () => {

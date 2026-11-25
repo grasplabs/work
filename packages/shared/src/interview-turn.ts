@@ -427,31 +427,67 @@ const saidIn = (answer: string, quote: string): boolean => {
 
 const wordEnds = /^[.,;:!?"'…-]+|[.,;:!?"'…-]+$/gu;
 
-/** The words that carry a sentence, as they are compared: those of more than two letters, without punctuation. */
-const carryingWords = (said: string): string[] =>
+/** The words of what was said, as they are compared: without punctuation at their ends. */
+const wordsOf = (said: string): string[] =>
   plainWords(said)
     .split(" ")
     .map((word) => word.replace(wordEnds, ""))
-    .filter((word) => word.length > 2);
-
-/** How much of a quote must be heard in a spoken answer for it to count as said. */
-const heardShare = 0.8;
+    .filter((word) => word !== "");
 
 /**
- * Whether a quote was said in an answer given out loud. Speech recognition
- * writes a word wrong here and there, and the model that quotes it spells
- * it right, so letter for letter would lose what was really said: enough
- * is that most of the quote's words stand in the answer, in the same
- * order, with other words between them or not.
+ * The words that turn a sentence into its opposite, in the languages he
+ * speaks: a quote and what was heard must agree on every one of them.
  */
-const heardIn = (answer: string, quote: string): boolean => {
-  const wanted = carryingWords(quote);
-  if (wanted.length === 0) {
-    return false;
+const negations: ReadonlySet<string> = new Set([
+  "not",
+  "no",
+  "never",
+  "cannot",
+  "none",
+  "niet",
+  "geen",
+  "nooit",
+  "nicht",
+  "kein",
+  "keine",
+  "keinen",
+  "nie",
+  "ne",
+  "pas",
+  "jamais",
+  "aucun",
+  "aucune",
+  "nunca",
+  "ningún",
+  "ninguna",
+]);
+
+const negates = (word: string): boolean =>
+  negations.has(word) || word.endsWith("n't") || word.startsWith("n'");
+
+/** How many of a quote's words speech recognition may have heard as another. */
+const missesFor = (words: number): number => {
+  if (words <= 2) {
+    return 0;
   }
-  // The longest run of the quote's words the answer has in their order.
+  return words <= 5 ? 1 : Math.floor(words * 0.2);
+};
+
+/** How many words more than the quote the part of the answer it is found in may have. */
+const windowSlack = 2;
+
+/** How many words before a stretch are read for a "not" that belongs to it. */
+const negationBefore = 2;
+
+const spacesAndHyphens = /[\s-]+/gu;
+
+/** How many of `wanted` stand in `heard` in their order. */
+const inOrder = (
+  wanted: readonly string[],
+  heard: readonly string[]
+): number => {
   let row = Array.from({ length: wanted.length + 1 }, () => 0);
-  for (const word of carryingWords(answer)) {
+  for (const word of heard) {
     const next = [0];
     for (const [at, each] of wanted.entries()) {
       next.push(
@@ -462,7 +498,68 @@ const heardIn = (answer: string, quote: string): boolean => {
     }
     row = next;
   }
-  return (row.at(-1) ?? 0) >= Math.ceil(wanted.length * heardShare);
+  return row.at(-1) ?? 0;
+};
+
+const negatedIn = (words: readonly string[]): number =>
+  words.filter((word) => negates(word)).length;
+
+/**
+ * Whether a quote was said in an answer given out loud. Speech recognition
+ * writes a word wrong here and there, or as two ("exact on line"), and the
+ * model that quotes it spells it right, so letter for letter would lose
+ * what was really said. It counts as said when
+ *
+ * - the quote stands there once spaces and hyphens are left out of both; or
+ * - its words stand in order in one stretch of the answer, hardly longer
+ *   than the quote itself, but for a word or two heard as another: none
+ *   of a quote of one or two words, one of up to five, a fifth of a longer
+ *   one. Words spread over a long sentence are not the quote.
+ *
+ * And never when that stretch says "not" where the quote does not, or the
+ * other way round: one word heard wrong must not turn a fact into its
+ * opposite. Numbers written as words are not matched to digits.
+ */
+const heardIn = (answer: string, quote: string): boolean => {
+  const wanted = wordsOf(quote);
+  const squashed = wanted.join("").replace(spacesAndHyphens, "");
+  if (squashed.length < 3) {
+    return false;
+  }
+  const heard = wordsOf(answer);
+  if (heard.join("").replace(spacesAndHyphens, "").includes(squashed)) {
+    return true;
+  }
+  const needed = wanted.length - missesFor(wanted.length);
+  const negated = negatedIn(wanted);
+  const known = new Set(wanted);
+  for (const [from, first] of heard.entries()) {
+    // A stretch that holds the quote starts with a word of it.
+    if (!known.has(first)) {
+      continue;
+    }
+    for (
+      let length = needed;
+      length <= wanted.length + windowSlack;
+      length += 1
+    ) {
+      const stretch = heard.slice(from, from + length);
+      // "Not" stands before what it denies: the words just before the
+      // stretch count with it.
+      const around = heard.slice(
+        Math.max(0, from - negationBefore),
+        from + length
+      );
+      if (
+        stretch.length === length &&
+        negatedIn(around) === negated &&
+        inOrder(wanted, stretch) >= needed
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
 };
 
 const looseObject = z.record(z.string(), z.unknown());
@@ -567,8 +664,8 @@ export interface TurnSaid {
  * and only facts whose words are really in what they said: nothing is
  * written down that the person didn't say. A typed answer holds the words
  * as they stand, but for capitals, quote marks and spaces; a spoken one is
- * as speech recognition heard it, so most of the words in their order are
- * enough (`heardIn`). The one fact that needs no words is the example they
+ * as speech recognition heard it, so its words in one stretch, but for a
+ * word heard as another, are enough (`heardIn`). The one fact that needs no words is the example they
  * shared without saying anything.
  */
 export const checkedTurn = (

@@ -17,18 +17,18 @@ export const labMarks: Record<
   Record<InterviewLocale, string>
 > = {
   own: {
-    en: "4d23b10dcb6629b30f47c0d735865286f626d6db40efc1d330ebaa4d6d109cd6",
-    nl: "4001d38d1047e6207b8a8cc2fe28288a2981a96b8774135797f1d31f885f344f",
-    de: "e7c5f5e0fcb46b44d878793aec63701c4f2d1f07c2f2f0baf4121817a48b08b7",
-    fr: "e7658c02da82d7d82c2b5887dde8f03ba9313c03a3ad7a99913c7f99bd8709fe",
-    es: "ceb74d8459a128186f55e3ae38eee959899c8968eaf8e81d55c29681f4f92ff4",
+    en: "dde21eba640bbc929bce25640cff8b7c8c6bd7db414e0882c58ce2848cc318ad",
+    nl: "340011328024b7f6f55c2aa66617cb66e93a694497d55d28185844c3a3c2233f",
+    de: "d971f7b29ca96360bd797f01c85397d5762de38887cf1e101832f47e32789572",
+    fr: "4ca136d91dab319fdaf710bcc224bd014880a8c0bff2731a2c5c6aa177149ba3",
+    es: "4910b8b55df5f335724e71db96216c78fe99d189bd00f61bce82eac07fe48e84",
   },
   lead: {
-    en: "6962165e74cec77c0dfa8d9529ecfb2d5a62ea992e3463aa0561f89d398ef1bd",
-    nl: "c906b9021b66161b5d9a08da3d3b887d406ca066027f8074a53f6a4172662908",
-    de: "65d9692a13ae911bb1f246fc2278f4b87bc6c0839bff0ab9f48afa3c61521cc9",
-    fr: "3a68d083eca76455d8e9a6b73edfb7a088d64148c90d9c28c2d982b60c6d412e",
-    es: "d078ce1f12320f3d7858829918e16542aa25316fba5b8c729c764779db7ab34f",
+    en: "200760d265c2bcf280abd478457ea36c49532846f295dda59125614d7e86735f",
+    nl: "b57c685b5ffe89f5586a71ba8f7bd014b479539ea0d1f31afff7ad00a7db95bf",
+    de: "1cfa326a1129e2b18e21345bb89b492e9d59617d5ed8b33d05b994fcca5fddd3",
+    fr: "be2167b95e372312456ce338cd8d08f5e1b663de68340a270b5a0a375e339a59",
+    es: "e4f17ed9362162067e5d752670f2bf939466b5212a83036dd431a9d2c5cb3777",
   },
 };
 
@@ -36,7 +36,7 @@ export const labMarks: Record<
 // every mark, in the order they stand here, one to a line. A test holds it
 // to the marks, so no text changes under a version's name: whoever changes
 // a mark changes this.
-export const marksDigest = "86f7e0ec0e09";
+export const marksDigest = "c10677a67f74";
 
 // Which Stephen this is, as one name for all of the marks above: an
 // interview that keeps it says which texts held it, in whatever language

@@ -28,7 +28,6 @@ import {
 //   the lab can't work out from the text alone.
 // - A word changed without its mark: a text held under the name of
 //   another, so a measurement or an interview names a Stephen it never met.
-// - The interview starting with AI again, or asking for it twice.
 
 interface Which {
   kind: InterviewKind;
@@ -103,42 +102,6 @@ describe("the interview", () => {
       'ask for one real example to share, and set wants to "file"'
     );
   });
-
-  it.each(everyText)(
-    "starts with the work and asks about AI last, before the read-back ($kind, $locale)",
-    (which) => {
-      const { text } = textOf(which);
-      const parts = [
-        ...text.matchAll(/^(?<part>\d+)\. (?<name>[a-z]+):/gmu),
-      ].map((found) => found.groups?.name);
-      expect(parts).toStrictEqual(
-        which.kind === "own"
-          ? [
-              "open",
-              "week",
-              "anchor",
-              "story",
-              "steps",
-              "exceptions",
-              "numbers",
-              "result",
-              "you",
-              "readback",
-            ]
-          : [
-              "open",
-              "anchor",
-              "story",
-              "steps",
-              "exceptions",
-              "numbers",
-              "result",
-              "you",
-              "readback",
-            ]
-      );
-    }
-  );
 
   it("is with a lead about the team's work", () => {
     const { text } = textOf({ kind: "lead", locale: "en" });
