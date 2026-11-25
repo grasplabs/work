@@ -212,14 +212,23 @@ const compatibilityNamespace =
  * doesn't show as its text: an alternate content's fallback, which an
  * application shows only when it understands none of the choices before
  * it (ECMA-376 Part 3), and Word understands the choices it writes, so
- * there a fallback is a copy of a choice's text, or text hidden; and a
- * tracked move's old place, whose text stands at its new one. A choice
- * Word doesn't understand, and an ignorable namespace's content, are read
- * all the same, and left to the marking.
+ * there a fallback is a copy of a choice's text, or text hidden; a
+ * tracked deletion, and a tracked move's old place, whose text stands at
+ * its new one, as Word shows a document by default. A choice Word doesn't
+ * understand, and an ignorable namespace's content, are read all the
+ * same, and left to the marking.
  */
 const isUnshown = ({ uri, local }: SaxesTagNS, name: string): boolean =>
   (uri === compatibilityNamespace && local === "Fallback") ||
+  name === "del" ||
   name === "moveFrom";
+
+/** The value of `tag`'s WordprocessingML attribute `local`, if it has one. */
+const wordAttribute = (tag: SaxesTagNS, local: string): string | undefined =>
+  Object.values(tag.attributes).find(
+    (attribute) =>
+      wordNamespaces.has(attribute.uri) && attribute.local === local
+  )?.value;
 
 /** A toggle property's values that turn it off (ECMA-376 Part 1, 17.17.4). */
 const offValues: ReadonlySet<string> = new Set(["false", "0", "off"]);
@@ -233,9 +242,7 @@ const hidesRun = (tag: SaxesTagNS, name: string): boolean => {
   if (name !== "vanish" && name !== "specVanish") {
     return false;
   }
-  const value = Object.values(tag.attributes).find(
-    ({ uri, local }) => wordNamespaces.has(uri) && local === "val"
-  )?.value;
+  const value = wordAttribute(tag, "val");
   return value === undefined || !offValues.has(value);
 };
 
@@ -249,15 +256,36 @@ const bodyText = (xml: string): string => {
   let inUnshown = 0;
   /** The runs open now, innermost last: whether each is hidden. */
   const runs: boolean[] = [];
+  /**
+   * The fields open now, innermost last: whether each is still in its
+   * code, which Word shows only as the field's result.
+   */
+  const fields: boolean[] = [];
   /** Whether what is read now is the body's, and shown. */
   const reading = (): boolean =>
-    inBody > 0 && inUnshown === 0 && !runs.includes(true);
+    inBody > 0 &&
+    inUnshown === 0 &&
+    !runs.includes(true) &&
+    !fields.includes(true);
+  /** A field's begin, separator or end, a run's `fldChar`. */
+  const fieldChar = (tag: SaxesTagNS): void => {
+    const type = wordAttribute(tag, "fldCharType");
+    if (type === "begin") {
+      fields.push(true);
+    } else if (type === "separate") {
+      fields[fields.length - 1] = false;
+    } else if (type === "end") {
+      fields.pop();
+    }
+  };
   readXml(xml, {
     open: (tag) => {
       const name = wordName(tag);
       const parent = open.at(-1);
       if (name === "r") {
         runs.push(false);
+      } else if (parent === "r" && name === "fldChar") {
+        fieldChar(tag);
       } else if (
         parent === "rPr" &&
         open.at(-2) === "r" &&

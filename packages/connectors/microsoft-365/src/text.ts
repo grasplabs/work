@@ -64,6 +64,9 @@ const unread: Readonly<Record<string, ReadonlySet<string>>> = {
     "video",
     "canvas",
     "datalist",
+    "meter",
+    "progress",
+    "rp",
   ]),
   [htmlSpec.NS.SVG]: new Set([
     "script",
@@ -93,6 +96,7 @@ const hasAttribute = ({ attrs }: Element, attribute: string): boolean =>
 const isUnread = (element: Element): boolean =>
   unread[element.namespaceURI]?.has(element.tagName) === true ||
   hasAttribute(element, "hidden") ||
+  hasAttribute(element, "popover") ||
   (element.tagName === "dialog" && !hasAttribute(element, "open"));
 
 /**

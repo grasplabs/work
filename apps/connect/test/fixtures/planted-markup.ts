@@ -66,7 +66,7 @@ export const plantedHtml: Readonly<
     shown: "Due Friday noon\nOwner\nSam",
   },
   neverShown: {
-    html: `<noscript>${plantedInstruction}</noscript><template><p>${plantedInstruction}</p></template><iframe>${plantedInstruction}</iframe><datalist><option>${plantedInstruction}</option></datalist><p>${shownText}</p>`,
+    html: `<noscript>${plantedInstruction}</noscript><template><p>${plantedInstruction}</p></template><iframe>${plantedInstruction}</iframe><datalist><option>${plantedInstruction}</option></datalist><div popover>${plantedInstruction}</div><progress>${plantedInstruction}</progress><meter>${plantedInstruction}</meter><p>${shownText}</p>`,
     shown: shownText,
   },
   // A closed `details` shows its summary alone.
@@ -183,6 +183,13 @@ export const plantedWordXml: Readonly<
       `<w:p><w:moveFrom w:id="1"><w:r><w:t>${shownText}</w:t></w:r></w:moveFrom></w:p><w:p><w:moveTo w:id="2"><w:r><w:t>${shownText}</w:t></w:r></w:moveTo></w:p>`
     ),
     shown: `\n${shownText}`,
+  },
+  // A tracked deletion, and a field's code: Word shows its result.
+  deletedAndFieldCode: {
+    xml: documentXml(
+      `<w:p><w:del w:id="3"><w:r><w:t>${plantedInstruction}</w:t></w:r></w:del><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:t>${plantedInstruction}</w:t></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>${shownText}</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r><w:r><w:t>.</w:t></w:r></w:p>`
+    ),
+    shown: `${shownText}.`,
   },
   nestedDeepest: {
     xml: documentXml(
