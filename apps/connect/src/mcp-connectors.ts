@@ -514,6 +514,7 @@ const readOnceLater = async (
         and(
           eq(connections.id, connection.id),
           eq(connections.status, "active"),
+          eq(connections.updatedAt, connection.updatedAt),
           or(
             isNull(connections.toolListFreshUntil),
             lte(connections.toolListFreshUntil, new Date(now))
