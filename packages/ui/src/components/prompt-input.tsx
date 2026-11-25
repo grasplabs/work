@@ -1519,7 +1519,10 @@ const styles = stylex.create({
   // The voice's field, on the bar's centre line between the time and the controls: one canvas
   // (prompt-input-voice-field.ts). Its colour is the ink, which the field reads to know the
   // ground it draws on, and draws in where colours are forced.
+  // The hill's canvas (prompt-input-voice-hill.ts) is taller than its row: it reaches down to the
+  // bar's foot and up to its top, so the hill rises from the card's edge and has room to stand.
   level: {
+    position: "relative",
     display: "grid",
     alignItems: "center",
     flexGrow: 1,
@@ -1527,7 +1530,20 @@ const styles = stylex.create({
     height: size.controlSm,
     color: { default: colors.foreground, [FORCED]: "CanvasText" },
   },
-  canvas: { display: "block", width: "100%", height: size.controlSm },
+  canvas: {
+    position: "absolute",
+    insetInline: 0,
+    bottom: `calc(-1 * ${space["2"]})`,
+    display: "block",
+    width: "100%",
+    height: `calc(${size.controlSm} + 2 * ${space["2"]})`,
+    pointerEvents: "none",
+  },
+  // In one row the card's own inset is the row's: the hill stands on the card's foot.
+  compactCanvas: {
+    bottom: `calc(-1 * ${space["3"]})`,
+    height: `calc(${size.controlSm} + 2 * ${space["3"]})`,
+  },
   // A spoken conversation, in the body's and the footer's place: its two rows are the card's own.
   conversation: { display: "contents" },
   // The words of the turn, where the text's words stand, in the text's size and line.
@@ -3963,12 +3979,12 @@ const drawVoice = (
     held.field?.run(held.seen && document.visibilityState === "visible");
   };
   const start = async () => {
-    const { startVoiceField } = await import("./prompt-input-voice-field");
+    const { startVoiceHill } = await import("./prompt-input-voice-hill");
     if (held.gone) {
       return;
     }
     held.field?.stop();
-    held.field = startVoiceField(canvas, {
+    held.field = startVoiceHill(canvas, {
       sample,
       still: reduced.matches,
       onLevel,
@@ -4022,7 +4038,8 @@ const Level = ({
   const [drawing, setDrawing] = useState<ReturnType<typeof drawVoice> | null>(
     null
   );
-  const heardAt = usePromptInput()?.heardAt;
+  const form = usePromptInput();
+  const heardAt = form?.heardAt;
   // The newest sampler and level, read at each frame.
   const now = useRef({ level, sample, heardAt });
   useEffect(() => {
@@ -4045,7 +4062,13 @@ const Level = ({
   }, [drawing, mode]);
   return (
     <span aria-hidden="true" {...stylex.props(styles.level)}>
-      <canvas ref={setCanvas} {...stylex.props(styles.canvas)} />
+      <canvas
+        ref={setCanvas}
+        {...stylex.props(
+          styles.canvas,
+          form?.compact === true && styles.compactCanvas
+        )}
+      />
     </span>
   );
 };

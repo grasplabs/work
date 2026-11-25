@@ -81,7 +81,7 @@ const smooth = (edge0: number, edge1: number, value: number) => {
 };
 
 /** The grade, from no dot to the core, as the brand's light resolves here. */
-const gradeOf = (canvas: HTMLCanvasElement): string[] => {
+export const gradeOf = (canvas: HTMLCanvasElement): string[] => {
   const style = getComputedStyle(canvas);
   // Forced colours: one colour, the canvas's own, which is the system's text there.
   if (matchMedia("(forced-colors: active)").matches) {
@@ -112,7 +112,7 @@ const gradeOf = (canvas: HTMLCanvasElement): string[] => {
  * The other voice's grade, in a conversation: the same light, its core one stop short of the
  * person's (mint on paper, sea at night), so whose turn it is reads at a glance.
  */
-const quietOf = (grade: string[]) =>
+export const quietOf = (grade: string[]) =>
   grade.map((stop, index) =>
     index === grade.length - 1 ? (grade[index - 1] ?? stop) : stop
   );

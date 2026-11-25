@@ -118,7 +118,8 @@ const squaresFor = (from: Place, to: Place, leaves: number): Square[] => {
   return Array.from({ length: count }, (_, index) => {
     const order = index / Math.max(1, count - 1);
     const x0 = root + (hash(seed, index, 47) - 0.5) * 36;
-    const y0 = from.y + from.height * (0.3 + hash(seed, index, 53) * 0.4);
+    // Out of the hill's body: the lower half of the field.
+    const y0 = from.y + from.height * (0.55 + hash(seed, index, 53) * 0.3);
     // They land along the word from its start to its end, as it is written.
     const x1 = to.x + to.width * (0.08 + 0.84 * order);
     const y1 = to.y + to.height * (0.38 + hash(seed, index, 23) * 0.3);
