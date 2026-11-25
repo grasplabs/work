@@ -146,7 +146,6 @@ const KeptEntries = ({
                 <Button
                   errorText={t`Not reset`}
                   onClick={resetAll}
-                  size="sm"
                   variant="destructive"
                 >
                   {t`Reset`}

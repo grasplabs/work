@@ -8,7 +8,13 @@ import {
 } from "@grasp-os/ui/components/sidebar";
 import { sidebarMarker } from "@grasp-os/ui/components/sidebar.stylex";
 import { Toaster } from "@grasp-os/ui/components/toast";
-import { duration, media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import {
+  colors,
+  duration,
+  media,
+  size,
+  space,
+} from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef, useState } from "react";
@@ -47,6 +53,11 @@ const styles = stylex.create({
     // A layer of its own, so the line inside the card's edge stands over
     // all of it, the page's bar too, as the reference's.
     zIndex: 0,
+    // The card's ground under the lg breakpoint too, as #2503's card
+    // (shell-card) is on a phone: Damsko's SidebarInset is a card only from
+    // lg and takes the page's ground under it, which in dark is the brand's
+    // night, a step darker than the card. From lg the card draws it.
+    backgroundColor: { default: colors.sidebarCard, [media.lg]: "transparent" },
   },
   // The page, under the banner: it scrolls up and down only, what is wider
   // than the card is cut at its edge. Laid out down the card, at least as
@@ -95,6 +106,15 @@ const styles = stylex.create({
     insetInlineEnd: `calc(${size.appShellPageInline} - (${size.sidebarIconButton} - ${size.sidebarIcon}) / 2)`,
     zIndex: 25,
   },
+  // On a phone the menu's button is #2503's Menu button, a ghost Button:
+  // in the chat button's ink, not the sidebar's greys (site-header.tsx).
+  menuInk: {
+    display: "contents",
+    "--damsko-sidebar-secondary-foreground": {
+      default: null,
+      [media.maxSm]: colors.foreground,
+    },
+  },
   // The menu's button at the row's start on a phone, where the page's bar
   // has its trigger (site-header.tsx), while the chat covers the page.
   menu: {
@@ -120,6 +140,13 @@ const styles = stylex.create({
     transitionProperty: "opacity",
     transitionDuration: duration.ui,
     transitionTimingFunction: duration.ease,
+    // On a phone it stands in the card, which is the window, and nothing
+    // of it (its shadow, its light) reaches past the card's foot, as
+    // #2503's dock in its card: cut at the card's foot, `space4` under it.
+    clipPath: {
+      default: null,
+      [media.maxSm]: `inset(-100vh -100vw calc(-1 * ${space["4"]}) -100vw)`,
+    },
   },
   // What it holds takes presses again: inherited, through a wrapper that
   // draws no box of its own.
@@ -130,11 +157,13 @@ const styles = stylex.create({
   // margin when no panel stands there.
   card: { marginInlineEnd: 0 },
   // Room under a page that fills the card while the dock stands over its
-  // foot: as tall as the dock, its inset from the card's foot and the gap
-  // above it, so the page ends above the bar, as #2503's shell keeps it
-  // (its `roomForDock`).
+  // foot, as #2503's shell keeps it (its `roomForDock`): the page's foot is
+  // as tall as the dock, its inset from the card's foot and the gap above
+  // it, in place of the page's usual room (never less). Such a page (an
+  // App's workspace, a workflow) keeps that usual room inside itself
+  // (`space8`, the shell's room below), so the frame adds only the rest.
   roomForDock: (height: number) => ({
-    paddingBlockEnd: `calc(${height}px + ${space["4"]} + ${space["6"]})`,
+    paddingBlockEnd: `max(0px, calc(${height}px + ${space["4"]} + ${space["6"]} - ${space["8"]}))`,
   }),
   // Under the chat lying over it (full screen, or for want of room), the
   // card spans the room beside the sidebar, its margins in, edge to edge on
@@ -296,10 +325,12 @@ export const AppFrame = ({
           {/* On a phone the chat lies over the page under the bar's row,
               which keeps the menu's button, as #2503's shell does. */}
           {phone ? (
-            <SidebarTrigger
-              aria-label={t`Show or hide the sidebar`}
-              style={styles.menu}
-            />
+            <span {...stylex.props(styles.menuInk)}>
+              <SidebarTrigger
+                aria-label={t`Show or hide the sidebar`}
+                style={styles.menu}
+              />
+            </span>
           ) : null}
         </div>
       </div>

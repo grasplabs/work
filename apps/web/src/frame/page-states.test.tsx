@@ -165,7 +165,14 @@ describe("where a page can't stand", () => {
     it("says why with the request ID, and reads the page again on Try again", async () => {
       const { router, reads } = await opened("/broken");
       expect(heading()).toBe("This page didn't load");
-      expect(document.body.textContent).toContain(reason);
+      // The sentence is said as it appears; the reference stands apart, to copy.
+      expect({
+        said: document.querySelector('[role="alert"]')?.textContent,
+        reference: document.body.textContent?.includes("req-1"),
+      }).toStrictEqual({
+        said: "Grasp can't be reached right now.",
+        reference: true,
+      });
       expect(reads.broken).toBe(1);
 
       await click("Try again");

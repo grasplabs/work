@@ -2,6 +2,7 @@ import {
   CalendarIcon,
   ChartLineIcon,
   FileDocIcon,
+  FileInvoiceIcon,
   InboxIcon,
   ListChecksIcon,
   MessageCircleIcon,
@@ -10,8 +11,6 @@ import {
 import type { IconData } from "@grasp-os/ui/lib/icons";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
-
-import { InvoiceIcon } from "../frame/sidebar-icons.ts";
 
 // The starting points Grasp offers when someone makes an agent
 // (manual-agent.tsx, new-agent.tsx): a job most companies have, drawn as
@@ -59,7 +58,7 @@ export interface AgentTemplate {
 export const agentTemplates: readonly AgentTemplate[] = [
   {
     key: "invoices",
-    icon: InvoiceIcon,
+    icon: FileInvoiceIcon,
     label: msg`Chase unpaid invoices`,
     description: msg`Finds overdue invoices and drafts friendly reminders.`,
     cadence: msg`Every weekday`,

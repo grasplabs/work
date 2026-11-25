@@ -15,6 +15,7 @@ import {
   EmptyTitle,
 } from "@grasp-os/ui/components/empty";
 import {
+  AppWindowIcon,
   ArchiveIcon,
   EllipsisIcon,
   Icon,
@@ -29,7 +30,6 @@ import type { ReactNode } from "react";
 
 import { StatusBadge } from "../drafts/status-badge.tsx";
 import { ItemBar, ItemShell } from "../frame/item-shell.tsx";
-import { AppWindowIcon } from "../frame/sidebar-icons.ts";
 import type { Crumb } from "../frame/site-header.tsx";
 import { pageHref, useAppAddress } from "../pages/app-address.ts";
 import { PageFrame } from "../pages/page-frame.tsx";
@@ -50,6 +50,19 @@ import type { AppSettingsSection } from "./settings-sections.ts";
 // everyone who opens it, each section as they may see it (app-settings.tsx).
 
 const styles = stylex.create({
+  // The App under its bar stands in from the card's edges as #2503's shell
+  // sets every page in (28px under the bar, 24px at the sides, 32px at the
+  // foot), as the workspace's views do (app-workspace.tsx).
+  room: {
+    display: "flex",
+    flexDirection: "column",
+    flexGrow: 1,
+    minHeight: 0,
+    boxSizing: "border-box",
+    paddingBlockStart: space[7],
+    paddingInline: space[6],
+    paddingBlockEnd: space[8],
+  },
   place: {
     display: "flex",
     flexGrow: 1,
@@ -74,7 +87,7 @@ const MoreMenu = ({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button aria-label={t`More for ${name}`} size="icon-sm" variant="ghost">
+        <Button aria-label={t`More for ${name}`} size="icon" variant="ghost">
           <Icon icon={EllipsisIcon} />
         </Button>
       </DropdownMenuTrigger>
@@ -165,7 +178,9 @@ const AppPage = ({
         />
       }
     >
-      {opens ? children : <NoPage archived={app.archived} />}
+      <div {...stylex.props(styles.room)}>
+        {opens ? children : <NoPage archived={app.archived} />}
+      </div>
     </ItemShell>
   );
 };

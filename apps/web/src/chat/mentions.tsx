@@ -6,6 +6,7 @@ import type {
   PromptInputProps,
 } from "@grasp-os/ui/components/prompt-input";
 import {
+  AppWindowIcon,
   CircleUserIcon,
   UserSparklesIcon,
   WorkflowIcon,
@@ -14,7 +15,6 @@ import type { IconData } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
 import { useEffect, useState } from "react";
 
-import { AppWindowIcon } from "../frame/sidebar-icons.ts";
 import { roleLabel } from "../labels.ts";
 import { loadFromCore } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";

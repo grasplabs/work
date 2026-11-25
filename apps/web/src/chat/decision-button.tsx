@@ -5,13 +5,14 @@ import type { ReactNode } from "react";
  * One answer to what waits on the person in the chat (a held write, the
  * packages the agent asked for), named for what it answers ("Confirm Send
  * an email on …"), so a list of them reads apart: a small Damsko Button in
- * a Confirmation's actions.
+ * a Confirmation's actions, the yes in the success colour (the reference's
+ * approve).
  */
 export const DecisionButton = ({
   label,
   describedBy,
   disabled,
-  variant = "default",
+  variant = "success",
   onPress,
   children,
 }: {
@@ -19,7 +20,7 @@ export const DecisionButton = ({
   /** The line that says why it waits, while it does. */
   describedBy?: string | undefined;
   disabled: boolean;
-  variant?: "default" | "outline";
+  variant?: "success" | "outline";
   onPress: () => Promise<void>;
   children: ReactNode;
 }) => (

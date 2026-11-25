@@ -85,17 +85,6 @@ import { isEffort } from "./model-choice.ts";
 
 const styles = stylex.create({
   agentModel: { display: "inline-flex", alignItems: "center", minWidth: 0 },
-  // The microphone, Send and what the page adds, at the row's end: in the
-  // footer pushed to its end, in one row the card's own end column.
-  end: {
-    flexShrink: 0,
-    marginInlineStart: "auto",
-    gridArea: "end",
-    justifySelf: "end",
-  },
-  // At the row's end, #2503 sets its controls a space-2 apart, where
-  // Damsko's tools stand a space-1 apart: the rest after the first.
-  apart: { marginInlineStart: space["1"] },
   // The files take the header's whole line, their cards 16px from the
   // card's top and side and the text 12px under them, as #2503's and as
   // Damsko's own PromptInputAttachments (its `attachments` style), which
@@ -327,18 +316,10 @@ const BoxTools = ({
         {attaches ? <AddMenu /> : null}
         {compact ? null : answerer}
       </PromptInputTools>
-      <PromptInputTools style={styles.end}>
+      <PromptInputTools align="end">
         {compact && !folded ? answerer : null}
-        {speech === undefined ? null : (
-          <PromptInputSpeechButton
-            {...speech}
-            {...(compact ? { style: styles.apart } : {})}
-          />
-        )}
-        <PromptInputSubmit
-          {...(stop === undefined ? {} : { onStop: stop })}
-          {...(compact || speech !== undefined ? { style: styles.apart } : {})}
-        />
+        {speech === undefined ? null : <PromptInputSpeechButton {...speech} />}
+        <PromptInputSubmit {...(stop === undefined ? {} : { onStop: stop })} />
         {children}
       </PromptInputTools>
     </>

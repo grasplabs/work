@@ -1,10 +1,15 @@
-import { duration, media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { PromptInputButton } from "@grasp-os/ui/components/prompt-input";
+import { Separator } from "@grasp-os/ui/components/separator";
+import { Icon, PanelRightIcon } from "@grasp-os/ui/lib/icons";
+import { duration, media, size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useEffect, useRef } from "react";
 
+import { shortcutLabel } from "../shortcuts.ts";
 import { useOpenChat } from "./chat-presence.ts";
 import { Composer } from "./composer.tsx";
-import { useGlobalChat } from "./global-chat.tsx";
+import { chatKey, useGlobalChat } from "./global-chat.tsx";
 import { unavailableText } from "./models-unavailable.tsx";
 
 // Grasp's chat while it waits (global-chat.tsx): a bar at the foot of the
@@ -37,6 +42,9 @@ const styles = stylex.create({
     transitionDuration: duration.ui,
     transitionTimingFunction: duration.ease,
   },
+  // Before the way to open the chat, after Send: a line as tall as an
+  // icon, the tools' own gap from each, as #2503's bar draws it.
+  line: { alignSelf: "center", height: size.iconSm },
   // Away while the chat is open: sunk a little and out of reach.
   closed: {
     visibility: "hidden",
@@ -47,7 +55,9 @@ const styles = stylex.create({
 
 /** The chat's idle bar: on every page the chat shows on, while it is closed. */
 export const ChatBar = () => {
-  const { stage, composer, words, modelsUnavailable } = useGlobalChat();
+  const { t } = useLingui();
+  const { stage, composer, words, modelsUnavailable, presence } =
+    useGlobalChat();
   const unavailable = unavailableText(modelsUnavailable);
   const openHere = useOpenChat();
   const bar = useRef<HTMLDivElement>(null);
@@ -92,6 +102,12 @@ export const ChatBar = () => {
     };
   }, [open]);
   const { onAttach } = composer;
+  // The bar ends in Send: sending opens the chat, and the card's own button
+  // opens it without asking. Where the chat is part of the page (an App's
+  // workspace on a phone) and doesn't float, the bar keeps a way to open it
+  // too, after a line, as #2503's does, so its history opens without
+  // asking from where one asks.
+  const ownChat = !presence.placements.includes("floating");
   return (
     <div
       inert={!open}
@@ -139,7 +155,22 @@ export const ChatBar = () => {
                 openHere();
               },
             })}
-      />
+      >
+        {ownChat ? (
+          <>
+            <Separator orientation="vertical" style={styles.line} />
+            <PromptInputButton
+              aria-label={t`Open the chat`}
+              onClick={() => {
+                openHere();
+              }}
+              tooltip={shortcutLabel(chatKey)}
+            >
+              <Icon icon={PanelRightIcon} />
+            </PromptInputButton>
+          </>
+        ) : null}
+      </Composer>
     </div>
   );
 };

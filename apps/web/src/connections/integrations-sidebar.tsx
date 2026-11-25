@@ -1,6 +1,9 @@
 import { catalogGroups } from "@grasp-os/shared/connect-names";
 import type { CatalogGroup } from "@grasp-os/shared/connect-names";
 import {
+  AppWindowIcon,
+  CableIcon,
+  CircleHelpIcon,
   ClipboardListIcon,
   CodeIcon,
   CoinsIcon,
@@ -22,11 +25,6 @@ import { useLingui } from "@lingui/react/macro";
 import { Link, useLocation, useMatch } from "@tanstack/react-router";
 
 import { formatNumber } from "../format.ts";
-import {
-  AppWindowIcon,
-  CableIcon,
-  CircleHelpIcon,
-} from "../frame/sidebar-icons.ts";
 import type { SidebarSection } from "../frame/sidebar.tsx";
 import { WayOut } from "../frame/way-out.tsx";
 import type { Outside } from "../frame/way-out.tsx";

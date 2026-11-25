@@ -1,18 +1,18 @@
 import type { StatementKind } from "@grasp-os/shared/brain";
 import {
+  ArrowLeftRightIcon,
   CircleAlertIcon,
   ClockIcon,
   Icon,
   LightbulbIcon,
   RocketIcon,
+  ScaleIcon,
   WrenchIcon,
 } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
 
-import { ArrowLeftRightIcon } from "../frame/sidebar-icons.ts";
 import { statementKindLabel } from "./brain.ts";
-import { ScaleIcon } from "./icons.ts";
 
 /**
  * One icon per kind of statement, as in the prototype

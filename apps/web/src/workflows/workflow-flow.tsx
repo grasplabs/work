@@ -27,7 +27,11 @@ import {
   CodeIcon,
   Icon,
   PlayIcon,
+  ScanIcon,
+  SplitIcon,
   TableIcon,
+  ZoomInIcon,
+  ZoomOutIcon,
 } from "@grasp-os/ui/lib/icons";
 import {
   colors,
@@ -42,12 +46,6 @@ import { useEffect, useRef, useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { useCore } from "../use-core.ts";
-import {
-  FitToScreenIcon,
-  SplitIcon,
-  ZoomInIcon,
-  ZoomOutIcon,
-} from "./icons.ts";
 import { stepFieldsAt } from "./step-body.ts";
 import { WorkflowDiagramView } from "./workflow-diagram.tsx";
 import type { Layout } from "./workflow-diagram.tsx";
@@ -467,7 +465,7 @@ const Controls = ({
         size="icon-sm"
         variant="ghost"
       >
-        <Icon icon={FitToScreenIcon} />
+        <Icon icon={ScanIcon} />
       </Button>
       <Button
         aria-label={t`Zoom out`}

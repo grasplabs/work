@@ -66,6 +66,7 @@ import {
   ArrowUpDownIcon,
   DatabaseIcon,
   EllipsisIcon,
+  FileInvoiceIcon,
   Icon,
   ListIcon,
   LockIcon,
@@ -250,7 +251,7 @@ const TableView = ({
             value={[showing]}
           >
             <ToggleGroupItem value="records">
-              <Icon icon={TableIcon} />
+              <Icon icon={FileInvoiceIcon} />
               {t({ message: "Records", context: "a table's records" })}
             </ToggleGroupItem>
             <ToggleGroupItem value="fields">
