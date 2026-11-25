@@ -8,9 +8,11 @@
  * (src/admin/voice-lab-heard.ts).
  *
  * Nothing said is kept anywhere but in this page, until it is left.
+ *
+ * Mistral's SDK and the audio transport it brings are loaded when a call
+ * begins, never with the page: they are large, and only the browser runs
+ * them.
  */
-import { initSession } from "@mistralai/mistralai/extra/voice-agents/browser";
-
 import {
   closeVoiceSessionFn,
   openVoiceSessionFn,
@@ -80,10 +82,15 @@ export const beginCall = (
   show: (call: Call) => void
 ): Calling => {
   let call: Call = { ...noCall, stands: "connecting" };
+  /** They ended it: nothing that still comes back of it shows any more. */
   let ended = false;
-  let close: (() => Promise<void>) | null = null;
+  /** Set once the page is in the room: how to leave it. */
+  let leave: (() => Promise<void>) | null = null;
   let mute: ((muted: boolean) => Promise<void>) | null = null;
   const set = (next: Partial<Call>): void => {
+    if (ended) {
+      return;
+    }
     call = { ...call, ...next };
     show(call);
   };
@@ -92,6 +99,11 @@ export const beginCall = (
   };
   show(call);
   const join = async (): Promise<void> => {
+    const { initSession } =
+      await import("@mistralai/mistralai/extra/voice-agents/browser");
+    if (ended) {
+      return;
+    }
     const session = await initSession({
       createSession: async () => {
         const opened = await openVoiceSessionFn({ data: input });
@@ -110,9 +122,6 @@ export const beginCall = (
         await closeVoiceSessionFn({ data: { sessionId } });
       },
     });
-    close = async () => {
-      await session.close();
-    };
     mute = async (muted) => {
       await session.setInputEnabled(!muted);
     };
@@ -136,11 +145,21 @@ export const beginCall = (
     session.on("disconnected", () => {
       set({ stands: "over", agent: null });
     });
-    if (ended) {
-      await session.close();
-      return;
+    // Ended while it was set up: left only once joining has settled, as
+    // the SDK takes the microphone at the end of it, and a close before
+    // that would leave the microphone on.
+    try {
+      if (!ended) {
+        await session.connect();
+      }
+    } finally {
+      if (ended) {
+        await session.close();
+      }
     }
-    await session.connect();
+    leave = async () => {
+      await session.close();
+    };
     set({ stands: "live" });
   };
   void (async () => {
@@ -161,13 +180,22 @@ export const beginCall = (
   })();
   return {
     setMuted: (muted) => {
+      const was = call.muted;
       set({ muted });
-      void mute?.(muted);
+      void (async () => {
+        try {
+          await mute?.(muted);
+        } catch {
+          // The microphone is as it was: the page says so.
+          set({ muted: was });
+        }
+      })();
     },
     end: () => {
-      ended = true;
       set({ stands: "over", agent: null });
-      void close?.();
+      ended = true;
+      // In the room, it is left now; still joining, once that has settled.
+      void leave?.();
     },
   };
 };

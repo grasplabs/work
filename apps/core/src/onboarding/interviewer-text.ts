@@ -29,7 +29,7 @@ import type {
 // the same text has the same mark here and in the lab.
 
 /**
- * What comes after who Stephen is (`stephen.ts`) when Grasp's own models
+ * What comes after who Stephen is (@grasp-os/shared/interviewers/stephen) when Grasp's own models
  * make him speak: what he writes down, and the shape he answers in.
  */
 const WRITING = `# What you write down
