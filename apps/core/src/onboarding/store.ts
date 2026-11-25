@@ -1391,6 +1391,29 @@ export class Onboarding extends DurableObject<Env> {
     });
   }
 
+  /**
+   * On a local stack only (`vp run dev`): everything this onboarding kept,
+   * wiped, so its admin can walk the setup and an interview again from the
+   * start without stopping the stack (dev-reset.ts). Its tables are made
+   * again at once and its one row as it is first made, so the next request
+   * finds it as new. Anywhere else it does nothing.
+   */
+  async startOverLocally(): Promise<boolean> {
+    if (this.env.DEV_SKIP_ROUTER_SECRET !== "true") {
+      return false;
+    }
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+    migrateOnWake(this.ctx, migrations);
+    const start = startingFlowOf(this.env.ONBOARDING_START);
+    this.#db
+      .insert(onboarding)
+      .values({ id: 1, flow: start === null ? null : JSON.stringify(start) })
+      .onConflictDoNothing()
+      .run();
+    return true;
+  }
+
   /** The onboarding as its admin sees it. */
   view(now: string = new Date().toISOString()): OnboardingView {
     const roster = this.#roster();
