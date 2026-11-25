@@ -101,19 +101,12 @@ const whereItWent = (
   const whole =
     settings !== undefined && !spend.more && !settings.bindings.more;
   const left = spend.total - rows.reduce((sum, row) => sum + row.spend, 0);
-  // One bar per name: the chart keys its bars by it, so an App with two
-  // model bindings, or two workflows of one name, add up on one bar.
-  const bars = new Map<string, number>();
-  for (const row of [
+  return [
     ...rows,
     ...(whole && left > leftOverMin
       ? [{ name: names.other, spend: left }]
       : []),
-  ]) {
-    bars.set(row.name, (bars.get(row.name) ?? 0) + row.spend);
-  }
-  return [...bars]
-    .map(([name, spent]) => ({ name, spend: spent }))
+  ]
     .filter((row) => row.spend > 0)
     .toSorted((a, b) => b.spend - a.spend);
 };

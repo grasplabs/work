@@ -1,24 +1,22 @@
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
+  AppWindowIcon,
+  CableIcon,
   ClockIcon,
   CodeIcon,
   DatabaseIcon,
+  LaptopIcon,
   LinkIcon,
   SettingsIcon,
   SlidersHorizontalIcon,
+  SmartphoneIcon,
+  TabletIcon,
   UsersIcon,
 } from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
 import { useLingui } from "@lingui/react/macro";
 import { Link, useMatch, useNavigate } from "@tanstack/react-router";
 
-import {
-  AppWindowIcon,
-  CableIcon,
-  LaptopIcon,
-  SmartphoneIcon,
-  TabletIcon,
-} from "../frame/sidebar-icons.ts";
 import type {
   SidebarRow,
   SidebarSection,

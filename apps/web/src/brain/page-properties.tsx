@@ -1,5 +1,10 @@
 import { Button } from "@grasp-os/ui/components/button";
-import { ChevronDownIcon, Icon, TableIcon } from "@grasp-os/ui/lib/icons";
+import {
+  ChevronDownIcon,
+  CircleHelpIcon,
+  Icon,
+  TableIcon,
+} from "@grasp-os/ui/lib/icons";
 import type { IconData } from "@grasp-os/ui/lib/icons";
 import { focusRing } from "@grasp-os/ui/lib/styles";
 import {
@@ -16,8 +21,6 @@ import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useId, useState } from "react";
 import type { ReactNode, SyntheticEvent } from "react";
-
-import { CircleHelpIcon } from "../frame/sidebar-icons.ts";
 
 // Page properties, from the reference's library (#2503's
 // `grasp/page-properties`): under a page's title, one quiet button

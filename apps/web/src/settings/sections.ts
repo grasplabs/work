@@ -3,8 +3,11 @@ import type { Role } from "@grasp-os/shared/roles";
 import {
   BrainIcon,
   BuildingIcon,
+  CableIcon,
   CircleUserIcon,
   ClockIcon,
+  ContrastIcon,
+  FileInvoiceIcon,
   InfoIcon,
   LinkIcon,
   LockIcon,
@@ -15,12 +18,6 @@ import {
 import type { IconData } from "@grasp-os/ui/lib/icons";
 import type { MessageDescriptor } from "@lingui/core";
 import { msg } from "@lingui/core/macro";
-
-import {
-  CableIcon,
-  ContrastIcon,
-  InvoiceIcon,
-} from "../frame/sidebar-icons.ts";
 
 // Settings' sections as data, in the order they are listed: the sidebar
 // lists them as a level of its own while a Settings page is open
@@ -178,7 +175,7 @@ const settingsSections: readonly SettingsSection[] = [
     label: msg`Billing`,
     href: "/settings/billing",
     group: "workspace",
-    icon: InvoiceIcon,
+    icon: FileInvoiceIcon,
     audience: "admins",
   },
   // Not in the reference, which dropped both: no other page lets an admin

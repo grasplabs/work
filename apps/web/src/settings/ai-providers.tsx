@@ -52,6 +52,7 @@ import {
 import { Text } from "@grasp-os/ui/components/text";
 import { useAction } from "@grasp-os/ui/hooks/use-action";
 import {
+  CableIcon,
   ChevronDownIcon,
   ChevronUpIcon,
   Icon,
@@ -78,7 +79,6 @@ import {
   BrandOpenRouter,
 } from "../frame/brands.ts";
 import { EU, Flag, US } from "../frame/flag.tsx";
-import { CableIcon } from "../frame/sidebar-icons.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { SeparatedItems } from "../workflows/separated-items.tsx";

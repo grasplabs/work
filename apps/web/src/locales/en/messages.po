@@ -6206,6 +6206,7 @@ msgstr "Done in a run"
 msgid "Done right"
 msgstr "Done right"
 
+#: src/chat/sidebar-chats.tsx
 #: src/frame/panels/rename.tsx
 msgid "Double-click or press F2 to rename"
 msgstr "Double-click or press F2 to rename"
@@ -14194,6 +14195,10 @@ msgstr "Rename chat"
 #: src/activity/audit-words.ts
 msgid "Renamed the organization"
 msgstr "Renamed the organization"
+
+#: src/chat/sidebar-chats.tsx
+msgid "Renamed to {name}"
+msgstr "Renamed to {name}"
 
 #: src/apps/data-model-changes.tsx
 msgid "Renames the table {from} to {to}; its records go with it."

@@ -9,6 +9,7 @@ import type {
 import { Button } from "@grasp-os/ui/components/button";
 import type { KeyValueItem } from "@grasp-os/ui/components/key-value";
 import {
+  AppWindowIcon,
   CircleUserIcon,
   CoinsIcon,
   Icon,
@@ -25,7 +26,6 @@ import { useNavigate } from "@tanstack/react-router";
 import { appName, personName } from "../directory.ts";
 import type { Directory } from "../directory.ts";
 import { formatDateTime } from "../format.ts";
-import { AppWindowIcon } from "../frame/sidebar-icons.ts";
 import { actorIcon, actorOf, entryWords } from "./audit-log.tsx";
 
 // One audit event's details, beside the events on Settings › Audit trail
