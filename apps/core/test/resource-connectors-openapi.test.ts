@@ -146,7 +146,14 @@ describe(
   () => {
     it("answer the App a page of deals, asked for with the vendor's arguments and the connection's token alone", async () => {
       const crm = await dealsApp([
-        { id: 1, title: "Acme renewal", status: "open", pipeline_id: 3 },
+        // A custom field, which Pipedrive's spec doesn't name: left out.
+        {
+          id: 1,
+          title: "Acme renewal",
+          status: "open",
+          pipeline_id: 3,
+          "9dc80c50d78a15643bfc4ca79d76156a73a1ca0e": "Q4",
+        },
         { id: 2, title: "Globex pilot", status: "open", pipeline_id: 3 },
       ]);
       const result = await call(crm, "deals.titles", { pipeline: 3 });

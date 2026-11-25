@@ -374,7 +374,8 @@ const toolOf = <Args extends ValueShape, Returns extends AnySchema>(
           : async (data: typeof parsed.value, effect: { key: string }) => {
               const found = await find(
                 data,
-                apiFor(connector.title, connector.hosts, reads, connector.base).api,
+                apiFor(connector.title, connector.hosts, reads, connector.base)
+                  .api,
                 effect
               );
               return found === null ? null : { output: found };
@@ -496,8 +497,15 @@ export interface DefinedConnector extends Connector {
 export const defineConnector = (
   declaration: ConnectorDeclaration
 ): DefinedConnector => {
-  const { name, title, hosts, base, tools, events = {}, syncs = {} } =
-    declaration;
+  const {
+    name,
+    title,
+    hosts,
+    base,
+    tools,
+    events = {},
+    syncs = {},
+  } = declaration;
   for (const { routes } of [
     ...Object.values(events),
     ...Object.values(syncs),
