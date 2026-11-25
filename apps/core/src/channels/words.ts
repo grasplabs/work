@@ -378,6 +378,33 @@ const lines = {
     fr: "Je ne sais pas si une modification a abouti. Vérifiez-la dans Grasp avant de réessayer.",
     es: "No sé si un cambio se ha completado. Compruébalo en Grasp antes de volver a intentarlo.",
   },
+  /**
+   * A connection a change goes through is paused (`connect.rate_limited`):
+   * nothing was taken from that change on, and the card can be confirmed
+   * again once the pause is over, in the minutes it has left if connect
+   * said, else soon.
+   */
+  pausedSoon: {
+    en: "A service these changes go through asked me to slow down, so the changes still waiting haven't been made yet. Confirm them again in a moment.",
+    nl: "Een dienst waar deze wijzigingen via gaan, vroeg me het rustiger aan te doen, dus de wijzigingen die nog wachten zijn nog niet doorgevoerd. Bevestig ze zo opnieuw.",
+    de: "Ein Dienst, über den diese Änderungen laufen, hat mich gebeten, langsamer zu machen, deshalb wurden die noch wartenden Änderungen noch nicht vorgenommen. Bestätigen Sie sie gleich noch einmal.",
+    fr: "Un service par lequel passent ces modifications m’a demandé de ralentir, les modifications encore en attente n’ont donc pas encore été effectuées. Confirmez-les à nouveau dans un instant.",
+    es: "Un servicio por el que pasan estos cambios me ha pedido que vaya más despacio, así que los cambios que siguen pendientes aún no se han hecho. Vuelve a confirmarlos en un momento.",
+  },
+  pausedMinute: {
+    en: "A service these changes go through asked me to slow down, so the changes still waiting haven't been made yet. Confirm them again in a minute.",
+    nl: "Een dienst waar deze wijzigingen via gaan, vroeg me het rustiger aan te doen, dus de wijzigingen die nog wachten zijn nog niet doorgevoerd. Bevestig ze over een minuut opnieuw.",
+    de: "Ein Dienst, über den diese Änderungen laufen, hat mich gebeten, langsamer zu machen, deshalb wurden die noch wartenden Änderungen noch nicht vorgenommen. Bestätigen Sie sie in einer Minute noch einmal.",
+    fr: "Un service par lequel passent ces modifications m’a demandé de ralentir, les modifications encore en attente n’ont donc pas encore été effectuées. Confirmez-les à nouveau dans une minute.",
+    es: "Un servicio por el que pasan estos cambios me ha pedido que vaya más despacio, así que los cambios que siguen pendientes aún no se han hecho. Vuelve a confirmarlos en un minuto.",
+  },
+  pausedMinutes: {
+    en: "A service these changes go through asked me to slow down, so the changes still waiting haven't been made yet. Confirm them again in {count} minutes.",
+    nl: "Een dienst waar deze wijzigingen via gaan, vroeg me het rustiger aan te doen, dus de wijzigingen die nog wachten zijn nog niet doorgevoerd. Bevestig ze over {count} minuten opnieuw.",
+    de: "Ein Dienst, über den diese Änderungen laufen, hat mich gebeten, langsamer zu machen, deshalb wurden die noch wartenden Änderungen noch nicht vorgenommen. Bestätigen Sie sie in {count} Minuten noch einmal.",
+    fr: "Un service par lequel passent ces modifications m’a demandé de ralentir, les modifications encore en attente n’ont donc pas encore été effectuées. Confirmez-les à nouveau dans {count} minutes.",
+    es: "Un servicio por el que pasan estos cambios me ha pedido que vaya más despacio, así que los cambios que siguen pendientes aún no se han hecho. Vuelve a confirmarlos en {count} minutos.",
+  },
   expired: {
     en: "This card expired at the end of the day, and nothing was changed. Ask me again if you still want it.",
     nl: "Deze kaart is aan het eind van de dag verlopen en er is niets gewijzigd. Vraag het me opnieuw als je het nog wilt.",

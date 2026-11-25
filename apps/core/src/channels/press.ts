@@ -1,6 +1,7 @@
 import { agentErrors } from "@grasp-os/shared/agent";
 import { connectErrors } from "@grasp-os/shared/connect";
 import type { ConnectionPerson, PendingAction } from "@grasp-os/shared/connect";
+import { isExpectedError } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ActionEvent, StateAdapter } from "chat";
@@ -21,7 +22,9 @@ import {
 } from "./cards.tsx";
 import type {
   HeldWriteView,
+  Paused,
   Press,
+  PressLine,
   PressOutcome,
   WriteState,
 } from "./cards.tsx";
@@ -62,7 +65,10 @@ import type { ChannelLocale } from "./words.ts";
 //   The door takes each activity once (its id), and a card is pressed once
 //   (`pressed`, by the card's message): a second press, Confirm or Cancel,
 //   runs nothing and says so. Connect takes each held write at most once
-//   besides.
+//   besides. The one exception is a Confirm that a connection's pause
+//   refused (`connect.rate_limited`), which connect does before it takes
+//   the write: that write and every one after it still wait, and the card
+//   can be pressed again, for exactly those.
 // - [GRA-700 P?] A write that changed, went or was decided elsewhere since
 //   the card showed it (in Grasp's own app, or by a drop). Then nothing on
 //   the card runs: the card says it changed, and the person asks again.
@@ -89,6 +95,8 @@ import type { ChannelLocale } from "./words.ts";
 
 /** How long a card is remembered as pressed: past any write's life. */
 export const pressedTtlMs = 30 * 24 * 60 * 60 * 1000;
+
+const secondsInMinute = 60;
 
 /** What marks a card pressed, by its message: one press runs, once. */
 export const pressedKey = (
@@ -262,11 +270,30 @@ const notConfirmable = async (
   return leftOut ? "heldLater" : null;
 };
 
-/** How a confirmed write that failed ended, as its card shows it. */
+/**
+ * How a confirmed write that failed ended, as its card shows it. One its
+ * connection's pause refused (`connect.rate_limited`) was never taken: it
+ * still waits, to confirm again once the pause is over, in the minutes it
+ * has left as connect said them.
+ */
 const failedAs = (
   error: unknown
-): { state: WriteState; outcome: PressOutcome } => {
+):
+  | { state: "held"; outcome: Paused }
+  | { state: Exclude<WriteState, "held">; outcome: PressLine } => {
   const code = connectErrors.codeOf(error);
+  if (code === "connect.rate_limited") {
+    const seconds = isExpectedError(error)
+      ? error.details?.retryAfterSeconds
+      : undefined;
+    return {
+      state: "held",
+      outcome:
+        typeof seconds === "number" && seconds > 0
+          ? { minutes: Math.ceil(seconds / secondsInMinute) }
+          : {},
+    };
+  }
   if (code === "connect.outcome_unknown") {
     return { state: "unknown", outcome: "unknownOutcome" };
   }
@@ -388,6 +415,16 @@ export const pressCard = async (
     } catch (error) {
       const { state: ended, outcome } = failedAs(error);
       write.state = ended;
+      if (ended === "held") {
+        // Nothing of it was taken: it and the rest still wait, and the
+        // card is answered only once they no longer do.
+        log.info("channel.press_paused", { platform, ...errorFields(error) });
+        // oxlint-disable-next-line no-await-in-loop -- once, then out
+        await state.delete(pressedKey(platform, event));
+        // oxlint-disable-next-line no-await-in-loop -- once, then out
+        await editCard(event, shown(outcome));
+        return;
+      }
       for (const rest of writes.slice(index + 1)) {
         rest.state = "skipped";
       }

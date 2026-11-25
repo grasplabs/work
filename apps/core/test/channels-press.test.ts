@@ -1,6 +1,8 @@
+import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
-import { cancelAction } from "../src/channels/cards.tsx";
+import { cancelAction, confirmAction } from "../src/channels/cards.tsx";
 import { say } from "../src/channels/words.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
@@ -13,6 +15,8 @@ import {
   pressOn,
   waitingOf,
 } from "./teams-press.ts";
+import type { Turn } from "./teams-press.ts";
+import { connectDb } from "./test-env.ts";
 
 // A press on a Teams card of held writes (src/channels/press.ts), D2: "a
 // verified Teams press confirms exactly the held writes on its card,
@@ -29,6 +33,33 @@ const idp = mockIdp();
 watched();
 
 const setUpTime = { timeout: 90_000 };
+
+/**
+ * Pauses the card's mail connection until `until` (ms), as connect does
+ * when its vendor asks for no more calls (tokens.ts `pauseFor`).
+ */
+const pauseMail = async (turn: Turn, until: number): Promise<void> => {
+  await connectDb()
+    .prepare(
+      "INSERT INTO connection_tokens (connection_id, sealed, access_expires_at, generation, updated_at, paused_until) VALUES (?, '', ?, 0, ?, ?) ON CONFLICT (connection_id) DO UPDATE SET paused_until = excluded.paused_until"
+    )
+    .bind(turn.mail.id, until, Date.now(), until)
+    .run();
+};
+
+const requestToolsSchema = z.array(z.object({ ok: z.boolean() }));
+
+/** How many tools of `turn`'s person's requests are kept as not working. */
+const failedToolsOf = async (turn: Turn): Promise<number> => {
+  const { results } = await env.DB.prepare(
+    "SELECT tools FROM stephen_requests WHERE person_id = ?"
+  )
+    .bind(turn.person.userId)
+    .all<{ tools: string }>();
+  return results
+    .flatMap(({ tools }) => requestToolsSchema.parse(JSON.parse(tools)))
+    .filter(({ ok }) => !ok).length;
+};
 
 describe("a press that mustn't run anything", setUpTime, () => {
   it("[GRA-700 P?] another person's press on the card runs nothing", async () => {
@@ -164,6 +195,47 @@ describe("the person's own press", setUpTime, () => {
         { type: "person", userId: turn.person.userId, via: "teams" },
         { type: "person", userId: turn.person.userId, via: "teams" },
       ],
+    });
+  });
+
+  it("waits out a paused connection: every write still waits, the card says when to confirm again, and a press after the pause runs them", async () => {
+    const turn = await heldTurn(idp);
+    await pauseMail(turn, Date.now() + 90_000);
+    await post(pressOn(turn.person.teams, turn));
+    const pausedEdits = await editsOf(turn);
+    const paused = pausedEdits.at(-1) ?? "";
+    const whilePaused = {
+      mail: await mailOf(turn.mail),
+      waiting: new Set(await waitingOf(turn.person)),
+      said: paused.includes(say("pausedMinutes", "en", { count: 2 })),
+      confirmable: paused.includes(confirmAction),
+      failedTools: await failedToolsOf(turn),
+    };
+    await pauseMail(turn, Date.now() - 1000);
+    await post(pressOn(turn.person.teams, turn));
+    const edits = await editsOf(turn);
+    expect({
+      whilePaused,
+      after: {
+        mail: await mailOf(turn.mail),
+        waiting: await waitingOf(turn.person),
+        done: edits.at(-1)?.includes(say("allDone", "en")),
+        lines: await linesAfterCard(turn),
+      },
+    }).toStrictEqual({
+      whilePaused: {
+        mail: { calls: 0, to: [] },
+        waiting: new Set(turn.press.map(({ id }) => id)),
+        said: true,
+        confirmable: true,
+        failedTools: 0,
+      },
+      after: {
+        mail: { calls: 2, to: ["ben@acme.test", "cleo@acme.test"] },
+        waiting: [],
+        done: true,
+        lines: [],
+      },
     });
   });
 

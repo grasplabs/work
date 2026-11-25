@@ -493,8 +493,17 @@ export interface HeldWriteView {
  */
 export type ReadCheck = { read: "mail" } | { read: "record"; where: string };
 
-/** How a press ended, said once at the foot of the card. */
-export type PressOutcome = Extract<
+/**
+ * A press that a connection's pause refused before it took a write: that
+ * write and every one after it still wait, to confirm again on the card in
+ * `minutes`, the pause's time left as connect said it, if it did.
+ */
+export interface Paused {
+  minutes?: number;
+}
+
+/** How a press ended, by the line said once at the foot of the card. */
+export type PressLine = Extract<
   LineName,
   | "allDone"
   | "cancelled"
@@ -503,6 +512,9 @@ export type PressOutcome = Extract<
   | "expired"
   | "changedSince"
 >;
+
+/** How a press ended, said once at the foot of the card. */
+export type PressOutcome = PressLine | Paused;
 
 /** A turn's held writes on one card. */
 export interface HeldWritesCard {
@@ -589,13 +601,35 @@ const checkLine = (check: ReadCheck, locale: ChannelLocale, room: Room) =>
         where: fit(check.where, maxTitleChars, room).text,
       });
 
-/** What a press on a card of `writes` carries: each write's id and hash, a write to an App's with its chat. */
+/**
+ * What a press on a card of `writes` carries: each write's id and hash, a
+ * write to an App's with its chat, of those still waiting (all of them,
+ * until a press ran one).
+ */
 const pressOfWrites = (writes: readonly HeldWriteView[]): string =>
   JSON.stringify(
-    writes.map(({ id, inputHash, chatId }) =>
-      chatId === undefined ? { id, inputHash } : { id, inputHash, chatId }
-    )
+    writes.flatMap(({ id, inputHash, chatId, state }) => {
+      if (state !== "held") {
+        return [];
+      }
+      return chatId === undefined
+        ? [{ id, inputHash }]
+        : [{ id, inputHash, chatId }];
+    })
   );
+
+/** The line at the foot of a card whose press ended as `outcome`. */
+const outcomeLine = (outcome: PressOutcome, locale: ChannelLocale): string => {
+  if (typeof outcome === "string") {
+    return say(outcome, locale);
+  }
+  if (outcome.minutes === undefined) {
+    return say("pausedSoon", locale);
+  }
+  return outcome.minutes === 1
+    ? say("pausedMinute", locale)
+    : say("pausedMinutes", locale, { count: outcome.minutes });
+};
 
 /**
  * `writes` as a card on `platform` lays them out, in `locale`, within the
@@ -666,8 +700,10 @@ export const wholeAlone = (
  * Cancel carry the writes' ids and input hashes (a write to an App's with
  * its chat), so a press decides exactly what the card showed. Cancel is on
  * the card while every write it carries is held, whether or not they fit:
- * cancelling runs nothing. Confirm only while, besides, every write is on
- * the card and every value whole, as `platform` shows it: otherwise the
+ * cancelling runs nothing. After a press a connection's pause refused
+ * (`Paused`), both are on it again, for the writes still waiting. Confirm
+ * only while, besides, every write is on the card and every value whole,
+ * as `platform` shows it: otherwise the
  * card says it can't be confirmed, and to ask for fewer changes at a time.
  */
 export const heldWritesCard = ({
@@ -687,10 +723,13 @@ export const heldWritesCard = ({
     writes,
     check,
   });
+  // Before a press, while every write waits; after one a pause refused,
+  // for the writes still waiting.
   const cancellable =
     pressFits &&
-    outcome === undefined &&
-    shown.every((write) => write.state === "held");
+    (outcome === undefined
+      ? shown.every((write) => write.state === "held")
+      : typeof outcome === "object");
   const pressable = whole && cancellable && cancelOnly === undefined;
   // Why a card to cancel can't be confirmed, said truly: written after the
   // card to confirm (and, for a connection's write, which only the turn
@@ -731,7 +770,7 @@ export const heldWritesCard = ({
       ))}
       {why === null ? null : <CardText>{say(why, locale)}</CardText>}
       {outcome === undefined ? null : (
-        <CardText style="bold">{say(outcome, locale)}</CardText>
+        <CardText style="bold">{outcomeLine(outcome, locale)}</CardText>
       )}
       {cancellable ? (
         <Actions>
