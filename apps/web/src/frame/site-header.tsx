@@ -406,7 +406,11 @@ const PhoneTrail = ({
                 look={stylex.props(styles.phoneLink, focusRingText)}
               />
             ) : (
-              step.label
+              // A step that leads nowhere (Settings) in the page's look, as
+              // #2503's bar draws a crumb without a link (`CrumbStep`).
+              <span title={step.label} {...stylex.props(styles.phonePageWords)}>
+                {step.label}
+              </span>
             )}
             <span aria-hidden="true" {...stylex.props(styles.phoneSlash)}>
               /
