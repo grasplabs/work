@@ -341,6 +341,28 @@ const isObjectSchema = (node: Node): boolean =>
   "properties" in node || typesOf(node).includes("object");
 
 /**
+ * A schema and its `allOf` members, nested ones too, each without its
+ * `allOf`; undefined for a member that isn't a schema, or one that holds
+ * itself.
+ */
+const allOfMembers = (node: Node, seen: Set<object>): Node[] | undefined => {
+  if (seen.has(node)) {
+    return undefined;
+  }
+  seen.add(node);
+  const { allOf: nested, ...own } = node;
+  const nodes = [own];
+  for (const member of list(nested)) {
+    const inner = isRecord(member) ? allOfMembers(member, seen) : undefined;
+    if (inner === undefined) {
+      return undefined;
+    }
+    nodes.push(...inner);
+  }
+  return nodes;
+};
+
+/**
  * `allOf`: an object of every member's properties, or, where no member is
  * an object, one schema of all their keywords (`allOf: [{ $ref: Status }]`
  * is a Status). Members that state one keyword differently ask for no
@@ -351,9 +373,8 @@ const allOf = (
   reading: Reading,
   depth: number
 ): Modifiable | undefined => {
-  const { allOf: members, ...own } = node;
-  const nodes = [own, ...list(members).map(record)];
-  if (nodes.some((each) => isObjectSchema(each) || "allOf" in each)) {
+  const nodes = allOfMembers(node, new Set());
+  if (nodes === undefined || nodes.some(isObjectSchema)) {
     return objectOf(node, reading, depth);
   }
   const merged: Record<string, unknown> = {};

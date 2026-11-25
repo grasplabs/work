@@ -58,6 +58,46 @@ const spec = await readSpec(
           },
         },
       },
+      "/me": {
+        get: {
+          responses: {
+            "200": {
+              description: "ok",
+              content: { "application/json": { schema: { type: "string" } } },
+            },
+          },
+        },
+      },
+      "/files/{id}:download": {
+        servers: [{ url: "https://files.example.test" }],
+        get: {
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+          responses: {
+            "200": {
+              description: "ok",
+              content: { "application/json": { schema: { type: "object" } } },
+            },
+          },
+        },
+      },
+      "/lookup": {
+        servers: [{ url: "https://files.example.test" }],
+        get: {
+          responses: {
+            "200": {
+              description: "ok",
+              content: { "application/json": { schema: { type: "object" } } },
+            },
+          },
+        },
+      },
       "/deals/{id}": {
         parameters: [
           {
@@ -237,7 +277,33 @@ describe("a tool held to the vendor's spec", () => {
     ]);
   });
 
-  it("is refused a route the spec doesn't have, and a second route of another family", () => {
+  it("is named from its one write, read before or after it, on the spec's server", () => {
+    const operation = spec.operations.find(
+      ({ name }) => name === "deals.update"
+    );
+    const update = (routes: string[]): MirrorTool => ({
+      name: "deals.update",
+      routes,
+      args: operation?.args.kind === "object" ? operation.args.fields : {},
+      returns: operation?.returns ?? v.null().descriptor,
+    });
+    expect(
+      messages([
+        update(["GET /deals", "PATCH /deals/{id}"]),
+        update(["PATCH /deals/{id}", "GET /deals"]),
+        update(["GET /me", "PATCH /deals/{id}"]),
+        update(["PATCH /deals/{id}", "GET elsewhere.example.test/deals"]),
+        update(["GET /lookup", "PATCH /deals/{id}"]),
+        update(["GET /files/{id}:download", "PATCH /deals/{id}"]),
+      ])
+    ).toStrictEqual([
+      "deals.update: GET elsewhere.example.test/deals isn't on the spec's host api.example.test.",
+      "deals.update: GET /lookup isn't an operation of the vendor's spec.",
+      "deals.update: GET /files/{id}:download isn't an operation of the vendor's spec.",
+    ]);
+  });
+
+  it("is refused a route the spec doesn't have, or one on another host", () => {
     expect(
       messages([
         dealsList({
@@ -246,13 +312,11 @@ describe("a tool held to the vendor's spec", () => {
         }),
         dealsList({ routes: ["GET /deals", "GET /persons"] }),
         dealsList({ routes: ["GET elsewhere.example.test/deals"] }),
-        dealsList({ routes: ["GET /deals", "DELETE /deals/{id}"] }),
       ])
     ).toStrictEqual([
       "deals.archived.list: GET /deals/archived isn't an operation of the vendor's spec.",
       "deals.list: GET /persons isn't an operation of the vendor's spec.",
       "deals.list: GET elsewhere.example.test/deals isn't on the spec's host api.example.test.",
-      "deals.list: DELETE /deals/{id} isn't a read, as a tool's other routes are.",
     ]);
   });
 });
@@ -303,10 +367,6 @@ describe("a tool with no spec to hold it to", () => {
           tool("deals.change", "PATCH /deals/{id}"),
           tool("deals.get", "GET /v1/deals/{id}"),
           {
-            ...tool("deals.delete", "DELETE /deals/{id}"),
-            routes: ["DELETE /deals/{id}", "GET /persons/{id}"],
-          },
-          {
             name: "deals.get",
             routes: [],
             args: {},
@@ -325,8 +385,91 @@ describe("a tool with no spec to hold it to", () => {
       "deals.products.delete: DELETE /deals/{id}/products is named deals.products.<the vendor's operation name>.",
       "deals.change: PATCH /deals/{id} is named deals.update.",
       "deals.get: GET /v1/deals/{id} is named v1.deals.get.",
-      "deals.delete: GET /persons/{id} isn't of its family deals.",
       "deals.get: It declares no route it is named from.",
+    ]);
+  });
+
+  it("is named from its one write, read before it of any family on the connector's hosts", () => {
+    const writing = (name: string, routes: string[]): MirrorTool => ({
+      ...tool(name, routes[0] ?? ""),
+      routes,
+    });
+    expect(
+      messages(
+        [
+          writing("deals.update", [
+            "GET /me",
+            "GET /pipelines/{pipeline}",
+            "PATCH /deals/{id}",
+          ]),
+          writing("deals.delete", ["DELETE /deals/{id}", "PATCH /deals/{id}"]),
+          writing("deals.get", ["GET /deals/{id}", "HEAD /deals"]),
+        ],
+        false
+      )
+    ).toStrictEqual([
+      "deals.delete: It declares 2 writes, and a tool sends one.",
+      "deals.get: HEAD /deals isn't a GET, as a tool's other routes are.",
+    ]);
+  });
+
+  it("takes the vendor's operation name only where the rule can't read its path", () => {
+    expect(
+      messages(
+        [
+          tool("drive.getContent", "GET /drive/root:/{name}:/content"),
+          tool(
+            "drives.root.search",
+            "GET /drives/{drive}/root/search(q='{q}')"
+          ),
+          tool(
+            "drives.items.workbook.tables.rows.itemAt.range.update",
+            "PATCH /drives/{drive}/items/{workbook}/workbook/tables/{table}/rows/itemAt(index={index})/range"
+          ),
+          tool(
+            "me.chats.messages.list",
+            "GET /me/chats/19:{chat}/messages",
+            page(v.object({ id: v.string() }))
+          ),
+          {
+            ...tool("me.drive.root.content.upload", ""),
+            routes: [
+              "GET /me",
+              "GET /me/drive/root:/{folder}/{name}",
+              "GET /me/chats/19:{chat}",
+              "PUT /me/drive/root:/{folder}/{name}:/content",
+            ],
+          },
+          tool("deals.getDeal", "GET /deals/{id}"),
+          tool("deals.get", "GET /v2.0/deals/{id}"),
+          tool("deals.delete", "DELETE /{collection}/{id}"),
+          tool("drive.get", "DELETE /drive/root:/{name}:"),
+          tool("content", "GET /drive/root:/{name}:/content"),
+          tool(
+            "drives.list",
+            "GET /drives/{drive}/root/search(q='{q}')",
+            page(v.object({ id: v.string() }))
+          ),
+          tool("me.drive.get", "GET /me/drive/root:/{folder}/{name}"),
+          tool("drive.children.list", "GET /drive/root:/{name}:/children"),
+          tool(
+            "me.chats.listMessages",
+            "GET /me/chats/19:{chat}/messages",
+            page(v.object({ id: v.string() }))
+          ),
+        ],
+        false
+      )
+    ).toStrictEqual([
+      "deals.getDeal: GET /deals/{id} is named deals.get.",
+      "deals.get: The segment \"v2.0\" of /v2.0/deals/{id} can't be part of a tool's name.",
+      "deals.delete: /{collection}/{id} names no collection.",
+      "drive.get: DELETE /drive/root:/{name}: is named drive.<the vendor's operation name>.",
+      "content: GET /drive/root:/{name}:/content is named drive.<the vendor's operation name>.",
+      "drives.list: GET /drives/{drive}/root/search(q='{q}') is named drives.<the vendor's operation name>.",
+      "me.drive.get: GET /me/drive/root:/{folder}/{name} is named me.drive.<the vendor's operation name>.",
+      "drive.children.list: A list answers page(item): { items, next }.",
+      "me.chats.listMessages: GET /me/chats/19:{chat}/messages is named me.chats.messages.list.",
     ]);
   });
 });

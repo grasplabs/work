@@ -41,6 +41,7 @@ import m0038 from './0038_chat_answer_rating.sql';
 import m0039 from './0039_chat_request_keys.sql';
 import m0040 from './0040_chat_archived_project.sql';
 import m0041 from './0041_chat_file_parts.sql';
+import m0042 from './0042_chat_read_up_to.sql';
 
   export default {
     journal,
@@ -86,7 +87,8 @@ m0037,
 m0038,
 m0039,
 m0040,
-m0041
+m0041,
+m0042
     }
   }
   

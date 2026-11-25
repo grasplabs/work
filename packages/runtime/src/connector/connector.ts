@@ -128,6 +128,7 @@ export {
   accountLookupSchema,
   endpointHost,
   keyHeaderSchema,
+  plainEndpointSchema,
   reservedAuthorizationParams,
   scopeToken,
   signInSchema,

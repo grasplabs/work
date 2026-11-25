@@ -21,6 +21,7 @@ const chat = (title: string, lastAt: string): ChatSummary => ({
   createdAt: daysBack(40),
   lastAt,
   running: false,
+  unread: false,
   make: null,
   archived: false,
 });

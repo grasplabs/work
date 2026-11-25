@@ -39,6 +39,7 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { connectionErrorMessage } from "../connection-errors.ts";
+import { AddConnector } from "../connections/add-connector.tsx";
 import {
   ConnectedDialog,
   returnedOf,
@@ -630,6 +631,7 @@ const Integrations = () => {
           actions={
             <div {...stylex.props(styles.actions)}>
               <Search q={q} />
+              <AddConnector identity={identity} />
               <Button
                 onClick={() => {
                   setRequesting(true);

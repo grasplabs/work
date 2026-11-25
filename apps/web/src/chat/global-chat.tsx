@@ -360,6 +360,15 @@ export const useGlobalChat = (): GlobalChat => {
   return chat;
 };
 
+/**
+ * The chat open in front of the person beside or over the page, if any;
+ * none while it is closed to its bar, and never outside the chat's provider.
+ */
+export const useChatOpenBeside = (): string | undefined => {
+  const chat = use(GlobalChatContext);
+  return chat?.stage.card === true ? chat.chatId : undefined;
+};
+
 /** Whether the chat's idle bar stands over the page's foot; never outside the chat's provider. */
 export const useChatBarShown = (): boolean =>
   use(GlobalChatContext)?.stage.bar ?? false;

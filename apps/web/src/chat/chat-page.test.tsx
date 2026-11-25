@@ -90,6 +90,7 @@ const summaryOf = (id: string): ChatSummary => ({
   createdAt: "2026-11-01T08:00:00.000Z",
   lastAt: "2026-11-01T08:00:00.000Z",
   running: false,
+  unread: false,
   make: null,
   archived: false,
 });

@@ -267,9 +267,8 @@ const connectionItems = async (
       const entry = entries.get(`${connection.source}:${connection.provider}`);
       const { source } = connection;
       // An HTTP connection is never signed in again: its admin approves
-      // another (`canSignInAgain` says so too). A connector made from a URL
-      // is in no catalog yet, so nothing names it here.
-      if (source === "http" || source === "connector") {
+      // another (`canSignInAgain` says so too).
+      if (source === "http") {
         return [];
       }
       const waits =

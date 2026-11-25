@@ -136,7 +136,7 @@ const endpointTemplateSchema = z
  * nothing to mix it into, or the authorization endpoint, whose parameters
  * are connect's and the record's `authorizationParams`, every one checked.
  */
-const plainEndpointSchema = endpointSchema.refine(
+export const plainEndpointSchema = endpointSchema.refine(
   (value) => urlOf(value)?.search === "",
   "An endpoint without a query string"
 );

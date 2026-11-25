@@ -12,6 +12,7 @@
  */
 import { botFrameworkKeysFake } from "../../connect/test/bot-framework-keys-fake.ts";
 import { graphEventsFake } from "../../connect/test/graph-events-fake.ts";
+import { linearOrigin } from "../../connect/test/linear-mcp-fake.ts";
 import { npmRegistryFake } from "../../connect/test/npm-registry-fake.ts";
 import { osvFake } from "../../connect/test/osv-fake.ts";
 import {
@@ -25,6 +26,7 @@ import { aiProvidersFake } from "./ai-providers-fake.ts";
 import { botConnectorFake } from "./bot-connector-fake.ts";
 import { composioApiScript, composioLogoScript } from "./composio-api.ts";
 import { driveSyncControlUrl, driveSyncFake } from "./drive-sync-fake.ts";
+import { linearConsentUrl } from "./linear-service.ts";
 import { mailServerScript } from "./mail-server.ts";
 import { pipedriveControlUrl, pipedriveFake } from "./pipedrive-fake.ts";
 import { sampleKeyControlUrl, sampleKeyFake } from "./sample-key-fake.ts";
@@ -766,8 +768,20 @@ const osv = (${osvFake.toString()})();
 const aiProviders = (${aiProvidersFake.toString()})();
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const url = new URL(request.url);
+    // Linear's MCP server, run in Node (test/linear-service.ts), at a
+    // public address as its name resolves.
+    if (url.origin === ${JSON.stringify(linearOrigin)} || url.href === ${JSON.stringify(linearConsentUrl)}) {
+      return await env.LINEAR.fetch(request);
+    }
+    if (url.hostname === "cloudflare-dns.com" && url.searchParams.get("name") === ${JSON.stringify(new URL(linearOrigin).hostname)}) {
+      const type = url.searchParams.get("type") === "AAAA" ? 28 : 1;
+      return Response.json({
+        Status: 0,
+        Answer: type === 1 ? [{ name: url.searchParams.get("name"), type, TTL: 60, data: "34.120.10.1" }] : [],
+      });
+    }
     if (aiProviders.handles(url)) {
       return await aiProviders.answer(request, url);
     }

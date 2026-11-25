@@ -1,6 +1,7 @@
 /**
  * Connect's Wrangler config for the e2e stack: connect's own
- * (apps/connect/wrangler.jsonc), plus the vars that send every AI
+ * (apps/connect/wrangler.jsonc), run from e2e/connect-entry.ts, which
+ * answers Linear's MCP server in connect's place, plus the vars that send every AI
  * provider's request to the stack's fake providers (e2e/model-fake.ts),
  * so no test's request reaches a provider. They are connect's on-prem
  * relay, as plain workerd takes it (connect's src/ai-providers.ts):
@@ -34,7 +35,8 @@ if (import.meta.main) {
   const written = {
     ...config,
     $schema: undefined,
-    main: path.join(connectDir, config.main),
+    // Connect itself, with Linear's server beside it (e2e/connect-entry.ts).
+    main: path.join(import.meta.dirname, "connect-entry.ts"),
     d1_databases: config.d1_databases.map((database) => ({
       ...database,
       migrations_dir: path.join(connectDir, database.migrations_dir),

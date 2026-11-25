@@ -3,6 +3,7 @@ import type { ValueDescriptor } from "@grasp-os/runtime/app";
 import {
   hostSchema,
   keyHeaderSchema,
+  plainEndpointSchema,
   routeSchema,
   signInScopesSchema,
 } from "@grasp-os/runtime/connector";
@@ -220,23 +221,18 @@ const serverOf = (
   return { host: address.host, base };
 };
 
-const httpsUrl = (value: unknown): string | undefined => {
+/** An OAuth endpoint the SDK takes, or undefined. */
+const endpointOf = (value: unknown): string | undefined => {
   const candidate = text(value);
-  if (candidate === undefined || !URL.canParse(candidate)) {
-    return undefined;
-  }
-  const address = new URL(candidate);
-  const plain =
-    address.protocol === "https:" &&
-    address.username === "" &&
-    address.password === "";
-  return plain ? address.href : undefined;
+  return plainEndpointSchema.safeParse(candidate).success
+    ? candidate
+    : undefined;
 };
 
 const oauthOf = (scheme: Node): SpecAuth | undefined => {
   const flow = record(record(scheme.flows).authorizationCode);
-  const authorizeUrl = httpsUrl(flow.authorizationUrl);
-  const tokenUrl = httpsUrl(flow.tokenUrl);
+  const authorizeUrl = endpointOf(flow.authorizationUrl);
+  const tokenUrl = endpointOf(flow.tokenUrl);
   const scopes = Object.fromEntries(
     Object.entries(record(flow.scopes)).flatMap(([scope, description]) =>
       typeof description === "string"
@@ -440,7 +436,9 @@ const parameterOf = (
     return { field, parameter: { name, in: where } };
   }
   const items =
-    descriptor.kind === "array" && scalarKinds.has(descriptor.item.kind);
+    descriptor.kind === "array" &&
+    !descriptor.item.nullable &&
+    scalarKinds.has(descriptor.item.kind);
   const sent = where === "query" && items ? arrayStyle(node) : undefined;
   return sent === undefined
     ? undefined
@@ -661,15 +659,20 @@ const answeredBy = (
   return { answer, page, returns: answer };
 };
 
+/** Why an operation on a server of its own makes no tool, nor any route. */
+export const servedElsewhere = "It is served from a server of its own.";
+
 const candidateOf = (from: Source): Candidate => {
   const { method, item, operation } = from;
   const path = from.key;
+  // First: a route on another server, whatever else is wrong with it, is
+  // one no route under the spec's base reaches.
+  if (operation.servers !== undefined || item.servers !== undefined) {
+    throw new OperationError(servedElsewhere);
+  }
   const segments = pathSegments(path);
   if (segments === undefined) {
     throw new OperationError("Its path isn't one a route may take.");
-  }
-  if (operation.servers !== undefined || item.servers !== undefined) {
-    throw new OperationError("It is served from a server of its own.");
   }
   const request: Reading = {
     mode: "request",
