@@ -96,8 +96,9 @@ export const usePixels = (
       const size = typeof cell === "number" ? cell : cell(width);
       const columns = Math.floor(width / size);
       const rows = Math.floor(height / size);
-      const left = (width - columns * size) / 2;
-      const top = height - rows * size;
+      // Whole pixels, so neighbouring cells meet without a seam.
+      const left = Math.floor((width - columns * size) / 2);
+      const top = Math.floor(height - rows * size);
       draw(columns, rows, (x, y, tone, alpha = 1) => {
         context.globalAlpha = alpha;
         context.fillStyle = tones[tone];

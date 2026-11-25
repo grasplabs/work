@@ -548,6 +548,10 @@ msgstr "{cutOff, plural, one {# exécution plus ancienne d’aujourd’hui n’e
 msgid "{date} by {by}"
 msgstr "{date} par {by}"
 
+#: src/onboarding/campaign/concepts/concept-words.ts
+msgid "{date}, day {day} of {days}"
+msgstr "{date}, jour {day} sur {days}"
+
 #: src/settings/audit-archive.tsx
 msgctxt "how long something is kept"
 msgid "{days, plural, one {# day} other {# days}}"
@@ -883,6 +887,10 @@ msgstr "{more, plural, one {{words}, et # de plus} other {{words}, et # de plus}
 #: src/drafts/draft-history.tsx
 msgid "{more, plural, one {# more file} other {# more files}}"
 msgstr "{more, plural, one {# autre fichier} other {# autres fichiers}}"
+
+#: src/onboarding/campaign/concepts/concept-words.ts
+msgid "{more, plural, one {# more for enough} other {# more for enough}}"
+msgstr "{more, plural, one {Encore # pour en savoir assez} other {Encore # pour en savoir assez}}"
 
 #: src/onboarding/company-dots.tsx
 msgid "{more, plural, one {# other} other {# others}}"
@@ -1519,6 +1527,10 @@ msgstr "{taken, plural, one {Remettre la ligne retirée} other {Remettre les # l
 #: src/onboarding/setup-steps.tsx
 msgid "{talked, plural, one {I talked with # person.} other {I talked with # people.}}"
 msgstr "{talked, plural, one {J’ai parlé avec # personne.} other {J’ai parlé avec # personnes.}}"
+
+#: src/onboarding/campaign/concepts/road.tsx
+msgid "{talked} of {invited} have talked; {enough} are enough to understand every team."
+msgstr "{talked} sur {invited} ont parlé ; {enough} suffisent pour comprendre chaque équipe."
 
 #: src/onboarding/campaign/campaign-words.ts
 msgid "{talked} of {invited} have talked."
@@ -2619,6 +2631,10 @@ msgstr "Les admins peuvent changer le rôle de chacun, mettre fin à ses session
 msgid "Advisory"
 msgstr "Avis de sécurité"
 
+#: src/onboarding/campaign/concepts/concept-words.ts
+msgid "After"
+msgstr "Ensuite"
+
 #: src/frame/ui-words.tsx
 msgctxt "a change's new side"
 msgid "After"
@@ -3699,6 +3715,22 @@ msgstr "Au plus {tokens} jetons par réponse"
 msgid "At the end of the search, the arrow toward the line's end stars or unstars the highlighted model"
 msgstr "En fin de recherche, la flèche vers la fin de la ligne ajoute ou retire des favoris le modèle en surbrillance"
 
+#: src/onboarding/campaign/concepts/concept-words.ts
+msgid "At this pace about {projected} will have talked by {day}, enough to understand every team but {names}."
+msgstr "À ce rythme, environ {projected} personnes auront parlé d’ici {day}, assez pour comprendre chaque équipe sauf {names}."
+
+#: src/onboarding/campaign/concepts/concept-words.ts
+msgid "At this pace about {projected} will have talked by {day}, enough to understand every team."
+msgstr "À ce rythme, environ {projected} personnes auront parlé d’ici {day}, assez pour comprendre chaque équipe."
+
+#: src/onboarding/campaign/concepts/concept-words.ts
+msgid "At this pace about {projected} will have talked by {day}. That is enough."
+msgstr "À ce rythme, environ {projected} personnes auront parlé d’ici {day}. C’est assez."
+
+#: src/onboarding/campaign/concepts/concept-words.ts
+msgid "At this pace about {projected} will have talked by {day}. That is not quite enough yet."
+msgstr "À ce rythme, environ {projected} personnes auront parlé d’ici {day}. Ce n’est pas encore tout à fait assez."
+
 #. A time zone, by its city
 #: src/routes/_shell.settings.workspace.tsx
 msgid "Athens"
@@ -3942,6 +3974,10 @@ msgstr "Par {who}"
 msgctxt "who started a workflow run, and when it ended"
 msgid "By {who} · ended {ended}"
 msgstr "Par {who} · terminé {ended}"
+
+#: src/onboarding/campaign/concepts/concept-words.ts
+msgid "By {written}"
+msgstr "D’ici le {written}"
 
 #: src/apps/app-data.tsx
 msgctxt "a change's source"
@@ -4737,6 +4773,10 @@ msgstr "A fermé Grasp à l’entreprise"
 #: src/brain/activity-page.tsx
 msgid "Closed without an answer"
 msgstr "Fermée sans réponse"
+
+#: src/onboarding/campaign/concepts/road.tsx
+msgid "Closes"
+msgstr "Clôture"
 
 #: src/onboarding/interviews-progress.tsx
 msgid "Closes {closes}"
@@ -6595,6 +6635,10 @@ msgstr "Employeur"
 msgid "Empty"
 msgstr "Vide"
 
+#: src/onboarding/campaign/concepts/road.tsx
+msgid "Empty squares: where this pace leads."
+msgstr "Carrés vides : là où mène ce rythme."
+
 #: src/settings/staff-access.tsx
 msgid "End access"
 msgstr "Mettre fin à l'accès"
@@ -6626,6 +6670,10 @@ msgstr "Fin de l'accès en cours"
 #: src/workflows/workflow-diagram.tsx
 msgid "Ends the workflow"
 msgstr "Termine le workflow"
+
+#: src/onboarding/campaign/concepts/concept-words.ts
+msgid "Enough to understand it"
+msgstr "Assez pour le comprendre"
 
 #: src/settings/org-card.tsx
 msgid "Enter a name for the organization."
@@ -6888,6 +6936,10 @@ msgstr "Chaque ligne est d'abord vérifiée. Si l'une est incorrecte, rien n'est
 msgid "Every run, a test of your draft on recent items, and what happened lately."
 msgstr "Chaque exécution, un test de votre brouillon sur des éléments récents, et ce qui s'est passé dernièrement."
 
+#: src/onboarding/campaign/concepts/road.tsx
+msgid "Every team has said enough."
+msgstr "Chaque équipe en a assez dit."
+
 #: src/brain/skills-page.tsx
 msgid "Every team's skills"
 msgstr "Skills de toutes les équipes"
@@ -6928,6 +6980,7 @@ msgstr "Chaque jour ouvré à 9:00"
 #: src/brain/sources-page.tsx
 #: src/connections/app/words.ts
 #: src/onboarding/campaign/campaign-words.ts
+#: src/onboarding/campaign/concepts/road.tsx
 #: src/settings/stephen-audience.tsx
 msgid "Everyone"
 msgstr "Tout le monde"
@@ -7586,6 +7639,8 @@ msgid "For whom"
 msgstr "Pour qui"
 
 #: src/onboarding/campaign/campaign-asks.tsx
+#: src/onboarding/campaign/concepts/letter.tsx
+#: src/onboarding/campaign/concepts/road.tsx
 msgid "For you"
 msgstr "Pour vous"
 
@@ -8064,6 +8119,14 @@ msgstr "Grasp ne peut utiliser {app} qu’avec les outils que vous avez autoris�
 #: src/chat/saved-memory.tsx
 msgid "Grasp no longer remembers this."
 msgstr "Grasp ne retient plus ceci."
+
+#: src/onboarding/campaign/concepts/road.tsx
+msgid "Grasp opens"
+msgstr "Grasp ouvre"
+
+#: src/onboarding/campaign/concepts/concept-words.ts
+msgid "Grasp opens for everyone"
+msgstr "Grasp s’ouvre à tous"
 
 #: src/connections/integrations-band.tsx
 msgid "Grasp reaches only what you connect."
@@ -8921,6 +8984,10 @@ msgstr "Entretien : {role}"
 #: src/brain/brain.ts
 msgid "Interviews"
 msgstr "Entretiens"
+
+#: src/onboarding/campaign/concepts/concept-words.ts
+msgid "Invitations went out"
+msgstr "Invitations envoyées"
 
 #: src/projects/project-view.tsx
 #: src/settings/invitations.tsx
@@ -10040,6 +10107,7 @@ msgid "List what was finished, and who did it."
 msgstr "Liste ce qui a été terminé, et par qui."
 
 #: src/frame/ui-words.tsx
+#: src/onboarding/campaign/concepts/concept-words.ts
 msgid "Listening"
 msgstr "À l’écoute"
 
@@ -10748,6 +10816,10 @@ msgstr "Point du matin"
 #: src/apps/field-editor.tsx
 msgid "Most characters"
 msgstr "Nombre maximal de caractères"
+
+#: src/onboarding/campaign/concepts/concept-words.ts
+msgid "Most people talk in the first three days, so the next two count most."
+msgstr "La plupart parlent dans les trois premiers jours : les deux prochains comptent le plus."
 
 #: src/apps/field-editor.tsx
 #: src/settings/ai-providers.tsx
@@ -11874,6 +11946,10 @@ msgstr "Pas encore partagé"
 msgid "Not shown"
 msgstr "Non affiché"
 
+#: src/onboarding/campaign/concepts/mosaic.tsx
+msgid "Not shown in a small team"
+msgstr "Non affiché dans une petite équipe"
+
 #: src/routes/_shell.settings.members.tsx
 #: src/routes/_shell.settings.security.tsx
 msgid "Not signed out"
@@ -12029,10 +12105,13 @@ msgid "Nothing is shared with you yet."
 msgstr "Rien n’est encore partagé avec vous."
 
 #: src/onboarding/campaign/campaign-week.tsx
+#: src/onboarding/campaign/concepts/mosaic.tsx
 msgid "Nothing learned here yet."
 msgstr "Rien appris ici pour l’instant."
 
 #: src/onboarding/campaign/campaign-week.tsx
+#: src/onboarding/campaign/concepts/letter.tsx
+#: src/onboarding/campaign/concepts/road.tsx
 msgid "Nothing learned yet. The first findings come tomorrow."
 msgstr "Rien appris pour l’instant. Les premiers constats arrivent demain."
 
@@ -12047,6 +12126,10 @@ msgstr "Aucun résultat. Tapez son nom pour le demander."
 #: src/agents/new-agent.tsx
 msgid "Nothing more"
 msgstr "Rien de plus"
+
+#: src/onboarding/campaign/concepts/concept-words.ts
+msgid "Nothing needs you today."
+msgstr "Rien ne vous attend aujourd’hui."
 
 #: src/workflows/workflow-status.tsx
 msgid "Nothing new starts until you resume it: a start is refused while it is paused. Runs already going carry on to their end."
@@ -12168,6 +12251,7 @@ msgid "now"
 msgstr "maintenant"
 
 #: src/drafts/draft-history.tsx
+#: src/onboarding/campaign/concepts/concept-words.ts
 msgid "Now"
 msgstr "Maintenant"
 
@@ -13666,6 +13750,14 @@ msgstr "Question {current} sur {total}"
 #: src/agents/setup/thinking-step.tsx
 msgid "Quick and careful. Good for most jobs."
 msgstr "Rapide et soigné. Convient à la plupart des tâches."
+
+#: src/onboarding/campaign/concepts/concept-words.ts
+msgid "Quiet: {more, plural, one {# more needed} other {# more needed}}"
+msgstr "Calme : {more, plural, one {encore # nécessaire} other {encore # nécessaires}}"
+
+#: src/onboarding/campaign/concepts/concept-words.ts
+msgid "Quiet: the lead hasn’t talked"
+msgstr "Calme : le responsable n’a pas parlé"
 
 #: src/agents/agent-templates.ts
 msgid "Quote the document's own words for numbers and dates."
@@ -16541,6 +16633,14 @@ msgstr "Étapes"
 msgid "Still open"
 msgstr "En suspens"
 
+#: src/onboarding/campaign/concepts/road.tsx
+msgid "Still to hear"
+msgstr "Encore à entendre"
+
+#: src/onboarding/campaign/concepts/mosaic.tsx
+msgid "Still to talk"
+msgstr "Doit encore parler"
+
 #: src/connections/revocations-by-hand.tsx
 msgid "Still trying · {tries} tries"
 msgstr "Toujours en cours · {tries} essais"
@@ -16838,9 +16938,17 @@ msgstr "Redirection vers la connexion Microsoft…"
 msgid "Talk"
 msgstr "Parler"
 
+#: src/onboarding/campaign/concepts/mosaic.tsx
+msgid "Talked"
+msgstr "A parlé"
+
 #: src/brain/brain.ts
 msgid "Talked about in {source}"
 msgstr "Abordé dans {source}"
+
+#: src/onboarding/campaign/concepts/mosaic.tsx
+msgid "Talked today"
+msgstr "A parlé aujourd’hui"
 
 #: src/projects/project-dialog.tsx
 msgid "Target"
@@ -16878,6 +16986,10 @@ msgstr "L'équipe {team} peut lire ce fichier importé."
 #: src/brain/sources-page.tsx
 msgid "Team {teamName}"
 msgstr "Équipe {teamName}"
+
+#: src/onboarding/campaign/concepts/letter.tsx
+msgid "Team by team"
+msgstr "Équipe par équipe"
 
 #: src/settings/directory-placement.tsx
 msgid "Team doesn’t match the directory"
@@ -17497,6 +17609,14 @@ msgstr "Le document que quelqu’un partage ou cite."
 msgid "The documents couldn't be loaded. Reload the page."
 msgstr "Les documents n'ont pas pu être chargés. Rechargez la page."
 
+#: src/onboarding/campaign/concepts/road.tsx
+msgid "The dotted line: {enough} people, enough to understand every team."
+msgstr "La ligne pointillée : {enough} personnes, assez pour comprendre chaque équipe."
+
+#: src/onboarding/campaign/concepts/road.tsx
+msgid "The dotted line: {enough} people, enough to understand the work."
+msgstr "La ligne pointillée : {enough} personnes, assez pour comprendre le travail."
+
 #: src/workflows/workflow-flow.tsx
 msgid "The draft doesn't pass yet: fix it under Definition to change steps here. The Flow shows it as it last passed."
 msgstr "Le brouillon ne passe pas encore la vérification : corrigez-le dans Définition pour modifier des étapes ici. Le Flow l’affiche tel qu’il est passé la dernière fois."
@@ -17552,6 +17672,7 @@ msgstr "L'entrée n'est pas du JSON."
 msgid "The interviews are over."
 msgstr "Les entretiens sont terminés."
 
+#: src/onboarding/campaign/concepts/concept-words.ts
 #: src/onboarding/plan.tsx
 msgid "The interviews close"
 msgstr "Les entretiens se terminent"
@@ -17880,6 +18001,10 @@ msgstr "Ses données personnelles disparaissent définitivement. Son nom reste d
 #: src/routes/_shell.settings.appearance.tsx
 msgid "Theme"
 msgstr "Thème"
+
+#: src/onboarding/campaign/concepts/concept-words.ts
+msgid "Then"
+msgstr "Puis"
 
 #: src/workflows/workflow-diagram.tsx
 msgid "Then {task}"
@@ -19299,6 +19424,10 @@ msgstr "En attente d’une réponse"
 msgid "Waiting for more voices"
 msgstr "En attente de plus de voix"
 
+#: src/onboarding/campaign/concepts/concept-words.ts
+msgid "Waiting for the lead"
+msgstr "En attente du responsable"
+
 #: src/chat/held-writes.tsx
 msgid "Waiting for you"
 msgstr "En attente de vous"
@@ -19424,6 +19553,10 @@ msgstr "Nous n’utilisons pas de plateforme RH"
 msgid "We have a technical problem on our side. It is not you. I have kept what you said, and I keep trying."
 msgstr "Nous avons un problème technique de notre côté. Cela ne vient pas de vous. J’ai gardé ce que vous avez dit et je continue d’essayer."
 
+#: src/onboarding/campaign/concepts/road.tsx
+msgid "We have heard enough."
+msgstr "Nous en avons assez entendu."
+
 #: src/onboarding/campaign/campaign-words.ts
 msgid "We have what we need."
 msgstr "Nous avons ce qu’il nous faut."
@@ -19447,6 +19580,14 @@ msgstr "Nous la conservons scellée. Vous n’en verrez plus que les quatre dern
 #: src/onboarding/team-step.tsx
 msgid "We want to spend less time on repetitive work, so there’s more time for our clients. This is about how work flows, not about jobs."
 msgstr "Nous voulons passer moins de temps sur les tâches répétitives, pour avoir plus de temps pour nos clients. Il s’agit de la façon dont le travail circule, pas des postes."
+
+#: src/onboarding/campaign/concepts/concept-words.ts
+msgid "We write down how each team works"
+msgstr "Nous écrivons comment travaille chaque équipe"
+
+#: src/onboarding/campaign/concepts/concept-words.ts
+msgid "We write down how the work runs"
+msgstr "Nous écrivons comment le travail se déroule"
 
 #: src/agents/setup/instructions-step.tsx
 msgid "We wrote these for you. Change what you like."
@@ -19615,6 +19756,10 @@ msgstr "Ce que Grasp a vu pouvoir être amélioré, par type."
 #: src/workflows/run-page.tsx
 msgid "What happened to this run"
 msgstr "Ce qui est arrivé à cette exécution"
+
+#: src/onboarding/campaign/concepts/letter.tsx
+msgid "What happens next"
+msgstr "La suite"
 
 #: src/interview/start.tsx
 msgid "What happens to your answers"
@@ -19806,6 +19951,11 @@ msgctxt "a workflow's triggers"
 msgid "What starts it"
 msgstr "Ce qui le lance"
 
+#: src/onboarding/campaign/concepts/letter.tsx
+#: src/onboarding/campaign/concepts/road.tsx
+msgid "What stood out"
+msgstr "Ce qui ressort"
+
 #: src/apps/app-access-requests.tsx
 msgid "What the App may do with it"
 msgstr "Ce que l’application peut en faire"
@@ -19866,6 +20016,10 @@ msgstr "Ce qu’a fait l’exécution de la version {version}"
 #: src/settings/event-sources.tsx
 msgid "What the sender needs: the URL, and the secret it signs with."
 msgstr "Ce dont l’expéditeur a besoin : l’URL et le secret avec lequel il signe."
+
+#: src/onboarding/campaign/concepts/mosaic.tsx
+msgid "What the squares mean"
+msgstr "Ce que signifient les carrés"
 
 #: src/agents/own-agents-admin.tsx
 msgid "What they cost couldn't be loaded."
@@ -20234,6 +20388,10 @@ msgstr "Qui le fait"
 #: src/chat/plan-card.tsx
 msgid "Who gets it"
 msgstr "Qui le reçoit"
+
+#: src/onboarding/campaign/concepts/letter.tsx
+msgid "Who has talked"
+msgstr "Qui a parlé"
 
 #: src/onboarding/leads-step.tsx
 msgid "Who leads it?"
@@ -20669,6 +20827,10 @@ msgstr "Écrit"
 msgid "Written in a document"
 msgstr "Écrit dans un document"
 
+#: src/onboarding/campaign/concepts/road.tsx
+msgid "Written up"
+msgstr "Mis par écrit"
+
 #: src/chat/thread.tsx
 msgid "Wrote {file}"
 msgstr "{file} écrit"
@@ -20734,6 +20896,10 @@ msgstr "Vous"
 #: src/interview/words.ts
 msgid "You and AI"
 msgstr "Vous et l’IA"
+
+#: src/onboarding/campaign/concepts/concept-words.ts
+msgid "You and your leads look it over"
+msgstr "Vous et vos responsables le relisez"
 
 #: src/connections/connect-dialog.tsx
 msgid "You approve there. {app} shows what Grasp asks for."
@@ -20832,6 +20998,10 @@ msgstr "Vous ne l’avez pas encore lancé. Seules vos propres exécutions appar
 #: src/brain/memories-page.tsx
 msgid "You haven't shared any of your memories."
 msgstr "Vous n’avez encore partagé aucun de vos souvenirs."
+
+#: src/onboarding/campaign/concepts/concept-words.ts
+msgid "You look it over"
+msgstr "Vous le relisez"
 
 #. {host} is the web address of the sign-in page, e.g. login.microsoftonline.com.
 #: src/connections/connect-dialog.tsx
@@ -21013,6 +21183,10 @@ msgstr "Vos invitations ont atteint les {invited} personnes. {talked, plural, on
 #: src/onboarding/language-cards.tsx
 msgid "Your language"
 msgstr "Votre langue"
+
+#: src/onboarding/campaign/concepts/road.tsx
+msgid "Your look"
+msgstr "Votre relecture"
 
 #: src/interview/parts/consent.tsx
 msgid "Your microphone stays off until you agree."
