@@ -206,15 +206,14 @@ describe("generated modules", () => {
     expect(releaseFunctions.get("notes.create")).toStrictEqual({
       kind: "mutation",
       args: create?.args,
-      returns: create?.returns,
     });
-    // Never an internal function's, and a query without `returns` says so.
+    // Never an internal function's.
     expect({
       internal: releaseFunctions.has("notes.count"),
-      titles: releaseFunctions.get("notes.titles")?.returns,
+      titles: releaseFunctions.get("notes.titles")?.kind,
       start: releaseFunctions.get("workflows.summarizeNote.mutations.start")
         ?.kind,
-    }).toStrictEqual({ internal: false, titles: null, start: "mutation" });
+    }).toStrictEqual({ internal: false, titles: "query", start: "mutation" });
     // Each workflow as the App declares it, by alias.
     const summarize = build.workflows.get("summarizeNote");
     expect({

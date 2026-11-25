@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
-import { RichText } from "../src/components/rich-text.tsx";
+import { RichText } from "../src/form.tsx";
 
 // What a person's formatted text can put on a page: what it means to
 // (bold, lists, a link's words and address), and nothing that runs, loads

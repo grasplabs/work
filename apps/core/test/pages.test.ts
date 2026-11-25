@@ -321,7 +321,7 @@ export const Route = createFileRoute("/counter")({ component: Counter });
     );
   });
 
-  it("refuses imports from outside the kit, saying where", async () => {
+  it("refuses imports from outside the kit, the product's own parts of @grasp-os/app-kit among them, saying where", async () => {
     const built = await buildPages(
       env,
       {
@@ -334,9 +334,10 @@ import * as icons from "lucide-react";
 export * from "lucide-react";
 
 const remote = import("https://example.com/remote.js");
+import { PageHeader } from "@grasp-os/app-kit/components/page-header";
 
 function Desk() {
-  return <p>{leftPad(Dialog, Nope, secret, remote, InboxIcon, NotAnIcon, icons)}</p>;
+  return <p>{leftPad(Dialog, Nope, secret, remote, InboxIcon, NotAnIcon, icons, PageHeader)}</p>;
 }
 export const Route = createFileRoute("/")({ component: Desk });
 `,
@@ -366,6 +367,9 @@ export const Route = createFileRoute("/")({ component: Desk });
       ),
       expect.stringContaining(
         "src/routes/index.tsx:7 imports: import or export icons from lucide-react by name"
+      ),
+      expect.stringContaining(
+        'src/routes/index.tsx:10 imports: "@grasp-os/app-kit/components/page-header" is outside the kit'
       ),
       expect.stringContaining(
         'src/routes/index.tsx:9 imports: "https://example.com/remote.js" is outside the kit'

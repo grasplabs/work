@@ -83,7 +83,6 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@grasp-os/app-kit/components/resizable";
-import { RichText } from "@grasp-os/app-kit/components/rich-text";
 import { ScrollArea } from "@grasp-os/app-kit/components/scroll-area";
 import { Separator } from "@grasp-os/app-kit/components/separator";
 import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
@@ -99,22 +98,7 @@ import {
   TableHeader,
   TableRow,
 } from "@grasp-os/app-kit/components/table";
-import {
-  Tile,
-  TileContent,
-  TileDescription,
-  TileField,
-  TileMeta,
-  TileSheet,
-  TileSheetBar,
-  TileTitle,
-} from "@grasp-os/app-kit/components/tile";
-import {
-  ChevronRightIcon,
-  CogIcon,
-  InfoIcon,
-  LayoutGridIcon,
-} from "lucide-react";
+import { ChevronRightIcon, InfoIcon, LayoutGridIcon } from "lucide-react";
 
 const AccordionDemo = () => (
   <Accordion defaultValue={["shipping"]}>
@@ -357,27 +341,6 @@ const ItemDemo = () => (
   </div>
 );
 
-const TileDemo = () => (
-  <Tile className="max-w-sm">
-    <TileField painting="dawn" pattern="columns">
-      <Badge variant="passed">Published</Badge>
-      <TileSheet>
-        <TileSheetBar icon={<LayoutGridIcon />}>Board</TileSheetBar>
-      </TileSheet>
-    </TileField>
-    <TileContent>
-      <TileTitle href="#board">Board</TileTitle>
-      <TileDescription>
-        Every open lead, from first call to contract.
-      </TileDescription>
-      <TileMeta>
-        <CogIcon aria-hidden="true" />
-        Sales pipeline
-      </TileMeta>
-    </TileContent>
-  </Tile>
-);
-
 const KbdDemo = () => (
   <p className="text-sm">
     Search with{" "}
@@ -500,14 +463,6 @@ const GraspMarkDemo = () => (
   </div>
 );
 
-const RichTextDemo = () => (
-  <RichText
-    value={
-      "**Ship** the *plan* this week:\n\n- Draft it\n- [Review it](https://example.com)\n\n<b>Raw HTML</b> is dropped."
-    }
-  />
-);
-
 export const displayDemos = {
   accordion: AccordionDemo,
   alert: AlertDemo,
@@ -532,6 +487,4 @@ export const displayDemos = {
   skeleton: SkeletonDemo,
   spinner: SpinnerDemo,
   table: TableDemo,
-  tile: TileDemo,
-  "rich-text": RichTextDemo,
 };

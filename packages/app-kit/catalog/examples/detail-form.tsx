@@ -11,7 +11,6 @@ import {
   FieldLegend,
   FieldSet,
 } from "@grasp-os/app-kit/components/field";
-import { Inline } from "@grasp-os/app-kit/components/inline";
 import { Input } from "@grasp-os/app-kit/components/input";
 import {
   PageHeader,
@@ -26,7 +25,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@grasp-os/app-kit/components/select";
-import { Stack } from "@grasp-os/app-kit/components/stack";
 import { Switch } from "@grasp-os/app-kit/components/switch";
 import { Textarea } from "@grasp-os/app-kit/components/textarea";
 
@@ -37,7 +35,7 @@ const terms = [
 ];
 
 export const DetailFormExample = () => (
-  <Stack gap="lg">
+  <div className="flex min-w-0 flex-col gap-6">
     <PageHeader>
       <PageHeaderContent>
         <PageHeaderTitle>Acme Corp</PageHeaderTitle>
@@ -102,13 +100,13 @@ export const DetailFormExample = () => (
             </FieldDescription>
           </Field>
         </FieldSet>
-        <Inline justify="end">
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
           <Button variant="outline" type="button">
             Cancel
           </Button>
           <Button type="submit">Save</Button>
-        </Inline>
+        </div>
       </FieldGroup>
     </form>
-  </Stack>
+  </div>
 );

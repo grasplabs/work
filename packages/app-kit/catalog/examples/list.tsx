@@ -23,7 +23,6 @@ import {
   PageHeaderDescription,
   PageHeaderTitle,
 } from "@grasp-os/app-kit/components/page-header";
-import { Stack } from "@grasp-os/app-kit/components/stack";
 import { ChevronRightIcon, PlusIcon } from "lucide-react";
 
 interface Invoice {
@@ -46,7 +45,7 @@ const statusVariant = {
 } as const;
 
 export const ListExample = () => (
-  <Stack gap="lg">
+  <div className="flex min-w-0 flex-col gap-6">
     <PageHeader>
       <PageHeaderContent>
         <PageHeaderTitle>Invoices</PageHeaderTitle>
@@ -94,5 +93,5 @@ export const ListExample = () => (
         ))}
       </ItemGroup>
     )}
-  </Stack>
+  </div>
 );

@@ -1,4 +1,4 @@
-// Demos of the kit's layout primitives and the direction provider. One per
+// Demos of the kit's layout parts and the direction provider. One per
 // component, for the dev-only gallery and its accessibility checks
 // (test/kit.browser.test.tsx).
 import {
@@ -7,22 +7,13 @@ import {
   AppShellDock,
   AppShellMain,
 } from "@grasp-os/app-kit/components/app-shell";
-import { Badge } from "@grasp-os/app-kit/components/badge";
 import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@grasp-os/app-kit/components/card";
 import { DirectionProvider } from "@grasp-os/app-kit/components/direction";
 import {
   DockablePanel,
   DockablePanelHandle,
   DockablePanelHeader,
 } from "@grasp-os/app-kit/components/dockable-panel";
-import { Grid } from "@grasp-os/app-kit/components/grid";
-import { Inline } from "@grasp-os/app-kit/components/inline";
 import {
   PageHeader,
   PageHeaderActions,
@@ -41,12 +32,6 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@grasp-os/app-kit/components/sidebar";
-import {
-  SplitPane,
-  SplitPaneAside,
-  SplitPaneMain,
-} from "@grasp-os/app-kit/components/split-pane";
-import { Stack } from "@grasp-os/app-kit/components/stack";
 import { useState } from "react";
 
 const AppShellDemo = () => {
@@ -107,8 +92,8 @@ const PanelDemo = () => {
   const [rightSize, setRightSize] = useState(192);
   const sides: PanelSide[] = ["top", "right", "bottom", "left"];
   return (
-    <Stack>
-      <Inline>
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-2">
         {sides.map((side) => (
           <Button
             key={side}
@@ -120,7 +105,7 @@ const PanelDemo = () => {
             {open[side] ? `Collapse ${side}` : `Open ${side}`}
           </Button>
         ))}
-      </Inline>
+      </div>
       <div className="flex h-80 flex-col overflow-hidden rounded-lg border">
         <Panel bordered open={open.top} side="top" size={64}>
           <p className="p-4">Top</p>
@@ -153,7 +138,7 @@ const PanelDemo = () => {
           <p className="p-4">Bottom</p>
         </Panel>
       </div>
-    </Stack>
+    </div>
   );
 };
 
@@ -185,41 +170,12 @@ const DockablePanelDemo = () => {
 const DirectionDemo = () => (
   <DirectionProvider direction="rtl">
     <div dir="rtl" lang="ar">
-      <Inline>
+      <div className="flex flex-wrap items-center gap-2">
         <Button>حفظ</Button>
         <Button variant="outline">إلغاء</Button>
-      </Inline>
+      </div>
     </div>
   </DirectionProvider>
-);
-
-const stats = [
-  { label: "Revenue", value: "€12,400" },
-  { label: "Orders", value: "318" },
-  { label: "Customers", value: "92" },
-];
-
-const GridDemo = () => (
-  <Grid columns={3}>
-    {stats.map((stat) => (
-      <Card key={stat.label}>
-        <CardHeader>
-          <CardTitle>{stat.label}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-xl font-semibold tabular-nums">{stat.value}</p>
-        </CardContent>
-      </Card>
-    ))}
-  </Grid>
-);
-
-const InlineDemo = () => (
-  <Inline>
-    <Badge>Design</Badge>
-    <Badge variant="secondary">Research</Badge>
-    <Badge variant="outline">Q4</Badge>
-  </Inline>
 );
 
 const PageHeaderDemo = () => (
@@ -233,40 +189,6 @@ const PageHeaderDemo = () => (
       <Button>Add customer</Button>
     </PageHeaderActions>
   </PageHeader>
-);
-
-const SplitPaneDemo = () => (
-  <SplitPane>
-    <SplitPaneMain>
-      <Card>
-        <CardContent>
-          <p className="text-sm">The order.</p>
-        </CardContent>
-      </Card>
-    </SplitPaneMain>
-    <SplitPaneAside aria-label="Customer">
-      <Card>
-        <CardContent>
-          <p className="text-sm">Who ordered it.</p>
-        </CardContent>
-      </Card>
-    </SplitPaneAside>
-  </SplitPane>
-);
-
-const StackDemo = () => (
-  <Stack>
-    <Card>
-      <CardContent>
-        <p className="text-sm">First</p>
-      </CardContent>
-    </Card>
-    <Card>
-      <CardContent>
-        <p className="text-sm">Second</p>
-      </CardContent>
-    </Card>
-  </Stack>
 );
 
 const PaintedFieldDemo = () => (
@@ -286,9 +208,5 @@ export const layoutDemos = {
   panel: PanelDemo,
   direction: DirectionDemo,
   "dockable-panel": DockablePanelDemo,
-  grid: GridDemo,
-  inline: InlineDemo,
   "page-header": PageHeaderDemo,
-  "split-pane": SplitPaneDemo,
-  stack: StackDemo,
 };

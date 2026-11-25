@@ -36,10 +36,16 @@ import type {
   FilesReference,
   FunctionReference,
   FunctionReturn,
+  LinksReference,
 } from "@grasp-os/runtime/app";
 import { bindingOf } from "@grasp-os/runtime/forms";
 import type { ValueDescriptor } from "@grasp-os/runtime/forms";
-import { useQuery, useRetryFailed, useUpload } from "@grasp-os/runtime/react";
+import {
+  useClient,
+  useQuery,
+  useRetryFailed,
+  useUpload,
+} from "@grasp-os/runtime/react";
 import type {
   Declaring,
   FormStatus,
@@ -54,8 +60,18 @@ import {
   ListOrderedIcon,
   PaperclipIcon,
 } from "lucide-react";
-import { useId, useRef, useState, useSyncExternalStore } from "react";
+import {
+  createContext,
+  use,
+  useId,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import type { ReactNode } from "react";
 import type * as React from "react";
+import Markdown from "react-markdown";
+import type { Components } from "react-markdown";
 
 import { pageText } from "./internal/language.ts";
 import type { Texts } from "./internal/language.ts";
@@ -1428,9 +1444,8 @@ const markIcons: Readonly<Record<Mark, React.ComponentType>> = {
  * A field of `form` that holds formatted text, as Markdown: bold, italic
  * and lists, which its toolbar puts around what is selected (a link the
  * person types in Markdown is kept). It
- * holds text alone, never HTML: show it with `RichText`
- * (`@grasp-os/app-kit/components/rich-text`), which renders the Markdown and
- * drops any HTML in it.
+ * holds text alone, never HTML: show it with `RichText` (below), which
+ * renders the Markdown and drops any HTML in it.
  */
 const RichTextField = <Values,>({
   form,
@@ -1675,6 +1690,139 @@ const SubmitButton = ({
   );
 };
 
+// Formatted text as the rich text field keeps it (Markdown), shown safely:
+// raw HTML in it is dropped (`skipHtml`), a link keeps only a safe address
+// (react-markdown's default URL transform: http, https, mailto and the
+// like, never `javascript:`), and an image shows as its words, never
+// loaded from its address. Headings read as bold paragraphs: formatted
+// text inside a page never outranks the page's own headings.
+//
+// An App's page runs in a frame that opens nothing itself: it opens a
+// URL through one of the App's links resources (`client.links.open`). So
+// given the resource (`links`), a link is a button that opens its address
+// through it; without one, the link's words show with their address
+// beside them, to read.
+
+/** The links resource a link's address opens through, if the page gave one. */
+const Links = createContext<LinksReference | undefined>(undefined);
+
+/** A link that opens its address through the page's links resource. */
+const OpeningLink = ({
+  links,
+  href,
+  children,
+}: {
+  links: LinksReference;
+  href: string;
+  children?: ReactNode;
+}): ReactNode => {
+  const client = useClient();
+  return (
+    <Button
+      onClick={() => {
+        const open = async (): Promise<void> => {
+          try {
+            await client.links.open(links, { url: href });
+          } catch {
+            // The host says why it didn't open (an address the resource
+            // doesn't allow, the person declining) in its own UI.
+          }
+        };
+        void open();
+      }}
+      size="inline"
+      type="button"
+      variant="link"
+    >
+      {children}
+    </Button>
+  );
+};
+
+const RichLink = ({
+  href,
+  children,
+}: {
+  href?: string;
+  children?: ReactNode;
+}): ReactNode => {
+  const links = use(Links);
+  // An address the transform dropped (`javascript:`): its words alone.
+  if (href === undefined || href === "") {
+    return <span>{children}</span>;
+  }
+  if (links !== undefined) {
+    return (
+      <OpeningLink href={href} links={links}>
+        {children}
+      </OpeningLink>
+    );
+  }
+  return children === href ? (
+    <span>{href}</span>
+  ) : (
+    <span>
+      {children} ({href})
+    </span>
+  );
+};
+
+const heading: Components["h1"] = ({ children }) => (
+  <p className="font-semibold">{children}</p>
+);
+
+const components: Components = {
+  p: ({ children }) => <p>{children}</p>,
+  h1: heading,
+  h2: heading,
+  h3: heading,
+  h4: heading,
+  h5: heading,
+  h6: heading,
+  ul: ({ children }) => (
+    <ul className="flex list-disc flex-col gap-1 pl-5">{children}</ul>
+  ),
+  // A list that starts elsewhere (`3. …`) keeps its numbering.
+  ol: ({ children, start }) => (
+    <ol className="flex list-decimal flex-col gap-1 pl-5" start={start}>
+      {children}
+    </ol>
+  ),
+  a: ({ href, children }) => <RichLink href={href}>{children}</RichLink>,
+  img: ({ alt }) => <span>{alt}</span>,
+};
+
+/**
+ * Formatted text as `RichTextField` saved it (Markdown), shown safely: the
+ * field's other half.
+ */
+const RichText = ({
+  value,
+  links,
+  className,
+}: {
+  /** The Markdown, as a rich text field saved it. */
+  value: string;
+  /**
+   * The App's links permission its links open through (`permissions.links`):
+   * a link is then a button that opens its address there. Without it,
+   * links show their address as text.
+   */
+  links?: LinksReference;
+  className?: string;
+}): React.JSX.Element => (
+  <div
+    className={cn("flex flex-col gap-2 text-sm", className)}
+    data-slot="rich-text"
+  >
+    <Links value={links}>
+      <Markdown components={components} skipHtml>
+        {value}
+      </Markdown>
+    </Links>
+  </div>
+);
+
 export {
   CheckboxField,
   DateField,
@@ -1685,6 +1833,7 @@ export {
   MultiSelectField,
   NumberField,
   RelationField,
+  RichText,
   RichTextField,
   SelectField,
   SubmitButton,

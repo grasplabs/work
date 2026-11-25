@@ -26,12 +26,6 @@ Grasp generates the route tree from these files, as TanStack does in any project
 ```tsx src/routes/tasks.$taskId.tsx
 import { useMutation, useQuery } from "@grasp-os/sdk/react";
 import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  PageHeader,
-  PageHeaderActions,
-  PageHeaderContent,
-  PageHeaderTitle,
-} from "@grasp-os/app-kit/components/page-header";
 import { Skeleton } from "@grasp-os/app-kit/components/skeleton";
 import { api } from "@server/_generated/api";
 import type { Id } from "@server/_generated/dataModel";
@@ -49,19 +43,15 @@ const Task = () => {
   }
   return (
     <main className="p-6">
-      <PageHeader>
-        <PageHeaderContent>
-          <PageHeaderTitle>{task.title}</PageHeaderTitle>
-        </PageHeaderContent>
-        <PageHeaderActions>
-          <Button
-            disabled={task.done}
-            onClick={async () => await complete({ id: task._id })}
-          >
-            Complete
-          </Button>
-        </PageHeaderActions>
-      </PageHeader>
+      <header className="flex items-center justify-between gap-4">
+        <h1 className="text-2xl font-semibold">{task.title}</h1>
+        <Button
+          disabled={task.done}
+          onClick={async () => await complete({ id: task._id })}
+        >
+          Complete
+        </Button>
+      </header>
     </main>
   );
 };
@@ -156,4 +146,4 @@ It is bundled into the App's build and runs on the kit's React. An import of a p
 
 ## How Pages look
 
-Pages are built from `@grasp-os/app-kit`, the same components and theme as Grasp itself: buttons, forms, tables, cards, charts and more, each under `@grasp-os/app-kit/components/<name>`. Lay them out with Tailwind's layout classes and leave their look to the components; Grasp's checks refuse raw colours and restyled components, so every App looks like Grasp.
+Pages are built from `@grasp-os/app-kit`: [shadcn/ui](https://ui.shadcn.com)'s own components, by shadcn's names, each under `@grasp-os/app-kit/components/<name>` (`button`, `card`, `table`, `dialog`, `select` and the rest), on the kit's theme, and the form fields of `@grasp-os/app-kit/form`. Lay them out with Tailwind's layout classes and leave their look to the components: Grasp's checks refuse raw colours and restyled components.
