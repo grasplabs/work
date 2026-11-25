@@ -17,15 +17,8 @@ import {
 } from "@grasp-os/runtime/connector";
 import { z } from "zod";
 
-import {
-  gmailHost,
-  googleJson,
-  googleUrl,
-  idSchema,
-  nextPageOf,
-  pageSchema,
-  topSchema,
-} from "./google.ts";
+import { googleJson, googleUrl } from "./google-sync.ts";
+import { gmailHost } from "./google.ts";
 import {
   attachmentsOf,
   bodyPartOf,
@@ -35,6 +28,35 @@ import {
   textOf,
 } from "./mime.ts";
 import type { Part } from "./mime.ts";
+
+/**
+ * An ID Google gives a message, a thread or a label: letters, digits, `_`
+ * and `-`.
+ */
+const idSchema = z
+  .string()
+  .min(1)
+  .max(1024)
+  .regex(/^[\w-]+$/u);
+
+/** How many results a page holds, at most `max`. */
+const topSchema = (max: number) => z.number().int().min(1).max(max).optional();
+
+/**
+ * Where to go on: a previous result's `nextPage` (Google's page token),
+ * with the same input. It is sent as `pageToken` on the tool's own route,
+ * and only there.
+ */
+const pageSchema = z
+  .string()
+  .min(1)
+  .max(4096)
+  .regex(/^[!-~]+$/u)
+  .optional();
+
+/** The `nextPage` a result hands back: Google's page token, or `null`. */
+const nextPageOf = (token: string | undefined): string | null =>
+  token === undefined || token === "" ? null : token;
 
 // Gmail, one mailbox per call, always as `/gmail/v1/users/{mailbox}` with
 // the mailbox's address, never `me`, so a call's capability binds every

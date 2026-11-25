@@ -17,7 +17,8 @@ import type { SyncItem, SyncPage, SyncReader } from "@grasp-os/shared/sync";
 import { ownPlace } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
-import { apisHost, googleFailure, googleUrl } from "./google.ts";
+import { apisHost } from "./google.ts";
+import { googleFailure, googleUrl } from "./google-sync.ts";
 
 // Native sync of a person's own calendar (GRA-1758): every event in it,
 // then what changed and what was cancelled. A calendar's one reader is

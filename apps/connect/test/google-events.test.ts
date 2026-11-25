@@ -590,7 +590,7 @@ describe("Google Workspace connector events", () => {
         connection: gmail.id,
         owner: gmail.person.userId,
         resource: financeDrive,
-        action: "files.list",
+        action: "drive.files.list",
         type: "google.file.created",
         payload: {
           drive: financeDrive,

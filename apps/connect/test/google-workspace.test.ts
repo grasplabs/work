@@ -38,8 +38,8 @@ import {
   reportText,
   sentId,
   sheetCsv,
+  sheetGrid,
   sheetNames,
-  sheetRows,
   signaturePng,
   teamCalendar,
   threadId,
@@ -120,11 +120,11 @@ const mailboxInputs: Record<string, Input> = {
 
 /** Input for each Calendar tool, but its calendar. */
 const calendarInputs: Record<string, Input> = {
-  "calendar.list": {
-    start: "2026-09-28T00:00:00Z",
-    end: "2026-10-05T00:00:00Z",
+  "calendar.calendars.events.list": {
+    timeMin: "2026-09-28T00:00:00Z",
+    timeMax: "2026-10-05T00:00:00Z",
   },
-  "calendar.get": { event: eventId(teamCalendar, 1) },
+  "calendar.calendars.events.get": { eventId: eventId(teamCalendar, 1) },
   "calendar.create": {
     subject: "Focus time",
     start: "2026-10-26T14:00",
@@ -135,10 +135,9 @@ const calendarInputs: Record<string, Input> = {
 
 /** Input for each Drive tool, but its drive. */
 const driveInputs: Record<string, Input> = {
-  "files.list": {},
-  "files.search": { query: "invoice" },
+  "drive.files.list": {},
   "files.read": { item: fileIds.report },
-  "sheets.read": { spreadsheet: fileIds.sheet },
+  "spreadsheets.get": { spreadsheetId: fileIds.sheet },
 };
 
 describe("the Google Workspace connector's scoping", () => {
@@ -157,13 +156,13 @@ describe("the Google Workspace connector's scoping", () => {
             (name === "files.createDraft" && resource === null) ||
             (resource === "mailbox" &&
               path.startsWith("/gmail/v1/users/{mailbox}/")) ||
-            (resource === "calendar" &&
-              (path.startsWith("/calendar/v3/calendars/{calendar}/") ||
+            (resource === "calendarId" &&
+              (path.startsWith("/calendar/v3/calendars/{calendarId}/") ||
                 // The person's own entry for that same calendar.
-                path === "/calendar/v3/users/me/calendarList/{calendar}")) ||
-            (resource === "drive" &&
+                path === "/calendar/v3/users/me/calendarList/{calendarId}")) ||
+            (resource === "driveId" &&
               (path.startsWith("/drive/v3/files") ||
-                path.startsWith("/v4/spreadsheets/{spreadsheet}")))
+                path.startsWith("/v4/spreadsheets/{spreadsheetId}")))
           )
       )
       .map(({ name, path }) => `${name} ${path}`);
@@ -183,6 +182,7 @@ describe("the Google Workspace connector's scoping", () => {
       "gmail.googleapis.com",
       "www.googleapis.com",
       "sheets.googleapis.com",
+      "openidconnect.googleapis.com",
     ]);
     // No batch endpoint, and no redirect is ever followed.
     expect(
@@ -218,7 +218,7 @@ describe("the Google Workspace connector's scoping", () => {
   it("keeps a call for one calendar out of every other", async () => {
     const connection = await connected();
     await expect(
-      refusalsFor(connection, calendarInputs, "calendar", teamCalendar, [
+      refusalsFor(connection, calendarInputs, "calendarId", teamCalendar, [
         invoices,
         "primary",
         holidayCalendar,
@@ -230,7 +230,7 @@ describe("the Google Workspace connector's scoping", () => {
   it("keeps a call for one shared drive out of every other", async () => {
     const connection = await connected();
     await expect(
-      refusalsFor(connection, driveInputs, "drive", financeDrive, [
+      refusalsFor(connection, driveInputs, "driveId", financeDrive, [
         otherDrive,
         financeDrive.toLowerCase(),
       ])
@@ -246,21 +246,23 @@ describe("the Google Workspace connector's scoping", () => {
     const refusals = await Promise.all(
       [
         { action: "mail.labels", resource: "me", input: { mailbox: "me" } },
-        ...["primary", holidayCalendar].map((calendar) => ({
-          action: "calendar.get",
-          resource: calendar,
-          input: { calendar, event },
+        ...["primary", holidayCalendar].map((calendarId) => ({
+          action: "calendar.calendars.events.get",
+          resource: calendarId,
+          input: { calendarId, eventId: event },
         })),
       ].map(
         async ({ action, resource, input }) =>
           await toolError(call(connection, action, input, { resource }))
       )
     );
-    expect(refusals).toStrictEqual([
+    const [mailbox, primary, holiday] = refusals;
+    expect([mailbox, primary]).toStrictEqual([
       "Invalid input: invalid_format at mailbox",
-      "Invalid input: invalid_format at calendar",
-      "Invalid input: invalid_format at calendar",
+      "Invalid input: value.invalid_email at calendarId",
     ]);
+    // An address, but with a `#`, which no path parameter may hold.
+    expect(holiday).toMatchObject({ error: { code: "failed" } });
     expect(google.sent).toStrictEqual([]);
   });
 });
@@ -825,53 +827,52 @@ describe("the Google Workspace connector's Calendar tools", () => {
   it("list a range of events in UTC, page by page", async () => {
     const connection = await connected();
     const range = {
-      calendar: teamCalendar,
-      start: "2026-09-28T00:00:00Z",
-      end: "2026-10-05T00:00:00Z",
-      top: 1,
+      calendarId: teamCalendar,
+      timeMin: "2026-09-28T00:00:00Z",
+      timeMax: "2026-10-05T00:00:00Z",
+      maxResults: 1,
     };
     await expect(
-      resultOf(call(connection, "calendar.list", range))
+      resultOf(call(connection, "calendar.calendars.events.list", range))
     ).resolves.toStrictEqual({
       output: {
-        calendar: teamCalendar,
-        events: [
+        items: [
           {
-            calendar: teamCalendar,
             id: eventId(teamCalendar, 1),
-            subject: "Month-end close",
-            start: "2026-09-29T09:00:00Z",
-            end: "2026-09-29T10:00:00Z",
-            isAllDay: false,
-            isCancelled: false,
+            status: "confirmed",
+            htmlLink: `https://www.google.com/calendar/event?eid=${eventId(teamCalendar, 1)}`,
+            summary: "Month-end close",
             location: "Room 4.12",
+            start: { dateTime: "2026-09-29T09:00:00Z", timeZone: "UTC" },
+            end: { dateTime: "2026-09-29T10:00:00Z", timeZone: "UTC" },
             organizer: {
-              name: "Controller",
-              address: "controller@example.com",
+              email: "controller@example.com",
+              displayName: "Controller",
             },
-            recurringEventId: null,
-            webLink: `https://www.google.com/calendar/event?eid=${eventId(teamCalendar, 1)}`,
           },
         ],
-        nextPage: eventPageToken,
+        next: eventPageToken,
       },
       provenance: [eventId(teamCalendar, 1)],
     });
     await expect(
       outputOf(
-        call(connection, "calendar.list", { ...range, page: eventPageToken })
+        call(connection, "calendar.calendars.events.list", {
+          ...range,
+          pageToken: eventPageToken,
+        })
       )
     ).resolves.toMatchObject({
-      events: [{ id: eventId(teamCalendar, 2) }],
-      nextPage: null,
+      items: [{ id: eventId(teamCalendar, 2) }],
+      next: null,
     });
     expect(requests()).toMatchObject([
       {
         host: "www.googleapis.com",
         path: `${calendarPath}/events`,
         query: {
-          timeMin: range.start,
-          timeMax: range.end,
+          timeMin: range.timeMin,
+          timeMax: range.timeMax,
           singleEvents: "true",
           orderBy: "startTime",
           timeZone: "UTC",
@@ -885,7 +886,10 @@ describe("the Google Workspace connector's Calendar tools", () => {
     ]);
     await expect(
       toolError(
-        call(connection, "calendar.list", { ...range, end: range.start })
+        call(connection, "calendar.calendars.events.list", {
+          ...range,
+          timeMax: range.timeMin,
+        })
       )
     ).resolves.toMatchObject({ error: { code: "invalid" } });
   });
@@ -894,45 +898,41 @@ describe("the Google Workspace connector's Calendar tools", () => {
     const connection = await connected();
     await expect(
       resultOf(
-        call(connection, "calendar.get", {
-          calendar: teamCalendar,
-          event: eventId(teamCalendar, 1),
+        call(connection, "calendar.calendars.events.get", {
+          calendarId: teamCalendar,
+          eventId: eventId(teamCalendar, 1),
         })
       )
     ).resolves.toMatchObject({
       output: {
-        event: {
-          calendar: teamCalendar,
-          id: eventId(teamCalendar, 1),
-          body: "Agenda: open invoices over EUR 10,000.",
-          attendees: [
-            {
-              name: "Controller",
-              address: "controller@example.com",
-              response: "accepted",
-              optional: false,
-            },
-            {
-              name: null,
-              address: "jane@example.com",
-              response: "needsAction",
-              optional: true,
-            },
-          ],
-          joinUrl: "https://meet.google.com/abc-defg-hij",
-        },
+        id: eventId(teamCalendar, 1),
+        description: "Agenda: open invoices over EUR 10,000.",
+        attendees: [
+          {
+            email: "controller@example.com",
+            displayName: "Controller",
+            responseStatus: "accepted",
+          },
+          {
+            email: "jane@example.com",
+            responseStatus: "needsAction",
+            optional: true,
+          },
+        ],
+        hangoutLink: "https://meet.google.com/abc-defg-hij",
       },
       provenance: [eventId(teamCalendar, 1)],
     });
     await expect(
       outputOf(
-        call(connection, "calendar.get", {
-          calendar: teamCalendar,
-          event: eventId(teamCalendar, 3),
+        call(connection, "calendar.calendars.events.get", {
+          calendarId: teamCalendar,
+          eventId: eventId(teamCalendar, 3),
         })
       )
     ).resolves.toMatchObject({
-      event: { start: "2026-10-01", end: "2026-10-02", isAllDay: true },
+      start: { date: "2026-10-01" },
+      end: { date: "2026-10-02" },
     });
     expect(paths()[0]).toBe(
       `${calendarPath}/events/${eventId(teamCalendar, 1)}`
@@ -944,26 +944,22 @@ describe("the Google Workspace connector's Calendar tools", () => {
     // A cancelled occurrence has only the start it had, and no end.
     await expect(
       outputOf(
-        call(connection, "calendar.get", {
-          calendar: teamCalendar,
-          event: cancelledOccurrenceId(teamCalendar),
+        call(connection, "calendar.calendars.events.get", {
+          calendarId: teamCalendar,
+          eventId: cancelledOccurrenceId(teamCalendar),
         })
       )
-    ).resolves.toMatchObject({
-      event: {
-        start: "2026-10-06T09:00:00Z",
-        end: "",
-        isAllDay: false,
-        isCancelled: true,
-        recurringEventId: eventId(teamCalendar, 1),
-        attendees: [],
-      },
+    ).resolves.toStrictEqual({
+      id: cancelledOccurrenceId(teamCalendar),
+      status: "cancelled",
+      recurringEventId: eventId(teamCalendar, 1),
+      originalStartTime: { dateTime: "2026-10-06T09:00:00Z", timeZone: "UTC" },
     });
     await expect(
       outcome(
-        call(connection, "calendar.get", {
-          calendar: teamCalendar,
-          event: incompleteEventId(teamCalendar),
+        call(connection, "calendar.calendars.events.get", {
+          calendarId: teamCalendar,
+          eventId: incompleteEventId(teamCalendar),
         })
       )
     ).resolves.toBe("connect.action_failed");
@@ -1342,39 +1338,42 @@ describe("the Google Workspace connector's drafts", () => {
 });
 
 describe("the Google Workspace connector's Drive tools", () => {
-  it("list a shared drive's top folder or a folder in it, page by page", async () => {
+  it("list a shared drive's folder, without its trash, page by page", async () => {
     const connection = await connected();
     await expect(
-      resultOf(call(connection, "files.list", { drive: financeDrive }))
+      resultOf(
+        call(connection, "drive.files.list", {
+          driveId: financeDrive,
+          q: `'${financeDrive}' in parents`,
+        })
+      )
     ).resolves.toStrictEqual({
       output: {
-        drive: financeDrive,
         items: [
           expect.objectContaining({
-            drive: financeDrive,
             id: fileIds.folder,
-            kind: "folder",
+            mimeType: "application/vnd.google-apps.folder",
           }),
           {
-            drive: financeDrive,
             id: fileIds.report,
             name: "Month-end report.txt",
-            kind: "file",
             mimeType: "text/plain",
-            size: new TextEncoder().encode(reportText).byteLength,
-            parentId: financeDrive,
-            lastModifiedAt: "2026-09-24T16:02:11.000Z",
-            webUrl: `https://drive.google.com/file/d/${fileIds.report}/view?usp=drivesdk`,
+            size: String(new TextEncoder().encode(reportText).byteLength),
+            modifiedTime: "2026-09-24T16:02:11.000Z",
+            webViewLink: `https://drive.google.com/file/d/${fileIds.report}/view?usp=drivesdk`,
+            parents: [financeDrive],
+            driveId: financeDrive,
           },
         ],
-        nextPage: filePageToken,
+        next: filePageToken,
       },
       provenance: [fileIds.folder, fileIds.report],
     });
-    await call(connection, "files.list", {
-      drive: financeDrive,
-      folder: fileIds.folder,
-      page: filePageToken,
+    await call(connection, "drive.files.list", {
+      driveId: financeDrive,
+      q: `'${fileIds.folder}' in parents`,
+      orderBy: "folder,name",
+      pageToken: filePageToken,
     });
     expect(requests()).toMatchObject([
       {
@@ -1385,7 +1384,7 @@ describe("the Google Workspace connector's Drive tools", () => {
           driveId: financeDrive,
           includeItemsFromAllDrives: "true",
           supportsAllDrives: "true",
-          q: `'${financeDrive}' in parents and trashed = false`,
+          q: `('${financeDrive}' in parents) and trashed = false`,
           pageSize: "50",
         },
       },
@@ -1393,37 +1392,35 @@ describe("the Google Workspace connector's Drive tools", () => {
         query: {
           corpora: "drive",
           driveId: financeDrive,
-          q: `'${fileIds.folder}' in parents and trashed = false`,
+          q: `('${fileIds.folder}' in parents) and trashed = false`,
+          orderBy: "folder,name",
           pageToken: filePageToken,
         },
       },
     ]);
+    expect(requests()[0]?.query).not.toHaveProperty("orderBy");
   });
 
-  it("search a shared drive, quoting the query as Drive does, and pass on its own items only", async () => {
+  it("search a shared drive, and pass on its own items only", async () => {
     const connection = await connected();
+    const q = String.raw`fullText contains 'Northwind\'s \\invoice'`;
     // Google adds an item of another drive: it's left out.
     await expect(
       resultOf(
-        call(connection, "files.search", {
-          drive: financeDrive,
-          query: String.raw`Northwind's \invoice`,
-        })
+        call(connection, "drive.files.list", { driveId: financeDrive, q })
       )
     ).resolves.toStrictEqual({
       output: {
-        drive: financeDrive,
         items: [expect.objectContaining({ id: fileIds.pdf })],
-        nextPage: null,
+        next: null,
       },
       provenance: [fileIds.pdf],
     });
     expect(requests()[0]?.query).toMatchObject({
       corpora: "drive",
       driveId: financeDrive,
-      q: String.raw`fullText contains 'Northwind\'s \\invoice' and trashed = false`,
+      q: `(${q}) and trashed = false`,
     });
-    expect(requests()[0]?.query).not.toHaveProperty("orderBy");
   });
 
   it("read a file's own content from Google itself", async () => {
@@ -1547,41 +1544,37 @@ describe("the Google Workspace connector's Drive tools", () => {
 });
 
 describe("the Google Workspace connector's Sheets tools", () => {
-  it("read a spreadsheet's first sheet in order, as values, after Drive says it is in the drive", async () => {
+  it("list a spreadsheet's sheets and no cells, after Drive says it is in the drive", async () => {
     const connection = await connected();
-    const [first, ...others] = sheetNames;
     await expect(
       resultOf(
         call(
           connection,
-          "sheets.read",
-          { drive: financeDrive, spreadsheet: fileIds.sheet },
+          "spreadsheets.get",
+          { driveId: financeDrive, spreadsheetId: fileIds.sheet },
           { resource: financeDrive }
         )
       )
     ).resolves.toStrictEqual({
       output: {
-        drive: financeDrive,
-        id: fileIds.sheet,
-        name: "Invoice register",
-        // In the spreadsheet's order, not in Sheets' answer's.
-        sheets: [first, ...others],
-        sheet: first,
-        range: `'${first}'!1:201`,
-        rows: sheetRows[first],
-        more: false,
+        spreadsheetId: fileIds.sheet,
+        properties: { title: "Invoice register" },
+        sheets: [
+          { properties: { title: sheetNames[1], index: 1 } },
+          { properties: { title: sheetNames[0], index: 0 } },
+        ],
       },
       provenance: [fileIds.sheet],
     });
-    // Drive's metadata first, which says its drive; then Sheets: the
-    // spreadsheet's sheets, then the first rows of the first, one more
-    // than it gives to tell there are more.
+    // Drive's metadata first, which says its drive; then Sheets, with a
+    // field mask that holds no cells.
     expect(
       requests().map(({ host, path, query }) => ({
         host,
         path,
         ranges: query.ranges,
         grid: query.includeGridData,
+        cells: query.fields?.includes("rowData"),
       }))
     ).toStrictEqual([
       {
@@ -1589,60 +1582,71 @@ describe("the Google Workspace connector's Sheets tools", () => {
         path: `/drive/v3/files/${fileIds.sheet}`,
         ranges: undefined,
         grid: undefined,
+        cells: false,
       },
       {
         host: "sheets.googleapis.com",
         path: `/v4/spreadsheets/${fileIds.sheet}`,
         ranges: undefined,
         grid: undefined,
-      },
-      {
-        host: "sheets.googleapis.com",
-        path: `/v4/spreadsheets/${fileIds.sheet}`,
-        ranges: `'${first}'!1:201`,
-        grid: "true",
+        cells: false,
       },
     ]);
   });
 
-  it("read a named sheet's cells, its name quoted, and say when there are more rows than asked for", async () => {
+  it("read the cells of each range asked for, as Sheets gives them", async () => {
     const connection = await connected();
     const [register, notes] = sheetNames;
-    const read = await outputOf(
-      call(connection, "sheets.read", {
-        drive: financeDrive,
-        spreadsheet: fileIds.sheet,
-        sheet: register,
-        cells: "A1:D3",
-        top: 2,
-      })
-    );
-    await call(connection, "sheets.read", {
-      drive: financeDrive,
-      spreadsheet: fileIds.sheet,
-      sheet: notes,
-    });
-    expect(read).toMatchObject({
-      sheet: register,
-      range: `'${register}'!A1:D3`,
-      rows: sheetRows[register]?.slice(0, 2),
-      more: true,
-    });
-    expect(
-      requests().flatMap(({ query }) =>
-        query.ranges === undefined ? [] : [query.ranges]
+    const ranges = [`'${register}'!A1:D3`, "'Ben''s notes'!1:201"];
+    await expect(
+      outputOf(
+        call(connection, "spreadsheets.get", {
+          driveId: financeDrive,
+          spreadsheetId: fileIds.sheet,
+          ranges,
+        })
       )
-    ).toStrictEqual([`'${register}'!A1:D3`, "'Ben''s notes'!1:201"]);
+    ).resolves.toStrictEqual({
+      spreadsheetId: fileIds.sheet,
+      properties: { title: "Invoice register" },
+      sheets: [
+        {
+          properties: { title: register, index: 0 },
+          data: [
+            {
+              rowData: (sheetGrid[register] ?? []).map((values) => ({
+                values,
+              })),
+            },
+          ],
+        },
+        {
+          properties: { title: notes, index: 1 },
+          data: [
+            {
+              rowData: (sheetGrid[notes] ?? []).map((values) => ({ values })),
+            },
+          ],
+        },
+      ],
+    });
+    const [, read] = requests();
+    expect(read?.search.getAll("ranges")).toStrictEqual(ranges);
+    expect(read?.query.includeGridData).toBe("true");
   });
 
-  it("read nothing of another drive's file, a file that isn't a spreadsheet, or a sheet it doesn't have", async () => {
+  it("read nothing of another drive's file, or a file that isn't a spreadsheet, and pass on a range Sheets can't read as invalid", async () => {
     const connection = await connected();
     const inputs: Input[] = [
-      { spreadsheet: fileIds.foreign },
-      { spreadsheet: fileIds.myDrive },
-      { spreadsheet: fileIds.trashed },
-      { spreadsheet: fileIds.report },
-      { spreadsheet: fileIds.sheet, sheet: "Salaries" },
+      { spreadsheetId: fileIds.foreign },
+      { spreadsheetId: fileIds.myDrive },
+      { spreadsheetId: fileIds.trashed },
+      { spreadsheetId: fileIds.report },
+      { spreadsheetId: fileIds.sheet, ranges: ["'Salaries'!A1:B2"] },
+      ...["A1:B2'!Z", "Sheet1!A1", "a1", "A1:B2:C3"].map((range) => ({
+        spreadsheetId: fileIds.sheet,
+        ranges: [range],
+      })),
     ];
     const refusals = await Promise.all(
       inputs.map(
@@ -1650,8 +1654,8 @@ describe("the Google Workspace connector's Sheets tools", () => {
           await toolError(
             call(
               connection,
-              "sheets.read",
-              { drive: financeDrive, ...input },
+              "spreadsheets.get",
+              { driveId: financeDrive, ...input },
               { resource: financeDrive }
             )
           )
@@ -1662,37 +1666,20 @@ describe("the Google Workspace connector's Sheets tools", () => {
       { error: { code: "not_found" } },
       { error: { code: "not_found" } },
       { error: { code: "not_a_file" } },
-      { error: { code: "not_found" } },
+      { error: { code: "invalid" } },
+      { error: { code: "invalid" } },
+      { error: { code: "invalid" } },
+      { error: { code: "invalid" } },
+      { error: { code: "invalid" } },
     ]);
-    // Only the spreadsheet in the drive reached Sheets, and none of its
-    // cells were read.
+    // Only the spreadsheet in the drive reached Sheets.
     expect(
-      requests()
-        .filter(({ host }) => host === "sheets.googleapis.com")
-        .map(({ path, query }) => ({ path, ranges: query.ranges }))
-    ).toStrictEqual([
-      { path: `/v4/spreadsheets/${fileIds.sheet}`, ranges: undefined },
-    ]);
-  });
-
-  it("refuses cells that aren't A1 notation before anything goes out", async () => {
-    const connection = await connected();
-    const refusals = await Promise.all(
-      ["A1:B2'!Z", "Sheet1!A1", "a1", "A1:B2:C3"].map(
-        async (cells) =>
-          await toolError(
-            call(connection, "sheets.read", {
-              drive: financeDrive,
-              spreadsheet: fileIds.sheet,
-              cells,
-            })
-          )
+      new Set(
+        requests()
+          .filter(({ host }) => host === "sheets.googleapis.com")
+          .map(({ path }) => path)
       )
-    );
-    expect(new Set(refusals)).toStrictEqual(
-      new Set(["Invalid input: invalid_format at cells"])
-    );
-    expect(google.sent).toStrictEqual([]);
+    ).toStrictEqual(new Set([`/v4/spreadsheets/${fileIds.sheet}`]));
   });
 });
 
@@ -1702,7 +1689,7 @@ describe("the Google Workspace connector's answers", () => {
     // Calendar and Drive rate limit with a 403 as often as a 429.
     google.rateLimit403();
     await expect(
-      retryable(call(connection, "files.list", { drive: financeDrive }))
+      retryable(call(connection, "drive.files.list", { driveId: financeDrive }))
     ).resolves.toStrictEqual({
       code: "connect.server_unavailable",
       retryAfterSeconds: 60,

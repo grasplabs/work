@@ -28,7 +28,8 @@ import type {
 import { ownPlace } from "@grasp-os/shared/sync";
 import { z } from "zod";
 
-import { gmailHost, googleFailure, googleUrl } from "./google.ts";
+import { gmailHost } from "./google.ts";
+import { googleFailure, googleUrl } from "./google-sync.ts";
 import { attachmentsOf, headerOf, partSchema, textOf } from "./mime.ts";
 import type { Part } from "./mime.ts";
 

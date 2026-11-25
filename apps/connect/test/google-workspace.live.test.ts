@@ -75,21 +75,33 @@ describe.runIf(smoke.success)("Google Workspace, live", () => {
     const now = Date.now();
     await run(
       id,
-      "calendar.list",
+      "calendar.calendars.events.list",
       {
-        calendar,
-        start: new Date(now).toISOString(),
-        end: new Date(now + 7 * 24 * 3600 * 1000).toISOString(),
+        calendarId: calendar,
+        timeMin: new Date(now).toISOString(),
+        timeMax: new Date(now + 7 * 24 * 3600 * 1000).toISOString(),
       },
       calendar
     );
     const files = z
       .object({
-        items: z.array(z.object({ id: z.string(), kind: z.string() })),
+        items: z.array(z.object({ id: z.string(), mimeType: z.string() })),
       })
-      .parse(await run(id, "files.list", { drive }, drive));
+      .parse(
+        await run(
+          id,
+          "drive.files.list",
+          { driveId: drive, q: `'${drive}' in parents` },
+          drive
+        )
+      );
     // The drive's top folder must hold a file (its own, or a Google Doc).
-    const item = files.items.find(({ kind }) => kind === "file")?.id ?? "";
+    const item =
+      files.items.find(
+        ({ mimeType }) =>
+          !mimeType.startsWith("application/vnd.google-apps.") ||
+          mimeType === "application/vnd.google-apps.document"
+      )?.id ?? "";
     await expect(
       run(id, "files.read", { drive, item, as: "base64" }, drive)
     ).resolves.toMatchObject({ id: item, encoding: "base64" });

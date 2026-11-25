@@ -3,7 +3,8 @@ import type { Effect } from "@grasp-os/connector-kit/connector";
 import { ToolError } from "@grasp-os/runtime/connector";
 import { z } from "zod";
 
-import { apisHost, googleJson, googleUrl } from "./google.ts";
+import { googleJson, googleUrl } from "./google-sync.ts";
+import { apisHost } from "./google.ts";
 
 // Drafts in a person's own Google Drive: a letter or a summary Stephen
 // wrote, as a new Google Doc or text file, for them to finish and send, as
