@@ -18,9 +18,11 @@ import {
 } from "vite-plus/test";
 
 import { connections, connectionTokens } from "../src/db/schema.ts";
+import { exchangeCode } from "../src/oauth-client.ts";
 import type { TokenSet } from "../src/oauth-client.ts";
 import { startConnection } from "../src/oauth.ts";
-import { appProvider, providers } from "../src/providers.ts";
+import { holdsClassRights } from "../src/provider-rights.ts";
+import { appProvider, grantedAsAsked, providers } from "../src/providers.ts";
 import type { OAuthProviderConfig } from "../src/providers.ts";
 import {
   auditEvents,
@@ -30,7 +32,7 @@ import {
   someone,
   stateOf,
 } from "./connect.ts";
-import {
+import sampleTenant, {
   sampleTenantApiHost,
   sampleTenantLoginHost,
   sampleTenantScopePrefix,
@@ -356,6 +358,15 @@ const listItems = async (id: string, person: ConnectionPerson) =>
     { board: "board-1" },
     { resource: "board-1" }
   );
+
+const grantOf = async (id: string) => {
+  const row = await drizzle(env.DB)
+    .select({ granted: connectionTokens.grantedScopes })
+    .from(connectionTokens)
+    .where(eq(connectionTokens.connectionId, id))
+    .get();
+  return row?.granted;
+};
 
 const statusOf = async (id: string) => {
   const row = await drizzle(env.DB)
@@ -809,7 +820,7 @@ describe("threat model", () => {
   it("AP18: a consent whose answer lists no grant is refused, and its grant revoked", async () => {
     const refused: Record<string, string> = {};
     const kept: Record<string, unknown> = {};
-    for (const granted of [null, "", "  "]) {
+    for (const granted of [null, "", "  ", "\t"]) {
       const person = someone();
       const account = accountOf(person);
       app.options.granted = granted;
@@ -822,9 +833,47 @@ describe("threat model", () => {
         null: "connection.scopes_refused",
         "": "connection.scopes_refused",
         "  ": "connection.scopes_refused",
+        "\t": "connection.scopes_refused",
       },
-      kept: { null: [], "": [], "  ": [] },
+      kept: { null: [], "": [], "  ": [], "\t": [] },
     });
+  });
+
+  it("AP18: a record joined with commas reads its answer's grant by them too", async () => {
+    const provider = appProvider({
+      provider: "sample-tenant",
+      server: "sample-tenant",
+      signIn: signInSchema.parse({
+        ...sampleTenant.manifest.signIn,
+        scopeSeparator: ",",
+      }),
+    });
+    if (provider.kind !== "oauth") {
+      throw new Error("An OAuth provider");
+    }
+    const answered = async (scope: string): Promise<TokenSet> => {
+      vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+        Response.json({ access_token: "tenant-access", scope })
+      );
+      return await exchangeCode(provider, client, acmeTenant, {
+        code: "code",
+        redirectUri: "https://grasp.example.test/callback",
+        verifier: "verifier",
+      });
+    };
+    const joined = await answered(
+      "openid,profile,email,offline_access,Account.Read,Items.Read,Items.ReadWrite"
+    );
+    // A comma alone lists none.
+    const none = await answered(",");
+    expect({
+      asAsked: grantedAsAsked(provider, joined),
+      holds: holdsClassRights("sample-tenant", joined.scope ?? null, [
+        "read-own",
+        "change-own",
+      ]),
+      none: grantedAsAsked(provider, none),
+    }).toStrictEqual({ asAsked: true, holds: true, none: false });
   });
 
   it("AP18: a renewal that no longer holds what it requires asks its person to reconnect", async () => {
@@ -842,6 +891,17 @@ describe("threat model", () => {
     app.options.renewed = `openid ${sampleTenantScopePrefix}Account.Read`;
     await expire(kept);
     await expect(outcome(listItems(kept, other))).resolves.toBe("ok");
+  });
+
+  it("AP18: a renewal that lists no grant keeps the one it renews", async () => {
+    const person = someone();
+    const held = await connect(person, accountOf(person));
+    const before = await grantOf(held);
+    app.options.renewed = "";
+    await expire(held);
+    await expect(outcome(listItems(held, person))).resolves.toBe("ok");
+    await expect(grantOf(held)).resolves.toBe(before);
+    expect(before).toContain("Account.Read");
   });
 
   it("AP16: a suite's own config stands, and a declared provider's client is its own entry", async () => {
