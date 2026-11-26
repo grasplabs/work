@@ -178,7 +178,7 @@ const styles = stylex.create({
 // `components/onboarding/send-plan.tsx`): set by the one person who sends
 // them, on one card under its own title, a part of the step as clear as
 // the message over it. Each thing set on a row with its name at the start:
-// the day, as tiles for the next working days, a little calendar, with
+// the day, as tiles for today and the next working days, a little calendar, with
 // another day after them; the hour; the teams, as pills with their tick,
 // all of them unless one is taken out. For the teams taken out: a later
 // day and hour, or nothing yet, so a first group can go this week and the
@@ -372,7 +372,8 @@ export const SendPlanForm = ({
   const laterField = useId();
   const dayLabel = useId();
   const teamsLabel = useId();
-  const strip = workingDaysAfter(today, stripLength);
+  // Today first, as a plan can start today; then the next working days.
+  const strip = [today, ...workingDaysAfter(today, stripLength - 1)];
   const inStrip = strip.includes(choice.day);
   // Another day asked for, or one set before that the strip has no tile for: the day field shows.
   const [picking, setPicking] = useState(!inStrip);
@@ -432,7 +433,9 @@ export const SendPlanForm = ({
                       {...stylex.props(styles.tile, on && styles.tileOn)}
                     >
                       <span {...stylex.props(styles.tileSmall)}>
-                        {weekday.format(date)}
+                        {day === today
+                          ? t({ message: "Today", context: "a day tile" })
+                          : weekday.format(date)}
                       </span>
                       <span {...stylex.props(styles.tileDay)}>
                         {date.getUTCDate()}
