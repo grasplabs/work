@@ -2,7 +2,11 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { cancelAction, confirmAction } from "../src/channels/cards.tsx";
+import {
+  cancelAction,
+  confirmAction,
+  pressOf,
+} from "../src/channels/cards.tsx";
 import { say } from "../src/channels/words.ts";
 import { chatAgentId } from "../src/chats-rpc.ts";
 import { codeStep, says } from "./agent-chat.ts";
@@ -63,23 +67,43 @@ const pause = async (connectionId: string, until: number): Promise<void> => {
 };
 
 /**
- * A member whose Teams turn read their mail, then held two mails on one
+ * A member whose Teams turn read their mail, or, given `reads`, only with
+ * that tool of a connection of that provider, then held two mails on one
  * card: to Ben through `mail`, then to Cleo through `other`, another mail
  * connection when `connections` is 2, else the same.
  */
-const heldMails = async (connections: 1 | 2) => {
+const heldMails = async (
+  connections: 1 | 2,
+  reads?: { provider: string; tool: string }
+) => {
   const admin = await signedInApi(idp, "admin");
   const tools = ["MAIL_SEND", { name: "mail.search", read: true }];
   const mail = await mailConnection([], tools);
   const other = connections === 1 ? mail : await mailConnection([], tools);
+  const read = reads?.tool ?? "mail.search";
+  const reader =
+    reads === undefined
+      ? mail
+      : await mailConnection([], [{ name: read, read: true }], {
+          provider: reads.provider,
+        });
+  if (reads !== undefined) {
+    await reader.serves([{ name: read, inputSchema: { type: "object" } }]);
+    await reader.answer(read, { content: [{ type: "text", text: "[]" }] });
+  }
+  const actions = new Map([
+    [mail.id, ["MAIL_SEND"]],
+    [other.id, ["MAIL_SEND"]],
+  ]);
+  actions.set(reader.id, [...(actions.get(reader.id) ?? []), read]);
   const bindings = new Map<string, string>();
-  for (const { id } of new Set([mail, other])) {
+  for (const [id, granted] of actions) {
     const binding = `MAIL${unique()}`.toUpperCase();
     // oxlint-disable-next-line no-await-in-loop -- one grant each
     await requestGranted(idp, admin, {
       subject: { type: "agent", agentId: chatAgentId },
       object: { type: "connection", connectionId: id },
-      actions: ["MAIL_SEND", "mail.search"],
+      actions: granted,
       binding,
     });
     bindings.set(id, binding);
@@ -87,7 +111,7 @@ const heldMails = async (connections: 1 | 2) => {
   const call = (on: { id: string }, action: string, input: unknown) =>
     `await env.connections.call(${JSON.stringify(bindings.get(on.id))}, ${JSON.stringify(action)}, ${JSON.stringify(input)});`;
   const code = [
-    call(mail, "mail.search", { query: "invoice" }),
+    call(reader, read, { query: "invoice" }),
     call(mail, "MAIL_SEND", { to: "ben@acme.test", subject: "Invoice INV-7" }),
     call(other, "MAIL_SEND", {
       to: "cleo@acme.test",
@@ -116,7 +140,14 @@ const heldMails = async (connections: 1 | 2) => {
   const press = writes
     .toSorted((a, b) => Date.parse(a.requestedAt) - Date.parse(b.requestedAt))
     .map(({ id, inputHash }) => ({ id, inputHash }));
-  return { person, mail, other, cardId: card.id, press };
+  return {
+    person,
+    mail,
+    other,
+    cardId: card.id,
+    card: { id: card.id, json: JSON.stringify(card.activity) },
+    press,
+  };
 };
 
 /** The cards of held writes posted after `turn`'s card, each as JSON. */
@@ -135,12 +166,8 @@ const cardsAfter = async (
   });
 };
 
-const pressSchema = z.array(
-  z.object({ id: z.string(), inputHash: z.string() })
-);
-
-/** The writes button `actionId` on `card` (as JSON) names in its press. */
-const pressIn = (card: { json: string }, actionId: string) => {
+/** What button `actionId` on `card` (as JSON) carries, as Teams sends it back. */
+const valueIn = (card: { json: string }, actionId: string): string => {
   let value: unknown;
   JSON.parse(card.json, (_key, each: unknown) => {
     if (
@@ -155,8 +182,19 @@ const pressIn = (card: { json: string }, actionId: string) => {
   if (typeof value !== "string") {
     throw new TypeError(`Expected ${actionId} on the card`);
   }
-  return pressSchema.parse(JSON.parse(value));
+  return value;
 };
+
+/** A press by `from` on button `actionId` of `card`, with what it carries. */
+const pressOnCard = (
+  from: Turn["person"]["teams"],
+  card: { id: string; json: string },
+  actionId: string = confirmAction
+) => ({
+  ...messageFrom(from, { text: undefined }),
+  replyToId: card.id,
+  value: { actionId, value: valueIn(card, actionId) },
+});
 
 /** `line` as a card's JSON holds it. */
 const inJson = (line: string): string => JSON.stringify(line).slice(1, -1);
@@ -314,13 +352,8 @@ describe("the person's own press", setUpTime, () => {
 
   it("waits out a paused connection: the card says when to confirm again, and a new card for its writes, warning of what the turn read, runs them after the pause", async () => {
     const turn = await heldMails(1);
-    // The turn's code read mail: its card says so (GRA-2367).
-    const { sent } = await reached(turn.person.teams.conversation);
-    const first = JSON.stringify(
-      sent.find(({ id }) => id === turn.cardId)?.activity ?? {}
-    );
     await pause(turn.mail.id, Date.now() + 90_000);
-    await post(pressOn(turn.person.teams, turn));
+    await post(pressOnCard(turn.person.teams, turn.card));
     const pausedEdits = await editsOf(turn);
     const paused = pausedEdits.at(-1) ?? "";
     const [card, ...more] = await cardsAfter(turn);
@@ -328,7 +361,8 @@ describe("the person's own press", setUpTime, () => {
       throw new Error("Expected a new card of held writes");
     }
     const whilePaused = {
-      warned: first.includes(inJson(say("checkMail", "en"))),
+      // The turn's code read mail: its card says so (GRA-2367).
+      warned: turn.card.json.includes(inJson(say("checkMail", "en"))),
       mail: await mailOf(turn.mail),
       waiting: new Set(await waitingOf(turn.person)),
       said: [
@@ -337,19 +371,14 @@ describe("the person's own press", setUpTime, () => {
         paused.includes(confirmAction),
       ],
       more: more.length,
-      offered: pressIn(card, confirmAction),
+      offered: pressOf(valueIn(card, confirmAction)),
       warns: card.json.includes(inJson(say("checkMail", "en"))),
       failedTools: await failedToolsOf(turn),
     };
     await pause(turn.mail.id, Date.now() - 1000);
     // The pressed card stays answered; its new card runs.
-    await post(pressOn(turn.person.teams, turn));
-    await post(
-      pressOn(turn.person.teams, {
-        cardId: card.id,
-        press: pressIn(card, confirmAction),
-      })
-    );
+    await post(pressOnCard(turn.person.teams, turn.card));
+    await post(pressOnCard(turn.person.teams, card));
     const edits = await editsOf({ ...turn, cardId: card.id });
     const lines = await linesAfterCard(turn);
     expect({
@@ -365,9 +394,10 @@ describe("the person's own press", setUpTime, () => {
         warned: true,
         mail: { calls: 0, to: [] },
         waiting: new Set(turn.press.map(({ id }) => id)),
-        said: [true, true, false],
+        // The pressed card, with no buttons, warns no more.
+        said: [true, false, false],
         more: 0,
-        offered: turn.press,
+        offered: { writes: turn.press, check: { read: "mail" } },
         warns: true,
         failedTools: 0,
       },
@@ -388,7 +418,7 @@ describe("the person's own press", setUpTime, () => {
       // oxlint-disable-next-line no-await-in-loop -- one card at a time
       await pause(turn.other.id, Date.now() + 30_000);
       // oxlint-disable-next-line no-await-in-loop -- one card at a time
-      await post(pressOn(turn.person.teams, turn));
+      await post(pressOnCard(turn.person.teams, turn.card));
     }
     const pressedEdits = await editsOf(confirmed);
     const pressed = pressedEdits.at(-1) ?? "";
@@ -405,22 +435,11 @@ describe("the person's own press", setUpTime, () => {
         pressed.includes(inJson(say("pausedOneMinute", "en"))),
         pressed.includes(confirmAction),
       ],
-      offered: pressIn(card, confirmAction),
+      offered: pressOf(valueIn(card, confirmAction))?.writes,
     };
     await pause(confirmed.other.id, Date.now() - 1000);
-    await post(
-      pressOn(confirmed.person.teams, {
-        cardId: card.id,
-        press: pressIn(card, confirmAction),
-      })
-    );
-    await post(
-      pressOn(
-        cancelled.person.teams,
-        { cardId: cancelCard.id, press: pressIn(cancelCard, cancelAction) },
-        cancelAction
-      )
-    );
+    await post(pressOnCard(confirmed.person.teams, card));
+    await post(pressOnCard(cancelled.person.teams, cancelCard, cancelAction));
     const confirmedEdits = await editsOf({ ...confirmed, cardId: card.id });
     const cancelledEdits = await editsOf({
       ...cancelled,
@@ -471,10 +490,10 @@ describe("the person's own press", setUpTime, () => {
     const turn = await heldMails(1);
     await pause(turn.mail.id, Date.now() + 90_000);
     await failsOnce(turn.person.teams.conversation, confirmAction);
-    await post(pressOn(turn.person.teams, turn));
+    await post(pressOnCard(turn.person.teams, turn.card));
     const edits = await editsOf(turn);
     expect({
-      said: edits.at(-1)?.includes(inJson(say("pausedAskAgain", "en"))),
+      said: edits.at(-1)?.includes(inJson(say("pausedManyAskAgain", "en"))),
       cards: await cardsAfter(turn),
       mail: await mailOf(turn.mail),
       waiting: new Set(await waitingOf(turn.person)),
@@ -483,6 +502,25 @@ describe("the person's own press", setUpTime, () => {
       cards: [],
       mail: { calls: 0, to: [] },
       waiting: new Set(turn.press.map(({ id }) => id)),
+    });
+  });
+
+  it("warns of nothing on the card of a turn that read only what isn't mail", async () => {
+    const turn = await heldMails(1, {
+      provider: "crm",
+      tool: "CRM_LIST_CONTACTS",
+    });
+    const card = turn.card.json;
+    expect({
+      mail: card.includes(inJson(say("checkMail", "en"))),
+      record: card.includes(
+        inJson(say("checkRecord", "en", { where: "mail" }))
+      ),
+      press: pressOf(valueIn(turn.card, confirmAction)),
+    }).toStrictEqual({
+      mail: false,
+      record: false,
+      press: { writes: turn.press },
     });
   });
 
