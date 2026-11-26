@@ -669,6 +669,20 @@ export const voiceUse = sqliteTable(
 );
 
 /**
+ * The live conversation open on someone's link (onboarding/voice.ts), one
+ * at most: the seconds held for it against their listening that day
+ * (`voiceUse`), and when it opened, so what it didn't use is given back
+ * once it ends or the next one opens. Nothing that was said.
+ */
+export const voiceHolds = sqliteTable("voice_holds", {
+  who: text().primaryKey(),
+  day: text().notNull(),
+  seconds: real().notNull(),
+  /** ISO 8601. */
+  at: text().notNull(),
+});
+
+/**
  * The text each interview ran on (onboarding/interviewer-text.ts), as its
  * last turn had it: the text's mark, who held it, and in which language.
  * Nothing that was said. Goes with the interview.

@@ -184,6 +184,7 @@ import {
   checkedDifferences,
   settledWorks,
   usage,
+  voiceHolds,
   voiceUse,
   works,
 } from "../db/onboarding/schema.ts";
@@ -715,6 +716,12 @@ export const adminWho = "admin:";
  * for them, in the same daily table.
  */
 const heardKey = (who: string): string => `${who}:heard`;
+
+/**
+ * The least a conversation counts when the next one opens before it was
+ * closed: a page that never says it left can't open them for nothing.
+ */
+const unclosedHoldSeconds = 120;
 
 /** What one interview turn knows of who it is with, from the store (`turnContext`). */
 /** What the drawing gets from one interview: only what its person agreed to. */
@@ -1428,6 +1435,7 @@ export class Onboarding extends DurableObject<Env> {
       return false;
     }
     this.#db.delete(voiceUse).run();
+    this.#db.delete(voiceHolds).run();
     return true;
   }
 
@@ -4668,11 +4676,13 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * Holds `seconds` of a live voice session (voice.ts) against `who`'s
+   * Holds `seconds` for a live conversation (voice.ts) against `who`'s
    * listening today, in one write, only when all of them fit `budget`:
-   * sessions opened side by side each find what the others held. The day
-   * they are held on, to give them back on; null, holding nothing, when
-   * they don't fit.
+   * conversations opened side by side each find what the others held. One
+   * is held for `who` at a time: the one before, never closed (a page
+   * reloaded, a line dropped), is settled first at how long it was open
+   * (`#settleHold`). The day they are held on; null, holding nothing new,
+   * when they don't fit.
    */
   reserveListening(
     who: string,
@@ -4681,11 +4691,13 @@ export class Onboarding extends DurableObject<Env> {
     now: string = new Date().toISOString()
   ): string | null {
     return this.ctx.storage.transactionSync(() => {
+      this.#settleHold(who, now, unclosedHoldSeconds);
       if (this.voiceSaid(who, now) + seconds > budget) {
         return null;
       }
       const day = now.slice(0, 10);
       this.#db.delete(voiceUse).where(lt(voiceUse.day, day)).run();
+      this.#db.delete(voiceHolds).where(lt(voiceHolds.day, day)).run();
       this.#db
         .insert(voiceUse)
         .values({ who, day, seconds })
@@ -4694,21 +4706,78 @@ export class Onboarding extends DurableObject<Env> {
           set: { seconds: sql`${voiceUse.seconds} + ${seconds}` },
         })
         .run();
+      this.#db.insert(voiceHolds).values({ who, day, seconds, at: now }).run();
       return day;
     });
   }
 
   /**
-   * Gives back what `reserveListening` held on `day` for a session that
-   * never opened: ElevenLabs refused it, so nothing was listened to. On that
-   * day alone: one held before midnight never takes from the next.
+   * Gives back all of what `reserveListening` just held for a conversation
+   * that never opened: ElevenLabs refused it, so nothing was listened to.
    */
-  releaseListening(who: string, seconds: number, day: string): void {
+  releaseListening(who: string): void {
+    this.ctx.storage.transactionSync(() => {
+      const [hold] = this.#db
+        .select()
+        .from(voiceHolds)
+        .where(eq(voiceHolds.who, who))
+        .all();
+      if (hold !== undefined) {
+        this.#giveBack(hold, hold.seconds);
+      }
+    });
+  }
+
+  /**
+   * Settles the conversation open on the link `secretMark`, as the page
+   * closes it: what was held for it and it didn't use is given back, so a
+   * pause, a language switched or a short talk costs what it lasted, never
+   * the whole of what an interview may. Once: closing it again gives
+   * nothing more back. Whatever the link's state, as a close is taken.
+   */
+  settleListeningOnLink(
+    secretMark: string,
+    now: string = new Date().toISOString()
+  ): void {
+    this.ctx.storage.transactionSync(() => {
+      const [code] = this.#db
+        .select({ person: linkCodes.person })
+        .from(linkCodes)
+        .where(eq(linkCodes.mark, secretMark))
+        .all();
+      if (code !== undefined) {
+        this.#settleHold(heardKey(`${linkWho}${code.person}`), now, 0);
+      }
+    });
+  }
+
+  /**
+   * Settles `who`'s open conversation at how long it was open by `now`,
+   * at least `least` seconds and at most what was held, and gives the
+   * rest back on the day it was held.
+   */
+  #settleHold(who: string, now: string, least: number): void {
+    const [hold] = this.#db
+      .select()
+      .from(voiceHolds)
+      .where(eq(voiceHolds.who, who))
+      .all();
+    if (hold === undefined) {
+      return;
+    }
+    const open = Math.ceil((Date.parse(now) - Date.parse(hold.at)) / 1000);
+    const used = Math.min(hold.seconds, Math.max(least, open, 0));
+    this.#giveBack(hold, hold.seconds - used);
+  }
+
+  /** Takes `seconds` off what `hold` held on its day, and lets the hold go. */
+  #giveBack(hold: typeof voiceHolds.$inferSelect, seconds: number): void {
     this.#db
       .update(voiceUse)
       .set({ seconds: sql`max(0, ${voiceUse.seconds} - ${seconds})` })
-      .where(and(eq(voiceUse.who, who), eq(voiceUse.day, day)))
+      .where(and(eq(voiceUse.who, hold.who), eq(voiceUse.day, hold.day)))
       .run();
+    this.#db.delete(voiceHolds).where(eq(voiceHolds.who, hold.who)).run();
   }
 
   /**

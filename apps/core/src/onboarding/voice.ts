@@ -285,12 +285,12 @@ const open = async (
   // Held before ElevenLabs is asked, in one write with the check, so
   // conversations opened side by side can't each find the budget unspent;
   // given back when none opens.
-  const heldOn = await onboardingStore(env).reserveListening(
+  const held = await onboardingStore(env).reserveListening(
     who,
     seconds,
     heardBudgets.link
   );
-  if (heldOn === null) {
+  if (held === null) {
     log.warn("interview.voice_budget_spent", { requestId });
     return failed(
       "That is as long as the interview can run today. Come back tomorrow to go on.",
@@ -301,7 +301,7 @@ const open = async (
     why: { code: string } | { status: number }
   ): Promise<Response> => {
     log.warn("interview.voice_not_opened", { requestId, ...why });
-    await onboardingStore(env).releaseListening(who, seconds, heldOn);
+    await onboardingStore(env).releaseListening(who);
     return failed("The interview could not start. Try again.", 503);
   };
   const { agent } = platformAi;
@@ -497,6 +497,9 @@ export const interviewVoiceResponse = async (
       log.warn("interview.voice_pass_refused", { requestId });
       return linkRefusal("interview.invalid", requestId);
     }
+    // What the conversation held of the day's listening and didn't use
+    // is given back, once.
+    await onboardingStore(env).settleListeningOnLink(secretMark);
     return new Response(null, { status: 204, headers: linkHeaders });
   }
   const found = await onboardingStore(env).turnContext(

@@ -49,6 +49,7 @@ import m0046 from './0046_team_minted.sql';
 import m0047 from './0047_spicy_typhoid_mary.sql';
 import m0048 from './0048_married_havok.sql';
 import m0049 from './0049_team_co_leads.sql';
+import m0050 from './0050_voice_holds.sql';
 
   export default {
     journal,
@@ -102,7 +103,8 @@ m0045,
 m0046,
 m0047,
 m0048,
-m0049
+m0049,
+m0050
     }
   }
   
