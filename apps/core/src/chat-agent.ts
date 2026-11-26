@@ -808,7 +808,14 @@ const roundTools = (tools: readonly ToolRegistration[]): ToolRegistration[] => {
           execute: async (args, api, context) => {
             await slots.take(context);
             try {
-              return await tool.execute(args, api, context);
+              // A call still under way when the turn stops ends with it, its
+              // slot given back: a dedicated tool's run is closed by then
+              // (agent-tools.ts `callAs`), so nothing it still does is
+              // admitted or handed on.
+              return await awaitWithContext(
+                tool.execute(args, api, context),
+                context
+              );
             } finally {
               slots.release();
             }

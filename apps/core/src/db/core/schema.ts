@@ -7170,8 +7170,9 @@ export const chatTurns = sqliteTable(
     cost: real().notNull(),
     /**
      * Each tool it called, by name: `{ "<tool>": { "calls": n, "ms": t } }`,
-     * `t` the sum of its calls' own times, which overlap where a round of
-     * reads ran them together, so may pass the turn's.
+     * `t` the sum of its calls' own times, a wait for a slot among the
+     * reads of one round included (chat-agent.ts `readsAtOnce`): reads that
+     * ran together overlap, so `t` may pass the turn's.
      */
     tools: text({ mode: "json" })
       .$type<Record<string, { calls: number; ms: number }>>()
