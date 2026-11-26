@@ -158,8 +158,11 @@ const Face = ({ kind, name }: { kind: ShareMember["kind"]; name: string }) =>
 /**
  * A candidate's face in the list and in its chip: an Avatar, which the
  * chip draws at its own line's size; a team's or a project's icon in it.
+ * The decision's people picker draws its people and teams with it too.
  */
-const choiceFace = (candidate: ShareCandidate) => (
+export const choiceFace = (
+  candidate: Pick<ShareCandidate, "name" | "kind">
+) => (
   <Avatar decorative name={candidate.name} size="xs">
     <AvatarFallback>
       {candidate.kind === "person" ? undefined : (
