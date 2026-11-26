@@ -3900,9 +3900,15 @@ export const PromptInputSubmit = ({
     onStop !== undefined
   );
   const compact = form?.compact === true;
+  // Nothing typed yet: quiet rather than dimmed. A box out of use stays disabled.
+  const quiet =
+    off && !working && form?.disabled !== true && form?.loading !== true;
   const press = async (event: MouseEvent<HTMLElement>) => {
     if (stoppable) {
       await onStop?.();
+      return;
+    }
+    if (off) {
       return;
     }
     // The text takes the focus first: Submit gives way to Stop as the message goes, and focus
@@ -3926,7 +3932,11 @@ export const PromptInputSubmit = ({
         variant={off && !working ? "ghost" : "default"}
         size="icon-sm"
         aria-label={ariaLabel ?? (stoppable ? words.stop : words.submit)}
-        disabled={off}
+        // With nothing to send it is as quiet as the microphone beside it, not a dimmed button: out
+        // of use as it says (`aria-disabled`), and a press does nothing. Once there is something to
+        // send it is the primary button.
+        disabled={off && !quiet}
+        aria-disabled={quiet ? true : undefined}
         focusableWhenDisabled={working}
         // Busy while the message goes, whether a press or Enter sent it.
         aria-busy={
