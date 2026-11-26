@@ -22,7 +22,7 @@ import { docsPath } from "./security-headers.ts";
 // reference is generated from the SDK's own types.
 //
 // Only a person who builds gets them (`TurnContext.builds`). The guides
-// go whole into the system prompt, right after the instructions, the
+// go whole into the system prompt, right after the building rules, the
 // same text for every chat that builds (build-agent-docs.ts embeds them
 // at build time); the section ends where the part of the prompt every
 // chat shares ends, which the gateway caches apart (prompt-cache.ts). The
@@ -34,7 +34,7 @@ import { docsPath } from "./security-headers.ts";
 /** The docs section of the system prompt: the guides, and how to read on. */
 export const docsSection = [
   "<docs>",
-  "How to build Apps and workflows with Grasp: the docs of the release this deployment runs. The guides are below in full; follow them, and never guess a shape that they or the API reference don't show. Find anything else with `searchDocs`, which answers the matching lines of each page it finds, and read a page with `readDocs`, from a line on when you know where: the API reference (`/reference` lists a page for each module App code imports), or a page a guide links to, such as `/guides/data`. The brain holds none of this: never search it for Grasp's docs or code.",
+  "How to build Apps and workflows with Grasp: the docs of the release this deployment runs. The guides are below in full; follow them, and never guess a shape that they or the API reference don't show. Find anything else with `searchDocs`, which answers the matching lines of each page it finds, and read a page with `readDocs`, from a line on when you know where: the API reference (`/reference` lists a page for each module App code imports), or a page a guide links to, such as `/guides/data`.",
   guides,
   sharedPrefixEnd,
 ].join("\n");

@@ -21,7 +21,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { AgentApi } from "../src/agent-scope.ts";
-import { instructions, withheldResult } from "../src/agent.ts";
+import { preamble, withheldResult } from "../src/agent.ts";
 import type { CodeRunEnd, TurnSkill } from "../src/agent.ts";
 import {
   chatAgent,
@@ -380,7 +380,7 @@ describe("the chat agent's prompt", () => {
     });
     await chat.ask("Hi", [chat.reply(says("Hello"))]);
     const sections = sectionsIn(chat.requests[0] ?? []);
-    expect(sections.preamble).toBe(instructions);
+    expect(sections.preamble).toBe(preamble);
     expect(sections.apis).toContain(`- env.notes: ${notes.summary}`);
     expect(sections.skills).toContain(
       "- expenses (company, version 1): How to do expenses"
