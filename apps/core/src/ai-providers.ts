@@ -43,6 +43,7 @@ import {
   choiceNow,
   choiceOf,
   graspAiAvailable,
+  graspAiOf,
   isConnectedModel,
   readAiSource,
   readModelChoice,
@@ -237,15 +238,18 @@ const graspListed = (
   routes: AiProviderRoutes,
   month: GraspAiListed["month"]
 ): GraspAiListed => {
-  const model = catalogModelsOf(graspAi.provider).find(
-    (each) => each.model === graspAi.model
+  // Where Grasp has no key for it, the first it would run on, shown as not available.
+  const here = graspAiOf(routes);
+  const grasp = here ?? graspAi.models[0];
+  const model = catalogModelsOf(grasp.provider).find(
+    (each) => each.model === grasp.model
   );
   return {
-    available: model !== undefined && graspAiAvailable(routes),
-    model: model ?? { model: graspAi.model, name: graspAi.model },
+    available: model !== undefined && here !== undefined,
+    model: model ?? { model: grasp.model, name: grasp.model },
     whereItRuns:
-      platformRouteOf(graspAi.provider, usualHostsOf(env))?.whereItRuns ??
-      aiProviders[graspAi.provider].whereItRuns,
+      platformRouteOf(grasp.provider, usualHostsOf(env))?.whereItRuns ??
+      aiProviders[grasp.provider].whereItRuns,
     month,
   };
 };
