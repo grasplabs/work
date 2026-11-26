@@ -35,7 +35,7 @@ import type { QuestionnaireAnswer } from "@grasp-os/ui/components/questionnaire"
 import { Text } from "@grasp-os/ui/components/text";
 import { ArrowUpRightIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { focusRingText } from "@grasp-os/ui/lib/styles";
-import { size, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { font, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
@@ -55,7 +55,7 @@ import {
   useShown,
 } from "../chat/held-writes.tsx";
 import type { Session } from "../core.ts";
-import { formatDate } from "../format.ts";
+import { formatDate, formatDateTime } from "../format.ts";
 import { useCoreAction } from "../use-core-action.ts";
 import { useCore } from "../use-core.ts";
 import { PendingBindingList } from "../workflows/binding-approvals.tsx";
@@ -78,6 +78,8 @@ import { TargetLink } from "./target-link.tsx";
 // it no more.
 
 const styles = stylex.create({
+  // A receipt, the effect key's hash: in the code face, broken anywhere.
+  receipt: { fontFamily: font.mono, overflowWrap: "anywhere" },
   // Under the title, before the date: what kind it is, and whether it blocks work.
   marks: {
     display: "flex",
@@ -1012,6 +1014,82 @@ const ElsewhereItem = ({ frame }: { frame: Frame }) => {
   );
 };
 
+/**
+ * Someone else's change whose answer was lost, for the organization's own
+ * admin to follow up with them: what it was, for whom, where and when, and
+ * its receipt, by which its trail is found in the audit log. Read only:
+ * only that person can say what became of it, and only they see what was
+ * sent.
+ */
+const EveryonesOutcomeItem = ({
+  frame,
+  source,
+}: {
+  frame: Frame;
+  source: Extract<InboxSource, { type: "everyonesOutcome" }>;
+}) => {
+  const { t } = useLingui();
+  const titleId = useId();
+  const { listing, person } = source;
+  const connection = listing.connectionName ?? listing.connectionId;
+  return (
+    <Card asChild size="sm">
+      <article aria-labelledby={titleId}>
+        <CardHeader>
+          {/* Where focus lands once the inbox moves on. */}
+          <span
+            data-item-heading
+            id={titleId}
+            tabIndex={-1}
+            {...stylex.props(focusRingText)}
+          >
+            <CardTitle level={2}>{frame.item.title}</CardTitle>
+          </span>
+          <CardDescription>
+            {t`Its answer was lost: nobody can tell whether it took effect.`}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div {...stylex.props(styles.body)}>
+            <KeyValueList
+              items={[
+                { id: "for", label: t`For`, value: person },
+                {
+                  id: "connection",
+                  label: t`Connection`,
+                  value:
+                    listing.resource === null
+                      ? connection
+                      : `${connection} · ${listing.resource}`,
+                },
+                {
+                  id: "sent",
+                  label: t`Sent`,
+                  value: formatDateTime(listing.sentAt),
+                },
+                {
+                  id: "receipt",
+                  label: t`Receipt`,
+                  value: (
+                    <code {...stylex.props(styles.receipt)}>
+                      {listing.effectKeyHash}
+                    </code>
+                  ),
+                  copyable: listing.effectKeyHash,
+                },
+              ]}
+              orientation="horizontal"
+            />
+            <Text color="muted" size="sm">
+              {t`Only ${person} can say whether it happened.`}
+            </Text>
+          </div>
+        </CardContent>
+      </article>
+    </Card>
+  );
+};
+
 /** The item, by what it was made from. */
 export const ItemDetail = (frame: Frame) => {
   const { source } = frame.item;
@@ -1023,6 +1101,9 @@ export const ItemDetail = (frame: Frame) => {
   }
   if (source.type === "outcome") {
     return <OutcomeItem frame={frame} source={source} />;
+  }
+  if (source.type === "everyonesOutcome") {
+    return <EveryonesOutcomeItem frame={frame} source={source} />;
   }
   if (source.type === "request") {
     return <RequestItem frame={frame} source={source} />;

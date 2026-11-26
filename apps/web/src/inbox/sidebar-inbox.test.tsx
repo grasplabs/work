@@ -216,10 +216,13 @@ describe("the sidebar's inbox", () => {
       id: "openQuestion:note-2",
       notification: { ...question.notification, id: "note-2", read: true },
     } as WaitingFeed["items"][number];
-    await shown(feedOf([heldWrite, question, read]), admin);
+    const { listAll } = await shown(feedOf([heldWrite, question, read]), admin);
     await vi.waitFor(() => {
       expect(counted()).toBe("2");
     });
+    // Everyone's unknown outcomes are the inbox page's alone: core audits
+    // each read of them, and the sidebar reads every few minutes.
+    expect(listAll).not.toHaveBeenCalled();
   });
 
   it("says so quietly when nothing waits", async () => {

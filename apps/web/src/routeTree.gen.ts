@@ -51,7 +51,6 @@ import { Route as ShellSettingsBrainRouteImport } from './routes/_shell.settings
 import { Route as ShellSettingsInstructionsRouteImport } from './routes/_shell.settings.instructions'
 import { Route as ShellSettingsMembersRouteImport } from './routes/_shell.settings.members'
 import { Route as ShellSettingsOnboardingRouteImport } from './routes/_shell.settings.onboarding'
-import { Route as ShellSettingsOutcomesRouteImport } from './routes/_shell.settings.outcomes'
 import { Route as ShellSettingsProfileRouteImport } from './routes/_shell.settings.profile'
 import { Route as ShellSettingsSecurityRouteImport } from './routes/_shell.settings.security'
 import { Route as ShellSettingsTeamsRouteImport } from './routes/_shell.settings.teams'
@@ -283,11 +282,6 @@ const ShellSettingsOnboardingRoute = ShellSettingsOnboardingRouteImport.update({
   path: '/onboarding',
   getParentRoute: () => ShellSettingsRoute,
 } as any)
-const ShellSettingsOutcomesRoute = ShellSettingsOutcomesRouteImport.update({
-  id: '/outcomes',
-  path: '/outcomes',
-  getParentRoute: () => ShellSettingsRoute,
-} as any)
 const ShellSettingsProfileRoute = ShellSettingsProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
@@ -417,7 +411,6 @@ export interface FileRoutesByFullPath {
   '/settings/instructions': typeof ShellSettingsInstructionsRoute
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/onboarding': typeof ShellSettingsOnboardingRoute
-  '/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/settings/profile': typeof ShellSettingsProfileRoute
   '/settings/security': typeof ShellSettingsSecurityRoute
   '/settings/teams': typeof ShellSettingsTeamsRoute
@@ -477,7 +470,6 @@ export interface FileRoutesByTo {
   '/settings/instructions': typeof ShellSettingsInstructionsRoute
   '/settings/members': typeof ShellSettingsMembersRoute
   '/settings/onboarding': typeof ShellSettingsOnboardingRoute
-  '/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/settings/profile': typeof ShellSettingsProfileRoute
   '/settings/security': typeof ShellSettingsSecurityRoute
   '/settings/teams': typeof ShellSettingsTeamsRoute
@@ -541,7 +533,6 @@ export interface FileRoutesById {
   '/_shell/settings/instructions': typeof ShellSettingsInstructionsRoute
   '/_shell/settings/members': typeof ShellSettingsMembersRoute
   '/_shell/settings/onboarding': typeof ShellSettingsOnboardingRoute
-  '/_shell/settings/outcomes': typeof ShellSettingsOutcomesRoute
   '/_shell/settings/profile': typeof ShellSettingsProfileRoute
   '/_shell/settings/security': typeof ShellSettingsSecurityRoute
   '/_shell/settings/teams': typeof ShellSettingsTeamsRoute
@@ -605,7 +596,6 @@ export interface FileRouteTypes {
     | '/settings/instructions'
     | '/settings/members'
     | '/settings/onboarding'
-    | '/settings/outcomes'
     | '/settings/profile'
     | '/settings/security'
     | '/settings/teams'
@@ -665,7 +655,6 @@ export interface FileRouteTypes {
     | '/settings/instructions'
     | '/settings/members'
     | '/settings/onboarding'
-    | '/settings/outcomes'
     | '/settings/profile'
     | '/settings/security'
     | '/settings/teams'
@@ -728,7 +717,6 @@ export interface FileRouteTypes {
     | '/_shell/settings/instructions'
     | '/_shell/settings/members'
     | '/_shell/settings/onboarding'
-    | '/_shell/settings/outcomes'
     | '/_shell/settings/profile'
     | '/_shell/settings/security'
     | '/_shell/settings/teams'
@@ -1068,13 +1056,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShellSettingsOnboardingRouteImport
       parentRoute: typeof ShellSettingsRoute
     }
-    '/_shell/settings/outcomes': {
-      id: '/_shell/settings/outcomes'
-      path: '/outcomes'
-      fullPath: '/settings/outcomes'
-      preLoaderRoute: typeof ShellSettingsOutcomesRouteImport
-      parentRoute: typeof ShellSettingsRoute
-    }
     '/_shell/settings/profile': {
       id: '/_shell/settings/profile'
       path: '/profile'
@@ -1239,7 +1220,6 @@ interface ShellSettingsRouteChildren {
   ShellSettingsInstructionsRoute: typeof ShellSettingsInstructionsRoute
   ShellSettingsMembersRoute: typeof ShellSettingsMembersRoute
   ShellSettingsOnboardingRoute: typeof ShellSettingsOnboardingRoute
-  ShellSettingsOutcomesRoute: typeof ShellSettingsOutcomesRoute
   ShellSettingsProfileRoute: typeof ShellSettingsProfileRoute
   ShellSettingsSecurityRoute: typeof ShellSettingsSecurityRoute
   ShellSettingsTeamsRoute: typeof ShellSettingsTeamsRoute
@@ -1257,7 +1237,6 @@ const ShellSettingsRouteChildren: ShellSettingsRouteChildren = {
   ShellSettingsInstructionsRoute: ShellSettingsInstructionsRoute,
   ShellSettingsMembersRoute: ShellSettingsMembersRoute,
   ShellSettingsOnboardingRoute: ShellSettingsOnboardingRoute,
-  ShellSettingsOutcomesRoute: ShellSettingsOutcomesRoute,
   ShellSettingsProfileRoute: ShellSettingsProfileRoute,
   ShellSettingsSecurityRoute: ShellSettingsSecurityRoute,
   ShellSettingsTeamsRoute: ShellSettingsTeamsRoute,
