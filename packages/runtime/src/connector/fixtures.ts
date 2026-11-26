@@ -200,7 +200,10 @@ const decodingsOf = (token: string): string[] => {
   const standard = token.replaceAll("-", "+").replaceAll("_", "/");
   return [0, 1, 2, 3].flatMap((start) => {
     const from = standard.slice(start);
-    const whole = from.slice(0, from.length - (from.length % 4));
+    // A tail of 2 or 3 characters is whole once padded; one of 1 never is.
+    const tail = from.length % 4;
+    const whole =
+      tail === 1 ? from.slice(0, -1) : from + "=".repeat((4 - tail) % 4);
     try {
       return [
         new TextDecoder().decode(

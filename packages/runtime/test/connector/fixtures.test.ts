@@ -58,6 +58,42 @@ describe("the outputs a recording run makes", () => {
   });
 });
 
+describe("a recording that carries the credential", () => {
+  it("is refused when base64 carries it at the end of a part-filled group", () => {
+    // 20 bytes: the last group holds two, unpadded.
+    const answer = JSON.stringify({
+      token: btoa(`x${credential}`).replace(/=+$/u, ""),
+    });
+    expect(() =>
+      recordedFixtures(
+        {
+          cases: [
+            {
+              tool: "people.list",
+              args: {},
+              calls: [
+                {
+                  exchanges: [
+                    {
+                      method: "GET",
+                      url: "https://api.example.test/people",
+                      body: "",
+                      status: 200,
+                      headers: { "content-type": "application/json" },
+                      answer,
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        { credential, personal: [], secret: [] }
+      )
+    ).toThrow("Case 1 carries the connection's credential");
+  });
+});
+
 describe("the vendor a recording makes", () => {
   it("answers only a query whose every name and value is as recorded", async () => {
     const vendor = fixtureVendor([
