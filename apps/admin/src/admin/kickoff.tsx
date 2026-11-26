@@ -8,19 +8,6 @@
  * it brought, and the questions it left; never what was said.
  */
 
-import { Button } from "@grasp-os/app-kit/components/button";
-import {
-  Field,
-  FieldDescription,
-  FieldLabel,
-} from "@grasp-os/app-kit/components/field";
-import { Input } from "@grasp-os/app-kit/components/input";
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@grasp-os/app-kit/components/native-select";
-import { Spinner } from "@grasp-os/app-kit/components/spinner";
-import { Textarea } from "@grasp-os/app-kit/components/textarea";
 import type {
   AdminKickoffField,
   AdminKickoffView,
@@ -37,14 +24,97 @@ import {
 } from "@grasp-os/shared/kickoff";
 import { interviewLocales } from "@grasp-os/shared/onboarding";
 import type { InterviewLocale } from "@grasp-os/shared/onboarding";
+import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import { Button } from "@grasp-os/ui/components/button";
+import { CardContent } from "@grasp-os/ui/components/card";
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+} from "@grasp-os/ui/components/field";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@grasp-os/ui/components/native-select";
+import { Spinner } from "@grasp-os/ui/components/spinner";
+import { Text } from "@grasp-os/ui/components/text";
+import { Textarea } from "@grasp-os/ui/components/textarea";
+import {
+  CircleCheckIcon,
+  CircleHelpIcon,
+  Icon,
+  UploadIcon,
+} from "@grasp-os/ui/lib/icons";
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
+import { colors, font, space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { useRouter } from "@tanstack/react-router";
-import { CircleCheckIcon, CircleHelpIcon, UploadIcon } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { kickoffFn } from "../clients/kickoff-functions.ts";
 import type { KickoffAnswer, KickoffRefusal } from "../clients/kickoff.ts";
 import { InvalidFieldError, useAction } from "../use-action.ts";
 import { formatDate } from "./words.ts";
+
+const styles = stylex.create({
+  // Bringing the transcript in: its fields at a readable width.
+  form: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-start",
+    gap: space["4"],
+  },
+  field: { width: "100%", maxWidth: "36rem" },
+  transcript: { maxHeight: "20rem" },
+  language: { maxWidth: "12rem" },
+  row: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: space["3"],
+  },
+  chosen: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  answer: { display: "flex", flexDirection: "column", gap: space["2"] },
+  keep: { display: "flex", justifyContent: "flex-end" },
+  // Where the transcript stands, and the way to replace it.
+  stands: {
+    display: "flex",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space["3"],
+  },
+  fields: { margin: 0, padding: 0, listStyle: "none" },
+  fieldRow: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["2"],
+    paddingBlock: space["3"],
+    paddingInline: space["5"],
+    borderBlockStartWidth: 1,
+    borderBlockStartStyle: "solid",
+    borderBlockStartColor: colors.border,
+  },
+  fieldName: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["2"],
+    fontWeight: font.weightMedium,
+  },
+  open: { color: colors.warning },
+  // Under the name, as far in as the name stands past its mark.
+  under: {
+    display: "flex",
+    flexDirection: "column",
+    gap: space["2"],
+    paddingInlineStart: space["6"],
+  },
+});
 
 /** The ten things Stephen needs from the first conversation, by name. */
 export const visionWords: Record<VisionField, string> = {
@@ -133,7 +203,6 @@ const BringIn = ({
   replacing: boolean;
   keep: Keep;
 }) => {
-  const id = useId();
   const { busy, failure, run } = useKickoff(keep);
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -159,126 +228,125 @@ const BringIn = ({
     });
   };
   return (
-    <form
-      className="flex flex-col gap-4 border-t px-5 py-4 *:max-w-xl"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void bringIn();
-      }}
-    >
-      <Field>
-        <FieldLabel htmlFor={`${id}-text`}>The transcript</FieldLabel>
-        <Textarea
-          className="max-h-80"
-          disabled={busy || file !== null}
-          id={`${id}-text`}
-          maxLength={transcriptMaxLength}
-          onChange={(event) => {
-            setText(event.target.value);
-          }}
-          placeholder="Paste the transcript of the first conversation with the sponsor"
-          value={text}
-        />
-      </Field>
-      <Field>
-        <FieldLabel htmlFor={`${id}-file`}>Or a file</FieldLabel>
-        {/* The browser's own file control is kept for what it does and for a
-            screen reader, out of sight: a button of the kit's opens it, and
-            the file's name stands beside it. */}
-        <Input
-          accept={accept}
-          className="sr-only"
-          disabled={busy}
-          id={`${id}-file`}
-          key={fileInput}
-          onChange={(event) => {
-            setFile(event.target.files?.[0] ?? null);
-          }}
-          ref={fileRef}
-          tabIndex={-1}
-          type="file"
-        />
-        <div className="flex flex-wrap items-center gap-3">
-          <Button
+    <CardContent>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void bringIn();
+        }}
+        {...stylex.props(styles.form)}
+      >
+        <Field disabled={busy || file !== null} style={styles.field}>
+          <FieldLabel>The transcript</FieldLabel>
+          <Textarea
+            maxLength={transcriptMaxLength}
+            onValueChange={setText}
+            placeholder="Paste the transcript of the first conversation with the sponsor"
+            style={styles.transcript}
+            value={text}
+          />
+        </Field>
+        <Field disabled={busy} style={styles.field}>
+          <FieldLabel>Or a file</FieldLabel>
+          {/* The browser's own file control is kept for what it does and for a
+              screen reader, out of sight: a button opens it, and the file's
+              name stands beside it. */}
+          <input
+            accept={accept}
             disabled={busy}
-            onClick={() => {
-              fileRef.current?.click();
+            key={fileInput}
+            onChange={(event) => {
+              setFile(event.target.files?.[0] ?? null);
             }}
-            size="sm"
-            type="button"
-            variant="outline"
-          >
-            <UploadIcon data-icon="inline-start" />
-            Choose a file
-          </Button>
-          <span
-            className={
-              file === null ? "text-muted-foreground" : "min-w-0 truncate"
-            }
-          >
-            {file === null ? "No file chosen" : file.name}
-          </span>
-          {file === null ? null : (
+            ref={fileRef}
+            tabIndex={-1}
+            type="file"
+            {...stylex.props(visuallyHidden)}
+          />
+          <div {...stylex.props(styles.row)}>
             <Button
               disabled={busy}
-              onClick={clearFile}
+              onClick={() => {
+                fileRef.current?.click();
+              }}
               size="sm"
               type="button"
               variant="outline"
             >
-              Remove the file
+              <Icon icon={UploadIcon} />
+              Choose a file
             </Button>
-          )}
+            {file === null ? (
+              <Text color="muted" size="sm">
+                No file chosen
+              </Text>
+            ) : (
+              <span {...stylex.props(styles.chosen)}>
+                <Text size="sm">{file.name}</Text>
+              </span>
+            )}
+            {file === null ? null : (
+              <Button
+                disabled={busy}
+                onClick={clearFile}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Remove the file
+              </Button>
+            )}
+          </div>
+          <FieldDescription>
+            A .txt, .vtt, .srt or .docx file of at most 5 MB.
+          </FieldDescription>
+        </Field>
+        <Field disabled={busy} style={styles.field}>
+          <FieldLabel>Read it in</FieldLabel>
+          <NativeSelect
+            onChange={(event) => {
+              const picked = interviewLocales.find(
+                (each) => each === event.target.value
+              );
+              setLocale(picked ?? "en");
+            }}
+            style={styles.language}
+            value={locale}
+          >
+            {interviewLocales.map((each) => (
+              <NativeSelectOption key={each} value={each}>
+                {languageWords[each]}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+          <FieldDescription>
+            The language Stephen writes down what it brought in.
+          </FieldDescription>
+        </Field>
+        {failure === null ? null : (
+          <Alert appearance="subtle" variant="destructive">
+            <AlertDescription>{failure}</AlertDescription>
+          </Alert>
+        )}
+        <div {...stylex.props(styles.row)}>
+          <Button
+            disabled={busy || (file === null && text.trim() === "")}
+            size="sm"
+            type="submit"
+          >
+            {replacing ? "Read it again" : "Read it"}
+          </Button>
+          {busy ? (
+            <span {...stylex.props(styles.row)}>
+              <Spinner />
+              <Text color="muted" size="sm">
+                Stephen is reading it. This takes a minute.
+              </Text>
+            </span>
+          ) : null}
         </div>
-        <FieldDescription>
-          A .txt, .vtt, .srt or .docx file of at most 5 MB.
-        </FieldDescription>
-      </Field>
-      <Field>
-        <FieldLabel htmlFor={`${id}-language`}>Read it in</FieldLabel>
-        <NativeSelect
-          className="max-w-48"
-          disabled={busy}
-          id={`${id}-language`}
-          onChange={(event) => {
-            const picked = interviewLocales.find(
-              (each) => each === event.target.value
-            );
-            setLocale(picked ?? "en");
-          }}
-          value={locale}
-        >
-          {interviewLocales.map((each) => (
-            <NativeSelectOption key={each} value={each}>
-              {languageWords[each]}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-        <FieldDescription>
-          The language Stephen writes down what it brought in.
-        </FieldDescription>
-      </Field>
-      {failure === null ? null : (
-        <p className="text-destructive" role="alert">
-          {failure}
-        </p>
-      )}
-      <div className="flex flex-wrap items-center gap-3">
-        <Button
-          disabled={busy || (file === null && text.trim() === "")}
-          size="sm"
-          type="submit"
-        >
-          {replacing ? "Read it again" : "Read it"}
-        </Button>
-        {busy ? (
-          <span className="text-muted-foreground flex items-center gap-2">
-            <Spinner />
-            Stephen is reading it. This takes a minute.
-          </span>
-        ) : null}
-      </div>
-    </form>
+      </form>
+    </CardContent>
   );
 };
 
@@ -292,14 +360,11 @@ const Answer = ({
   field: AdminKickoffField;
   keep: Keep;
 }) => {
-  const id = useId();
-  const sharedId = useId();
   const shared = isVisionShared(field.field);
   const { busy, failure, run } = useKickoff(keep);
   const [text, setText] = useState(field.answer ?? "");
   return (
     <form
-      className="flex flex-col gap-2"
       onSubmit={(event) => {
         event.preventDefault();
         void run(
@@ -312,32 +377,28 @@ const Answer = ({
             })
         );
       }}
+      {...stylex.props(styles.answer)}
     >
-      <label className="sr-only" htmlFor={id}>
-        {`The sponsor’s answer: ${visionWords[field.field]}`}
-      </label>
-      <Textarea
-        aria-describedby={shared ? sharedId : undefined}
-        disabled={busy}
-        id={id}
-        maxLength={answerMaxLength}
-        onChange={(event) => {
-          setText(event.target.value);
-        }}
-        placeholder="The sponsor’s answer"
-        value={text}
-      />
-      {shared ? (
-        <p className="text-muted-foreground text-xs" id={sharedId}>
-          Part of the company’s vision: every member will see this answer.
-        </p>
-      ) : null}
+      <Field disabled={busy}>
+        <Textarea
+          aria-label={`The sponsor’s answer: ${visionWords[field.field]}`}
+          maxLength={answerMaxLength}
+          onValueChange={setText}
+          placeholder="The sponsor’s answer"
+          value={text}
+        />
+        {shared ? (
+          <FieldDescription>
+            Part of the company’s vision: every member will see this answer.
+          </FieldDescription>
+        ) : null}
+      </Field>
       {failure === null ? null : (
-        <p className="text-destructive" role="alert">
-          {failure}
-        </p>
+        <Alert appearance="subtle" variant="destructive">
+          <AlertDescription>{failure}</AlertDescription>
+        </Alert>
       )}
-      <div className="flex justify-end">
+      <div {...stylex.props(styles.keep)}>
         <Button
           disabled={busy || text.trim() === (field.answer ?? "")}
           size="sm"
@@ -362,28 +423,24 @@ const FieldRow = ({
   keep: Keep;
 }) => {
   const known = field.state !== "open";
-  const Icon = known ? CircleCheckIcon : CircleHelpIcon;
   return (
-    <li className="flex flex-col gap-2 border-t px-5 py-3">
-      <span className="flex items-center gap-2">
-        <Icon
-          aria-hidden
-          className={
-            known
-              ? "size-4 flex-none"
-              : "text-status-attention size-4 flex-none"
-          }
-        />
-        <span className="font-medium">{visionWords[field.field]}</span>
+    <li {...stylex.props(styles.fieldRow)}>
+      <span {...stylex.props(styles.fieldName)}>
+        <span {...stylex.props(!known && styles.open)}>
+          <Icon icon={known ? CircleCheckIcon : CircleHelpIcon} />
+        </span>
+        <Text size="sm" weight="medium">
+          {visionWords[field.field]}
+        </Text>
       </span>
       {field.state === "said" && field.answer === null ? null : (
-        <div className="flex flex-col gap-2 pl-6">
+        <div {...stylex.props(styles.under)}>
           {field.state === "said" ? null : (
-            <p className="text-muted-foreground">
+            <Text color="muted" size="sm">
               {field.ask === ""
                 ? "Ask the sponsor about it."
                 : `Ask the sponsor: ${field.ask}`}
-            </p>
+            </Text>
           )}
           <Answer
             clientId={clientId}
@@ -450,24 +507,26 @@ export const Kickoff = ({ clientId }: { clientId: string }) => {
   const broughtIn = kickoff !== null && kickoff.transcript !== null;
   return (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t px-5 py-3">
-        <p className="text-muted-foreground">
-          {kickoff === null
-            ? (unread ?? "Reading where it stands in the company’s Grasp…")
-            : broughtWords(kickoff.transcript)}
-        </p>
-        {broughtIn && !replacing ? (
-          <Button
-            onClick={() => {
-              setReplacing(true);
-            }}
-            size="sm"
-            variant="outline"
-          >
-            Replace
-          </Button>
-        ) : null}
-      </div>
+      <CardContent>
+        <div {...stylex.props(styles.stands)}>
+          <Text color="muted" size="sm">
+            {kickoff === null
+              ? (unread ?? "Reading where it stands in the company’s Grasp…")
+              : broughtWords(kickoff.transcript)}
+          </Text>
+          {broughtIn && !replacing ? (
+            <Button
+              onClick={() => {
+                setReplacing(true);
+              }}
+              size="sm"
+              variant="outline"
+            >
+              Replace
+            </Button>
+          ) : null}
+        </div>
+      </CardContent>
       {broughtIn && !replacing ? null : (
         <BringIn
           clientId={clientId}
@@ -479,16 +538,21 @@ export const Kickoff = ({ clientId }: { clientId: string }) => {
         />
       )}
       {kickoff?.read === true ? (
-        <ol aria-label="What it brought, and what it left open">
-          {kickoff.fields.map((field) => (
-            <FieldRow
-              clientId={clientId}
-              field={field}
-              keep={setKickoff}
-              key={field.field}
-            />
-          ))}
-        </ol>
+        <CardContent flush>
+          <ol
+            aria-label="What it brought, and what it left open"
+            {...stylex.props(styles.fields)}
+          >
+            {kickoff.fields.map((field) => (
+              <FieldRow
+                clientId={clientId}
+                field={field}
+                keep={setKickoff}
+                key={field.field}
+              />
+            ))}
+          </ol>
+        </CardContent>
       ) : null}
     </>
   );

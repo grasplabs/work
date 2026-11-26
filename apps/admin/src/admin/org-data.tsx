@@ -11,15 +11,6 @@
  * them back).
  */
 
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableFooter,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@grasp-os/app-kit/components/table";
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import { MIN_GROUP } from "@grasp-os/shared/admin/interviews";
 import { DELETE_DAYS, peopleOf } from "@grasp-os/shared/admin/onboarding-admin";
@@ -28,8 +19,44 @@ import {
   companySees,
   keptOf,
 } from "@grasp-os/shared/admin/onboarding-admin-record";
+import { CardContent } from "@grasp-os/ui/components/card";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableFooter,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@grasp-os/ui/components/table";
+import { Text } from "@grasp-os/ui/components/text";
+import { colors, font } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 
-import { Section, SectionRow } from "./section.tsx";
+import { Panel, PanelNote, PanelRow, PanelRows } from "./panel.tsx";
+
+const styles = stylex.create({
+  figure: { fontVariantNumeric: "tabular-nums" },
+  muted: { color: colors.mutedForeground },
+  // A name with its quiet lines under it.
+  lines: { display: "flex", flexDirection: "column" },
+  small: {
+    fontSize: font.textXs,
+    fontWeight: font.weightNormal,
+    color: colors.mutedForeground,
+  },
+  // Said under the name only where the People column is left out.
+  narrowOnly: {
+    display: { default: null, "@container (width >= 40rem)": "none" },
+  },
+});
 
 const percent = new Intl.NumberFormat("en", {
   style: "percent",
@@ -57,28 +84,26 @@ const WhatIsKept = ({ view }: { view: AdminView }) => {
   const kept = keptOf(view, view.asOf);
   const { conversation } = view.state;
   return (
-    <Section title="What is kept">
-      <SectionRow label="The first conversation">
-        <span
-          className={
-            conversation === "none" ? "text-muted-foreground" : undefined
-          }
+    <Panel title="What is kept">
+      <PanelRows>
+        <PanelRow label="The first conversation">
+          <span {...stylex.props(conversation === "none" && styles.muted)}>
+            {conversationWords[conversation]}
+          </span>
+        </PanelRow>
+        <PanelRow label="Interviews people agreed to">
+          <span {...stylex.props(styles.figure)}>{kept.agreed}</span>
+        </PanelRow>
+        <PanelRow label="Interviews that stopped halfway">
+          <span {...stylex.props(styles.figure)}>{kept.halfway}</span>
+        </PanelRow>
+        <PanelRow
+          label={`Can still be deleted, for ${DELETE_DAYS} days after the interview`}
         >
-          {conversationWords[conversation]}
-        </span>
-      </SectionRow>
-      <SectionRow label="Interviews people agreed to">
-        <span className="tabular-nums">{kept.agreed}</span>
-      </SectionRow>
-      <SectionRow label="Interviews that stopped halfway">
-        <span className="tabular-nums">{kept.halfway}</span>
-      </SectionRow>
-      <SectionRow
-        label={`Can still be deleted, for ${DELETE_DAYS} days after the interview`}
-      >
-        <span className="tabular-nums">{kept.deletable}</span>
-      </SectionRow>
-    </Section>
+          <span {...stylex.props(styles.figure)}>{kept.deletable}</span>
+        </PanelRow>
+      </PanelRows>
+    </Panel>
   );
 };
 
@@ -88,30 +113,32 @@ const Deleted = ({ view }: { view: AdminView }) => {
     state.deleted.includes(person.id)
   );
   return (
-    <Section
+    <Panel
       description="Their words are gone, and with them what only they said. Their name stays, so nobody is asked again."
       title="Deleted because they asked"
     >
       {deleted.length === 0 ? (
-        <p className="text-muted-foreground border-t px-5 py-4">
-          Nobody asked.
-        </p>
+        <PanelNote>Nobody asked.</PanelNote>
       ) : (
-        <ul className="flex flex-col">
-          {deleted.map((person) => (
-            <li
-              className="flex flex-wrap items-center justify-between gap-x-6 gap-y-0.5 border-t px-5 py-2.5"
-              key={person.id}
-            >
-              <span>{person.name}</span>
-              <span className="text-muted-foreground">
-                {org.teams.find((team) => team.id === person.team)?.name ?? ""}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <CardContent flush>
+          <ItemGroup separated>
+            {deleted.map((person) => (
+              <Item key={person.id} size="sm">
+                <ItemContent>
+                  <ItemTitle>{person.name}</ItemTitle>
+                </ItemContent>
+                <ItemActions>
+                  <Text as="span" color="muted">
+                    {org.teams.find((team) => team.id === person.team)?.name ??
+                      ""}
+                  </Text>
+                </ItemActions>
+              </Item>
+            ))}
+          </ItemGroup>
+        </CardContent>
       )}
-    </Section>
+    </Panel>
   );
 };
 
@@ -126,17 +153,17 @@ const Figures = ({
   stopped: number | null;
 }) => (
   <>
-    <TableCell className="hidden text-right @sm:table-cell" variant="card">
-      <span className="tabular-nums">{people}</span>
+    <TableCell align="end" hideBelow="sm">
+      <span {...stylex.props(styles.figure)}>{people}</span>
     </TableCell>
-    <TableCell className="text-right" variant="card">
-      <span className="tabular-nums">{completed ?? "–"}</span>
+    <TableCell align="end">
+      <span {...stylex.props(styles.figure)}>{completed ?? "–"}</span>
     </TableCell>
-    <TableCell className="hidden text-right @3xl:table-cell" variant="card">
-      <span className="tabular-nums">{stopped ?? "–"}</span>
+    <TableCell align="end" hideBelow="md">
+      <span {...stylex.props(styles.figure)}>{stopped ?? "–"}</span>
     </TableCell>
-    <TableCell className="hidden text-right @xl:table-cell" variant="card">
-      <span className="tabular-nums">
+    <TableCell align="end" hideBelow="sm">
+      <span {...stylex.props(styles.figure)}>
         {completed === null ? "–" : share(completed, people)}
       </span>
     </TableCell>
@@ -146,39 +173,28 @@ const Figures = ({
 const CompanySees = ({ view }: { view: AdminView }) => {
   const sees = companySees(view);
   return (
-    <Section
+    <Panel
       description={`Numbers per team, only where ${MIN_GROUP} or more in a team are asked to talk, and for everyone only the teams that show theirs. Never a name, never anyone’s words, and never who stopped or did not start.`}
       title="What the company itself sees"
     >
       {sees.teams.length === 0 ? (
-        <p className="text-muted-foreground border-t px-5 py-4">
+        <PanelNote>
           Nothing yet. The teams come with the company’s own sign-in.
-        </p>
+        </PanelNote>
       ) : (
-        <div className="@container border-t">
-          <Table>
+        <CardContent flush>
+          <Table aria-label="What the company itself sees">
             <TableHeader>
               <TableRow>
-                <TableHead variant="card">Team</TableHead>
-                <TableHead
-                  className="hidden text-right @sm:table-cell"
-                  variant="card"
-                >
+                <TableHead>Team</TableHead>
+                <TableHead align="end" hideBelow="sm">
                   People
                 </TableHead>
-                <TableHead className="text-right" variant="card">
-                  Completed
-                </TableHead>
-                <TableHead
-                  className="hidden text-right @3xl:table-cell"
-                  variant="card"
-                >
+                <TableHead align="end">Completed</TableHead>
+                <TableHead align="end" hideBelow="md">
                   Stopped halfway
                 </TableHead>
-                <TableHead
-                  className="hidden text-right @xl:table-cell"
-                  variant="card"
-                >
+                <TableHead align="end" hideBelow="sm">
                   Share completed
                 </TableHead>
               </TableRow>
@@ -186,15 +202,21 @@ const CompanySees = ({ view }: { view: AdminView }) => {
             <TableBody>
               {sees.teams.map((team) => (
                 <TableRow key={team.team.id}>
-                  <TableCell className="whitespace-normal" variant="card">
-                    <span className="flex flex-col">
+                  <TableCell wrap>
+                    <span {...stylex.props(styles.lines)}>
                       {team.team.name}
                       {/* Where there is no room for a column of its own, the number of people goes under the name. */}
-                      <span className="text-muted-foreground text-xs tabular-nums @sm:hidden">
+                      <span
+                        {...stylex.props(
+                          styles.small,
+                          styles.figure,
+                          styles.narrowOnly
+                        )}
+                      >
                         {peopleWords(team.people)}
                       </span>
                       {team.shown ? null : (
-                        <span className="text-muted-foreground text-xs">
+                        <span {...stylex.props(styles.small)}>
                           Too small to show
                         </span>
                       )}
@@ -210,10 +232,16 @@ const CompanySees = ({ view }: { view: AdminView }) => {
             </TableBody>
             <TableFooter>
               <TableRow>
-                <TableCell variant="card">
-                  <span className="flex flex-col">
+                <TableCell>
+                  <span {...stylex.props(styles.lines)}>
                     Everyone
-                    <span className="text-muted-foreground text-xs font-normal tabular-nums @sm:hidden">
+                    <span
+                      {...stylex.props(
+                        styles.small,
+                        styles.figure,
+                        styles.narrowOnly
+                      )}
+                    >
                       {peopleWords(sees.people)}
                     </span>
                   </span>
@@ -226,9 +254,9 @@ const CompanySees = ({ view }: { view: AdminView }) => {
               </TableRow>
             </TableFooter>
           </Table>
-        </div>
+        </CardContent>
       )}
-    </Section>
+    </Panel>
   );
 };
 

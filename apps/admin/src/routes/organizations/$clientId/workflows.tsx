@@ -1,9 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { WaitingOnConnectionsRows } from "../../../admin/connections.tsx";
 import { useOrganization } from "../../../admin/organization.tsx";
 import { Section } from "../../../admin/section.tsx";
-import { OrgWorkflows } from "../../../admin/workflows.tsx";
+import {
+  OrgWorkflows,
+  WaitingOnConnectionsRows,
+} from "../../../admin/workflows.tsx";
 
 /**
  * An organization's Workflows: how far each piece of work is known, and

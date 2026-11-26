@@ -1,13 +1,16 @@
 /**
- * Words with a mark before them, drawn with Damsko's tokens: what needs
- * someone (`Attention`, the warning's dot) and what is in place (`Done`,
- * a check in the success colour). The Damsko counterparts of parts.tsx's
- * `Attention` and `Done`, which the pages still on the kit keep until
- * their area moves.
+ * Marks drawn with Damsko's tokens: words with a mark before them, what
+ * needs someone (`Attention`, the warning's dot) and what is in place
+ * (`Done`, a check in the success colour); and how much Grasp knows, in
+ * dots (`KnowledgeDots`). The Damsko counterparts of parts.tsx's, which
+ * the pages still on the kit keep until their area moves.
  */
+import type { OrgKnowledge } from "@grasp-os/shared/admin/onboarding-admin";
 import { CheckIcon, Icon } from "@grasp-os/ui/lib/icons";
+import { visuallyHidden } from "@grasp-os/ui/lib/styles";
 import { colors, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
+import { Fragment } from "react";
 import type { ReactNode } from "react";
 
 const styles = stylex.create({
@@ -28,6 +31,24 @@ const styles = stylex.create({
     color: colors.mutedForeground,
   },
   check: { display: "inline-flex", flexShrink: 0, color: colors.success },
+  dots: { display: "flex", alignItems: "center", gap: space["1"] },
+  knowledgeDot: {
+    width: "0.375rem",
+    height: "0.375rem",
+    flexShrink: 0,
+    borderRadius: "50%",
+    backgroundColor: colors.border,
+  },
+  filled: { backgroundColor: colors.foreground },
+  // Where Grasp opens: a thin upright line between the dots.
+  gate: {
+    display: "block",
+    width: "1px",
+    height: "0.875rem",
+    flexShrink: 0,
+    marginInline: "0.125rem",
+    backgroundColor: colors.foreground,
+  },
 });
 
 /** What needs someone, in words: the warning's dot, then the words in the text's colour. */
@@ -47,3 +68,41 @@ export const Done = ({ children }: { children: ReactNode }) => (
     {children}
   </span>
 );
+
+/** Where the rounding of a share of the dots may land just under a whole one. */
+const dotSlack = 1e-9;
+
+/**
+ * How much Grasp knows about an organization, in dots: dark for what is
+ * in, filling from the start, with a mark at the share where Grasp opens.
+ * Dark up to the mark is ready. `label` says it to a screen reader.
+ */
+export const KnowledgeDots = ({
+  knowledge,
+  count,
+  label,
+}: {
+  knowledge: Pick<OrgKnowledge, "percent" | "threshold">;
+  count: number;
+  label: string;
+}) => {
+  const filled = Math.floor((knowledge.percent / 100) * count + dotSlack);
+  const gate = Math.round((knowledge.threshold / 100) * count);
+  const mark = <span aria-hidden {...stylex.props(styles.gate)} />;
+  return (
+    <span {...stylex.props(styles.dots)}>
+      <span {...stylex.props(visuallyHidden)}>{label}</span>
+      {Array.from({ length: count }, (_, at) => (
+        <Fragment key={at}>
+          {at === gate ? mark : null}
+          <span
+            aria-hidden
+            {...stylex.props(styles.knowledgeDot, at < filled && styles.filled)}
+          />
+        </Fragment>
+      ))}
+      {/* Where Grasp opens only once every dot is filled, the mark stands after the last. */}
+      {gate >= count ? mark : null}
+    </span>
+  );
+};

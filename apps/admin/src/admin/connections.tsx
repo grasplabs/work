@@ -7,21 +7,48 @@
  * so a Composio toolkit is named after its slug.
  */
 
-import { Badge } from "@grasp-os/app-kit/components/badge";
-import { Button } from "@grasp-os/app-kit/components/button";
 import type {
   AdminAppAsked,
   AdminConnection,
   AdminIntegrations,
   AdminNeeded,
 } from "@grasp-os/shared/admin-snapshot";
+import { Badge } from "@grasp-os/ui/components/badge";
+import { Button } from "@grasp-os/ui/components/button";
+import { CardContent } from "@grasp-os/ui/components/card";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
+import { Text } from "@grasp-os/ui/components/text";
+import { ArrowRightIcon, Icon } from "@grasp-os/ui/lib/icons";
+import { colors, font } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import { Link } from "@tanstack/react-router";
-import { ArrowRightIcon } from "lucide-react";
+import type { ReactNode } from "react";
 
 import { appKey } from "./integrations-asked.ts";
-import { Attention, Done } from "./parts.tsx";
+import { Done } from "./marks.tsx";
+import { PanelNote } from "./panel.tsx";
 import { sourceNames } from "./sections.ts";
 import { formatDate, formatList, plural } from "./words.ts";
+
+const styles = stylex.create({
+  // What needs someone, in the warning's colour.
+  attention: { color: colors.warning, textAlign: "end" },
+  small: { fontSize: font.textXs },
+});
+
+/** Rows of a panel, edge to edge, a hairline between each. */
+const Rows = ({ children }: { children: ReactNode }) => (
+  <CardContent flush>
+    <ItemGroup separated>{children}</ItemGroup>
+  </CardContent>
+);
 
 /** The native connectors, by name. */
 const nativeNames: Record<string, string> = {
@@ -79,32 +106,34 @@ const ConnectedRow = ({ connection }: { connection: AdminConnection }) => {
   const since = formatDate(connection.connectedAt);
   const by = connection.connectedBy;
   return (
-    <li className="grid items-center gap-x-6 gap-y-2 border-t px-5 py-3 lg:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_minmax(0,14rem)]">
-      <span className="flex min-w-0 flex-col">
-        <span className="truncate">{name}</span>
-        <span className="text-muted-foreground text-xs">
+    <Item size="sm">
+      <ItemContent>
+        <ItemTitle>{name}</ItemTitle>
+        <ItemDescription>
           {connection.source === "composio" ? sourceNames.composio : "Grasp"}
           {connection.hidden ? ", hidden from its people" : ""}
-        </span>
-      </span>
-      <span className="flex min-w-0 flex-col">
-        <span>{accessOf(connection)}</span>
-        <span className="text-muted-foreground text-xs">
+        </ItemDescription>
+      </ItemContent>
+      <ItemContent>
+        <Text as="span" size="sm">
+          {accessOf(connection)}
+        </Text>
+        <ItemDescription>
           {by === null
             ? `Connected on ${since}.`
             : `Connected by ${by} on ${since}.`}
-        </span>
-      </span>
-      <span className="flex flex-col items-start lg:items-end">
+        </ItemDescription>
+      </ItemContent>
+      <ItemActions>
         {connection.state === "works" ? (
           <Done>{connectionWords.works}</Done>
         ) : (
-          <span className="text-status-attention lg:text-right">
+          <span {...stylex.props(styles.attention)}>
             {connectionWords[connection.state]}
           </span>
         )}
-      </span>
-    </li>
+      </ItemActions>
+    </Item>
   );
 };
 
@@ -116,14 +145,10 @@ export const ConnectedRows = ({
 }) => {
   const { connected, personal } = integrations;
   if (connected.length === 0 && personal.length === 0) {
-    return (
-      <p className="text-muted-foreground border-t px-5 py-4">
-        Nothing connected yet beyond its sign-in.
-      </p>
-    );
+    return <PanelNote>Nothing connected yet beyond its sign-in.</PanelNote>;
   }
   return (
-    <ul className="flex flex-col">
+    <Rows>
       {connected.map((connection) => (
         <ConnectedRow
           connection={connection}
@@ -134,27 +159,26 @@ export const ConnectedRows = ({
         const name = appName(app);
         const { people, again } = app;
         return (
-          <li
-            className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 border-t px-5 py-3"
-            key={`${app.source}:${app.provider}`}
-          >
-            <span className="flex min-w-0 flex-col">
-              <span>{name}</span>
-              <span className="text-muted-foreground text-xs">
+          <Item key={`${app.source}:${app.provider}`} size="sm">
+            <ItemContent>
+              <ItemTitle>{name}</ItemTitle>
+              <ItemDescription>
                 {`${people} ${plural(people, "person", "people")} connected their own`}
-              </span>
-            </span>
-            {again === 0 ? (
-              <Done>{connectionWords.works}</Done>
-            ) : (
-              <span className="text-status-attention">
-                {`${again} ${plural(again, "needs", "need")} signing in again`}
-              </span>
-            )}
-          </li>
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              {again === 0 ? (
+                <Done>{connectionWords.works}</Done>
+              ) : (
+                <span {...stylex.props(styles.attention)}>
+                  {`${again} ${plural(again, "needs", "need")} signing in again`}
+                </span>
+              )}
+            </ItemActions>
+          </Item>
         );
       })}
-    </ul>
+    </Rows>
   );
 };
 
@@ -211,119 +235,44 @@ export const StillToConnectRows = ({
   const apps = neededApps(integrations.needed);
   const { requests } = integrations;
   if (apps.length === 0 && requests.length === 0) {
-    return (
-      <p className="text-muted-foreground border-t px-5 py-4">
-        Every app the workflows need is connected.
-      </p>
-    );
+    return <PanelNote>Every app the workflows need is connected.</PanelNote>;
   }
   return (
-    <ul className="flex flex-col">
-      {apps.map((app) => {
-        const workflows = formatList(app.workflows);
-        return (
-          <li
-            className="flex items-center gap-3 border-t px-5 py-3"
-            key={app.key}
-          >
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span>{app.name}</span>
-              <span className="text-muted-foreground text-xs">
-                {`For ${workflows}`}
-              </span>
-            </span>
-            <span className="text-status-attention flex-none text-xs">
+    <Rows>
+      {apps.map((app) => (
+        <Item key={app.key} size="sm">
+          <ItemContent>
+            <ItemTitle>{app.name}</ItemTitle>
+            <ItemDescription>{`For ${formatList(app.workflows)}`}</ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            <span {...stylex.props(styles.attention, styles.small)}>
               {needWords[app.state]}
             </span>
-          </li>
-        );
-      })}
+          </ItemActions>
+        </Item>
+      ))}
       {requests.map((request) => {
-        const name = appName(request);
         const { waiting } = request;
         const since = formatDate(request.since);
         return (
-          <li
-            className="flex items-center gap-3 border-t px-5 py-3"
+          <Item
             key={`${request.source}:${request.provider}:${request.decidedBy}`}
+            size="sm"
           >
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span>{name}</span>
-              <span className="text-muted-foreground text-xs">
+            <ItemContent>
+              <ItemTitle>{appName(request)}</ItemTitle>
+              <ItemDescription>
                 {`Asked for in ${waiting} ${plural(waiting, "chat", "chats")} since ${since}, waiting on ${decidedByWords[request.decidedBy]}`}
-              </span>
-            </span>
-            <Badge variant="outline">Asked for</Badge>
-          </li>
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Badge variant="outline">Asked for</Badge>
+            </ItemActions>
+          </Item>
         );
       })}
-    </ul>
-  );
-};
-
-/** One workflow, and each of its bindings no working connection serves. */
-interface WaitingWorkflow {
-  id: string;
-  name: string;
-  needs: AdminNeeded[];
-}
-
-const waitingWorkflows = (
-  needed: readonly AdminNeeded[]
-): WaitingWorkflow[] => {
-  const workflows = new Map<string, WaitingWorkflow>();
-  for (const need of needed) {
-    const workflow = workflows.get(need.workflow.id) ?? {
-      id: need.workflow.id,
-      name: need.workflow.name,
-      needs: [],
-    };
-    workflow.needs.push(need);
-    workflows.set(need.workflow.id, workflow);
-  }
-  return [...workflows.values()];
-};
-
-/** What one binding waits on: its app and why, or that no app was approved for it. */
-const needLine = (need: AdminNeeded): string =>
-  need.app === null
-    ? `${need.alias}: ${needWords.unbound}`
-    : `${need.alias}: ${appName(need.app)}, ${needWords[need.state].toLowerCase()}`;
-
-/**
- * The company's workflows that can't run as they are, for a connection:
- * each with every binding of its current version that no working
- * connection serves.
- */
-export const WaitingOnConnectionsRows = ({
-  integrations,
-}: {
-  integrations: AdminIntegrations;
-}) => {
-  const workflows = waitingWorkflows(integrations.needed);
-  if (workflows.length === 0) {
-    return (
-      <p className="text-muted-foreground border-t px-5 py-4">
-        No workflow waits on a connection.
-      </p>
-    );
-  }
-  return (
-    <ul className="flex flex-col">
-      {workflows.map((workflow) => (
-        <li
-          className="flex flex-wrap items-start justify-between gap-x-6 gap-y-1 border-t px-5 py-3"
-          key={workflow.id}
-        >
-          <span className="min-w-0">{workflow.name}</span>
-          <span className="flex flex-col text-xs lg:items-end">
-            {workflow.needs.map((need) => (
-              <Attention key={need.alias}>{needLine(need)}</Attention>
-            ))}
-          </span>
-        </li>
-      ))}
-    </ul>
+    </Rows>
   );
 };
 
@@ -337,26 +286,29 @@ export const AskedOfGraspRows = ({
 }: {
   asked: readonly AdminAppAsked[];
 }) => (
-  <ul className="flex flex-col">
+  <Rows>
     {asked.map((app) => (
-      <li className="flex items-center gap-3 border-t px-5 py-3" key={app.id}>
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span>{app.name}</span>
-          <span className="text-muted-foreground text-xs">
+      <Item key={app.id} size="sm">
+        <ItemContent>
+          <ItemTitle>{app.name}</ItemTitle>
+          <ItemDescription>
             {`Asked for on ${formatDate(app.askedAt)}, as Composio doesn’t have it`}
-          </span>
-        </span>
-        <Button
-          aria-label={`Asked of Grasp: open ${app.name} on Apps asked for`}
-          nativeButton={false}
-          render={<Link search={{ app: appKey(app.name) }} to="/connectors" />}
-          size="sm"
-          variant="outline"
-        >
-          Asked of Grasp
-          <ArrowRightIcon data-icon="inline-end" />
-        </Button>
-      </li>
+          </ItemDescription>
+        </ItemContent>
+        <ItemActions>
+          <Button
+            aria-label={`Asked of Grasp: open ${app.name} on Apps asked for`}
+            asChild
+            size="sm"
+            variant="outline"
+          >
+            <Link search={{ app: appKey(app.name) }} to="/connectors">
+              Asked of Grasp
+              <Icon icon={ArrowRightIcon} />
+            </Link>
+          </Button>
+        </ItemActions>
+      </Item>
     ))}
-  </ul>
+  </Rows>
 );
