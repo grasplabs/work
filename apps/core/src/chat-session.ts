@@ -60,6 +60,9 @@ const opensMost = 6;
 /** Most a Harness that failed may take to close before the object resets. */
 const closeMs = 30_000;
 
+/** Most the Workspace may take to hear a chat was given up on (`#giveUp`). */
+const noticeMs = 20_000;
+
 /**
  * Kept once the object is erased (`erase`), and nothing else: it never
  * opens pi again, so nothing that reaches it later (a note on a decision,
@@ -424,23 +427,35 @@ export class ChatSession extends DurableObject<Env> {
         chatSession: name,
         failedOpens: this.#failedOpens(),
       });
+      // A fallback first: a notice that fails, takes too long or resets
+      // the object leaves an alarm that tells it again.
+      await this.ctx.storage.setAlarm(Date.now() + backoffMs(opensMost));
       const [workspaceId, chatId] = name.split("/");
-      try {
-        await callObject(async () => {
-          await workspace(
-            this.env,
-            workspaceIdSchema.parse(workspaceId)
-          ).turnRunning(chatIdSchema.parse(chatId), false);
-        });
-      } catch (error) {
-        log.error("chat.gave_up_untold", {
-          chatSession: name,
-          ...errorFields(error),
-        });
-        await this.ctx.storage.setAlarm(Date.now() + backoffMs(opensMost));
-        return;
+      const telling = (async () => {
+        try {
+          await callObject(async () => {
+            await workspace(
+              this.env,
+              workspaceIdSchema.parse(workspaceId)
+            ).turnRunning(chatIdSchema.parse(chatId), false);
+          });
+          return true;
+        } catch (error) {
+          log.error("chat.gave_up_untold", {
+            chatSession: name,
+            ...errorFields(error),
+          });
+          return false;
+        }
+      })();
+      // Within the block's own time limit.
+      const told = await Promise.race([
+        telling,
+        scheduler.wait(noticeMs).then(() => false),
+      ]);
+      if (told) {
+        await this.ctx.storage.deleteAlarm();
       }
-      await this.ctx.storage.deleteAlarm();
     });
   }
 }
