@@ -35,7 +35,7 @@ import {
 } from "../frame/theme.ts";
 import { TopErrorBar } from "../frame/top-error.tsx";
 import { useCore } from "../use-core.ts";
-import { allowSound, setVoiceOn, useSay, useVoice } from "../voice/voice.ts";
+import { allowSound, setVoiceOn, speak, useVoice } from "../voice/voice.ts";
 import type { Pose } from "./field/engine.ts";
 import { fromTheTop } from "./field/poses.ts";
 import { StephenField } from "./field/stephen-field.tsx";
@@ -515,8 +515,31 @@ const spokenStep = (title: string, body: ReactNode): string => {
 };
 
 /**
+ * What Stephen has said as its step arrived, in this visit: back on a step, he doesn't say it
+ * again (Ruben: "he's not going to narrate that again"). Starting the onboarding over loads the
+ * page anew, and so forgets it.
+ */
+const saidOnArrival = new Set<string>();
+
+/** Stephen says `line` as its step arrives, after `delay` ms: once in a visit, not again on the way back. */
+const useSayOnce = (line: string, delay: number, when: boolean): void => {
+  useEffect(() => {
+    const id =
+      when && !saidOnArrival.has(line)
+        ? window.setTimeout(() => {
+            saidOnArrival.add(line);
+            speak(line);
+          }, delay)
+        : undefined;
+    return () => {
+      window.clearTimeout(id);
+    };
+  }, [line, delay, when]);
+};
+
+/**
  * One step: the serif title in Stephen's voice (he says it, and its line,
- * as the step arrives), one line under it, what
+ * as the step first arrives), one line under it, what
  * the step asks, and its end: its one `default` Button, an `outline` for a
  * lesser way, a `link` for a third.
  */
@@ -551,8 +574,8 @@ export const CalmStep = ({
   children?: ReactNode;
   end?: ReactNode;
 }) => {
-  // Stephen says the step as it arrives: his own words for it, else its title and its line.
-  useSay(spoken ?? spokenStep(title, body), { delay: 250, when: !silent });
+  // Stephen says the step as it first arrives: his own words for it, else its title and its line.
+  useSayOnce(spoken ?? spokenStep(title, body), 250, !silent);
   return (
     <section
       {...stylex.props(styles.step, figure !== undefined && styles.stepCentred)}
