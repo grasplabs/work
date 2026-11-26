@@ -37,15 +37,17 @@
  * through, so the agent and Apps learn nothing of its shape (GRA-2330).
  * It refuses a call of `json` on a `v` imported under any name, or read
  * off a namespace import, unless a comment beside it says why the shape
- * is free-form (a vendor's custom fields): on lines of its own, ending
- * on the line right before the call or the property that holds it
- * (outside an object, its statement). A comment after code on its line explains nothing: it would
+ * is free-form (a vendor's custom fields): on lines of its own, ending on
+ * the line right before the call, or before the property that holds it
+ * (outside an object, its statement) or one around it that starts on the
+ * same line. A comment after code on its line explains nothing: it would
  * stand before whatever comes next, and no-inline-comments refuses it
- * anyway. A comment with no words, or a tool's directive
- * (`eslint`, `oxlint`, `@ts-`, `oxfmt-ignore`, `prettier-ignore`), is no
- * such comment. What the OpenAPI generator writes
- * (`tools.gen.ts`) is never linted: it writes `v.json()` only where the
- * spec gives the value no shape `v` can hold.
+ * anyway. A comment with no words, or a tool's directive (`eslint`,
+ * `oxlint`, `@ts-`, `oxfmt-ignore`, `prettier-ignore`), is no such
+ * comment, but one may stand between the explanation and the code. What
+ * the OpenAPI generator writes (`tools.gen.ts`) is never linted: it
+ * writes `v.json()` only where the spec gives the value no shape `v` can
+ * hold.
  *
  * icon-has-move: every Lucide icon the app imports moves in its own parts
  * when its control is pointed at (apps/web/src/icon-moves.css, the
@@ -584,22 +586,41 @@ const toolDirective =
 const hasWords = /[^\s*]/u;
 
 /** The statement lists, whose members are the statements a comment stands before. */
-const statementLists = new Set(["Program", "BlockStatement", "StaticBlock"]);
+const statementLists = new Set([
+  "Program",
+  "BlockStatement",
+  "StaticBlock",
+  "SwitchCase",
+]);
+
+/** Whether `node` is a property, a class's field or a statement, with the export that wraps it. */
+const isHolder = (node: Node): boolean =>
+  node.type === "Property" ||
+  node.type === "PropertyDefinition" ||
+  statementLists.has(node.parent?.type ?? "");
 
 /**
- * The nearest property that holds `call`, or else its statement, with the
- * export that wraps it.
+ * What a comment explaining `call` may stand before: the call, the nearest
+ * property or statement that holds it, and those around that one which
+ * start on its line, up to the statement.
  */
-const holderOf = (call: Node): Node => {
-  let node = call;
-  while (
-    node.type !== "Property" &&
-    node.parent !== undefined &&
-    !statementLists.has(node.parent.type)
-  ) {
-    node = node.parent;
+const holdersOf = (call: Node): Node[] => {
+  const holders = [call];
+  let line: number | undefined;
+  for (let node = call.parent; node !== undefined; node = node.parent) {
+    if (!isHolder(node)) {
+      continue;
+    }
+    line ??= node.loc?.start.line;
+    if (node.loc?.start.line !== line) {
+      break;
+    }
+    holders.push(node);
+    if (statementLists.has(node.parent?.type ?? "")) {
+      break;
+    }
   }
-  return node;
+  return holders;
 };
 
 /** The import specifier that binds `node`, an identifier, where one does. */
@@ -654,18 +675,28 @@ const noUnexplainedJson = {
     const { sourceCode } = context;
     const explains = ({ value }: Token): boolean =>
       hasWords.test(value) && !toolDirective.test(value);
-    // A comment on the lines right before `node`, with nothing else on them.
-    const leads = (node: Node): boolean =>
-      sourceCode.getCommentsBefore(node).some((comment) => {
+    // The comments right before `node`, each on lines of its own and
+    // ending on the line before the next, read back from `node` until one
+    // explains it.
+    const leads = (node: Node): boolean => {
+      let line = node.loc?.start.line;
+      for (const comment of sourceCode.getCommentsBefore(node).toReversed()) {
         const before = sourceCode.getTokenBefore(comment, {
           includeComments: true,
         });
-        return (
-          explains(comment) &&
-          (before === null || before.loc.end.line < comment.loc.start.line) &&
-          comment.loc.end.line + 1 === node.loc?.start.line
-        );
-      });
+        if (
+          comment.loc.end.line + 1 !== line ||
+          (before !== null && before.loc.end.line >= comment.loc.start.line)
+        ) {
+          return false;
+        }
+        if (explains(comment)) {
+          return true;
+        }
+        ({ line } = comment.loc.start);
+      }
+      return false;
+    };
     return {
       CallExpression: (node: Node): void => {
         const { callee } = node;
@@ -676,7 +707,7 @@ const noUnexplainedJson = {
         ) {
           return;
         }
-        if (!leads(node) && !leads(holderOf(node))) {
+        if (!holdersOf(node).some(leads)) {
           context.report({ node, messageId: "free" });
         }
       },

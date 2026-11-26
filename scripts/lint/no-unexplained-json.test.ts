@@ -25,7 +25,7 @@ const free = (name: string, code: string, count = 1) => ({
 });
 
 /** A connector's `code`, let through. */
-const typed = (name: string, code: string) => ({
+const explained = (name: string, code: string) => ({
   name,
   code,
   filename: "connector.ts",
@@ -72,7 +72,7 @@ tester.run("grasp/no-unexplained-json", rule, {
     ),
     free(
       "a comment before the object that holds its property",
-      `${imports}tool({\n  // The deal as the vendor answers it.\n  returns: v.object({ deal: v.json() }),\n});`
+      `${imports}tool({\n  // The deal as the vendor answers it.\n  returns: v.object({\n    deal: v.json(),\n  }),\n});`
     ),
     free(
       "a comment that only turns another rule off",
@@ -123,35 +123,55 @@ tester.run("grasp/no-unexplained-json", rule, {
     ),
   ],
   valid: [
-    typed(
+    explained(
+      "a comment before a statement on one line",
+      `${imports}// Each company names its own custom fields.\nconst Deal = v.object({ fields: v.json() });`
+    ),
+    explained(
+      "a comment before a property on one line",
+      `${imports}const Outer = v.object({\n  // Each company names its own custom fields.\n  deal: v.object({ fields: v.json() }),\n});`
+    ),
+    explained(
+      "a comment above a directive",
+      `${imports}const Deal = v.object({\n  // Each company names its own custom fields.\n  // oxlint-disable-next-line no-console\n  fields: v.json(),\n});`
+    ),
+    explained(
+      "a comment before a class's field",
+      `${imports}class Schemas {\n  // Each company names its own custom fields.\n  static fields = v.json();\n}`
+    ),
+    explained(
+      "a comment before a statement of a case",
+      `${imports}const pick = (kind) => {\n  switch (kind) {\n    case "free":\n      // Each company names its own custom fields.\n      return v.json();\n    default:\n      return v.string();\n  }\n};`
+    ),
+    explained(
       "a comment before its property",
       `${imports}tool({\n  args: {},\n  returns: v.object({\n    // Each company names its own custom fields.\n    custom_fields: v.record(v.json()).optional(),\n  }),\n});`
     ),
-    typed(
+    explained(
       "a comment on the line before it among arguments",
       `${imports}const Value = v.union(\n  v.string(),\n  // Any of the vendor's own.\n  v.json()\n);`
     ),
-    typed(
+    explained(
       "a comment before its declaration",
       `${imports}/** Each company names its own custom fields. */\nconst Fields = v.record(v.json());`
     ),
-    typed(
+    explained(
       "a comment before its exported declaration",
       `${imports}// Each company names its own custom fields.\nexport const Fields = v.record(v.json());`
     ),
-    typed(
+    explained(
       "a typed schema",
       `${imports}tool({ args: { id: v.string() }, returns: v.object({ ok: v.boolean() }) });`
     ),
-    typed(
+    explained(
       "a response's json()",
       `${imports}const read = async (response) => await response.json();`
     ),
-    typed(
+    explained(
       "json() on a v the SDK didn't give",
       "const v = { json: () => ({}) };\nconst Any = v.json();"
     ),
-    typed(
+    explained(
       "json() on a parameter that hides the imported v",
       `${imports}const read = (v) => v.json();`
     ),
