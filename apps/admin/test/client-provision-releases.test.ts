@@ -47,6 +47,7 @@ import {
 import { mockCloudflareApi } from "./cloudflare-api-mock.ts";
 import { clientScripts } from "./grasp-account.ts";
 import { db, staff } from "./hosting.ts";
+import { onPi } from "./releases.ts";
 import { useStoreSecrets } from "./secrets-store.ts";
 import { setupPage } from "./setup-page.ts";
 
@@ -245,6 +246,66 @@ describe("provisioning a placed client", () => {
       past: "rollback_past_migration",
       behind: "release_behind_migration",
       uploaded: 0,
+    });
+  });
+
+  it("never takes a live client back across a change in how chats are stored, by a rollback or a release to an older one, and goes back within one", async () => {
+    const first = await importRelease({
+      notes: "feat(core): pi 1.4",
+      ...onPi("1.4.2"),
+    });
+    const { account, clientId } = await liveClient(first);
+    const second = await importRelease({
+      notes: "chore(deps): pi 1.6",
+      ...onPi("1.6.0"),
+    });
+    await startClientRelease(db, staff, await attempt(clientId), {
+      releaseId: second.releaseId,
+    });
+    await runClientProvision(context, await attempt(clientId));
+    const uploads = account.scriptUploads.length;
+
+    const past = await codeOf(
+      startClientRelease(db, staff, await attempt(clientId), { rollback: true })
+    );
+    const behind = await codeOf(
+      startClientRelease(db, staff, await attempt(clientId), {
+        releaseId: first.releaseId,
+      })
+    );
+    const refused = {
+      uploaded: account.scriptUploads.length - uploads,
+      operation: await operationOf(clientId),
+    };
+    // A patch of the same minor stores chats as it does: back is fine.
+    const third = await importRelease({
+      notes: "chore(deps): pi 1.6 patch",
+      ...onPi("1.6.1"),
+    });
+    await startClientRelease(db, staff, await attempt(clientId), {
+      releaseId: third.releaseId,
+    });
+    await runClientProvision(context, await attempt(clientId));
+    const back = await codeOf(
+      startClientRelease(db, staff, await attempt(clientId), { rollback: true })
+    );
+    await runClientProvision(context, await attempt(clientId));
+
+    expect({
+      past,
+      behind,
+      refused,
+      back,
+      runs: await runs(clientId),
+    }).toMatchObject({
+      past: "rollback_past_chat_storage",
+      behind: "release_behind_chat_storage",
+      refused: {
+        uploaded: 0,
+        operation: { releaseId: second.releaseId, status: "done" },
+      },
+      back: "started",
+      runs: { core: second.releaseId, connect: second.releaseId },
     });
   });
 
