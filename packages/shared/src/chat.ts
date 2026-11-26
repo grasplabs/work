@@ -9,7 +9,12 @@ import type {
 import type { ChatSavedMemory } from "./brain-memories.ts";
 import type { DependencyRequest } from "./dependencies.ts";
 import type { AppId } from "./ids.ts";
-import type { ModelEffort, ModelEfforts, ModelErrorCode } from "./models.ts";
+import type {
+  ModelEffort,
+  ModelEfforts,
+  ModelErrorCode,
+  ModelWait,
+} from "./models.ts";
 import type { PageBundle } from "./pages.ts";
 import type { Role } from "./roles.ts";
 import type { Subject, SubjectKind } from "./subject.ts";
@@ -1209,6 +1214,12 @@ export interface ChatUpdate {
    * until it ends. Left out by an earlier release.
    */
   checking?: boolean;
+  /**
+   * What the turn's model request waits on now, if anything: its AI
+   * provider's rate limit, or another model answering instead (the model
+   * gateway's `ModelWait`). Left out by an earlier release.
+   */
+  waiting?: ModelWait | null;
 }
 
 /**
