@@ -42,7 +42,7 @@ msgid "{0, plural, one {# thing that was said in it goes with it.} other {# thin
 msgstr "{0, plural, one {# chose qui y a été dite part avec.} other {# choses qui y ont été dites partent avec.}}"
 
 #. placeholder {0}: team.name
-#. placeholder {1}: lead.name
+#. placeholder {1}: formatList(ledBy)
 #: src/onboarding/leads-step.tsx
 msgid "{0} · led by {1}"
 msgstr "{0} · dirigée par {1}"
@@ -7245,8 +7245,8 @@ msgid "Everyone found"
 msgstr "Toutes les personnes trouvées"
 
 #: src/onboarding/leads-step.tsx
-msgid "Everyone from {signIn} is listed below. Untick anyone who isn’t taking part, and mark each team’s lead—I’ll talk to them first."
-msgstr "Tous les membres de {signIn} apparaissent ci-dessous. Décochez ceux qui ne participent pas et indiquez le responsable de chaque équipe — je commencerai par eux."
+msgid "Everyone from {signIn} is listed below. Untick anyone who isn’t taking part, and mark each team’s leads—I’ll talk to them first."
+msgstr "Tous les membres de {signIn} apparaissent ci-dessous. Décochez ceux qui ne participent pas et indiquez les responsables de chaque équipe — je commencerai par eux."
 
 #: src/settings/staff-access.tsx
 msgid "Everyone from Grasp is signed out at once, and nobody from Grasp can sign in again until a new window is opened."
@@ -12617,8 +12617,8 @@ msgid "Now for the people I’ll be talking to. I don’t have anyone yet, so ad
 msgstr "Passons aux personnes à qui je vais parler. Je n’ai encore personne, alors ajoutez-les ici par e-mail, ou déposez une liste du personnel si vous en avez une. Indiquez ensuite qui dirige chaque équipe. Je commence toujours par les responsables, pour qu’ils en entendent parler avant leur équipe."
 
 #: src/onboarding/leads-step.tsx
-msgid "Now let’s decide who I’ll be talking to. Everyone from {signIn} is already here—just untick anyone who shouldn’t be included, and mark each team’s lead. I always speak with leads first so they know what’s coming before their team does. Missing someone? Add them by email."
-msgstr "Voyons maintenant avec qui je vais échanger. Tous les membres de {signIn} sont déjà listés : décochez ceux qui ne participent pas et indiquez le responsable de chaque équipe. Je parle toujours aux responsables en premier pour qu’ils soient informés avant leur équipe. Il manque quelqu’un ? Ajoutez-le par e-mail."
+msgid "Now let’s decide who I’ll be talking to. Everyone from {signIn} is already here—just untick anyone who shouldn’t be included, and mark each team’s leads, as many as it has. I always speak with leads first so they know what’s coming before their team does. Missing someone? Add them by email."
+msgstr "Voyons maintenant avec qui je vais échanger. Tous les membres de {signIn} sont déjà listés : décochez ceux qui ne participent pas et indiquez les responsables de chaque équipe, autant qu’elle en compte. Je parle toujours aux responsables en premier pour qu’ils soient informés avant leur équipe. Il manque quelqu’un ? Ajoutez-le par e-mail."
 
 #: src/onboarding/company-step.tsx
 msgid "Now let’s get to know your company. A staff list works fine for that, one row per person with their team and job. Don’t have one at hand? No problem, skip it and we’ll sort it out together."
