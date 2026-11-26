@@ -23,7 +23,7 @@ export const composioToolkits = [
     composio_managed_auth_schemes: ["OAUTH2"],
     meta: {
       categories: [{ id: "crm", name: "CRM" }],
-      tools_count: 2,
+      tools_count: 4,
       description:
         "HubSpot is a CRM platform for marketing, sales and service. It brings teams together.",
       logo: "https://logos.composio.dev/api/hubspot",
@@ -49,7 +49,7 @@ export const composioToolkits = [
   // (test/mail-connection.ts), each holding the tools of `taggedTools`.
   ...["mail", "mail_own", "crm", "bulk"].map((slug) => ({
     slug,
-    name: `Test ${slug}`,
+    name: slug,
     composio_managed_auth_schemes: ["OAUTH2"],
     meta: { categories: [], tools_count: 1 },
   })),
@@ -64,11 +64,7 @@ const bulkTools = [
   "BULK_WOMBAT_READ_1",
 ];
 
-/**
- * The tools Composio tags read-only (`readOnlyHint`), by toolkit: those the
- * tests allow as reads. Connect runs a tool as a read only if Composio
- * tags it so; its other tools are listed without the tag.
- */
+/** The mail toolkits' tools Composio tags read-only, and the rest. */
 const mailReads = [
   "mail.search",
   "mail.read",
@@ -77,10 +73,17 @@ const mailReads = [
   "MAIL_READ",
 ];
 const mailChanges = ["mail.send", "MAIL_SEND", "MAIL_REPLY"];
+
+/**
+ * Each toolkit's tools: those Composio tags read-only (`readOnlyHint`),
+ * which the tests allow as reads, and the rest, listed without the tag.
+ * Connect runs a tool as a read only if Composio tags it so.
+ */
 const taggedTools: Record<string, { reads: string[]; changes: string[] }> = {
+  // With the CRM's tools in Stephen's eval (fixtures/stephen-world.ts).
   hubspot: {
-    reads: ["HUBSPOT_LIST_CONTACTS"],
-    changes: ["HUBSPOT_CREATE_CONTACT"],
+    reads: ["HUBSPOT_LIST_CONTACTS", "HUBSPOT_SEARCH_NOTES"],
+    changes: ["HUBSPOT_CREATE_CONTACT", "HUBSPOT_UPDATE_DEAL"],
   },
   acme_crm: { reads: [], changes: ["ACME_CRM_LIST_DEALS"] },
   mail: { reads: mailReads, changes: mailChanges },

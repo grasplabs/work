@@ -399,6 +399,12 @@ const actionFor = async (
   if (rule === undefined) {
     throw connectErrors.create("connect.action_not_found");
   }
+  // Core let it through as the class it read (`connectionOwners`), and held
+  // it to pointers only as a read: one Composio's tag made otherwise since
+  // is refused, so a read core took for a change never runs unpointed.
+  if (claims.toolClass !== undefined && claims.toolClass !== rule.class) {
+    throw connectErrors.create("connect.class_changed");
+  }
   const server = composioServer(env, connection);
   const tool = composioTool(await toolFor(server, action), rule);
   // A remote server's call of unknown outcome is never recovered: we

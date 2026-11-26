@@ -939,7 +939,7 @@ describe("offering catalog entries", () => {
     ]);
     await expect(
       anna.connections.catalogTools("composio", "hubspot")
-    ).resolves.toHaveLength(2);
+    ).resolves.toHaveLength(4);
   });
 
   it("is changed by the organization's admins only, never by staff, and only for entries there can be", async () => {

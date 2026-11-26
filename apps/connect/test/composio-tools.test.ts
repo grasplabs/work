@@ -282,6 +282,36 @@ describe("a Composio tool stored as a read", () => {
       unread: "held",
     });
   });
+
+  it("is refused when core let it through as another class than Composio's tag makes it now, so a read core took for a change never runs unpointed", async () => {
+    const connectionId = await addConnection({
+      provider: "attio",
+      server: `https://backend.composio.dev/v3/mcp/${crypto.randomUUID()}?connected_account_id=ca_attio`,
+      tools: JSON.stringify([{ name: "ATTIO_SEARCH_RECORDS", read: true }]),
+    });
+    const inChat = agentFor("user-anna", "agent-chat", "interactive");
+    const search = read(connectionId, "ATTIO_SEARCH_RECORDS", { query: "x" });
+    const as = async (toolClass: "read-company" | "change-company") =>
+      await outcome(callAs(inChat, search, { origin: chatOrigin, toolClass }));
+    // Core read the catalog while Composio was down: a change, no pointers.
+    const takenForChange = await as("change-company");
+    const asRead = await as("read-company");
+    // Core read it as a read; the catalog can't be read as it runs.
+    forgetComposioCatalog();
+    composio.state.health = "down";
+    const unreadNow = await as("read-company");
+    expect({
+      takenForChange,
+      asRead,
+      unreadNow,
+      ran: composio.state.mcp.ran.map(({ tool }) => tool),
+    }).toStrictEqual({
+      takenForChange: "connect.class_changed",
+      asRead: "ok",
+      unreadNow: "connect.class_changed",
+      ran: ["ATTIO_SEARCH_RECORDS"],
+    });
+  });
 });
 
 describe("a chat agent's read in a company app pointed at within some resources", () => {
