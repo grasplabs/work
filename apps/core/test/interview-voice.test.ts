@@ -608,7 +608,7 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
     }).toStrictEqual({ answered: true, cameBack: false });
   });
 
-  it("opens no more sessions on a link than a day's listening allows", async () => {
+  it("opens no more sessions on a link than a day's listening allows, also asked for all at once", async () => {
     const link = await opened();
     await plan(
       platformMistralKey,
@@ -618,24 +618,96 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
       }))
     );
     const before = await atMistral();
+    // Each held at the 15 minutes it is expected to last: four fill the
+    // hour, side by side as one after the other.
     const { result } = await answering([], async () => {
-      const statuses: number[] = [];
-      // Each counted at the 15 minutes it is expected to last: four fill the hour.
-      for (const _ of [1, 2, 3, 4, 5]) {
-        // oxlint-disable-next-line no-await-in-loop -- one after the other, as the budget fills
-        const join = await ask(link, {
-          action: "open",
-          event: "start",
-          ...standing,
-        });
-        statuses.push(join.status);
-      }
-      return statuses;
+      const joins = await Promise.all(
+        [1, 2, 3, 4, 5].map(
+          async () =>
+            await ask(link, { action: "open", event: "start", ...standing })
+        )
+      );
+      return joins
+        .map(({ status }) => status)
+        .toSorted((one, other) => one - other);
     });
     const after = await atMistral();
     expect({
       statuses: result,
       opened: after.length - before.length,
     }).toStrictEqual({ statuses: [200, 200, 200, 200, 429], opened: 4 });
+  });
+
+  it("keeps a quote across a pause when the words before it were written down already", async () => {
+    const link = await opened();
+    const first = kept("I check the invoices");
+    const rest = {
+      role: "user",
+      content: "in Exact every morning.",
+      timestamp: "2026-11-25T10:00:06.000Z",
+      latency: {},
+    };
+    await plan(platformMistralKey, [
+      { status: 200, body: openedSession },
+      {
+        status: 200,
+        body: { ...first, transcripts: first.transcripts.slice(0, 2) },
+      },
+      {
+        status: 200,
+        body: {
+          ...first,
+          transcripts: [...first.transcripts.slice(0, 2), rest],
+        },
+      },
+    ]);
+    const { result } = await answering(
+      [
+        notes({ facts: [], changes: [] }),
+        notes({
+          facts: [
+            {
+              tag: "step",
+              text: "You check the invoices in Exact every morning.",
+              record: "Check the invoices in Exact every morning.",
+              quote: "I check the invoices in Exact every morning",
+            },
+          ],
+          changes: [],
+        }),
+      ],
+      async () => {
+        const join = await ask(link, {
+          action: "open",
+          event: "start",
+          ...standing,
+        });
+        const joined: VoiceSessionJoin = await join.json();
+        const firstRead = await ask(link, {
+          action: "answer",
+          ...standing,
+          pass: joined.pass,
+          noted: 0,
+        });
+        const firstAnswer: VoiceAnswered = await firstRead.json();
+        const secondRead = await ask(link, {
+          action: "answer",
+          ...standing,
+          pass: joined.pass,
+          noted: firstAnswer.noted,
+        });
+        const second: VoiceAnswered = await secondRead.json();
+        return { first: firstAnswer.noted, second };
+      }
+    );
+    expect({
+      first: result.first,
+      noted: result.second.noted,
+      kept: result.second.turn?.facts.map(({ text }) => text),
+    }).toStrictEqual({
+      first: 1,
+      noted: 2,
+      kept: ["You check the invoices in Exact every morning."],
+    });
   });
 });

@@ -186,6 +186,7 @@ export const VoiceLab = () => {
   const [locale, setLocale] = useState<InterviewLocale>("en");
   const [call, setCall] = useState<Call>(noCall);
   const calling = useRef<Calling | null>(null);
+  const latest = useRef<symbol | null>(null);
   // Leaving the page ends the call: the microphone is let go, and the session closed.
   useEffect(
     () => () => {
@@ -195,7 +196,15 @@ export const VoiceLab = () => {
   );
   const busy = call.stands === "connecting" || call.stands === "live";
   const start = () => {
-    calling.current = beginCall({ locale }, setCall);
+    // Only the latest call shows: one ended a moment ago may still answer
+    // its close after "Talk again".
+    const mine = Symbol("call");
+    latest.current = mine;
+    calling.current = beginCall({ locale }, (next) => {
+      if (latest.current === mine) {
+        setCall(next);
+      }
+    });
   };
   const end = () => {
     calling.current?.end();

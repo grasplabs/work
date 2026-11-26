@@ -372,6 +372,39 @@ const heardOf = (answer: unknown): Heard | null => {
   return { lines, phase, answeredIn };
 };
 
+/**
+ * Their answers in `lines` as the notes are checked against them: what
+ * they said since the first `noted` answers as one answer, with the ones
+ * just before it that nothing of Stephen's came between, so a quote
+ * across a pause Mistral split an answer at stands, also where part of it
+ * was written down before. Quotes stand in it or in the two before.
+ */
+const joinedSince = (
+  lines: readonly VoiceLine[],
+  noted: number
+): { text: string }[] => {
+  const theirs = lines.flatMap((line, at) =>
+    line.from === "person" ? [{ text: line.text, at }] : []
+  );
+  let start = Math.min(noted, theirs.length);
+  while (
+    start > 0 &&
+    start < theirs.length &&
+    theirs[start - 1]?.at === (theirs[start]?.at ?? 0) - 1
+  ) {
+    start -= 1;
+  }
+  return [
+    ...theirs.slice(0, start).map(({ text }) => ({ text })),
+    {
+      text: theirs
+        .slice(start)
+        .map(({ text }) => text)
+        .join(" "),
+    },
+  ];
+};
+
 // ---- The route ----------------------------------------------------------
 
 /** A 2xx answer's JSON; undefined for any other answer, or one that isn't JSON. Read once, whole. */
@@ -449,7 +482,18 @@ const open = async (
   if (!listening.ok) {
     return linkRefusal(listening.code, requestId);
   }
-  if (listening.value.heard >= heardBudgets.link) {
+  const { who } = listening.value;
+  const seconds = expectedSeconds[context.kind];
+  // Held before Mistral is asked, in one write with the check, so sessions
+  // opened side by side can't each find the budget unspent; given back
+  // when none opens.
+  if (
+    !(await onboardingStore(env).reserveListening(
+      who,
+      seconds,
+      heardBudgets.link
+    ))
+  ) {
     log.warn("interview.voice_budget_spent", { requestId });
     return failed(
       "That is as long as the interview can run today. Come back tomorrow to go on.",
@@ -480,7 +524,7 @@ const open = async (
       trigger: { type: "system" },
       work: { onboarding: true },
       requestId,
-      seconds: expectedSeconds[context.kind],
+      seconds,
       session: {
         instructions: instructionsOf(
           voice.text,
@@ -513,6 +557,7 @@ const open = async (
       requestId,
       ...(code === undefined ? {} : { code }),
     });
+    await onboardingStore(env).releaseListening(who, seconds);
     return failed("The interview could not start. Try again.", 503);
   }
   const raw = await jsonOrNothing(answered);
@@ -528,16 +573,18 @@ const open = async (
     if (answered.ok && unusable.success) {
       await closeQuietly(env, unusable.data.id, requestId);
     }
+    await onboardingStore(env).releaseListening(who, seconds);
     return failed("The interview could not start. Try again.", 503);
   }
   const { id, participant_token, server_url, expires_at } = opened.data;
   let pass: string;
   try {
-    await onboardingStore(env).countHeard(
-      listening.value.who,
-      "interviews",
-      expectedSeconds[context.kind]
-    );
+    // In the onboarding's use, as a line said is.
+    await onboardingStore(env).meter({
+      purpose: "interviews",
+      model: "voice",
+      seconds,
+    });
     await onboardingStore(env).turnRan(secretMark, {
       mark: voice.mark,
       interviewer: "stephen",
@@ -694,18 +741,7 @@ const answer = async (
       more: false,
     },
     {
-      // What they said since the last notes, as one answer: Mistral may
-      // split a spoken answer at a pause, or several may come in while
-      // notes are written. Quotes stand in it or in the two before.
-      answers: [
-        ...answers.slice(0, asked.noted),
-        {
-          text: answers
-            .slice(asked.noted)
-            .map(({ text }) => text)
-            .join(" "),
-        },
-      ],
+      answers: joinedSince(heard.lines, asked.noted),
       known: asked.facts.map(({ id }) => id),
       phase,
     }
