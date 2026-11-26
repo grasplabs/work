@@ -8313,7 +8313,6 @@ msgid "Groups of teams"
 msgstr "Groups of teams"
 
 #: src/drafts/sharing.tsx
-#: src/people/person-picker.tsx
 #: src/routes/_shell.settings.members.tsx
 #: src/settings/erasures.tsx
 msgid "Guest"
@@ -11504,10 +11503,6 @@ msgstr "No one has shared an App with you yet."
 msgid "No one yet: open it to add people"
 msgstr "No one yet: open it to add people"
 
-#: src/people/person-picker.tsx
-msgid "No owner yet"
-msgstr "No owner yet"
-
 #: src/apps/app-page.tsx
 msgid "No page yet"
 msgstr "No page yet"
@@ -11722,10 +11717,6 @@ msgstr "Nobody sees the records in {table}, Sam included."
 #: src/connections/connected-dialog.tsx
 msgid "Nobody uses it in chat until you choose who may, and Apps and workflows only through the permissions you grant."
 msgstr "Nobody uses it in chat until you choose who may, and Apps and workflows only through the permissions you grant."
-
-#: src/people/person-picker.tsx
-msgid "Nobody with that name."
-msgstr "Nobody with that name."
 
 #: src/agents/agent-facts.tsx
 #: src/agents/new-agent.tsx
@@ -13177,14 +13168,6 @@ msgctxt "who answers for an app"
 msgid "Owner"
 msgstr "Owner"
 
-#: src/people/person-picker.tsx
-msgid "Owner: {owner}. Change owner"
-msgstr "Owner: {owner}. Change owner"
-
-#: src/people/person-picker.tsx
-msgid "Owner: nobody yet. Change owner"
-msgstr "Owner: nobody yet. Change owner"
-
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Owns"
@@ -14160,10 +14143,6 @@ msgstr "Reading it kept failing, so your triggers there start nothing new for no
 msgid "Reading its instructions…"
 msgstr "Reading its instructions…"
 
-#: src/people/people-teams-picker.tsx
-msgid "Reading people and teams…"
-msgstr "Reading people and teams…"
-
 #: src/connections/sync-places.tsx
 msgid "Reading the places"
 msgstr "Reading the places"
@@ -14183,10 +14162,6 @@ msgstr "Reading the workspace"
 #: src/activity/audit-words.ts
 msgid "Reading what changed at a connection failed"
 msgstr "Reading what changed at a connection failed"
-
-#: src/people/person-picker.tsx
-msgid "Reading who can own it…"
-msgstr "Reading who can own it…"
 
 #: src/onboarding/setup-steps.tsx
 msgid "Reading your staff list"
@@ -15511,11 +15486,6 @@ msgstr "Search members"
 msgid "Search models"
 msgstr "Search models"
 
-#: src/people/person-picker.tsx
-msgid "Search people"
-msgstr "Search people"
-
-#: src/people/people-teams-picker.tsx
 #: src/projects/project-people.tsx
 msgid "Search people and teams"
 msgstr "Search people and teams"
