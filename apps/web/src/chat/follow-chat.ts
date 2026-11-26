@@ -161,9 +161,12 @@ export const followChat = (
           ),
         startRetryMs,
         // No connection came in its few seconds: say so, rather than wait
-        // on, as a page does when core is out of reach.
+        // on, as a page does when core is out of reach. Stopped: nothing
+        // more to try.
         (failure) =>
-          isTransient(failure) && !(failure instanceof CoreTimeoutError)
+          !stopping.signal.aborted &&
+          isTransient(failure) &&
+          !(failure instanceof CoreTimeoutError)
       );
       release = () => {
         void releaseQuietly(subscription);

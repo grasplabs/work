@@ -63,7 +63,8 @@ const problemOf = (file: File): string | undefined => {
  * `asking`, where a connection that broke on the way says Grasp can't be
  * reached: a socket's own words ("Peer closed WebSocket") are nobody's to
  * read, and whether the question got there is core's to say once it is
- * back (its key, `questionKeyFor`).
+ * back (its key, `questionKeyFor`). A file the browser couldn't read (moved
+ * since it was added) says so itself.
  */
 const reaching =
   <T>(asking: (session: Session) => Promise<T>) =>
@@ -71,7 +72,7 @@ const reaching =
     try {
       return await asking(session);
     } catch (error) {
-      throw isConnectionFailure(error)
+      throw isConnectionFailure(error) && !(error instanceof DOMException)
         ? new CoreTimeoutError(timeoutMs)
         : error;
     }
@@ -150,7 +151,11 @@ export const useAsk = (
 ) => {
   const { identity } = useRouteContext({ from: "/_shell" });
   const { busy, failure, run } = useCoreAction();
-  const reconnecting = useReconnecting(busy || running);
+  // A question with files on its way is one large message, which a ping
+  // waits behind: it isn't checked meanwhile, or a slow upload would read
+  // as a dead connection.
+  const [uploading, setUploading] = useState(false);
+  const reconnecting = useReconnecting(running || (busy && !uploading));
   const [text, setText] = useState("");
   // Why dictating into the text stopped on its own, kept with it: the box
   // it stopped in may have gone (dictation.ts).
@@ -241,6 +246,7 @@ export const useAsk = (
       return false;
     }
     sending.current = true;
+    setUploading(carried.length > 0);
     const named = chatMentionsOf(mentioned);
     // A new chat starts with the agent picked, else the first one the
     // question mentions: the first agent, paused, never stops it.
@@ -318,7 +324,14 @@ export const useAsk = (
   return {
     composer: {
       text,
-      onText: setText,
+      onText: (typed: string) => {
+        setText(typed);
+        // Changed since it failed to send: whatever is sent next is a new
+        // question, even in the same words.
+        if (unsent.current !== null && typed !== unsent.current.question) {
+          unsent.current = null;
+        }
+      },
       stopNote,
       mentions,
       onMentions: setMentions,

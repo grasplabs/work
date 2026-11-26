@@ -561,6 +561,35 @@ describe("Chat's page from Make something", () => {
     ]);
   });
 
+  it("sends a question that failed as a new one once its words were changed, even back to the same words", async () => {
+    const { keys } = await shown(undefined, undefined, {
+      sends: [new Error("Peer closed WebSocket: 1006")],
+    });
+    // The box's words, each time all of them anew.
+    const write = async (words: string) => {
+      await act(async () => {
+        box().replaceChildren();
+        typeInPrompt(box(), words);
+        await Promise.resolve();
+      });
+    };
+    const ask = async (words: string) => {
+      await write(words);
+      await act(async () => {
+        box().closest("form")?.requestSubmit();
+        await Promise.resolve();
+      });
+      await settled();
+    };
+
+    await ask("Yes");
+    await write("Yes, go on");
+    await ask("Yes");
+
+    const sent = keys.filter((each) => each.startsWith("send "));
+    expect(new Set(sent).size).toBe(2);
+  });
+
   it("sends a question asked before core has said which models there are once it has, with no second press", async () => {
     const models = Promise.withResolvers<string[]>();
     const { asked } = await shown(undefined, undefined, {
