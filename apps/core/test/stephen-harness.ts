@@ -39,6 +39,7 @@ import { newTeam } from "./admin-teams.ts";
 import { model, setObjectEnv } from "./agent-chat.ts";
 import { grantReviewed } from "./apps.ts";
 import { eventsAfterWithHead, logHead } from "./audit-events.ts";
+import { chooseAudience } from "./brain-audiences.ts";
 import { brainBudgetMonth, charged } from "./brain-harness.ts";
 import type { BrainModelSetup } from "./brain-harness.ts";
 import { percentile } from "./brain-scoring.ts";
@@ -547,6 +548,16 @@ export const setUpStephenCompany = async (
   // as an admin turns it on in Settings › Stephen: the register, and her
   // calendar and mail, which the connector reaches company-wide.
   const customerService = [held(teams, "customerService")];
+  // The company's account and its CRM are opened to Lisa's team, as an
+  // admin does on their cards (GRA-2322): their audience, which every
+  // grant to her agent stays within.
+  for (const connectionId of [company, crm]) {
+    // oxlint-disable-next-line no-await-in-loop -- one connection at a time
+    await chooseAudience(admin.api, connectionId, {
+      kind: "team",
+      teamId: held(teams, "customerService"),
+    });
+  }
   for (const toolClass of ["read-company", "change-company"] as const) {
     // oxlint-disable-next-line no-await-in-loop -- one class at a time
     await admin.api.connections.setToolClass(toolClass, {
