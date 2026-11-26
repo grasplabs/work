@@ -18,6 +18,10 @@ import type {
   StephenTurn,
   VoiceTag,
 } from "@grasp-os/shared/interview-turn";
+import type {
+  VoiceAnswered,
+  VoiceLine,
+} from "@grasp-os/shared/interview-voice";
 import { useSyncExternalStore } from "react";
 
 import { readingSeconds } from "../onboarding/setup.ts";
@@ -1592,6 +1596,8 @@ const happen = (happening: Happening): void => {
 let live: Live | null = null;
 /** Its pass, kept a moment after it is left, so the last answer is still written down. */
 let livePass: string | null = null;
+/** What the session heard, kept with its pass, for core to write down from where it reads no transcript of its own. */
+let liveSaid: (() => VoiceLine[] | null) | null = null;
 /** The pass of the session left last: a new one closes it, should it still be open. */
 let lastPass: string | null = null;
 /** How many of their answers in the session are written down. */
@@ -1687,10 +1693,10 @@ const lastAnswer = (): number =>
 /** Tells Stephen where the interview stands; when that fails he goes on as told before, and the next answer tells him again. */
 const instructQuietly = async (
   session: Live,
-  instructions: string
+  told: Pick<VoiceAnswered, "instructions" | "situation">
 ): Promise<void> => {
   try {
-    await session.instruct(instructions);
+    await session.instruct(told);
   } catch {
     // As above.
   }
@@ -1739,7 +1745,7 @@ const tookLive = (
     }
   }
   if (session !== null && live === session) {
-    void instructQuietly(session, answered.instructions);
+    void instructQuietly(session, answered);
   }
 };
 
@@ -1779,6 +1785,7 @@ const noteOnce = async (waited: number): Promise<number | null> => {
   }
   const session = live;
   const noted = liveNoted;
+  const said = liveSaid?.() ?? null;
   const answered = await answerVoice({
     action: "answer",
     ...standing,
@@ -1786,6 +1793,7 @@ const noteOnce = async (waited: number): Promise<number | null> => {
     noted,
     // Only a new session is told what came before.
     before: [],
+    ...(said === null ? {} : { said }),
   });
   if (isRefused(answered)) {
     return null;
@@ -1976,6 +1984,7 @@ const leaveLive = async ({ quick = false } = {}): Promise<void> => {
     await noteLive();
   }
   livePass = null;
+  liveSaid = null;
   await session.close();
 };
 
@@ -2092,6 +2101,7 @@ const goLive = async (): Promise<boolean> => {
   }
   live = joined;
   livePass = joined.pass;
+  liveSaid = joined.said;
   lastPass = joined.pass;
   liveNoted = 0;
   if (micMuted()) {
@@ -2106,6 +2116,21 @@ const goLive = async (): Promise<boolean> => {
 /** What they typed is their answer: typing over him stops him at once. */
 export const sendTyped = (text: string): void => {
   if (!on || text.trim() === "" || state.doing === "idle") {
+    return;
+  }
+  const typing = live?.type ?? null;
+  if (live !== null && typing !== null && progressNow().mode === "talk") {
+    // Typed while they talk, it goes to him in the session, as their turn.
+    typing(text.trim());
+    update((progress) =>
+      withSpoken(progress, {
+        from: "person",
+        text: text.trim(),
+        at: Date.now(),
+      })
+    );
+    meter.sent(performance.now());
+    void noteLive();
     return;
   }
   if (live !== null) {

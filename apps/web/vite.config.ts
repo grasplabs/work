@@ -164,7 +164,12 @@ export default defineConfig(({ command }) => ({
     // Fonts are always files of their own: Vite would inline the smallest
     // (a few of JetBrains Mono's subsets) as `data:` URLs, which the page's
     // CSP refuses (font-src is default-src, 'self'; core's security-headers.ts).
-    assetsInlineLimit: (file) => (file.endsWith(".woff2") ? false : undefined),
+    // The ElevenLabs SDK's audio worklets too (interview/live.ts): a worklet
+    // is a script, and script-src takes none from `data:`.
+    assetsInlineLimit: (file) =>
+      file.endsWith(".woff2") || file.includes("/@elevenlabs/client/worklets/")
+        ? false
+        : undefined,
   },
   test: {
     setupFiles: ["./src/test-setup.ts"],

@@ -99,6 +99,15 @@ export interface AiProviderSpec {
    * without.
    */
   sessions: string | undefined;
+  /**
+   * The path below its host where a conversation token for one of Grasp's
+   * own voice agents is asked (GET, its one query `?agent_id=<agent's
+   * ID>`, `agentTokenQuery`), and nothing else: ElevenLabs's agents, for
+   * Grasp's interviews (platform features only, never an organization's
+   * key). The browser joins the conversation with the token; Grasp's key
+   * never leaves connect. None for a provider without.
+   */
+  agentTokens: string | undefined;
   /** Where its key goes: `x-api-key: <key>`, `xi-api-key: <key>` or `authorization: Bearer <key>`. */
   keyHeader: AiKeyHeader;
   /** Where it runs, in plain words, for the admin. */
@@ -144,6 +153,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     queries: ["", "?beta=true"],
     realtime: [],
     sessions: undefined,
+    agentTokens: undefined,
     keyHeader: "x-api-key",
     whereItRuns: "Anthropic, United States",
     region: "us",
@@ -168,6 +178,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     queries: [""],
     realtime: [{ path: "/v1/realtime", query: "?intent=transcription" }],
     sessions: undefined,
+    agentTokens: undefined,
     keyHeader: "authorization",
     whereItRuns: "OpenAI, United States",
     region: "us",
@@ -193,6 +204,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     ],
     // Its voice agents' sessions, for Grasp's interviews.
     sessions: "/v1/audio/sessions",
+    agentTokens: undefined,
     keyHeader: "authorization",
     whereItRuns: "Mistral AI, European Union (France)",
     region: "eu",
@@ -211,6 +223,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     queries: [""],
     realtime: [],
     sessions: undefined,
+    agentTokens: undefined,
     keyHeader: "authorization",
     whereItRuns:
       "OpenRouter, United States, passing each call on to the model's provider",
@@ -227,6 +240,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     queries: [""],
     realtime: [],
     sessions: undefined,
+    agentTokens: undefined,
     keyHeader: "authorization",
     whereItRuns: "Wherever your endpoint runs",
     region: "custom",
@@ -245,6 +259,8 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     queries: ["?enable_logging=false&output_format=mp3_44100_128"],
     realtime: [],
     sessions: undefined,
+    // Its agents' conversation tokens, for Grasp's interviews.
+    agentTokens: "/v1/convai/conversation/token",
     keyHeader: "xi-api-key",
     whereItRuns: "ElevenLabs, United States",
     region: "us",
@@ -253,6 +269,12 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     statusPage: "https://status.elevenlabs.io",
   },
 };
+
+/**
+ * The one query an agent's conversation token is asked with
+ * (`agentTokens`): the agent's ID, nothing else.
+ */
+export const agentTokenQuery = /^\?agent_id=agent_[A-Za-z0-9]{1,64}$/u;
 
 /** The host a fixed provider's requests go to; none for a custom endpoint. */
 export const aiProviderHost = (provider: AiProviderId): string | undefined => {

@@ -65,11 +65,14 @@ const frontendTheme = "/theme.js";
 /**
  * Where the interview's live voice session is held (core's
  * onboarding/voice.ts hands the page a room at Mistral, which its SDK joins
- * over LiveKit): the room's socket, and the region lookup LiveKit makes on
- * the same host. Sound itself goes over WebRTC, which this policy doesn't govern.
+ * over LiveKit, or a token for Grasp's ElevenLabs agent, whose SDK joins
+ * its own LiveKit at livekit.rtc.elevenlabs.io and asks api.elevenlabs.io,
+ * or their EU residency hosts): the room's socket, and the region lookup
+ * LiveKit makes on the same host. Sound itself goes over WebRTC, which this
+ * policy doesn't govern.
  */
 export const voiceRoomSources =
-  "wss://*.livekit.cloud https://*.livekit.cloud wss://*.mistral.ai https://*.mistral.ai";
+  "wss://*.livekit.cloud https://*.livekit.cloud wss://*.mistral.ai https://*.mistral.ai wss://*.elevenlabs.io https://*.elevenlabs.io";
 
 export const frontendDirectives = (origin: string): Record<string, string> => ({
   "default-src": "'self'",

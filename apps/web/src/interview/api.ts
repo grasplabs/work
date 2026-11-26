@@ -39,7 +39,10 @@ import type {
   VoiceAnswered,
   VoiceSessionJoin,
 } from "@grasp-os/shared/interview-voice";
-import { interviewKindSchema } from "@grasp-os/shared/onboarding";
+import {
+  interviewKindSchema,
+  interviewLocaleSchema,
+} from "@grasp-os/shared/onboarding";
 import { t } from "@lingui/core/macro";
 import { z } from "zod";
 
@@ -537,13 +540,24 @@ export const hearRecording = async ({
   }
 };
 
-const voiceJoinSchema = z.object({
-  id: z.string().min(1),
-  participantToken: z.string().min(1),
-  serverUrl: z.url({ protocol: /^wss$/u }),
-  expiresAt: z.string(),
-  pass: z.string().min(1),
-}) satisfies z.ZodType<VoiceSessionJoin>;
+const voiceJoinSchema = z.discriminatedUnion("via", [
+  z.object({
+    via: z.literal("mistral"),
+    id: z.string().min(1),
+    participantToken: z.string().min(1),
+    serverUrl: z.url({ protocol: /^wss$/u }),
+    expiresAt: z.string(),
+    pass: z.string().min(1),
+  }),
+  z.object({
+    via: z.literal("elevenlabs"),
+    conversationToken: z.string().min(1),
+    prompt: z.string().min(1),
+    firstMessage: z.string(),
+    language: interviewLocaleSchema,
+    pass: z.string().min(1),
+  }),
+]) satisfies z.ZodType<VoiceSessionJoin>;
 
 const voiceAnsweredSchema = z.object({
   noted: z.int().min(0),
@@ -571,11 +585,13 @@ const voiceAnsweredSchema = z.object({
     })
     .nullable(),
   instructions: z.string(),
+  situation: z.string(),
 }) satisfies z.ZodType<VoiceAnswered>;
 
 /**
- * Opens the interview's live voice session at Mistral, through core
- * (`/api/interview/voice`): what the page joins its room with, never
+ * Opens the interview's live voice session, through core
+ * (`/api/interview/voice`): what the page joins it with (a room at
+ * Mistral, or a conversation token for Grasp's ElevenLabs agent), never
  * Grasp's key.
  */
 export const openVoice = async (

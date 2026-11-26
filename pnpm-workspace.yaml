@@ -179,6 +179,9 @@ catalog:
   # and the audio transport its SDK loads for it.
   "@mistralai/mistralai": 3.5.0
   livekit-client: 2.25.0
+  # The interview (apps/web): Stephen as Grasp's ElevenLabs agent, joined
+  # with a conversation token core asks for on Grasp's key.
+  "@elevenlabs/client": 1.37.1
   # Vercel's Chat SDK (MIT): one bot on Teams and Slack, its
   # state in Durable Objects (packages/chat). Its adapters
   # move together; keep them on chat's version.
