@@ -15,6 +15,7 @@ import type {
   SetupPlace,
 } from "@grasp-os/shared/onboarding-flow";
 import type { GateView } from "@grasp-os/shared/onboarding-gate";
+import { companyNameOf } from "@grasp-os/shared/organization";
 import type { Organization } from "@grasp-os/shared/organization";
 import { isAdmin } from "@grasp-os/shared/roles";
 import { useLingui } from "@lingui/react/macro";
@@ -326,15 +327,16 @@ const Setup = () => {
 };
 
 /**
- * The organization's name, for the message to the team; none when it has
- * none or core can't say, which leaves the rest of the onboarding as it is.
+ * The company's name, for the message to the team: never the placeholder
+ * core made the organization with (`companyNameOf`); none when nothing
+ * gives one or core can't say, which leaves the rest as it is.
  */
 const companyOf = async (
   organization: () => Promise<Organization>
 ): Promise<string | null> => {
   try {
-    const { name } = await organization();
-    return name.trim() === "" ? null : name;
+    const { name, signInDomains } = await organization();
+    return companyNameOf(name, signInDomains);
   } catch {
     return null;
   }
