@@ -33,7 +33,7 @@ export const connectBundle = path.join(testRun, "connect.js");
 export const testConnectorEntries = (): string[] => [
   ...connectorEntries(),
   path.join(connect, "test/fixtures/sample-sync-connector.ts"),
-  path.join(connect, "test/fixtures/sample-key-connector.ts"),
+  path.join(connect, "test/fixtures/sample-key/connector.ts"),
   path.join(connect, "test/fixtures/pipedrive/connector.ts"),
 ];
 

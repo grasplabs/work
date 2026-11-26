@@ -35,6 +35,7 @@
     "@modelcontextprotocol/sdk": "catalog:",
     "drizzle-kit": "catalog:",
     "fflate": "catalog:",
+    "miniflare": "catalog:",
     "vite-plus": "catalog:",
     "wrangler": "catalog:"
   }

@@ -26,7 +26,35 @@ export const modelErrors = defineErrorFamily({
   "model.request_refused": "The model call failed. Try again later.",
   "model.invalid_output":
     "The model's answer didn't match the expected shape, also when asked again.",
+  /**
+   * A streamed answer the AI provider sent nothing of for too long, or
+   * that ran past the longest a streamed request may take: a failure,
+   * never a stop someone asked for.
+   */
+  "model.timeout":
+    "The AI provider sent nothing for too long, so the answer was ended. Try again.",
+  /**
+   * The model declined to answer: a refusal, or the provider's content
+   * filter. Asking the same again gets the same.
+   */
+  "model.declined": "The model declined to answer.",
+  /**
+   * The conversation is past the model's context window, also once pi
+   * summarized what of it could be: asking the same again gets the same.
+   */
+  "model.context_too_long":
+    "The conversation is too long for the model's context window. Start a new conversation.",
 });
+
+/**
+ * What a streamed model request waits on, said to the person while it
+ * does: its AI provider's rate limit, for `seconds` before it asks again,
+ * or the organization's next model, `<provider>/<model>`, which answers
+ * instead (`ChatUpdate.waiting`).
+ */
+export type ModelWait =
+  | { kind: "rate_limited"; seconds: number }
+  | { kind: "fallback"; model: string };
 
 /** One of {@link modelErrors}' codes: why the model gateway refused or failed a call. */
 export type ModelErrorCode = Parameters<typeof modelErrors.create>[0];

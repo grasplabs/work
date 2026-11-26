@@ -1,10 +1,11 @@
-import type { ToolClass } from "@grasp-os/shared/connect";
-
 import {
   composioClasses as shipped,
   toolkitsWithoutCopies as shippedWithoutCopies,
 } from "../../src/composio-classes.ts";
-import type { ComposioClasses } from "../../src/composio-classes.ts";
+import type {
+  ComposioClass,
+  ComposioClasses,
+} from "../../src/composio-classes.ts";
 
 // The release's table (src/composio-classes.ts), with the classes of the
 // fake Composio's tools in place of its HubSpot's, in connect's tests and
@@ -14,7 +15,7 @@ import type { ComposioClasses } from "../../src/composio-classes.ts";
 // `HUBSPOT_REFUSED`, which a review turned down. Writable, so a test can
 // reclass a tool as a release would.
 
-export const composioClasses: Record<string, Record<string, ToolClass>> = {
+export const composioClasses: Record<string, Record<string, ComposioClass>> = {
   ...shipped,
   // The fake's toolkit that takes a key.
   pipedesk: {
@@ -85,15 +86,15 @@ export const composioClasses: Record<string, Record<string, ToolClass>> = {
     "mail.open": "read-company",
     "mail.photo": "read-company",
     "mail.read": "read-company",
-    "mail.search": "read-company",
+    "mail.search": { class: "read-company", mail: true },
     "mail.send": "reach-others",
     "mail.unsure": "change-company",
     // By the names an App's connector resource declares (core's
     // test/mail-server.ts).
-    MAIL_SEARCH: "read-company",
+    MAIL_SEARCH: { class: "read-company", mail: true },
     MAIL_SEND: "reach-others",
     // A chat app's mail read and reply (core's chat-app-writes.test.ts).
-    MAIL_READ: "read-company",
+    MAIL_READ: { class: "read-company", mail: true },
     MAIL_REPLY: "change-company",
   },
   // Core's CRM (core's resource-connectors.test.ts).

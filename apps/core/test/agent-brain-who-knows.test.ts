@@ -20,7 +20,14 @@ import {
   users,
 } from "../src/db/core/schema.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
+import {
+  chatOf,
+  codeResults,
+  codeStep,
+  model,
+  says,
+  returnedOf,
+} from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
@@ -168,9 +175,7 @@ const answersIn = async (
   chatId: string
 ): Promise<WhoKnowsAnswer[]> => {
   const results = await codeResults(stub, chatId);
-  return results.map(({ text }) =>
-    answerSchema.parse(JSON.parse(text.replace(/^Returned:\n/u, "")))
-  );
+  return results.map(({ text }) => answerSchema.parse(returnedOf(text)));
 };
 
 /** The people `answer` names, in its order: it must be one. */

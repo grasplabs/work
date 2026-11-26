@@ -44,6 +44,7 @@ const schemas = {
   updated: v.string().datetime().optional(),
   day: v.string().date(),
   link: v.string().trim().url().nullable(),
+  attachment: v.string().segment(),
   custom: v.json().optional(),
 };
 

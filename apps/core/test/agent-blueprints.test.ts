@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
-import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
+import {
+  chatOf,
+  codeResults,
+  codeStep,
+  says,
+  returnedOf,
+} from "./agent-chat.ts";
 import { release } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import type { ProviderReply } from "./model-provider.ts";
@@ -18,7 +24,7 @@ const idp = mockIdp();
 
 /** What a code step returned, as JSON. */
 const returned = (text: string | undefined): unknown =>
-  z.unknown().parse(JSON.parse(text?.replace("Returned:\n", "") ?? "null"));
+  z.unknown().parse(returnedOf(text));
 
 /** Code that makes each call in turn: what it returned, or its message. */
 const tryEach = (calls: Record<string, string>): string =>

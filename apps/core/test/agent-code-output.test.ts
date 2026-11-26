@@ -10,7 +10,13 @@ import {
   cutToBytes,
   utf8Bytes,
 } from "../src/code-mode.ts";
-import { codeResults, codeStep, says, testRunOpening } from "./agent-chat.ts";
+import {
+  codeResults,
+  codeStep,
+  readResult,
+  says,
+  testRunOpening,
+} from "./agent-chat.ts";
 import {
   chatsWith,
   runRecords,
@@ -66,7 +72,10 @@ describe("chat agent code output", () => {
     await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
       {
         isError: false,
-        text: "Logs:\nfirst\nkey [redacted]\nafter the wait\n\nReturned:\ndone",
+        text: JSON.stringify({
+          logs: ["first", "key [redacted]", "after the wait"],
+          returned: "done",
+        }),
       },
     ]);
 
@@ -100,7 +109,10 @@ describe("chat agent code output", () => {
     expect(streamed.length).toBeGreaterThan(0);
     expect(streamed.some((text) => /MIIE|BKcw/u.test(text))).toBeFalsy();
     await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
-      { isError: false, text: "Logs:\n[redacted]\ndone" },
+      {
+        isError: false,
+        text: JSON.stringify({ logs: ["[redacted]", "done"] }),
+      },
     ]);
   });
 
@@ -127,7 +139,10 @@ describe("chat agent code output", () => {
     await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
       {
         isError: false,
-        text: 'Logs:\nauthorization: [redacted]\npassword: "[redacted]"\n\nReturned:\ndone',
+        text: JSON.stringify({
+          logs: ["authorization: [redacted]", 'password: "[redacted]"'],
+          returned: "done",
+        }),
       },
     ]);
   });
@@ -241,10 +256,11 @@ describe("chat agent code output", () => {
 
     const [result] = await codeResults(stub, chat.id);
     const text = result?.text ?? "";
+    const { cut, status, error } = readResult(text);
     expect({
       within: utf8Bytes(text) <= codeLimits.outputBytes,
-      cut: text.includes(cutMarker),
-      ending: /\n\nError \(threw\):\nError: the end/u.test(text),
+      cut,
+      ending: status === "threw" && error?.startsWith("Error: the end"),
       streamed:
         longest > 0 &&
         longest <= codeLimits.outputBytes - codeLimits.diagnosticBytes,

@@ -216,7 +216,8 @@ export const recordSources = async (
 /**
  * Notes with the run the connections whose own words a call hands over
  * without calling them (`told`), before the call hands them over, so the
- * run's result is marked with them as text from outside (`describeRun`).
+ * run's result names them as read from outside (`describeRun`'s
+ * `readFrom`).
  * A run that ended since the call began notes nothing, and the call is
  * refused.
  */

@@ -77,6 +77,7 @@ describe("a descriptor as JSON Schema", () => {
           at: v.string().datetime(),
           day: v.string().date().optional(),
           link: v.string().url().nullable(),
+          attachment: v.string().segment(),
           custom: v.json(),
         }).descriptor
       )
@@ -86,9 +87,10 @@ describe("a descriptor as JSON Schema", () => {
         at: { type: "string", format: "date-time" },
         day: { type: "string", format: "date" },
         link: { anyOf: [{ type: "string", format: "iri" }, { type: "null" }] },
+        attachment: { type: "string", format: "segment" },
         custom: {},
       },
-      required: ["at", "link", "custom"],
+      required: ["at", "link", "attachment", "custom"],
       additionalProperties: false,
     });
   });

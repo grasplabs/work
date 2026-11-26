@@ -14,6 +14,9 @@ import {
   codeStep,
   model,
   personalChatsOf,
+  readResult,
+  returnedOf,
+  returnedText,
   says,
   toolResults,
   toolStep,
@@ -60,25 +63,34 @@ const gapCalls = async (
     { timeout: 10_000, interval: 50 }
   );
 
+/** A result's fields, but what it returned, and what type that is. */
+const shapeOf = (text: string | undefined) => {
+  const { returned, ...rest } = readResult(text);
+  return { ...rest, returns: typeof returned };
+};
+
 describe("a chat's brain", setUpTime, () => {
-  it("has its open questions with no grant, and records every read", async () => {
+  it("has its open questions with no grant, records every read, and hands the model the recall, a code step and a tool's call in one shape", async () => {
     const person = await signedInWithRole(idp, "user");
     const { stub, agent, chat, ask } = await chatOf(
       person.userId,
       askGaps,
+      toolStep("searchBrain", { question: "What is still unknown?" }),
       says("None open.")
     );
     await ask("What's still unknown?");
 
     const calls = await gapCalls(agent.agentId, 1);
     // The turn recalls for the question before the model's first request
-    // (turn-recall.ts): its own search step, then the model's code step.
+    // (turn-recall.ts): its own search step, then the model's code step
+    // and its tool's call.
     const [read] = await codeResults(stub, chat.id);
     const [recalled] = await toolResults(stub, chat.id, { recalls: true });
+    const results = await toolResults(stub, chat.id);
+    const searched = results.find(({ tool }) => tool === "searchBrain");
     expect({
-      recalled:
-        recalled?.tool === "searchBrain" &&
-        recalled.text.startsWith('Returned:\n{"note":'),
+      recalled: recalled?.tool === "searchBrain" && shapeOf(recalled.text),
+      searched: searched?.tool === "searchBrain" && shapeOf(searched.text),
       read: read?.text,
       calls: calls.map(({ actor, detail }) => ({
         onBehalfOf: actor.type === "agent" ? actor.onBehalfOf : null,
@@ -86,8 +98,9 @@ describe("a chat's brain", setUpTime, () => {
         reason: detail.reason,
       })),
     }).toStrictEqual({
-      recalled: true,
-      read: "Returned:\n[]",
+      recalled: { returns: "object" },
+      searched: { returns: "object" },
+      read: returnedText([]),
       calls: [{ onBehalfOf: person.userId, outcome: "ok", reason: null }],
     });
   });
@@ -137,7 +150,7 @@ describe("a chat's brain", setUpTime, () => {
     const text = read?.text ?? "";
     expect(recalled?.text).not.toContain(secret);
     expect(text).not.toContain(secret);
-    expect(JSON.parse(text.replace(/^Returned:\n/u, ""))).toStrictEqual([
+    expect(returnedOf(text)).toStrictEqual([
       {
         id: "gap-open",
         question: "How many invoices come in a month?",

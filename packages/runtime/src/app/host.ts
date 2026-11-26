@@ -10,7 +10,12 @@ export { SchemaDefinitionError } from "../common/schema-error.ts";
 export { allowsNull, indexBase, relationOf } from "../common/schema-fields.ts";
 export type { IndexBase } from "../common/schema-fields.ts";
 export { managedFields, schemaLimits } from "../common/schema-limits.ts";
-export { isDate, isDateTime, isWebUrl } from "../common/value-formats.ts";
+export {
+  isDate,
+  isDateTime,
+  isPathSegment,
+  isWebUrl,
+} from "../common/value-formats.ts";
 export type {
   AccessMode,
   RowRule,
