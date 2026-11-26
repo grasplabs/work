@@ -627,6 +627,12 @@ describe("chats", () => {
       { timeout: 10_000 }
     );
     const answered = await unread();
+    // Followed again, as a page opens it: its first update says where she
+    // had read to, as the mark would, before anything is marked.
+    const opened = await follow(ann.chats, chat.id);
+    await vi.waitFor(() => {
+      expect(opened.updates).not.toHaveLength(0);
+    });
     const second = await ann.chats.markRead(chat.id);
 
     expect({
@@ -636,6 +642,7 @@ describe("chats", () => {
       read,
       again,
       answered,
+      watched: opened.updates[0]?.seenUpTo,
       second,
       done: await unread(),
     }).toStrictEqual({
@@ -645,6 +652,7 @@ describe("chats", () => {
       read: false,
       again: seen,
       answered: true,
+      watched: seen,
       second: seen,
       done: false,
     });

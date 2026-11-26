@@ -4,6 +4,7 @@ import { agentErrors } from "@grasp-os/shared/agent";
 import type {
   ChatQuestion,
   ChatSummary,
+  ChatListUpdate,
   ChatUpdate,
 } from "@grasp-os/shared/chat";
 import { internalErrors } from "@grasp-os/shared/errors";
@@ -83,7 +84,7 @@ const Page = () => {
   return (
     <>
       <Probe />
-      <LoadedChatPage chatId={chatId} page={chatRoute.useLoaderData()} />
+      <LoadedChatPage chatId={chatId} page={chatRoute.useLoaderData().page} />
     </>
   );
 };
@@ -120,7 +121,15 @@ const opened = async (
   const chats = {
     models: async () => await Promise.resolve(["openai/gpt-5"]),
     efforts: async () => await Promise.resolve({}),
-    list: async () => await Promise.resolve([]),
+    watchList: async (onUpdate: (update: ChatListUpdate) => void) => {
+      onUpdate({
+        chats: [summaryOf(first)],
+        removed: [],
+        full: true,
+        archived: 0,
+      });
+      return await Promise.withResolvers<never>().promise;
+    },
     agents: async () => await Promise.resolve([]),
     send: async (chatId: string, question: ChatQuestion) => {
       asked.push(`send ${chatId} ${question.text}`);
@@ -152,13 +161,14 @@ const opened = async (
     getParentRoute: () => shell,
     path: "/chats/$chatId",
     // As the chat's route reads it (routes/_shell.chats.$chatId.tsx).
-    loader: async ({ params: { chatId } }) =>
-      await loadFromCore(
+    loader: ({ params: { chatId } }) => ({
+      page: loadFromCore(
         // SAFETY: a stand-in for the parts of core's API the page reads.
         // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- see SAFETY
         core as never,
         async (session) => await session.chats.summary(chatId)
       ),
+    }),
     component: () => <Page />,
   });
   const router = createRouter({
@@ -292,6 +302,18 @@ describe("a chat's own page", () => {
       typedForA: "Half a thought for A",
       onB: "",
     });
+  });
+
+  it("shows the chat to ask in at once, its name as the person's list has it, while core's read of it is still on its way", async () => {
+    await opened(
+      "chat-a",
+      async () => await Promise.withResolvers<never>().promise
+    );
+
+    expect({
+      box: box() !== null,
+      named: document.body.textContent.includes("Chat chat-a"),
+    }).toStrictEqual({ box: true, named: true });
   });
 
   it("says why a read that failed did, with Try again, and gives no box to ask in", async () => {

@@ -127,16 +127,20 @@ export class ChatWatch {
   #shownOutput: ChatOutput | null | undefined = undefined;
   /** The provenance version this watcher has; none at first. */
   #provenanceSent: number | undefined;
+  /** Where the person had read to as they began to follow it: sent once, first. */
+  #seenUpTo: number | null | undefined;
 
   constructor(
     listener: ChatListener,
     state: () => ChatState,
     provenance: () => ChatProvenance,
-    drop: () => void
+    drop: () => void,
+    seenUpTo: number | null
   ) {
     this.#pushes = new Pushes(listener, () => this.#next(), drop);
     this.#state = state;
     this.#provenance = provenance;
+    this.#seenUpTo = seenUpTo;
   }
 
   /**
@@ -165,8 +169,11 @@ export class ChatWatch {
       waiting,
     } = this.#state();
     const tools = this.#unsentTools.splice(0);
+    const seenUpTo = this.#seenUpTo;
+    this.#seenUpTo = undefined;
     const update: ChatUpdate = {
       messages: this.#unsent.splice(0),
+      ...(seenUpTo === undefined ? {} : { seenUpTo }),
       partial: partialUpdate(this.#shown, partial),
       ...outputChange(this.#shownOutput, output),
       ...(tools.length === 0 ? {} : { tools }),
