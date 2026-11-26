@@ -1,9 +1,19 @@
+import {
+  composioReasonSchema,
+  connectVersionSchema,
+  releaseNameSchema,
+} from "@grasp-os/shared/connect";
+import type { ComposioReason } from "@grasp-os/shared/connect";
 import { catalogGroups } from "@grasp-os/shared/connect-names";
 import type { CatalogGroup } from "@grasp-os/shared/connect-names";
 import { isAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ConnectionWorkflows } from "@grasp-os/shared/workflows";
-import { Alert, AlertTitle } from "@grasp-os/ui/components/alert";
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
 import {
   Empty,
@@ -98,6 +108,14 @@ interface IntegrationsSearch {
   /** The app open over the page, by its key. */
   app?: string;
   connectionError?: string;
+  /**
+   * Why a Composio flow was refused, the release core runs and which
+   * version of connect refused, when core's callback named them: each
+   * only as its fixed form has it, for support.
+   */
+  connectionReason?: ComposioReason;
+  connectionRelease?: string;
+  connectionVersion?: string;
   /** A connection a flow just made, when core sent it back here. */
   connection?: string;
 }
@@ -451,14 +469,51 @@ const Returned = ({
   );
 };
 
+/**
+ * One plain line under a failed flow, for an admin to pass to support: why
+ * Composio's flow was refused, the release core runs and the version of
+ * connect that refused, each a dash when core's callback didn't name it.
+ * An old release names none of them, which says as much.
+ */
+const SupportDetails = ({
+  connectionReason,
+  connectionRelease,
+  connectionVersion,
+}: Pick<
+  IntegrationsSearch,
+  "connectionReason" | "connectionRelease" | "connectionVersion"
+>) => {
+  const { t } = useLingui();
+  const reason = connectionReason ?? "–";
+  const release = connectionRelease ?? "–";
+  const version = connectionVersion ?? "–";
+  return (
+    <AlertDescription>
+      <span
+        data-connect-version={connectionVersion}
+        data-reason={connectionReason}
+        data-release={connectionRelease}
+      >
+        {t`Details for support: ${reason} (release ${release}, connect ${version})`}
+      </span>
+    </AlertDescription>
+  );
+};
+
 /** What the page must say before its tiles: a failed flow, staff's limits, Composio down, revokes to make. */
 const Notices = ({
   connectionError,
+  support,
   integrations,
   toRevoke,
   unlisted,
 }: {
   connectionError: string | undefined;
+  /** What core's callback named for support beside the failed flow. */
+  support: Pick<
+    IntegrationsSearch,
+    "connectionReason" | "connectionRelease" | "connectionVersion"
+  >;
   integrations: readonly Integration[];
   toRevoke: Parameters<typeof RevocationsByHand>[0]["toDos"];
   /** Composio's toolkits couldn't be listed. */
@@ -471,6 +526,9 @@ const Notices = ({
       {connectionError === undefined ? null : (
         <Alert variant="destructive">
           <AlertTitle>{connectionErrorMessage(connectionError)}</AlertTitle>
+          {identity.staff || isAdmin(identity.role) ? (
+            <SupportDetails {...support} />
+          ) : null}
         </Alert>
       )}
       {identity.staff ? (
@@ -583,7 +641,16 @@ const Integrations = () => {
   const { catalog, connections, known, requests, toRevoke, uses } =
     Route.useLoaderData();
   const { identity } = Route.useRouteContext();
-  const { q, group, app, connectionError, connection } = Route.useSearch();
+  const {
+    q,
+    group,
+    app,
+    connectionError,
+    connectionReason,
+    connectionRelease,
+    connectionVersion,
+    connection,
+  } = Route.useSearch();
   const { t, i18n } = useLingui();
   const listed = connections.state === "ready" ? connections.data : undefined;
   const integrations = integrationsOf(
@@ -649,6 +716,7 @@ const Integrations = () => {
         <Returned connection={connection} integrations={integrations} />
         <Notices
           connectionError={connectionError}
+          support={{ connectionReason, connectionRelease, connectionVersion }}
           integrations={integrations}
           toRevoke={toRevoke}
           unlisted={
@@ -760,6 +828,14 @@ export const Route = createFileRoute("/_shell/connectors/")({
     group: catalogGroups.find((each) => each === search.group),
     app: textOf(search.app),
     connectionError: textOf(search.connectionError),
+    connectionReason: composioReasonSchema.safeParse(search.connectionReason)
+      .data,
+    connectionRelease: releaseNameSchema.safeParse(
+      textOf(search.connectionRelease)
+    ).data,
+    connectionVersion: connectVersionSchema.safeParse(
+      textOf(search.connectionVersion)
+    ).data,
     connection: textOf(search.connection),
   }),
   // No `shouldReload`: the router reads the page again as it is entered,

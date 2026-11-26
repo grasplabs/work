@@ -542,6 +542,40 @@ describe("connecting a Composio toolkit", () => {
     });
   });
 
+  it("names why Composio's flow was refused and the release that refused it, for support, and nothing else", async () => {
+    const admin = await signedInAdmin();
+    const { url } = await admin.connections.connectToolkit(request);
+    const response = await backFromProvider(
+      admin.session,
+      { ...Object.fromEntries(new URL(url).searchParams), status: "failed" },
+      {
+        ...admin.coreEnv,
+        PLATFORM_CHANGE: JSON.stringify({
+          by: "rollout",
+          what: "release",
+          release: "26.11.900",
+          at: new Date().toISOString(),
+        }),
+      }
+    );
+    const location = new URL(response.headers.get("location") ?? "");
+    expect({
+      path: location.pathname,
+      query: Object.fromEntries(
+        [...location.searchParams].filter(
+          ([name]) => name !== "connectionVersion"
+        )
+      ),
+    }).toStrictEqual({
+      path: "/connectors",
+      query: {
+        connectionError: "connection.provider_refused",
+        connectionReason: "redirect_said_failed",
+        connectionRelease: "26.11.900",
+      },
+    });
+  });
+
   it("leaves out an empty or overlong hint on Composio's redirect, and still connects", async () => {
     const admin = await signedInAdmin();
     const { url } = await admin.connections.connectToolkit(request);

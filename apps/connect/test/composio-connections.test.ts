@@ -2,6 +2,7 @@ import {
   composioConsentText,
   composioToolName,
   composioToolsSchema,
+  connectionErrors,
 } from "@grasp-os/shared/connect";
 import type { OrganizationConnection } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
@@ -14,6 +15,7 @@ import {
   changeToolkitTools,
   reconcileUnsyncedTools,
 } from "../src/composio-connections.ts";
+import type { FakeAccount } from "./composio-api.ts";
 import {
   afterMinutes,
   allowed,
@@ -66,6 +68,30 @@ const connectsEnded = async () => {
   return recorded
     .filter(({ action }) => action === "connection.connect")
     .map(({ detail }) => [detail.outcome, detail.reason ?? null]);
+};
+
+/**
+ * The code a finish ended with and why, as core's callback reads them:
+ * the refusal's `details.reason`.
+ */
+const endingOf = async (
+  promise: Promise<unknown>
+): Promise<[string, unknown]> => {
+  try {
+    await promise;
+    return ["ok", null];
+  } catch (error) {
+    const details: unknown =
+      typeof error === "object" && error !== null
+        ? Reflect.get(error, "details")
+        : undefined;
+    return [
+      connectionErrors.codeOf(error) ?? String(error),
+      typeof details === "object" && details !== null
+        ? (Reflect.get(details, "reason") ?? null)
+        : null,
+    ];
+  }
 };
 
 describe("connecting a Composio toolkit", () => {
@@ -444,6 +470,87 @@ describe("connecting a Composio toolkit", () => {
       ends: ["connection.provider_refused", "connection.provider_refused"],
       held: nothingHeld,
     });
+  });
+
+  it("says why each refusal ended, from a fixed set, to the admin and in the audit log", async () => {
+    const admin = someone("admin");
+    const cases: {
+      why: string;
+      send?: { status?: "ACTIVE" | "FAILED"; says?: string };
+      before?: (account: FakeAccount) => void;
+    }[] = [
+      { why: "redirect_said_failed", send: { status: "FAILED" } },
+      { why: "status:FAILED", send: { status: "FAILED", says: "success" } },
+      {
+        why: "mismatch:auth_config",
+        before: (account) => {
+          account.authConfigId = "ac_someone_elses";
+        },
+      },
+      {
+        why: "read:http_404",
+        before: () => {
+          composio.state.failingFor = {
+            prefix: "GET /connected_accounts/",
+            times: 1,
+            status: 404,
+          };
+        },
+      },
+      {
+        why: "server:http_403",
+        before: () => {
+          composio.state.failingFor = {
+            prefix: "POST /mcp/servers",
+            times: 1,
+            status: 403,
+          };
+        },
+      },
+      {
+        why: "url:http_422",
+        before: () => {
+          composio.state.failingFor = {
+            prefix: "POST /mcp/servers/generate",
+            times: 1,
+            status: 422,
+          };
+        },
+      },
+      {
+        why: "url:host",
+        before: () => {
+          composio.state.serverUrlBase = "https://mcp.attacker.example/v3/mcp/";
+        },
+      },
+    ];
+    const endings = [];
+    for (const { send, before } of cases) {
+      // oxlint-disable-next-line no-await-in-loop -- one flow at a time
+      const url = await start(admin);
+      const { callback, account } = composio.authorize(url, send);
+      before?.(account);
+      // oxlint-disable-next-line no-await-in-loop -- one flow at a time
+      endings.push(await endingOf(back(admin, callback)));
+      composio.state.failingFor = undefined;
+      composio.state.serverUrlBase = "https://backend.composio.dev/v3/mcp/";
+    }
+    const recorded = await events();
+    const audited = recorded
+      .filter(({ action }) => action === "connection.connect")
+      .map(({ detail }) => detail.why);
+    expect({ endings, audited, held: heldAtComposio() }).toStrictEqual({
+      endings: cases.map(({ why }) => ["connection.provider_refused", why]),
+      audited: cases.map(({ why }) => why),
+      held: nothingHeld,
+    });
+  });
+
+  it("connects an account whose toolkit Composio names in capitals", async () => {
+    const admin = someone("admin");
+    const { callback } = composio.authorize(await start(admin));
+    composio.state.slugCase = "upper";
+    await expect(outcome(back(admin, callback))).resolves.toBe("ok");
   });
 
   it("connects only the flow's own account, whatever account the redirect names", async () => {

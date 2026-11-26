@@ -9,11 +9,13 @@ import type {
   OwnAgentsUsage,
 } from "@grasp-os/shared/agents";
 import { actorOf } from "@grasp-os/shared/audit";
+import { deploymentConfig } from "@grasp-os/shared/config";
 import {
   addConnectorSchema,
   blockConnectorToolSchema,
   catalogLogoPath,
   catalogSourceSchema,
+  composioReasonSchema,
   composioToolkitSchema,
   connectErrors,
   connectionErrors,
@@ -23,7 +25,9 @@ import {
   connectorClientMetadataPath,
   connectorIdSchema,
   connectorToolsRequestSchema,
+  connectVersionSchema,
   oauthProviderSchema,
+  releaseNameSchema,
   returnPathMaxLength,
 } from "@grasp-os/shared/connect";
 import type {
@@ -57,6 +61,7 @@ import { httpConnectionSchema } from "@grasp-os/shared/http-connections";
 import { identifierMaxLength } from "@grasp-os/shared/ids";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { permissionErrors } from "@grasp-os/shared/permissions";
+import { platformChangeSchema } from "@grasp-os/shared/platform-change";
 import {
   guestRole,
   isAdmin,
@@ -1402,6 +1407,46 @@ export const clientMetadataResponse = (
   });
 };
 
+/** The value of `key` in a coded error's `details`, as it crossed RPC. */
+const detailOfError = (error: unknown, key: string): unknown => {
+  if (typeof error !== "object" || error === null || !("details" in error)) {
+    return undefined;
+  }
+  const { details } = error;
+  return typeof details === "object" && details !== null && key in details
+    ? Reflect.get(details, key)
+    : undefined;
+};
+
+/**
+ * What a failed flow's redirect names for support, beside its code: the
+ * release this deployment runs (core's `PLATFORM_CHANGE`), and, from a
+ * Composio refusal, why it was refused and which version of connect
+ * refused it. Each only as its fixed form has it, never secret: a word of
+ * a set, a release's name, eight hex digits.
+ */
+const supportParams = (env: Env, error: unknown): [string, string][] => {
+  const release = releaseNameSchema.safeParse(
+    deploymentConfig(
+      platformChangeSchema,
+      "PLATFORM_CHANGE",
+      env.PLATFORM_CHANGE
+    )?.release
+  );
+  const reason = composioReasonSchema.safeParse(detailOfError(error, "reason"));
+  const version = connectVersionSchema.safeParse(
+    detailOfError(error, "version")
+  );
+  const named: [string, string | undefined][] = [
+    ["connectionReason", reason.data],
+    ["connectionVersion", version.data],
+    ["connectionRelease", release.data],
+  ];
+  return named.flatMap(([name, value]) =>
+    value === undefined ? [] : [[name, value]]
+  );
+};
+
 /** A hint on Composio's redirect, or `undefined` when empty or over `max`. */
 const composioHint = (value: string | null, max: number): string | undefined =>
   value === null || value === "" || value.length > max ? undefined : value;
@@ -1427,8 +1472,11 @@ export const handleConnectionCallback = async (
   // connecting and can read why: its own `returnTo` stays with connect,
   // which may never have found the flow.
   const integrationsPage = new URL("/connectors", config.origin);
-  const failed = (code: string): Response => {
+  const failed = (code: string, error?: unknown): Response => {
     integrationsPage.searchParams.set("connectionError", code);
+    for (const [name, value] of supportParams(env, error)) {
+      integrationsPage.searchParams.set(name, value);
+    }
     return redirect(integrationsPage);
   };
   const params = new URL(request.url).searchParams;
@@ -1477,7 +1525,7 @@ export const handleConnectionCallback = async (
       await env.CONNECT.personalAccounts(identity.userId)
     );
   } catch (error) {
-    return failed(errorCodeOf(error));
+    return failed(errorCodeOf(error), error);
   }
   // A chat app may be waiting on it (channels/connect-own.ts).
   onConnected?.(identity.userId);
