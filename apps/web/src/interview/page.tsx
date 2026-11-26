@@ -47,6 +47,7 @@ import { setLoopWords, startLoop, stopLoop } from "./loop.ts";
 import { reachMic } from "./mic.ts";
 import {
   begun,
+  feedbackGiven,
   isReading,
   isTalking,
   leftFor,
@@ -429,14 +430,19 @@ const readBackNow = (): void => {
 
 /** His thanks, once they agreed to the read-back. */
 const Thanks = ({ name, closes }: { name: string; closes: string }) => {
-  const { rating } = useProgress();
+  const { rating, feedback } = useProgress();
   return (
     <Page>
       <Closed
         closes={closes}
+        feedback={feedback}
         name={name}
         onAdd={() => {
           update(reopened);
+        }}
+        onFeedback={(given) => {
+          update((was) => feedbackGiven(was, given));
+          keepNow();
         }}
         onRate={(given) => {
           update((was) => rated(was, given));

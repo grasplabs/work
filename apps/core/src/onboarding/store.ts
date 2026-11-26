@@ -1216,7 +1216,7 @@ const lineWords = (line: InterviewLine | undefined): string =>
 /**
  * Whether `progress` records anything of theirs that `held` doesn't: a
  * line, or a line's words, marks or file; a fact's words; a line moved to
- * shared as how their team works; or how they rated it. Removing a line,
+ * shared as how their team works; or how they rated it and what they wrote with it. Removing a line,
  * taking a fact out, erasing it, or moving a line to only counted
  * anonymously records nothing new.
  */
@@ -1228,6 +1228,7 @@ const recordsNew = (
   const facts = new Map((held?.facts ?? []).map((fact) => [fact.id, fact]));
   return (
     (progress.rating !== undefined && progress.rating !== held?.rating) ||
+    (progress.feedback !== undefined && progress.feedback !== held?.feedback) ||
     progress.lines.some(
       (line, at) =>
         line.removed !== true && lineWords(line) !== lineWords(lines[at])
