@@ -15,16 +15,15 @@ import Markdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-// Markdown that someone or something else wrote, such as the agent's
-// answers, rendered so that nothing in it runs or loads: raw HTML is
-// dropped (`skipHtml`), a link keeps its address only for a safe protocol
-// (http, https, mailto and a few more; react-markdown's
-// `defaultUrlTransform` empties any other, such as `javascript:`), and
-// opens in a tab of its own without this page as its opener. Images show
-// their alt text: loading one would tell its host who read the text, and
-// when. It draws a printed export's page (export/export-file.tsx), not
-// Damsko's Markdown, which draws for the screen: a copy button and folds
-// on fenced code, folding sections, and raw HTML shown as text.
+// The Markdown of a printed export's page (export-file.tsx): a Brain page or
+// a chat, which someone or something else wrote, rendered so that nothing
+// in it runs or loads. Raw HTML is dropped (`skipHtml`), a link keeps its
+// address only for a safe protocol (http, https, mailto and a few more;
+// react-markdown's `defaultUrlTransform` empties any other, such as
+// `javascript:`), and images show their alt text: loading one would tell
+// its host who read the text, and when. Not Damsko's Markdown, which draws
+// for the screen: a copy button and folds on fenced code, folding
+// sections, and raw HTML shown as text.
 
 const styles = stylex.create({
   text: { display: "flex", flexDirection: "column", gap: space["3"] },
@@ -70,11 +69,12 @@ const styles = stylex.create({
 });
 
 /**
- * A link that leaves the page: in a tab of its own, without this page as
- * its opener. An address the transform emptied was unsafe: the text stays,
- * as text.
+ * A link, as Damsko's Link underlines one in a sentence. Plain, not
+ * `external`: on paper an arrow and "opens in a new tab" mean nothing, and
+ * the PDF opens the address itself. An address the transform emptied was
+ * unsafe: the text stays, as text.
  */
-const OutsideLink = ({
+const PrintedLink = ({
   href,
   children,
 }: {
@@ -84,9 +84,7 @@ const OutsideLink = ({
   href === undefined || href === "" ? (
     <span>{children}</span>
   ) : (
-    <Link href={href} rel="noopener noreferrer" target="_blank">
-      {children}
-    </Link>
+    <Link href={href}>{children}</Link>
   );
 
 /** A table, named as Damsko's Markdown names one with no heading of its own. */
@@ -117,14 +115,14 @@ const components: Components = {
   tr: ({ children }) => <TableRow>{children}</TableRow>,
   th: ({ children }) => <TableHead>{children}</TableHead>,
   td: ({ children }) => <TableCell>{children}</TableCell>,
-  a: ({ href, children }) => <OutsideLink href={href}>{children}</OutsideLink>,
+  a: ({ href, children }) => <PrintedLink href={href}>{children}</PrintedLink>,
   img: ({ alt }) =>
     alt === undefined || alt === "" ? null : <span>{alt}</span>,
 };
 
 /**
- * Markdown such as the agent's answers, safely: no raw HTML, safe links
- * only (react-markdown's `defaultUrlTransform`), no images.
+ * A printed export's Markdown, safely: no raw HTML, safe links only
+ * (react-markdown's `defaultUrlTransform`), no images.
  */
 export const PlainMarkdown = ({ text }: { text: string }) => (
   <div {...stylex.props(styles.text)}>

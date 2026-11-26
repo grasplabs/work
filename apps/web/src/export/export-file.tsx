@@ -9,14 +9,14 @@ import { createRoot } from "react-dom/client";
 
 import { GraspMark } from "../frame/grasp-mark.ts";
 import { UiWords } from "../frame/ui-words.tsx";
-import { PlainMarkdown } from "../markdown.tsx";
+import { PlainMarkdown } from "./plain-markdown.tsx";
 
 // What every export in Grasp can become, by the person's choice: a
 // Markdown file, or a PDF. A PDF is made by the browser's own print dialog
 // (Save as PDF), from the Markdown set as an A4 page in the brand's hand,
 // as in the prototype (`lib/export-file.ts`, `lib/report.ts`): the Grasp
 // mark at its head, the sans for the text, the title as a page's title, the
-// Markdown's first two levels of heading in the serif (markdown.tsx), and
+// Markdown's first two levels of heading in the serif (plain-markdown.tsx), and
 // the light theme, which is what paper takes (the theme's dark is for the
 // screen only). No PDF is drawn in the app itself.
 //
