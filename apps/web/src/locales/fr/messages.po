@@ -19460,6 +19460,11 @@ msgid "Unlinked a chat app account"
 msgstr "A dissocié un compte d’application de chat"
 
 #: src/frame/ui-words.tsx
+msgctxt "turn your microphone back on"
+msgid "Unmute"
+msgstr "Rallumer le micro"
+
+#: src/frame/ui-words.tsx
 msgid "Unpin"
 msgstr "Désépingler"
 
@@ -20320,10 +20325,6 @@ msgstr "Ce qu'il peut faire"
 #: src/settings/stephen-settings.tsx
 msgid "What he may do in {appName}, with each person's own sign-in: as for the whole company, or for fewer people."
 msgstr "Ce qu’il peut faire dans {appName}, avec la connexion de chaque personne : comme pour toute l’entreprise, ou pour moins de personnes."
-
-#: src/interview/transcript.tsx
-msgid "What is marked is what I wrote down. You check it at the end."
-msgstr "Ce qui est surligné, c’est ce que j’ai noté. Vous le vérifiez à la fin."
 
 #: src/brain/memories-page.tsx
 msgid "What is right"

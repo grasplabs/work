@@ -13,9 +13,10 @@ const styles = stylex.create({
     color: "inherit",
     backgroundColor: "transparent",
     textDecorationLine: "underline",
-    textDecorationColor: colors.success,
-    textDecorationThickness: "2px",
-    textUnderlineOffset: "0.2em",
+    // A hairline, half seen: it says what was written down without shouting.
+    textDecorationColor: `color-mix(in srgb, ${colors.success} 55%, transparent)`,
+    textDecorationThickness: "1px",
+    textUnderlineOffset: "0.25em",
   },
 });
 
