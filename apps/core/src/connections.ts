@@ -548,13 +548,10 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
       scope,
       ...(tenant === undefined ? {} : { tenant }),
       returnTo: `${back.pathname}${back.search}`,
-      // What a suite's sign-in asks for; a connector's server decides its own.
-      ...(suite.success
-        ? {
-            classes: await classesOn(this.#env),
-            sharedMailbox: await anyMailboxPointed(this.#env),
-          }
-        : {}),
+      // What a sign-in asked by class asks for (a suite's, or a connector's
+      // that declares its rights); connect asks the rest for all they declare.
+      classes: await classesOn(this.#env),
+      sharedMailbox: await anyMailboxPointed(this.#env),
     });
   }
 

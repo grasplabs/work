@@ -64,9 +64,7 @@ const pausedBy = async (answer: ResponseInit) => {
   api.holdingReads = 1;
   const limited = list();
   await vi.waitUntil(() => api.held.length === 1, { timeout: 10_000 });
-  if (vi.isFakeTimers()) {
-    vi.setSystemTime(asked);
-  }
+  vi.setSystemTime(asked);
   const [read] = api.held.splice(0, 1);
   if (read === undefined) {
     throw new Error("The read is held");
