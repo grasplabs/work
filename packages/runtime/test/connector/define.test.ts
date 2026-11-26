@@ -878,7 +878,7 @@ describe("a connector's definition", () => {
   });
 
   it("is its provider's, its name unless it names one, and asks by class for nothing beyond its scopes", () => {
-    const named = defineConnector({
+    const suite = defineConnector({
       name: "stock-suite",
       provider: "stock",
       title: "Stock",
@@ -886,7 +886,7 @@ describe("a connector's definition", () => {
       auth: keyAuth,
       tools: { "stock.get": getStock },
     });
-    expect([named.manifest.provider, stock.manifest.provider]).toStrictEqual([
+    expect([suite.manifest.provider, stock.manifest.provider]).toStrictEqual([
       "stock",
       "stock",
     ]);
