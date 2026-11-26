@@ -876,7 +876,11 @@ export const appProvider = ({
               : undefined;
             return typeof id === "string" && id !== "" ? id : undefined;
           },
-          account: async ({ idToken: token }, each, clientId) =>
+          account: async (
+            { idToken: token }: TokenSet,
+            each: string,
+            clientId: string
+          ) =>
             await Promise.resolve(
               idTokenAccount(idToken, token, each, clientId)
             ),
