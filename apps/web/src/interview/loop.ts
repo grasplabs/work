@@ -590,8 +590,9 @@ const readyToTell = (told: LoopWords): void => {
 
 /**
  * Something he has to tell them that is no part of the conversation: he
- * couldn't hear them, or can't listen here. He says it himself, and then
- * his own line stands there again.
+ * couldn't hear them, or can't listen here. He only says it: the screen
+ * keeps his own line, whole, as what went wrong shows in the top bar
+ * alone, never as a line of his on screen.
  */
 const notice = (line: string, then: () => void): void => {
   const was = state.line;
@@ -599,10 +600,11 @@ const notice = (line: string, then: () => void): void => {
   speak(line, sorry, {
     after: () => {
       asked = question;
-      set({ line: was });
+      set({ line: was, from: was.length });
       then();
     },
   });
+  set({ line: was, from: was.length });
 };
 
 /** What core is told: what was said and written down, and what just happened. */
