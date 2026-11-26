@@ -192,6 +192,7 @@ export const ChatConversation = ({
         sources={
           <ChatSources names={sourceNames} sources={view.provenance.sources} />
         }
+        sourceNames={sourceNames}
         tools={view.tools}
         build={{
           model: composer.model,

@@ -1852,6 +1852,10 @@ msgctxt "what an opportunity could become"
 msgid "A change to an existing App"
 msgstr "Un cambio en una App existente"
 
+#: src/chat/answer-steps.tsx
+msgid "a connection"
+msgstr "una conexión"
+
 #: src/apps/app-access-requests.tsx
 #: src/apps/draft-changes.tsx
 msgid "A connection"
@@ -10293,6 +10297,11 @@ msgstr "Ubicación"
 msgid "Log in"
 msgstr "Iniciar sesión"
 
+#: src/chat/answer-steps.tsx
+msgctxt "what a code step logged"
+msgid "Logged"
+msgstr "Registrado"
+
 #: src/settings/org-card.tsx
 msgid "Logo"
 msgstr "Logo"
@@ -13267,6 +13276,10 @@ msgstr "Parte {n} de {parts}: {label}"
 msgid "Part of the brain not found"
 msgstr "Parte del brain no encontrada"
 
+#: src/chat/answer-steps.tsx
+msgid "Part of what came back was left out, to fit what the model reads."
+msgstr "Se omitió parte de lo que se devolvió, para que quepa en lo que lee el modelo."
+
 #: src/inbox/outcome-details.tsx
 msgid "Part of what was sent is cut short above. Show it all, or exactly what was sent, before you say it didn't happen."
 msgstr "Parte de lo que se envió aparece recortado arriba. Muéstralo todo, o exactamente lo que se envió, antes de decir que no ocurrió."
@@ -14028,6 +14041,11 @@ msgstr "Leído de"
 #: src/brain/sources-page.tsx
 msgid "Read from {name} on {readOn}"
 msgstr "Leído de {name} el {readOn}"
+
+#. The outside systems a step of the answer read from; {sources} is their names, as a list.
+#: src/chat/answer-steps.tsx
+msgid "Read from {sources}"
+msgstr "Leído de {sources}"
 
 #: src/brain/sources-page.tsx
 msgctxt "a source of the Brain"

@@ -4,6 +4,12 @@ import {
   ChainOfThought,
   ChainOfThoughtContent,
 } from "@grasp-os/ui/components/chain-of-thought";
+import {
+  CodeBlock,
+  CodeBlockActions,
+  CodeBlockContent,
+  CodeBlockCopyButton,
+} from "@grasp-os/ui/components/code-block";
 import { Shimmer } from "@grasp-os/ui/components/shimmer";
 import {
   TraceCollapsible,
@@ -33,7 +39,10 @@ import * as stylex from "@stylexjs/stylex";
 import { useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
+import { formatList } from "../format.ts";
 import type { StepStatus } from "./chat-states.ts";
+import type { SourceName } from "./sources.tsx";
+import { stepResultOf } from "./step-result.ts";
 
 // An answer's steps as #2503's Agent activity draws them, on Damsko's
 // Chain of thought and Trace: one line that opens (what the steps came to,
@@ -42,8 +51,11 @@ import type { StepStatus } from "./chat-states.ts";
 // the working mark while it works; the alert when it failed; a struck
 // circle, and its words struck through, when the answer stopped before
 // it finished) and its words. A step with an input or a result opens to
-// them, each under its small label on the soft ground, cut to six lines
-// with Show more. Damsko's Chain of thought has no step that opens (the
+// them, each under its small label: what went in, and what it returned, as
+// Damsko's code block (JSON coloured, folded when long); the systems it
+// read from, as a quiet line; what it logged, line by line, and any other
+// text on the soft ground, cut to six lines with Show more; and, in words,
+// when part of it was left out to fit. Damsko's Chain of thought has no step that opens (the
 // registry gap "a chain of thought's step that opens"), so a step that
 // does is Trace's own row that opens among steps.
 
@@ -59,6 +71,9 @@ export interface AnswerStep {
   status: StepStatus;
   /** What went in: a tool's arguments as JSON, or a code step's code. */
   input: string;
+  /** The language `input` is in: `json` for a tool's, `ts` for a code step's. */
+  inputLanguage: "json" | "ts";
+  /** What it gave back, as core gave it to the model (step-result.ts). */
   result: string | undefined;
 }
 
@@ -284,8 +299,120 @@ const StepItem = ({ children }: { children: ReactNode }) => (
   </span>
 );
 
+/** How many lines of a step's data show before Show more. */
+const stepDataLines = 12;
+
+/** What a step took in or gave back as data: Damsko's code block, coloured, folded when long. */
+const StepData = ({
+  label,
+  language,
+  text,
+}: {
+  label: string;
+  language: "json" | "ts";
+  text: string;
+}) => (
+  <div {...stylex.props(styles.block)}>
+    <span {...stylex.props(styles.label)}>{label}</span>
+    <CodeBlock aria-label={label} language={language} size="sm">
+      <CodeBlockActions>
+        <CodeBlockCopyButton value={text} />
+      </CodeBlockActions>
+      <CodeBlockContent maxLines={stepDataLines} wrap>
+        {text}
+      </CodeBlockContent>
+    </CodeBlock>
+  </div>
+);
+
+/** What a step returned: words as words, any other value as JSON. */
+const ReturnedValue = ({ label, value }: { label: string; value: unknown }) =>
+  typeof value === "string" ? (
+    <StepOutput label={label} text={value} />
+  ) : (
+    <StepData
+      label={label}
+      language="json"
+      text={JSON.stringify(value, null, 2)}
+    />
+  );
+
+/**
+ * What a step gave back, each part as itself (step-result.ts): where it
+ * read from, what it logged, what it returned or why it failed, and that
+ * part was left out; never the JSON core hands the model.
+ */
+const StepResultParts = ({
+  text,
+  failed,
+  sourceNames,
+}: {
+  text: string;
+  failed: boolean;
+  sourceNames: ReadonlyMap<string, SourceName>;
+}) => {
+  const { t } = useLingui();
+  const result = stepResultOf(text);
+  const why = t`Why it failed`;
+  const gave = t({ message: "Result", context: "what a tool gave back" });
+  const cut = result.cut ? (
+    <span {...stylex.props(styles.label)}>
+      {t`Part of what came back was left out, to fit what the model reads.`}
+    </span>
+  ) : null;
+  if (result.kind === "text") {
+    return (
+      <>
+        <StepOutput
+          failed={failed}
+          label={failed ? why : gave}
+          text={result.text}
+        />
+        {cut}
+      </>
+    );
+  }
+  const read = result.readFrom.map(
+    (id) => sourceNames.get(id)?.name ?? t`a connection`
+  );
+  const sources = formatList([...new Set(read)]);
+  const { returned, error } = result;
+  return (
+    <>
+      {read.length === 0 ? null : (
+        <span {...stylex.props(styles.label)}>
+          {t({
+            message: `Read from ${sources}`,
+            comment:
+              "The outside systems a step of the answer read from; {sources} is their names, as a list.",
+          })}
+        </span>
+      )}
+      {result.logs.length === 0 ? null : (
+        <StepOutput
+          label={t({ message: "Logged", context: "what a code step logged" })}
+          text={result.logs.join("\n")}
+        />
+      )}
+      {returned === undefined ? null : (
+        <ReturnedValue label={gave} value={returned.value} />
+      )}
+      {error === undefined ? null : (
+        <StepOutput failed label={why} text={error} />
+      )}
+      {cut}
+    </>
+  );
+};
+
 /** One step: its line, opening to its input and result where it has them. */
-const Step = ({ step }: { step: AnswerStep }) => {
+const Step = ({
+  step,
+  sourceNames,
+}: {
+  step: AnswerStep;
+  sourceNames: ReadonlyMap<string, SourceName>;
+}) => {
   const { t } = useLingui();
   const status = traceStatuses[step.status];
   const result = step.result ?? "";
@@ -320,25 +447,19 @@ const Step = ({ step }: { step: AnswerStep }) => {
           <TraceCollapsibleContent>
             <div {...stylex.props(styles.detail)}>
               {step.input === "" ? null : (
-                <StepOutput
+                <StepData
                   label={t({
                     message: "Input",
                     context: "what a tool was given",
                   })}
+                  language={step.inputLanguage}
                   text={step.input}
                 />
               )}
               {result === "" ? null : (
-                <StepOutput
+                <StepResultParts
                   failed={failed}
-                  label={
-                    failed
-                      ? t`Why it failed`
-                      : t({
-                          message: "Result",
-                          context: "what a tool gave back",
-                        })
-                  }
+                  sourceNames={sourceNames}
                   text={result}
                 />
               )}
@@ -361,11 +482,14 @@ export const AnswerSteps = ({
   line,
   live,
   workingLabel,
+  sourceNames,
 }: {
   steps: readonly AnswerStep[];
   line: ReactNode;
   live: boolean;
   workingLabel: string;
+  /** The connections' names, by ID, which name where a step read from. */
+  sourceNames: ReadonlyMap<string, SourceName>;
 }) => {
   const { t } = useLingui();
   const [open, setOpen] = useState(false);
@@ -418,7 +542,9 @@ export const AnswerSteps = ({
       </TraceCollapsibleTrigger>
       <ChainOfThoughtContent>
         {opened || open
-          ? steps.map((step) => <Step key={step.id} step={step} />)
+          ? steps.map((step) => (
+              <Step key={step.id} sourceNames={sourceNames} step={step} />
+            ))
           : null}
       </ChainOfThoughtContent>
     </ChainOfThought>

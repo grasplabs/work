@@ -1852,6 +1852,10 @@ msgctxt "what an opportunity could become"
 msgid "A change to an existing App"
 msgstr "A change to an existing App"
 
+#: src/chat/answer-steps.tsx
+msgid "a connection"
+msgstr "a connection"
+
 #: src/apps/app-access-requests.tsx
 #: src/apps/draft-changes.tsx
 msgid "A connection"
@@ -10293,6 +10297,11 @@ msgstr "Location"
 msgid "Log in"
 msgstr "Log in"
 
+#: src/chat/answer-steps.tsx
+msgctxt "what a code step logged"
+msgid "Logged"
+msgstr "Logged"
+
 #: src/settings/org-card.tsx
 msgid "Logo"
 msgstr "Logo"
@@ -13267,6 +13276,10 @@ msgstr "Part {n} of {parts}: {label}"
 msgid "Part of the brain not found"
 msgstr "Part of the brain not found"
 
+#: src/chat/answer-steps.tsx
+msgid "Part of what came back was left out, to fit what the model reads."
+msgstr "Part of what came back was left out, to fit what the model reads."
+
 #: src/inbox/outcome-details.tsx
 msgid "Part of what was sent is cut short above. Show it all, or exactly what was sent, before you say it didn't happen."
 msgstr "Part of what was sent is cut short above. Show it all, or exactly what was sent, before you say it didn't happen."
@@ -14028,6 +14041,11 @@ msgstr "Read from"
 #: src/brain/sources-page.tsx
 msgid "Read from {name} on {readOn}"
 msgstr "Read from {name} on {readOn}"
+
+#. The outside systems a step of the answer read from; {sources} is their names, as a list.
+#: src/chat/answer-steps.tsx
+msgid "Read from {sources}"
+msgstr "Read from {sources}"
 
 #: src/brain/sources-page.tsx
 msgctxt "a source of the Brain"
