@@ -32,18 +32,17 @@ export interface LoopWords {
   agrees: RegExp;
   /** What they say when they put a line of the read-back right themselves. */
   changed: (was: string, now: string) => string;
-  /**
-   * What he says when something fails, each a line of his own: nothing
-   * came back, so most likely their connection; core or the model said
-   * no, so it is on our side; it still doesn't work after all his tries;
-   * he couldn't hear what they said; he can't listen here.
-   */
-  offline: string;
-  trouble: string;
-  stillTrouble: string;
+  /** What he says, as a line of his own, when he couldn't hear what they said in the read-back. */
   unheard: string;
-  noMicrophone: string;
-  /** Their voice for today is used up: they can type, or come back tomorrow to talk. */
+  /**
+   * What the bar at the top says when the conversation can't go on: none
+   * could be started; it was cut off; what they said couldn't be written
+   * down yet.
+   */
+  notStarted: string;
+  dropped: string;
+  notNoted: string;
+  /** In the read-back, their listening for today is used up: they type there. */
   voiceSpent: string;
 }
 
@@ -74,12 +73,11 @@ export const useLoopWords = (locale: Locale): LoopWords => {
         : t`Thanks so much, ${name}—it was great talking with you. You can always come back to this link within 7 days if you want to adjust anything. Have a great rest of your week.`,
     agrees: agreesIn[locale],
     changed: (was, now) => t`Change “${was}” to “${now}”.`,
-    offline: t`I lost the connection. Please check your internet. I have kept what you said, and I keep trying.`,
-    trouble: t`We have a technical problem on our side. It is not you. I have kept what you said, and I keep trying.`,
-    stillTrouble: t`It still does not work. You can stop for now and come back later. Your place is kept.`,
     unheard: t`I could not hear that. Say it once more, or type it.`,
+    notStarted: t`The interview could not start. Try again.`,
+    dropped: t`The conversation with Stephen was cut off. What you said is kept. Try again to go on.`,
+    notNoted: t`What you said could not be written down yet. It is kept. Try again in a moment.`,
     voiceSpent: t`You have talked as long as you can today. Type your answers to go on, or come back tomorrow to talk.`,
-    noMicrophone: t`The microphone is not available here. Type your answer.`,
   };
 };
 

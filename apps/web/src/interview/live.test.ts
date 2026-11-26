@@ -17,29 +17,36 @@ import type { LiveHandlers, LiveSegment, StartAgent } from "./live.ts";
 // their place, whatever our ear still hears of a turn taken up is dropped,
 // and what our ear heard that the agent never took up goes again. The
 // agent hanging up after his goodbye ends the interview; a drop does not.
+// Without sound, the conversation is started as text only, what they type
+// goes to him marked as typed, and nothing is muted or hushed.
 
 type Options = Parameters<StartAgent>[0];
 
 /** A conversation as the SDK would start it: what it was started with, and what it was told. */
 const faked = () => {
-  const started: { options: Options | null; updates: string[] } = {
-    options: null,
-    updates: [],
-  };
+  const started: {
+    options: Options | null;
+    updates: string[];
+    typed: string[];
+    sound: string[];
+  } = { options: null, updates: [], typed: [], sound: [] };
   const start: StartAgent = async (options) => {
     started.options = options;
     return await Promise.resolve({
       sendContextualUpdate: (text: string) => {
         started.updates.push(text);
       },
-      sendUserMessage: () => {
-        // Nothing typed here.
+      sendUserMessage: (text: string) => {
+        started.typed.push(text);
+      },
+      sendUserActivity: () => {
+        // Nobody is told they type here.
       },
       setMicMuted: () => {
-        // Never muted here.
+        started.sound.push("muted");
       },
       setVolume: () => {
-        // Never hushed here.
+        started.sound.push("volume");
       },
       getInputVolume: () => 0.5,
       getOutputVolume: () => 0.25,
@@ -51,16 +58,17 @@ const faked = () => {
   return { started, start };
 };
 
-/** Joins a faked conversation: what the page was told, and the conversation's callbacks. */
-const joined = async () => {
+/** Joins a faked conversation, without sound when `textOnly`: what the page was told, and the conversation's callbacks. */
+const joined = async (textOnly = false) => {
   const segments: LiveSegment[] = [];
   const ends: string[] = [];
+  const poses: string[] = [];
   const on: LiveHandlers = {
     segment: (segment) => {
       segments.push(segment);
     },
-    doing: () => {
-      // Its poses aren't looked at here.
+    doing: (doing) => {
+      poses.push(doing);
     },
     part: () => {
       // No parts here.
@@ -84,13 +92,14 @@ const joined = async () => {
       pass: "pass",
     },
     on,
+    textOnly,
     start
   );
   const { options } = started;
   if (live === null || options === null) {
     throw new Error("not joined");
   }
-  return { live, options, started, segments, ends };
+  return { live, options, started, segments, ends, poses };
 };
 
 /** A line of the conversation, as the SDK tells one. */
@@ -167,6 +176,61 @@ describe("the live interview with the ElevenLabs agent", () => {
   it("says how loud each is in the session", async () => {
     const { live } = await joined();
     expect(live.levels()).toStrictEqual({ his: 0.25, theirs: 0.5 });
+  });
+
+  it("starts a conversation without sound as text only, where his line stands and it is their turn", async () => {
+    const spoken = await joined();
+    const typing = await joined(true);
+    typing.options.onMessage?.(lineOf("agent", "What do you do here?"));
+    expect({
+      spoken: spoken.options.textOnly,
+      typing: typing.options.textOnly,
+      his: shown(typing.segments, "his-0"),
+      pose: typing.poses.at(-1),
+    }).toStrictEqual({
+      spoken: false,
+      typing: true,
+      his: {
+        id: "his-0",
+        from: "stephen",
+        text: "What do you do here?",
+        final: true,
+      },
+      pose: "listening",
+    });
+  });
+
+  it("hands what they type to him as their turn, kept as typed for the notes", async () => {
+    const { live, options, started, poses } = await joined(true);
+    options.onMessage?.(lineOf("agent", "What do you do here?"));
+    live.type(" I handle the invoices. ");
+    // The agent tells it back: it stands already.
+    options.onMessage?.(lineOf("user", "I handle the invoices."));
+    expect({
+      sent: started.typed,
+      said: live.said(),
+      pose: poses.at(-1),
+    }).toStrictEqual({
+      sent: ["I handle the invoices."],
+      said: [
+        { from: "stephen", text: "What do you do here?" },
+        { from: "person", text: "I handle the invoices.", typed: true },
+      ],
+      pose: "thinking",
+    });
+  });
+
+  it("mutes and hushes nothing in a conversation without sound, which has neither", async () => {
+    const typing = await joined(true);
+    await typing.live.setMuted(true);
+    typing.live.hush(true);
+    const spoken = await joined();
+    await spoken.live.setMuted(true);
+    spoken.live.hush(true);
+    expect({
+      typing: typing.started.sound,
+      spoken: spoken.started.sound,
+    }).toStrictEqual({ typing: [], spoken: ["muted", "volume"] });
   });
 
   it("ends the interview when he hangs up after he began, and only drops it otherwise", async () => {

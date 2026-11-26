@@ -9,7 +9,6 @@ import { wait } from "../core.ts";
 import { readingSeconds } from "../onboarding/setup.ts";
 import { linkNow } from "./kept.ts";
 import { scheduleOf, wordsOf } from "./spoken.tsx";
-import { wavReader } from "./wav-stream.ts";
 
 // The interviewer's voice on the link (prototype `data/voice.ts`): lines
 // said through core's `POST /api/speech` with the link's secret and the
@@ -17,10 +16,9 @@ import { wavReader } from "./wav-stream.ts";
 // they are said. A line of the interview is said a sentence at a time,
 // each its own clip (`sayInPieces`): a short clip is ready much sooner
 // than a whole line, so he is heard sooner, and the rest is made while
-// the first is said. Each clip is asked for streamed and played from its
-// first piece of audio on, while the voice still makes the rest of it
-// (`streamedClip`): what someone waits for is his first sound, not the
-// whole sentence. It can begin before the whole line is written, and
+// the first is said. Each clip comes as core's stream of it
+// (`streamedClip`): its audio, then when its words are said. A line can
+// begin before the whole of it is written, and
 // the line grows on screen as the rest comes. Where there is no sound (the
 // browser holds it back before a first press, the voice isn't set up, or
 // they chose to go without), the words light up at the pace of speech
@@ -247,11 +245,9 @@ const joinedBytes = (pieces: Uint8Array[]): Uint8Array<ArrayBuffer> => {
 };
 
 /**
- * A line as core says it while the voice makes it: playable as soon as
- * its first piece of audio is here, growing as the rest comes, with the
- * voice's own timing of its words once all of it was made. None when no
- * sound came at all. Audio that isn't plain samples (`wavReader`) can't be
- * played in pieces: it is decoded once it is whole.
+ * A line as core's stream holds it: its audio, decoded once it is all
+ * here, with the voice's own timing of its words. None when no sound came
+ * at all, or the browser can't play it.
  */
 const streamedClip = async (
   text: string,
@@ -259,71 +255,35 @@ const streamedClip = async (
   made: AudioContext
 ): Promise<Clip | null> => {
   const reading = readingClip(text);
-  const sound: Sound = { parts: [], done: false, heard: new Set() };
-  const first = Promise.withResolvers<boolean>();
-  const timed = Promise.withResolvers<Schedule | null>();
-  const whole = Promise.withResolvers<boolean>();
-  const grew = (): void => {
-    first.resolve(true);
-    for (const listener of sound.heard) {
-      listener();
-    }
-  };
-  const read = wavReader();
-  /** Every piece so far, kept only until its samples are known to play as they come. */
-  let kept: Uint8Array[] | null = [];
-  let plain = true;
-  const take = (bytes: Uint8Array): void => {
-    kept?.push(bytes);
-    const got = plain ? read(bytes) : "unknown";
-    if (got === "unknown") {
-      plain = false;
-      return;
-    }
-    if (got === null) {
-      return;
-    }
-    kept = null;
-    const part = made.createBuffer(1, got.samples.length, got.rate);
-    part.copyToChannel(got.samples, 0);
-    sound.parts.push(part);
-    grew();
-  };
-  void (async () => {
-    let all = false;
-    try {
-      for await (const event of streamEvents(body)) {
-        if ("audio" in event) {
-          take(bytesOf(event.audio));
-        } else if ("words" in event) {
-          all = true;
-          timed.resolve(scheduleBy(text, event.words));
-        }
+  const pieces: Uint8Array[] = [];
+  let timed: Schedule | null = null;
+  let all = false;
+  const sound: Sound = { parts: [], done: true, heard: new Set() };
+  try {
+    for await (const event of streamEvents(body)) {
+      if ("audio" in event) {
+        pieces.push(bytesOf(event.audio));
+      } else if ("words" in event) {
+        all = true;
+        timed = scheduleBy(text, event.words);
       }
-      if (!plain && kept !== null) {
-        sound.parts.push(await made.decodeAudioData(joinedBytes(kept).buffer));
-      }
-    } catch {
-      // It broke off, or the browser can't play it: what came is said.
-      all = false;
     }
-    sound.done = true;
-    first.resolve(sound.parts.length > 0);
-    timed.resolve(null);
-    whole.resolve(all);
-    for (const listener of sound.heard) {
-      listener();
+    if (pieces.length > 0) {
+      sound.parts.push(await made.decodeAudioData(joinedBytes(pieces).buffer));
     }
-  })();
-  if (!(await first.promise)) {
+  } catch {
+    // It broke off, or the browser can't play it: what came is said.
+    all = false;
+  }
+  if (sound.parts.length === 0) {
     return null;
   }
   return {
     audio: sound,
     schedule: reading.schedule,
     length: reading.length,
-    timed: timed.promise,
-    whole: whole.promise,
+    timed: Promise.resolve(timed),
+    whole: Promise.resolve(all),
   };
 };
 

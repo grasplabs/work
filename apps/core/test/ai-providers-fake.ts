@@ -7,12 +7,12 @@
  * refuses a key it doesn't know. Every request it got is kept, with all of
  * its headers, so a test can read where a key went and in which header.
  *
- * Mistral's speech and OpenAI's transcription, which Grasp's own
+ * ElevenLabs's speech and OpenAI's transcription, which Grasp's own
  * features reach (@grasp-os/shared/platform-ai), answer as the provider
- * does when no reply is planned for the key: a line as a WAV file with
- * `speechBytesPerChar` bytes of samples for each character it says, which
- * take `secondsPerCharacter` each to play, and a voice Grasp didn't choose
- * refused; a recording with `writtenText`; and a realtime transcription socket with a delta of
+ * does when no reply is planned for the key: a line as audio with
+ * `speechBytesPerChar` bytes for each character it says, each said in
+ * `secondsPerCharacter`, and a voice Grasp didn't choose refused; a
+ * recording with `writtenText`; and a realtime transcription socket with a delta of
  * `partialText` for the first audio of each stretch, and `writtenText` for
  * each commit that has audio, or OpenAI's error for one that has none.
  * Every socket's opening, events and close are kept (`realtimeControlUrl`).
@@ -32,10 +32,10 @@ export const writtenText = "Hello there";
 /** The delta a realtime stretch is first heard as. */
 export const partialText = "Hello";
 
-/** Bytes of samples the fake says for each character of a line, after its file's 44 of header. */
-export const speechBytesPerChar = 1440;
+/** Bytes of audio the fake says for each character of a line. */
+export const speechBytesPerChar = 400;
 
-/** How long the fake takes to say each character of a line: 16-bit mono at 24 kHz. */
+/** How long the fake takes to say each character of a line. */
 export const secondsPerCharacter = 0.03;
 
 /**
@@ -307,101 +307,6 @@ export const aiProvidersFake = () => {
     return new Response(null, { status: 101, webSocket: client });
   };
   /**
-   * Mistral's line said: a WAV file in base64, 16-bit mono at 24 kHz, as
-   * long as the characters it says, a direction in brackets not among
-   * them; a voice Grasp didn't choose is refused, as Mistral refuses one
-   * it doesn't have.
-   */
-  const spokenLine = (body: string): Response => {
-    const voices = [
-      "voice_485",
-      "voice_478",
-      "voice_590",
-      "voice_1788",
-      "voice_591",
-    ];
-    const asked: unknown = JSON.parse(body);
-    const voice =
-      isRecord(asked) && typeof asked.voice_id === "string"
-        ? asked.voice_id
-        : "";
-    if (!voices.includes(voice)) {
-      return Response.json(
-        {
-          object: "error",
-          message: `Voice '${voice}' not found.`,
-          type: "invalid_voice",
-        },
-        { status: 404 }
-      );
-    }
-    const input =
-      isRecord(asked) && typeof asked.input === "string" ? asked.input : "";
-    const said = input
-      .split("[")
-      .map((part, at) => (at === 0 ? part : part.slice(part.indexOf("]") + 1)))
-      .join("");
-    // The fake's lines are plain text, one code point to a character.
-    // oxlint-disable-next-line typescript/no-misused-spread -- see above
-    const samples = [...said].length * 1440;
-    const file = new Uint8Array(44 + samples);
-    const view = new DataView(file.buffer);
-    const name = (at: number, tag: string): void => {
-      for (let letter = 0; letter < 4; letter += 1) {
-        view.setUint8(at + letter, tag.codePointAt(letter) ?? 0);
-      }
-    };
-    name(0, "RIFF");
-    view.setUint32(4, 36 + samples, true);
-    name(8, "WAVE");
-    name(12, "fmt ");
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, 1, true);
-    view.setUint32(24, 24_000, true);
-    view.setUint32(28, 48_000, true);
-    view.setUint16(32, 2, true);
-    view.setUint16(34, 16, true);
-    name(36, "data");
-    view.setUint32(40, samples, true);
-    /** The file's bytes from `from` up to `to`, base64. */
-    const base64Of = (from: number, to: number): string => {
-      let binary = "";
-      for (let at = from; at < to; at += 8192) {
-        binary += String.fromCodePoint(
-          ...file.subarray(at, Math.min(at + 8192, to))
-        );
-      }
-      return btoa(binary);
-    };
-    const headers = { "x-request-id": `req-speech-${seen.length}` };
-    if (isRecord(asked) && asked.stream === true) {
-      // Streamed, as Mistral does: the same file in pieces, one event
-      // each, the first of them cut inside the file's header, then that
-      // it is done.
-      const cuts = [0, 20, 44 + Math.floor(samples / 2), file.length];
-      const events = cuts.slice(1).map((end, at) => {
-        const data = JSON.stringify({
-          type: "speech.audio.delta",
-          audio_data: base64Of(cuts[at] ?? 0, end),
-        });
-        return `event: speech.audio.delta${String.fromCodePoint(10)}data: ${
-          data
-        }`;
-      });
-      events.push(
-        `event: speech.audio.done${String.fromCodePoint(
-          10
-        )}data: ${JSON.stringify({ type: "speech.audio.done", usage: {} })}`
-      );
-      const end = String.fromCodePoint(10, 10);
-      return new Response(events.join(end) + end, {
-        headers: { ...headers, "content-type": "text/event-stream" },
-      });
-    }
-    return Response.json({ audio_data: base64Of(0, file.length) }, { headers });
-  };
-  /**
    * ElevenLabs's line said with timestamps: the audio in base64, and when
    * each character of the line is said; a voice Grasp didn't choose is
    * refused, as ElevenLabs refuses a voice the account doesn't have.
@@ -439,6 +344,7 @@ export const aiProvidersFake = () => {
     const seconds = 0.03;
     return Response.json(
       {
+        // `speechBytesPerChar`, written out, as below.
         audio_base64: btoa("\0".repeat(characters.length * 400)),
         alignment: {
           characters,
@@ -475,7 +381,7 @@ export const aiProvidersFake = () => {
     }
     return request.method === "POST" ? elevenLabsLine(url, body) : undefined;
   };
-  /** How Mistral's and ElevenLabs's speech, ElevenLabs's conversation tokens and OpenAI's audio endpoints answer when nothing is planned. */
+  /** How Mistral's live transcription, ElevenLabs's speech and conversation tokens and OpenAI's audio endpoints answer when nothing is planned. */
   const audioAnswer = (
     request: Request,
     url: URL,
@@ -488,9 +394,7 @@ export const aiProvidersFake = () => {
       ) {
         return openRealtime(request, url);
       }
-      return request.method === "POST" && url.pathname === "/v1/audio/speech"
-        ? spokenLine(body)
-        : undefined;
+      return undefined;
     }
     // Grasp's own ElevenLabs answers at its EU residency host, or its US one.
     if (

@@ -78,7 +78,10 @@ export const simulate = async (
     if (employee === undefined || link === undefined) {
       return false;
     }
-    const onLink = linkOn(link, practiceEmail(person.id));
+    const onLink = linkOn(core, link, {
+      person: person.id,
+      email: practiceEmail(person.id),
+    });
     if (await talkedAlready(onLink)) {
       return false;
     }

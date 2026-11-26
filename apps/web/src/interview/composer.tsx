@@ -29,8 +29,8 @@ import type { MicProblem } from "./mic.ts";
 
 // The box at the bottom (prototype `interview-view.tsx`, `Composer` and
 // `ChatBox`): Damsko's PromptInput, as in any chat. Enter sends,
-// Shift+Enter starts a new line, and an answer stops at the most one turn
-// takes. For whoever chose to talk, the card is a spoken conversation
+// Shift+Enter starts a new line, and an answer stops at the most the
+// notes read of one. For whoever chose to talk, the card is a spoken conversation
 // (PromptInputVoice) while Stephen talks or thinks and while he listens:
 // what they say written over it as it is heard (heard.tsx), the card one
 // slim row with the sound as a field of light, the
@@ -127,6 +127,7 @@ export const Composer = ({
   names,
   onSend,
   onTalk,
+  onTyping,
 }: {
   placeholder: string;
   /** They chose to talk, not to type. */
@@ -141,6 +142,8 @@ export const Composer = ({
   onSend: (text: string) => void;
   /** Back to talking, for whoever types now: the microphone is asked for again. */
   onTalk: () => void;
+  /** They are typing: whoever they talk with waits for it. */
+  onTyping: () => void;
 }) => {
   const { t } = useLingui();
   // Whether something is typed: the card is spoken only while the box is empty.
@@ -194,7 +197,11 @@ export const Composer = ({
           }
         }}
         onValueChange={(value) => {
-          setTyped(holdsWords(value));
+          const holds = holdsWords(value);
+          setTyped(holds);
+          if (holds) {
+            onTyping();
+          }
         }}
       >
         {/* No microphone: said in the top bar, like every error here; "Talk" in the card asks again. */}

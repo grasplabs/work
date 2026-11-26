@@ -21,6 +21,11 @@ import type { Refused } from "./api.ts";
 // tells is handed to the loop (loop.ts) as it happens: their words and his
 // as they are heard and said, what he is doing, and the part he goes to.
 //
+// Whoever can't or won't talk types to the same agent, in a conversation
+// without sound (`textOnly`): no microphone is asked for, nothing is
+// played, and his answers come as text. The agent must allow that
+// override in its dashboard, or ElevenLabs refuses the conversation.
+//
 // The page starts the conversation with the token core asked for on
 // Grasp's key, and tells the agent who it talks with as context: its
 // prompt and first line are its own. What was said core can't read there:
@@ -68,10 +73,14 @@ export interface LiveHandlers {
 export interface Live {
   /** What core is sent back with each answer and the close. */
   pass: string;
+  /** Held without sound: they type, and his answers come as text. */
+  textOnly: boolean;
   /** The conversation as the page heard it, for core to write down from. */
   said: () => VoiceLine[];
   /** Hands what they typed to Stephen in the conversation, as their turn. */
   type: (text: string) => void;
+  /** They are typing: he waits for it, and doesn't ask whether they are still there. */
+  typing: () => void;
   setMuted: (muted: boolean) => Promise<void>;
   /**
    * Stops his voice here at once, or lets it be heard again: what is
@@ -116,6 +125,7 @@ export type StartAgent = (
     VoiceConversation,
     | "sendContextualUpdate"
     | "sendUserMessage"
+    | "sendUserActivity"
     | "setMicMuted"
     | "setVolume"
     | "getInputVolume"
@@ -144,7 +154,6 @@ const loadAgentSdk = async (): Promise<StartAgent> => {
   return async (options) =>
     await Conversation.startSession({
       ...options,
-      textOnly: false,
       workletPaths: {
         rawAudioProcessor: raw.default,
         audioConcatProcessor: concat.default,
@@ -152,10 +161,14 @@ const loadAgentSdk = async (): Promise<StartAgent> => {
     });
 };
 
-/** Joins the conversation core opened with the agent, started by `start`; null when it can't be. */
+/**
+ * Joins the conversation core opened with the agent, started by `start`;
+ * null when it can't be. With `textOnly`, without sound: they type.
+ */
 export const joinAgent = async (
   join: VoiceSessionJoin,
   on: LiveHandlers,
+  textOnly: boolean,
   start?: StartAgent
 ): Promise<Live | null> => {
   let closed = false;
@@ -189,6 +202,7 @@ export const joinAgent = async (
     said.push({
       from: line.from,
       text: line.text.slice(0, interviewLimits.line),
+      ...(line.typed === true ? { typed: true as const } : {}),
     });
     if (said.length > interviewLimits.lines) {
       said.splice(0, said.length - interviewLimits.lines);
@@ -199,6 +213,8 @@ export const joinAgent = async (
     const conversation = await startSession({
       conversationToken: join.conversationToken,
       connectionType: "webrtc",
+      // Without sound the SDK asks for no microphone, and the agent sends text alone.
+      textOnly,
       // The token is of the host core asked it at: joined in the EU, the audio stays there.
       ...(join.location === "eu-residency" ? euResidency : {}),
       // The agent takes no overrides: its own prompt and first line stand; who they are comes as context.
@@ -224,7 +240,8 @@ export const joinAgent = async (
         }
       },
       onModeChange: ({ mode }) => {
-        if (!closed) {
+        // Without sound he never speaks: what he does follows his lines (`onMessage`).
+        if (!closed && !textOnly) {
           on.doing(mode === "speaking" ? "speaking" : "listening");
         }
       },
@@ -295,6 +312,10 @@ export const joinAgent = async (
           final: true,
         });
         hisCount += 1;
+        if (textOnly) {
+          // His line stands, whole: their turn.
+          on.doing("listening");
+        }
       },
       onAgentResponseCorrection: ({ corrected_agent_response }) => {
         // Talked over: what was said of his line is what was played.
@@ -355,6 +376,7 @@ export const joinAgent = async (
     }, firstLineMs);
     return {
       pass: join.pass,
+      textOnly,
       said: () => [...said],
       overheard: (stretch, text, ended) => {
         if (closed || streamsTheirs || takenUp.has(stretch)) {
@@ -390,18 +412,24 @@ export const joinAgent = async (
           return;
         }
         typed = text.trim();
-        keep({ from: "person", text: typed });
+        keep({ from: "person", text: typed, typed: true });
         conversation.sendUserMessage(typed);
         on.doing("thinking");
       },
-      setMuted: async (muted) => {
+      typing: () => {
         if (!closed) {
+          conversation.sendUserActivity();
+        }
+      },
+      // A conversation without sound has no microphone to mute and no voice to hush.
+      setMuted: async (muted) => {
+        if (!closed && !textOnly) {
           conversation.setMicMuted(muted);
         }
         await Promise.resolve();
       },
       hush: (hushed) => {
-        if (!closed) {
+        if (!closed && !textOnly) {
           conversation.setVolume({ volume: hushed ? 0 : 1 });
         }
       },
@@ -414,24 +442,20 @@ export const joinAgent = async (
 };
 
 /**
- * Joins a live conversation for `request`: the conversation, or why core
- * opened none; null when core opened one but the page couldn't join it, or
- * the browser has nothing to join it with. Core is told when the page
- * leaves it.
+ * Joins a live conversation for `request`, without sound when `textOnly`:
+ * the conversation, or why core opened none; null when core opened one but
+ * the page couldn't join it, or the browser has nothing to join it with.
+ * Core is told when the page leaves it.
  */
 export const joinLive = async (
   request: Extract<InterviewVoiceRequest, { action: "open" }>,
-  on: LiveHandlers
+  on: LiveHandlers,
+  textOnly: boolean
 ): Promise<Live | Refused | null> => {
   if (typeof RTCPeerConnection === "undefined") {
     return null;
   }
-  let opened: Awaited<ReturnType<typeof openVoice>>;
-  try {
-    opened = await openVoice(request);
-  } catch {
-    return null;
-  }
+  const opened = await openVoice(request);
   if (isRefused(opened)) {
     return opened;
   }
@@ -448,7 +472,7 @@ export const joinLive = async (
       // Core holds nothing open for it: nothing is lost.
     }
   };
-  const live = await joinAgent(opened, on);
+  const live = await joinAgent(opened, on, textOnly);
   if (live === null) {
     await tellClosed();
     return null;

@@ -9,29 +9,21 @@ import type {
   StorySentence,
 } from "@grasp-os/shared/interview-story";
 import type {
-  EarlyLine,
-  EarlyNext,
   FactTag,
-  InterviewEvent,
   InterviewPhase,
-  InterviewTurnRequest,
-  StephenTurn,
   VoiceTag,
 } from "@grasp-os/shared/interview-turn";
-import type { VoiceLine } from "@grasp-os/shared/interview-voice";
+import type {
+  VoiceAnswered,
+  VoiceLine,
+} from "@grasp-os/shared/interview-voice";
 import { useSyncExternalStore } from "react";
 
 import { readingSeconds } from "../onboarding/setup.ts";
 import { answerMeter } from "./answer-meter.ts";
 import type { Measured } from "./answer-meter.ts";
-import {
-  answerVoice,
-  askStory,
-  askTurn,
-  isRefused,
-  turnFailed,
-} from "./api.ts";
-import type { EarlyEvent, TurnFailed } from "./api.ts";
+import { answerVoice, askStory, isRefused } from "./api.ts";
+import type { Refused } from "./api.ts";
 import type { DotSign } from "./dot-signs.ts";
 import { openEar, pauseMs } from "./ear.ts";
 import type { Ear, EarEvent } from "./ear.ts";
@@ -75,68 +67,58 @@ import {
   setSound,
   stopSpeaking,
 } from "./speech.ts";
-import type { Saying, Voicing } from "./speech.ts";
+import type { Voicing } from "./speech.ts";
 import {
   echoes,
-  hiccup,
   pauseFor,
   quietFloor,
-  retryWaits,
   step,
-  stillIn,
-  troubleOf,
   unanswered,
 } from "./turn-taking.ts";
 import type { Act, Floor, Happening, Wait } from "./turn-taking.ts";
 import type { LoopWords } from "./words.ts";
 
-// The interview as it runs: Stephen says his line, out loud (speech.ts),
-// its words lighting up as he says them, or at the pace he would say it
-// without sound; they type; he thinks; turn after turn. His lines come
-// from core (`/api/interview/turn`): the first sentence of his line while
-// the rest is still being written, so he begins to speak with it; then the
-// whole line, which he goes on saying without a gap, while what he wrote
-// down is still on its way. Last he reads back what he wrote down, a part
-// at a time, told as a short story (`/api/interview/story`), and they
-// agree to it, put a line right or take one out. What was said is kept
-// with the interview (kept.ts); this is only the moment. Ported from the
-// prototype (grasplabs/prototype, packages/grasp:
-// src/data/interview-loop.ts), with his voice and his ears: whoever chose
-// to talk is listened to while it is their turn, and their words show as
-// they say them.
+// The interview as it runs. It is one live conversation with Grasp's
+// ElevenLabs agent (live.ts): ElevenLabs hears them and Stephen answers
+// and speaks there, so he answers at once and they can talk over him.
+// Their words show over the box as they are heard, and go into the
+// transcript as each stretch is settled. Whoever can't or won't talk
+// types to the same agent, in a conversation without sound: his answers
+// come as text, and stand on the stage to be read. Core writes down what
+// was said after each answer, from the conversation as the page heard it
+// (`/api/interview/voice`); an answer it couldn't write down is asked
+// with again at the next, and before the read-back.
 //
-// Whose turn it is is decided by turn-taking.ts, which is told everything
-// that happens here, also what his ears hear (ear.ts), and says what to
-// do: he answers when they are done, waits when they aren't, and drops his
-// answer when they talk on. One ear is opened for the conversation, for
-// whoever chose to talk, and it is deaf whenever the floor says so:
-// through the read-back until he asks whether it is right. It hears while
-// he speaks, so they can talk over him: he stops at once and hears them
-// out; when it was nothing, or his own voice in the microphone, he says
-// his line again.
+// When he says he will read back, the conversation is left and the
+// read-back goes on here: he tells what he wrote down, a part at a time,
+// as a short story (`/api/interview/story`), out loud (speech.ts), its
+// lines lighting up as he says them, or at the pace he would say it
+// without sound. They agree to it with the button or a plain yes, put a
+// line right or take one out. What they put right, typed, said or
+// changed on screen, core's notes write down like any answer, with the
+// lines read back. What was said is kept with the interview (kept.ts);
+// this is only the moment.
 //
-// When core can't be reached, a turn is asked for again by itself, twice.
-// Only when that doesn't help does anyone notice: Stephen says so himself,
-// as his own line, and whether it is their connection or our side; those
-// lines are fetched ahead, so he can still say them. What they said is
-// kept, and he goes on trying: after a while, at once when the connection
-// is back, and with whatever they say next.
+// In the read-back whose turn it is is decided by turn-taking.ts, which
+// is told everything that happens there, also what his own ears hear
+// (ear.ts), for whoever chose to talk: he doesn't listen until he asks
+// whether it is right.
 //
-// Whoever chose to talk is talked with in one live conversation with
-// Grasp's ElevenLabs agent (live.ts), when it can be had: ElevenLabs hears
-// them and Stephen answers and speaks there, so he answers at once and
-// they can talk over him. Their words show over the box as they are heard,
-// and go into the transcript as each stretch is settled; core writes down
-// what was said after each answer, from the conversation as the page
-// heard it. When he says he will read back, the
-// session is closed and the read-back goes on here as before. Typing, a
-// read-back, or a session that can't be had or breaks off: the turns
-// above, as before.
+// Nothing goes on quietly in another way when the conversation can't be
+// had. When core opens none, the bar at the top says why, as core said
+// it; when it drops, that it dropped; when what they said can't be
+// written down, that. Each with a way to try again where that can help.
 //
-// Every answer is measured from their last word to his first sound
-// (answer-meter.ts). Everything that happens, what is done about it and each answer
-// measured is told on `window` as a `loopEventName` event, so tests can
-// follow the conversation.
+// Every answer typed is measured from when it was sent
+// (answer-meter.ts). Everything that happens in the read-back, what is
+// done about it and each answer measured is told on `window` as a
+// `loopEventName` event, so tests can follow the conversation.
+
+/** What stands in the bar at the top when the conversation can't go on, and whether trying again can help (`goOn`). */
+export interface LoopTrouble {
+  message: string;
+  again: boolean;
+}
 
 /** What Stephen is doing, and what is on screen with it. */
 export interface LoopState {
@@ -156,8 +138,8 @@ export interface LoopState {
   talking: boolean;
   /** The sign beside him: what he is doing, or the little he feels. */
   sign: DotSign | null;
-  /** A turn could not be had: why, for the bar at the top, never as his line. */
-  trouble: string | null;
+  /** The conversation can't go on: why, for the bar at the top, never as his line. */
+  trouble: LoopTrouble | null;
 }
 
 /** What happens in the conversation, as it is told on `window` (`loopEventName`). */
@@ -179,8 +161,6 @@ export interface Said {
 /** How long what he marked stays over the box, and how long the pen shows beside him. */
 const notedMs = 2600;
 const penMs = 1400;
-/** How long nothing may come in of a turn before that try is given up. */
-const quietMs = 20_000;
 /** How long the summary's story is waited for once he brought it in: it is all of it, and takes a while to write. */
 const storyWaitMs = 6000;
 /** How he sounds saying that something doesn't work. */
@@ -235,42 +215,22 @@ export const useLoop = (): LoopState =>
 let words: LoopWords | null = null;
 /** Whether the conversation is on screen: nothing that comes back late does anything once it is not. */
 let on = false;
-/** Whose turn it is, and what they said that he hasn't answered yet. */
+/** In the read-back: whose turn it is, and what they said that he hasn't taken yet. */
 let floor: Floor = quietFloor;
-/** The turn on its way: how to give it up, and whether his line from it is out. */
-interface Pending {
-  /** The floor's number for it, when it answers what they said. */
-  turn: number | null;
-  giving: AbortController;
-  spoke: boolean;
-  /** His line leads to the read-back or the end. */
-  leads: EarlyNext | null;
-  /** His line is said, and he waits, not listening, for what he wrote down. */
-  waits: boolean;
-}
-let pending: Pending | null = null;
-/** How many turns were asked for: a later one decides what happens next. */
-let turns = 0;
 /** Which of his lines is being said: a later one makes an earlier one's end count for nothing. */
 let speaking = 0;
 let sayingCount = 0;
-/** His line being said while the rest of it is still being written. */
-let underway: Saying | null = null;
 let noting = 0;
 /** The waits the floor set, by name. */
 const waits = new Map<Wait, number>();
 /** How he says the line on screen, and whether it asked something. */
 let tone: VoiceTag | null = null;
 let asked = false;
-/** How many turns in a row could not be had; the turn still owed; when he asks for it again. */
-let troubled = 0;
+/** What trying again does, while the bar at the top offers it. */
 let owed: (() => void) | null = null;
-let again = 0;
 let unmeasure: (() => void) | null = null;
 /** The line he says or said last, and what follows it: said again when what cut him off was nothing. */
 let lastSaid: { how: VoiceTag | null; after: () => void } | null = null;
-/** His line was begun with its first sentence, and the rest of it is still owed. */
-let restOwed = false;
 /** The language the last session was opened in: one opened in another goes on in that one. */
 let sessionIn: string | null = null;
 
@@ -321,7 +281,6 @@ const show = (
 /** He stops: what he says. */
 const rest = (): void => {
   stopSpeaking();
-  underway = null;
 };
 
 /** How he says a line: in the voice of whoever holds the interview. */
@@ -330,12 +289,31 @@ const voiceOf = (how: VoiceTag | null): Voicing => ({
   tone: how,
 });
 
-/** The turn on its way counts for nothing any more, nor one still owed. */
-const drop = (): void => {
-  pending?.giving.abort();
-  pending = null;
+/**
+ * The conversation can't go on: why stands in the bar at the top, with a
+ * way to try again (`again`) where that can help.
+ */
+const stuck = (message: string, again: (() => void) | null): void => {
+  owed = again;
+  set({ trouble: { message, again: again !== null } });
+};
+
+/** Nothing stands in the bar any more. */
+const unstuck = (): void => {
   owed = null;
-  window.clearTimeout(again);
+  if (state.trouble !== null) {
+    set({ trouble: null });
+  }
+};
+
+/** They press "Try again" in the bar at the top: what couldn't be done is tried once more. */
+export const goOn = (): void => {
+  const retry = owed;
+  if (!on || retry === null) {
+    return;
+  }
+  unstuck();
+  retry();
 };
 
 /** What they said since his last line, for the bubble: every stretch so far, and what they are saying now. */
@@ -383,71 +361,26 @@ const listen = (afterReading = false, nudge = false): void => {
 
 /**
  * Stephen says a line, a sentence at a time, its words lighting up as he
- * says them; then `after`, unless something else happened meanwhile. With
- * `open`, the line is only its first sentence so far: the rest follows
- * (`grow`) as it is written.
+ * says them; then `after`, unless something else happened meanwhile.
  */
-const speak = (
-  line: string,
-  how: VoiceTag | null,
-  {
-    noted = false,
-    open = false,
-    answers = false,
-    after,
-  }: {
-    noted?: boolean;
-    open?: boolean;
-    /** It answers what they said, which is then his. */
-    answers?: boolean;
-    after: () => void;
-  }
-): void => {
+const speak = (line: string, how: VoiceTag | null, after: () => void): void => {
   speaking += 1;
   const mine = speaking;
   rest();
   lastSaid = { how, after };
-  // Only a line begun with its first sentence has more to come.
-  restOwed = open;
   // oxlint-disable-next-line no-use-before-define -- the floor decides whether he listens while he speaks
-  happen({ type: "speak", at: performance.now(), answers });
+  happen({ type: "speak", at: performance.now() });
   tone = how;
   asked = line.trim().endsWith("?");
   sayingCount += 1;
-  show("speaking", {
-    line,
-    saying: sayingCount,
-    from: 0,
-    ...(noted ? { sign: "pen" as const } : {}),
-  });
-  if (noted) {
-    window.setTimeout(() => {
-      if (state.doing === "speaking" && speaking === mine) {
-        set({ sign: signFor("speaking") });
-      }
-    }, penMs);
-  }
-  const saying = sayInPieces(line, voiceOf(how), { done: !open });
-  underway = open ? saying : null;
+  show("speaking", { line, saying: sayingCount, from: 0 });
+  const saying = sayInPieces(line, voiceOf(how), { done: true });
   void (async () => {
     await saying.over;
     if (speaking === mine && on) {
       after();
     }
   })();
-};
-
-/** The rest of the line he began with its first sentence: he says it on without a gap, and it grows on screen in place. */
-const grow = (all: string): void => {
-  const saying = underway;
-  if (saying === null) {
-    return;
-  }
-  underway = null;
-  saying.add(all);
-  saying.end();
-  asked = saying.text.trim().endsWith("?");
-  set({ line: saying.text });
 };
 
 /** Says a line and waits until it is said; false when something else happened meanwhile. */
@@ -468,212 +401,37 @@ const sayThrough = async (
   return speaking === mine && on;
 };
 
-/** A hiccup is worth asking again; a refusal or a budget used up is not. */
-const retries = (answer: StephenTurn | TurnFailed): boolean =>
-  turnFailed(answer) && hiccup(answer.status);
-
-/** One try at a turn, given up when nothing comes in for a while. */
-const attempt = async (
-  request: InterviewTurnRequest,
-  giving: AbortController,
-  onEvent: (event: EarlyEvent) => void
-): Promise<StephenTurn | TurnFailed> => {
-  const trying = new AbortController();
-  const stop = (): void => {
-    trying.abort();
-  };
-  let slow = false;
-  let quiet = 0;
-  const alive = (): void => {
-    window.clearTimeout(quiet);
-    quiet = window.setTimeout(() => {
-      slow = true;
-      stop();
-    }, quietMs);
-  };
-  giving.signal.addEventListener("abort", stop, { once: true });
-  alive();
-  try {
-    return await askTurn(request, trying.signal, onEvent, alive);
-  } catch {
-    return { failed: true, status: slow ? 504 : 0 };
-  } finally {
-    window.clearTimeout(quiet);
-    giving.signal.removeEventListener("abort", stop);
-  }
-};
-
-/** A turn, asked again by itself after a hiccup: three times in all. */
-const reach = async (
-  request: InterviewTurnRequest,
-  giving: AbortController,
-  onEvent: (event: EarlyEvent) => void
-): Promise<StephenTurn | TurnFailed> => {
-  let answer = await attempt(request, giving, onEvent);
-  for (const wait of retryWaits) {
-    if (!retries(answer) || giving.signal.aborted) {
-      return answer;
-    }
-    // oxlint-disable-next-line no-await-in-loop -- backing off between tries
-    await pause(wait);
-    if (giving.signal.aborted) {
-      return answer;
-    }
-    meter.again();
-    // oxlint-disable-next-line no-await-in-loop -- one try at a time
-    answer = await attempt(request, giving, onEvent);
-  }
-  return answer;
-};
-
-/** The turn still owed is asked for again: after a while, or the moment the connection is back. */
-const tryAgain = (): void => {
-  if (!on || owed === null) {
-    return;
-  }
-  // They are saying something: once that is written down, it is asked for with it.
-  if (floor.talking || floor.parts.some(({ waiting }) => waiting)) {
-    window.clearTimeout(again);
-    again = window.setTimeout(tryAgain, 2000);
-    return;
-  }
-  const retry = owed;
-  owed = null;
-  retry();
-};
-
-/**
- * A turn could not be had, however often it was asked for. The first time
- * it shows in the bar at the top, and he says it out loud while the stage
- * keeps his question: their connection when nothing came
- * back, our side when core or the model said no or took too long. What they
- * typed is kept. Then he waits for them, and asks again by himself, longer
- * apart each time, and at once when the connection is back; whatever they
- * type asks again too. When none of that helped, he says they can come back.
- */
-const trouble = (status: number, retry: () => void): void => {
-  if (words === null) {
-    return;
-  }
-  const told = words;
-  const { say: line, again: after } = troubleOf({
-    tried: troubled,
-    status,
-    online: navigator.onLine,
-  });
-  troubled += 1;
-  const wait = (): void => {
-    listen();
-    owed = retry;
-    window.clearTimeout(again);
-    if (after !== null) {
-      again = window.setTimeout(tryAgain, after);
-    }
-  };
-  if (line === null) {
-    wait();
-    return;
-  }
-  // What went wrong stands in the bar at the top; out loud he says it, and the stage keeps his question.
-  set({ trouble: told[line] });
-  // oxlint-disable-next-line no-use-before-define -- said as any notice is
-  notice(told[line], wait);
-};
-
-/** The lines he may have to say when nothing can be fetched any more are fetched ahead, a sentence at a time as he says them. */
+/** The line he may have to say out of turn is fetched ahead, a sentence at a time as he says it. */
 const readyToTell = (told: LoopWords): void => {
   const voicing = voiceOf(sorry);
-  for (const line of [
-    told.offline,
-    told.trouble,
-    told.stillTrouble,
-    told.unheard,
-    told.noMicrophone,
-  ]) {
-    for (const piece of piecesOf(line)) {
-      prepare(piece.text, voicing);
-    }
+  for (const piece of piecesOf(told.unheard)) {
+    prepare(piece.text, voicing);
   }
 };
 
 /**
  * Something he has to tell them that is no part of the conversation: he
- * couldn't hear them, or can't listen here. He only says it: the screen
- * keeps his own line, whole, as what went wrong shows in the top bar
- * alone, never as a line of his on screen.
+ * couldn't hear them. He only says it: the screen keeps his own line,
+ * whole.
  */
 const notice = (line: string, then: () => void): void => {
   const was = state.line;
   const question = asked;
-  speak(line, sorry, {
-    after: () => {
-      asked = question;
-      set({ line: was, from: was.length });
-      then();
-    },
+  speak(line, sorry, () => {
+    asked = question;
+    set({ line: was, from: was.length });
+    then();
   });
   set({ line: was, from: was.length });
-};
-
-/** What core is told: what was said and written down, and what just happened. */
-const requestOf = (
-  told: LoopWords,
-  event: InterviewEvent,
-  lines: InterviewLine[],
-  at: number,
-  reading?: string[]
-): InterviewTurnRequest | null => {
-  const link = linkNow();
-  if (link === null) {
-    return null;
-  }
-  const now = progressNow();
-  return {
-    ...link,
-    event,
-    locale: told.locale,
-    interviewer: now.interviewer ?? "stephen",
-    // A line they removed is said to no one again, the model included.
-    lines: lines
-      .filter(({ removed }) => removed !== true)
-      .map(({ from, text, typed, file }) => ({
-        from,
-        text,
-        ...(typed === true ? { typed } : {}),
-        ...(file === undefined ? {} : { file }),
-      })),
-    facts: now.facts
-      .filter(({ out }) => out !== true)
-      .map(({ id, tag, text }) => ({ id, tag, text })),
-    phase: now.phase,
-    minutes: minutesAt(now, at),
-    ...(reading === undefined ? {} : { reading }),
-    adding: now.adding,
-  };
 };
 
 /** The lines of the part on screen, by id, as core is told what was read back. */
 const readingIds = (facts: InterviewFact[], part: number): string[] =>
   (readBackParts(facts)[part]?.facts ?? []).map(({ id }) => id).slice(0, 60);
 
-/** In the read-back it stays the read-back, whatever the model makes of it. */
-const staysIn = (turn: StephenTurn): StephenTurn["wants"] =>
-  turn.wants === "file" ? "file" : "readback";
-
-/** What they said, as the bubble shows it with what he marked. */
-const theirs = (
-  said: InterviewLine | undefined,
-  turn?: StephenTurn
-): Said | null =>
-  said === undefined || said.text === ""
-    ? null
-    : {
-        text: said.text,
-        marks: (turn?.facts ?? [])
-          .filter(({ quote }) => quote !== "")
-          .map(({ quote, tag }) => ({ quote, tag })),
-        waiting: false,
-      };
+/** What they said, as the bubble shows it. */
+const theirs = (said: InterviewLine): Said | null =>
+  said.text === "" ? null : { text: said.text, marks: [], waiting: false };
 
 /** What they said since his last line, as one line of theirs; none when nothing. */
 const saidNow = (): InterviewLine | undefined => {
@@ -762,6 +520,7 @@ export const setLoopName = (name: string): void => {
  * says goodbye, warmly and by name, while the thanks comes on screen.
  */
 const finish = (): void => {
+  unstuck();
   rest();
   show("idle", { line: "", said: null, sign: null });
   const goodbye = words?.farewell(firstName);
@@ -777,6 +536,153 @@ const finish = (): void => {
   }
   update(approved);
   approveWhenKept();
+};
+
+/** Where the interview stands, as core is told it with each call. */
+const standingOf = (told: LoopWords) => {
+  const link = linkNow();
+  if (link === null) {
+    return null;
+  }
+  // The clock moves on to this call first: the minutes core is told leave
+  // out what was time away since the last one.
+  const at = Date.now();
+  update((progress) => ticked(progress, at));
+  const now = progressNow();
+  return {
+    secret: link.secret,
+    locale: told.locale,
+    facts: now.facts
+      .filter(({ out }) => out !== true)
+      .map(({ id, tag, text }) => ({ id, tag, text })),
+    phase: now.phase,
+    minutes: minutesAt(now, at),
+    adding: now.adding,
+  };
+};
+
+/** Something they put right in the read-back, until core has written it down. */
+interface Correction {
+  /** Their line, as it stands in the conversation at `answered`. */
+  said: InterviewLine;
+  answered: number;
+  /** The lines that were read back to them, by id, and the part they are of. */
+  reading: string[];
+  part: number;
+  /** They changed this line on their screen themselves, to these words. */
+  edit?: { id: string; text: string };
+}
+
+/** What they put right that core hasn't written down yet, oldest first. */
+const corrections: Correction[] = [];
+let correcting: Promise<boolean> | null = null;
+
+/** What core's notes made of a correction: kept, pinned to the part it was said to. */
+const tookCorrection = (
+  { facts, changes }: NonNullable<VoiceAnswered["turn"]>,
+  { answered, part }: Correction
+): void => {
+  update((progress) =>
+    afterTurn(
+      progress,
+      {
+        facts,
+        changes,
+        // It stays the read-back, where it stands.
+        phase: progress.phase,
+        wants: progress.wants,
+      },
+      { answered, kind: kindNow(), pin: part }
+    )
+  );
+  if (on && facts.length + changes.length > 0) {
+    wroteDown();
+  }
+};
+
+/** One correction written down by core's notes, as any answer is, with the lines read back; false when it couldn't be. */
+const correctOnce = async (correction: Correction): Promise<boolean> => {
+  const standing = words === null ? null : standingOf(words);
+  if (standing === null) {
+    return false;
+  }
+  const { said, answered, reading, edit } = correction;
+  const written = await answerVoice({
+    action: "answer",
+    ...standing,
+    // The conversation it came after, which the notes read it with.
+    before: progressNow()
+      .lines.slice(0, answered)
+      .filter(({ removed }) => removed !== true)
+      .map(({ from, text }) => ({ from, text }))
+      .slice(-interviewLimits.lines),
+    noted: 0,
+    said: [
+      {
+        from: "person",
+        text: said.text,
+        ...(said.typed === true ? { typed: true as const } : {}),
+      },
+    ],
+    reading,
+    ...(edit === undefined ? {} : { edit }),
+  });
+  if (isRefused(written)) {
+    return false;
+  }
+  if (written.turn !== null) {
+    tookCorrection(written.turn, correction);
+  }
+  return true;
+};
+
+/** Every correction still owed, written down one at a time, oldest first; false when one couldn't be, and it stays owed. */
+const writeOwed = async (): Promise<boolean> => {
+  let [next] = corrections;
+  while (next !== undefined) {
+    // oxlint-disable-next-line no-await-in-loop -- one at a time: each is read with the facts the one before left
+    if (!(await correctOnce(next))) {
+      return false;
+    }
+    corrections.shift();
+    [next] = corrections;
+  }
+  return true;
+};
+
+/** What is owed is written down (`writeOwed`): one run at a time, which whoever asks meanwhile waits for too. */
+const writeCorrections = async (): Promise<boolean> => {
+  correcting ??= writeOwed();
+  const run = correcting;
+  try {
+    return await run;
+  } finally {
+    if (correcting === run) {
+      correcting = null;
+    }
+  }
+};
+
+/**
+ * The end, once everything they put right is written down: they never
+ * agree to a summary that misses what they changed in it.
+ */
+const finishWhenWritten = async (): Promise<void> => {
+  const done = await writeCorrections();
+  if (!on) {
+    return;
+  }
+  if (done) {
+    finish();
+    return;
+  }
+  if (words !== null) {
+    stuck(words.notNoted, () => {
+      void finishWhenWritten();
+    });
+  }
+  // Their turn again: they can try again, or put more right.
+  listen(true);
 };
 
 /** He tells the lines of a part, each lighting up as he gets to it; false when something else happened meanwhile. */
@@ -813,7 +719,7 @@ const readPart = async (): Promise<void> => {
   const parts = readBackParts(now.facts);
   const part = parts[now.confirmed];
   if (part === undefined) {
-    finish();
+    void finishWhenWritten();
     return;
   }
   speaking += 1;
@@ -889,7 +795,6 @@ export const agreeToPart = (inWords?: string): void => {
   }
   speaking += 1;
   rest();
-  drop();
   const at = performance.now();
   // oxlint-disable-next-line no-use-before-define -- what they said is answered, and he doesn't listen meanwhile
   happen({ type: "answered", at });
@@ -909,7 +814,7 @@ export const agreeToPart = (inWords?: string): void => {
     }
     set({ said: null });
     if (last) {
-      finish();
+      void finishWhenWritten();
       return;
     }
     update(partConfirmed);
@@ -918,426 +823,79 @@ export const agreeToPart = (inWords?: string): void => {
 };
 
 /** Their line goes in the conversation, and where it stands there: the line his marks go on. */
-const conversed = (said: InterviewLine | undefined): number => {
-  if (said !== undefined) {
-    update((progress) => withLine(progress, said));
-    return progressNow().lines.length - 1;
-  }
-  return progressNow().lines.findLastIndex(({ from }) => from === "person");
-};
-
-/** His line in the conversation. */
-const hisLine = ({ say: text, tone: how }: EarlyLine): void => {
-  update((progress) =>
-    withLine(progress, {
-      from: "stephen",
-      text,
-      ...(how === null ? {} : { tone: how }),
-    })
-  );
+const conversed = (said: InterviewLine): number => {
+  update((progress) => withLine(progress, said));
+  return progressNow().lines.length - 1;
 };
 
 /**
- * His line came whole after he began it with its first sentence: it goes
- * in the conversation, unless they went on meanwhile, and he says the rest.
+ * They put something right in the read-back: typed, said, or changed on
+ * their screen (`edit`). Their line goes in the conversation, core's
+ * notes write it down, and he asks nothing more: the summary on screen
+ * changes, and it is their turn again. One that couldn't be written down
+ * stays owed, said so in the bar at the top, and is tried again with the
+ * next, with the button there, and before they agree.
  */
-const rounded = (known: Turn, line: EarlyLine): void => {
-  if (known.opening === null) {
-    return;
-  }
-  known.opening = null;
-  const latest = on && known.order === turns;
-  restOwed = false;
-  if (latest) {
-    hisLine(line);
-  }
-  // Cut off in its first sentence, nothing of it is being said any more:
-  // the whole line still stands, so it is all of it he says again when
-  // what cut him off was nothing.
-  const hushed = underway === null;
-  grow(line.say);
-  if (latest && hushed && state.doing !== "speaking") {
-    set({ line: line.say });
-  }
-};
-
-/** What one turn knows while it runs. */
-interface Turn {
-  mine: Pending;
-  order: number;
-  inRead: boolean;
-  /** The part of the read-back on screen when it was asked. */
-  part: number;
-  said: InterviewLine | undefined;
-  /** Where the line his marks go on stands in the conversation. */
-  answered: number;
-  /** The first sentence of his line, said while the rest of it is owed. */
-  opening: EarlyLine | null;
-}
-
-/** Where the interview goes after a turn whose line is out: a later turn, the read-back, or an answer still coming decides it. */
-const whereOf = (
-  turn: StephenTurn,
-  {
-    decided,
-    inRead,
-    answering,
-  }: { decided: boolean; inRead: boolean; answering: boolean }
-): Pick<StephenTurn, "phase" | "wants"> => {
-  const current = progressNow();
-  if (decided) {
-    return { phase: current.phase, wants: current.wants };
-  }
-  if (inRead) {
-    return { phase: "readback", wants: staysIn(turn) };
-  }
-  const reads = turn.wants === "readback" || turn.wants === "end";
-  return answering && reads ? { phase: turn.phase, wants: "answer" } : turn;
-};
-
-/**
- * His line is out, and what he would have written down never came: it is
- * missing, and the read-back is where they put that right. When he said he
- * would read back, he does, with what there is.
- */
-const notesLost = (
-  mine: Pending,
-  { decided, answering }: { decided: boolean; answering: boolean }
-): void => {
-  if (!on || decided) {
-    return;
-  }
-  if (!answering) {
-    fade();
-  }
-  const { leads } = mine;
-  if (mine.waits && leads !== null) {
-    update((progress) => steered(progress, leads));
-    onward();
-  }
-};
-
-/** The rest of a turn whose line is out: what he wrote down, and where the interview goes. */
-const taken = (
-  turn: StephenTurn | TurnFailed,
-  { mine, order, inRead, part, said, answered }: Turn
-): void => {
-  const decided = order !== turns || progressNow().person === "completed";
-  const answering = floor.parts.length > 0 || floor.talking;
-  if (turnFailed(turn)) {
-    notesLost(mine, { decided, answering });
-    return;
-  }
-  const where = whereOf(turn, { decided, inRead, answering });
-  update((progress) =>
-    afterTurn(
-      progress,
-      { ...turn, ...where },
-      { answered, kind: kindNow(), ...(inRead ? { pin: part } : {}) }
-    )
-  );
-  if (!on || decided) {
-    return;
-  }
-  if (turn.facts.length > 0) {
-    wroteDown();
-  }
-  if (answering) {
-    return;
-  }
-  set({ said: theirs(said, turn) });
-  fade();
-  const reads = turn.wants === "readback" || turn.wants === "end";
-  if (reads && !inRead && (state.doing === "listening" || mine.waits)) {
-    onward();
-  } else if (mine.waits) {
-    // He waited to read back, and it isn't that after all: he listens.
-    listen(true);
-  }
-};
-
-/**
- * What a turn does with what comes in before the whole of it: his line,
- * said the moment it is written, and where the interview goes from it,
- * which the screen follows once his line is out; and what he does once
- * his line is said.
- */
-const earlyOf = (
-  known: Turn
-): { after: () => void; onEvent: (early: EarlyEvent) => void } => {
-  const { mine, inRead, said } = known;
-  let next: EarlyNext | null = null;
-  const after = inRead
-    ? (): void => {
-        listen(true);
-      }
-    : (): void => {
-        const { wants } = progressNow();
-        if (mine.leads === null || wants === "readback" || wants === "end") {
-          onward();
-          return;
-        }
-        // He said he will read back: what he wrote down from this turn may still be on its way, and he waits for it without listening.
-        mine.waits = true;
-        show("thinking");
-        // oxlint-disable-next-line no-use-before-define -- the floor keeps the ear closed
-        happen({ type: "wait", at: performance.now() });
-      };
-  /** The screen follows where the interview goes once his line is out; the read-back and the end wait for what he wrote down. */
-  const steer = (): void => {
-    if (next === null || !mine.spoke || known.order !== turns || !on) {
-      return;
-    }
-    const { phase, wants } = next;
-    next = null;
-    const waitsForNotes =
-      wants === "readback" || wants === "end" || (inRead && wants !== "file");
-    if (!waitsForNotes) {
-      update((progress) =>
-        steered(progress, { phase: inRead ? null : phase, wants })
-      );
-    }
-  };
-  /** He begins his line: with its first sentence while the rest is written, or all of it. */
-  const begin = (line: EarlyLine, whole: boolean): void => {
-    // They typed on while he thought, or left: this line is not said.
-    if (pending !== mine || !on || line.say === "") {
-      return;
-    }
-    pending = null;
-    troubled = 0;
-    set({ trouble: null });
-    mine.spoke = true;
-    meter.line(performance.now());
-    known.answered = conversed(said);
-    if (whole) {
-      hisLine(line);
-    } else {
-      known.opening = line;
-    }
-    window.clearTimeout(noting);
-    set({ said: theirs(said) });
-    speak(line.say, line.tone, { after, open: !whole, answers: true });
-    steer();
-  };
-  const onEvent = (early: EarlyEvent): void => {
-    if ("opening" in early) {
-      const { opening } = early;
-      // oxlint-disable-next-line no-use-before-define -- not while they may be starting to talk
-      whenStill(() => {
-        begin(opening, false);
-      });
-    } else if ("line" in early) {
-      const { line } = early;
-      // oxlint-disable-next-line no-use-before-define -- as above
-      whenStill(() => {
-        if (known.opening === null) {
-          begin(line, true);
-        } else {
-          rounded(known, line);
-        }
-      });
-    } else if ("next" in early) {
-      ({ next } = early);
-      if (early.next.wants === "readback" || early.next.wants === "end") {
-        mine.leads = early.next;
-        // From this line on he doesn't listen, until he asks whether what he reads back is right.
-        // oxlint-disable-next-line no-use-before-define -- the floor closes the ear
-        happen({ type: "reads-back", at: performance.now() });
-        // The story of the first part is asked for while he says he will read back.
-        foretell();
-      }
-      steer();
-    }
-  };
-  return { after, onEvent };
-};
-
-/** A whole turn, before he said anything of it: he says it now, or waits for the rest of what they say. */
-const answer = (turn: StephenTurn, known: Turn, after: () => void): void => {
-  const { inRead, part, said, mine } = known;
-  troubled = 0;
-  set({ trouble: null });
-  if (turn.more) {
-    // They stopped in the middle of a sentence: he waits for the rest, and answers with what there is.
-    show("listening");
-    if (mine.turn !== null) {
-      // oxlint-disable-next-line no-use-before-define -- the floor waits for the rest
-      happen({ type: "more", at: performance.now(), turn: mine.turn });
-    }
-    return;
-  }
-  // oxlint-disable-next-line no-use-before-define -- what they said is his now
-  happen({ type: "answered", at: performance.now() });
-  meter.line(performance.now());
-  const answered = conversed(said);
-  if (turn.say !== "") {
-    hisLine(turn);
-  }
-  update((progress) =>
-    afterTurn(
-      progress,
-      inRead ? { ...turn, phase: "readback", wants: staysIn(turn) } : turn,
-      { answered, kind: kindNow(), ...(inRead ? { pin: part } : {}) }
-    )
-  );
-  set({ said: theirs(said, turn) });
-  fade();
-  if (inRead && turn.approved) {
-    agreeToPart();
-    return;
-  }
-  if (turn.say === "") {
-    onward();
-    return;
-  }
-  speak(turn.say, turn.tone, {
-    noted: turn.facts.length > 0,
-    answers: true,
-    after,
-  });
-};
-
-/**
- * One turn: core is told what happened, and Stephen does what comes back.
- * His line comes first, the moment it is written, and shows at once; what
- * he wrote down follows while it does. `turn` is the floor's number for
- * it when it answers what they said.
- */
-const ask = async (
-  event: InterviewEvent,
-  said?: InterviewLine,
-  turn: number | null = null
-): Promise<void> => {
-  if (words === null) {
-    return;
-  }
-  // The clock moves on to this turn first: the minutes he is told leave
-  // out what was time away since their last one.
-  const at = Date.now();
-  update((progress) => ticked(progress, at));
+const putRight = (said: InterviewLine, edit?: Correction["edit"]): void => {
   const now = progressNow();
-  const inRead = event === "readback";
-  const reading = inRead ? readingIds(now.facts, now.confirmed) : undefined;
-  const request = requestOf(
-    words,
-    event,
-    said === undefined ? now.lines : [...now.lines, said],
-    at,
-    reading
-  );
-  if (request === null) {
-    return;
-  }
-  drop();
-  const mine: Pending = {
-    turn,
-    giving: new AbortController(),
-    spoke: false,
-    leads: null,
-    waits: false,
-  };
-  pending = mine;
-  turns += 1;
-  const known: Turn = {
-    mine,
-    order: turns,
-    inRead,
-    part: now.confirmed,
+  // He stops reading: what he read is what they answer.
+  speaking += 1;
+  rest();
+  const at = performance.now();
+  // oxlint-disable-next-line no-use-before-define -- what they said is his now, and he doesn't listen meanwhile
+  happen({ type: "answered", at });
+  // oxlint-disable-next-line no-use-before-define -- as above
+  happen({ type: "wait", at });
+  corrections.push({
     said,
-    answered: -1,
-    opening: null,
-  };
-  // Spoken, he looks as if he listens a moment longer: the floor says when he thinks.
-  const looksListening =
-    turn !== null && floor.asking === turn && floor.doing === "listening";
-  if (!looksListening) {
-    show("thinking");
-  }
-  const { after, onEvent } = earlyOf(known);
-  const answered = await reach(request, mine.giving, onEvent);
-  if (mine.spoke) {
-    // Begun with its first sentence, his line came only with the whole turn, or never: he says what there is.
-    const { opening } = known;
-    if (opening !== null) {
-      rounded(
-        known,
-        turnFailed(answered) || answered.say === ""
-          ? opening
-          : { say: answered.say, tone: answered.tone }
-      );
-    }
-    taken(answered, known);
-    return;
-  }
-  if (pending !== mine || !on) {
-    return;
-  }
-  pending = null;
-  if (turnFailed(answered)) {
-    // What they said is kept, and asked with again, with whatever they say meanwhile.
-    if (turn === null) {
-      trouble(answered.status, () => {
-        void ask(event, said);
-      });
-      return;
-    }
-    // oxlint-disable-next-line no-use-before-define -- the floor keeps what they said
-    happen({ type: "failed", at: performance.now(), turn });
-    trouble(answered.status, () => {
-      // oxlint-disable-next-line no-use-before-define -- as above
-      happen({ type: "retry", at: performance.now() });
-    });
-    return;
-  }
-  answer(answered, known, after);
+    answered: conversed(said),
+    reading: readingIds(now.facts, now.confirmed),
+    part: now.confirmed,
+    ...(edit === undefined ? {} : { edit }),
+  });
+  window.clearTimeout(noting);
+  set({ said: theirs(said) });
+  show("thinking");
+  // oxlint-disable-next-line no-use-before-define -- written down, then their turn again
+  void settleCorrections();
 };
 
-/** What they said goes to him: in the read-back, a plain yes needs no thinking about. */
-const askedFor = ({
-  turn,
-  text,
-  typed,
-  nudge,
-}: Extract<Act, { type: "ask" }>): void => {
-  if (words === null) {
+/** What they put right is written down; then it is their turn again, with what couldn't be said in the bar at the top. */
+const settleCorrections = async (): Promise<void> => {
+  const done = await writeCorrections();
+  if (!on || !isReading(progressNow()) || state.doing !== "thinking") {
     return;
   }
-  const said: InterviewLine = {
-    from: "person",
-    text,
-    ...(typed ? { typed } : {}),
-    at: Date.now(),
-  };
-  if (!isReading(progressNow())) {
-    void ask(nudge ? "nudge" : "answer", said, turn);
+  if (done) {
+    unstuck();
+  } else if (words !== null) {
+    stuck(words.notNoted, () => {
+      show("thinking");
+      void settleCorrections();
+    });
+  }
+  fade();
+  listen(true);
+};
+
+/** What they said in the read-back goes to him: a plain yes agrees, anything else puts something right. */
+const askedFor = ({ text, typed }: Extract<Act, { type: "ask" }>): void => {
+  if (words === null) {
     return;
   }
   if (words.agrees.test(text)) {
     agreeToPart(text);
     return;
   }
-  void ask("readback", said, turn);
-};
-
-/** Does `go` once they make no sound: at once, unless they made one so lately they may be starting to talk; then a moment later, at most. */
-const whenStill = (go: () => void, since = performance.now()): void => {
-  const wait = stillIn({
-    now: performance.now(),
-    since,
-    lastHeard: lastHeard(),
-    hearing: floor.hearing,
+  putRight({
+    from: "person",
+    text,
+    ...(typed ? { typed } : {}),
+    at: Date.now(),
   });
-  if (wait === 0) {
-    go();
-    return;
-  }
-  window.setTimeout(() => {
-    whenStill(go, since);
-  }, wait);
 };
 
-/** Stephen's ears, while the conversation is on and they chose to talk. */
+/** Stephen's own ears in the read-back, for whoever chose to talk. */
 let ear: Ear | null = null;
 let earOpening = false;
 /** The ear numbers its stretches from 1; the floor's are counted on across ears. */
@@ -1405,34 +963,25 @@ const heardBy =
   };
 
 /**
- * Their voice for today is used up (core's `interview.voice_budget_spent`):
- * the bar at the top says so, and from then on they type, as without a
- * microphone; listening would only be refused again.
+ * Their listening for today is used up, in the read-back: the bar at the
+ * top says so, and from then on they type there, as without a microphone;
+ * listening would only be refused again.
  */
 const voiceSpent = (): void => {
   if (words !== null) {
-    set({ trouble: words.voiceSpent });
+    stuck(words.voiceSpent, null);
   }
   update((progress) => ({ ...progress, mode: "type" }));
   // oxlint-disable-next-line no-use-before-define -- the floor stops listening by ear
   happen({ type: "voice", at: performance.now(), on: false });
 };
 
-/** Without a microphone, he says so, and from then on they type. */
+/** No microphone for his ears in the read-back: from then on they type; the box to type in is there anyway. */
 const noMicrophone = (): void => {
   update((progress) => ({ ...progress, mode: "type" }));
   // oxlint-disable-next-line no-use-before-define -- the floor stops listening by ear
   happen({ type: "voice", at: performance.now(), on: false });
-  // On the read-back his question stands: the box to type in is there anyway.
-  if (isReading(progressNow())) {
-    listen();
-    return;
-  }
-  if (words !== null) {
-    notice(words.noMicrophone, () => {
-      listen();
-    });
-  }
+  listen();
 };
 
 /** Opens his ears, once, for whoever chose to talk; it hears from now on. */
@@ -1512,12 +1061,6 @@ const perform = (act: Act): void => {
       askedFor(act);
       return;
     }
-    case "drop": {
-      if (pending?.turn === act.turn) {
-        drop();
-      }
-      return;
-    }
     case "hush": {
       speaking += 1;
       rest();
@@ -1525,12 +1068,7 @@ const perform = (act: Act): void => {
     }
     case "resume": {
       if (lastSaid !== null && state.line !== "") {
-        // Cut off in his first sentence with the rest still being written:
-        // he says it again as a line that goes on, so the rest follows.
-        speak(state.line, lastSaid.how, {
-          after: lastSaid.after,
-          open: restOwed,
-        });
+        speak(state.line, lastSaid.how, lastSaid.after);
       }
       return;
     }
@@ -1609,12 +1147,20 @@ const happen = (happening: Happening): void => {
   }
 };
 
-/** The live session they talk in, while there is one (live.ts). */
+/** The live conversation they are in, while there is one (live.ts). */
 let live: Live | null = null;
-/** Its pass, kept a moment after it is left, so the last answer is still written down. */
+/** The one being opened or held is without sound: they type, and his answers come as text. */
+let liveTextOnly = false;
+/** Its pass, kept after it is left until everything said in it is written down. */
 let livePass: string | null = null;
 /** What the session heard, kept with its pass, for core to write down from. */
 let liveSaid: (() => VoiceLine[]) | null = null;
+/** An answer couldn't be written down: what they said since `liveNoted` is still owed. */
+let notesBehind = false;
+/** The conversation being left, until what was said in it is written down or given up. */
+let leaving: Promise<void> = Promise.resolve();
+/** What they typed while no conversation was open: said to him once one is. */
+let unsent: string[] = [];
 /** Our own ear beside the session, for their words as they talk (`overhearLive`). */
 let liveEar: Ear | null = null;
 /** How many of their answers in the session are written down. */
@@ -1684,25 +1230,6 @@ const paceLive = (speaks: boolean): void => {
   livePacing = window.setInterval(paceHis, 60);
 };
 
-/** Where the interview stands, as core is told it with each call of the session. */
-const standingOf = (told: LoopWords) => {
-  const link = linkNow();
-  if (link === null) {
-    return null;
-  }
-  const now = progressNow();
-  return {
-    secret: link.secret,
-    locale: told.locale,
-    facts: now.facts
-      .filter(({ out }) => out !== true)
-      .map(({ id, tag, text }) => ({ id, tag, text })),
-    phase: now.phase,
-    minutes: minutesAt(now, Date.now()),
-    adding: now.adding,
-  };
-};
-
 /** Where the line his marks go on stands: their last line. */
 const lastAnswer = (): number =>
   progressNow().lines.findLastIndex(({ from }) => from === "person");
@@ -1717,10 +1244,7 @@ const muteQuietly = async (session: Live, muted: boolean): Promise<void> => {
 };
 
 /** What core wrote down after an answer: kept. */
-const tookLive = (answered: Awaited<ReturnType<typeof answerVoice>>): void => {
-  if (isRefused(answered)) {
-    return;
-  }
+const tookLive = (answered: VoiceAnswered): void => {
   liveNoted = answered.noted;
   const { turn } = answered;
   if (turn !== null) {
@@ -1729,15 +1253,11 @@ const tookLive = (answered: Awaited<ReturnType<typeof answerVoice>>): void => {
       afterTurn(
         progress,
         {
-          say: "",
-          tone: null,
           facts,
           changes,
           // The read-back, once he said he goes there, stays where it is.
           phase: isReading(progress) ? progress.phase : phase,
           wants: progress.wants,
-          more: false,
-          approved: false,
         },
         { answered: lastAnswer(), kind: kindNow() }
       )
@@ -1773,7 +1293,11 @@ const noteLive = async (): Promise<void> => {
   }
 };
 
-/** One answer written down, while one is owed: false once nothing more can be. */
+/**
+ * One answer written down, while one is owed: null once nothing more can
+ * be. One that core couldn't write down stays owed (`notesBehind`):
+ * `liveNoted` stands where it was, so the next request covers it.
+ */
 const noteOnce = async (waited: number): Promise<number | null> => {
   liveNoteOwed = false;
   const pass = livePass;
@@ -1794,8 +1318,10 @@ const noteOnce = async (waited: number): Promise<number | null> => {
     said,
   });
   if (isRefused(answered)) {
+    notesBehind = true;
     return null;
   }
+  notesBehind = false;
   if (answered.noted === noted && waited < liveNoteTries) {
     // Their answer isn't heard here yet: a moment later.
     liveNoteOwed = true;
@@ -1817,10 +1343,30 @@ const notingLive = async (waited = 0): Promise<void> => {
   }
 };
 
+/** How long after each try what was said is asked to be written down once more, in ms. */
+const noteAgainMs = [800, 2000];
+
+/**
+ * Whether everything said in the conversation is written down. What
+ * wasn't is asked for again, a moment apart: before the read-back, the
+ * end and a new conversation, none of which may miss it.
+ */
+const written = async (): Promise<boolean> => {
+  for (const wait of noteAgainMs) {
+    if (!notesBehind) {
+      return true;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- backing off between tries
+    await pause(wait);
+    // oxlint-disable-next-line no-await-in-loop -- one try at a time
+    await noteLive();
+  }
+  return !notesBehind;
+};
+
 /** Their words over the box: every stretch of theirs still being heard. */
 const liveWords = (): string => [...liveHeard.values()].join(" ").trim();
 
-/** A stretch of the conversation, as the session hears and says it. */
 /** What stands over the box: their sentences resting there, then what is still being heard. */
 const showHeard = (): void => {
   const heard = [...liveResting, liveWords()]
@@ -1892,8 +1438,9 @@ const liveSegment = ({ id, from, text, final }: LiveSegment): void => {
   }
   asked = heardText.endsWith("?");
   hisWords = heardText;
-  if (hisVoiced) {
-    set({ line: heardText });
+  if (hisVoiced || liveTextOnly) {
+    // Without sound his line stands whole at once, to be read.
+    set({ line: heardText, from: heardText.length });
   } else {
     // Told ahead of his voice: it comes on the stage as he starts to say it.
     hisUnseen = heardText;
@@ -1941,6 +1488,11 @@ const livePart = (part: InterviewPhase): void => {
   if (part === "readback") {
     liveReadsBack = true;
     foretell();
+    if (liveTextOnly && state.doing === "listening") {
+      // Without sound his line stands already when he says where he goes: nothing more of it is waited for.
+      // oxlint-disable-next-line no-use-before-define -- the session is left for it
+      void toReadBack();
+    }
     return;
   }
   update((progress) => steered(progress, { phase: part, wants: "answer" }));
@@ -1948,9 +1500,10 @@ const livePart = (part: InterviewPhase): void => {
 
 /**
  * The session is left: what they said last is written down first, unless
- * `quick`, as when the page is left; then it is closed.
+ * `quick`, as when the page is left; then it is closed. What couldn't be
+ * written down stays owed, with the pass and what was heard (`written`).
  */
-const leaveLive = async ({ quick = false } = {}): Promise<void> => {
+const left = async (quick: boolean): Promise<void> => {
   const session = live;
   liveEar?.close();
   liveEar = null;
@@ -1981,12 +1534,32 @@ const leaveLive = async ({ quick = false } = {}): Promise<void> => {
   if (session === null) {
     return;
   }
-  if (!quick) {
+  const pass = livePass;
+  if (quick) {
+    notesBehind = false;
+  } else {
     await noteLive();
   }
-  livePass = null;
-  liveSaid = null;
+  // Not when another conversation was opened meanwhile: the pass is that one's then.
+  if (livePass === pass && !notesBehind) {
+    livePass = null;
+    liveSaid = null;
+  }
   await session.close();
+};
+
+/** Leaves the session (`left`), and has whoever opens the next one wait until it is left. */
+const leaveLive = async ({ quick = false } = {}): Promise<void> => {
+  leaving = left(quick);
+  await leaving;
+};
+
+/** What they said couldn't be written down: said in the bar at the top, with `again` to try once more. */
+const notWritten = (again: () => void): void => {
+  show("idle", { sign: null });
+  if (words !== null) {
+    stuck(words.notNoted, again);
+  }
 };
 
 /**
@@ -1998,7 +1571,21 @@ const toEnd = async (): Promise<void> => {
   const count = liveCount;
   show("thinking");
   await leaveLive();
-  if (!on || liveCount !== count + 1) {
+  // oxlint-disable-next-line no-use-before-define -- the rest of it, also when tried again
+  await endWritten(count + 1);
+};
+
+/** The end, once what was said is written down: nothing is agreed to that misses an answer. */
+const endWritten = async (count: number): Promise<void> => {
+  const done = await written();
+  if (!on || liveCount !== count) {
+    return;
+  }
+  if (!done) {
+    notWritten(() => {
+      show("thinking");
+      void endWritten(count);
+    });
     return;
   }
   rest();
@@ -2010,9 +1597,30 @@ const toEnd = async (): Promise<void> => {
 /** The read-back, after his line that says so: the session is left, and he reads back here. */
 const toReadBack = async (): Promise<void> => {
   const count = liveCount;
+  if (liveTextOnly) {
+    // Nobody hears his last line: it stands as long as it takes to read.
+    await pause(sayingMs(state.line));
+    if (!on || liveCount !== count) {
+      return;
+    }
+  }
   show("thinking");
   await leaveLive();
-  if (!on || liveCount !== count + 1) {
+  // oxlint-disable-next-line no-use-before-define -- the rest of it, also when tried again
+  await readBackWritten(count + 1);
+};
+
+/** The read-back, once what was said is written down: it never reads back a summary that misses an answer. */
+const readBackWritten = async (count: number): Promise<void> => {
+  const done = await written();
+  if (!on || liveCount !== count) {
+    return;
+  }
+  if (!done) {
+    notWritten(() => {
+      show("thinking");
+      void readBackWritten(count);
+    });
     return;
   }
   update((progress) =>
@@ -2027,18 +1635,9 @@ const toReadBack = async (): Promise<void> => {
   onward();
 };
 
-/** The turns above, in the session's place: the floor hears them again, and he goes on from where it is. */
-const withoutLive = (): void => {
-  happen({
-    type: "voice",
-    at: performance.now(),
-    on: progressNow().mode === "talk",
-  });
-};
-
 /** How a new session opens: as the interview stands, or in the language they just switched to. */
 const eventOf = (
-  opening: InterviewEvent,
+  opening: ReturnType<typeof openingEvent>,
   locale: string
 ): "start" | "resume" | "add" | "language" => {
   const switched = sessionIn !== null && sessionIn !== locale;
@@ -2089,100 +1688,83 @@ const overhearLive = async (session: Live, count: number): Promise<void> => {
   });
 };
 
-/**
- * The conversation, held in a live session: joined, or false when none
- * can be had, and the turns go on as before.
- */
-const goLive = async (): Promise<boolean> => {
-  if (words === null) {
-    return false;
-  }
-  const standing = standingOf(words);
-  if (standing === null) {
-    return false;
-  }
-  const now = progressNow();
-  const opening = openingEvent(now);
-  const count = liveCount;
-  // The level of their voice, for the hill in the box: the session holds a microphone of its own.
-  void (async () => {
-    if ((await reachMic()) && liveCount === count && liveLevel === null) {
-      liveLevel = watchLevel(() => {
-        // Only the level: the session hears them.
-      });
-    }
-  })();
-  show("thinking");
-  const joined = await joinLive(
-    {
-      action: "open",
-      event: eventOf(opening, standing.locale),
-      ...standing,
-      // What a new session doesn't know: the conversation before.
-      before: now.lines
-        .filter(({ removed }) => removed !== true)
-        .map(({ from, text }) => ({ from, text }))
-        .slice(-interviewLimits.lines),
-    },
-    {
-      segment: (segment) => {
-        if (liveCount === count && on) {
-          liveSegment(segment);
+/** Whether asking core again can help: nothing came back, our side failed, or too much came at once. Not a budget spent, a link that doesn't work or an interview withdrawn. */
+const worthAgain = ({ status, code }: Refused): boolean =>
+  status === 0 || status >= 500 || code === "interview.limited";
+
+/** No conversation could be had: why stands in the bar at the top, with a way to try again where that can help. */
+const notOpened = (message: string, again: boolean): void => {
+  show("idle", { sign: null });
+  stuck(
+    message,
+    again
+      ? () => {
+          // oxlint-disable-next-line no-use-before-define -- opened once more
+          void converse();
         }
-      },
-      doing: (doing) => {
-        if (liveCount === count && on) {
-          liveDoing(doing);
-        }
-      },
-      part: (part) => {
-        if (liveCount === count && on) {
-          livePart(part);
-        }
-      },
-      ended: () => {
-        if (liveCount === count && on) {
-          // It broke off: what was said is kept, and the turns go on.
-          void leaveLive({ quick: true });
-          withoutLive();
-          listen();
-        }
-      },
-      finished: () => {
-        if (liveCount === count && on) {
-          // He summed it up, they agreed and he said goodbye: what was said is written down, and that is the end.
-          void toEnd();
-        }
-      },
-      failed: () => {
-        if (liveCount === count && on) {
-          // It never began: that stands in the bar at the top, and he begins turn by turn.
-          if (words !== null) {
-            set({ trouble: words.trouble });
-          }
-          void leaveLive({ quick: true });
-          withoutLive();
-          void ask(openingEvent(progressNow()));
-        }
-      },
-    }
+      : null
   );
-  if (joined !== null && isRefused(joined) && joined.status === 429) {
-    // Their voice for today is used up: it stands in the bar at the top, and they go on typing.
-    voiceSpent();
-    return false;
-  }
-  if (joined === null || isRefused(joined)) {
-    return false;
-  }
-  if (!on || liveCount !== count) {
-    await joined.close();
-    return true;
-  }
+};
+
+/** What the conversation tells, while it is the one the page is in. */
+const handlersFor = (count: number): Parameters<typeof joinLive>[1] => {
+  const mine = (): boolean => liveCount === count && on;
+  return {
+    segment: (segment) => {
+      if (mine()) {
+        liveSegment(segment);
+      }
+    },
+    doing: (doing) => {
+      if (mine()) {
+        liveDoing(doing);
+      }
+    },
+    part: (part) => {
+      if (mine()) {
+        livePart(part);
+      }
+    },
+    ended: () => {
+      if (mine() && words !== null) {
+        // It dropped: what was said is kept and written down, and they are told, with a way to go on.
+        void leaveLive();
+        notOpened(words.dropped, true);
+      }
+    },
+    finished: () => {
+      if (mine()) {
+        // He summed it up, they agreed and he said goodbye: what was said is written down, and that is the end.
+        void toEnd();
+      }
+    },
+    failed: () => {
+      if (mine() && words !== null) {
+        // It began, but his first line never came: no conversation, said as one that could not start.
+        void leaveLive({ quick: true });
+        notOpened(words.notStarted, true);
+      }
+    },
+  };
+};
+
+/** The conversation is the page's now: muted as the box says, and overheard for their words as they talk. */
+const joinedLive = (joined: Live, count: number): void => {
   live = joined;
   livePass = joined.pass;
   liveSaid = joined.said;
   liveNoted = 0;
+  // What they typed while there was none goes to him now, as their turn.
+  for (const text of unsent) {
+    joined.type(text);
+  }
+  if (unsent.length > 0) {
+    unsent = [];
+    void noteLive();
+  }
+  if (joined.textOnly) {
+    return;
+  }
   if (micMuted()) {
     void muteQuietly(joined, true);
   }
@@ -2190,40 +1772,128 @@ const goLive = async (): Promise<boolean> => {
     void muteQuietly(joined, micMuted());
   });
   void overhearLive(joined, count);
-  return true;
+};
+
+/**
+ * The conversation is opened, at the start or again where it stood: with
+ * their voice, or without sound for whoever types or has no microphone
+ * here. When none can be had the bar at the top says why; nothing goes on
+ * in another way.
+ */
+const converse = async (): Promise<void> => {
+  const told = words;
+  if (told === null) {
+    return;
+  }
+  show("thinking");
+  const count = liveCount;
+  // The one before is left first, and what was said in it written down: a new one's notes start at its own answers.
+  await leaving;
+  const done = await written();
+  if (!on || liveCount !== count) {
+    return;
+  }
+  if (!done) {
+    notWritten(() => {
+      void converse();
+    });
+    return;
+  }
+  if (progressNow().mode === "talk" && !(await reachMic())) {
+    if (!on || liveCount !== count) {
+      return;
+    }
+    // No microphone here: said in the bar at the top (composer.tsx), and they type to him instead.
+    update((progress) => ({ ...progress, mode: "type" }));
+    setSound(false);
+  }
+  const standing = standingOf(told);
+  if (!on || liveCount !== count || standing === null) {
+    return;
+  }
+  const now = progressNow();
+  liveTextOnly = now.mode !== "talk";
+  if (!liveTextOnly && liveLevel === null) {
+    // The level of their voice, for the hill in the box: the session holds a microphone of its own.
+    liveLevel = watchLevel(() => {
+      // Only the level: the session hears them.
+    });
+  }
+  const joined = await joinLive(
+    {
+      action: "open",
+      event: eventOf(openingEvent(now), standing.locale),
+      ...standing,
+      // What a new session doesn't know: the conversation before.
+      before: now.lines
+        .filter(({ removed }) => removed !== true)
+        .map(({ from, text }) => ({ from, text }))
+        .slice(-interviewLimits.lines),
+    },
+    handlersFor(count),
+    liveTextOnly
+  );
+  if (!on || liveCount !== count) {
+    if (joined !== null && !isRefused(joined)) {
+      await joined.close();
+    }
+    return;
+  }
+  if (joined === null) {
+    notOpened(told.notStarted, true);
+    return;
+  }
+  if (isRefused(joined)) {
+    // Why core opened none, as core said it: a budget spent for today, not set up, withdrawn, a link that doesn't work.
+    notOpened(joined.message, worthAgain(joined));
+    return;
+  }
+  unstuck();
+  joinedLive(joined, count);
 };
 
 /** How loud he and they are in the session now, 0 to 1: nothing outside one. */
 export const liveLevels = (): { his: number; theirs: number } =>
   live?.levels() ?? { his: 0, theirs: 0 };
 
-/** What they typed is their answer: typing over him stops him at once. */
+/** They are typing: in a conversation, he waits for it. */
+export const typingNow = (): void => {
+  live?.typing();
+};
+
+/**
+ * What they typed is their answer. In the conversation it goes to him
+ * there, as their turn, with their voice or without sound; in the
+ * read-back it is their answer to what he read, and stops him at once.
+ * Typed while no conversation is open, it stands in the transcript and
+ * goes to him once one is, which trying again opens.
+ */
 export const sendTyped = (text: string): void => {
-  if (!on || text.trim() === "" || state.doing === "idle") {
+  const typed = text.trim();
+  if (!on || typed === "") {
     return;
-  }
-  if (live !== null && progressNow().mode === "talk") {
-    // Typed while they talk, it goes to him in the session, as their turn.
-    live.type(text.trim());
-    update((progress) =>
-      withSpoken(progress, {
-        from: "person",
-        text: text.trim(),
-        at: Date.now(),
-      })
-    );
-    meter.sent(performance.now());
-    void noteLive();
-    return;
-  }
-  if (live !== null) {
-    // Typed, it goes to him as a turn: the session is left, and the turns go on.
-    void leaveLive();
-    withoutLive();
   }
   const at = performance.now();
   meter.sent(at);
-  happen({ type: "typed", at, text });
+  if (isReading(progressNow())) {
+    happen({ type: "typed", at, text: typed });
+    return;
+  }
+  update((progress) =>
+    withLine(progress, {
+      from: "person",
+      text: typed,
+      typed: true,
+      at: Date.now(),
+    })
+  );
+  if (live === null) {
+    unsent.push(typed);
+    goOn();
+    return;
+  }
+  live.type(typed);
+  void noteLive();
 };
 
 /** A line as it is quoted in a sentence: without its own full stop. */
@@ -2231,13 +1901,23 @@ const quoted = (line: string): string => line.replace(/\.$/u, "");
 
 /**
  * They put a line of the read-back right themselves: it says their words
- * at once, and Stephen hears of it as if they had typed it, so what is
- * kept for the record follows.
+ * at once, and core's notes hear of it as if they had typed it, told
+ * which line and its new words, so the change is exactly theirs and what
+ * is kept for the record follows.
  */
 export const changeLine = (id: string, was: string, now: string): void => {
-  update((progress) => withFactText(progress, id, now));
-  if (words !== null) {
-    sendTyped(words.changed(quoted(was), quoted(now)));
+  const text = now.trim().slice(0, interviewLimits.fact);
+  update((progress) => withFactText(progress, id, text));
+  if (on && words !== null) {
+    putRight(
+      {
+        from: "person",
+        text: words.changed(quoted(was), quoted(text)),
+        typed: true,
+        at: Date.now(),
+      },
+      { id, text }
+    );
   }
 };
 
@@ -2252,10 +1932,8 @@ export const startLoop = (): void => {
   }
   on = true;
   floor = quietFloor;
-  drop();
+  owed = null;
   state = idle;
-  troubled = 0;
-  window.addEventListener("online", tryAgain);
   unmeasure = onFirstSound((at) => {
     meter.voice(at);
   });
@@ -2265,29 +1943,19 @@ export const startLoop = (): void => {
   if (now.mode === "type") {
     setSound(false);
   }
-  if (now.mode === "talk" && !isReading(now)) {
-    const count = liveCount;
-    void (async () => {
-      if ((await goLive()) || !on || liveCount !== count) {
-        return;
-      }
-      // No session to be had: the turns, as before.
-      withoutLive();
-      void ask(openingEvent(progressNow()));
-    })();
-    return;
-  }
-  happen({ type: "voice", at: performance.now(), on: now.mode === "talk" });
   if (isReading(now)) {
+    // He reads back here, and hears their answer with his own ears.
+    happen({ type: "voice", at: performance.now(), on: now.mode === "talk" });
     void readPart();
     return;
   }
-  void ask(openingEvent(now));
+  void converse();
 };
 
 /**
- * The conversation is left: what they typed and he didn't answer is kept
- * with it, unless the copy kept elsewhere took this one's place.
+ * The conversation is left: what they typed in the read-back and he
+ * didn't take yet is kept with it, unless the copy kept elsewhere took
+ * this one's place; then nothing of this one is owed any more either.
  */
 export const stopLoop = ({ keep = true }: { keep?: boolean } = {}): void => {
   const unsaid = saidNow();
@@ -2296,8 +1964,12 @@ export const stopLoop = ({ keep = true }: { keep?: boolean } = {}): void => {
   }
   on = false;
   void leaveLive({ quick: !keep });
+  if (!keep) {
+    corrections.length = 0;
+    unsent = [];
+  }
   speaking += 1;
-  drop();
+  owed = null;
   happen({ type: "stop", at: performance.now() });
   floor = quietFloor;
   hangUpEar();
@@ -2305,13 +1977,10 @@ export const stopLoop = ({ keep = true }: { keep?: boolean } = {}): void => {
   unmeasure?.();
   unmeasure = null;
   // His goodbye is said to its end, as the thanks comes on screen.
-  if (farewell) {
-    underway = null;
-  } else {
+  if (!farewell) {
     rest();
   }
   window.clearTimeout(noting);
-  window.removeEventListener("online", tryAgain);
   state = idle;
   for (const listener of listeners) {
     listener();
@@ -2321,13 +1990,13 @@ export const stopLoop = ({ keep = true }: { keep?: boolean } = {}): void => {
 /**
  * What the conversation says by itself follows the language on screen.
  * Switched while it runs, he stops at once, mid-word if he must, and goes
- * on in the new language: his line again in it, heard and answered in it.
- * Nothing of the old language is said in the new one's voice, nor the
+ * on in the new language: a new conversation in it, heard and answered in
+ * it. Nothing of the old language is said in the new one's voice, nor the
  * other way round.
  */
 export const setLoopWords = (next: LoopWords): void => {
   const was = words;
-  if (on && next.offline !== was?.offline) {
+  if (on && next.unheard !== was?.unheard) {
     readyToTell(next);
   }
   words = next;

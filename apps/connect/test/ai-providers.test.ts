@@ -711,7 +711,7 @@ describe("AI providers in connect", () => {
       });
     });
 
-    it("sends a line to say to Mistral with Grasp's key, and nothing else of Mistral's audio", async () => {
+    it("sends nothing of Mistral's audio with Grasp's key: no line to say, no voices", async () => {
       const withKey = connect({ MISTRAL_API_KEY: mistralKey });
       const grant = async () =>
         await grantFor({
@@ -721,6 +721,7 @@ describe("AI providers in connect", () => {
         });
 
       const outcomes = {
+        // No feature says a line with Mistral: its lines are ElevenLabs's.
         speech: refusalOf(
           await withKey.modelFetch(modelRequest(speechUrl), await grant())
         ),
@@ -731,45 +732,11 @@ describe("AI providers in connect", () => {
             await grant()
           )
         ),
-        below: refusalOf(
-          await withKey.modelFetch(
-            modelRequest(`${speechUrl}/voices`),
-            await grant()
-          )
-        ),
-        query: refusalOf(
-          await withKey.modelFetch(
-            modelRequest(`${speechUrl}?stream=true`),
-            await grant()
-          )
-        ),
-        noKey: refusalOf(
-          await connect().modelFetch(modelRequest(speechUrl), await grant())
-        ),
       };
 
-      expect({
-        outcomes,
-        sent: sent.map(({ host, path, headers }) => ({
-          host,
-          path,
-          key: headers.authorization,
-        })),
-      }).toStrictEqual({
-        outcomes: {
-          speech: "sent",
-          voices: "path",
-          below: "path",
-          query: "endpoint",
-          noKey: "no_credential",
-        },
-        sent: [
-          {
-            host: "api.mistral.ai",
-            path: "/v1/audio/speech",
-            key: `Bearer ${mistralKey}`,
-          },
-        ],
+      expect({ outcomes, sent }).toStrictEqual({
+        outcomes: { speech: "path", voices: "path" },
+        sent: [],
       });
     });
 

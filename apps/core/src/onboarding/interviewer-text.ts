@@ -12,9 +12,12 @@ import type {
   InterviewLocale,
 } from "@grasp-os/shared/onboarding";
 
-// What the model that holds an interview is told, whole: who Stephen is
+// What Grasp's own models are told of an interview, whole: who Stephen is
 // and how he talks (@grasp-os/shared/interviewers/stephen), how the
-// interview goes, what he follows up on, and what he writes down. Ported
+// interview goes, what he follows up on, and what he writes down. The
+// notes' model reads it after each answer of a live conversation
+// (voice.ts), whose lines the ElevenLabs agent says from its own prompt;
+// a turn of the Stephen Lab's speaks from it too (lab-turn.ts). Ported
 // from the prototype (grasplabs/prototype, packages/grasp:
 // worker/stephen.ts, and WRITING and READ_BACK in worker/interview.ts),
 // and since changed here: the whole job first and AI last, a task as a
@@ -23,9 +26,8 @@ import type {
 // yet (lab-marks.ts).
 //
 // Each text has a mark: the SHA-256 of the text as the model gets it, in
-// its language. Every turn and every interview keeps the mark of the text
-// that spoke, so a measurement always names the Stephen it measured, and
-// the same text has the same mark here and in the lab.
+// its language, so a measurement of the lab's always names the Stephen it
+// measured, and the same text has the same mark here and in the lab.
 
 /**
  * What comes after who Stephen is (@grasp-os/shared/interviewers/stephen) when Grasp's own models

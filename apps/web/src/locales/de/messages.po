@@ -8894,10 +8894,6 @@ msgstr "Ich lösche alles, was Ihr Brain von Ihren Teams aufbewahrt, auch jede f
 msgid "I found nobody in {signIn}."
 msgstr "Ich habe in {signIn} niemanden gefunden."
 
-#: src/interview/words.ts
-msgid "I lost the connection. Please check your internet. I have kept what you said, and I keep trying."
-msgstr "Ich habe die Verbindung verloren. Bitte prüf dein Internet. Ich habe behalten, was du gesagt hast, und versuche es weiter."
-
 #: src/onboarding/forget-kickoff.tsx
 msgid "I’ll delete what was said and everything I learned from it, including what your Brain saved. I’ll know less about your company, which may delay when Grasp is ready. This can’t be undone."
 msgstr "Ich lösche das Gespräch und alles, was ich daraus gelernt habe – einschließlich dem, was dein Brain gespeichert hat. Dadurch weiß ich weniger über dein Unternehmen, was den Start von Grasp verzögern kann. Dies kann nicht rückgängig gemacht werden."
@@ -9460,10 +9456,6 @@ msgstr "Es bleibt hier, damit du es lesen kannst."
 #: src/interview/page.tsx
 msgid "It stays here for you to read. You can still delete it."
 msgstr "Es bleibt hier, damit du es lesen kannst. Du kannst es weiterhin löschen."
-
-#: src/interview/words.ts
-msgid "It still does not work. You can stop for now and come back later. Your place is kept."
-msgstr "Es funktioniert immer noch nicht. Du kannst jetzt aufhören und später wiederkommen. Dein Stand bleibt erhalten."
 
 #: src/workflows/run-page.tsx
 msgid "It stopped here"
@@ -16944,10 +16936,6 @@ msgid "Stephen can offer it in Microsoft Teams to anyone who may start it. It st
 msgstr "Stephen kann ihn in Microsoft Teams allen anbieten, die ihn starten dürfen. Er startet erst, wenn sie auf „Starten“ drücken, und läuft in ihrem Namen."
 
 #: src/interview/api.ts
-msgid "Stephen could not answer that. Say it another way."
-msgstr "Darauf konnte Stephen nicht antworten. Sag es anders."
-
-#: src/interview/api.ts
 msgid "Stephen could not be reached. Try again."
 msgstr "Stephen ist nicht erreichbar. Versuch es noch einmal."
 
@@ -17947,6 +17935,10 @@ msgstr "Die Vision des Unternehmens"
 msgid "The connection stopped working. Workflows that use it wait until someone signs in again."
 msgstr "Die Verbindung funktioniert nicht mehr. Workflows, die sie nutzen, warten, bis sich jemand erneut anmeldet."
 
+#: src/interview/words.ts
+msgid "The conversation with Stephen was cut off. What you said is kept. Try again to go on."
+msgstr "Das Gespräch mit Stephen wurde unterbrochen. Was du gesagt hast, ist gespeichert. Versuch es noch einmal, um weiterzumachen."
+
 #: src/connections/http-connections.tsx
 msgid "The credential needs a header name (letters, digits and dashes) and a secret of at least {shortest} plain ASCII characters, on one line."
 msgstr "Die Zugangsdaten brauchen einen Header-Namen (Buchstaben, Ziffern und Bindestriche) und ein Geheimnis aus mindestens {shortest} einfachen ASCII-Zeichen, in einer Zeile."
@@ -18079,6 +18071,7 @@ msgid "The input isn't JSON."
 msgstr "Die Eingabe ist kein JSON."
 
 #: src/interview/api.ts
+#: src/interview/words.ts
 msgid "The interview could not start. Try again."
 msgstr "Das Interview konnte nicht starten. Versuch es noch einmal."
 
@@ -18151,7 +18144,6 @@ msgid "The message is deleted now, and so is what I marked in it. What I wrote d
 msgstr "Die Nachricht wird jetzt gelöscht, ebenso das, was ich darin markiert habe. Was ich daraus notiert habe, steht in dem, was ich dir am Ende vorlese: Nimm es dort heraus, dann wird es endgültig gelöscht, sobald unser Gespräch beendet ist. Das lässt sich nicht rückgängig machen."
 
 #: src/interview/composer.tsx
-#: src/interview/words.ts
 msgid "The microphone is not available here. Type your answer."
 msgstr "Das Mikrofon ist hier nicht verfügbar. Tipp deine Antwort."
 
@@ -19172,6 +19164,7 @@ msgstr "Versuchen"
 #: src/inbox/decision-card.tsx
 #: src/inbox/inbox-page.tsx
 #: src/interview-routes.tsx
+#: src/interview/conversation.tsx
 #: src/onboarding/company-step.tsx
 #: src/onboarding/document-shelf.tsx
 #: src/settings/sign-in-settings.tsx
@@ -20022,10 +20015,6 @@ msgstr "Erhebungsweg"
 msgid "Ways of collecting"
 msgstr "Erhebungswege"
 
-#: src/interview/words.ts
-msgid "We have a technical problem on our side. It is not you. I have kept what you said, and I keep trying."
-msgstr "Wir haben ein technisches Problem auf unserer Seite. Es liegt nicht an dir. Ich habe behalten, was du gesagt hast, und versuche es weiter."
-
 #: src/interview/api.ts
 msgid "We have no email address to remind you at. This link stays open: come back when it suits you."
 msgstr "Wir haben keine E-Mail-Adresse, an die wir dich erinnern können. Dieser Link bleibt offen: Komm zurück, wann es dir passt."
@@ -20632,6 +20621,10 @@ msgstr "Was Sie gewählt haben"
 #: src/agents/setup/schedule-step.tsx
 msgid "What you get each time"
 msgstr "Was Sie jedes Mal bekommen"
+
+#: src/interview/words.ts
+msgid "What you said could not be written down yet. It is kept. Try again in a moment."
+msgstr "Was du gesagt hast, konnte noch nicht aufgeschrieben werden. Es ist gespeichert. Versuch es gleich noch einmal."
 
 #: src/brain/memories-page.tsx
 msgid "What you shared"

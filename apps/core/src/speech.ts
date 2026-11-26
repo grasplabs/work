@@ -39,12 +39,11 @@ export const platformSpeech = (
   env: Env,
   caller: SpeechCaller
 ): SpeechSynthesis => ({
-  speak: async ({ text, voice, language, model }, signal, onAudio) => {
+  speak: async ({ text, voice, language, model }, signal) => {
     const named = model ?? speechModelOf();
     return await models(env).speak(
       { ...caller, model: named, text, voice, language },
-      signal,
-      onAudio
+      signal
     );
   },
 });

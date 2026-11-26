@@ -98,7 +98,6 @@ import { recordResponse } from "./model-usage.ts";
 import type { ProviderNote, UsageRecord } from "./model-usage.ts";
 import { isInterviewModel, platformAi } from "./platform-ai.ts";
 import { usualHostsOf } from "./platform-hosts.ts";
-import { jsonOf } from "./request-body.ts";
 import {
   charactersOf,
   conversationCostOf,
@@ -108,7 +107,6 @@ import {
   alignedWordsOf,
   parseVoiceRef,
   speechCostOf,
-  wordsOf,
 } from "./voice-models.ts";
 import type { AgentRef, HearingRef, VoiceRef } from "./voice-models.ts";
 
@@ -2768,26 +2766,14 @@ export type SpeechCall = z.input<typeof speechSchema> & {
 const speechTimeoutMs = 60_000;
 
 /**
- * Retries for a line the provider refused for a moment (429 or 5xx):
- * Mistral says so many lines at a time and turns the rest away, which is
- * over in a moment.
+ * Retries for a line the provider refused for a moment (429 or 5xx): it
+ * says so many lines at a time and turns the rest away, which is over in
+ * a moment.
  */
 const speechRetries = 1;
 
 /** The wait before a line turned away is asked for again. */
 const speechRetryMs = 500;
-
-/**
- * The audio asked of Mistral: a WAV file, whose size says how long the
- * line takes to say, which Mistral's answer doesn't otherwise tell.
- */
-const speechFormat = { name: "wav", mime: "audio/wav" } as const;
-
-/** Where Mistral says a line: its speech endpoint, the whole file at once or in pieces as it is made. */
-const speechPath = "/v1/audio/speech";
-
-/** Mistral's answer: the audio. */
-const spokenSchema = z.object({ audio_data: z.string().min(1) });
 
 /** The audio asked of ElevenLabs: MP3 at 44.1 kHz, 128 kbit/s, its default. */
 const elevenLabsFormat = {
@@ -2815,28 +2801,14 @@ const elevenLabsSpokenSchema = z.object({
 });
 
 /**
- * A line's provider request: Mistral's speech endpoint with no language
- * named, as Voxtral says a line in the language it is written in; or
- * ElevenLabs's, which tells when each character is said, with the line's
- * language, and kept by neither side (`enable_logging=false`).
+ * A line's provider request: ElevenLabs's, which tells when each
+ * character is said, with the line's language, and kept by neither side
+ * (`enable_logging=false`).
  */
 const speechRequestOf = (
   call: SpeechSession,
-  ref: VoiceRef,
-  streamed: boolean
+  ref: VoiceRef
 ): { path: string; body: string } => {
-  if (ref.provider === "mistral") {
-    return {
-      path: speechPath,
-      body: JSON.stringify({
-        model: ref.id,
-        input: call.text,
-        voice_id: call.voice,
-        response_format: speechFormat.name,
-        ...(streamed ? { stream: true } : {}),
-      }),
-    };
-  }
   const query = new URLSearchParams({
     enable_logging: "false",
     output_format: elevenLabsFormat.query,
@@ -2983,8 +2955,7 @@ const platformTarget = async (
  */
 const admitSpeech = async (
   env: Env,
-  call: SpeechSession,
-  streamed: boolean
+  call: SpeechSession
 ): Promise<SpeechRoute> => {
   const ref = parseVoiceRef(call.model);
   if (ref === undefined) {
@@ -3001,9 +2972,7 @@ const admitSpeech = async (
   if (!verdict.ok) {
     return await refuse(env, call, verdict);
   }
-  // Streamed, the same file comes in pieces as it is made: Mistral's alone.
-  const pieces = streamed && ref.provider === "mistral";
-  const { path, body } = speechRequestOf(call, ref, pieces);
+  const { path, body } = speechRequestOf(call, ref);
   return {
     env,
     call,
@@ -3017,7 +2986,7 @@ const admitSpeech = async (
         {
           headers: {
             "content-type": "application/json",
-            accept: pieces ? "text/event-stream" : "application/json",
+            accept: "application/json",
           },
           body,
         },
@@ -3092,193 +3061,33 @@ const sendSpeech = async (
   return sent;
 };
 
-/** The four letters at `at` of a file, such as a WAV chunk's name. */
-const tagAt = (bytes: Uint8Array, at: number): string =>
-  String.fromCodePoint(...bytes.subarray(at, at + 4));
-
 /**
- * How long a WAV file of plain samples takes to play, in seconds, from
- * its `fmt ` chunk's bytes a second and its `data` chunk's size;
- * `undefined` for bytes that aren't such a file. A file written as it was
- * made may name a size it didn't know yet: its samples then run to its end.
+ * What a line's answer holds, read; `undefined` when it isn't a line. Its
+ * words are timed as ElevenLabs aligned them.
  */
-const wavSeconds = (bytes: Uint8Array): number | undefined => {
-  if (tagAt(bytes, 0) !== "RIFF" || tagAt(bytes, 8) !== "WAVE") {
-    return undefined;
-  }
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  let bytesPerSecond: number | undefined = undefined;
-  for (let at = 12; at + 8 <= bytes.byteLength;) {
-    const size = view.getUint32(at + 4, true);
-    const tag = tagAt(bytes, at);
-    if (tag === "fmt " && at + 20 <= bytes.byteLength) {
-      bytesPerSecond = view.getUint32(at + 16, true);
-    }
-    if (tag === "data") {
-      const samples = Math.min(size, bytes.byteLength - at - 8);
-      return bytesPerSecond === undefined || bytesPerSecond === 0
-        ? undefined
-        : samples / bytesPerSecond;
-    }
-    // A chunk of an odd size is followed by one byte of padding.
-    at += 8 + size + (size % 2);
-  }
-  return undefined;
-};
-
-/**
- * What a line's answer holds, read; `undefined` when it isn't a line.
- * ElevenLabs's words are timed as it aligned them; Mistral's are those of
- * the `line` asked for, timed over the audio's length.
- */
-const readSpeech = async (
-  answered: Response,
-  line: string,
-  ref: VoiceRef
-): Promise<Speech | undefined> => {
+const readSpeech = async (answered: Response): Promise<Speech | undefined> => {
   const answer: unknown = await answered.json().catch(() => null);
-  if (ref.provider === "elevenlabs") {
-    const aligned = elevenLabsSpokenSchema.safeParse(answer);
-    if (!aligned.success) {
-      return undefined;
-    }
-    const audio = bytesOf(aligned.data.audio_base64);
-    const words = alignedWordsOf(aligned.data.alignment);
-    return audio === undefined || words === undefined
-      ? undefined
-      : { audio, mime: elevenLabsFormat.mime, words };
-  }
-  const parsed = spokenSchema.safeParse(answer);
-  if (!parsed.success) {
+  const aligned = elevenLabsSpokenSchema.safeParse(answer);
+  if (!aligned.success) {
     return undefined;
   }
-  const audio = bytesOf(parsed.data.audio_data);
-  const seconds = audio === undefined ? undefined : wavSeconds(audio);
-  return audio === undefined || seconds === undefined
+  const audio = bytesOf(aligned.data.audio_base64);
+  const words = alignedWordsOf(aligned.data.alignment);
+  return audio === undefined || words === undefined
     ? undefined
-    : { audio, mime: speechFormat.mime, words: wordsOf(line, seconds) };
-};
-
-/** What ends a line of an event stream: a line feed, a carriage return, or both. */
-const eventLineEnd = /\r\n|\n|\r/u;
-
-/** An event of Mistral's speech stream, as far as it is read: what it is, and its piece of the file. */
-const speechEventSchema = z.object({
-  type: z.string().optional(),
-  audio_data: z.string().min(1).optional(),
-});
-
-/** The event that ends a line's stream: every piece of the file came before it. */
-const speechDone = "speech.audio.done";
-
-/**
- * One event of Mistral's speech stream, by the lines of its `data` field
- * joined (the event stream format, HTML's "server-sent events"): the piece
- * of the file a `speech.audio.delta` carries, or that the line is done.
- * Nothing for any other event.
- */
-const speechEventOf = (
-  data: readonly string[]
-): { piece?: Uint8Array; done: boolean } => {
-  const parsed = speechEventSchema.safeParse(
-    data.length === 0 ? undefined : jsonOf(data.join("\n"))
-  );
-  if (!parsed.success) {
-    return { done: false };
-  }
-  const piece =
-    parsed.data.audio_data === undefined
-      ? undefined
-      : bytesOf(parsed.data.audio_data);
-  return {
-    ...(piece === undefined ? {} : { piece }),
-    done: parsed.data.type === speechDone,
-  };
-};
-
-/** Pieces of a file as one. */
-const joinedBytes = (pieces: readonly Uint8Array[]): Uint8Array => {
-  const whole = new Uint8Array(
-    pieces.reduce((sum, piece) => sum + piece.byteLength, 0)
-  );
-  let at = 0;
-  for (const piece of pieces) {
-    whole.set(piece, at);
-    at += piece.byteLength;
-  }
-  return whole;
-};
-
-/**
- * What a line's streamed answer holds, read as it comes: each piece of
- * the file goes to `onAudio` the moment it is there, so whoever listens
- * hears the start of the line while the rest is made; `undefined` when it
- * isn't a line. Put together, the pieces are the file a line asked for
- * whole would be. A stream that ends without saying the line is done broke
- * off: what came of it is no line to keep.
- */
-const readSpeechStream = async (
-  answered: Response,
-  line: string,
-  onAudio: (piece: Uint8Array) => void
-): Promise<Speech | undefined> => {
-  if (answered.body === null) {
-    return undefined;
-  }
-  const pieces: Uint8Array[] = [];
-  let data: string[] = [];
-  let unread = "";
-  let done = false;
-  const take = (written: string): void => {
-    // A blank line ends an event; a `data` line adds to the one underway.
-    if (written === "") {
-      const event = speechEventOf(data);
-      data = [];
-      done ||= event.done;
-      if (event.piece !== undefined) {
-        pieces.push(event.piece);
-        onAudio(event.piece);
-      }
-      return;
-    }
-    if (written.startsWith("data:")) {
-      const value = written.slice("data:".length);
-      data.push(value.startsWith(" ") ? value.slice(1) : value);
-    }
-  };
-  for await (const text of answered.body.pipeThrough(new TextDecoderStream())) {
-    unread += text;
-    // A carriage return at the very end may be half of a line's end.
-    const held = unread.endsWith("\r") ? "\r" : "";
-    const lines = unread
-      .slice(0, unread.length - held.length)
-      .split(eventLineEnd);
-    unread = (lines.pop() ?? "") + held;
-    for (const written of lines) {
-      take(written);
-    }
-  }
-  const audio = joinedBytes(pieces);
-  const seconds = done ? wavSeconds(audio) : undefined;
-  return seconds === undefined
-    ? undefined
-    : { audio, mime: speechFormat.mime, words: wordsOf(line, seconds) };
+    : { audio, mime: elevenLabsFormat.mime, words };
 };
 
 /** The line the provider answered with, read; none when it said nothing. */
-const heardSpeech = async (
-  { answered, answering }: SpeechSent,
-  line: string,
-  ref: VoiceRef,
-  onAudio: ((piece: Uint8Array) => void) | undefined
-): Promise<Speech | undefined> => {
+const heardSpeech = async ({
+  answered,
+  answering,
+}: SpeechSent): Promise<Speech | undefined> => {
   if (answered === undefined || answering === undefined) {
     return undefined;
   }
   try {
-    return onAudio === undefined || ref.provider !== "mistral"
-      ? await readSpeech(answered, line, ref)
-      : await readSpeechStream(answered, line, onAudio);
+    return await readSpeech(answered);
   } catch {
     // Cut off while its answer came in: said and billed all the same.
     return undefined;
@@ -3787,15 +3596,14 @@ const openConversation = async (
 const speakLine = async (
   env: Env,
   fields: SpeechCall,
-  signal: AbortSignal | undefined,
-  onAudio: ((piece: Uint8Array) => void) | undefined
+  signal: AbortSignal | undefined
 ): Promise<Speech> => {
   const call = parseCall(speechSchema, fields);
-  const route = await admitSpeech(env, call, onAudio !== undefined);
+  const route = await admitSpeech(env, call);
   const limit = deadline(call.timeoutMs ?? speechTimeoutMs, signal);
   try {
     const sent = await sendSpeech(route, limit);
-    const speech = await heardSpeech(sent, route.call.text, route.ref, onAudio);
+    const speech = await heardSpeech(sent);
     const stopped = limit.stopped();
     const outcome = speechOutcome(
       speech,
@@ -3954,16 +3762,9 @@ export const models = (env: Env) => ({
     agent: async (session: AgentSession): Promise<AgentModel> =>
       await agentModel(env, session, () => [], undefined, interviewVia),
   },
-  /**
-   * Says a line. With `onAudio`, the line is asked for streamed: each
-   * piece of its file is handed over as the provider makes it, and the
-   * whole line is still what comes back.
-   */
-  speak: async (
-    call: SpeechCall,
-    signal?: AbortSignal,
-    onAudio?: (piece: Uint8Array) => void
-  ): Promise<Speech> => await speakLine(env, call, signal, onAudio),
+  /** Says a line. */
+  speak: async (call: SpeechCall, signal?: AbortSignal): Promise<Speech> =>
+    await speakLine(env, call, signal),
   listen: async (call: ListeningCall): Promise<Listening> =>
     await listenThrough(env, call),
   /**

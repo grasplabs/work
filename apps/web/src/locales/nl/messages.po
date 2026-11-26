@@ -8894,10 +8894,6 @@ msgstr "Ik wis alles wat je Brain van je teams bewaart, ook elke eerdere versie,
 msgid "I found nobody in {signIn}."
 msgstr "Ik heb in {signIn} niemand gevonden."
 
-#: src/interview/words.ts
-msgid "I lost the connection. Please check your internet. I have kept what you said, and I keep trying."
-msgstr "Ik ben de verbinding kwijt. Controleer je internet. Ik heb bewaard wat je zei en ik blijf het proberen."
-
 #: src/onboarding/forget-kickoff.tsx
 msgid "I’ll delete what was said and everything I learned from it, including what your Brain saved. I’ll know less about your company, which may delay when Grasp is ready. This can’t be undone."
 msgstr "Ik verwijder het gesprek en alles wat ik eruit heb gehaald, inclusief wat je Brain heeft opgeslagen. Ik weet dan minder over jullie bedrijf, waardoor Grasp mogelijk later klaarstaat. Dit kan niet ongedaan worden gemaakt."
@@ -9460,10 +9456,6 @@ msgstr "Het blijft hier voor jou om te lezen."
 #: src/interview/page.tsx
 msgid "It stays here for you to read. You can still delete it."
 msgstr "Het blijft hier voor jou om te lezen. Je kunt het nog steeds verwijderen."
-
-#: src/interview/words.ts
-msgid "It still does not work. You can stop for now and come back later. Your place is kept."
-msgstr "Het werkt nog steeds niet. Je kunt nu stoppen en later terugkomen. Je plek blijft bewaard."
 
 #: src/workflows/run-page.tsx
 msgid "It stopped here"
@@ -16944,10 +16936,6 @@ msgid "Stephen can offer it in Microsoft Teams to anyone who may start it. It st
 msgstr "Stephen kan hem in Microsoft Teams aanbieden aan iedereen die hem mag starten. Hij start pas als ze op Starten drukken, en draait namens hen."
 
 #: src/interview/api.ts
-msgid "Stephen could not answer that. Say it another way."
-msgstr "Daar kon Stephen niet op antwoorden. Zeg het op een andere manier."
-
-#: src/interview/api.ts
 msgid "Stephen could not be reached. Try again."
 msgstr "Stephen is niet bereikbaar. Probeer het opnieuw."
 
@@ -17947,6 +17935,10 @@ msgstr "De visie van het bedrijf"
 msgid "The connection stopped working. Workflows that use it wait until someone signs in again."
 msgstr "De koppeling werkt niet meer. Workflows die hem gebruiken, wachten tot iemand opnieuw inlogt."
 
+#: src/interview/words.ts
+msgid "The conversation with Stephen was cut off. What you said is kept. Try again to go on."
+msgstr "Het gesprek met Stephen is afgebroken. Wat je hebt gezegd is bewaard. Probeer het opnieuw om verder te gaan."
+
 #: src/connections/http-connections.tsx
 msgid "The credential needs a header name (letters, digits and dashes) and a secret of at least {shortest} plain ASCII characters, on one line."
 msgstr "De inloggegevens hebben een headernaam nodig (letters, cijfers en streepjes) en een geheim van minstens {shortest} gewone ASCII-tekens, op één regel."
@@ -18079,6 +18071,7 @@ msgid "The input isn't JSON."
 msgstr "De invoer is geen JSON."
 
 #: src/interview/api.ts
+#: src/interview/words.ts
 msgid "The interview could not start. Try again."
 msgstr "Het interview kon niet starten. Probeer het opnieuw."
 
@@ -18151,7 +18144,6 @@ msgid "The message is deleted now, and so is what I marked in it. What I wrote d
 msgstr "Het bericht wordt nu verwijderd, net als wat ik erin heb gemarkeerd. Wat ik eruit heb opgeschreven, staat in wat ik je aan het eind voorlees: haal het daar weg, dan wordt het voorgoed verwijderd zodra ons gesprek klaar is. Dit kan niet ongedaan worden gemaakt."
 
 #: src/interview/composer.tsx
-#: src/interview/words.ts
 msgid "The microphone is not available here. Type your answer."
 msgstr "De microfoon werkt hier niet. Typ je antwoord."
 
@@ -19172,6 +19164,7 @@ msgstr "Proberen"
 #: src/inbox/decision-card.tsx
 #: src/inbox/inbox-page.tsx
 #: src/interview-routes.tsx
+#: src/interview/conversation.tsx
 #: src/onboarding/company-step.tsx
 #: src/onboarding/document-shelf.tsx
 #: src/settings/sign-in-settings.tsx
@@ -20022,10 +20015,6 @@ msgstr "Verzamelwijze"
 msgid "Ways of collecting"
 msgstr "Verzamelwijzen"
 
-#: src/interview/words.ts
-msgid "We have a technical problem on our side. It is not you. I have kept what you said, and I keep trying."
-msgstr "We hebben een technisch probleem aan onze kant. Het ligt niet aan jou. Ik heb bewaard wat je zei en ik blijf het proberen."
-
 #: src/interview/api.ts
 msgid "We have no email address to remind you at. This link stays open: come back when it suits you."
 msgstr "We hebben geen e-mailadres om je een herinnering te sturen. Deze link blijft open: kom terug wanneer het je uitkomt."
@@ -20632,6 +20621,10 @@ msgstr "Wat je hebt gekozen"
 #: src/agents/setup/schedule-step.tsx
 msgid "What you get each time"
 msgstr "Wat je elke keer krijgt"
+
+#: src/interview/words.ts
+msgid "What you said could not be written down yet. It is kept. Try again in a moment."
+msgstr "Wat je hebt gezegd kon nog niet worden opgeschreven. Het is bewaard. Probeer het zo opnieuw."
 
 #: src/brain/memories-page.tsx
 msgid "What you shared"

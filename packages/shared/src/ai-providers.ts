@@ -180,10 +180,9 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     id: "mistral",
     label: "Mistral AI",
     baseUrls: { "openai-completions": "https://api.mistral.ai/v1" },
-    // Its chat completions, which the onboarding interview also runs on
-    // with Grasp's key, and the speech Grasp's own lines are said with
-    // (Voxtral), on Grasp's key alone.
-    paths: ["/v1/chat/completions", "/v1/audio/speech"],
+    // Its chat completions, which the onboarding interview's notes also
+    // run on with Grasp's key.
+    paths: ["/v1/chat/completions"],
     queries: [""],
     // Voxtral's realtime transcription, for Grasp's live listening.
     realtime: [

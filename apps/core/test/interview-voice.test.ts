@@ -1,20 +1,28 @@
+import { errorPayloadSchema } from "@grasp-os/shared/errors";
 import { interviewVoicePath } from "@grasp-os/shared/interview-voice";
 import type {
   VoiceAnswered,
   VoiceLine,
   VoiceSessionJoin,
 } from "@grasp-os/shared/interview-voice";
+import { modelErrors } from "@grasp-os/shared/models";
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
+import { models } from "../src/models.ts";
 import { onboardingStore } from "../src/onboarding/store.ts";
 import { platformAi } from "../src/platform-ai.ts";
 import { allEvents } from "./audit-events.ts";
-import { platformElevenLabsKey } from "./connect-providers.ts";
+import {
+  platformElevenLabsKey,
+  platformMistralKey,
+} from "./connect-providers.ts";
 import {
   answering,
   codeOf,
   holdAlarm,
+  interviewModels,
+  modelOf,
   onLink,
   opened,
   openedFor,
@@ -39,7 +47,16 @@ import { unique } from "./sign-in.ts";
 // - A fact written down that nobody said: one whose words aren't in their
 //   answers, as the page heard them, is left out.
 // - Someone writing into another person's interview: a pass from another
-//   link, or one changed, writes nothing down.
+//   link, or one changed, writes nothing down; nor does a link that opens
+//   nothing, nobody signed in, anyone else, someone who didn't agree to
+//   take part or withdrew.
+// - The page saying who it is or what Stephen knows: the request takes no
+//   such field, and the notes' brief holds what the store knows.
+// - The notes running on anything but Grasp's own models and key.
+// - A correction in the read-back written down as something they never
+//   said: a typed one is quoted as it stands; and a line they changed on
+//   their screen themselves coming back as anything but their words.
+// - The turn-by-turn endpoint still answering a link: it is gone.
 // - Something written down twice: nothing is, until one more answer of
 //   theirs was heard.
 // - A conversation opened unrecorded, or recorded with what was said.
@@ -180,6 +197,18 @@ const heard = (...answers: string[]): VoiceLine[] => [
   { from: "stephen", text: "What do you do here, in a sentence or two?" },
   ...answers.map((text) => ({ from: "person" as const, text })),
 ];
+
+/** The lines read back, as the page holds them in the read-back. */
+const readBack = {
+  ...standing,
+  phase: "readback",
+  facts: [
+    { id: "f1", tag: "step", text: "You check the invoices in Exact." },
+    { id: "f2", tag: "wait", text: "It waits two days for approval." },
+  ],
+  noted: 0,
+  reading: ["f1", "f2"],
+} as const;
 
 const exactFact = {
   tag: "step",
@@ -572,5 +601,345 @@ describe("an interview as a live conversation", { timeout: 60_000 }, () => {
       answered: brief.includes("answered out loud"),
       cameBack: brief.includes("has just come back on their link"),
     }).toStrictEqual({ answered: true, cameBack: false });
+  });
+
+  it("writes down on Grasp's own Mistral key, on no other model, for who the store says they are", async () => {
+    const link = await opened();
+    const { requests } = await answering(
+      [notes({ facts: [], changes: [] })],
+      async () => {
+        const { pass } = await join(link);
+        await noteFrom(link, pass, heard("I look it up."), 0);
+      }
+    );
+    // The gateway lets the interview's way through for its own models only.
+    let other: string | null = null;
+    try {
+      await models(env).interview.call({
+        model: interviewModels[0],
+        purpose: "onboarding.interview",
+        trigger: { type: "system" },
+        work: { onboarding: true },
+        input: "Hello",
+      });
+    } catch (error) {
+      other = modelErrors.codeOf(error) ?? null;
+    }
+    const brief = JSON.stringify(requests[0]?.body);
+    expect({
+      sentTo: requests.map(({ url, headers }) => [
+        new URL(url).host,
+        headers.get("authorization"),
+      ]),
+      model: requests.map(modelOf),
+      other,
+      toldName: brief.includes("You talk with: Oli, Ops."),
+      noLead: brief.includes('say \\"I was told\\" instead'),
+      // Nothing written down yet: the first thing the record misses.
+      open: brief.includes(
+        String.raw`What is still open, most important first:\n- which work comes back every day or week, and how often\n`
+      ),
+    }).toStrictEqual({
+      sentTo: [["api.mistral.ai", `Bearer ${platformMistralKey}`]],
+      model: ["mistral-medium-latest"],
+      other: "model.not_allowed",
+      toldName: true,
+      noLead: true,
+      open: true,
+    });
+  });
+
+  it("opens no conversation and writes nothing down for a link that opens nothing, nobody signed in, anyone else, or a page that says who it is", async () => {
+    const link = await opened();
+    const { pass } = await join(link);
+    const someoneElse = await signedInAs(`someone-${unique()}@acme.test`);
+    const before = await tokensAsked();
+    const open = { action: "open", event: "start", ...standing };
+    const answer = {
+      action: "answer",
+      ...standing,
+      pass,
+      noted: 0,
+      said: heard("I check the invoices in Exact every morning."),
+    };
+    const { requests, result } = await answering([], async () => ({
+      unknown: await Promise.all(
+        [open, answer].map(
+          async (body) =>
+            await codeOf(await ask({ ...link, secret: "a".repeat(43) }, body))
+        )
+      ),
+      signedOut: await Promise.all(
+        [open, answer].map(
+          async (body) => await codeOf(await ask({ ...link, cookie: "" }, body))
+        )
+      ),
+      someoneElse: await Promise.all(
+        [open, answer].map(
+          async (body) =>
+            await codeOf(await ask({ ...link, cookie: someoneElse }, body))
+        )
+      ),
+      // The page can't say who it is with.
+      named: await Promise.all(
+        [open, answer].map(
+          async (body) =>
+            await codeOf(await ask(link, { ...body, name: "Someone else" }))
+        )
+      ),
+    }));
+    const after = await tokensAsked();
+    expect({
+      ...result,
+      notesAsked: requests.length,
+      opened: after.length - before.length,
+    }).toStrictEqual({
+      unknown: [
+        [404, "interview.link_invalid"],
+        [404, "interview.link_invalid"],
+      ],
+      signedOut: [
+        [401, "interview.sign_in"],
+        [401, "interview.sign_in"],
+      ],
+      someoneElse: [
+        [404, "interview.link_invalid"],
+        [404, "interview.link_invalid"],
+      ],
+      named: [
+        [400, "interview.invalid"],
+        [400, "interview.invalid"],
+      ],
+      notesAsked: 0,
+      opened: 0,
+    });
+  });
+
+  it("opens no conversation and writes nothing down for someone who didn't agree to take part, or withdrew (GRA-329, T1, T5)", async () => {
+    const { link } = await openedFor({ participating: false });
+    const before = await tokensAsked();
+    const open = { action: "open", event: "start", ...standing };
+    const correction = {
+      action: "answer",
+      ...readBack,
+      said: [{ from: "person", text: "Three days.", typed: true }],
+    };
+    const { requests, result } = await answering([], async () => {
+      const unagreed = [
+        await codeOf(await ask(link, open)),
+        await codeOf(await ask(link, correction)),
+      ];
+      await participate(link);
+      await onLink({ action: "withdraw", ...link });
+      return {
+        unagreed,
+        withdrawn: [
+          await codeOf(await ask(link, open)),
+          await codeOf(await ask(link, correction)),
+        ],
+      };
+    });
+    const after = await tokensAsked();
+    expect({
+      ...result,
+      notesAsked: requests.length,
+      opened: after.length - before.length,
+    }).toStrictEqual({
+      unagreed: [
+        [403, "interview.not_participating"],
+        [403, "interview.not_participating"],
+      ],
+      withdrawn: [
+        [410, "interview.withdrawn"],
+        [410, "interview.withdrawn"],
+      ],
+      notesAsked: 0,
+      opened: 0,
+    });
+  });
+
+  it("writes down what they put right in the read-back, told which lines were read back, and quotes a typed correction only as it stands", async () => {
+    const link = await opened();
+    const said = "No, it waits three days, and Sam approves it by e-mail.";
+    const written = {
+      facts: [
+        {
+          tag: "next",
+          text: "Sam approves it.",
+          record: "Sam approves it.",
+          quote: "Sam approves it",
+        },
+        // Their words but for a hyphen: how a spoken answer is heard, never how a typed one stands.
+        {
+          tag: "system",
+          text: "The approval comes by email.",
+          record: "The approval comes by email.",
+          quote: "by email",
+        },
+      ],
+      changes: [
+        {
+          id: "f2",
+          text: "It waits three days for approval.",
+          record: "It waits three days for approval.",
+        },
+        // No line of theirs: left out.
+        { id: "f9", text: "Unknown.", record: "Unknown." },
+      ],
+    };
+    const { requests, result } = await answering(
+      [notes(written), notes(written)],
+      async () => {
+        const correct = async (typed: boolean): Promise<VoiceAnswered> => {
+          // No conversation is open in the read-back: no pass.
+          const answered = await ask(link, {
+            action: "answer",
+            ...readBack,
+            before: heard("I check the invoices in Exact."),
+            said: [{ from: "person", text: said, ...(typed ? { typed } : {}) }],
+          });
+          return await answered.json();
+        };
+        return { typed: await correct(true), spoken: await correct(false) };
+      }
+    );
+    const brief = JSON.stringify(requests[0]?.body);
+    expect({
+      typed: {
+        facts: result.typed.turn?.facts.map(({ text }) => text),
+        changes: result.typed.turn?.changes,
+      },
+      spoken: result.spoken.turn?.facts.map(({ text }) => text),
+      toldWhatWasRead: brief.includes(
+        "You read these lines back to Oli: f1, f2. Their last line is their answer to that."
+      ),
+      toldTheConversation: brief.includes("I check the invoices in Exact."),
+    }).toStrictEqual({
+      typed: {
+        facts: ["Sam approves it."],
+        changes: [
+          {
+            id: "f2",
+            text: "It waits three days for approval.",
+            record: "It waits three days for approval.",
+          },
+        ],
+      },
+      spoken: ["Sam approves it.", "The approval comes by email."],
+      toldWhatWasRead: true,
+      toldTheConversation: true,
+    });
+  });
+
+  it("answers a line they changed on their screen as exactly that change, whatever the notes' model makes of it", async () => {
+    const link = await opened();
+    const edit = { id: "f2", text: "It waits three days for approval." };
+    const edited = async (): Promise<VoiceAnswered> => {
+      const answered = await ask(link, {
+        action: "answer",
+        ...readBack,
+        said: [
+          {
+            from: "person",
+            text: "Change “It waits two days for approval” to “It waits three days for approval”.",
+            typed: true,
+          },
+        ],
+        edit,
+      });
+      return await answered.json();
+    };
+    const { result } = await answering(
+      [
+        // Other words than theirs, another line changed, and a fact of its own.
+        notes({
+          facts: [
+            {
+              tag: "wait",
+              text: "It waits three days.",
+              record: "It waits three days.",
+              quote: "It waits three days for approval",
+            },
+          ],
+          changes: [
+            {
+              id: "f2",
+              text: "Approval takes about three days.",
+              record: "The invoice waits 3 days for approval.",
+            },
+            { id: "f1", text: "", record: "" },
+          ],
+        }),
+        // Nothing changed at all.
+        notes({ facts: [], changes: [] }),
+      ],
+      async () => [await edited(), await edited()]
+    );
+    expect(result.map(({ turn }) => turn)).toStrictEqual([
+      {
+        facts: [],
+        changes: [
+          { ...edit, record: "The invoice waits 3 days for approval." },
+        ],
+        phase: "readback",
+      },
+      {
+        facts: [],
+        changes: [{ ...edit, record: edit.text }],
+        phase: "readback",
+      },
+    ]);
+  });
+
+  it("takes no answer of a conversation without its pass, and no changed line outside the lines they have", async () => {
+    const link = await opened();
+    const said = heard("I check the invoices in Exact every morning.");
+    const { requests, result } = await answering([], async () => [
+      await codeOf(
+        await ask(link, { action: "answer", ...standing, noted: 0, said })
+      ),
+      await codeOf(
+        await ask(link, {
+          action: "answer",
+          ...readBack,
+          said,
+          edit: { id: "f7", text: "Something else." },
+        })
+      ),
+      await codeOf(
+        await ask(link, {
+          action: "answer",
+          ...standing,
+          noted: 0,
+          said,
+          edit: { id: "f1", text: "Something else." },
+        })
+      ),
+    ]);
+    expect({ refusals: result, notesAsked: requests.length }).toStrictEqual({
+      refusals: [
+        [400, "interview.invalid"],
+        [400, "interview.invalid"],
+        [400, "interview.invalid"],
+      ],
+      notesAsked: 0,
+    });
+  });
+
+  it("answers a link no turn any more: the turn-by-turn endpoint is gone", async () => {
+    const link = await opened();
+    const answered = await postedOnLink("/api/interview/turn", {
+      ...link,
+      event: "start",
+      locale: "en",
+      lines: [],
+      facts: [],
+      phase: "open",
+      minutes: 0,
+    });
+    expect([
+      answered.status,
+      errorPayloadSchema.safeParse(await answered.json()).data?.code,
+    ]).toStrictEqual([404, "request.not_found"]);
   });
 });
