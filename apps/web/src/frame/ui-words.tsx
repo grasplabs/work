@@ -630,6 +630,10 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
           context: "turn your microphone off for a moment",
         }),
         settling: t`Writing it down`,
+        unmute: t({
+          message: "Unmute",
+          context: "turn your microphone back on",
+        }),
       },
       stop: t({ message: "Stop", context: "stop an answer" }),
       submit: t({ message: "Send", context: "send a message" }),

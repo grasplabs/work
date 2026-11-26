@@ -37,7 +37,7 @@
   },
   {
     "path": "src/components/prompt-input.tsx",
-    "reason": "A voice is drawn as the hill (prompt-input-voice-hill.ts) in the field's place, on a canvas that reaches from the bar's foot to its top (in a compact card, from the card's foot). And timed={false} on PromptInputVoice leaves the running time out, where the page keeps its own. And what a dictation hears is drawn in the text word by word (prompt-input-heard.tsx), in place of the lighter words after it.",
+    "reason": "A voice is drawn as the hill (prompt-input-voice-hill.ts) in the field's place, on a canvas that reaches from the bar's foot to its top (in a compact card, from the card's foot). And timed={false} on PromptInputVoice leaves the running time out, where the page keeps its own. And what a dictation hears is drawn in the text word by word (prompt-input-heard.tsx), in place of the lighter words after it. A voice's mute shows the microphone struck through while it is off, named Unmute, with no held fill; and its close is a words button, a keyboard and Type instead, not an X.",
     "since": "2026-11-25"
   },
   {
@@ -51,8 +51,13 @@
     "since": "2026-11-24"
   },
   {
+    "path": "src/lib/i18n.tsx",
+    "reason": "speechButton.unmute, the name of a voice's mute while it is off; and voice.close as Type instead, for the words button that gives the text back.",
+    "since": "2026-11-26"
+  },
+  {
     "path": "src/lib/icons.ts",
-    "reason": "The filled forms of the message and pause icons, for a header whose icons are filled.",
+    "reason": "The filled forms of the message and pause icons, for a header whose icons are filled. And MicOffIcon and KeyboardIcon, for a voice's mute and its Type instead.",
     "since": "2026-11-24",
     "pullRequest": "https://github.com/grasplabs/damsko/pull/66"
   },

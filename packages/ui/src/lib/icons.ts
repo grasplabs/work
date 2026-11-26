@@ -97,6 +97,7 @@ import {
   LabsIcon,
   LaptopIcon as HugeLaptopIcon,
   LeftToRightListBulletIcon,
+  KeyboardIcon as HugeKeyboardIcon,
   LeftToRightListDashIcon,
   Link04Icon,
   Loading03Icon,
@@ -105,6 +106,7 @@ import {
   Mail01Icon,
   Message01Icon,
   Mic01Icon,
+  MicOff01Icon,
   MinusSignCircleIcon,
   MinusSignIcon,
   Moon02Icon,
@@ -467,6 +469,8 @@ export const InfoIcon: IconData = InformationCircleIcon;
 export const ItalicIcon: IconData = TextItalicIcon;
 /** A key: an AI provider's key, an API key, a secret. Key01Icon. */
 export const KeyIcon: IconData = Key01Icon;
+/** Type instead of speaking. KeyboardIcon. */
+export const KeyboardIcon: IconData = HugeKeyboardIcon;
 /** A desktop's width: shown as on a laptop or a desktop. LaptopIcon. */
 export const LaptopIcon: IconData = HugeLaptopIcon;
 /** Apps, as panels on a page. DashboardSquare01Icon. */
@@ -509,6 +513,8 @@ export const MessageSquareFilledIcon: IconData =
 export const MessageSquareIcon: IconData = Message01Icon;
 /** Speak instead of typing. Mic01Icon. */
 export const MicIcon: IconData = Mic01Icon;
+/** The microphone turned off: struck through, as a call shows it muted. MicOff01Icon. */
+export const MicOffIcon: IconData = MicOff01Icon;
 /** Back to its own size: leave full screen, Maximize2Icon's pair. ArrowShrink01Icon. */
 export const Minimize2Icon: IconData = ArrowShrink01Icon;
 /** Some, not all: a checkbox whose group is partly checked. MinusSignIcon. */

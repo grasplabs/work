@@ -59,7 +59,6 @@ const styles = stylex.create({
     height: "100%",
     paddingBlockEnd: space["2"],
   },
-  note: { flexShrink: 0, paddingBlockEnd: space["2"] },
   thread: { display: "flex", flexGrow: 1, minHeight: 0 },
   // A new turn stands apart from the one before; lines of one turn keep the scroller's own rhythm.
   turn: { paddingBlockStart: space["2"] },
@@ -214,7 +213,6 @@ export const Transcript = ({
   if (!open) {
     return null;
   }
-  const marked = lines.some(({ marks }) => (marks?.length ?? 0) > 0);
   return (
     <aside
       aria-label={t`Transcript`}
@@ -223,13 +221,6 @@ export const Transcript = ({
     >
       {look === "c" && lines.length > 0 ? (
         <QaLegend who={interviewerNames[interviewer]} />
-      ) : null}
-      {marked ? (
-        <div {...stylex.props(styles.note)}>
-          <Text color="muted" size="xs">
-            {t`What is marked is what I wrote down. You check it at the end.`}
-          </Text>
-        </div>
       ) : null}
       {lines.length === 0 ? (
         <Text color="muted">{t`Nothing said yet.`}</Text>

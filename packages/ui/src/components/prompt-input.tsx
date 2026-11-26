@@ -120,8 +120,10 @@ import {
   ChevronRightIcon,
   Icon,
   InfoIcon,
+  KeyboardIcon,
   LoaderIcon,
   MicIcon,
+  MicOffIcon,
   PaperclipIcon,
   PlusIcon,
   SquareIcon,
@@ -4662,22 +4664,30 @@ export const PromptInputVoice = ({
             note={note}
           />
           {toolButton({
-            "aria-label": words.speechButton.mute,
-            pressed: off,
+            // Muted is the microphone struck through, as every call shows it, not a held fill:
+            // its name says what pressing it does.
+            "aria-label": off
+              ? words.speechButton.unmute
+              : words.speechButton.mute,
             off: false,
             slot: "prompt-input-voice-mute",
             onClick: () => {
               setOwnMuted(!off);
               onMutedChange?.(!off);
             },
-            children: <Icon icon={MicIcon} />,
+            children: <Icon icon={off ? MicOffIcon : MicIcon} />,
           })}
           {toolButton({
-            "aria-label": words.voice.close,
             off: false,
             slot: "prompt-input-voice-close",
             onClick: onClose,
-            children: <Icon icon={XIcon} />,
+            // Closing gives the text back: said so in words, with a keyboard.
+            children: (
+              <>
+                <Icon icon={KeyboardIcon} />
+                {words.voice.close}
+              </>
+            ),
           })}
         </div>
       </div>
