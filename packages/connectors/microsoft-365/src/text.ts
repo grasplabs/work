@@ -82,6 +82,9 @@ const unread: Readonly<Record<string, ReadonlySet<string>>> = {
     "mask",
     "pattern",
     "marker",
+    "filter",
+    "linearGradient",
+    "radialGradient",
   ]),
   [htmlSpec.NS.MATHML]: new Set([
     "script",
@@ -106,20 +109,25 @@ const isUnread = (element: Element): boolean =>
       hasAttribute(element, "popover") ||
       (element.tagName === "dialog" && !hasAttribute(element, "open"))));
 
-/** Formula elements that show their first child alone (MathML Core). */
-const firstShown: ReadonlySet<string> = new Set(["semantics", "maction"]);
+/**
+ * Elements that show their first element alone, by their namespace: a
+ * formula's `semantics` and `maction` (MathML Core), and a drawing's
+ * `switch`, whose first child meeting its conditions, which a page's
+ * drawings rarely set, is the one drawn.
+ */
+const firstShown: Readonly<Record<string, ReadonlySet<string>>> = {
+  [htmlSpec.NS.MATHML]: new Set(["semantics", "maction"]),
+  [htmlSpec.NS.SVG]: new Set(["switch"]),
+};
 
 /**
  * What a browser shows of what `element` holds: of a closed `details`,
- * only its first `summary`; of a formula's `semantics` or `maction`,
- * only its first element.
+ * only its first `summary`; of a {@link firstShown} element, only its
+ * first element.
  */
 const shownChildren = (element: Element): readonly Node[] => {
   let shown: Node | undefined;
-  if (
-    element.namespaceURI === htmlSpec.NS.MATHML &&
-    firstShown.has(element.tagName)
-  ) {
+  if (firstShown[element.namespaceURI]?.has(element.tagName) === true) {
     shown = element.childNodes.find((node) => "tagName" in node);
   } else if (
     element.tagName === "details" &&
@@ -136,10 +144,20 @@ const shownChildren = (element: Element): readonly Node[] => {
 };
 
 /**
- * Drawing elements whose text a browser draws: a drawing's characters
- * outside them are never shown (SVG 2, 11.1).
+ * Drawing elements whose own characters a browser draws: a drawing's
+ * characters in any other are never shown (SVG 2, 11.1). What a
+ * `foreignObject` holds is HTML, read as a page's.
  */
-const drawnText: ReadonlySet<string> = new Set(["text", "foreignObject"]);
+const drawnText: ReadonlySet<string> = new Set(["text", "tspan", "textPath"]);
+
+/** Whether a browser shows `text`'s characters, by what holds them. */
+const isShownText = ({
+  parentNode,
+}: DefaultTreeAdapterTypes.TextNode): boolean =>
+  parentNode === null ||
+  !("namespaceURI" in parentNode) ||
+  parentNode.namespaceURI !== htmlSpec.NS.SVG ||
+  drawnText.has(parentNode.tagName);
 
 /** Elements on lines of their own: paragraphs, headings, list items, table rows, sections. */
 const lineEnds: ReadonlySet<string> = new Set([
@@ -286,9 +304,9 @@ const spacesBeforeBreak = /[ \t]+\n/gu;
 const spacesBeforeTab = / +\t/gu;
 const blankLines = /\n{2,}/gu;
 
-/** What ends once an element's content is read: a line, a cell, `pre`, drawn text. */
+/** What ends once an element's content is read: a line, a cell, `pre`. */
 interface Leaving {
-  leave: "line" | "cell" | "inCell" | "pre" | "drawn";
+  leave: "line" | "cell" | "inCell" | "pre";
 }
 
 /**
@@ -315,8 +333,6 @@ export const htmlText = (html: string): string => {
   };
   pushChildren(parse(html, { treeAdapter: boundedTree(html) }).childNodes);
   let pre = 0;
-  /** How many of a drawing's elements whose text it draws are open. */
-  let drawn = 0;
   let cells = 0;
   let rowCells = 0;
   /** Whether nothing but a line break or a tab stands before what comes next. */
@@ -343,8 +359,6 @@ export const htmlText = (html: string): string => {
       space();
     } else if (what === "cell") {
       cells -= 1;
-    } else if (what === "drawn") {
-      drawn -= 1;
     } else {
       pre -= 1;
     }
@@ -390,12 +404,6 @@ export const htmlText = (html: string): string => {
     if (tagName === "pre") {
       pre += 1;
       steps.push({ leave: "pre" });
-    } else if (
-      element.namespaceURI === htmlSpec.NS.SVG &&
-      drawnText.has(tagName)
-    ) {
-      drawn += 1;
-      steps.push({ leave: "drawn" });
     }
     pushChildren(shownChildren(element));
   };
@@ -403,12 +411,7 @@ export const htmlText = (html: string): string => {
     if ("leave" in step) {
       leave(step);
     } else if (step.nodeName === "#text" && "value" in step) {
-      const { parentNode } = step;
-      const inDrawing =
-        parentNode !== null &&
-        "namespaceURI" in parentNode &&
-        parentNode.namespaceURI === htmlSpec.NS.SVG;
-      if (!inDrawing || drawn > 0) {
+      if (isShownText(step)) {
         read(step.value);
       }
     } else if ("tagName" in step && !isUnread(step)) {

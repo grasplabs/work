@@ -63,7 +63,7 @@ export const plantedHtml: Readonly<
   // A drawing draws only its text elements' characters, and a formula
   // its shown parts.
   drawnAlone: {
-    html: `<p>${shownText}</p><svg><g>${plantedInstruction}</g>${plantedInstruction}<foo>${plantedInstruction}</foo><text hidden>Due</text><foreignObject><p>soon</p></foreignObject></svg><p><math><mphantom><mi>${plantedInstruction}</mi></mphantom><semantics><mi>y</mi><mtext>${plantedInstruction}</mtext></semantics><maction><mi>z</mi><mtext>${plantedInstruction}</mtext></maction></math></p>`,
+    html: `<p>${shownText}</p><svg><g>${plantedInstruction}</g>${plantedInstruction}<foo>${plantedInstruction}</foo><text hidden>Due<rect>${plantedInstruction}</rect></text><switch><g/><text>${plantedInstruction}</text></switch><filter><text>${plantedInstruction}</text></filter><linearGradient><text>${plantedInstruction}</text></linearGradient><foreignObject><p>soon</p><svg>${plantedInstruction}</svg></foreignObject></svg><p><math><mphantom><mi>${plantedInstruction}</mi></mphantom><semantics><mi>y</mi><mtext>${plantedInstruction}</mtext></semantics><maction><mi>z</mi><mtext>${plantedInstruction}</mtext></maction></math></p>`,
     shown: `${shownText}\nDue\nsoon\nyz`,
   },
   // What only an SVG drawing hides, a page shows.
