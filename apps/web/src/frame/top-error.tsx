@@ -5,7 +5,7 @@ import {
   AlertTitle,
 } from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
 import * as stylex from "@stylexjs/stylex";
 import {
   useEffect,
@@ -131,10 +131,14 @@ export const TopError = ({
 };
 
 const styles = stylex.create({
-  // Over the top of the window, clear of its edges, above everything on the page.
+  // Across the top of the page, just under the header, so its controls stay clear and usable;
+  // above everything on the page.
   bar: {
     position: "fixed",
-    insetBlockStart: space["3"],
+    insetBlockStart: {
+      default: `calc(4rem + ${space["2"]})`,
+      [media.sm]: `calc(5rem + ${space["2"]})`,
+    },
     insetInline: space["3"],
     zIndex: 50,
     display: "flex",
