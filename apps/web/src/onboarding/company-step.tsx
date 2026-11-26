@@ -15,12 +15,6 @@ import { BrandIcon } from "@grasp-os/ui/components/brand-icon";
 import { Button } from "@grasp-os/ui/components/button";
 import { FileUpload } from "@grasp-os/ui/components/file-upload";
 import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-} from "@grasp-os/ui/components/input-group";
-import {
   Item,
   ItemActions,
   ItemContent,
@@ -31,12 +25,8 @@ import {
 } from "@grasp-os/ui/components/item";
 import { Separator } from "@grasp-os/ui/components/separator";
 import { Text } from "@grasp-os/ui/components/text";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@grasp-os/ui/components/toggle-group";
 import { CircleCheckIcon, FileIcon, Icon } from "@grasp-os/ui/lib/icons";
-import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { colors, radius, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { msg, plural } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -84,8 +74,17 @@ const styles = stylex.create({
   stack: { display: "grid", gap: space[4] },
   // The ways in, kept mounted (the upload is still settling) but out of sight while the list comes in.
   gone: { display: "none" },
-  // Another account: which kind, then its domain and Connect, in one column.
-  add: { display: "grid", gap: space[2] },
+  // Microsoft and Google side by side where they fit, one above the other where not.
+  signIns: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(15rem, 1fr))",
+    gap: space[3],
+    alignItems: "start",
+  },
+  kind: { display: "grid", gap: space[2] },
+  // A row's own ground under it, so nothing behind the step shows through its fill.
+  solid: { backgroundColor: colors.background, borderRadius: radius.xl },
+  another: { justifySelf: "center" },
   drop: { display: "grid", gap: space[2] },
   example: { justifySelf: "center" },
   // "Or use a staff list", through the middle of a line either side.
@@ -187,25 +186,22 @@ const readDirectoryRoster = async (
 const startDirectory = async (
   core: ReturnType<typeof useCore>,
   suite: DirectorySuite,
-  domain?: string
-): Promise<"unknown" | "failed" | null> => {
+  way: SignInWay
+): Promise<boolean> => {
   try {
     const { url } = await core.withSession(async (session) =>
-      domain === undefined
+      way === "own"
         ? await session.onboarding.connectDirectory(suite, companyStep)
         : await session.onboarding.connectOtherDirectory(
             suite,
-            domain,
+            way === "any" ? null : way.again,
             companyStep
           )
     );
     window.location.assign(url);
-    return null;
-  } catch (error) {
-    const code = directoryErrors.codeOf(error);
-    return code === "directory.unknown_domain" || code === "directory.invalid"
-      ? "unknown"
-      : "failed";
+    return true;
+  } catch {
+    return false;
   }
 };
 
@@ -365,161 +361,136 @@ const useAccountLabel = (): ((
     if (account.own) {
       return t`${signIn} is connected`;
     }
+    // Its check says it is connected; the name stays short enough for one line beside the other suite.
     return account.suite === "google"
-      ? t`${account.tenant} is connected`
-      : t`Another ${signIn} account is connected`;
+      ? account.tenant
+      : t`Another ${signIn} account`;
   };
 };
 
 /**
- * Another of the company's accounts, by its domain: a second Microsoft
- * tenant, a Google domain of a daughter company. Pressed open, it asks
- * which kind and the domain, and connects it; everyone in it joins the
- * roster, each email once.
+ * How a sign-in starts: the company's own account at its suite (`own`),
+ * any organization's, the one signed in to then counting (`any`), or one
+ * connected before, by its tenant, signed in to again.
  */
-const AddAccount = ({
-  suites,
-  busy,
-  onAdd,
-}: {
-  suites: DirectorySuite[];
-  busy: boolean;
-  onAdd: (suite: DirectorySuite, domain: string) => void;
-}) => {
-  const { t } = useLingui();
-  const [open, setOpen] = useState(false);
-  // Any kind of account, whichever the company signs in with: the one it does first.
-  const kinds = [
-    ...suites,
-    ...directorySuiteSchema.options.filter((each) => !suites.includes(each)),
-  ];
-  const [first = "microsoft"] = kinds;
-  const [suite, setSuite] = useState<DirectorySuite>(first);
-  const [domain, setDomain] = useState("");
-  if (!open) {
-    return (
-      <Button
-        onClick={() => {
-          setOpen(true);
-        }}
-        size="sm"
-        style={styles.example}
-        type="button"
-        variant="link"
-      >
-        {t`Add another Microsoft or Google account`}
-      </Button>
-    );
-  }
-  return (
-    <form
-      onSubmit={(event) => {
-        event.preventDefault();
-        onAdd(suite, domain.trim());
-      }}
-      {...stylex.props(styles.add)}
-    >
-      {kinds.length > 1 ? (
-        <ToggleGroup
-          aria-label={t`Which kind of account`}
-          onValueChange={(value) => {
-            const picked = directorySuiteSchema.safeParse(value[0]);
-            if (picked.success) {
-              setSuite(picked.data);
-            }
-          }}
-          value={[suite]}
-        >
-          {kinds.map((each) => (
-            <ToggleGroupItem key={each} value={each}>
-              {suiteNames[each]}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-      ) : null}
-      <InputGroup>
-        <InputGroupInput
-          aria-label={t`The account’s domain`}
-          autoFocus
-          onChange={(event) => {
-            setDomain(event.target.value);
-          }}
-          placeholder={t`other-company.com`}
-          value={domain}
-        />
-        <InputGroupAddon align="inline-end">
-          <InputGroupButton
-            disabled={busy || domain.trim() === ""}
-            type="submit"
-            variant="default"
-          >
-            {t`Connect`}
-          </InputGroupButton>
-        </InputGroupAddon>
-      </InputGroup>
-    </form>
-  );
-};
+type SignInWay = "own" | "any" | { again: string };
 
 /**
- * The ways in by sign-in: before any, the company's own account at each
- * suite; once there is a roster, every account connected (its own and its
- * others) and the own account of a suite not yet connected.
+ * The ways in by sign-in, Microsoft and Google side by side, the suite the
+ * company signs in with first. Each holds its accounts connected, or, with
+ * none, its "Continue with"; once one is, a quiet way to add another of
+ * that kind, through the same sign-in. Every account's people join the
+ * one list, each address once.
  */
 const SignIns = ({
   suites,
   accounts,
-  known,
   reading,
   onConnect,
 }: {
+  /** The suites the company signs in with. */
   suites: DirectorySuite[];
   accounts: OnboardingDirectoryAccount[];
-  known: boolean;
   reading: DirectorySuite | "list" | null;
-  onConnect: (
-    suite: DirectorySuite,
-    account?: OnboardingDirectoryAccount
-  ) => void;
+  onConnect: (suite: DirectorySuite, way: SignInWay) => void;
 }) => {
   const { t } = useLingui();
   const labelOf = useAccountLabel();
-  const shown = known ? accounts : [];
-  const ownShown = new Set(
-    shown.filter(({ own }) => own).map(({ suite }) => suite)
-  );
+  const kinds = [
+    ...suites,
+    ...directorySuiteSchema.options.filter((each) => !suites.includes(each)),
+  ];
   return (
-    <ItemGroup aria-label={t`Your sign-in`}>
-      {shown.map((account) => (
-        <SignInRow
-          done={account.status === "active"}
-          key={account.id}
-          label={labelOf(account)}
-          onConnect={() => {
-            onConnect(account.suite, account);
-          }}
-          suite={account.suite}
-        />
-      ))}
-      {suites
-        .filter((suite) => !ownShown.has(suite))
-        .map((suite) => (
-          <SignInRow
-            done={false}
-            key={suite}
-            label={
-              reading === suite
-                ? t`Waiting for ${suiteNames[suite]}`
-                : t`Continue with ${suiteNames[suite]}`
-            }
-            onConnect={() => {
-              onConnect(suite);
-            }}
-            suite={suite}
-          />
-        ))}
-    </ItemGroup>
+    <div {...stylex.props(styles.signIns)}>
+      {kinds.map((suite) => {
+        const connected = accounts.filter((each) => each.suite === suite);
+        return (
+          <div key={suite} {...stylex.props(styles.kind)}>
+            {connected.map((account) => (
+              <div key={account.id} {...stylex.props(styles.solid)}>
+                <SignInRow
+                  done={account.status === "active"}
+                  label={labelOf(account)}
+                  onConnect={() => {
+                    onConnect(
+                      suite,
+                      account.own ? "own" : { again: account.tenant }
+                    );
+                  }}
+                  suite={suite}
+                />
+              </div>
+            ))}
+            {connected.length === 0 ? (
+              <div {...stylex.props(styles.solid)}>
+                <SignInRow
+                  done={false}
+                  label={
+                    reading === suite
+                      ? t`Waiting for ${suiteNames[suite]}`
+                      : t`Continue with ${suiteNames[suite]}`
+                  }
+                  onConnect={() => {
+                    onConnect(suite, suites.includes(suite) ? "own" : "any");
+                  }}
+                  suite={suite}
+                />
+              </div>
+            ) : (
+              <Button
+                disabled={reading !== null}
+                onClick={() => {
+                  onConnect(suite, "any");
+                }}
+                size="sm"
+                style={styles.another}
+                type="button"
+                variant="link"
+              >
+                {suite === "microsoft"
+                  ? t`Add another Microsoft account`
+                  : t`Add another Google account`}
+              </Button>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
+};
+
+/**
+ * On a local stack only, which has no directory to sign in to: accounts as
+ * if connected, named in the address (`?devAccounts=microsoft,google`),
+ * the first of the company's suite its own. Null anywhere else.
+ */
+const devAccounts = (): OnboardingDirectoryAccount[] | null => {
+  if (!import.meta.env.DEV || typeof window === "undefined") {
+    return null;
+  }
+  const named = new URLSearchParams(window.location.search).get("devAccounts");
+  if (named === null) {
+    return null;
+  }
+  return named.split(",").flatMap((each, at) => {
+    const suite = directorySuiteSchema.safeParse(each.trim());
+    if (!suite.success) {
+      return [];
+    }
+    const own = at === 0;
+    return [
+      {
+        id: `dev-${String(at)}`,
+        suite: suite.data,
+        tenant:
+          suite.data === "google"
+            ? `team-${String(at)}.test`
+            : `dev-${String(at)}`,
+        own,
+        status: "active" as const,
+      },
+    ];
+  });
 };
 
 /** A directory sign-in that didn't connect, and why: one that came back refused (`useConnectionReturn`), or one the step couldn't start. */
@@ -655,7 +626,7 @@ export const CompanyStep = (props: StepProps) => {
   const [kept, setKept] = useState<Kept | null>(null);
   const { roster } = props.data.view;
   const { directory, suites } = props.data;
-  const accounts = props.data.directoryAccounts ?? [];
+  const accounts = devAccounts() ?? props.data.directoryAccounts ?? [];
   // A sign-in that didn't connect, back refused or not started: said over the step, with the way on.
   const [notConnected, setNotConnected] = useNotConnected(suites);
   // He says it's in right here, as it comes in; the next step only says it can wait, when skipped.
@@ -712,22 +683,15 @@ export const CompanyStep = (props: StepProps) => {
     setProblem(why);
     throw new Error(why);
   };
-  const connect = async (suite: DirectorySuite, domain?: string) => {
+  const connect = async (suite: DirectorySuite, way: SignInWay) => {
     setReading(suite);
     setProblem(null);
     const signIn = suiteNames[suite];
-    const failed = await startDirectory(core, suite, domain);
-    if (failed === "unknown") {
-      setProblem(
-        t`I could not find a ${signIn} account for ${domain ?? ""}. Check how it is spelled.`
-      );
-    } else if (failed === "failed") {
+    if (!(await startDirectory(core, suite, way))) {
       setNotConnected({
         suite,
         why: t`I could not reach ${signIn} just now. Try again in a moment, or use a staff list.`,
       });
-    }
-    if (failed !== null) {
       setReading(null);
     }
   };
@@ -791,33 +755,18 @@ export const CompanyStep = (props: StepProps) => {
     >
       {kept === null ? null : <ReadRow kept={kept} />}
       <div {...stylex.props(kept === null ? styles.stack : styles.gone)}>
-        {suites.length > 0 || (roster !== null && accounts.length > 0) ? (
+        {suites.length > 0 || accounts.length > 0 ? (
           <SignIns
             accounts={accounts}
-            known={roster !== null}
-            onConnect={(suite, account) => {
+            onConnect={(suite, way) => {
               if (reading === null) {
-                // Another account connects again by its own tenant; the company's own as ever.
-                void connect(
-                  suite,
-                  account === undefined || account.own
-                    ? undefined
-                    : account.tenant
-                );
+                void connect(suite, way);
               }
             }}
             reading={reading}
             suites={suites}
           />
         ) : null}
-        {/* Another account, of either kind, quietly under the company's own: there from the start. */}
-        <AddAccount
-          busy={reading !== null}
-          onAdd={(suite, domain) => {
-            void connect(suite, domain);
-          }}
-          suites={suites}
-        />
         <div {...stylex.props(styles.or)}>
           <Separator decorative style={styles.orLine} />
           <Text color="muted" size="sm">
@@ -832,7 +781,9 @@ export const CompanyStep = (props: StepProps) => {
         />
       </div>
       <CompanyError
-        connect={connect}
+        connect={async (suite) => {
+          await connect(suite, suites.includes(suite) ? "own" : "any");
+        }}
         notConnected={notConnected}
         onClose={() => {
           setNotConnected(null);

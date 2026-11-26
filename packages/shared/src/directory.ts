@@ -355,12 +355,14 @@ export interface OnboardingDirectoryApi {
   /** Every account's directory connected for the onboarding's roster, the company's own first. */
   directoryAccounts: () => Promise<OnboardingDirectoryAccount[]>;
   /**
-   * Starts connecting another account's directory of `suite`, named by its
-   * `domain`, for the roster only: where to send the browser.
+   * Starts connecting another account's directory of `suite`, for the
+   * roster only: where to send the browser. With `domain` null, whichever
+   * organization the admin signs in to; else the one connected before
+   * under that tenant, signed in to again.
    */
   connectOtherDirectory: (
     suite: DirectorySuite,
-    domain: string,
+    domain: string | null,
     returnTo: string
   ) => Promise<{ url: string }>;
   /**
