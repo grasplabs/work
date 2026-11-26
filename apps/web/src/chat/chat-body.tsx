@@ -279,6 +279,7 @@ export const ChatFooter = ({
     retry,
     summary,
     offered,
+    box,
   } = chat;
   const work = workOf(builds);
   const unavailable = unavailableText(modelsUnavailable);
@@ -335,8 +336,9 @@ export const ChatFooter = ({
         onAnswer={async (text) => await ask(text)}
         // The box's editor takes its placeholder and its words as it
         // starts: another placeholder, or another chat's draft (whose
-        // mentions may differ in the same words), starts it afresh.
-        key={`${chatId ?? "new"} ${placeholder}`}
+        // mentions may differ in the same words), starts it afresh; the
+        // chat a question made from this draft keeps it, and its cursor.
+        key={`${box} ${placeholder}`}
         placeholder={placeholder}
         running={view.running}
       />

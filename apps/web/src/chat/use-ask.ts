@@ -145,9 +145,13 @@ export const useAsk = (
   // made: the box is that one's still once it opens.
   const [draftOf, setDraftOf] = useState(chatId);
   const [made, setMade] = useState<string>();
+  // Which box the draft is in: another once the box shows another chat's
+  // draft, the same when a question made the chat it shows from its own.
+  const [box, setBox] = useState(0);
   if (chatId !== draftOf) {
     setDraftOf(chatId);
     if (chatId === undefined || chatId !== made) {
+      setBox(box + 1);
       setFiles([]);
       setFileProblem(undefined);
       setStopped(undefined);
@@ -339,5 +343,10 @@ export const useAsk = (
           }),
     },
     ask,
+    /**
+     * Changes when the box shows another chat's draft, not when a question
+     * made the chat it shows: the box's editor starts afresh with it.
+     */
+    box,
   };
 };
