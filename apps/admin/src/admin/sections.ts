@@ -17,18 +17,18 @@ import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
 import type { Need } from "@grasp-os/shared/admin/onboarding-admin";
 import {
   BrainIcon,
-  Building2Icon,
+  BuildingIcon,
+  CableIcon,
+  ClipboardListIcon,
+  ClockIcon,
   CoinsIcon,
-  HistoryIcon,
-  HourglassIcon,
   LayoutDashboardIcon,
   ListChecksIcon,
-  MessagesSquareIcon,
-  PlugIcon,
+  MessageSquareIcon,
   ServerIcon,
   WorkflowIcon,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+} from "@grasp-os/ui/lib/icons";
+import type { IconData } from "@grasp-os/ui/lib/icons";
 
 /** Every section, in the column's order. */
 export const orgSections = [
@@ -87,14 +87,14 @@ export const sectionTo = {
 /** Each section's title, what it is for in one line under it, and its icon, so the folded column still says which is which. */
 export const sectionWords: Record<
   OrgSection,
-  { title: string; about: string; icon: LucideIcon }
+  { title: string; about: string; icon: IconData }
 > = {
   overview: { title: "Overview", about: "", icon: LayoutDashboardIcon },
   details: {
     title: "Details",
     about:
       "The company as its own papers have it, who Grasp deals with there, its contract and its members.",
-    icon: Building2Icon,
+    icon: BuildingIcon,
   },
   steps: {
     title: "Steps",
@@ -105,7 +105,7 @@ export const sectionWords: Record<
   interviews: {
     title: "Interviews",
     about: "Where every team stands, everyone by name, and how Stephen did.",
-    icon: MessagesSquareIcon,
+    icon: MessageSquareIcon,
   },
   workflows: {
     title: "Workflows",
@@ -122,7 +122,7 @@ export const sectionWords: Record<
     title: "Connectors",
     about:
       "What the company connected, who connected it, and what Grasp may do there.",
-    icon: PlugIcon,
+    icon: CableIcon,
   },
   usage: {
     title: "AI use",
@@ -133,7 +133,7 @@ export const sectionWords: Record<
     title: "Hours",
     about:
       "The hours in the work that is known, and what the workflows free of them.",
-    icon: HourglassIcon,
+    icon: ClockIcon,
   },
   brain: {
     title: "Brain",
@@ -145,7 +145,7 @@ export const sectionWords: Record<
     title: "Log",
     about:
       "Everything that happened here, and everything a person at Grasp did by hand.",
-    icon: HistoryIcon,
+    icon: ClipboardListIcon,
   },
 };
 
