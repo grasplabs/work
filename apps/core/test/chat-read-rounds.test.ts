@@ -219,7 +219,7 @@ describe("a round of the chat's tool calls", () => {
 
     const reply = ask("What do we charge?");
     const releaseBrain = await roundHeld(provider, reads);
-    let stopped: Promise<boolean> | undefined;
+    let stopped: Promise<unknown> | undefined;
     try {
       await vi.waitFor(
         async () => {
