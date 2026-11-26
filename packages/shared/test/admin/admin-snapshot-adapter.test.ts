@@ -90,7 +90,6 @@ describe("an organization from core's admin snapshot", () => {
         "company",
         "sources",
         "documents",
-        "pulse",
         "leads",
         "team",
         "listening",

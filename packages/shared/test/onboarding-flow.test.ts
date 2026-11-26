@@ -109,7 +109,7 @@ describe("an onboarding flow", () => {
   it("reads a kept flow back, and one that can't be read as all of it", () => {
     const short: OnboardingFlow = {
       ...defaultFlow,
-      steps: stepsOf(flowSteps, ["pulse"]),
+      steps: stepsOf(flowSteps, ["documents"]),
     };
     expect({
       kept: storedFlowOf(JSON.stringify(short)),
@@ -152,7 +152,7 @@ describe("an onboarding flow", () => {
   it("asks for the sources its steps give, so what Grasp knows is a share of what is asked", () => {
     const short: OnboardingFlow = {
       ...defaultFlow,
-      steps: stepsOf(flowSteps, ["documents", "pulse", "interviews"]),
+      steps: stepsOf(flowSteps, ["documents", "interviews"]),
       grasp: { ...defaultFlow.grasp, kickoff: false },
     };
     expect({
@@ -168,7 +168,6 @@ describe("an onboarding flow", () => {
         "people",
         "sources",
         "documents",
-        "tools",
         "leads",
         "conversations",
         "review",

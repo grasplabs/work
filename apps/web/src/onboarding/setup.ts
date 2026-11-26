@@ -420,7 +420,7 @@ export const teamNumbersOf = (team: {
  */
 export const setupParts = [
   ["welcome", "ai"],
-  ["company", "sources", "documents", "pulse"],
+  ["company", "sources", "documents"],
   ["leads", "team", "about"],
 ] as const satisfies readonly (readonly SetupStep[])[];
 

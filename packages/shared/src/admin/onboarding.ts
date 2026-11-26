@@ -12,7 +12,6 @@ export const WEIGHTS = {
   sources: 5,
   /** The documents the admin drops in: policies, procedures, handbooks. */
   documents: 5,
-  pulse: 5,
   /** The HR platform: who leads which team. */
   leadsKnown: 10,
   /** The share of team leads interviewed. */

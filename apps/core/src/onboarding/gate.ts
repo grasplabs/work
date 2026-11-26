@@ -196,8 +196,8 @@ const share = (some: number, of: number): number => (of === 0 ? 0 : some / of);
  * holds; the kickoff by how much of what Stephen needs from it is in
  * (`kickoff`, 0 to 1), and the documents once any is shared (`documents`).
  * From what the admin chose (`choices`): where the documents live once a
- * place is noted or connected (one only asked for by name is not), the
- * tools once Pulse is to be set up, and the leads from an HR platform
+ * place is noted or connected (one only asked for by name is not), and
+ * the leads from an HR platform
  * named, as from every team taking part having one. The review by how
  * much of what needs the admin is settled and how much of the work is
  * known (`review`, 0 to 1).
@@ -221,7 +221,6 @@ export const knownParts = (
     part("people", roster === null ? 0 : 1),
     part("sources", choices.sources.length > 0 ? 1 : 0),
     part("documents", documents),
-    part("tools", choices.pulse === "wanted" ? 1 : 0),
     part(
       "leads",
       choices.hr?.kind === "platform" ||

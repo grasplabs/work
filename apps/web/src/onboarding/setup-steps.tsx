@@ -218,11 +218,8 @@ const About = ({ data, onward }: StepProps) => (
   <PlanStory data={data} onward={onward} />
 );
 
-/** The screens a flow can show: Pulse, Stephen listening, the review and the way in are no longer among them. */
-export type ShownStep = Exclude<
-  SetupStep,
-  "pulse" | "listening" | "review" | "open"
->;
+/** The screens a flow can show: Stephen listening, the review and the way in are no longer among them. */
+export type ShownStep = Exclude<SetupStep, "listening" | "review" | "open">;
 
 /** One screen per step. */
 const bodies: Record<ShownStep, ComponentType<StepProps>> = {

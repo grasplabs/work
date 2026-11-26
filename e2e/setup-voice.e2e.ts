@@ -90,7 +90,6 @@ test("the admin goes through steps and back, with his voice on and off", async (
 const noChoices = {
   sources: [],
   sourcesWanted: [],
-  pulse: null,
   hr: null,
 };
 
@@ -148,7 +147,7 @@ test("the admin connects SharePoint, notes Confluence and Personio", async ({
     ).toBeVisible();
     await page.getByRole("button", { name: "Continue" }).click();
 
-    // Pulse is not on the admin's path: the HR platform comes next. Personio, noted.
+    // The HR platform comes next. Personio, noted.
     await expect(
       page.getByRole("heading", { name: "Which HR platform do you use?" })
     ).toBeVisible();
@@ -163,7 +162,6 @@ test("the admin connects SharePoint, notes Confluence and Personio", async ({
     ).resolves.toStrictEqual({
       sources: ["sharepoint", "confluence"],
       sourcesWanted: [],
-      pulse: null,
       hr: { kind: "platform", name: "Personio" },
     });
   } finally {

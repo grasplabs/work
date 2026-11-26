@@ -66,7 +66,7 @@ describe("a company's onboarding flow", { timeout: 60_000 }, () => {
     // A short one: no story, no documents, no interviews, no kickoff.
     const short: OnboardingFlow = {
       on: true,
-      steps: stepsOf(["about", "documents", "pulse", "interviews"]),
+      steps: stepsOf(["about", "documents", "interviews"]),
       grasp: {
         kickoff: false,
         agreements: { processing: true, assessment: false, council: false },
@@ -191,7 +191,7 @@ describe("a company's onboarding flow", { timeout: 60_000 }, () => {
       commands.setFlow({ ...onlyProcessing, on: false })
     );
     const otherSteps = await outcome(
-      commands.setFlow({ ...onlyProcessing, steps: stepsOf(["pulse"]) })
+      commands.setFlow({ ...onlyProcessing, steps: stepsOf(["sources"]) })
     );
     const kept = await flowNow();
     expect({
