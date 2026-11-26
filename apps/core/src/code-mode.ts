@@ -13,6 +13,7 @@ import { z } from "zod";
 
 import { requestReadMs } from "./app-requests.ts";
 import type { CodeRunStatus } from "./code-run-statuses.ts";
+import type { OutsideText, OutsideTextNote } from "./outside-text.ts";
 import { holdRunSession } from "./run-sessions.ts";
 import {
   capability,
@@ -1038,27 +1039,36 @@ export const cutToBytes = (text: string, bytes: number): string => {
 /** The marker where output was cut, saying where. */
 export const cutMarker = `\n… (cut: over ${codeLimits.outputBytes} bytes of output)`;
 
+/** How {@link OutsideText} reads to the model. */
+const outsideTextNames: Record<OutsideText, string> = {
+  tools: "its tools' names, descriptions and schemas",
+  account: "its account's name",
+};
+
 /**
  * An outside system a run read from: a connection, and the action of the
- * grant it read under (`null` for a read with no grant).
+ * grant it read under (`null` for a read with no grant), or what the
+ * connection itself says that the run handed over (`told`).
  */
-export interface OutsideRead {
-  connectionId: string;
-  action: string | null;
-}
+export type OutsideRead =
+  | { connectionId: string; action: string | null }
+  | OutsideTextNote;
 
 /**
  * The outside systems a run read from, as the model reads them: each
- * connection once, with the actions it was read by.
+ * connection once, with the actions it was read by and what of its own
+ * words the run handed over.
  */
 const outsideNames = (readFrom: readonly OutsideRead[]): string => {
   const actions = new Map<string, Set<string>>();
-  for (const { connectionId, action } of readFrom) {
-    const of = actions.get(connectionId) ?? new Set();
-    if (action !== null) {
-      of.add(action);
+  for (const read of readFrom) {
+    const of = actions.get(read.connectionId) ?? new Set();
+    if ("told" in read) {
+      of.add(outsideTextNames[read.told]);
+    } else if (read.action !== null) {
+      of.add(read.action);
     }
-    actions.set(connectionId, of);
+    actions.set(read.connectionId, of);
   }
   return [...actions]
     .map(([connectionId, of]) =>

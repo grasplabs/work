@@ -29,6 +29,7 @@ import {
   chatContext,
   connectionRead,
   endedBy,
+  noteOutsideText,
   recordSources,
   recordToolCall,
   requireOpenRun,
@@ -57,6 +58,7 @@ import { captureRead } from "./connection-capture.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { callObject, workspace } from "./durable-objects.ts";
 import { endOfCompanyDay } from "./organization.ts";
+import type { OutsideTextNote } from "./outside-text.ts";
 import { grantedPermissions } from "./permissions.ts";
 import { markPrivateRead } from "./private-reads.ts";
 import { mailboxesFor } from "./shared-mailboxes.ts";
@@ -526,6 +528,33 @@ const reachableTools = async (
   return { usable, owners, tools };
 };
 
+/**
+ * Of `connectionIds`, those whose tools' names and descriptions were
+ * written outside Grasp, by a connector's server or a provider: all but a
+ * native connector's, whose manifest is Grasp's own (one with no owner
+ * known counts as outside). As the run hands them over
+ * (`noteOutsideText`), marked as text from outside.
+ */
+const toolsToldBy = (
+  owners: ReadonlyMap<string, Pick<ConnectionOwner, "source">>,
+  connectionIds: Iterable<string>
+): OutsideTextNote[] =>
+  [...new Set(connectionIds)]
+    .filter((connectionId) => owners.get(connectionId)?.source !== "native")
+    .map((connectionId) => ({ connectionId, told: "tools" }));
+
+/**
+ * Of `connections`, those with an account's name, which its provider
+ * wrote. As the run hands them over (`noteOutsideText`), marked as text
+ * from outside.
+ */
+const accountsToldBy = (
+  connections: readonly { connectionId: string; account: string | null }[]
+): OutsideTextNote[] =>
+  connections.flatMap(({ connectionId, account }): OutsideTextNote[] =>
+    account === null ? [] : [{ connectionId, told: "account" }]
+  );
+
 /** The connections whose tools connect describes (`connectionTools`). */
 const describedSources: ReadonlySet<string> = new Set(["native", "connector"]);
 
@@ -895,6 +924,16 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
             scope,
             false
           );
+          await noteOutsideText(
+            this.env,
+            scope,
+            accountsToldBy(
+              usable.map(({ connection: { connectionId } }) => ({
+                connectionId,
+                account: owners.get(connectionId)?.accountName ?? null,
+              }))
+            )
+          );
           return usable.map(({ connection }) => {
             const counts: Partial<Record<ToolClass, number>> = {};
             for (const tool of tools) {
@@ -950,10 +989,26 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
           const chosen = tools.filter(
             (tool) => kind === undefined || tool.reads === (kind === "read")
           );
-          return await searchTools(
+          const found = await searchTools(
             await searchable(this.env, owners, chosen),
             queries
           );
+          const ids = new Map(
+            chosen.map((tool) => [tool.connection, tool.connectionId])
+          );
+          await noteOutsideText(
+            this.env,
+            scope,
+            toolsToldBy(
+              owners,
+              found.flatMap(({ matches, related }) =>
+                [...matches, ...related].flatMap(
+                  (match) => ids.get(match.connection) ?? []
+                )
+              )
+            )
+          );
+          return found;
         }
       );
     } catch (error) {
@@ -1000,6 +1055,18 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
             found,
             found.map(({ action }) => action)
           );
+          await noteOutsideText(
+            this.env,
+            scope,
+            toolsToldBy(
+              owners,
+              found.flatMap(({ connectionId, action }) =>
+                described.some((tool) => tool.action === action)
+                  ? [connectionId]
+                  : []
+              )
+            )
+          );
           return named
             .map((action) => {
               const tool = described.find((each) => each.action === action);
@@ -1035,7 +1102,30 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
             connections: listed.length,
           }),
         },
-        async () => await askableConnections(this.env, scope)
+        async () => {
+          const askable = await askableConnections(this.env, scope);
+          const named = askable.filter(
+            ({ forAppsOnly, actions }) =>
+              forAppsOnly !== true && actions.length > 0
+          );
+          const found = await connectionOwnersOf(
+            this.env,
+            named.map(({ connectionId }) => connectionId)
+          );
+          const owners = new Map(found.map((owner) => [owner.id, owner]));
+          // An outside API's name and origin are its admin's words, and
+          // its actions Grasp's (`httpActionsOf`): none are noted.
+          await noteOutsideText(this.env, scope, [
+            ...accountsToldBy(
+              askable.filter(({ forAppsOnly }) => forAppsOnly !== true)
+            ),
+            ...toolsToldBy(
+              owners,
+              named.map(({ connectionId }) => connectionId)
+            ),
+          ]);
+          return askable;
+        }
       );
     } catch (error) {
       throw forSandbox(error);

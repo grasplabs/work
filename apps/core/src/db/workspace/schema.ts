@@ -23,6 +23,7 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 import { codeRunStatuses } from "../../code-run-statuses.ts";
+import type { OutsideTextNote } from "../../outside-text.ts";
 
 export const chats = sqliteTable(
   "chats",
@@ -605,6 +606,15 @@ export const chatCodeRuns = sqliteTable(
     status: text({ enum: ["running", ...codeRunStatuses] }).notNull(),
     startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
     endedAt: integer("ended_at", { mode: "timestamp_ms" }),
+    /**
+     * The connections whose own words the run handed over without calling
+     * them, and which (`OutsideText`): its result is marked with them as
+     * text from outside (`describeRun`). Never the chat's provenance, nor
+     * what the run's result rests on (`chat_run_sources`). Null for none.
+     */
+    outsideText: text("outside_text", { mode: "json" }).$type<
+      OutsideTextNote[]
+    >(),
   },
   (table) => [
     index("chat_code_runs_chat").on(table.chatId, table.startedAt),
