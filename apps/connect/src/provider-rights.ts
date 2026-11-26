@@ -378,6 +378,19 @@ export const classesOnByDefault: readonly CompanyToolClass[] =
     (toolClass) => defaultToolClassAudiences[toolClass].who !== "nobody"
   );
 
+/**
+ * The rights a `provider` token's answer lists (`scope`), each by its key,
+ * with every one they take in; undefined for a provider not asked by
+ * class, whose rights take in none.
+ */
+export const rightsHeld = (
+  provider: string,
+  scope: string
+): ReadonlySet<string> | undefined => {
+  const suite = suiteOf(provider);
+  return suite === undefined ? undefined : heldWith(suite, scope.split(" "));
+};
+
 /** The rights a token's answer lists (`scope`), each once. */
 export const grantedRights = (scope: string | undefined): string[] | null =>
   scope === undefined ? null : [...new Set(scope.split(" "))];

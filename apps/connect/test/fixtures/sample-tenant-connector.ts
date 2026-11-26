@@ -39,6 +39,7 @@ export default defineConnector({
       email: "Read your address",
       offline_access: "Stay signed in",
       "Account.Read": "Read your account",
+      "Account.ReadWrite": "Change your account",
       "Items.Read": "Read your items",
       "Items.ReadWrite": "Change your items",
       "Items.Send": "Send items to others",
@@ -61,11 +62,15 @@ export default defineConnector({
         "read-own": ["Items.Read"],
         "change-own": ["Items.ReadWrite"],
         "read-company": [],
-        "change-company": [],
+        "change-company": ["Account.ReadWrite"],
         "reach-others": ["Items.Send"],
         "read-others": [],
       },
-      implied: { "Items.ReadWrite": ["Items.Read"] },
+      implied: {
+        "Items.ReadWrite": ["Items.Read"],
+        // What a renewal requires, taken in by a class's right.
+        "Account.ReadWrite": ["Account.Read"],
+      },
       sharedMailbox: {
         read: ["Items.Read.Shared"],
         reach: ["Items.Send.Shared"],

@@ -32,6 +32,7 @@ import {
   microsoftRights,
   rightKey,
   rightsFor,
+  rightsHeld,
 } from "./provider-rights.ts";
 
 // The providers people connect accounts from, as config records: one
@@ -929,8 +930,9 @@ const scopesOf = (
 
 /**
  * Whether a renewal's `tokens` still hold every scope `provider` requires
- * of one (`renewalRequires`). An answer that lists none passes: nothing
- * says it lacks one.
+ * of one (`renewalRequires`), itself or through one that takes it in: a
+ * consent asked by class leaves out what another right it asks takes in.
+ * An answer that lists none passes: nothing says it lacks one.
  */
 export const renewalHolds = (
   provider: OAuthProviderConfig,
@@ -939,9 +941,9 @@ export const renewalHolds = (
   if (scope === undefined) {
     return true;
   }
-  const scopes = scopesOf(provider, scope);
+  const held = rightsHeld(provider.id, scope) ?? scopesOf(provider, scope);
   return (provider.renewalRequires ?? []).every((each) =>
-    scopes.has(rightKey(each))
+    held.has(rightKey(each))
   );
 };
 

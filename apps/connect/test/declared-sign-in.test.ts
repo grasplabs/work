@@ -511,6 +511,7 @@ describe("threat model", () => {
     const person = someone();
     const declaredScopes = new Set([
       ...signIn,
+      "Account.ReadWrite",
       "Items.Read",
       "Items.ReadWrite",
       "Items.Send",
@@ -643,6 +644,24 @@ describe("threat model", () => {
     app.options.renewed = `openid ${sampleTenantScopePrefix}Account.Read`;
     await expire(kept);
     await expect(outcome(listItems(kept, other))).resolves.toBe("ok");
+  });
+
+  it("AP18: a renewal holds what it requires through a right that takes it in", async () => {
+    const person = someone();
+    // Change company's right takes in the sign-in's: the consent asks for
+    // it alone, and the answer lists it alone, at renewal too.
+    const id = await connect(person, accountOf(person), {
+      classes: ["read-own", "change-company"],
+    });
+    const granted = await grantOf(id);
+    await expire(id);
+    await expect(outcome(listItems(id, person))).resolves.toBe("ok");
+    expect({
+      account: granted
+        ?.split(" ")
+        .filter((each) => each.startsWith("Account.")),
+      status: await statusOf(id),
+    }).toStrictEqual({ account: ["Account.ReadWrite"], status: "active" });
   });
 
   it("AP18: a renewal that lists no grant keeps the one it renews", async () => {
