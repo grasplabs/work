@@ -3923,8 +3923,8 @@ msgid "Before meetings"
 msgstr "Vor Besprechungen"
 
 #: src/interview/guide.tsx
-msgid "Before we start, a quick look around. You can just talk to me like you would to a colleague. Prefer to type? That works just as well."
-msgstr "Bevor wir anfangen, ein kurzer Rundgang. Du kannst einfach mit mir reden, wie mit einer Kollegin oder einem Kollegen. Schreibst du lieber? Das geht genauso gut."
+msgid "Before we start, a quick look around. You can just talk to me like you would to a colleague."
+msgstr "Bevor wir anfangen, ein kurzer Rundgang. Du kannst einfach mit mir reden, wie mit einer Kollegin oder einem Kollegen."
 
 #: src/apps/data-model-changes.tsx
 msgid "Before you make this change"
@@ -5379,7 +5379,6 @@ msgstr "Kontext"
 msgid "Context used"
 msgstr "Genutzter Kontext"
 
-#: src/interview/guide.tsx
 #: src/interview/rating.tsx
 #: src/interview/start.tsx
 #: src/onboarding/company-step.tsx
@@ -13966,6 +13965,14 @@ msgstr "Position"
 msgid "Prague"
 msgstr "Prag"
 
+#: src/interview/guide.tsx
+msgid "Prefer to type? It’s right here."
+msgstr "Lieber schreiben? Das geht hier."
+
+#: src/interview/guide.tsx
+msgid "Prefer to type? Just press here—that works just as well."
+msgstr "Schreibst du lieber? Drück einfach hier – das geht genauso gut."
+
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Preference"
@@ -16660,7 +16667,6 @@ msgctxt "the Brain's skills page"
 msgid "Skills"
 msgstr "Skills"
 
-#: src/interview/guide.tsx
 #: src/onboarding/plan-story.tsx
 msgid "Skip"
 msgstr "Überspringen"
