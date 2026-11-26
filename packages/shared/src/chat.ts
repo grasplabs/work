@@ -1159,6 +1159,18 @@ export interface ChatToolEvent {
 export const chatToolEventsKept = 200;
 
 /**
+ * A question the person sent while the agent worked, waiting for it: the
+ * agent takes it once its current step ends, in the order sent, and it is
+ * then stored as a question like any other (`ChatsApi.send`).
+ */
+export interface ChatQueued {
+  /** Stable while it waits. */
+  id: string;
+  /** The person's own words. */
+  text: string;
+}
+
+/**
  * What changed in a chat since the last update: the messages stored since,
  * and the chat as it is now. The first update of a `watch` catches up: the
  * messages after the one it named, what the agent is writing then, and
@@ -1186,6 +1198,11 @@ export interface ChatUpdate {
   tools?: ChatToolEvent[];
   /** Whether the agent is working on a question. */
   running: boolean;
+  /**
+   * The questions sent while the agent worked that it hasn't taken yet,
+   * oldest first: whole in each update, left out while there are none.
+   */
+  queued?: ChatQueued[];
   /** The chat's provenance: in the first update, and whenever it changes. */
   provenance?: ChatProvenance;
   /**
@@ -1210,8 +1227,8 @@ export interface ChatUpdate {
   worked: number;
   /**
    * Whether the turn checks the drafts it wrote now, past its answer
-   * (core's agent-builds.ts, `turnCheck`): the chat takes no question
-   * until it ends. Left out by an earlier release.
+   * (core's agent-builds.ts, `turnCheck`): a question sent meanwhile
+   * joins the turn (`ChatsApi.send`). Left out by an earlier release.
    */
   checking?: boolean;
   /**
@@ -1447,9 +1464,17 @@ export interface ChatsApi {
   /**
    * Asks the chat's agent a question. Resolves once the agent has taken
    * it; the answer streams to `watch`, and goes on without anyone
-   * watching.
+   * watching. One sent while the agent works on another is queued
+   * (`ChatUpdate.queued`): the agent takes it once its current step ends,
+   * in the same turn and with the same model, and answers both in order.
+   * Not one that addresses another agent (`mentions`): `agent.busy`.
    */
   send: (chatId: string, question: ChatQuestion) => Promise<void>;
+  /**
+   * Stops the answer being written and has the agent take the questions
+   * queued meanwhile at once (`ChatUpdate.queued`); nothing when none is.
+   */
+  sendNow: (chatId: string) => Promise<void>;
   /**
    * Rates an answer of the person's own chat, by its message's `id`, or
    * takes the rating back (`null`). Kept with the chat, where only its
@@ -1502,7 +1527,10 @@ export interface ChatsApi {
    * App or workflow whose draft it wrote (`ChatWork`).
    */
   worked: (chatId: string) => Promise<ChatWork[]>;
-  /** Stops the agent's work on the chat; `false` when there was none. */
+  /**
+   * Stops the agent's work on the chat; `false` when there was none. The
+   * questions queued meanwhile (`ChatUpdate.queued`) are dropped, unanswered.
+   */
   cancel: (chatId: string) => Promise<boolean>;
   /** The npm packages the chat's agent asked for that wait, oldest first. */
   packageRequests: (chatId: string) => Promise<DependencyRequest[]>;

@@ -1327,6 +1327,12 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
     });
   }
 
+  async sendNow(chatId: string): Promise<void> {
+    await withPerson(this.#check, async ({ userId }) => {
+      await this.#chatsOf(userId).sendNow(chatIdOf(chatId), userId);
+    });
+  }
+
   async cancel(chatId: string): Promise<boolean> {
     return await withPerson(
       this.#check,

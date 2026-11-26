@@ -14,6 +14,7 @@ import { useRef, useState } from "react";
 import { useCoreAction } from "../use-core-action.ts";
 import { activeChat, setActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
+import { useFollowedChat } from "./chat-watch.ts";
 import type { Problem, StopNote } from "./dictation.ts";
 import type { BoxMention } from "./mentions.tsx";
 import { chatMentionsOf } from "./mentions.tsx";
@@ -119,6 +120,8 @@ export const useAsk = (
 ) => {
   const { identity } = useRouteContext({ from: "/_shell" });
   const { busy, failure, run } = useCoreAction();
+  // The questions queued behind the answer being written: a stop drops them.
+  const { queued } = useFollowedChat(chatId).view;
   const [text, setText] = useState("");
   // Why dictating into the text stopped on its own, kept with it: the box
   // it stopped in may have gone (dictation.ts).
@@ -282,8 +285,23 @@ export const useAsk = (
     onAsked?.(sent);
     return true;
   };
+  // A stop drops what was queued behind the answer (core's `cancel`): it
+  // comes back into an empty box, the oldest first, as Codex hands queued
+  // messages back on an interrupt, to send again or let go.
   const stop = async (id: string): Promise<void> => {
-    await run(async (session) => await session.chats.cancel(id));
+    const dropped = queued.map((each) => each.text);
+    const cancelled = await run(
+      async (session) => await session.chats.cancel(id)
+    );
+    if (cancelled === true && dropped.length > 0) {
+      setText((now) => (now.trim() === "" ? dropped.join("\n\n") : now));
+    }
+  };
+  /** Has the agent take the questions queued behind its answer at once. */
+  const sendNow = async (id: string): Promise<void> => {
+    await run(async (session) => {
+      await session.chats.sendNow(id);
+    });
   };
   return {
     composer: {
@@ -325,5 +343,6 @@ export const useAsk = (
           }),
     },
     ask,
+    sendNow,
   };
 };

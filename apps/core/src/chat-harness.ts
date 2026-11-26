@@ -33,12 +33,13 @@ import type {
   SettledSubmissionRecord,
   Storage,
   Submission,
+  SubmissionId,
   SubmissionRecord,
   Wake,
 } from "@earendil-works/pi-durable";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { delegateActorOf } from "@grasp-os/shared/audit";
-import type { ChatMake } from "@grasp-os/shared/chat";
+import type { ChatMake, ChatQueued } from "@grasp-os/shared/chat";
 import { isExpectedError } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { ModelEffort, ModelWait } from "@grasp-os/shared/models";
@@ -86,6 +87,7 @@ import { inputTokens, modelFailureOf, models } from "./models.ts";
 import type { AgentModel } from "./models.ts";
 import { sessionHost } from "./sandboxed.ts";
 import { recallForTurn, turnRecallTool } from "./turn-recall.ts";
+import type { TurnRecall } from "./turn-recall.ts";
 import { recordTurn } from "./turn-records.ts";
 import type { ChatTurn } from "./turn-records.ts";
 
@@ -212,6 +214,21 @@ export interface TurnEnd {
   stopped?: TurnStop;
 }
 
+/**
+ * A question its person sent while the chat's turn ran, as its Workspace
+ * hands it over to be queued into that turn (`ChatHarness.queueQuestion`).
+ */
+export interface QueuedQuestion {
+  /** Its own ID, which the Workspace made: its request ID, so a retry finds it. */
+  id: string;
+  text: string;
+  /** The files it carries: their IDs and types. */
+  files: { id: string; type: string }[];
+  subject?: QuestionSubject;
+  mentions?: QuestionMention[];
+  built?: QuestionBuilt;
+}
+
 /** A message for the Workspace to show, with the files a question carries. */
 export interface TurnMessage {
   /** The chat's entry it shows, so a copy sent again is kept once. */
@@ -234,6 +251,13 @@ const gateway = "grasp";
  * the input, so the turn's last input is found by it (`#lastInputOf`).
  */
 const noticeRequestPrefix = (turnId: string): string => `notice:${turnId}:`;
+
+/**
+ * How the request ID of a question queued into turn `turnId` begins
+ * (`ChatHarness.queueQuestion`), its own or sent again at once (`sendNow`): it is
+ * one of the turn's inputs, found as a notice is (`#lastInputOf`).
+ */
+const queuedRequestPrefix = (turnId: string): string => `queued:${turnId}:`;
 
 /**
  * Most checks of a turn's drafts (`turnCheck`, agent-builds.ts): as the
@@ -429,6 +453,8 @@ interface TurnFacts {
   retries: number;
   stopReason: string | null;
   compacted: boolean;
+  /** Questions queued into it (`queueQuestion`) that pi placed. */
+  queued: number;
 }
 
 const TurnDoc = defineDoc<TurnRecord>({
@@ -486,6 +512,48 @@ const shownBuilt = ({ plan, app, workflow }: QuestionBuilt): ShownBuilt => ({
   plan,
   ...(app === undefined ? {} : { app }),
   ...(workflow === undefined ? {} : { workflow }),
+});
+
+/**
+ * A question as pi takes it: its content for the model (`questionContent`)
+ * and the entry the chat shows it by, with what that keeps besides
+ * (`questionDataOf`).
+ */
+const questionInput = (
+  question: Pick<
+    TurnRequest["question"],
+    "text" | "files" | "subject" | "mentions" | "make" | "built" | "followUp"
+  >,
+  recall?: TurnRecall
+) => ({
+  type: "input" as const,
+  content: questionContent(question.text, question.files, recall, {
+    subject: question.subject,
+    mentions: question.mentions,
+    make: question.make,
+    built: question.built,
+  }),
+  entry: {
+    kind: questionKind,
+    data: {
+      files: question.files.map(({ id }) => id),
+      ...(question.followUp === true ? { followUp: true } : {}),
+      // Shown with the person's Build it, as what it built.
+      ...(question.built === undefined
+        ? {}
+        : { built: shownBuilt(question.built) }),
+      ...(recall === undefined
+        ? {}
+        : {
+            recall: {
+              runId: recall.runId,
+              callId: recall.callId,
+              query: recall.query,
+              status: recall.status,
+            },
+          }),
+    },
+  },
 });
 
 /** A question's recall's call (turn-recall.ts), as its entry keeps it. */
@@ -612,6 +680,56 @@ const liveSchema = z.object({
         .optional(),
     })
     .optional(),
+});
+
+/**
+ * What the chat reads of `pi.inbox`: the inputs pi holds for the next
+ * boundary, oldest first. A queued question (`ChatHarness.queueQuestion`) is one
+ * placed as a question's entry, its content as `questionContent` made it:
+ * text alone.
+ */
+const inboxSchema = z.object({
+  items: z.array(
+    z.object({
+      id: z.custom<SubmissionId>((value) => typeof value === "number"),
+      mode: z.string(),
+      content: z
+        .union([
+          z.string(),
+          z.array(z.object({ type: z.literal("text"), text: z.string() })),
+        ])
+        .optional(),
+      entry: z
+        .object({ kind: z.string(), data: z.json().optional() })
+        .optional(),
+    })
+  ),
+});
+
+/** A question pi holds queued for the turn, as `pi.inbox` has it. */
+interface InboxQuestion {
+  id: SubmissionId;
+  content: string | { type: "text"; text: string }[];
+  data: z.infer<ReturnType<typeof z.json>> | undefined;
+}
+
+/** The questions queued in `inbox` (`pi.inbox`), oldest first. */
+const inboxQuestionsOf = (inbox: unknown): InboxQuestion[] => {
+  const parsed = inboxSchema.safeParse(inbox ?? { items: [] });
+  if (!parsed.success) {
+    return [];
+  }
+  return parsed.data.items.flatMap(({ id, mode, content, entry }) =>
+    mode !== "write" && content !== undefined && entry?.kind === questionKind
+      ? [{ id, content, data: entry.data }]
+      : []
+  );
+};
+
+/** A queued question as the chat shows it: its person's own words. */
+const queuedOf = ({ id, content }: InboxQuestion): ChatQueued => ({
+  id: String(id),
+  text: questionText({ role: "user", content, timestamp: 0 }),
 });
 
 /**
@@ -846,6 +964,25 @@ export class ChatHarness {
   #answering: string | undefined;
   /** Whether pi runs the agent now (`pi.live.run`). */
   #running = false;
+  /**
+   * The turn questions may be queued into now (`queueQuestion`): from once its own
+   * question is in pi until it is about to settle.
+   */
+  #open: string | undefined;
+  /**
+   * The turn a `run` takes, and whether it opens (`#open`) or ends first:
+   * what a question queued meanwhile waits on.
+   */
+  #opening:
+    | { turnId: string; opened: PromiseWithResolvers<boolean> }
+    | undefined;
+  /**
+   * Queued questions on their way into pi (`queueQuestion`, `sendNow`): the turn
+   * waits for them, and for the runs they start, before it settles.
+   */
+  readonly #joining = new Set<Promise<unknown>>();
+  /** The questions pi holds queued now (`pi.inbox`), oldest first. */
+  #inbox: InboxQuestion[] = [];
   /** What this object saw of the turn under way, for its record. */
   #pace: Pace | undefined;
   /** The answer streaming in, as `pi.live` has it now. */
@@ -868,6 +1005,7 @@ export class ChatHarness {
     partial: AssistantMessage | null;
     waiting?: ModelWait | null;
     running?: boolean;
+    queued?: string;
   } = { partial: null };
   /** The Workspace brought up to date (`#sync`), once at a time. */
   #syncing: Promise<void> | undefined;
@@ -925,6 +1063,11 @@ export class ChatHarness {
         settings: () => ({
           // One code run at a time, as each is an isolate of its own.
           toolExecution: "sequential",
+          // A question queued into a turn (`queueQuestion`) is answered after a
+          // run that failed before it, as after one that answered: the
+          // turn waits for it either way, and it is never left queued
+          // with nothing to place it (pi keeps it by default).
+          afterFailedRun: "continue",
           retry: retryPolicy(asked.since),
           ...restartLimitOf(env),
         }),
@@ -1006,6 +1149,7 @@ export class ChatHarness {
     const running = live.success && live.data.run !== undefined;
     this.#running = running;
     this.#partial = partial;
+    this.#inbox = inboxQuestionsOf(value.docs["pi.inbox"]);
     if (partial !== null) {
       this.#streamedAfter ??= value.entries.at(-1)?.id ?? null;
       this.#thinking.see(partial);
@@ -1062,12 +1206,18 @@ export class ChatHarness {
       throw agentErrors.create("agent.busy");
     }
     this.#active = request.turnId;
+    const opened = Promise.withResolvers<boolean>();
+    this.#opening = { turnId: request.turnId, opened };
     const end = this.#take(request);
     this.#taking = { turnId: request.turnId, end };
     try {
       return await end;
     } finally {
       this.#taking = undefined;
+      // However it ended: a question queued meanwhile is asked on its own.
+      opened.resolve(false);
+      this.#opening = undefined;
+      this.#close(request.turnId);
       // A turn whose run failed after its question is settled as its runs
       // end, by the sync this asks for.
       this.#syncSoon();
@@ -1080,25 +1230,10 @@ export class ChatHarness {
    * settles it (`#settle`), and copies everything to the Workspace.
    */
   async #take(request: TurnRequest): Promise<TurnEnd> {
-    const placed = await this.#conversation.commit(
-      async (tx) =>
-        await tx.submissionByRequest(this.#conversation.id, request.turnId),
-      context
-    );
-    let submission: Submission | undefined;
-    try {
-      submission =
-        placed === undefined
-          ? await this.#submit(request)
-          : await this.#harness.submission(placed.id, context);
-      if (submission === undefined) {
-        throw new Error(`Turn ${request.turnId} has no submission`);
-      }
-    } catch (error) {
-      // Refused before its question: settled with no end, nothing ran.
-      await this.#settle(request.turnId);
-      throw error;
-    }
+    const submission = await this.#question(request);
+    // Its question is in pi: one sent meanwhile is queued into it (`queueQuestion`).
+    this.#open = request.turnId;
+    this.#opening?.opened.resolve(true);
     // After the submit: a stop that came before it was kept, and one that
     // comes after it stops the run itself.
     const stopped = await this.#harness.snapshot(StoppedDoc, context);
@@ -1154,6 +1289,15 @@ export class ChatHarness {
       );
       ({ settled, newest } = await this.#ended(request.turnId, submission));
     }
+    // A question queued as the turn wrapped up (its checks, its words)
+    // started a run of its own in it: the turn waits for that too. Then it
+    // takes no more, decided with nothing awaited between, so none slips in
+    // after.
+    while (this.#running || this.#joining.size > 0) {
+      // oxlint-disable-next-line no-await-in-loop -- until nothing joins it
+      ({ settled, newest } = await this.#ended(request.turnId, submission));
+    }
+    this.#close(request.turnId);
     const end = await this.#endOf(settled);
     if (end.stopped === "history_revoked") {
       await this.#rebaseIfNeeded(request);
@@ -1186,6 +1330,32 @@ export class ChatHarness {
       this.#record(done);
     }
     return end;
+  }
+
+  /**
+   * Turn `request`'s question in pi: submitted once (`#submit`), and found
+   * by the turn's ID when it is asked again. A turn refused before its
+   * question is settled with no end: nothing ran.
+   */
+  async #question(request: TurnRequest): Promise<Submission> {
+    const placed = await this.#conversation.commit(
+      async (tx) =>
+        await tx.submissionByRequest(this.#conversation.id, request.turnId),
+      context
+    );
+    try {
+      const submission =
+        placed === undefined
+          ? await this.#submit(request)
+          : await this.#harness.submission(placed.id, context);
+      if (submission === undefined) {
+        throw new Error(`Turn ${request.turnId} has no submission`);
+      }
+      return submission;
+    } catch (error) {
+      await this.#settle(request.turnId);
+      throw error;
+    }
   }
 
   /**
@@ -1291,6 +1461,7 @@ export class ChatHarness {
       outcome: end.outcome,
       code: failureCodeOf(end),
       compacted: facts?.compacted ?? false,
+      queued: facts?.queued ?? 0,
       resumed: pace.resumed,
     };
     this.#host.waitUntil(recordTurn(this.#env, record));
@@ -1346,13 +1517,13 @@ export class ChatHarness {
       retries: 0,
       stopReason: null,
       compacted: false,
+      queued: 0,
     };
-    for (const [index, entry] of entries.entries()) {
-      // A rebase after the turn (`history_revoked`) starts a context of
-      // its own: nothing from it on is the turn's.
-      if (ResetEntry.is(entry)) {
-        break;
-      }
+    // A rebase after the turn (`history_revoked`) starts a context of its
+    // own: nothing from it on is the turn's.
+    const reset = entries.findIndex((entry) => ResetEntry.is(entry));
+    const own = reset === -1 ? entries : entries.slice(0, reset);
+    for (const [index, entry] of own.entries()) {
       const [message] = entry.model ?? [];
       if (ToolResultEntry.is(entry) && message?.role === "toolResult") {
         const tool = tools.get(message.toolName) ?? { calls: 0, ms: 0 };
@@ -1366,12 +1537,17 @@ export class ChatHarness {
         // response stopped (`cancelledMessage`).
         facts.stopReason = "aborted";
       } else if (AssistantEntry.is(entry) && message?.role === "assistant") {
-        if (cutAttempt(entry, entries.slice(index + 1), false) === true) {
+        if (cutAttempt(entry, own.slice(index + 1), false) === true) {
           facts.retries += 1;
         }
         facts.stopReason = message.stopReason;
       }
     }
+    // A question after its own is one queued into it: a next agent's turn
+    // of the same question (`followUp`) starts once this one has ended.
+    facts.queued = own.filter(
+      ({ kind }, index) => index > 0 && kind === questionKind
+    ).length;
     return { ...facts, tools: Object.fromEntries(tools) };
   }
 
@@ -1388,7 +1564,10 @@ export class ChatHarness {
     await asked.wait(context);
     await this.#conversation.waitForIdle(context);
     let newest = await this.#newest();
-    while (this.#running) {
+    // And until the questions queued into it are in pi (`#joining`).
+    while (this.#running || this.#joining.size > 0) {
+      // oxlint-disable-next-line no-await-in-loop -- until pi is idle
+      await Promise.allSettled(this.#joining);
       // oxlint-disable-next-line no-await-in-loop -- until pi is idle
       await this.#conversation.waitForIdle(context);
       // oxlint-disable-next-line no-await-in-loop -- until pi is idle
@@ -1442,8 +1621,9 @@ export class ChatHarness {
   }
 
   /**
-   * The last input of turn `turnId` pi keeps: its question, or a notice it
-   * took after (`noticeRequestPrefix`), found by their request IDs.
+   * The last input of turn `turnId` pi keeps: its question, a notice it
+   * took after (`noticeRequestPrefix`), or a question queued into it
+   * (`queuedRequestPrefix`), found by their request IDs.
    */
   async #lastInputOf(turnId: string): Promise<Submission | undefined> {
     let cursor: Cursor | undefined;
@@ -1460,7 +1640,8 @@ export class ChatHarness {
         ({ type, requestId }) =>
           type === "input" &&
           (requestId === turnId ||
-            requestId?.startsWith(noticeRequestPrefix(turnId)) === true)
+            requestId?.startsWith(noticeRequestPrefix(turnId)) === true ||
+            requestId?.startsWith(queuedRequestPrefix(turnId)) === true)
       );
       cursor = page.next;
     } while (last === undefined && cursor !== undefined);
@@ -1521,41 +1702,9 @@ export class ChatHarness {
     try {
       return await this.#conversation.submit(
         {
-          type: "input",
-          content: questionContent(
-            request.question.text,
-            request.question.files,
-            recall,
-            {
-              subject: request.question.subject,
-              mentions: request.question.mentions,
-              make: request.question.make,
-              built: request.question.built,
-            }
-          ),
+          ...questionInput(request.question, recall),
           requestId: request.turnId,
           whenBusy: "reject",
-          entry: {
-            kind: questionKind,
-            data: {
-              files: request.question.files.map(({ id }) => id),
-              ...(request.question.followUp === true ? { followUp: true } : {}),
-              // Shown with the person's Build it, as what it built.
-              ...(request.question.built === undefined
-                ? {}
-                : { built: shownBuilt(request.question.built) }),
-              ...(recall === undefined
-                ? {}
-                : {
-                    recall: {
-                      runId: recall.runId,
-                      callId: recall.callId,
-                      query: recall.query,
-                      status: recall.status,
-                    },
-                  }),
-            },
-          },
         },
         context
       );
@@ -1659,6 +1808,105 @@ export class ChatHarness {
   /** The chat's turn not yet settled, if there is one: what a stop ends. */
   activeTurn(): string | undefined {
     return this.#active;
+  }
+
+  /**
+   * Queues `question`, sent while turn `turnId` runs, into that turn, in
+   * pi's own queue (`pi.inbox`, a steer): pi places it as a question once
+   * the run's current step ends, and the run goes on to answer it; sent as
+   * the run answers, it starts the turn's next run. In the order sent; the
+   * turn's model and setup answer it, without a recall of its own (the
+   * agent searches the brain itself). Once, by its ID, however often it is
+   * sent. Waits while the turn is still on its way to pi. False when the
+   * turn takes no more (it ended, or settles now): its Workspace asks it as
+   * a turn of its own.
+   */
+  async queueQuestion(
+    turnId: string,
+    question: QueuedQuestion
+  ): Promise<boolean> {
+    const opening = this.#opening;
+    if (opening?.turnId === turnId) {
+      await opening.opened.promise;
+    }
+    if (this.#open !== turnId) {
+      return false;
+    }
+    const queued = this.#conversation.submit(
+      {
+        ...questionInput(question),
+        requestId: `${queuedRequestPrefix(turnId)}${question.id}`,
+        whenBusy: "steer",
+      },
+      context
+    );
+    this.#join(queued);
+    await queued;
+    return true;
+  }
+
+  /**
+   * Has turn `turnId` take the questions queued into it now, rather than
+   * once its current step ends: the run stops as a stop stops it (the
+   * answer being written kept as it is), and pi withdraws what it held
+   * queued; each is then asked again as it was, in order, and the turn
+   * answers them. Each once, however often this is asked; one pi placed
+   * just before the stop is in the transcript already, and isn't.
+   */
+  async sendNow(turnId: string): Promise<void> {
+    const queued = this.#inbox;
+    if (this.#open !== turnId || queued.length === 0) {
+      return;
+    }
+    const sending = (async () => {
+      await this.#conversation.abort(context);
+      for (const { id, content, data } of queued) {
+        // oxlint-disable-next-line no-await-in-loop -- one after another, in order
+        const withdrawn = await this.#harness.submission(id, context);
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        const record = await withdrawn?.status(context);
+        if (record?.status !== "unanswered" || record.entry !== undefined) {
+          continue;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- see above
+        await this.#conversation.submit(
+          {
+            type: "input",
+            content,
+            requestId: `${queuedRequestPrefix(turnId)}now:${id}`,
+            whenBusy: "steer",
+            entry: {
+              kind: questionKind,
+              ...(data === undefined ? {} : { data }),
+            },
+          },
+          context
+        );
+      }
+    })();
+    this.#join(sending);
+    await sending;
+  }
+
+  /** Makes `work` one the turn waits for before it settles (`#joining`). */
+  #join(work: Promise<unknown>): void {
+    this.#joining.add(work);
+    void (async () => {
+      try {
+        await work;
+      } catch {
+        // Its caller hears how it failed.
+      } finally {
+        this.#joining.delete(work);
+      }
+    })();
+  }
+
+  /** Turn `turnId` takes no more questions queued into it (`queueQuestion`). */
+  #close(turnId: string): void {
+    if (this.#open === turnId) {
+      this.#open = undefined;
+    }
   }
 
   /**
@@ -2155,12 +2403,25 @@ export class ChatHarness {
     // Workspace is told it ended or gets its capture. One that settles
     // during this sync is told by the next, which its settling asks for.
     const left =
-      !before.ended && !this.#running && this.#taking?.turnId !== turnId;
+      !before.ended &&
+      !this.#running &&
+      this.#joining.size === 0 &&
+      this.#taking?.turnId !== turnId;
     const owed = await this.#owed();
     if (await this.#copy(scope)) {
       this.#sawText(turnId);
     }
     await this.#showPartial(scope, turnId);
+    // After the copy: a question pi just placed shows as asked before it
+    // leaves the queue.
+    const queued = this.#inbox.map(queuedOf);
+    const queuedNow = JSON.stringify(queued);
+    if (queuedNow !== this.#told.queued) {
+      await callObject(async () => {
+        await this.#workspace(scope).turnQueued(scope.chatId, queued);
+      });
+      this.#told.queued = queuedNow;
+    }
     const waiting = this.#waiting;
     if (waiting !== this.#told.waiting) {
       await callObject(async () => {
