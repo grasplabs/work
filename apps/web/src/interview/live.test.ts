@@ -78,8 +78,8 @@ const joined = async () => {
   const { started, start } = faked();
   const live = await joinAgent(
     {
-      via: "elevenlabs",
       conversationToken: "token",
+      location: "eu-residency",
       context: "You are talking with Tim.",
       pass: "pass",
     },
@@ -124,15 +124,15 @@ describe("the live interview with the ElevenLabs agent", () => {
   it("shows their words as our ear hears them, at once, before the agent has them", async () => {
     const { live, options, segments } = await joined();
     options.onMessage?.(lineOf("agent", "What do you do here?"));
-    live.overheard?.(1, "I handle", false);
+    live.overheard(1, "I handle", false);
     expect(shown(segments, "you-0")).toStrictEqual({
       id: "you-0",
       from: "person",
       text: "I handle",
       final: false,
     });
-    live.overheard?.(1, "I handle the invoices", false);
-    live.overheard?.(2, "for Acme", false);
+    live.overheard(1, "I handle the invoices", false);
+    live.overheard(2, "for Acme", false);
     expect(shown(segments, "you-0")?.text).toBe(
       "I handle the invoices for Acme"
     );
@@ -140,7 +140,7 @@ describe("the live interview with the ElevenLabs agent", () => {
 
   it("puts the agent's words for their turn in place of ours, and drops what our ear still hears of it", async () => {
     const { live, options, segments } = await joined();
-    live.overheard?.(1, "I handle the invoice", false);
+    live.overheard(1, "I handle the invoice", false);
     options.onMessage?.(lineOf("user", "I handle the invoices."));
     expect(shown(segments, "you-0")).toStrictEqual({
       id: "you-0",
@@ -149,16 +149,16 @@ describe("the live interview with the ElevenLabs agent", () => {
       final: true,
     });
     // Late, from the turn already taken up: never shown as their next turn.
-    live.overheard?.(1, "I handle the invoices", true);
+    live.overheard(1, "I handle the invoices", true);
     expect(shown(segments, "you-1")).toBeUndefined();
     // Their next turn shows as it is heard again.
-    live.overheard?.(2, "Every Monday", false);
+    live.overheard(2, "Every Monday", false);
     expect(shown(segments, "you-1")?.text).toBe("Every Monday");
   });
 
   it("lets go of what our ear heard that the agent never took up as their turn", async () => {
     const { live, segments } = await joined();
-    live.overheard?.(1, "Hm", true);
+    live.overheard(1, "Hm", true);
     expect(shown(segments, "you-0")?.text).toBe("Hm");
     await vi.advanceTimersByTimeAsync(6000);
     expect(shown(segments, "you-0")?.text).toBe("");

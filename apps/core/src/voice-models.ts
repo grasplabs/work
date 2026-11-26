@@ -6,7 +6,8 @@ import type { SpokenWord } from "@grasp-os/shared/voice";
 // models. Each speech model is Mistral's or ElevenLabs's, priced per
 // character it is asked to say, which is how both bill speech. Each transcription
 // model is OpenAI's or Mistral's, priced per second it hears, at a price never below
-// what the provider bills for it. Grasp pays for these on its own keys:
+// what the provider bills for it. A conversation with Grasp's ElevenLabs
+// agent is priced per second it is expected to last. Grasp pays for these on its own keys:
 // what each cost is recorded for Grasp's spend overview (model-usage.ts).
 
 /**
@@ -169,56 +170,43 @@ export const hearingCostOf = ({ id }: HearingRef, seconds: number): number =>
   (seconds * dollarsPerHour[id]) / 3600;
 
 /**
- * Mistral's prices for a voice agent's session (its voice agents:
- * listening, the model and the voice in one live session), in US dollars
- * per hour of the session, by the model that answers in it. The session
- * is named by that model.
+ * ElevenLabs's price for a conversation with one of its agents
+ * (listening, the model and the voice in one live conversation), in US
+ * dollars per hour of it.
  *
- * Source: Mistral's launch of its Voice Agents API, as reported on
- * 2026-10-26 (its own pricing page names no rate): $0.04 a minute with
- * Mistral Small, $0.08 with a larger model.
+ * Source: ElevenLabs's pricing page (https://elevenlabs.io/pricing), read
+ * in 2026-11: its agents at $0.10 a minute on the Creator and Pro plans,
+ * $0.08 on Business. Charged at $0.10: an estimate until the rate of
+ * Grasp's own contract is known.
  */
-const conversationDollarsPerHour = {
-  "mistral-small-latest": 2.4,
-} as const;
+const agentDollarsPerHour = 6;
 
-/** The providers that hold a live voice session: Mistral. */
-const conversationProviders = ["mistral"] as const;
+/** An agent's ID as ElevenLabs writes it. */
+const agentId = /^agent_[A-Za-z0-9]{1,64}$/u;
 
-/** A voice agent's model the gateway offers. */
-export interface ConversingRef {
-  provider: (typeof conversationProviders)[number];
-  id: keyof typeof conversationDollarsPerHour;
+/** A voice agent the gateway opens conversations with. */
+export interface AgentRef {
+  provider: "elevenlabs";
+  id: string;
 }
 
-const isConversingModel = (id: string): id is ConversingRef["id"] =>
-  Object.hasOwn(conversationDollarsPerHour, id);
-
-const isConversationProvider = (
-  provider: string
-): provider is ConversingRef["provider"] =>
-  conversationProviders.some((one) => one === provider);
-
 /**
- * A voice agent's model as the gateway names it, `<provider>/<model>`,
- * such as `mistral/mistral-small-latest`; `undefined` for any other.
+ * A voice agent as the gateway names it, `<provider>/<agent's ID>`, such
+ * as `elevenlabs/agent_4601m8c6`; `undefined` for any other.
  */
-export const parseConversingRef = (ref: string): ConversingRef | undefined => {
+export const parseAgentRef = (ref: string): AgentRef | undefined => {
   const [provider, id, ...rest] = ref.split("/");
-  return provider !== undefined &&
-    isConversationProvider(provider) &&
+  return provider === "elevenlabs" &&
     id !== undefined &&
     rest.length === 0 &&
-    isConversingModel(id)
+    agentId.test(id)
     ? { provider, id }
     : undefined;
 };
 
-/** What `seconds` of a voice session cost on `ref`, in US dollars. */
-export const conversationCostOf = (
-  { id }: ConversingRef,
-  seconds: number
-): number => (seconds * conversationDollarsPerHour[id]) / 3600;
+/** What `seconds` of a conversation with an agent cost, in US dollars. */
+export const conversationCostOf = (seconds: number): number =>
+  (seconds * agentDollarsPerHour) / 3600;
 
 /**
  * Characters a line is charged as: its UTF-16 length, never fewer than

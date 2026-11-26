@@ -101,11 +101,6 @@ import { resealBatchSize, vaultFor } from "./vault.ts";
 //   both ends and passes each message on as it comes, keeping and logging
 //   none; when either end closes, so does the other, and both close at the
 //   grant's deadline.
-// - A voice session (`sessions`, Mistral's voice agents for Grasp's
-//   interviews): opened by a POST to the provider's sessions path, read
-//   or closed by the GET or DELETE its grant names, only at that path and
-//   a session's ID below it, and only on Grasp's own key. The browser then
-//   joins the session's room itself: its audio never passes connect.
 // - An agent's conversation token (`agentTokens`, ElevenLabs's agents for
 //   Grasp's interviews): a GET its grant names, at that one path with the
 //   agent's ID as its one query, and only on Grasp's own key. The browser
@@ -557,33 +552,6 @@ const isModelEndpoint = (
   );
 };
 
-/** A voice session's ID in a path: nothing that reads as more of one. */
-const sessionIdPattern = /^[\w-]{1,128}$/u;
-
-/**
- * Whether `url` is the provider's live voice sessions (`sessions`), to
- * open one (POST), or one of them by its ID, to read or close it (GET,
- * DELETE): on Grasp's own key alone.
- */
-const isSessionEndpoint = (
-  url: URL,
-  claims: ModelGrantClaims,
-  method: string
-): boolean => {
-  const { sessions } = aiProviders[claims.provider];
-  if (sessions === undefined || claims.credential !== "platform") {
-    return false;
-  }
-  if (method === "POST") {
-    return url.pathname === sessions;
-  }
-  const prefix = `${sessions}/`;
-  return (
-    url.pathname.startsWith(prefix) &&
-    sessionIdPattern.test(url.pathname.slice(prefix.length))
-  );
-};
-
 /**
  * Whether `url` asks for a conversation token of one of the provider's
  * agents (`agentTokens`), with the agent's ID as its one query: a GET, on
@@ -604,7 +572,7 @@ const isAgentTokenEndpoint = (
   );
 };
 
-/** Whether `url` is a model endpoint a POST goes to, a voice session's, or an agent's token. */
+/** Whether `url` is a model endpoint a POST goes to, or an agent's token. */
 const isEndpoint = (
   url: URL,
   claims: ModelGrantClaims,
@@ -612,7 +580,6 @@ const isEndpoint = (
   method: string
 ): boolean =>
   (method === "POST" && isModelEndpoint(url, claims.provider, base)) ||
-  isSessionEndpoint(url, claims, method) ||
   isAgentTokenEndpoint(url, claims, method);
 
 /** Where the credential for `claims` may be sent, and the key. */
@@ -886,8 +853,8 @@ export const modelFetch = async (
     answered = await aiRoute(env).fetch(sending.to, {
       method,
       headers,
-      // Reading or closing a session sends no body; its grant's hash is
-      // of none, so none came.
+      // Asking for an agent's token sends no body; its grant's hash is of
+      // none, so none came.
       body: method === "POST" ? body : undefined,
       redirect: "manual",
       signal: AbortSignal.any([

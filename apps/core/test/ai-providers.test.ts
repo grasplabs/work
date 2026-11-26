@@ -1408,9 +1408,9 @@ describe("AI providers", { timeout: 60_000 }, () => {
         )
       ).toStrictEqual([
         "transcription: OpenAI, European Union",
-        "speech: Mistral AI, European Union (France)",
+        "speech: ElevenLabs, European Union",
         "interview: Mistral AI, European Union (France)",
-        "conversation: Mistral AI, European Union (France)",
+        "conversation: ElevenLabs, European Union",
       ]);
     });
   });

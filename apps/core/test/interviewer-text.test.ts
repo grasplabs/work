@@ -10,18 +10,12 @@ import type {
 } from "@grasp-os/shared/onboarding";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  interviewerText,
-  voiceText,
-} from "../src/onboarding/interviewer-text.ts";
+import { interviewerText } from "../src/onboarding/interviewer-text.ts";
 import type { InterviewerText } from "../src/onboarding/interviewer-text.ts";
 import {
   everyLabMark,
-  everyVoiceMark,
   labMarks,
   marksDigest,
-  voiceMarks,
-  voiceMarksDigest,
 } from "../src/onboarding/lab-marks.ts";
 
 // What the model that holds an interview is told (src/onboarding/), in
@@ -164,26 +158,5 @@ describe("the mark", () => {
     const again = await interviewerText("lead", "fr");
     expect(marks.size).toBe(everyText.length);
     expect(again.mark).toBe(textOf({ kind: "lead", locale: "fr" }).mark);
-  });
-});
-
-describe("the voice session's text", () => {
-  it.each(everyText)(
-    "is the one kept for it, so no word changes without its mark and its version's name ($kind, $locale)",
-    async (which) => {
-      const { mark } = await voiceText(which.kind, which.locale);
-      expect(mark).toBe(voiceMarks[which.kind][which.locale]);
-    }
-  );
-
-  it("names every voice mark at once, apart from the turn texts' version", async () => {
-    const digest = await crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(everyVoiceMark().join("\n"))
-    );
-    expect(everyVoiceMark()).toHaveLength(
-      interviewKinds.length * interviewLocales.length
-    );
-    expect(toHex(new Uint8Array(digest)).slice(0, 12)).toBe(voiceMarksDigest);
   });
 });

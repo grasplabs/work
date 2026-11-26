@@ -1,5 +1,6 @@
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { maxDirectionChars, maxSpeechChars } from "@grasp-os/shared/voice";
+import type { SpeechSynthesis } from "@grasp-os/shared/voice";
 import { env } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -13,8 +14,8 @@ import { spentMicros } from "./model-usage.ts";
 import { carrying, keyPlaces, plan } from "./platform-providers.ts";
 import { outcome, uniqueLetters } from "./sign-in.ts";
 
-// Speech through the model gateway: Grasp's own speech feature
-// (@grasp-os/shared/platform-ai), Mistral's Voxtral, says a line, judged by
+// Speech through the model gateway: one of its speech models
+// (src/voice-models.ts), Mistral's Voxtral, says a line, judged by
 // the deployment's rules, charged per character to Grasp's own key (never
 // the organization's spend) and audited
 // like any model call, through connect with Grasp's own key.
@@ -26,7 +27,7 @@ const speechModel = "mistral/voxtral-mini-tts-3-0";
 /** A text model, as an organization chooses one: no speech model. */
 const textModel = "mistral/mistral-large-latest";
 
-/** Stephen's voice by default: a Mistral voice ID. */
+/** A voice of Voxtral's, by its Mistral ID. */
 const voice = "voice_485";
 
 /** What a line of `characters` costs at Voxtral's $13 a million: 13 micros each. */
@@ -66,13 +67,21 @@ const withRules = () => {
 const newPerson = () =>
   ({ type: "person", userId: `person-${crypto.randomUUID()}` }) as const;
 
-/** One of Stephen's lines in an interview, said for `trigger`. */
-const stephen = (rulesEnv: Env, trigger: ReturnType<typeof newPerson>) =>
-  platformSpeech(rulesEnv, {
+/** One of Stephen's lines, said for `trigger`: in `speechModel`, unless the line names another. */
+const stephen = (
+  rulesEnv: Env,
+  trigger: ReturnType<typeof newPerson>
+): SpeechSynthesis => {
+  const speech = platformSpeech(rulesEnv, {
     purpose: "onboarding.speech",
     trigger,
     work: { onboarding: true },
   });
+  return {
+    speak: async (line, signal, onAudio) =>
+      await speech.speak({ model: speechModel, ...line }, signal, onAudio),
+  };
+};
 
 /** The audit events triggered by `userId`, once `count` have arrived. */
 const auditedFor = async (

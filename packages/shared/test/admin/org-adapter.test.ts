@@ -5,7 +5,7 @@ import { talkedByDay } from "../../src/admin/admin-interviews.ts";
 import { logItemsOf } from "../../src/admin/admin-log.ts";
 import { organizationOf } from "../../src/admin/admin-organization.ts";
 import { todosAt } from "../../src/admin/admin-todo.ts";
-import { PRICES, valueOf } from "../../src/admin/admin-usage.ts";
+import { MODEL_NAMES, PRICES, valueOf } from "../../src/admin/admin-usage.ts";
 import { adminViewOf } from "../../src/admin/admin-view.ts";
 import type { InterviewFact } from "../../src/admin/interview-turn.ts";
 import {
@@ -741,6 +741,63 @@ describe("a real organization as the admin reads it", () => {
           heard: 3,
           spend: 3 * PRICES.ears.minute,
         },
+      },
+    ]);
+  });
+
+  it("counts an interview's turns by Mistral's prices and a live interview by the ElevenLabs agent's a minute, never as models without a price", () => {
+    const counted = meteredOf([
+      {
+        day: "2026-11-26",
+        use: {
+          interviews: {
+            "mistral/mistral-medium-latest": {
+              calls: 2,
+              tokensIn: 1_000_000,
+              kept: 0,
+              tokensOut: 500_000,
+              seconds: 0,
+            },
+            "mistral/mistral-small-latest": {
+              calls: 2,
+              tokensIn: 2_000_000,
+              kept: 0,
+              tokensOut: 1_000_000,
+              seconds: 0,
+            },
+            conversation: heard(900),
+          },
+        },
+      },
+    ]);
+
+    expect(
+      counted.map(({ model, use }) => ({
+        model,
+        named: MODEL_NAMES[model],
+        spoken: use.spoken,
+        spend: Math.round(use.spend * 1e4) / 1e4,
+      }))
+    ).toStrictEqual([
+      {
+        model: "mistralMedium",
+        named: "Mistral Medium",
+        spoken: 0,
+        // A million tokens in at 0.40, half a million out at 2.
+        spend: 1.4,
+      },
+      {
+        model: "mistralSmall",
+        named: "Mistral Small",
+        spoken: 0,
+        spend: 0.5,
+      },
+      {
+        model: "conversation",
+        named: "ElevenLabs agent",
+        spoken: 15,
+        // A quarter of an hour at 0.0925 a minute.
+        spend: 1.3875,
       },
     ]);
   });

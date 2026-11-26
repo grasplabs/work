@@ -123,7 +123,8 @@ export const workOf = (record: WorkRecord): Work => {
 /**
  * The model a call was made to, by the name its maker gives it: one the admin has no price for is
  * another. Core counts what Stephen hears, live or from a recording, as `transcription`: his ears;
- * an interview held as one live voice session as `conversation`.
+ * an interview held as one live conversation with the ElevenLabs agent as `conversation`; and an
+ * interview's turns by the gateway's names of their models (`mistral/mistral-medium-latest`).
  */
 const modelOf = (name: string): Model => {
   if (name === "voice") {
@@ -134,6 +135,12 @@ const modelOf = (name: string): Model => {
   }
   if (name === "conversation") {
     return "conversation";
+  }
+  if (name.includes("mistral-medium")) {
+    return "mistralMedium";
+  }
+  if (name.includes("mistral-small")) {
+    return "mistralSmall";
   }
   return (
     (["opus", "sonnet", "haiku"] as const).find((model) =>

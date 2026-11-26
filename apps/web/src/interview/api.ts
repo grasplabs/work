@@ -537,28 +537,15 @@ export const hearRecording = async ({
   }
 };
 
-const voiceJoinSchema = z.discriminatedUnion("via", [
-  z.object({
-    via: z.literal("mistral"),
-    id: z.string().min(1),
-    participantToken: z.string().min(1),
-    serverUrl: z.url({ protocol: /^wss$/u }),
-    expiresAt: z.string(),
-    pass: z.string().min(1),
-  }),
-  z.object({
-    via: z.literal("elevenlabs"),
-    conversationToken: z.string().min(1),
-    context: z.string(),
-    pass: z.string().min(1),
-  }),
-]) satisfies z.ZodType<VoiceSessionJoin>;
+const voiceJoinSchema = z.object({
+  conversationToken: z.string().min(1),
+  location: z.enum(["eu-residency", "us"]),
+  context: z.string(),
+  pass: z.string().min(1),
+}) satisfies z.ZodType<VoiceSessionJoin>;
 
 const voiceAnsweredSchema = z.object({
   noted: z.int().min(0),
-  lines: z.array(
-    z.object({ from: z.enum(["person", "stephen"]), text: z.string() })
-  ),
   turn: z
     .object({
       facts: z.array(
@@ -579,28 +566,25 @@ const voiceAnsweredSchema = z.object({
       phase: z.enum(interviewPhases),
     })
     .nullable(),
-  instructions: z.string(),
-  situation: z.string(),
 }) satisfies z.ZodType<VoiceAnswered>;
 
 /**
- * Opens the interview's live voice session, through core
- * (`/api/interview/voice`): what the page joins it with (a room at
- * Mistral, or a conversation token for Grasp's ElevenLabs agent), never
- * Grasp's key.
+ * Opens the interview's live conversation, through core
+ * (`/api/interview/voice`): what the page starts it with (a conversation
+ * token for Grasp's ElevenLabs agent), never Grasp's key.
  */
 export const openVoice = async (
   request: Extract<InterviewVoiceRequest, { action: "open" }>
 ): Promise<VoiceSessionJoin | Refused> =>
   await posted(interviewVoicePath, request, voiceJoinSchema);
 
-/** Has core write down what was said in the session since `noted` of their answers. */
+/** Has core write down what was said in the conversation since `noted` of their answers. */
 export const answerVoice = async (
   request: Extract<InterviewVoiceRequest, { action: "answer" }>
 ): Promise<VoiceAnswered | Refused> =>
   await posted(interviewVoicePath, request, voiceAnsweredSchema);
 
-/** Closes the session at Mistral: also as the page is left, so it outlives the page. */
+/** Tells core the page left the conversation: also as the page is left, so it outlives the page. */
 export const closeVoice = async (
   request: Extract<InterviewVoiceRequest, { action: "close" }>
 ): Promise<void> => {

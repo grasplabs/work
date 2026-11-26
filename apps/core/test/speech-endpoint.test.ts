@@ -5,7 +5,7 @@ import { speechPath } from "@grasp-os/shared/voice";
 import type { SpeechRequestBody } from "@grasp-os/shared/voice";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { voiceBudgets } from "../src/onboarding/speech.ts";
@@ -13,7 +13,7 @@ import { onboardingStore } from "../src/onboarding/store.ts";
 import { platformAi } from "../src/platform-ai.ts";
 import { storedKeyOf } from "../src/speech-cache.ts";
 import { secondsPerCharacter } from "./ai-providers-fake.ts";
-import { platformMistralKey } from "./connect-providers.ts";
+import { platformElevenLabsKey } from "./connect-providers.ts";
 import { mockIdp } from "./idp.ts";
 import {
   onLink,
@@ -26,8 +26,8 @@ import { routed, signedInWithRole, unique, uniqueLetters } from "./sign-in.ts";
 
 // The onboarding's lines said out loud (src/onboarding/speech.ts), over
 // the endpoint, as the page asks for them: on someone's interview link, or
-// for an admin signed in. Mistral, Grasp's own speech feature's
-// provider (@grasp-os/shared/platform-ai), is the outside system: a fake
+// for an admin signed in. ElevenLabs, Grasp's own speech feature's
+// provider (src/platform-ai.ts), is the outside system: a fake
 // behind connect's fetch, which says each character in 30 ms. Connect, the
 // store, the cache, the gateway's rules and its ledger are real. The ways
 // it can fail, tried here:
@@ -38,8 +38,8 @@ import { routed, signedInWithRole, unique, uniqueLetters } from "./sign-in.ts";
 //   own.
 // - A line said twice paid twice, or the voice running on past its budget.
 
-/** Stephen's voice, by its Mistral ID. */
-const stephen = "voice_485";
+/** Stephen's voice in an interview: the agent's, by its ElevenLabs ID. */
+const { stephen } = platformAi.speech.voices;
 
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -54,18 +54,13 @@ const answerSchema = z.object({
   ),
 });
 
-/** What Mistral was asked, as far as these tests read it. */
-const askedSchema = z.object({
-  input: z.string(),
-  model: z.string(),
-  voice_id: z.string(),
-});
+/** What ElevenLabs was asked, as far as these tests read it. */
+const askedSchema = z.object({ text: z.string(), model_id: z.string() });
 
 /** An event of a line answered as it is made. */
 const streamEventSchema = z.union([
   z.object({ audio: z.string() }),
   z.object({ words: answerSchema.shape.words }),
-  z.object({ failed: z.literal(true) }),
 ]);
 
 /** Every event of a line answered as it is made, a line of JSON each. */
@@ -158,10 +153,15 @@ const codeOf = async (response: Response) => {
   return [response.status, parsed.success ? parsed.data.code : null];
 };
 
-/** What Mistral was asked for the lines carrying `text`. */
+/** What ElevenLabs was asked for the lines carrying `text`: the line, its model, and the voice in its path. */
 const askedFor = async (text: string) => {
   const carried = await carrying(text);
-  return carried.map(({ body }) => askedSchema.parse(JSON.parse(body)));
+  return carried.map(({ path, body }) => {
+    const { text: input, model_id: model } = askedSchema.parse(
+      JSON.parse(body)
+    );
+    return { input, model, voice: path.split("/")[3] };
+  });
 };
 
 /** Seconds of voice the onboarding counted for `purpose`. */
@@ -194,7 +194,7 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
       ends: answer.words.at(-1)?.endMs,
     }).toStrictEqual({
       status: 200,
-      mime: "audio/wav",
+      mime: "audio/mpeg",
       words: text.split(" "),
       ends: said,
     });
@@ -206,17 +206,13 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     );
   });
 
-  it("answers a line asked for streamed as it is made: its audio in pieces, then its words, and keeps it whole for the next to ask", async () => {
+  it("answers a line asked for streamed as a stream: its audio, then its words, and keeps it whole for the next to ask", async () => {
     const { link } = await opened();
     const text = newLine();
     const before = await voiceCounted("interviews");
 
     const streamed = await speak({ text, language: "en", link, stream: true });
     const events = eventsOf(await streamed.text());
-    // Kept and counted once the answer is out: asked again only then.
-    await vi.waitFor(async () => {
-      await expect(voiceCounted("interviews")).resolves.toBeGreaterThan(before);
-    });
     const asWhole = await speak({ text, language: "en", link });
     const whole = answerSchema.parse(await asWhole.json());
     const again = await speak({ text, language: "en", link, stream: true });
@@ -226,8 +222,6 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     expect({
       status: streamed.status,
       type: streamed.headers.get("content-type"),
-      // The provider's pieces, as they came: more than one.
-      inPieces: audioOf(events).length > 1,
       audio: audioOf(events).join("") === atob(whole.audio),
       last: events.at(-1),
       keptAudio: audioOf(kept).join("") === atob(whole.audio),
@@ -235,7 +229,6 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     }).toStrictEqual({
       status: 200,
       type: "application/x-ndjson",
-      inPieces: true,
       audio: true,
       last: { words: whole.words },
       keptAudio: true,
@@ -249,46 +242,17 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     );
   });
 
-  it("refuses a line asked for streamed at once when the voice is busy, as one asked for whole", async () => {
+  it("refuses a line asked for streamed when the voice is busy, as one asked for whole", async () => {
     const { link } = await opened();
     const text = newLine();
     // Busy, and busy again when asked once more.
-    await plan(platformMistralKey, [busy, busy]);
+    await plan(platformElevenLabsKey, [busy, busy]);
 
     const result = await codeOf(
       await speak({ text, language: "en", link, stream: true })
     );
 
     expect(result).toStrictEqual([429, "speech.busy"]);
-  });
-
-  it("tells the page when a line breaks off halfway, and keeps nothing of it", async () => {
-    const { link } = await opened();
-    const text = newLine();
-    // A piece of the file, and then the stream ends without saying it is done.
-    await plan(platformMistralKey, [
-      {
-        sse: `data: ${JSON.stringify({ type: "speech.audio.delta", audio_data: btoa("RIFF") })}\n\n`,
-      },
-    ]);
-
-    const broken = await speak({ text, language: "en", link, stream: true });
-    const events = eventsOf(await broken.text());
-    // Asked again, it is said anew: nothing was kept.
-    const again = await speak({ text, language: "en", link });
-
-    expect({
-      status: broken.status,
-      audio: audioOf(events),
-      last: events.at(-1),
-      again: again.status,
-    }).toStrictEqual({
-      status: 200,
-      audio: ["RIFF"],
-      last: { failed: true },
-      again: 200,
-    });
-    await expect(carrying(text)).resolves.toHaveLength(2);
   });
 
   it.each([
@@ -404,7 +368,7 @@ describe("lines said at the speech endpoint", { timeout: 60_000 }, () => {
     await response.body?.cancel();
 
     await expect(askedFor(text)).resolves.toStrictEqual([
-      { input: text, model: "voxtral-mini-tts-3-0", voice_id: stephen },
+      { input: text, model: platformAi.speech.model, voice: stephen },
     ]);
   });
 

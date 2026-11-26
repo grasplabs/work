@@ -92,14 +92,6 @@ export interface AiProviderSpec {
    */
   realtime: readonly { path: string; query: string }[];
   /**
-   * The path below its host where a live voice session is opened (POST),
-   * and each one read (GET) and closed (DELETE) at `<path>/<id>`, and
-   * nothing else: Mistral's voice agents, for Grasp's interviews (platform
-   * features only, never an organization's key). None for a provider
-   * without.
-   */
-  sessions: string | undefined;
-  /**
    * The path below its host where a conversation token for one of Grasp's
    * own voice agents is asked (GET, its one query `?agent_id=<agent's
    * ID>`, `agentTokenQuery`), and nothing else: ElevenLabs's agents, for
@@ -152,7 +144,6 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     // Anthropic's SDK asks its beta Messages API, which names no data.
     queries: ["", "?beta=true"],
     realtime: [],
-    sessions: undefined,
     agentTokens: undefined,
     keyHeader: "x-api-key",
     whereItRuns: "Anthropic, United States",
@@ -177,7 +168,6 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     ],
     queries: [""],
     realtime: [{ path: "/v1/realtime", query: "?intent=transcription" }],
-    sessions: undefined,
     agentTokens: undefined,
     keyHeader: "authorization",
     whereItRuns: "OpenAI, United States",
@@ -202,8 +192,6 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
         query: "?model=voxtral-mini-transcribe-realtime-3",
       },
     ],
-    // Its voice agents' sessions, for Grasp's interviews.
-    sessions: "/v1/audio/sessions",
     agentTokens: undefined,
     keyHeader: "authorization",
     whereItRuns: "Mistral AI, European Union (France)",
@@ -222,7 +210,6 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     paths: ["/api/v1/messages", "/api/v1/chat/completions"],
     queries: [""],
     realtime: [],
-    sessions: undefined,
     agentTokens: undefined,
     keyHeader: "authorization",
     whereItRuns:
@@ -239,7 +226,6 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     paths: ["/chat/completions"],
     queries: [""],
     realtime: [],
-    sessions: undefined,
     agentTokens: undefined,
     keyHeader: "authorization",
     whereItRuns: "Wherever your endpoint runs",
@@ -258,7 +244,6 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     paths: ["/v1/text-to-speech/*/with-timestamps"],
     queries: ["?enable_logging=false&output_format=mp3_44100_128"],
     realtime: [],
-    sessions: undefined,
     // Its agents' conversation tokens, for Grasp's interviews.
     agentTokens: "/v1/convai/conversation/token",
     keyHeader: "xi-api-key",
