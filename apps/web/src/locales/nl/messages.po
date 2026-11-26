@@ -697,6 +697,14 @@ msgstr "{goals, plural, one {# doel} other {# doelen}}"
 msgid "{going, plural, one {The lead of # team gets their link {when}. Everyone else right after their lead has talked to me.} other {The leads of # teams get their link {when}. Everyone else right after their lead has talked to me.}}"
 msgstr "{going, plural, one {De teamleider van # team krijgt de link {when}. Alle anderen direct nadat hun teamleider met mij heeft gesproken.} other {De teamleiders van # teams krijgen hun link {when}. Alle anderen direct nadat hun teamleider met mij heeft gesproken.}}"
 
+#: src/onboarding/team-step.tsx
+msgid "{heldCount, plural, one {{heldNames} gets no link yet.} other {{heldNames} get no link yet.}}"
+msgstr "{heldCount, plural, one {{heldNames} krijgt nog geen link.} other {{heldNames} krijgen nog geen link.}}"
+
+#: src/onboarding/team-step.tsx
+msgid "{heldCount, plural, one {{heldNames} gets theirs {heldWhen}.} other {{heldNames} get theirs {heldWhen}.}}"
+msgstr "{heldCount, plural, one {{heldNames} volgt {heldWhen}.} other {{heldNames} volgen {heldWhen}.}}"
+
 #: src/brain/brain-chips.tsx
 #: src/brain/brain-source-contents.tsx
 msgid "{hidden, plural, one {Show # more} other {Show # more}}"
@@ -3746,11 +3754,6 @@ msgstr "Vraagt het je eerst, elke keer."
 msgctxt "who wrote a message"
 msgid "Assistant"
 msgstr "Assistent"
-
-#: src/onboarding/send-plan-form.tsx
-msgctxt "at an hour of the day: on Tuesday at 9:00"
-msgid "at"
-msgstr "om"
 
 #: src/agents/setup/schedule-step.tsx
 msgid "At"
@@ -12202,10 +12205,6 @@ msgstr "Niet van mij"
 msgid "Not offered"
 msgstr "Niet aangeboden"
 
-#: src/onboarding/send-plan-form.tsx
-msgid "Not planned yet"
-msgstr "Nog niet gepland"
-
 #: src/routes/_shell.workflows.$workflow.tsx
 msgid "Not published yet."
 msgstr "Nog niet gepubliceerd."
@@ -12767,10 +12766,6 @@ msgstr "Bij {type}-gebeurtenissen van een verwijderde webhookbron"
 #: src/inbox/outcome-details.tsx
 msgid "On {where}"
 msgstr "Op {where}"
-
-#: src/onboarding/send-plan-form.tsx
-msgid "On a later day"
-msgstr "Op een latere dag"
 
 #: src/agents/setup/schedule-step.tsx
 msgid "On a schedule"
@@ -18119,10 +18114,6 @@ msgstr "De huidige versie declareert deze niet, dus ze bedienen niets tot een ve
 msgid "The data isn't JSON."
 msgstr "De gegevens zijn geen JSON."
 
-#: src/onboarding/send-plan-form.tsx
-msgid "The day the other teams get their links"
-msgstr "De dag waarop de andere teams hun links krijgen"
-
 #: src/chat/composer.tsx
 msgid "The default"
 msgstr "De standaard"
@@ -18224,10 +18215,6 @@ msgstr "De header is een naam van letters, cijfers en streepjes, en niet een die
 #: src/drafts/draft-history.tsx
 msgid "The history of your changes couldn't be read. Try again in a moment."
 msgstr "De geschiedenis van je wijzigingen kon niet gelezen worden. Probeer het zo opnieuw."
-
-#: src/onboarding/send-plan-form.tsx
-msgid "The hour the other teams get their links"
-msgstr "Het uur waarop de andere teams hun links krijgen"
 
 #: src/inbox/inbox-page.tsx
 msgid "The inbox didn't load"
