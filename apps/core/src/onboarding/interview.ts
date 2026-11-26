@@ -291,6 +291,15 @@ const textOfAnswer = (answer: AssistantMessage): string => {
       : refusalOf(code);
   }
   if (text.trim() === "" || answer.stopReason === "length") {
+    // Why there was nothing to say, and how much of each kind came, never what.
+    log.warn("interview.line_lost", {
+      stopReason: answer.stopReason,
+      textChars: text.length,
+      thinkingChars: answer.content
+        .flatMap((block) => (block.type === "thinking" ? [block.thinking] : []))
+        .join("").length,
+      tokensOut: answer.usage.output,
+    });
     throw lostThread();
   }
   return text;
@@ -405,6 +414,11 @@ export const write = async (
     return output;
   } catch (error) {
     const code = modelErrors.codeOf(error);
+    if (code === undefined) {
+      log.warn("interview.notes_lost", {
+        error: error instanceof Error ? error.name : typeof error,
+      });
+    }
     throw code === undefined ? lostThread() : refusalOf(code);
   }
 };

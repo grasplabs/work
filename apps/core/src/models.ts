@@ -970,8 +970,13 @@ const open = async (
   const events = await streamRoute(endpoint, context, {
     fetch: measured,
     maxTokens: answerTokens(call, model),
-    // Without a level pi turns reasoning off.
-    reasoning: thinkingOf(model, call.effort),
+    // Without a level pi turns reasoning off: an interview's lines are
+    // said out loud and must come at once, and a model that reasons spends
+    // their few tokens on it (Mistral's lowest level is its highest).
+    reasoning:
+      route.via.kind === "interview"
+        ? undefined
+        : thinkingOf(model, call.effort),
     signal,
     cache,
     onResponse: ({ status, headers }) => {
