@@ -200,7 +200,10 @@ describe("chat agent code output", () => {
 
     expect(seen.some(({ output }) => output !== null)).toBeFalsy();
     await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
-      { isError: false, text: "Logs:\nheld\n\nReturned:\ndone" },
+      {
+        isError: false,
+        text: JSON.stringify({ logs: ["held"], returned: "done" }),
+      },
     ]);
   });
 });

@@ -218,7 +218,8 @@ const cutWords = (text: string): string => {
  * failed; the literal is one line, so where the words end is plain even
  * with the run's stack after them. The run read them from outside (`call`
  * records the error's output as read), so the model reads them as
- * outside data, between the run's own tags (code-mode.ts `describeRun`).
+ * outside data, a value in the run's result whose `readFrom` names the
+ * connection (code-mode.ts `describeRun`).
  * Words that are only blanks go nowhere. Any other error as it is.
  */
 const withServerWords = (error: unknown): unknown => {

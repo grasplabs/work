@@ -3,7 +3,6 @@ import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import { Type } from "@earendil-works/pi-ai";
 import type { Message, Static, TSchema } from "@earendil-works/pi-ai";
 import type { ToolRegistration } from "@earendil-works/pi-durable";
-import { agentErrors } from "@grasp-os/shared/agent";
 import { brainQuestionMaxLength } from "@grasp-os/shared/brain-sources";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { env, exports } from "cloudflare:workers";
@@ -103,7 +102,7 @@ const callAs = async (
   try {
     guard();
     const value = await call({ ...scope, runId }, guard, know);
-    result = typeof value === "string" ? value : JSON.stringify(value ?? null);
+    result = JSON.stringify(value ?? null);
     status = "completed";
   } catch (error) {
     failure = error instanceof Error ? error.message : String(error);
@@ -116,22 +115,7 @@ const callAs = async (
     end = await (closing ?? runs.close(runId, status));
   }
   const { status: ended, readFrom } = end;
-  const text =
-    ended === "revoked"
-      ? describeRun({
-          status: ended,
-          logs: [],
-          error: agentErrors.create("agent.run_revoked").message,
-        })
-      : describeRun(
-          {
-            status: ended,
-            logs: [],
-            ...(result === undefined ? {} : { result }),
-            ...(failure === undefined ? {} : { error: failure }),
-          },
-          readFrom
-        );
+  const text = describeRun({ status: ended, result, error: failure }, readFrom);
   const details: ToolStepDetails =
     ended === "completed" && Object.keys(files).length > 0
       ? { status: ended, runId, files }
@@ -208,8 +192,9 @@ const maxNameChars = 512;
 const maxFilesPerWrite = 50;
 
 /**
- * Most UTF-8 bytes of a file `readFile` hands over at once: the room a
- * result has, less some for the note of where it was cut.
+ * Most UTF-8 bytes of a file `readFile` hands over at once, as a result's
+ * JSON writes it: the room a result has, less some for the result's
+ * other fields and the note of where it was cut.
  */
 const maxReadBytes = codeLimits.outputBytes - 1024;
 
@@ -431,9 +416,9 @@ const fileOf = async (
 
 /**
  * The lines `fromLine` to `toLine` of `content` (from 1, both included;
- * all of it without), as its own text, cut where it passes
- * {@link maxReadBytes}. A part of the file ends with a note, after a
- * blank line, of which lines it is and how to read on.
+ * all of it without), as its own text, cut where it would pass
+ * {@link maxReadBytes} in a result. A part of the file ends with a note,
+ * after a blank line, of which lines it is and how to read on.
  */
 export const fileLines = (
   content: string,
@@ -446,7 +431,8 @@ export const fileLines = (
   let bytes = 0;
   for (let at = fromLine; at <= last; at += 1) {
     const line = lines[at - 1] ?? "";
-    bytes += utf8Bytes(line) + 1;
+    // Escaped as a result's JSON writes it, with its line break (`\n`).
+    bytes += utf8Bytes(JSON.stringify(line));
     if (bytes > maxReadBytes && shown.length > 0) {
       break;
     }

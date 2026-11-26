@@ -4,7 +4,13 @@ import { z } from "zod";
 
 import { installShippedSkills } from "../src/brain-skills.ts";
 import { shippedSkills } from "../src/shipped-skills.ts";
-import { codeResults, codeStep, personalChatsOf, says } from "./agent-chat.ts";
+import {
+  codeResults,
+  codeStep,
+  personalChatsOf,
+  returnedOf,
+  says,
+} from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { signedInWithRole } from "./sign-in.ts";
@@ -30,17 +36,6 @@ const calling = (call: string) =>
   codeStep(
     `export default async (self, env) => { try { return await ${call}; } catch (error) { return error.message; } };`
   );
-
-/** What a code step returned, as JSON, or its text when it isn't. */
-const returned = (text: string | undefined): unknown => {
-  const body = (text ?? "").replace(/^Returned:\n/u, "");
-  try {
-    const parsed: unknown = JSON.parse(body);
-    return parsed;
-  } catch {
-    return body;
-  }
-};
 
 const selectedSchema = z.object({
   skills: z.array(
@@ -85,7 +80,7 @@ describe("a chat's skills", setUpTime, () => {
     const chat = await newChat();
     await chat.ask("How do I file this expense?");
     const results = await codeResults(stub, chat.chat.id);
-    const [forExpense, forBread] = results.map(({ text }) => returned(text));
+    const [forExpense, forBread] = results.map(({ text }) => returnedOf(text));
     const pinned = selectedSchema
       .parse(forExpense)
       .skills.find(({ name }) => name === "file-an-expense");
@@ -107,7 +102,7 @@ describe("a chat's skills", setUpTime, () => {
     await again.ask("And now?");
     const laterResults = await codeResults(later.stub, again.chat.id);
     const reads = laterResults.map(({ text }) =>
-      readSchema.parse(returned(text))
+      readSchema.parse(returnedOf(text))
     );
     // Put back as shipped, for the file's other tests.
     await installShippedSkills(env, [
@@ -158,7 +153,7 @@ describe("a chat's skills", setUpTime, () => {
       ],
       texts: false,
     });
-    expect(returned(results[2]?.text)).toBe(
+    expect(returnedOf(results[2]?.text)).toBe(
       "There's no such skill, or not at that version."
     );
   });

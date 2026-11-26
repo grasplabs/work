@@ -9,7 +9,13 @@ import { addSource } from "../src/brain-next.ts";
 import type { SourceReaders } from "../src/brain-next.ts";
 import { workspace } from "../src/durable-objects.ts";
 import { newTeam } from "./admin-teams.ts";
-import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
+import {
+  chatOf,
+  codeResults,
+  codeStep,
+  says,
+  returnedText,
+} from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import { mockIdp } from "./idp.ts";
 import { outcome, signedInApi, signedInWithRole, unique } from "./sign-in.ts";
@@ -207,7 +213,7 @@ describe("a chat's history", setUpTime, () => {
     const results = await codeResults(stub, chat.id);
     expect(results.map(({ text }) => text)).toStrictEqual([
       // Their team's plan, never the team's they aren't in.
-      `Returned:\n["Our plan: ${word}."]`,
+      returnedText([`Our plan: ${word}.`]),
     ]);
   });
 });

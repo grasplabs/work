@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { personalWorkspaceId } from "../src/chats-rpc.ts";
 import { workspace } from "../src/durable-objects.ts";
-import { codeStep, model, says } from "./agent-chat.ts";
+import { codeStep, model, says, returnedText } from "./agent-chat.ts";
 import { mockIdp } from "./idp.ts";
 import { fakeProvider } from "./model-provider.ts";
 import type { ProviderReply } from "./model-provider.ts";
@@ -116,7 +116,7 @@ describe("a chat's tool lines", () => {
       code: /^[a-z_]+\.[a-z_]+$/u.test(tools[3]?.reason ?? ""),
       unique: new Set(tools.map(({ id }) => id)).size,
     }).toStrictEqual({
-      result: `Returned:\n${JSON.stringify({ files: 0, workflows: 0, hits: 0, refused: true })}`,
+      result: returnedText({ files: 0, workflows: 0, hits: 0, refused: true }),
       lines: [
         {
           id: tools[0]?.id,

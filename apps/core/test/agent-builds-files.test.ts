@@ -28,6 +28,7 @@ import {
   toolResults,
   toolStep,
   turnChecks,
+  returnedText,
 } from "./agent-chat.ts";
 import { allEvents } from "./audit-events.ts";
 import { agentWriting } from "./draft-writers.ts";
@@ -285,7 +286,9 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
       read: read?.text,
     }).toStrictEqual({
       written: [{ line: 3, rule: "eqeqeq" }],
-      read: "Returned:\nconst rate = 2;\nexport const total = (n: number) => n * rate;\nexport const same = (a: number, b: number) => a == b;\n",
+      read: returnedText(
+        "const rate = 2;\nexport const total = (n: number) => n * rate;\nexport const same = (a: number, b: number) => a == b;\n"
+      ),
     });
   });
 
@@ -309,8 +312,12 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
     const [, first, last] = await toolResults(chat.stub, chat.chat.id);
     expect([first?.text, last?.text]).toStrictEqual([
-      `Returned:\nconst rate0 = 0;\nexport const total0 = (n: number) => n * rate0;\n${lines(0)}\n`,
-      `Returned:\nconst rate49 = 49;\nexport const total49 = (n: number) => n * rate49;\n${lines(49)}\n`,
+      returnedText(
+        `const rate0 = 0;\nexport const total0 = (n: number) => n * rate0;\n${lines(0)}\n`
+      ),
+      returnedText(
+        `const rate49 = 49;\nexport const total49 = (n: number) => n * rate49;\n${lines(49)}\n`
+      ),
     ]);
   });
 
@@ -342,8 +349,10 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
 
     const [, stopped, tidied] = await toolResults(chat.stub, chat.chat.id);
     expect([stopped?.text, tidied?.text]).toStrictEqual([
-      `Returned:\n${rates(0)}`,
-      "Returned:\nconst rate3 = 3;\nexport const total3 = (n: number) => n * rate3;\n",
+      returnedText(rates(0)),
+      returnedText(
+        "const rate3 = 3;\nexport const total3 = (n: number) => n * rate3;\n"
+      ),
     ]);
   });
 
@@ -392,8 +401,10 @@ describe("building Apps from a chat", { timeout: 120_000 }, () => {
         ],
       },
       capped: [100, 5, "many.md:1:an alpha line"],
-      whole: "Returned:\nAlpha\nbeta\nalphabet",
-      end: "Returned:\nan alpha line\nan alpha line\n\n[Lines 104 to 105 of 105. That is the end of the file.]",
+      whole: returnedText("Alpha\nbeta\nalphabet"),
+      end: returnedText(
+        "an alpha line\nan alpha line\n\n[Lines 104 to 105 of 105. That is the end of the file.]"
+      ),
     });
   });
 

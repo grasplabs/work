@@ -34,7 +34,14 @@ import {
   retireSkill,
   shareOwnSkill,
 } from "../src/skill-shares.ts";
-import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
+import {
+  chatOf,
+  codeResults,
+  codeStep,
+  model,
+  says,
+  returnedText,
+} from "./agent-chat.ts";
 import { eventsAfterWithHead, logHead } from "./audit-events.ts";
 import { ageOwnErasure } from "./brain-next-own-store.ts";
 import { actingFor } from "./contexts.ts";
@@ -737,23 +744,29 @@ describe("writing and sharing skills", setUpTime, () => {
       sharedThread,
     }).toStrictEqual({
       ownTurns: {
-        selected: [`Returned:\nperson:${name}`, "Returned:\nnone"],
+        selected: [returnedText(`person:${name}`), returnedText("none")],
         listed: [true, true, false, false],
       },
       teamsDirect: {
-        selected: [`Returned:\nperson:${name}`],
+        selected: [returnedText(`person:${name}`)],
         listed: [true, true],
       },
       slackDirect: {
-        selected: [`Returned:\nperson:${name}`],
+        selected: [returnedText(`person:${name}`)],
         listed: [true, true],
       },
-      teamsChannel: { selected: ["Returned:\nnone"], listed: [false, false] },
-      othersChat: {
-        selected: ["Returned:\nnone"],
+      teamsChannel: {
+        selected: [returnedText("none")],
         listed: [false, false],
       },
-      sharedThread: { selected: ["Returned:\nnone"], listed: [false, false] },
+      othersChat: {
+        selected: [returnedText("none")],
+        listed: [false, false],
+      },
+      sharedThread: {
+        selected: [returnedText("none")],
+        listed: [false, false],
+      },
     });
   });
 
@@ -1314,9 +1327,12 @@ describe("sharing a skill with a team", setUpTime, () => {
         listed: listedIn(others.provider.requests),
       },
     }).toStrictEqual({
-      own: { selected: [`Returned:\nteam:${name}`], listed: [true, true] },
-      sharedThread: { selected: ["Returned:\nnone"], listed: [false, false] },
-      othersChat: { selected: ["Returned:\nnone"], listed: [false, false] },
+      own: { selected: [returnedText(`team:${name}`)], listed: [true, true] },
+      sharedThread: {
+        selected: [returnedText("none")],
+        listed: [false, false],
+      },
+      othersChat: { selected: [returnedText("none")], listed: [false, false] },
     });
   });
 

@@ -3,7 +3,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
-import { codeLimits, cutMarker, utf8Bytes } from "../src/code-mode.ts";
+import { codeLimits, utf8Bytes } from "../src/code-mode.ts";
 import {
   codeResults,
   codeStatuses,
@@ -11,6 +11,10 @@ import {
   says,
   setObjectEnv,
   transcript,
+  returnedOf,
+  returnedText,
+  failedText,
+  readResult,
 } from "./agent-chat.ts";
 import { chatsWith, refusalsIn } from "./agent-code-runs.ts";
 import { allEvents } from "./audit-events.ts";
@@ -69,7 +73,20 @@ describe("chat agent sandbox", () => {
 
     expect(result).toStrictEqual({
       isError: false,
-      text: `Returned:\n${JSON.stringify({ given: ["chat", "connections", "apps", "build", "workflows", "workflowBuild", "skills", "brain"], imported: [], exports: [] })}`,
+      text: returnedText({
+        given: [
+          "chat",
+          "connections",
+          "apps",
+          "build",
+          "workflows",
+          "workflowBuild",
+          "skills",
+          "brain",
+        ],
+        imported: [],
+        exports: [],
+      }),
     });
   });
 
@@ -91,7 +108,10 @@ describe("chat agent sandbox", () => {
 
     expect(result).toStrictEqual({
       isError: true,
-      text: "Error (wall_expired):\nThe run waits for something that can never come, so it was stopped.",
+      text: failedText(
+        "wall_expired",
+        "The run waits for something that can never come, so it was stopped."
+      ),
       status: "wall_expired",
     });
   });
@@ -115,7 +135,10 @@ describe("chat agent sandbox", () => {
     await expect(codeResults(stub, chat.id)).resolves.toStrictEqual([
       {
         isError: true,
-        text: "Error (wall_expired):\nThe run took longer than 1 seconds, so it was stopped.",
+        text: failedText(
+          "wall_expired",
+          "The run took longer than 1 seconds, so it was stopped."
+        ),
       },
     ]);
     await expect(codeStatuses(stub, chat.id)).resolves.toStrictEqual([
@@ -132,7 +155,7 @@ describe("chat agent sandbox", () => {
 
     expect(result).toStrictEqual({
       isError: false,
-      text: `Returned:\n${JSON.stringify({ self: null, ctx: ["waitUntil"], same: true })}`,
+      text: returnedText({ self: null, ctx: ["waitUntil"], same: true }),
       status: "completed",
     });
   });
@@ -144,7 +167,10 @@ describe("chat agent sandbox", () => {
 
     expect(result).toStrictEqual({
       isError: true,
-      text: `Error (refused):\nThe module is ${code.length} characters long; a run takes at most ${codeLimits.sourceChars}.`,
+      text: failedText(
+        "refused",
+        `The module is ${code.length} characters long; a run takes at most ${codeLimits.sourceChars}.`
+      ),
       status: "refused",
     });
   });
@@ -268,12 +294,12 @@ describe("chat agent sandbox", () => {
     [
       "a module that throws as it loads",
       "console.log('before'); throw new Error('broken module'); export default async () => 1;",
-      /^Logs:\nbefore\n\nError \(load_failed\):\nError: broken module/u,
+      /^\{"logs":\["before"\],"status":"load_failed","error":"Error: broken module/u,
     ],
     [
       "a syntax error",
       "export default async () => {",
-      /^Error \(load_failed\):\n.*Syntax/isu,
+      /^\{"status":"load_failed","error":".*Syntax/isu,
     ],
   ])(
     "reports %s as a module that didn't load, without running it",
@@ -293,7 +319,7 @@ describe("chat agent sandbox", () => {
 
     expect(result.status).toBe("threw");
     expect(result.text).toMatch(
-      /^Logs:\nloaded\n\nError \(threw\):\nError: nope/u
+      /^\{"logs":\["loaded"\],"status":"threw","error":"Error: nope/u
     );
   });
 
@@ -336,7 +362,7 @@ describe("chat agent sandbox", () => {
     expect(utf8Bytes(result?.text ?? "")).toBeLessThanOrEqual(
       codeLimits.outputBytes
     );
-    expect(result?.text.endsWith(cutMarker)).toBeTruthy();
+    expect(readResult(result?.text).cut).toBeTruthy();
   });
 
   it("keeps a run whose output is all characters JSON must escape, within its limits", async () => {
@@ -347,7 +373,7 @@ describe("chat agent sandbox", () => {
 
     expect(result.status).toBe("completed");
     expect(
-      (result.text ?? "").startsWith(`Logs:\n${"\u0001".repeat(100)}`)
+      readResult(result.text).logs?.[0]?.startsWith("\u0001".repeat(100))
     ).toBeTruthy();
   });
 
@@ -358,7 +384,7 @@ describe("chat agent sandbox", () => {
 
     expect(result).toStrictEqual({
       isError: false,
-      text: "Returned:\n(a value too large to show, over 65536 characters)",
+      text: returnedText("(a value too large to show, over 65536 characters)"),
     });
   });
 
@@ -454,9 +480,7 @@ describe("chat agent sandbox", () => {
 
     const [result] = await codeResults(stub, chat.id);
     expect(result?.isError).toBeFalsy();
-    expect(
-      JSON.parse(result?.text.replace("Returned:\n", "") ?? "")
-    ).toStrictEqual({
+    expect(returnedOf(result?.text)).toStrictEqual({
       answered: codeLimits.subRequests,
       refused: 150 - codeLimits.subRequests,
       message: agentErrors.create("agent.run_calls_spent").message,
@@ -476,24 +500,27 @@ describe("chat agent sandbox", () => {
   it("has no Cache API to hand data to another chat", async () => {
     await expect(
       runStep("export default async () => typeof caches;")
-    ).resolves.toStrictEqual({ isError: false, text: "Returned:\nundefined" });
+    ).resolves.toStrictEqual({
+      isError: false,
+      text: returnedText("undefined"),
+    });
   });
 
   it.each([
     [
       "patched string and array methods",
       "String.prototype.slice = function () { return String(this); }; Array.prototype.push = function (...items) { for (const item of items) this[this.length] = item; return this.length; }; export default async () => { for (let i = 0; i < 5000; i++) console.log('x'.repeat(1000)); return 'y'.repeat(5_000_000); };",
-      /^Logs:\nx+/u,
+      /^\{"logs":\["x+/u,
     ],
     [
       "a value that makes itself huge text",
       "export default async () => { const value = () => {}; value.toString = () => 'z'.repeat(30_000_000); return value; };",
-      /^Returned:\nz{60000,}\n… \(cut: over 65536 bytes of output\)$/u,
+      /^\{"returned":"z{60000,}","cut":true\}$/u,
     ],
     [
       "a forged result through Object.prototype.then",
       "Object.prototype.then = function (resolve) { delete Object.prototype.then; resolve({ ok: true, logs: Array.from({ length: 1000 }, () => 'q'.repeat(31_000)), result: 'forged' }); }; export default async () => 'mine';",
-      /^Returned:\nmine$/u,
+      /^\{"returned":"mine"\}$/u,
     ],
   ])(
     "can't store more than the model reads, even with %s",

@@ -3,7 +3,6 @@ import { WorkerEntrypoint, env, exports } from "cloudflare:workers";
 import {
   codeLimits,
   codeRuntime,
-  cutMarker,
   describeRun,
   runCode,
   utf8Bytes,
@@ -118,7 +117,8 @@ const runCase = async ({ code, timeoutMs, cancelAfterMs }: Case) => {
     ending: text.slice(-200),
     ms: Date.now() - started,
     bytes: utf8Bytes(text),
-    cut: text.includes(cutMarker),
+    // `cut` is a result's last field (code-mode.ts `describeRun`).
+    cut: text.endsWith(',"cut":true}'),
     streamed: streamed.length,
   };
 };

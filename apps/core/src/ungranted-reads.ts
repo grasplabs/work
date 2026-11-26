@@ -166,7 +166,7 @@ export const ungrantedReadOf = (source: string): string | undefined =>
 /**
  * The outside system a run's source names, if it is a connection's read,
  * granted (`connectionRead`) or not (`ungrantedRead`): what a run's
- * result is marked with as text from outside (`describeRun`).
+ * result names as read from outside (`describeRun`'s `readFrom`).
  */
 export const outsideReadOf = (source: string): OutsideRead | undefined => {
   const granted = connectionReadOf(source);
