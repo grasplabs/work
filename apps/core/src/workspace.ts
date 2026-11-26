@@ -210,6 +210,7 @@ import { instructionFilesFor } from "./instruction-files.ts";
 import type { InstructionContext } from "./instruction-files.ts";
 import { chatTurnPurpose } from "./model-spend.ts";
 import { inputTokens, modelSettings, models } from "./models.ts";
+import type { OutsideTextNote } from "./outside-text.ts";
 import type { WorkContext } from "./restricted.ts";
 import { outsideReadOf } from "./ungranted-reads.ts";
 import { retireUnseen } from "./unseen-memories.ts";
@@ -3449,7 +3450,13 @@ export class Workspace extends DurableObject<Env> {
       .orderBy(chatRunSources.sourceId)
       .all()
       .flatMap(({ sourceId }) => outsideReadOf(sourceId) ?? []);
-    return { status: ended, readFrom };
+    const told =
+      this.#db
+        .select({ outsideText: chatCodeRuns.outsideText })
+        .from(chatCodeRuns)
+        .where(and(eq(chatCodeRuns.id, runId), eq(chatCodeRuns.chatId, chatId)))
+        .get()?.outsideText ?? [];
+    return { status: ended, readFrom: [...readFrom, ...told] };
   }
 
   /**
@@ -4129,6 +4136,54 @@ export class Workspace extends DurableObject<Env> {
       .where(eq(chatRunSources.chatId, id))
       .all()
       .map(({ sourceId }) => sourceId);
+  }
+
+  /**
+   * Notes with a code run of the chat the connections whose own words an
+   * API call of it hands over without calling them (`told`: their tools'
+   * names and descriptions, their account's name), before the call hands
+   * them over: what the run's result is marked with as text from outside
+   * (`endTurnRun`), never a read of the chat's or the run's. The same
+   * refusal once the run isn't open.
+   */
+  noteOutsideText(
+    chatId: ChatId,
+    runId: string,
+    told: readonly OutsideTextNote[]
+  ): CodeRunAdmission["call"] {
+    const { call } = this.admitFromCodeRun(chatId, runId);
+    if (call !== "open") {
+      return call;
+    }
+    const where = and(
+      eq(chatCodeRuns.id, runId),
+      eq(chatCodeRuns.chatId, chatId)
+    );
+    // Read and written with no await between: nothing else runs here.
+    const row = this.#db
+      .select({ outsideText: chatCodeRuns.outsideText })
+      .from(chatCodeRuns)
+      .where(where)
+      .get();
+    // A run whose record is gone (pruned) can't be marked: refused.
+    if (row === undefined) {
+      return "ended";
+    }
+    const noted = row.outsideText ?? [];
+    const keys = new Set(
+      noted.map(({ connectionId, told: what }) => `${connectionId}/${what}`)
+    );
+    const added = told.filter(
+      ({ connectionId, told: what }) => !keys.has(`${connectionId}/${what}`)
+    );
+    if (added.length > 0) {
+      this.#db
+        .update(chatCodeRuns)
+        .set({ outsideText: [...noted, ...added] })
+        .where(where)
+        .run();
+    }
+    return call;
   }
 
   /**

@@ -1,0 +1,1 @@
+ALTER TABLE `chat_code_runs` ADD `outside_text` text;
