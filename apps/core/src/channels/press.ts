@@ -1,6 +1,7 @@
 import { agentErrors } from "@grasp-os/shared/agent";
-import { connectErrors } from "@grasp-os/shared/connect";
+import { connectErrors, wasTaken } from "@grasp-os/shared/connect";
 import type { ConnectionPerson, PendingAction } from "@grasp-os/shared/connect";
+import { isExpectedError } from "@grasp-os/shared/errors";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { Identity } from "@grasp-os/shared/rpc";
 import type { ActionEvent, StateAdapter } from "chat";
@@ -22,6 +23,7 @@ import {
 import type {
   HeldWriteView,
   Press,
+  PressLine,
   PressOutcome,
   WriteState,
 } from "./cards.tsx";
@@ -68,7 +70,11 @@ import type { ChannelLocale } from "./words.ts";
 //   the card runs: the card says it changed, and the person asks again.
 // - [GRA-700 P?] A failure part way. The writes run in the card's order and
 //   stop at the first that fails, or whose outcome is unknown: the rest
-//   stay held, nothing after runs, and the card says so.
+//   stay held, nothing after runs, and the card says so. One a
+//   connection's pause refused before connect took it still waits, with
+//   the rest: the card says so, and a new card, pressed on its own, offers
+//   exactly those again. Connect checks the pause again once it has taken
+//   one (its credential read); that one failed, as any other.
 // - [GRA-700 P?] The platform giving up and resending. The door answers at
 //   once; the writes run after, as the request's background work, and the
 //   card is edited in place as each ends.
@@ -89,6 +95,8 @@ import type { ChannelLocale } from "./words.ts";
 
 /** How long a card is remembered as pressed: past any write's life. */
 export const pressedTtlMs = 30 * 24 * 60 * 60 * 1000;
+
+const secondsInMinute = 60;
 
 /** What marks a card pressed, by its message: one press runs, once. */
 export const pressedKey = (
@@ -159,7 +167,7 @@ const stillAsShown = async (
   { platform, locale }: { platform: string; locale: ChannelLocale }
 ): Promise<StillHeld[] | null> => {
   const held: StillHeld[] = [];
-  for (const { id, inputHash, chatId } of press) {
+  for (const { id, inputHash, chatId } of press.writes) {
     if (chatId === undefined) {
       // oxlint-disable-next-line no-await-in-loop -- in the card's order
       const found = await env.CONNECT.pendingAction({ person, id });
@@ -262,11 +270,31 @@ const notConfirmable = async (
   return leftOut ? "heldLater" : null;
 };
 
-/** How a confirmed write that failed ended, as its card shows it. */
+/**
+ * How confirmed write `write` that failed ended, as its card shows it. A
+ * connection's write its pause refused before connect took it
+ * (`connect.rate_limited`, not `wasTaken`) still waits, to confirm again
+ * in the `minutes` the pause has left, as connect said them.
+ */
 const failedAs = (
-  error: unknown
-): { state: WriteState; outcome: PressOutcome } => {
+  error: unknown,
+  write: StillHeld
+):
+  | { state: "held"; minutes: number }
+  | { state: Exclude<WriteState, "held">; outcome: PressLine } => {
   const code = connectErrors.codeOf(error);
+  if (code === "connect.rate_limited" && !wasTaken(error) && "held" in write) {
+    const seconds = isExpectedError(error)
+      ? error.details?.retryAfterSeconds
+      : undefined;
+    return {
+      state: "held",
+      minutes:
+        typeof seconds === "number"
+          ? Math.max(Math.ceil(seconds / secondsInMinute), 1)
+          : 1,
+    };
+  }
   if (code === "connect.outcome_unknown") {
     return { state: "unknown", outcome: "unknownOutcome" };
   }
@@ -301,6 +329,54 @@ const decide = async (
 };
 
 /**
+ * Offers `waiting`, the writes a connection's pause left waiting on a
+ * pressed card, on a new card with a press of its own, warning of what the
+ * pressed one did (`check`, which its press carries): whether it could be
+ * posted. Where it couldn't, no card can confirm them, so they are
+ * declined: asking again holds them once, never twice.
+ */
+const offerAgain = async (
+  env: Env,
+  {
+    identity,
+    platform,
+    locale,
+    event,
+  }: {
+    identity: Identity;
+    platform: string;
+    locale: ChannelLocale;
+    event: ActionEvent;
+  },
+  waiting: readonly StillHeld[],
+  check: Press["check"]
+): Promise<boolean> => {
+  try {
+    await event.adapter.postMessage(
+      event.threadId,
+      heldWritesCard({
+        locale,
+        platform,
+        writes: waiting.map(({ view }) => view),
+        ...(check === undefined ? {} : { check }),
+      })
+    );
+    return true;
+  } catch (error) {
+    log.warn("channel.card_post_failed", errorFields(error));
+  }
+  for (const write of waiting) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one at a time, each recorded
+      await decide(env, identity, platform, write, false);
+    } catch (error) {
+      log.warn("channel.decline_failed", errorFields(error));
+    }
+  }
+  return false;
+};
+
+/**
  * Runs a press on a card of held writes: Confirm runs exactly the card's
  * writes, in order, once, stopping at the first that fails; Cancel
  * declines them. Anything else, or a card pressed before, runs nothing.
@@ -309,12 +385,19 @@ export const pressCard = async (
   env: Env,
   { platform, userId, event, state }: CardPress
 ): Promise<void> => {
-  const press = pressOf(event.value);
   const confirming = event.actionId === confirmAction;
-  if (press === null || (!confirming && event.actionId !== cancelAction)) {
+  if (!confirming && event.actionId !== cancelAction) {
     return;
   }
   const locale = appLocale(event.raw);
+  // Not what this release's cards carry (`pressOf`): a card of an older
+  // release, or none of ours. Nothing runs, and the person asks again.
+  const press = pressOf(event.value);
+  if (press === null) {
+    log.info("channel.press_refused", { platform, reason: "unreadable" });
+    await sayThere(event, "changedSince", locale);
+    return;
+  }
   const first = await state.setIfNotExists(
     pressedKey(platform, event),
     true,
@@ -386,8 +469,32 @@ export const pressCard = async (
       await decide(env, identity, platform, still, true);
       write.state = "done";
     } catch (error) {
-      const { state: ended, outcome } = failedAs(error);
-      write.state = ended;
+      const ended = failedAs(error, still);
+      write.state = ended.state;
+      if (ended.state === "held") {
+        // Nothing of it was taken: it and the rest still wait, offered
+        // again (`offerAgain`), as this card then says.
+        const waiting = held.slice(index);
+        log.info("channel.press_paused", {
+          platform,
+          waiting: waiting.length,
+          ...errorFields(error),
+        });
+        // oxlint-disable-next-line no-await-in-loop -- once, then out
+        const newCard = await offerAgain(
+          env,
+          { identity, platform, locale, event },
+          waiting,
+          press.check
+        );
+        // oxlint-disable-next-line no-await-in-loop -- once, then out
+        await editCard(
+          event,
+          shown({ waiting: waiting.length, minutes: ended.minutes, newCard })
+        );
+        return;
+      }
+      const { outcome } = ended;
       for (const rest of writes.slice(index + 1)) {
         rest.state = "skipped";
       }
