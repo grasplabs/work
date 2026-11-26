@@ -637,10 +637,10 @@ describe("a chat's ChatSession", () => {
         );
       });
       await runDurableObjectAlarm(session());
-      // The failure arms the alarm for now, which opens pi again.
+      // The failure arms the alarm for now, which opens pi again: no sooner
+      // than the heartbeat, a minute on, without it.
       await vi.waitFor(
-        async () => {
-          await runDurableObjectAlarm(session());
+        () => {
           expect(provider.requests).toHaveLength(3);
         },
         { timeout: 15_000 }
