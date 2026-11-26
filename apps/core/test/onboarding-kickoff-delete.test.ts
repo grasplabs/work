@@ -129,14 +129,14 @@ describe("deleting the kickoff", { timeout: 60_000 }, () => {
     // What /setup said of it, in the voice: the company as the kickoff read it.
     const spoken = `You run ${marker} bakeries.`;
     await sayForAdmin(admin.session, spoken);
-    const voicedBefore = await stillKept(spoken);
+    const voicedBefore = await stillKept(spoken, "onboarding");
     const before = await reads(admin);
     const keptBefore = await keptWhere(marker);
     const events = await auditedDuring(async () => {
       await admin.api.onboarding.deleteKickoff();
     });
     const after = await reads(admin);
-    const voicedAfter = await stillKept(spoken);
+    const voicedAfter = await stillKept(spoken, "onboarding");
     const kept = await onboardingStore(env).kickoff();
     const view = await admin.api.onboarding.view();
 
