@@ -134,18 +134,17 @@ const Ai = ({ data, askedFor, path, go, onward }: StepProps) => {
   };
   const why = t`Everything Grasp does runs on AI, from reading your documents to every interview.`;
   let body = `${why} ${t`Paste a key from your provider to connect it. You pay them directly.`}`;
-  // What Stephen tells about it, as a tutor would: why it's asked, then what to do.
-  const because = t`Good, that’s settled. Before we really start, one thing: everything in Grasp runs on AI. Reading your documents, the interviews, the plan, all of it. So we need an AI attached to get it working.`;
+  // What Stephen tells about it, as a tutor would: why it's asked, then the
+  // choice as it stands on the screen, neither way pressed on them (Ruben:
+  // "je moet mensen wel gewoon de keuze altijd geven").
+  const because = t`Good, that’s settled. Everything in Grasp runs on AI: reading your documents, the interviews, the plan. Here you choose which AI that is.`;
   let spoken = `${because} ${t`Paste a key from your company’s provider here. You pay them directly, and I’ll check that it works.`}`;
-  if (ready && ai?.listing.source === "grasp") {
-    body = `${why} ${t`You’re on our own system, and it works.`}`;
-    spoken = `${because} ${t`You’re already on our own system, and it works, so just press Continue.`}`;
+  if (graspOffered) {
+    body = `${why} ${t`Continue with our own system, or add your own API key if you’d rather.`}`;
+    spoken = `${because} ${t`You can carry on with our own system: it works right away, with nothing to set up. Or, if your company would rather use a provider of its own, you can add your own API key. Either is fine.`}`;
   } else if (ready && ai !== null) {
     body = `${why} ${t`Your own key is connected and works.`}`;
-    spoken = `${because} ${t`Your own key works, so just press Continue.`}`;
-  } else if (graspOffered) {
-    body = `${why} ${t`Use our own system and you’re set, or connect a provider of your own.`}`;
-    spoken = `${because} ${t`The simplest is our own system: leave it chosen and press Continue, and you’re ready. If your company already works with a provider like OpenAI or Mistral, choose your own key and paste it instead.`}`;
+    spoken = `${because} ${t`Your own key is connected and works. You can keep it, or change it here.`}`;
   } else if (ai === null) {
     // Core couldn't say: no providers are shown, so nothing is asked of them here.
     body = `${why} ${t`You can set it up later in Settings.`}`;
