@@ -59,9 +59,10 @@ export type HeldBinding = z.infer<typeof heldBindingSchema>;
 /** Where a call a person is there for comes from (`origin`). */
 const originSchema = z.strictObject({
   /**
-   * The grant the call was allowed under; null for a read in its
-   * person's own chat that needs none (core's ungranted-reads.ts), which
-   * is always `readOnly`.
+   * The grant the call was allowed under; null for a call in its
+   * person's own chat that needs none (core's ungranted-reads.ts): always
+   * `readOnly` but the chat's agent's through a shared connection
+   * (`verifyCapability`).
    */
   permissionId: permissionIdSchema.nullable(),
   context: workContextSchema,
@@ -427,10 +428,19 @@ export const verifyCapability = async (
     claims.resource === (scope.resource ?? null) &&
     claims.action === scope.action &&
     claims.idempotencyKey === (scope.idempotencyKey ?? null);
-  // A call no grant allows may only read: whatever signed it, connect
-  // takes nothing else from it.
+  // A call no grant allows may only read, but the chat's agent's in a chat
+  // through a shared connection its person's audience holds (core's
+  // ungranted-reads.ts): every side effect of that agent waits for its
+  // person to confirm it (`interactive`), and the confirmation is signed
+  // again by core; through a personal connection, connect's call.ts
+  // `connectionFor` refuses it. Whatever else signed one, connect takes
+  // nothing but a read from it.
   const grantless = claims.origin.permissionId === null;
-  if (!matches || (grantless && !claims.readOnly)) {
+  const heldForPerson =
+    claims.authority.subject.type === "agent" &&
+    claims.authority.mode === "interactive" &&
+    claims.origin.context.type === "chat";
+  if (!matches || (grantless && !claims.readOnly && !heldForPerson)) {
     throw invalid("scope");
   }
   return claims;

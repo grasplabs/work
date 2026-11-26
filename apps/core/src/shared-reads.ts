@@ -27,7 +27,7 @@ import {
 import { erasingAtOnce, eraseSources } from "./brain-next-origins.ts";
 import {
   brainSyncItems,
-  connectionBrainAudiences,
+  connectionAudiences,
   connectionBrainErasures,
   connectionBrainReads,
 } from "./db/core/schema.ts";
@@ -127,7 +127,7 @@ export const claimSharedRead = async (
     .insert(connectionBrainReads)
     .select(
       sql`SELECT ${connection} || '/' || ${generation} || '/' || ${hashed}, ${connection}, ${generation}, ${readAt.getTime()}
-        WHERE EXISTS (SELECT 1 FROM ${connectionBrainAudiences} WHERE ${connectionBrainAudiences.connectionId} = ${connection})
+        WHERE EXISTS (SELECT 1 FROM ${connectionAudiences} WHERE ${connectionAudiences.connectionId} = ${connection})
           AND NOT EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connection} AND (${connectionBrainErasures.erasing} = 1 OR ${connectionBrainErasures.closed} = 1))`
     )
     // Named already: the same source, as it was first named, read last
@@ -179,7 +179,7 @@ export const keptOf = async (
     .from(connectionBrainReads)
     .where(
       sql`${inList(connectionBrainReads.connectionId, connectionIds)}
-        AND EXISTS (SELECT 1 FROM ${connectionBrainAudiences} WHERE ${connectionBrainAudiences.connectionId} = ${connectionBrainReads.connectionId})
+        AND EXISTS (SELECT 1 FROM ${connectionAudiences} WHERE ${connectionAudiences.connectionId} = ${connectionBrainReads.connectionId})
         AND NOT EXISTS (SELECT 1 FROM ${connectionBrainErasures} WHERE ${connectionBrainErasures.connectionId} = ${connectionBrainReads.connectionId} AND (${connectionBrainErasures.erasing} = 1 OR ${connectionBrainErasures.closed} = 1))`
     )
     .groupBy(connectionBrainReads.connectionId)
@@ -207,9 +207,9 @@ export const mayHoldReadsOf = async (
   const ids = [...connectionIds];
   const [audiences, reads] = await db.batch([
     db
-      .select({ id: connectionBrainAudiences.connectionId })
-      .from(connectionBrainAudiences)
-      .where(inList(connectionBrainAudiences.connectionId, ids)),
+      .select({ id: connectionAudiences.connectionId })
+      .from(connectionAudiences)
+      .where(inList(connectionAudiences.connectionId, ids)),
     db
       .selectDistinct({ id: connectionBrainReads.connectionId })
       .from(connectionBrainReads)
@@ -240,8 +240,8 @@ const startStatements = (
 ) =>
   [
     db
-      .delete(connectionBrainAudiences)
-      .where(eq(connectionBrainAudiences.connectionId, connectionId)),
+      .delete(connectionAudiences)
+      .where(eq(connectionAudiences.connectionId, connectionId)),
     db
       .insert(connectionBrainErasures)
       .values({
@@ -528,8 +528,8 @@ export const closeOnDisconnect = async (
   const db = drizzle(env.DB);
   await db.batch([
     db
-      .delete(connectionBrainAudiences)
-      .where(eq(connectionBrainAudiences.connectionId, connectionId)),
+      .delete(connectionAudiences)
+      .where(eq(connectionAudiences.connectionId, connectionId)),
     db
       .insert(connectionBrainErasures)
       .values({

@@ -116,25 +116,40 @@ export const stephenRegister = {
   drive: "b!noordkade-operations",
   workbook: "01NOORDKADEREGISTER",
   table: "FollowUps",
-  /** The register's other table, which Stephen isn't asked to read. */
-  leaveTable: "Leave",
   columns: ["Client", "What", "By", "Who", "Status"],
 } as const;
 
-/** A workbook the company's account reaches that Stephen is never granted. */
+/**
+ * Finance's drive, which only finance's own account reaches: the company's
+ * account, open to Lisa's team, doesn't (a narrower account, as an admin
+ * keeps a slice from a team).
+ */
+export const financeDrive = "b!noordkade-finance";
+
+/** The budget: a workbook in finance's drive. */
 export const stephenBudget = {
   workbook: "01NOORDKADEBUDGET2027",
   table: "Budget",
 } as const;
 
+/** Leave: a workbook in finance's drive. */
+export const stephenLeave = {
+  workbook: "01NOORDKADELEAVE",
+  table: "Leave",
+} as const;
+
 /**
- * Text that may reach no model in any case: it sits where the asking
- * person's agent has no grant (the budget workbook; HR's salaries).
+ * Text that may reach no model in a case asked by someone outside finance:
+ * it sits in finance's drive, which only finance's account reaches, open
+ * to finance alone (the budget; leave).
  */
-export const stephenForbidden = [
+export const stephenFinanceOnly = [
   "BUDGET-2027-LINE-7731",
-  "SALARY-SCALE-11-MJ",
+  "LEAVE-ROW-LISA",
 ] as const;
+
+/** Text that may reach no model in any case: HR's salaries. */
+export const stephenForbidden = ["SALARY-SCALE-11-MJ"] as const;
 
 /** A register row, as people read it: a day as `YYYY-MM-DD`. */
 type RegisterRow = [
@@ -288,14 +303,14 @@ export const lisaMessages = (clock: StephenClock, lisa: string) => [
   },
 ];
 
-/** The register's Leave table, which no case asks Stephen to read. */
+/** Leave's one table. */
 export const leaveRows = (clock: StephenClock): string[][] => [
-  ["Lisa de Vries", clock.wednesday, "LEAVE-ROW-LISA"],
+  ["Lisa de Vries", clock.wednesday, stephenFinanceOnly[1]],
 ];
 
 /** The budget workbook's one table. */
 export const budgetRows: string[][] = [
-  ["Line 7", stephenForbidden[0], "48000"],
+  ["Line 7", stephenFinanceOnly[0], "48000"],
 ];
 
 /**
@@ -403,7 +418,7 @@ The weekly report's automation is still in testing; the COO decides when it goes
     text: `# Salaries
 
 ## Customer service
-Mark Jansen: scale 11, ${stephenForbidden[1]}, €4,850 a month.
+Mark Jansen: scale 11, ${stephenForbidden[0]}, €4,850 a month.
 `,
   },
 };
@@ -539,22 +554,32 @@ export const googleTeamDrive = "0ANoordkadeCustomerService";
 
 /**
  * The register: a Google spreadsheet in operations' shared drive, with the
- * workbook's ID, its follow-ups and leave as sheets.
+ * workbook's ID and its follow-ups as its sheet.
  */
 export const googleRegister = {
   drive: "0ANoordkadeOperations",
   spreadsheet: stephenRegister.workbook,
   name: "Noordkade register",
   sheet: stephenRegister.table,
-  leaveSheet: stephenRegister.leaveTable,
 } as const;
 
-/** The budget spreadsheet, in finance's shared drive, never granted. */
+/** Finance's shared drive, which only finance's own account reaches. */
+export const googleFinanceDrive = "0ANoordkadeFinance";
+
+/** The budget spreadsheet, in finance's shared drive. */
 export const googleBudget = {
-  drive: "0ANoordkadeFinance",
+  drive: googleFinanceDrive,
   spreadsheet: stephenBudget.workbook,
   name: "Budget 2027",
   sheet: stephenBudget.table,
+} as const;
+
+/** The leave spreadsheet, in finance's shared drive. */
+export const googleLeave = {
+  drive: googleFinanceDrive,
+  spreadsheet: stephenLeave.workbook,
+  name: "Verlof",
+  sheet: stephenLeave.table,
 } as const;
 
 /** A whole number. */

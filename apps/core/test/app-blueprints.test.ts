@@ -163,7 +163,7 @@ describe("blueprints", { timeout: 60_000 }, () => {
     ]);
     const source = await notesApp(owner);
     const [mail, mailbox] = await Promise.all([
-      mailConnection(),
+      mailConnection([], ["mail.send"], { audience: "everyone" }),
       mailboxOf(owner),
     ]);
     // Granted, and asked for: what the platform offers is declared, the

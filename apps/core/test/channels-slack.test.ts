@@ -927,7 +927,9 @@ describe("a workflow offered in Slack", () => {
  */
 const heldInSlack = async (subject: string) => {
   const admin = await signedInApi(idp, "admin");
-  const mail = await mailConnection([], ["MAIL_SEND"]);
+  const mail = await mailConnection([], ["MAIL_SEND"], {
+    audience: "everyone",
+  });
   const binding = `MAIL${unique()}`.toUpperCase();
   await requestGranted(idp, admin, {
     subject: { type: "agent", agentId: chatAgentId },
@@ -1405,7 +1407,8 @@ describe("a linked person's held write in Slack, on a paused connection", () => 
     const admin = await signedInApi(idp, "admin");
     const mail = await mailConnection(
       [],
-      ["MAIL_SEND", { name: "mail.search", read: true }]
+      ["MAIL_SEND", { name: "mail.search", read: true }],
+      { audience: "everyone" }
     );
     const binding = bindingOf("MAIL");
     await requestGranted(idp, admin, {

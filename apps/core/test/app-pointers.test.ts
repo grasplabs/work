@@ -49,7 +49,8 @@ const message = (code: Parameters<typeof connectErrors.create>[0]) =>
 const mailApp = async (admin: Admin) => {
   const mail = await mailConnection(
     [],
-    ["mail.send", { name: "mail.search", read: true, resource: "query" }]
+    ["mail.send", { name: "mail.search", read: true, resource: "query" }],
+    { audience: "everyone" }
   );
   await admin.api.connections.pointApp({
     connectionId: mail.id,

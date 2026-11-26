@@ -78,10 +78,10 @@ const ScopeRow = ({ connection }: { connection: ListedConnection }) => {
   return (
     <Item size="xs">
       <ItemContent>
-        <ItemTitle>{shared ? t`For everyone` : t`Just for you`}</ItemTitle>
+        <ItemTitle>{shared ? t`For the company` : t`Just for you`}</ItemTitle>
         <ItemDescription>
           {shared
-            ? t`Your organization uses it through the permissions you grant.`
+            ? t`Nobody uses it in chat until you choose who may, and Apps and workflows only through the permissions you grant.`
             : t`Only you can use it.`}
         </ItemDescription>
       </ItemContent>

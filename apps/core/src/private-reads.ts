@@ -27,11 +27,12 @@ import { workspace } from "./durable-objects.ts";
 //   in their own word, from their own store: turn-recall.ts `profileOf`),
 //   until the owner rules otherwise (GRA-1745);
 // - an answer read through the person's own personal connection (their
-//   mailbox, their drive: agent-connections.ts), a call's or a confirmed
-//   held call's;
-// - an App's answer, when the App may read through a person's own
-//   connection (app-provenance.ts `sourcesOf`), as connect lets it for
-//   the person the chat acts for (agent-apps.ts).
+//   mailbox, their drive: agent-connections.ts), or through a shared one
+//   whose audience isn't everyone (one team, or nobody: GRA-2322), a
+//   call's or a confirmed held call's;
+// - an App's answer, when the App may read through such a connection
+//   (app-provenance.ts `sourcesOf`), as connect lets it for the person
+//   the chat acts for (agent-apps.ts).
 // Rows of an App's table only the person may read (an `owner` table, a
 // read row rule) don't mark yet: GRA-1932.
 // Their own instruction file, their own agent's instructions and
@@ -53,9 +54,6 @@ import { workspace } from "./durable-objects.ts";
 //   (held-app-calls.ts) while the chat is marked, in Grasp's own chat or
 //   on the card of the person's direct message in a chat app
 //   (channels/held.ts); refused in a chat app's thread others share.
-// - A request for a shared connection (`env.connections.request`): its
-//   reason is read by admins, and nothing holds it, so it is refused
-//   while the chat is marked (chat-connections.ts).
 // - A connection's side effects (mail, posts, invites, files) and a
 //   workflow's starts are held for the person from every chat already
 //   (connect's call.ts, held-starts.ts). A marked chat's reads whose

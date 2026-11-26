@@ -46,7 +46,9 @@ const invoiceMail = { to: "ben@acme.test", subject: "Invoice INV-7" };
 const setUp = async (...replies: Parameters<typeof chatOf>[1][]) => {
   const person = await signedInApi(idp, "user");
   const admin = await signedInApi(idp, "admin");
-  const mail = await mailConnection([], mailWithSearch);
+  const mail = await mailConnection([], mailWithSearch, {
+    audience: "everyone",
+  });
   const chat = await chatOf(person.userId, ...replies);
   const grant = async (connectionId: string, binding: string) =>
     await requestGranted(idp, admin, {
@@ -252,7 +254,8 @@ describe("a chat's connections", setUpTime, () => {
           const tried = async (name) => { try { return (await env.connections.call(name, "mail.search", { query: "invoice" })).output; } catch (error) { return error.message; } };
           const listed = await env.connections.list();
           return {
-            listed: listed.map(({ name, tools }) => ({ name, tools })),
+            // Those granted, under their names: not the shared ones every test's audience holds, by their IDs.
+            listed: listed.filter(({ name }) => ["MAIL", "THEIRS", "OTHER"].includes(name)).map(({ name, tools }) => ({ name, tools })),
             mail: await tried("MAIL"),
             theirs: await tried("THEIRS"),
             ungranted: await tried("OTHER"),
@@ -262,7 +265,9 @@ describe("a chat's connections", setUpTime, () => {
       says("Done.")
     );
     // Someone else's personal connection, granted to the agent anyway.
-    const theirs = await mailConnection([], mailWithSearch);
+    const theirs = await mailConnection([], mailWithSearch, {
+      audience: "everyone",
+    });
     await connectDb()
       .prepare(
         "UPDATE connections SET scope = 'personal', owner_user_id = ? WHERE id = ?"
@@ -560,7 +565,9 @@ describe("a chat's connections", setUpTime, () => {
     const person = await signedInApi(idp, "user");
     const admin = await signedInApi(idp, "admin");
     // Both sends go out, and their answers are lost.
-    const mail = await mailConnection(["lost", "lost"]);
+    const mail = await mailConnection(["lost", "lost"], ["mail.send"], {
+      audience: "everyone",
+    });
     const send = (subject: string) =>
       codeStep(
         `export default async (self, env) => await env.connections.call("MAIL", "mail.send", ${JSON.stringify({ ...invoiceMail, subject })});`
@@ -637,7 +644,8 @@ describe("a chat's connections", setUpTime, () => {
     // Searches held to the query they name, as the admin's rule says.
     const mail = await mailConnection(
       [],
-      ["mail.send", { name: "mail.search", read: true, resource: "query" }]
+      ["mail.send", { name: "mail.search", read: true, resource: "query" }],
+      { audience: "everyone" }
     );
     const chat = await chatOf(
       person.userId,
@@ -694,7 +702,7 @@ describe("a chat's connections", setUpTime, () => {
       const mail = await mailConnection(
         [],
         mailWithSearch,
-        whose === "own" ? { owner: person.userId } : {}
+        whose === "own" ? { owner: person.userId } : { audience: "everyone" }
       );
       await grant(mail.id, "MAIL");
       const setStatus = async (status: string) => {
@@ -734,7 +742,8 @@ describe("a chat's connections", setUpTime, () => {
     // Searches held to the query they name, as the admin's rule says.
     const mail = await mailConnection(
       [],
-      ["mail.send", { name: "mail.search", read: true, resource: "query" }]
+      ["mail.send", { name: "mail.search", read: true, resource: "query" }],
+      { audience: "everyone" }
     );
     const chat = await chatOf(
       person.userId,
@@ -823,7 +832,9 @@ describe("a chat's connections", setUpTime, () => {
     await admin.api.organization.update({ timeZone });
     // A send whose fields its server lists, so core can check a Teams
     // chat's write against them (channels/stephen-rules.ts).
-    const mail = await mailConnection([], ["MAIL_SEND"]);
+    const mail = await mailConnection([], ["MAIL_SEND"], {
+      audience: "everyone",
+    });
     await requestGranted(idp, admin, {
       subject: chat.agent,
       object: { type: "connection", connectionId: mail.id },
@@ -1125,13 +1136,15 @@ describe(
   "a shared connection whose audience holds the person",
   setUpTime,
   () => {
-    it("is read with no request in their own chat, listed by its ID, audited naming them, and sends nothing", async () => {
+    it("is used with no request in their own chat, listed by its ID with all its actions, audited naming them, and holds a write for them to confirm", async () => {
       const [person, admin] = await Promise.all([
         signedInApi(idp, "user"),
         signedInApi(idp, "admin"),
       ]);
       const marker = `MARK-${crypto.randomUUID().slice(0, 8)}`;
-      const mail = await mailConnection([], mailWithSearch);
+      const mail = await mailConnection([], mailWithSearch, {
+        audience: "everyone",
+      });
       await chooseAudience(admin.api, mail.id, { kind: "everyone" });
       const chat = await chatOf(
         person.userId,
@@ -1163,17 +1176,19 @@ describe(
         { timeout: 10_000, interval: 50 }
       );
       const did = await mail.did();
+      const [held] = await person.api.pendingActions.list();
       expect({
         listed: listed?.text.includes(
           JSON.stringify({
             name: mail.id,
             account: null,
             resource: null,
-            tools: { "read-company": 1 },
+            tools: { "reach-others": 1, "read-company": 1 },
           })
         ),
         read: read?.text.includes(`${marker}-1`),
-        sent: sent?.text.includes("connect.connection_not_found"),
+        sent: sent?.text,
+        held: { connectionId: held?.connectionId, action: held?.action },
         did: did.sent,
         // No one person's: it marks nothing.
         marked: await chat.stub.isChatPrivateRead(chat.chat.id),
@@ -1185,22 +1200,24 @@ describe(
       }).toStrictEqual({
         listed: true,
         read: true,
-        sent: true,
+        // Held: `calling` returns its output, none while it waits.
+        sent: "Returned:\nnull",
+        held: { connectionId: mail.id, action: "mail.send" },
         did: [],
         marked: false,
         audited: { onBehalfOf: person.userId, connection: mail.id },
       });
     });
 
-    it("reads one a team's audience holds for its members alone, and none with no audience or in a turn nobody started", async () => {
+    it("is used for the members of a team its audience holds alone, in a turn nobody started too, and none with no audience", async () => {
       const [member, outsider, admin] = await Promise.all([
         signedInApi(idp, "user"),
         signedInApi(idp, "user"),
         signedInApi(idp, "admin"),
       ]);
       const [team, nobodys] = await Promise.all([
-        mailConnection([], mailWithSearch),
-        mailConnection([], mailWithSearch),
+        mailConnection([], mailWithSearch, { audience: "everyone" }),
+        mailConnection([], mailWithSearch, { audience: "nobody" }),
       ]);
       await chooseAudience(admin.api, team.id, {
         kind: "team",
@@ -1251,8 +1268,120 @@ describe(
         member: { listed: true, read: true },
         outsider: none,
         nobodys: none,
-        woken: none,
+        woken: { listed: true, read: true },
       });
+    });
+
+    it("lets no grant to the agent reach past it: a grant on one works only for those its audience holds", async () => {
+      const searchesMail = calling("MAIL", "mail.search", { query: "invoice" });
+      const { person, admin, mail, chat, grant } = await setUp(
+        searchesMail,
+        says("Refused."),
+        searchesMail,
+        says("Found it.")
+      );
+      await chooseAudience(admin.api, mail.id, {
+        kind: "team",
+        teamId: await newTeam(admin, [admin]),
+      });
+      await grant(mail.id, "MAIL");
+      await chat.ask("Find the invoice.");
+      await chooseAudience(admin.api, mail.id, {
+        kind: "team",
+        teamId: await newTeam(admin, [person]),
+      });
+      await chat.ask("And now?");
+
+      const [outside, inside] = await texts(chat.stub, chat.chat.id);
+      expect({
+        outside: outside?.includes("connect.connection_not_found"),
+        inside: inside?.includes("invoice-1"),
+      }).toStrictEqual({ outside: true, inside: true });
+    });
+
+    it("sends no write it held once the person left the audience it was asked under", async () => {
+      const [person, admin] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "admin"),
+      ]);
+      const mail = await mailConnection([], mailWithSearch, {
+        audience: "nobody",
+      });
+      const teamId = await newTeam(admin, [person]);
+      await chooseAudience(admin.api, mail.id, { kind: "team", teamId });
+      const chat = await chatOf(
+        person.userId,
+        calling(mail.id, "mail.send", invoiceMail),
+        says("It waits for you.")
+      );
+      await chat.ask("Send Ben the invoice.");
+      const [held] = await person.api.pendingActions.list();
+      await env.DB.prepare(
+        "DELETE FROM team_members WHERE team_id = ? AND user_id = ?"
+      )
+        .bind(teamId, person.userId)
+        .run();
+      const confirmed = await outcome(
+        person.api.pendingActions.confirm(held?.id ?? "", held?.inputHash ?? "")
+      );
+      const { sent } = await mail.did();
+
+      expect({ held: held?.connectionId, confirmed, did: sent }).toStrictEqual({
+        held: mail.id,
+        confirmed: "connect.connection_not_found",
+        did: [],
+      });
+    });
+
+    it("sends no write held under a grant to the agent once the person left the audience it was asked under", async () => {
+      const { person, admin, mail, chat, grant } = await setUp(
+        calling("MAIL", "mail.send", invoiceMail),
+        says("It waits for you.")
+      );
+      const teamId = await newTeam(admin, [person]);
+      await chooseAudience(admin.api, mail.id, { kind: "team", teamId });
+      await grant(mail.id, "MAIL");
+      await chat.ask("Send Ben the invoice.");
+      const [held] = await person.api.pendingActions.list();
+      await env.DB.prepare(
+        "DELETE FROM team_members WHERE team_id = ? AND user_id = ?"
+      )
+        .bind(teamId, person.userId)
+        .run();
+      const confirmed = await outcome(
+        person.api.pendingActions.confirm(held?.id ?? "", held?.inputHash ?? "")
+      );
+      const { sent } = await mail.did();
+
+      expect({ held: held?.connectionId, confirmed, did: sent }).toStrictEqual({
+        held: mail.id,
+        confirmed: "permission.denied",
+        did: [],
+      });
+    });
+
+    it("marks the chat after a read through one only a team's audience holds, as not everyone may read what it said", async () => {
+      const [person, admin] = await Promise.all([
+        signedInApi(idp, "user"),
+        signedInApi(idp, "admin"),
+      ]);
+      const mail = await mailConnection([], mailWithSearch);
+      await chooseAudience(admin.api, mail.id, {
+        kind: "team",
+        teamId: await newTeam(admin, [person]),
+      });
+      const chat = await chatOf(
+        person.userId,
+        calling(mail.id, "mail.search", { query: "invoice" }),
+        says("Found it.")
+      );
+      await chat.ask("Find the invoice.");
+
+      const [read] = await codeResults(chat.stub, chat.chat.id);
+      expect({
+        read: read?.text.includes("invoice-1"),
+        marked: await chat.stub.isChatPrivateRead(chat.chat.id),
+      }).toStrictEqual({ read: true, marked: true });
     });
 
     it("withholds what a member read from their next request once they leave the team", async () => {
@@ -1261,7 +1390,9 @@ describe(
         signedInApi(idp, "admin"),
       ]);
       const marker = `MARK-${crypto.randomUUID().slice(0, 8)}`;
-      const mail = await mailConnection([], mailWithSearch);
+      const mail = await mailConnection([], mailWithSearch, {
+        audience: "everyone",
+      });
       const teamId = await newTeam(admin, [person]);
       await chooseAudience(admin.api, mail.id, { kind: "team", teamId });
       const chat = await chatOf(
@@ -1301,7 +1432,10 @@ describe(
         signedInApi(idp, "admin"),
       ]);
       const provider = `mail-${crypto.randomUUID().slice(0, 8)}`;
-      const mail = await mailConnection([], mailWithSearch, { provider });
+      const mail = await mailConnection([], mailWithSearch, {
+        audience: "everyone",
+        provider,
+      });
       await chooseAudience(admin.api, mail.id, { kind: "everyone" });
       await connectDb()
         .prepare("UPDATE connections SET status = 'needs_reauth' WHERE id = ?")
@@ -1347,7 +1481,9 @@ describe(
         signedInApi(idp, "admin"),
       ]);
       const marker = `MARK-${crypto.randomUUID().slice(0, 8)}`;
-      const mail = await mailConnection([], mailWithSearch);
+      const mail = await mailConnection([], mailWithSearch, {
+        audience: "everyone",
+      });
       await chooseAudience(admin.api, mail.id, { kind: "everyone" });
       const chat = await chatOf(
         person.userId,
@@ -1419,7 +1555,7 @@ describe(
       ]);
       const [own, shared] = await Promise.all([
         mailConnection([], mailWithSearch, { owner: person.userId }),
-        mailConnection([], mailWithSearch),
+        mailConnection([], mailWithSearch, { audience: "everyone" }),
       ]);
       await chooseAudience(admin.api, shared.id, { kind: "everyone" });
       return { person, admin, own, shared };
@@ -1447,8 +1583,8 @@ describe(
         outcomeOf(id),
         says("Found it.")
       );
-      // A turn nobody started reads nothing with no grant, a held one's
-      // answer neither; the person's next turn does.
+      // A shared one is the person's to use in a turn nobody started too
+      // (ungranted-reads.ts), so its held answer reads there as well.
       await chat.stub.askUnattended(chat.chat.id, {
         text: "What did it find?",
         model,
@@ -1468,7 +1604,7 @@ describe(
           input: z.json().parse(JSON.parse(held?.input ?? "null")),
         },
         searched: await shared.searched(),
-        woken,
+        woken: readOutside(woken),
         answered: readOutside(answered),
         marked: await chat.stub.isChatPrivateRead(chat.chat.id),
       }).toStrictEqual({
@@ -1482,7 +1618,10 @@ describe(
           input: { query: `${marker}-leak` },
         },
         searched: [`${marker}-leak`],
-        woken: `Returned:\n${permissionErrors.create("permission.denied").message}`,
+        woken: {
+          from: `connection ${shared.id}`,
+          text: `Returned:\n${JSON.stringify({ status: "done", output: { messages: [`${marker}-leak-1`] }, error: null })}`,
+        },
         answered: {
           from: `connection ${shared.id}`,
           text: `Returned:\n${JSON.stringify({ status: "done", output: { messages: [`${marker}-leak-1`] }, error: null })}`,
@@ -1525,7 +1664,9 @@ describe(
 
     it("sends nothing it held once the person left the audience it was asked under", async () => {
       const { person, admin, own } = await mailboxes();
-      const team = await mailConnection([], mailWithSearch);
+      const team = await mailConnection([], mailWithSearch, {
+        audience: "everyone",
+      });
       const teamId = await newTeam(admin, [person]);
       await chooseAudience(admin.api, team.id, { kind: "team", teamId });
       const chat = await chatOf(

@@ -456,9 +456,9 @@ const ScopeChoice = ({
           value="shared"
         />
         <FieldContent>
-          <FieldLabel>{t`For everyone`}</FieldLabel>
+          <FieldLabel>{t`For the company`}</FieldLabel>
           <FieldDescription>
-            {t`Your organization uses it through the permissions you grant.`}
+            {t`Nobody uses it in chat until you choose who may, and Apps and workflows only through the permissions you grant.`}
           </FieldDescription>
         </FieldContent>
       </Field>

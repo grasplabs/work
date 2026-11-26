@@ -50,7 +50,9 @@ const requestsOf = async (person: Person, permission: string) => {
 
 /** A chat of `person`'s whose agent, granted mail, holds a mail for them to approve. */
 const heldMail = async (person: Person, admin: Person) => {
-  const mail = await mailConnection([], mailWithSearch);
+  const mail = await mailConnection([], mailWithSearch, {
+    audience: "everyone",
+  });
   const chat = await chatOf(
     person.userId,
     codeStep(

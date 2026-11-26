@@ -17,8 +17,6 @@ export const agentErrors = defineErrorFamily({
     "This chat used something only its person can read, so a write to an App waits for them to confirm it, which they can do only in a chat in Grasp or in their direct message with you. Nothing was written: tell them they can do it there.",
   "agent.held_call_failed":
     "The App refused or failed this write, so it may not have been done. It no longer waits for you.",
-  "agent.private_shared_request":
-    "This chat used something only its person can read, and admins read why a shared connection is asked for, so it wasn't asked for. Ask the person to ask for it in a new chat, or an admin to grant it.",
   "agent.paused":
     "This agent is paused, so it doesn't answer now. An admin can turn it back on.",
   "agent.not_for_you":
