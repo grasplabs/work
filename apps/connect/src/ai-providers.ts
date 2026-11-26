@@ -194,6 +194,16 @@ const sendingOf = (
 };
 
 /**
+ * The way out to AI endpoints. On-prem, the AI endpoints' own workerd
+ * network (`AI_NETWORK`), the one opened to the addresses
+ * `AI_PRIVATE_HOSTS` names, so connect's other calls, which go out
+ * through its public-only network, never reach them. Hosted, connect's
+ * own fetch, whose egress is Cloudflare's.
+ */
+export const aiRoute = (env: Env): Pick<Fetcher, "fetch"> =>
+  env.AI_NETWORK ?? { fetch: async (input, init) => await fetch(input, init) };
+
+/**
  * A custom endpoint's base URL as kept: checked by the endpoint guard,
  * without a query, fragment or trailing slash; or why it is refused.
  */
@@ -826,7 +836,7 @@ export const modelFetch = async (
   const stopped = stoppedBy(stop);
   let answered: Response;
   try {
-    answered = await fetch(sending.to, {
+    answered = await aiRoute(env).fetch(sending.to, {
       method,
       headers,
       // Reading or closing a session sends no body; its grant's hash is
@@ -963,7 +973,7 @@ export const modelSocket = async (
   const startedAt = Date.now();
   let answered: Response;
   try {
-    answered = await fetch(sending.to, {
+    answered = await aiRoute(env).fetch(sending.to, {
       headers: {
         upgrade: "websocket",
         authorization: `Bearer ${key}`,

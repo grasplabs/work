@@ -28,8 +28,8 @@ import { takesPlaceOf } from "./connection-list.tsx";
 // page opens this once it lists that connection: that the
 // app is connected (again, where it took the place of one of its
 // connections that stopped working, `returnedOf`), what Grasp may do
-// there, and what was chosen: who uses it and, for a Composio toolkit, the
-// tools allowed. A Damsko Dialog: it has no success mark, and its title
+// there, and what was chosen: who uses it, where one reached through the
+// company network goes and, for a Composio toolkit, the tools allowed. A Damsko Dialog: it has no success mark, and its title
 // says it.
 
 /**
@@ -54,6 +54,21 @@ export const returnedOf = (
       connection !== undefined &&
       connections.some((each) => takesPlaceOf(connection, each)),
   };
+};
+
+/** Where a connection reached through the company network goes, at `address`. */
+const CompanyNetworkRow = ({ address }: { address: string }) => {
+  const { t } = useLingui();
+  return (
+    <Item size="xs">
+      <ItemContent>
+        <ItemTitle>{t`Reached through your company network`}</ItemTitle>
+        <ItemDescription>
+          {t`Grasp reaches it at ${address}, inside your network.`}
+        </ItemDescription>
+      </ItemContent>
+    </Item>
+  );
 };
 
 /** The scope chosen, in the connect dialog's own words. */
@@ -117,6 +132,12 @@ export const ConnectedDialog = ({
             <DialogBody>
               <ItemGroup aria-label={t`What you chose`}>
                 <ScopeRow connection={connection} />
+                {connection.companyNetwork === undefined ? null : (
+                  <>
+                    <ItemSeparator />
+                    <CompanyNetworkRow address={connection.companyNetwork} />
+                  </>
+                )}
                 {tools.map((tool) => (
                   <Fragment key={tool}>
                     <ItemSeparator />

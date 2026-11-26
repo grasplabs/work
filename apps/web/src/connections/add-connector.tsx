@@ -4,6 +4,7 @@ import { isMemberAdmin } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { Alert, AlertTitle } from "@grasp-os/ui/components/alert";
 import { Button } from "@grasp-os/ui/components/button";
+import { Checkbox } from "@grasp-os/ui/components/checkbox";
 import {
   Dialog,
   DialogBody,
@@ -16,6 +17,7 @@ import {
 } from "@grasp-os/ui/components/dialog";
 import {
   Field,
+  FieldContent,
   FieldDescription,
   FieldLabel,
 } from "@grasp-os/ui/components/field";
@@ -43,7 +45,10 @@ import { integrationKey } from "./integrations.ts";
 // OAuth, with the client its vendor issued where the server registers none
 // itself) or with a key each connection gives in a header. Connect checks
 // the address, learns the server's sign-in and registers there; the
-// connector is then in the catalog, offered, and its page opens.
+// connector is then in the catalog, offered, and its page opens. A server
+// inside the company's own network (GRA-2327) is reached through the
+// company network at its URL's host and port: plain HTTP is taken there,
+// it signs in with a key in a header, and only admins connect it, shared.
 
 /** How the server signs in, as the form offers it. */
 type AuthKind = AddConnectorRequest["auth"]["kind"];
@@ -55,22 +60,33 @@ type ConnectorInput = Omit<AddConnectorRequest, "person" | "origin">;
 const problemTexts = {
   name: msg`Give it a name of at most 80 characters.`,
   url: msg`The address is the server's own https:// URL, such as https://mcp.example.com/mcp, with no query, fragment or user name in it.`,
+  companyUrl: msg`The address is the server's own http:// or https:// URL inside your network, such as http://10.0.0.8:8080/mcp, with no query, fragment or user name in it.`,
   header: msg`The header is a name of letters, digits and dashes, and not one Grasp sets itself.`,
   client: msg`The client ID is at most 512 characters, and its secret at most 4,096.`,
 } as const satisfies Record<string, MessageDescriptor>;
 
 /** Why the form isn't a connector core takes, by the first field wrong. */
-const problemOf = ([field, part]: readonly PropertyKey[]): string => {
-  if (field === "name" || field === "url") {
-    return i18n._(problemTexts[field]);
+const problemOf = (
+  [field, part]: readonly PropertyKey[],
+  companyNetwork: boolean
+): string => {
+  if (field === "url") {
+    return i18n._(companyNetwork ? problemTexts.companyUrl : problemTexts.url);
+  }
+  if (field === "name") {
+    return i18n._(problemTexts.name);
   }
   return i18n._(part === "client" ? problemTexts.client : problemTexts.header);
 };
 
-/** What was typed, as core takes it: a client only where an ID was typed. */
+/**
+ * What was typed, as core takes it: a client only where an ID was typed,
+ * and a server in the company network always with a key in a header.
+ */
 const inputOf = ({
   name,
   url,
+  companyNetwork,
   kind,
   header,
   clientId,
@@ -78,11 +94,20 @@ const inputOf = ({
 }: {
   name: string;
   url: string;
+  companyNetwork: boolean;
   kind: AuthKind;
   header: string;
   clientId: string;
   clientSecret: string;
 }): ConnectorInput => {
+  if (companyNetwork) {
+    return {
+      name: name.trim(),
+      url: url.trim(),
+      companyNetwork,
+      auth: { kind: "header", header: header.trim() },
+    };
+  }
   if (kind === "header") {
     return {
       name: name.trim(),
@@ -122,6 +147,7 @@ const AddConnectorForm = ({
   const [problem, setProblem] = useState<string>();
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
+  const [companyNetwork, setCompanyNetwork] = useState(false);
   const [kind, setKind] = useState<AuthKind>("oauth");
   const [header, setHeader] = useState("");
   const [clientId, setClientId] = useState("");
@@ -129,13 +155,29 @@ const AddConnectorForm = ({
 
   const add = (): void => {
     setProblem(undefined);
-    const input = inputOf({ name, url, kind, header, clientId, clientSecret });
-    // Read here only to say which field is wrong; core and connect read it again.
+    const input = inputOf({
+      name,
+      url,
+      companyNetwork,
+      kind,
+      header,
+      clientId,
+      clientSecret,
+    });
+    // Read here only to say which field is wrong; core and connect read it
+    // again. The schema takes plain HTTP for a server in the company
+    // network, which connect checks; anywhere else it is refused here too.
     const parsed = addConnectorSchema
       .omit({ person: true, origin: true })
+      .refine(
+        (connector) =>
+          connector.companyNetwork === true ||
+          URL.parse(connector.url)?.protocol === "https:",
+        { path: ["url"] }
+      )
       .safeParse(input);
     if (!parsed.success) {
-      setProblem(problemOf(parsed.error.issues[0]?.path ?? []));
+      setProblem(problemOf(parsed.error.issues[0]?.path ?? [], companyNetwork));
       return;
     }
     void action.run(async (session) => {
@@ -172,7 +214,11 @@ const AddConnectorForm = ({
               size="sm"
               autoComplete="off"
               onValueChange={setUrl}
-              placeholder="https://mcp.example.com/mcp"
+              placeholder={
+                companyNetwork
+                  ? "http://10.0.0.8:8080/mcp"
+                  : "https://mcp.example.com/mcp"
+              }
               spellCheck={false}
               type="url"
               value={url}
@@ -181,25 +227,43 @@ const AddConnectorForm = ({
               {t`The address of its MCP server, as its vendor gives it.`}
             </FieldDescription>
           </Field>
-          <Field>
-            <FieldLabel>{t`How it signs in`}</FieldLabel>
-            <Select
-              items={[
-                { value: "oauth", label: t`People sign in at the server` },
-                { value: "header", label: t`A key in a header` },
-              ]}
-              onValueChange={(value) => {
-                setKind(value === "header" ? "header" : "oauth");
+          <Field orientation="horizontal">
+            <Checkbox
+              checked={companyNetwork}
+              onCheckedChange={(checked) => {
+                setCompanyNetwork(checked === true);
               }}
-              value={kind}
-            >
-              <SelectTrigger size="sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent />
-            </Select>
+            />
+            <FieldContent>
+              <FieldLabel>{t`Reached through your company network`}</FieldLabel>
+              <FieldDescription>
+                {companyNetwork
+                  ? t`Its host and port are the one address Grasp reaches inside your network, and plain HTTP is allowed there. An IP address is safer than a name, which trusts your company's own DNS. It signs in with a key in a header, and only admins connect it, as a shared connection.`
+                  : t`For a server inside your company's own network, with no public address.`}
+              </FieldDescription>
+            </FieldContent>
           </Field>
-          {kind === "header" ? (
+          {companyNetwork ? null : (
+            <Field>
+              <FieldLabel>{t`How it signs in`}</FieldLabel>
+              <Select
+                items={[
+                  { value: "oauth", label: t`People sign in at the server` },
+                  { value: "header", label: t`A key in a header` },
+                ]}
+                onValueChange={(value) => {
+                  setKind(value === "header" ? "header" : "oauth");
+                }}
+                value={kind}
+              >
+                <SelectTrigger size="sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent />
+              </Select>
+            </Field>
+          )}
+          {companyNetwork || kind === "header" ? (
             <Field>
               <FieldLabel>{t`Header name`}</FieldLabel>
               <Input
@@ -212,7 +276,9 @@ const AddConnectorForm = ({
                 value={header}
               />
               <FieldDescription>
-                {t`Each person who connects it types their own key, which goes in this header.`}
+                {companyNetwork
+                  ? t`The admin who connects it types its key, which goes in this header.`
+                  : t`Each person who connects it types their own key, which goes in this header.`}
               </FieldDescription>
             </Field>
           ) : (
