@@ -82,7 +82,10 @@ export const interviewVoiceRequestSchema = z.discriminatedUnion("action", [
     action: z.literal("answer"),
     ...standing,
     pass: voicePassSchema,
-    /** How many of their answers in this session were written down already. */
+    /**
+     * How many of their answers in this session were written down already:
+     * 0 for each session opened, a resume's too, whatever came before.
+     */
     noted: z.int().min(0).max(interviewLimits.lines),
   }),
   /**

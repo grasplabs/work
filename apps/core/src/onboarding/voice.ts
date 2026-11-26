@@ -491,7 +491,12 @@ const open = async (
       session: {
         instructions: instructionsOf(
           voice.text,
-          situationOf(asked, context, company),
+          // Back to add something is what the event says, whatever else came.
+          situationOf(
+            { ...asked, adding: asked.event === "add" },
+            context,
+            company
+          ),
           before,
           context.name
         ),
@@ -591,17 +596,17 @@ const answer = async (
   asked: Extract<InterviewVoiceRequest, { action: "answer" }>,
   session: string
 ): Promise<Response> => {
-  const [heard, company, notesModel] = await Promise.all([
-    heardIn(env, session, requestId),
-    companyOf(env),
-    notesModelOf(env),
-  ]);
-  if (heard === null) {
-    return failed("What was said could not be read. Try again.", 502);
-  }
+  const notesModel = await notesModelOf(env);
   if (notesModel === undefined) {
     log.error("interview.no_model", { requestId });
     return failed("The interview is not set up yet.", 503);
+  }
+  const [heard, company] = await Promise.all([
+    heardIn(env, session, requestId),
+    companyOf(env),
+  ]);
+  if (heard === null) {
+    return failed("What was said could not be read. Try again.", 502);
   }
   const answers = heard.lines.filter(({ from }) => from === "person");
   const phase = heard.phase ?? asked.phase;
@@ -675,7 +680,13 @@ const answer = async (
     ctx.waitUntil(Promise.allSettled(counting));
   }
   const { turn: checked, dropped } = checkedTurn(
-    typeof noted === "object" && noted !== null ? noted : {},
+    // Never waiting for the rest: Mistral decided their turn ended, and
+    // Stephen answered it already. What the notes' model answers holds
+    // facts and changes alone (`notesSchema`).
+    {
+      ...(typeof noted === "object" && noted !== null ? noted : {}),
+      more: false,
+    },
     {
       // What they said since the last notes, as one answer: Mistral may
       // split a spoken answer at a pause, or several may come in while

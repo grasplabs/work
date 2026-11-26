@@ -515,7 +515,7 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
     });
   });
 
-  it("keeps a quote that runs across a pause Mistral split their answer at", async () => {
+  it("keeps a quote that runs across a pause Mistral split their answer at, also one the notes' model reads as broken off", async () => {
     const link = await opened();
     const split = kept("I check the invoices");
     const transcripts = [
@@ -543,6 +543,9 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
             },
           ],
           changes: [],
+          // Read as broken off mid-sentence: Mistral ended their turn there,
+          // and what they said is still written down.
+          more: true,
         }),
       ],
       async () => {
