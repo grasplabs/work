@@ -2,7 +2,13 @@ import { connectErrors } from "@grasp-os/shared/connect";
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
 
-import { chatOf, codeResults, codeStep, says } from "./agent-chat.ts";
+import {
+  chatOf,
+  codeResults,
+  codeStep,
+  says,
+  withoutMarking,
+} from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
@@ -107,7 +113,7 @@ const chatUsing = async (
   return async () => {
     await chat.ask("Look in the app.");
     const [result] = await codeResults(chat.stub, chat.chat.id);
-    return result?.text;
+    return result === undefined ? undefined : withoutMarking(result.text);
   };
 };
 

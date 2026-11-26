@@ -42,8 +42,24 @@ const users = String.raw`^/v1\.0/users/(?<mailbox>[^/]+)`;
 /** The mailboxes whose calendar holds the meetings. Cleared before each test. */
 const meetingCalendars = new Set<string>();
 
+/** Messages posted in the person's own chat during a test, newest first. */
+const postedMessages: unknown[] = [];
+
 export const resetTeams = (): void => {
   meetingCalendars.clear();
+  postedMessages.length = 0;
+};
+
+/** Has a colleague post a message of `html` in the person's own chat, newest. */
+export const postInChat = (html: string): void => {
+  postedMessages.unshift({
+    id: String(1_729_439_000_000 + postedMessages.length),
+    messageType: "message",
+    createdDateTime: "2026-10-20T15:50:00.000Z",
+    deletedDateTime: null,
+    from: { user: { id: financeLead.userId, displayName: "Lisa Meyer" } },
+    body: { contentType: "html", content: html },
+  });
 };
 
 /** Makes `mailbox`'s calendar hold the meetings, in place of the usual events. */
@@ -128,7 +144,7 @@ export const teamsRoutes = (
         }
         return chatOf(mailbox, decodeURIComponent(id)) === undefined
           ? json(notFound, 404)
-          : json({ value: chatMessages });
+          : json({ value: [...postedMessages, ...chatMessages] });
       }
     ),
     route("GET", `${users}/onlineMeetings`, ({ mailbox, query, request }) => {

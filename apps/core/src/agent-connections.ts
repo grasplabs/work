@@ -1021,10 +1021,29 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
     } catch (error) {
       throw forSandbox(error);
     }
+    // The run's result rests on this grant's action and resource, not on
+    // the connection: another grant left on it doesn't let it through. A
+    // read with no grant rests on the connection being the person's own.
+    const { connectionId, resource } = grant.connection;
+    const read =
+      grant.permissionId === null
+        ? ungrantedRead(connectionId)
+        : connectionRead(
+            connectionId,
+            permissionActionSchema.parse(action),
+            resource ?? null
+          );
     let result: ConnectResult;
     try {
       result = await this.env.CONNECT.call(request);
     } catch (error) {
+      // A tool that failed hands the run what it said (the error's
+      // `details.output`): recorded as what it answered is, before the
+      // run has it.
+      if (connectErrors.codeOf(error) === "connect.action_failed") {
+        await markIfPersonal(this.env, scope, connectionId);
+        await recordSources(this.env, scope, [connectionId], [read]);
+      }
       await recordToolCall(this.env, scope, shown, endedBy(error));
       throw forSandbox(error);
     }
@@ -1042,28 +1061,11 @@ export class ConnectionsApi extends WorkerEntrypoint<Env, AgentScope> {
     const output: unknown = JSON.parse(result.output);
     // The chat marked first, as nothing that holds the answer runs
     // unmarked: before it is kept or recorded, and before it is handed over.
-    await markIfPersonal(this.env, scope, grant.connection.connectionId);
+    await markIfPersonal(this.env, scope, connectionId);
     if (shape !== undefined) {
       await keptForChatApp(this.env, scope, request.action, shape, output);
     }
-    // The run's result rests on this grant's action and resource, not on
-    // the connection: another grant left on it doesn't let it through. A
-    // read with no grant rests on the connection being the person's own.
-    const { connectionId, resource } = grant.connection;
-    await recordSources(
-      this.env,
-      scope,
-      [connectionId],
-      [
-        grant.permissionId === null
-          ? ungrantedRead(connectionId)
-          : connectionRead(
-              connectionId,
-              permissionActionSchema.parse(action),
-              resource ?? null
-            ),
-      ]
-    );
+    await recordSources(this.env, scope, [connectionId], [read]);
     // Recorded with the chat first: a run that ended since keeps nothing.
     // Kept in the Brain once the agent has its answer, never in its way.
     this.ctx.waitUntil(
