@@ -10,7 +10,14 @@ import { callAppFunction } from "../src/app-functions.ts";
 import { loadRelease } from "../src/app-releases.ts";
 import type { Release } from "../src/app-releases.ts";
 import { appHost } from "../src/durable-objects.ts";
-import { chatOf, codeResults, codeStep, model, says } from "./agent-chat.ts";
+import {
+  chatOf,
+  codeResults,
+  codeStep,
+  model,
+  says,
+  returnedOf,
+} from "./agent-chat.ts";
 import { testApp } from "./app-definitions.ts";
 import type { TestApp } from "./app-definitions.ts";
 import { commitApp, requestGranted } from "./apps.ts";
@@ -122,9 +129,7 @@ const returnedSchema = z.record(z.string(), z.unknown());
 /** What the chat's code returned. */
 const returned = async (chat: Awaited<ReturnType<typeof chatOf>>) => {
   const [result] = await codeResults(chat.stub, chat.chat.id);
-  return returnedSchema.parse(
-    JSON.parse(result?.text.replace("Returned:\n", "") ?? "{}")
-  );
+  return returnedSchema.parse(returnedOf(result?.text));
 };
 
 /** Asks a chat of the builder's to run `code`, with the agent granted `actions` on the App. */

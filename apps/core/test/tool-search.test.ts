@@ -7,9 +7,9 @@ import {
   codeResults,
   codeStep,
   model,
-  readOutside,
+  readResult,
+  returnedOf,
   says,
-  withoutMarking,
 } from "./agent-chat.ts";
 import { chooseAudience } from "./brain-audiences.ts";
 import { mockIdp } from "./idp.ts";
@@ -80,10 +80,6 @@ const openTo = async (
   });
 };
 
-/** What a code step returned, as the model read it inside any marking. */
-const returned = (text: string | undefined): unknown =>
-  JSON.parse(withoutMarking(text ?? "").replace(/^Returned:\n/u, ""));
-
 describe("a chat's tool search", setUpTime, () => {
   it("finds the one tool a task needs among thousands, and calls it by its real name", async () => {
     const person = await signedInApi(idp, "user");
@@ -121,7 +117,7 @@ describe("a chat's tool search", setUpTime, () => {
     await chat.ask("Find the lost shipment for invoice INV-7.");
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
-    expect(returned(result?.text)).toStrictEqual({
+    expect(returnedOf(result?.text)).toStrictEqual({
       best: {
         connection: holder?.id,
         action: needle,
@@ -166,7 +162,7 @@ describe("a chat's tool search", setUpTime, () => {
         }),
         declared: z.array(z.string()),
       })
-      .parse(returned(result?.text));
+      .parse(returnedOf(result?.text));
     expect({
       connection: send.connection,
       summarised: send.summary !== "",
@@ -178,7 +174,7 @@ describe("a chat's tool search", setUpTime, () => {
       ),
       answered: declared.some((line) => line.includes("| null; pending:")),
       // Its manifest is Grasp's own words: not marked as from outside.
-      marked: readOutside(describedAlone?.text) !== undefined,
+      marked: readResult(describedAlone?.text).readFrom !== undefined,
     }).toStrictEqual({
       connection: outlook.id,
       summarised: true,
@@ -228,7 +224,7 @@ describe("a chat's tool search", setUpTime, () => {
     await chat.ask("Which issues does the team have?");
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
-    expect(returned(result?.text)).toStrictEqual({
+    expect(returnedOf(result?.text)).toStrictEqual({
       best: {
         connection: tracker.id,
         action: "list_issues",
@@ -296,33 +292,31 @@ describe("a chat's tool search", setUpTime, () => {
 
     const results = await codeResults(chat.stub, chat.chat.id);
     const [searched, described, listed] = results.map(({ text }) =>
-      readOutside(text)
+      readResult(text)
     );
     const matches = z
       .array(z.tuple([z.string(), z.string(), z.string()]))
-      .parse(returned(searched?.text));
+      .parse(searched?.returned);
     const told = "its tools' names, descriptions and schemas";
     expect({
-      searched: searched?.from,
-      // Its summary came from inside the marking: `searched` is all of it.
+      searched: searched?.readFrom,
+      // Its summary is in what the run returned: `searched` is all of it.
       saveComment: matches
         .find(([action]) => action === "save_comment")
         ?.slice(1),
-      described: described?.from,
-      plantedInside: [planted, plantedNote].every(
-        (text) => described?.text.includes(text) === true
+      described: described?.readFrom,
+      plantedInside: [planted, plantedNote].every((text) =>
+        JSON.stringify(described?.returned).includes(text)
       ),
       // Every connection the chat may ask for is handed over, others too.
-      offered: listed?.from
-        .split("; ")
-        .includes(
-          `connection ${tracker.id} (its tools' names, descriptions and schemas)`
-        ),
-      offeredInside: listed?.text.includes("save_comment"),
+      offered: listed?.readFrom?.includes(
+        `connection ${tracker.id} (its tools' names, descriptions and schemas)`
+      ),
+      offeredInside: JSON.stringify(listed?.returned).includes("save_comment"),
     }).toStrictEqual({
-      searched: `connection ${tracker.id} (${told})`,
+      searched: [`connection ${tracker.id} (${told})`],
       saveComment: ["change-company", plantedSummary],
-      described: `connection ${tracker.id} (${told})`,
+      described: [`connection ${tracker.id} (${told})`],
       plantedInside: true,
       offered: true,
       offeredInside: true,
@@ -359,7 +353,7 @@ describe("a chat's tool search", setUpTime, () => {
     await chat.ask("Which issues does the team have?");
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
-    expect(returned(result?.text)).toStrictEqual({
+    expect(returnedOf(result?.text)).toStrictEqual({
       best: "list_issues",
       described: "failed",
     });
@@ -401,7 +395,7 @@ describe("a chat's tool search", setUpTime, () => {
     await chat.ask("Comment on the issue.");
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
-    expect(returned(result?.text)).toStrictEqual({
+    expect(returnedOf(result?.text)).toStrictEqual({
       listed: { "read-company": 1 },
       found: ["list_issues"],
       declared: `// ${JSON.stringify(tracker.id)} has no action "save_comment" this chat may call or ask for.`,
@@ -444,7 +438,7 @@ describe("a chat's tool search", setUpTime, () => {
     const [result] = await codeResults(chat.stub, chat.chat.id);
     const found = z
       .array(z.object({ connection: z.string(), action: z.string() }))
-      .parse(returned(result?.text));
+      .parse(returnedOf(result?.text));
     expect({ first: found[0], all: found.length }).toStrictEqual({
       first: { connection: own.id, action: "BULK_QUOKKA_READ_0" },
       all: 3,
@@ -507,7 +501,7 @@ describe("a chat's tool search", setUpTime, () => {
     await chat.ask("Comment on the issue.");
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
-    expect(returned(result?.text)).toStrictEqual({
+    expect(returnedOf(result?.text)).toStrictEqual({
       match: {
         connection: tracker.id,
         action: "save_comment",
@@ -527,7 +521,7 @@ describe("a chat's tool search", setUpTime, () => {
     // Such a turn can't ask for a connection, nor read the person's own,
     // so it is shown none.
     const [unattended] = await codeResults(woken.stub, woken.chat.id);
-    expect(returned(unattended?.text)).toStrictEqual([]);
+    expect(returnedOf(unattended?.text)).toStrictEqual([]);
   });
 
   it("offers a tool of the person's own connector to ask for as connect keeps its server's list, and lets the chat ask for it; never a shared one", async () => {
@@ -570,7 +564,7 @@ describe("a chat's tool search", setUpTime, () => {
     await chat.ask("Comment on the issue.");
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
-    expect(returned(result?.text)).toStrictEqual({
+    expect(returnedOf(result?.text)).toStrictEqual({
       best: { connection: tracker.id, action: "save_comment", ask: true },
       shared: false,
       offered: ["list_issues", "save_comment"],
@@ -599,7 +593,7 @@ describe("a chat's tool search", setUpTime, () => {
     await chat.ask("Which mail tools do you have?");
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
-    expect(returned(result?.text)).toStrictEqual({
+    expect(returnedOf(result?.text)).toStrictEqual({
       all: ["mail.search", "mail.send"],
       read: ["mail.search"],
       change: ["mail.send"],
@@ -641,7 +635,7 @@ describe("a chat's tool search", setUpTime, () => {
     await chat.ask("Send Ben the invoice.");
 
     const [result] = await codeResults(chat.stub, chat.chat.id);
-    expect(returned(result?.text)).toStrictEqual({
+    expect(returnedOf(result?.text)).toStrictEqual({
       native: `// ${JSON.stringify(outlook.id)} has no action "mail.send" this chat may call or ask for.`,
       listed: [
         {

@@ -20,6 +20,7 @@ import {
   codeStep,
   readApiStep,
   says,
+  returnedOf,
 } from "./agent-chat.ts";
 import { release, requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -68,7 +69,7 @@ const declaredActionsOf = (declared: string, kind: string): string[] => {
 const exampleExpression = /\\"\$expr\\": \\"(?<source>[^"\\]*)\\"/gu;
 
 const returned = (text: string | undefined): unknown =>
-  z.unknown().parse(JSON.parse(text?.replace("Returned:\n", "") ?? "null"));
+  z.unknown().parse(returnedOf(text));
 
 /** Code that makes each call in turn: what it returned, or its message. */
 const tryEach = (calls: Record<string, string>, before = ""): string =>

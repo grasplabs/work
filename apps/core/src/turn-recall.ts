@@ -1,5 +1,4 @@
 import type { Message } from "@earendil-works/pi-ai";
-import { agentErrors } from "@grasp-os/shared/agent";
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import { withinTime } from "@grasp-os/shared/deadline";
 import { log } from "@grasp-os/shared/log";
@@ -639,21 +638,6 @@ export const recallForTurn = async (
       { outcome: "failed", reason: "agent.run_revoked" }
     );
   }
-  const text = describeRun(
-    {
-      status: ended,
-      logs: [],
-      ...(ended === "completed" && result !== undefined ? { result } : {}),
-      ...(ended === "completed"
-        ? {}
-        : {
-            error:
-              ended === "revoked"
-                ? agentErrors.create("agent.run_revoked").message
-                : failure,
-          }),
-    },
-    readFrom
-  );
+  const text = describeRun({ status: ended, result, error: failure }, readFrom);
   return { runId, callId, query, status: ended, text };
 };

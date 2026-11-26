@@ -5,7 +5,13 @@ import { z } from "zod";
 
 import { personalWorkspaceId } from "../../src/chats-rpc.ts";
 import { workspace } from "../../src/durable-objects.ts";
-import { codeResults, codeStep, model, says } from "../agent-chat.ts";
+import {
+  codeResults,
+  codeStep,
+  model,
+  says,
+  returnedOf,
+} from "../agent-chat.ts";
 import { testApp, withoutDefinition } from "../app-definitions.ts";
 import type { TestApp } from "../app-definitions.ts";
 import { release } from "../apps.ts";
@@ -108,11 +114,7 @@ describe(
       });
 
       const [result] = await codeResults(stub, chat.id);
-      expect(
-        z
-          .unknown()
-          .parse(JSON.parse(result?.text.replace("Returned:\n", "") ?? "null"))
-      ).toStrictEqual({
+      expect(z.unknown().parse(returnedOf(result?.text))).toStrictEqual({
         created: true,
         logs: [
           {

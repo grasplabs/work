@@ -13,7 +13,8 @@ import {
   codeStep,
   chatOf,
   says,
-  withoutMarking,
+  withoutReadFrom,
+  returnedText,
 } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { allEvents } from "./audit-events.ts";
@@ -165,7 +166,7 @@ const chatCalling = async (
     answered: async () => {
       await chat.ask("List the mailbox and send Ben the invoice.");
       const [result] = await codeResults(chat.stub, chat.chat.id);
-      return result === undefined ? undefined : withoutMarking(result.text);
+      return result === undefined ? undefined : withoutReadFrom(result.text);
     },
   };
 };
@@ -195,7 +196,7 @@ const pointedAt = async (admin: Admin, mailbox: string): Promise<void> => {
 };
 
 const answer = (answers: { list: string; send: string }) =>
-  `Returned:\n${JSON.stringify(answers)}`;
+  returnedText(answers);
 
 const off = connectErrors.create("connect.class_off").message;
 
@@ -273,7 +274,7 @@ const chatSending = async (
   });
   await chat.ask("Send Ben the invoice.");
   const [result] = await codeResults(chat.stub, chat.chat.id);
-  return result === undefined ? undefined : withoutMarking(result.text);
+  return result === undefined ? undefined : withoutReadFrom(result.text);
 };
 
 /** The classes on for everyone until an admin changes them. */
@@ -376,7 +377,7 @@ describe("the classes a company turned on", setUpTime, () => {
     const { id, mailbox } = await ownGmail(person);
 
     await expect(chatSending(admin, person.userId, mailbox, id)).resolves.toBe(
-      `Returned:\n${off}`
+      returnedText(off)
     );
     const calls = await connectCalls(id);
     expect(
@@ -427,7 +428,7 @@ describe("the classes a company turned on", setUpTime, () => {
     });
     await chat.ask("What did Lisa ask me in Teams?");
     const [result] = await codeResults(chat.stub, chat.chat.id);
-    expect(result?.text).toBe(`Returned:\n${off}`);
+    expect(result?.text).toBe(returnedText(off));
     const calls = await connectCalls(id);
     expect(
       calls.filter(({ detail }) => detail.action === "chats.list")
