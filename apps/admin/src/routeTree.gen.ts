@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as SplatRouteImport } from './routes/$'
 import { Route as AskRouteImport } from './routes/ask'
 import { Route as ConnectorsRouteImport } from './routes/connectors'
 import { Route as LabRouteImport } from './routes/lab'
@@ -36,6 +37,11 @@ import { Route as PlatformReleasesReleaseIdRouteImport } from './routes/platform
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SplatRoute = SplatRouteImport.update({
+  id: '/$',
+  path: '/$',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AskRoute = AskRouteImport.update({
@@ -163,6 +169,7 @@ const PlatformReleasesReleaseIdRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/$': typeof SplatRoute
   '/ask': typeof AskRoute
   '/connectors': typeof ConnectorsRoute
   '/lab': typeof LabRoute
@@ -188,6 +195,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/$': typeof SplatRoute
   '/ask': typeof AskRoute
   '/connectors': typeof ConnectorsRoute
   '/lab': typeof LabRoute
@@ -213,6 +221,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/$': typeof SplatRoute
   '/ask': typeof AskRoute
   '/connectors': typeof ConnectorsRoute
   '/lab': typeof LabRoute
@@ -240,6 +249,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/$'
     | '/ask'
     | '/connectors'
     | '/lab'
@@ -265,6 +275,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/$'
     | '/ask'
     | '/connectors'
     | '/lab'
@@ -289,6 +300,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/$'
     | '/ask'
     | '/connectors'
     | '/lab'
@@ -315,6 +327,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  SplatRoute: typeof SplatRoute
   AskRoute: typeof AskRoute
   ConnectorsRoute: typeof ConnectorsRoute
   LabRoute: typeof LabRoute
@@ -335,6 +348,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/$': {
+      id: '/$'
+      path: '/$'
+      fullPath: '/$'
+      preLoaderRoute: typeof SplatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/ask': {
@@ -529,6 +549,7 @@ const OrganizationsClientIdRouteWithChildren =
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  SplatRoute: SplatRoute,
   AskRoute: AskRoute,
   ConnectorsRoute: ConnectorsRoute,
   LabRoute: LabRoute,

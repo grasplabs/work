@@ -6,7 +6,7 @@ import {
   outcomeUnknownMetaKey,
   provenanceMetaKey,
   provenanceSchema,
-} from "@grasp-os/connector-kit/manifest";
+} from "@grasp-os/runtime/connector";
 import type { Json } from "@grasp-os/shared/json";
 import { z } from "zod";
 
@@ -557,5 +557,245 @@ export const mcpServer = (
       await started();
       return await request(method, params);
     },
+  };
+};
+
+// The client of the one connection kind (GRA-1375): MCP 2026-07-28, which
+// a connector made from a server's URL speaks. Stateless: no `initialize`
+// and no session; each request says its protocol version, who sends it
+// and what it can do in its `_meta`, and its method and tool in the
+// `Mcp-Method` and `Mcp-Name` headers. Answers are read as the client
+// above reads them: capped, and validated before anything uses them.
+// Native connectors and Composio keep the 2025-06-18 handshake above until
+// they move onto this kind (GRA-1374) or go (GRA-2329).
+
+/** The protocol version connectors made from a URL speak. */
+export const modernProtocolVersion = "2026-07-28";
+
+/** Who connect says it is on each request. */
+const clientMeta = {
+  "io.modelcontextprotocol/protocolVersion": modernProtocolVersion,
+  "io.modelcontextprotocol/clientInfo": {
+    name: "grasp-os-connect",
+    version: "1.0.0",
+  },
+  "io.modelcontextprotocol/clientCapabilities": {},
+};
+
+/** A header value as it is, when it is plain visible ASCII. */
+const plainHeaderValue =
+  /^[\u0021-\u007E](?:[\u0020-\u007E]*[\u0021-\u007E])?$/u;
+
+/** What a Base64 header value looks like (`=?base64?…?=`). */
+const base64Sentinel = /^=\?base64\?.*\?=$/u;
+
+/**
+ * `value` as an MCP request header carries it: as it is when it is plain
+ * visible ASCII, otherwise as UTF-8 in Base64 between the spec's markers,
+ * so no value of a server's or a person's can add or end a header.
+ */
+export const mcpHeaderValue = (value: string): string => {
+  if (plainHeaderValue.test(value) && !base64Sentinel.test(value)) {
+    return value;
+  }
+  let binary = "";
+  for (const byte of new TextEncoder().encode(value)) {
+    binary += String.fromCodePoint(byte);
+  }
+  return `=?base64?${btoa(binary)}?=`;
+};
+
+/** A tool as a modern server lists it: nothing in it read yet. */
+export interface ListedServerTool {
+  name: string;
+  description: unknown;
+  inputSchema: unknown;
+  outputSchema: unknown;
+  annotations: unknown;
+}
+
+/** One page of `tools/list`, each tool read on its own. */
+const modernPageSchema = z.object({
+  tools: z.array(z.unknown()),
+  nextCursor: z.string().optional(),
+  ttlMs: z.number().int().nonnegative().optional(),
+});
+
+/** A listed tool's shape; one without a name is left out. */
+const listedServerToolSchema = z.object({
+  name: z.string(),
+  description: z.unknown().optional(),
+  inputSchema: z.unknown().optional(),
+  outputSchema: z.unknown().optional(),
+  annotations: z.unknown().optional(),
+});
+
+/** A result says it is complete, or says nothing (2026-07-28 requires it). */
+const completeResultSchema = z.object({
+  resultType: z.literal("complete").optional(),
+});
+
+/** A modern MCP server: its tools, and calls of them. */
+export interface ModernMcpServer {
+  /**
+   * Every tool the server lists, up to `maxTools` over `maxToolPages`
+   * pages, and how long its first page says the list stays fresh. Throws
+   * {@link McpError} when it lists more, or anything goes wrong reading.
+   */
+  list: (
+    maxTools: number
+  ) => Promise<{ tools: ListedServerTool[]; ttlMs: number | undefined }>;
+  /**
+   * Calls the tool once, with `headers` (its `Mcp-Param-*` headers) on
+   * the request. A result that isn't complete (a server asking for more
+   * input, which connect doesn't give) throws {@link McpError}, as does
+   * anything else that goes wrong.
+   */
+  call: (
+    name: string,
+    input: Record<string, Json>,
+    headers: Readonly<Record<string, string>>
+  ) => Promise<McpToolResult>;
+}
+
+/**
+ * A 2026-07-28 client for the server at `endpoint`, reached through
+ * `send`, with one deadline for everything it sends.
+ */
+export const modernMcpServer = (
+  endpoint: string,
+  send: McpFetch
+): ModernMcpServer => {
+  let nextId = 1;
+  // One limit for everything this client sends, each answer's last byte
+  // included; a timer rather than `AbortSignal.timeout`, so it ends with
+  // the request it belongs to.
+  const endsAt = Date.now() + callTimeoutMs;
+
+  const request = async (
+    method: string,
+    params: Record<string, unknown>,
+    headers: Readonly<Record<string, string>> = {}
+  ): Promise<unknown> => {
+    const id = nextId;
+    nextId += 1;
+    const sent = new Headers(headers);
+    sent.set("content-type", "application/json");
+    sent.set("accept", "application/json, text/event-stream");
+    sent.set("mcp-protocol-version", modernProtocolVersion);
+    sent.set("mcp-method", method);
+    if (typeof params.name === "string") {
+      sent.set("mcp-name", mcpHeaderValue(params.name));
+    }
+    let message: RpcResponse | undefined;
+    const timeout = new AbortController();
+    const timer = setTimeout(
+      () => {
+        timeout.abort(
+          new DOMException("The call took too long", "TimeoutError")
+        );
+      },
+      Math.max(0, endsAt - Date.now())
+    );
+    try {
+      const response = await send(
+        new Request(endpoint, {
+          method: "POST",
+          headers: sent,
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            method,
+            params: { ...params, _meta: clientMeta },
+          }),
+          // A redirect could carry the request somewhere else: never follow.
+          redirect: "manual",
+          signal: timeout.signal,
+        })
+      );
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new McpError(`The server answered ${response.status}`);
+      }
+      message = await readResponse(response, id, maxResponseBytes);
+    } catch (error) {
+      // A connection that failed or timed out may have delivered the request.
+      throw error instanceof McpError
+        ? error
+        : new McpError(`${method} failed`, error);
+    } finally {
+      clearTimeout(timer);
+    }
+    if (message === undefined) {
+      throw new McpError(`No readable answer to ${method}`);
+    }
+    if (message.error !== undefined) {
+      throw new McpError(
+        `The server refused ${method} (${message.error.code})`
+      );
+    }
+    if (!completeResultSchema.safeParse(message.result).success) {
+      throw new McpError(`The server didn't complete ${method}`);
+    }
+    return message.result;
+  };
+
+  return {
+    list: async (maxTools) => {
+      try {
+        const tools: ListedServerTool[] = [];
+        let ttlMs: number | undefined;
+        let cursor: string | undefined;
+        for (let page = 0; page < maxToolPages; page += 1) {
+          const read = modernPageSchema.safeParse(
+            // oxlint-disable-next-line no-await-in-loop -- pages come one after another
+            await request("tools/list", cursor === undefined ? {} : { cursor })
+          );
+          if (!read.success) {
+            throw new McpError("The server's tool list isn't readable");
+          }
+          ttlMs = page === 0 ? read.data.ttlMs : ttlMs;
+          if (tools.length + read.data.tools.length > maxTools) {
+            throw new McpError(
+              "The server lists more tools than connect reads"
+            );
+          }
+          for (const item of read.data.tools) {
+            const tool = listedServerToolSchema.safeParse(item);
+            if (tool.success) {
+              const {
+                name,
+                description,
+                inputSchema,
+                outputSchema,
+                annotations,
+              } = tool.data;
+              tools.push({
+                name,
+                description,
+                inputSchema,
+                outputSchema,
+                annotations,
+              });
+            }
+          }
+          cursor = read.data.nextCursor;
+          if (cursor === undefined) {
+            return { tools, ttlMs };
+          }
+        }
+        throw new McpError("The server lists more pages than connect reads");
+      } catch (error) {
+        // Whatever a crafted list makes go wrong is the server's failure,
+        // never an unexpected one of connect's.
+        throw error instanceof McpError
+          ? error
+          : new McpError("The server's tool list isn't readable", error);
+      }
+    },
+    call: async (name, input, headers) =>
+      resultOf(
+        await request("tools/call", { name, arguments: input }, headers)
+      ),
   };
 };

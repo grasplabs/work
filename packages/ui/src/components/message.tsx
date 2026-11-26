@@ -40,7 +40,6 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  useSyncExternalStore,
 } from "react";
 import type { ReactNode } from "react";
 
@@ -61,7 +60,7 @@ import {
   size,
   space,
 } from "../lib/tokens.stylex";
-import { announce, lazyPart, nothing } from "../lib/utils";
+import { announce, lazyPart, nothing, useReducedMotion } from "../lib/utils";
 import type { LayoutStyle } from "../lib/utils";
 import { iconVars } from "../lib/vars.stylex";
 import { Bubble, BubbleContent } from "./bubble";
@@ -367,6 +366,14 @@ const styles = stylex.create({
       default: space["1"],
       [media.pointerCoarse]: `calc(${size.tapTarget} - ${size.controlSm})`,
     },
+    "--tap-room-inline": {
+      default: `calc(${space["1"]} / 2)`,
+      [media.pointerCoarse]: `calc((${size.tapTarget} - ${size.controlSm}) / 2)`,
+    },
+    "--tap-room-block": {
+      default: `calc(${space["1"]} / 2)`,
+      [media.pointerCoarse]: `calc((${size.tapTarget} - ${size.controlSm}) / 2)`,
+    },
     // The first icon stands under the first letter of the words; at the end, the last under the
     // bubble's edge.
     marginInlineStart: `calc(-1 * (${size.controlSm} - ${size.iconSm}) / 2)`,
@@ -573,16 +580,6 @@ export const MessageFooter = ({ children, style }: MessageFooterProps) => {
 
 // ---- Smooth text --------------------------------------------------------------------------------
 
-const REDUCE = "(prefers-reduced-motion: reduce)";
-
-const watchMotion = (changed: () => void) => {
-  const query = window.matchMedia(REDUCE);
-  query.addEventListener("change", changed);
-  return () => {
-    query.removeEventListener("change", changed);
-  };
-};
-
 /** The time it takes to catch up with what has arrived: a burst is spread over about this long. */
 const CATCH_UP = 300;
 
@@ -602,18 +599,15 @@ const everyFrame = (step: (share: number) => void) => {
 };
 
 /**
- * The words of an answer still being written, let out a few characters a frame so a chunk never
- * lands as a jump: each frame takes a share of what is still to show, so a large burst comes
- * quickly and a trickle at about a frame a character. Once the stream ends, or with reduced
- * motion, the whole text shows at once: the end is never held back. Nothing runs while caught up,
- * so the answer is drawn again (and its last block read again) at most once a frame.
+ * The text of an answer still being written, let out over time so a chunk never lands as a lump:
+ * each frame takes a share of what is still to show, so a large burst comes quickly and a trickle
+ * at about a frame a character. Markdown shows only its whole words, so the words come one after
+ * another, each whole. Once the stream ends, or with reduced motion, the whole text shows at once:
+ * the end is never held back. Nothing runs while caught up, so the answer is drawn again (and its
+ * last block read again) at most once a frame.
  */
 const useSmoothText = (text: string, streaming: boolean): string => {
-  const reduced = useSyncExternalStore(
-    watchMotion,
-    () => window.matchMedia(REDUCE).matches,
-    () => false
-  );
+  const reduced = useReducedMotion();
   const paced = streaming && !reduced;
   // Words there when it is first drawn are not news: they show at once.
   const [shown, setShown] = useState(text.length);

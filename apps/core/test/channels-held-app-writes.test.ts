@@ -511,12 +511,10 @@ describe("a press on a held write to an App in Teams that mustn't run anything",
       const b = `b-${unique()}`;
       const held = await heldInTeams(undefined, { first: writesNotes([a, b]) });
       // The card's own writes, listed the other way round.
-      const reversed = JSON.stringify(
-        z
-          .array(z.unknown())
-          .parse(JSON.parse(held.value ?? "[]"))
-          .toReversed()
-      );
+      const { writes } = z
+        .object({ writes: z.array(z.unknown()) })
+        .parse(JSON.parse(held.value ?? "{}"));
+      const reversed = JSON.stringify({ writes: writes.toReversed() });
       await post({
         ...messageFrom(held.person.teams, { text: undefined }),
         replyToId: held.cardId,
@@ -638,7 +636,10 @@ describe("a press on a held write to an App in Teams that mustn't run anything",
         await post({
           ...messageFrom(held.person.teams, { text: undefined }),
           replyToId: `1729${unique()}`,
-          value: { actionId: confirmAction, value: JSON.stringify(press) },
+          value: {
+            actionId: confirmAction,
+            value: JSON.stringify({ writes: press }),
+          },
         });
         const after = await linesAfterCard(held);
         return after.slice(before.length);

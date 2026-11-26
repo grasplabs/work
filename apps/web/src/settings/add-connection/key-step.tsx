@@ -286,6 +286,7 @@ export const StepFoot = ({
       <>
         <SheetClose disabled={status === "working"}>{words.cancel}</SheetClose>
         <Button
+          errorText={words.connect}
           form={formId}
           loadingText={words.connecting}
           status={status === "working" ? "loading" : "idle"}

@@ -1,5 +1,5 @@
-import { defineTool, ToolError } from "@grasp-os/connector-kit/connector";
-import { jsonBody, segment } from "@grasp-os/connector-kit/provider";
+import { defineTool } from "@grasp-os/connector-kit/connector";
+import { jsonBody, segment, ToolError } from "@grasp-os/runtime/connector";
 import { z } from "zod";
 
 import {

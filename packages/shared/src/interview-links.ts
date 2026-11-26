@@ -27,18 +27,33 @@ export const interviewSecretSchema = z
   .string()
   .regex(/^[A-Za-z0-9_-]{43}$/u, "An interview link's secret");
 
-/** The parts of an interview, in order. */
+/**
+ * The parts of an interview, in order: someone's work as a whole (`week`),
+ * then one piece of it up close (`anchor` to `result`), and them and AI
+ * (`you`) last before the read-back. A lead's interview has no `week`.
+ */
 export const interviewPhases = [
   "open",
-  "you",
+  "week",
   "anchor",
   "story",
   "steps",
   "exceptions",
   "numbers",
   "result",
+  "you",
   "readback",
 ] as const;
+
+/**
+ * Which order the read-back's parts are read in (interview-story.ts
+ * `readBackGroups`), as a number that goes up whenever that order changes.
+ * A place in the read-back (`confirmed`) is a page's number, and means
+ * another page under another order: one kept under another number is not
+ * trusted, and the read-back starts over (core's `#forSpeaker`). Agreeing
+ * to a page twice costs a moment; skipping one agrees to lines never read.
+ */
+export const readBackOrder = 2;
 
 /** What a fact is about: the kinds Stephen marks in what someone says. */
 export const factTags = [
@@ -64,6 +79,11 @@ export const factTags = [
    * name they said: whom Grasp asks about it next (GRA-1285).
    */
   "who",
+  /**
+   * A piece of work that comes back, in their own words, with how often
+   * and about how long one takes, as they said: what their week is made of.
+   */
+  "task",
 ] as const;
 
 /** Where someone invited stands. */
@@ -211,6 +231,7 @@ const teamByDefault: ReadonlySet<FactTag> = new Set([
   "term",
   "next",
   "work",
+  "task",
 ]);
 
 /**
@@ -320,6 +341,12 @@ export const interviewProgressSchema = z.strictObject({
   seenAt: z.number().nonnegative().optional(),
   awayMs: z.number().nonnegative().optional(),
   confirmed: z.int().min(0).max(interviewLimits.facts),
+  /**
+   * The order of the read-back `confirmed` counts pages of
+   * (`readBackOrder`). None on an interview kept before the order was
+   * noted: its place is of an order that is gone.
+   */
+  readBack: z.int().min(1).optional(),
   adding: z.boolean(),
   addedAt: z.number().nonnegative(),
   /** How they found it, from 1 to 5, when they said so. */

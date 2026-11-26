@@ -35,7 +35,7 @@ import { ownerErased } from "./erased-people.ts";
 //   connection, a timeout, the egress withholding it): the key is spent,
 //   every repeat is `connect.outcome_unknown`, and nothing is sent again.
 // - The provider answers the write with a server error (5xx), which may
-//   come after it acted: the connector kit says the outcome is unknown
+//   come after it acted: runtime/connector says the outcome is unknown
 //   (`outcomeUnknownMetaKey`), and connect spends the key the same way.
 //   The error is never kept as the answer: a stored failure would tell
 //   every repeat the action failed, and code that read that as "nothing

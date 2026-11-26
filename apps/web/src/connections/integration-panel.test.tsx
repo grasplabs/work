@@ -78,7 +78,7 @@ const entry = (
   categories: ["CRM"],
   toolCount: tools.length,
   logo: null,
-  description: `${name}, in a sentence.`,
+  description: source === "native" ? null : `${name}, in a sentence.`,
   group: "Other",
   auth: "managed",
   offered: true,

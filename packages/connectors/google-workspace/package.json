@@ -6,11 +6,11 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./google": "./src/google.ts",
-    "./mime": "./src/mime.ts"
+    "./google": "./src/google.ts"
   },
   "dependencies": {
     "@grasp-os/connector-kit": "workspace:*",
+    "@grasp-os/runtime": "workspace:*",
     "zod": "catalog:"
   },
   "devDependencies": {

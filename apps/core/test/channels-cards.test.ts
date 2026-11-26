@@ -251,6 +251,10 @@ const outcomes: PressOutcome[] = [
   "unknownOutcome",
   "expired",
   "changedSince",
+  { waiting: 1, minutes: 1, newCard: true },
+  { waiting: 2, minutes: 60, newCard: true },
+  { waiting: 1, minutes: 1, newCard: false },
+  { waiting: 2, minutes: 1, newCard: false },
 ];
 
 /** The chat apps an answer goes to, each made inert its own way. */
@@ -325,7 +329,7 @@ const everyCard = channelLocales.flatMap((locale) => [
     }))
   ),
   ...outcomes.map((outcome) => ({
-    name: `largest held writes, ${outcome} (${locale})`,
+    name: `largest held writes, ${JSON.stringify(outcome)} (${locale})`,
     card: heldWritesCard({
       locale,
       platform: "teams",
@@ -372,13 +376,17 @@ describe("Stephen's cards in Teams", () => {
           type: "Action.Submit",
           title: "Bevestigen",
           action: confirmAction,
-          press: writes.map(({ id, inputHash }) => ({ id, inputHash })),
+          press: {
+            writes: writes.map(({ id, inputHash }) => ({ id, inputHash })),
+          },
         },
         {
           type: "Action.Submit",
           title: "Annuleren",
           action: cancelAction,
-          press: writes.map(({ id, inputHash }) => ({ id, inputHash })),
+          press: {
+            writes: writes.map(({ id, inputHash }) => ({ id, inputHash })),
+          },
         },
       ],
       says: true,
@@ -481,15 +489,26 @@ describe("Stephen's cards in Teams", () => {
     expect({
       none: pressOf(),
       notJson: pressOf("confirm"),
-      empty: pressOf("[]"),
-      extra: pressOf('[{"id":"a","inputHash":"b","run":"all"}]'),
-      one: pressOf('[{"id":"a","inputHash":"b"}]'),
+      empty: pressOf('{"writes":[]}'),
+      extra: pressOf('{"writes":[{"id":"a","inputHash":"b","run":"all"}]}'),
+      otherCheck: pressOf(
+        '{"writes":[{"id":"a","inputHash":"b"}],"check":{"read":"all"}}'
+      ),
+      one: pressOf('{"writes":[{"id":"a","inputHash":"b"}]}'),
+      warned: pressOf(
+        '{"writes":[{"id":"a","inputHash":"b"}],"check":{"read":"mail"}}'
+      ),
     }).toStrictEqual({
       none: null,
       notJson: null,
       empty: null,
       extra: null,
-      one: [{ id: "a", inputHash: "b" }],
+      otherCheck: null,
+      one: { writes: [{ id: "a", inputHash: "b" }] },
+      warned: {
+        writes: [{ id: "a", inputHash: "b" }],
+        check: { read: "mail" },
+      },
     });
   });
 });
@@ -506,6 +525,7 @@ const values = {
   about: "Acme",
   value: "Dutch",
   replaced: "Wants answers in English",
+  minutes: 5,
 };
 
 /** Block Kit's limits, as Slack documents them for a message's blocks. */

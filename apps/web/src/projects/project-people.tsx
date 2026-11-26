@@ -21,6 +21,7 @@ import {
   Item,
   ItemActions,
   ItemContent,
+  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -42,7 +43,6 @@ import { roleLabel } from "../labels.ts";
 import { usePeopleApart } from "../people/people-apart.ts";
 import type { Named, PeopleApart } from "../people/people-apart.ts";
 import { useCoreAction } from "../use-core-action.ts";
-import { SeparatedItems } from "../workflows/separated-items.tsx";
 import { usePages } from "./project-pages.ts";
 
 // Who is in a project: its owner, who always builds it, and the people and
@@ -356,31 +356,22 @@ export const ProjectPeople = ({ project }: { project: Project }) => {
           project={project}
         />
       ) : (
-        <SeparatedItems
-          aria-label={t`People`}
-          rows={[
-            {
-              key: "owner",
-              row: (
-                <MemberRow
-                  name={owner}
-                  role={t({ message: "Owner", context: "a project's owner" })}
-                  team={false}
-                />
-              ),
-            },
-            ...pages.all.map((member) => ({
-              key: keyOf(member),
-              row: (
-                <MemberRow
-                  name={nameOf(member)}
-                  role={roleLabel(member.role)}
-                  team={member.type === "team"}
-                />
-              ),
-            })),
-          ]}
-        />
+        <ItemGroup separated aria-label={t`People`}>
+          <MemberRow
+            key="owner"
+            name={owner}
+            role={t({ message: "Owner", context: "a project's owner" })}
+            team={false}
+          />
+          {pages.all.map((member) => (
+            <MemberRow
+              key={keyOf(member)}
+              name={nameOf(member)}
+              role={roleLabel(member.role)}
+              team={member.type === "team"}
+            />
+          ))}
+        </ItemGroup>
       )}
       {pages.more ? (
         <Button

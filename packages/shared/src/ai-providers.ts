@@ -90,6 +90,14 @@ export interface AiProviderSpec {
    * organization's key). Empty for a provider with none.
    */
   realtime: readonly { path: string; query: string }[];
+  /**
+   * The path below its host where a live voice session is opened (POST),
+   * and each one read (GET) and closed (DELETE) at `<path>/<id>`, and
+   * nothing else: Mistral's voice agents, for Grasp's interviews (platform
+   * features only, never an organization's key). None for a provider
+   * without.
+   */
+  sessions: string | undefined;
   /** Where its key goes: `x-api-key: <key>`, `xi-api-key: <key>` or `authorization: Bearer <key>`. */
   keyHeader: AiKeyHeader;
   /** Where it runs, in plain words, for the admin. */
@@ -134,6 +142,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     // Anthropic's SDK asks its beta Messages API, which names no data.
     queries: ["", "?beta=true"],
     realtime: [],
+    sessions: undefined,
     keyHeader: "x-api-key",
     whereItRuns: "Anthropic, United States",
     region: "us",
@@ -157,6 +166,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     ],
     queries: [""],
     realtime: [{ path: "/v1/realtime", query: "?intent=transcription" }],
+    sessions: undefined,
     keyHeader: "authorization",
     whereItRuns: "OpenAI, United States",
     region: "us",
@@ -174,6 +184,8 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     paths: ["/v1/chat/completions", "/v1/audio/speech"],
     queries: [""],
     realtime: [],
+    // Its voice agents' sessions, for Grasp's interviews.
+    sessions: "/v1/audio/sessions",
     keyHeader: "authorization",
     whereItRuns: "Mistral AI, European Union (France)",
     region: "eu",
@@ -191,6 +203,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     paths: ["/api/v1/messages", "/api/v1/chat/completions"],
     queries: [""],
     realtime: [],
+    sessions: undefined,
     keyHeader: "authorization",
     whereItRuns:
       "OpenRouter, United States, passing each call on to the model's provider",
@@ -206,6 +219,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     paths: ["/chat/completions"],
     queries: [""],
     realtime: [],
+    sessions: undefined,
     keyHeader: "authorization",
     whereItRuns: "Wherever your endpoint runs",
     region: "custom",
@@ -223,6 +237,7 @@ export const aiProviders: Readonly<Record<AiProviderId, AiProviderSpec>> = {
     paths: ["/v1/text-to-speech/*/with-timestamps"],
     queries: ["?enable_logging=false&output_format=mp3_44100_128"],
     realtime: [],
+    sessions: undefined,
     keyHeader: "xi-api-key",
     whereItRuns: "ElevenLabs, United States",
     region: "us",
@@ -504,6 +519,7 @@ export const aiPlatformFeatures = [
   "transcription",
   "speech",
   "interview",
+  "conversation",
 ] as const;
 export type AiPlatformFeature = (typeof aiPlatformFeatures)[number];
 

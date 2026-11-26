@@ -1,5 +1,5 @@
-import { defineTool, ToolError } from "@grasp-os/connector-kit/connector";
-import { segment } from "@grasp-os/connector-kit/provider";
+import { defineTool } from "@grasp-os/connector-kit/connector";
+import { segment, ToolError } from "@grasp-os/runtime/connector";
 import { z } from "zod";
 
 import {
@@ -112,14 +112,29 @@ const isWritten = (message: GraphMessage): boolean =>
   (message.messageType ?? "message") === "message" &&
   (message.deletedDateTime ?? null) === null;
 
-/** A message's words as text, from the HTML or text Graph gives them in. */
+/** What a message reads as when its markup is too costly to read. */
+const unreadMessage = "[This message's markup is too complex to read.]";
+
+/**
+ * A message's words as text, from the HTML or text Graph gives them in.
+ * Markup too costly to read is that one message's loss, not the chat's:
+ * anyone in a chat can post it.
+ */
 const textOf = (body: GraphMessage["body"]): string => {
   if (body === null || body === undefined) {
     return "";
   }
-  return body.contentType === "html"
-    ? htmlText(body.content)
-    : body.content.trim();
+  if (body.contentType !== "html") {
+    return body.content.trim();
+  }
+  try {
+    return htmlText(body.content);
+  } catch (error) {
+    if (error instanceof ToolError && error.details?.code === "too_large") {
+      return unreadMessage;
+    }
+    throw error;
+  }
 };
 
 const messageOf = (message: GraphMessage): z.infer<typeof messageSchema> => ({

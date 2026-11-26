@@ -331,7 +331,7 @@ const VERHAAL =
 /** The parts of an interview before the story is told. */
 const beforeStory: ReadonlySet<InterviewPhase> = new Set([
   "open",
-  "you",
+  "week",
   "anchor",
   "story",
 ]);

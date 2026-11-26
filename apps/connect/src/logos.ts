@@ -244,9 +244,9 @@ export const catalogLogo = async (
   }
   const { source, id } = parsed.data;
   const key = composioKey(env);
-  // Native providers have no logo in the catalog; without a key, Composio's
-  // toolkits aren't in it at all.
-  if (source === "native" || key === undefined) {
+  // Only Composio's toolkits have a logo in the catalog, and without a key
+  // they aren't in it at all.
+  if (source !== "composio" || key === undefined) {
     return null;
   }
   try {

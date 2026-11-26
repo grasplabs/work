@@ -27,7 +27,7 @@ import {
   requestBudget,
 } from "./event-kinds.ts";
 import type { ProviderAccess } from "./event-kinds.ts";
-import { accessTokenFor } from "./tokens.ts";
+import { accessTokenFor, pausedWait } from "./tokens.ts";
 
 // The directory's reads (GRA-369): who works where, from Microsoft Graph
 // or Google's directory, with the directory connection's token, which
@@ -472,6 +472,10 @@ export const directoryToken = async (
   } catch (error) {
     if (connectErrors.codeOf(error) === "connect.connection_inactive") {
       throw directoryErrors.create("directory.inactive");
+    }
+    const paused = pausedWait(error);
+    if (paused !== undefined) {
+      throw directoryErrors.create("directory.throttled", paused);
     }
     if (connectionErrors.codeOf(error) !== undefined) {
       throw directoryErrors.create("directory.provider_failed");

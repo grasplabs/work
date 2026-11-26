@@ -1,3 +1,4 @@
+import { isDate, isDateTime, isWebUrl } from "@grasp-os/runtime/host";
 import { isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
 
@@ -62,29 +63,13 @@ const types = new Set([
 const emailPattern =
   /^(?!\.)(?!.*\.\.)(?:[A-Za-z0-9_'+\-.]*)[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z]{2,}$/u;
 
-/** A timestamp's form, as `format: date-time` asks (RFC 3339, with an offset). */
-const dateTimePattern =
-  /^(?<year>\d{4})-(?<month>0[1-9]|1[0-2])-(?<day>0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:(?:[0-5]\d|60)(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/iu;
-
-/** The days of `month` (1–12) in `year`, leap years counted. */
-const daysIn = (year: number, month: number): number =>
-  new Date(Date.UTC(year, month, 0)).getUTCDate();
-
-/** Whether `text` is an RFC 3339 timestamp of a day that exists. */
-const isDateTime = (text: string): boolean => {
-  const parts = dateTimePattern.exec(text)?.groups;
-  if (parts === undefined) {
-    return false;
-  }
-  const year = Number(parts.year);
-  const month = Number(parts.month);
-  return Number(parts.day) <= daysIn(year, month);
-};
-
 /** Each format checked, and how. */
 const formats: Readonly<Record<string, (text: string) => boolean>> = {
   email: (text) => emailPattern.test(text),
+  // The SDK's own rules, which a connector's `v` checks its values by.
   "date-time": isDateTime,
+  date: isDate,
+  iri: isWebUrl,
 };
 
 /** The most a schema nests here, as the SDK's descriptors do. */
@@ -95,6 +80,10 @@ const isList = (value: Json | undefined): value is readonly Json[] =>
 
 /** Each admitted schema's pattern, compiled once. */
 const patterns = new WeakMap<Schema, RegExp>();
+
+/** Whether `schema` says nothing but annotations: any JSON value, as `v.json()` has it. */
+export const annotatesOnly = (schema: Schema): boolean =>
+  Object.keys(schema).every((key) => annotations.has(key));
 
 /** Whether `schema`'s own keywords, and their values, are admissible. */
 const ownAdmissible = (schema: Schema): boolean => {

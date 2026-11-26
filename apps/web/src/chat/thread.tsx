@@ -14,6 +14,7 @@ import { Bubble, BubbleContent } from "@grasp-os/ui/components/bubble";
 import { Button } from "@grasp-os/ui/components/button";
 import { CopyButton } from "@grasp-os/ui/components/copy-button";
 import { Link } from "@grasp-os/ui/components/link";
+import { Marker, MarkerContent } from "@grasp-os/ui/components/marker";
 import {
   Message,
   MessageAction,
@@ -56,7 +57,7 @@ import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link as RouterLink, useLocation } from "@tanstack/react-router";
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useId, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 
 import type { ThinkingOf } from "../brain/thinking/play.ts";
@@ -85,6 +86,7 @@ import { SavedMemoryLine } from "./saved-memory.tsx";
 import { readingFileOf, signOf } from "./sign.ts";
 import type { WorkState } from "./sign.ts";
 import { shortTime, turnsOf, workedFor } from "./turns.ts";
+import { newLineRow, OpenAtNewLine } from "./unread.ts";
 
 /**
  * An answer's thinking as a card (thinking-card.tsx), loaded once an
@@ -190,7 +192,7 @@ const toolKinds: Readonly<Record<string, AnswerStep["kind"]>> = {
   editFile: "write",
   createApp: "write",
   editWorkflow: "write",
-  remember: "write",
+  remember: "remember",
   searchFiles: "search",
   searchBrain: "search",
   searchDocs: "search",
@@ -268,7 +270,7 @@ const useToolSummary = (): ((call: ChatToolCall, done: boolean) => string) => {
         return done ? t`Edited a workflow` : t`Editing a workflow`;
       }
       case "remember": {
-        return done ? t`Saved to your memory` : t`Saving to your memory`;
+        return done ? t`Saved to memory` : t`Saving to memory`;
       }
       default: {
         return done ? t`Used ${tool}` : t`Using ${tool}`;
@@ -403,6 +405,7 @@ const kindOrder: readonly AnswerStep["kind"][] = [
   "search",
   "read",
   "write",
+  "remember",
   "tool",
 ];
 
@@ -419,6 +422,7 @@ const useStepsSummary = (): ((steps: readonly AnswerStep[]) => string) => {
       search: t`${plural(count, { one: "searched once", other: "searched # times" })}`,
       read: t`${plural(count, { one: "read # file", other: "read # files" })}`,
       write: t`${plural(count, { one: "changed # file", other: "changed # files" })}`,
+      remember: t`${plural(count, { one: "saved # memory", other: "saved # memories" })}`,
       tool: t`${plural(count, { one: "ran # tool", other: "ran # tools" })}`,
     })[kind];
   return (steps) => {
@@ -542,6 +546,7 @@ type Row =
     }
   | AnswerTurn
   | { kind: "after"; id: string; at?: undefined; children: ReactNode }
+  | { kind: "new"; id: string; at?: undefined }
   | {
       kind: "day";
       id: string;
@@ -614,6 +619,43 @@ const DayLine = ({
       </Text>
       <Separator decorative style={styles.dayRule} />
     </div>
+  );
+};
+
+/**
+ * The rows with the New line over the answer that holds reply `before`,
+ * the first the person hadn't seen as the chat opened (unread.ts); as
+ * they are where there is none.
+ */
+const withNewLine = (rows: readonly Row[], before: number | undefined) => {
+  const at = rows.findIndex(
+    (row) =>
+      row.kind === "answer" && row.replies.some(({ id }) => id === before)
+  );
+  return at === -1
+    ? [...rows]
+    : [
+        ...rows.slice(0, at),
+        { kind: "new" as const, id: newLineRow },
+        ...rows.slice(at),
+      ];
+};
+
+/**
+ * The New line, over what the person hadn't seen: a separator named New,
+ * its word in the middle of a hairline, in the primary colour as news is.
+ * Never focused: the thread opens with it near the top instead.
+ */
+const NewLine = () => {
+  const { t } = useLingui();
+  const words = t({
+    message: "New",
+    context: "the line in a chat over the answers the person hasn't read",
+  });
+  return (
+    <Marker color="primary" decorative={false} variant="separator">
+      <MarkerContent>{words}</MarkerContent>
+    </Marker>
   );
 };
 
@@ -755,10 +797,19 @@ const lastAnswerOf = (
   };
 };
 
-/** When a message was sent, at its foot: the time of day. */
-const SentAt = ({ at, style }: { at: string; style?: LayoutStyle }) => (
+/** When a message was sent, at its foot: the time of day, after what else stands there (an answer's actions). */
+const SentAt = ({
+  at,
+  children,
+  style,
+}: {
+  at: string | undefined;
+  children?: ReactNode;
+  style?: LayoutStyle;
+}) => (
   <MessageFooter {...(style === undefined ? {} : { style })}>
-    <time dateTime={at}>{formatTime(at)}</time>
+    {children}
+    {at === undefined ? null : <time dateTime={at}>{formatTime(at)}</time>}
   </MessageFooter>
 );
 
@@ -1131,39 +1182,53 @@ const useThoughtShown = (
 };
 
 /**
- * An answer's foot, as #2503's: its actions, then when it was given, on
- * one line; with no words to act on (its turn asked the person instead,
- * or it failed), the time alone. The actions are there from the start,
- * while it is written too: the Message keeps their room and shows them
- * once the answer is done, so the end moves nothing.
+ * An answer's foot: its actions, then when it was given, on one line;
+ * with no words to act on (its turn asked the person instead, or it
+ * failed), the time alone. The actions stand in the time's own
+ * MessageFooter, so they come and go exactly as it does: where a pointer
+ * hovers, while the message is hovered or holds the focus (so the
+ * keyboard reaches them, and they show as it does); on touch always;
+ * never hidden from a screen reader, and their room always kept. They
+ * are there from the start, while it is written too: the Message keeps
+ * them unseen and out of reach until the answer is done, so the end
+ * moves nothing. A stopped answer keeps them out of the footer, always
+ * shown: Damsko says Stopped on the actions' row, and that must not hide.
  */
 const AnswerFoot = ({
   at,
   copyText,
   retry,
+  stopped,
 }: {
   at: string | undefined;
   copyText: string;
   retry: (() => void) | undefined;
+  stopped: boolean;
 }) => {
   const { t } = useLingui();
   if (copyText === "") {
     return at === undefined ? null : <SentAt at={at} />;
   }
-  return (
-    <div {...stylex.props(styles.foot)}>
-      <MessageActions aria-label={t`Answer actions`}>
-        <CopyButton aria-label={t`Copy the answer`} value={copyText} />
-        {retry === undefined ? null : (
-          <MessageAction aria-label={t`Ask again`} onClick={retry}>
-            <Icon icon={RefreshCwIcon} />
-          </MessageAction>
-        )}
-      </MessageActions>
-      {/* Level with the actions, in the middle of their line. */}
-      {at === undefined ? null : <SentAt at={at} style={styles.beside} />}
-    </div>
+  const actions = (
+    <MessageActions aria-label={t`Answer actions`}>
+      <CopyButton aria-label={t`Copy the answer`} value={copyText} />
+      {retry === undefined ? null : (
+        <MessageAction aria-label={t`Ask again`} onClick={retry}>
+          <Icon icon={RefreshCwIcon} />
+        </MessageAction>
+      )}
+    </MessageActions>
   );
+  if (stopped) {
+    return (
+      <div {...stylex.props(styles.foot)}>
+        {actions}
+        {/* Level with the actions, in the middle of their line. */}
+        {at === undefined ? null : <SentAt at={at} style={styles.beside} />}
+      </div>
+    );
+  }
+  return <SentAt at={at}>{actions}</SentAt>;
 };
 
 /** One answer of Grasp's: what it thought, its steps, its words, and what came of them, as one Message. */
@@ -1239,6 +1304,7 @@ const AnswerRow = ({
           at={last?.at}
           copyText={status === "error" ? "" : copyText}
           retry={retry}
+          stopped={status === "stopped"}
         />
       </MessageContent>
     </Message>
@@ -1293,6 +1359,7 @@ export const ChatThread = ({
   onRetry,
   compact = false,
   build,
+  newLineBefore,
   children,
 }: {
   /**
@@ -1326,6 +1393,13 @@ export const ChatThread = ({
    * chat): without it, a plan shows with no way to build it.
    */
   build?: ThreadBuild;
+  /**
+   * The answer the New line goes over, the first the person hadn't seen
+   * as the chat opened: the thread opens with it near the top, or at its
+   * end when all it has unread fits (MessageScroller's `last-anchor`).
+   * None, and it opens at its end.
+   */
+  newLineBefore?: number;
   /** Shown after the messages, in the thread: what is held, why it stopped. */
   children?: ReactNode;
 }) => {
@@ -1436,7 +1510,8 @@ export const ChatThread = ({
       agentName: agentNameOf(turn),
     };
   };
-  const lined = withDayLines(rows);
+  const lined = withNewLine(withDayLines(rows), newLineBefore);
+  const logId = useId();
   const items: Row[] =
     children === undefined || children === null
       ? lined
@@ -1448,8 +1523,13 @@ export const ChatThread = ({
     <div {...stylex.props(styles.room)}>
       <AnswerLinks>
         <MessageScrollerProvider autoScroll loading={!loaded}>
+          {/* It opens at its end, as ever, or at the New line (unread.ts). */}
+          <OpenAtNewLine
+            line={loaded ? newLineBefore : undefined}
+            logId={logId}
+          />
           <MessageScroller>
-            <MessageScrollerViewport aria-label={t`Messages`}>
+            <MessageScrollerViewport aria-label={t`Messages`} id={logId}>
               <MessageScrollerContent aria-busy={running}>
                 {loaded
                   ? items.map((row) => (
@@ -1466,6 +1546,7 @@ export const ChatThread = ({
                           <AnswerRow context={contextOf(row)} turn={row} />
                         ) : null}
                         {row.kind === "after" ? row.children : null}
+                        {row.kind === "new" ? <NewLine /> : null}
                         {row.kind === "day" ? (
                           <DayLine
                             ago={row.ago}

@@ -218,6 +218,26 @@ const showers: Readonly<
   },
   literal: (value, { text }) => shownUndeclared(value, text),
   union: (value, { text }) => shownUndeclared(value, text),
+  // Any JSON, read as its own kinds: a list's items and an object's fields.
+  json: (value, { descriptor, text, language }) => {
+    if (Array.isArray(value)) {
+      // Objects and lists in a list each read as one, apart from the next.
+      const separator = value.some(
+        (each: unknown) => isRecord(each) || Array.isArray(each)
+      )
+        ? "; "
+        : ", ";
+      return (
+        value
+          // oxlint-disable-next-line no-use-before-define -- each item shows as its own kind does
+          .map((each: unknown) => shownCell(each, descriptor, text, language))
+          .join(separator)
+      );
+    }
+    return isRecord(value)
+      ? shownFields(value, () => descriptor, text, language)
+      : shownUndeclared(value, text);
+  },
 };
 
 /** A field's value as a cell shows it, by what the query declares of the field. */

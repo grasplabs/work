@@ -25,7 +25,7 @@ import type { HoverCardTriggerState } from "@ui-sdk/react/hover-card";
 import { useId, useState, useSyncExternalStore } from "react";
 import type { ComponentProps, ReactNode } from "react";
 
-import { focusRingText } from "../lib/styles";
+import { focusRingText, tapTargetAfter } from "../lib/styles";
 import {
   colors,
   duration,
@@ -157,18 +157,6 @@ const styles = stylex.create({
   // touch screen an unseen area makes it 44px each way, so a link on its own can be hit.
   trigger: {
     position: "relative",
-    "::after": {
-      content: '""',
-      position: "absolute",
-      insetInline: {
-        default: 0,
-        [media.pointerCoarse]: `min(0px, calc((100% - ${size.tapTarget}) / 2))`,
-      },
-      insetBlock: {
-        default: 0,
-        [media.pointerCoarse]: `min(0px, calc((100% - ${size.tapTarget}) / 2))`,
-      },
-    },
     color: "inherit",
     fontWeight: font.weightMedium,
     textDecorationLine: "underline",
@@ -307,6 +295,7 @@ export const HoverCardTrigger = ({
       className(
         variant === "link" && [
           styles.trigger,
+          tapTargetAfter,
           state.open && styles.open,
           focusRingText,
         ],

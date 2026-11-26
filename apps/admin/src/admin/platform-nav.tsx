@@ -4,26 +4,18 @@
  * every release the admin imported, the offboarded clients, and its
  * maintenance (shared secrets, and what staff did).
  */
-import {
-  NavigationMenu,
-  NavigationMenuItem,
-  NavigationMenuLink,
-  NavigationMenuList,
-} from "@grasp-os/app-kit/components/navigation-menu";
+import { TabsLink, TabsNav } from "@grasp-os/ui/components/tabs";
 import { Link, useMatchRoute } from "@tanstack/react-router";
 
 import type { Crumb } from "./page.tsx";
 
 /** Platform, above its releases in the bar. */
-export const platformCrumb: Crumb = {
-  label: "Platform",
-  link: <Link to="/platform" />,
-};
+export const platformCrumb: Crumb = { label: "Platform", to: "/platform" };
 
 /** The releases, above one release or a comparison in the bar. */
 export const releasesCrumb: Crumb = {
   label: "Releases",
-  link: <Link to="/platform/releases" />,
+  to: "/platform/releases",
 };
 
 /** Platform's places, in the order its navigation shows them. */
@@ -35,9 +27,9 @@ const platformPlaces = [
 ] as const;
 
 /**
- * Platform's places as links under a page's title, looking as line tabs
- * do: the one shown, or the one above it, is the current page. Its
- * overview is only itself.
+ * Platform's places as links under a page's title, drawn as line tabs
+ * (Damsko's TabsNav): the one shown, or the one above it, is the current
+ * page. Its overview is only itself.
  */
 export const PlatformNav = () => {
   const matchRoute = useMatchRoute();
@@ -46,23 +38,16 @@ export const PlatformNav = () => {
       ({ to }) => matchRoute({ to, fuzzy: to !== "/platform" }) !== false
     )?.to ?? "/platform";
   return (
-    <NavigationMenu aria-label="Platform">
-      <NavigationMenuList variant="line">
-        {platformPlaces.map(({ to, label }) => (
-          <NavigationMenuItem key={to}>
-            <NavigationMenuLink
-              active={to === shown}
-              render={
-                <Link activeOptions={{ exact: to === "/platform" }} to={to} />
-              }
-              variant="line"
-            >
-              {label}
-            </NavigationMenuLink>
-          </NavigationMenuItem>
-        ))}
-      </NavigationMenuList>
-    </NavigationMenu>
+    <TabsNav aria-label="Platform" variant="line">
+      {platformPlaces.map(({ to, label }) => (
+        <TabsLink asChild current={to === shown} key={to}>
+          {/* The overview only itself, so the router marks one link current, as `current` does. */}
+          <Link activeOptions={{ exact: to === "/platform" }} to={to}>
+            {label}
+          </Link>
+        </TabsLink>
+      ))}
+    </TabsNav>
   );
 };
 

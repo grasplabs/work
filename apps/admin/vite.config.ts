@@ -3,10 +3,12 @@ import path from "node:path";
 import { cloudflare } from "@cloudflare/vite-plugin";
 import type { PluginConfig } from "@cloudflare/vite-plugin";
 import babel from "@rolldown/plugin-babel";
+import stylex from "@stylexjs/unplugin/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { bindings } from "cf/config";
+import { Features } from "lightningcss";
 import { defineConfig } from "vite-plus";
 
 import { serverOnlyCheck } from "./server-only-check.ts";
@@ -20,6 +22,32 @@ export const adminDefine = {
     process.env.GITHUB_SHA ?? "local"
   ),
 };
+
+/**
+ * Damsko's tokens give a colour's light and dark values in one
+ * `light-dark()`, which every browser staff use reads: kept as written by
+ * both CSS passes, StyleX's and Vite's, as in apps/web, whose config says
+ * why.
+ */
+const keepLightDark = { exclude: Features.LightDark };
+
+/**
+ * StyleX's options for Damsko's components (packages/ui), as apps/web
+ * sets them: each `stylex.create` compiled to class names before React's
+ * own transforms (the plugin runs first, whatever its place in a list),
+ * its CSS joined to the browser's stylesheet outside any cascade layer.
+ * In a dev server or a test, what can't be read yet on a cold start is
+ * left out rather than an error; a build fails on it. The plugin, typed
+ * as `any`, is called where each config lists its plugins: here,
+ * vite.e2e.config.ts, vite.components.config.ts and vite.test.config.ts.
+ */
+export const damskoStyles = (command: "serve" | "build") => ({
+  lightningcssOptions: {
+    ...keepLightDark,
+    errorRecovery: command === "serve",
+    minify: true,
+  },
+});
 
 /**
  * The admin's plugins, its Worker as cloudflare.config.ts builds it from
@@ -51,7 +79,13 @@ export const adminPlugins = (worker: PluginConfig = {}) => [
   // of silently shipping it uncompiled.
   babel({ presets: [reactCompilerPreset({ panicThreshold: "all_errors" })] }),
   tailwindcss(),
-  { name: "grasp-admin-build", config: () => ({ define: adminDefine }) },
+  {
+    name: "grasp-admin-build",
+    config: () => ({
+      define: adminDefine,
+      css: { lightningcss: keepLightDark },
+    }),
+  },
   serverOnlyCheck(path.join(import.meta.dirname, "src")),
 ];
 
@@ -80,5 +114,8 @@ export const adminWorker = (command: "serve" | "build"): PluginConfig =>
     : {};
 
 export default defineConfig(({ command }) => ({
-  plugins: adminPlugins(adminWorker(command)),
+  plugins: [
+    stylex(damskoStyles(command)),
+    ...adminPlugins(adminWorker(command)),
+  ],
 }));

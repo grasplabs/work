@@ -40,6 +40,7 @@ import { interviewCaller } from "./interview-caller.ts";
 import { interviewerText } from "./interviewer-text.ts";
 import { stephenVersion } from "./lab-marks.ts";
 import { linkHeaders, linkRefusal, noCallerRefusal } from "./links.ts";
+import { stillOpen } from "./still-open.ts";
 import { onboardingStore } from "./store.ts";
 import type { Took, TurnContext } from "./store.ts";
 
@@ -67,7 +68,7 @@ import type { Took, TurnContext } from "./store.ts";
 //   (model-rules.ts), so only models the rules allow for that are used.
 // - Let a line out that breaks his rules: it is put right before it goes
 //   (`asStephenSays`), and a fact whose words weren't said is left out
-//   (`checkedTurn`).
+//   (`checkedTurn`), and counted in the log, never with its words.
 // - Run up the bill: the body is bounded, the store limits calls per link,
 //   the conversation sent is its last lines, and a turn given up halfway
 //   is cut off at once, and still counted for what it took.
@@ -118,26 +119,56 @@ const happenedOf = (
 export const languageLast = (locale: TurnAsked["locale"]): string =>
   `Say your line in ${NAMED[locale]}: every word of it, your small words too, also when they answered in another language, and also a line from the examples in your instructions, which you say in ${NAMED[locale]}, never as it stands in English.`;
 
-/** The first part takes 3 minutes at most: a talker can fill the whole interview with it. */
-const aiPartMinutes = 3;
+/** Their work as a whole takes 4 minutes at most: a talker can fill the whole interview with it. */
+const weekPartMinutes = 4;
 
 /**
- * What Stephen is told for one turn: who he talks to and about what, what
- * Grasp knows already, what he wrote down, the conversation, and what just
- * happened. Who they are comes from the store, the conversation from the
- * page.
+ * What the record still misses, as Stephen is told it each turn
+ * (`stillOpen`), as what was said about the work, never an order to him.
+ * Not once the interview is at the read-back or they are back to add
+ * something: nothing more is asked for then.
  */
-export const briefOf = (
-  turn: TurnAsked,
+const openOf = (turn: Situation, kind: TurnContext["kind"]): string[] => {
+  if (turn.phase === "readback" || turn.adding) {
+    return [];
+  }
+  const open = stillOpen(kind, turn.facts, turn.phase);
+  // In the part about AI nothing is listed, and he is not sent on either:
+  // the one follow-up his script allows there is his to ask.
+  if (open.length === 0 && turn.phase === "you") {
+    return [];
+  }
+  return [
+    "",
+    "What is still open, most important first:",
+    open.length === 0
+      ? "Nothing: go to the read-back."
+      : open.map((each) => `- ${each}`).join("\n"),
+  ];
+};
+
+/** What of a turn tells where the interview stands, without its conversation. */
+export type Situation = Pick<
+  TurnAsked,
+  "phase" | "minutes" | "adding" | "facts"
+>;
+
+/**
+ * Where the interview stands, as Stephen is told it: who he talks to and
+ * about what, what Grasp knows already, how long it has run, what he
+ * wrote down and what is still open. Who they are comes from the store.
+ * The first part of every turn's brief (`briefOf`), and what a live voice
+ * session is told, and told again after each answer (voice.ts).
+ */
+export const situationOf = (
+  turn: Situation,
   context: TurnContext,
   company: string
-): string => {
+): string[] => {
   const { name, team, lead, work, kind, known } = context;
-  const self = interviewerNames.stephen;
-  const lines = turn.lines.slice(-turnLinesMax);
   const toLearn =
     work === ""
-      ? "The work to learn about: not named yet. In part 3, ask which work comes back most often or takes most of their time, and learn that one."
+      ? "The work to learn about: not named yet. In part 3, take the piece that repeats most and costs them most time, by what they said in part 2, and learn that one."
       : `The work to learn about: ${work}.`;
   const teamLead =
     lead === null
@@ -153,9 +184,11 @@ export const briefOf = (
       : toLearn,
     ...(known === "" ? [] : ["", "What Grasp knows already:", known]),
     `Minutes since they pressed start: ${turn.minutes.toFixed(1)}. The part you were in: ${turn.phase}.`,
-    ...(turn.phase === "you" && turn.minutes > aiPartMinutes
+    ...(kind === "own" &&
+    turn.phase === "week" &&
+    turn.minutes > weekPartMinutes
       ? [
-          "Part 2 has taken more than 3 minutes. When you have not asked what they wish for, ask only that now. When you have, your next line starts part 3: say that you now go to the work.",
+          "Part 2 has taken more than 4 minutes. Your next line starts part 3: name the piece you now look at up close, and ask about it.",
         ]
       : []),
     ...(turn.adding
@@ -170,6 +203,25 @@ export const briefOf = (
       : turn.facts
           .map((fact) => `- [${fact.id}] ${fact.tag}: ${fact.text}`)
           .join("\n"),
+    ...openOf(turn, kind),
+  ];
+};
+
+/**
+ * What Stephen is told for one turn: where the interview stands
+ * (`situationOf`), the conversation, and what just happened. The
+ * conversation comes from the page, or, in a live voice session, from
+ * what Mistral wrote down of it.
+ */
+export const briefOf = (
+  turn: TurnAsked,
+  context: TurnContext,
+  company: string
+): string => {
+  const self = interviewerNames.stephen;
+  const lines = turn.lines.slice(-turnLinesMax);
+  return [
+    ...situationOf(turn, context, company),
     "",
     "The conversation so far:",
     lines.length === 0
@@ -177,16 +229,16 @@ export const briefOf = (
       : lines
           .map(
             (line) =>
-              `${line.from === "stephen" ? self : name}: ${answerOf(line.text)}${line.file === undefined ? "" : ` [shared a file called "${fileCalled(line.file)}"]`}`
+              `${line.from === "stephen" ? self : context.name}: ${answerOf(line.text)}${line.file === undefined ? "" : ` [shared a file called "${fileCalled(line.file)}"]`}`
           )
           .join("\n"),
     "",
-    `What just happened: ${happenedOf(turn, name)[turn.event]}`,
+    `What just happened: ${happenedOf(turn, context.name)[turn.event]}`,
   ].join("\n");
 };
 
 /** Why a turn went wrong, as the page is told it. */
-class TurnFailedError extends Error {
+export class TurnFailedError extends Error {
   override name = "TurnFailedError";
   readonly status: number;
 
@@ -261,6 +313,7 @@ interface Turn {
   env: Env;
   turn: TurnAsked;
   context: TurnContext;
+  requestId: string;
   system: string;
   brief: string;
   quick: string;
@@ -316,9 +369,18 @@ const speak = async (
   return textOfAnswer(answer);
 };
 
-/** Asks the notes' model what to write down from what was just said. */
-const write = async (
-  { env, system, brief, signal, count }: Turn,
+/**
+ * Asks the notes' model what to write down from what was just said: in a
+ * turn, and after each answer in a live voice session (voice.ts).
+ */
+export const write = async (
+  {
+    env,
+    system,
+    brief,
+    signal,
+    count,
+  }: Pick<Turn, "env" | "system" | "brief" | "signal" | "count">,
   model: string
 ): Promise<unknown> => {
   const call: ModelCall<unknown> = {
@@ -367,7 +429,7 @@ const unheard = (): void => undefined;
  * page's to try again.
  */
 const holdTurn = async (held: Turn): Promise<void> => {
-  const { turn, quick, careful, send } = held;
+  const { turn, quick, careful, send, requestId } = held;
   let early = false;
   let steered = false;
   let notes: Promise<Settled> | null = null;
@@ -416,23 +478,26 @@ const holdTurn = async (held: Turn): Promise<void> => {
     throw written.error;
   }
   const noted = written?.value ?? {};
-  const last = turn.lines.findLast(({ from }) => from === "person");
-  send({
-    turn: checkedTurn(
-      { ...line, ...(typeof noted === "object" ? noted : {}) },
-      {
-        answer: last?.text ?? "",
-        known: turn.facts.map(({ id }) => id),
-        phase: turn.phase,
-      }
-    ),
-  });
+  const { turn: checked, dropped } = checkedTurn(
+    { ...line, ...(typeof noted === "object" ? noted : {}) },
+    {
+      answers: turn.lines.filter(({ from }) => from === "person"),
+      known: turn.facts.map(({ id }) => id),
+      phase: turn.phase,
+    }
+  );
+  // What he wrote down and was left out used to go unseen: how many and
+  // why, so a model that quotes badly shows. Never the words.
+  if (dropped.unknownTag + dropped.noText + dropped.notSaid > 0) {
+    log.info("interview.notes_dropped", { requestId, ...dropped });
+  }
+  send({ turn: checked });
 };
 
 const encoder = new TextEncoder();
 
 /** The organization's name, as Stephen is told it. */
-const companyOf = async (env: Env): Promise<string> => {
+export const companyOf = async (env: Env): Promise<string> => {
   const { name } = await readOrganization(env);
   return name;
 };
@@ -514,6 +579,7 @@ export const turnStream = async ({
         env,
         turn,
         context,
+        requestId,
         system,
         brief: briefOf(turn, context, name),
         quick,

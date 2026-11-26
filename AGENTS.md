@@ -17,8 +17,8 @@ One codebase, deployed once per client into the client's own Cloudflare account 
 | `packages/ui` | `@grasp-os/ui`: Damsko, Grasp's design system (github.com/grasplabs/damsko), installed as source from its registry: StyleX on UI SDK. `apps/web` and `apps/admin` move to it |
 | `packages/app-kit` | `@grasp-os/app-kit`: the component kit for App pages (shadcn on Base UI, Tailwind v4), still used by `apps/web`, `apps/admin` and `apps/docs` for now |
 | `packages/compiler` | `@grasp-os/compiler`: builds and checks App code and pages |
-| `packages/connectors/*` | Native MCP servers, loaded by connect |
-| `packages/connector-kit` | `@grasp-os/connector-kit`: how a native connector is written (manifest, tools, MCP server) |
+| `packages/connectors/*` | Native MCP servers, loaded by connect, each written with `@grasp-os/sdk/connector` (implemented in `@grasp-os/runtime/connector`) |
+| `packages/connector-kit` | `@grasp-os/connector-kit`: the old Zod `defineTool` and `defineConnector`, kept for the Google Workspace and Microsoft 365 connectors until they move to the SDK (GRA-2323, GRA-2324); deleted in GRA-2329 |
 | `packages/shared` | `@grasp-os/shared`: types and Zod schemas |
 | `scripts` | Repo tooling, run by Node directly (TypeScript, no build step) |
 

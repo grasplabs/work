@@ -388,7 +388,6 @@ const styles = stylex.create({
     fontWeight: font.weightMedium,
     color: colors.foreground,
     overflowWrap: "anywhere",
-    textWrap: "pretty",
   },
   description: {
     margin: 0,

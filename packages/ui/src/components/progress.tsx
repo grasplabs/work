@@ -223,6 +223,7 @@ const styles = stylex.create({
     "--progress-line-sign": { default: "1", ":dir(rtl)": "-1" },
     height: "100%",
     borderRadius: "inherit",
+    cornerShape: "inherit",
     // How far unknown, the light below draws it; only forced colours keep this solid third.
     backgroundColor: {
       default: progressVars.color,

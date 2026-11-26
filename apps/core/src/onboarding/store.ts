@@ -24,6 +24,7 @@ import {
   isErased,
   onlyForAsking,
   participationNotice,
+  readBackOrder,
   sharedWithTeam,
 } from "@grasp-os/shared/interview-links";
 import type {
@@ -249,6 +250,7 @@ import { interviewBrief, setupView } from "./stephen-setup.ts";
 import { onboardingStoreName } from "./store-name.ts";
 import { checksFor, teamClaims } from "./team-claims.ts";
 import { assignWork, companyName, drawTeamMap } from "./team-map.ts";
+import { tellsHowItGoes, toldAbout, toldByEnough } from "./told-work.ts";
 import { drawWork, knownOf } from "./work-drawing.ts";
 import type { WorkBrief, WorkKnown } from "./work-drawing.ts";
 
@@ -943,10 +945,14 @@ const drawingOf = (stored: string | null): DrawnWork | null =>
  * as a drawing shows a part from the first person who told it (GRA-1749,
  * GRA-1987). The next interview asks
  * about these when they come up. Never the drawing's own open questions,
- * which the model writes from what as few as one colleague said, so they
- * could carry that colleague's words, paraphrased, into someone else's
- * interview; what fewer than five people said reaches nobody but them.
- * Only that an answer is missing is told, never what anyone answered.
+ * which its model writes from what as few as one colleague said. Beside it
+ * the interviewer is told what the team already said of the work
+ * (told-work.ts `toldAbout`): the Brain's standing drawing, which the team
+ * reads already, once two people besides the listener told how it goes.
+ * He started every interview blind and asked each person the same things
+ * again. The interviewer knows what was said, never who said it: no line
+ * is one known colleague's, no name goes with it, and he is told never to
+ * hint at one.
  */
 const unknownAnswers: readonly {
   missing: (told: Told[], routine: RoutineShows) => boolean;
@@ -1092,8 +1098,9 @@ export interface TurnContext {
   /** The piece of work Stephen learns about; empty until the team's map names it. */
   work: string;
   /**
-   * What Stephen knows beforehand: a lead's team, what earlier interviews
-   * about someone's work left open, his setup, the kickoff and the documents.
+   * What Stephen knows beforehand: a lead's team, what the team already
+   * told about someone's work (never who told it) and what earlier
+   * interviews about it left open, his setup, the kickoff and the documents.
    */
   known: string;
   /** Names and words to listen for. */
@@ -2791,10 +2798,11 @@ export class Onboarding extends DurableObject<Env> {
   }
 
   /**
-   * What the standing drawing of the piece of work `routine` shows: none
-   * standing shows nothing. Only that drawing is read, by its work's id.
+   * The standing drawing of the piece of work `routine`, as its team reads
+   * it in the Brain: none when none stands. Only that drawing is read, by
+   * its work's id.
    */
-  #routineShows(routine: string | null): RoutineShows {
+  #standingRoutine(routine: string | null): WorkflowVersionRecord | null {
     const [row] =
       routine === null
         ? []
@@ -2804,10 +2812,90 @@ export class Onboarding extends DurableObject<Env> {
             .where(and(eq(brainDrawings.workflow, routine), standingDrawing))
             .limit(1)
             .all();
-    const drawing = row === undefined ? null : brainDrawingOf(row.drawing);
-    return {
-      teamCount: drawing?.volumes.some(({ of }) => of === "team") ?? false,
-    };
+    return row === undefined ? null : brainDrawingOf(row.drawing);
+  }
+
+  /**
+   * What the team already told about the work `listener` is asked about,
+   * for their interviewer (told-work.ts). Only of work that is named to
+   * them (`#workOf`), and only once two people besides them told how it
+   * goes: with one, every line would be that one colleague's, and their
+   * teammate would know whose. What is told is the Brain's standing
+   * drawing, the parts a check backed and their team reads already, never
+   * the drawing as its model wrote it.
+   */
+  #toldTo(
+    listener: string,
+    roster: Roster,
+    {
+      work,
+      drawn,
+      standing,
+    }: {
+      work: string;
+      drawn: DrawnWork | null;
+      standing: WorkflowVersionRecord | null;
+    }
+  ): string {
+    return work !== "" &&
+      drawn !== null &&
+      standing !== null &&
+      this.#toldByOthers(drawn, listener)
+      ? toldAbout(
+          work,
+          standing,
+          roster.people.map(({ name }) => name)
+        )
+      : "";
+  }
+
+  /**
+   * Whether enough people besides `listener` told how the work they are
+   * asked about goes, the work of `drawn`, for it to be told on
+   * (`toldByEnough`). Counted by the host: among those it was drawn from,
+   * the ones asked about this same work (`askedAbout`: someone's lines are
+   * of the work their interview was about, and a doer of this work who
+   * was asked about another told that one), whose own agreed, shared lines
+   * (`drawInput`) say how work goes. Never from who the drawing's model
+   * says told a part (`told`): a line someone approved can steer it into
+   * naming everyone. It stops reading at the second.
+   *
+   * What is told on is the Brain's standing drawing, which every member of
+   * the team can read in the Brain already. This rule is about how it
+   * sounds when the interviewer says it to a teammate: "I've heard that…"
+   * of what one colleague alone told is that colleague, quoted.
+   */
+  #toldByOthers(drawn: DrawnWork, listener: string): boolean {
+    const [own] = this.#db
+      .select({ work: askedAbout.work })
+      .from(askedAbout)
+      .where(eq(askedAbout.person, listener))
+      .all();
+    if (own === undefined) {
+      return false;
+    }
+    const aboutIt = new Set(
+      this.#db
+        .select({ person: askedAbout.person })
+        .from(askedAbout)
+        .where(eq(askedAbout.work, own.work))
+        .all()
+        .map(({ person }) => person)
+    );
+    let tellers = 0;
+    for (const teller of drawn.from) {
+      if (
+        teller !== listener &&
+        aboutIt.has(teller) &&
+        tellsHowItGoes(this.drawInput(teller)?.facts ?? [])
+      ) {
+        tellers += 1;
+        if (tellers >= toldByEnough) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   #contextOf(
@@ -2829,14 +2917,18 @@ export class Onboarding extends DurableObject<Env> {
           )
         : [];
     const teamName = team?.name ?? "";
+    const work = kind === "lead" ? "" : this.#workOf(person.id);
+    const drawn = kind === "lead" ? null : this.#drawingAskedOf(person.id);
+    const standing = kind === "lead" ? null : this.#standingRoutine(routine);
     const known = [
       ...(kind === "lead" ? teamKnown(person.name, teamName, members) : []),
+      this.#toldTo(person.id, roster, { work, drawn, standing }),
       ...(kind === "lead"
         ? []
-        : stillUnknown(
-            this.#drawingAskedOf(person.id),
-            this.#routineShows(routine)
-          )),
+        : stillUnknown(drawn, {
+            teamCount:
+              standing?.volumes.some(({ of }) => of === "team") ?? false,
+          })),
       ...(kind === "lead" ? [] : this.#insteadKnown(person)),
       this.interviewBrief(),
       this.documentsBrief(teamName),
@@ -2854,7 +2946,7 @@ export class Onboarding extends DurableObject<Env> {
       name: firstName(person.name),
       team: teamName,
       lead: lead === undefined ? null : firstName(lead.name),
-      work: kind === "lead" ? "" : this.#workOf(person.id),
+      work,
       known: known.join("\n\n"),
       terms: [...new Set(terms)],
     };
@@ -4524,6 +4616,50 @@ export class Onboarding extends DurableObject<Env> {
     if (audited) {
       this.#deliverAudit();
     }
+  }
+
+  /**
+   * Holds `seconds` of a live voice session (voice.ts) against `who`'s
+   * listening today, in one write, only when all of them fit `budget`:
+   * sessions opened side by side each find what the others held. The day
+   * they are held on, to give them back on; null, holding nothing, when
+   * they don't fit.
+   */
+  reserveListening(
+    who: string,
+    seconds: number,
+    budget: number,
+    now: string = new Date().toISOString()
+  ): string | null {
+    return this.ctx.storage.transactionSync(() => {
+      if (this.voiceSaid(who, now) + seconds > budget) {
+        return null;
+      }
+      const day = now.slice(0, 10);
+      this.#db.delete(voiceUse).where(lt(voiceUse.day, day)).run();
+      this.#db
+        .insert(voiceUse)
+        .values({ who, day, seconds })
+        .onConflictDoUpdate({
+          target: [voiceUse.who, voiceUse.day],
+          set: { seconds: sql`${voiceUse.seconds} + ${seconds}` },
+        })
+        .run();
+      return day;
+    });
+  }
+
+  /**
+   * Gives back what `reserveListening` held on `day` for a session that
+   * never opened: Mistral refused it, so nothing was listened to. On that
+   * day alone: one held before midnight never takes from the next.
+   */
+  releaseListening(who: string, seconds: number, day: string): void {
+    this.#db
+      .update(voiceUse)
+      .set({ seconds: sql`max(0, ${voiceUse.seconds} - ${seconds})` })
+      .where(and(eq(voiceUse.who, who), eq(voiceUse.day, day)))
+      .run();
   }
 
   /**
@@ -10414,7 +10550,9 @@ export class Onboarding extends DurableObject<Env> {
   /**
    * Someone's interview as they read it back, and staff: whether they
    * read what this is (`told`) and which facts they agreed to (`agreed`)
-   * as this store holds them, never as the page last said.
+   * as this store holds them, never as the page last said; and their
+   * place in the read-back only when it was kept under the order its
+   * parts are read in now (`readBackOrder`).
    */
   #forSpeaker(
     person: string,
@@ -10427,6 +10565,10 @@ export class Onboarding extends DurableObject<Env> {
     const approved = this.#approvedOf(person);
     return {
       ...progress,
+      // A place in the read-back kept under another order of its parts
+      // points at another page: the read-back starts over, under this one.
+      confirmed: progress.readBack === readBackOrder ? progress.confirmed : 0,
+      readBack: readBackOrder,
       told: this.#participating(person) === null,
       facts: progress.facts.map(({ agreed: _agreed, ...fact }) => {
         const revision = revisions.get(fact.id);

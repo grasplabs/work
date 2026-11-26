@@ -10,7 +10,7 @@ import {
  * attacker's would. `rateLimit403` makes Google refuse the next request as
  * Drive and Calendar do when they rate limit.
  */
-import { egressHeader } from "@grasp-os/connector-kit/manifest";
+import { egressHeader } from "@grasp-os/runtime/connector";
 import { beforeEach } from "vite-plus/test";
 import { z } from "zod";
 

@@ -191,7 +191,7 @@ export interface InlineCitationSourceProps {
   /** Its title, as the source calls itself ("Linking and navigating"). */
   title?: string;
   /**
-   * Where it lives: an http, https or mailto address, linked by its host in a new tab. Any other
+   * Where it lives: an http, https, mailto or tel address, linked by its host in a new tab. Any other
    * (`javascript:`, `data:`, a path) is shown as its words, not a link.
    */
   url?: string;
@@ -227,6 +227,7 @@ const styles = stylex.create({
   // Lit while the pointer is on the citation, or focus is on its chip.
   text: {
     borderRadius: radius.xs,
+    cornerShape: radius.shape,
     backgroundColor: {
       default: "transparent",
       [stylex.when.ancestor(":focus-within")]: colors.accent,

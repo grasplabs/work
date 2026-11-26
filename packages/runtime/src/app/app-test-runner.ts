@@ -3,7 +3,6 @@ import { messageOf } from "@grasp-os/shared/errors";
 import { isRecord } from "@grasp-os/shared/json";
 import type { ReadRequest, WriteRequest } from "@grasp-os/shared/store-reads";
 
-import type { SchemaDefinition } from "../common/schema-types.ts";
 import { followed } from "./app-test-follow.ts";
 import {
   TestAssertionError,
@@ -32,6 +31,7 @@ import type {
 import { GraspError } from "./client-error.ts";
 import { databaseWriter } from "./database-writer.ts";
 import type { ReferenceKind } from "./function-references.ts";
+import type { SchemaDefinition } from "./schema-types.ts";
 import type { AnyTables } from "./server-function.ts";
 
 /** What `t.run` waits for before it begins: nobody to register. */

@@ -972,7 +972,8 @@ const declarationOf = (source: string): string =>
  * links in node_modules would be a library's, which emits nothing.
  */
 const emitOwnDeclarations = (
-  specifiers: readonly string[]
+  specifiers: readonly string[],
+  replaced: Readonly<Record<string, string>>
 ): Map<string, string> => {
   const entry = path.join(root, "kit-declarations.ts");
   const config = path.join(root, "kit-declarations.tsconfig.json");
@@ -983,6 +984,7 @@ const emitOwnDeclarations = (
   const [error] = tsrs(
     diskHost(
       {
+        ...replaced,
         [entry]: importingSources(specifiers),
         [config]: JSON.stringify({
           compilerOptions: {
@@ -1089,13 +1091,14 @@ const ownDeclarations = (declarations: Map<string, string>): RolldownPlugin => {
  * kit's types.
  */
 const rollUpTypes = async (
-  specifiers: readonly string[]
+  specifiers: readonly string[],
+  replaced: Readonly<Record<string, string>>
 ): Promise<Record<string, string>> => {
   const own = specifiers.filter((specifier) => ownModuleOf(specifier));
   const entries = new Map(
     own.map((specifier) => [specifier, declarationOf(kitSourceOf(specifier))])
   );
-  const declarations = emitOwnDeclarations(own);
+  const declarations = emitOwnDeclarations(own, replaced);
   const bundle = await rolldown({
     input: Object.fromEntries(
       [...entries.values()].map((file) => [chunkPathOf(file), file])
@@ -1278,7 +1281,8 @@ const resolveKitType = (
  */
 const typeChunks = async (
   sources: Readonly<Record<string, string>>,
-  specifiers: readonly string[]
+  specifiers: readonly string[],
+  replaced: Readonly<Record<string, string>>
 ): Promise<KitTypes> => {
   const libraries = Object.fromEntries(
     Object.entries(sources).filter(
@@ -1288,7 +1292,7 @@ const typeChunks = async (
         )
     )
   );
-  const files = { ...libraries, ...(await rollUpTypes(specifiers)) };
+  const files = { ...libraries, ...(await rollUpTypes(specifiers, replaced)) };
   const { read, error } = readByKit(files, specifiers);
   if (error !== undefined) {
     throw new Error(
@@ -1694,7 +1698,9 @@ const pruneReleases = (assets: string): void => {
  */
 const buildAppCompiler = async (
   assets: string,
-  versionModule: string
+  versionModule: string,
+  /** Own sources whose declarations are emitted from this text instead. */
+  replaced: Readonly<Record<string, string>>
 ): Promise<void> => {
   // The kit's sources compile on oxc.wasm, as App code does.
   startOxc(await oxcWasmModule());
@@ -1767,7 +1773,9 @@ const buildAppCompiler = async (
     colors: await themeColors(stylesheets),
   };
   const kitJson = JSON.stringify(kit);
-  const typesJson = JSON.stringify(await typeChunks(typeSources, typed));
+  const typesJson = JSON.stringify(
+    await typeChunks(typeSources, typed, replaced)
+  );
   const compiler = await buildCompiler();
   const ultracite = await buildUltracite();
   const packageBuilder = await buildPackageBuilder();
@@ -1842,13 +1850,25 @@ const buildAppCompiler = async (
   );
 };
 
-// `node build.ts [assets] [version module]`: core's build runs this with
-// its own static assets directory, core's tests with theirs and a version
-// module of their own, and the dev watcher (watch.ts) as core's build does.
+// `node build.ts [assets] [version module] [connector catalog]`: core's
+// build runs this with its own static assets directory, core's tests with
+// theirs, a version module of their own and a connector catalog of their
+// own (test/global-setup.ts), and the dev watcher (watch.ts) as core's
+// build does. The catalog is a file of `connector-catalog.gen.ts`'s
+// source, whose declarations App code is then checked against in place of
+// the runtime's: a release's are always the runtime's own.
 // One at a time per assets directory: the lock is taken before any source
 // is read and held until the version is written and old releases are gone.
 const assets = process.argv[2] ?? path.join(dist, "assets");
 const versionModule = process.argv[3] ?? releaseVersionModule;
+const testCatalog = process.argv.at(4);
 await withBuildLock(assets, async () => {
-  await buildAppCompiler(assets, versionModule);
+  const replaced =
+    testCatalog === undefined
+      ? {}
+      : {
+          [path.join(runtime, "src/app/connector-catalog.gen.ts")]:
+            readText(testCatalog),
+        };
+  await buildAppCompiler(assets, versionModule, replaced);
 });

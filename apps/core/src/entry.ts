@@ -9,7 +9,10 @@ import {
   brainReportPath,
 } from "@grasp-os/shared/brain-report";
 import { channelPlatformOf } from "@grasp-os/shared/channels";
-import { connectionCallbackPath } from "@grasp-os/shared/connect";
+import {
+  connectionCallbackPath,
+  connectorClientMetadataPath,
+} from "@grasp-os/shared/connect";
 import { devInterviewLinkPath, devResetPath } from "@grasp-os/shared/dev-reset";
 import { errorReportPath } from "@grasp-os/shared/error-reports";
 import { internalErrors, requestErrors } from "@grasp-os/shared/errors";
@@ -21,6 +24,7 @@ import {
 } from "@grasp-os/shared/interview-links";
 import { interviewStoryPath } from "@grasp-os/shared/interview-story";
 import { interviewTurnPath } from "@grasp-os/shared/interview-turn";
+import { interviewVoicePath } from "@grasp-os/shared/interview-voice";
 import { labPath } from "@grasp-os/shared/lab";
 import { errorFields, log } from "@grasp-os/shared/log";
 import type { LogFields } from "@grasp-os/shared/log";
@@ -62,6 +66,7 @@ import { chatFileResponse } from "./chat-file-route.ts";
 import { ensureClockOnce } from "./clock.ts";
 import {
   catalogLogoResponse,
+  clientMetadataResponse,
   handleConnectionCallback,
   isCatalogLogoPath,
 } from "./connections.ts";
@@ -81,6 +86,7 @@ import { speechResponse } from "./onboarding/speech.ts";
 import { interviewStoryResponse } from "./onboarding/story.ts";
 import { onboardingSummaryResponse } from "./onboarding/summary.ts";
 import { transcriptionResponse } from "./onboarding/transcription.ts";
+import { interviewVoiceResponse } from "./onboarding/voice.ts";
 import { logoResponse } from "./organization-logo.ts";
 import { pageCallRoute } from "./page-calls.ts";
 import { pageFrameResponse, pageModuleResponse } from "./page-frame.ts";
@@ -214,7 +220,9 @@ const frontendResponse = async (
  * interview-caller.ts); its lines are said at the speech endpoint, also for an admin signed in
  * (src/onboarding/speech.ts), and what they say is written down over a
  * WebSocket, which also takes a member's dictation
- * (src/onboarding/transcription.ts).
+ * (src/onboarding/transcription.ts). An interview held as one live voice
+ * session is opened, written down and closed at its own route
+ * (src/onboarding/voice.ts).
  */
 const linkResponse = async (
   pathname: string,
@@ -228,6 +236,9 @@ const linkResponse = async (
   }
   if (pathname === interviewTurnPath) {
     return await interviewTurnResponse(request, env, requestId, ctx);
+  }
+  if (pathname === interviewVoicePath) {
+    return await interviewVoiceResponse(request, env, requestId, ctx);
   }
   if (pathname === interviewStoryPath) {
     return await interviewStoryResponse(request, env, requestId, ctx);
@@ -287,6 +298,9 @@ const connectionRouteResponse = async (
       };
       ctx.waitUntil(carryOn());
     });
+  }
+  if (pathname === connectorClientMetadataPath) {
+    return clientMetadataResponse(request, env);
   }
   if (isCatalogLogoPath(pathname)) {
     return await catalogLogoResponse(request, env, pathname, requestId);

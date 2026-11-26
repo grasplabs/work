@@ -382,6 +382,7 @@ const fieldKinds: Record<
   model: "other",
   schedule: "other",
   template: "other",
+  json: "other",
 };
 
 /** A field's kind, as a person picks it, with what it takes (`FieldType`). */
@@ -397,6 +398,11 @@ const fieldTypeOf = (type: ValueDescriptor): FieldType => {
     };
   }
   if (type.kind === "string") {
+    // A format other than email is edited in code alone: the editor's
+    // kinds have no place for it, and would drop it.
+    if (type.datetime === true || type.date === true || type.url === true) {
+      return { kind: "other" };
+    }
     return {
       kind: type.email ? "email" : "text",
       trim: type.trim,

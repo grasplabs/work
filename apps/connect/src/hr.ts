@@ -17,7 +17,7 @@ import { requestBudget, SourceError } from "./event-kinds.ts";
 import type { ProviderAccess } from "./event-kinds.ts";
 import { hibobPeople } from "./hibob.ts";
 import type { HibobPerson } from "./hibob.ts";
-import { credentialFor } from "./tokens.ts";
+import { credentialFor, pausedWait } from "./tokens.ts";
 
 // The HR platform's reads (GRA-371): who leads which team, from the
 // company's HR platform, with its connection's key, which stays here.
@@ -105,6 +105,10 @@ const hrCredential = async (env: Env, connectionId: string) => {
   } catch (error) {
     if (connectErrors.codeOf(error) === "connect.connection_inactive") {
       throw hrErrors.create("hr.inactive");
+    }
+    const paused = pausedWait(error);
+    if (paused !== undefined) {
+      throw hrErrors.create("hr.throttled", paused);
     }
     if (connectionErrors.codeOf(error) !== undefined) {
       throw hrErrors.create("hr.provider_failed");

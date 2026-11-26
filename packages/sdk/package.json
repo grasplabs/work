@@ -10,7 +10,8 @@
     "./server": "./src/server.ts",
     "./react": "./src/react.ts",
     "./workflow": "./src/workflow.ts",
-    "./testing": "./src/testing.ts"
+    "./testing": "./src/testing.ts",
+    "./connector": "./src/connector.ts"
   },
   "dependencies": {
     "@grasp-os/runtime": "workspace:*"

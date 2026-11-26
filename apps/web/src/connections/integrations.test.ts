@@ -148,10 +148,7 @@ describe("filters, search and sections", () => {
   const [microsoft, google, hubspot] = integrationsOf(
     [
       entry("microsoft", ["Email"], { group: "Email and calendar" }),
-      entry("google", ["Email"], {
-        group: "Email and calendar",
-        description: "Mail and files from Google.",
-      }),
+      entry("google", ["Email"], { group: "Email and calendar" }),
       entry("hubspot", ["CRM"], { group: "CRM" }),
     ],
     [connection("google", "personal", "needs_reauth")]
@@ -176,8 +173,10 @@ describe("filters, search and sections", () => {
 
   it("finds by name before what an app is for, whatever the case", () => {
     expect(find(all, "GOO").map(({ id }) => id)).toStrictEqual(["google"]);
-    expect(find(all, "files").map(({ id }) => id)).toStrictEqual(["google"]);
-    // Google by its name, Microsoft only by its kind (Email).
+    expect(find(all, "sharepoint").map(({ id }) => id)).toStrictEqual([
+      "microsoft",
+    ]);
+    // Google by its name, Microsoft by its kind and what it is for.
     expect(find(all, "e").map(({ id }) => id)).toStrictEqual([
       "google",
       "microsoft",

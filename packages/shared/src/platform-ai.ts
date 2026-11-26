@@ -15,6 +15,8 @@ export const platformAiFeatures = [
   "speech",
   /** The onboarding interview's own turns: its lines, and what it writes down. */
   "interview",
+  /** An interview held as one live voice session (Mistral's voice agents). */
+  "conversation",
   /**
    * Not a feature of Grasp's: the organization's own AI, where it runs on
    * Grasp's key (`graspAi`, @grasp-os/shared/ai-providers). Grasp pays the

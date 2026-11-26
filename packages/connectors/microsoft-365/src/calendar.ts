@@ -1,10 +1,6 @@
-import {
-  defineTool,
-  invalidCode,
-  ToolError,
-} from "@grasp-os/connector-kit/connector";
+import { defineTool } from "@grasp-os/connector-kit/connector";
 import type { Effect } from "@grasp-os/connector-kit/connector";
-import { segment } from "@grasp-os/connector-kit/provider";
+import { invalidCode, segment, ToolError } from "@grasp-os/runtime/connector";
 import { z } from "zod";
 
 import {
@@ -561,8 +557,8 @@ const weekdays = [
 
 /** Working hours when the call names none: Monday to Friday, 9 to 5. */
 const defaultWorkingHours = {
-  from: "09:00",
-  to: "17:00",
+  start: "09:00",
+  end: "17:00",
   days: ["monday", "tuesday", "wednesday", "thursday", "friday"],
 } as const;
 
@@ -662,7 +658,7 @@ const workingStretches = (
   start: number,
   end: number,
   timeZone: string,
-  hours: { from: string; to: string; days: readonly string[] }
+  hours: { start: string; end: string; days: readonly string[] }
 ): { start: number; end: number }[] => {
   const stretches: { start: number; end: number }[] = [];
   const firstDay = Date.parse(`${wallClockOf(start, timeZone).slice(0, 10)}Z`);
@@ -670,11 +666,11 @@ const workingStretches = (
     const weekday = weekdays[new Date(day).getUTCDay()] ?? "sunday";
     if (hours.days.includes(weekday)) {
       const from = Math.max(
-        momentOf(`${dayOf(day).slice(0, 10)}T${hours.from}`, timeZone),
+        momentOf(`${dayOf(day).slice(0, 10)}T${hours.start}`, timeZone),
         start
       );
       const to = Math.min(
-        momentOf(`${dayOf(day).slice(0, 10)}T${hours.to}`, timeZone),
+        momentOf(`${dayOf(day).slice(0, 10)}T${hours.end}`, timeZone),
         end
       );
       if (to > from) {
@@ -720,8 +716,8 @@ const freeTime = defineTool({
       .max(24 * 60),
     workingHours: z
       .strictObject({
-        from: timeOfDaySchema,
-        to: timeOfDaySchema,
+        start: timeOfDaySchema,
+        end: timeOfDaySchema,
         days: z.array(z.enum(weekdays)).min(1).max(weekdays.length),
       })
       .optional(),
@@ -759,7 +755,7 @@ const freeTime = defineTool({
       );
     }
     const hours = workingHours ?? defaultWorkingHours;
-    if (hours.to <= hours.from) {
+    if (hours.end <= hours.start) {
       throw new ToolError("Working hours must end after they start", {
         code: invalidCode,
       });

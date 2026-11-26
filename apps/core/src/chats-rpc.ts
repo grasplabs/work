@@ -274,6 +274,7 @@ const summaryOfMade = (chat: Chat): ChatSummary => ({
   createdAt: chat.createdAt.toISOString(),
   lastAt: chat.lastAt.toISOString(),
   running: false,
+  unread: false,
   make: makeOf(chat),
   archived: chat.archivedAt !== null,
 });
@@ -511,6 +512,16 @@ export class ChatsRpc extends CoreRpcTarget implements ChatsApi {
         actorOf(person)
       );
     });
+  }
+
+  async markRead(chatId: string): Promise<number | null> {
+    // Only the signed-in person's own object, and only their chat in it:
+    // nobody moves where another person has read to.
+    return await withPerson(
+      this.#check,
+      async ({ userId }) =>
+        await this.#chatsOf(userId).markChatRead(chatIdOf(chatId), userId)
+    );
   }
 
   async archive(chatId: string): Promise<void> {

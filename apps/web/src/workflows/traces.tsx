@@ -17,6 +17,7 @@ import {
   Item,
   ItemContent,
   ItemDescription,
+  ItemGroup,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
 import {
@@ -55,7 +56,6 @@ import { ItemTest } from "./item-test.tsx";
 import { ListedCount } from "./listed-count.tsx";
 import { WorkflowRunsTable } from "./resource-runs.tsx";
 import { SectionCard } from "./section-card.tsx";
-import { SeparatedItems } from "./separated-items.tsx";
 import { WorkflowDiagramView } from "./workflow-diagram.tsx";
 
 // A workflow's Traces, for its builders (prototype `inside-traces.tsx`):
@@ -304,22 +304,18 @@ const ActivityList = ({
   });
   return (
     <SectionCard aria-label={label} flush>
-      <SeparatedItems
-        aria-label={label}
-        rows={activity.data.map((row) => ({
-          key: activityKey(row),
-          row: (
-            <Item size="sm">
-              <ItemContent>
-                <ItemTitle>{activityText(row, names)}</ItemTitle>
-                <ItemDescription>
-                  <time dateTime={row.at}>{formatDateTime(row.at)}</time>
-                </ItemDescription>
-              </ItemContent>
-            </Item>
-          ),
-        }))}
-      />
+      <ItemGroup separated aria-label={label}>
+        {activity.data.map((row) => (
+          <Item key={activityKey(row)} size="sm">
+            <ItemContent>
+              <ItemTitle>{activityText(row, names)}</ItemTitle>
+              <ItemDescription>
+                <time dateTime={row.at}>{formatDateTime(row.at)}</time>
+              </ItemDescription>
+            </ItemContent>
+          </Item>
+        ))}
+      </ItemGroup>
     </SectionCard>
   );
 };

@@ -6,6 +6,7 @@ import {
   ItemActions,
   ItemContent,
   ItemDescription,
+  ItemGroup,
   ItemMedia,
   ItemTitle,
 } from "@grasp-os/ui/components/item";
@@ -30,7 +31,6 @@ import { colors, size, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 
-import { SeparatedItems } from "../../workflows/separated-items.tsx";
 import { AgentMark } from "../figure/agent-mark.tsx";
 import { ChoiceCards } from "./choice-cards.tsx";
 import { frequencies } from "./model.ts";
@@ -347,26 +347,23 @@ export const ScheduleStep = ({ setup, change, name }: StepProps) => {
               <Heading level={2} size="2xs">
                 {t`Next times`}
               </Heading>
-              <SeparatedItems
-                rows={runs.map((run) => ({
-                  key: run.toISOString(),
-                  row: (
-                    <Item key={run.toISOString()} size="sm">
-                      <ItemMedia variant="default">
-                        <Icon icon={CalendarIcon} />
-                      </ItemMedia>
-                      <ItemContent>
-                        <ItemTitle>{dated.format(run)}</ItemTitle>
-                      </ItemContent>
-                      <ItemActions>
-                        <Text size="sm" color="muted">
-                          {time}
-                        </Text>
-                      </ItemActions>
-                    </Item>
-                  ),
-                }))}
-              />
+              <ItemGroup separated>
+                {runs.map((run) => (
+                  <Item key={run.toISOString()} size="sm">
+                    <ItemMedia variant="default">
+                      <Icon icon={CalendarIcon} />
+                    </ItemMedia>
+                    <ItemContent>
+                      <ItemTitle>{dated.format(run)}</ItemTitle>
+                    </ItemContent>
+                    <ItemActions>
+                      <Text size="sm" color="muted">
+                        {time}
+                      </Text>
+                    </ItemActions>
+                  </Item>
+                ))}
+              </ItemGroup>
             </span>
           )}
           <span {...stylex.props(styles.part)}>

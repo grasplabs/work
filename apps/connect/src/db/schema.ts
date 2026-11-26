@@ -35,8 +35,10 @@ export interface ReaderGroupsReading {
 
 /**
  * One connection to an outside system, and the MCP server that carries out
- * its actions: a native connector of ours (`server` names it) or a Composio
- * server scoped to one toolkit (`server` is its HTTPS URL).
+ * its actions: a native connector of ours (`server` names it), a connector
+ * made from an MCP server's URL (`server` and `provider` are its ID in
+ * `connectors`), or a Composio server scoped to one toolkit (`server` is
+ * its HTTPS URL).
  *
  * A personal connection is one person's own account: only calls acting for
  * `owner_user_id` may use it. A shared one (a service account or an
@@ -59,9 +61,16 @@ export const connections = sqliteTable(
      * itself, to `server`, its origin (`http_connections`).
      */
     serverKind: text("server_kind", {
-      enum: ["native", "composio", "http"],
+      enum: ["native", "composio", "http", "connector"],
     }).notNull(),
     server: text().notNull(),
+    /**
+     * For a shared connection reached through the company network, the
+     * one address its requests go to, as an origin (company-network.ts).
+     * The address its key is sealed with is what routes them; this is
+     * what is shown of it.
+     */
+    companyNetwork: text("company_network"),
     /**
      * For an OAuth connection: the organization's tenant at the provider,
      * the account in it (its stable subject, such as an Entra object ID)
@@ -185,6 +194,21 @@ export const connections = sqliteTable(
      * answer may still land there; null for one not yet tried.
      */
     toolsSyncRetryAt: timestamp("tools_sync_retry_at"),
+    /**
+     * For a connection to a connector made from a URL: when its server's
+     * tool list was last read (`connection_tools`), and until when that
+     * read is fresh, as the server's `ttlMs` said, a minute at least and
+     * an hour at most. Null until the first read.
+     */
+    toolListReadAt: timestamp("tool_list_read_at"),
+    toolListFreshUntil: timestamp("tool_list_fresh_until"),
+    /**
+     * When connect last started reading that list after an answer, as it
+     * does for a stale one, whether the read worked or not: the next such
+     * read waits a while (mcp-connectors.ts `refreshLater`). Null until
+     * the first.
+     */
+    toolListTriedAt: timestamp("tool_list_tried_at"),
     createdAt: timestamp("created_at").notNull(),
     updatedAt: timestamp("updated_at").notNull(),
   },
@@ -210,6 +234,112 @@ export const connections = sqliteTable(
     // Offboarding disconnects a removed person's personal connections.
     index("connections_owner_user_id_idx").on(table.ownerUserId),
   ]
+);
+
+/**
+ * A connector made from an MCP server's URL (GRA-1375): the one-line
+ * `defineConnector({ name, mcp: { url } })`, kept as its parts until the
+ * SDK's connector entry holds it (GRA-1374), with how connect signs in to
+ * its server. Never edited: another URL, or a server that moved its sign-in
+ * elsewhere, is another connector (src/mcp-connectors.ts).
+ *
+ * `url` is the server's own URL, exactly as its protected-resource
+ * metadata names it: the only address a request with a token goes to, and
+ * the `resource` every token is asked for. A server that signs in with
+ * OAuth (`auth = 'oauth'`) has the authorization server its metadata
+ * named (`issuer`), that server's endpoints as its own metadata gave them,
+ * and the client connect registered there or the admin entered, bound to
+ * that issuer: `client_secret` sealed for this connector and issuer, and
+ * null for a public client. One that takes a fixed key (`auth = 'header'`)
+ * has the header it goes in; each connection keeps its own key.
+ */
+export const connectors = sqliteTable(
+  "connectors",
+  {
+    id: text().primaryKey(),
+    name: text().notNull(),
+    /** The server's URL, as the URL parser writes it. */
+    url: text().notNull(),
+    /**
+     * The `resource` its metadata names (RFC 9728), the same URL as the
+     * server's spelled as the server spells it: what its sign-in asks
+     * tokens for (RFC 8707). None for a key.
+     */
+    resource: text(),
+    auth: text({ enum: ["oauth", "header"] }).notNull(),
+    /** The header a key goes in, in lower case. */
+    header: text(),
+    /**
+     * Whether its server sits inside the company's own network, reached
+     * through the company network at its URL's origin alone
+     * (company-network.ts).
+     */
+    companyNetwork: integer("company_network", { mode: "boolean" }),
+    issuer: text(),
+    authorizationEndpoint: text("authorization_endpoint"),
+    tokenEndpoint: text("token_endpoint"),
+    revocationEndpoint: text("revocation_endpoint"),
+    /** The scopes asked for, space-separated, as the server named them. */
+    scopes: text(),
+    /** Whether the issuer said its answers carry `iss` (RFC 9207). */
+    issParameter: integer("iss_parameter", { mode: "boolean" }),
+    registration: text({
+      enum: ["dynamic", "metadata_document", "preregistered"],
+    }),
+    clientId: text("client_id"),
+    clientSecret: text("client_secret"),
+    clientAuthentication: text("client_authentication", {
+      enum: ["none", "client_secret_post", "client_secret_basic"],
+    }),
+    createdBy: text("created_by").notNull(),
+    createdAt: timestamp("created_at").notNull(),
+  },
+  (table) => [uniqueIndex("connectors_url_idx").on(table.url)]
+);
+
+/**
+ * The tools an admin blocked on a connector made from a URL, by the name
+ * its server lists them under: offered to nobody, and refused at the call
+ * before anything goes out (src/mcp-connectors.ts). A name may be blocked
+ * before any list holds it.
+ */
+export const connectorBlockedTools = sqliteTable(
+  "connector_blocked_tools",
+  {
+    connectorId: text("connector_id")
+      .notNull()
+      .references(() => connectors.id),
+    name: text().notNull(),
+    blockedBy: text("blocked_by").notNull(),
+    blockedAt: timestamp("blocked_at").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.connectorId, table.name] })]
+);
+
+/**
+ * The tools a connector's server listed for a connection at its last read
+ * (`connections.tool_list_read_at`), each replaced whole by the next read:
+ * what a call of it is checked against, what its class is computed from
+ * (src/tool-rules.ts), and its description, kept for tool search. Only
+ * tools whose schemas passed the checks are kept; a tool the server listed
+ * twice isn't. `input_schema` and `output_schema` are JSON text, and
+ * `annotations` the hints the rules read.
+ */
+export const connectionTools = sqliteTable(
+  "connection_tools",
+  {
+    connectionId: text("connection_id")
+      .notNull()
+      .references(() => connections.id),
+    name: text().notNull(),
+    description: text(),
+    inputSchema: text("input_schema").notNull(),
+    outputSchema: text("output_schema"),
+    annotations: text({ mode: "json" })
+      .$type<{ readOnlyHint?: boolean; destructiveHint?: boolean }>()
+      .notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.connectionId, table.name] })]
 );
 
 /**
@@ -579,6 +709,13 @@ export const connectionTokens = sqliteTable("connection_tokens", {
   refreshUntil: timestamp("refresh_until"),
   grantedScopes: text("granted_scopes"),
   updatedAt: timestamp("updated_at").notNull(),
+  /**
+   * Until when the connection's vendor asked for no more calls: every call
+   * that reads the connection's credential before then is refused, as
+   * `connect.rate_limited`, and never reaches the vendor (tokens.ts
+   * `pauseFor`). Null until it first asks.
+   */
+  pausedUntil: timestamp("paused_until"),
 });
 
 /**

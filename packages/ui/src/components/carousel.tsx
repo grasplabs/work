@@ -176,9 +176,16 @@ const styles = stylex.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: space["3"],
+    // Each control's touch target reaches the middle of the gap to the next (tapTarget).
+    "--tap-room-inline": `calc(${space["3"]} / 2)`,
     minWidth: 0,
   },
-  steps: { display: "flex", gap: space["2"], marginInlineStart: "auto" },
+  steps: {
+    display: "flex",
+    gap: space["2"],
+    marginInlineStart: "auto",
+    "--tap-room-inline": `calc(${space["2"]} / 2)`,
+  },
   dots: {
     display: "flex",
     flexWrap: "wrap",

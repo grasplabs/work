@@ -4,8 +4,9 @@
  * out lands here, where tests read it back. The provider answers what the
  * sample connector asks, and the probes' special cases (a redirect, a flood
  * of bytes); any other host takes whatever it is sent, as an attacker's
- * would. Tests can have it rate limit its next writes (`rateLimited`), and
- * fail its next reads (`failingReads`).
+ * would. Tests can have it rate limit its next writes (`rateLimited`),
+ * fail its next reads (`failingReads`), and hold its next reads
+ * unanswered (`holdingReads`) until they answer each (`held`).
  */
 import { beforeEach } from "vite-plus/test";
 
@@ -31,6 +32,9 @@ const flood = (): ReadableStream<Uint8Array> => {
   });
 };
 
+/** How often a held read looks for its answer, in ms. */
+const heldPollMs = 5;
+
 const itemsPath = /^\/v1\/mailboxes\/(?<mailbox>[^/]+)\/items$/u;
 
 const downloadsPath = /^\/v1\/downloads\/(?<name>[^/]+)$/u;
@@ -52,7 +56,10 @@ const download = (url: URL): Response | undefined => {
   return Response.redirect(to ?? `https://${storageHost}/${name}`, 302);
 };
 
-/** The storage: a file, a flood of bytes, or a redirect of its own. */
+/**
+ * The storage: a file, a flood of bytes, a rate limit, or a redirect of
+ * its own.
+ */
 const storage = (url: URL): Response => {
   switch (url.pathname) {
     case "/flood": {
@@ -60,6 +67,13 @@ const storage = (url: URL): Response => {
     }
     case "/again": {
       return Response.redirect(`https://${storageHost}/file`, 302);
+    }
+    // Rate limited, with its reset in seconds and no Retry-After.
+    case "/limited": {
+      return new Response(null, {
+        status: 429,
+        headers: { "x-ratelimit-reset": "45" },
+      });
     }
     default: {
       return new Response("file");
@@ -121,15 +135,36 @@ export const fakeSampleApi = () => {
     written: 0,
     /** How many of the next item reads it answers 503. */
     failingReads: 0,
+    /** How many of the next item reads it holds for the test to answer. */
+    holdingReads: 0,
   };
+  /**
+   * The held reads, in the order they arrived: a test answers one by
+   * setting its status and headers. Plain values, which the request's
+   * context looks for, since neither a response nor a promise's resolver
+   * made in a test can be used in another request's context.
+   */
+  const held: { answer?: ResponseInit }[] = [];
   beforeEach(() => {
     counters.rateLimited = 0;
     counters.written = 0;
     counters.failingReads = 0;
+    counters.holdingReads = 0;
+    held.length = 0;
   });
-  const answerItems = (method: string, url: URL): Response => {
+  const answerItems = async (method: string, url: URL): Promise<Response> => {
     const isItems = itemsPath.test(url.pathname);
     const isWrite = method === "POST" && isItems;
+    if (method === "GET" && isItems && counters.holdingReads > 0) {
+      counters.holdingReads -= 1;
+      const read: { answer?: ResponseInit } = {};
+      held.push(read);
+      while (read.answer === undefined) {
+        // oxlint-disable-next-line no-await-in-loop -- waits for the test
+        await scheduler.wait(heldPollMs);
+      }
+      return new Response(null, read.answer);
+    }
     if (isWrite && counters.rateLimited > 0) {
       counters.rateLimited -= 1;
       return new Response("Too Many Requests", { status: 429 });
@@ -143,13 +178,13 @@ export const fakeSampleApi = () => {
     }
     return answer(method, url);
   };
-  const { sent } = fakeInternet((request, url) => {
+  const { sent } = fakeInternet(async (request, url) => {
     if (url.hostname === sampleHost) {
-      return answerItems(request.method, url);
+      return await answerItems(request.method, url);
     }
     return url.hostname.endsWith(".storage.test")
       ? storage(url)
       : new Response("Taken");
   });
-  return Object.assign(counters, { sent });
+  return Object.assign(counters, { sent, held });
 };

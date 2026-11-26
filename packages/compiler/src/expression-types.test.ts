@@ -349,16 +349,16 @@ describe("type-checking a workflow's expressions", () => {
     }).toStrictEqual({ fine: [], wrong: [{ code: "TS2551", column: 6 }] });
   });
 
-  it("reads a file, an amount, a schedule and an ID by the SDK's value types", () => {
+  it("reads a file, an amount, a schedule, an ID and any JSON by the SDK's value types", () => {
     const { expressions, scope: problems } = typed(
       {
         ...scope,
-        args: '{ doc: FileValue; price: MoneyValue; when: ScheduleValue; row: Id<"rows"> }',
+        args: '{ doc: FileValue; price: MoneyValue; when: ScheduleValue; row: Id<"rows">; custom: JsonValue }',
       },
       {
         fine: {
           source:
-            "args.doc.id + args.price.currency + args.when.cron + args.row + args.price.minorUnits",
+            "args.doc.id + args.price.currency + args.when.cron + args.row + args.price.minorUnits + JSON.stringify(args.custom)",
         },
         wrong: { source: "args.doc.name" },
       }

@@ -22,7 +22,13 @@ import {
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
-import { use, useEffect, useEffectEvent, useSyncExternalStore } from "react";
+import {
+  use,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useSyncExternalStore,
+} from "react";
 import type { ComponentType, ReactNode, SVGProps } from "react";
 
 import { Backdrop } from "../chat/backdrop/backdrop.tsx";
@@ -369,10 +375,13 @@ export const PageFailed = ({
   heading?: StateHeading;
   /** Whether it is the whole window: outside the frame, where nothing else stands. */
   whole?: boolean;
-  /** Whether it is being read again now: Try again waits, and the sentence goes until it is back. */
+  /** Whether it is being read again now: the sentence goes until it is back. */
   trying?: boolean;
-  /** Reads again what failed. */
-  onRetry: () => void;
+  /**
+   * Reads again what failed. Given a Promise, Try again works until it
+   * settles and says Loaded, or Not loaded when it rejects.
+   */
+  onRetry: () => Promise<void> | void;
   /** A quiet way on beside Try again: Go to Chat, Fix with Grasp. */
   wayOn?: ReactNode;
   /** Whether Grasp can be reached; the line is left out without it. */
@@ -434,8 +443,15 @@ export const PageFailed = ({
           />
         )}
         <div {...stylex.props(styles.actions)}>
-          <Button disabled={trying} onClick={onRetry}>
-            {trying ? t`Trying again…` : t`Try again`}
+          {/* Its words for each state keep their room, so the button is as
+              wide at rest as while it works (#2503's "Not loaded"). */}
+          <Button
+            errorText={t`Not loaded`}
+            loadingText={t`Trying again`}
+            onClick={onRetry}
+            successText={t`Loaded`}
+          >
+            {t`Try again`}
           </Button>
           {wayOn}
         </div>
@@ -475,6 +491,11 @@ const useCoreReach = (): CoreReach | undefined => {
   );
 };
 
+/** Loads Grasp anew, for a page whose file is gone after a new release. */
+const loadAnew = () => {
+  window.location.reload();
+};
+
 /**
  * The error, in a page that keeps its own frame, such as the Brain with
  * its navigation: the failed page (`PageFailed`) with core's reason. Try
@@ -489,6 +510,7 @@ export const ErrorState = ({
   heading = "h1",
   reload = false,
   again,
+  reread,
 }: {
   reason: string | undefined;
   /** What failed; "This page didn't load" without it. */
@@ -498,16 +520,62 @@ export const ErrorState = ({
   /** Whether trying again loads Grasp anew: the page's file is gone after a new release. */
   reload?: boolean;
   /**
-   * Reads again what a section reads itself, rather than the page's
-   * loaders: what Try again does then.
+   * Starts reading again what a section reads itself, rather than the
+   * page's loaders: what Try again does then, and goes back to rest.
    */
   again?: () => void;
+  /**
+   * Reads again what a section reads itself, done when the read is: Try
+   * again waits for it and says whether it loaded. In place of `again`.
+   */
+  reread?: () => Promise<void>;
 }) => {
   const { t } = useLingui();
   const router = useRouter();
+  // Whether this failure still stands: a section read again that loaded
+  // draws its data in its place, and this goes.
+  const standing = useRef(true);
+  useEffect(() => {
+    standing.current = true;
+    return () => {
+      standing.current = false;
+    };
+  }, []);
+  const sectionAgain = async (read: () => Promise<void>): Promise<void> => {
+    await read();
+    // Once what the read set is drawn.
+    const { promise, resolve } = Promise.withResolvers<boolean>();
+    requestAnimationFrame(() => {
+      resolve(true);
+    });
+    await promise;
+    if (standing.current) {
+      throw new Error("It still didn't load.");
+    }
+  };
+  const pageAgain = async (): Promise<void> => {
+    await router.invalidate();
+    // Read again and failed again: Try again says so.
+    if (router.state.matches.some((match) => match.status === "error")) {
+      throw new Error("The page still didn't load.");
+    }
+  };
+  // What Try again does: load Grasp anew, read the section again (waited
+  // on, or only started), or the page's loaders.
+  const retry = (): (() => Promise<void> | void) => {
+    if (reload) {
+      return loadAnew;
+    }
+    if (reread !== undefined) {
+      return async () => {
+        await sectionAgain(reread);
+      };
+    }
+    return again ?? pageAgain;
+  };
   const loading = useRouterState({ select: (state) => state.isLoading });
   // Only the page's own loaders say they are on their way.
-  const trying = again === undefined && loading;
+  const trying = again === undefined && reread === undefined && loading;
   const inFrame = use(InFrame);
   const reach = useCoreReach();
   return (
@@ -515,17 +583,7 @@ export const ErrorState = ({
       heading={heading}
       reach={reach}
       whole={!inFrame}
-      onRetry={() => {
-        if (reload) {
-          window.location.reload();
-          return;
-        }
-        if (again === undefined) {
-          void router.invalidate();
-          return;
-        }
-        again();
-      }}
+      onRetry={retry()}
       reason={reason}
       title={title ?? t`This page didn't load`}
       trying={trying}
@@ -570,13 +628,18 @@ export const PageError = ({
  */
 const useReadAgainWhenBack = (
   page: Loaded<unknown>,
-  again?: () => void
+  again?: () => void,
+  reread?: () => Promise<void>
 ): void => {
   const router = useRouter();
   const core = useCore();
   const offline = page.state === "offline";
   // The latest `again`, which a section may make anew at each render.
   const readAgain = useEffectEvent((): void => {
+    if (reread !== undefined) {
+      void reread();
+      return;
+    }
     if (again === undefined) {
       void router.invalidate();
       return;
@@ -635,19 +698,22 @@ export const NotLoadedState = ({
   icon,
   heading,
   again,
+  reread,
 }: {
   page: Exclude<Loaded<unknown>, { state: "ready" }>;
   notFound?: string;
   icon?: StateIcon;
   heading?: StateHeading;
   /**
-   * Reads it again, for a section that reads it itself rather than the
-   * page's loaders: on Try again, and once core is back.
+   * Starts reading it again, for a section that reads it itself rather
+   * than the page's loaders: on Try again, and once core is back.
    */
   again?: () => void;
+  /** The same, done when the read is, so Try again says how it went (`ErrorState`). */
+  reread?: () => Promise<void>;
 }) => {
   const { i18n } = useLingui();
-  useReadAgainWhenBack(page, again);
+  useReadAgainWhenBack(page, again, reread);
   return page.state === "missing" ? (
     <NotFoundState heading={heading} icon={icon} title={notFound} />
   ) : (
@@ -655,6 +721,7 @@ export const NotLoadedState = ({
       again={again}
       heading={heading}
       reason={notLoadedText(page, i18n)}
+      reread={reread}
     />
   );
 };

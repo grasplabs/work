@@ -2,17 +2,19 @@ import {
   attachedFiles,
   attachmentsInput,
   defineTool,
-  invalidCode,
-  ToolError,
 } from "@grasp-os/connector-kit/connector";
 import type { Effect } from "@grasp-os/connector-kit/connector";
 import {
+  addressesOf,
   checkReadable,
   contentAs,
   fromBase64,
-} from "@grasp-os/connector-kit/content";
-import { readAsSchema } from "@grasp-os/connector-kit/manifest";
-import { jsonBody, segment } from "@grasp-os/connector-kit/provider";
+  invalidCode,
+  jsonBody,
+  readAsSchema,
+  segment,
+  ToolError,
+} from "@grasp-os/runtime/connector";
 import { z } from "zod";
 
 import {
@@ -25,7 +27,6 @@ import {
   topSchema,
 } from "./google.ts";
 import {
-  addressesOf,
   attachmentsOf,
   bodyPartOf,
   headerOf,

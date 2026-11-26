@@ -22,7 +22,25 @@ import {
 
 const answer =
   "So it lands in Zendesk, I copy the client number and check it in our sheet.";
-const context = { answer, known: ["f1", "f2"], phase: "story" as const };
+const context = {
+  answers: [{ text: answer, typed: true }],
+  known: ["f1", "f2"],
+  phase: "story" as const,
+};
+
+/** A step as the model writes one down, from `quote`. */
+const stepFrom = (quote: string) => ({
+  tag: "step",
+  text: "You do it.",
+  record: "Do it.",
+  quote,
+});
+
+/** The turn alone, for the tests that are not about what was left out. */
+const checked = (
+  value: unknown,
+  said: Parameters<typeof checkedTurn>[1] = context
+) => checkedTurn(value, said).turn;
 
 describe("what Stephen may say", () => {
   it("keeps one question: what comes after it is not said", () => {
@@ -115,12 +133,18 @@ describe("what Stephen may say", () => {
 
   it("names what a line got wrong by his own rules", () => {
     expect(mistakesIn("Who gets it next?")).toStrictEqual([]);
+    // Twenty words is as long as a question of his gets.
+    expect(
+      mistakesIn(
+        "When the invoice sits in your inbox, who has to approve it before you can book it in Exact Online?"
+      )
+    ).toStrictEqual([]);
     expect(
       mistakesIn("What do you do and how long does it take? And who checks it?")
     ).toContain("two questions");
     expect(
       mistakesIn(
-        "Could you perhaps tell me in a bit more detail how the matching of an invoice typically unfolds for you?"
+        "Could you perhaps tell me in a bit more detail how the matching of an invoice typically unfolds for you on a normal day?"
       )
     ).toContain("long question");
     expect(mistakesIn("Great question. Who approves it?")).toContain(
@@ -131,7 +155,7 @@ describe("what Stephen may say", () => {
 
 describe("a turn from the model", () => {
   it("is taken as it is when it is whole", () => {
-    const turn = checkedTurn(
+    const turn = checked(
       {
         say: "Mm-hm. Then?",
         tone: "softly",
@@ -164,7 +188,7 @@ describe("a turn from the model", () => {
   });
 
   it("has no tone he does not have, and stays in the part it was in when none is named", () => {
-    const turn = checkedTurn(
+    const turn = checked(
       {
         say: "Go on.",
         tone: "excited",
@@ -181,7 +205,7 @@ describe("a turn from the model", () => {
   });
 
   it("writes down only what was really said: a fact whose words are not in the answer is left out", () => {
-    const turn = checkedTurn(
+    const turn = checked(
       {
         say: "Then?",
         facts: [
@@ -196,7 +220,7 @@ describe("a turn from the model", () => {
       context
     );
     expect(turn.facts).toStrictEqual([]);
-    const made = checkedTurn(
+    const made = checked(
       {
         say: "Okay.",
         facts: [
@@ -208,13 +232,16 @@ describe("a turn from the model", () => {
           },
         ],
       },
-      { ...context, answer: "No idea. It changes all the time." }
+      {
+        ...context,
+        answers: [{ text: "No idea. It changes all the time.", typed: true }],
+      }
     );
     expect(made.facts).toStrictEqual([]);
   });
 
   it("takes the words of a fact as said but for capitals, quote marks and spaces, and marks them only when they stand there letter for letter", () => {
-    const turn = checkedTurn(
+    const turn = checked(
       {
         say: "Then?",
         facts: [
@@ -232,8 +259,105 @@ describe("a turn from the model", () => {
     expect(turn.facts[0]?.quote).toBe("");
   });
 
+  it("takes the words of a fact from any of their last three answers, and from none before", () => {
+    const answers = [
+      "First I print the invoice.",
+      "Then it goes to the manager.",
+      "She signs it on paper.",
+      "After that I scan it again.",
+    ].map((text) => ({ text, typed: true }));
+    const turn = checked(
+      {
+        say: "Then?",
+        facts: [
+          stepFrom("I print the invoice"),
+          stepFrom("it goes to the manager"),
+          stepFrom("She signs it"),
+          stepFrom("I scan it again"),
+        ],
+      },
+      { ...context, answers }
+    );
+    expect(turn.facts.map(({ quote }) => quote)).toStrictEqual([
+      // From an answer before the last: kept, and marked nowhere.
+      "",
+      "",
+      "I scan it again",
+    ]);
+  });
+
+  it("takes a spoken answer with the spaces, hyphens and punctuation it was heard with, and never a word that was not said", () => {
+    const answers = [
+      "I open the file, and then... I book about 14 a week in exact on line. One takes 2,5 minutes.",
+      "Nobody checks it. I send an email to the supplier with the invoice",
+    ];
+    const keptOf = (quote: string, typed: boolean) =>
+      checked(
+        { say: "Then?", facts: [stepFrom(quote)] },
+        {
+          ...context,
+          answers: answers.map((text) => (typed ? { text, typed } : { text })),
+        }
+      ).facts.length === 1;
+    const quotes = [
+      // Heard as two words, with a comma or a hyphen more or less.
+      "Exact Online",
+      "an e-mail to the supplier",
+      "I open the file and then I book",
+      // A word that was not said, however close.
+      "I delete the file",
+      "about 40 a week",
+      "takes 25 minutes",
+      "Somebody checks it",
+      "the supplier without the invoice",
+      // The same words in another order.
+      "book it and then open the file",
+    ];
+    expect({
+      spoken: quotes.filter((quote) => keptOf(quote, false)),
+      typed: quotes.filter((quote) => keptOf(quote, true)),
+    }).toStrictEqual({
+      spoken: [
+        "Exact Online",
+        "an e-mail to the supplier",
+        "I open the file and then I book",
+      ],
+      typed: [],
+    });
+  });
+
+  it("counts what it leaves out, by why", () => {
+    const { turn, dropped } = checkedTurn(
+      {
+        say: "Then?",
+        facts: [
+          { tag: "mood", text: "You like it.", record: "", quote: "Zendesk" },
+          { tag: "step", text: " ", record: "", quote: "it lands in Zendesk" },
+          {
+            tag: "step",
+            text: "You approve it.",
+            record: "",
+            quote: "I approve",
+          },
+          { tag: "step", text: "You pay it.", record: "", quote: "I pay it" },
+          {
+            tag: "system",
+            text: "The ticket lands in Zendesk.",
+            record: "",
+            quote: "it lands in Zendesk",
+          },
+        ],
+      },
+      context
+    );
+    expect({ kept: turn.facts.length, dropped }).toStrictEqual({
+      kept: 1,
+      dropped: { unknownTag: 1, noText: 1, notSaid: 2 },
+    });
+  });
+
   it("keeps the example someone shared without a word", () => {
-    const turn = checkedTurn(
+    const turn = checked(
       {
         say: "Thanks.",
         facts: [
@@ -246,7 +370,7 @@ describe("a turn from the model", () => {
           { tag: "step", text: "You open it.", record: "Open it.", quote: "" },
         ],
       },
-      { ...context, answer: "" }
+      { ...context, answers: [{ text: "", typed: true }] }
     );
     expect(turn.facts.map((each) => each.tag)).toStrictEqual(["case"]);
   });
@@ -272,7 +396,7 @@ describe("a turn from the model", () => {
   });
 
   it("changes only facts that exist, and takes one out with an empty text", () => {
-    const turn = checkedTurn(
+    const turn = checked(
       {
         say: "Got it.",
         changes: [
@@ -294,7 +418,7 @@ describe("a turn from the model", () => {
   });
 
   it("says nothing and writes nothing while they are mid-sentence", () => {
-    const turn = checkedTurn(
+    const turn = checked(
       {
         say: "What then?",
         more: true,
@@ -306,7 +430,7 @@ describe("a turn from the model", () => {
   });
 
   it("survives anything that is not a turn", () => {
-    expect(checkedTurn(null, context)).toMatchObject({
+    expect(checked(null, context)).toMatchObject({
       say: "",
       facts: [],
       changes: [],
@@ -414,7 +538,7 @@ describe("his line, written in plain lines", () => {
   });
 
   it("reads as a turn once it is whole, with what he waits for and whether he waits or they agreed", () => {
-    expect(checkedTurn(plainLine(whole), context)).toMatchObject({
+    expect(checked(plainLine(whole), context)).toMatchObject({
       say: "That is clear. Who gets it after you?",
       tone: "softly",
       phase: "steps",
@@ -424,7 +548,7 @@ describe("his line, written in plain lines", () => {
       facts: [],
     });
     expect(
-      checkedTurn(
+      checked(
         plainLine(
           "TONE: none\nSAY:\nPART: Steps\nWANTS: answer\nMORE: yes\nAGREED: no"
         ),
@@ -432,7 +556,7 @@ describe("his line, written in plain lines", () => {
       )
     ).toMatchObject({ say: "", more: true, phase: "steps" });
     expect(
-      checkedTurn(
+      checked(
         plainLine(
           "TONE: none\nSAY:\nPART: readback\nWANTS: readback\nMORE: no\nAGREED: Yes."
         ),
@@ -443,7 +567,7 @@ describe("his line, written in plain lines", () => {
 
   it("survives lines that are missing, out of order or written a little differently", () => {
     expect(
-      checkedTurn(plainLine("say: Then?\ntone: softly"), context)
+      checked(plainLine("say: Then?\ntone: softly"), context)
     ).toMatchObject({
       say: "Then?",
       tone: "softly",
@@ -452,7 +576,7 @@ describe("his line, written in plain lines", () => {
       more: false,
       approved: false,
     });
-    expect(checkedTurn(plainLine("nothing like it"), context)).toMatchObject({
+    expect(checked(plainLine("nothing like it"), context)).toMatchObject({
       say: "",
       wants: "answer",
     });
@@ -469,7 +593,7 @@ describe("his line, written in plain lines", () => {
       changes: [],
     };
     expect(
-      checkedTurn({ ...plainLine(whole), ...notes }, context).facts
+      checked({ ...plainLine(whole), ...notes }, context).facts
     ).toStrictEqual(notes.facts);
   });
 });

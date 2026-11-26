@@ -57,6 +57,14 @@ const typeRules: readonly {
   { action: "connection.call", sideEffect: true, type: "action" },
   { action: "connection.call", type: "read" },
   { action: "connection.connect", type: "config" },
+  // An admin adding a connector by its MCP server's URL (GRA-1375).
+  { action: "connector.added", type: "config" },
+  // A connector's server changing a connection's tool list (counts of
+  // tools added, removed and changed), and an admin blocking one of its
+  // tools or letting it through again (GRA-2347).
+  { action: "connector.tools.changed", type: "config" },
+  { action: "connector.tool.blocked", type: "config" },
+  { action: "connector.tool.unblocked", type: "config" },
   // An admin changing which tools a connected app allows (GRA-993).
   { action: "connection.tools", type: "config" },
   // An admin picking which places of a shared connection sync into the

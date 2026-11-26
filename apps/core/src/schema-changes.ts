@@ -1,5 +1,6 @@
 import type { FrozenJson, ValueDescriptor } from "@grasp-os/runtime/definition";
 import {
+  allowsNull,
   fieldWidens,
   holdsReference,
   referencesRenamed,
@@ -11,7 +12,7 @@ import type {
 } from "@grasp-os/runtime/host";
 import { canonicalText } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
-import { fieldValueSchema } from "@grasp-os/shared/stores";
+import { storedFieldsSchema } from "@grasp-os/shared/stores";
 
 import { fitted } from "./store-queries.ts";
 
@@ -299,7 +300,7 @@ const planLacking = (
   lacking: Lacking
 ): void => {
   const absent = lacking.absent && type.presence !== "optional";
-  const nulls = lacking.nulls && !type.nullable;
+  const nulls = lacking.nulls && !allowsNull(type);
   if (!absent && !nulls) {
     return;
   }
@@ -326,14 +327,25 @@ const planLacking = (
   if (given === undefined) {
     return;
   }
-  // As a write would store it: fitting its type, nested defaults filled.
-  const fits = fitted(type, given);
-  const stored = fieldValueSchema.safeParse(fits?.value);
-  if (fits === undefined || !stored.success) {
+  // As a write would store it: fitting its type where a record holds it,
+  // one level down, so any JSON is held to the depth a record's is, nested
+  // defaults filled.
+  const fits = fitted(
+    {
+      descriptorVersion: 1,
+      kind: "object",
+      presence: "required",
+      nullable: false,
+      fields: { [field]: type },
+    },
+    { [field]: given }
+  );
+  const stored = storedFieldsSchema.safeParse(fits?.value);
+  const value = stored.success ? stored.data[field] : undefined;
+  if (value === undefined) {
     plan.refused.push({ table: name, field, reason: "answer_unfit" });
     return;
   }
-  const value = stored.data;
   if (holdsReference(type)) {
     plan.refused.push({ table: name, field, reason: "reference_filled" });
   } else if (ruleFields(table).has(field)) {

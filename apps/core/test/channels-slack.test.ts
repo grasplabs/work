@@ -13,6 +13,7 @@ import { memberOf } from "../src/auth/identity.ts";
 import { addSource, rememberAs } from "../src/brain-next.ts";
 import {
   confirmAction,
+  pressOf,
   startAction,
   undoAction,
 } from "../src/channels/cards.tsx";
@@ -36,6 +37,7 @@ import { codeStep, keptAnswersOf, says, toolStep } from "./agent-chat.ts";
 import { requestGranted } from "./apps.ts";
 import { chatIdsOf } from "./code-step-trace.ts";
 import { slackApp, slackPostedUrl } from "./connect-providers.ts";
+import { pause } from "./connection-pause.ts";
 import { mockIdp } from "./idp.ts";
 import { attacks, ordinary } from "./inert-answers.ts";
 import { saveInstructions } from "./instruction-saves.ts";
@@ -471,11 +473,19 @@ describe("a press on a card in Slack", () => {
     const { slackUser } = await linkedPerson();
     // Writes that aren't held: the card's handler says it changed since.
     const confirm = pressFrom(slackUser, {
+      value: JSON.stringify({
+        writes: [{ id: crypto.randomUUID(), inputHash: "0".repeat(64) }],
+      }),
+    });
+    const confirmed = await post(confirm, { form: true });
+    // A card of an older release, whose press listed its writes alone:
+    // refused the same way.
+    const older = pressFrom(slackUser, {
       value: JSON.stringify([
         { id: crypto.randomUUID(), inputHash: "0".repeat(64) },
       ]),
     });
-    const confirmed = await post(confirm, { form: true });
+    const olderPressed = await post(older, { form: true });
     // An offer that isn't there: Start's handler says it is gone.
     const start = pressFrom(slackUser, {
       actionId: startAction,
@@ -490,11 +500,15 @@ describe("a press on a card in Slack", () => {
     expect({
       confirmed: confirmed.status,
       confirmSaid: await said(confirm.channel.id),
+      older: olderPressed.status,
+      olderSaid: await said(older.channel.id),
       started: started.status,
       startSaid: await said(start.channel.id),
     }).toStrictEqual({
       confirmed: 200,
       confirmSaid: [["chat.postMessage", say("changedSince", "en")]],
+      older: 200,
+      olderSaid: [["chat.postMessage", say("changedSince", "en")]],
       started: 200,
       startSaid: [["chat.postMessage", say("startGone", "en")]],
     });
@@ -502,9 +516,9 @@ describe("a press on a card in Slack", () => {
 
   it("is refused unsigned, and runs nothing for someone who hasn't linked their Slack account, or outside a direct message", async () => {
     const { slackUser } = await linkedPerson();
-    const value = JSON.stringify([
-      { id: crypto.randomUUID(), inputHash: "0".repeat(64) },
-    ]);
+    const value = JSON.stringify({
+      writes: [{ id: crypto.randomUUID(), inputHash: "0".repeat(64) }],
+    });
     const unsigned = await post(pressFrom(slackUser, { value }), {
       form: true,
       signed: null,
@@ -1378,6 +1392,67 @@ describe("a linked person's memory in Slack", () => {
         ["chat.update", true],
         ["chat.postMessage", say("alreadyAnswered", "en")],
       ],
+    });
+  });
+});
+
+/** Whether a card Slack was sent warns of mail other people wrote. */
+const warnsOfMail = (card?: { texts: string[] }) =>
+  card?.texts.some((text) => text.includes(say("checkMail", "en")));
+
+describe("a linked person's held write in Slack, on a paused connection", () => {
+  it("is offered again on a new card, which warns of the mail the turn read", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const mail = await mailConnection(
+      [],
+      ["MAIL_SEND", { name: "mail.search", read: true }]
+    );
+    const binding = bindingOf("MAIL");
+    await requestGranted(idp, admin, {
+      subject: { type: "agent", agentId: chatAgentId },
+      object: { type: "connection", connectionId: mail.id },
+      actions: ["MAIL_SEND", "mail.search"],
+      binding,
+    });
+    const { slackUser } = await linkedPerson();
+    const call = (action: string, input: unknown) =>
+      `await env.connections.call(${JSON.stringify(binding)}, ${JSON.stringify(action)}, ${JSON.stringify(input)});`;
+    await fakeProvider(
+      codeStep(
+        `export default async (self, env) => { ${call("mail.search", { query: "agenda" })} ${call("MAIL_SEND", { to: "ben@acme.test", subject: "Agenda" })} return "held"; };`
+      ),
+      says("It waits for you to confirm it.")
+    );
+    const message = messageFrom(slackUser);
+    message.event.text = "Find the agenda, and mail it to ben@acme.test.";
+    await post(message, { caught: false });
+    const { channel } = message.event;
+    const cards = async () => {
+      const sent = await slackSawIn(channel);
+      return sent
+        .filter(
+          ({ method, fields }) =>
+            method === "chat.postMessage" &&
+            JSON.stringify(fields).includes(confirmAction)
+        )
+        .map(({ fields }) => slackCardOf(fields));
+    };
+    const [first] = await cards();
+    await pause(mail.id, Date.now() + 30_000);
+    await post(pressFrom(slackUser, { channel, value: first?.confirm ?? "" }), {
+      form: true,
+    });
+    const [, again] = await cards();
+    expect({
+      first: warnsOfMail(first),
+      again: warnsOfMail(again),
+      carried: pressOf(again?.confirm)?.check,
+      sent: await mail.did(),
+    }).toStrictEqual({
+      first: true,
+      again: true,
+      carried: { read: "mail" },
+      sent: { calls: 0, sent: [] },
     });
   });
 });

@@ -378,6 +378,54 @@ const lines = {
     fr: "Je ne sais pas si une modification a abouti. Vérifiez-la dans Grasp avant de réessayer.",
     es: "No sé si un cambio se ha completado. Compruébalo en Grasp antes de volver a intentarlo.",
   },
+  /**
+   * A connection a change goes through is paused (`connect.rate_limited`):
+   * nothing was taken from that change on, and a new card offers the one
+   * (`One`) or several (`Many`) still waiting, to confirm once the pause
+   * is over, in `{minutes}`; or, where none could be posted, to ask again.
+   */
+  pausedOneMinute: {
+    en: "A service asked me to slow down, so one change hasn't been made yet. Confirm it again on the new card in a minute.",
+    nl: "Een dienst vroeg me het rustiger aan te doen, dus één wijziging is nog niet doorgevoerd. Bevestig die over een minuut opnieuw op de nieuwe kaart.",
+    de: "Ein Dienst hat mich gebeten, langsamer zu machen, deshalb wurde eine Änderung noch nicht vorgenommen. Bestätigen Sie sie in einer Minute noch einmal auf der neuen Karte.",
+    fr: "Un service m’a demandé de ralentir, une modification n’a donc pas encore été effectuée. Confirmez-la à nouveau dans une minute sur la nouvelle carte.",
+    es: "Un servicio me ha pedido que vaya más despacio, así que un cambio todavía no se ha hecho. Vuelve a confirmarlo en un minuto en la tarjeta nueva.",
+  },
+  pausedOneMinutes: {
+    en: "A service asked me to slow down, so one change hasn't been made yet. Confirm it again on the new card in {minutes} minutes.",
+    nl: "Een dienst vroeg me het rustiger aan te doen, dus één wijziging is nog niet doorgevoerd. Bevestig die over {minutes} minuten opnieuw op de nieuwe kaart.",
+    de: "Ein Dienst hat mich gebeten, langsamer zu machen, deshalb wurde eine Änderung noch nicht vorgenommen. Bestätigen Sie sie in {minutes} Minuten noch einmal auf der neuen Karte.",
+    fr: "Un service m’a demandé de ralentir, une modification n’a donc pas encore été effectuée. Confirmez-la à nouveau dans {minutes} minutes sur la nouvelle carte.",
+    es: "Un servicio me ha pedido que vaya más despacio, así que un cambio todavía no se ha hecho. Vuelve a confirmarlo en {minutes} minutos en la tarjeta nueva.",
+  },
+  pausedManyMinute: {
+    en: "A service asked me to slow down, so the changes still waiting haven't been made yet. Confirm them again on the new card in a minute.",
+    nl: "Een dienst vroeg me het rustiger aan te doen, dus de wijzigingen die nog wachten zijn nog niet doorgevoerd. Bevestig ze over een minuut opnieuw op de nieuwe kaart.",
+    de: "Ein Dienst hat mich gebeten, langsamer zu machen, deshalb wurden die noch wartenden Änderungen noch nicht vorgenommen. Bestätigen Sie sie in einer Minute noch einmal auf der neuen Karte.",
+    fr: "Un service m’a demandé de ralentir, les modifications encore en attente n’ont donc pas encore été effectuées. Confirmez-les à nouveau dans une minute sur la nouvelle carte.",
+    es: "Un servicio me ha pedido que vaya más despacio, así que los cambios pendientes todavía no se han hecho. Vuelve a confirmarlos en un minuto en la tarjeta nueva.",
+  },
+  pausedManyMinutes: {
+    en: "A service asked me to slow down, so the changes still waiting haven't been made yet. Confirm them again on the new card in {minutes} minutes.",
+    nl: "Een dienst vroeg me het rustiger aan te doen, dus de wijzigingen die nog wachten zijn nog niet doorgevoerd. Bevestig ze over {minutes} minuten opnieuw op de nieuwe kaart.",
+    de: "Ein Dienst hat mich gebeten, langsamer zu machen, deshalb wurden die noch wartenden Änderungen noch nicht vorgenommen. Bestätigen Sie sie in {minutes} Minuten noch einmal auf der neuen Karte.",
+    fr: "Un service m’a demandé de ralentir, les modifications encore en attente n’ont donc pas encore été effectuées. Confirmez-les à nouveau dans {minutes} minutes sur la nouvelle carte.",
+    es: "Un servicio me ha pedido que vaya más despacio, así que los cambios pendientes todavía no se han hecho. Vuelve a confirmarlos en {minutes} minutos en la tarjeta nueva.",
+  },
+  pausedOneAskAgain: {
+    en: "A service asked me to slow down, so one change hasn't been made, and I couldn't show it on a new card. Ask me for it again in a few minutes.",
+    nl: "Een dienst vroeg me het rustiger aan te doen, dus één wijziging is niet doorgevoerd, en ik kon die niet op een nieuwe kaart laten zien. Vraag me er over een paar minuten opnieuw om.",
+    de: "Ein Dienst hat mich gebeten, langsamer zu machen, deshalb wurde eine Änderung nicht vorgenommen, und ich konnte sie nicht auf einer neuen Karte zeigen. Fragen Sie mich in ein paar Minuten noch einmal danach.",
+    fr: "Un service m’a demandé de ralentir, une modification n’a donc pas été effectuée, et je n’ai pas pu l’afficher sur une nouvelle carte. Redemandez-la-moi dans quelques minutes.",
+    es: "Un servicio me ha pedido que vaya más despacio, así que un cambio no se ha hecho, y no he podido mostrarlo en una tarjeta nueva. Vuelve a pedírmelo dentro de unos minutos.",
+  },
+  pausedManyAskAgain: {
+    en: "A service asked me to slow down, so the changes still waiting haven't been made, and I couldn't show them on a new card. Ask me for them again in a few minutes.",
+    nl: "Een dienst vroeg me het rustiger aan te doen, dus de wijzigingen die nog wachten zijn niet doorgevoerd, en ik kon ze niet op een nieuwe kaart laten zien. Vraag me er over een paar minuten opnieuw om.",
+    de: "Ein Dienst hat mich gebeten, langsamer zu machen, deshalb wurden die noch wartenden Änderungen nicht vorgenommen, und ich konnte sie nicht auf einer neuen Karte zeigen. Fragen Sie mich in ein paar Minuten noch einmal danach.",
+    fr: "Un service m’a demandé de ralentir, les modifications encore en attente n’ont donc pas été effectuées, et je n’ai pas pu les afficher sur une nouvelle carte. Redemandez-les-moi dans quelques minutes.",
+    es: "Un servicio me ha pedido que vaya más despacio, así que los cambios pendientes no se han hecho, y no he podido mostrarlos en una tarjeta nueva. Vuelve a pedírmelos dentro de unos minutos.",
+  },
   expired: {
     en: "This card expired at the end of the day, and nothing was changed. Ask me again if you still want it.",
     nl: "Deze kaart is aan het eind van de dag verlopen en er is niets gewijzigd. Vraag het me opnieuw als je het nog wilt.",

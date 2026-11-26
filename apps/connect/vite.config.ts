@@ -1,6 +1,7 @@
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import { defineProject } from "vite-plus";
 
+import { startCompanyNetwork } from "./test/company-network-fake.ts";
 import {
   testComposioClassesFile,
   testConnectorsFile,
@@ -32,6 +33,12 @@ const smokeBindings = Object.fromEntries(
     "GOOGLE_SMOKE_CALENDAR",
     "GOOGLE_SMOKE_DRIVE",
     "GOOGLE_SMOKE_WRITES",
+    "MCP_LIVE_URL",
+    "MCP_LIVE_CALLBACK",
+    "MCP_LIVE_READ",
+    "MCP_LIVE_READ_INPUT",
+    "MCP_LIVE_WRITE",
+    "MCP_LIVE_WRITE_INPUT",
   ].flatMap((name) => {
     const value = process.env[name];
     return value === undefined || value === "" ? [] : [[name, value]];
@@ -45,6 +52,12 @@ const smokeBindings = Object.fromEntries(
  */
 const walkAll: Record<string, string> =
   process.env.CONNECT_WALK_ALL === "1" ? { CONNECT_WALK_ALL: "1" } : {};
+
+/**
+ * The system inside the client's network the tests reach through the
+ * company network (test/company-network-fake.ts): its origin.
+ */
+const companyNetworkOrigin = await startCompanyNetwork();
 
 /** Seals the tests' tokens: 32 bytes, in base64, as a real key is. */
 const testTokenKey = btoa("test-token-key-of-exactly-32-b!!");
@@ -117,8 +130,15 @@ export default defineProject({
           TEAMS_BOT_TENANT_ID: teamsBot.tenant,
           TEAMS_BOT_SECRET: teamsBot.secret,
           CONNECT_MIGRATIONS: migrations,
+          COMPANY_NETWORK_TEST_ORIGIN: companyNetworkOrigin,
           ...smokeBindings,
           ...walkAll,
+        },
+        // The route into the company network, as on-prem: a workerd network
+        // of its own that allows only the approved address
+        // (src/company-network.ts).
+        serviceBindings: {
+          COMPANY_NETWORK: { network: { allow: ["127.0.0.1/32"] } },
         },
       },
     }),

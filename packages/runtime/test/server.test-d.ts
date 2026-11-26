@@ -6,6 +6,8 @@
 // must stay an error.
 import { expectTypeOf } from "vite-plus/test";
 
+import { defineSchema } from "../src/app/define-schema.ts";
+import { defineTable } from "../src/app/define-table.ts";
 import type { Callable } from "../src/app/function-references.ts";
 import { AppError, defineApp, permission } from "../src/app/index.ts";
 import { serverModule } from "../src/app/server.ts";
@@ -23,8 +25,6 @@ import type {
 import type { BrainPack } from "../src/common/brain-recall.ts";
 import type { Id } from "../src/common/value-types.ts";
 import {
-  defineSchema,
-  defineTable,
   paginationOptionsValidator,
   paginationResultValidator,
   v,

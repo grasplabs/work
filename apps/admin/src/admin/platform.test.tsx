@@ -60,7 +60,7 @@ const offboardedItem = (root: Element, name: string) => {
   const button = [...(item?.querySelectorAll("button") ?? [])].find(
     (each) => each.textContent === "Delete its resources"
   );
-  const confirm = item?.querySelector('[id^="no-export-"]');
+  const confirm = item?.querySelector('[role="checkbox"]');
   return {
     text: item?.textContent ?? "",
     deleteOff: button?.hasAttribute("disabled") ?? null,

@@ -10,24 +10,30 @@ import type {
 } from "@grasp-os/shared/onboarding";
 import { describe, expect, it } from "vite-plus/test";
 
-import { interviewerText } from "../src/onboarding/interviewer-text.ts";
+import {
+  interviewerText,
+  voiceText,
+} from "../src/onboarding/interviewer-text.ts";
 import type { InterviewerText } from "../src/onboarding/interviewer-text.ts";
 import {
   everyLabMark,
+  everyVoiceMark,
   labMarks,
   marksDigest,
+  voiceMarks,
+  voiceMarksDigest,
 } from "../src/onboarding/lab-marks.ts";
 
-// What the model that holds an interview is told (src/onboarding/): the
-// same text the Stephen Lab measures, in five languages, with a mark that
-// names it. How it can go wrong:
+// What the model that holds an interview is told (src/onboarding/), in
+// five languages, with a mark that names it, as the Stephen Lab names the
+// text it measures. How it can go wrong:
 //
 // - A language left half filled in: a placeholder said out loud, or the
 //   wrong form of address.
 // - A mark that doesn't name its text: two texts with one mark, or a mark
 //   the lab can't work out from the text alone.
-// - A word changed here and not in the lab: a text whose mark the lab
-//   never measured.
+// - A word changed without its mark: a text held under the name of
+//   another, so a measurement or an interview names a Stephen it never met.
 
 interface Which {
   kind: InterviewKind;
@@ -135,7 +141,7 @@ describe("the marks' digest", () => {
 
 describe("the mark", () => {
   it.each(everyText)(
-    "is one the lab measured, so no word changes outside the lab ($kind, $locale)",
+    "is the one kept for it, so no word changes without its mark and the version's name ($kind, $locale)",
     (which) => {
       expect(textOf(which).mark).toBe(labMarks[which.kind][which.locale]);
     }
@@ -159,5 +165,26 @@ describe("the mark", () => {
     const again = await interviewerText("lead", "fr");
     expect(marks.size).toBe(everyText.length);
     expect(again.mark).toBe(textOf({ kind: "lead", locale: "fr" }).mark);
+  });
+});
+
+describe("the voice session's text", () => {
+  it.each(everyText)(
+    "is the one kept for it, so no word changes without its mark and its version's name ($kind, $locale)",
+    async (which) => {
+      const { mark } = await voiceText(which.kind, which.locale);
+      expect(mark).toBe(voiceMarks[which.kind][which.locale]);
+    }
+  );
+
+  it("names every voice mark at once, apart from the turn texts' version", async () => {
+    const digest = await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(everyVoiceMark().join("\n"))
+    );
+    expect(everyVoiceMark()).toHaveLength(
+      interviewKinds.length * interviewLocales.length
+    );
+    expect(toHex(new Uint8Array(digest)).slice(0, 12)).toBe(voiceMarksDigest);
   });
 });

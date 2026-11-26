@@ -75,6 +75,14 @@ export type ValueKindDescriptor =
       readonly kind: "string";
       readonly trim: boolean;
       readonly email: boolean;
+      /**
+       * The formats added since: each is here only when set, so a
+       * descriptor written before they existed reads the same. A string
+       * has one format at most, `email` included.
+       */
+      readonly datetime?: true;
+      readonly date?: true;
+      readonly url?: true;
       /** In UTF-16 code units, as `String.length` counts. */
       readonly min?: number;
       readonly max?: number;
@@ -85,7 +93,8 @@ export type ValueKindDescriptor =
       readonly min?: number;
       readonly max?: number;
     }
-  | { readonly kind: "boolean" | "null" }
+  /** `json` is any JSON value. */
+  | { readonly kind: "boolean" | "null" | "json" }
   | {
       readonly kind: "literal";
       readonly value: null | boolean | number | string;
@@ -174,6 +183,10 @@ export const valueIssueMessages = {
   "value.too_short": "The value is too short.",
   "value.too_long": "The value is too long.",
   "value.invalid_email": "The value must be an email address.",
+  "value.invalid_datetime":
+    "The value isn't a date and time with its offset (RFC 3339).",
+  "value.invalid_date": "The value isn't a calendar date (YYYY-MM-DD).",
+  "value.invalid_url": "The value isn't an http or https URL.",
   "value.invalid_literal": "The value isn't the one allowed.",
   "value.invalid_enum": "The value isn't one of those allowed.",
   "value.invalid_id": "The value isn't a record ID.",

@@ -1,15 +1,15 @@
 import { identifierMaxLength } from "@grasp-os/shared/identifier";
 import type { WriteRequest } from "@grasp-os/shared/store-reads";
 
-import { tablesOf } from "../common/define-schema.ts";
-import type { AnyTable, SchemaDefinition } from "../common/schema-types.ts";
 import type { Id, ObjectInput, ObjectOutput } from "../common/value-types.ts";
 import { databaseReader } from "./database-reader.ts";
 import type { DatabaseReader } from "./database-reader.ts";
+import { tablesOf } from "./define-schema.ts";
 import type { ReadExecutor } from "./query-builder.ts";
 import { refuse } from "./query-error.ts";
 import type { AnyTables, Present } from "./query-types.ts";
 import { hasOnly, isPlainRecord } from "./query-values.ts";
+import type { AnyTable, SchemaDefinition } from "./schema-types.ts";
 
 // `ctx.db` for writing, a mutation's only: each write is one request
 // (`WriteRequest`) handed to the invocation's executor, which stages it on
