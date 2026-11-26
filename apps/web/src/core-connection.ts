@@ -99,6 +99,12 @@ const onPageBack = (back: () => void, offline: () => void): void => {
 export const heartbeatMs = 2500;
 
 /**
+ * How long a ping may wait behind a large message going out
+ * (`holdHeartbeat`): a file's 13 MB at 1 Mbit/s and more.
+ */
+export const heldPingMs = 120_000;
+
+/**
  * Whether core answers, as the connection last found: trying to reach it,
  * reached, or not reached on the last try (it tries again by itself). For
  * a page that failed, to say truthfully whether Grasp can be reached.
@@ -335,8 +341,9 @@ export class CoreConnection {
   /**
    * Holds off the heartbeat while a large message goes out, such as a
    * file: a ping waits behind it on the socket, and a slow upload would
-   * read as a dead connection. No ping is sent, and none that fails lets
-   * the connection go, until every hold is let go of. Returns what lets go.
+   * read as a dead connection. Meanwhile a ping waits as long as a slow
+   * upload may take ({@link heldPingMs}), and one sent before it that
+   * fails lets nothing go. Returns what lets go.
    */
   holdHeartbeat(): () => void {
     this.#held += 1;
@@ -588,12 +595,14 @@ export class CoreConnection {
 
   async #probe(): Promise<void> {
     const api = this.#live;
-    if (api === undefined || this.#held > 0) {
+    if (api === undefined) {
       return;
     }
     const holds = this.#holds;
     try {
-      await withTimeout(api.ping());
+      // Behind a large message, a ping waits as long as a slow upload may
+      // take, so a socket that died while one went is still let go of.
+      await withTimeout(api.ping(), this.#held > 0 ? heldPingMs : undefined);
     } catch {
       // Behind a large message that went out meanwhile, a ping is late,
       // not lost.
