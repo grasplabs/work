@@ -6,6 +6,17 @@
  * audit log.
  */
 import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@grasp-os/ui/components/alert-dialog";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import { CardContent, CardFooter } from "@grasp-os/ui/components/card";
@@ -169,13 +180,69 @@ const Refused = ({ failure }: { failure: string | null }) =>
     </Alert>
   );
 
-/** Moves `channel` to a release it may take: promoted from the channel before, or back. */
+/** How many companies, in words: "1 company", "3 companies". */
+const companies = (count: number): string =>
+  count === 1 ? "1 company" : `${count} companies`;
+
+/**
+ * The question before a move that changes what a channel's companies run:
+ * what it is, and whom it reaches. Focus starts on Cancel; the move is the
+ * weighty answer.
+ */
+const ConfirmMove = ({
+  title,
+  description,
+  action,
+  onConfirm,
+}: {
+  title: string;
+  description: string;
+  action: string;
+  onConfirm: () => void;
+}) => (
+  <AlertDialogContent>
+    <AlertDialogHeader>
+      <AlertDialogTitle>{title}</AlertDialogTitle>
+      <AlertDialogDescription>{description}</AlertDialogDescription>
+    </AlertDialogHeader>
+    <AlertDialogFooter>
+      <AlertDialogCancel>Cancel</AlertDialogCancel>
+      <AlertDialogAction onClick={onConfirm} variant="destructive">
+        {action}
+      </AlertDialogAction>
+    </AlertDialogFooter>
+  </AlertDialogContent>
+);
+
+/**
+ * Moves `channel` to a release it may take: promoted from the channel
+ * before, or back. Every company that follows the channel moves, so it
+ * asks first.
+ */
 const Promote = ({ channel }: { channel: ChannelProgress }) => {
   const router = useRouter();
   const { busy, failure, run } = useRolloutAction();
+  // The release chosen, while the question stands.
+  const [asking, setAsking] = useState<string | null>(null);
   if (channel.promotable.length === 0) {
     return null;
   }
+  const name = channelWords[channel.channel];
+  const back = channel.channel === "edge";
+  const promote = (releaseId: string) => {
+    void run(
+      async () =>
+        await thenRefresh(
+          async () =>
+            await promoteReleaseFn({
+              data: { channel: channel.channel, releaseId },
+            }),
+          async () => {
+            await router.invalidate({ sync: true });
+          }
+        )
+    );
+  };
   return (
     <form
       {...stylex.props(styles.promote)}
@@ -185,64 +252,92 @@ const Promote = ({ channel }: { channel: ChannelProgress }) => {
         if (typeof releaseId !== "string") {
           return;
         }
-        void run(
-          async () =>
-            await thenRefresh(
-              async () =>
-                await promoteReleaseFn({
-                  data: { channel: channel.channel, releaseId },
-                }),
-              async () => {
-                await router.invalidate({ sync: true });
-              }
-            )
-        );
+        setAsking(releaseId);
       }}
     >
       <NativeSelect
-        aria-label={`Release for ${channelWords[channel.channel]}`}
+        aria-label={`Release for ${name}`}
         id={`promote-${channel.channel}`}
         name="releaseId"
         size="sm"
         style={styles.select}
       >
-        {channel.promotable.map(({ releaseId, back }) => (
+        {channel.promotable.map(({ releaseId, back: before }) => (
           <NativeSelectOption key={releaseId} value={releaseId}>
-            {back ? `${releaseId} (back)` : releaseId}
+            {before ? `${releaseId} (back)` : releaseId}
           </NativeSelectOption>
         ))}
       </NativeSelect>
       <Button disabled={busy} size="sm" type="submit" variant="outline">
-        {channel.channel === "edge" ? "Set back" : "Promote"}
+        {back ? "Set back" : "Promote"}
       </Button>
+      <AlertDialog
+        onOpenChange={(open) => {
+          if (!open) {
+            setAsking(null);
+          }
+        }}
+        open={asking !== null}
+      >
+        <ConfirmMove
+          action={back ? "Set back" : "Promote"}
+          description={`${companies(channel.following)} on ${name} ${channel.following === 1 ? "moves" : "move"} to ${asking ?? ""}, in stages. Companies pinned to a release of their own stay on it.`}
+          onConfirm={() => {
+            if (asking !== null) {
+              promote(asking);
+            }
+          }}
+          title={
+            back
+              ? `Set ${name} back to ${asking ?? ""}?`
+              : `Promote ${asking ?? ""} to ${name}?`
+          }
+        />
+      </AlertDialog>
       <Refused failure={failure} />
     </form>
   );
 };
 
-/** Clears a channel's failed deploys, so the reconciler tries them again. */
-const Retry = ({ channel }: { channel: ChannelProgress["channel"] }) => {
+/**
+ * Clears a channel's failed deploys, so the reconciler tries them again:
+ * it asks first, as its companies take the release again.
+ */
+const Retry = ({ channel }: { channel: ChannelProgress }) => {
   const router = useRouter();
   const { busy, failure, run } = useRolloutAction();
+  const name = channelWords[channel.channel];
+  const failed = channel.clients.filter(
+    (client) => client.state === "failed"
+  ).length;
   return (
     <div {...stylex.props(styles.retry)}>
-      <Button
-        disabled={busy}
-        onClick={() => {
-          void run(
-            async () =>
-              await thenRefresh(
-                async () => await retryChannelFn({ data: { channel } }),
-                async () => {
-                  await router.invalidate({ sync: true });
-                }
-              )
-          );
-        }}
-        size="sm"
-      >
-        Retry
-      </Button>
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button disabled={busy} size="sm">
+            Retry
+          </Button>
+        </AlertDialogTrigger>
+        <ConfirmMove
+          action="Retry"
+          description={`${companies(failed)} on ${name} whose deploy failed ${failed === 1 ? "tries" : "try"} ${channel.releaseId ?? "its release"} again, and new deploys start again.`}
+          onConfirm={() => {
+            void run(
+              async () =>
+                await thenRefresh(
+                  async () =>
+                    await retryChannelFn({
+                      data: { channel: channel.channel },
+                    }),
+                  async () => {
+                    await router.invalidate({ sync: true });
+                  }
+                )
+            );
+          }}
+          title={`Retry ${name}’s failed deploys?`}
+        />
+      </AlertDialog>
       <Refused failure={failure} />
     </div>
   );
@@ -380,7 +475,7 @@ const ChannelPanel = ({ channel }: { channel: ChannelProgress }) => {
       {channel.failed || promotes ? (
         <CardFooter>
           <div {...stylex.props(styles.actions)}>
-            {channel.failed ? <Retry channel={channel.channel} /> : null}
+            {channel.failed ? <Retry channel={channel} /> : null}
             <Promote channel={channel} />
           </div>
         </CardFooter>
