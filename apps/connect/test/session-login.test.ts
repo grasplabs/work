@@ -57,7 +57,7 @@ interface Vendor {
   /** How the orders answer instead, when a test says so. */
   orders?: () => Response;
   /** What its login's answer says of how long the session lasts. */
-  expiresIn?: number;
+  expiresIn?: number | string;
   /** The session its next login answers with. */
   next: () => string;
 }
@@ -189,6 +189,17 @@ const tokenRow = async (id: string) =>
     .from(connectionTokens)
     .where(eq(connectionTokens.connectionId, id))
     .get();
+
+/**
+ * Makes the connection's session older than a session refused moments
+ * after its login (which isn't logged in for again), as time would.
+ */
+const age = async (id: string): Promise<void> => {
+  await drizzle(env.DB)
+    .update(connectionTokens)
+    .set({ updatedAt: new Date(Date.now() - 3 * 60_000) })
+    .where(eq(connectionTokens.connectionId, id));
+};
 
 /** Makes the connection's session run out, as time would. */
 const expire = async (id: string): Promise<void> => {
@@ -405,12 +416,12 @@ describe("a connector's sign-in with a call", () => {
       hosts: internet.sent.map(({ host }) => host),
       events: await actionsOf(),
     }).toMatchObject({
-      result: "connection.provider_refused",
+      result: "connection.provider_unavailable",
       hosts: [sampleLoginApiHost],
       events: [
         {
           action: "connection.connect",
-          detail: { outcome: "failed", reason: "connection.provider_refused" },
+          detail: { reason: "connection.provider_unavailable" },
         },
       ],
     });
@@ -422,6 +433,7 @@ describe("a connector's sign-in with a call", () => {
     const [first = ""] = vendor.sessions;
     // The vendor signs the session out: the next read logs in again and
     // is sent again with the new session, and so is every call after it.
+    await age(id);
     vendor.sessions.delete(first);
     const listed = await call(id, person, "orders.list");
     await call(id, person, "orders.list");
@@ -448,9 +460,10 @@ describe("a connector's sign-in with a call", () => {
     });
   });
 
-  it("SL6: logs in again once a call when the vendor refuses every session, and never sends a write again", async () => {
+  it("SL6: logs in again at most once in two minutes when the vendor refuses every session, and never sends a write again", async () => {
     const person = someone("admin");
     const id = await connect(person);
+    await age(id);
     vendor.orders = () => json({ message: "Session expired" }, 401);
     await outcome(call(id, person, "orders.list"));
     const readSent = internet.sent.filter(
@@ -468,10 +481,56 @@ describe("a connector's sign-in with a call", () => {
     }).toStrictEqual({
       // The read, and once more with the new session.
       readSent: 2,
-      // The sign-in, then once for each call's refused session.
-      logins: 3,
+      // The sign-in, then once: the new session was refused moments after.
+      logins: 2,
       writes: 1,
       status: "active",
+    });
+  });
+
+  it("SL6: makes one login for twenty calls at once refused the same session, and sends each read again with it", async () => {
+    const person = someone("admin");
+    const id = await connect(person);
+    await age(id);
+    vendor.sessions.clear();
+    const results = await Promise.all(
+      Array.from(
+        { length: 20 },
+        async () => await outcome(call(id, person, "orders.list"))
+      )
+    );
+
+    expect({
+      results: new Set(results),
+      logins: vendor.logins.length,
+      events: await reasonsOf(),
+    }).toStrictEqual({
+      results: new Set([undefined]),
+      logins: 2,
+      events: [
+        ["connection.connect", undefined],
+        ["connection.session_renewed", "refused"],
+      ],
+    });
+  });
+
+  it("SL6: sends a write after a read that logged in again with the new session", async () => {
+    const person = someone("admin");
+    const id = await connect(person);
+    const [first = ""] = vendor.sessions;
+    await age(id);
+    vendor.sessions.clear();
+    const copied = await call(id, person, "orders.duplicate");
+    const [second = ""] = vendor.sessions;
+
+    expect({
+      copied: output(copied),
+      sessions: sentSessions(),
+      logins: vendor.logins.length,
+    }).toStrictEqual({
+      copied: { id: "order-2", title: "Second" },
+      sessions: [first, second, second],
+      logins: 2,
     });
   });
 
@@ -533,6 +592,37 @@ describe("a connector's sign-in with a call", () => {
     });
   });
 
+  it("SL6: keeps the fields when a renewal is answered with a redirect or no session, and backs off", async () => {
+    const person = someone("admin");
+    const redirected = await connect(person);
+    const empty = await connect(person);
+    vendor.login = () =>
+      new Response(null, {
+        status: 302,
+        headers: { location: "https://status.sample-login.test/" },
+      });
+    await expire(redirected);
+    const afterRedirect = await outcome(
+      call(redirected, person, "orders.list")
+    );
+    vendor.login = () => json({ message: "Maintenance" });
+    await expire(empty);
+    const afterEmpty = await outcome(call(empty, person, "orders.list"));
+
+    expect({
+      results: [afterRedirect, afterEmpty],
+      statuses: [await statusOf(redirected), await statusOf(empty)],
+      kept: [
+        (await tokenRow(redirected)) !== undefined,
+        (await tokenRow(empty)) !== undefined,
+      ],
+    }).toStrictEqual({
+      results: ["connect.rate_limited", "connect.rate_limited"],
+      statuses: ["active", "active"],
+      kept: [true, true],
+    });
+  });
+
   it("SL7: keeps a session as long as the answer says, or its JWT, within two minutes and a day, and logs in again once it runs out", async () => {
     const person = someone("admin");
     const lasts = async (): Promise<number> => {
@@ -543,9 +633,13 @@ describe("a connector's sign-in with a call", () => {
     };
     vendor.expiresIn = 600;
     const stated = await lasts();
+    vendor.expiresIn = "900";
+    const written = await lasts();
     vendor.expiresIn = 5;
     const short = await lasts();
     vendor.expiresIn = undefined;
+    vendor.next = () => jwtUntil(Math.floor(Date.now() / 1000) + 3600);
+    const hourJwt = await lasts();
     vendor.next = () =>
       jwtUntil(Math.floor(Date.now() / 1000) + 30 * 24 * 3600);
     const farJwt = await lasts();
@@ -559,14 +653,21 @@ describe("a connector's sign-in with a call", () => {
     const events = await actionsOf();
 
     expect({
-      minutes: { stated, short, farJwt, none },
+      minutes: { stated, written, short, hourJwt, farJwt, none },
       logins: vendor.logins.length,
       renewed: events
         .filter(({ action }) => action === "connection.session_renewed")
         .map(({ detail }) => detail),
     }).toStrictEqual({
-      minutes: { stated: 10, short: 2, farJwt: 24 * 60, none: 24 * 60 },
-      logins: 6,
+      minutes: {
+        stated: 10,
+        written: 15,
+        short: 2,
+        hourJwt: 60,
+        farJwt: 24 * 60,
+        none: 24 * 60,
+      },
+      logins: 8,
       renewed: [{ provider: "sample-login", reason: "expired" }],
     });
   });
@@ -580,6 +681,7 @@ describe("a connector's sign-in with a call", () => {
     }
     const person = someone("admin");
     const id = await connect(person);
+    await age(id);
     vendor.sessions.clear();
     await call(id, person, "orders.list");
     await expire(id);

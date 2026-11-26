@@ -380,10 +380,11 @@ export const apiKeyMaxLength = 4096;
 export const loginFieldMaxLength = 1024;
 
 /**
- * Connects an app that signs in with an API key, which the person typed:
- * connect checks it with the app (its provider record's account lookup)
- * and seals it in the token vault, as it does OAuth tokens. It never comes
- * back out, and never reaches the connector's code.
+ * Connects an app that signs in with what the person typed: an API key,
+ * which connect checks with the app (its provider record's account
+ * lookup), or a login's fields, which connect logs in with. Either is
+ * sealed in the token vault, as OAuth tokens are, never comes back out,
+ * and never reaches the connector's code.
  */
 export const connectWithKeySchema = z
   .strictObject({
@@ -413,15 +414,16 @@ export const connectWithKeySchema = z
      * For an app's shared connection to a system inside the company's own
      * network: the one address its requests go to, through the
      * deployment's company network, as an http or https origin with its
-     * port (`http://10.0.0.8:8080`). Sealed with the key, so another
-     * address takes the key again (GRA-2327). A connector made from a URL
-     * names its own (`AddConnector.companyNetwork`).
+     * port (`http://10.0.0.8:8080`). Sealed with the key or fields, so
+     * another address takes them again (GRA-2327). A connector made from a
+     * URL names its own (`AddConnector.companyNetwork`).
      */
     companyNetwork: z.string().max(connectorUrlMaxLength).optional(),
     /**
      * The host for each of the app's connector's host templates, such as
-     * `{ "{host}": "erp.example.com" }`: sealed with the key, so another
-     * host takes signing in again. Connect checks each against its template.
+     * `{ "{host}": "erp.example.com" }`: sealed with the key or fields, so
+     * another host takes signing in again. Connect checks each against its
+     * template.
      */
     hosts: z.record(z.string().max(253), z.string().max(253)).optional(),
   })

@@ -84,7 +84,7 @@ export const startOnboardingConnection = async (
 export const connectOnboardingWithKey = async (
   env: Env,
   identity: Identity,
-  { provider, key }: Pick<ConnectWithKey, "provider" | "key">
+  { provider, key }: Pick<ConnectWithKey, "provider"> & { key: string }
 ): Promise<{ connectionId: string }> => {
   requireClientAdmin(identity);
   return await env.CONNECT.connectWithKey({

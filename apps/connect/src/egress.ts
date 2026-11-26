@@ -17,7 +17,7 @@ import { z } from "zod";
 import { outbound } from "./company-network.ts";
 import { credentialForms, withoutCredential } from "./credential-copies.ts";
 import { pauseAsked } from "./pause.ts";
-import { sessionAfterRefusal } from "./tokens.ts";
+import { sessionAfterRefusal, sessionSince } from "./tokens.ts";
 
 // A native connector's only way out. Connect loads each call's connector
 // isolate with this as its `globalOutbound`, so every request the
@@ -40,9 +40,10 @@ import { sessionAfterRefusal } from "./tokens.ts";
 // replaced (`answerHeaders`), so a session a vendor hands out, or a
 // credential it echoes in a header, never reaches connector code.
 // A session login's session (session-login.ts) the vendor answers 401 is
-// logged in for again once, however many calls it refused, and a read is
-// sent again with the new one; never a write, which may have done
-// something first (threat model LG9).
+// logged in for again once, however many calls it refused, unless it was
+// logged in for moments before, and a read is sent again with the new
+// one; never a write, which may have done something first (threat model
+// LG9), so a write goes with the newest session there is.
 // Redirects aren't followed, except one from a route that names the hosts
 // it may lead to (a download), which the handler follows itself,
 // once, without the token or anything of the connector's request. A
@@ -433,6 +434,43 @@ const reachedHost = (
 };
 
 /**
+ * The vendor's answer to a request of `call`, whose credential is a
+ * session login's (`session` its generation), sent by `send`; each
+ * session it went with is added to `credentials`, for `answerHeaders`.
+ * A write goes with the session another request of the call logged in
+ * for, if one did: refused with the old one, it isn't sent again. A
+ * session the vendor refuses is logged in for again, and a read sent
+ * again with the new one, once. A write isn't: it may have done
+ * something before it was refused (threat model LG9).
+ */
+const sentWithSession = async (
+  env: Env,
+  { connectionId, credential, session }: EgressProps & { session: number },
+  method: string,
+  send: (sent: EgressProps["credential"]) => Promise<Response | undefined>,
+  credentials: EgressProps["credential"][]
+): Promise<Response | undefined> => {
+  const reads = method === "GET" || method === "HEAD";
+  const latest = reads
+    ? undefined
+    : await sessionSince(env, connectionId, session);
+  if (latest !== undefined) {
+    credentials.push(latest);
+  }
+  const response = await send(latest ?? credential);
+  if (response?.status !== 401 || !reads) {
+    return response;
+  }
+  const renewed = await sessionAfterRefusal(env, connectionId, session);
+  if (renewed === undefined) {
+    return response;
+  }
+  await response.body?.cancel();
+  credentials.push(renewed);
+  return await send(renewed);
+};
+
+/**
  * The egress handler. Reached only as a connector isolate's
  * `globalOutbound`, with props connect sets for one call; without them
  * (another Worker naming this entrypoint), nothing goes out.
@@ -460,8 +498,7 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
       companyNetwork,
       expiresAt,
     } = call;
-    const remainingMs = expiresAt - Date.now();
-    if (remainingMs <= 0) {
+    if (expiresAt <= Date.now()) {
       return refuse(call, "expired", url, method);
     }
     const reached = reachedHost(call, url);
@@ -477,6 +514,11 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
     const send = async (
       sent: EgressProps["credential"]
     ): Promise<Response | undefined> => {
+      // Within the call's window, a resend after a renewal too.
+      const remainingMs = expiresAt - Date.now();
+      if (remainingMs <= 0) {
+        return undefined;
+      }
       const headers = new Headers(request.headers);
       // The credential's own header too: the connector can't send another
       // key there, or a second copy that a provider might read first.
@@ -512,22 +554,16 @@ export class ConnectorEgress extends WorkerEntrypoint<Env, EgressProps> {
       }
     };
     const credentials = [credential];
-    let response = await send(credential);
-    // A session the vendor refused: logged in for again, and a read sent
-    // again with the new one, once. A write isn't: it may have done
-    // something before it was refused (threat model LG9).
-    if (response?.status === 401 && carries && call.session !== undefined) {
-      const renewed = await sessionAfterRefusal(
-        this.env,
-        call.connectionId,
-        call.session
-      );
-      if (renewed !== undefined && (method === "GET" || method === "HEAD")) {
-        await response.body?.cancel();
-        credentials.push(renewed);
-        response = await send(renewed);
-      }
-    }
+    let response =
+      carries && call.session !== undefined
+        ? await sentWithSession(
+            this.env,
+            { ...call, session: call.session },
+            method,
+            send,
+            credentials
+          )
+        : await send(credential);
     if (response === undefined) {
       return egressAnswer(egressKind.failed);
     }

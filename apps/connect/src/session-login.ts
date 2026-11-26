@@ -39,11 +39,21 @@ const maxSessionMs = 24 * 60 * 60 * 1000;
  * Shortest: one that says it lasts less is still used this long, and a
  * 401 ends it, so a short or past expiry never has every call log in.
  */
-const minSessionMs = 2 * 60 * 1000;
+export const minSessionMs = 2 * 60 * 1000;
 /** How long the login may take: well within a renewal's lease (tokens.ts). */
 const loginTimeoutMs = 10_000;
 /** Longest session connect takes. */
 const maxSessionLength = 4096;
+
+/**
+ * The answers that say the fields are wrong (threat model LG5). Any other
+ * a login gets, a redirect or a page without a session among them, is a
+ * vendor that can't sign in for now, which keeps the fields.
+ */
+const refusedStatuses: ReadonlySet<number> = new Set([400, 401, 403]);
+
+/** Seconds as a vendor may write them in JSON: a number, or its digits. */
+const digits = /^\d+$/u;
 
 /** A session that may go in a header as it is: visible ASCII, no space. */
 const headerSafe = /^[\u0021-\u007E]+$/u;
@@ -54,9 +64,9 @@ const cookieSafe = /^(?:"[!#-+\--:<-[\]-~]+"|[!#-+\--:<-[\]-~]+)$/u;
 /** What a login answered: a session, or why there is none. */
 export type LoginAnswer =
   | { session: string; expiresAt: number }
-  /** Answered, without a session: the fields are wrong, or the record is. */
+  /** Refused (400, 401, 403): the fields are wrong. */
   | { refused: true }
-  /** Not answered for now (429, 5xx, unreachable): after `retryAfterSeconds`, if it says. */
+  /** No session for now (any other answer, or none): after `retryAfterSeconds`, if it says. */
   | { refused: false; retryAfterSeconds?: number };
 
 /** The session as a call's requests carry it. */
@@ -146,9 +156,11 @@ const expiryOf = (
     typeof claims === "object" && claims !== null
       ? Reflect.get(claims, "exp")
       : undefined;
+  const seconds =
+    typeof stated === "string" && digits.test(stated) ? Number(stated) : stated;
   let lasts = maxSessionMs;
-  if (typeof stated === "number" && Number.isFinite(stated)) {
-    lasts = stated * 1000;
+  if (typeof seconds === "number" && Number.isFinite(seconds)) {
+    lasts = seconds * 1000;
   } else if (typeof exp === "number" && Number.isFinite(exp)) {
     lasts = exp * 1000 - now;
   }
@@ -180,7 +192,7 @@ const sessionFrom = async (
     ("cookie" in token ? cookieSafe.test(session) : headerSafe.test(session));
   return fits
     ? { session, expiresAt: expiryOf(json, expiresIn, session, now) }
-    : { refused: true };
+    : { refused: false };
 };
 
 /**
@@ -219,16 +231,15 @@ export const logIn = async (
     return { refused: false };
   }
   log.info("login.answered", { provider, status: response.status });
-  if (response.status === 429 || response.status >= 500) {
-    await response.body?.cancel();
-    const retryAfterSeconds = retryAfterOf(response);
-    return retryAfterSeconds === undefined
-      ? { refused: false }
-      : { refused: false, retryAfterSeconds };
+  if (response.ok) {
+    return await sessionFrom(response, signIn, now);
   }
-  if (!response.ok) {
-    await response.body?.cancel();
+  await response.body?.cancel();
+  if (refusedStatuses.has(response.status)) {
     return { refused: true };
   }
-  return await sessionFrom(response, signIn, now);
+  const retryAfterSeconds = retryAfterOf(response);
+  return retryAfterSeconds === undefined
+    ? { refused: false }
+    : { refused: false, retryAfterSeconds };
 };

@@ -1357,10 +1357,10 @@ export const finishConnection = async (
 };
 
 /**
- * Gives a live key connection that holds `account` the new key `key`:
- * a key the person rotated at the app, which an API key's connection
- * otherwise can't take, since nothing tells connect the old one stopped
- * working. Only one of `scope` that the person may manage (their own if
+ * Gives a live key or login connection that holds `account` the new key
+ * or fields in `tokens`: a key the person rotated at the app, or a
+ * password changed there, which its connection otherwise can't take,
+ * since nothing tells connect the old one stopped working. Only one of `scope` that the person may manage (their own if
  * personal; any admin's if shared, as checked before), so it keeps its ID
  * and every permission on it. In one write with its event, and only
  * while it is still active. Its ID if this call replaced the key.
@@ -1545,11 +1545,12 @@ const typedSignIn = async (
 };
 
 /**
- * Connects an app that signs in with an API key: the key the person gave,
- * once the app's own lookup takes it and names its account, kept sealed
- * as a connection's tokens are, under the same rules (`keepAccount`). The
- * key is never logged, audited or answered; a key the app refuses is
- * `connection.provider_refused`, and nothing is kept.
+ * Connects an app that signs in with what the person typed: an API key,
+ * once the app's own lookup takes it and names its account; or a login's
+ * fields, once the app answers its login with a session (`typedSignIn`).
+ * Kept sealed as a connection's tokens are, under the same rules
+ * (`keepAccount`), and never logged, audited or answered; what the app
+ * refuses is `connection.provider_refused`, and nothing is kept.
  */
 export const connectWithKey = async (
   env: Env,

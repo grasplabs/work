@@ -12,6 +12,14 @@ import { beforeEach } from "vite-plus/test";
 
 import { maxEgressResponseBytes } from "../src/egress.ts";
 import { sampleHost, storageHost } from "./fixtures/sample-connector.ts";
+import {
+  sampleCookieHost,
+  sampleCookieName,
+} from "./fixtures/sample-cookie-connector.ts";
+import {
+  sampleLoginApiHost,
+  sampleLoginPath,
+} from "./fixtures/sample-login-connector.ts";
 import { fakeInternet } from "./internet.ts";
 
 /** The host an admin gives the sample app on a host of its own. */
@@ -184,6 +192,22 @@ export const fakeSampleApi = () => {
   const { sent } = fakeInternet(async (request, url) => {
     if (url.hostname === sampleHost) {
       return await answerItems(request.method, url);
+    }
+    // The apps that sign in with a call: their logins.
+    if (
+      url.hostname === sampleLoginApiHost &&
+      url.pathname === sampleLoginPath
+    ) {
+      return Response.json({ token: "a-session" });
+    }
+    if (
+      url.hostname === sampleCookieHost &&
+      url.pathname === "/session/login"
+    ) {
+      return new Response(null, {
+        status: 204,
+        headers: { "set-cookie": `${sampleCookieName}=a-session` },
+      });
     }
     // An app on a host of its own (sample-host): its account lookup.
     if (url.hostname === sampleHostHost && url.pathname === "/v1/whoami") {

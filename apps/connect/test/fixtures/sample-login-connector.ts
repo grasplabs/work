@@ -6,7 +6,8 @@
  * second host, which the session doesn't go to. `orders.headers` reads what
  * an answer's headers hold, and `orders.probe` posts to the login itself,
  * as connector code that looks for a session would; `orders.create` is a
- * write, which a refused session never sends again.
+ * write, which a refused session never sends again, and
+ * `orders.duplicate` reads before it writes.
  */
 import { auth, defineConnector, page, tool, v } from "@grasp-os/sdk/connector";
 
@@ -65,6 +66,26 @@ export default defineConnector({
           body: { title },
           returns: Order,
         }),
+    }),
+    "orders.duplicate": tool({
+      description: "Adds a copy of the first order",
+      readOnly: false,
+      reach: "own",
+      routes: [
+        `GET ${sampleLoginApiHost}/orders`,
+        `POST ${sampleLoginApiHost}/orders`,
+      ],
+      args: {},
+      returns: Order,
+      handler: async (_args, api) => {
+        const { items } = await api.get(`${sampleLoginApiHost}/orders`, {
+          returns: Orders,
+        });
+        return await api.post(`${sampleLoginApiHost}/orders`, {
+          body: { title: items[0]?.title ?? "" },
+          returns: Order,
+        });
+      },
     }),
     "files.list": tool({
       description: "Lists the files, from the app's storage",

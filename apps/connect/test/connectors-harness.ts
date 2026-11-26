@@ -122,6 +122,24 @@ export const connectionOf = async (
     api.sent.length = 0;
     return { id: connectionId, person };
   }
+  // An app that signs in with a call: a shared connection an admin gives
+  // the fields of, which the sample API logs in.
+  if (provider === "sample-login" || provider === "sample-cookie") {
+    const person = someone("admin");
+    const user = `user-${crypto.randomUUID()}`;
+    const { connectionId } = await exports.default.connectWithKey({
+      person,
+      provider,
+      scope: "shared",
+      fields:
+        provider === "sample-login"
+          ? { userName: user, password: "a-password" }
+          : { user, secret: "a-password" },
+    });
+    // Its login isn't what the test reads back.
+    api.sent.length = 0;
+    return { id: connectionId, person };
+  }
   if (!isApp(provider)) {
     return await connectionTo(
       server,

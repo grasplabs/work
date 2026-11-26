@@ -288,7 +288,8 @@ export interface LoginProviderConfig {
   ) => Promise<LoginAnswer>;
   /** As an API key's (`ApiKeyProviderConfig`). */
   hostTemplates?: readonly string[];
-  sharedOnly?: boolean;
+  /** Always: a login's connection is the organization's (`appProvider`). */
+  sharedOnly: true;
   companyNetwork?: never;
 }
 
@@ -913,7 +914,8 @@ export const appProvider = ({
       logIn: async (fields, send, given) =>
         await logIn(provider, signIn, fields, send, given),
       hostTemplates: templates,
-      ...(sharedOnly ? { sharedOnly } : {}),
+      // An account a login names has no address to prove a person's own.
+      sharedOnly: true,
     };
   }
   if (signIn.kind === "api_key") {

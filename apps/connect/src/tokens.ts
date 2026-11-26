@@ -33,15 +33,16 @@ import type {
   OAuthClientCredentials,
   OAuthProviderConfig,
 } from "./providers.ts";
+import { minSessionMs } from "./session-login.ts";
 import { resealBatchSize, VaultError, vaultFor } from "./vault.ts";
 import type { Vault } from "./vault.ts";
 
 // The token vault: each connection's tokens, its API key, or its login's
-// fields and session, sealed (src/vault.ts), in connect's D1. Nothing here is reachable over RPC:
-// tokens and keys never leave connect, except as the credential of one
-// call, which a connector's egress handler adds to the call's requests
-// (threat model R1). A refresh token never leaves at all: only its token
-// endpoint sees it.
+// fields and session, sealed (src/vault.ts), in connect's D1. Nothing
+// here is reachable over RPC: tokens and keys never leave connect, except
+// as the credential of one call, which a connector's egress handler adds
+// to the call's requests (threat model R1). A refresh token never leaves
+// at all: only its token endpoint sees it.
 
 /**
  * The host a connection signed in with for each of its connector's host
@@ -283,6 +284,18 @@ const releaseLease = async (db: D1Database, row: TokenRow): Promise<void> => {
     .where(unchanged(row));
 };
 
+/** Why a connection's tokens are no use any more (`markDead`). */
+type DeadReason =
+  | "invalid_grant"
+  | "unreadable"
+  | "scopes_changed"
+  | "scopes_missing"
+  | "login_refused";
+
+/** Whether a connection marked for `reason` still holds a valid grant. */
+const grantStillValid = (reason: DeadReason): boolean =>
+  reason === "scopes_changed" || reason === "scopes_missing";
+
 /**
  * The connection's tokens are no use any more (the grant is gone, or they
  * don't open): it needs the person to connect again, and they go. Only if
@@ -291,17 +304,6 @@ const releaseLease = async (db: D1Database, row: TokenRow): Promise<void> => {
  * and that connection is fine. Recorded only when it changed something.
  * Whether it did.
  */
-/** Whether a connection marked for `reason` still holds a valid grant. */
-type DeadReason =
-  | "invalid_grant"
-  | "unreadable"
-  | "scopes_changed"
-  | "scopes_missing"
-  | "login_refused";
-
-const grantStillValid = (reason: DeadReason): boolean =>
-  reason === "scopes_changed" || reason === "scopes_missing";
-
 const markDead = async (
   env: Env,
   provider: string,
@@ -851,6 +853,15 @@ const logInUnderLease = async (
   reason: "expired" | "refused"
 ): Promise<Session | undefined> => {
   try {
+    // A session refused this soon after its login wasn't refused for
+    // being old: a new one would be too, and every call would log in.
+    // The call gets the vendor's refusal; one after the floor logs in.
+    const age = Date.now() - row.updatedAt.getTime();
+    if (reason === "refused" && age < minSessionMs) {
+      throw connectErrors.create("connect.rate_limited", {
+        retryAfterSeconds: Math.ceil((minSessionMs - age) / 1000),
+      });
+    }
     const { login, companyNetwork, hosts = {} } = await openLogin(vault, row);
     const answer = await provider.logIn(
       login,
@@ -954,6 +965,30 @@ export const sessionAfterRefusal = async (
       connection: connectionId,
       ...errorFields(error),
     });
+    return undefined;
+  }
+};
+
+/**
+ * The session a call of session login's connection `connectionId` that
+ * was given its session of `generation` sends a write with: the one
+ * another request logged in for since, if one did, since a write refused
+ * with the old one isn't sent again (egress.ts); else `undefined`, and
+ * the call's own goes.
+ */
+export const sessionSince = async (
+  env: Env,
+  connectionId: string,
+  generation: number
+): Promise<(Credential & { secret: string }) | undefined> => {
+  try {
+    const { provider, row, vault } = await activeConnection(env, connectionId);
+    if (provider.kind !== "login" || row.generation === generation) {
+      return undefined;
+    }
+    const { session } = await openLogin(vault, row);
+    return { ...provider.credential(session), secret: session };
+  } catch {
     return undefined;
   }
 };

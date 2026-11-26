@@ -532,6 +532,12 @@ export const keyHeaderSchema = z
     "Not a header an API key may go in"
   );
 
+/** Text before a key or token in its header, such as `Bearer `. */
+const keyPrefixSchema = z
+  .string()
+  .regex(/^[!-~]{1,32} ?$/u)
+  .optional();
+
 /**
  * An API key the person gives, sent on every request in one header:
  * `authorization` with a `Bearer ` prefix, say, or `x-api-key` alone.
@@ -540,11 +546,7 @@ const apiKeySignInSchema = z.strictObject({
   kind: z.literal("api_key"),
   name: appNameSchema,
   header: keyHeaderSchema,
-  /** Text before the key in the header, such as `Bearer `. */
-  prefix: z
-    .string()
-    .regex(/^[!-~]{1,32} ?$/u)
-    .optional(),
+  prefix: keyPrefixSchema,
   account: accountLookupSchema,
 });
 
@@ -624,11 +626,7 @@ const loginSignInSchema = z
         /** Where the answer's JSON holds it. */
         from: pointerSchema,
         header: keyHeaderSchema,
-        /** Text before it in the header, such as `Bearer `. */
-        prefix: z
-          .string()
-          .regex(/^[!-~]{1,32} ?$/u)
-          .optional(),
+        prefix: keyPrefixSchema,
       }),
       z.strictObject({ cookie: cookieNameSchema }),
     ]),
