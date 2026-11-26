@@ -105,10 +105,10 @@ const signInServer = (
 };
 
 /** Adds the server at `url` as a connector signing in with OAuth. */
-const addServer = async (url: string, person = admin()) =>
+const addServer = async (url: string, person = admin(), name = "A server") =>
   await exports.default.addConnector({
     person,
-    name: "A server",
+    name,
     url,
     origin: clientOrigin,
     auth: { kind: "oauth" },
@@ -653,6 +653,27 @@ describe("a connector's server", () => {
       notUrl: "connection.invalid",
       inside: "connection.server_refused",
       unknown: "connection.server_refused",
+      registered: 0,
+    });
+  });
+
+  it("is named only in characters that show, never turning or hiding the text around it", async () => {
+    const named = async (name: string) =>
+      await outcome(addServer(linear.url, admin(), name));
+
+    expect({
+      rightToLeft: await named("Linear\u202Etxt.exe"),
+      isolate: await named("\u2067Linear"),
+      zeroWidth: await named("Lin\u200Bear"),
+      control: await named("Linear\u0007"),
+      lineBreak: await named("Linear\u2028Notes"),
+      registered: linear.registrations.length,
+    }).toStrictEqual({
+      rightToLeft: "connection.invalid",
+      isolate: "connection.invalid",
+      zeroWidth: "connection.invalid",
+      control: "connection.invalid",
+      lineBreak: "connection.invalid",
       registered: 0,
     });
   });

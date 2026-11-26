@@ -36,7 +36,7 @@ const answered = (
 const none = { sources: [], restricted: false };
 
 describe(chatMarkdown, () => {
-  it("writes the title, each question and answer under who said it, and the sources by name", () => {
+  it("writes the title, each question and answer under who said it, and the sources by name, never by ID", () => {
     expect(
       chatMarkdown({
         title: "Open invoices",
@@ -74,7 +74,7 @@ describe(chatMarkdown, () => {
         // An answer that opens with a table keeps it a table.
         "**Grasp:**\n\n| Open |\n| --- |\n| 12 |",
         "## Sources",
-        "- Microsoft 365\n- conn-9",
+        "- Microsoft 365\n- Unknown source",
       ].join("\n\n")
     );
   });

@@ -572,13 +572,18 @@ export const aiSourceSchema = z.enum(aiSources);
 export type AiSource = z.infer<typeof aiSourceSchema>;
 
 /**
- * Grasp's AI: the provider whose key of Grasp's it runs on, and its one
- * model. Nothing to choose: changing either is a change here, released as
- * any change is.
+ * Grasp's AI: the model it runs on, on a key of Grasp's, by which keys this
+ * deployment has: the first of `models` whose provider Grasp has a key for
+ * here (`graspAiOf` in core). Anthropic's where it can; OpenAI's where
+ * Grasp has only that one, so a deployment with an OpenAI key alone still
+ * offers it. Nothing to choose: changing a model is a change here,
+ * released as any change is.
  */
 export const graspAi = {
-  provider: "anthropic",
-  model: "anthropic/claude-sonnet-5-5",
+  models: [
+    { provider: "anthropic", model: "anthropic/claude-sonnet-5-5" },
+    { provider: "openai", model: "openai/gpt-5.5" },
+  ],
   /**
    * The most an organization's use of Grasp's AI may come to in a UTC
    * month, in US dollars at list prices: past it, its calls on Grasp's
@@ -587,8 +592,7 @@ export const graspAi = {
    */
   monthlyLimitUsd: 100,
 } as const satisfies {
-  provider: AiProviderId;
-  model: string;
+  models: readonly { provider: AiProviderId; model: string }[];
   monthlyLimitUsd: number;
 };
 
