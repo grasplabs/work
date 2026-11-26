@@ -31,7 +31,7 @@ import { z } from "zod";
 
 import { derivedHmacKey } from "../derived-keys.ts";
 import { errorResponse } from "../errors.ts";
-import { modelForRole, modelSettings, models } from "../models.ts";
+import { models } from "../models.ts";
 import { platformAi } from "../platform-ai.ts";
 import { boundedText, jsonOf } from "../request-body.ts";
 import { interviewCaller } from "./interview-caller.ts";
@@ -445,14 +445,6 @@ const closeQuietly = async (
 const failed = (message: string, status: number): Response =>
   Response.json({ error: message, status }, { status, headers: linkHeaders });
 
-/** The models it runs on: the notes' model, the organization's careful one. */
-const notesModelOf = async (env: Env): Promise<string | undefined> => {
-  const settings = await modelSettings(env);
-  return settings.models.length > 0
-    ? modelForRole(settings, "careful")
-    : undefined;
-};
-
 interface Asked {
   env: Env;
   context: TurnContext;
@@ -467,11 +459,6 @@ const open = async (
   { env, context, secretMark, account, requestId }: Asked,
   asked: Extract<InterviewVoiceRequest, { action: "open" }>
 ): Promise<Response> => {
-  // Nothing said could be written down: no session is opened, nor paid for.
-  if ((await notesModelOf(env)) === undefined) {
-    log.error("interview.no_model", { requestId });
-    return failed("The interview is not set up yet.", 503);
-  }
   // A session listens as live transcription does, and from the same budget
   // a day: each one opened is counted at what it is expected to last, so a
   // link can't open them without end.
@@ -644,11 +631,9 @@ const answer = async (
   asked: Extract<InterviewVoiceRequest, { action: "answer" }>,
   session: string
 ): Promise<Response> => {
-  const notesModel = await notesModelOf(env);
-  if (notesModel === undefined) {
-    log.error("interview.no_model", { requestId });
-    return failed("The interview is not set up yet.", 503);
-  }
+  // Grasp's own notes' model, as an interview's turns write theirs
+  // (`platformAi.interview`), whatever models the organization set up.
+  const notesModel = platformAi.interview.notes;
   const [heard, company] = await Promise.all([
     heardIn(env, session, requestId),
     companyOf(env),
