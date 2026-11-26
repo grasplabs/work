@@ -188,7 +188,7 @@ const Connected = ({
     ) : (
       <>
         <div {...stylex.props(styles.table)}>
-          <Table aria-labelledby="connected">
+          <Table aria-label="The company’s connections">
             <TableHeader>
               <TableRow>
                 <TableHead>App</TableHead>
