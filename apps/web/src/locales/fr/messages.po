@@ -549,10 +549,6 @@ msgstr "{count, plural, one {Écriture de # fichier} other {Écriture de # fichi
 msgid "{count, plural, one {Wrote # file} other {Wrote # files}}"
 msgstr "{count, plural, one {# fichier écrit} other {# fichiers écrits}}"
 
-#: src/onboarding/send-plan-form.tsx
-msgid "{count, plural, one {Your one team gets links.} other {All # teams get links.}}"
-msgstr "{count, plural, one {Votre équipe reçoit des liens.} other {Les # équipes reçoivent des liens.}}"
-
 #: src/brain/thinking/use-thinking.ts
 msgid "{count, plural, other {# not counted yet}}"
 msgstr "{count, plural, other {# pas encore comptés}}"
@@ -707,8 +703,8 @@ msgid "{going, plural, one {The lead of # team gets their link {when}. Everyone 
 msgstr "{going, plural, one {Le responsable de # équipe reçoit son lien {when}. Tous les autres juste après que leur responsable m’a parlé.} other {Les responsables de # équipes reçoivent leur lien {when}. Tous les autres juste après que leur responsable m’a parlé.}}"
 
 #: src/onboarding/send-plan-form.tsx
-msgid "{heldCount, plural, one {The team you left out: {leftOut}.} other {The # teams you left out: {leftOut}.}}"
-msgstr "{heldCount, plural, one {L’équipe que vous avez mise de côté : {leftOut}.} other {Les # équipes que vous avez mises de côté : {leftOut}.}}"
+msgid "{heldCount, plural, one {When {leftOut} gets links} other {When {leftOut} get links}}"
+msgstr "{heldCount, plural, one {Quand {leftOut} reçoit les liens} other {Quand {leftOut} reçoivent les liens}}"
 
 #: src/brain/brain-chips.tsx
 #: src/brain/brain-source-contents.tsx
@@ -1013,10 +1009,6 @@ msgstr "{name} est injoignable pour le moment. Réessayez dans un instant."
 #: src/drafts/draft-history.tsx
 msgid "{name} edited it"
 msgstr "{name} l’a modifié"
-
-#: src/onboarding/send-plan-form.tsx
-msgid "{name} gets links"
-msgstr "{name} reçoit des liens"
 
 #: src/agents/agent-documents.tsx
 msgid "{name} has no documents."
@@ -4288,11 +4280,6 @@ msgstr "Modifier"
 
 #: src/onboarding/review-parts.tsx
 msgctxt "change how it was settled"
-msgid "Change"
-msgstr "Modifier"
-
-#: src/onboarding/send-plan-form.tsx
-msgctxt "change which teams"
 msgid "Change"
 msgstr "Modifier"
 
@@ -17532,6 +17519,10 @@ msgstr "Conversations et réunions Teams auxquelles ils ont participé : ce que 
 msgid "Teams for {label}"
 msgstr "Équipes pour {label}"
 
+#: src/onboarding/send-plan-form.tsx
+msgid "Teams that get links"
+msgstr "Équipes qui reçoivent les liens"
+
 #: src/onboarding/interviews-progress.tsx
 msgid "Teams under five people show only whether their lead talked, so nobody can be singled out."
 msgstr "Les équipes de moins de cinq personnes indiquent seulement si leur responsable a parlé, pour que personne ne puisse être identifié."
@@ -18611,10 +18602,6 @@ msgstr "Ces notes ne reposent sur rien d'autre et partent aussi : {named} et {mo
 #: src/brain/forget.tsx
 msgid "These notes rest on nothing else and go too: {named}."
 msgstr "Ces notes ne reposent sur rien d'autre et partent aussi : {named}."
-
-#: src/onboarding/send-plan-form.tsx
-msgid "These teams get links. Switch one off to send its links later."
-msgstr "Ces équipes reçoivent des liens. Désactivez-en une pour envoyer ses liens plus tard."
 
 #: src/settings/guests.tsx
 msgid "They are signed out everywhere and cannot sign in again."
