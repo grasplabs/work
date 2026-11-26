@@ -79,10 +79,27 @@ const styles = stylex.create({
 // chat is shown: most pages show the chat idle.
 type ThreadComponent = typeof ChatThreadType;
 
-const ChatThread = lazy(async (): Promise<{ default: ThreadComponent }> => {
+/** The conversation's code, once loaded: drawn as it is, never suspending. */
+let loadedThread: ThreadComponent | undefined;
+
+const loadThread = async (): Promise<{ default: ThreadComponent }> => {
   const { ChatThread: thread } = await import("./thread.tsx");
+  loadedThread = thread;
   return { default: thread };
-});
+};
+
+const LazyThread = lazy(loadThread);
+
+/**
+ * Loads the conversation's code ahead of the chat it shows (Chat's start,
+ * where a question opens one): its first question then shows the moment
+ * the chat does, never its skeleton while the code arrives. Loaded, it is
+ * drawn as it is: React's `lazy` suspends a first draw even then, and
+ * keeps the fallback it showed for a while after.
+ */
+export const preloadThread = (): void => {
+  void loadThread();
+};
 
 /** The chat loading, in the thread's place: the shape of a question and its answer. */
 const Loading = () => {
@@ -170,6 +187,7 @@ export const ChatConversation = ({
     return <div {...stylex.props(styles.grow)} />;
   }
   const lastQuestion = view.messages.findLast(({ role }) => role === "user");
+  const ChatThread = loadedThread ?? LazyThread;
   return (
     <Suspense fallback={<Loading />}>
       <ChatThread

@@ -14,7 +14,7 @@ import {
 } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
-import { Await, useRouteContext } from "@tanstack/react-router";
+import { Await, useRouteContext, useRouter } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 
 import { briefOf, useStartFrom } from "../brain/opportunity-drafts.ts";
@@ -26,6 +26,7 @@ import { BlueprintIdeas, WorkflowIdeas } from "../make/make-ideas.tsx";
 import { agentModelOf } from "./agent-choice.tsx";
 import { useLook } from "./backdrop-look.ts";
 import { Backdrop } from "./backdrop/backdrop.tsx";
+import { preloadThread } from "./chat-body.tsx";
 import { useGoToChat } from "./chat-link.ts";
 import { Composer } from "./composer.tsx";
 import { useGlobalChat } from "./global-chat.tsx";
@@ -247,6 +248,17 @@ export const ChatStart = ({
   // whose model the box shows (the first one's, else the first agent's).
   const agentsMentioned = mentions.filter(({ kind }) => kind === "agent");
   const answering = agentsMentioned.at(0)?.id ?? agents.at(0)?.id;
+  // The chat a question here opens shows it at once: its page's code
+  // (the router's chunk for it) and its conversation's are here already.
+  const router = useRouter();
+  useEffect(() => {
+    preloadThread();
+    // Where the app has the chat's page (a test may not).
+    const page = "/_shell/chats/$chatId";
+    if (Object.hasOwn(router.routesById, page)) {
+      void router.loadRouteChunk(router.routesById[page]);
+    }
+  }, [router]);
   useEffect(() => {
     if (named === undefined || mentioned.current || typed !== "") {
       return;
