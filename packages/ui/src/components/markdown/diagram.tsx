@@ -34,7 +34,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../dropdown-menu";
-import { drawable, safeSvg } from "./diagram-safe";
+import { refusalOf, safeSvg } from "./diagram-safe";
 import { themeAt, watchScheme } from "./diagram-theme";
 import type { DiagramTheme } from "./diagram-theme";
 
@@ -128,31 +128,66 @@ const svgOfFrame = (frame: string) => {
   );
 };
 
-// One drawing at a time: Mermaid then makes its frame as it is asked, and it has its policy before
-// Mermaid draws in it. The drawing before this one ends when this promise does.
+/**
+ * Why a diagram is its code: `skipped` when Damsko does not give it to Mermaid (`limit`, past a
+ * bound on its size; `source`, a way to an address in it), `failed` when Mermaid was asked and did
+ * not draw it (`load`, its code did not load; `syntax`, Mermaid could not read the fence; `render`,
+ * it could not draw it; `output`, what it drew is no SVG; `timeout`, it took too long).
+ */
+export type DiagramReason =
+  | "skipped:limit"
+  | "skipped:source"
+  | "failed:load"
+  | "failed:syntax"
+  | "failed:render"
+  | "failed:output"
+  | "failed:timeout";
+
+/** A diagram drawn, or why it is not. */
+export type Drawing = { svg: string } | { reason: DiagramReason };
+
+// A failure that may not happen again: tried once more after a wait, and again after a longer one.
+// A chunk of Mermaid's that failed to load once (a dropped request, a server busy rebuilding) loads
+// when it is asked again; the same fence, read again, fails the same way, so the rest are not.
+const AGAIN = new Set<DiagramReason>([
+  "failed:load",
+  "failed:render",
+  "failed:timeout",
+]);
+const WAITS = [400, 1600];
+// The longest one attempt may take before it is given up and the next one may start.
+const LONGEST = 10_000;
+
+// One drawing at a time: Mermaid makes its frame as it is asked, and it has its policy before
+// Mermaid draws in it. The drawing before this one ends when this promise does, or when it has
+// taken LONGEST, so one that never ends (a request for a chunk that is never answered) is given up.
 let turn: Promise<unknown> = Promise.resolve();
+// Each attempt's own id: an attempt that took too long may still be drawing in its frame, which
+// Mermaid finds by its id.
+let attempts = 0;
+
+/** A promise that settles after `wait` milliseconds, as `value`. */
+const after = async <T,>(wait: number, value: T) =>
+  // oxlint-disable-next-line promise/avoid-new -- a timer has no promise of its own
+  await new Promise<T>((resolve) => {
+    setTimeout(() => {
+      resolve(value);
+    }, wait);
+  });
+
+/** A failure's reason: a dynamic import that failed is a TypeError in every engine. */
+const failure = (error: unknown, otherwise: DiagramReason): DiagramReason =>
+  error instanceof TypeError ? "failed:load" : otherwise;
 
 /**
- * Draws `code` with Mermaid, loaded the first time: its SVG, held to SVG's own shapes, or null when
- * it cannot. A fence that is not `drawable` is never drawn (`check: false` is for the spec that
- * shows the frame alone loads nothing). Mermaid draws in its sandbox's frame, out of sight and with
- * a policy that loads nothing, never in the page: what it measures is measured there.
+ * One attempt at drawing `code`: in Mermaid's sandbox frame, out of sight and with a policy that
+ * loads nothing, never in the page, so what it measures is measured there.
  */
-export const drawDiagram = async (
+const attempt = async (
   code: string,
   id: string,
-  { check = true, theme }: { check?: boolean; theme?: DiagramTheme } = {}
-) => {
-  if (check && !drawable(code)) {
-    return null;
-  }
-  const before = turn;
-  let done = nothing;
-  // oxlint-disable-next-line promise/avoid-new -- this drawing's turn, which ends when it does
-  turn = new Promise<void>((resolve) => {
-    done = resolve;
-  });
-  await before;
+  theme: DiagramTheme | undefined
+): Promise<Drawing> => {
   const box = document.createElement("div");
   const watch = new MutationObserver(() => {
     for (const frame of box.querySelectorAll("iframe")) {
@@ -160,15 +195,12 @@ export const drawDiagram = async (
     }
   });
   try {
-    box.setAttribute("aria-hidden", "true");
-    // Out of sight, at a size of its own, so what Mermaid measures is laid out.
-    box.setAttribute(
-      "style",
-      "position:fixed;inset-inline-start:-10000px;top:0;width:1000px;height:1000px;visibility:hidden;pointer-events:none"
-    );
-    document.body.append(box);
-    watch.observe(box, { childList: true, subtree: true });
-    const { default: mermaid } = await import("mermaid");
+    let mermaid;
+    try {
+      ({ default: mermaid } = await import("mermaid"));
+    } catch {
+      return { reason: "failed:load" };
+    }
     mermaid.initialize({
       startOnLoad: false,
       securityLevel: "sandbox",
@@ -179,25 +211,87 @@ export const drawDiagram = async (
       themeVariables: theme?.variables ?? {},
       // Labels as SVG text, not HTML in the drawing.
       htmlLabels: false,
-      // Mermaid's own bounds, under the fence's own (drawable).
+      // Mermaid's own bounds, under the fence's own (refusalOf).
       maxTextSize: 20_000,
       maxEdges: 200,
     });
+    try {
+      await mermaid.parse(code);
+    } catch (error) {
+      return { reason: failure(error, "failed:syntax") };
+    }
+    box.setAttribute("aria-hidden", "true");
+    // Out of sight, at a size of its own, so what Mermaid measures is laid out.
+    box.setAttribute(
+      "style",
+      "position:fixed;inset-inline-start:-10000px;top:0;width:1000px;height:1000px;visibility:hidden;pointer-events:none"
+    );
+    document.body.append(box);
+    watch.observe(box, { childList: true, subtree: true });
+    // Made as Mermaid is asked (or, behind a render still in its queue, as it starts: the observer
+    // gives that frame its policy), before Mermaid reads the fence and draws.
     const pending = mermaid.render(id, code, box);
-    // Made as Mermaid was asked, before it reads the fence and draws.
     for (const frame of box.querySelectorAll("iframe")) {
       guard(frame);
     }
-    const { svg: framed } = await pending;
-    const svg = svgOfFrame(framed);
-    return svg === null ? null : safeSvg(svg, id);
-  } catch {
-    return null;
+    let framed: string;
+    try {
+      ({ svg: framed } = await pending);
+    } catch (error) {
+      return { reason: failure(error, "failed:render") };
+    }
+    const inner = svgOfFrame(framed);
+    const svg = inner === null ? null : safeSvg(inner, id);
+    return svg === null ? { reason: "failed:output" } : { svg };
   } finally {
     watch.disconnect();
     box.remove();
-    done();
   }
+};
+
+/**
+ * Draws `code` with Mermaid, loaded the first time: its SVG, held to SVG's own shapes, or why it is
+ * its code. A fence `refusalOf` refuses is never drawn (`check: false` is for the spec that shows
+ * the frame alone loads nothing). A failure that may pass is tried again (AGAIN), twice at most.
+ */
+export const drawDiagram = async (
+  code: string,
+  id: string,
+  { check = true, theme }: { check?: boolean; theme?: DiagramTheme } = {}
+): Promise<Drawing> => {
+  const refused = check ? refusalOf(code) : null;
+  if (refused !== null) {
+    return { reason: `skipped:${refused}` };
+  }
+  let drawing: Drawing = { reason: "failed:render" };
+  for (const [tried, wait] of [0, ...WAITS].entries()) {
+    if (tried > 0) {
+      // oxlint-disable-next-line no-await-in-loop -- one attempt after the other
+      await after(wait, null);
+    }
+    const before = turn;
+    let done = nothing;
+    // oxlint-disable-next-line promise/avoid-new -- this attempt's turn, which ends when it does
+    turn = new Promise<void>((resolve) => {
+      done = resolve;
+    });
+    // oxlint-disable-next-line no-await-in-loop -- one attempt after the other
+    await before;
+    attempts += 1;
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one attempt after the other
+      drawing = await Promise.race([
+        attempt(code, `${id}-${attempts}`, theme),
+        after<Drawing>(LONGEST, { reason: "failed:timeout" }),
+      ]);
+    } finally {
+      done();
+    }
+    if ("svg" in drawing || !AGAIN.has(drawing.reason)) {
+      return drawing;
+    }
+  }
+  return drawing;
 };
 
 /** The numbers of the drawing's `viewBox`: where it starts, and its size. */
@@ -403,6 +497,7 @@ export const Diagram = ({
     theme: string;
     svg: string | null;
     title: string;
+    reason: DiagramReason | null;
   } | null>(null);
   const svg = drawn?.svg ?? null;
   // The look it is drawn in, resolved where it stands; drawn again when the colour scheme changes.
@@ -444,14 +539,24 @@ export const Diagram = ({
     let live = true;
     const draw = async (look: DiagramTheme) => {
       const made = await drawDiagram(code, id, { theme: look });
-      if (live) {
-        setDrawn({
-          code,
-          theme: look.key,
-          svg: made === null ? null : onGround(made, look.background),
-          title: made === null ? "" : titleOf(made),
-        });
+      if (!live) {
+        return;
       }
+      if ("reason" in made && made.reason.startsWith("failed:")) {
+        // Said once, for whoever looks: never the fence's words.
+        console.debug(`A Mermaid diagram is shown as its code: ${made.reason}`);
+      }
+      setDrawn(
+        "svg" in made
+          ? {
+              code,
+              theme: look.key,
+              svg: onGround(made.svg, look.background),
+              title: titleOf(made.svg),
+              reason: null,
+            }
+          : { code, theme: look.key, svg: null, title: "", reason: made.reason }
+      );
     };
     if (theme !== null) {
       void draw(theme);
@@ -465,6 +570,8 @@ export const Diagram = ({
     <div
       ref={frame}
       data-slot="markdown-diagram"
+      // Drawn, or why it is its code (DiagramReason), for a host and its tests.
+      data-diagram={drawn === null ? undefined : (drawn.reason ?? "drawn")}
       aria-busy={near && (drawn?.code !== code || drawn.theme !== theme?.key)}
     >
       <Code.CodeBlock language="mermaid">

@@ -85,6 +85,7 @@ import {
   stageOfNamespace,
 } from "@grasp-os/shared/names";
 import type { Stage } from "@grasp-os/shared/names";
+import { readsChatsOf } from "@grasp-os/shared/release";
 import type { ReleaseManifest, WorkerEntry } from "@grasp-os/shared/release";
 import { deriveRouterSecret } from "@grasp-os/shared/router";
 import { and, eq, gt, isNotNull, isNull, sql } from "drizzle-orm";
@@ -221,6 +222,17 @@ export const provisionOperationErrorCodes = [
    * client's ran: an older release, which only a rollback may go to.
    */
   "release_behind_migration",
+  /**
+   * A rollback past a release that changed how chats are stored: the
+   * release before can't read the chats the client stores since
+   * (`readsChatsOf`). Also what a failed probe's rollback stops with.
+   */
+  "rollback_past_chat_storage",
+  /**
+   * A release to one that can't read the chats the client's release
+   * stores: an older one, from before a change in how they're stored.
+   */
+  "release_behind_chat_storage",
   /**
    * The release failed its probe once live and was rolled back to the
    * release before on its own: its deploy counts as failed.
@@ -527,12 +539,16 @@ const behindMigration = (
 
 /**
  * Throws unless the client of `operation` may go to `target` (a rollback
- * when `rollback`): both imported, and `target` with every Durable Object
- * migration a script ran. What a script ran is what it was observed at
+ * when `rollback`): both imported, `target` with every Durable Object
+ * migration a script ran, and reading every chat the client stores
+ * (`readsChatsOf`). What a script ran is what it was observed at
  * (`migrated`); a Worker never observed counts at the last migration of
- * the release the operation has, which may have reached it. Checked for
- * every target before anything is uploaded: the upload refuses one per
- * script too, but only once connect may have gone.
+ * the release the operation has, which may have reached it. The chats
+ * are read as the operation's release stores them, whether or not its
+ * core went live: every release the operation went to passed this, so
+ * none stores chats in a newer way. Checked for every target before
+ * anything is uploaded: the upload refuses one per script too, but only
+ * once connect may have gone.
  */
 const assertCanGo = async (
   db: AdminDatabase,
@@ -577,6 +593,12 @@ const assertCanGo = async (
     throw new ProvisionOperationError(
       rollback ? "rollback_past_migration" : "release_behind_migration",
       `${behind} ran a Durable Object migration ${target} doesn't have`
+    );
+  }
+  if (!readsChatsOf(to, from)) {
+    throw new ProvisionOperationError(
+      rollback ? "rollback_past_chat_storage" : "release_behind_chat_storage",
+      `${target} can't read the chats ${running} stores`
     );
   }
 };
@@ -789,8 +811,10 @@ export const startedAs = (started: {
  * Refused for a client that isn't active (`client_not_active`), for a
  * rollback with nothing before (`nothing_to_roll_back`), when the release
  * it runs isn't imported (`release_not_imported`), past a migration a
- * script ran (`rollback_past_migration`, `release_behind_migration`), and
- * when the claim or the operation changed as it started
+ * script ran (`rollback_past_migration`, `release_behind_migration`), to
+ * one that can't read the chats the client stores
+ * (`rollback_past_chat_storage`, `release_behind_chat_storage`), and when
+ * the claim or the operation changed as it started
  * (`operation_running`). `cause` goes in the audit event, as when a
  * release is rolled back on its own.
  */
@@ -2832,7 +2856,13 @@ const rollsBack = async (
  * `failed`, which failed its probe with `code`: through its operation,
  * as runner `held`, audited as the system's rollback with the cause.
  * Throws when the rollback doesn't finish, its failure recorded on the
- * operation as any is.
+ * operation as any is. Refused as any rollback is (`assertCanGo`): past a
+ * Durable Object migration, or to a release that can't read the chats
+ * the failed one stores (`rollback_past_chat_storage`). Then the client
+ * stays on the failed release, its probe's failure on its operation, and
+ * the refusal is what its run stops with, for staff to release a fix:
+ * serving broken for a while does less harm than chats that no longer
+ * open.
  */
 const rollBackAfterProbe = async (
   context: ProvisionContext,
