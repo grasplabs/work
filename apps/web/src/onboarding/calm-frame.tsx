@@ -18,6 +18,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
@@ -93,12 +94,8 @@ const styles = stylex.create({
   },
   // One column for every step, the welcome too: centred on the page, its words on the start edge.
   column: { width: "100%", maxWidth: "40rem" },
-  // A screen with little on it stands in the middle of the room under the bar, a little above centre.
-  centred: {
-    marginBlockStart: "auto",
-    marginBlockEnd: "auto",
-    paddingBlockEnd: space[16],
-  },
+  // How far the column stands down the room, so it sits in its middle (useMiddle).
+  lowered: (top: number) => ({ marginBlockStart: `${top}px` }),
   step: { display: "grid", gap: space[10] },
   // A page with little on it: Stephen over the title, all of it on the column's middle.
   stepCentred: { justifyItems: "center", textAlign: "center", gap: space[8] },
@@ -436,13 +433,92 @@ const Track = ({
   );
 };
 
+/** Where in the room between the bar and the foot a step stands: a little above its middle, as the eye finds the middle. */
+const ABOVE_MIDDLE = 0.42;
+
+/** How long a step's room may still follow what arrives on it, before it settles where it is. */
+const SETTLING_MS = 1200;
+
+/**
+ * Every screen in the middle of the room between the bar and the foot, on a tall window too
+ * (Ruben, on a wide screen: "more centered in the middle"), a little above its centre. A step
+ * finds its place as it arrives, following what loads onto it in its first moment; from the
+ * first press or key on it (or that moment's end) it stays where it stands, so what opens on it
+ * (the AI step's cards, files, the list of leads) grows downward and nothing above it moves. A
+ * step taller than the room starts under the bar and the page scrolls. A new screen, or a
+ * resized window, finds its place again.
+ */
+const useMiddle = (): {
+  setRoom: (room: HTMLElement | null) => void;
+  setBlock: (block: HTMLDivElement | null) => void;
+  top: number;
+} => {
+  const [room, setRoom] = useState<HTMLElement | null>(null);
+  const [block, setBlock] = useState<HTMLDivElement | null>(null);
+  const [top, setTop] = useState(0);
+  // How far down the column stands as the page now has it, from one screen to the next.
+  const lowered = useRef(0);
+  useLayoutEffect(() => {
+    lowered.current = top;
+  }, [top]);
+  useLayoutEffect(() => {
+    if (room === null || block === null) {
+      return () => {
+        // Nothing to place.
+      };
+    }
+    let settled = false;
+    const place = (): void => {
+      const foot = room.nextElementSibling;
+      const footHeight =
+        foot instanceof HTMLElement && foot.tagName === "FOOTER"
+          ? foot.offsetHeight
+          : 0;
+      const roomTop = room.getBoundingClientRect().top;
+      // Where the column would start, not lowered: under the room's own room at its top.
+      const start = block.getBoundingClientRect().top - lowered.current;
+      const free =
+        window.innerHeight - footHeight - roomTop - block.offsetHeight;
+      const next = Math.max(
+        0,
+        Math.round(free * ABOVE_MIDDLE - (start - roomTop))
+      );
+      setTop(next);
+    };
+    const settle = (): void => {
+      settled = true;
+    };
+    place();
+    // Settled, what opens or closes on the step moves nothing above it.
+    const watch = new ResizeObserver(() => {
+      if (!settled) {
+        place();
+      }
+    });
+    watch.observe(block);
+    const timer = window.setTimeout(settle, SETTLING_MS);
+    // A resized window has another middle.
+    window.addEventListener("resize", place);
+    room.addEventListener("pointerdown", settle);
+    room.addEventListener("keydown", settle);
+    return () => {
+      watch.disconnect();
+      window.clearTimeout(timer);
+      window.removeEventListener("resize", place);
+      room.removeEventListener("pointerdown", settle);
+      room.removeEventListener("keydown", settle);
+    };
+  }, [room, block]);
+  return { setRoom, setBlock, top };
+};
+
 export const CalmFrame = ({
   userId,
   ways,
   progress,
   language = true,
   pose = fromTheTop,
-  centred = false,
+  screen,
   covered = false,
   children,
 }: {
@@ -452,8 +528,8 @@ export const CalmFrame = ({
   ways?: Ways;
   /** How far along, as the track shows it. */
   progress?: SetupProgress;
-  /** Little on it: the column in the middle of the room, not at its top. */
-  centred?: boolean;
+  /** Which screen is shown: a new one finds its own place in the middle of the room. */
+  screen?: string;
   /** The language in the bar: not on the step that asks for it. */
   language?: boolean;
   /**
@@ -467,6 +543,7 @@ export const CalmFrame = ({
   children: ReactNode;
 }) => {
   const [slot, setSlot] = useState<HTMLElement | null>(null);
+  const { setRoom, setBlock, top } = useMiddle();
   // A page without steps (the waiting page) keeps its buttons where they are.
   const tracked = ways !== undefined || progress !== undefined;
   return (
@@ -488,8 +565,11 @@ export const CalmFrame = ({
                 <Leave />
               </div>
             </header>
-            <main {...stylex.props(styles.main)}>
-              <div {...stylex.props(styles.column, centred && styles.centred)}>
+            <main key={screen} ref={setRoom} {...stylex.props(styles.main)}>
+              <div
+                ref={setBlock}
+                {...stylex.props(styles.column, styles.lowered(top))}
+              >
                 {children}
               </div>
             </main>
