@@ -20,6 +20,7 @@ import { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/e
 import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import {
+  agentTokenQuery,
   aiProviderIdSchema,
   aiProviders,
   platformRouteOf,
@@ -3814,6 +3815,42 @@ const sessionRequest = async (
 };
 
 /**
+ * A conversation token for one of Grasp's own voice agents (`agentTokens`,
+ * ElevenLabs's agents, for Grasp's interviews), asked with Grasp's key
+ * through connect: what the browser joins the conversation with, never
+ * the key. The token itself bills nothing: the conversation is metered by
+ * its caller, as a session is. The agent's ID is the caller's own,
+ * Grasp's (src/platform-ai.ts), never one the page names.
+ */
+const agentTokenRequest = async (
+  env: Env,
+  provider: ConnectTarget["provider"],
+  agentId: string,
+  signal?: AbortSignal
+): Promise<Response> => {
+  const { agentTokens } = aiProviders[provider];
+  const query = `?agent_id=${encodeURIComponent(agentId)}`;
+  if (agentTokens === undefined || !agentTokenQuery.test(query)) {
+    throw modelErrors.create("model.not_allowed");
+  }
+  const target = platformTargetOf(env, await routesOrFailed(env), provider);
+  if (typeof target === "string") {
+    throw modelErrors.create(target);
+  }
+  return await connectRequest(
+    env,
+    target,
+    `${agentTokens}${query}`,
+    { method: "GET", headers: { accept: "application/json" } },
+    {
+      providerRequest: crypto.randomUUID(),
+      endsAt: Date.now() + voiceSessionRequestMs,
+      ...(signal === undefined ? {} : { signal }),
+    }
+  );
+};
+
+/**
  * Says a line through the gateway: refused, audited, before anything is
  * sent when the rules or Grasp's keys don't let it through; otherwise
  * sent, and recorded with its characters, however it ended.
@@ -4019,6 +4056,13 @@ export const models = (env: Env) => ({
     sessionId: string,
     signal?: AbortSignal
   ): Promise<Response> => await sessionRequest(env, "GET", sessionId, signal),
+  /** A conversation token for one of Grasp's own voice agents (`agentTokenRequest`). */
+  agentToken: async (
+    provider: ConnectTarget["provider"],
+    agentId: string,
+    signal?: AbortSignal
+  ): Promise<Response> =>
+    await agentTokenRequest(env, provider, agentId, signal),
   /** Closes a voice session it opened (`sessionRequest`). */
   closeConversation: async (
     sessionId: string,

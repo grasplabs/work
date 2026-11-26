@@ -1,4 +1,5 @@
 import {
+  agentTokenQuery,
   aiCredentialPlaceholder,
   aiGrantHeader,
   aiKeyErrors,
@@ -105,6 +106,10 @@ import { resealBatchSize, vaultFor } from "./vault.ts";
 //   or closed by the GET or DELETE its grant names, only at that path and
 //   a session's ID below it, and only on Grasp's own key. The browser then
 //   joins the session's room itself: its audio never passes connect.
+// - An agent's conversation token (`agentTokens`, ElevenLabs's agents for
+//   Grasp's interviews): a GET its grant names, at that one path with the
+//   agent's ID as its one query, and only on Grasp's own key. The browser
+//   joins the conversation with the token alone.
 // - A relay that sends the keys somewhere else (`AI_PROVIDER_ORIGIN`, where
 //   an on-prem deployment's fixed-provider requests go instead of the
 //   provider's own host): taken only on-prem, only at a private host the
@@ -579,7 +584,27 @@ const isSessionEndpoint = (
   );
 };
 
-/** Whether `url` is a model endpoint a POST goes to, or a voice session's. */
+/**
+ * Whether `url` asks for a conversation token of one of the provider's
+ * agents (`agentTokens`), with the agent's ID as its one query: a GET, on
+ * Grasp's own key alone.
+ */
+const isAgentTokenEndpoint = (
+  url: URL,
+  claims: Pick<ModelGrantClaims, "provider" | "credential">,
+  method: string
+): boolean => {
+  const { agentTokens } = aiProviders[claims.provider];
+  return (
+    agentTokens !== undefined &&
+    claims.credential === "platform" &&
+    method === "GET" &&
+    url.pathname === agentTokens &&
+    agentTokenQuery.test(url.search)
+  );
+};
+
+/** Whether `url` is a model endpoint a POST goes to, a voice session's, or an agent's token. */
 const isEndpoint = (
   url: URL,
   claims: ModelGrantClaims,
@@ -587,7 +612,8 @@ const isEndpoint = (
   method: string
 ): boolean =>
   (method === "POST" && isModelEndpoint(url, claims.provider, base)) ||
-  isSessionEndpoint(url, claims, method);
+  isSessionEndpoint(url, claims, method) ||
+  isAgentTokenEndpoint(url, claims, method);
 
 /** Where the credential for `claims` may be sent, and the key. */
 interface Destination {
@@ -643,14 +669,18 @@ const socketOpenMs = 10_000;
 const sendsToBase = (
   url: URL,
   base: URL,
-  provider: AiProviderId,
+  claims: ModelGrantClaims,
   policy: EndpointPolicy
 ): boolean => {
+  const { provider } = claims;
   const checked = checkEndpoint(url.href, policy);
   // The query a model request may carry: exactly one its provider names
   // (`queries`), none only where it names `""`. ElevenLabs's must be its
-  // own, so a line is never sent with logging left on.
-  const query = aiProviders[provider].queries.includes(url.search);
+  // own, so a line is never sent with logging left on. An agent's token is
+  // asked with the agent's ID alone (`agentTokenQuery`).
+  const query =
+    aiProviders[provider].queries.includes(url.search) ||
+    isAgentTokenEndpoint(url, claims, claims.method ?? "POST");
   return (
     !("refused" in checked) &&
     url.origin === base.origin &&
@@ -826,7 +856,7 @@ export const modelFetch = async (
   const url = new URL(request.url);
   if (
     url.hostname !== claims.host ||
-    !sendsToBase(url, base, claims.provider, policyOf(env))
+    !sendsToBase(url, base, claims, policyOf(env))
   ) {
     return refused("endpoint", claims);
   }

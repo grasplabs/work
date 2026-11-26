@@ -9,9 +9,11 @@ import {
 } from "./interview-links.ts";
 import type { StephenTurn } from "./interview-turn.ts";
 import { interviewLocaleSchema } from "./onboarding.ts";
+import type { InterviewLocale } from "./onboarding.ts";
 
-// An interview held as one live voice session at Mistral (core's
-// onboarding/voice.ts): Mistral listens, Stephen answers and speaks there,
+// An interview held as one live voice session (core's onboarding/voice.ts):
+// a conversation with Grasp's ElevenLabs agent, or a session at Mistral.
+// At Mistral, Mistral listens, Stephen answers and speaks there,
 // and the person can talk over him. Core opens the session through connect
 // with Grasp's key and tells Stephen who he talks to; the page joins the
 // session's room with what core answers, and its audio goes between the
@@ -87,6 +89,17 @@ export const interviewVoiceRequestSchema = z.discriminatedUnion("action", [
      * 0 for each session opened, a resume's too, whatever came before.
      */
     noted: z.int().min(0).max(interviewLimits.lines),
+    /**
+     * The conversation of this session as the page heard it, for a
+     * conversation with Grasp's ElevenLabs agent (`AgentJoin`), whose
+     * transcript core doesn't read: their words as the agent heard them,
+     * and his as he said them. Left out for a session at Mistral, whose
+     * own transcript core reads.
+     */
+    said: z
+      .array(interviewLineSchema.pick({ from: true, text: true }))
+      .max(interviewLimits.lines)
+      .optional(),
   }),
   /**
    * Close the session at Mistral: the page left it, the interview is at the
@@ -103,8 +116,9 @@ export type InterviewVoiceRequest = z.output<
   typeof interviewVoiceRequestSchema
 >;
 
-/** A session as the page joins it: never Grasp's key. */
-export interface VoiceSessionJoin {
+/** A session at Mistral as the page joins it: never Grasp's key. */
+export interface MistralJoin {
+  via: "mistral";
   id: string;
   participantToken: string;
   /** The room's address, a `wss:` URL. */
@@ -114,6 +128,29 @@ export interface VoiceSessionJoin {
   /** What the page sends back with each answer and the close. */
   pass: string;
 }
+
+/**
+ * A conversation with Grasp's ElevenLabs agent as the page starts it,
+ * through ElevenLabs's own client SDK: a token core asked for with
+ * Grasp's key, never the key, and what Stephen is told for this
+ * conversation, which the page sends as the agent's overrides.
+ */
+export interface AgentJoin {
+  via: "elevenlabs";
+  /** What the page starts the conversation with: it holds a few minutes. */
+  conversationToken: string;
+  /** Who Stephen is, how the interview goes and where it stands: the agent's prompt for this conversation. */
+  prompt: string;
+  /** What he says first. */
+  firstMessage: string;
+  /** The language they talk in. */
+  language: InterviewLocale;
+  /** What the page sends back with each answer and the close. */
+  pass: string;
+}
+
+/** A live session as the page joins it: never Grasp's key. */
+export type VoiceSessionJoin = MistralJoin | AgentJoin;
 
 /** A line of the session as Mistral wrote it down: theirs as heard, his as it was played. */
 export interface VoiceLine {
@@ -140,4 +177,10 @@ export interface VoiceAnswered {
   turn: Pick<StephenTurn, "facts" | "changes" | "phase"> | null;
   /** What Stephen is told from now on: the page hands it the session (`session.update`). */
   instructions: string;
+  /**
+   * Where the interview stands now, alone: what a conversation with the
+   * ElevenLabs agent is told (a contextual update), as its prompt can't
+   * change while it runs.
+   */
+  situation: string;
 }

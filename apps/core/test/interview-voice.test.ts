@@ -1,5 +1,6 @@
 import { interviewVoicePath } from "@grasp-os/shared/interview-voice";
 import type {
+  MistralJoin,
   VoiceAnswered,
   VoiceSessionJoin,
 } from "@grasp-os/shared/interview-voice";
@@ -314,6 +315,7 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
       auditCarries: JSON.stringify(audited).includes("Exact"),
     }).toStrictEqual({
       join: {
+        via: "mistral",
         id: "sess_7f3a",
         participantToken: "room-token-not-a-key",
         serverUrl: "wss://voice.mistral.test",
@@ -479,7 +481,7 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
         ],
         previous: left.pass,
       });
-      const resumed: VoiceSessionJoin = await back.json();
+      const resumed: MistralJoin = await back.json();
       return resumed.id;
     });
     const after = await atMistral();

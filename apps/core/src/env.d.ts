@@ -34,6 +34,12 @@ interface __BaseEnv_Env {
    * production.
    */
   PLATFORM_AI_USUAL_HOSTS?: unknown;
+  /**
+   * Where a live interview is held, when not where `platformAi.liveInterview`
+   * says (src/onboarding/voice.ts): "mistral" or "elevenlabs". Unset on
+   * every deployment; core's own tests of the session at Mistral set it.
+   */
+  INTERVIEW_LIVE_VOICE?: unknown;
   PLATFORM_CHANGE?: unknown;
   /**
    * The flow the company's onboarding starts with (src/onboarding/store.ts):

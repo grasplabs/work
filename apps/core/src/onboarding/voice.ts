@@ -16,10 +16,11 @@ import {
   partFunction,
 } from "@grasp-os/shared/interview-voice";
 import type {
+  AgentJoin,
   InterviewVoiceRequest,
+  MistralJoin,
   VoiceAnswered,
   VoiceLine,
-  VoiceSessionJoin,
 } from "@grasp-os/shared/interview-voice";
 import { NAMED } from "@grasp-os/shared/interviewers/stephen";
 import { log } from "@grasp-os/shared/log";
@@ -78,6 +79,16 @@ import { heardBudgets } from "./transcription.ts";
 // call goes through connect" is the owner's decision, made for this. His
 // lines are no longer checked in code (one question, no praise): the
 // instructions alone hold him to them.
+//
+// Held with Grasp's ElevenLabs agent instead (`platformAi.liveInterview`),
+// open asks ElevenLabs for a conversation token with Grasp's key, through
+// connect, and answers the page the token with what Stephen is told and
+// says first, which the page sends as the agent's overrides; the page
+// starts the conversation with ElevenLabs's own SDK. Core doesn't read
+// that conversation's transcript: on each answer the page sends the
+// conversation as it heard it (`said`), and every fact is checked against
+// their answers in it, as against Mistral's. Close has nothing to close
+// at ElevenLabs: the page ends the conversation itself.
 
 /** What the gateway is told the session and its notes are for. */
 const purpose = "onboarding.interview";
@@ -309,8 +320,16 @@ const passClaimsSchema = z.strictObject({
   account: z.string().min(1),
   /** When it stops holding, in ms since the epoch. */
   until: z.int().positive(),
+  /** Where the session is held: at Mistral, or with Grasp's ElevenLabs agent. */
+  via: z.enum(["mistral", "elevenlabs"]).default("mistral"),
 });
-type PassClaims = z.infer<typeof passClaimsSchema>;
+type PassClaims = z.input<typeof passClaimsSchema>;
+
+/** The session a pass names, and where it is held. */
+interface Passed {
+  session: string;
+  via: "mistral" | "elevenlabs";
+}
 
 const passKey = async (env: Env, usage: "sign" | "verify") =>
   await derivedHmacKey(env, passPurpose, [usage]);
@@ -335,7 +354,7 @@ const sessionOfPass = async (
   pass: string,
   link: string,
   account: string
-): Promise<string | null> => {
+): Promise<Passed | null> => {
   const [payload, mac, ...rest] = pass.split(".");
   if (payload === undefined || mac === undefined || rest.length > 0) {
     return null;
@@ -357,7 +376,7 @@ const sessionOfPass = async (
       claims.data.link === link &&
       claims.data.account === account &&
       Date.now() < claims.data.until
-      ? claims.data.session
+      ? { session: claims.data.session, via: claims.data.via }
       : null;
   } catch {
     return null;
@@ -457,6 +476,25 @@ const heardOf = (answer: unknown): Heard | null => {
   }
   return { lines, phase, answeredIn };
 };
+
+/**
+ * A conversation with the ElevenLabs agent as the page heard it (`said`):
+ * its lines, each within what a request takes, and the part the
+ * interview is in, as the page holds it.
+ */
+const heardFromPage = (
+  said: readonly VoiceLine[],
+  phase: InterviewPhase
+): Heard => ({
+  lines: said
+    .map(({ from, text }) => ({ from, text: text.trim() }))
+    .filter(({ text }) => text !== ""),
+  phase,
+  answeredIn: phase,
+});
+
+/** What ElevenLabs answers for a conversation token. */
+const agentTokenSchema = z.object({ token: z.string().min(1).max(8192) });
 
 /**
  * Their answers in `lines` as the notes are checked against them: what
@@ -584,6 +622,98 @@ interface Asked {
   ctx: Pick<ExecutionContext, "waitUntil">;
 }
 
+/** Where a live interview is held here: as the deployment says, or as `platformAi` does. */
+const liveInterviewOf = (
+  env: Pick<Env, "INTERVIEW_LIVE_VOICE">
+): "mistral" | "elevenlabs" =>
+  env.INTERVIEW_LIVE_VOICE === "mistral" ||
+  env.INTERVIEW_LIVE_VOICE === "elevenlabs"
+    ? env.INTERVIEW_LIVE_VOICE
+    : platformAi.liveInterview;
+
+/** What a conversation with the agent is opened with: all decided before it is asked for. */
+interface AgentOpening {
+  asked: Extract<InterviewVoiceRequest, { action: "open" }>;
+  seconds: number;
+  voiceMark: string;
+  instructions: string;
+  firstMessage: string;
+}
+
+/**
+ * Opens a conversation with Grasp's ElevenLabs agent: a token for it,
+ * asked with Grasp's key through connect, and what Stephen is told and
+ * says first, which the page sends as the agent's overrides. The
+ * listening held for it is given back when none could be had.
+ */
+const openAgent = async (
+  { env, secretMark, account, requestId }: Omit<Asked, "ctx">,
+  { asked, seconds, voiceMark, instructions, firstMessage }: AgentOpening,
+  release: () => Promise<void>
+): Promise<Response> => {
+  const { agent } = platformAi;
+  let answered: Response;
+  try {
+    answered = await models(env).agentToken(
+      agent.provider,
+      agent.id,
+      AbortSignal.timeout(10_000)
+    );
+  } catch (error) {
+    const code = modelErrors.codeOf(error);
+    log.warn("interview.voice_not_opened", {
+      requestId,
+      via: "elevenlabs",
+      ...(code === undefined ? {} : { code }),
+    });
+    await release();
+    return failed("The interview could not start. Try again.", 503);
+  }
+  // A refusal's body is read for what ElevenLabs names as wrong, and only that.
+  const refusal = answered.ok
+    ? []
+    : refusalDetailOf(await answered.json().catch(() => null));
+  const token = agentTokenSchema.safeParse(await jsonOrNothing(answered));
+  if (!token.success) {
+    log.warn("interview.voice_not_opened", {
+      requestId,
+      via: "elevenlabs",
+      status: answered.status,
+      ...(refusal.length === 0 ? {} : { refused: refusal.join(" ; ") }),
+    });
+    await release();
+    return failed("The interview could not start. Try again.", 503);
+  }
+  await onboardingStore(env).meter({
+    purpose: "interviews",
+    model: "conversation",
+    seconds,
+  });
+  await onboardingStore(env).turnRan(secretMark, {
+    mark: voiceMark,
+    interviewer: "stephen",
+    locale: asked.locale,
+    version: voiceVersion,
+  });
+  const pass = await passOf(env, {
+    // Core's own name for the conversation: ElevenLabs gives its ID to the page alone.
+    session: `el-${crypto.randomUUID()}`,
+    link: secretMark,
+    account,
+    until: Date.now() + passMs,
+    via: "elevenlabs",
+  });
+  const join: AgentJoin = {
+    via: "elevenlabs",
+    conversationToken: token.data.token,
+    prompt: instructions,
+    firstMessage,
+    language: asked.locale,
+    pass,
+  };
+  return Response.json(join, { headers: linkHeaders });
+};
+
 /** Opens the session, and answers the page what it joins it with. */
 const open = async (
   { env, context, secretMark, account, requestId }: Asked,
@@ -628,8 +758,8 @@ const open = async (
     asked.previous === undefined
       ? null
       : await sessionOfPass(env, asked.previous, secretMark, account);
-  if (earlier !== null) {
-    await closeQuietly(env, earlier, requestId);
+  if (earlier?.via === "mistral") {
+    await closeQuietly(env, earlier.session, requestId);
   }
   const before = asked.event === "start" ? [] : asked.before;
   const said = asked.event === "start" ? context.kind : asked.event;
@@ -637,6 +767,25 @@ const open = async (
     said === "language"
       ? await restatedIn(env, asked.locale, before, AbortSignal.timeout(8000))
       : null;
+  const instructions = instructionsOf(
+    voice.text,
+    // Back to add something is what the event says, whatever else came.
+    situationOf({ ...asked, adding: asked.event === "add" }, context, company),
+    before,
+    context.name,
+    asked.locale
+  );
+  const firstMessage = welcomeOf(asked.locale, said, before, restated);
+  const release = async (): Promise<void> => {
+    await onboardingStore(env).releaseListening(who, seconds, heldOn);
+  };
+  if (liveInterviewOf(env) === "elevenlabs") {
+    return await openAgent(
+      { env, context, secretMark, account, requestId },
+      { asked, seconds, voiceMark: voice.mark, instructions, firstMessage },
+      release
+    );
+  }
   const { conversation } = platformAi;
   let answered: Response;
   try {
@@ -648,25 +797,14 @@ const open = async (
       requestId,
       seconds,
       session: {
-        instructions: instructionsOf(
-          voice.text,
-          // Back to add something is what the event says, whatever else came.
-          situationOf(
-            { ...asked, adding: asked.event === "add" },
-            context,
-            company
-          ),
-          before,
-          context.name,
-          asked.locale
-        ),
+        instructions,
         stt: {
           model: conversation.listening,
           language: asked.locale,
           turn_detection: turnDetection,
         },
         tts: { model: conversation.speaking, voice_id: conversation.voice },
-        welcome_message: welcomeOf(asked.locale, said, before, restated),
+        welcome_message: firstMessage,
         turn: {
           allow_interruptions: true,
           inactivity: inactivityOf(asked.locale),
@@ -727,13 +865,15 @@ const open = async (
       link: secretMark,
       account,
       until: Date.now() + passMs,
+      via: "mistral",
     });
   } catch (error) {
     // Open at Mistral, with no pass the page could close it by.
     await closeQuietly(env, id, requestId);
     throw error;
   }
-  const join: VoiceSessionJoin = {
+  const join: MistralJoin = {
+    via: "mistral",
     id,
     participantToken: participant_token,
     serverUrl: server_url,
@@ -770,13 +910,15 @@ const heardIn = async (
 const answer = async (
   { env, context, requestId, ctx }: Asked,
   asked: Extract<InterviewVoiceRequest, { action: "answer" }>,
-  session: string
+  { session, via }: Passed
 ): Promise<Response> => {
   // Grasp's own notes' model, as an interview's turns write theirs
   // (`platformAi.interview`), whatever models the organization set up.
   const notesModel = platformAi.interview.notes;
   const [heard, company] = await Promise.all([
-    heardIn(env, session, requestId),
+    via === "elevenlabs"
+      ? heardFromPage(asked.said ?? [], asked.phase)
+      : heardIn(env, session, requestId),
     companyOf(env),
   ]);
   if (heard === null) {
@@ -808,6 +950,7 @@ const answer = async (
           context.name,
           asked.locale
         ),
+        situation: situationOf(situation, context, company).join("\n"),
       } satisfies VoiceAnswered,
       { headers: linkHeaders }
     );
@@ -947,7 +1090,10 @@ export const interviewVoiceResponse = async (
       log.warn("interview.voice_pass_refused", { requestId });
       return linkRefusal("interview.invalid", requestId);
     }
-    await closeQuietly(env, session, requestId);
+    // A conversation with the agent the page ends itself: nothing is open here.
+    if (session.via === "mistral") {
+      await closeQuietly(env, session.session, requestId);
+    }
     return new Response(null, { status: 204, headers: linkHeaders });
   }
   const found = await onboardingStore(env).turnContext(

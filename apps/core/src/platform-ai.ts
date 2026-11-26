@@ -38,6 +38,12 @@ const onboardingVoices = {
 } as const satisfies Record<Speaker, string>;
 
 /**
+ * Where a live interview is held (`platformAi.liveInterview`): with
+ * Grasp's ElevenLabs agent, or as a voice session at Mistral.
+ */
+const liveInterview: "elevenlabs" | "mistral" = "elevenlabs";
+
+/**
  * Each feature's provider and model: OpenAI's GPT-4o Transcribe writes
  * down a recording, and Mistral's Voxtral realtime transcription speech as
  * it is said, live (`liveTranscription`: a dictation, an interview typed
@@ -75,6 +81,23 @@ export const platformAi = {
     line: "mistral/mistral-small-latest",
     notes: "mistral/mistral-medium-latest",
   },
+  /**
+   * The interview held as a live conversation with Grasp's ElevenLabs
+   * agent: who Stephen is, what he says first, and what he is told is
+   * sent with each conversation (core's onboarding/voice.ts); his voice,
+   * his ears and the model he answers with are the agent's, as its
+   * dashboard sets them. The agent is Grasp's own; the browser joins it
+   * with a token core asks for on Grasp's key.
+   */
+  agent: {
+    provider: "elevenlabs",
+    id: "agent_4601m8c6sznzezb9dms6fm6jp5vm",
+  },
+  /**
+   * Where a live interview is held: with the ElevenLabs agent (`agent`),
+   * or as a voice session at Mistral (`conversation`).
+   */
+  liveInterview,
   conversation: {
     provider: "mistral",
     model: "mistral-small-latest",

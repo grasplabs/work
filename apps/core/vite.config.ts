@@ -332,6 +332,9 @@ export const coreProject = (
             TEST_QUOTA_LIMITS: { workflowSteps: testStepLimit },
             // So a run waiting on a held side effect checks again at once.
             WORKFLOW_OFF_WAIT_MS: "250",
+            // The interview's live session at Mistral, as its tests plan
+            // Mistral's answers (test/interview-voice.test.ts).
+            INTERVIEW_LIVE_VOICE: "mistral",
             CORE_MIGRATIONS: coreMigrations,
             CONNECT_MIGRATIONS: connectMigrations,
             ...bindings,

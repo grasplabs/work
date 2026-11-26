@@ -107,6 +107,13 @@ const bare = (url: string, method: "GET" | "DELETE"): Request =>
     headers: { authorization: `Bearer ${aiCredentialPlaceholder}` },
   });
 
+/** A request to ElevenLabs with the placeholder in its key header, and no body. */
+const toElevenLabs = (url: string, method: "GET" | "DELETE" = "GET"): Request =>
+  new Request(url, {
+    method,
+    headers: { "xi-api-key": aiCredentialPlaceholder },
+  });
+
 /** The `store` a sent JSON body asks for, if it names one. */
 const storeOf = (body: string): unknown => {
   const parsed: unknown = JSON.parse(body);
@@ -892,6 +899,97 @@ describe("AI providers in connect", () => {
             at === 0 ? "/v1/audio/sessions" : "/v1/audio/sessions/sess_1a2b",
           key: `Bearer ${mistralKey}`,
         })),
+      });
+    });
+
+    it("asks for a conversation token of Grasp's ElevenLabs agent with Grasp's key alone, by GET, at its one path with the agent's ID as its one query", async () => {
+      const elevenKey = "test-platform-elevenlabs-key-0001";
+      const withKey = connect({ ELEVENLABS_API_KEY: elevenKey });
+      const host = "api.eu.residency.elevenlabs.io";
+      const tokenUrl = `https://${host}/v1/convai/conversation/token`;
+      const empty = await sha256Hex("");
+      const grant = async (scope: Partial<ModelGrantScope> = {}) =>
+        await grantFor({
+          provider: "elevenlabs",
+          host,
+          credential: "platform",
+          method: "GET",
+          body: empty,
+          ...scope,
+        });
+      const agent = "agent_4601m8c6sznzezb9dms6fm6jp5vm";
+
+      const outcomes = {
+        token: refusalOf(
+          await withKey.modelFetch(
+            toElevenLabs(`${tokenUrl}?agent_id=${agent}`),
+            await grant()
+          )
+        ),
+        // Only the agent's ID: nothing more, nothing else.
+        noAgent: refusalOf(
+          await withKey.modelFetch(toElevenLabs(tokenUrl), await grant())
+        ),
+        more: refusalOf(
+          await withKey.modelFetch(
+            toElevenLabs(`${tokenUrl}?agent_id=${agent}&participant_name=x`),
+            await grant()
+          )
+        ),
+        notAnAgent: refusalOf(
+          await withKey.modelFetch(
+            toElevenLabs(`${tokenUrl}?agent_id=..%2Fvoices`),
+            await grant()
+          )
+        ),
+        // The agent's ID never opens any other of ElevenLabs's paths.
+        elsewhere: refusalOf(
+          await withKey.modelFetch(
+            toElevenLabs(`https://${host}/v1/convai/agents?agent_id=${agent}`),
+            await grant()
+          )
+        ),
+        otherMethod: refusalOf(
+          await withKey.modelFetch(
+            toElevenLabs(`${tokenUrl}?agent_id=${agent}`, "DELETE"),
+            await grant({ method: "DELETE" })
+          )
+        ),
+        // A token is asked only for Grasp's own features.
+        organization: refusalOf(
+          await withKey.modelFetch(
+            toElevenLabs(`${tokenUrl}?agent_id=${agent}`),
+            await grant({ credential: "organization" })
+          )
+        ),
+      };
+
+      expect({
+        outcomes,
+        sent: sent.map(({ method, host: to, path, headers }) => ({
+          method,
+          host: to,
+          path,
+          key: headers["xi-api-key"],
+        })),
+      }).toStrictEqual({
+        outcomes: {
+          token: "sent",
+          noAgent: "endpoint",
+          more: "endpoint",
+          notAnAgent: "endpoint",
+          elsewhere: "endpoint",
+          otherMethod: "endpoint",
+          organization: "no_credential",
+        },
+        sent: [
+          {
+            method: "GET",
+            host,
+            path: `/v1/convai/conversation/token?agent_id=${agent}`,
+            key: elevenKey,
+          },
+        ],
       });
     });
 
