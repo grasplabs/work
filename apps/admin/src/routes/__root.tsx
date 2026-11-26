@@ -12,6 +12,9 @@ import { openClientId, readAdmins } from "../admin/org-loads.ts";
 import { freshMs } from "../admin/org-reads.ts";
 import type { OrgReads } from "../admin/org-reads.ts";
 import { platformCounts } from "../admin/platform.ts";
+import { fetchReadiness } from "../admin/readiness.ts";
+import type { Readiness } from "../admin/readiness.ts";
+import { fetchStaff } from "../admin/staff-functions.ts";
 import { fetchClientGrid } from "../clients/functions.ts";
 
 import styles from "../styles.css?url";
@@ -30,6 +33,15 @@ const stylexDev = import.meta.env.DEV
       scripts: [{ type: "module", src: "/@id/virtual:stylex:runtime" }],
     }
   : { links: [], scripts: [] };
+
+/** Readiness, or null when it couldn't be read: the frame never fails for it. */
+const readinessOrNone = async (): Promise<Readiness | null> => {
+  try {
+    return await fetchReadiness();
+  } catch {
+    return null;
+  }
+};
 
 /** What every route's loader is given (src/router.tsx). */
 interface AdminContext {
@@ -62,8 +74,16 @@ const RootDocument = ({ children }: { children: ReactNode }) => (
 );
 
 const Frame = () => {
-  const { clients, admins, platform } = Route.useLoaderData();
-  return <AdminFrame admins={admins} clients={clients} platform={platform} />;
+  const { clients, admins, platform, staff, readiness } = Route.useLoaderData();
+  return (
+    <AdminFrame
+      admins={admins}
+      clients={clients}
+      platform={platform}
+      readiness={readiness}
+      staff={staff}
+    />
+  );
 };
 
 /**
@@ -90,6 +110,10 @@ export const Route = createRootRouteWithContext<AdminContext>()({
   // Every client's core is asked at once, beside the grid, never after it.
   loader: async ({ context, location, preload }) => {
     const grid = fetchClientGrid();
+    const staff = fetchStaff();
+    // Never awaited, nor a failure of the frame: the banner shows once it
+    // is in, and stays away when it couldn't be read.
+    const readiness = readinessOrNone();
     const open = openClientId(location.pathname);
     const frame = readAdmins(
       context.reads,
@@ -101,6 +125,8 @@ export const Route = createRootRouteWithContext<AdminContext>()({
     const clients = await grid;
     return {
       clients,
+      staff: await staff,
+      readiness,
       platform: platformCounts(clients),
       admins: frame.admins,
       adminsAsked: frame.asked,
@@ -114,7 +140,7 @@ export const Route = createRootRouteWithContext<AdminContext>()({
       { title: "Grasp admin" },
     ],
     links: [{ rel: "stylesheet", href: styles }, ...stylexDev.links],
-    // Light or dark as the system has it, set before first paint
+    // Light or dark as staff chose, or as the system has it, set before first paint
     // (public/theme.js, the admin's own), so the admin never flashes light.
     scripts: [{ src: "/theme.js" }, ...stylexDev.scripts],
   }),

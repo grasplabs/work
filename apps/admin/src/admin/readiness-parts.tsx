@@ -120,8 +120,17 @@ export const ReadinessPanel = ({ readiness }: { readiness: Readiness }) => {
   );
 };
 
-/** Home's banner while a required line isn't ready; nothing once all are. */
-export const ReadinessBanner = ({ readiness }: { readiness: Readiness }) => {
+/**
+ * The banner across the top of the frame while a required line isn't
+ * ready; nothing once all are. `onClose` sets it aside.
+ */
+export const ReadinessBanner = ({
+  readiness,
+  onClose,
+}: {
+  readiness: Readiness;
+  onClose: () => void;
+}) => {
   if (readiness.blocking === 0) {
     return null;
   }
@@ -129,7 +138,12 @@ export const ReadinessBanner = ({ readiness }: { readiness: Readiness }) => {
     ({ required, status }) => required && status !== "ready"
   );
   return (
-    <Alert live="polite" variant="warning">
+    <Alert
+      appearance="banner"
+      live="polite"
+      onClose={onClose}
+      variant="warning"
+    >
       <AlertTitle>
         {`Grasp can't onboard an organization yet: ${readiness.blocking} ${readiness.blocking === 1 ? "thing to fix" : "things to fix"}.`}
       </AlertTitle>

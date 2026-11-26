@@ -1,4 +1,5 @@
 import { Alert, AlertDescription } from "@grasp-os/ui/components/alert";
+import { Avatar, AvatarFallback } from "@grasp-os/ui/components/avatar";
 import { Badge } from "@grasp-os/ui/components/badge";
 import { Button } from "@grasp-os/ui/components/button";
 import {
@@ -89,9 +90,13 @@ const styles = stylex.create({
   },
 });
 
-/** What a row says under its name: its kind and when it came in. */
-const rowLine = (item: InboxItem, kind: string): string =>
-  item.date === "" ? kind : `${kind} · ${formatDayMonth(item.date)}`;
+/** What a row says under its name: its own words, or its kind and date when it has one. */
+const rowLine = (item: InboxItem, kind: string): string => {
+  if (item.summary !== undefined) {
+    return item.summary;
+  }
+  return item.date === "" ? kind : `${kind} · ${formatDayMonth(item.date)}`;
+};
 
 /** Whether a key press belongs to something being typed, not to the inbox. */
 const typing = (target: EventTarget | null): boolean =>
@@ -153,7 +158,13 @@ const ItemList = ({
               to="/inbox"
             >
               <ItemMedia>
-                <Icon icon={kindMark[item.kind]} />
+                {item.face === undefined ? (
+                  <Icon icon={kindMark[item.kind]} />
+                ) : (
+                  <Avatar name={item.face} size="xs">
+                    <AvatarFallback />
+                  </Avatar>
+                )}
               </ItemMedia>
               <ItemContent>
                 <ItemTitle>

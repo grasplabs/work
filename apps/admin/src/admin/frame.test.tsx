@@ -26,7 +26,7 @@ describe("the admin's frame in the browser", () => {
     const loading = container.querySelector('output[aria-busy="true"]');
     expect({
       loading: loading?.getAttribute("aria-label"),
-      brand: container.textContent?.includes("Grasp"),
+      brand: container.querySelector('[aria-label="Grasp admin"]') !== null,
     }).toStrictEqual({ loading: "Loading…", brand: true });
   });
 
