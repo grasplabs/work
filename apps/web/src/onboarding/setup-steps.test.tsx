@@ -171,7 +171,6 @@ const drawn = (
     },
     review: { differences: [], mapped: 0 },
     directory: null,
-    hr: null,
     suites: [],
     places: null,
     choices,
@@ -297,15 +296,14 @@ describe("where the interviews stand", () => {
 });
 
 describe("a setup without a staff list", () => {
-  it("leaves the teams to Grasp's staff, and lets the admin go on or share a list after all", () => {
-    const leads = said("leads", {
-      choices: { ...noChoices, hr: { kind: "none" } },
-    });
+  it("asks who to talk to, by email or with a staff list, and lets the admin skip it for Grasp's staff", () => {
+    const leads = said("leads", {});
     expect({
-      said: leads.includes("Grasp’s team goes through your teams with you"),
-      on: leads.includes("Continue"),
-      list: leads.includes("Share a staff list"),
-    }).toStrictEqual({ said: true, on: true, list: true });
+      said: leads.includes("Nobody on the list yet"),
+      add: leads.includes("Add people"),
+      skip: leads.includes("Skip for now"),
+      hr: leads.includes("HR platform"),
+    }).toStrictEqual({ said: true, add: true, skip: true, hr: false });
   });
 
   it("never holds the admin at the company step: they share a list, or skip it for Grasp's staff to sort out", () => {
