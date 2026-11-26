@@ -1065,7 +1065,8 @@ const styles = stylex.create({
     backgroundColor: { default: colors.card, ":disabled": colors.muted },
     boxShadow: {
       default: shadow.md,
-      ":has([contenteditable=true]:focus)": `inset 0 0 0 ${size.hairline} ${colors.promptInputBorderFocus}, 0 0 0 3px ${colors.inputFocusHalo}, ${shadow.md}`,
+      // Writing in it: a faint edge and a halo hardly there, so the card stays calm.
+      ":has([contenteditable=true]:focus)": `inset 0 0 0 ${size.hairline} color-mix(in oklab, ${colors.promptInputBorderFocus} 50%, transparent), 0 0 0 2px color-mix(in oklab, ${colors.inputFocusHalo} 25%, transparent), ${shadow.md}`,
     },
     color: colors.foreground,
     cursor: { default: "text", ":disabled": "not-allowed" },
