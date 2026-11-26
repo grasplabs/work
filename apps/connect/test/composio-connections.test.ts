@@ -17,6 +17,7 @@ import {
 import {
   afterMinutes,
   allowed,
+  asTimePasses,
   back,
   call,
   change,
@@ -58,6 +59,14 @@ import {
 // it reach only those tools, with connect's key; its consent is in the
 // audit log with who gave it; and whatever didn't finish is deleted at
 // Composio again.
+
+/** How each connect of the test ended, as the audit log has it. */
+const connectsEnded = async () => {
+  const recorded = await events();
+  return recorded
+    .filter(({ action }) => action === "connection.connect")
+    .map(({ detail }) => [detail.outcome, detail.reason ?? null]);
+};
 
 describe("connecting a Composio toolkit", () => {
   it("keeps no flow of someone whose erasure began as they connected, and deletes what it made at Composio", async () => {
@@ -164,9 +173,9 @@ describe("connecting a Composio toolkit", () => {
 
   it("records the admin's consent, with who gave it, then the connection", async () => {
     const admin = someone("admin");
-    const { state } = composio.authorize(await start(admin));
+    const { callback } = composio.authorize(await start(admin));
     const consented = await events();
-    const { connectionId } = await back(admin, state);
+    const { connectionId } = await back(admin, callback);
     const all = await events();
     expect(consented.map(({ action }) => action)).toStrictEqual([
       "connection.consent",
@@ -284,12 +293,12 @@ describe("connecting a Composio toolkit", () => {
   it("finishes only for the admin who started it, once, and deletes what it made at Composio otherwise", async () => {
     const admin = someone("admin");
     const other = someone("admin");
-    const { state } = composio.authorize(await start(admin));
-    await expect(outcome(back(other, state))).resolves.toBe(
+    const { callback } = composio.authorize(await start(admin));
+    await expect(outcome(back(other, callback))).resolves.toBe(
       "connection.flow_invalid"
     );
     // Spent: not even the admin who started it can finish it now.
-    await expect(outcome(back(admin, state))).resolves.toBe(
+    await expect(outcome(back(admin, callback))).resolves.toBe(
       "connection.flow_invalid"
     );
     expect(heldAtComposio()).toStrictEqual({
@@ -299,30 +308,166 @@ describe("connecting a Composio toolkit", () => {
     });
   });
 
-  it("doesn't finish when the admin didn't connect at Composio", async () => {
+  it("connects an account Composio is still completing when it sends the browser back, once it is active", async () => {
     const admin = someone("admin");
-    const { state } = composio.authorize(await start(admin), "FAILED");
-    await expect(outcome(back(admin, state))).resolves.toBe(
-      "connection.provider_refused"
-    );
-    expect(heldAtComposio()).toStrictEqual({
-      authConfigs: 0,
-      accounts: 0,
-      servers: 0,
+    // Composio's redirect says success while the account still reads
+    // INITIATED: its docs say to check again from the backend.
+    const { callback } = composio.authorize(await start(admin), {
+      pendingReads: 3,
     });
+    const finished = await asTimePasses(
+      async (connect) => await outcome(back(admin, callback, connect))
+    );
+    const [accountId = ""] = composio.state.holds.accounts.keys();
+    const listed = await exports.default.listConnections(admin);
+    const accountReads = composio.state.requests.filter(
+      ({ method, path }) =>
+        method === "GET" && path === `/connected_accounts/${accountId}`
+    ).length;
+    expect({
+      finished,
+      held: heldAtComposio(),
+      connections: listed.filter(
+        ({ connectedBy }) => connectedBy === admin.userId
+      ).length,
+      readAgain: accountReads > 1,
+    }).toStrictEqual({
+      finished: "ok",
+      held: { authConfigs: 1, accounts: 1, servers: 1 },
+      connections: 1,
+      readAgain: true,
+    });
+  });
+
+  it("says the provider is still finishing when Composio doesn't complete the account in time, and keeps nothing", async () => {
+    const admin = someone("admin");
+    const { callback } = composio.authorize(await start(admin), {
+      pendingReads: 1000,
+    });
+    const finished = await asTimePasses(
+      async (connect) => await outcome(back(admin, callback, connect))
+    );
+    expect({
+      finished,
+      held: heldAtComposio(),
+      cleanups: await cleanupsLeft(),
+      ended: await connectsEnded(),
+    }).toStrictEqual({
+      finished: "connection.provider_pending",
+      held: nothingHeld,
+      cleanups: 0,
+      ended: [["failed", "connection.provider_pending"]],
+    });
+  });
+
+  it("asks again when Composio fails to read the account for a moment, or its answer breaks off, and connects", async () => {
+    const admin = someone("admin");
+    const ends = [];
+    for (const broken of [false, true]) {
+      // oxlint-disable-next-line no-await-in-loop -- one flow at a time
+      const { callback } = composio.authorize(await start(admin));
+      composio.state.failingFor = {
+        prefix: "GET /connected_accounts/",
+        times: 2,
+        broken,
+      };
+      ends.push(
+        // oxlint-disable-next-line no-await-in-loop -- one flow at a time
+        await asTimePasses(
+          async (connect) => await outcome(back(admin, callback, connect))
+        )
+      );
+    }
+    expect({ ends, ended: await connectsEnded() }).toStrictEqual({
+      ends: ["ok", "ok"],
+      ended: [
+        ["ok", null],
+        ["ok", null],
+      ],
+    });
+  });
+
+  it("says the provider isn't answering when Composio never reads the account back, or its answer always breaks off, and keeps nothing", async () => {
+    const admin = someone("admin");
+    const ends = [];
+    for (const broken of [false, true]) {
+      // oxlint-disable-next-line no-await-in-loop -- one flow at a time
+      const { callback } = composio.authorize(await start(admin));
+      composio.state.failingFor = {
+        prefix: "GET /connected_accounts/",
+        times: Number.POSITIVE_INFINITY,
+        broken,
+      };
+      ends.push(
+        // oxlint-disable-next-line no-await-in-loop -- one flow at a time
+        await asTimePasses(
+          async (connect) => await outcome(back(admin, callback, connect))
+        )
+      );
+      composio.state.failingFor = undefined;
+    }
+    expect({
+      ends,
+      held: heldAtComposio(),
+      cleanups: await cleanupsLeft(),
+      ended: await connectsEnded(),
+    }).toStrictEqual({
+      ends: [
+        "connection.provider_not_answering",
+        "connection.provider_not_answering",
+      ],
+      held: nothingHeld,
+      cleanups: 0,
+      ended: [
+        ["failed", "connection.provider_not_answering"],
+        ["failed", "connection.provider_not_answering"],
+      ],
+    });
+  });
+
+  it("doesn't finish when the admin didn't connect at Composio, whatever its redirect says", async () => {
+    const admin = someone("admin");
+    const ends = [];
+    const sends: { status: "ACTIVE" | "FAILED"; says?: string }[] = [
+      // Composio says it failed: its account isn't even read.
+      { status: "FAILED" },
+      // Its redirect is a hint: the account as Composio holds it decides.
+      { status: "FAILED", says: "success" },
+    ];
+    for (const send of sends) {
+      // oxlint-disable-next-line no-await-in-loop -- one flow at a time
+      const { callback } = composio.authorize(await start(admin), send);
+      // oxlint-disable-next-line no-await-in-loop -- one flow at a time
+      ends.push(await outcome(back(admin, callback)));
+    }
+    expect({ ends, held: heldAtComposio() }).toStrictEqual({
+      ends: ["connection.provider_refused", "connection.provider_refused"],
+      held: nothingHeld,
+    });
+  });
+
+  it("connects only the flow's own account, whatever account the redirect names", async () => {
+    const admin = someone("admin");
+    const { callback } = composio.authorize(await start(admin));
+    const [accountId = ""] = composio.state.holds.accounts.keys();
+    const swapped = new URL(callback);
+    swapped.searchParams.set("connected_account_id", "ca_someone_else");
+    const { connectionId } = await back(admin, swapped.href);
+    const connection = await stored(connectionId);
+    expect(connection?.accountId).toBe(accountId);
   });
 
   it("stores nothing, and deletes what it made, when Composio fails on the way", async () => {
     const admin = someone("admin");
     const failures = ["POST /mcp/servers", "POST /mcp/servers/generate"];
     for (const failing of failures) {
-      const { state } = composio.authorize(
+      const { callback } = composio.authorize(
         // oxlint-disable-next-line no-await-in-loop -- one flow at a time
         await start(admin)
       );
       composio.state.failing = failing;
       // oxlint-disable-next-line no-await-in-loop -- one flow at a time
-      const ended = await outcome(back(admin, state));
+      const ended = await outcome(back(admin, callback));
       composio.state.failing = undefined;
       expect(ended).toBe("connection.provider_refused");
     }
@@ -339,9 +484,9 @@ describe("connecting a Composio toolkit", () => {
 
   it("doesn't store a server Composio says is anywhere but its MCP host", async () => {
     const admin = someone("admin");
-    const { state } = composio.authorize(await start(admin));
+    const { callback } = composio.authorize(await start(admin));
     composio.state.serverUrlBase = "https://mcp.attacker.example/v3/mcp/";
-    await expect(outcome(back(admin, state))).resolves.toBe(
+    await expect(outcome(back(admin, callback))).resolves.toBe(
       "connection.provider_refused"
     );
     expect(heldAtComposio().servers).toBe(0);
@@ -350,7 +495,7 @@ describe("connecting a Composio toolkit", () => {
   it("drops a flow nobody finished in time, and what it made at Composio", async () => {
     const admin = someone("admin");
     // The admin connected at Composio, and never came back.
-    const { state } = composio.authorize(await start(admin));
+    const { callback } = composio.authorize(await start(admin));
     await expireFlowsOf(admin);
     await runMaintenance();
     expect(heldAtComposio()).toStrictEqual({
@@ -358,7 +503,7 @@ describe("connecting a Composio toolkit", () => {
       accounts: 0,
       servers: 0,
     });
-    await expect(outcome(back(admin, state))).resolves.toBe(
+    await expect(outcome(back(admin, callback))).resolves.toBe(
       "connection.flow_invalid"
     );
   });
@@ -366,10 +511,10 @@ describe("connecting a Composio toolkit", () => {
   it("hands every flow of an admin removed from the organization over to cleanup at once, however many", async () => {
     const admin = someone("admin");
     const flows = 12;
-    const states: string[] = [];
+    const callbacks: string[] = [];
     for (let flow = 0; flow < flows; flow += 1) {
       // oxlint-disable-next-line no-await-in-loop -- one flow at a time
-      states.push(composio.authorize(await start(admin)).state);
+      callbacks.push(composio.authorize(await start(admin)).callback);
     }
     await exports.default.disconnectPersonal({
       person: null,
@@ -386,7 +531,7 @@ describe("connecting a Composio toolkit", () => {
       handedOver,
       held: heldAtComposio(),
       cleanups: await cleanupsLeft(),
-      finished: await outcome(back(admin, states[0] ?? "")),
+      finished: await outcome(back(admin, callbacks[0] ?? "")),
     }).toStrictEqual({
       handedOver: { flows: 0, cleanups: flows },
       held: nothingHeld,
@@ -438,11 +583,11 @@ describe("connecting a Composio toolkit", () => {
 
   it("finds by its marker a server whose ID it couldn't record and couldn't delete at once", async () => {
     const admin = someone("admin");
-    const { state } = composio.authorize(await start(admin));
+    const { callback } = composio.authorize(await start(admin));
     composio.state.failing = "DELETE /";
     const failed = await withTrigger(
       "BEFORE UPDATE",
-      async () => await outcome(back(admin, state))
+      async () => await outcome(back(admin, callback))
     );
     composio.state.failing = undefined;
     const kept = heldAtComposio();
@@ -505,10 +650,10 @@ describe("connecting a Composio toolkit", () => {
     const ends = [];
     for (const accountInUrl of ["other", "none"] as const) {
       // oxlint-disable-next-line no-await-in-loop -- one flow at a time
-      const { state } = composio.authorize(await start(admin));
+      const { callback } = composio.authorize(await start(admin));
       composio.state.accountInUrl = accountInUrl;
       // oxlint-disable-next-line no-await-in-loop -- one flow at a time
-      ends.push(await outcome(back(admin, state)));
+      ends.push(await outcome(back(admin, callback)));
       composio.state.accountInUrl = "own";
     }
     expect({ ends, held: heldAtComposio() }).toStrictEqual({
@@ -519,9 +664,9 @@ describe("connecting a Composio toolkit", () => {
 
   it("reads the role again when the admin comes back: someone no longer an admin can't finish", async () => {
     const admin = someone("admin");
-    const { state } = composio.authorize(await start(admin));
+    const { callback } = composio.authorize(await start(admin));
     await expect(
-      outcome(back({ ...admin, role: "user" }, state))
+      outcome(back({ ...admin, role: "user" }, callback))
     ).resolves.toBe("role.forbidden");
     expect(heldAtComposio()).toStrictEqual(nothingHeld);
   });

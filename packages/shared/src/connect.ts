@@ -435,6 +435,17 @@ export const finishConnectionSchema = z.strictObject({
    * issuer it recorded before the code is redeemed.
    */
   iss: z.string().min(1).max(2048).optional(),
+  /**
+   * Composio's `status` on its redirect, `success` or `failed`: a hint
+   * only, never proof the account is connected (connect reads it at
+   * Composio).
+   */
+  status: z.string().min(1).max(64).optional(),
+  /**
+   * The connected account Composio's redirect names
+   * (`connected_account_id`): it must be the one the flow made.
+   */
+  connectedAccountId: identifierSchema.optional(),
 });
 export type FinishConnection = z.input<typeof finishConnectionSchema>;
 
@@ -2818,6 +2829,10 @@ export const connectionErrors = defineErrorFamily({
     "This connection attempt has expired, was already used, or was started by someone else. Start again.",
   "connection.provider_refused":
     "The provider didn't complete the connection. Start again.",
+  "connection.provider_pending":
+    "The provider was still finishing the connection, so nothing was connected yet. Start again in a minute.",
+  "connection.provider_not_answering":
+    "The provider isn't answering just now, so nothing was connected. Try again in a minute.",
   "connection.wrong_account":
     "That account isn't in your organization. Connect an account of your organization.",
   "connection.refresh_failed":

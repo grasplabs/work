@@ -10041,7 +10041,6 @@ msgid "Language: {language}"
 msgstr "Idioma: {language}"
 
 #: src/frame/language-button.tsx
-#: src/language-picker.tsx
 msgid "Language: {name}"
 msgstr "Idioma: {name}"
 
@@ -20001,6 +20000,10 @@ msgstr "Conversación por voz"
 #: src/voice/sound-controls.tsx
 msgid "Volume"
 msgstr "Volumen"
+
+#: src/voice/sound-controls.tsx
+msgid "Volume (sound off)"
+msgstr "Volumen (sonido desactivado)"
 
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"

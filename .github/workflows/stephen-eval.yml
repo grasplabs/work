@@ -7,7 +7,10 @@
 # with the stephen-eval 1Password Environment's key for that provider
 # (`STEPHEN_EVAL_MODEL_KEY`). The run's budget (`STEPHEN_EVAL_BUDGET_USD`)
 # stops it between cases once its calls cost that much, so it may go one
-# case past it; core refuses nothing for spend. The key's own spend limit
+# case past it; core refuses nothing for spend. A run may name its own
+# `model` and `budget_usd`, up to `maxBudgetUsd` below, in place of the
+# Environment's; the key always comes from the Environment, so a model
+# whose provider's key isn't there fails at its first call. The key's own spend limit
 # at the provider is the hard cap: give it one. Its numbers go to the run's summary and, when the
 # branch has an open pull request, on it; its report and every model
 # exchange go to the run's artifact. The weekly run on main is
@@ -19,6 +22,14 @@ on:
     inputs:
       cases:
         description: "Case IDs to run, comma-separated (R1,X2); empty for all"
+        required: false
+        default: ""
+      model:
+        description: "Model as the gateway names it (anthropic/claude-sonnet-5-5); empty for the Environment's"
+        required: false
+        default: ""
+      budget_usd:
+        description: "Most the run may spend, in US dollars, up to a ceiling; empty for the Environment's"
         required: false
         default: ""
 
@@ -55,6 +66,37 @@ jobs:
           secrets: STEPHEN_EVAL_MODEL_KEY
           settings: STEPHEN_EVAL_MODEL STEPHEN_EVAL_BUDGET_USD
           required: STEPHEN_EVAL_MODEL_KEY
+      # The run's own model and budget, when it names them, checked before
+      # they reach the job's env: a model as `<provider>/<name>`, a budget
+      # in dollars and cents up to the ceiling.
+      - name: Take the run's model and budget
+        env:
+          MODEL: ${{ inputs.model }}
+          BUDGET_USD: ${{ inputs.budget_usd }}
+        run: |
+          maxBudgetUsd=10
+          if [ -n "$MODEL" ]; then
+            if [[ ! "$MODEL" =~ ^[a-z0-9-]+/[A-Za-z0-9._:/-]+$ ]]; then
+              echo "::error::model must be <provider>/<name>, such as anthropic/claude-sonnet-5-5."
+              exit 1
+            fi
+            echo "STEPHEN_EVAL_MODEL=$MODEL" >> "$GITHUB_ENV"
+          fi
+          if [ -n "$BUDGET_USD" ]; then
+            # Compared in cents, as whole numbers in bash: base 10, so a
+            # leading zero isn't octal.
+            if [[ ! "$BUDGET_USD" =~ ^([0-9]{1,4})(\.([0-9]{1,2}))?$ ]]; then
+              cents=0
+            else
+              fraction="${BASH_REMATCH[3]}00"
+              cents=$((10#${BASH_REMATCH[1]} * 100 + 10#${fraction:0:2}))
+            fi
+            if [ "$cents" -le 0 ] || [ "$cents" -gt $((maxBudgetUsd * 100)) ]; then
+              echo "::error::budget_usd must be a number of US dollars above 0 and at most $maxBudgetUsd."
+              exit 1
+            fi
+            echo "STEPHEN_EVAL_BUDGET_USD=$BUDGET_USD" >> "$GITHUB_ENV"
+          fi
       # Fails on a broken hard rule (test/stephen-real-model.test.ts).
       - name: Run Stephen's eval with the real model
         run: |
