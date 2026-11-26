@@ -22,8 +22,8 @@ import { useInterviewWords } from "./words.ts";
 // concept, `?transcript=a|b|c`; `a` when none is asked for):
 //
 //   a  Script: who spoke stands in a narrow column at the start, once per
-//      turn, as in a play's script; Stephen's words in the serif he speaks
-//      in on the stage, theirs in the sans.
+//      turn, as in a play's script; Stephen's words and theirs both
+//      in the sans (his serif is the stage's).
 //   b  Chat: Stephen at the start under his small pixel mark, no bubble;
 //      theirs at the end in a soft bubble, as a message they sent.
 //   c  Q&A: the conversation as a printed interview, his question and
@@ -70,8 +70,9 @@ const styles = stylex.create({
     overflowWrap: "anywhere",
     margin: 0,
   },
+  // In the sans of theirs: the transcript is a record to read, the serif is for the stage.
   his: {
-    fontFamily: font.serif,
+    fontFamily: font.sans,
     fontSize: font.textBase,
     lineHeight: 1.55,
     color: colors.foreground,

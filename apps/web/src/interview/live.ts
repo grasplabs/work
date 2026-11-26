@@ -53,6 +53,11 @@ export interface Live {
   /** What Stephen is told from now on: it takes effect at his next turn. */
   instruct: (instructions: string) => Promise<void>;
   setMuted: (muted: boolean) => Promise<void>;
+  /**
+   * Stops his voice here at once, or lets it be heard again: what is
+   * said in the room goes on, but nothing of it is played.
+   */
+  hush: (hushed: boolean) => void;
   /** Leaves the room and closes the session at Mistral; again does nothing. */
   close: () => Promise<void>;
 }
@@ -180,6 +185,12 @@ export const joinLive = async (
       setMuted: async (muted) => {
         if (!closed) {
           await session.setInputEnabled(!muted);
+        }
+      },
+      hush: (hushed) => {
+        const voice = session.remoteTrack;
+        if (voice !== null) {
+          voice.enabled = !hushed;
         }
       },
       close,

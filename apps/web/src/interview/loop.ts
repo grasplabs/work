@@ -46,9 +46,11 @@ import type { Live, LiveDoing, LiveSegment } from "./live.ts";
 import {
   hangUp,
   lastHeard,
+  listenForVoice,
   micMuted,
   muteMic,
   reachMic,
+  watchLevel,
   watchMute,
 } from "./mic.ts";
 import {
@@ -1541,11 +1543,23 @@ let liveNoted = 0;
 const liveHeard = new Map<string, string>();
 /** The stretch of his being said now. */
 let hisStretch: string | null = null;
+/** Its words so far. */
+let hisWords = "";
 /** He said he will read back: the session is left once his line is said. */
 let liveReadsBack = false;
 let liveMuting: (() => void) | null = null;
+/** Keeps the level of their voice for the hill in the box, while in a session. */
+let liveLevel: (() => void) | null = null;
+/** While he speaks: hears whether they talk over him, to stop his voice here at once. */
+let liveOver: (() => void) | null = null;
+/** Their sentences just said: they rest over the box a moment before they go to the transcript. */
+let liveResting: string[] = [];
+let liveRest: number | undefined;
 /** Bumped as a session is joined or left: what comes of an older one counts for nothing. */
 let liveCount = 0;
+
+/** How long a sentence of theirs rests over the box once said, in ms. */
+const restMs = 900;
 
 /** Where the interview stands, as core is told it with each call of the session. */
 const standingOf = (told: LoopWords) => {
@@ -1701,30 +1715,57 @@ const notingLive = async (waited = 0): Promise<void> => {
 const liveWords = (): string => [...liveHeard.values()].join(" ").trim();
 
 /** A stretch of the conversation, as the session hears and says it. */
+/** What stands over the box: their sentences resting there, then what is still being heard. */
+const showHeard = (): void => {
+  const heard = [...liveResting, liveWords()]
+    .filter((part) => part !== "")
+    .join(" ");
+  window.clearTimeout(noting);
+  set({
+    said: heard === "" ? null : { text: heard, marks: [], waiting: true },
+    talking: liveWords() !== "",
+  });
+};
+
+/** Their resting sentences go to the transcript, and the words over the box with them. */
+const keepResting = (): void => {
+  window.clearTimeout(liveRest);
+  liveRest = undefined;
+  const resting = liveResting;
+  liveResting = [];
+  for (const sentence of resting) {
+    update((progress) =>
+      withSpoken(progress, { from: "person", text: sentence, at: Date.now() })
+    );
+  }
+  if (resting.length > 0) {
+    void noteLive();
+  }
+};
+
 const liveSegment = ({ id, from, text, final }: LiveSegment): void => {
   const heardText = text.trim();
   if (from === "person") {
     if (final) {
       liveHeard.delete(id);
       if (heardText !== "") {
-        update((progress) =>
-          withSpoken(progress, {
-            from: "person",
-            text: heardText,
-            at: Date.now(),
-          })
-        );
-        void noteLive();
+        // Said: it rests a moment where it stands, then becomes their line.
+        liveResting.push(heardText);
+        window.clearTimeout(liveRest);
+        liveRest = window.setTimeout(() => {
+          if (liveWords() === "") {
+            keepResting();
+            showHeard();
+          } else {
+            // They talk on: it goes with what they say next.
+            liveRest = undefined;
+          }
+        }, restMs);
       }
     } else {
       liveHeard.set(id, heardText);
     }
-    const heard = liveWords();
-    window.clearTimeout(noting);
-    set({
-      said: heard === "" ? null : { text: heard, marks: [], waiting: true },
-      talking: heard !== "",
-    });
+    showHeard();
     return;
   }
   if (heardText === "") {
@@ -1737,9 +1778,11 @@ const liveSegment = ({ id, from, text, final }: LiveSegment): void => {
     set({ saying: sayingCount, from: 0 });
   }
   asked = heardText.endsWith("?");
+  hisWords = heardText;
   set({ line: heardText });
   if (final) {
     hisStretch = null;
+    hisWords = "";
     update((progress) =>
       withSpoken(progress, { from: "stephen", text: heardText, at: Date.now() })
     );
@@ -1750,7 +1793,21 @@ const liveSegment = ({ id, from, text, final }: LiveSegment): void => {
 const liveDoing = (doing: LiveDoing): void => {
   if (doing === "speaking") {
     show("speaking");
+    live?.hush(false);
+    if (liveOver === null && !micMuted()) {
+      // They talk over him: his voice stops here at once, as the room stops him too.
+      liveOver = listenForVoice(() => {
+        live?.hush(true);
+      });
+    }
     return;
+  }
+  liveOver?.();
+  liveOver = null;
+  live?.hush(false);
+  if (liveResting.length > 0 && liveRest === undefined && liveWords() === "") {
+    keepResting();
+    showHeard();
   }
   if (doing === "thinking" || doing === "initializing") {
     show("thinking");
@@ -1781,12 +1838,28 @@ const livePart = (part: InterviewPhase): void => {
  */
 const leaveLive = async ({ quick = false } = {}): Promise<void> => {
   const session = live;
+  // Nothing more of him is heard from now: what is still noted below takes a moment.
+  session?.hush(true);
+  void session?.setMuted(true);
+  keepResting();
   liveCount += 1;
   live = null;
   liveMuting?.();
   liveMuting = null;
+  liveOver?.();
+  liveOver = null;
+  liveLevel?.();
+  liveLevel = null;
   liveHeard.clear();
+  // His line cut off: kept as far as it came, so he says it again when they come back.
+  const cut = hisStretch === null ? "" : hisWords;
+  if (session !== null && cut !== "") {
+    update((progress) =>
+      withSpoken(progress, { from: "stephen", text: cut, at: Date.now() })
+    );
+  }
   hisStretch = null;
+  hisWords = "";
   liveReadsBack = false;
   if (session === null) {
     return;
@@ -1844,7 +1917,13 @@ const goLive = async (): Promise<boolean> => {
   const opening = openingEvent(now);
   const count = liveCount;
   // The level of their voice, for the hill in the box: the session holds a microphone of its own.
-  void reachMic();
+  void (async () => {
+    if ((await reachMic()) && liveCount === count && liveLevel === null) {
+      liveLevel = watchLevel(() => {
+        // Only the level: the session hears them.
+      });
+    }
+  })();
   show("thinking");
   const joined = await joinLive(
     {

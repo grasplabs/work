@@ -108,38 +108,61 @@ const turnDetection = {} as const;
  */
 const welcome: Record<
   InterviewLocale,
-  Record<"own" | "lead" | "resume" | "add", string>
+  Record<"own" | "lead" | "resume" | "add" | "back", string>
 > = {
   en: {
-    own: "First your work as a whole, then one part of it up close. What do you do here, in a sentence or two?",
-    lead: "First the work of your team as a whole, then who does what. What does your team take care of, in a few words?",
+    own: "Hi, I'm Stephen, nice to meet you. First your work as a whole, then one part of it up close. What do you do here, in a sentence or two?",
+    lead: "Hi, I'm Stephen, nice to meet you. First the work of your team as a whole, then who does what. What does your team take care of, in a few words?",
     resume: "Welcome back. Let's go on where we left off.",
+    back: "Welcome back.",
     add: "Welcome back. What would you like to add or put right?",
   },
   nl: {
-    own: "Eerst je werk als geheel, daarna één onderdeel ervan van dichtbij. Wat doe je hier, in een of twee zinnen?",
-    lead: "Eerst het werk van je team als geheel, daarna wie wat doet. Waar zorgt je team voor, in een paar woorden?",
+    own: "Hoi, ik ben Stephen, leuk je te spreken. Eerst je werk als geheel, daarna één onderdeel ervan van dichtbij. Wat doe je hier, in een of twee zinnen?",
+    lead: "Hoi, ik ben Stephen, leuk je te spreken. Eerst het werk van je team als geheel, daarna wie wat doet. Waar zorgt je team voor, in een paar woorden?",
     resume: "Welkom terug. Laten we verdergaan waar we gebleven waren.",
+    back: "Welkom terug.",
     add: "Welkom terug. Wat wil je toevoegen of rechtzetten?",
   },
   de: {
-    own: "Zuerst Ihre Arbeit als Ganzes, dann ein Teil davon aus der Nähe. Was machen Sie hier, in ein oder zwei Sätzen?",
-    lead: "Zuerst die Arbeit Ihres Teams als Ganzes, dann wer was macht. Worum kümmert sich Ihr Team, in ein paar Worten?",
+    own: "Hallo, ich bin Stephen, schön, Sie kennenzulernen. Zuerst Ihre Arbeit als Ganzes, dann ein Teil davon aus der Nähe. Was machen Sie hier, in ein oder zwei Sätzen?",
+    lead: "Hallo, ich bin Stephen, schön, Sie kennenzulernen. Zuerst die Arbeit Ihres Teams als Ganzes, dann wer was macht. Worum kümmert sich Ihr Team, in ein paar Worten?",
     resume: "Willkommen zurück. Machen wir da weiter, wo wir aufgehört haben.",
+    back: "Willkommen zurück.",
     add: "Willkommen zurück. Was möchten Sie ergänzen oder richtigstellen?",
   },
   fr: {
-    own: "D’abord votre travail dans son ensemble, puis une partie de plus près. Que faites-vous ici, en une ou deux phrases ?",
-    lead: "D’abord le travail de votre équipe dans son ensemble, puis qui fait quoi. De quoi votre équipe s’occupe-t-elle, en quelques mots ?",
+    own: "Bonjour, je suis Stephen, ravi de vous rencontrer. D’abord votre travail dans son ensemble, puis une partie de plus près. Que faites-vous ici, en une ou deux phrases ?",
+    lead: "Bonjour, je suis Stephen, ravi de vous rencontrer. D’abord le travail de votre équipe dans son ensemble, puis qui fait quoi. De quoi votre équipe s’occupe-t-elle, en quelques mots ?",
     resume: "Bon retour. Reprenons là où nous nous étions arrêtés.",
+    back: "Bon retour.",
     add: "Bon retour. Que souhaitez-vous ajouter ou corriger ?",
   },
   es: {
-    own: "Primero tu trabajo en conjunto, luego una parte de cerca. ¿Qué haces aquí, en una o dos frases?",
-    lead: "Primero el trabajo de tu equipo en conjunto, luego quién hace qué. ¿De qué se encarga tu equipo, en pocas palabras?",
+    own: "Hola, soy Stephen, encantado de conocerte. Primero tu trabajo en conjunto, luego una parte de cerca. ¿Qué haces aquí, en una o dos frases?",
+    lead: "Hola, soy Stephen, encantado de conocerte. Primero el trabajo de tu equipo en conjunto, luego quién hace qué. ¿De qué se encarga tu equipo, en pocas palabras?",
     resume: "Bienvenido de nuevo. Sigamos donde lo dejamos.",
+    back: "Bienvenido de nuevo.",
     add: "Bienvenido de nuevo. ¿Qué te gustaría añadir o corregir?",
   },
+};
+
+/**
+ * What he says first: the first question, said after a quick hello; or,
+ * back where they left off, his last line again whole, as they may not
+ * have heard all of it when they paused or talked over it.
+ */
+const welcomeOf = (
+  locale: InterviewLocale,
+  said: "own" | "lead" | "resume" | "add",
+  before: readonly VoiceLine[]
+): string => {
+  const lines = welcome[locale];
+  const last = before.at(-1);
+  if (said === "resume" && last?.from === "stephen" && last.text !== "") {
+    return `${lines.back} ${last.text}`;
+  }
+  return lines[said];
 };
 
 /** What he asks after a minute of silence. */
@@ -572,7 +595,7 @@ const open = async (
           turn_detection: turnDetection,
         },
         tts: { model: conversation.speaking, voice_id: conversation.voice },
-        welcome_message: welcome[asked.locale][said],
+        welcome_message: welcomeOf(asked.locale, said, before),
         turn: {
           allow_interruptions: true,
           inactivity: inactivityOf(asked.locale),
