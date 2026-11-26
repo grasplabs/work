@@ -1,6 +1,11 @@
+import {
+  createExecutionContext,
+  waitOnExecutionContext,
+} from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import Connect from "../src/index.ts";
 import { callAs, outcome, someone } from "./connect.ts";
 import type { LinearTool } from "./linear-mcp-fake.ts";
 import {
@@ -126,16 +131,18 @@ describe("a connector's tools", () => {
     };
     linear.next = failing;
     try {
-      const ask = async () =>
+      // Three asks at once, then whatever they started after their answers.
+      const ask = async () => {
+        const ctx = createExecutionContext();
+        const connect = new Connect(ctx, env);
         await Promise.all([
-          offered(connectionId),
-          offered(connectionId),
-          exports.default.connectionTools({ connectionId }),
+          connect.offeredConnectorTools([connectionId]),
+          connect.offeredConnectorTools([connectionId]),
+          connect.connectionTools({ connectionId }),
         ]);
+        await waitOnExecutionContext(ctx);
+      };
       await ask();
-      await vi.waitFor(() => {
-        expect(reads).toBeGreaterThan(0);
-      }, waitForRead);
       const once = reads;
       await ask();
       await ask();
@@ -147,9 +154,6 @@ describe("a connector's tools", () => {
         .bind(connectionId)
         .run();
       await ask();
-      await vi.waitFor(() => {
-        expect(reads).toBeGreaterThan(once);
-      }, waitForRead);
 
       expect({ once, soon, later: reads }).toStrictEqual({
         once: 1,
