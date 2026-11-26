@@ -1,3 +1,4 @@
+import { agentErrors } from "@grasp-os/shared/agent";
 import { applyPartial } from "@grasp-os/shared/chat";
 import type {
   ChatMessage,
@@ -482,6 +483,98 @@ describe("a question sent while the agent answers", slow, () => {
       });
     } finally {
       cut.release();
+    }
+  });
+
+  it("is refused while a turn nobody asked for runs, which only reads", async () => {
+    const { userId } = await signedInWithRole(idp, "user");
+    const { id, chat } = await chatOf(userId);
+    const provider = await fakeProviderFor([model], { hang: true });
+    const session = () => chatSession(env, id, chatIdSchema.parse(chat.id));
+    const woken = session()
+      .run({
+        turnId: "turn-wake",
+        sentAt: Date.now(),
+        scope: {
+          workspaceId: id,
+          agentId: chat.agentId,
+          chatId: chat.id,
+          personId: userId,
+          via: chat.via,
+          unattended: true,
+        },
+        question: { text: "Anything due?", model, files: [] },
+        shared: false,
+        personal: true,
+        context: { skills: [] },
+        capture: { attended: false },
+      })
+      .catch(() => "stopped");
+    await vi.waitFor(
+      () => {
+        expect(provider.requests).toHaveLength(1);
+      },
+      { timeout: 10_000 }
+    );
+
+    await expect(
+      session().queueQuestion("turn-wake", {
+        id: "question-wake",
+        text: "And mine?",
+        files: [],
+      })
+    ).rejects.toThrow(agentErrors.create("agent.busy").message);
+    await session().abort("turn-wake");
+    await woken;
+  });
+
+  it("is queued into the turn the person's object left running as it restarted", async () => {
+    const ann = await signedInApi(idp, "user");
+    const first = pausedReply(says("Paris."), 2);
+    const provider = await fakeProvider(first.reply, says("Berlin."));
+    const chat = await ann.api.chats.create("Left running");
+    const id = personalWorkspaceId(ann.userId);
+    try {
+      await ann.api.chats.send(chat.id, { text: "France?", model });
+      await vi.waitFor(
+        () => {
+          expect(provider.requests).toHaveLength(1);
+        },
+        { timeout: 10_000 }
+      );
+      // Only the person's object restarts: the chat's goes on answering,
+      // and nothing here holds the turn any more.
+      await restart(workspace(env, id));
+      const tab = await follow(ann, chat.id);
+      await vi.waitFor(() => {
+        expect(tab.running()).toBeTruthy();
+      });
+
+      await ann.api.chats.send(chat.id, { text: "Germany?", model });
+      await vi.waitFor(() => {
+        expect(tab.queued()).toStrictEqual(["Germany?"]);
+      });
+      first.release();
+      await settled(tab);
+      const [record] = await turnRecordsOf(chat.id, 1);
+      expect({
+        shown: tab.shown(),
+        queued: tab.queued(),
+        requests: provider.requests.length,
+        record: { outcome: record?.outcome, queued: record?.queued },
+      }).toStrictEqual({
+        shown: [
+          { role: "user", text: "France?" },
+          { role: "assistant", text: "Paris." },
+          { role: "user", text: "Germany?" },
+          { role: "assistant", text: "Berlin." },
+        ],
+        queued: [],
+        requests: 2,
+        record: { outcome: "answered", queued: 1 },
+      });
+    } finally {
+      first.release();
     }
   });
 

@@ -1974,6 +1974,15 @@ export class ChatHarness {
     if (opening?.turnId === turnId) {
       await opening.opened.promise;
     }
+    // A turn nobody asked for there and then (a wake) only reads, so never
+    // answers in a person's own scope: their question waits for a turn of
+    // its own. Decided here, by the turn's record, as its Workspace may
+    // have restarted since the turn began and kept nothing of it.
+    const turn = await this.#harness.snapshot(TurnDoc, context);
+    const request = turn === undefined ? undefined : requestOf(turn);
+    if (request?.turnId === turnId && request.scope.unattended === true) {
+      throw agentErrors.create("agent.busy");
+    }
     if (this.#open !== turnId) {
       return false;
     }
