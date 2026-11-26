@@ -6397,6 +6397,10 @@ msgid "Download as PDF"
 msgstr "Télécharger en PDF"
 
 #: src/frame/ui-words.tsx
+msgid "Download diagram"
+msgstr "Télécharger le diagramme"
+
+#: src/frame/ui-words.tsx
 msgid "Download table"
 msgstr "Télécharger le tableau"
 
@@ -10623,6 +10627,10 @@ msgid "Mentioned"
 msgstr "Cités"
 
 #: src/frame/ui-words.tsx
+msgid "Mermaid diagram"
+msgstr "Diagramme Mermaid"
+
+#: src/frame/ui-words.tsx
 msgid "Message actions"
 msgstr "Actions du message"
 
@@ -14678,6 +14686,10 @@ msgstr "Réinitialiser ce qu'il conserve"
 #: src/workflows/kept-state.tsx
 msgid "Reset what it keeps?"
 msgstr "Réinitialiser ce qu'il conserve ?"
+
+#: src/frame/ui-words.tsx
+msgid "Reset zoom"
+msgstr "Réinitialiser le zoom"
 
 #: src/apps/app-reset.tsx
 #: src/apps/reset-test-data.tsx
@@ -19479,6 +19491,10 @@ msgstr "Tout voir"
 msgid "View changes"
 msgstr "Voir les modifications"
 
+#: src/frame/ui-words.tsx
+msgid "View full screen"
+msgstr "Afficher en plein écran"
+
 #: src/brain/note-actions.tsx
 msgid "View in map"
 msgstr "Voir sur la carte"
@@ -21479,12 +21495,14 @@ msgid "Zoom"
 msgstr "Zoom"
 
 #: src/brain/atlas-overlays.tsx
+#: src/frame/ui-words.tsx
 #: src/inbox/report-viewer.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom in"
 msgstr "Zoom avant"
 
 #: src/brain/atlas-overlays.tsx
+#: src/frame/ui-words.tsx
 #: src/inbox/report-viewer.tsx
 #: src/workflows/workflow-flow.tsx
 msgid "Zoom out"
