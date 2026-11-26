@@ -74,11 +74,14 @@ import { dropPendingActions } from "./pending.ts";
 // user, and sends the admin's browser to Composio's auth link. Composio
 // sends it back to core's callback, with the flow's `state`, as a
 // provider's OAuth flow does; the flow finishes only for the admin who
-// started it, as an OAuth flow does (CN4). Finishing checks the account is
-// the one this flow made, active, for this toolkit, then makes an MCP
-// server at Composio with only that toolkit's auth config and the allowed
-// tools, and stores the connection with that server's URL for that one
-// connected account: never Composio's single Tool Router URL.
+// started it, as an OAuth flow does (CN4). Composio may send the browser
+// back before the account is active: finishing reads the account at
+// Composio until it settles, for a few seconds at most
+// (`settledAccount`), checks it is the one this flow made, active, for
+// this toolkit, then makes an MCP server at Composio with only that
+// toolkit's auth config and the allowed tools, and stores the connection
+// with that server's URL for that one connected account: never
+// Composio's single Tool Router URL.
 //
 // Whatever goes wrong after something was made at Composio, it is deleted
 // there again. What Composio doesn't take, or what can't be deleted while
@@ -879,6 +882,118 @@ const hasLiveShared = async (env: Env, toolkit: string): Promise<boolean> => {
   return live !== undefined;
 };
 
+/**
+ * Composio's statuses of an account whose auth it is still completing: its
+ * redirect may come before the account is active, and its docs say to
+ * check again from the backend while it is pending.
+ */
+const completingStatuses = new Set(["INITIALIZING", "INITIATED"]);
+
+/**
+ * How long finishing waits for Composio to complete an account: reads
+ * start only within it, and the last may take `shortestReadMs` past it,
+ * so the browser waits on the callback for 17 seconds at most.
+ */
+const completingWaitMs = 15_000;
+
+/** The least time a read of the account is given, even the last. */
+const shortestReadMs = 2000;
+
+/**
+ * The waits between reads of an account still completing, as Composio's
+ * own SDK waits (`waitForConnection`): a second, then half as long again
+ * each time, up to five.
+ */
+const firstReadWaitMs = 1000;
+const readWaitGrowth = 1.5;
+const longestReadWaitMs = 5000;
+
+/**
+ * Whether Composio may answer a read it failed if it's asked again: it
+ * didn't answer at all, rate limited it, or failed on its side. Never an
+ * answer connect can't read, which asking again won't change.
+ */
+const isTransient = (error: unknown): error is ComposioError =>
+  error instanceof ComposioError &&
+  (error.unanswered ||
+    (error.status !== undefined &&
+      (error.status === 429 || error.status >= 500)));
+
+/** Where a Composio account settled, as `settledAccount` reads it. */
+type Settled = "active" | "refused" | "pending" | "unanswered";
+
+/**
+ * Where Composio's connected account `account` settled, read at Composio
+ * with connect's key, never taken from the browser: `active` once it is
+ * the one made (its ID, toolkit and auth config) and `ACTIVE`; `refused`
+ * when it isn't the one made, or failed, expired or was revoked; `pending`
+ * while Composio is still completing it after `completingWaitMs`; and
+ * `unanswered` when Composio's last read in that time failed in a way
+ * asking again might not (`isTransient`), as such a read is asked again
+ * meanwhile. Throws {@link ComposioError} when Composio fails otherwise.
+ */
+const settledAccount = async (
+  key: string,
+  account: Pick<Made, "toolkit" | "authConfigId" | "connectedAccountId">
+): Promise<Settled> => {
+  const deadline = Date.now() + completingWaitMs;
+  const detail = { toolkit: account.toolkit };
+  for (let waitMs = firstReadWaitMs; ;) {
+    let failed = false;
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- one read at a time
+      const held = await composioRequest(key, {
+        path: `/connected_accounts/${encodeURIComponent(account.connectedAccountId)}`,
+        schema: connectedAccountSchema,
+        timeoutMs: Math.max(deadline - Date.now(), shortestReadMs),
+      });
+      const isThisOne =
+        held.id === account.connectedAccountId &&
+        held.toolkit.slug === account.toolkit &&
+        held.auth_config.id === account.authConfigId;
+      if (!isThisOne) {
+        log.warn("composio.account_not_made", detail);
+        return "refused";
+      }
+      if (held.status === "ACTIVE") {
+        return "active";
+      }
+      if (!completingStatuses.has(held.status)) {
+        // Composio's word for it, such as FAILED or EXPIRED: never its
+        // reason, which is the provider's text.
+        log.warn("composio.account_refused", {
+          ...detail,
+          status: held.status.slice(0, 32),
+        });
+        return "refused";
+      }
+    } catch (error) {
+      if (!isTransient(error)) {
+        throw error;
+      }
+      failed = true;
+    }
+    const left = deadline - Date.now();
+    if (left <= 0) {
+      log.warn(
+        failed ? "composio.account_unanswered" : "composio.account_pending",
+        detail
+      );
+      return failed ? "unanswered" : "pending";
+    }
+    // oxlint-disable-next-line no-await-in-loop -- waits for Composio
+    await scheduler.wait(Math.min(waitMs, left));
+    waitMs = Math.min(waitMs * readWaitGrowth, longestReadWaitMs);
+  }
+};
+
+/** The refusal each way an account didn't settle active ends as. */
+const unsettledReasons = {
+  refused: "connection.provider_refused",
+  pending: "connection.provider_pending",
+  unanswered: "connection.provider_not_answering",
+} as const;
+
 /** A connected account connect made at Composio, to serve as a connection. */
 interface Made {
   flowId: string;
@@ -890,13 +1005,12 @@ interface Made {
 }
 
 /**
- * Serves the connected account `account` as a connection of `person`'s:
- * checks it is the one made, active, for its toolkit, makes an MCP server
+ * Serves the connected account `account`, settled active
+ * (`settledAccount`), as a connection of `person`'s: makes an MCP server
  * at Composio with only its auth config and the allowed tools (noted in
  * `made` and in its cleanup row), and stores the connection with that
  * server's URL for that one account, with `events` for its ID in the same
- * batch, which also clears the cleanup row. The connection's ID, or
- * `undefined` when the account isn't the one made or isn't active.
+ * batch, which also clears the cleanup row. The connection's ID.
  * Throws {@link ComposioError} when Composio fails.
  */
 const serveAndStore = async (
@@ -907,19 +1021,7 @@ const serveAndStore = async (
   made: AtComposio,
   events: (connectionId: string) => [AuditEntry, ...AuditEntry[]],
   auth: "managed" | "key"
-): Promise<string | undefined> => {
-  const held = await composioRequest(key, {
-    path: `/connected_accounts/${encodeURIComponent(account.connectedAccountId)}`,
-    schema: connectedAccountSchema,
-  });
-  const isThisOne =
-    held.id === account.connectedAccountId &&
-    held.status === "ACTIVE" &&
-    held.toolkit.slug === account.toolkit &&
-    held.auth_config.id === account.authConfigId;
-  if (!isThisOne) {
-    return undefined;
-  }
+): Promise<string> => {
   const tools = composioToolsSchema.parse(JSON.parse(account.tools));
   const server = await composioRequest(key, {
     method: "POST",
@@ -993,14 +1095,24 @@ const serveAndStore = async (
   return connectionId;
 };
 
+/** What Composio appended to the callback it sent the browser back to. */
+interface ComposioAnswer {
+  status?: string | undefined;
+  connectedAccountId?: string | undefined;
+}
+
 /**
  * Finishes a Composio flow for the admin who started it, once Composio
- * sent their browser back: the new connection.
+ * sent their browser back: the new connection. Composio's redirect is a
+ * hint: its `failed` ends the flow, and an account it names must be the
+ * flow's own, but only the account as Composio holds it, read with
+ * connect's key, connects anything (`settledAccount`).
  */
 const finishToolkitConnection = async (
   env: Env,
   person: ConnectionPerson,
-  flow: ToolkitFlow
+  flow: ToolkitFlow,
+  answer: ComposioAnswer
 ): Promise<{ connectionId: string; returnTo: string }> => {
   const detail = detailOf(flow.toolkit);
   const refuse = async (
@@ -1031,6 +1143,20 @@ const finishToolkitConnection = async (
       await refuse("connection.provider_unavailable");
       throw connectionErrors.create("connection.provider_unavailable");
     }
+    if (
+      answer.connectedAccountId !== undefined &&
+      answer.connectedAccountId !== flow.connectedAccountId
+    ) {
+      // Only noted: the flow's own account, read at Composio, decides.
+      log.warn("composio.callback_account_differs", { toolkit: flow.toolkit });
+    }
+    const settled =
+      answer.status === "failed" ? "refused" : await settledAccount(key, flow);
+    if (settled !== "active") {
+      const reason = unsettledReasons[settled];
+      await refuse(reason, "failed");
+      throw connectionErrors.create(reason);
+    }
     const tools = composioToolsSchema.parse(JSON.parse(flow.tools));
     const toolsHash = await sha256Hex(flow.tools);
     const connectionId = await serveAndStore(
@@ -1052,10 +1178,6 @@ const finishToolkitConnection = async (
       ],
       "managed"
     );
-    if (connectionId === undefined) {
-      await refuse("connection.provider_refused", "failed");
-      throw connectionErrors.create("connection.provider_refused");
-    }
     return { connectionId, returnTo: flow.returnTo };
   } catch (error) {
     await carryOutCleanup(env, flow.flowId, made, markerOf(flow.flowId));
@@ -1081,12 +1203,15 @@ export const finishToolkitFlow = async (
   if (!parsed.success) {
     return undefined;
   }
-  const { person, state } = parsed.data;
+  const { person, state, status, connectedAccountId } = parsed.data;
   const flow = await takeToolkitFlow(env, await sha256Hex(state));
   if (flow === undefined) {
     return undefined;
   }
-  return await finishToolkitConnection(env, person, flow);
+  return await finishToolkitConnection(env, person, flow, {
+    status,
+    connectedAccountId,
+  });
 };
 
 /**
@@ -1230,7 +1355,7 @@ export const connectToolkitWithKey = async (
       .update(composioCleanups)
       .set({ authConfigId: authConfig.id })
       .where(thisCleanup);
-    const account = await composioRequest(key, {
+    const created = await composioRequest(key, {
       method: "POST",
       path: "/connected_accounts",
       body: {
@@ -1242,10 +1367,10 @@ export const connectToolkitWithKey = async (
       },
       schema: createdAccountSchema,
     });
-    made.connectedAccountId = account.id;
+    made.connectedAccountId = created.id;
     await db
       .update(composioCleanups)
-      .set({ connectedAccountId: account.id })
+      .set({ connectedAccountId: created.id })
       .where(thisCleanup);
     const storedTools = JSON.stringify(tools);
     const consented = await consentEvents(person, {
@@ -1257,17 +1382,27 @@ export const connectToolkitWithKey = async (
       detail: { scheme: auth.scheme, fields: fieldNames },
     });
     const toolsHash = await sha256Hex(storedTools);
+    const account = {
+      flowId,
+      toolkit,
+      authConfigId: authConfig.id,
+      connectedAccountId: created.id,
+      tools: storedTools,
+    };
+    const settled = await settledAccount(key, account);
+    if (settled === "refused") {
+      throw new ComposioError("Composio didn't make the account active");
+    }
+    if (settled !== "active") {
+      const reason = unsettledReasons[settled];
+      await refuse(reason, "failed");
+      throw connectionErrors.create(reason);
+    }
     const connectionId = await serveAndStore(
       env,
       key,
       person,
-      {
-        flowId,
-        toolkit,
-        authConfigId: authConfig.id,
-        connectedAccountId: account.id,
-        tools: storedTools,
-      },
+      account,
       made,
       (id) => [
         ...consented,
@@ -1285,9 +1420,6 @@ export const connectToolkitWithKey = async (
       ],
       "key"
     );
-    if (connectionId === undefined) {
-      throw new ComposioError("Composio's account isn't the one made");
-    }
     return { connectionId };
   } catch (error) {
     await carryOutCleanup(env, flowId, made, marker);

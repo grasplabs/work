@@ -66,6 +66,7 @@ test("the admin goes through steps and back, with his voice on and off", async (
   // Voice off: kept in this browser, and nothing more is asked of the voice.
   await page.getByRole("button", { name: "Turn my voice off" }).click();
   await page.reload();
+  await page.getByRole("button", { name: "Volume" }).click();
   await expect(
     page.getByRole("button", { name: "Turn my voice on" })
   ).toBeVisible();

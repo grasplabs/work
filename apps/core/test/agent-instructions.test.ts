@@ -71,7 +71,8 @@ describe("a chat's instructions", setUpTime, () => {
 
   it("give the agent the company's, its own and its person's instruction files, the skills it may read and how to build, and an edit from the next turn", async () => {
     const admin = await signedInApi(idp, "admin");
-    const person = await signedInApi(idp, "user");
+    // A builder: only a turn that builds is told how.
+    const person = await signedInApi(idp, "builder");
     const u = unique();
     const rule = `Always answer in Dutch ${u}.`;
     await saveFile(admin, { scope: "company", name: "instructions" }, rule);
