@@ -8,6 +8,7 @@ import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  asTimePasses,
   call,
   cleanupsLeft,
   composio,
@@ -377,6 +378,27 @@ describe("connecting a Composio toolkit with a key", () => {
     expect(
       recorded.map(({ action, detail }) => [action, detail.reason])
     ).toStrictEqual([["connection.connect", "connection.provider_refused"]]);
+  });
+
+  it("says the provider isn't answering when Composio never reads the new account back, and keeps nothing", async () => {
+    composio.state.failing = "GET /connected_accounts/";
+    const ended = await asTimePasses(
+      async (connect) =>
+        await outcome(connectWithKey(someone("admin"), {}, connect))
+    );
+    composio.state.failing = undefined;
+    const recorded = await events();
+    expect({
+      ended,
+      held: heldAtComposio(),
+      cleanups: await cleanupsLeft(),
+      recorded: recorded.map(({ action, detail }) => [action, detail.reason]),
+    }).toStrictEqual({
+      ended: "connection.provider_not_answering",
+      held: nothingHeld,
+      cleanups: 0,
+      recorded: [["connection.connect", "connection.provider_not_answering"]],
+    });
   });
 
   it("keeps one shared connection per toolkit: of two connects at once, one is stored and the other leaves nothing at Composio", async () => {
