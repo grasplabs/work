@@ -34,6 +34,7 @@ import { AdminsLoading, WithAdmins } from "./admins.tsx";
 import { askedApps } from "./integrations-asked.ts";
 import type { AskedApp } from "./integrations-asked.ts";
 import { AdminPage } from "./page.tsx";
+import type { Deferred } from "./settled.tsx";
 import { formatDate, formatList } from "./words.ts";
 
 /** The companies that asked for an app, by name. */
@@ -183,14 +184,21 @@ const AppsAskedPage = ({
 };
 
 /** The page, once the apps every company asked for are in: its title at once. */
-export const AppsAsked = ({ open }: { open: string | undefined }) => (
+export const AppsAsked = ({
+  admins,
+  open,
+}: {
+  admins: Deferred<ClientAdmin[] | null> | undefined;
+  open: string | undefined;
+}) => (
   <WithAdmins
+    admins={admins}
     fallback={
       <AdminPage description={appsAbout} title={appsTitle}>
         <AdminsLoading />
       </AdminPage>
     }
   >
-    {(admins) => <AppsAskedPage admins={admins} open={open} />}
+    {(read) => <AppsAskedPage admins={read} open={open} />}
   </WithAdmins>
 );

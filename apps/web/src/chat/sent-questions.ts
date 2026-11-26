@@ -24,6 +24,11 @@ export interface SentQuestion {
   at: string;
   /** Why core didn't take it, once it refused; none while on its way. */
   failure?: string;
+  /**
+   * Whether it was sent while Grasp answered the chat: it waits behind
+   * that answer (core queues it), so it shows after it.
+   */
+  behind: boolean;
   /** The files it carries, and whom it mentions: sent again with it. */
   files: readonly BoxFile[];
   mentions: readonly BoxMention[];
@@ -35,6 +40,15 @@ let sent = new Map<string, readonly SentQuestion[]>();
 
 /** The keys of the questions on their way to core now, by chat. */
 const sending = new Map<string, Set<string>>();
+
+const listeners = new Set<() => void>();
+
+const changed = (next: Map<string, readonly SentQuestion[]>): void => {
+  sent = next;
+  for (const listener of listeners) {
+    listener();
+  }
+};
 
 /**
  * Whether a question is on its way in `chatId`, from any box of this tab
@@ -49,17 +63,20 @@ export const sendBegan = (chatId: string, key: string): void => {
   sending.set(chatId, new Set(sending.get(chatId)).add(key));
 };
 
-/** Question `key` reached core in `chatId`, or was refused. */
+/**
+ * Question `key` reached core in `chatId`, or was refused. One that waits
+ * behind an answer is core's to show from here, among the chat's queued
+ * questions (`ChatUpdate.queued`), until it is taken.
+ */
 export const sendEnded = (chatId: string, key: string): void => {
   sending.get(chatId)?.delete(key);
-};
-
-const listeners = new Set<() => void>();
-
-const changed = (next: Map<string, readonly SentQuestion[]>): void => {
-  sent = next;
-  for (const listener of listeners) {
-    listener();
+  const questions = sent.get(chatId) ?? noQuestions;
+  const kept = questions.filter(
+    (question) =>
+      question.key !== key || !question.behind || question.failure !== undefined
+  );
+  if (kept.length !== questions.length) {
+    changed(new Map(sent).set(chatId, kept));
   }
 };
 

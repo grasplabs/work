@@ -6,6 +6,8 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 
 import { WithAdmins } from "../admin/admins.tsx";
 import { StephenLab } from "../admin/lab.tsx";
+import { loadEveryAdmin } from "../admin/org-loads.ts";
+import { freshMs } from "../admin/org-reads.ts";
 import { AdminPage } from "../admin/page.tsx";
 import { organizationsOf } from "../admin/views.ts";
 
@@ -48,17 +50,18 @@ const Channels = ({ search }: { search: LabSearch }) => {
 /** Stephen Lab: testing and improving Stephen, in the lab and with real people (src/admin/lab.tsx). */
 const LabPage = () => {
   const search = Route.useSearch();
+  const { admins } = Route.useLoaderData();
   return (
     <AdminPage
       action={<Channels search={search} />}
       description="Where Stephen stands in the lab and with real people, version by version, and what needs us."
       title="Stephen Lab"
     >
-      <WithAdmins>
-        {(admins) => (
+      <WithAdmins admins={admins}>
+        {(read) => (
           <StephenLab
             now={new Date().toISOString()}
-            organizations={organizationsOf(admins)}
+            organizations={organizationsOf(read)}
             {...(search.where === undefined ? {} : { channel: search.where })}
           />
         )}
@@ -70,5 +73,9 @@ const LabPage = () => {
 export const Route = createFileRoute("/lab")({
   validateSearch: (search: Record<string, unknown>): LabSearch =>
     isChannel(search.where) ? { where: search.where } : {},
+  loader: loadEveryAdmin,
+  staleTime: freshMs,
+  // A preload reads nothing: opened, the page loads anew and reads them.
+  preloadStaleTime: 0,
   component: LabPage,
 });

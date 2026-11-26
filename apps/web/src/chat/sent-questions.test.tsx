@@ -29,6 +29,7 @@ const question = (key: string): SentQuestion => ({
   key,
   text: `Question ${key}`,
   at: "2026-11-26T09:00:00.000Z",
+  behind: false,
   files: [],
   mentions: [],
 });
@@ -94,6 +95,28 @@ describe("the questions a tab sent", () => {
       afterAnswerEnded: ["a"],
       taken: [],
       sending: false,
+    });
+  });
+
+  it("hands a question sent while Grasp answers to core's queued questions once core took it", () => {
+    host = document.createElement("div");
+    const into = host;
+    act(() => {
+      root = createRoot(into);
+      root.render(<Probe />);
+    });
+    act(() => {
+      questionSent("chat-1", { ...question("b"), behind: true });
+      sendBegan("chat-1", "b");
+    });
+    const onItsWay = shownNow();
+    act(() => {
+      sendEnded("chat-1", "b");
+    });
+
+    expect({ onItsWay, taken: shownNow() }).toStrictEqual({
+      onItsWay: ["b"],
+      taken: [],
     });
   });
 });

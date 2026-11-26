@@ -11,6 +11,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 import type { AdminSnapshot } from "@grasp-os/shared/admin-snapshot";
+import type { AdminSummary } from "@grasp-os/shared/admin-summary";
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import type { AnyRoute } from "@tanstack/react-router";
 import { act as reactAct } from "react";
@@ -21,10 +22,12 @@ import type { SerovalJSON } from "seroval";
 import { aroundEach, vi } from "vite-plus/test";
 
 import type { AnsweredAdmin } from "../src/admin/org-reads.ts";
+import type { Billing } from "../src/billing/billing.ts";
 import type { ClientAdmin } from "../src/clients/admin.ts";
 import type { GridRow } from "../src/clients/grid.ts";
+import type { ClientSummary } from "../src/clients/summary.ts";
 import { getRouter } from "../src/router.tsx";
-import { emptyAdminSnapshot } from "./snapshots.ts";
+import { emptyAdminSnapshot, emptyAdminSummary } from "./snapshots.ts";
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true);
 
@@ -86,6 +89,50 @@ export const answeredAdmin = (
     crm: { state: "not_linked" },
     ...overrides,
   };
+};
+
+/**
+ * A client's summary as `fetchClientSummaries` answers it: nothing begun,
+ * `needs` as given, Stripe not linked unless given.
+ */
+export const answeredSummary = ({
+  client = gridRow(),
+  needs = [],
+  asked = 0,
+  billing = { state: "not_linked" },
+}: {
+  client?: GridRow;
+  needs?: AdminSummary["needs"];
+  asked?: number;
+  billing?: Billing;
+} = {}): ClientSummary => ({
+  client,
+  state: "answered",
+  summary: { ...emptyAdminSummary(needs), asked },
+  billing,
+});
+
+/**
+ * What `fetchClientSummaries` answers of a client the frame also reads in
+ * full (`admin`): answered with its apps asked for and its billing, and
+ * `needs` as given (core works them out); else not deployed or unreachable.
+ */
+export const summaryOf = (
+  admin: ClientAdmin,
+  needs: AdminSummary["needs"] = []
+): ClientSummary => {
+  if (admin.state !== "answered") {
+    return {
+      client: admin.client,
+      state: admin.error === "not_deployed" ? "not_deployed" : "unreachable",
+    };
+  }
+  return answeredSummary({
+    client: admin.client,
+    needs,
+    asked: admin.snapshot.asked.length,
+    billing: admin.billing,
+  });
 };
 
 /** The text of the line under `label` in a list of terms, or undefined. */
@@ -308,6 +355,7 @@ export const openAdmin = async (
   const answered: Answers = {
     fetchClientGrid: [] satisfies GridRow[],
     fetchClientAdmins: [] satisfies ClientAdmin[],
+    fetchClientSummaries: [] satisfies ClientSummary[],
     fetchStaff: { name: "Sam Staff" },
     fetchReadiness: { checks: [], blocking: 0 },
     reportPageErrorFn: { logged: true },

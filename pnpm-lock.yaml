@@ -125,8 +125,8 @@ catalogs:
       specifier: 0.156.0
       version: 0.156.0
     '@pierre/highlights':
-      specifier: 0.5.2
-      version: 0.5.2
+      specifier: 0.6.0
+      version: 0.6.0
     '@playwright/test':
       specifier: 1.63.0
       version: 1.63.0
@@ -283,6 +283,9 @@ catalogs:
     csv-parse:
       specifier: 7.0.3
       version: 7.0.3
+    diff:
+      specifier: 9.0.0
+      version: 9.0.0
     drizzle-kit:
       specifier: 0.31.11
       version: 0.31.11
@@ -1626,7 +1629,7 @@ importers:
         version: 1.1.10(react@19.3.0)
       '@pierre/highlights':
         specifier: 'catalog:'
-        version: 0.5.2
+        version: 0.6.0
       '@stylexjs/stylex':
         specifier: 'catalog:'
         version: 0.19.2
@@ -1639,6 +1642,9 @@ importers:
       '@ui-sdk/react':
         specifier: 'catalog:'
         version: 0.1.0-beta.13(@types/react@19.3.0)(@ui-sdk/core@0.1.0-beta.13)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      diff:
+        specifier: 'catalog:'
+        version: 9.0.0
       katex:
         specifier: 'catalog:'
         version: 0.18.10
@@ -4630,8 +4636,8 @@ packages:
   '@pierre/highlights@0.3.0':
     resolution: {integrity: sha512-s6xZ/giPPrSeCO2w254GiysUXD4ditKMTOrl1vHynvPqP7VdlujYi01O9joxJ0T16XkoXGQMN6zkRi9+O8NCzg==}
 
-  '@pierre/highlights@0.5.2':
-    resolution: {integrity: sha512-CV+yFa8dodaU3w7U42FR+AfoavrsfcH0/n3rckDu1A/UXan1Dzo6OdM/MPOAAsGM/EbKhDxD6k+qMcNUtnLfsg==}
+  '@pierre/highlights@0.6.0':
+    resolution: {integrity: sha512-5RhenEkZxlcsw2hrDaYlGyT6ERfQgHSvZxRg/ByZ11SVkoWuAwDMozL7HxUfUnOVyShD5WKMxqiakg8S/8Fi7A==}
 
   '@pierre/theme@2.0.0':
     resolution: {integrity: sha512-yNDd9GYLQl1mEUJR8AneJ5e4ohLIHQd/wZLWr4fagt78vS2RwwZNW530vVgHqXFAyFVcFlRmGUD5ramXH46OXw==}
@@ -14049,7 +14055,7 @@ snapshots:
 
   '@pierre/highlights@0.3.0': {}
 
-  '@pierre/highlights@0.5.2': {}
+  '@pierre/highlights@0.6.0': {}
 
   '@pierre/theme@2.0.0': {}
 

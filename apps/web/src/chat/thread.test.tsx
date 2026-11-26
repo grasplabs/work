@@ -6,6 +6,7 @@ import type {
   ChatAgent,
   ChatMessage,
   ChatPartial,
+  ChatQueued,
   ChatToolEvent,
 } from "@grasp-os/shared/chat";
 import type { ModelWait } from "@grasp-os/shared/models";
@@ -40,6 +41,9 @@ let root: Root | undefined;
 /** The memories the page undid, by id, in order. */
 const forgotten: string[] = [];
 
+/** How often the thread asked for the queued questions to be sent now. */
+const sentNow: string[] = [];
+
 /** What core answers the page's undo of a memory. */
 let forgetAnswer: "done" | "nothing" = "done";
 
@@ -69,7 +73,9 @@ const thread = async (
   /** What the chat read, as the page passes it. */
   sources?: ReactNode,
   /** What the turn's model request waits on, as core says. */
-  modelWait?: ModelWait
+  modelWait?: ModelWait,
+  /** The questions queued behind the answer, as core says. */
+  queued?: readonly ChatQueued[]
 ): Promise<void> => {
   const core = {
     withSession: async <T,>(
@@ -116,6 +122,10 @@ const thread = async (
         }
         checking={checking}
         modelWait={modelWait ?? null}
+        queued={queued}
+        onSendNow={() => {
+          sentNow.push("now");
+        }}
         tools={tools}
         newLineBefore={newLineBefore}
         sources={sources}
@@ -256,6 +266,50 @@ describe(ChatThread, () => {
     document.body.replaceChildren();
     forgotten.length = 0;
     forgetAnswer = "done";
+    sentNow.length = 0;
+  });
+
+  it("draws the questions queued behind the answer last, in order, each saying so, Send now on the newest", async () => {
+    await thread(
+      [asked],
+      {
+        text: "Four",
+        reasoning: "",
+        code: [],
+        tools: [],
+      },
+      [],
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      [
+        { id: "7", text: "And 3 + 3?" },
+        { id: "8", text: "And 4 + 4?" },
+      ]
+    );
+    const rows = [...document.querySelectorAll('[data-slot="message"]')];
+    const sendNow = [...document.querySelectorAll("button")].filter(
+      (button) => button.textContent.trim() === "Send now"
+    );
+    act(() => {
+      sendNow[0]?.click();
+    });
+
+    expect({
+      // The question, the answer being written, then each queued one.
+      last: rows.slice(-2).map((row) => row.textContent),
+      sendNow: sendNow.length,
+      newest: rows.at(-1)?.contains(sendNow[0] ?? null),
+      sentNow,
+    }).toStrictEqual({
+      last: ["And 3 + 3?Queued", "And 4 + 4?QueuedSend now"],
+      sendNow: 1,
+      newest: true,
+      sentNow: ["now"],
+    });
   });
 
   it("says under a call of remember who or what it is about, when it isn't the person", async () => {

@@ -9,7 +9,7 @@ import { failureText } from "@grasp-os/shared/errors";
 import type { ModelEffort, ModelEfforts } from "@grasp-os/shared/models";
 import type { Subject } from "@grasp-os/shared/subject";
 import { useRouteContext } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { useCoreAction } from "../use-core-action.ts";
 import { activeChat, setActiveChat } from "./active-chat.ts";
@@ -92,6 +92,11 @@ export interface AskOptions {
    * `chats.agents()`; the company's first one by default.
    */
   agentId?: string;
+  /**
+   * Whether Grasp answers in the chat now: a question sent meanwhile waits
+   * behind that answer, and shows there (sent-questions.ts).
+   */
+  running?: boolean;
 }
 
 const noOptions: AskOptions = {};
@@ -130,7 +135,7 @@ export const useAsk = (
   efforts: Readonly<Record<string, ModelEfforts>> = noModelEfforts,
   /** Which of the tab's open chats a new chat becomes. */
   slot: ChatSlot = "chat",
-  { onAsked, subject, make, agentId }: AskOptions = noOptions
+  { onAsked, subject, make, agentId, running = false }: AskOptions = noOptions
 ) => {
   const { identity } = useRouteContext({ from: "/_shell" });
   const { busy, failure, run } = useCoreAction();
@@ -150,6 +155,11 @@ export const useAsk = (
   // The chat what is typed belongs to, and the chat a question asked here
   // made: the box is that one's still once it opens.
   const [draftOf, setDraftOf] = useState(chatId);
+  // The chat the box is now, for what comes back after an await.
+  const boxOf = useRef(chatId);
+  useEffect(() => {
+    boxOf.current = chatId;
+  }, [chatId]);
   const [made, setMade] = useState<string>();
   if (chatId !== draftOf) {
     setDraftOf(chatId);
@@ -248,6 +258,7 @@ export const useAsk = (
         at: new Date().toISOString(),
         files: carried,
         mentions: mentioned,
+        behind: id === chatId && running,
       });
       // Out of the box, all of it: the question is in the chat now.
       setText((now) => (now === question ? "" : now));
@@ -340,8 +351,30 @@ export const useAsk = (
     }
     return true;
   };
+  // A stop drops what was queued behind the answer (core's `cancel` says
+  // which): it comes back into the box, the oldest first and before what
+  // is typed there, as Codex hands queued messages back on an interrupt,
+  // to send again or let go. Only while the box is still that chat's.
   const stop = async (id: string): Promise<void> => {
-    await run(async (session) => await session.chats.cancel(id));
+    const ended = await run(async (session) => await session.chats.cancel(id));
+    if (
+      ended === undefined ||
+      ended === false ||
+      ended.dropped.length === 0 ||
+      boxOf.current !== id
+    ) {
+      return;
+    }
+    const { dropped } = ended;
+    setText((now) =>
+      [...dropped, now].filter((each) => each.trim() !== "").join("\n\n")
+    );
+  };
+  /** Has the agent take the questions queued behind its answer at once. */
+  const sendNow = async (id: string): Promise<void> => {
+    await run(async (session) => {
+      await session.chats.sendNow(id);
+    });
   };
   return {
     composer: {
@@ -383,5 +416,6 @@ export const useAsk = (
           }),
     },
     ask,
+    sendNow,
   };
 };

@@ -117,10 +117,11 @@ const show = async (next: Partial<Shown>) => {
   });
 };
 
-/** The thread's rows, in order: each as the element that draws it. */
-const rows = (): HTMLElement[] => [
-  ...document.querySelectorAll<HTMLElement>('[role="log"] [data-message-id]'),
-];
+/** The thread's rows, in order, each as the element that draws it: its day lines left out. */
+const rows = (): HTMLElement[] =>
+  [
+    ...document.querySelectorAll<HTMLElement>('[role="log"] [data-message-id]'),
+  ].filter((row) => !(row.dataset.messageId ?? "").startsWith("day-"));
 
 /** What each row says first: its question, or Grasp at work, or its answer. */
 const said = (): string[] =>
@@ -148,6 +149,7 @@ describe("the thread's order as a question is sent and answered", () => {
       key,
       text: "Question 3",
       at: "2026-11-26T09:02:00.000Z",
+      behind: false,
       files: [],
       mentions: [],
     };
@@ -208,6 +210,7 @@ describe("the thread's order as a question is sent and answered", () => {
       text: "Question 9",
       at: "2026-11-26T09:02:00.000Z",
       failure: "Grasp can't be reached right now.",
+      behind: false,
       files: [],
       mentions: [],
     };
@@ -238,5 +241,28 @@ describe("the thread's order as a question is sent and answered", () => {
       ],
       done: ["Question 1", "Answer 2", "Question 3", "Answer 4", "Question 9"],
     });
+  });
+
+  it("draws a question sent while Grasp answers after that answer, where core queues it", async () => {
+    await opened({
+      messages: [question(1)],
+      sent: [],
+      partial: writing("Ans"),
+      running: true,
+    });
+    await show({
+      sent: [
+        {
+          key: "8c1d4e2f-3a5b-4c6d-9e7f-0a1b2c3d4e5f",
+          text: "Question 2",
+          at: "2026-11-26T09:02:00.000Z",
+          behind: true,
+          files: [],
+          mentions: [],
+        },
+      ],
+    });
+
+    expect(said()).toStrictEqual(["Question 1", "working", "Question 2"]);
   });
 });
