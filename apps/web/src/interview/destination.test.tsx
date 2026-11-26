@@ -19,6 +19,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
 import type { OpenSession } from "./api.ts";
+import { WhereLinesGo } from "./destination.tsx";
 import { holdInterview, progressNow, releaseInterview } from "./kept.ts";
 import { InterviewPage } from "./page.tsx";
 
@@ -256,7 +257,14 @@ const sheetOpen = async (): Promise<void> => {
   const page = createRoute({
     getParentRoute: () => rootRoute,
     path: "/",
-    component: () => <InterviewPage session={session} />,
+    // The thanks no longer opens the sheet (where lines go was said at the
+    // start): it stands beside the page, which says every error in its bar.
+    component: () => (
+      <>
+        <InterviewPage session={session} />
+        <WhereLinesGo />
+      </>
+    ),
   });
   const router = createRouter({
     routeTree: rootRoute.addChildren([page]),
