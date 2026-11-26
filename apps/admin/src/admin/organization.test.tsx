@@ -194,17 +194,21 @@ describe("an organization's page", () => {
     const ready = readySnapshot("Acme");
     const { container } = await openAcme("", {
       ...ready,
-      // A deployment that started open: no go recorded.
+      // A deployment that started open: no go recorded, no first
+      // conversation brought in.
       gate: { ...ready.gate, open: true, openedAt: null },
+      kickoff: null,
     });
     const next =
       container.querySelector('section[aria-labelledby="next"]')?.textContent ??
       "";
 
     expect({
-      live: statusOf(container).includes("Live"),
-      noGo: next.includes("Give the go"),
-    }).toStrictEqual({ live: true, noGo: false });
+      live: statusOf(container).includes("LiveOpen, without interviews"),
+      onboarding: ["Give the go", "Bring in the conversation"].some((words) =>
+        next.includes(words)
+      ),
+    }).toStrictEqual({ live: true, onboarding: false });
   });
 
   it("leads with what its own platform needs, settled on its Setup, before anything its core says", async () => {

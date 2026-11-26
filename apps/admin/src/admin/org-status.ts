@@ -71,7 +71,8 @@ export const standingTime = (
   }
   const since = standingSince(standing, snapshot);
   if (since === null) {
-    return null;
+    // Open from the start, as Home says it.
+    return standing === "live" ? "Open, without interviews" : null;
   }
   const days = daysBetween(since, snapshot.now);
   // The Badge beside it names the standing: the line says how long.
