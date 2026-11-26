@@ -116,20 +116,32 @@ export const stephenRegister = {
   drive: "b!noordkade-operations",
   workbook: "01NOORDKADEREGISTER",
   table: "FollowUps",
-  /** The register's other table, which Stephen isn't asked to read. */
-  leaveTable: "Leave",
   columns: ["Client", "What", "By", "Who", "Status"],
 } as const;
 
-/** A workbook the company's account reaches that Stephen is never granted. */
+/**
+ * Finance's drive, which only finance's own account reaches: the company's
+ * account, open to Lisa's team, doesn't (a narrower account, as an admin
+ * keeps a slice from a team).
+ */
+export const financeDrive = "b!noordkade-finance";
+
+/** The budget: a workbook in finance's drive. */
 export const stephenBudget = {
   workbook: "01NOORDKADEBUDGET2027",
   table: "Budget",
 } as const;
 
+/** Leave: a workbook in finance's drive, which no case asks Stephen to read. */
+export const stephenLeave = {
+  workbook: "01NOORDKADELEAVE",
+  table: "Leave",
+} as const;
+
 /**
  * Text that may reach no model in any case: it sits where the asking
- * person's agent has no grant (the budget workbook; HR's salaries).
+ * person's agent may not reach (finance's account, whose audience is
+ * finance; HR's salaries).
  */
 export const stephenForbidden = [
   "BUDGET-2027-LINE-7731",
@@ -288,7 +300,7 @@ export const lisaMessages = (clock: StephenClock, lisa: string) => [
   },
 ];
 
-/** The register's Leave table, which no case asks Stephen to read. */
+/** Leave's one table. */
 export const leaveRows = (clock: StephenClock): string[][] => [
   ["Lisa de Vries", clock.wednesday, "LEAVE-ROW-LISA"],
 ];
@@ -539,22 +551,32 @@ export const googleTeamDrive = "0ANoordkadeCustomerService";
 
 /**
  * The register: a Google spreadsheet in operations' shared drive, with the
- * workbook's ID, its follow-ups and leave as sheets.
+ * workbook's ID and its follow-ups as its sheet.
  */
 export const googleRegister = {
   drive: "0ANoordkadeOperations",
   spreadsheet: stephenRegister.workbook,
   name: "Noordkade register",
   sheet: stephenRegister.table,
-  leaveSheet: stephenRegister.leaveTable,
 } as const;
 
-/** The budget spreadsheet, in finance's shared drive, never granted. */
+/** Finance's shared drive, which only finance's own account reaches. */
+export const googleFinanceDrive = "0ANoordkadeFinance";
+
+/** The budget spreadsheet, in finance's shared drive. */
 export const googleBudget = {
-  drive: "0ANoordkadeFinance",
+  drive: googleFinanceDrive,
   spreadsheet: stephenBudget.workbook,
   name: "Budget 2027",
   sheet: stephenBudget.table,
+} as const;
+
+/** The leave spreadsheet, in finance's shared drive. */
+export const googleLeave = {
+  drive: googleFinanceDrive,
+  spreadsheet: stephenLeave.workbook,
+  name: "Verlof",
+  sheet: stephenLeave.table,
 } as const;
 
 /** A whole number. */

@@ -457,7 +457,7 @@ describe("a shared connection's audience, for an admin", () => {
 
     expect({
       asking: asking.includes(
-        "Everyone in the company will be able to use Notes in their own chats, whatever their permissions in Notes, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before. Choose a team if not everyone should have this."
+        "Everyone in the company will be able to use Notes in their own chats, with everything it reaches, whatever their own permissions there, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before. To open only part of it, connect an account that reaches only that part, or have each person connect their own. Choose a team if not everyone should have this."
       ),
       afterCancel,
       asked,
@@ -501,7 +501,7 @@ describe("a shared connection's audience, for an admin", () => {
       asked,
       erasing: erasing.includes("This can't be undone."),
       toTeam: toTeam.includes(
-        "Everyone in Sales will be able to use Notes in their own chats, whatever their permissions in Notes, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before."
+        "Everyone in Sales will be able to use Notes in their own chats, with everything it reaches, whatever their own permissions there, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before. To open only part of it, connect an account that reaches only that part, or have each person connect their own."
       ),
       fromNobody,
     }).toStrictEqual({
@@ -560,7 +560,7 @@ describe("a shared connection's audience, for an admin", () => {
     expect({
       whileErasing,
       asking: dialogText().includes(
-        "Everyone in Sales will be able to use Notes in their own chats, whatever their permissions in Notes, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before."
+        "Everyone in Sales will be able to use Notes in their own chats, with everything it reaches, whatever their own permissions there, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before. To open only part of it, connect an account that reaches only that part, or have each person connect their own."
       ),
       asked,
     }).toStrictEqual({
@@ -648,7 +648,7 @@ describe("a shared connection's audience, for an admin", () => {
     expect({
       after,
       asking: dialogText().includes(
-        "Everyone in Sales will be able to use Notes in their own chats, whatever their permissions in Notes, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before."
+        "Everyone in Sales will be able to use Notes in their own chats, with everything it reaches, whatever their own permissions there, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before. To open only part of it, connect an account that reaches only that part, or have each person connect their own."
       ),
     }).toStrictEqual({
       after: { says: true, shown: "nobody", held: { kind: "nobody" } },

@@ -7060,8 +7060,8 @@ msgid "Everyone in {project}"
 msgstr "Iedereen in {project}"
 
 #: src/connections/connection-audience.tsx
-msgid "Everyone in {team} will be able to use {label} in their own chats, whatever their permissions in {label}, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before."
-msgstr "Iedereen in {team} kan {label} gebruiken in hun eigen chats, wat hun rechten in {label} ook zijn, er dingen mee wijzigen zodra ze elke wijziging bevestigen, Apps krijgen die het gebruiken, en in het Brain vinden wat eruit kwam, ook wat eerder is bewaard."
+msgid "Everyone in {team} will be able to use {label} in their own chats, with everything it reaches, whatever their own permissions there, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before. To open only part of it, connect an account that reaches only that part, or have each person connect their own."
+msgstr "Iedereen in {team} kan {label} gebruiken in hun eigen chats, met alles wat het bereikt, wat hun eigen rechten daar ook zijn, er dingen mee wijzigen zodra ze elke wijziging bevestigen, Apps krijgen die het gebruiken, en in het Brain vinden wat eruit kwam, ook wat eerder is bewaard. Wil je maar een deel ervan openen, koppel dan een account dat alleen dat deel bereikt, of laat ieder zijn eigen account koppelen."
 
 #: src/drafts/sharing.tsx
 msgid "Everyone in a project you aren’t in"
@@ -7091,8 +7091,8 @@ msgid "Everyone in the company will be able to read everything in the places you
 msgstr "Iedereen in het bedrijf kan alles lezen in de plekken die je kiest, wat hun rechten in {label} ook zijn."
 
 #: src/connections/connection-audience.tsx
-msgid "Everyone in the company will be able to use {label} in their own chats, whatever their permissions in {label}, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before. Choose a team if not everyone should have this."
-msgstr "Iedereen in het bedrijf kan {label} gebruiken in hun eigen chats, wat hun rechten in {label} ook zijn, er dingen mee wijzigen zodra ze elke wijziging bevestigen, Apps krijgen die het gebruiken, en in het Brain vinden wat eruit kwam, ook wat eerder is bewaard. Kies een team als niet iedereen dit mag hebben."
+msgid "Everyone in the company will be able to use {label} in their own chats, with everything it reaches, whatever their own permissions there, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before. To open only part of it, connect an account that reaches only that part, or have each person connect their own. Choose a team if not everyone should have this."
+msgstr "Iedereen in het bedrijf kan {label} gebruiken in hun eigen chats, met alles wat het bereikt, wat hun eigen rechten daar ook zijn, er dingen mee wijzigen zodra ze elke wijziging bevestigen, Apps krijgen die het gebruiken, en in het Brain vinden wat eruit kwam, ook wat eerder is bewaard. Wil je maar een deel ervan openen, koppel dan een account dat alleen dat deel bereikt, of laat ieder zijn eigen account koppelen. Kies een team als niet iedereen dit mag hebben."
 
 #: src/connections/sync-places.tsx
 msgid "Everyone in the team {team} will be able to read everything in the places you pick, whatever their permissions in {label}."
@@ -7103,8 +7103,8 @@ msgid "Everyone in this team will be able to read everything in the places you p
 msgstr "Iedereen in dit team kan alles lezen in de plekken die je kiest, wat hun rechten in {label} ook zijn."
 
 #: src/connections/connection-audience.tsx
-msgid "Everyone in this team will be able to use {label} in their own chats, whatever their permissions in {label}, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before."
-msgstr "Iedereen in dit team kan {label} gebruiken in hun eigen chats, wat hun rechten in {label} ook zijn, er dingen mee wijzigen zodra ze elke wijziging bevestigen, Apps krijgen die het gebruiken, en in het Brain vinden wat eruit kwam, ook wat eerder is bewaard."
+msgid "Everyone in this team will be able to use {label} in their own chats, with everything it reaches, whatever their own permissions there, change things through it once they confirm each change, be given Apps that use it, and find in the Brain what came from it, including what was kept before. To open only part of it, connect an account that reaches only that part, or have each person connect their own."
+msgstr "Iedereen in dit team kan {label} gebruiken in hun eigen chats, met alles wat het bereikt, wat hun eigen rechten daar ook zijn, er dingen mee wijzigen zodra ze elke wijziging bevestigen, Apps krijgen die het gebruiken, en in het Brain vinden wat eruit kwam, ook wat eerder is bewaard. Wil je maar een deel ervan openen, koppel dan een account dat alleen dat deel bereikt, of laat ieder zijn eigen account koppelen."
 
 #: src/drafts/share-with-team.tsx
 msgid "Everyone it is shared with can open it once it is published."
@@ -20595,8 +20595,8 @@ msgid "Who may read it"
 msgstr "Wie het mag lezen"
 
 #: src/connections/connection-audience.tsx
-msgid "Who may use {label} in their own chats, be given Apps that use it, and find in the Brain what came from it is decided inside Grasp, not by the permissions in {label}: choose a team if not everyone should have it. An App's owner and admins can still open Apps that use it, whatever you choose."
-msgstr "Wie {label} mag gebruiken in hun eigen chats, Apps mag krijgen die het gebruiken, en in het Brain mag vinden wat eruit kwam, wordt in Grasp bepaald, niet door de rechten in {label}: kies een team als niet iedereen het mag hebben. De eigenaar van een App en beheerders kunnen Apps die het gebruiken nog steeds openen, wat je ook kiest."
+msgid "Who may use {label} in their own chats, be given Apps that use it, and find in the Brain what came from it is decided inside Grasp, not by the permissions in {label}: choose a team if not everyone should have it. Their chats reach everything {label} reaches: to open only part of it, connect an account that reaches only that part, or have each person connect their own. An App's owner and admins can still open Apps that use it, whatever you choose."
+msgstr "Wie {label} mag gebruiken in hun eigen chats, Apps mag krijgen die het gebruiken, en in het Brain mag vinden wat eruit kwam, wordt in Grasp bepaald, niet door de rechten in {label}: kies een team als niet iedereen het mag hebben. Hun chats bereiken alles wat {label} bereikt: wil je maar een deel ervan openen, koppel dan een account dat alleen dat deel bereikt, of laat ieder zijn eigen account koppelen. De eigenaar van een App en beheerders kunnen Apps die het gebruiken nog steeds openen, wat je ook kiest."
 
 #: src/connections/connection-audience.tsx
 msgid "Who may use {label} was changed in the meantime. This is who may use it now: choose again if you still want to change it."

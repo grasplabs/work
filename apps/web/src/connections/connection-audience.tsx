@@ -339,28 +339,35 @@ const WidenDialog = ({
             {!outsideApi && next.kind === "everyone" ? (
               <Trans>
                 Everyone in the company will be able to use {label} in their own
-                chats, whatever their permissions in {label}, change things
-                through it once they confirm each change, be given Apps that use
-                it, and find in the Brain what came from it, including what was
-                kept before. Choose a team if not everyone should have this.
+                chats, with everything it reaches, whatever their own
+                permissions there, change things through it once they confirm
+                each change, be given Apps that use it, and find in the Brain
+                what came from it, including what was kept before. To open only
+                part of it, connect an account that reaches only that part, or
+                have each person connect their own. Choose a team if not
+                everyone should have this.
               </Trans>
             ) : null}
             {!outsideApi && next.kind === "team" && team !== undefined ? (
               <Trans>
                 Everyone in {team} will be able to use {label} in their own
-                chats, whatever their permissions in {label}, change things
-                through it once they confirm each change, be given Apps that use
-                it, and find in the Brain what came from it, including what was
-                kept before.
+                chats, with everything it reaches, whatever their own
+                permissions there, change things through it once they confirm
+                each change, be given Apps that use it, and find in the Brain
+                what came from it, including what was kept before. To open only
+                part of it, connect an account that reaches only that part, or
+                have each person connect their own.
               </Trans>
             ) : null}
             {!outsideApi && next.kind === "team" && team === undefined ? (
               <Trans>
                 Everyone in this team will be able to use {label} in their own
-                chats, whatever their permissions in {label}, change things
-                through it once they confirm each change, be given Apps that use
-                it, and find in the Brain what came from it, including what was
-                kept before.
+                chats, with everything it reaches, whatever their own
+                permissions there, change things through it once they confirm
+                each change, be given Apps that use it, and find in the Brain
+                what came from it, including what was kept before. To open only
+                part of it, connect an account that reaches only that part, or
+                have each person connect their own.
               </Trans>
             ) : null}
           </AlertDialogDescription>
@@ -575,7 +582,7 @@ export const AudienceChoice = ({
                 <InfoTip>
                   {outsideApi
                     ? t`Who Apps that use ${label}, with its credential, may be shared with is decided inside Grasp: choose a team if not everyone should have it. An App's owner and admins can still open Apps that use it, whatever you choose.`
-                    : t`Who may use ${label} in their own chats, be given Apps that use it, and find in the Brain what came from it is decided inside Grasp, not by the permissions in ${label}: choose a team if not everyone should have it. An App's owner and admins can still open Apps that use it, whatever you choose.`}
+                    : t`Who may use ${label} in their own chats, be given Apps that use it, and find in the Brain what came from it is decided inside Grasp, not by the permissions in ${label}: choose a team if not everyone should have it. Their chats reach everything ${label} reaches: to open only part of it, connect an account that reaches only that part, or have each person connect their own. An App's owner and admins can still open Apps that use it, whatever you choose.`}
                 </InfoTip>
               </span>
             </div>

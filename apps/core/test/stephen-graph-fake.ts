@@ -8,7 +8,9 @@
  * as Excel's serial number, with its number format: the traps a turn has
  * to get through. A test sets a mailbox's world and a workbook's table by
  * POSTing to the control URL; it answers only for those, so every other
- * test's Graph stays as it was. Every read of a world is kept, its path
+ * test's Graph stays as it was. A drive set with an `account` is that
+ * account's alone, as one consented to its site alone: Graph refuses it
+ * to any other account's token, and keeps no read of it. Every read of a world is kept, its path
  * and query, and every write is kept and never carried out, for the
  * eval's first hard rule: nothing runs in the turn. `{ failNext:
  * "calendarView" }` has the next calendar read fail, as Graph sometimes
@@ -42,6 +44,8 @@ export const stephenGraphFake = () => {
   const worlds = new Map<string, World>();
   const drives = new Map<string, File[]>();
   const tables = new Map<string, Table>();
+  /** The account each drive that is one account's alone belongs to. */
+  const accounts = new Map<string, string>();
   // oxlint-disable-next-line unicorn/consistent-function-scoping -- self-contained: core's tests embed this function's source
   const listOf = (value: unknown): unknown[] =>
     Array.isArray(value) ? value.map((item: unknown) => item) : [];
@@ -192,12 +196,28 @@ export const stephenGraphFake = () => {
     return notFound();
   };
 
+  /** Graph's refusal of `drive` to a token of another account, if it is one account's alone. */
+  const deniedOf = (request: Request, drive: string): Response | undefined => {
+    // The account a token is of: `Bearer access.{subject}.{nonce}`.
+    const [subject] = (request.headers.get("authorization") ?? "")
+      .replace("Bearer access.", "")
+      .split(".");
+    const account = accounts.get(drive);
+    return account === undefined || account === subject
+      ? undefined
+      : Response.json(
+          { error: { code: "accessDenied", message: "Access denied" } },
+          { status: 403 }
+        );
+  };
+
   return {
     /**
      * POST `{ mailbox, events, messages, todoLists }` to set a mailbox's world,
      * `{ drive, files }` a drive's files (each `{ id, name, mimeType,
      * text }`), `{ table: "drive/item/name", columns, values, numberFormat }`
-     * a workbook's table, or `{ failNext }`; GET reads what reached them.
+     * a workbook's table, or `{ failNext }`; with an `account`, the drive is
+     * that account's alone. GET reads what reached them.
      */
     control: async (request: Request): Promise<Response> => {
       if (request.method === "GET") {
@@ -226,6 +246,11 @@ export const stephenGraphFake = () => {
           }))
         );
       }
+      const owned =
+        typeof drive === "string" ? drive : textOf(table).split("/")[0];
+      if (typeof set.account === "string" && owned !== undefined) {
+        accounts.set(owned, set.account);
+      }
       if (typeof table === "string") {
         tables.set(table, {
           columns: listOf(set.columns).map(String),
@@ -246,6 +271,11 @@ export const stephenGraphFake = () => {
       const [, version, kind] = parts;
       if (version !== "v1.0") {
         return undefined;
+      }
+      const refused =
+        kind === "drives" ? deniedOf(request, parts[3] ?? "") : undefined;
+      if (refused !== undefined) {
+        return refused;
       }
       let answer: () => Response;
       if (kind === "users") {

@@ -4,12 +4,14 @@
  * Noordkade up in core through its public APIs (fixtures/stephen-world.ts):
  * its people and teams, what it knows in Knowledge, Lisa's own Microsoft
  * 365 account and the company's, each granted to the person's agent as
- * Settings › Stephen would (her mailbox; the register workbook alone), and
- * Graph's side of them in core's fake Graph (stephen-graph-fake.ts). On
- * Google Workspace (GRA-756) the same: Lisa's own Google account and the
- * company's (her mailbox and calendar, her team's shared drive; the
- * register's drive alone), and Google's side in core's fake Google
- * (stephen-google-fake.ts). Then it asks each case of
+ * Settings › Stephen would (her mailbox; the register workbook), the
+ * company's open to her team as its audience (GRA-2322), finance's own
+ * account open to finance alone, and Graph's side of them in core's fake
+ * Graph (stephen-graph-fake.ts), where finance's drive is its account's
+ * alone. On Google Workspace (GRA-756) the same: Lisa's own Google account
+ * and the company's (her mailbox and calendar, her team's shared drive;
+ * the register's drive), finance's, and Google's side in core's fake
+ * Google (stephen-google-fake.ts). Then it asks each case of
  * fixtures/stephen-cases.ts in a new chat, as the Teams door does: through
  * the real Workspace object, Knowledge, the agent's code, connect, the
  * permissions, the model gateway and its usage, with only the model
@@ -62,9 +64,11 @@ import {
   budgetRows,
   crmNote,
   crmTools,
+  financeDrive,
   gmailMessages,
   googleBudget,
   googleEvents,
+  googleLeave,
   googleRegister,
   googleTeamDrive,
   graphTable,
@@ -78,6 +82,7 @@ import {
   stephenBudget,
   stephenClock,
   stephenDocuments,
+  stephenLeave,
   stephenMemory,
   stephenPeople,
   stephenPersonas,
@@ -106,7 +111,7 @@ import type {
 import { connectDb, testBinding } from "./test-env.ts";
 
 /** Bumped with any change to how the harness runs or measures a case. */
-export const stephenHarnessVersion = "2";
+export const stephenHarnessVersion = "3";
 
 type Person = Awaited<ReturnType<typeof signedInApi>>;
 
@@ -163,8 +168,11 @@ export interface StephenCompany {
   teams: Map<StephenTeam, string>;
   /** The text of each of Noordkade's documents, by its source in the Brain. */
   sources: Map<string, string>;
-  /** The connections Lisa's agent is granted: her own, and the company's. */
-  connections: { own: string; company: string };
+  /**
+   * The connections Lisa's agent is granted, her own and the company's,
+   * and finance's own, which her agent is refused.
+   */
+  connections: { own: string; company: string; finance: string };
   /** Each persona's Workspace object and the agent its grants are for. */
   places: Record<
     StephenPersona,
@@ -348,39 +356,44 @@ const granted = async (
   await grantReviewed(admin.api, id);
 };
 
-/** Puts the register, the budget and the files on Graph: Lisa's OneDrive, and Excel's workbooks. */
-const setMicrosoftFiles = async (clock: StephenClock): Promise<void> => {
+/**
+ * Puts the register, the budget, leave and the files on Graph: Lisa's
+ * OneDrive, and Excel's workbooks, the budget and leave in finance's
+ * drive, which is `finance`'s account's alone.
+ */
+const setMicrosoftFiles = async (
+  clock: StephenClock,
+  finance: string
+): Promise<void> => {
   await setApp("microsoft", { drive: lisaDrive, files: lisaFiles });
-  const { drive, workbook, table, leaveTable, columns } = stephenRegister;
+  const { drive, workbook, table, columns } = stephenRegister;
   await setApp(
     "microsoft",
     graphTable(`${drive}/${workbook}/${table}`, columns, registerRows(clock))
   );
-  await setApp(
-    "microsoft",
-    graphTable(
-      `${drive}/${workbook}/${leaveTable}`,
-      ["Who", "From", "Note"],
-      leaveRows(clock)
-    )
-  );
-  await setApp(
-    "microsoft",
-    graphTable(
-      `${drive}/${stephenBudget.workbook}/${stephenBudget.table}`,
-      ["Line", "What", "Amount"],
-      budgetRows
-    )
-  );
+  for (const [{ workbook: item, table: name }, header, rows] of [
+    [stephenLeave, ["Who", "From", "Note"], leaveRows(clock)],
+    [stephenBudget, ["Line", "What", "Amount"], budgetRows],
+  ] as const) {
+    // oxlint-disable-next-line no-await-in-loop -- one table at a time
+    await setApp("microsoft", {
+      ...graphTable(`${financeDrive}/${item}/${name}`, header, rows),
+      account: finance,
+    });
+  }
 };
 
 /**
- * Puts them on Google: her team's shared drive, and the register and the
- * budget as Google spreadsheets in shared drives of their own.
+ * Puts them on Google: her team's shared drive, and the register, the
+ * budget and leave as Google spreadsheets in shared drives of their own,
+ * finance's `finance`'s account's alone.
  */
-const setGoogleFiles = async (clock: StephenClock): Promise<void> => {
+const setGoogleFiles = async (
+  clock: StephenClock,
+  finance: string
+): Promise<void> => {
   await setApp("google", { drive: googleTeamDrive, files: lisaFiles });
-  const { drive, spreadsheet, name, sheet, leaveSheet } = googleRegister;
+  const { drive, spreadsheet, name, sheet } = googleRegister;
   await setApp("google", {
     drive,
     spreadsheet,
@@ -390,28 +403,27 @@ const setGoogleFiles = async (clock: StephenClock): Promise<void> => {
         title: sheet,
         rows: sheetRows(stephenRegister.columns, registerRows(clock)),
       },
-      {
-        title: leaveSheet,
-        rows: sheetRows(["Who", "From", "Note"], leaveRows(clock)),
-      },
     ],
   });
-  await setApp("google", {
-    ...googleBudget,
-    sheets: [
-      {
-        title: googleBudget.sheet,
-        rows: sheetRows(["Line", "What", "Amount"], budgetRows),
-      },
-    ],
-  });
+  for (const [spreadsheetOf, columns, rows] of [
+    [googleLeave, ["Who", "From", "Note"], leaveRows(clock)],
+    [googleBudget, ["Line", "What", "Amount"], budgetRows],
+  ] as const) {
+    // oxlint-disable-next-line no-await-in-loop -- one spreadsheet at a time
+    await setApp("google", {
+      ...spreadsheetOf,
+      sheets: [{ title: spreadsheetOf.sheet, rows: sheetRows(columns, rows) }],
+      account: finance,
+    });
+  }
 };
 
 /**
  * Grants Lisa's agent her own account and the company's, as Settings ›
  * Stephen would: on Microsoft 365 her Outlook, her OneDrive and the
  * register workbook; on Google her Gmail and calendar, her team's drive
- * and the register's drive.
+ * and the register's drive. A grant of the company's holds only within
+ * its audience, her team's (GRA-2322), where her chats use all of it.
  */
 const grantLisa = async (
   company: Pick<StephenCompany, "suite" | "admin" | "mailbox" | "connections">,
@@ -525,7 +537,13 @@ export const setUpStephenCompany = async (
           messages: lisaMessages(clock, mailbox),
         }
   );
-  await (suite === "google" ? setGoogleFiles(clock) : setMicrosoftFiles(clock));
+  // Finance's own account, consented to finance's drive alone: what an
+  // admin connects to keep a slice of the company's from a team.
+  const financeSubject = `noordkade-finance-${crypto.randomUUID()}`;
+  const finance = await connectSuite(suite, admin, "shared", financeSubject);
+  await (suite === "google"
+    ? setGoogleFiles(clock, financeSubject)
+    : setMicrosoftFiles(clock, financeSubject));
   const crm = await crmConnection();
   const placed = new Map<StephenPersona, StephenCompany["places"]["lisa"]>();
   for (const persona of stephenPersonas) {
@@ -548,14 +566,19 @@ export const setUpStephenCompany = async (
   // as an admin turns it on in Settings › Stephen: the register, and her
   // calendar and mail, which the connector reaches company-wide.
   const customerService = [held(teams, "customerService")];
-  // The company's account and its CRM are opened to Lisa's team, as an
-  // admin does on their cards (GRA-2322): their audience, which every
-  // grant to her agent stays within.
-  for (const connectionId of [company, crm]) {
+  // The company's account and its CRM are opened to Lisa's team, and
+  // finance's account to finance, as an admin does on their cards
+  // (GRA-2322): their audience, which every grant to her agent stays
+  // within.
+  for (const [connectionId, team] of [
+    [company, "customerService"],
+    [crm, "customerService"],
+    [finance, "finance"],
+  ] as const) {
     // oxlint-disable-next-line no-await-in-loop -- one connection at a time
     await chooseAudience(admin.api, connectionId, {
       kind: "team",
-      teamId: held(teams, "customerService"),
+      teamId: held(teams, team),
     });
   }
   for (const toolClass of ["read-company", "change-company"] as const) {
@@ -566,7 +589,7 @@ export const setUpStephenCompany = async (
     });
   }
   const lisa = places.lisa.agentId;
-  const connections = { own, company };
+  const connections = { own, company, finance };
   await grantLisa({ suite, admin, mailbox, connections }, lisa);
   await granted(admin, {
     subject: { type: "agent", agentId: lisa },
@@ -608,13 +631,14 @@ export interface StephenBreak {
   /**
    * An admin's mistake made first, which the platform otherwise stops a
    * turn short of: the person put in HR's team, whose notes the Brain
-   * then lets them read, or Lisa's agent granted more of her own
-   * mailbox, under a binding of its own, with the class of those actions
-   * turned on for her team unless it names none. It stays for the rest of
-   * the run.
+   * then lets them read, finance's account opened to a team as its
+   * audience, or Lisa's agent granted more of her own mailbox, under a
+   * binding of its own, with the class of those actions turned on for her
+   * team unless it names none. It stays for the rest of the run.
    */
   mistake?:
     | { team: StephenTeam }
+    | { financeOpenTo: StephenTeam }
     | { binding: string; actions: string[]; toolClass?: CompanyToolClass };
 }
 
@@ -637,6 +661,13 @@ const makeMistake = async (
     if (!added.ok) {
       throw new Error(`Adding ${persona} to ${mistake.team} failed`);
     }
+    return;
+  }
+  if ("financeOpenTo" in mistake) {
+    await chooseAudience(company.admin.api, company.connections.finance, {
+      kind: "team",
+      teamId: held(company.teams, mistake.financeOpenTo),
+    });
     return;
   }
   await granted(company.admin, {
@@ -743,13 +774,15 @@ const callsOf = (
   events: readonly AuditEvent[],
   chatId: string
 ): StephenObservation["calls"] =>
-  events.flatMap(({ action, detail }) => {
+  events.flatMap(({ action, target, detail }) => {
     const parsed = callDetail.safeParse(detail);
     return action === "connection.call" &&
+      target !== undefined &&
       parsed.success &&
       parsed.data.chat === chatId
       ? [
           {
+            connection: target.id,
             action: parsed.data.action,
             outcome: parsed.data.outcome,
             sideEffect: parsed.data.sideEffect === true,
@@ -840,6 +873,7 @@ const observeCase = async (
     clock: company.clock,
     mailbox: company.mailbox,
     suite,
+    finance: company.connections.finance,
   };
   await pointAt(place.stub);
   if (breaker?.mistake !== undefined) {

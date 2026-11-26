@@ -1285,8 +1285,9 @@ connections: {
    * by, its account, the one resource it covers (\`null\` for all), and how
    * many of its tools you may call, by class. Those used with no request
    * are named by ID: the shared ones whose audience holds your person, with
-   * all their tools (each change waits for them to confirm), and, in their
-   * own chat, their own, with their reads alone.
+   * all their tools over everything their account reaches (each change
+   * waits for them to confirm), and, in their own chat, their own, with
+   * their reads alone.
    */
   list(): Promise<{
     name: string;
