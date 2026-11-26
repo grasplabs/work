@@ -12,7 +12,6 @@ import {
   PromptInputTools,
   PromptInputVoice,
 } from "@grasp-os/ui/components/prompt-input";
-import { Text } from "@grasp-os/ui/components/text";
 import { AudioWaveformIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { fadeIn } from "@grasp-os/ui/lib/styles";
 import { colors, font, space } from "@grasp-os/ui/lib/tokens.stylex";
@@ -75,6 +74,11 @@ const styles = stylex.create({
     lineHeight: font.textXsLine,
   },
 });
+
+/** Whether `target` is in the box's text, where they type. */
+const inText = (target: EventTarget | null): boolean =>
+  target instanceof Element &&
+  target.closest('[data-slot="prompt-input-body"]') !== null;
 
 /** Whether a PromptInput's value holds anything but spaces. */
 const holdsWords = (value: readonly unknown[]): boolean =>
@@ -151,34 +155,42 @@ export const Composer = ({
   const [typed, setTyped] = useState(false);
   // The line during which they asked to type instead: the box stays until his next, or "Talk".
   const [typing, setTyping] = useState<number | null>(null);
-  const spoken = talking && !typed && typing !== line && doing !== "idle";
+  // While they are in the box it stays theirs, his next line or not: it never goes from under
+  // their cursor, nor hands their focus to the mute as it goes.
+  const [inBox, setInBox] = useState(false);
+  const typingOn = typing === line || (typing !== null && inBox);
+  const spoken = talking && !typed && !typingOn && doing !== "idle";
   // How many lines of theirs the transcript holds: one more, and what stands over the card goes there.
   const sent = useProgress().lines.filter(
     ({ from }) => from === "person"
   ).length;
   return (
-    <div {...stylex.props(styles.root)}>
+    <div
+      onBlur={(event) => {
+        if (!inText(event.relatedTarget)) {
+          setInBox(false);
+        }
+      }}
+      onFocus={(event) => {
+        setInBox(inText(event.target));
+      }}
+      {...stylex.props(styles.root)}
+    >
       <div {...stylex.props(styles.over)}>
-        {said === null || spoken ? null : (
+        {/* What they said as he took it, with what he marked: what is still on its way is Heard's. */}
+        {said === null || said.waiting || spoken ? null : (
           <div key={said.text} {...stylex.props(styles.said, fadeIn)}>
             <Bubble align="end" variant="secondary">
               <BubbleContent>
                 <SaidWords names={names} said={said} />
-                {said.waiting ? (
-                  <Text as="span" color="muted">
-                    {" "}
-                    …
-                  </Text>
-                ) : null}
               </BubbleContent>
             </Bubble>
           </div>
         )}
       </div>
-      {spoken ? (
-        // Theirs while it is on its way; once kept it is the transcript's, and goes there.
-        <Heard sent={sent} text={said?.waiting === true ? said.text : ""} />
-      ) : null}
+      {/* Theirs while it is on its way, typed or said, in one place and one motion whichever way
+          they switch while they answer; once kept it is the transcript's, and goes there. */}
+      <Heard sent={sent} text={said?.waiting === true ? said.text : ""} />
       <PromptInput
         compact
         style={styles.card}
