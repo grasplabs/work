@@ -2,9 +2,11 @@ import type {
   InterviewLocale,
   RosterPerson,
 } from "@grasp-os/shared/onboarding";
+import { companyNameOf } from "@grasp-os/shared/organization";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
+import { signInConfig } from "../auth/config.ts";
 import { organizations } from "../db/core/schema.ts";
 import { modelSettings, modelForRole, models } from "../models.ts";
 import type { Took } from "./store.ts";
@@ -187,7 +189,8 @@ export const companyName = async (env: Env): Promise<string> => {
     .select({ name: organizations.name })
     .from(organizations)
     .limit(1);
-  return row?.name ?? "";
+  // Never the placeholder core made it with: the name its domain spells.
+  return companyNameOf(row?.name ?? "", signInConfig(env)?.domains ?? []) ?? "";
 };
 
 /**

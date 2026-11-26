@@ -1,5 +1,6 @@
 import { createAuditEvent } from "@grasp-os/shared/audit";
 import type { DirectoryPerson } from "@grasp-os/shared/directory";
+import { newOrganizationName } from "@grasp-os/shared/organization";
 import { and, eq, sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
@@ -169,7 +170,7 @@ export const memberFromDirectory = async (
     .insert(organizations)
     .values({
       id: organizationId,
-      name: "Organization",
+      name: newOrganizationName(signInConfig(env)?.domains ?? []),
       slug: organizationId,
       createdAt: now,
     })

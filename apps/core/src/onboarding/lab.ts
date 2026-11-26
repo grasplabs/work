@@ -11,6 +11,7 @@ import type {
   LabVia,
 } from "@grasp-os/shared/lab";
 import { modelErrors } from "@grasp-os/shared/models";
+import { companyNameOf } from "@grasp-os/shared/organization";
 import type { Identity } from "@grasp-os/shared/rpc";
 import { z } from "zod";
 
@@ -180,7 +181,9 @@ const context = async (env: Env, person: string): Promise<Response> => {
       found === null
         ? null
         : {
-            company: organization.name,
+            company:
+              companyNameOf(organization.name, organization.signInDomains) ??
+              "",
             name: found.name,
             team: found.team,
             lead: found.lead,

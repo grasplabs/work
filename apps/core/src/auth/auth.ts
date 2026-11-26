@@ -10,6 +10,7 @@ import {
   staffListTeamRefusals,
   teamNameKey,
 } from "@grasp-os/shared/onboarding";
+import { newOrganizationName } from "@grasp-os/shared/organization";
 import { guestRole, roleSchema } from "@grasp-os/shared/roles";
 import { routerClientIpHeader } from "@grasp-os/shared/router";
 import type { SignInRefusal } from "@grasp-os/shared/sign-in";
@@ -426,7 +427,7 @@ const ensureMember = async (
     .insert(organizations)
     .values({
       id: organizationId,
-      name: "Organization",
+      name: newOrganizationName(config.domains),
       slug: organizationId,
       createdAt: now,
     })
