@@ -744,8 +744,8 @@ msgid "{kind}: {contractId}"
 msgstr "{kind}: {contractId}"
 
 #: src/onboarding/documents-step.tsx
-msgid "{kinds}, and whatever explains how you work. Drafts are fine too. Leave out anything about one person."
-msgstr "{kinds} und alles, was erklärt, wie ihr arbeitet. Entwürfe sind auch gut. Lass alles weg, was nur eine Person betrifft."
+msgid "{kinds}, and whatever explains how you work."
+msgstr "{kinds} und alles, was erklärt, wie ihr arbeitet."
 
 #: src/frame/ui-words.tsx
 msgid "{kinds}, up to {maxSize}"
@@ -13883,8 +13883,8 @@ msgid "PNG, JPEG or WebP, up to {most}."
 msgstr "PNG, JPEG oder WebP, bis {most}."
 
 #: src/onboarding/documents-step.tsx
-msgid "Policies, procedures, work instructions. Drafts are fine too. Leave out anything about one person."
-msgstr "Richtlinien, Abläufe, Arbeitsanweisungen. Entwürfe sind auch gut. Lass alles weg, was nur eine Person betrifft."
+msgid "Policies, procedures, work instructions. Anything that explains how you work helps."
+msgstr "Richtlinien, Abläufe, Arbeitsanweisungen. Alles, was erklärt, wie ihr arbeitet, hilft."
 
 #: src/activity/audit-event.tsx
 msgid "Position"
@@ -18772,8 +18772,8 @@ msgid "This interview went on in another window. You now see that one."
 msgstr "Dieses Gespräch ging in einem anderen Fenster weiter. Sie sehen jetzt dieses."
 
 #: src/onboarding/documents-step.tsx
-msgid "This is a good moment to give me some context. A process description, an onboarding guide, a price list or even a rough draft helps me understand what you’re dealing with every day. The more I know, the better my questions to your team, and the more useful everything I give back. Just leave out anything about a single person."
-msgstr "Das ist ein guter Moment, mir etwas Kontext zu geben. Eine Prozessbeschreibung, eine Einarbeitungsmappe, eine Preisliste oder auch ein grober Entwurf hilft mir zu verstehen, womit ihr jeden Tag zu tun habt. Je mehr ich weiß, desto besser meine Fragen an dein Team, und desto nützlicher alles, was ich zurückgebe. Lass nur alles weg, was um eine einzelne Person geht."
+msgid "This is a good moment to give me some context. A process description, an onboarding guide or a price list helps me understand what you’re dealing with every day. The more I know, the better my questions to your team, and the more useful everything I give back."
+msgstr "Das ist ein guter Moment, mir etwas Kontext zu geben. Eine Prozessbeschreibung, eine Einarbeitungsmappe oder eine Preisliste hilft mir zu verstehen, womit ihr jeden Tag zu tun habt. Je mehr ich weiß, desto besser meine Fragen an dein Team, und desto nützlicher alles, was ich zurückgebe."
 
 #: src/onboarding/leads-step.tsx
 msgid "This is how I understand your organization. I’ll talk to each team lead first, so nobody is caught off guard. Have a quick look whether the right people lead the right teams, and which teams should take part."
