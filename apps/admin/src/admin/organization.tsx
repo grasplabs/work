@@ -370,7 +370,7 @@ const StatusLine = ({
     if (view === null) {
       return null;
     }
-    standing = standingOfView(view);
+    standing = standingOfView(view, admin.snapshot.gate.open);
     const members = admin.snapshot.members.length;
     facts = [
       standingTime(standing, view, admin.snapshot),

@@ -9,7 +9,7 @@ import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import { listenDays } from "@grasp-os/shared/admin/onboarding-admin";
 import type { Need } from "@grasp-os/shared/admin/onboarding-admin";
 
-import { dayCount, daysBetween } from "./standing.ts";
+import { dayCount, daysBetween, interviewDay } from "./standing.ts";
 import type { Standing } from "./standing.ts";
 
 /** The day its interviews closed, or will: the plan's start and its days. */
@@ -24,33 +24,23 @@ const interviewsEnd = (snapshot: AdminSnapshot): string | null => {
 
 /**
  * When the organization came to its standing, as far as what its core
- * answers tells: its go, the interviews' close, or its kickoff. Null where
- * nothing tells it (the interviews count their own days instead).
+ * answers tells: its go, or the interviews' close for one waiting after
+ * them. Null where nothing tells it: when enough came to be known isn't
+ * kept, and the interviews count their own days instead.
  */
 const standingSince = (
   standing: Standing,
   snapshot: AdminSnapshot
 ): string | null => {
-  const kickoff = snapshot.kickoff?.at ?? null;
   switch (standing) {
     case "live": {
       return snapshot.gate.openedAt;
     }
     case "waiting": {
-      // Ready once enough is known: after the interviews closed, if they
-      // have, and never before the kickoff.
       const end = interviewsEnd(snapshot);
-      const closed = end !== null && end <= snapshot.now ? end : null;
-      return (
-        [closed, kickoff]
-          .filter((at) => at !== null)
-          .toSorted()
-          .at(-1) ?? null
-      );
+      return end !== null && end <= snapshot.now ? end : null;
     }
-    case "setting_up": {
-      return kickoff;
-    }
+    case "setting_up":
     case "interviews":
     case "at_risk":
     case "older":
@@ -77,11 +67,12 @@ export const standingTime = (
         ? "The interviews closed"
         : `The interviews closed ${dayCount(daysBetween(end, snapshot.now))} ago`;
     }
-    return `Day ${view.day} of ${listenDays(view.org)}`;
+    return `Day ${interviewDay(view) ?? listenDays(view.org)} of ${listenDays(view.org)}`;
   }
   const since = standingSince(standing, snapshot);
   if (since === null) {
-    return null;
+    // Open from the start, as Home says it.
+    return standing === "live" ? "Open, without interviews" : null;
   }
   const days = daysBetween(since, snapshot.now);
   // The Badge beside it names the standing: the line says how long.
