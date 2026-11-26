@@ -53,6 +53,9 @@ const rateLimited = (seconds: number): ResponseInit => ({
  * answered its first read with `answer`.
  */
 const pausedBy = async (answer: ResponseInit) => {
+  // `vi.waitUntil` moves a faked clock on as it polls: the answer comes, and
+  // is read, at the instant the call began, however long the wait took.
+  const asked = Date.now();
   const connection = await connectionTo("sample");
   const list = async () =>
     await retryable(
@@ -61,6 +64,7 @@ const pausedBy = async (answer: ResponseInit) => {
   api.holdingReads = 1;
   const limited = list();
   await vi.waitUntil(() => api.held.length === 1, { timeout: 10_000 });
+  vi.setSystemTime(asked);
   const [read] = api.held.splice(0, 1);
   if (read === undefined) {
     throw new Error("The read is held");

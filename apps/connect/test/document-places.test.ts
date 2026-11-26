@@ -172,7 +172,7 @@ const documentsAccount = (
 ): Account => ({
   ...ownAccount(admin, suiteOf[provider]),
   audience: clientOf(provider).id,
-  ...(granted === null ? {} : { granted }),
+  granted,
 });
 
 /** Connects the places of `provider` for `admin`, granted `granted`. */

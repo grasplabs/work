@@ -876,6 +876,46 @@ describe("a connector's definition", () => {
       },
     });
   });
+
+  it("is its provider's, its name unless it names one, and asks by class for nothing beyond its scopes", () => {
+    const suite = defineConnector({
+      name: "stock-suite",
+      provider: "stock",
+      title: "Stock",
+      hosts: [host],
+      auth: keyAuth,
+      tools: { "stock.get": getStock },
+    });
+    expect([suite.manifest.provider, stock.manifest.provider]).toStrictEqual([
+      "stock",
+      "stock",
+    ]);
+    expect(() =>
+      defineConnector({
+        name: "stock",
+        title: "Stock",
+        hosts: [host],
+        auth: auth.oauth2({
+          authorizeUrl: "https://auth.stock.test/authorize",
+          tokenUrl: "https://auth.stock.test/token",
+          scopes: { "stock:read": "Read stock" },
+          account: { url: `https://${host}/v1/account`, id: "/id" },
+          rights: {
+            signIn: [],
+            classes: {
+              "read-own": ["stock:read"],
+              "change-own": ["stock:write"],
+              "read-company": [],
+              "change-company": [],
+              "reach-others": [],
+              "read-others": [],
+            },
+          },
+        }),
+        tools: { "stock.get": getStock },
+      })
+    ).toThrow("among its scopes");
+  });
 });
 
 describe("a call of a tool", () => {

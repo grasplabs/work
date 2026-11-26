@@ -300,8 +300,8 @@ export const connectorManifestSchema = z
     provider: connectorProviderSchema,
     /**
      * An app's provider record: how a person signs in to it (sign-in.ts).
-     * Required for an app, and never for a suite, whose sign-in connect
-     * handles itself.
+     * Required for an app; a suite's connector may leave it to connect's
+     * own config for the suite, which wins while connect has one.
      */
     signIn: signInSchema.optional(),
     /** The OAuth scopes its actions need, all among those connect asks for. */
@@ -318,9 +318,8 @@ export const connectorManifestSchema = z
   })
   .refine(
     ({ provider, signIn }) =>
-      oauthProviderSchema.safeParse(provider).success ===
-      (signIn === undefined),
-    "An app's connector carries its provider record, and a suite's none"
+      signIn !== undefined || oauthProviderSchema.safeParse(provider).success,
+    "An app's connector carries its provider record"
   )
   .refine(
     ({ signIn, scopes }) =>
@@ -332,7 +331,7 @@ export const connectorManifestSchema = z
   )
   .refine(
     ({ signIn, hosts }) =>
-      signIn === undefined ||
+      signIn?.account === undefined ||
       hosts.includes(endpointHost(signIn.account.url) ?? ""),
     // The lookup carries the token or key: only where the calls go.
     "The account lookup goes to one of the connector's hosts"

@@ -29,7 +29,13 @@ import {
   ToolError,
 } from "./server.ts";
 import type { CallResult, Connector, JsonObject, Tool } from "./server.ts";
-import type { AccountLookup, SignInInput } from "./sign-in.ts";
+import type {
+  AccountLookup,
+  DeclaredRights,
+  IdTokenCheck,
+  SignInInput,
+  TenantKind,
+} from "./sign-in.ts";
 import { isDeliveringPath } from "./tool-rules.ts";
 
 // How a connector is written (@grasp-os/sdk/connector): its tools, each one
@@ -233,26 +239,77 @@ type DistributiveOmit<Value, Key extends PropertyKey> = Value extends unknown
  */
 export type AccountDeclaration = AccountLookup;
 
+/**
+ * Where connect reads whose account a sign-in is from the OpenID ID token:
+ * its issuer (`{tenant}` filled), the claim of the account's stable ID,
+ * the claims its name and address are read from, the first that is there,
+ * the claims that must say what they say here (`{tenant}` filled,
+ * compared without case) or be `true`, and those that must be absent or
+ * the issuer itself.
+ */
+export type IdTokenDeclaration = IdTokenCheck;
+
+/**
+ * What a consent asks for by the tool classes the company has on (each
+ * scope among the sign-in's `scopes`): `signIn` always, each class's
+ * while it is on, `implied` what a scope takes in besides itself, and
+ * `sharedMailbox` while a shared mailbox is pointed at (`reach` only with
+ * Reach others on too).
+ */
+export type RightsDeclaration = DeclaredRights;
+
+/** OAuth 2.0 with the authorization code, PKCE and refresh. */
+export type OAuth2Declaration = {
+  /** May hold `{tenant}` past its host, as `tokenUrl` may. */
+  authorizeUrl: string;
+  tokenUrl: string;
+  /** RFC 7009; without one, disconnecting deletes the tokens only. */
+  revokeUrl?: string;
+  /** Each scope it may ask for, and what it allows. */
+  scopes: Readonly<Record<string, string>>;
+  /** Parameters the authorization request adds; values may hold `{tenant}`. */
+  params?: Readonly<Record<string, string>>;
+  /**
+   * The kind of the organization's own tenant at the vendor (`guid`, an
+   * Entra tenant ID; `domain`, a hosted domain): the flow is pinned to it.
+   * Only a provider the deployment has a tenant for can be pinned.
+   */
+  tenant?: TenantKind;
+  rights?: RightsDeclaration;
+  /** A prefix the token answer may put on a scope (a URL ending in `/`). */
+  scopePrefix?: string;
+  /** Scopes a renewed token must hold, or its connection is asked to reconnect. */
+  renewalRequires?: readonly string[];
+  /** `account`: revoking one token revokes the account's whole grant. */
+  grant?: "account";
+} & (
+  | { account: AccountDeclaration; idToken?: never }
+  | { idToken: IdTokenDeclaration; account?: never }
+);
+
 /** The sign-ins connect runs for a connector. Connector code never sees a token. */
 export const auth = Object.freeze({
   /** OAuth 2.0 with the authorization code, PKCE and refresh. */
-  oauth2: (declaration: {
-    authorizeUrl: string;
-    tokenUrl: string;
-    revokeUrl?: string;
-    /** Each scope it may ask for, and what it allows. */
-    scopes: Readonly<Record<string, string>>;
-    account: AccountDeclaration;
-  }): ConnectorAuth => ({
+  oauth2: ({
+    authorizeUrl,
+    tokenUrl,
+    revokeUrl,
+    scopes,
+    params,
+    renewalRequires,
+    ...rest
+  }: OAuth2Declaration): ConnectorAuth => ({
     signIn: {
       kind: "oauth2",
-      authorizationEndpoint: declaration.authorizeUrl,
-      tokenEndpoint: declaration.tokenUrl,
-      ...(declaration.revokeUrl === undefined
+      authorizationEndpoint: authorizeUrl,
+      tokenEndpoint: tokenUrl,
+      ...(revokeUrl === undefined ? {} : { revocationEndpoint: revokeUrl }),
+      scopes: Object.keys(scopes),
+      ...(params === undefined ? {} : { authorizationParams: { ...params } }),
+      ...(renewalRequires === undefined
         ? {}
-        : { revocationEndpoint: declaration.revokeUrl }),
-      scopes: Object.keys(declaration.scopes),
-      account: declaration.account,
+        : { renewalRequires: [...renewalRequires] }),
+      ...rest,
     },
   }),
   /** A key the person pastes, sent in `header`, after `prefix` if it has one. */
@@ -268,6 +325,11 @@ export const auth = Object.freeze({
 export interface ConnectorDeclaration {
   /** Its name: lowercase, as permissions and the catalogue name it. */
   name: string;
+  /**
+   * Whose connections its calls get, and whose sign-in its `auth` is:
+   * its `name` unless it says otherwise.
+   */
+  provider?: string;
   /** Its vendor's name, as people read it: `Pipedrive`. */
   title: string;
   /** Every host it may reach, exactly. */
@@ -532,7 +594,7 @@ export const defineConnector = (
     ...serveConnector(
       {
         name,
-        provider: name,
+        provider: declaration.provider ?? name,
         signIn: { ...declaration.auth.signIn, name: title },
         scopes: [...scopes],
         hosts,
