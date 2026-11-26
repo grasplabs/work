@@ -4772,7 +4772,6 @@ msgstr "Kliffen"
 #: src/interview/destination.tsx
 #: src/projects/project-chats.tsx
 #: src/settings/erasures.tsx
-#: src/shown-once.tsx
 #: src/workflows/start-run.tsx
 msgid "Close"
 msgstr "Sluiten"
@@ -5297,7 +5296,6 @@ msgstr "Kopenhagen"
 #: src/settings/event-sources.tsx
 #: src/settings/guests.tsx
 #: src/settings/invitations.tsx
-#: src/shown-once.tsx
 msgid "Copied"
 msgstr "Gekopieerd"
 
@@ -5321,7 +5319,6 @@ msgstr "Kopieën"
 #: src/frame/ui-words.tsx
 #: src/onboarding/review-parts.tsx
 #: src/onboarding/setup-steps.tsx
-#: src/shown-once.tsx
 msgid "Copy"
 msgstr "Kopiëren"
 
@@ -5343,7 +5340,6 @@ msgstr "E-mail kopiëren"
 msgid "Copy into the Brain from {label}"
 msgstr "Uit {label} naar het Brain kopiëren"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy it now: you won't see it again. Lost, it can only be replaced."
 msgstr "Kopieer het nu: je ziet het niet nog eens. Kwijt, dan kan het alleen worden vervangen."
@@ -5364,7 +5360,6 @@ msgstr "Kopieer de link voor {name}"
 msgid "Copy the output"
 msgstr "Uitvoer kopiëren"
 
-#: src/settings/event-sources.tsx
 #: src/shown-once.tsx
 msgid "Copy the secret"
 msgstr "Geheim kopiëren"
@@ -15573,7 +15568,6 @@ msgid "Searching the docs for {query}"
 msgstr "Zoekt in de docs naar {query}"
 
 #: src/connections/http-connections.tsx
-#: src/shown-once.tsx
 msgid "Secret"
 msgstr "Geheim"
 
