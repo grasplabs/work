@@ -517,10 +517,6 @@ const words: readonly { action: string; text: MessageDescriptor }[] = [
     text: msg`Arranged the company's groups of teams`,
   },
   {
-    action: "brain.team_groups.saved",
-    text: msg`Saved the company's groups of teams`,
-  },
-  {
     action: "brain.work.more_voices_asked",
     text: msg`Asked Stephen to hear more people about a piece of work`,
   },
