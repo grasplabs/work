@@ -85,14 +85,8 @@ const integrationsOf = (root: Element) => {
   return {
     nothing: headings.has("Nothing connected yet"),
     waits: main.includes("Grasp waits on the company’s own admin."),
-    connected: headings.has("What the company connected"),
-    notReported: main.includes(
-      "The company’s own Grasp doesn’t report what it connected yet."
-    ),
-    stillToConnect: headings.has("Still to connect"),
-    needsNotReported: main.includes(
-      "The company’s own Grasp doesn’t report what its workflows need yet."
-    ),
+    notReported: headings.has("Its connections aren’t reported"),
+    asked: headings.has("Asked of Grasp"),
     source: main.includes(
       "What the company connected: the company’s own Grasp doesn’t hold it yet. What its workflows still need connected: from Composio, once it is connected."
     ),
@@ -188,32 +182,24 @@ describe("an organization's integrations, workflows and members", () => {
     {
       when: "before it signed in",
       snapshot: emptyAdminSnapshot("Before"),
-      says: {
-        nothing: true,
-        waits: true,
-        connected: false,
-        notReported: false,
-      },
+      says: { nothing: true, waits: true, notReported: false },
     },
     {
       when: "once it signed in",
       snapshot: signedIn(emptyAdminSnapshot("Signed")),
-      says: {
-        nothing: false,
-        waits: false,
-        connected: true,
-        notReported: true,
-      },
+      says: { nothing: false, waits: false, notReported: true },
     },
   ])(
-    "shows what a company connected only once it signed in ($when), says core doesn't report its connections yet, and that what is still to connect comes from Composio",
+    "shows nothing connected before a company signed in, and that core doesn't report its connections once it has ($when), with the apps it asked Grasp for either way",
     async ({ snapshot, says }) => {
-      const { container } = await openAcme("/connectors", snapshot);
+      const { container } = await openAcme("/connectors", {
+        ...snapshot,
+        asked: [{ id: "asked-1", name: "Exact Online", askedAt: daysAgo(2) }],
+      });
 
       expect(integrationsOf(container)).toStrictEqual({
         ...says,
-        stillToConnect: true,
-        needsNotReported: true,
+        asked: true,
         source: true,
         toCome: false,
       });
@@ -266,11 +252,10 @@ describe("an organization's integrations, workflows and members", () => {
     const page = integrations.main();
 
     expect({
-      drive: page.includes(
-        `Connected by Anna de Vries on ${formatDate(daysAgo(3))}.`
-      ),
-      microsoft: page.includes("4 people connected their own"),
-      again: page.includes("1 needs signing in again"),
+      drive: page.includes(`${formatDate(daysAgo(3))}, by Anna de Vries`),
+      tools: page.includes("1 tool its admin allowed"),
+      microsoft: page.includes("4 people"),
+      again: page.includes("1 to sign in again"),
       // Core sends the toolkit's slug, not the catalog's name for it.
       hubspot: page.includes("Hubspot"),
       forCrmSync: page.includes("For CRM sync"),
@@ -281,6 +266,7 @@ describe("an organization's integrations, workflows and members", () => {
       notReported: page.includes("doesn’t report"),
     }).toStrictEqual({
       drive: true,
+      tools: true,
       microsoft: true,
       again: true,
       hubspot: true,
