@@ -48,6 +48,7 @@ import { voiceVersion } from "./lab-marks.ts";
 import { linkHeaders, linkRefusal, noCallerRefusal } from "./links.ts";
 import { onboardingStore } from "./store.ts";
 import type { TurnContext } from "./store.ts";
+import { heardBudgets } from "./transcription.ts";
 
 // An interview held as one live voice session at Mistral (its voice
 // agents), as the page asks for it at /api/interview/voice
@@ -85,8 +86,8 @@ const expectedSeconds: Record<InterviewKind, number> = {
   lead: 25 * 60,
 };
 
-/** How long a pass holds: longer than any interview runs. */
-const passMs = 2 * 60 * 60_000;
+/** How long a pass holds: longer than any interview may run (`minutes`, at most 240). */
+const passMs = 5 * 60 * 60_000;
 
 /** What the pass is signed for, kept apart from every other key derived from the same secret. */
 const passPurpose = "grasp-os onboarding voice session";
@@ -433,6 +434,23 @@ const open = async (
     log.error("interview.no_model", { requestId });
     return failed("The interview is not set up yet.", 503);
   }
+  // A session listens as live transcription does, and from the same budget
+  // a day: each one opened is counted at what it is expected to last, so a
+  // link can't open them without end.
+  const listening = await onboardingStore(env).transcriptionOnLink(
+    secretMark,
+    account
+  );
+  if (!listening.ok) {
+    return linkRefusal(listening.code, requestId);
+  }
+  if (listening.value.heard >= heardBudgets.link) {
+    log.warn("interview.voice_budget_spent", { requestId });
+    return failed(
+      "That is as long as the interview can run today. Come back tomorrow to go on.",
+      429
+    );
+  }
   // The session they left, when they come back with its pass: closed, so
   // only one runs for a link.
   const earlier =
@@ -510,6 +528,11 @@ const open = async (
   const { id, participant_token, server_url, expires_at } = opened.data;
   let pass: string;
   try {
+    await onboardingStore(env).countHeard(
+      listening.value.who,
+      "interviews",
+      expectedSeconds[context.kind]
+    );
     await onboardingStore(env).turnRan(secretMark, {
       mark: voice.mark,
       interviewer: "stephen",

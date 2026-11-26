@@ -801,6 +801,12 @@ describe("AI providers in connect", () => {
             await grant({ method: "GET", body: empty })
           )
         ),
+        query: refusalOf(
+          await withKey.modelFetch(
+            bare(`${one}?include=audio`, "GET"),
+            await grant({ method: "GET", body: empty })
+          )
+        ),
         escaped: refusalOf(
           await withKey.modelFetch(
             bare(`${sessionsUrl}/%2e%2e%2fagents`, "GET"),
@@ -849,6 +855,8 @@ describe("AI providers in connect", () => {
           postGrantReads: "method",
           list: "path",
           deeper: "path",
+          // No query on any of a provider's paths (`queries`).
+          query: "endpoint",
           escaped: "path",
           organization: "no_credential",
           openai: "path",

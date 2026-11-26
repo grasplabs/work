@@ -604,4 +604,35 @@ describe("an interview as a live voice session", { timeout: 60_000 }, () => {
       cameBack: brief.includes("has just come back on their link"),
     }).toStrictEqual({ answered: true, cameBack: false });
   });
+
+  it("opens no more sessions on a link than a day's listening allows", async () => {
+    const link = await opened();
+    await plan(
+      platformMistralKey,
+      ["a", "b", "c", "d"].map((at) => ({
+        status: 200,
+        body: { ...openedSession, id: `sess_day_${at}` },
+      }))
+    );
+    const before = await atMistral();
+    const { result } = await answering([], async () => {
+      const statuses: number[] = [];
+      // Each counted at the 15 minutes it is expected to last: four fill the hour.
+      for (const _ of [1, 2, 3, 4, 5]) {
+        // oxlint-disable-next-line no-await-in-loop -- one after the other, as the budget fills
+        const join = await ask(link, {
+          action: "open",
+          event: "start",
+          ...standing,
+        });
+        statuses.push(join.status);
+      }
+      return statuses;
+    });
+    const after = await atMistral();
+    expect({
+      statuses: result,
+      opened: after.length - before.length,
+    }).toStrictEqual({ statuses: [200, 200, 200, 200, 429], opened: 4 });
+  });
 });
