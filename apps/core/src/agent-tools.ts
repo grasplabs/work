@@ -15,6 +15,7 @@ import {
   compile,
 } from "@earendil-works/pi-schema";
 import type { Schema, Static, Validator } from "@earendil-works/pi-schema";
+import { formats } from "@earendil-works/pi-schema/formats";
 import { brainQuestionMaxLength } from "@grasp-os/shared/brain-sources";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { env, exports } from "cloudflare:workers";
@@ -382,8 +383,9 @@ const checkedInput = <T>(
 
 /** A definition as a tool of the turn, its calls run by `callAs`. */
 const tool = <P extends Schema>({ api, run, ...definition }: Definition<P>) => {
-  // Compiled once, with the definitions: each call only checks.
-  const validator = compile(definition.parameters);
+  // Compiled once, with the definitions: each call only checks, formats
+  // included, as pi's own check of a tool's input does.
+  const validator = compile(definition.parameters, { formats });
   return (deps: ToolDeps): TurnTool => {
     const made = defineTool({
       ...definition,

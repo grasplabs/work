@@ -1,3 +1,4 @@
+import { isRetryableAssistantError } from "@earendil-works/pi-ai";
 import { agentErrors } from "@grasp-os/shared/agent";
 import type { ChatUpdate } from "@grasp-os/shared/chat";
 import { chatIdSchema } from "@grasp-os/shared/ids";
@@ -846,27 +847,44 @@ const restart = async (
 
 describe("a turn a restart cuts off", () => {
   it.each([
-    ["before its first word", 0],
-    ["after its first words", 3],
+    ["before its first word", 0, false],
+    ["after its first words, stored", 5, true],
   ])(
     "asks the model again when the cut came %s, and the chat shows the answer once",
-    async (_when, at) => {
+    async (_when, at, stored) => {
       const { userId } = await signedInWithRole(idp, "user");
       const asking = await chatOf(userId);
-      const cut = pausedReply(says("The whole answer."), at);
+      const cut = pausedReply(says("Zebra crossings ahead."), at);
       const provider = await fakeProviderFor(
         [model],
         cut.reply,
-        says("The whole answer.")
+        says("Zebra crossings ahead.")
       );
       const { session, request } = sessionOf(asking, userId);
+      /** How many of pi's records hold `text`. */
+      const piHolds = async (text: string): Promise<number> =>
+        await runInDurableObject(session(), (_instance, state) =>
+          ["pi_document_revisions", "pi_entries"]
+            .map(
+              (table) =>
+                state.storage.sql
+                  .exec<{ count: number }>(
+                    `SELECT count(*) AS count FROM ${table} WHERE ${table === "pi_entries" ? "record" : "content"} LIKE ?`,
+                    `%${text}%`
+                  )
+                  .one().count
+            )
+            .reduce((sum, count) => sum + count, 0)
+        );
       try {
         void session()
           .run(request("turn-a", "Answer?"))
           .catch(() => "cut short");
         await vi.waitFor(
-          () => {
+          async () => {
             expect(provider.requests).toHaveLength(1);
+            // pi stores the words streamed so far within a second.
+            expect((await piHolds("Zebra")) > 0 || !stored).toBeTruthy();
           },
           { timeout: 10_000 }
         );
@@ -876,10 +894,13 @@ describe("a turn a restart cuts off", () => {
         expect({
           answer: end.answer,
           requests: provider.requests.length,
+          // The words the cut answer got to, kept by pi as aborted.
+          cutKept: (await piHolds('"stopReason":"aborted"')) > 0,
           kept: await keptOf(asking.stub, asking.chat.id),
         }).toStrictEqual({
-          answer: "The whole answer.",
+          answer: "Zebra crossings ahead.",
           requests: 2,
+          cutKept: stored,
           kept: ["user", "assistant:toolUse", "toolResult", "assistant:stop"],
         });
       } finally {
@@ -974,16 +995,23 @@ describe("a turn a restart cuts off", () => {
   });
 
   it.each([
-    ["fails", { status: 500 } as const, {}],
-    // A failure pi takes for one to retry, for an idle time lowered here.
+    // A failure pi's own classifier wouldn't retry anyway, and two it would.
+    ["fails", { status: 500 } as const, {}, false],
     [
       "sends nothing for too long",
       { hang: true } as const,
       { MODEL_STREAM_IDLE_MS: "400" },
+      true,
+    ],
+    [
+      "limits requests for longer than the call may wait",
+      { status: 429, headers: { "retry-after": "3600" } } as const,
+      {},
+      true,
     ],
   ])(
     "sends nothing again when the provider %s: the gateway's failure is final",
-    async (_case, reply, vars) => {
+    async (_case, reply, vars, retryable) => {
       const { userId } = await signedInWithRole(idp, "user");
       const asking = await chatOf(userId);
       const provider = await fakeProviderFor(
@@ -995,10 +1023,48 @@ describe("a turn a restart cuts off", () => {
       const restore = await setObjectEnv(session(), vars);
       try {
         const end = await session().run(request("turn-a", "Fail?"));
+        const failed = await runInDurableObject(
+          asking.stub,
+          (_instance, state) =>
+            state.storage.sql
+              .exec<{ message: string }>(
+                "SELECT message FROM chat_messages WHERE chat_id = ? ORDER BY id DESC LIMIT 1",
+                asking.chat.id
+              )
+              .one().message
+        );
+        const answer = z
+          .object({ errorMessage: z.string() })
+          .parse(JSON.parse(failed));
         expect({
           outcome: end.outcome,
           requests: provider.requests.length,
-        }).toStrictEqual({ outcome: "failed", requests: 1 });
+          // Whether pi would send it again, were its retry on.
+          retryable: isRetryableAssistantError({
+            role: "assistant",
+            content: [],
+            api: "openai-responses",
+            provider: "grasp",
+            model,
+            usage: {
+              input: 0,
+              output: 0,
+              cacheRead: 0,
+              cacheWrite: 0,
+              totalTokens: 0,
+              cost: {
+                input: 0,
+                output: 0,
+                cacheRead: 0,
+                cacheWrite: 0,
+                total: 0,
+              },
+            },
+            stopReason: "error",
+            errorMessage: answer.errorMessage,
+            timestamp: 0,
+          }),
+        }).toStrictEqual({ outcome: "failed", requests: 1, retryable });
       } finally {
         await restore();
       }
@@ -1072,7 +1138,8 @@ const restoreFixture = async (
 
 // Captured on Pi 1.4.0 (before the 1.6.1 upgrade) from a chat of two
 // answered turns, a code step in the second; `mid-request` again as a third
-// turn's request was in flight and the object was evicted.
+// turn's request was in flight and the object was evicted. Its turn record
+// as the release before writes it, without `startedAt`.
 describe("a chat Pi 1.4 wrote", () => {
   it("opens on this Pi and goes on, its model reading the chat so far", async () => {
     const { userId } = await signedInWithRole(idp, "user");

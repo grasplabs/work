@@ -233,6 +233,7 @@ export const coreProject = (
               "jose",
               "yaml",
               "@earendil-works/pi-schema",
+              "@earendil-works/pi-schema/formats",
               "@orama/orama",
               "chat",
               "postal-mime",

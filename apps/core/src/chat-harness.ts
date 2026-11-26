@@ -257,6 +257,9 @@ interface Asked {
  */
 const retryPolicy = (asked: boolean): Partial<ConversationRetryPolicy> =>
   asked ? { enabled: false } : { enabled: true, maxRetries: 4, baseDelayMs: 0 };
+// A summary a restart cut off alongside the request is sent again as it
+// was (pi doesn't count it): it asks the model only after the request,
+// which pi reserves first and which reads this policy at once.
 
 /** How soon the object wakes to sync again after a sync failed. */
 const syncRetryMs = 15_000;
@@ -643,6 +646,35 @@ const stopOf = (error: Error): TurnStop =>
     ? "history_revoked"
     : "unreadable";
 
+/**
+ * Whether `entry` is a response a restart cut short that pi then asked
+ * for again: kept by pi as aborted, outside the model's context, and
+ * never shown, as the person gets the whole answer from the attempt
+ * after it. One a stop cut short ends its run, and is shown. Unknown
+ * (`undefined`) while it is the newest response and pi still runs
+ * (`running`, as of before the entries were read). `later` are the
+ * entries committed after it.
+ */
+const cutAttempt = (
+  entry: EntryRecord,
+  later: readonly EntryRecord[],
+  running: boolean
+): boolean | undefined => {
+  const [message] = entry.model ?? [];
+  if (
+    entry.kind !== "pi.assistant" ||
+    message?.role !== "assistant" ||
+    message.stopReason !== "aborted"
+  ) {
+    return false;
+  }
+  const next = later.find(({ kind }) => turnKinds.has(kind));
+  if (next === undefined) {
+    return running ? undefined : false;
+  }
+  return next.kind === "pi.assistant";
+};
+
 /** One chat's Harness, opened on its object's storage. */
 export class ChatHarness {
   readonly #host: ChatHost;
@@ -806,8 +838,16 @@ export class ChatHarness {
             opened.#see(call.value);
           }
         },
-        end: () => {
-          // pi closed: its host opens it again.
+        end: (end) => {
+          // pi closed or failed: its host opens it again. An observer that
+          // threw no longer sees the chat: pi is closed, so it opens again.
+          if (end.kind === "listener_error") {
+            log.error("chat.observer_failed", {
+              chatSession: name,
+              ...errorFields(end.error),
+            });
+            void harness.close(context);
+          }
         },
       },
       context
@@ -1864,6 +1904,9 @@ export class ChatHarness {
    * Workspace knows each by its entry.
    */
   async #copy(scope: TurnRequest["scope"]): Promise<void> {
+    // Before the entries are read: pi may end its run meanwhile, and an
+    // entry read before then is judged as of then.
+    const running = this.#running;
     const copied = await this.#harness.snapshot(CopiedDoc, context);
     const after = copied?.after ?? null;
     const entries: EntryRecord[] = [];
@@ -1886,7 +1929,7 @@ export class ChatHarness {
     const seen: EntryId[] = [];
     let last: EntryId | undefined;
     for (const [index, entry] of entries.entries()) {
-      const cut = this.#cutAttempt(entry, entries.slice(index + 1));
+      const cut = cutAttempt(entry, entries.slice(index + 1), running);
       // Copied only once it is known whether pi went on after it.
       if (cut === undefined) {
         break;
@@ -1939,32 +1982,5 @@ export class ChatHarness {
     for (const id of seen) {
       this.#thought.delete(id);
     }
-  }
-
-  /**
-   * Whether `entry` is a response a restart cut short that pi then asked
-   * for again: kept by pi as aborted, outside the model's context, and
-   * never shown, as the person gets the whole answer from the attempt
-   * after it. One a stop cut short ends its run, and is shown. Unknown
-   * (`undefined`) while it is the newest response and pi still runs.
-   * `later` are the entries committed after it.
-   */
-  #cutAttempt(
-    entry: EntryRecord,
-    later: readonly EntryRecord[]
-  ): boolean | undefined {
-    const [message] = entry.model ?? [];
-    if (
-      entry.kind !== "pi.assistant" ||
-      message?.role !== "assistant" ||
-      message.stopReason !== "aborted"
-    ) {
-      return false;
-    }
-    const next = later.find(({ kind }) => turnKinds.has(kind));
-    if (next === undefined) {
-      return this.#running ? undefined : false;
-    }
-    return next.kind === "pi.assistant";
   }
 }
