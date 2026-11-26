@@ -47,6 +47,9 @@ const generated = [
   "**/tools.gen.ts",
   "**/openapi.yaml",
   "**/openapi.json",
+  // A connector's recorded vendor answers, as a recording run writes them
+  // (apps/connect/test/fixture-recorder.ts).
+  "**/fixtures.json",
 ];
 
 /** Why a target may not extend Cap'n Web's or workerd's RpcTarget itself. */
@@ -619,13 +622,15 @@ export default defineConfig({
       "packages/workerflow/vite.process.config.ts",
       "packages/workerflow/vite.conformance.config.ts",
       "packages/connectors/*",
-      // Repo tooling's pure logic, and core's build step, in Node.
+      // Repo tooling's pure logic, and core's and connect's build steps,
+      // in Node.
       {
         test: {
           name: "scripts",
           include: [
             "scripts/**/*.test.ts",
             "apps/core/build-blueprints.test.ts",
+            "apps/connect/build.test.ts",
             "apps/core/host-json.bundle.test.ts",
             "apps/admin/vite.config.test.ts",
           ],

@@ -1,6 +1,5 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vite-plus/test";
-import { z } from "zod";
 
 import { loadRelease } from "../src/app-releases.ts";
 import { personOf } from "../src/connections.ts";
@@ -10,59 +9,25 @@ import { mockIdpWith } from "./idp.ts";
 import {
   call,
   idp,
-  isFetcher,
   outcomeOf,
+  recordedRequests,
 } from "./resource-connectors-harness.ts";
-import { sampleKeyControlUrl } from "./sample-key-fake.ts";
 import { signedInApi } from "./sign-in.ts";
-import { testBinding } from "./test-env.ts";
 
 // An App calls a connector written on `@grasp-os/sdk/connector` the way
 // it calls any connector: through connect, under a binding an admin
 // approved and the App's own grant on the connection, checked against the
 // contract connect generates from the connector's tools. This runs the
 // real connect with connect's sample API-key app bundled
-// (apps/connect/test/fixtures/sample-key-connector.ts); only the app's
-// API is faked (test/sample-key-fake.ts).
+// (apps/connect/test/fixtures/sample-key/connector.ts); only the app's
+// API is faked, by its recorded answers (the fixture's fixtures.json,
+// which connect's build replays too).
 
 mockIdpWith(idp);
 
-const providers = testBinding("CONNECT_PROVIDERS");
-
-const control = async (init?: RequestInit): Promise<Response> => {
-  if (!isFetcher(providers)) {
-    throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
-  }
-  return await providers.fetch(sampleKeyControlUrl, init);
-};
-
-/** Has the app list `answer` for `board`. */
-const answerFor = async (board: string, answer: unknown): Promise<void> => {
-  await control({ method: "POST", body: JSON.stringify({ board, answer }) });
-};
-
-/** The headers of every request the app got to list `board`. */
-const listingsOf = async (board: string) => {
-  if (!isFetcher(providers)) {
-    throw new TypeError("Expected the providers Worker as CONNECT_PROVIDERS");
-  }
-  const response = await providers.fetch(
-    `${sampleKeyControlUrl}?${new URLSearchParams({ board }).toString()}`
-  );
-  return z.array(z.record(z.string(), z.string())).parse(await response.json());
-};
-
-/** The credentials each listing of `board` carried, by header. */
-const credentialsOf = async (board: string) => {
-  const listings = await listingsOf(board);
-  return listings.map((headers) =>
-    Object.fromEntries(
-      Object.entries(headers).filter(([name]) =>
-        /auth|key|token|cookie/u.test(name)
-      )
-    )
-  );
-};
+/** The credentials of each request that listed `board` with `key`. */
+const listingsOf = async (board: string, key: string) =>
+  await recordedRequests(`/v1/boards/${board}/items`, "x-api-key", key);
 
 const someBoard = () => `board-${crypto.randomUUID()}`;
 
@@ -117,13 +82,6 @@ const boardsApp = async () => {
   await commitApp(builder.api, created.id, boardsFiles());
   await builder.api.versions.rollback({ kind: "app", id: created.id }, 1);
   const key = `key-${crypto.randomUUID()}`;
-  await control({
-    method: "POST",
-    body: JSON.stringify({
-      key,
-      account: { id: `team-${key}`, name: "Team", email: "team@acme.test" },
-    }),
-  });
   // Core has no route yet that connects an app signing in with an API
   // key: the admin's connection is made at connect, as core would ask it.
   const { connectionId } = await env.CONNECT.connectWithKey({
@@ -160,22 +118,24 @@ describe(
   () => {
     it("answer the App the app's items, listed with the connection's key alone", async () => {
       const boards = await boardsApp();
-      const board = someBoard();
-      const items = [
-        { id: "item-1", title: "First" },
-        { id: "item-2", title: "Second" },
-      ];
-      await answerFor(board, { items });
-      const result = await call(boards, "boards.items", { board });
+      // The board the app's recorded answers list two pages of.
+      const result = await call(boards, "boards.items", { board: "board-1" });
       const answered: unknown =
         result.ok && typeof result.value === "string"
           ? JSON.parse(result.value)
           : outcomeOf(result);
+      const listings = await listingsOf("board-1", boards.key);
       expect({
         answered,
-        credentials: await credentialsOf(board),
+        credentials: listings.map(({ credentials }) => credentials),
       }).toStrictEqual({
-        answered: { items, next: null },
+        answered: {
+          items: [
+            { id: "item-1", title: "First" },
+            { id: "item-2", title: "Second" },
+          ],
+          next: "page-2",
+        },
         credentials: [{ "x-api-key": boards.key }],
       });
     });
@@ -186,7 +146,7 @@ describe(
       const result = await call(boards, "boards.archived", { board });
       expect({
         outcome: outcomeOf(result),
-        listings: await listingsOf(board),
+        listings: await listingsOf(board, boards.key),
       }).toStrictEqual({
         outcome: { failed: "permission.invalid_args" },
         listings: [],
@@ -195,12 +155,12 @@ describe(
 
     it("fail closed on an answer outside the tool's returns", async () => {
       const boards = await boardsApp();
-      const board = someBoard();
-      await answerFor(board, { items: [{ id: 1, title: null }] });
-      // The app was asked, and its answer refused in the connector: the
-      // App gets a failure in its place, and none of the answer.
+      // The board the app's recorded answer lists items of the wrong
+      // shape: the app was asked, and its answer refused in the
+      // connector. The App gets a failure in its place, and none of it.
+      const board = "malformed";
       const result = await call(boards, "boards.items", { board });
-      const listings = await listingsOf(board);
+      const listings = await listingsOf(board, boards.key);
       expect({
         outcome: outcomeOf(result),
         listings: listings.length,
@@ -217,7 +177,7 @@ describe(
       const result = await call(boards, "boards.items", { board });
       expect({
         outcome: outcomeOf(result),
-        listings: await listingsOf(board),
+        listings: await listingsOf(board, boards.key),
       }).toStrictEqual({
         outcome: { failed: "permission.unavailable" },
         listings: [],

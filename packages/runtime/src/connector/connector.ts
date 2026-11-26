@@ -34,6 +34,20 @@ export type {
   RouteText,
 } from "./api.ts";
 export {
+  credentialStandIn,
+  fixtureVendor,
+  fixturesSchema,
+  recordedFixtures,
+} from "./fixtures.ts";
+export type {
+  Captured,
+  Exchange,
+  FixtureCall,
+  FixtureCase,
+  Fixtures,
+  Seen,
+} from "./fixtures.ts";
+export {
   ToolError,
   callMetaOf,
   checkOneWrite,

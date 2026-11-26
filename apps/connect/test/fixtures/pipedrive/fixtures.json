@@ -1,0 +1,304 @@
+{
+  "personal": [
+    "name",
+    "email",
+    "phone"
+  ],
+  "account": {
+    "request": {
+      "method": "GET",
+      "url": "https://api.pipedrive.com/api/v1/users/me"
+    },
+    "answer": {
+      "status": 200,
+      "headers": {
+        "content-type": "application/json"
+      },
+      "body": {
+        "success": true,
+        "data": {
+          "id": 123,
+          "name": "person-1",
+          "email": "person-2@example.com",
+          "phone": "person-3",
+          "company_id": 456,
+          "company_name": "Pipedrive Sales",
+          "default_currency": "USD",
+          "locale": "en_US",
+          "lang": 1,
+          "timezone_name": "Europe/Tallinn",
+          "is_admin": true,
+          "active_flag": true
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "tool": "deals.list",
+      "args": {
+        "pipeline_id": 1,
+        "status": [
+          "open"
+        ],
+        "limit": 1
+      },
+      "cursor": "cursor",
+      "calls": [
+        {
+          "exchanges": [
+            {
+              "request": {
+                "method": "GET",
+                "url": "https://api.pipedrive.com/api/v2/deals?pipeline_id=1&status=open&limit=1"
+              },
+              "answer": {
+                "status": 200,
+                "headers": {
+                  "content-type": "application/json"
+                },
+                "body": {
+                  "success": true,
+                  "data": [
+                    {
+                      "id": 1,
+                      "title": "Deal Title",
+                      "creator_user_id": 1,
+                      "owner_id": 1,
+                      "value": 200,
+                      "person_id": 1,
+                      "org_id": 1,
+                      "stage_id": 1,
+                      "pipeline_id": 1,
+                      "currency": "USD",
+                      "archive_time": "2021-01-01T00:00:00Z",
+                      "add_time": "2021-01-01T00:00:00Z",
+                      "update_time": "2021-01-01T00:00:00Z",
+                      "stage_change_time": "2021-01-01T00:00:00Z",
+                      "status": "open",
+                      "is_archived": false,
+                      "is_deleted": false,
+                      "probability": 90,
+                      "lost_reason": "Lost Reason",
+                      "visible_to": 7,
+                      "close_time": "2021-01-01T00:00:00Z",
+                      "won_time": "2021-01-01T00:00:00Z",
+                      "lost_time": "2021-01-01T00:00:00Z",
+                      "local_won_date": "2021-01-01",
+                      "local_lost_date": "2021-01-01",
+                      "local_close_date": "2021-01-01",
+                      "expected_close_date": "2021-01-01",
+                      "label_ids": [
+                        1,
+                        2,
+                        3
+                      ],
+                      "origin": "ManuallyCreated",
+                      "origin_id": null,
+                      "channel": 52,
+                      "channel_id": "Jun23 Billboards",
+                      "source_lead_id": "35b0d604-eb0d-42d0-be11-eac8832051f0",
+                      "acv": 120,
+                      "arr": 120,
+                      "mrr": 10,
+                      "custom_fields": {},
+                      "9dc80c50d78a15643bfc4ca79d76156a73a1ca0e": "Q4"
+                    }
+                  ],
+                  "additional_data": {
+                    "next_cursor": "eyJmaWVsZCI6ImlkIiwiZmllbGRWYWx1ZSI6Nywic29ydERpcmVjdGlvbiI6ImFzYyIsImlkIjo3fQ"
+                  }
+                }
+              }
+            }
+          ],
+          "output": {
+            "items": [
+              {
+                "acv": 120,
+                "add_time": "2021-01-01T00:00:00Z",
+                "arr": 120,
+                "channel": 52,
+                "channel_id": "Jun23 Billboards",
+                "close_time": "2021-01-01T00:00:00Z",
+                "currency": "USD",
+                "custom_fields": {},
+                "expected_close_date": "2021-01-01",
+                "id": 1,
+                "is_archived": false,
+                "is_deleted": false,
+                "label_ids": [
+                  1,
+                  2,
+                  3
+                ],
+                "lost_reason": "Lost Reason",
+                "lost_time": "2021-01-01T00:00:00Z",
+                "mrr": 10,
+                "org_id": 1,
+                "origin": "ManuallyCreated",
+                "origin_id": null,
+                "owner_id": 1,
+                "person_id": 1,
+                "pipeline_id": 1,
+                "probability": 90,
+                "source_lead_id": "35b0d604-eb0d-42d0-be11-eac8832051f0",
+                "stage_change_time": "2021-01-01T00:00:00Z",
+                "stage_id": 1,
+                "status": "open",
+                "title": "Deal Title",
+                "update_time": "2021-01-01T00:00:00Z",
+                "value": 200,
+                "visible_to": 7,
+                "won_time": "2021-01-01T00:00:00Z"
+              }
+            ],
+            "next": "eyJmaWVsZCI6ImlkIiwiZmllbGRWYWx1ZSI6Nywic29ydERpcmVjdGlvbiI6ImFzYyIsImlkIjo3fQ"
+          }
+        },
+        {
+          "exchanges": [
+            {
+              "request": {
+                "method": "GET",
+                "url": "https://api.pipedrive.com/api/v2/deals?pipeline_id=1&status=open&limit=1&cursor=eyJmaWVsZCI6ImlkIiwiZmllbGRWYWx1ZSI6Nywic29ydERpcmVjdGlvbiI6ImFzYyIsImlkIjo3fQ"
+              },
+              "answer": {
+                "status": 200,
+                "headers": {
+                  "content-type": "application/json"
+                },
+                "body": {
+                  "success": true,
+                  "data": [
+                    {
+                      "id": 2,
+                      "title": "Deal Title",
+                      "creator_user_id": 1,
+                      "owner_id": 1,
+                      "value": 200,
+                      "person_id": 1,
+                      "org_id": 1,
+                      "stage_id": 1,
+                      "pipeline_id": 1,
+                      "currency": "USD",
+                      "archive_time": "2021-01-01T00:00:00Z",
+                      "add_time": "2021-01-01T00:00:00Z",
+                      "update_time": "2021-01-01T00:00:00Z",
+                      "stage_change_time": "2021-01-01T00:00:00Z",
+                      "status": "open",
+                      "is_archived": false,
+                      "is_deleted": false,
+                      "probability": 90,
+                      "lost_reason": "Lost Reason",
+                      "visible_to": 7,
+                      "close_time": "2021-01-01T00:00:00Z",
+                      "won_time": "2021-01-01T00:00:00Z",
+                      "lost_time": "2021-01-01T00:00:00Z",
+                      "local_won_date": "2021-01-01",
+                      "local_lost_date": "2021-01-01",
+                      "local_close_date": "2021-01-01",
+                      "expected_close_date": "2021-01-01",
+                      "label_ids": [
+                        1,
+                        2,
+                        3
+                      ],
+                      "origin": "ManuallyCreated",
+                      "origin_id": null,
+                      "channel": 52,
+                      "channel_id": "Jun23 Billboards",
+                      "source_lead_id": "35b0d604-eb0d-42d0-be11-eac8832051f0",
+                      "acv": 120,
+                      "arr": 120,
+                      "mrr": 10,
+                      "custom_fields": {}
+                    }
+                  ],
+                  "additional_data": {
+                    "next_cursor": null
+                  }
+                }
+              }
+            }
+          ],
+          "output": {
+            "items": [
+              {
+                "acv": 120,
+                "add_time": "2021-01-01T00:00:00Z",
+                "arr": 120,
+                "channel": 52,
+                "channel_id": "Jun23 Billboards",
+                "close_time": "2021-01-01T00:00:00Z",
+                "currency": "USD",
+                "custom_fields": {},
+                "expected_close_date": "2021-01-01",
+                "id": 2,
+                "is_archived": false,
+                "is_deleted": false,
+                "label_ids": [
+                  1,
+                  2,
+                  3
+                ],
+                "lost_reason": "Lost Reason",
+                "lost_time": "2021-01-01T00:00:00Z",
+                "mrr": 10,
+                "org_id": 1,
+                "origin": "ManuallyCreated",
+                "origin_id": null,
+                "owner_id": 1,
+                "person_id": 1,
+                "pipeline_id": 1,
+                "probability": 90,
+                "source_lead_id": "35b0d604-eb0d-42d0-be11-eac8832051f0",
+                "stage_change_time": "2021-01-01T00:00:00Z",
+                "stage_id": 1,
+                "status": "open",
+                "title": "Deal Title",
+                "update_time": "2021-01-01T00:00:00Z",
+                "value": 200,
+                "visible_to": 7,
+                "won_time": "2021-01-01T00:00:00Z"
+              }
+            ],
+            "next": null
+          }
+        }
+      ]
+    },
+    {
+      "tool": "deals.get",
+      "args": {
+        "id": 404
+      },
+      "error": "not_found",
+      "calls": [
+        {
+          "exchanges": [
+            {
+              "request": {
+                "method": "GET",
+                "url": "https://api.pipedrive.com/api/v2/deals/404"
+              },
+              "answer": {
+                "status": 404,
+                "headers": {
+                  "content-type": "application/json"
+                },
+                "body": {
+                  "success": false,
+                  "error": "Deal not found",
+                  "error_info": "Please check developers.pipedrive.com for more information about Pipedrive API.",
+                  "data": null,
+                  "additional_data": null
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

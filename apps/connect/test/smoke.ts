@@ -2,7 +2,6 @@
  * What the live smoke tests share: a connection holding a token taken as
  * is, and calls through connect's whole call path with it.
  */
-import type { OAuthProvider } from "@grasp-os/shared/connect";
 import { env } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
@@ -20,7 +19,7 @@ const person = "user-smoke";
 
 /** A shared connection to `server` holding `accessToken`, as OAuth would leave one. */
 export const smokeConnection = async (
-  provider: OAuthProvider,
+  provider: string,
   server: string,
   accessToken: string
 ): Promise<string> => {
