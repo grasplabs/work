@@ -100,11 +100,24 @@ const integrationsOf = (root: Element) => {
   };
 };
 
-/** The text of the list item naming `name`. */
-const memberOf = (root: Element, name: string): string =>
-  [...root.querySelectorAll("main li")].find((each) =>
-    [...each.querySelectorAll("span")].some((span) => span.textContent === name)
-  )?.textContent ?? "";
+/** The facts of the member named `name`, as their row in the members' table says them. */
+const memberOf = (root: Element, name: string): string[] => {
+  const row = [...root.querySelectorAll("main tr")].find(
+    (each) => each.querySelector("th")?.textContent === name
+  );
+  return [...(row?.querySelectorAll("td") ?? [])].map(
+    (cell) => cell.textContent ?? ""
+  );
+};
+
+/** The members' figure labelled `label`: its value, then what it says under it. */
+const memberFigureOf = (root: Element, label: string): string[] => {
+  const name = [...root.querySelectorAll('[aria-label="Its members"] p')].find(
+    (element) => element.textContent === label
+  );
+  const figures = name?.parentElement?.nextElementSibling;
+  return [...(figures?.children ?? [])].map((part) => part.textContent ?? "");
+};
 
 /** A client whose core doesn't answer now (`error`), never having answered. */
 const unread = (
@@ -331,12 +344,17 @@ describe("an organization's integrations, workflows and members", () => {
       anna: memberOf(closed.container, "Anna de Vries"),
       ben: memberOf(closed.container, "Ben Okafor").includes("Builder"),
       // No contract is known, so only the seats taken are counted.
-      seats: closed.main().includes("2 seats taken"),
+      seats: memberFigureOf(closed.container, "Seats taken"),
+      // A row writes to the member.
+      writes: closed.container
+        .querySelector('main a[aria-label="Write to Anna de Vries"]')
+        ?.getAttribute("href"),
       toCome: closed.main().includes("This section isn’t in the admin yet."),
     }).toStrictEqual({
-      anna: `AVAnna de Vriesanna@acme.testReady since ${joined}Role: Admin`,
+      anna: ["anna@acme.test", `Ready since ${joined}`, "Admin"],
       ben: true,
-      seats: true,
+      seats: ["2", "No contract known, so no seats to count against"],
+      writes: "mailto:anna@acme.test",
       toCome: false,
     });
   });
@@ -348,9 +366,11 @@ describe("an organization's integrations, workflows and members", () => {
       gate: { ...empty.gate, open: true, openedAt: empty.now },
     });
 
-    expect(memberOf(open.container, "Anna de Vries")).toBe(
-      `AVAnna de Vriesanna@acme.testIn since ${joined}Role: Admin`
-    );
+    expect(memberOf(open.container, "Anna de Vries")).toStrictEqual([
+      "anna@acme.test",
+      `In since ${joined}`,
+      "Admin",
+    ]);
   });
 
   it("says when nobody of an organization has made an account yet", async () => {
