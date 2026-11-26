@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 
 import { connections } from "../src/db/schema.ts";
 import { currentTools } from "../src/mcp-connectors.ts";
-import { auditEvents, callAs, outcome, someone } from "./connect.ts";
+import { appFor, auditEvents, callAs, outcome, someone } from "./connect.ts";
 import { linearOrigin } from "./linear-mcp-fake.ts";
 import type { LinearTool } from "./linear-mcp-fake.ts";
 import {
@@ -44,7 +44,7 @@ const connected = async () => {
   const connectionId = await connectLinear(connector, anna);
   const agent = chatAgent(anna);
   await callAs(agent, { connectionId, action: "list_issues", input: {} });
-  return { connector, connectionId, agent };
+  return { anna, connector, connectionId, agent };
 };
 
 /** Ends the kept list's freshness, as its `ttlMs` running out would. */
@@ -269,6 +269,57 @@ describe("a connector's tool list", () => {
       listRead: true,
       sent: 0,
     });
+  });
+
+  it("refuses a write blocked while it was made ready, sends it nothing, and frees its key", async () => {
+    const { anna, connector, connectionId } = await connected();
+    const app = appFor(anna.userId);
+    const save = {
+      connectionId,
+      action: "save_issue",
+      input: { title: "Fix it", team: "Engineering" },
+      idempotencyKey: "run-1:save",
+    };
+    await listExpires(connectionId);
+    const serve = vi.mocked(globalThis.fetch).getMockImplementation();
+    if (serve === undefined) {
+      throw new Error("Expected the internet to be stood up");
+    }
+    let blocking = true;
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      const request = new Request(input, init);
+      const { origin } = new URL(request.url);
+      const rpc =
+        origin === linearOrigin && request.method === "POST"
+          ? await rpcOf(request)
+          : undefined;
+      // The admin blocks it after connect checked it first, while the
+      // call is made ready.
+      if (blocking && rpc?.method === "tools/list") {
+        blocking = false;
+        await exports.default.blockConnectorTool({
+          person: admin(),
+          connector,
+          tool: "save_issue",
+          blocked: true,
+        });
+      }
+      return await serve(request);
+    });
+    const refused = await outcome(callAs(app, save));
+    await exports.default.blockConnectorTool({
+      person: admin(),
+      connector,
+      tool: "save_issue",
+      blocked: false,
+    });
+    const again = await outcome(callAs(app, save));
+
+    expect({
+      refused,
+      again,
+      sent: linear.calls.filter(({ name }) => name === "save_issue").length,
+    }).toStrictEqual({ refused: "connect.tool_blocked", again: "ok", sent: 1 });
   });
 
   it("is read again no sooner than a minute later, whatever the server says", async () => {

@@ -884,13 +884,15 @@ export const connectorAction = async (
         connection,
         (method, name) => method === "tools/call" && name === callName
       );
-      // Blocked while its list or credential was read: still nothing goes out.
-      const blockedSince = await blockedToolsOf(env.DB, connection.server);
-      if (blockedSince.has(action)) {
-        throw connectErrors.create("connect.tool_blocked");
-      }
       return {
         call: async (name, input) => {
+          // Checked again last, after its list and credential were read
+          // and a write's key claimed: a tool blocked by then gets nothing
+          // (call.ts frees the key).
+          const blockedSince = await blockedToolsOf(env.DB, connection.server);
+          if (blockedSince.has(action)) {
+            throw connectErrors.create("connect.tool_blocked");
+          }
           const sent: Record<string, string> = {};
           for (const [property, header] of headers) {
             const value = input[property];
