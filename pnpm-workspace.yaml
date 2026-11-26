@@ -115,6 +115,10 @@ catalog:
   # dereferenced, without fetching anything) for the connector generator
   # (packages/compiler/src/openapi.ts).
   "@scalar/openapi-parser": 0.29.26
+  # The Public Suffix List (MIT): which labels of a connector's host are its
+  # registrable domain, a brand's name, in the class rules
+  # (packages/runtime/src/connector/tool-rules.ts).
+  tldts: 7.4.13
   # Bundles an App's approved npm packages in the package builder's isolate
   # (packages/compiler/src/packages), run on workerd.
   esbuild-wasm: 0.28.2

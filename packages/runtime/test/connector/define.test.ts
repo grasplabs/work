@@ -583,7 +583,11 @@ describe("a connector's definition", () => {
     expect(savingTo("hooks.slack.com")).toThrow(
       "notes.save: a route's host names what Grasp never does"
     );
+    expect(savingTo("hooks.example.co.uk")).toThrow(
+      "notes.save: a route's host names what Grasp never does"
+    );
     expect(savingTo("api.clearbit.com")).not.toThrow();
+    expect(savingTo("api.payfit.co.uk")).not.toThrow();
   });
 
   it("refuses a read whose path changes or delivers", () => {

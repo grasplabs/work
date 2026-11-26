@@ -1098,7 +1098,7 @@ const readMethods: ReadonlySet<string> = new Set(["GET", "HEAD"]);
 export interface DeclaredTool {
   readOnly: boolean;
   reach: ToolReach;
-  routes: readonly { method: string; host: string; path: string }[];
+  routes: readonly { method: string; path: string }[];
   contract: { input: Json };
 }
 
@@ -1146,13 +1146,6 @@ export const declarationProblem = (
   }
   if (routes.some(({ path }) => isNeverPath(path))) {
     return "a route's path names what Grasp never does";
-  }
-  // The labels left of the domain (`hooks` of `hooks.slack.com`): a
-  // domain is a brand's name, which may hold a word (`clearbit`, `payfit`).
-  if (
-    routes.some(({ host }) => host.split(".").slice(0, -2).some(isNeverTool))
-  ) {
-    return "a route's host names what Grasp never does";
   }
   if (readOnly && routes.some(({ method }) => !readMethods.has(method))) {
     return "it is read-only, so it sends only GET and HEAD requests";
