@@ -67,7 +67,7 @@ export type ClientSummary =
        * there stays readable until it updates.
        */
       state: "older";
-      admin: ClientAdmin;
+      admin: Extract<ClientAdmin, { state: "answered" }>;
     }
   | { client: GridRow; state: "not_deployed" | "unreachable" };
 
@@ -320,11 +320,12 @@ export const clientSummaries = async (
       ]);
       if (summary === "older") {
         // As before the summary: its full snapshot, read as `staff`, whom
-        // its audit log records, for this client alone.
+        // its audit log records, for this client alone. Not read either, it
+        // is a client whose core didn't answer.
         const [admin] = await clientAdmins(env, staff, options, client.id);
-        return admin === undefined
-          ? { client, state: "unreachable" }
-          : { client, state: "older", admin };
+        return admin?.state === "answered"
+          ? { client, state: "older", admin }
+          : { client, state: "unreachable" };
       }
       return summary === null
         ? { client, state: "unreachable" }

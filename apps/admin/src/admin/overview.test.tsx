@@ -11,7 +11,12 @@ import {
   summaryOf,
 } from "../../test/app.tsx";
 import type { Answers } from "../../test/app.tsx";
-import { daysAgo, readySnapshot, toldSnapshot } from "../../test/snapshots.ts";
+import {
+  daysAgo,
+  emptyAdminSnapshot,
+  readySnapshot,
+  toldSnapshot,
+} from "../../test/snapshots.ts";
 import type { ClientAdmin } from "../clients/admin.ts";
 import type { GridRow } from "../clients/grid.ts";
 
@@ -256,15 +261,27 @@ describe("the admin's frame", () => {
     });
   });
 
-  it("leaves out of the Apps asked for count a company that doesn't share it", async () => {
+  it("leaves out of the Apps asked for count a company that doesn't share it, and counts one on an older core from its snapshot", async () => {
     const acme = row("acme");
     const ended = row("ended");
+    const older = row("older");
     const shared = answeredSummary({ client: acme, asked: 2 });
     const notShared = answeredSummary({ client: ended, asked: 5 });
     const { container } = await openAdmin("/platform/releases", {
-      fetchClientGrid: [acme, ended],
+      fetchClientGrid: [acme, ended, older],
       fetchClientSummaries: [
         shared,
+        {
+          client: older,
+          state: "older",
+          admin: answeredAdmin({
+            client: older,
+            snapshot: {
+              ...emptyAdminSnapshot("Older"),
+              asked: [asked("Exact", 3)],
+            },
+          }),
+        },
         notShared.state === "answered"
           ? {
               ...notShared,
@@ -277,7 +294,7 @@ describe("the admin's frame", () => {
     const sidebar =
       container.querySelector('[data-slot="sidebar"]')?.textContent ?? "";
 
-    expect(sidebar).toContain("2 apps asked for");
+    expect(sidebar).toContain("3 apps asked for");
   });
 
   it("says nothing is asked for yet where the table of apps goes, with nothing to act on", async () => {
