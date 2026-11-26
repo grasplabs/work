@@ -7,6 +7,12 @@
  * core now. Nothing caps these features: this is where staff watch them.
  */
 
+import { aiProviderIdSchema, aiProviders } from "@grasp-os/shared/ai-providers";
+import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
+import type { PlatformAiFeature } from "@grasp-os/shared/platform-ai";
+import { CardContent } from "@grasp-os/ui/components/card";
+import { Link } from "@grasp-os/ui/components/link";
+import { Stat } from "@grasp-os/ui/components/stat";
 import {
   Table,
   TableBody,
@@ -14,21 +20,28 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/app-kit/components/table";
-import { aiProviderIdSchema, aiProviders } from "@grasp-os/shared/ai-providers";
-import type { AiStatusReport } from "@grasp-os/shared/ai-status-report";
-import type { PlatformAiFeature } from "@grasp-os/shared/platform-ai";
-import { Await, Link } from "@tanstack/react-router";
+} from "@grasp-os/ui/components/table";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
+import { Await, Link as RouterLink } from "@tanstack/react-router";
 
-import { Figure } from "./parts.tsx";
+import { Panel, PanelNote } from "./panel.tsx";
 import { microsPerDollar, organizationSpendOf } from "./platform-spend-sums.ts";
 import type {
   OrganizationSpend,
   PlatformSpend,
   SpendOverview,
 } from "./platform-spend-sums.ts";
-import { Section } from "./section.tsx";
 import { dollars, formatMonth } from "./words.ts";
+
+const styles = stylex.create({
+  // This month and last, side by side.
+  months: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: space["4"],
+  },
+});
 
 const featureWords: Record<PlatformAiFeature, string> = {
   // No release converts documents any more; its old rows still read so.
@@ -52,9 +65,6 @@ const modelLabel = (model: string): string => {
 
 /** Micros as dollars, to the cent. */
 const spent = (micros: number): string => dollars(micros / microsPerDollar);
-
-/** What the prices are, said once under each figure. */
-const pricesLine = "US dollars at list prices";
 
 /** One row of a split: what it is, and what it cost this month and last. */
 interface SplitRow {
@@ -100,15 +110,15 @@ const SplitTable = ({
   overview: SpendOverview;
   rows: SplitRow[];
 }) => (
-  <div className="border-t">
+  <CardContent flush>
     <Table aria-label={label}>
       <TableHeader>
         <TableRow>
-          <TableHead variant="section">{label}</TableHead>
-          <TableHead className="text-right" variant="section">
+          <TableHead>{label}</TableHead>
+          <TableHead align="end">
             {formatMonth(overview.thisMonth.period)}
           </TableHead>
-          <TableHead className="text-right" variant="section">
+          <TableHead align="end">
             {formatMonth(overview.lastMonth.period)}
           </TableHead>
         </TableRow>
@@ -116,44 +126,38 @@ const SplitTable = ({
       <TableBody>
         {rows.map((row) => (
           <TableRow key={row.key}>
-            <TableCell variant="section">{row.label}</TableCell>
-            <TableCell className="text-right" variant="section">
-              <span className="tabular-nums">{spent(row.thisMonth)}</span>
-            </TableCell>
-            <TableCell className="text-right" variant="section">
-              <span className="tabular-nums">{spent(row.lastMonth)}</span>
-            </TableCell>
+            <TableCell rowHeader>{row.label}</TableCell>
+            <TableCell align="end">{spent(row.thisMonth)}</TableCell>
+            <TableCell align="end">{spent(row.lastMonth)}</TableCell>
           </TableRow>
         ))}
       </TableBody>
     </Table>
-  </div>
+  </CardContent>
 );
 
 /** This month and last in all, then by feature and by model. */
 const SpendBody = ({ overview }: { overview: SpendOverview }) => {
   const { thisMonth, lastMonth } = overview;
   if (thisMonth.micros + lastMonth.micros === 0) {
-    return (
-      <p className="text-muted-foreground border-t px-5 py-4">
-        Nothing on Grasp’s keys this month or last.
-      </p>
-    );
+    return <PanelNote>Nothing on Grasp’s keys this month or last.</PanelNote>;
   }
   return (
     <>
-      <div className="bg-border grid grid-cols-2 gap-px border-t">
-        <Figure
-          label={formatMonth(thisMonth.period)}
-          sub={pricesLine}
-          value={spent(thisMonth.micros)}
-        />
-        <Figure
-          label={formatMonth(lastMonth.period)}
-          sub={pricesLine}
-          value={spent(lastMonth.micros)}
-        />
-      </div>
+      <CardContent>
+        <div {...stylex.props(styles.months)}>
+          <Stat
+            label={formatMonth(thisMonth.period)}
+            unstyled
+            value={spent(thisMonth.micros)}
+          />
+          <Stat
+            label={formatMonth(lastMonth.period)}
+            unstyled
+            value={spent(lastMonth.micros)}
+          />
+        </div>
+      </CardContent>
       <SplitTable
         label="By feature"
         overview={overview}
@@ -180,11 +184,6 @@ const SpendBody = ({ overview }: { overview: SpendOverview }) => {
   );
 };
 
-/** A line in place of the figures while they are read, or when they can't be. */
-const Line = ({ children }: { children: string }) => (
-  <p className="text-muted-foreground border-t px-5 py-4">{children}</p>
-);
-
 /** What its core reported, or that its release doesn't report it yet. */
 const OrganizationSpendBody = ({
   overview,
@@ -192,10 +191,10 @@ const OrganizationSpendBody = ({
   overview: SpendOverview | null;
 }) =>
   overview === null ? (
-    <Line>
+    <PanelNote>
       Not reported by this release: its core runs a release from before these
       costs were reported. They show once it is updated.
-    </Line>
+    </PanelNote>
   ) : (
     <SpendBody overview={overview} />
   );
@@ -209,22 +208,22 @@ export const OrganizationPlatformSpend = ({
 }: {
   status: Promise<AiStatusReport | null>;
 }) => (
-  <Section
+  <Panel
     description="What transcription and speech cost Grasp on its own keys for this organization: what each call used, recorded after it, in US dollars at list prices, read from its core now. Nothing caps them."
     title="Grasp’s own AI features"
   >
-    <Await fallback={<Line>Reading its core…</Line>} promise={status}>
+    <Await fallback={<PanelNote>Reading its core…</PanelNote>} promise={status}>
       {(report) =>
         report === null ? (
-          <Line>
+          <PanelNote>
             Its core didn’t answer, so what they cost isn’t known now.
-          </Line>
+          </PanelNote>
         ) : (
           <OrganizationSpendBody overview={organizationSpendOf(report)} />
         )
       }
     </Await>
-  </Section>
+  </Panel>
 );
 
 /** The organizations that cost the most this month, then last, each linked to its AI use. */
@@ -235,15 +234,15 @@ const TopOrganizations = ({
   overview: SpendOverview;
   top: OrganizationSpend[];
 }) => (
-  <div className="border-t">
+  <CardContent flush>
     <Table aria-label="Top organizations">
       <TableHeader>
         <TableRow>
-          <TableHead variant="section">Organization</TableHead>
-          <TableHead className="text-right" variant="section">
+          <TableHead>Organization</TableHead>
+          <TableHead align="end">
             {formatMonth(overview.thisMonth.period)}
           </TableHead>
-          <TableHead className="text-right" variant="section">
+          <TableHead align="end">
             {formatMonth(overview.lastMonth.period)}
           </TableHead>
         </TableRow>
@@ -251,30 +250,23 @@ const TopOrganizations = ({
       <TableBody>
         {top.map((organization) => (
           <TableRow key={organization.clientId}>
-            <TableCell variant="section">
-              <Link
-                className="hover:underline"
-                params={{ clientId: organization.clientId }}
-                to="/organizations/$clientId/ai-use"
-              >
-                {organization.name}
+            <TableCell rowHeader>
+              <Link asChild variant="plain">
+                <RouterLink
+                  params={{ clientId: organization.clientId }}
+                  to="/organizations/$clientId/ai-use"
+                >
+                  {organization.name}
+                </RouterLink>
               </Link>
             </TableCell>
-            <TableCell className="text-right" variant="section">
-              <span className="tabular-nums">
-                {spent(organization.thisMonth)}
-              </span>
-            </TableCell>
-            <TableCell className="text-right" variant="section">
-              <span className="tabular-nums">
-                {spent(organization.lastMonth)}
-              </span>
-            </TableCell>
+            <TableCell align="end">{spent(organization.thisMonth)}</TableCell>
+            <TableCell align="end">{spent(organization.lastMonth)}</TableCell>
           </TableRow>
         ))}
       </TableBody>
     </Table>
-  </div>
+  </CardContent>
 );
 
 /** Which organizations aren't in the sums, as their core didn't answer. */
@@ -294,14 +286,14 @@ export const PlatformSpendPanel = ({
 }: {
   spend: Promise<PlatformSpend | null>;
 }) => (
-  <Section
+  <Panel
     description="Every active organization’s, summed: what each call used, recorded after it, in US dollars at list prices, read from each core now. Nothing caps them."
     title="What they cost"
   >
-    <Await fallback={<Line>Reading each core…</Line>} promise={spend}>
+    <Await fallback={<PanelNote>Reading each core…</PanelNote>} promise={spend}>
       {(all) => {
         if (all === null) {
-          return <Line>The organizations couldn’t be read now.</Line>;
+          return <PanelNote>The organizations couldn’t be read now.</PanelNote>;
         }
         return (
           <>
@@ -309,13 +301,15 @@ export const PlatformSpendPanel = ({
             {all.top.length === 0 ? null : (
               <TopOrganizations overview={all} top={all.top} />
             )}
-            {all.unread.length === 0 ? null : <Line>{unreadLine(all)}</Line>}
+            {all.unread.length === 0 ? null : (
+              <PanelNote>{unreadLine(all)}</PanelNote>
+            )}
             {all.unreported.length === 0 ? null : (
-              <Line>{unreportedLine(all)}</Line>
+              <PanelNote>{unreportedLine(all)}</PanelNote>
             )}
           </>
         );
       }}
     </Await>
-  </Section>
+  </Panel>
 );
