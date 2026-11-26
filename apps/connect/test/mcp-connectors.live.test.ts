@@ -29,7 +29,11 @@ import { describe, expect, it } from "vite-plus/test";
 import { z } from "zod";
 
 import { callAs, someone } from "./connect.ts";
-import { chatAgent, confirmHeld } from "./mcp-connectors-harness.ts";
+import {
+  chatAgent,
+  confirmHeld,
+  generatedConnector,
+} from "./mcp-connectors-harness.ts";
 
 const live = z
   .object({
@@ -88,13 +92,17 @@ describe.runIf(live.success)(
         const admin = someone("admin");
         const named = config?.MCP_LIVE_CONNECTOR ?? "";
         const added = URL.canParse(named)
-          ? await exports.default.addConnector({
-              person: admin,
-              name: "Live",
-              url: named,
-              origin: callback,
-              auth: { kind: "oauth" },
-            })
+          ? await exports.default.addConnector(
+              generatedConnector(
+                admin,
+                {
+                  name: "Live",
+                  url: named,
+                  auth: { kind: "oauth" },
+                },
+                callback
+              )
+            )
           : { id: named };
         const connector = added.id;
         const { url } = await exports.default.startConnection({

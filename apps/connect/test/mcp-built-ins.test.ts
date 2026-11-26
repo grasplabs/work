@@ -23,6 +23,7 @@ import type { Call } from "./connect.ts";
 import { sampleTrackerOrigin } from "./fixtures/sample-mcp-key-connector.ts";
 import {
   admin,
+  generatedConnector,
   chatAgent,
   confirmHeld,
   connectLinear,
@@ -48,10 +49,13 @@ import { racingDb, racingRead } from "./racing-db.ts";
 mcpInternet();
 const audit = auditEvents();
 
-/** Makes the built-in Linear's row look made for another URL, as before a release moved it. */
+/**
+ * Makes the built-in Linear's row look made for another URL, as an
+ * earlier release moves it: its URL and client, never its `server`.
+ */
 const madeForAnotherUrl = async (): Promise<void> => {
   await env.DB.prepare(
-    "UPDATE connectors SET url = ?, client_id = ? WHERE id = ?"
+    "UPDATE connectors SET url = ?1, client_id = ?2 WHERE id = ?3"
   )
     .bind("https://mcp.linear-old.example/mcp", "old-client", "linear")
     .run();
@@ -253,13 +257,13 @@ describe("a built-in connector serving its vendor's MCP server", () => {
   it("is refused when an admin adds its server by hand, before anything is asked of the server", async () => {
     expect({
       added: await outcome(
-        exports.default.addConnector({
-          person: admin(),
-          name: "Linear",
-          url: linearItself.url,
-          origin: clientOrigin,
-          auth: { kind: "oauth" },
-        })
+        exports.default.addConnector(
+          generatedConnector(admin(), {
+            name: "Linear",
+            url: linearItself.url,
+            auth: { kind: "oauth" },
+          })
+        )
       ),
       asked: linearItself.metadataRequests.length,
       rows: await rowsOf("linear"),
@@ -289,7 +293,7 @@ describe("a built-in connector serving its vendor's MCP server", () => {
     // token is due for refreshing, and a revoke of it is owed.
     await env.DB.batch([
       env.DB.prepare(
-        "UPDATE connectors SET url = ?, client_id = ? WHERE id = ?"
+        "UPDATE connectors SET url = ?1, server = ?1, client_id = ?2 WHERE id = ?3"
       ).bind("https://mcp.linear-old.example/mcp", "old-client", "linear"),
       env.DB.prepare(
         "UPDATE connection_tokens SET access_expires_at = 0 WHERE connection_id = ?"
@@ -418,6 +422,27 @@ describe("a built-in connector serving its vendor's MCP server", () => {
     });
   });
 
+  it("goes by its release's title, whatever its row was made with, its sign-in and connections as they are", async () => {
+    const anna = someone();
+    const annas = await connectLinear("linear", anna, "personal", linearItself);
+    await env.DB.prepare("UPDATE connectors SET name = ? WHERE id = ?")
+      .bind("Linear, as it was called", "linear")
+      .run();
+    const registered = linearItself.registrations.length;
+    await startLinear("linear", someone());
+    const listed = await exports.default.listConnections(anna);
+    const named = listed.find(({ id }) => id === annas)?.name;
+    expect({
+      named,
+      registrations: linearItself.registrations.length - registered,
+      annas: await stateOf(annas),
+    }).toStrictEqual({
+      named: "Linear",
+      registrations: 0,
+      annas: { status: "active", tokens: 1 },
+    });
+  });
+
   it("confirms no action held before its server moved, once its person signs in again, and counts it in the move's event", async () => {
     await parkEarlierLinears();
     const anna = someone();
@@ -461,32 +486,6 @@ describe("a built-in connector serving its vendor's MCP server", () => {
       confirmed: "connect.pending_not_found",
       saved: [],
       heldDropped: [1],
-    });
-  });
-
-  it("takes a new title as a new name, its sign-in and connections as they are", async () => {
-    const annas = await connectLinear(
-      "linear",
-      someone(),
-      "personal",
-      linearItself
-    );
-    await env.DB.prepare("UPDATE connectors SET name = ? WHERE id = ?")
-      .bind("Linear, as it was called", "linear")
-      .run();
-    const registered = linearItself.registrations.length;
-    await startLinear("linear", someone());
-    const named = await env.DB.prepare(
-      "SELECT name FROM connectors WHERE id = 'linear'"
-    ).first<string>("name");
-    expect({
-      named,
-      registrations: linearItself.registrations.length - registered,
-      annas: await stateOf(annas),
-    }).toStrictEqual({
-      named: "Linear",
-      registrations: 0,
-      annas: { status: "active", tokens: 1 },
     });
   });
 
@@ -544,11 +543,10 @@ describe("a built-in connector serving its vendor's MCP server", () => {
     });
   });
 
-  it("sends no credential read as its server moved to the server it moved from", async () => {
+  it("sends no credential read as another release moved its row away", async () => {
     await parkEarlierLinears();
     const anna = someone();
     const annas = await connectLinear("linear", anna, "personal", linearItself);
-    await madeForAnotherUrl();
     const connection = await drizzle(env.DB)
       .select()
       .from(connections)
@@ -558,8 +556,9 @@ describe("a built-in connector serving its vendor's MCP server", () => {
       throw new Error("Expected Anna's connection");
     }
     const before = sent.length;
-    // Once the list's request read the row it sends to, the release moves
-    // it and Anna signs in again, just before her credential is read.
+    // Once the list's request read the row as this release's, another
+    // release (a rollback) moves it to the server it serves, just before
+    // her credential is read: what it reads is no longer this server's.
     let moved = false;
     const listed = await outcome(
       currentTools(
@@ -567,8 +566,7 @@ describe("a built-in connector serving its vendor's MCP server", () => {
           ...env,
           DB: racingRead(/from "connection_tokens"/iu, async () => {
             moved = true;
-            await startLinear("linear", someone());
-            await connectLinear("linear", anna, "personal", linearItself);
+            await madeForAnotherUrl();
           }),
         },
         { ...connection, toolListFreshUntil: null }
@@ -577,13 +575,13 @@ describe("a built-in connector serving its vendor's MCP server", () => {
     expect({
       moved,
       listed,
-      toOld: sent
+      sent: sent
         .slice(before)
-        .filter(({ url }) => url.startsWith("https://mcp.linear-old.example")),
+        .filter(({ url }) => url.startsWith(linearItself.origin)),
     }).toStrictEqual({
       moved: true,
       listed: "connect.server_unavailable",
-      toOld: [],
+      sent: [],
     });
   });
 

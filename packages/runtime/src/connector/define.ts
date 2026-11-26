@@ -333,12 +333,21 @@ export const auth = Object.freeze({
  * The vendor's own MCP server, which a connector serves: every tool its
  * `tools/list` names, classed by the rules. `registration` says how
  * Grasp gets a client there: `"dcr"`, the server registers it;
- * `{ header }`, each person types a key that goes in that header.
+ * `"client"`, an admin enters the one its vendor issued; `{ header }`,
+ * each person types a key that goes in that header.
  */
 export interface McpDeclaration {
-  /** The server's URL: https, without credentials, query or fragment. */
+  /**
+   * The server's URL, without credentials, query or fragment: https, or
+   * plain http with `network: "company"`.
+   */
   url: string;
-  registration: "dcr" | { header: string };
+  registration: "dcr" | "client" | { header: string };
+  /**
+   * `company`: the server sits inside the company's own network, reached
+   * through the deployment's company network; it takes a key in a header.
+   */
+  network?: "company";
 }
 
 interface DeclarationBase {

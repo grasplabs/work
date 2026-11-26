@@ -29,7 +29,6 @@ import type {
   PackageTarball,
 } from "@grasp-os/shared/packages";
 import type { Message, OnResolveResult, Plugin } from "esbuild-wasm";
-import { build, initialize } from "esbuild-wasm/esm/browser.js";
 import { unpackTar } from "modern-tar";
 import {
   exports as exportsOf,
@@ -38,6 +37,7 @@ import {
 } from "resolve.exports";
 
 import { kitPeers } from "../kit.ts";
+import { startedEsbuild } from "./esbuild.ts";
 
 /**
  * Where a build runs: a page, in the browser, beside the kit's React; or
@@ -369,9 +369,6 @@ const lockPlugin = (
   };
 };
 
-/** esbuild, started once per isolate on the module it was loaded with. */
-let started: Promise<void> | undefined;
-
 /** Most refusals one answer carries, each cut to what core takes. */
 const maxRefusals = 50;
 const refusalLength = 500;
@@ -398,8 +395,7 @@ export const buildLock = async (
   target: PackageTarget,
   wasmModule: WebAssembly.Module
 ): Promise<PackageBuildAnswer> => {
-  started ??= initialize({ wasmModule, worker: false });
-  await started;
+  const build = await startedEsbuild(wasmModule);
   const packages = new Map<string, Unpacked>();
   const budget = { left: packageLimits.extractedBytes };
   try {

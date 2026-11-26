@@ -166,9 +166,9 @@ const AddConnectorForm = ({
     });
     // Read here only to say which field is wrong; core and connect read it
     // again. The schema takes plain HTTP for a server in the company
-    // network, which connect checks; anywhere else it is refused here too.
+    // network, which its manifest holds it to; anywhere else it is refused
+    // here too.
     const parsed = addConnectorSchema
-      .omit({ person: true, origin: true })
       .refine(
         (connector) =>
           connector.companyNetwork === true ||

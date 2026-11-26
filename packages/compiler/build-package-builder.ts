@@ -16,6 +16,7 @@ import path from "node:path";
 import { build } from "vite-plus";
 import type { InlineConfig, Rolldown } from "vite-plus";
 
+import { buildConnectorSdk } from "./build-connectors.ts";
 import { compilerAssets } from "./src/kit.ts";
 
 const root = import.meta.dirname;
@@ -41,17 +42,35 @@ export const chunksOf = (
     .flatMap((output) => ("output" in output ? output.output : []))
     .filter((file) => file.type === "chunk");
 
+/** Where the package builder's code imports the SDK's connector module. */
+const connectorSdkImport = "#connector-sdk";
+const connectorSdkId = "\0connector-sdk-module";
+
 /**
  * The package builder's module (src/packages/worker.ts), which core runs
  * in an isolate of its own for each use. It runs without Node.js
- * compatibility: nothing it bundles may import Node's built-ins.
+ * compatibility: nothing it bundles may import Node's built-ins. It
+ * carries `@grasp-os/sdk/connector` as one module, which it builds a
+ * connector with (`buildConnectorSdk`).
  */
 export const buildPackageBuilder = async (): Promise<string> => {
+  const sdkModule = await buildConnectorSdk();
   const config: InlineConfig = {
     configFile: false,
     root,
     logLevel: "warn",
     mode: "production",
+    plugins: [
+      {
+        name: "connector-sdk",
+        enforce: "pre",
+        resolveId: (id) => (id === connectorSdkImport ? connectorSdkId : null),
+        load: (id) =>
+          id === connectorSdkId
+            ? `export default ${JSON.stringify(sdkModule)};`
+            : null,
+      },
+    ],
     resolve: { conditions: ["workerd", "worker", "browser"] },
     ssr: { noExternal: true, target: "webworker" },
     define: production,

@@ -5,6 +5,7 @@ import { startCompanyNetwork } from "./test/company-network-fake.ts";
 import {
   testComposioClassesFile,
   testConnectorsFile,
+  testUrlConnectorFile,
 } from "./test/global-setup.ts";
 import {
   appClients,
@@ -70,6 +71,8 @@ export default defineProject({
       "#connectors": testConnectorsFile,
       // The classes of the fake Composio's tools, for the release's.
       "#composio-classes": testComposioClassesFile,
+      // A connector made from a URL, as core builds it (see the setup).
+      "#test-url-connector": testUrlConnectorFile,
     },
   },
   test: {

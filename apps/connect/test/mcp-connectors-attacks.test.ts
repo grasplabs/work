@@ -1,11 +1,14 @@
+import { isRecord } from "@grasp-os/shared/json";
 import { env, exports } from "cloudflare:workers";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import bundled from "#connectors";
+
+import { manifestIn } from "../src/connectors.ts";
 import {
   appFor,
   auditEvents,
   callAs,
-  clientOrigin,
   connectWith,
   outcome,
   someone,
@@ -13,6 +16,7 @@ import {
 import {
   addLinear,
   admin,
+  generatedConnector,
   chatAgent,
   confirmHeld,
   connectLinear,
@@ -106,13 +110,13 @@ const signInServer = (
 
 /** Adds the server at `url` as a connector signing in with OAuth. */
 const addServer = async (url: string, person = admin()) =>
-  await exports.default.addConnector({
-    person,
-    name: "A server",
-    url,
-    origin: clientOrigin,
-    auth: { kind: "oauth" },
-  });
+  await exports.default.addConnector(
+    generatedConnector(person, {
+      name: "A server",
+      url,
+      auth: { kind: "oauth" },
+    })
+  );
 
 describe("a connector's server", () => {
   it("is cut off for an answer too large, malformed, or of another request", async () => {
@@ -494,13 +498,13 @@ describe("a connector's server", () => {
     const notes = keyServer(origin, "notes-key");
     const serve = servers.get(origin);
     const bob = someone();
-    const { id: provider } = await exports.default.addConnector({
-      person: admin(),
-      name: "Notes",
-      url: notes,
-      origin: clientOrigin,
-      auth: { kind: "header", header: "X-Api-Key" },
-    });
+    const { id: provider } = await exports.default.addConnector(
+      generatedConnector(admin(), {
+        name: "Notes",
+        url: notes,
+        auth: { kind: "header", header: "X-Api-Key" },
+      })
+    );
     const connect = async () =>
       await exports.default.connectWithKey({
         person: bob,
@@ -563,13 +567,13 @@ describe("a connector's server", () => {
     const { connectionId } = await connected();
     const bob = someone();
     const notes = keyServer("https://mcp.notes.example", "notes-key");
-    const { id: notesConnector } = await exports.default.addConnector({
-      person: admin(),
-      name: "Notes",
-      url: notes,
-      origin: clientOrigin,
-      auth: { kind: "header", header: "X-Api-Key" },
-    });
+    const { id: notesConnector } = await exports.default.addConnector(
+      generatedConnector(admin(), {
+        name: "Notes",
+        url: notes,
+        auth: { kind: "header", header: "X-Api-Key" },
+      })
+    );
     const { connectionId: notesConnection } =
       await exports.default.connectWithKey({
         person: bob,
@@ -679,5 +683,125 @@ describe("a connector's server", () => {
       { detail: { outcome: "refused", reason: "role.forbidden" } },
     ]);
     expect(added).toHaveLength(2);
+  });
+});
+
+describe("a connector made from a URL, as core sends it", () => {
+  it("is kept only as the platform generated it: never another source, code that makes another manifest, a client it doesn't take, or a network it wasn't made for", async () => {
+    const asked = generatedConnector(admin(), {
+      name: "Linear",
+      url: linear.url,
+      auth: { kind: "oauth" },
+    });
+    const keyed = generatedConnector(admin(), {
+      name: "Linear",
+      url: linear.url,
+      auth: { kind: "header", header: "X-Api-Key" },
+    });
+    const inside = ', network: "company"';
+    const sample = bundled.find(
+      ({ manifest }) => isRecord(manifest) && manifest.name === "sample-key"
+    );
+    const notes = generatedConnector(admin(), {
+      name: "Notes",
+      url: linear.url,
+      auth: { kind: "oauth" },
+    });
+    const tampered = {
+      source: {
+        ...asked,
+        source: asked.source.replace(
+          "defineConnector({",
+          'defineConnector({ hosts: ["api.linear.app"],'
+        ),
+      },
+      title: { ...asked, source: asked.source.replace('"Linear"', '"Notes"') },
+      code: { ...asked, code: sample?.code ?? "" },
+      codeForAnotherTitle: {
+        ...asked,
+        code: notes.code.replaceAll(notes.id, asked.id),
+      },
+      unloadable: { ...asked, code: "export default {};" },
+      client: { ...asked, client: { id: "a-client" } },
+      networkInSource: {
+        ...keyed,
+        source: keyed.source.replace("} },", `}${inside} },`),
+      },
+      networkInCode: {
+        ...keyed,
+        code: keyed.code.replace(
+          '{header:"x-api-key"}',
+          '{header:"x-api-key"},network:"company"'
+        ),
+      },
+    };
+    const refused: Record<string, string> = {};
+    for (const [attempt, request] of Object.entries(tampered)) {
+      // oxlint-disable-next-line no-await-in-loop -- each on the same ID
+      refused[attempt] = await outcome(exports.default.addConnector(request));
+    }
+    const versionsOf = async () =>
+      await env.DB.prepare(
+        "SELECT count(*) AS count FROM connector_versions WHERE connector = ?"
+      )
+        .bind(asked.id)
+        .first<number>("count");
+    const kept = await versionsOf();
+    const { id } = await exports.default.addConnector(asked);
+    expect({
+      refused,
+      kept,
+      added: id,
+      versions: await versionsOf(),
+    }).toStrictEqual({
+      refused: {
+        source: "connection.invalid",
+        title: "connection.invalid",
+        code: "connection.invalid",
+        codeForAnotherTitle: "connection.invalid",
+        unloadable: "connection.invalid",
+        client: "connection.invalid",
+        networkInSource: "connection.invalid",
+        networkInCode: "connection.invalid",
+      },
+      kept: 0,
+      added: asked.id,
+      versions: 1,
+    });
+  });
+
+  it("is kept only while the manifest its code makes is a connector made from a URL's alone: no tools or hosts of its own beside its server", async () => {
+    const asked = generatedConnector(admin(), {
+      name: "Linear",
+      url: linear.url,
+      auth: { kind: "oauth" },
+    });
+    const made = await manifestIn(env.LOADER, asked.code);
+    const sample = bundled.find(
+      ({ manifest }) => isRecord(manifest) && manifest.name === "sample-key"
+    );
+    // Code that answers its manifest as `made` with `more`, as
+    // hand-written code could: its source is still the generated one.
+    const answering = (more: Record<string, unknown>) => ({
+      ...asked,
+      code: `export default { fetch: async (request) => { const { id } = await request.json(); return Response.json({ jsonrpc: "2.0", id, result: ${JSON.stringify(isRecord(made) ? { ...made, ...more } : {})} }); } };`,
+    });
+    const refused = {
+      tool: await outcome(
+        exports.default.addConnector(
+          answering({
+            actions: isRecord(sample?.manifest) ? sample.manifest.actions : {},
+          })
+        )
+      ),
+      host: await outcome(
+        exports.default.addConnector(answering({ hosts: ["api.linear.app"] }))
+      ),
+    };
+    const { id } = await exports.default.addConnector(answering({}));
+    expect({ refused, added: id }).toStrictEqual({
+      refused: { tool: "connection.invalid", host: "connection.invalid" },
+      added: asked.id,
+    });
   });
 });

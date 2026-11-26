@@ -1,9 +1,15 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
+import { connectorBuilder } from "@grasp-os/compiler/build-connectors";
+import {
+  mcpConnectorEntry,
+  mcpConnectorSource,
+} from "@grasp-os/compiler/connector-source";
 import { z } from "zod";
 
 import { buildConnectors, connectorEntries } from "../build.ts";
+import { urlConnectorPlaceholders } from "./url-connector-placeholders.ts";
 
 /**
  * Connect's connectors as its tests load them: the release's, as build.ts
@@ -68,6 +74,46 @@ const withUnreachedTool = (file: string): void => {
   writeFileSync(file, `export default ${JSON.stringify(built)};\n`);
 };
 
+/**
+ * A connector made from a URL as core builds it, its fields placeholders
+ * (url-connector-placeholders.ts): what the tests add in core's place,
+ * each field put in as the compiler puts in a string (`generatedConnector`
+ * in mcp-connectors-harness.ts). Built once, with the `connector` target.
+ */
+export const testUrlConnectorFile = path.join(
+  import.meta.dirname,
+  "../dist/test/url-connector.js"
+);
+
+const writeUrlConnector = async (): Promise<void> => {
+  const { name, title, url, registration } = urlConnectorPlaceholders;
+  const source = mcpConnectorSource({
+    name,
+    title,
+    mcp: { url, registration },
+  });
+  const built = await (
+    await connectorBuilder()
+  )({
+    entry: mcpConnectorEntry,
+    read: (file) => (file === mcpConnectorEntry ? source : undefined),
+  });
+  if (!built.ok) {
+    throw new Error(built.refusals.join("\n"));
+  }
+  for (const placeholder of [name, title, url, registration]) {
+    if (built.code.split(JSON.stringify(placeholder)).length !== 2) {
+      throw new Error(
+        `${placeholder} isn't in the built code once, as written`
+      );
+    }
+  }
+  writeFileSync(
+    testUrlConnectorFile,
+    `export default ${JSON.stringify(built.code)};\n`
+  );
+};
+
 const setup = async (): Promise<void> => {
   await buildConnectors(
     [
@@ -84,6 +130,7 @@ const setup = async (): Promise<void> => {
     testConnectorsFile
   );
   withUnreachedTool(testConnectorsFile);
+  await writeUrlConnector();
 };
 
 export default setup;
