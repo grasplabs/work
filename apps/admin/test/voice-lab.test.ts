@@ -144,7 +144,10 @@ describe("the Voice Lab's session", () => {
       voice: asked.includes('"voice_id":"voice_485"'),
       interrupts: asked.includes('"allow_interruptions":true'),
       // Talking over him is listened for at a set threshold, never left empty.
-      listens: asked.includes('"start_threshold":0.3'),
+      // In the order Mistral takes: start >= eager end > end.
+      listens: asked.includes(
+        '"turn_detection":{"start_threshold":0.35,"eager_end_threshold":0.35,"end_threshold":0.33'
+      ),
       // Nothing of what only core's own turns need.
       notes: asked.includes("What you write down"),
       keyInAnswer: JSON.stringify(session).includes("grasp-mistral-key"),

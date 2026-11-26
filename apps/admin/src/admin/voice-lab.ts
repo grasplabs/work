@@ -61,9 +61,13 @@ const models = {
  * the first try-out. Its realtime transcription's own defaults, but for
  * a lower start, so a few words over him stop him; the record the page
  * shows after each call (`recordOf`) says whether Mistral heard them.
+ * Mistral takes them only in order, start >= eager end > end, and its
+ * eager end is 0.5 unless sent: so the start stays just above the end,
+ * and the eager end is sent at the start.
  */
 const turnDetection = {
-  start_threshold: 0.3,
+  start_threshold: 0.35,
+  eager_end_threshold: 0.35,
   end_threshold: 0.33,
   min_silence_ms: 500,
 } as const;
