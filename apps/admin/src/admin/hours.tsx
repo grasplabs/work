@@ -28,24 +28,14 @@ import type { OrgSection } from "./sections.ts";
 
 /**
  * Why no hours are known yet, and where to go about it: the interviews
- * haven't started (its steps), are under way (its interviews), or the
- * work drawn from them isn't read (nowhere to go yet).
+ * haven't started (its steps), or are under way (its interviews). Core
+ * sends the work as it draws it, so there is no third case of work
+ * agreed to but not read.
  */
-const whyNone = ({
-  told,
-  approved,
-  unread,
-}: {
-  told: boolean;
-  approved: boolean;
-  unread: boolean;
-}): { why: string; way?: { section: OrgSection; words: string } } => {
-  if (approved && unread) {
-    return {
-      why: "People agreed to what they said, but the work drawn from it isn’t read yet: the company’s own Grasp doesn’t hold it.",
-    };
-  }
-  return told
+const whyNone = (
+  told: boolean
+): { why: string; way: { section: OrgSection; words: string } } =>
+  told
     ? {
         why: "The team leads go first. Their teams follow the same day.",
         way: { section: "interviews", words: "To the interviews" },
@@ -54,7 +44,6 @@ const whyNone = ({
         why: "The interviews start once the company has told its team.",
         way: { section: "steps", words: "To its steps" },
       };
-};
 
 /** An organization's hours: none known yet, and why. */
 export const Hours = () => {
@@ -62,11 +51,7 @@ export const Hours = () => {
   if (view.value.works.length > 0) {
     return <SectionToCome />;
   }
-  const { why, way } = whyNone({
-    told: view.told,
-    approved: view.interviews.some((interview) => interview.approved),
-    unread: view.unknown.works,
-  });
+  const { why, way } = whyNone(view.told);
   return (
     <Empty>
       <EmptyHeader>
@@ -76,18 +61,16 @@ export const Hours = () => {
           {`They come from the interviews: how many of each piece of work there are, and how long one takes. ${why}`}
         </EmptyDescription>
       </EmptyHeader>
-      {way === undefined ? null : (
-        <EmptyContent>
-          <Button asChild variant="outline">
-            <Link
-              params={{ clientId: admin.client.id }}
-              to={sectionTo[way.section]}
-            >
-              {way.words}
-            </Link>
-          </Button>
-        </EmptyContent>
-      )}
+      <EmptyContent>
+        <Button asChild variant="outline">
+          <Link
+            params={{ clientId: admin.client.id }}
+            to={sectionTo[way.section]}
+          >
+            {way.words}
+          </Link>
+        </Button>
+      </EmptyContent>
     </Empty>
   );
 };
