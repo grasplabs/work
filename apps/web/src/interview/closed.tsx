@@ -33,7 +33,8 @@ import { SpokenText, useSaid } from "./spoken.tsx";
 // `Rating` and `DeleteInterview`): his thanks, and how long the link still
 // works. The one thing to do here is to go back in and add something;
 // under it, quietly, how it was to talk to him. Deleting is top right, out
-// of the way, and has to be held before it even asks.
+// of the way, and has to be held before it even asks. Once the link's 7
+// days are over, it only reads: his thanks and a note, nothing to press.
 
 const styles = stylex.create({
   page: {
@@ -54,9 +55,10 @@ const styles = stylex.create({
   },
 });
 
-/** His thanks, and what they can still do: add something, and say how it was. */
+/** His thanks, and what they can still do: add something, and say how it was; or, once the link only reads, that it does. */
 export const Closed = ({
   name,
+  readOnly,
   rating,
   feedback,
   onRate,
@@ -64,6 +66,8 @@ export const Closed = ({
   onAdd,
 }: {
   name: string;
+  /** The link's 7 days are over: nothing more is added, rated or deleted through it. */
+  readOnly: boolean;
   rating: number | undefined;
   feedback: string | undefined;
   onRate: (rating: number) => void;
@@ -72,7 +76,9 @@ export const Closed = ({
 }) => {
   const { t } = useLingui();
   const title = t`Thank you, ${name}.`;
-  const message = t`What you approved is saved. Forgot something? This link works for 7 days.`;
+  const message = readOnly
+    ? t`What you approved is saved. The 7 days to add something or delete it have passed.`
+    : t`What you approved is saved. Forgot something? This link works for 7 days.`;
   const line = `${title} ${message}`;
   // He says his thanks once, as the screen comes.
   const [saying, setSaying] = useState(true);
@@ -96,19 +102,23 @@ export const Closed = ({
           {message}
         </Text>
       </div>
-      {/* Where their lines go was said when they started: not again here. */}
-      <Button onClick={onAdd} size="lg">
-        <Icon icon={PlusIcon} />
-        {t`Add something`}
-      </Button>
-      {/* A rating or their words not kept, or refused, shows here too. */}
-      <SaveTrouble />
-      <Rating
-        feedback={feedback}
-        onFeedback={onFeedback}
-        onRate={onRate}
-        value={rating}
-      />
+      {readOnly ? null : (
+        <>
+          {/* Where their lines go was said when they started: not again here. */}
+          <Button onClick={onAdd} size="lg">
+            <Icon icon={PlusIcon} />
+            {t`Add something`}
+          </Button>
+          {/* A rating or their words not kept, or refused, shows here too. */}
+          <SaveTrouble />
+          <Rating
+            feedback={feedback}
+            onFeedback={onFeedback}
+            onRate={onRate}
+            value={rating}
+          />
+        </>
+      )}
     </div>
   );
 };

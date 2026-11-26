@@ -2357,6 +2357,7 @@ export class Onboarding extends DurableObject<Env> {
       kind: this.#kindOf(person.id, roster),
       closes,
       closed: dayOf(now) > closes,
+      readOnly: this.#pastItsDays(person.id, now),
       progress: this.#forSpeaker(person.id, this.#held(person.id)),
       version: link.version,
       withdrawn: this.#withdrawnAt(person.id) !== null,

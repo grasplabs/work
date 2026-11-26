@@ -858,6 +858,50 @@ describe("when a link opens", () => {
     }).toStrictEqual({ closed: true, late: "interview.closed", deleted: 200 });
   });
 
+  it("adds and deletes for 7 days after they first approved, then only reads", async () => {
+    const { ids, secrets, me } = await running();
+    await opened(secrets.oli, me);
+    await takePart(secrets.oli, me);
+    await save(secrets.oli, me, 0, { ...progress(), person: "completed" });
+    /** As if they first approved `days` days ago. */
+    const approvedAgo = async (days: number): Promise<void> => {
+      await runInDurableObject(onboardingStore(env), (_instance, state) => {
+        state.storage.sql.exec(
+          "UPDATE interview_states SET completed_at = ? WHERE person = ?",
+          new Date(Date.now() - days * dayMs).toISOString(),
+          ids.oli
+        );
+      });
+    };
+    await approvedAgo(7);
+    const lastDay = await opened(secrets.oli, me);
+    const added = await save(secrets.oli, me, lastDay.version);
+    await approvedAgo(8);
+    const after = await opened(secrets.oli, me);
+    const late = await save(secrets.oli, me, after.version);
+    const deleted = await remove(secrets.oli, me);
+    expect({
+      lastDay: { readOnly: lastDay.readOnly, added: added.status },
+      after: {
+        readOnly: after.readOnly,
+        closed: after.closed,
+        read: (after.progress?.lines.length ?? 0) > 0,
+        late: await codeOf(late),
+        deleted: await codeOf(deleted),
+      },
+    }).toStrictEqual({
+      lastDay: { readOnly: false, added: 200 },
+      after: {
+        readOnly: true,
+        closed: false,
+        read: true,
+        late: "interview.closed",
+        deleted: "interview.closed",
+      },
+    });
+    await expect(storeText()).resolves.toContain(sentinel);
+  });
+
   it("answers for someone taken off the list as for a link that never was, and forgets what they said (L7, L10)", async () => {
     const { store, ids, secrets, me } = await running();
     await opened(secrets.oli, me);

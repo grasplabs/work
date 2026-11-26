@@ -9526,6 +9526,10 @@ msgid "It starts nothing until an admin allows it to start this workflow."
 msgstr "It starts nothing until an admin allows it to start this workflow."
 
 #: src/interview/page.tsx
+msgid "It stays here for you to read."
+msgstr "It stays here for you to read."
+
+#: src/interview/page.tsx
 msgid "It stays here for you to read. You can still delete it."
 msgstr "It stays here for you to read. You can still delete it."
 
@@ -20772,6 +20776,10 @@ msgstr "What would have made it better?"
 #: src/interview/closed.tsx
 msgid "What you approved is saved. Forgot something? This link works for 7 days."
 msgstr "What you approved is saved. Forgot something? This link works for 7 days."
+
+#: src/interview/closed.tsx
+msgid "What you approved is saved. The 7 days to add something or delete it have passed."
+msgstr "What you approved is saved. The 7 days to add something or delete it have passed."
 
 #: src/brain/skills-page.tsx
 msgid "What you asked to share"

@@ -123,9 +123,18 @@ const onEscape = (then: () => void): (() => void) => {
 const inConversation = (progress: InterviewProgress): boolean =>
   isTalking(progress) && progress.told;
 
-/** Whether there is an interview to delete: something said, and it is agreed to, over or withdrawn from. */
-const deletable = (progress: InterviewProgress, ended: boolean): boolean =>
-  (progress.person === "completed" || ended) && progress.lines.length > 0;
+/**
+ * Whether there is an interview to delete: something said, and it is
+ * agreed to, over or withdrawn from; never once the link only reads.
+ */
+const deletable = (
+  progress: InterviewProgress,
+  ended: boolean,
+  readOnly: boolean
+): boolean =>
+  !readOnly &&
+  (progress.person === "completed" || ended) &&
+  progress.lines.length > 0;
 
 /** Deleting the interview: whether it is, and why it didn't work when it didn't. */
 const useDeleting = () => {
@@ -292,12 +301,23 @@ const Deleted = ({ removing }: { removing: boolean }) => {
  * nothing of it is used; or, while what the Brain kept of it is still
  * being removed, they are told that instead.
  */
-const Withdrawn = ({ removing }: { removing: boolean }) => {
+const Withdrawn = ({
+  removing,
+  readOnly,
+}: {
+  removing: boolean;
+  /** The link's 7 days are over: it is no longer theirs to delete here. */
+  readOnly: boolean;
+}) => {
   const { t } = useLingui();
   return (
     <Page>
       <Words
-        line={t`It stays here for you to read. You can still delete it.`}
+        line={
+          readOnly
+            ? t`It stays here for you to read.`
+            : t`It stays here for you to read. You can still delete it.`
+        }
         live
         title={
           removing
@@ -404,14 +424,15 @@ const readBackNow = (): void => {
   keepNow();
 };
 
-/** His thanks, once they agreed to the read-back. */
-const Thanks = ({ name }: { name: string }) => {
+/** His thanks, once they agreed to the read-back; only that once the link's 7 days are over. */
+const Thanks = ({ name, readOnly }: { name: string; readOnly: boolean }) => {
   const { rating, feedback } = useProgress();
   return (
     <Page>
       <Closed
         feedback={feedback}
         name={name}
+        readOnly={readOnly}
         onAdd={() => {
           update(reopened);
         }}
@@ -429,27 +450,38 @@ const Thanks = ({ name }: { name: string }) => {
   );
 };
 
-/** What stands once the interview is deleted, withdrawn from or over; nothing while it is none of these. */
+/**
+ * What stands once the interview is deleted, withdrawn from, over, or only
+ * read now that the link's 7 days are over (also when they had gone back
+ * in to add something); nothing while it is none of these.
+ */
 const endedAs = ({
+  name,
   deleted,
   removingDeleted,
   withdrawn,
   removingWithdrawn,
   closed,
+  readOnly,
 }: {
+  name: string;
   deleted: boolean;
   removingDeleted: boolean;
   withdrawn: boolean;
   removingWithdrawn: boolean;
   closed: boolean;
+  readOnly: boolean;
 }): ReactNode => {
   if (deleted) {
     return <Deleted removing={removingDeleted} />;
   }
   if (withdrawn) {
-    return <Withdrawn removing={removingWithdrawn} />;
+    return <Withdrawn readOnly={readOnly} removing={removingWithdrawn} />;
   }
-  return closed ? <Over /> : null;
+  if (closed) {
+    return <Over />;
+  }
+  return readOnly ? <Thanks name={name} readOnly /> : null;
 };
 
 /** The minutes left, counted while they are `asking`; the read-back is never cut short. */
@@ -569,6 +601,14 @@ const useTalkingAt = (progress: InterviewProgress, talking: boolean) => {
   return { reading, guiding, asking: talking && !reading && !guiding };
 };
 
+/**
+ * Whether the link still takes what they say: not withdrawn from, not over,
+ * and not past its 7 days, after which it only reads (core refuses the
+ * rest), so no talking, adding or deleting is offered.
+ */
+const stillTakes = (session: OpenSession, withdrawn: boolean): boolean =>
+  !(withdrawn || session.closed || session.readOnly);
+
 /** The interview on the link, held on this device. */
 export const InterviewPage = ({ session }: { session: OpenSession }) => {
   const progress = useProgress();
@@ -577,9 +617,11 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
   const { withdrawn, removing, withdrawFailed, withdraw } =
     useWithdrawing(session);
   const closes = formatDay(session.closes);
+  const { readOnly } = session;
   const talking =
     inConversation(progress) &&
-    !(stopped || withdrawn || session.closed) &&
+    !stopped &&
+    stillTakes(session, withdrawn) &&
     deleted === "no";
   const { reading, guiding, asking } = useTalkingAt(progress, talking);
   const { left, timeUp } = useClock(progress, asking);
@@ -597,7 +639,8 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
   const { transcript, setTranscript, floating, alone } =
     useTranscript(talkTools);
   const canDelete =
-    deleted !== "yes" && deletable(progress, session.closed || withdrawn);
+    deleted !== "yes" &&
+    deletable(progress, session.closed || withdrawn, readOnly);
 
   let actions: ReactNode = null;
   if (talkTools) {
@@ -627,11 +670,13 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
 
   const started = progress.person !== "invited" && progress.person !== "opened";
   const ended = endedAs({
+    name: session.name,
     deleted: deleted === "yes",
     removingDeleted,
     withdrawn,
     removingWithdrawn: removing,
     closed: session.closed,
+    readOnly,
   });
   let stage: ReactNode;
   if (ended !== null) {
@@ -648,7 +693,7 @@ export const InterviewPage = ({ session }: { session: OpenSession }) => {
       />
     );
   } else if (progress.person === "completed" && progress.told) {
-    stage = <Thanks name={session.name} />;
+    stage = <Thanks name={session.name} readOnly={false} />;
   } else if (started && progress.told) {
     stage = (
       <Talking
