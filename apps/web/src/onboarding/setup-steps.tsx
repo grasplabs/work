@@ -1,5 +1,6 @@
 import { Button } from "@grasp-os/ui/components/button";
 import { space } from "@grasp-os/ui/lib/tokens.stylex";
+import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
@@ -22,6 +23,7 @@ import { smoothly } from "./smoothly.ts";
 import { SourcesStep } from "./sources-step.tsx";
 import { useRefresh } from "./step-parts.ts";
 import type { StepProps } from "./step-parts.ts";
+import { useAnswer, useLeaving } from "./step-voice.tsx";
 import { TeamStep } from "./team-step.tsx";
 
 export type { SetupData, StepProps } from "./step-parts.ts";
@@ -44,6 +46,25 @@ const styles = stylex.create({
 let languagePicked = false;
 
 /**
+ * What Stephen says of the language as the next step arrives, in the
+ * language just chosen: each language's words name that language.
+ */
+const talkingIn = msg({
+  message: "Great, we’ll talk in English.",
+  comment:
+    "Stephen, as the next step arrives, in the language just chosen. Name your own language, not English: in Dutch “Fijn, dan praten we Nederlands.”",
+});
+
+/** What Stephen says of the AI chosen, as the next step arrives. */
+const aiChosen = {
+  grasp: msg`Our own system it is, so the AI is ready to go.`,
+  own: msg`Your own key works, so the AI is ready to go.`,
+};
+
+/** What Stephen answers as the admin picks their own key. */
+const ownKey = msg`Sure. Paste your key, and I’ll check that it works.`;
+
+/**
  * The welcome: the language, chosen from five cards; a press chooses it
  * and goes on. Coming back, the language in use is marked. The admin can
  * also forget the kickoff here, the first conversation Grasp had.
@@ -53,6 +74,7 @@ const Welcome = ({ data, onward }: StepProps) => {
   const refresh = useRefresh();
   const [picked, setPicked] = useState(languagePicked);
   const { admin } = data;
+  useLeaving(talkingIn);
   return (
     <CalmStep
       body={t`I’ll set up Grasp with you, one step at a time. Which language would you like?`}
@@ -94,6 +116,10 @@ const Ai = ({ data, askedFor, path, go, onward }: StepProps) => {
   const { t } = useLingui();
   const { ai } = data;
   const [way, setWay] = useState<AiWay>(() => firstWay(ai));
+  const answer = useAnswer([ownKey]);
+  // Left with a way that works: our own system, or a key of their own that answered (the setup
+  // holds them here until one does). Core couldn't say: nothing to answer.
+  useLeaving(ai === null ? null : aiChosen[way]);
   const grasp = useChooseGrasp();
   const ready = ai === null || ai.ready;
   const graspOffered = ai?.listing.grasp.available === true;
@@ -130,7 +156,8 @@ const Ai = ({ data, askedFor, path, go, onward }: StepProps) => {
   // What Stephen tells about it, as a tutor would: why it's asked, then the
   // choice as it stands on the screen, neither way pressed on them (Ruben:
   // "je moet mensen wel gewoon de keuze altijd geven").
-  const because = t`Good, that’s settled. Everything in Grasp runs on AI: reading your documents, the interviews, the plan. Here you choose which AI that is.`;
+  // Of the language just picked, he has already said a word as the step arrived (talkingIn).
+  const because = t`Everything in Grasp runs on AI: reading your documents, the interviews, the plan. Here you choose which AI that is.`;
   let spoken = `${because} ${t`Paste a key from your company’s provider here. You pay them directly, and I’ll check that it works.`}`;
   if (graspOffered) {
     body = `${why} ${t`Continue with our own system, or add your own API key if you’d rather.`}`;
@@ -169,7 +196,12 @@ const Ai = ({ data, askedFor, path, go, onward }: StepProps) => {
         ai={ai}
         onConnecting={setConnecting}
         onReady={onReady}
-        onWay={setWay}
+        onWay={(next) => {
+          if (next === "own" && way !== "own") {
+            answer(ownKey);
+          }
+          setWay(next);
+        }}
         way={way}
       />
       <TopError>{grasp.failure}</TopError>

@@ -4,6 +4,7 @@ import { Button } from "@grasp-os/ui/components/button";
 import { FileUpload } from "@grasp-os/ui/components/file-upload";
 import { ArrowRightIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { media, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
@@ -22,6 +23,7 @@ import { DocumentVisitors } from "./document-visitors.tsx";
 import { kindsOf, useContextWords } from "./sources-step.tsx";
 import { useRefresh } from "./step-parts.ts";
 import type { StepProps } from "./step-parts.ts";
+import { useAnswer, useLeaving } from "./step-voice.tsx";
 
 // Documents that explain how they work, on Damsko's File upload, the kinds
 // of file Grasp reads lying over its drop zone as pages (document-pages.tsx):
@@ -70,6 +72,22 @@ const useProblemOf = (): ((error: unknown) => string) => {
   };
 };
 
+/** What Stephen says of the documents shared, as the next step arrives. */
+const documentsLeft = {
+  none: msg`No documents for now, that’s fine. You can add them later too.`,
+  one: msg`Thanks for the document. I’ll read it before I talk to anyone.`,
+  some: msg`Thanks for the documents. I’ll read them before I talk to anyone.`,
+};
+
+/**
+ * What Stephen answers as files are dropped in. One he couldn't read shows in the bar at the top,
+ * and he answers that as he does every error (step-voice.tsx).
+ */
+const documentAnswers = {
+  one: msg`Got it, I’ll read that one.`,
+  some: msg`Got them, I’ll read through those.`,
+};
+
 export const DocumentsStep = ({ data, onward }: StepProps) => {
   const { t, i18n } = useLingui();
   const core = useCore();
@@ -82,6 +100,14 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
   // The files on their way: each sent the moment it is added, and once read, one of the documents shared.
   const [coming, setComing] = useState<Sending[]>([]);
   const [removeProblem, setRemoveProblem] = useState<string>();
+  const answer = useAnswer([documentAnswers.one, documentAnswers.some]);
+  let left = documentsLeft.some;
+  if (kept.length === 0) {
+    left = documentsLeft.none;
+  } else if (kept.length === 1) {
+    left = documentsLeft.one;
+  }
+  useLeaving(left);
   const change = (file: File, to: Partial<Sending> | null) => {
     setComing((now) =>
       to === null
@@ -111,6 +137,9 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
     }
   };
   const send = (files: File[]) => {
+    if (files.length > 0) {
+      answer(files.length === 1 ? documentAnswers.one : documentAnswers.some);
+    }
     setComing((now) => [
       ...now,
       ...files.map((file) => ({ file, done: false, problem: null })),

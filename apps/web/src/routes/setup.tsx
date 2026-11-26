@@ -281,13 +281,16 @@ const Setup = () => {
       ways={waysOf(index, furthest, path, go)}
       progress={progressOf(partOf(step, path), partNames)}
       centred={step === "company"}
+      // The story covers the frame and has its own bar.
+      covered={step === "about"}
       language={step !== "welcome"}
       pose={poses[step]}
     >
-      {/* The next step's lines fetched ahead, and this one's remembered for the next time through. */}
+      {/* The next step's lines fetched ahead, this one's remembered for the next time through, and Stephen answering what was done. */}
       <StepVoice
         key={step}
         next={path[index + 1]}
+        previous={index > 0 ? path[index - 1] : undefined}
         step={step}
         userId={identity.userId}
       >
