@@ -23,6 +23,7 @@ import { releaseToEdge } from "./edge.ts";
 import { db, staff } from "./hosting.ts";
 import { livePlacedClient, placedRelease, scriptsOf } from "./placed.ts";
 import type { PlacedClient } from "./placed.ts";
+import { onPi } from "./releases.ts";
 import {
   deliverAlarm,
   ended,
@@ -43,7 +44,8 @@ import {
 // One client's deploy, as the reconciler starts it (src/rollout/deploy.ts,
 // src/rollout/reconciler.ts), broken where it can break. How it can fail,
 // each tried below:
-// - a release that fails its probe once live left on the client;
+// - a release that fails its probe once live left on the client, or
+//   rolled back to one that can't read the chats it stores;
 // - a client deployed while another runner (an apply, provisioning) has it;
 // - an attempt that timed out, or lost its step's result, acting twice or
 //   counted failed;
@@ -259,6 +261,35 @@ describe("a client's deploy", () => {
       },
       runs: on(before),
       runner: null,
+    });
+  });
+
+  it("leaves a release that fails its probe once live on the client when the release before can't read the chats it stores, and records why", async () => {
+    const before = await placedRelease("feat(core): pi 1.4", onPi("1.4.2"));
+    await releaseToEdge(env, [before]);
+    const client = await live(before);
+    const release = await placedRelease(
+      "chore(deps): pi 1.6, broken once live",
+      onPi("1.6.1")
+    );
+    client.core.coreProbe = { asClient: "someone-else" };
+    await using runs = followRuns();
+
+    await releaseToEdge(env, [release]);
+    await runs.converge();
+
+    expect({
+      deploy: await deployOf(client.clientId),
+      runs: await releasesOf(client.clientId),
+      started: await startedOf(client.clientId),
+    }).toStrictEqual({
+      deploy: {
+        releaseId: release,
+        status: "failed",
+        error: "rollback_past_chat_storage",
+      },
+      runs: on(release),
+      started: 1,
     });
   });
 

@@ -18,6 +18,7 @@
  * A channel's history is its `channel.promote` events in the audit log.
  */
 import "@tanstack/react-start/server-only";
+import { readsChatsOf } from "@grasp-os/shared/release";
 import { releaseIdSchema } from "@grasp-os/shared/release-id";
 import {
   and,
@@ -44,6 +45,7 @@ import {
   clients,
   releases,
 } from "../db/schema.ts";
+import { importedManifest } from "../deploy/release.ts";
 import { channelIds } from "./channel-ids.ts";
 import { promotionRefusal } from "./desired.ts";
 import type { Promotion } from "./desired.ts";
@@ -234,9 +236,11 @@ export type PromoteInput = z.infer<typeof promoteSchema>;
  * promotion from the channel before it (Edge to Beta, Beta to Stable), or
  * a rollback to a release the channel had before. Refused for any other
  * move (`promotion_not_allowed`), for the release it has already
- * (`promotion_not_allowed`), for a release the admin doesn't have or no
- * longer has the bundle of, and when the channel changed as it was set
- * (`channel_changed`).
+ * (`promotion_not_allowed`), for one that can't read the chats the
+ * channel's release stores (`channel_behind_chat_storage`, `readsChatsOf`:
+ * its clients' deploys would each refuse it), for a release the admin
+ * doesn't have or no longer has the bundle of, and when the channel
+ * changed as it was set (`channel_changed`).
  */
 export const promoteRelease = async (
   env: Env,
@@ -255,6 +259,18 @@ export const promoteRelease = async (
       "promotion_not_allowed",
       `${releaseId} can't go to ${channel}: ${refusal}`
     );
+  }
+  if (current !== null) {
+    const [from, to] = await Promise.all([
+      importedManifest(db, current),
+      importedManifest(db, releaseId),
+    ]);
+    if (from !== null && to !== null && !readsChatsOf(to, from)) {
+      throw new RolloutError(
+        "channel_behind_chat_storage",
+        `${releaseId} can't read the chats ${current} stores`
+      );
+    }
   }
   const back = history.some((event) => event.channel === channel);
   const changed = await pointChannel(db, staff, {

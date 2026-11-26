@@ -87,6 +87,10 @@ const operationWords: Readonly<Record<ProvisionOperationErrorCode, string>> = {
     "It failed its probe once live, so it was rolled back to the release before on its own: look at the release before releasing it again.",
   release_behind_migration:
     "That release lacks a Durable Object migration the client's scripts ran, which they never go back past: pick a later release.",
+  rollback_past_chat_storage:
+    "The release since changed how chats are stored, and the release before can't read them, so the client stays where it is: release a fix instead.",
+  release_behind_chat_storage:
+    "That release can't read the chats the client's release stores, which changed how they're stored since: pick a later release.",
   attempt_lost:
     "A try stopped without recording why: Cloudflare ended the admin's run, most often past its memory or CPU limit. Look at the admin's Workers Logs from then for the outcome.",
 };
@@ -177,6 +181,8 @@ const failureCauses = {
   nothing_to_roll_back: "staff",
   rollback_past_migration: "staff",
   release_behind_migration: "release",
+  rollback_past_chat_storage: "staff",
+  release_behind_chat_storage: "release",
   release_rolled_back: "release",
   attempt_lost: "retry",
   // The inventory's.

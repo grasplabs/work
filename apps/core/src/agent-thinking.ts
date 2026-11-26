@@ -1,5 +1,6 @@
-import type { AgentTool } from "@earendil-works/pi-agent-core";
-import { Type } from "@earendil-works/pi-ai";
+import type { JsonRepresentation } from "@earendil-works/chord/json";
+import { defineTool } from "@earendil-works/pi-durable";
+import { arr, obj, oneOf, str } from "@earendil-works/pi-schema";
 import type { Statement, Team, Workflow } from "@grasp-os/shared/brain";
 import {
   checkThinkingStep,
@@ -12,6 +13,7 @@ import {
 import type { ThinkingNoteKind, ThinkingStep } from "@grasp-os/shared/thinking";
 
 import { showThinkingName } from "./agent-messages.ts";
+import { resultLimits } from "./code-mode.ts";
 
 // Grasp's thinking, shown in the brain while it answers (GRA-1274): the
 // chat agent's `show_thinking` tool. A step says in a short sentence what
@@ -34,27 +36,24 @@ export interface ThinkingBrain {
   workflows: readonly Pick<Workflow, "id" | "name" | "drawings">[];
 }
 
-const parameters = Type.Object(
-  {
-    step: Type.String({
-      description:
-        "What you do in this step, or at the last one what you found, in one short plain sentence in the person's language.",
-    }),
-    shape: Type.Enum(thinkingShapes, {
-      description:
-        'The shape the brain takes: "same-pain", for whether the same pain hurts more than one team; "hours", for where the hours go.',
-    }),
-    move: Type.String({
-      description:
-        'Which step of the shape this is. For "same-pain": "teams", then "said", then "together". For "hours": "work", then "hours", then "most".',
-    }),
-    notes: Type.Array(Type.String(), {
-      description:
-        "What it looks at: teams by their id or name and what they said by its statement id, or workflows by their id or name.",
-    }),
-  },
-  { additionalProperties: false }
-);
+const parameters = obj({
+  step: str({
+    description:
+      "What you do in this step, or at the last one what you found, in one short plain sentence in the person's language.",
+  }),
+  shape: oneOf(thinkingShapes, {
+    description:
+      'The shape the brain takes: "same-pain", for whether the same pain hurts more than one team; "hours", for where the hours go.',
+  }),
+  move: str({
+    description:
+      'Which step of the shape this is. For "same-pain": "teams", then "said", then "together". For "hours": "work", then "hours", then "most".',
+  }),
+  notes: arr(str(), {
+    description:
+      "What it looks at: teams by their id or name and what they said by its statement id, or workflows by their id or name.",
+  }),
+});
 
 /**
  * Finds what `name` names in `brain`, of `kinds`: by id, then by name,
@@ -116,13 +115,11 @@ export const toldOf = (step: ThinkingStep, brain: ThinkingBrain): string => {
  * The tool, reading the brain as the asker may read it once a turn, the
  * first time a step needs it.
  */
-export const showThinking = (
-  readBrain: () => Promise<ThinkingBrain>
-): AgentTool<typeof parameters, ThinkingStep> => {
+export const showThinking = (readBrain: () => Promise<ThinkingBrain>) => {
   let brain: Promise<ThinkingBrain> | undefined;
-  return {
+  return defineTool({
     name: showThinkingName,
-    label: "Show thinking",
+    outputLimits: resultLimits,
     description: [
       "Shows your thinking in the company brain while you answer, a step at a time, for one of two questions:",
       '- "same-pain": whether the same pain hurts more than one team. "teams": the teams you read; "said": what they said that slows them down, by statement id; "together": the teams that said the same, with what they said.',
@@ -131,7 +128,7 @@ export const showThinking = (
     ].join("\n"),
     parameters,
     executionMode: "sequential",
-    execute: async (_toolCallId, input) => {
+    execute: async (input) => {
       brain ??= readBrain();
       let read: ThinkingBrain;
       try {
@@ -145,10 +142,11 @@ export const showThinking = (
       if ("refused" in checked) {
         throw new Error(checked.refused);
       }
+      const details: JsonRepresentation<ThinkingStep> = checked.step;
       return {
-        content: [{ type: "text", text: toldOf(checked.step, read) }],
-        details: checked.step,
+        output: [{ type: "text" as const, text: toldOf(checked.step, read) }],
+        details,
       };
     },
-  };
+  });
 };

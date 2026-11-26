@@ -46,6 +46,7 @@ import {
   openTestRun,
   personalChatsOf,
   model,
+  readApiStep,
   returnedOf,
   says,
   setObjectEnv,
@@ -235,23 +236,27 @@ const stringsIn = (value: unknown): string[] => {
   return [];
 };
 
-const recallHeader = /^\[Recall (?<run>[^\]\s]+)\]\n/u;
+/** A question's recall part, as chat-agent.ts `questionContent` writes it. */
+const recallPart =
+  /^<recall run="(?<run>[^"\s]+)">\n(?<text>[\s\S]*)\n<\/recall>$/u;
+
+/** The groups of the last recall `body` (a request to the provider) carried. */
+const lastRecallIn = (body: unknown) => {
+  const part = stringsIn(body).findLast((text) => recallPart.test(text));
+  return part === undefined ? undefined : recallPart.exec(part)?.groups;
+};
 
 /**
  * What the recall before the question handed the model, as `body` (a
- * request to the provider) carried it: the part after its header, the
- * same in every chat for the same pack.
+ * request to the provider) carried it: the text in its tag, the same in
+ * every chat for the same pack.
  */
-const recallIn = (body: unknown): string | undefined => {
-  const part = stringsIn(body).findLast((text) => recallHeader.test(text));
-  return part?.replace(recallHeader, "");
-};
+const recallIn = (body: unknown): string | undefined =>
+  lastRecallIn(body)?.text;
 
 /** The run of the recall `body` (a request to the provider) carried. */
-const recallRunIn = (body: unknown): string | undefined => {
-  const part = stringsIn(body).findLast((text) => recallHeader.test(text));
-  return part === undefined ? undefined : recallHeader.exec(part)?.groups?.run;
-};
+const recallRunIn = (body: unknown): string | undefined =>
+  lastRecallIn(body)?.run;
 
 /** The analysis's answer: `query`, or nothing to look up. */
 const analysed = (
@@ -608,6 +613,37 @@ describe("the recall before a chat's question", setUpTime, () => {
       past500: padding.length > 500,
       found: recallIn(chat.provider.requests[0]?.body)?.includes(invoice),
     }).toStrictEqual({ past500: true, found: true });
+  });
+
+  it("hands the model the recall in a tag of its own and asks for no citation, so nothing it reads is a label to write into the answer", async () => {
+    const depot = word();
+    const fact = `Depot ${depot} opens at seven`;
+    const chat = await recallingChat(
+      readApiStep(
+        "chat",
+        "connections",
+        "apps",
+        "workflows",
+        "skills",
+        "brain"
+      ),
+      says("Seven.")
+    );
+    await added(fact, owner(chat.personId));
+
+    await chat.ask(`When does depot ${depot} open?`);
+
+    // The system prompt, the tools, the messages and every API's
+    // declaration: everything it read.
+    const sent = chat.provider.requests.flatMap(({ body }) => stringsIn(body));
+    expect({
+      tagged: sent.some(
+        (text) => recallPart.test(text) && text.includes(depot)
+      ),
+      labels: sent.filter((text) => /^\[[^\]\n]+\]/mu.test(text)),
+      declared: sent.some((text) => text.includes("whoKnows(input")),
+      cite: sent.filter((text) => /\bcite\b/iu.test(text)),
+    }).toStrictEqual({ tagged: true, labels: [], declared: true, cite: [] });
   });
 
   it("records the recall in the audit log, with its run and how many versions it hands over and never what they say, before the model gets any of it", async () => {
@@ -1732,9 +1768,8 @@ describe("what the recall before a question may reach", setUpTime, () => {
       const sent = provider.requests.slice(before).map(({ body }) => body);
       const bodies = JSON.stringify(sent);
       return {
-        recalls: stringsIn(sent.at(-1)).filter((text) =>
-          recallHeader.test(text)
-        ).length,
+        recalls: stringsIn(sent.at(-1)).filter((text) => recallPart.test(text))
+          .length,
         team: bodies.includes(teamMarker),
         company: bodies.includes(companyMarker),
       };
