@@ -20845,6 +20845,10 @@ msgstr "When someone asks"
 msgid "When the linked record is deleted"
 msgstr "When the linked record is deleted"
 
+#: src/onboarding/send-plan-form.tsx
+msgid "When the links go out"
+msgstr "When the links go out"
+
 #: src/interview/start.tsx
 msgid "When works better for you?"
 msgstr "When works better for you?"

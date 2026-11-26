@@ -1,5 +1,10 @@
 import { Button } from "@grasp-os/ui/components/button";
-import { Card } from "@grasp-os/ui/components/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@grasp-os/ui/components/card";
 import { Checkbox } from "@grasp-os/ui/components/checkbox";
 import { DatePicker } from "@grasp-os/ui/components/date-picker";
 import { Field, FieldLabel } from "@grasp-os/ui/components/field";
@@ -82,7 +87,8 @@ const styles = stylex.create({
 
 // When the links go out, and to whom (prototype
 // `components/onboarding/send-plan.tsx`): set by the one person who sends
-// them, on one calm card. A day, from the three asked for most (the chosen
+// them, on one calm card under its own title, so it stands as a part of the
+// step as clear as the message over it. A day, from the three asked for most (the chosen
 // one filled, so it reads at a glance) or any other, and an hour, on one
 // row; then the teams as ticks, all of them unless one is taken out; then
 // what happens next, in one line on the card's foot. For the teams taken
@@ -283,150 +289,158 @@ export const SendPlanForm = ({
     context: "at an hour of the day: on Tuesday at 9:00",
   });
   return (
-    <Card padding="lg">
-      <div {...stylex.props(styles.stack)}>
-        <div {...stylex.props(styles.when)}>
-          <fieldset
-            aria-label={t`The day I start`}
-            {...stylex.props(styles.set, styles.quick)}
-          >
-            {offered.map((each) => {
-              const on = each.day === choice.day;
-              return (
-                <Button
-                  aria-pressed={on}
-                  key={each.id}
-                  onClick={() => {
-                    onChange({ ...choice, day: each.day });
-                  }}
-                  size="sm"
-                  variant={on ? "default" : "outline"}
-                >
-                  {names[each.id]}
-                </Button>
-              );
-            })}
-          </fieldset>
-          <span {...stylex.props(styles.dayHour)}>
-            <DayField
-              label={t`Another day`}
-              min={today}
-              onDay={(day) => {
-                onChange({ ...choice, day });
-              }}
-              onWrong={(wrong) => {
-                onWrong("first", wrong);
-              }}
-              today={today}
-              value={choice.day}
-            />
-            <span {...stylex.props(styles.atHour)}>
-              <label htmlFor={timeField} {...stylex.props(styles.at)}>
-                <Text as="span">{at}</Text>
-              </label>
-              <Input
-                id={timeField}
-                onValueChange={(time) => {
-                  onChange({ ...choice, time });
-                }}
-                size="sm"
-                style={styles.hour}
-                type="time"
-                value={choice.time}
-              />
-            </span>
-          </span>
-        </div>
-        {teams.length > 1 ? (
-          <fieldset {...stylex.props(styles.set, styles.part)}>
-            <legend {...stylex.props(styles.label, styles.legend)}>
-              {t`Teams that get links`}
-            </legend>
-            <div {...stylex.props(styles.teams)}>
-              {teams.map((team) => (
-                <Field key={team.id} orientation="horizontal">
-                  <Checkbox
-                    checked={!choice.held.includes(team.id)}
-                    onCheckedChange={(checked) => {
-                      const on = checked === true;
-                      onChange({
-                        ...choice,
-                        held: on
-                          ? choice.held.filter((id) => id !== team.id)
-                          : [...choice.held, team.id],
-                      });
-                    }}
-                  />
-                  <FieldLabel>{team.name}</FieldLabel>
-                </Field>
-              ))}
-            </div>
-          </fieldset>
-        ) : null}
-        {heldCount > 0 ? (
-          <div {...stylex.props(styles.part)}>
-            <span id={laterField} {...stylex.props(styles.label)}>
-              {plural(heldCount, {
-                one: `When ${leftOut} gets links`,
-                other: `When ${leftOut} get links`,
-              })}
-            </span>
+    <Card asChild>
+      <section>
+        <CardHeader>
+          <CardTitle level={2}>{t`When the links go out`}</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div {...stylex.props(styles.stack)}>
             <div {...stylex.props(styles.when)}>
-              <ToggleGroup
-                aria-labelledby={laterField}
-                onValueChange={(value: unknown[]) => {
-                  if (value[0] === "open") {
-                    onChange({ ...choice, heldDay: null });
-                  }
-                  if (value[0] === "day") {
-                    onChange({
-                      ...choice,
-                      heldDay: choice.heldDay ?? offered[2]?.day ?? choice.day,
-                    });
-                  }
-                }}
-                size="sm"
-                value={[choice.heldDay === null ? "open" : "day"]}
+              <fieldset
+                aria-label={t`The day I start`}
+                {...stylex.props(styles.set, styles.quick)}
               >
-                <ToggleGroupItem value="open">{t`Not planned yet`}</ToggleGroupItem>
-                <ToggleGroupItem value="day">{t`On a later day`}</ToggleGroupItem>
-              </ToggleGroup>
-              {choice.heldDay === null ? null : (
-                <span {...stylex.props(styles.dayHour)}>
-                  <DayField
-                    label={t`The day the other teams get their links`}
-                    min={choice.day}
-                    onDay={(heldDay) => {
-                      onChange({ ...choice, heldDay });
-                    }}
-                    onWrong={(wrong) => {
-                      onWrong("later", wrong);
-                    }}
-                    today={today}
-                    value={choice.heldDay}
-                  />
-                  <span {...stylex.props(styles.atHour)}>
-                    <span {...stylex.props(styles.at)}>
-                      <Text as="span">{at}</Text>
-                    </span>
-                    <Input
-                      aria-label={t`The hour the other teams get their links`}
-                      onValueChange={(heldTime) => {
-                        onChange({ ...choice, heldTime });
+                {offered.map((each) => {
+                  const on = each.day === choice.day;
+                  return (
+                    <Button
+                      aria-pressed={on}
+                      key={each.id}
+                      onClick={() => {
+                        onChange({ ...choice, day: each.day });
                       }}
                       size="sm"
-                      style={styles.hour}
-                      type="time"
-                      value={choice.heldTime}
-                    />
-                  </span>
+                      variant={on ? "default" : "outline"}
+                    >
+                      {names[each.id]}
+                    </Button>
+                  );
+                })}
+              </fieldset>
+              <span {...stylex.props(styles.dayHour)}>
+                <DayField
+                  label={t`Another day`}
+                  min={today}
+                  onDay={(day) => {
+                    onChange({ ...choice, day });
+                  }}
+                  onWrong={(wrong) => {
+                    onWrong("first", wrong);
+                  }}
+                  today={today}
+                  value={choice.day}
+                />
+                <span {...stylex.props(styles.atHour)}>
+                  <label htmlFor={timeField} {...stylex.props(styles.at)}>
+                    <Text as="span">{at}</Text>
+                  </label>
+                  <Input
+                    id={timeField}
+                    onValueChange={(time) => {
+                      onChange({ ...choice, time });
+                    }}
+                    size="sm"
+                    style={styles.hour}
+                    type="time"
+                    value={choice.time}
+                  />
                 </span>
-              )}
+              </span>
             </div>
+            {teams.length > 1 ? (
+              <fieldset {...stylex.props(styles.set, styles.part)}>
+                <legend {...stylex.props(styles.label, styles.legend)}>
+                  {t`Teams that get links`}
+                </legend>
+                <div {...stylex.props(styles.teams)}>
+                  {teams.map((team) => (
+                    <Field key={team.id} orientation="horizontal">
+                      <Checkbox
+                        checked={!choice.held.includes(team.id)}
+                        onCheckedChange={(checked) => {
+                          const on = checked === true;
+                          onChange({
+                            ...choice,
+                            held: on
+                              ? choice.held.filter((id) => id !== team.id)
+                              : [...choice.held, team.id],
+                          });
+                        }}
+                      />
+                      <FieldLabel>{team.name}</FieldLabel>
+                    </Field>
+                  ))}
+                </div>
+              </fieldset>
+            ) : null}
+            {heldCount > 0 ? (
+              <div {...stylex.props(styles.part)}>
+                <span id={laterField} {...stylex.props(styles.label)}>
+                  {plural(heldCount, {
+                    one: `When ${leftOut} gets links`,
+                    other: `When ${leftOut} get links`,
+                  })}
+                </span>
+                <div {...stylex.props(styles.when)}>
+                  <ToggleGroup
+                    aria-labelledby={laterField}
+                    onValueChange={(value: unknown[]) => {
+                      if (value[0] === "open") {
+                        onChange({ ...choice, heldDay: null });
+                      }
+                      if (value[0] === "day") {
+                        onChange({
+                          ...choice,
+                          heldDay:
+                            choice.heldDay ?? offered[2]?.day ?? choice.day,
+                        });
+                      }
+                    }}
+                    size="sm"
+                    value={[choice.heldDay === null ? "open" : "day"]}
+                  >
+                    <ToggleGroupItem value="open">{t`Not planned yet`}</ToggleGroupItem>
+                    <ToggleGroupItem value="day">{t`On a later day`}</ToggleGroupItem>
+                  </ToggleGroup>
+                  {choice.heldDay === null ? null : (
+                    <span {...stylex.props(styles.dayHour)}>
+                      <DayField
+                        label={t`The day the other teams get their links`}
+                        min={choice.day}
+                        onDay={(heldDay) => {
+                          onChange({ ...choice, heldDay });
+                        }}
+                        onWrong={(wrong) => {
+                          onWrong("later", wrong);
+                        }}
+                        today={today}
+                        value={choice.heldDay}
+                      />
+                      <span {...stylex.props(styles.atHour)}>
+                        <span {...stylex.props(styles.at)}>
+                          <Text as="span">{at}</Text>
+                        </span>
+                        <Input
+                          aria-label={t`The hour the other teams get their links`}
+                          onValueChange={(heldTime) => {
+                            onChange({ ...choice, heldTime });
+                          }}
+                          size="sm"
+                          style={styles.hour}
+                          type="time"
+                          value={choice.heldTime}
+                        />
+                      </span>
+                    </span>
+                  )}
+                </div>
+              </div>
+            ) : null}
+            <div {...stylex.props(styles.summary)}>{summary}</div>
           </div>
-        ) : null}
-        <div {...stylex.props(styles.summary)}>{summary}</div>
-      </div>
+        </CardContent>
+      </section>
     </Card>
   );
 };

@@ -20845,6 +20845,10 @@ msgstr "Quand quelqu’un demande"
 msgid "When the linked record is deleted"
 msgstr "Quand l’enregistrement lié est supprimé"
 
+#: src/onboarding/send-plan-form.tsx
+msgid "When the links go out"
+msgstr "Quand partent les liens"
+
 #: src/interview/start.tsx
 msgid "When works better for you?"
 msgstr "Quand est-ce que ça vous arrange ?"
