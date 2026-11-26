@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, describe, expect, it } from "vite-plus/test";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   draftFor,
@@ -25,6 +25,7 @@ const mentioned = {
 
 describe("a chat's draft", () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     localStorage.clear();
   });
 
@@ -79,6 +80,17 @@ describe("a chat's draft", () => {
       broken: emptyDraft,
       halfBroken: { text: "Kept", mentions: [mentioned] },
     });
+  });
+
+  it("lasts while the page does where storage is full, rather than undo what is typed", () => {
+    keepDraft("ada", "chat-1", "chat", { text: "Who", mentions: [] });
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("Full", "QuotaExceededError");
+    });
+
+    keepDraft("ada", "chat-1", "chat", { text: "Who owes us?", mentions: [] });
+
+    expect(draftFor("ada", "chat-1", "chat").text).toBe("Who owes us?");
   });
 
   it("goes with the chat a question made: what was typed meanwhile is that chat's", () => {

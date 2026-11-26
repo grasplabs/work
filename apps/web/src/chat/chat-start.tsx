@@ -193,6 +193,29 @@ export const ideasOf = async (
 };
 
 /**
+ * The draft a start with a purpose keeps (use-ask.ts `draft`): Make
+ * something's, an agent's Chat's, an opportunity's brief's, each its own;
+ * none for plain Chat's start, which keeps the person's next chat's.
+ */
+const startDraft = ({
+  make,
+  agent,
+  opportunity,
+}: {
+  make: ChatMake | undefined;
+  agent: string | undefined;
+  opportunity: unknown;
+}): { draft?: string } => {
+  if (make !== undefined) {
+    return { draft: `make.${make.kind}` };
+  }
+  if (agent !== undefined) {
+    return { draft: `agent.${agent}` };
+  }
+  return opportunity === undefined ? {} : { draft: "opportunity" };
+};
+
+/**
  * Asks in a new chat, which opens full screen over the page; from Make
  * something (`make`), with `ideas` to start from, the chat made with what
  * to make. The agent `agent` names (the Agents page's "Chat") is mentioned
@@ -237,6 +260,7 @@ export const ChatStart = ({
         goToChat(chatId);
       },
       ...(make === undefined ? {} : { make }),
+      ...startDraft({ make, agent, opportunity }),
     }
   );
   // The agent the address names, mentioned in the box once the person's

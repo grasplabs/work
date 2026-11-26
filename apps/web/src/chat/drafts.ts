@@ -85,6 +85,12 @@ const draftAt = (key: string): Draft => {
   return draft;
 };
 
+const told = (): void => {
+  for (const listener of listeners) {
+    listener();
+  }
+};
+
 const keep = (key: string, draft: Draft): void => {
   const kept = draft.text.trim() === "" ? null : JSON.stringify(draft);
   read.set(key, { kept, draft });
@@ -95,17 +101,30 @@ const keep = (key: string, draft: Draft): void => {
       localStorage.setItem(key, kept);
     }
   } catch {
-    // Storage refused: the draft lasts until the page reloads.
+    // Storage refused, or is full: the draft lasts until the page reloads,
+    // read from here while storage holds what it held.
+    read.set(key, { kept: keptAt(key) ?? null, draft });
   }
-  for (const listener of listeners) {
-    listener();
+  told();
+};
+
+/** Another tab changed a draft: every box here reads it again. */
+const changedElsewhere = (event: StorageEvent): void => {
+  if (event.key === null || event.key.startsWith(prefix)) {
+    told();
   }
 };
 
 const subscribe = (listener: () => void): (() => void) => {
+  if (listeners.size === 0) {
+    window.addEventListener("storage", changedElsewhere);
+  }
   listeners.add(listener);
   return () => {
     listeners.delete(listener);
+    if (listeners.size === 0) {
+      window.removeEventListener("storage", changedElsewhere);
+    }
   };
 };
 
@@ -180,7 +199,5 @@ export const forgetDrafts = (): void => {
   } catch {
     // Storage refused: nothing was kept.
   }
-  for (const listener of listeners) {
-    listener();
-  }
+  told();
 };

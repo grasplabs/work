@@ -15,7 +15,7 @@ import { useCoreAction } from "../use-core-action.ts";
 import { activeChat, setActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
 import type { Problem, StopNote } from "./dictation.ts";
-import { moveNewDraft, useDraft } from "./drafts.ts";
+import { emptyDraft, moveNewDraft, useDraft } from "./drafts.ts";
 import type { BoxMention } from "./mentions.tsx";
 import { chatMentionsOf } from "./mentions.tsx";
 import {
@@ -79,6 +79,13 @@ export interface AskOptions {
    * `chats.agents()`; the company's first one by default.
    */
   agentId?: string;
+  /**
+   * Whose draft a box with no chat yet keeps (drafts.ts): the slot's
+   * next chat's unless given, as a start with a purpose of its own has
+   * (Make something, an agent's Chat, an opportunity's brief), so what it
+   * fills in never takes the place of the person's own.
+   */
+  draft?: string;
 }
 
 const noOptions: AskOptions = {};
@@ -117,11 +124,12 @@ export const useAsk = (
   efforts: Readonly<Record<string, ModelEfforts>> = noModelEfforts,
   /** Which of the tab's open chats a new chat becomes. */
   slot: ChatSlot = "chat",
-  { onAsked, subject, make, agentId }: AskOptions = noOptions
+  { onAsked, subject, make, agentId, draft: drafting }: AskOptions = noOptions
 ) => {
   const { identity } = useRouteContext({ from: "/_shell" });
   const { busy, failure, run } = useCoreAction();
-  const [draft, changeDraft] = useDraft(identity.userId, chatId, slot);
+  const draftScope = drafting ?? slot;
+  const [draft, changeDraft] = useDraft(identity.userId, chatId, draftScope);
   const { text, mentions } = draft;
   // Why dictating into the text stopped on its own, kept with it: the box
   // it stopped in may have gone (dictation.ts).
@@ -266,13 +274,10 @@ export const useAsk = (
     unsent.current = null;
     // Clears the box only of what was sent from it: asking again sends an
     // earlier question, and a draft the person started stays.
-    changeDraft((now) => ({
-      text: now.text === question ? "" : now.text,
-      mentions: mentioned.length > 0 ? [] : now.mentions,
-    }));
+    changeDraft((now) => (now.text === question ? emptyDraft : now));
     // A chat made for it takes what was typed while it was on its way.
     if (chatId === undefined) {
-      moveNewDraft(identity.userId, slot, sent);
+      moveNewDraft(identity.userId, draftScope, sent);
     }
     setFiles((now) => now.filter((each) => !carried.includes(each)));
     for (const { id } of carried) {

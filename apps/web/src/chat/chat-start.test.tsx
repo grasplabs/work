@@ -648,6 +648,37 @@ describe("Chat's page from Make something", () => {
     });
   });
 
+  it("mentions the agent the address names even over a new chat's draft the person left, which stays theirs", async () => {
+    localStorage.setItem(
+      "grasp.chat.draft.user-1.new.chat",
+      JSON.stringify({ text: "Half a question", mentions: [] })
+    );
+    const { asked } = await shown(undefined, undefined, {
+      agents: [agent("claire", "Claire")],
+      named: "claire",
+    });
+    await act(async () => {
+      typeInPrompt(box(), "Who owes us?");
+      await Promise.resolve();
+    });
+    await act(async () => {
+      box().closest("form")?.requestSubmit();
+      await Promise.resolve();
+    });
+    await settled();
+
+    expect({
+      asked,
+      left: localStorage.getItem("grasp.chat.draft.user-1.new.chat"),
+    }).toStrictEqual({
+      asked: [
+        "create @Claire Who owes us? null with claire",
+        'send chat-1 @Claire Who owes us? [{"kind":"agent","id":"claire"}]',
+      ],
+      left: JSON.stringify({ text: "Half a question", mentions: [] }),
+    });
+  });
+
   it("mentions nobody for an agent the person may not talk to", async () => {
     await shown(undefined, undefined, {
       agents: [agent("organization", "Grasp")],
