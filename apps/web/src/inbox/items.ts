@@ -1,4 +1,8 @@
-import type { PendingAction, UnknownOutcome } from "@grasp-os/shared/connect";
+import type {
+  PendingAction,
+  UnknownOutcome,
+  UnknownOutcomeListing,
+} from "@grasp-os/shared/connect";
 import type { DecisionView } from "@grasp-os/shared/decisions";
 import type { HeldStart } from "@grasp-os/shared/held-starts";
 import type {
@@ -49,6 +53,7 @@ export type InboxKind =
   | "heldWrite"
   | "heldStart"
   | "unknownOutcome"
+  | "everyonesOutcome"
   | "permissionRequest"
   | "stoppedSchedule"
   | "workflowChanged"
@@ -82,6 +87,7 @@ export type InboxSource =
   | { type: "held"; action: PendingAction }
   | { type: "heldStart"; start: HeldStart }
   | { type: "outcome"; outcome: UnknownOutcome }
+  | { type: "everyonesOutcome"; listing: UnknownOutcomeListing; person: string }
   | { type: "request"; request: Permission; pending: PendingRequests }
   | { type: "bindings"; item: BindingApprovalItem }
   | { type: "skillShare"; item: SkillShareItem }
@@ -104,6 +110,10 @@ export interface InboxItem {
   title: string;
   /** What it is about, in a few words. The list shows this, with the kind. */
   context: string;
+  /** What the list's row says under it in place of its kind and date, where it says more. */
+  summary?: string;
+  /** Whose it is, when it is someone else's: their face stands for it in the list. */
+  face?: string;
   /** The application or connection it is about, when it is about one: its tile stands for it. */
   logo?: { name: string };
   /** What happened and why it waits, in a few plain sentences. */
@@ -631,6 +641,47 @@ const readyOf = <T>(part: Loaded<T> | undefined): T | undefined =>
   part?.state === "ready" ? part.data : undefined;
 
 /**
+ * Everyone's open calls of unknown outcome, for the organization's own
+ * admins to follow up with each person: only that person can say what
+ * became of it, so there is nothing here to decide and nothing it blocks.
+ * The admin's own are theirs to answer already (`outcomeItems`), so
+ * `readWaiting` leaves them out.
+ */
+const everyonesOutcomeItems = (
+  waiting: Waiting,
+  viewer: Viewer
+): InboxItem[] => {
+  // The organization's own admins alone, as `readWaiting` reads them for.
+  const everyones = decidesRequests(viewer)
+    ? readyOf(waiting.everyonesOutcomes)
+    : undefined;
+  if (everyones === undefined) {
+    return [];
+  }
+  return everyones.listed.map((listing) => {
+    const person =
+      everyones.people.get(listing.onBehalfOf) ?? listing.onBehalfOf;
+    const change = listing.title ?? listing.action;
+    const connection = listing.connectionName ?? listing.connectionId;
+    return {
+      id: `everyonesOutcome:${listing.id}`,
+      kind: "everyonesOutcome",
+      title: change,
+      context: change,
+      summary: `${person} · ${connection}`,
+      face: person,
+      logo: { name: connection },
+      // Its page shows what became of it and its facts (item-detail.tsx).
+      body: [],
+      facts: [],
+      date: listing.sentAt,
+      urgent: false,
+      source: { type: "everyonesOutcome", listing, person },
+    };
+  });
+};
+
+/**
  * Every item that waits on the person, in the inbox's order: what blocks
  * something first, then the newest. `readAt` dates what core lists
  * without a date of its own.
@@ -687,6 +738,7 @@ export const inboxItems = (
     ...heldItems(held, me),
     ...heldStartItems(heldStarts, me),
     ...outcomeItems(outcomes, me),
+    ...everyonesOutcomeItems(waiting, viewer),
     ...(requests === undefined ? [] : requestItems(requests)),
     ...bindingItems(bindings, readAt),
     ...skillShareItems(skillShares),
@@ -718,6 +770,7 @@ export const unread = (waiting: Waiting): Loaded<unknown>[] => {
     waiting.heldStarts,
     waiting.bindings,
     waiting.skillShares,
+    waiting.everyonesOutcomes,
   ];
   return parts.filter(
     (part): part is Loaded<unknown> =>
