@@ -137,52 +137,79 @@ const unreachable = (): Refused => ({
  * English, and any other as core said it.
  */
 const inLanguage = (code: string | null, message: string): string => {
-  switch (code) {
-    case "interview.link_invalid":
-      return t`This link doesn't work. Ask whoever sent it for a new one.`;
-    case "interview.not_yet":
-      return t`Your interview isn't open yet. You'll get an email when it is.`;
-    case "interview.paused":
-      return t`The interviews are paused for now. Try again a little later.`;
-    case "interview.closed":
-      return t`The interviews are over. Thank you for your time.`;
-    case "interview.sign_in":
-      return t`Sign in with your work account to open your interview.`;
-    case "interview.deleted":
-      return t`You deleted this interview. Start again to talk with Stephen.`;
-    case "interview.limited":
-      return t`That was a lot at once. Wait a minute, then go on.`;
-    case "interview.invalid":
-      return t`That isn't something an interview takes.`;
-    case "interview.not_participating":
-      return t`Read what this interview is for and agree to take part first.`;
-    case "interview.notice_changed":
-      return t`What this interview is for has changed. Read it again before you go on.`;
-    case "interview.withdrawn":
-      return t`You withdrew from this interview. Nothing more is taken from it.`;
-    default:
-      break;
-  }
-  switch (message) {
-    case "That is as long as the interview can run today. Come back tomorrow to go on.":
-      return t`That is as long as the interview can run today. Come back tomorrow to go on.`;
-    case "The interview could not start. Try again.":
-      return t`The interview could not start. Try again.`;
-    case "What was said could not be read. Try again.":
-      return t`What was said could not be read. Try again.`;
-    case "Stephen lost his thread. Say it once more.":
-      return t`Stephen lost his thread. Say it once more.`;
-    case "Stephen is busy. Try again in a minute.":
-      return t`Stephen is busy. Try again in a minute.`;
-    case "The interview is not set up yet.":
-      return t`The interview is not set up yet.`;
-    case "Stephen could not be reached. Try again.":
-      return t`Stephen could not be reached. Try again.`;
-    case "Stephen could not answer that. Say it another way.":
-      return t`Stephen could not answer that. Say it another way.`;
-    default:
-      return message;
-  }
+  // Built on each call, so each line is in the language on screen now.
+  const said = new Map<string, string>([
+    [
+      "interview.link_invalid",
+      t`This link doesn't work. Ask whoever sent it for a new one.`,
+    ],
+    [
+      "interview.not_yet",
+      t`Your interview isn't open yet. You'll get an email when it is.`,
+    ],
+    [
+      "interview.paused",
+      t`The interviews are paused for now. Try again a little later.`,
+    ],
+    ["interview.closed", t`The interviews are over. Thank you for your time.`],
+    [
+      "interview.sign_in",
+      t`Sign in with your work account to open your interview.`,
+    ],
+    [
+      "interview.deleted",
+      t`You deleted this interview. Start again to talk with Stephen.`,
+    ],
+    [
+      "interview.limited",
+      t`That was a lot at once. Wait a minute, then go on.`,
+    ],
+    ["interview.invalid", t`That isn't something an interview takes.`],
+    [
+      "interview.not_participating",
+      t`Read what this interview is for and agree to take part first.`,
+    ],
+    [
+      "interview.notice_changed",
+      t`What this interview is for has changed. Read it again before you go on.`,
+    ],
+    [
+      "interview.withdrawn",
+      t`You withdrew from this interview. Nothing more is taken from it.`,
+    ],
+    [
+      "That is as long as the interview can run today. Come back tomorrow to go on.",
+      t`That is as long as the interview can run today. Come back tomorrow to go on.`,
+    ],
+    [
+      "The interview could not start. Try again.",
+      t`The interview could not start. Try again.`,
+    ],
+    [
+      "What was said could not be read. Try again.",
+      t`What was said could not be read. Try again.`,
+    ],
+    [
+      "Stephen lost his thread. Say it once more.",
+      t`Stephen lost his thread. Say it once more.`,
+    ],
+    [
+      "Stephen is busy. Try again in a minute.",
+      t`Stephen is busy. Try again in a minute.`,
+    ],
+    ["The interview is not set up yet.", t`The interview is not set up yet.`],
+    [
+      "Stephen could not be reached. Try again.",
+      t`Stephen could not be reached. Try again.`,
+    ],
+    [
+      "Stephen could not answer that. Say it another way.",
+      t`Stephen could not answer that. Say it another way.`,
+    ],
+  ]);
+  return (
+    (code === null ? undefined : said.get(code)) ?? said.get(message) ?? message
+  );
 };
 
 /** A refusal as core sent it, with its reference. */
