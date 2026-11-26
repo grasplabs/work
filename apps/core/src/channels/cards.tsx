@@ -496,11 +496,13 @@ export type ReadCheck = { read: "mail" } | { read: "record"; where: string };
 /**
  * A press that a connection's pause refused before connect took a write:
  * that write and every one after it on the card (`waiting`) still wait, to
- * confirm again on a new card in `minutes`, the pause's time left.
+ * confirm again in `minutes`, the pause's time left, on a new card, or,
+ * where none could be posted (`newCard` false), by asking again.
  */
 export interface Paused {
   waiting: number;
   minutes: number;
+  newCard: boolean;
 }
 
 /** How a press ended, by the line said once at the foot of the card. */
@@ -615,7 +617,10 @@ const outcomeLine = (outcome: PressOutcome, locale: ChannelLocale): string => {
   if (typeof outcome === "string") {
     return say(outcome, locale);
   }
-  const { waiting, minutes } = outcome;
+  const { waiting, minutes, newCard } = outcome;
+  if (!newCard) {
+    return say("pausedAskAgain", locale);
+  }
   if (waiting === 1) {
     return minutes === 1
       ? say("pausedOneMinute", locale)

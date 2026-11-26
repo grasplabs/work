@@ -6,7 +6,8 @@ import { forgetFor } from "../brain-memories.ts";
 import type { MemoryCaller } from "../brain-memories.ts";
 import { appLocale } from "./answer.ts";
 import { lineCard } from "./cards.tsx";
-import { pressedKey, pressedTtlMs, sayThere } from "./press.ts";
+import { pressedTtlMs } from "./held.ts";
+import { pressedKey, sayThere } from "./press.ts";
 import type { CardPress } from "./press.ts";
 import { say } from "./words.ts";
 

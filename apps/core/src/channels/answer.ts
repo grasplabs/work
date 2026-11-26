@@ -1,3 +1,4 @@
+import { durableObjectState } from "@grasp-os/chat/state";
 import { agentErrors } from "@grasp-os/shared/agent";
 import { errorFields, log } from "@grasp-os/shared/log";
 import { modelErrors } from "@grasp-os/shared/models";
@@ -6,8 +7,9 @@ import type { SentMessage, Thread } from "chat";
 import { z } from "zod";
 
 import { chatAgentId, personalWorkspaceId } from "../chats-rpc.ts";
-import { workspace } from "../durable-objects.ts";
+import { inJurisdiction, workspace } from "../durable-objects.ts";
 import { answerCards, draftCard, heldWritesCards, lineCard } from "./cards.tsx";
+import type { ReadCheck } from "./cards.tsx";
 import {
   offerConnectOwn,
   ownMicrosoftNeed,
@@ -15,7 +17,7 @@ import {
 } from "./connect-own.ts";
 import type { Conversation } from "./connect-own.ts";
 import type { ChannelHandoff, ChannelMessage } from "./door.ts";
-import { checkOf, inertView, turnHeldWrites } from "./held.ts";
+import { inertView, keepCheck, turnHeldWrites } from "./held.ts";
 import { inTeams } from "./inert.ts";
 import { postRemembered } from "./remembered.ts";
 import { sortRequest } from "./request-sorting.ts";
@@ -527,16 +529,31 @@ const answerOne = async (
       requestId,
       writes.map(({ id }) => `write:${id}`)
     );
-    const check = checkOf(answer.provenance.sources);
+    // What the turn's code read, as its card's check line says it.
+    let check: ReadCheck | undefined;
+    if (answer.check?.read === "mail") {
+      check = { read: "mail" };
+    } else if (answer.check?.read === "record") {
+      check = { read: "record", where: answer.check.where };
+    }
     const heldCards = heldWritesCards({
       locale,
       platform,
       writes: writes.map((write) => inertView(platform, write)),
       ...(check === undefined ? {} : { check }),
     });
+    // What the turn read, kept for a press on each card (`keepCheck`).
+    const state = durableObjectState(inJurisdiction(env, env.CHAT_STATE));
     for (const heldCard of heldCards) {
       // oxlint-disable-next-line no-await-in-loop -- in order: the card to confirm first
-      await thread.post(heldCard);
+      const sent = await thread.post(heldCard);
+      // oxlint-disable-next-line no-await-in-loop -- with its card
+      await keepCheck(
+        state,
+        platform,
+        { threadId: thread.id, messageId: sent.id },
+        check
+      );
     }
   });
   // Whole and inert, in as many cards as it takes (`answerCards`): the

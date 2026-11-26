@@ -141,7 +141,7 @@ export const ownMicrosoftNeed = async (
  */
 export interface Conversation {
   id: string;
-  post: (message: string | PostableCard) => Promise<unknown>;
+  post: (message: string | PostableCard) => Promise<{ id: string }>;
   startTyping: () => Promise<void>;
 }
 

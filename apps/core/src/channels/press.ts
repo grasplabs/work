@@ -31,7 +31,10 @@ import {
   appViewOf,
   heldAppCallsIn,
   inertView,
+  keepCheck,
+  keptCheck,
   memberOf,
+  pressedTtlMs,
   viewOf,
 } from "./held.ts";
 import { pressedChanges } from "./stephen-requests.ts";
@@ -92,9 +95,6 @@ import type { ChannelLocale } from "./words.ts";
 // Workspace's, as in Grasp. Still to settle before merge, with Nick: D2 itself (GRA-699),
 // the threat model's ids (GRA-700), and the seam with GRA-620's one
 // decision path for held writes and unknown outcomes.
-
-/** How long a card is remembered as pressed: past any write's life. */
-export const pressedTtlMs = 30 * 24 * 60 * 60 * 1000;
 
 const secondsInMinute = 60;
 
@@ -417,8 +417,9 @@ export const pressCard = async (
       const ended = failedAs(error, still);
       write.state = ended.state;
       if (ended.state === "held") {
-        // Nothing of it was taken: it and the rest still wait. This card
-        // says so, and a new one, with a press of its own, offers them.
+        // Nothing of it was taken: it and the rest still wait. A new card,
+        // with a press of its own, offers them, warning of what this one
+        // did; then this one says so, or, without it, to ask again.
         const waiting = writes.slice(index);
         log.info("channel.press_paused", {
           platform,
@@ -426,19 +427,35 @@ export const pressCard = async (
           ...errorFields(error),
         });
         // oxlint-disable-next-line no-await-in-loop -- once, then out
-        await editCard(
-          event,
-          shown({ waiting: waiting.length, minutes: ended.minutes })
-        );
+        const check = await keptCheck(state, platform, event);
+        const warned = check === undefined ? {} : { check };
+        let newCard = false;
         try {
           // oxlint-disable-next-line no-await-in-loop -- once, then out
-          await event.adapter.postMessage(
+          const posted = await event.adapter.postMessage(
             event.threadId,
-            heldWritesCard({ locale, platform, writes: waiting })
+            heldWritesCard({ locale, platform, writes: waiting, ...warned })
+          );
+          newCard = true;
+          // oxlint-disable-next-line no-await-in-loop -- once, then out
+          await keepCheck(
+            state,
+            platform,
+            { threadId: event.threadId, messageId: posted.id },
+            check
           );
         } catch (postError) {
           log.warn("channel.card_post_failed", errorFields(postError));
         }
+        // oxlint-disable-next-line no-await-in-loop -- once, then out
+        await editCard(event, {
+          ...shown({
+            waiting: waiting.length,
+            minutes: ended.minutes,
+            newCard,
+          }),
+          ...warned,
+        });
         return;
       }
       const { outcome } = ended;

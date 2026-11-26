@@ -12,7 +12,14 @@ import { heldFor } from "./held-in-connect.ts";
 import { mockIdp } from "./idp.ts";
 import { mailConnection } from "./mail-connection.ts";
 import { signedInApi, unique } from "./sign-in.ts";
-import { member, messageFrom, post, reached, watched } from "./teams-door.ts";
+import {
+  failsOnce,
+  member,
+  messageFrom,
+  post,
+  reached,
+  watched,
+} from "./teams-door.ts";
 import {
   editsOf,
   heldTurn,
@@ -56,40 +63,45 @@ const pause = async (connectionId: string, until: number): Promise<void> => {
 };
 
 /**
- * A member whose Teams turn held two mails on one card, to Ben through
- * one mail connection (`mail`), then to Cleo through another (`other`).
+ * A member whose Teams turn read their mail, then held two mails on one
+ * card: to Ben through `mail`, then to Cleo through `other`, another mail
+ * connection when `connections` is 2, else the same.
  */
-const heldOnTwo = async () => {
+const heldMails = async (connections: 1 | 2) => {
   const admin = await signedInApi(idp, "admin");
-  const mail = await mailConnection([], ["MAIL_SEND"]);
-  const other = await mailConnection([], ["MAIL_SEND"]);
-  const sends: string[] = [];
-  for (const [connection, to] of [
-    [mail, "ben@acme.test"],
-    [other, "cleo@acme.test"],
-  ] as const) {
+  const tools = ["MAIL_SEND", { name: "mail.search", read: true }];
+  const mail = await mailConnection([], tools);
+  const other = connections === 1 ? mail : await mailConnection([], tools);
+  const bindings = new Map<string, string>();
+  for (const { id } of new Set([mail, other])) {
     const binding = `MAIL${unique()}`.toUpperCase();
     // oxlint-disable-next-line no-await-in-loop -- one grant each
     await requestGranted(idp, admin, {
       subject: { type: "agent", agentId: chatAgentId },
-      object: { type: "connection", connectionId: connection.id },
-      actions: ["MAIL_SEND"],
+      object: { type: "connection", connectionId: id },
+      actions: ["MAIL_SEND", "mail.search"],
       binding,
     });
-    sends.push(
-      `await env.connections.call(${JSON.stringify(binding)}, "MAIL_SEND", ${JSON.stringify({ to, subject: "Invoice INV-7" })});`
-    );
+    bindings.set(id, binding);
   }
+  const call = (on: { id: string }, action: string, input: unknown) =>
+    `await env.connections.call(${JSON.stringify(bindings.get(on.id))}, ${JSON.stringify(action)}, ${JSON.stringify(input)});`;
+  const code = [
+    call(mail, "mail.search", { query: "invoice" }),
+    call(mail, "MAIL_SEND", { to: "ben@acme.test", subject: "Invoice INV-7" }),
+    call(other, "MAIL_SEND", {
+      to: "cleo@acme.test",
+      subject: "Invoice INV-7",
+    }),
+  ].join(" ");
   const person = await member(
     idp,
-    codeStep(
-      `export default async (self, env) => { ${sends.join(" ")} return "held"; };`
-    ),
+    codeStep(`export default async (self, env) => { ${code} return "held"; };`),
     says("Both mails wait for you to confirm them.")
   );
   await post(
     messageFrom(person.teams, {
-      text: "Mail ben@acme.test and cleo@acme.test the invoice.",
+      text: "Find the invoice, and mail it to ben@acme.test and cleo@acme.test.",
     })
   );
   const { sent } = await reached(person.teams.conversation);
@@ -122,6 +134,32 @@ const cardsAfter = async (
       : [];
   });
 };
+
+const pressSchema = z.array(
+  z.object({ id: z.string(), inputHash: z.string() })
+);
+
+/** The writes button `actionId` on `card` (as JSON) names in its press. */
+const pressIn = (card: { json: string }, actionId: string) => {
+  let value: unknown;
+  JSON.parse(card.json, (_key, each: unknown) => {
+    if (
+      typeof each === "object" &&
+      each !== null &&
+      Reflect.get(each, "actionId") === actionId
+    ) {
+      value = Reflect.get(each, "value");
+    }
+    return each;
+  });
+  if (typeof value !== "string") {
+    throw new TypeError(`Expected ${actionId} on the card`);
+  }
+  return pressSchema.parse(JSON.parse(value));
+};
+
+/** `line` as a card's JSON holds it. */
+const inJson = (line: string): string => JSON.stringify(line).slice(1, -1);
 
 const requestToolsSchema = z.array(z.object({ ok: z.boolean() }));
 
@@ -274,29 +312,43 @@ describe("the person's own press", setUpTime, () => {
     });
   });
 
-  it("waits out a paused connection: the card says when to confirm again, and a new card for its writes runs them after the pause", async () => {
-    const turn = await heldTurn(idp);
+  it("waits out a paused connection: the card says when to confirm again, and a new card for its writes, warning of what the turn read, runs them after the pause", async () => {
+    const turn = await heldMails(1);
+    // The turn's code read mail: its card says so (GRA-2367).
+    const { sent } = await reached(turn.person.teams.conversation);
+    const first = JSON.stringify(
+      sent.find(({ id }) => id === turn.cardId)?.activity ?? {}
+    );
     await pause(turn.mail.id, Date.now() + 90_000);
     await post(pressOn(turn.person.teams, turn));
     const pausedEdits = await editsOf(turn);
     const paused = pausedEdits.at(-1) ?? "";
     const [card, ...more] = await cardsAfter(turn);
-    const whilePaused = {
-      mail: await mailOf(turn.mail),
-      waiting: new Set(await waitingOf(turn.person)),
-      said: paused.includes(say("pausedManyMinutes", "en", { minutes: 2 })),
-      pressable: paused.includes(confirmAction),
-      cards: more.length + (card === undefined ? 0 : 1),
-      failedTools: await failedToolsOf(turn),
-    };
     if (card === undefined) {
       throw new Error("Expected a new card of held writes");
     }
+    const whilePaused = {
+      warned: first.includes(inJson(say("checkMail", "en"))),
+      mail: await mailOf(turn.mail),
+      waiting: new Set(await waitingOf(turn.person)),
+      said: [
+        paused.includes(inJson(say("pausedManyMinutes", "en", { minutes: 2 }))),
+        paused.includes(inJson(say("checkMail", "en"))),
+        paused.includes(confirmAction),
+      ],
+      more: more.length,
+      offered: pressIn(card, confirmAction),
+      warns: card.json.includes(inJson(say("checkMail", "en"))),
+      failedTools: await failedToolsOf(turn),
+    };
     await pause(turn.mail.id, Date.now() - 1000);
     // The pressed card stays answered; its new card runs.
     await post(pressOn(turn.person.teams, turn));
     await post(
-      pressOn(turn.person.teams, { cardId: card.id, press: turn.press })
+      pressOn(turn.person.teams, {
+        cardId: card.id,
+        press: pressIn(card, confirmAction),
+      })
     );
     const edits = await editsOf({ ...turn, cardId: card.id });
     const lines = await linesAfterCard(turn);
@@ -310,11 +362,13 @@ describe("the person's own press", setUpTime, () => {
       },
     }).toStrictEqual({
       whilePaused: {
+        warned: true,
         mail: { calls: 0, to: [] },
         waiting: new Set(turn.press.map(({ id }) => id)),
-        said: true,
-        pressable: false,
-        cards: 1,
+        said: [true, true, false],
+        more: 0,
+        offered: turn.press,
+        warns: true,
         failedTools: 0,
       },
       after: {
@@ -327,9 +381,9 @@ describe("the person's own press", setUpTime, () => {
   });
 
   it("runs the writes before a paused connection's, and offers only the one still waiting on a new card, which Confirm runs and Cancel declines", async () => {
-    const confirmed = await heldOnTwo();
-    const cancelled = await heldOnTwo();
-    const [first, second] = confirmed.press;
+    const confirmed = await heldMails(2);
+    const cancelled = await heldMails(2);
+    const [, second] = confirmed.press;
     for (const turn of [confirmed, cancelled]) {
       // oxlint-disable-next-line no-await-in-loop -- one card at a time
       await pause(turn.other.id, Date.now() + 30_000);
@@ -347,26 +401,23 @@ describe("the person's own press", setUpTime, () => {
       mail: [await mailOf(confirmed.mail), await mailOf(confirmed.other)],
       waiting: await waitingOf(confirmed.person),
       pressed: [
-        pressed.includes(say("stepDone", "en")),
-        pressed.includes(say("pausedOneMinute", "en")),
+        pressed.includes(inJson(say("stepDone", "en"))),
+        pressed.includes(inJson(say("pausedOneMinute", "en"))),
         pressed.includes(confirmAction),
       ],
-      offered: [
-        card.json.includes(second?.id ?? ""),
-        card.json.includes(first?.id ?? ""),
-      ],
+      offered: pressIn(card, confirmAction),
     };
     await pause(confirmed.other.id, Date.now() - 1000);
     await post(
       pressOn(confirmed.person.teams, {
         cardId: card.id,
-        press: confirmed.press.slice(1),
+        press: pressIn(card, confirmAction),
       })
     );
     await post(
       pressOn(
         cancelled.person.teams,
-        { cardId: cancelCard.id, press: cancelled.press.slice(1) },
+        { cardId: cancelCard.id, press: pressIn(cancelCard, cancelAction) },
         cancelAction
       )
     );
@@ -395,7 +446,7 @@ describe("the person's own press", setUpTime, () => {
         ],
         waiting: [second?.id],
         pressed: [true, true, false],
-        offered: [true, false],
+        offered: [second],
       },
       confirmed: {
         mail: [
@@ -413,6 +464,25 @@ describe("the person's own press", setUpTime, () => {
         waiting: [],
         said: true,
       },
+    });
+  });
+
+  it("says to ask again when a paused connection's writes can't get a new card, and leaves them waiting", async () => {
+    const turn = await heldMails(1);
+    await pause(turn.mail.id, Date.now() + 90_000);
+    await failsOnce(turn.person.teams.conversation, confirmAction);
+    await post(pressOn(turn.person.teams, turn));
+    const edits = await editsOf(turn);
+    expect({
+      said: edits.at(-1)?.includes(inJson(say("pausedAskAgain", "en"))),
+      cards: await cardsAfter(turn),
+      mail: await mailOf(turn.mail),
+      waiting: new Set(await waitingOf(turn.person)),
+    }).toStrictEqual({
+      said: true,
+      cards: [],
+      mail: { calls: 0, to: [] },
+      waiting: new Set(turn.press.map(({ id }) => id)),
     });
   });
 

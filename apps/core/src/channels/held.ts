@@ -2,8 +2,10 @@ import { agentErrors } from "@grasp-os/shared/agent";
 import { heldAppCallsPage, shownVisibly } from "@grasp-os/shared/chat";
 import type { ChatChannel, HeldAppCall } from "@grasp-os/shared/chat";
 import type { ConnectionPerson, PendingAction } from "@grasp-os/shared/connect";
+import { errorFields, log } from "@grasp-os/shared/log";
 import { roleSchema } from "@grasp-os/shared/roles";
 import type { Identity } from "@grasp-os/shared/rpc";
+import type { StateAdapter } from "chat";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -222,6 +224,60 @@ export const turnHeldWrites = async (
   return [...writes, ...toApps]
     .toSorted((a, b) => a.at - b.at)
     .map(({ view }) => view);
+};
+
+/** How long a card is remembered as pressed: past any write's life. */
+export const pressedTtlMs = 30 * 24 * 60 * 60 * 1000;
+
+/** A posted card, by its message. */
+interface PostedCard {
+  threadId: string;
+  messageId: string;
+}
+
+/** Where card `card`'s read check is kept (`keepCheck`). */
+const checkKey = (
+  platform: string,
+  { threadId, messageId }: PostedCard
+): string => `check:${platform}:${threadId}:${messageId}`;
+
+/**
+ * Keeps what card `card` of held writes warned of (`checkOf`), as long as
+ * a card is remembered pressed, for a press on it, which doesn't carry it:
+ * a card a press posts again for its writes warns of it too (press.ts).
+ * One that can't be kept is logged: that card warns, the one after not.
+ */
+export const keepCheck = async (
+  state: StateAdapter,
+  platform: string,
+  card: PostedCard,
+  check: ReadCheck | undefined
+): Promise<void> => {
+  if (check === undefined) {
+    return;
+  }
+  try {
+    await state.set(checkKey(platform, card), check, pressedTtlMs);
+  } catch (error) {
+    log.warn("channel.check_unkept", errorFields(error));
+  }
+};
+
+/**
+ * What card `card` warned of, as `keepCheck` kept it: none for one that
+ * warned of nothing, or whose check can't be read, which is logged.
+ */
+export const keptCheck = async (
+  state: StateAdapter,
+  platform: string,
+  card: PostedCard
+): Promise<ReadCheck | undefined> => {
+  try {
+    return (await state.get<ReadCheck>(checkKey(platform, card))) ?? undefined;
+  } catch (error) {
+    log.warn("channel.check_unread", errorFields(error));
+    return undefined;
+  }
 };
 
 /**

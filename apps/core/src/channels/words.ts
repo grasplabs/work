@@ -412,6 +412,14 @@ const lines = {
     fr: "Un service m’a demandé de ralentir, les modifications encore en attente n’ont donc pas encore été effectuées. Confirmez-les à nouveau dans {minutes} minutes sur la carte ci-dessous.",
     es: "Un servicio me ha pedido que vaya más despacio, así que los cambios pendientes todavía no se han hecho. Vuelve a confirmarlos en {minutes} minutos en la tarjeta de abajo.",
   },
+  /** As the others, where no new card could be posted. */
+  pausedAskAgain: {
+    en: "A service asked me to slow down, so the changes still waiting haven't been made, and I couldn't show them on a new card. Ask me for them again in a few minutes.",
+    nl: "Een dienst vroeg me het rustiger aan te doen, dus de wijzigingen die nog wachten zijn niet doorgevoerd, en ik kon ze niet op een nieuwe kaart laten zien. Vraag me er over een paar minuten opnieuw om.",
+    de: "Ein Dienst hat mich gebeten, langsamer zu machen, deshalb wurden die noch wartenden Änderungen nicht vorgenommen, und ich konnte sie nicht auf einer neuen Karte zeigen. Fragen Sie mich in ein paar Minuten noch einmal danach.",
+    fr: "Un service m’a demandé de ralentir, les modifications encore en attente n’ont donc pas été effectuées, et je n’ai pas pu les afficher sur une nouvelle carte. Redemandez-les-moi dans quelques minutes.",
+    es: "Un servicio me ha pedido que vaya más despacio, así que los cambios pendientes no se han hecho, y no he podido mostrarlos en una tarjeta nueva. Vuelve a pedírmelos dentro de unos minutos.",
+  },
   expired: {
     en: "This card expired at the end of the day, and nothing was changed. Ask me again if you still want it.",
     nl: "Deze kaart is aan het eind van de dag verlopen en er is niets gewijzigd. Vraag het me opnieuw als je het nog wilt.",
