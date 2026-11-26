@@ -159,7 +159,8 @@ export const stephenRules = {
   /**
    * Nothing the person's agent may not read reaches the model, and for
    * someone outside finance, every call of finance's account, open to
-   * finance alone, is refused.
+   * finance alone, is refused. Finance's own turns are exempt as its
+   * audience holds them, whatever classes are on for their team.
    */
   nothingUnreadableRead: ({ modelRead, calls }, { persona }, { finance }) => {
     const outsideFinance = stephenPeople[persona].team !== "finance";

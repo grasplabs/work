@@ -12,8 +12,7 @@
  * account's alone, as one consented to its site alone: Graph refuses it
  * to any other account's token, and keeps no read of it. Every read of a
  * world is kept, its path and query, and every write is kept and never
- * carried out, for the
- * eval's first hard rule: nothing runs in the turn. `{ failNext:
+ * carried out, for the eval's first hard rule: nothing runs in the turn. `{ failNext:
  * "calendarView" }` has the next calendar read fail, as Graph sometimes
  * does.
  *
@@ -45,8 +44,11 @@ export const stephenGraphFake = () => {
   const worlds = new Map<string, World>();
   const drives = new Map<string, File[]>();
   const tables = new Map<string, Table>();
-  /** The account each drive that is one account's alone belongs to. */
-  const accounts = new Map<string, string>();
+  /**
+   * The accounts that alone reach a drive: one for each company set up
+   * against this Graph.
+   */
+  const accounts = new Map<string, Set<string>>();
   // oxlint-disable-next-line unicorn/consistent-function-scoping -- self-contained: core's tests embed this function's source
   const listOf = (value: unknown): unknown[] =>
     Array.isArray(value) ? value.map((item: unknown) => item) : [];
@@ -202,12 +204,13 @@ export const stephenGraphFake = () => {
    * one account's alone.
    */
   const deniedOf = (request: Request, drive: string): Response | undefined => {
-    // The account a token is of: `Bearer access.{subject}.{nonce}`.
-    const [subject] = (request.headers.get("authorization") ?? "")
+    // The account a token is of: `Bearer access.{subject}`, with a
+    // `.{nonce}` once renewed (connect-providers.ts).
+    const [subject = ""] = (request.headers.get("authorization") ?? "")
       .replace("Bearer access.", "")
       .split(".");
-    const account = accounts.get(drive);
-    return account === undefined || account === subject
+    const reaching = accounts.get(drive);
+    return reaching === undefined || reaching.has(subject)
       ? undefined
       : Response.json(
           { error: { code: "accessDenied", message: "Access denied" } },
@@ -250,10 +253,12 @@ export const stephenGraphFake = () => {
           }))
         );
       }
-      const owned =
-        typeof drive === "string" ? drive : textOf(table).split("/")[0];
-      if (typeof set.account === "string" && owned !== undefined) {
-        accounts.set(owned, set.account);
+      const owned = typeof table === "string" ? table.split("/")[0] : drive;
+      if (typeof set.account === "string" && typeof owned === "string") {
+        accounts.set(
+          owned,
+          new Set([...(accounts.get(owned) ?? []), set.account])
+        );
       }
       if (typeof table === "string") {
         tables.set(table, {

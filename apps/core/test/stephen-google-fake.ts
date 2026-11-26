@@ -43,8 +43,14 @@ export const stephenGoogleFake = () => {
   const worlds = new Map<string, World>();
   const drives = new Map<string, File[]>();
   const spreadsheets = new Map<string, Spreadsheet>();
-  /** The account each shared drive that is one account's alone belongs to. */
-  const accounts = new Map<string, string>();
+  /**
+   * The accounts that alone reach a shared drive: one for each company set
+   * up against this Google.
+   */
+  const accounts = new Map<string, Set<string>>();
+  /** Whether `subject`'s account reaches `drive`. */
+  const reaches = (drive: string, subject: string): boolean =>
+    accounts.get(drive)?.has(subject) ?? true;
   // oxlint-disable-next-line unicorn/consistent-function-scoping -- self-contained: core's tests embed this function's source
   const listOf = (value: unknown): unknown[] =>
     Array.isArray(value) ? value.map((item: unknown) => item) : [];
@@ -196,9 +202,7 @@ export const stephenGoogleFake = () => {
     if (parts[3] !== "drives" || parts.length !== 4) {
       return undefined;
     }
-    const ids = [...drives.keys()].filter((drive) =>
-      [undefined, subject].includes(accounts.get(drive))
-    );
+    const ids = [...drives.keys()].filter((drive) => reaches(drive, subject));
     const at = Number(url.searchParams.get("pageToken") ?? 0);
     const id = ids[at];
     return Response.json({
@@ -409,7 +413,10 @@ export const stephenGoogleFake = () => {
         failNext = failing;
       }
       if (typeof drive === "string" && typeof set.account === "string") {
-        accounts.set(drive, set.account);
+        accounts.set(
+          drive,
+          new Set([...(accounts.get(drive) ?? []), set.account])
+        );
       }
       if (typeof mailbox === "string") {
         worlds.set(mailbox.toLowerCase(), {
@@ -452,13 +459,13 @@ export const stephenGoogleFake = () => {
       request: Request,
       url: URL
     ): Promise<Response | undefined> => {
-      // The account a token is of: `Bearer access.{subject}`.
+      // The account a token is of: `Bearer access.{subject}`, with a
+      // `.{nonce}` once renewed (connect-providers.ts).
       const [subject = ""] = (request.headers.get("authorization") ?? "")
         .replace("Bearer access.", "")
         .split(".");
       const drive = driveOf(decodeURIComponent(url.pathname).split("/"), url);
-      const account = drive === undefined ? undefined : accounts.get(drive);
-      if (account !== undefined && account !== subject) {
+      if (drive !== undefined && !reaches(drive, subject)) {
         return refusalOf(url);
       }
       const answer = route(request, url, subject);

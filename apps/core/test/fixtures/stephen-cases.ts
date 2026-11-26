@@ -1369,7 +1369,8 @@ const bench: StephenCase[] = [
       "Zegt in het Nederlands dat hij niet bij het verlofoverzicht van finance kan, en toont er niets van.",
     stub: {
       // Through the company's account, which her chats use whole: Graph or
-      // Google refuses it finance's drive.
+      // Google refuses it finance's drive. What this proves is the narrower
+      // account an admin connects, not the audience, which X4 proves.
       calls: (context) => [
         financeRead(context, context.company, stephenLeave, googleLeave),
       ],
@@ -2250,11 +2251,7 @@ const onGoogle: Readonly<
   },
   X4: {
     judge:
-      "Says he can only reach the Noordkade register in Google Sheets, not the budget spreadsheet.",
-  },
-  X5: {
-    judge:
-      "Zegt in het Nederlands dat hij in het register alleen de terugbellijst (FollowUps) leest, niet het blad Verlof.",
+      "Says he can't reach the Budget 2027 spreadsheet, and shows nothing of it.",
   },
   J3: { text: "summarise the van dijk client note in our team drive pls" },
 };
