@@ -299,7 +299,7 @@ describe("a chat's own page", () => {
     });
   });
 
-  it("shows a question in the thread the moment it is sent, and puts it back in the box with why once core refuses it", async () => {
+  it("shows a question in the thread the moment it is sent, and puts it back in the box with why once core refuses it, before what was typed since", async () => {
     const taken = Promise.withResolvers<undefined>();
     await opened(
       "chat-a",
@@ -344,6 +344,7 @@ describe("a chat's own page", () => {
         wordsOf(row)
       ),
     };
+    await typed("Only this month");
     await act(async () => {
       taken.reject(agentErrors.create("agent.invalid_question"));
       await taken.promise.catch(() => {});
@@ -365,7 +366,7 @@ describe("a chat's own page", () => {
           expect.stringContaining("And which are late?"),
         ],
       },
-      box: "And which are late?",
+      box: "And which are late?\n\nOnly this month",
       thread: 1,
       notes: [
         "Could not send. Your message is kept.",

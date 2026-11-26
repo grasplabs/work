@@ -734,7 +734,9 @@ describe(ChatThread, () => {
         files: [{ id: "f1", file: new File(["1,2"], "sums.csv") }],
         after: 2,
         at,
-        failed: false,
+        owner: "box",
+        fromBox: true,
+        state: "sending",
       }
     );
 

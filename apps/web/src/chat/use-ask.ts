@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from "react";
 import { useCoreAction } from "../use-core-action.ts";
 import { activeChat, setActiveChat } from "./active-chat.ts";
 import type { ChatSlot } from "./active-chat.ts";
+import { useFollowedChat } from "./chat-watch.ts";
 import type { Problem, StopNote } from "./dictation.ts";
 import type { BoxMention } from "./mentions.tsx";
 import { chatMentionsOf } from "./mentions.tsx";
@@ -25,9 +26,14 @@ import {
 } from "./model-choice.ts";
 import type { ModelChoice } from "./model-choice.ts";
 import {
+  clearPending,
   keepMade,
+  pendingAt,
   pendingKey,
   setPending,
+  taken,
+  takesBack,
+  useBoxOwner,
   usePending,
 } from "./pending-question.ts";
 import type { PendingQuestion } from "./pending-question.ts";
@@ -63,6 +69,13 @@ const problemOf = (file: File): string | undefined => {
   return undefined;
 };
 
+/**
+ * Where each of the page's box files went, by its ID in the box: a send
+ * that failed after core took one names it again in the same chat, from
+ * whichever box asks again.
+ */
+const attachedFiles = new Map<string, { chatId: string; fileId: string }>();
+
 /** No model takes an effort, as before core says which do. */
 const noModelEfforts: Readonly<Record<string, ModelEfforts>> = {};
 
@@ -73,8 +86,6 @@ export interface AskOptions {
    * the question goes on its way: its page may open at once, and shows it.
    */
   onChat?: (chatId: string) => void;
-  /** The chat's last message: a question sent now comes after it. */
-  after?: number;
   /**
    * What each question is about: the page it is asked on (chat-subject.ts).
    */
@@ -127,7 +138,7 @@ export const useAsk = (
   efforts: Readonly<Record<string, ModelEfforts>> = noModelEfforts,
   /** Which of the tab's open chats a new chat becomes. */
   slot: ChatSlot = "chat",
-  { onChat, after = 0, subject, make, agentId }: AskOptions = noOptions
+  { onChat, subject, make, agentId }: AskOptions = noOptions
 ) => {
   const { identity } = useRouteContext({ from: "/_shell" });
   const { busy, failure, run } = useCoreAction();
@@ -142,25 +153,6 @@ export const useAsk = (
   const [files, setFiles] = useState<readonly BoxFile[]>([]);
   // Why a file the person chose stays out of the box.
   const [fileProblem, setFileProblem] = useState<string>();
-  // A question that failed to send comes back into the box that shows its
-  // chat, which says why (`failure`): this one, or the chat's page Chat's
-  // start opened as it went. Into an empty box only; what was typed since
-  // stays, and the files go back before the box's own.
-  const pendingHere = pendingKey(chatId, slot);
-  const returned = usePending(pendingHere);
-  const [takenBack, setTakenBack] = useState<PendingQuestion>();
-  if (returned?.failed === true && returned !== takenBack) {
-    setTakenBack(returned);
-    setText((now) => (now === "" ? returned.text : now));
-    setMentions((now) => (now.length === 0 ? returned.mentions : now));
-    setFiles((now) => [...returned.files, ...now]);
-  }
-  // Taken back, it is the box's alone.
-  useEffect(() => {
-    if (returned?.failed === true) {
-      setPending(pendingHere, undefined);
-    }
-  }, [returned, pendingHere]);
   // The chat what is typed belongs to, and the chat a question asked here
   // made: the box is that one's still once it opens.
   const [draftOf, setDraftOf] = useState(chatId);
@@ -175,11 +167,50 @@ export const useAsk = (
       setStopped(undefined);
     }
   }
+  // The question on its way here (pending-question.ts), and the box's own
+  // ID, which only it takes back.
+  const owner = useBoxOwner();
+  const pendingHere = pendingKey(chatId, slot);
+  const here = usePending(pendingHere);
+  const { messages } = useFollowedChat(chatId).view;
+  // Why the question the box took back didn't go, until the next is sent.
+  const [returnedWhy, setReturnedWhy] = useState<string>();
+  // A question from the box that failed to send comes back into it, which
+  // says why: the box that sent it, or, once that one is gone (Chat's
+  // start, after it opened the chat's page), the one that shows its chat.
+  // Before what was typed since, never in place of it.
+  const [takenBack, setTakenBack] = useState<PendingQuestion>();
+  if (takesBack(here, owner) && here !== takenBack) {
+    setTakenBack(here);
+    setReturnedWhy(here.state.failed);
+    setText((now) => (now === "" ? here.text : `${here.text}\n\n${now}`));
+    setMentions((now) => [
+      ...here.mentions,
+      ...now.filter(
+        (each) =>
+          !here.mentions.some(
+            ({ kind, id }) => kind === each.kind && id === each.id
+          )
+      ),
+    ]);
+    setFiles((now) => [...here.files, ...now]);
+  }
+  // Taken back, or core's copy in the thread: it is no longer on its way.
+  useEffect(() => {
+    if (
+      here !== undefined &&
+      (takesBack(here, owner) ||
+        (here.state === "sent" && taken(here, messages)))
+    ) {
+      clearPending(pendingHere, here);
+    }
+  }, [here, owner, messages, pendingHere]);
+  // Another box's question on its way into this chat (Chat's start, which
+  // opened it): this one waits for it, so the two never pass each other.
+  const otherOnItsWay = here?.state === "sending" && here.owner !== owner;
   // The box's files core already took, by chat: asking again in the same
   // chat names them rather than attaching them twice.
-  const attached = useRef(
-    new Map<string, { chatId: string; fileId: string }>()
-  );
+  const attached = attachedFiles;
   // The person's last choice in this browser, against what core offers
   // now: until they make one, the default model at its default effort.
   const [choice, setChoice] = useState<ModelChoice>(() =>
@@ -222,8 +253,8 @@ export const useAsk = (
     setFiles((now) => now.filter((each) => each.id !== id));
     // Core took it already (a send that failed after it): removed there
     // too, so it holds none of the chat's places for files.
-    const known = attached.current.get(id);
-    attached.current.delete(id);
+    const known = attached.get(id);
+    attached.delete(id);
     setFileProblem(undefined);
     if (known !== undefined) {
       void run(async (session) => {
@@ -231,16 +262,21 @@ export const useAsk = (
       });
     }
   };
-  /** Asks `question`: true once core took it, false when it was not sent. */
+  /**
+   * Asks `question`: true once core took it, false when it was not sent.
+   * From the box (`fromBox`), a question that fails goes back into it.
+   */
   const ask = async (
     question: string,
     carried: readonly BoxFile[] = [],
-    mentioned: readonly BoxMention[] = []
+    mentioned: readonly BoxMention[] = [],
+    fromBox = false
   ): Promise<boolean> => {
-    if (sending.current) {
+    if (sending.current || otherOnItsWay) {
       return false;
     }
     sending.current = true;
+    setReturnedWhy(undefined);
     const named = chatMentionsOf(mentioned);
     // A new chat starts with the agent picked, else the first one the
     // question mentions: the first agent, paused, never stops it.
@@ -251,76 +287,97 @@ export const useAsk = (
       text: question,
       mentions: mentioned,
       files: carried,
-      after,
+      after: messages.at(-1)?.id ?? 0,
       at: new Date().toISOString(),
-      failed: false,
+      owner,
+      fromBox,
+      state: "sending",
     };
     let pendingIn = pendingKey(chatId, slot);
     setPending(pendingIn, asked);
-    setText((now) => (now === question ? "" : now));
-    if (mentioned.length > 0) {
-      setMentions([]);
+    if (fromBox) {
+      setText((now) => (now === question ? "" : now));
+      if (mentioned.length > 0) {
+        setMentions([]);
+      }
+      setFiles((now) => now.filter((each) => !carried.includes(each)));
     }
-    setFiles((now) => now.filter((each) => !carried.includes(each)));
-    const sent = await run(async (session) => {
-      let id = chatId ?? unsentChatFor(unsent.current, question, startWith);
-      if (id === undefined) {
-        const chat = await session.chats.create(
-          titleOf(question),
-          startWith,
-          make
-        );
-        keepMade(chat);
-        ({ id } = chat);
-        created = id;
-      }
-      if (chatId === undefined) {
-        // The chat is there: the question shows in it as it goes on, and
-        // it is the open one, unless another was opened meanwhile.
-        setPending(pendingIn, undefined);
-        pendingIn = id;
-        setPending(pendingIn, asked);
-        // The box is the chat's still once it opens.
-        setMade(id);
-        if (activeChat(slot) === undefined) {
-          setActiveChat(id, slot);
+    // Why it failed, kept with the question for whichever box takes it back.
+    let why: string | undefined;
+    const sent = await run(
+      async (session) => {
+        let id = chatId ?? unsentChatFor(unsent.current, question, startWith);
+        if (id === undefined) {
+          const chat = await session.chats.create(
+            titleOf(question),
+            startWith,
+            make
+          );
+          // Its page, if it opens at once, opens with what core said.
+          if (onChat !== undefined) {
+            keepMade(chat);
+          }
+          ({ id } = chat);
+          created = id;
         }
-        onChat?.(id);
-      }
-      const askedIn = id;
-      const fileIds: string[] = [];
-      for (const { id: boxId, file } of carried) {
-        const known = attached.current.get(boxId);
-        if (known?.chatId === askedIn) {
-          fileIds.push(known.fileId);
-          continue;
+        if (chatId === undefined) {
+          // The chat is there: the question shows in it as it goes on, and
+          // it is the open one, unless another was opened meanwhile.
+          clearPending(pendingIn, asked);
+          pendingIn = id;
+          setPending(pendingIn, asked);
+          // The box is the chat's still once it opens.
+          setMade(id);
+          if (activeChat(slot) === undefined) {
+            setActiveChat(id, slot);
+          }
+          onChat?.(id);
         }
-        // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
-        const { id: fileId } = await session.chats.attachFile(askedIn, {
-          name: file.name,
-          bytes,
+        const askedIn = id;
+        const fileIds: string[] = [];
+        for (const { id: boxId, file } of carried) {
+          const known = attached.get(boxId);
+          if (known?.chatId === askedIn) {
+            fileIds.push(known.fileId);
+            continue;
+          }
+          // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          // oxlint-disable-next-line no-await-in-loop -- one at a time, in the order they were added
+          const { id: fileId } = await session.chats.attachFile(askedIn, {
+            name: file.name,
+            bytes,
+          });
+          attached.set(boxId, { chatId: askedIn, fileId });
+          fileIds.push(fileId);
+        }
+        await session.chats.send(askedIn, {
+          text: question,
+          model,
+          ...(effort === undefined ? {} : { effort }),
+          ...(fileIds.length === 0 ? {} : { files: fileIds }),
+          ...(subject === undefined ? {} : { subject }),
+          ...(named.length === 0 ? {} : { mentions: named }),
         });
-        attached.current.set(boxId, { chatId: askedIn, fileId });
-        fileIds.push(fileId);
-      }
-      await session.chats.send(askedIn, {
-        text: question,
-        model,
-        ...(effort === undefined ? {} : { effort }),
-        ...(fileIds.length === 0 ? {} : { files: fileIds }),
-        ...(subject === undefined ? {} : { subject }),
-        ...(named.length === 0 ? {} : { mentions: named }),
-      });
-      return askedIn;
-    });
+        return askedIn;
+      },
+      fromBox
+        ? (reason) => {
+            why = reason;
+          }
+        : undefined
+    );
     sending.current = false;
     if (sent === undefined) {
-      // The question leaves the thread and goes back into the box, which
-      // says why it wasn't sent; a new chat made for it waits to be asked
-      // in again.
-      setPending(pendingIn, { ...asked, failed: true });
+      // From the box, the question leaves the thread and goes back into a
+      // box, which says why it wasn't sent; asked for the person, it only
+      // leaves the thread, and this box says why. A new chat made for it
+      // waits to be asked in again.
+      if (why === undefined) {
+        clearPending(pendingIn, asked);
+      } else {
+        setPending(pendingIn, { ...asked, state: { failed: why } });
+      }
       if (created !== undefined) {
         unsent.current = { id: created, question, agentId: startWith };
       }
@@ -328,7 +385,11 @@ export const useAsk = (
     }
     unsent.current = null;
     for (const { id } of carried) {
-      attached.current.delete(id);
+      attached.delete(id);
+    }
+    // Taken: drawn until core's copy is in the thread.
+    if (pendingAt(pendingIn) === asked) {
+      setPending(pendingIn, { ...asked, state: "sent" });
     }
     return true;
   };
@@ -352,8 +413,8 @@ export const useAsk = (
       onEffort: (chosen: ModelEffort) => {
         choose({ model, effort: chosen });
       },
-      busy,
-      failure: fileProblem ?? failure,
+      busy: busy || otherOnItsWay,
+      failure: fileProblem ?? failure ?? returnedWhy,
       files: files.map(({ id, file }) => ({
         id,
         name: file.name,
@@ -363,7 +424,7 @@ export const useAsk = (
       onRemoveFile: removeFile,
       onSend: () => {
         setFileProblem(undefined);
-        void ask(text, files, mentions);
+        void ask(text, files, mentions, true);
       },
       // Only in a chat: before there is one, nothing is answered to stop.
       ...(chatId === undefined
