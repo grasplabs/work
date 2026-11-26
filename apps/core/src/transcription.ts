@@ -188,20 +188,31 @@ const settlingOf = (events: EventQueue): Settling => {
   };
 };
 
+/** The most words to listen out for that the session is given. */
+const mostTerms = 100;
+
 /**
- * The session's settings: PCM at 16 kHz, the language, and a short delay,
- * for words as they are said. No words to listen out for: Voxtral's
- * realtime model refuses `context_bias` ("does not support context
- * biasing", its error 3051), so the keyterms the page's store names go
- * unused here.
+ * The session's settings: PCM at 16 kHz and a short delay, for words as
+ * they are said; in full, also the language it is held to (so Dutch isn't
+ * heard as English) and the words to listen out for, as Mistral's
+ * realtime guide sets them for voxtral-mini-transcribe-realtime-3. An
+ * older model refused both (error 3051, "does not support language
+ * forcing", "context biasing"): refused, the session is set up again
+ * without them (`plain`), rather than not at all.
  */
-const sessionUpdate = ({ language }: TranscriptionOptions): string =>
+const sessionUpdate = (
+  { language, keyterms }: TranscriptionOptions,
+  plain: boolean
+): string =>
   JSON.stringify({
     type: "session.update",
     session: {
       audio_format: { encoding: "pcm_s16le", sample_rate: sessionSampleRate },
-      language,
       target_streaming_delay_ms: streamingDelayMs,
+      ...(plain ? {} : { language }),
+      ...(plain || keyterms.length === 0
+        ? {}
+        : { context_bias: keyterms.slice(0, mostTerms) }),
     },
   });
 
@@ -214,29 +225,30 @@ const answerWithinMs = 10_000;
 
 /**
  * Waits for the session to send `type` (`session.created`, then
- * `session.updated`); throws when it errs, closes or doesn't in time. Its
+ * `session.updated`): `true` once it did, `false` when it refused with its
+ * error; throws when it closes or doesn't answer in time. Its
  * error here is about its settings, never what was said: its message is
  * logged with its code.
  */
 const answered = async (
   socket: WebSocket,
   type: "session.created" | "session.updated"
-): Promise<void> => {
-  const { promise, resolve, reject } = Promise.withResolvers<null>();
+): Promise<boolean> => {
+  const { promise, resolve, reject } = Promise.withResolvers<boolean>();
   const timer = setTimeout(() => {
     reject(new Error(`No ${type} in time`));
   }, answerWithinMs);
   const heard = (event: MessageEvent): void => {
     const read = serverEventOf(event.data);
     if (read?.type === type) {
-      resolve(null);
+      resolve(true);
     } else if (read !== undefined && "error" in read) {
       log.warn("transcription.upstream_refused", {
         waiting: type,
         code: read.error.code ?? undefined,
         message: settingsMessageOf(read.error.message),
       });
-      reject(new Error("The session was refused"));
+      resolve(false);
     }
   };
   const closed = (): void => {
@@ -245,7 +257,7 @@ const answered = async (
   socket.addEventListener("message", heard);
   socket.addEventListener("close", closed);
   try {
-    await promise;
+    return await promise;
   } finally {
     clearTimeout(timer);
     socket.removeEventListener("message", heard);
@@ -270,9 +282,17 @@ export const platformTranscription = (
       throw transcriptionErrors.create("transcription.failed");
     }
     try {
-      await answered(socket, "session.created");
-      socket.send(sessionUpdate(options));
-      await answered(socket, "session.updated");
+      if (!(await answered(socket, "session.created"))) {
+        throw new Error("The session was refused");
+      }
+      socket.send(sessionUpdate(options, false));
+      if (!(await answered(socket, "session.updated"))) {
+        // No audio went yet: the settings may still be set, plainer.
+        socket.send(sessionUpdate(options, true));
+        if (!(await answered(socket, "session.updated"))) {
+          throw new Error("The session's settings were refused");
+        }
+      }
     } catch {
       try {
         socket.close(1000, "Done");

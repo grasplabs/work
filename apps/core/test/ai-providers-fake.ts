@@ -243,7 +243,12 @@ export const aiProvidersFake = () => {
       }
       record.events.push(parsed.type);
       if (parsed.type === "session.update") {
-        if (isRecord(parsed.session) && "context_bias" in parsed.session) {
+        // The older model takes neither, as Mistral's refused them.
+        if (
+          url.search.includes("2602") &&
+          isRecord(parsed.session) &&
+          ("context_bias" in parsed.session || "language" in parsed.session)
+        ) {
           send({
             type: "error",
             error: {

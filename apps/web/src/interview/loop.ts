@@ -267,6 +267,8 @@ let unmeasure: (() => void) | null = null;
 let lastSaid: { how: VoiceTag | null; after: () => void } | null = null;
 /** His line was begun with its first sentence, and the rest of it is still owed. */
 let restOwed = false;
+/** The language the last session was opened in: one opened in another goes on in that one. */
+let sessionIn: string | null = null;
 
 /** Tells whoever follows the conversation what happens in it. */
 const announce = (event: LoopEvent): void => {
@@ -1950,6 +1952,19 @@ const withoutLive = (): void => {
   });
 };
 
+/** How a new session opens: as the interview stands, or in the language they just switched to. */
+const eventOf = (
+  opening: InterviewEvent,
+  locale: string
+): "start" | "resume" | "add" | "language" => {
+  const switched = sessionIn !== null && sessionIn !== locale;
+  sessionIn = locale;
+  if (opening === "start" || opening === "add") {
+    return opening;
+  }
+  return switched ? "language" : "resume";
+};
+
 /**
  * The conversation, held in a live session: joined, or false when none
  * can be had, and the turns go on as before.
@@ -1977,7 +1992,7 @@ const goLive = async (): Promise<boolean> => {
   const joined = await joinLive(
     {
       action: "open",
-      event: opening === "start" || opening === "add" ? opening : "resume",
+      event: eventOf(opening, standing.locale),
       ...standing,
       // What a new session doesn't know: the conversation before.
       before: now.lines
@@ -2062,14 +2077,6 @@ export const changeLine = (id: string, was: string, now: string): void => {
   }
 };
 
-/** What the conversation says by itself follows the language on screen. */
-export const setLoopWords = (next: LoopWords): void => {
-  if (on && next.offline !== words?.offline) {
-    readyToTell(next);
-  }
-  words = next;
-};
-
 /**
  * The conversation begins, or goes on where it was: with nothing said, his
  * first line; back on the link, where they were; in the read-back, the part
@@ -2139,5 +2146,24 @@ export const stopLoop = ({ keep = true }: { keep?: boolean } = {}): void => {
   state = idle;
   for (const listener of listeners) {
     listener();
+  }
+};
+
+/**
+ * What the conversation says by itself follows the language on screen.
+ * Switched while it runs, he stops at once, mid-word if he must, and goes
+ * on in the new language: his line again in it, heard and answered in it.
+ * Nothing of the old language is said in the new one's voice, nor the
+ * other way round.
+ */
+export const setLoopWords = (next: LoopWords): void => {
+  const was = words;
+  if (on && next.offline !== was?.offline) {
+    readyToTell(next);
+  }
+  words = next;
+  if (on && was !== null && was.locale !== next.locale) {
+    stopLoop();
+    startLoop();
   }
 };

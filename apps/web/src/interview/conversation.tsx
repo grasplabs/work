@@ -40,14 +40,21 @@ import { useInterviewWords } from "./words.ts";
 export const besideQuery = "(min-width: 80rem)";
 const beside = `@media ${besideQuery}`;
 
+// Each word comes out of a soft blur as it fades in, slower than it takes him to say the next,
+// so the words run into each other as one stream rather than ticking in one at a time: the
+// same motion as their own words over the box (heard.tsx).
 const stream = stylex.create({
   word: {
     opacity: 1,
-    transitionProperty: { default: "opacity", [media.reducedMotion]: "none" },
-    transitionDuration: duration.ui,
-    transitionTimingFunction: duration.easeInOut,
+    filter: "blur(0)",
+    transitionProperty: {
+      default: "opacity, filter",
+      [media.reducedMotion]: "none",
+    },
+    transitionDuration: "460ms",
+    transitionTimingFunction: duration.ease,
   },
-  unseen: { opacity: 0 },
+  unseen: { opacity: 0, filter: "blur(4px)" },
 });
 
 const styles = stylex.create({
@@ -94,25 +101,28 @@ const styles = stylex.create({
   },
   // On a narrow window the open transcript takes the stage's place.
   hiddenNarrow: { display: { default: "none", [beside]: "flex" } },
-  // The stage: the line in the middle of the room the card leaves.
+  // The stage: his line a little above the middle of the room the card leaves, where the eye
+  // rests. Its top stands still there: as the line grows while he says it, and the text under
+  // the title comes, it grows downwards, and nothing already shown moves.
   stage: {
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    justifyContent: "safe center",
     flexGrow: 1,
     minHeight: 0,
     overflowY: "auto",
     paddingBlock: space["6"],
   },
-  // The read-back reads from its top: its lines are a list to check.
-  reading: { justifyContent: "flex-start" },
+  // The room over the line: a share of the stage, given up first when the line needs it.
+  lead: { flexGrow: 0, flexShrink: 1, flexBasis: "28%", minHeight: 0 },
   question: {
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
     gap: space["5"],
     textAlign: "center",
+    // No word left alone on a line of its own.
+    textWrap: "balance",
   },
   next: {
     display: "flex",
@@ -156,7 +166,7 @@ const Streamed = ({
 
 /** A line of Stephen's on the stage: its first sentence large and the rest under it, when it is long. */
 const SaidLine = ({ line, said }: { line: string; said: number }) => {
-  const { title, rest } = shownAs(line, 90);
+  const { title, rest, restAt } = shownAs(line);
   return (
     <>
       <Heading level={1} size="xl">
@@ -164,7 +174,7 @@ const SaidLine = ({ line, said }: { line: string; said: number }) => {
       </Heading>
       {rest === "" ? null : (
         <Text size="lg">
-          <Streamed from={title.length + 1} said={said} text={rest} />
+          <Streamed from={restAt} said={said} text={rest} />
         </Text>
       )}
     </>
@@ -296,8 +306,15 @@ export const Conversation = ({
   return (
     <>
       <Room alone={alone} transcript={transcript}>
-        <div {...stylex.props(styles.stage, reading && styles.reading)}>
-          {reading ? <ReadBack /> : <Asking />}
+        <div {...stylex.props(styles.stage)}>
+          {reading ? (
+            <ReadBack />
+          ) : (
+            <>
+              <div aria-hidden="true" {...stylex.props(styles.lead)} />
+              <Asking />
+            </>
+          )}
         </div>
         {footed ? null : (
           <AnswerBox key={answer} onTalk={onTalk} reading={reading} />
@@ -338,17 +355,18 @@ export const TimeUp = ({
       stopSpeaking();
     };
   }, [line, speaker]);
-  const { title, rest } = shownAs(line, 0);
+  const { title, rest, restAt } = shownAs(line);
   return (
     <Room alone={false} transcript={false}>
       <div {...stylex.props(styles.stage)}>
+        <div aria-hidden="true" {...stylex.props(styles.lead)} />
         <div aria-live="polite" {...stylex.props(styles.question)}>
           <Countdown left={0} />
           <Heading level={1} size="xl">
             <Streamed said={saidOf} text={title} />
           </Heading>
           <Text size="lg">
-            <Streamed from={title.length + 1} said={saidOf} text={rest} />
+            <Streamed from={restAt} said={saidOf} text={rest} />
           </Text>
           <div {...stylex.props(styles.next)}>
             <Button onClick={onReadBack} size="lg">
