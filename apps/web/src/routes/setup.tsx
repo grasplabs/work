@@ -62,6 +62,7 @@ import type {
   SetupStep,
 } from "../onboarding/setup.ts";
 import { smoothly } from "../onboarding/smoothly.ts";
+import { StepVoice } from "../onboarding/step-voice.tsx";
 import { signInErrorSearch } from "../sign-in-errors.ts";
 import { useCore } from "../use-core.ts";
 
@@ -280,32 +281,40 @@ const Setup = () => {
       language={step !== "welcome"}
       pose={poses[step]}
     >
-      <SetupStepBody
-        data={{
-          ...data,
-          admin: identity.name.trim().split(/\s+/u)[0] ?? "",
-          sendingDomain: data.view.mailDomain,
-          signIn,
-          // The sign-ins the kickoff named, where it named any.
-          suites: suitesFor(suites, data.view.context),
-          identity,
-        }}
-        askedFor={askedFor}
-        go={go}
+      {/* The next step's lines fetched ahead, and this one's remembered for the next time through. */}
+      <StepVoice
         key={step}
-        message={kept.message}
-        onMessage={(message) => {
-          kept.onMessage(message);
-        }}
-        onSettle={(item, settled) => {
-          kept.onSettle(item, settled);
-        }}
-        onward={onward}
-        path={path}
-        settled={kept.settled}
+        next={path[index + 1]}
         step={step}
-        today={todayInUtc()}
-      />
+        userId={identity.userId}
+      >
+        <SetupStepBody
+          data={{
+            ...data,
+            admin: identity.name.trim().split(/\s+/u)[0] ?? "",
+            sendingDomain: data.view.mailDomain,
+            signIn,
+            // The sign-ins the kickoff named, where it named any.
+            suites: suitesFor(suites, data.view.context),
+            identity,
+          }}
+          askedFor={askedFor}
+          go={go}
+          key={step}
+          message={kept.message}
+          onMessage={(message) => {
+            kept.onMessage(message);
+          }}
+          onSettle={(item, settled) => {
+            kept.onSettle(item, settled);
+          }}
+          onward={onward}
+          path={path}
+          settled={kept.settled}
+          step={step}
+          today={todayInUtc()}
+        />
+      </StepVoice>
     </CalmFrame>
   );
 };
