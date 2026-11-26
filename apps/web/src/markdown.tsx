@@ -1,3 +1,4 @@
+import { Link } from "@grasp-os/ui/components/link";
 import {
   Table,
   TableBody,
@@ -5,7 +6,10 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@grasp-os/app-kit/components/table";
+} from "@grasp-os/ui/components/table";
+import { useI18n } from "@grasp-os/ui/lib/i18n";
+import { colors, font, radius, space } from "@grasp-os/ui/lib/tokens.stylex";
+import * as stylex from "@stylexjs/stylex";
 import type { ReactNode } from "react";
 import Markdown from "react-markdown";
 import type { Components } from "react-markdown";
@@ -18,7 +22,52 @@ import remarkGfm from "remark-gfm";
 // `defaultUrlTransform` empties any other, such as `javascript:`), and
 // opens in a tab of its own without this page as its opener. Images show
 // their alt text: loading one would tell its host who read the text, and
-// when.
+// when. It draws a printed export's page (export/export-file.tsx), not
+// Damsko's Markdown, which draws for the screen: a copy button and folds
+// on fenced code, folding sections, and raw HTML shown as text.
+
+const styles = stylex.create({
+  text: { display: "flex", flexDirection: "column", gap: space["3"] },
+  // The first two levels in the serif, as the prototype's printed page
+  // (packages/grasp/src/lib/export-file.ts).
+  h1: {
+    fontFamily: font.serif,
+    fontSize: font.headingMd,
+    lineHeight: font.headingMdLine,
+    fontWeight: font.weightNormal,
+    letterSpacing: font.trackingTitle,
+  },
+  h2: {
+    fontFamily: font.serif,
+    fontSize: font.headingSm,
+    lineHeight: font.headingSmLine,
+    fontWeight: font.weightNormal,
+    letterSpacing: font.trackingTitle,
+  },
+  h3: {
+    fontSize: font.headingXs,
+    lineHeight: font.headingXsLine,
+    fontWeight: font.weightMedium,
+  },
+  minor: { fontWeight: font.weightMedium },
+  ul: { listStyleType: "disc", paddingInlineStart: space["6"] },
+  ol: { listStyleType: "decimal", paddingInlineStart: space["6"] },
+  blockquote: {
+    color: colors.mutedForeground,
+    borderInlineStartWidth: "2px",
+    borderInlineStartStyle: "solid",
+    borderInlineStartColor: colors.border,
+    paddingInlineStart: space["4"],
+  },
+  pre: {
+    overflowX: "auto",
+    borderRadius: radius.sm,
+    backgroundColor: colors.muted,
+    padding: space["3"],
+    fontSize: font.textSm,
+  },
+  code: { fontFamily: font.mono, fontSize: font.textSm },
+});
 
 /**
  * A link that leaves the page: in a tab of its own, without this page as
@@ -35,41 +84,34 @@ const OutsideLink = ({
   href === undefined || href === "" ? (
     <span>{children}</span>
   ) : (
-    <a
-      className="underline"
-      href={href}
-      rel="noopener noreferrer"
-      target="_blank"
-    >
+    <Link href={href} rel="noopener noreferrer" target="_blank">
       {children}
-    </a>
+    </Link>
   );
 
+/** A table, named as Damsko's Markdown names one with no heading of its own. */
+const MarkdownTable = ({ children }: { children?: ReactNode }) => {
+  const words = useI18n().markdown;
+  return <Table aria-label={words.table}>{children}</Table>;
+};
+
 const components: Components = {
-  h1: ({ children }) => (
-    <h1 className="font-serif text-2xl font-light tracking-tight">
-      {children}
-    </h1>
-  ),
-  h2: ({ children }) => <h2 className="text-xl font-medium">{children}</h2>,
-  h3: ({ children }) => <h3 className="text-lg font-medium">{children}</h3>,
-  h4: ({ children }) => <h4 className="font-medium">{children}</h4>,
-  h5: ({ children }) => <h5 className="font-medium">{children}</h5>,
-  h6: ({ children }) => <h6 className="font-medium">{children}</h6>,
-  ul: ({ children }) => <ul className="list-disc pl-6">{children}</ul>,
-  ol: ({ children }) => <ol className="list-decimal pl-6">{children}</ol>,
+  h1: ({ children }) => <h1 {...stylex.props(styles.h1)}>{children}</h1>,
+  h2: ({ children }) => <h2 {...stylex.props(styles.h2)}>{children}</h2>,
+  h3: ({ children }) => <h3 {...stylex.props(styles.h3)}>{children}</h3>,
+  h4: ({ children }) => <h4 {...stylex.props(styles.minor)}>{children}</h4>,
+  h5: ({ children }) => <h5 {...stylex.props(styles.minor)}>{children}</h5>,
+  h6: ({ children }) => <h6 {...stylex.props(styles.minor)}>{children}</h6>,
+  ul: ({ children }) => <ul {...stylex.props(styles.ul)}>{children}</ul>,
+  ol: ({ children }) => <ol {...stylex.props(styles.ol)}>{children}</ol>,
   blockquote: ({ children }) => (
-    <blockquote className="text-muted-foreground border-l-2 pl-4">
-      {children}
-    </blockquote>
+    <blockquote {...stylex.props(styles.blockquote)}>{children}</blockquote>
   ),
-  pre: ({ children }) => (
-    <pre className="bg-muted overflow-x-auto rounded-md p-3 text-sm">
-      {children}
-    </pre>
+  pre: ({ children }) => <pre {...stylex.props(styles.pre)}>{children}</pre>,
+  code: ({ children }) => (
+    <code {...stylex.props(styles.code)}>{children}</code>
   ),
-  code: ({ children }) => <code className="font-mono text-sm">{children}</code>,
-  table: ({ children }) => <Table>{children}</Table>,
+  table: ({ children }) => <MarkdownTable>{children}</MarkdownTable>,
   thead: ({ children }) => <TableHeader>{children}</TableHeader>,
   tbody: ({ children }) => <TableBody>{children}</TableBody>,
   tr: ({ children }) => <TableRow>{children}</TableRow>,
@@ -80,34 +122,13 @@ const components: Components = {
     alt === undefined || alt === "" ? null : <span>{alt}</span>,
 };
 
-/** How a link that leaves the page is drawn: `OutsideLink`, unless one that asks first. */
-export type LeavingLink = (props: {
-  href: string | undefined;
-  children: ReactNode;
-}) => ReactNode;
-
-/**
- * The components for text such as the agent's answers, every link drawn
- * by `Leaving`: `OutsideLink`, unless one that asks first.
- */
-export const plainComponents = (
-  Leaving: LeavingLink = OutsideLink
-): Components => ({
-  ...components,
-  a: ({ href, children }) => <Leaving href={href}>{children}</Leaving>,
-});
-
 /**
  * Markdown such as the agent's answers, safely: no raw HTML, safe links
  * only (react-markdown's `defaultUrlTransform`), no images.
  */
 export const PlainMarkdown = ({ text }: { text: string }) => (
-  <div className="flex flex-col gap-3">
-    <Markdown
-      components={plainComponents()}
-      remarkPlugins={[remarkGfm]}
-      skipHtml
-    >
+  <div {...stylex.props(styles.text)}>
+    <Markdown components={components} remarkPlugins={[remarkGfm]} skipHtml>
       {text}
     </Markdown>
   </div>

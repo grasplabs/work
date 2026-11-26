@@ -1,19 +1,24 @@
-import { GraspMark } from "@grasp-os/app-kit/components/grasp-mark";
-import { PageHeaderTitle } from "@grasp-os/app-kit/components/page-header";
+import { Heading } from "@grasp-os/ui/components/heading";
+import { Icon } from "@grasp-os/ui/lib/icons";
+import { colors, font, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { i18n } from "@lingui/core";
+import { I18nProvider } from "@lingui/react";
+import * as stylex from "@stylexjs/stylex";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 
+import { GraspMark } from "../frame/grasp-mark.ts";
+import { UiWords } from "../frame/ui-words.tsx";
 import { PlainMarkdown } from "../markdown.tsx";
 
 // What every export in Grasp can become, by the person's choice: a
 // Markdown file, or a PDF. A PDF is made by the browser's own print dialog
 // (Save as PDF), from the Markdown set as an A4 page in the brand's hand,
 // as in the prototype (`lib/export-file.ts`, `lib/report.ts`): the Grasp
-// mark at its head, Geist for the text, the title (PageHeaderTitle), the
-// Markdown's first two levels of heading (`page-export` in styles.css) in
-// Newsreader, and the light theme, which is what
-// paper takes (the theme's dark is for the screen only). No PDF is drawn
-// in the app itself.
+// mark at its head, the sans for the text, the title as a page's title, the
+// Markdown's first two levels of heading in the serif (markdown.tsx), and
+// the light theme, which is what paper takes (the theme's dark is for the
+// screen only). No PDF is drawn in the app itself.
 //
 // The page to print is a frame of this origin, so it keeps this page's
 // Content Security Policy: no inline script or style. Its look comes from
@@ -22,6 +27,40 @@ import { PlainMarkdown } from "../markdown.tsx";
 // (`PlainMarkdown`: no raw HTML, safe links only, no images).
 
 export type ExportFormat = "md" | "pdf";
+
+const styles = stylex.create({
+  // A4 with the prototype's margins (`@page export` in styles.css), its
+  // colours printed as they are.
+  page: {
+    page: "export",
+    printColorAdjust: "exact",
+    display: "flex",
+    flexDirection: "column",
+    gap: space["3"],
+    backgroundColor: colors.card,
+    color: colors.foreground,
+    fontFamily: font.sans,
+    // The body size and line of Damsko's Markdown, as a note reads on screen.
+    fontSize: font.textBase,
+    lineHeight: font.textBaseLine,
+  },
+  head: {
+    display: "flex",
+    alignItems: "center",
+    gap: space["2"],
+    fontWeight: font.weightMedium,
+  },
+  // The frame the page is printed from: there, never seen.
+  frame: {
+    position: "fixed",
+    top: 0,
+    left: 0,
+    width: 0,
+    height: 0,
+    opacity: 0,
+    pointerEvents: "none",
+  },
+});
 
 export interface ExportFile {
   /** The file's name without its extension: "pricing". */
@@ -93,12 +132,12 @@ const PrintPage = ({
   title: string;
   markdown: string;
 }) => (
-  <main className="page-export bg-card text-foreground flex flex-col gap-3 font-sans text-sm leading-relaxed">
-    <header className="flex items-center gap-2 font-medium">
-      <GraspMark className="h-4 w-auto" />
+  <main {...stylex.props(styles.page)}>
+    <header {...stylex.props(styles.head)}>
+      <Icon icon={GraspMark} />
       Grasp
     </header>
-    <PageHeaderTitle>{title}</PageHeaderTitle>
+    <Heading level={1}>{title}</Heading>
     <PlainMarkdown
       text={withoutTitleLine(withoutFrontmatter(markdown).trimStart(), title)}
     />
@@ -156,7 +195,8 @@ export const printAsPdf = async (
   frame.setAttribute("aria-hidden", "true");
   frame.tabIndex = -1;
   frame.title = file.title;
-  frame.className = "pointer-events-none fixed top-0 left-0 size-0 opacity-0";
+  const { className = "" } = stylex.props(styles.frame);
+  frame.className = className;
   // Some browsers replace the frame's first empty page with another as it
   // loads: what is written into it waits for that.
   const loaded = eventOrTimeout(frame, "load");
@@ -198,20 +238,28 @@ export const printAsPdf = async (
   };
   printing = { remove };
   flushSync(() => {
-    root.render(<PrintPage markdown={file.markdown()} title={file.title} />);
+    root.render(
+      // In the page's language: the words Damsko's parts say themselves too.
+      <I18nProvider i18n={i18n}>
+        <UiWords>
+          <PrintPage markdown={file.markdown()} title={file.title} />
+        </UiWords>
+      </I18nProvider>
+    );
   });
   await Promise.all(
     links.map(async (link) => {
       await eventOrTimeout(link, "load");
     })
   );
-  // Laid out, so the page asks for Geist and the title's Newsreader; then
-  // both, or the PDF falls back to the system's fonts.
+  // Laid out, so the page asks for the sans and the title's serif (Damsko's
+  // Geist and Geist Serif); then both, or the PDF falls back to the
+  // system's fonts.
   page.body.getBoundingClientRect();
   await withinTime(
     Promise.all([
-      page.fonts.load('1em "Geist Variable"'),
-      page.fonts.load('300 1em "Newsreader Variable"'),
+      page.fonts.load('1em "Geist"'),
+      page.fonts.load('1em "Geist Serif"'),
     ])
   );
   await withinTime(page.fonts.ready);

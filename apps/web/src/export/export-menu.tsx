@@ -1,23 +1,29 @@
-import { Button } from "@grasp-os/app-kit/components/button";
+import { Button } from "@grasp-os/ui/components/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@grasp-os/app-kit/components/dropdown-menu";
-import { Spinner } from "@grasp-os/app-kit/components/spinner";
+} from "@grasp-os/ui/components/dropdown-menu";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@grasp-os/app-kit/components/tooltip";
+  DownloadIcon,
+  FileDocIcon,
+  FilePdfIcon,
+  Icon,
+} from "@grasp-os/ui/lib/icons";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { DownloadIcon, FileTextIcon, PrinterIcon } from "lucide-react";
+import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 
 import { ErrorText } from "../error-text.tsx";
 import { exportAs } from "./export-file.tsx";
 import type { ExportFile, ExportFormat } from "./export-file.tsx";
+
+const styles = stylex.create({
+  // Why the last export failed, beside the button that tries again.
+  row: { display: "inline-flex", alignItems: "center", gap: space["2"] },
+});
 
 /**
  * Every export in Grasp, as in the prototype (`components/export-menu.tsx`):
@@ -27,13 +33,10 @@ import type { ExportFile, ExportFormat } from "./export-file.tsx";
 export const ExportMenu = ({
   file,
   label,
-  className,
 }: {
   file: ExportFile;
   /** What it exports, as the tooltip says it: "Export this chat". Plain "Export" without it. */
   label?: string;
-  /** Placement only. */
-  className?: string;
 }) => {
   const { i18n, t } = useLingui();
   const name = label ?? t`Export`;
@@ -52,46 +55,37 @@ export const ExportMenu = ({
     setBusy(false);
   };
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span {...stylex.props(styles.row)}>
       {failed ? (
         <ErrorText>{t`The export didn't work. Try again.`}</ErrorText>
       ) : null}
       <DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <DropdownMenuTrigger
-                render={
-                  <Button
-                    aria-label={name}
-                    className={className}
-                    disabled={busy}
-                    size="icon-sm"
-                    variant="ghost"
-                  />
-                }
-              />
-            }
+        <DropdownMenuTrigger asChild>
+          {/* Its name shows as its tooltip; while the page is made, the spinner takes the icon's place. */}
+          <Button
+            aria-label={name}
+            size="icon-sm"
+            status={busy ? "loading" : "idle"}
+            variant="ghost"
           >
-            {busy ? <Spinner /> : <DownloadIcon />}
-          </TooltipTrigger>
-          <TooltipContent>{name}</TooltipContent>
-        </Tooltip>
-        <DropdownMenuContent align="end" className="w-44">
+            <Icon icon={DownloadIcon} />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
           <DropdownMenuItem
-            onClick={() => {
+            icon={FileDocIcon}
+            onSelect={() => {
               void exportIn("md");
             }}
           >
-            <FileTextIcon />
             <Trans>Markdown (.md)</Trans>
           </DropdownMenuItem>
           <DropdownMenuItem
-            onClick={() => {
+            icon={FilePdfIcon}
+            onSelect={() => {
               void exportIn("pdf");
             }}
           >
-            <PrinterIcon />
             <Trans>PDF</Trans>
           </DropdownMenuItem>
         </DropdownMenuContent>

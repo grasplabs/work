@@ -114,21 +114,6 @@
 }
 
 /*
- * In every Markdown export, its first two levels of heading are in
- * Newsreader, as the prototype's (packages/grasp/src/lib/export-file.ts),
- * so a printed page reads as Grasp's. A Markdown h1 is in the serif
- * already (markdown.tsx); on paper its h2 is too.
- */
-@utility page-export {
-  page: export;
-  print-color-adjust: exact;
-
-  & h2 {
-    @apply font-serif font-normal tracking-tight;
-  }
-}
-
-/*
  * From the prototype (packages/grasp/src/index.css at ddd235d), the rest of its
  * motion and surfaces: the document drop, workflow nodes and their wires and
  * nerves, the agent's spark, threads, live marks, the canvas and the torn
