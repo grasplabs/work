@@ -21,6 +21,7 @@ import type {
   EntryId,
   EntryRecord,
   JsonObject,
+  ConversationRetryPolicy,
   Registry,
   SessionEnd,
   SettledSubmissionRecord,
@@ -75,6 +76,7 @@ import { codeTimeoutMs } from "./code-mode.ts";
 import { callObject, workspace } from "./durable-objects.ts";
 import { chatTurnPurpose } from "./model-spend.ts";
 import { models } from "./models.ts";
+import type { AgentModel } from "./models.ts";
 import { sessionHost } from "./sandboxed.ts";
 import { recallForTurn, turnRecallTool } from "./turn-recall.ts";
 
@@ -229,6 +231,32 @@ const maxTurnChecks = 3;
 /** What a turn that only showed its thinking is asked, once, before it ends. */
 const wordsPlease =
   "You showed your thinking in the brain, but wrote no answer. Now write your answer to the person in words.";
+
+/** Whether a chat's Harness has asked the model anything yet (`retryPolicy`). */
+interface Asked {
+  since: boolean;
+}
+
+/**
+ * pi's retry of a turn's request, for one kind of failure only: a request
+ * a restart cut off (an eviction, a deploy, a reset), which pi counts as a
+ * failed attempt where pi 1.4 sent it again as it opened. It is sent again
+ * at once, as before, and at most four times in a row, as before (pi 1.4
+ * parked a request the fifth restart cut off). That one may have been
+ * billed, as it could before.
+ *
+ * Every other failure comes from the model gateway, which retries what may
+ * be retried (a rate limit, after the wait the provider asked for; never
+ * what may have been billed) and says why a request failed in the end: pi
+ * retrying that too would multiply the attempts and send again what may
+ * have been billed. pi reads one policy for both, so it is on only until
+ * the Harness first asks the model: a restart opens a new Harness, whose
+ * first act for a request a restart cut off is to count it (pi's
+ * `interrupted`), before it sends anything; once it sends, what the
+ * gateway answers is final, a summary's too.
+ */
+const retryPolicy = (asked: boolean): Partial<ConversationRetryPolicy> =>
+  asked ? { enabled: false } : { enabled: true, maxRetries: 4, baseDelayMs: 0 };
 
 /** How soon the object wakes to sync again after a sync failed. */
 const syncRetryMs = 15_000;
@@ -632,8 +660,8 @@ export class ChatHarness {
   #room: number = DEFAULT_COMPACTION_POLICY.keepRecentTokens;
   /** Why the turn under way was stopped, if it was. */
   #stopped: TurnStop | undefined;
-  /** Whether pi held the turn's work parked as the Harness opened. */
-  #parked = false;
+  /** Whether this Harness has asked the model anything (`retryPolicy`). */
+  readonly #asked: Asked;
   /**
    * The turn a `run` takes now, from its first step: the one question the
    * object takes at a time. A call for the same turn waits on its end.
@@ -694,8 +722,10 @@ export class ChatHarness {
     harness: Harness,
     conversation: Conversation,
     registry: Registry,
-    pi: MutableModels
+    pi: MutableModels,
+    asked: Asked
   ) {
+    this.#asked = asked;
     this.#host = host;
     this.#name = name;
     this.#env = env;
@@ -719,31 +749,31 @@ export class ChatHarness {
     const storage = await host.storage();
     const registry = createRegistry();
     const pi = createModels();
+    const asked: Asked = { since: false };
     const harness = await Harness.open(
       storage,
       {
         models: pi,
         registry,
-        // Read at each use: tests lower the restart limit as they go.
+        // Read at each use: tests lower the restart limit as they go, and
+        // pi's retry is on only until this Harness asks the model anything.
         settings: () => ({
           // One code run at a time, as each is an isolate of its own.
           toolExecution: "sequential",
-          // The model gateway's provider SDKs retry a request already, and
-          // the gateway says why one failed in the end (`model.rate_limited`
-          // and so on): pi retrying on top would multiply the attempts.
-          retry: { enabled: false },
+          retry: retryPolicy(asked.since),
           ...restartLimitOf(env),
         }),
         identity: { attribution: null },
         onWake: host.arm,
-        // Said once, as the open that parks a task: what the object does
-        // of it reads pi's state (`setUpStored`), at every open.
-        onReport: (error, info) => {
-          if (info.type === "task_parked") {
-            log.warn("chat.task_parked", {
+        // What crashes ended: a turn's run, its request or a step, cut off
+        // too often; the turn then ends with why (`#endOf`).
+        onReport: (report) => {
+          if (report.kind === "task_interrupted") {
+            log.warn("chat.task_interrupted", {
               chatSession: name,
-              task: info.task.kind,
-              ...errorFields(error),
+              task: report.task.kind,
+              reason: report.reason,
+              restarts: report.restarts,
             });
           }
         },
@@ -759,15 +789,33 @@ export class ChatHarness {
       harness,
       conversation,
       registry,
-      pi
+      pi,
+      asked
     );
-    // The one watch of pi: called at once with the view as it is, then at
-    // each commit. Whatever the Workspace was last told, and whatever a
+    // The one watch of pi, an observer, so it sees each commit as pi
+    // adopts it, partial answers included, as the object's state must
+    // (`#running`). Whatever the Workspace was last told, and whatever a
     // restart kept from being copied, it is brought up to date.
-    const view = await conversation.viewState(context);
-    view.subscribe((value) => {
+    let advanced = false;
+    const { value } = await harness.observeConversation(
+      conversation.id,
+      {
+        advance: (call) => {
+          if (call.kind === "value") {
+            advanced = true;
+            opened.#see(call.value);
+          }
+        },
+        end: () => {
+          // pi closed: its host opens it again.
+        },
+      },
+      context
+    );
+    // Its value as it attached, unless a commit came first.
+    if (!advanced) {
       opened.#see(value);
-    });
+    }
     return opened;
   }
 
@@ -802,7 +850,10 @@ export class ChatHarness {
         this.#thought.set(kept.id, ms);
       }
     }
-    this.#syncSoon();
+    // After pi's commit: an observer only records it.
+    queueMicrotask(() => {
+      this.#syncSoon();
+    });
   }
 
   /**
@@ -1110,7 +1161,6 @@ export class ChatHarness {
       throw agentErrors.create("agent.busy");
     }
     this.#stopped = undefined;
-    this.#parked = false;
     await this.#conversation.commit(async (tx) => {
       // The turn's record, before anything else of it: a fresh one.
       const turn = await tx.doc(TurnDoc);
@@ -1228,12 +1278,11 @@ export class ChatHarness {
    * request admitted again first, so nothing runs for a person who left.
    * The object does this as it opens the Harness, before it serves any
    * call, and resumes after, so it only admits and aborts here: a turn
-   * pi parked, one whose context holds what the chat may no longer read,
-   * or one that can't be set up is aborted, and ends with why (`#endOf`);
-   * the next question rebases (`#submit`), the guard holding every request
-   * meanwhile. A rebase can take longer than an object may block. A
-   * parked task is read from pi's state, as an earlier open may have
-   * parked it and reset before it ended the turn.
+   * whose context holds what the chat may no longer read, or one that
+   * can't be set up, is aborted, and ends with why (`#endOf`); the next
+   * question rebases (`#submit`), the guard holding every request
+   * meanwhile. A rebase can take longer than an object may block. A turn
+   * restarts cut off too often pi ends itself (`#endOf`).
    */
   async setUpStored(): Promise<void> {
     const turn = await this.#harness.snapshot(TurnDoc, context);
@@ -1245,19 +1294,10 @@ export class ChatHarness {
     if (!this.#running || request === undefined) {
       return;
     }
-    const { tasks } = await this.#harness.inspect(context);
-    this.#parked = tasks.some(
-      ({ state }) =>
-        state.kind === "blocked" && state.reason === "restart_limit"
-    );
     try {
       await this.#setUp(request);
       const { withheld } = await this.#guard(request.scope);
-      if (this.#parked) {
-        await this.#conversation.abort(context);
-      } else if (
-        await needsRebase(this.#conversation, new Set(withheld), context)
-      ) {
+      if (await needsRebase(this.#conversation, new Set(withheld), context)) {
         this.#stopped = "history_revoked";
         await this.#conversation.abort(context);
       }
@@ -1461,6 +1501,12 @@ export class ChatHarness {
         }
       }
     );
+    // Each request, a summary's too: from the first, pi retries nothing
+    // (`retryPolicy`).
+    const asking: AgentModel["stream"] = (model, sent, options) => {
+      this.#asked.since = true;
+      return admitted.stream(model, sent, options);
+    };
     this.#models.setProvider(
       createProvider({
         id: gateway,
@@ -1471,7 +1517,7 @@ export class ChatHarness {
           },
         },
         models: [{ ...admitted.model, provider: gateway }],
-        api: { stream: admitted.stream, streamSimple: admitted.stream },
+        api: { stream: asking, streamSimple: asking },
       })
     );
     /** The lines the turn's runs sent the Workspace, one after another. */
@@ -1591,13 +1637,6 @@ export class ChatHarness {
     if (stopped !== undefined) {
       return { outcome: "failed", answer: "", stopped };
     }
-    if (this.#parked) {
-      return {
-        outcome: "failed",
-        answer: "",
-        error: "Restarts cut the turn off too often for it to go on.",
-      };
-    }
     if (settled.type !== "input") {
       return { outcome: "failed", answer: "" };
     }
@@ -1616,6 +1655,18 @@ export class ChatHarness {
     }
     if (settled.reason === "aborted") {
       return { outcome: "cancelled", answer: "" };
+    }
+    // Restarts cut its request or a step off more often than pi tries
+    // again (`retryPolicy`, `restartLimit`).
+    if (
+      settled.reason === "interrupted" ||
+      settled.reason === "restart_limit"
+    ) {
+      return {
+        outcome: "failed",
+        answer: "",
+        error: "Restarts cut the turn off too often for it to go on.",
+      };
     }
     return {
       outcome: "failed",

@@ -1,4 +1,4 @@
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import type { ImageContent, Message, UserMessage } from "@earendil-works/pi-ai";
 import {
   estimateContextTokens,
@@ -822,9 +822,9 @@ export const chatAgent = (agent: ChatAgent): Extension => {
           try {
             return (await mayRead(agent, api, context))
               ? undefined
-              : { decline: true };
+              : { kind: "decline" as const };
           } catch {
-            return { decline: true };
+            return { kind: "decline" as const };
           }
         },
       }),

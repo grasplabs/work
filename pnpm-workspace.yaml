@@ -6,6 +6,17 @@ packages:
 # Supply-chain defaults: new versions wait 3 days, exotic sub-dependencies are
 # blocked, and only the packages listed here may run install scripts.
 minimumReleaseAge: 4320
+# Pi 1.6.1 (25 November 2026) before its three days, approved by the owner
+# for the Pi upgrade: these packages alone, each published by Pi's release
+# workflow with provenance and no install scripts. Remove after 28 November
+# 2026, when 1.6.1 is three days old.
+minimumReleaseAgeExclude:
+  - "@earendil-works/chord"
+  - "@earendil-works/pi-ai"
+  - "@earendil-works/pi-codemode"
+  - "@earendil-works/pi-durable"
+  - "@earendil-works/pi-schema"
+  - "@earendil-works/pi-telemetry"
 blockExoticSubdeps: true
 strictDepBuilds: true
 allowBuilds:
@@ -161,15 +172,16 @@ catalog:
   # as better-auth.
   "@better-auth/core": 1.7.14
   "@better-auth/sso": 1.7.14
-  "@earendil-works/pi-ai": 1.4.0
+  "@earendil-works/pi-ai": 1.6.1
   # pi's durable agent runtime (MIT, marked experimental: pinned exactly,
   # moved with pi-ai), and Chord, its document state and contexts: the chat
   # agent as a pi-durable extension (apps/core/src/chat-agent.ts).
-  "@earendil-works/pi-durable": 1.4.0
-  "@earendil-works/chord": 1.4.0
-  # TypeBox, as pi-ai uses it: the schemas of the chat agent's tools
-  # (apps/core/src/agent-tools.ts) checked without echoing their input.
-  typebox: 1.3.27
+  "@earendil-works/pi-durable": 1.6.1
+  "@earendil-works/chord": 1.6.1
+  # pi's JSON Schema builders and validator, moved with pi-durable: the
+  # schemas of the chat agent's tools (apps/core/src/agent-tools.ts),
+  # checked without echoing their input.
+  "@earendil-works/pi-schema": 1.6.1
   "@modelcontextprotocol/sdk": 1.32.2
   better-auth: 1.7.14
   # The admin's Cloudflare Access check.

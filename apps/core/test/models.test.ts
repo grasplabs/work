@@ -1,7 +1,7 @@
-import { Type } from "@earendil-works/pi-ai";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
+import { obj, str } from "@earendil-works/pi-schema";
 import type { AuditEvent } from "@grasp-os/shared/audit";
 import { appIdSchema } from "@grasp-os/shared/ids";
 import type { ModelWait } from "@grasp-os/shared/models";
@@ -943,7 +943,7 @@ describe("model gateway for agents", () => {
   const codeTool = {
     name: "executeCode",
     description: "Runs code.",
-    parameters: Type.Object({ code: Type.String() }),
+    parameters: obj({ code: str() }, { open: true }),
   };
 
   /** A conversation that offers the model the code tool. */

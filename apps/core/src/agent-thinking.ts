@@ -1,6 +1,6 @@
-import type { JsonRepresentation } from "@earendil-works/chord";
-import { Type } from "@earendil-works/pi-ai";
+import type { JsonRepresentation } from "@earendil-works/chord/json";
 import { defineTool } from "@earendil-works/pi-durable";
+import { arr, obj, oneOf, str } from "@earendil-works/pi-schema";
 import type { Statement, Team, Workflow } from "@grasp-os/shared/brain";
 import {
   checkThinkingStep,
@@ -36,27 +36,24 @@ export interface ThinkingBrain {
   workflows: readonly Pick<Workflow, "id" | "name" | "drawings">[];
 }
 
-const parameters = Type.Object(
-  {
-    step: Type.String({
-      description:
-        "What you do in this step, or at the last one what you found, in one short plain sentence in the person's language.",
-    }),
-    shape: Type.Enum(thinkingShapes, {
-      description:
-        'The shape the brain takes: "same-pain", for whether the same pain hurts more than one team; "hours", for where the hours go.',
-    }),
-    move: Type.String({
-      description:
-        'Which step of the shape this is. For "same-pain": "teams", then "said", then "together". For "hours": "work", then "hours", then "most".',
-    }),
-    notes: Type.Array(Type.String(), {
-      description:
-        "What it looks at: teams by their id or name and what they said by its statement id, or workflows by their id or name.",
-    }),
-  },
-  { additionalProperties: false }
-);
+const parameters = obj({
+  step: str({
+    description:
+      "What you do in this step, or at the last one what you found, in one short plain sentence in the person's language.",
+  }),
+  shape: oneOf(thinkingShapes, {
+    description:
+      'The shape the brain takes: "same-pain", for whether the same pain hurts more than one team; "hours", for where the hours go.',
+  }),
+  move: str({
+    description:
+      'Which step of the shape this is. For "same-pain": "teams", then "said", then "together". For "hours": "work", then "hours", then "most".',
+  }),
+  notes: arr(str(), {
+    description:
+      "What it looks at: teams by their id or name and what they said by its statement id, or workflows by their id or name.",
+  }),
+});
 
 /**
  * Finds what `name` names in `brain`, of `kinds`: by id, then by name,

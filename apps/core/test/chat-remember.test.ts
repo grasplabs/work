@@ -1,8 +1,8 @@
+import { compile } from "@earendil-works/pi-schema";
 import { personalBrainOf } from "@grasp-os/brain-next/contract";
 import type { MemoriesCursor } from "@grasp-os/brain-next/contract";
 import type { ChatMessage } from "@grasp-os/shared/chat";
 import { env } from "cloudflare:workers";
-import { Value } from "typebox/value";
 import { describe, expect, it, vi } from "vite-plus/test";
 import { z } from "zod";
 
@@ -983,7 +983,7 @@ describe("the agent remembering in a person's own chat", () => {
         quote: "it's sushi now",
         replaces: [pizza],
       };
-      if (!Value.Check(tool.parameters, input)) {
+      if (!compile(tool.parameters).check(input)) {
         throw new Error("Not the tool's input");
       }
       // A restart replays the same call, by its id.

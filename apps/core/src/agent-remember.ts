@@ -1,6 +1,7 @@
-import { Type } from "@earendil-works/pi-ai";
-import type { Message, Static } from "@earendil-works/pi-ai";
+import type { Message } from "@earendil-works/pi-ai";
 import { defineTool } from "@earendil-works/pi-durable";
+import { arr, lit, obj, opt, str, union } from "@earendil-works/pi-schema";
+import type { Static } from "@earendil-works/pi-schema";
 import { delegateActorOf } from "@grasp-os/shared/audit";
 import type {
   BrainEntityKind,
@@ -63,80 +64,74 @@ const oneOf = <const T extends string>(
   values: readonly T[],
   description: string
 ) =>
-  Type.Union(
-    values.map((value) => Type.Literal(value)),
+  union(
+    values.map((value) => lit(value)),
     { description }
   );
 
-const parameters = Type.Object(
-  {
-    about: Type.Union(
-      [
-        Type.Literal("me", {
-          description: "The person you are talking with.",
+const parameters = obj({
+  about: union(
+    [
+      lit("me", {
+        description: "The person you are talking with.",
+      }),
+      obj({
+        kind: oneOf(memoryChoices.kinds, "What it is."),
+        name: str({
+          minLength: 1,
+          maxLength: memoryChoices.valueMaxLength,
+          description:
+            'Its name. For the person you are talking with, use "me" as `about` instead, never an entity named "me".',
         }),
-        Type.Object(
-          {
-            kind: oneOf(memoryChoices.kinds, "What it is."),
-            name: Type.String({
-              minLength: 1,
-              maxLength: memoryChoices.valueMaxLength,
-              description:
-                'Its name. For the person you are talking with, use "me" as `about` instead, never an entity named "me".',
-            }),
-            id: Type.Optional(
-              Type.String({
-                format: "uuid",
-                description:
-                  "Its id from an earlier save, so this memory joins the same one.",
-              })
-            ),
-          },
-          { additionalProperties: false }
+        id: opt(
+          str({
+            format: "uuid",
+            description:
+              "Its id from an earlier save, so this memory joins the same one.",
+          })
         ),
-      ],
-      { description: "Who or what it is about." }
-    ),
-    attribute: Type.Optional(
-      oneOf(
-        memoryChoices.attributes,
-        'What it says of them, one their kind has: for "me", "role", "responsibility", "expertise", "preference" or "instruction"; for a customer "status", "renewal_date", "next_step"… Leave it out when none fits.'
-      )
-    ),
-    value: Type.Optional(
-      Type.String({
-        minLength: 1,
-        maxLength: memoryChoices.valueMaxLength,
-        description: "The attribute's value, short.",
-      })
-    ),
-    type: oneOf(
-      memoryChoices.types,
-      'A fact, a decision, how they want things ("preference") or how you should work for them ("instruction").'
-    ),
-    statement: Type.String({
+      }),
+    ],
+    { description: "Who or what it is about." }
+  ),
+  attribute: opt(
+    oneOf(
+      memoryChoices.attributes,
+      'What it says of them, one their kind has: for "me", "role", "responsibility", "expertise", "preference" or "instruction"; for a customer "status", "renewal_date", "next_step"… Leave it out when none fits.'
+    )
+  ),
+  value: opt(
+    str({
       minLength: 1,
-      maxLength: memoryChoices.statementMaxLength,
+      maxLength: memoryChoices.valueMaxLength,
+      description: "The attribute's value, short.",
+    })
+  ),
+  type: oneOf(
+    memoryChoices.types,
+    'A fact, a decision, how they want things ("preference") or how you should work for them ("instruction").'
+  ),
+  statement: str({
+    minLength: 1,
+    maxLength: memoryChoices.statementMaxLength,
+    description:
+      "What to remember, as one plain sentence in their language. They see it.",
+  }),
+  quote: str({
+    minLength: 1,
+    maxLength: memoryChoices.quoteMaxLength,
+    description:
+      "Their own words it rests on, copied exactly from their last message.",
+  }),
+  replaces: opt(
+    arr(str({ format: "uuid" }), {
+      minItems: 1,
+      maxItems: memoryChoices.replacesMax,
       description:
-        "What to remember, as one plain sentence in their language. They see it.",
-    }),
-    quote: Type.String({
-      minLength: 1,
-      maxLength: memoryChoices.quoteMaxLength,
-      description:
-        "Their own words it rests on, copied exactly from their last message.",
-    }),
-    replaces: Type.Optional(
-      Type.Array(Type.String({ format: "uuid" }), {
-        minItems: 1,
-        maxItems: memoryChoices.replacesMax,
-        description:
-          "The ids of their own earlier memories about the same subject that this one replaces, from your earlier saves' answers or what was recalled as theirs: only when they say those no longer hold.",
-      })
-    ),
-  },
-  { additionalProperties: false }
-);
+        "The ids of their own earlier memories about the same subject that this one replaces, from your earlier saves' answers or what was recalled as theirs: only when they say those no longer hold.",
+    })
+  ),
+});
 
 type Proposed = Static<typeof parameters>;
 

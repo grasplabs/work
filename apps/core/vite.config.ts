@@ -232,7 +232,7 @@ export const coreProject = (
               "@better-auth/sso",
               "jose",
               "yaml",
-              "typebox/value",
+              "@earendil-works/pi-schema",
               "@orama/orama",
               "chat",
               "postal-mime",
