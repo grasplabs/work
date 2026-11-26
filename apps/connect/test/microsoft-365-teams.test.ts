@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
+import { z } from "zod";
 
 import { connectAccount, ownAccount, someone } from "./connect.ts";
 import {
@@ -8,6 +9,7 @@ import {
   transcriptIds,
 } from "./fixtures/graph-teams.ts";
 import { ceo } from "./fixtures/graph.ts";
+import { plantedHtml } from "./fixtures/planted-markup.ts";
 import { fakeGraph } from "./graph-api.ts";
 import { fakeProviders } from "./oauth-provider.ts";
 import {
@@ -105,6 +107,29 @@ describe("the Microsoft 365 connector's chat tools", () => {
     expect(provenance).toContain(chatIds.own);
     // Reading changed nothing.
     expect(graph.writesDone()).toBe(0);
+  });
+
+  it("read only the words a message shows, however its markup hides others", async () => {
+    const connection = await connected();
+    // Markup too costly to read is that message's loss alone.
+    const cases = Object.values(plantedHtml).map(({ html, shown }) => ({
+      html,
+      shown: shown ?? "[This message's markup is too complex to read.]",
+    }));
+    for (const { html } of cases) {
+      graph.postInChat(html);
+    }
+    const { messages } = z
+      .object({ messages: z.array(z.object({ text: z.string() })) })
+      .parse(
+        await outputOf(
+          ownCall(connection, "chats.messages", { chat: chatIds.own })
+        )
+      );
+    // Newest first: the last posted leads.
+    expect(
+      messages.slice(0, cases.length).map(({ text }) => text)
+    ).toStrictEqual(cases.toReversed().map(({ shown }) => shown));
   });
 
   it("refuse a colleague's chats, and a chat the person isn't a member of", async () => {

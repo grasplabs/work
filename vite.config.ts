@@ -316,7 +316,9 @@ export default defineConfig({
         // refuses the rest too (apps/connect/build.ts). Google Workspace and Microsoft 365 keep
         // the old kit, Zod and the runtime until they move to the SDK
         // (GRA-2323, GRA-2324), as do connect's sample connectors written
-        // with the old kit.
+        // with the old kit. Its values are typed with v, or say why they
+        // are free-form (grasp/no-unexplained-json, GRA-2330); what the
+        // OpenAPI generator writes is ignored above (`generated`).
         files: [
           "packages/connectors/**",
           "apps/connect/test/fixtures/*-connector.ts",
@@ -351,6 +353,7 @@ export default defineConfig({
               ],
             },
           ],
+          "grasp/no-unexplained-json": "error",
         },
       },
       {

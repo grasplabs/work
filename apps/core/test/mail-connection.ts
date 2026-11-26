@@ -65,6 +65,54 @@ const agentMayUse = async (connectionId: string): Promise<void> => {
 };
 
 /**
+ * A shared Microsoft 365 connection in connect's registry, as connect's
+ * native connector serves it, which the chat's agent may use
+ * (`agentMayUse`): its tools are described by the connector's manifest.
+ */
+export const nativeMailConnection = async (): Promise<{ id: string }> => {
+  const id = `connection-${crypto.randomUUID()}`;
+  const now = Date.now();
+  await connectDb()
+    .prepare(
+      "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, created_at, updated_at) VALUES (?, 'microsoft', 'shared', NULL, 'active', 'native', 'microsoft-365', ?, ?)"
+    )
+    .bind(id, now, now)
+    .run();
+  await agentMayUse(id);
+  return { id };
+};
+
+/**
+ * A shared connection to a connector made from an MCP server's URL, in
+ * connect's registry, whose server listed `tools` (each with its
+ * description and input) a moment ago, so connect reads its kept list,
+ * which the chat's agent may use (`agentMayUse`).
+ */
+export const connectorConnection = async (
+  tools: readonly { name: string; description: string; inputSchema: unknown }[]
+): Promise<{ id: string }> => {
+  const id = `connection-${crypto.randomUUID()}`;
+  const now = Date.now();
+  const hour = 60 * 60 * 1000;
+  await connectDb().batch([
+    connectDb()
+      .prepare(
+        "INSERT INTO connections (id, provider, scope, owner_user_id, status, server_kind, server, tool_list_read_at, tool_list_fresh_until, created_at, updated_at) VALUES (?, ?, 'shared', NULL, 'active', 'connector', 'https://mcp.tracker.test/mcp', ?, ?, ?, ?)"
+      )
+      .bind(id, `connector-${crypto.randomUUID()}`, now, now + hour, now, now),
+    ...tools.map(({ name, description, inputSchema }) =>
+      connectDb()
+        .prepare(
+          "INSERT INTO connection_tools (connection_id, name, description, input_schema, output_schema, annotations) VALUES (?, ?, ?, ?, NULL, '{}')"
+        )
+        .bind(id, name, description, JSON.stringify(inputSchema))
+    ),
+  ]);
+  await agentMayUse(id);
+  return { id };
+};
+
+/**
  * A mail connection in connect's registry, shared unless `owner` is
  * given, as a Composio toolkit's,
  * allowing `tools`, to a mail server of its own that answers its next

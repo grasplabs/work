@@ -100,16 +100,25 @@ interface __BaseEnv_Env {
    * On-prem only: the private hosts an OpenAI-compatible endpoint may be
    * at, comma-separated, each exactly as its URL names it, such as
    * `models.acme.lan,10.0.0.8`. Never a cloud metadata address, whatever
-   * it names. Each named host also needs workerd's network opened to its
-   * own address, and to nothing else private: `allow = ["public",
-   * "10.0.0.8/32"]` on the network service connect fetches through, never
-   * `"private"`, which would let any name that resolves to a private
-   * address through (src/ai-endpoint-guard.ts). Connect has one outbound
-   * network, so every address opened for these is reachable by HTTP
-   * connections too (src/http-connections.ts), until they get a
-   * public-only network of their own (GRA-1481).
+   * it names. Each named host's own address is opened on `AI_NETWORK`
+   * alone, the network only AI requests go through; connect's own outbound
+   * network (its `globalOutbound`), which every other call goes through,
+   * stays public-only, so no connector, MCP server or OAuth endpoint can
+   * reach these (src/ai-endpoint-guard.ts).
    */
   AI_PRIVATE_HOSTS?: string;
+  /**
+   * On-prem only: the AI endpoints' own workerd network, which connect's
+   * requests to AI providers and endpoints go through (`aiRoute`,
+   * src/ai-providers.ts). It allows public addresses and the address of
+   * each host `AI_PRIVATE_HOSTS` names, and nothing else private:
+   * `allow = ["public", "10.0.0.8/32"]`, never `"private"`, which would
+   * let any name that resolves to a private address through
+   * (scripts/workerd-connect-networks.ts). `AI_PROVIDER_ORIGIN` at a
+   * private address is one of those hosts, so its address is opened here
+   * too. Unset (hosted), they go through connect's own fetch.
+   */
+  AI_NETWORK?: Fetcher;
   /**
    * On-prem only: the origin every request to a fixed AI provider goes to
    * instead of the provider's own host, its path unchanged and the
@@ -126,4 +135,14 @@ interface __BaseEnv_Env {
    * wrangler.jsonc.
    */
   DURABLE_OBJECT_JURISDICTION?: string;
+  /**
+   * On-prem only: the route into the company network, for shared
+   * connections an admin marked as reached through it
+   * (src/company-network.ts). A workerd network service of its own that
+   * allows only the addresses approved for those connections, such as
+   * `allow = ["10.0.0.8/32"]`: never `"public"` or `"private"`, and apart
+   * from connect's own network and the AI endpoints' (`AI_NETWORK`).
+   * Unset, nothing is reached through the company network.
+   */
+  COMPANY_NETWORK?: Fetcher;
 }

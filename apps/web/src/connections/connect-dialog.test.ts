@@ -77,6 +77,18 @@ describe("connecting from the Connectors page", () => {
     ).toBeTruthy();
   });
 
+  it("is offered to admins alone for a connector reached through the company network", () => {
+    const inside: Integration = {
+      ...integration("connector", `mcp_${"0".repeat(32)}`, "key"),
+      companyNetwork: "http://10.0.0.8:8080",
+    };
+    expect([
+      canConnect(inside, someone("admin")),
+      canConnect(inside, someone("user")),
+      canConnect(inside, someone("admin", true)),
+    ]).toStrictEqual([true, false, false]);
+  });
+
   it("is never offered to Grasp staff", () => {
     expect(
       canConnect(
