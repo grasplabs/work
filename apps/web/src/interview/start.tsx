@@ -19,7 +19,7 @@ import {
 } from "@grasp-os/ui/components/item";
 import { Link } from "@grasp-os/ui/components/link";
 import { Text } from "@grasp-os/ui/components/text";
-import { media, radius, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { colors, media, radius, space } from "@grasp-os/ui/lib/tokens.stylex";
 import { plural } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
@@ -102,6 +102,11 @@ const styles = stylex.create({
     listStyleType: "disc",
     display: "grid",
     gap: space["2"],
+    // The dialog's own description: its size, quieter than the title, so
+    // the title leads. Lines run its width; only a lone last word is kept
+    // from standing alone.
+    color: colors.mutedForeground,
+    textWrap: "pretty",
   },
   // The one button: the whole width on a phone, its own width on a wider window.
   agree: { width: { default: "100%", [media.sm]: "auto" } },
@@ -229,13 +234,11 @@ const Answers = ({
           <DialogTitle>{t`What happens to your answers`}</DialogTitle>
         </DialogHeader>
         <DialogBody>
-          <Text as="div" size="lg">
-            <ul {...stylex.props(styles.list)}>
-              {promises.map((each) => (
-                <li key={each}>{each}</li>
-              ))}
-            </ul>
-          </Text>
+          <ul {...stylex.props(styles.list)}>
+            {promises.map((each) => (
+              <li key={each}>{each}</li>
+            ))}
+          </ul>
         </DialogBody>
         <DialogFooter>
           <DialogClose variant="default">{t`Got it`}</DialogClose>
