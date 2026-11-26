@@ -76,7 +76,7 @@ import type { GridRow } from "../clients/grid.ts";
 import { PageLoading } from "./failure.tsx";
 import { GraspMark } from "./grasp-mark.ts";
 import { askedApps } from "./integrations-asked.ts";
-import { OrganizationLevel } from "./organization.tsx";
+import { OrganizationLevel, organizationLevel } from "./organization.tsx";
 import type { PlatformCounts } from "./platform.ts";
 import { useSettled } from "./settled.tsx";
 import type { Deferred } from "./settled.tsx";
@@ -410,7 +410,9 @@ const Levels = ({
   })?.loaderData;
   const shown = open?.state === "open" ? open : undefined;
   return (
-    <SidebarLevels value={shown?.client.id ?? "main"}>
+    <SidebarLevels
+      value={shown === undefined ? "main" : organizationLevel(shown.client.id)}
+    >
       <SidebarLevel value="main">
         {/* Every organization by name at once; what needs Grasp in each once its core answered. */}
         <Suspense
