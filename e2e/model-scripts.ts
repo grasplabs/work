@@ -11,6 +11,8 @@
  * it from the request, as the model would: from what the chat said so
  * far, its system prompt among it.
  */
+import { setTimeout as sleep } from "node:timers/promises";
+
 import { z } from "zod";
 
 import { withoutDefinition } from "../apps/core/test/app-definitions.ts";
@@ -190,6 +192,20 @@ export const modelScripts = {
     opener: "What should the weekly sales report cover?",
     replies: [
       says("Revenue by region, the deals that closed, and the pipeline."),
+    ],
+  },
+  /**
+   * An answer written slowly, its first words then a pause: the person
+   * asks again meanwhile, and the agent answers that after it.
+   */
+  answersWhileAsked: {
+    opener: "What should the quarterly plan cover?",
+    replies: [
+      (): Answer => ({
+        ...says("First the goals, then the budget and who owns each part."),
+        pause: { at: 15, until: sleep(12_000) },
+      }),
+      says("The budget is set by the end of the month."),
     ],
   },
   /**
