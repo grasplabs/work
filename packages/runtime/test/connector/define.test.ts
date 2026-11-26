@@ -564,32 +564,6 @@ describe("a connector's definition", () => {
     ).toThrow("chat.note: a route's path delivers to people");
   });
 
-  it("refuses a route to a host that names what Grasp never does, but not for its brand", () => {
-    const savingTo = (to: string) => () =>
-      defineConnector({
-        name: "notes",
-        title: "Notes",
-        hosts: [host, to],
-        auth: keyAuth,
-        tools: {
-          "notes.save": declared({
-            readOnly: false,
-            reach: "own",
-            routes: [`POST ${to}/services/{a}/{b}/{c}`],
-            args: {},
-          }),
-        },
-      });
-    expect(savingTo("hooks.slack.com")).toThrow(
-      "notes.save: a route's host names what Grasp never does"
-    );
-    expect(savingTo("hooks.example.co.uk")).toThrow(
-      "notes.save: a route's host names what Grasp never does"
-    );
-    expect(savingTo("api.clearbit.com")).not.toThrow();
-    expect(savingTo("api.payfit.co.uk")).not.toThrow();
-  });
-
   it("refuses a read whose path changes or delivers", () => {
     const read = { readOnly: true, reach: "own", args: {} } as const;
     expect(

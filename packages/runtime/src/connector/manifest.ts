@@ -7,16 +7,11 @@ import {
 import { attachmentsProperty } from "@grasp-os/shared/connector-attachments";
 import { permissionActionSchema } from "@grasp-os/shared/permissions";
 import { syncCursorSchema, syncItemKindSchema } from "@grasp-os/shared/sync";
-import { getSubdomain } from "tldts";
 import { z } from "zod";
 
 import { httpMethods, isBatchSegment, parameterSegment } from "./protocol.ts";
 import { endpointHost, signInSchema } from "./sign-in.ts";
-import {
-  declarationProblem,
-  isDeliveringPath,
-  isNeverTool,
-} from "./tool-rules.ts";
+import { declarationProblem, isDeliveringPath } from "./tool-rules.ts";
 
 // A native connector's manifest: what connect knows of it without running
 // it. Connect's build reads it from the connector's module and ships it
@@ -424,23 +419,6 @@ export const connectorManifestSchema = z
           code: "custom",
           path: ["actions", name],
           message: `${name}: ${problem}`,
-        });
-      }
-      // The labels left of the registrable domain (`hooks` of
-      // `hooks.slack.com` and `hooks.example.co.uk`): a domain is a brand's
-      // name, which may hold a word (`clearbit`, `payfit.co.uk`). Here, not
-      // in tool-rules.ts, so the suffix list never loads in an isolate.
-      // Without private suffixes: a host names the vendor's API, so a
-      // platform's tenant label is read as a label.
-      if (
-        action.routes.some(({ host }) =>
-          (getSubdomain(host) ?? "").split(".").some(isNeverTool)
-        )
-      ) {
-        context.addIssue({
-          code: "custom",
-          path: ["actions", name],
-          message: `${name}: a route's host names what Grasp never does`,
         });
       }
     }
