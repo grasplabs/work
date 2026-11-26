@@ -99,7 +99,11 @@ const passPurpose = "grasp-os onboarding voice session";
  * low start, so a few words over him stop him.
  */
 const turnDetection = {
-  start_threshold: 0.3,
+  // Mistral takes them only when start >= eager end > end, its eager end
+  // being 0.5 unless sent: so it is sent, as low as the start. The Voice
+  // Lab (apps/admin/src/admin/voice-lab.ts) sends the same.
+  start_threshold: 0.35,
+  eager_end_threshold: 0.35,
   end_threshold: 0.33,
   min_silence_ms: 500,
 } as const;
