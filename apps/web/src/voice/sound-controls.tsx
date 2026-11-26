@@ -34,15 +34,12 @@ import {
 
 const styles = stylex.create({
   controls: { display: "flex", alignItems: "center", gap: space["1"] },
-  volume: { display: "grid", gap: space["2"] },
 });
-
-/** Where the sound comes back when turned on from silent. */
-const halfVolume = 0.5;
 
 /**
  * How loud, from the sound's button: a slider from silent to full, said as
- * a share, and the sound off or on again. When the browser held sound back,
+ * a share (at nothing it is silent, the voice still on, as a mute), and
+ * the sound off or on again; its name says when the sound is off. When the browser held sound back,
  * it asks to turn it on, and the line being said starts again so it is
  * heard.
  */
@@ -67,41 +64,41 @@ const SoundButton = () => {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button aria-label={t`Volume`} size="icon-sm" variant="ghost">
+        <Button
+          aria-label={voice.on ? t`Volume` : t`Volume (sound off)`}
+          size="icon-sm"
+          variant="ghost"
+        >
           <Icon icon={silent ? VolumeOffIcon : VolumeIcon} />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" aria-label={t`Volume`} side="top">
-        <div {...stylex.props(styles.volume)}>
-          <Slider
-            format={{ style: "percent" }}
-            max={1}
-            min={0}
-            onValueChange={(value) => {
-              const next = typeof value === "number" ? value : (value[0] ?? 0);
-              setVolume(next);
-              setVoiceOn(next > 0);
-            }}
-            step={0.05}
-            value={voice.on ? voice.volume : 0}
-          >
-            <SliderLabel>{t`Volume`}</SliderLabel>
-          </Slider>
-          <Button
-            onClick={() => {
-              // Turned on from silent, it comes back at half, so it is heard.
-              if (!voice.on && voice.volume === 0) {
-                setVolume(halfVolume);
-              }
-              setVoiceOn(!voice.on);
-            }}
-            size="sm"
-            variant="ghost"
-          >
-            <Icon icon={voice.on ? VolumeOffIcon : VolumeIcon} />
-            {voice.on ? t`Turn sound off` : t`Turn sound on`}
-          </Button>
-        </div>
+      <PopoverContent align="end" side="top">
+        <Slider
+          format={{ style: "percent" }}
+          max={1}
+          min={0}
+          onValueChange={(value) => {
+            const next = typeof value === "number" ? value : (value[0] ?? 0);
+            setVolume(next);
+            if (next > 0 && !voice.on) {
+              setVoiceOn(true);
+            }
+          }}
+          step={0.01}
+          value={voice.volume}
+        >
+          <SliderLabel>{t`Volume`}</SliderLabel>
+        </Slider>
+        <Button
+          onClick={() => {
+            setVoiceOn(!voice.on);
+          }}
+          size="sm"
+          variant="ghost"
+        >
+          <Icon icon={voice.on ? VolumeOffIcon : VolumeIcon} />
+          {voice.on ? t`Turn sound off` : t`Turn sound on`}
+        </Button>
       </PopoverContent>
     </Popover>
   );

@@ -19555,6 +19555,10 @@ msgstr "Spraakgesprek"
 msgid "Volume"
 msgstr "Volume"
 
+#: src/voice/sound-controls.tsx
+msgid "Volume (sound off)"
+msgstr "Volume (geluid uit)"
+
 #: src/brain/memories-page.tsx
 msgctxt "what the Brain remembers about something"
 msgid "Wait"
