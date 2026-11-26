@@ -62,7 +62,8 @@ describe("calls to connect", () => {
   it("can't be given a stub name that is one of connect's own bindings", () => {
     // Test-only bindings aside, every name in connect's env is the platform's.
     const names = Object.keys(env).filter(
-      (name) => name !== "CONNECT_MIGRATIONS"
+      (name) =>
+        name !== "CONNECT_MIGRATIONS" && name !== "COMPANY_NETWORK_TEST_ORIGIN"
     );
     expect(
       names.filter((name) => bindingNameSchema.safeParse(name).success)

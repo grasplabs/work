@@ -25,8 +25,9 @@ import { recordEvents } from "./audit.ts";
 //   Connector only its conversations API. A `serviceUrl` a verified Teams
 //   message names is never trusted for being named: its host must be on
 //   the list. Redirects aren't followed (one would take the token along).
-//   Connect's `global_fetch_strictly_public` keeps a public name that
-//   resolves to a private address unreachable.
+//   A public name that resolves to a private address stays unreachable
+//   through connect's outbound network: Cloudflare's egress hosted,
+//   connect's public-only workerd network on-prem.
 // - Core sending a credential of its own, or reading the bot's. A request
 //   must carry the placeholder exactly where the credential goes, or it is
 //   refused before anything is fetched; nothing else of core's headers

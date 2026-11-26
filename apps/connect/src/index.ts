@@ -24,6 +24,7 @@ import type {
   Catalog,
   CatalogLogo,
   CatalogTool,
+  ConnectionTool,
   ConnectorContract,
   NativeOperation,
   ConnectApi,
@@ -122,6 +123,7 @@ import {
 import { connectionOwners, personalAccounts } from "./connections.ts";
 import {
   actionShape,
+  connectionTools,
   connectorContract,
   connectorContracts,
   nativeOperation,
@@ -151,7 +153,12 @@ import {
 import { hrConnections, readHr } from "./hr.ts";
 import { createHttpConnection } from "./http-connections.ts";
 import { catalogLogo } from "./logos.ts";
-import { addConnector, connectorToolClasses } from "./mcp-connectors.ts";
+import {
+  addConnector,
+  connectorToolClasses,
+  keepToolList,
+  offeredConnectorTools,
+} from "./mcp-connectors.ts";
 import {
   npmAdvisories,
   npmMalwareReports,
@@ -410,16 +417,19 @@ export default class Connect
   async finishConnection(
     request: FinishConnection
   ): Promise<{ connectionId: string; returnTo: string }> {
-    return (
+    const finished =
       (await finishToolkitFlow(this.env, request)) ??
-      (await finishConnection(this.env, request))
-    );
+      (await finishConnection(this.env, request));
+    await keepToolList(this.env, finished.connectionId);
+    return finished;
   }
 
   async connectWithKey(
     request: ConnectWithKey
   ): Promise<{ connectionId: string }> {
-    return await connectWithKey(this.env, request);
+    const connected = await connectWithKey(this.env, request);
+    await keepToolList(this.env, connected.connectionId);
+    return connected;
   }
 
   async listConnections(
@@ -442,6 +452,14 @@ export default class Connect
     connectionId: unknown
   ): Promise<Record<string, Exclude<ToolClass, "never">>> {
     return await connectorToolClasses(this.env, connectionId);
+  }
+
+  async offeredConnectorTools(
+    connectionIds: unknown
+  ): Promise<Record<string, string[]>> {
+    return await offeredConnectorTools(this.env, connectionIds, (work) => {
+      this.ctx.waitUntil(work);
+    });
   }
 
   async personalAccounts(userId: unknown): Promise<PersonalAccount[]> {
@@ -742,6 +760,16 @@ export default class Connect
 
   async connectorContracts(request: unknown): Promise<string[]> {
     return await connectorContracts(this.env, request);
+  }
+
+  /**
+   * A connection's tools with their descriptions and schemas: what core's
+   * tool search ranks for the chat's agent (`connectionTools`).
+   */
+  async connectionTools(request: unknown): Promise<ConnectionTool[]> {
+    return await connectionTools(this.env, request, (work) => {
+      this.ctx.waitUntil(work);
+    });
   }
 
   /**

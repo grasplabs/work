@@ -33,8 +33,10 @@ import { z } from "zod";
 //   the metadata (`dist.tarball`) or anything core sends. Redirects aren't
 //   followed by fetch: one is followed here only to the registry's own
 //   origin, over HTTPS, without credentials in the URL, a few times at
-//   most; any other is refused. Connect's `global_fetch_strictly_public`
-//   keeps a public name that resolves to a private address unreachable.
+//   most; any other is refused. A public name that resolves to a private
+//   address stays unreachable through connect's outbound network:
+//   Cloudflare's egress hosted, connect's public-only workerd network
+//   on-prem.
 // - Other bytes than asked for. A tarball is passed on only when its
 //   SHA-512 is the integrity hash core named, which comes from the
 //   registry's metadata when resolving and from the approved lock after.

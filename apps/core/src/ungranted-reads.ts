@@ -3,7 +3,9 @@ import type { ConnectionOwner } from "@grasp-os/shared/connect";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { drizzle } from "drizzle-orm/d1";
 
+import { connectionReadOf } from "./agent-scope.ts";
 import { teamsOf } from "./auth/identity.ts";
+import type { OutsideRead } from "./code-mode.ts";
 import { audiencesRead } from "./connection-audiences.ts";
 import { connectionOwnersOf } from "./connections.ts";
 import { readsOnly } from "./tool-classes.ts";
@@ -123,3 +125,19 @@ export const ungrantedReadOf = (source: string): string | undefined =>
   source.startsWith(ungrantedReadPrefix)
     ? source.slice(ungrantedReadPrefix.length)
     : undefined;
+
+/**
+ * The outside system a run's source names, if it is a connection's read,
+ * granted (`connectionRead`) or not (`ungrantedRead`): what a run's
+ * result is marked with as text from outside (`describeRun`).
+ */
+export const outsideReadOf = (source: string): OutsideRead | undefined => {
+  const granted = connectionReadOf(source);
+  if (granted !== undefined) {
+    return { connectionId: granted.connectionId, action: granted.action };
+  }
+  const connectionId = ungrantedReadOf(source);
+  return connectionId === undefined
+    ? undefined
+    : { connectionId, action: null };
+};

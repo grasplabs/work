@@ -18,6 +18,11 @@ import {
   hrSite,
   itemIds,
 } from "./fixtures/graph.ts";
+import {
+  docxOf,
+  plantedHtml,
+  plantedWordXml,
+} from "./fixtures/planted-markup.ts";
 import { fakeGraph } from "./graph-api.ts";
 import { fakeProviders } from "./oauth-provider.ts";
 import {
@@ -98,6 +103,33 @@ describe("the Microsoft 365 connector's Word tool", () => {
     expect(
       requests().filter(({ path }) => path.endsWith("/content"))
     ).toHaveLength(1);
+  });
+
+  it("reads only the words Word shows, and refuses XML no Word document holds", async () => {
+    const connection = await connected();
+    const readContract = async () =>
+      await call(
+        connection,
+        "word.read",
+        { drive: financeDrive, item: itemIds.contract },
+        { resource: financeDrive }
+      );
+    const read: Record<string, unknown> = {};
+    for (const [name, { xml, shown }] of Object.entries(plantedWordXml)) {
+      graph.saveFile(itemIds.contract, docxOf(xml));
+      // oxlint-disable-next-line no-await-in-loop -- one file, saved anew for each
+      read[name] = await (shown === null
+        ? toolError(readContract())
+        : outputOf(readContract()));
+    }
+    expect(read).toMatchObject(
+      Object.fromEntries(
+        Object.entries(plantedWordXml).map(([name, { shown }]) => [
+          name,
+          shown === null ? { error: { code: "not_text" } } : { text: shown },
+        ])
+      )
+    );
   });
 });
 
@@ -271,6 +303,33 @@ describe("the Microsoft 365 connector's OneNote tools", () => {
       sectionId: sectionIds.own,
       text: meetingText,
     });
+  });
+
+  it("read only the words a page shows, however its markup hides others", async () => {
+    const connection = await connected();
+    const owner = ownAccount(connection.person).subject;
+    const read: Record<string, unknown> = {};
+    for (const [name, { html, shown }] of Object.entries(plantedHtml)) {
+      const page = graph.keepNotePage(owner, html);
+      const reading = call(
+        connection,
+        "onenote.read",
+        { mailbox: ownMailbox(connection), page },
+        { resource: ownMailbox(connection) }
+      );
+      // oxlint-disable-next-line no-await-in-loop -- a page at a time
+      read[name] = await (shown === null
+        ? toolError(reading)
+        : outputOf(reading));
+    }
+    expect(read).toMatchObject(
+      Object.fromEntries(
+        Object.entries(plantedHtml).map(([name, { shown }]) => [
+          name,
+          shown === null ? { error: { code: "too_large" } } : { text: shown },
+        ])
+      )
+    );
   });
 
   it("add a page of notes to the person's own section, its text kept as text", async () => {

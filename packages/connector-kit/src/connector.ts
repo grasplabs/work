@@ -420,6 +420,7 @@ export const defineTool = <
   return {
     name,
     action: {
+      description: definition.description,
       routes: [...routes],
       readOnly,
       reach,

@@ -68,7 +68,8 @@ import type { AllowedTool } from "./tool-choices.ts";
 // toolkit, an admin first chooses what Grasp may do and consents; then the
 // person signs in at the app, which sends them back to its page here. A
 // connector an admin made from a URL is connected as a native suite is:
-// signing in at its server, or typing the key it takes.
+// signing in at its server, or typing the key it takes; one whose server is
+// inside the company's own network only by an admin, for everyone.
 // Signing in again to a connection whose access ran out is the same sign-in
 // for its provider and scope. Core and connect check every step: the page
 // offers only what the role can do.
@@ -92,7 +93,8 @@ export const goTo = (started: { url: string } | undefined): void => {
  * staff, never an entry that isn't offered (core refuses admins too), never
  * one that needs the organization's own sign-in app (connect refuses it);
  * a native provider or a connector made from a URL for anyone, a Composio
- * toolkit for admins.
+ * toolkit and a connector reached through the company network for admins
+ * (connect takes only a shared connection there, which only admins make).
  */
 export const canConnect = (
   integration: Integration,
@@ -100,6 +102,9 @@ export const canConnect = (
 ): boolean => {
   if (identity.staff || !integration.offered || integration.auth === "own") {
     return false;
+  }
+  if (integration.companyNetwork !== undefined) {
+    return isAdmin(identity.role);
   }
   if (integration.source === "native") {
     return oauthProviderSchema.safeParse(integration.id).success;
@@ -501,7 +506,8 @@ const KeyEntry = ({
 /**
  * Signing in to a native provider or a connector made from a URL: who uses
  * it (an admin chooses), then signing in, or typing the key a connector's
- * server takes.
+ * server takes. A connector reached through the company network is shared
+ * only, so there is nothing to choose.
  */
 const NativeFlow = ({
   integration,
@@ -519,8 +525,9 @@ const NativeFlow = ({
 }) => {
   const { attempt, begin, busy, failure } = useSignInStart();
   const { t } = useLingui();
+  const address = integration.companyNetwork;
   const [scope, setScope] = useState<ConnectionScope>(
-    again?.scope ?? "personal"
+    again?.scope ?? (address === undefined ? "personal" : "shared")
   );
   // Done once the admin chose who uses it, the default (just for them)
   // included: by picking an option, or by going on to sign in with it.
@@ -547,6 +554,15 @@ const NativeFlow = ({
   };
   const signIn = (
     <>
+      {address === undefined ? null : (
+        <Text color="muted" size="sm">
+          {t({
+            message: `Grasp reaches it through your company network at ${address}. It is connected once, for everyone: your organization uses it through the permissions you grant.`,
+            comment:
+              "{address} is the server's address inside the company's network, e.g. http://10.0.0.8:8080.",
+          })}
+        </Text>
+      )}
       {withKey ? (
         <KeyEntry
           disabled={busy}
@@ -580,7 +596,7 @@ const NativeFlow = ({
       )}
     </>
   );
-  if (again !== undefined || !isAdmin(identity.role)) {
+  if (again !== undefined || !isAdmin(identity.role) || address !== undefined) {
     return (
       <div {...stylex.props(styles.flow)}>
         <Step state="active" title={t`Sign in`}>

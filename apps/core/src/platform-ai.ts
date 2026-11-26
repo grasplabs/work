@@ -24,7 +24,10 @@ const voices = {
 /**
  * Each feature's provider and model: OpenAI's GPT-4o Transcribe writes
  * down speech, live and recorded, and Mistral's Voxtral TTS 3 says the
- * lines.
+ * lines. An interview is held as one live voice session at Mistral (its
+ * voice agents): Mistral Small answers, Voxtral's realtime transcription
+ * listens and Voxtral TTS 3 speaks, in Stephen's voice, the models
+ * Mistral names for a voice agent.
  */
 export const platformAi = {
   transcription: { provider: "openai", model: "gpt-4o-transcribe" },
@@ -32,5 +35,12 @@ export const platformAi = {
     provider: "mistral",
     model: "voxtral-mini-tts-3-0",
     voices,
+  },
+  conversation: {
+    provider: "mistral",
+    model: "mistral-small-latest",
+    listening: "voxtral-mini-transcribe-realtime-3",
+    speaking: "voxtral-mini-tts-3",
+    voice: voices.stephen,
   },
 } as const;

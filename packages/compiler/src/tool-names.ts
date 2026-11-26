@@ -12,8 +12,8 @@ import { httpMethods } from "@grasp-os/runtime/connector";
 //   route, so a version or an `/api` prefix never names a tool.
 // - The action is `list` for GET on a collection that answers a page, `get`
 //   for GET on an item, `create` for POST on a collection, `update` for
-//   PATCH or PUT on an item and `delete` for DELETE on an item. A route ends
-//   on an item when its last segment is a parameter.
+//   PATCH or PUT on an item. No route is a DELETE. A route ends on an item
+//   when its last segment is a parameter.
 // - Any other route takes the vendor's operation name as its action. So do
 //   two operations that would otherwise take the same name (PATCH and PUT
 //   on one item), which only a spec can say.
@@ -78,7 +78,6 @@ const itemActions: Partial<Readonly<Record<HttpMethod, string>>> = {
   GET: "get",
   PATCH: "update",
   PUT: "update",
-  DELETE: "delete",
 };
 
 /** Whether `text` may be a part of a tool's name. */

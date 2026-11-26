@@ -106,6 +106,7 @@
     "./interview-links": "./src/interview-links.ts",
     "./interview-story": "./src/interview-story.ts",
     "./interview-turn": "./src/interview-turn.ts",
+    "./interview-voice": "./src/interview-voice.ts",
     "./kickoff": "./src/kickoff.ts",
     "./hr": "./src/hr.ts",
     "./http-connections": "./src/http-connections.ts",
