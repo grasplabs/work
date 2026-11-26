@@ -40,6 +40,8 @@ const languageWords: Record<InterviewLocale, string> = {
 /** What went wrong, in words someone can act on. */
 const troubles: Record<CallTrouble, string> = {
   no_key: "Grasp's Mistral key isn't in Secrets Store for this admin.",
+  unreadable_key:
+    "Grasp's Mistral key is in Secrets Store, but this admin can't read it. Check that the secret's scopes include Workers.",
   not_opened:
     "Mistral didn't open a session. Voice agents may not be enabled for Grasp's key.",
   not_connected:

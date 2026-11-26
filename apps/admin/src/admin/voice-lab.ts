@@ -36,7 +36,6 @@ import { z } from "zod";
 
 import type { Staff } from "../access.ts";
 import { adminDatabase, audit } from "../db/act.ts";
-import { ifStored, storeSecret } from "../deploy/context.ts";
 
 /** Where Mistral's voice agent sessions are opened and closed: its own host, in the EU. */
 const sessionsUrl = "https://api.mistral.ai/v1/audio/sessions";
@@ -128,8 +127,12 @@ export type VoiceLabInput = z.infer<typeof voiceLabInputSchema>;
 /** A session's ID as Mistral gives one: nothing that reads as a path. */
 export const voiceSessionIdSchema = z.string().regex(/^[\w-]{1,128}$/u);
 
-/** Why no session was opened: Grasp's key isn't in the store, or Mistral didn't open one. */
-export type VoiceLabRefusal = "no_key" | "not_opened";
+/**
+ * Why no session was opened: Grasp's key isn't in the store, the store
+ * has it but this Worker can't read it (a secret without the Workers
+ * scope, say), or Mistral didn't open one.
+ */
+export type VoiceLabRefusal = "no_key" | "unreadable_key" | "not_opened";
 
 /**
  * A session as the page connects to it: its ID, the token for its one
@@ -168,9 +171,39 @@ const refused = (reason: VoiceLabRefusal): VoiceLabSession => ({
   refused: reason,
 });
 
-/** Grasp's Mistral key, or null when it isn't in Secrets Store. */
-const keyOf = async (env: Env): Promise<string | null> =>
-  await ifStored(async () => await storeSecret(env, "MISTRAL_API_KEY"));
+/** Secrets Store's answer for a secret it doesn't have. */
+const notInStore = /not found/iu;
+
+/**
+ * Grasp's Mistral key, or why there is none: `no_key` while the store
+ * doesn't have it (unbound, not there, or empty), `unreadable_key` when
+ * the store answered otherwise. Told apart, so a key that is there but
+ * can't be read isn't taken for one nobody added. The store's own words
+ * are logged, never a value.
+ */
+const keyOf = async (
+  env: Env
+): Promise<
+  { key: string; refusal: null } | { key: null; refusal: VoiceLabRefusal }
+> => {
+  const binding: SecretsStoreSecret | undefined = env.MISTRAL_API_KEY;
+  if (binding === undefined) {
+    return { key: null, refusal: "no_key" };
+  }
+  let value = "";
+  try {
+    value = await binding.get();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!notInStore.test(message)) {
+      log.warn("admin.voice_lab_key_unreadable", { message });
+      return { key: null, refusal: "unreadable_key" };
+    }
+  }
+  return value === ""
+    ? { key: null, refusal: "no_key" }
+    : { key: value, refusal: null };
+};
 
 /**
  * Opens a session for `staff`, on record as theirs, with its language:
@@ -181,9 +214,9 @@ export const openVoiceSession = async (
   staff: Staff,
   input: VoiceLabInput
 ): Promise<VoiceLabSession> => {
-  const apiKey = await keyOf(env);
+  const { key: apiKey, refusal } = await keyOf(env);
   if (apiKey === null) {
-    return refused("no_key");
+    return refused(refusal);
   }
   await audit(adminDatabase(env.DB), staff, {
     action: "admin.voice_lab",
@@ -267,7 +300,7 @@ export const closeVoiceSession = async (
   env: Env,
   sessionId: string
 ): Promise<CallRecord | null> => {
-  const apiKey = await keyOf(env);
+  const { key: apiKey } = await keyOf(env);
   if (apiKey === null) {
     return null;
   }

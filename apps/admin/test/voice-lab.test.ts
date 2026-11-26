@@ -181,6 +181,19 @@ describe("the Voice Lab's session", () => {
     });
   });
 
+  it("says Grasp's Mistral key can't be read when the store has it but won't hand it over, and asks nothing", async () => {
+    vi.spyOn(env.MISTRAL_API_KEY, "get").mockRejectedValue(
+      new Error("Secret is not available to Workers")
+    );
+    expect({
+      session: await open({ locale: "en" }),
+      sent: mistral.sent.length,
+    }).toStrictEqual({
+      session: { id: null, refused: "unreadable_key" },
+      sent: 0,
+    });
+  });
+
   it.each([
     ["refuses it", 403, { message: "Voice agents are not enabled." }],
     [
