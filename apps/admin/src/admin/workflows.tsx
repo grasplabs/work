@@ -39,6 +39,10 @@ import {
   ToggleGroupItem,
 } from "@grasp-os/app-kit/components/toggle-group";
 import { cn } from "@grasp-os/app-kit/lib/utils";
+import type {
+  AdminIntegrations,
+  AdminNeeded,
+} from "@grasp-os/shared/admin-snapshot";
 import type { AdminView } from "@grasp-os/shared/admin/admin-view";
 import {
   STANDINGS,
@@ -77,6 +81,7 @@ import { useId, useState } from "react";
 
 import { CommandMenu } from "./command-menu.tsx";
 import { CommandFailure, useCommand } from "./commands.tsx";
+import { appName, needWords } from "./connections.tsx";
 import { Attention } from "./parts.tsx";
 import { EmptySection } from "./section.tsx";
 
@@ -651,5 +656,71 @@ export const OrgWorkflows = ({
         />
       ) : null}
     </div>
+  );
+};
+
+/** One workflow, and each of its bindings no working connection serves. */
+interface WaitingWorkflow {
+  id: string;
+  name: string;
+  needs: AdminNeeded[];
+}
+
+const waitingWorkflows = (
+  needed: readonly AdminNeeded[]
+): WaitingWorkflow[] => {
+  const workflows = new Map<string, WaitingWorkflow>();
+  for (const need of needed) {
+    const workflow = workflows.get(need.workflow.id) ?? {
+      id: need.workflow.id,
+      name: need.workflow.name,
+      needs: [],
+    };
+    workflow.needs.push(need);
+    workflows.set(need.workflow.id, workflow);
+  }
+  return [...workflows.values()];
+};
+
+/** What one binding waits on: its app and why, or that no app was approved for it. */
+const needLine = (need: AdminNeeded): string =>
+  need.app === null
+    ? `${need.alias}: ${needWords.unbound}`
+    : `${need.alias}: ${appName(need.app)}, ${needWords[need.state].toLowerCase()}`;
+
+/**
+ * The company's workflows that can't run as they are, for a connection:
+ * each with every binding of its current version that no working
+ * connection serves.
+ */
+export const WaitingOnConnectionsRows = ({
+  integrations,
+}: {
+  integrations: AdminIntegrations;
+}) => {
+  const workflows = waitingWorkflows(integrations.needed);
+  if (workflows.length === 0) {
+    return (
+      <p className="text-muted-foreground border-t px-5 py-4">
+        No workflow waits on a connection.
+      </p>
+    );
+  }
+  return (
+    <ul className="flex flex-col">
+      {workflows.map((workflow) => (
+        <li
+          className="flex flex-wrap items-start justify-between gap-x-6 gap-y-1 border-t px-5 py-3"
+          key={workflow.id}
+        >
+          <span className="min-w-0">{workflow.name}</span>
+          <span className="flex flex-col text-xs lg:items-end">
+            {workflow.needs.map((need) => (
+              <Attention key={need.alias}>{needLine(need)}</Attention>
+            ))}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 };

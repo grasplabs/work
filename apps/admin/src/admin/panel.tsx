@@ -20,6 +20,14 @@ import {
   EmptyDescription,
   EmptyHeader,
 } from "@grasp-os/ui/components/empty";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemGroup,
+  ItemTitle,
+} from "@grasp-os/ui/components/item";
 import { Text } from "@grasp-os/ui/components/text";
 import type { ReactNode } from "react";
 
@@ -73,4 +81,35 @@ export const EmptyPanel = ({ children }: { children: ReactNode }) => (
       </EmptyHeader>
     </Empty>
   </Card>
+);
+
+/** A panel's rows, edge to edge under its header, a hairline between each. */
+export const PanelRows = ({ children }: { children: ReactNode }) => (
+  <CardContent flush>
+    <ItemGroup separated>{children}</ItemGroup>
+  </CardContent>
+);
+
+/**
+ * One row of a panel: what it is, a line on it, and at its end its value
+ * or what can be done there.
+ */
+export const PanelRow = ({
+  label,
+  description,
+  children,
+}: {
+  label: string;
+  description?: ReactNode;
+  children: ReactNode;
+}) => (
+  <Item size="sm">
+    <ItemContent>
+      <ItemTitle>{label}</ItemTitle>
+      {description === undefined ? null : (
+        <ItemDescription>{description}</ItemDescription>
+      )}
+    </ItemContent>
+    <ItemActions>{children}</ItemActions>
+  </Item>
 );
