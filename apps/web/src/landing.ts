@@ -40,8 +40,8 @@ export const onboardingIsBehind = async (
   }
 };
 
-/** The onboarding's own page under Settings, which its admins keep: who was asked, and the links. */
-const onboardingSettings = "/settings/onboarding";
+/** The interviews' own page under Settings, which its admins keep while they run: how far they are, and the links. */
+const interviewsSettings = "/settings/interviews";
 
 /**
  * Where someone on their way to `path` goes instead while the onboarding
@@ -64,5 +64,5 @@ export const heldWhileOnboarding = ({
   if (!isMemberAdmin(identity) || identity.onboardingOnly === true) {
     return "/waiting";
   }
-  return path === onboardingSettings ? null : "/setup";
+  return path === interviewsSettings ? null : "/setup";
 };

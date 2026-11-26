@@ -17,14 +17,12 @@ import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
-import { InterviewsProgress } from "./interviews-progress.tsx";
 import { SetupStepBody, directoryProblemOf } from "./setup-steps.tsx";
 import type { SetupData, ShownStep } from "./setup-steps.tsx";
 import { steps } from "./setup.ts";
 import type { AiReadiness } from "./setup.ts";
 
-// What the setup's steps tell the company's admin, and where the
-// interviews stand, from what they render.
+// What the setup's steps tell the company's admin, from what they render.
 
 const today = "2026-10-14";
 
@@ -208,89 +206,6 @@ const said = (step: ShownStep, shown: Shown): string =>
   drawn(step, shown)
     .replaceAll(/<[^>]+>/gu, " ")
     .replaceAll(/\s+/gu, " ");
-
-/** Where the interviews stand, as text: team Ops quiet, its lead named `lead`, the interviews `paused` or not. */
-const progressSaid = ({
-  lead = "Lea Smit",
-  paused = false,
-}: {
-  lead?: string;
-  paused?: boolean;
-}): string =>
-  page(
-    <InterviewsProgress
-      links={[]}
-      listening={{
-        progress: 0.5,
-        day: 7,
-        days: 14,
-        leadsHeard: 1,
-        colleaguesHeard: 0,
-        heard: [1],
-      }}
-      today={today}
-      view={{
-        ...view(paused, null, noContext, true, null, null),
-        roster: {
-          teams: [
-            { id: "ops", name: "Ops", lead: "lea", does: "", off: false },
-          ],
-          people: [
-            {
-              id: "lea",
-              name: lead,
-              email: "",
-              team: "ops",
-              title: "",
-              away: false,
-            },
-          ],
-        },
-        progress: {
-          teams: [
-            {
-              id: "ops",
-              name: "Ops",
-              people: 6,
-              off: false,
-              leadTalked: true,
-              talked: 0,
-              asked: 5,
-            },
-          ],
-          talked: 0,
-          asked: 5,
-          leadsTalked: 1,
-          leads: 1,
-          asOf: today,
-        },
-      }}
-    />
-  )
-    .replaceAll(/<[^>]+>/gu, " ")
-    .replaceAll(/\s+/gu, " ");
-
-describe("where the interviews stand", () => {
-  it("says the interviews are paused, while Grasp paused them, before the days", () => {
-    const paused = progressSaid({ paused: true });
-    expect(paused).toContain(
-      "Paused: no link opens and none goes out. The links that are due go out once they run again."
-    );
-    expect(paused.indexOf("Paused:")).toBeLessThan(
-      paused.indexOf("Day 7 of 14")
-    );
-    expect(progressSaid({})).not.toContain("Paused:");
-  });
-
-  it("names a team far behind with its lead, and not at all once core erased the lead", () => {
-    expect({
-      named: progressSaid({}).includes(
-        "Ops has been quiet so far. A short message from Lea, their lead, usually helps."
-      ),
-      erased: progressSaid({ lead: "" }).includes("has been quiet"),
-    }).toStrictEqual({ named: true, erased: false });
-  });
-});
 
 describe("a setup without a staff list", () => {
   it("asks who to talk to, by email or with a staff list, and lets the admin skip it for Grasp's staff", () => {
