@@ -311,6 +311,9 @@ export const nextFactId = (facts: readonly InterviewFact[]): string => {
 export const isErased = (fact: InterviewFact): boolean =>
   fact.out === true && fact.text === "";
 
+/** How long what they write with their rating may be, in characters. */
+export const interviewFeedbackLimit = 2000;
+
 /**
  * Where someone's interview is, as their page keeps it and sends it to be
  * kept. Checked item by item: a save with anything else in it, or more of
@@ -351,6 +354,8 @@ export const interviewProgressSchema = z.strictObject({
   addedAt: z.number().nonnegative(),
   /** How they found it, from 1 to 5, when they said so. */
   rating: z.int().min(1).max(5).optional(),
+  /** What they wrote with their rating, in their own words, when they did. */
+  feedback: z.string().max(interviewFeedbackLimit).optional(),
   interviewer: interviewerSchema.optional(),
 });
 export type InterviewProgress = z.output<typeof interviewProgressSchema>;

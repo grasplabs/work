@@ -14,12 +14,13 @@ import {
 } from "@grasp-os/ui/components/prompt-input";
 import { AudioWaveformIcon, Icon } from "@grasp-os/ui/lib/icons";
 import { fadeIn } from "@grasp-os/ui/lib/styles";
-import { colors, font, space } from "@grasp-os/ui/lib/tokens.stylex";
+import { space } from "@grasp-os/ui/lib/tokens.stylex";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { useState } from "react";
 import type { ReactNode } from "react";
 
+import { TopError } from "../frame/top-error.tsx";
 import { Heard } from "./heard.tsx";
 import { useProgress, useSaveState } from "./kept.ts";
 import type { LoopState, Said } from "./loop.ts";
@@ -63,15 +64,6 @@ const styles = stylex.create({
     maxHeight: "5rem",
     overflow: "hidden",
     maskImage: "linear-gradient(to bottom, transparent 0, black 3.5rem)",
-  },
-  trouble: {
-    paddingInline: space["5"],
-    paddingBlockEnd: space["2"],
-    textAlign: "center",
-    textWrap: "balance",
-    color: colors.warning,
-    fontSize: font.textXs,
-    lineHeight: font.textXsLine,
   },
 });
 
@@ -265,9 +257,6 @@ export const SaveTrouble = () => {
   } else if (save.state === "refused") {
     text = save.message;
   }
-  return text === null ? null : (
-    <p aria-live="polite" {...stylex.props(styles.trouble)}>
-      {text}
-    </p>
-  );
+  // In the bar at the top, as every error here is.
+  return <TopError>{text}</TopError>;
 };

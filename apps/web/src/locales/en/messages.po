@@ -1332,10 +1332,6 @@ msgstr "{query} reads the index {index}, which this table doesn’t have."
 msgid "{query} searches this table, which has no search."
 msgstr "{query} searches this table, which has no search."
 
-#: src/interview/closed.tsx
-msgid "{rating} of 5"
-msgstr "{rating} of 5"
-
 #: src/connections/permissions/parts.tsx
 msgid "{read} actions, all view only"
 msgstr "{read} actions, all view only"
@@ -3049,10 +3045,6 @@ msgstr "and {more} more"
 msgid "And more."
 msgstr "And more."
 
-#: src/interview/words.ts
-msgid "And the rest."
-msgstr "And the rest."
-
 #: src/onboarding/people-add.tsx
 msgid "anna@company.com, tom@company.com"
 msgstr "anna@company.com, tom@company.com"
@@ -3887,6 +3879,10 @@ msgstr "Back to your version"
 #: src/settings/backdrop-settings.tsx
 msgid "Background"
 msgstr "Background"
+
+#: src/interview/rating.tsx
+msgid "Bad"
+msgstr "Bad"
 
 #: src/settings/backdrop-settings.tsx
 msgid "Bayer"
@@ -8203,6 +8199,10 @@ msgstr "Going well, mostly."
 msgid "Going well."
 msgstr "Going well."
 
+#: src/interview/rating.tsx
+msgid "Good"
+msgstr "Good"
+
 #: src/onboarding/setup-steps.tsx
 msgid "Good, that’s settled. Everything in Grasp runs on AI: reading your documents, the interviews, the plan. Here you choose which AI that is."
 msgstr "Good, that’s settled. Everything in Grasp runs on AI: reading your documents, the interviews, the plan. Here you choose which AI that is."
@@ -8516,6 +8516,10 @@ msgstr "Grasp's chat"
 #: src/settings/staff-access.tsx
 msgid "Grasp's team can help here until then"
 msgstr "Grasp's team can help here until then"
+
+#: src/interview/rating.tsx
+msgid "Great"
+msgstr "Great"
 
 #: src/onboarding/campaign/concepts/canvas.tsx
 msgid "Green lines: new that day"
@@ -8834,7 +8838,7 @@ msgstr "How things are done here: guidance that never grants access."
 msgid "How this App is built and what to keep in mind when changing it."
 msgstr "How this App is built and what to keep in mind when changing it."
 
-#: src/interview/closed.tsx
+#: src/interview/rating.tsx
 msgid "How was talking to {who}?"
 msgstr "How was talking to {who}?"
 
@@ -10070,10 +10074,6 @@ msgstr "Last used"
 msgid "Last week"
 msgstr "Last week"
 
-#: src/interview/words.ts
-msgid "Last: what you told me about AI."
-msgstr "Last: what you told me about AI."
-
 #: src/routes/_shell.settings.instructions.tsx
 msgid "Lasting facts"
 msgstr "Lasting facts"
@@ -11055,22 +11055,6 @@ msgstr "More for this page"
 #: src/brain/learned-section.tsx
 msgid "More memories contradict it."
 msgstr "More memories contradict it."
-
-#: src/interview/words.ts
-msgid "More of the steps."
-msgstr "More of the steps."
-
-#: src/interview/words.ts
-msgid "More of what you told me about AI."
-msgstr "More of what you told me about AI."
-
-#: src/interview/words.ts
-msgid "More of when it goes differently."
-msgstr "More of when it goes differently."
-
-#: src/interview/words.ts
-msgid "More of your recurring work."
-msgstr "More of your recurring work."
 
 #: src/brain/work-knowledge.tsx
 msgid "More people are asked about it in the next interviews."
@@ -12129,6 +12113,10 @@ msgstr "Not found"
 msgid "Not found. It may have been renamed or removed."
 msgstr "Not found. It may have been renamed or removed."
 
+#: src/interview/rating.tsx
+msgid "Not great"
+msgstr "Not great"
+
 #: src/inbox/inbox-kind.tsx
 msgctxt "inbox item kind: a mailbox or drive connect stopped hearing"
 msgid "Not hearing"
@@ -12688,6 +12676,10 @@ msgstr "Offered to the company"
 #: src/inbox/report-view.tsx
 msgid "Often corrected"
 msgstr "Often corrected"
+
+#: src/interview/rating.tsx
+msgid "Okay"
+msgstr "Okay"
 
 #: src/activity/audit-log.tsx
 msgid "Older"
@@ -15935,6 +15927,10 @@ msgstr "Seen, but not described: {seenOnly}."
 msgid "Seen, never mentioned"
 msgstr "Seen, never mentioned"
 
+#: src/interview/rating.tsx
+msgid "Send"
+msgstr "Send"
+
 #: src/frame/ui-words.tsx
 msgctxt "send a message"
 msgid "Send"
@@ -17251,6 +17247,10 @@ msgstr "Suggestions"
 msgid "Summarise documents"
 msgstr "Summarise documents"
 
+#: src/interview/words.ts
+msgid "Summary"
+msgstr "Summary"
+
 #: src/agents/agent-templates.ts
 msgid "Summary writer"
 msgstr "Summary writer"
@@ -17618,7 +17618,7 @@ msgctxt "a version of a source's text"
 msgid "Text"
 msgstr "Text"
 
-#: src/interview/closed.tsx
+#: src/interview/rating.tsx
 msgid "Thank you for telling me."
 msgstr "Thank you for telling me."
 
@@ -17633,6 +17633,10 @@ msgstr "Thank you, {admin}"
 #: src/interview/closed.tsx
 msgid "Thank you, {name}."
 msgstr "Thank you, {name}."
+
+#: src/interview/rating.tsx
+msgid "Thank you. Want to say why?"
+msgstr "Thank you. Want to say why?"
 
 #: src/interview/start.tsx
 msgid "Thanks for letting us know"
@@ -18457,10 +18461,6 @@ msgstr "The source files of version {sourceVersion}"
 msgid "The step, as JSON"
 msgstr "The step, as JSON"
 
-#: src/interview/words.ts
-msgid "The steps."
-msgstr "The steps."
-
 #: src/settings/teams.tsx
 msgid "The team couldn't be created. Try again."
 msgstr "The team couldn't be created. Try again."
@@ -18565,14 +18565,6 @@ msgstr "Then"
 #: src/workflows/workflow-diagram.tsx
 msgid "Then {task}"
 msgstr "Then {task}"
-
-#: src/interview/words.ts
-msgid "Then, the numbers and the result."
-msgstr "Then, the numbers and the result."
-
-#: src/interview/words.ts
-msgid "Then, when it goes differently."
-msgstr "Then, when it goes differently."
 
 #: src/onboarding/company-step.tsx
 msgid "There are more people in {signIn} than I can take: up to {peopleMost} people in up to {teamsMost} teams. A staff list of those taking part works."
@@ -18816,10 +18808,6 @@ msgstr "This is the consent as Grasp words it now. The audit log keeps a hash of
 #: src/frame/ai-key-banner.tsx
 msgid "This is usually an outage on their side; Grasp keeps retrying."
 msgstr "This is usually an outage on their side; Grasp keeps retrying."
-
-#: src/interview/words.ts
-msgid "This is what I wrote down."
-msgstr "This is what I wrote down."
 
 #: src/interview/words.ts
 msgid "This is what is new."
@@ -20483,6 +20471,10 @@ msgstr "What its steps keep for later runs, which each run reads as it starts."
 msgid "What kind of field?"
 msgstr "What kind of field?"
 
+#: src/interview/rating.tsx
+msgid "What made it good? Anything that could be better?"
+msgstr "What made it good? Anything that could be better?"
+
 #: src/onboarding/setup-steps.tsx
 msgid "What needs you"
 msgstr "What needs you"
@@ -20734,6 +20726,14 @@ msgstr "What we learned"
 #: src/onboarding/campaign/concepts/canvas.tsx
 msgid "What we see"
 msgstr "What we see"
+
+#: src/interview/rating.tsx
+msgid "What went wrong? Every word helps."
+msgstr "What went wrong? Every word helps."
+
+#: src/interview/rating.tsx
+msgid "What would have made it better?"
+msgstr "What would have made it better?"
 
 #: src/interview/closed.tsx
 msgid "What you agreed to is kept. Forgot something? This link works until {closes}."
@@ -21834,10 +21834,6 @@ msgstr "Your question"
 #: src/onboarding/document-visitors.tsx
 msgid "Your quote template, perhaps?"
 msgstr "Your quote template, perhaps?"
-
-#: src/interview/words.ts
-msgid "Your recurring work."
-msgstr "Your recurring work."
 
 #: src/inbox/report-row.tsx
 msgid "Your report on week {week} is ready"

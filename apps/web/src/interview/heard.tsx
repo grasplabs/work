@@ -302,7 +302,10 @@ const leave = (stood: Stood, kept: boolean) => {
     paddingInline: space["4"],
     borderRadius: radius.xl,
     borderEndEndRadius: radius.sm,
-    backgroundColor: colors.secondary,
+    // The transcript bubble's own ground: its veil of ink on the page's colour, so
+    // Stephen's dither never shows through it.
+    backgroundColor: colors.background,
+    backgroundImage: `linear-gradient(${colors.secondary}, ${colors.secondary})`,
     color: colors.bodyForeground,
   });
   Object.assign(stood.copy.style, { position: "absolute", inset: "0" });
