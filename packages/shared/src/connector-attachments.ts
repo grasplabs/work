@@ -28,9 +28,13 @@ export {
 //
 // An input names each file by digest only (`AttachmentEntry`). That is
 // all a held write keeps and all its person is shown; the bytes travel
-// beside the input (`AttachmentBytes`), keyed by SHA-256, and are checked
-// against the digests wherever they arrive: by connect before it holds or
-// sends a call, and again by the connector's own tool before it uses them.
+// beside the input (`AttachmentBytes`), keyed by SHA-256. Connect checks
+// the entries against `attachmentsSchema` and the bytes against them
+// before it holds or sends a call (`requireFiles`). The connector's own
+// tool checks again, before it uses them, only what needs no Zod in its
+// isolate: the bytes against the digests and lengths, and the per-file
+// limits and file count its `attachments` argument holds. Names and the
+// total size are connect's alone to check.
 
 /**
  * One attached file as an input names it: by its digest, never its

@@ -1863,6 +1863,73 @@ describe("a call of a tool that answers items and files", () => {
     ]);
   });
 
+  it("names a numeric id by its text, and nothing that isn't a finite number or a string", async () => {
+    const Deal = v.object({ id: v.number(), title: v.string() });
+    const deals = defineConnector({
+      name: "deals",
+      title: "Deals",
+      hosts: [host],
+      auth: keyAuth,
+      tools: {
+        "deals.list": tool({
+          description: "Lists deals",
+          readOnly: true,
+          reach: "company",
+          routes: ["GET /v1/deals"],
+          args: {},
+          returns: page(Deal),
+          handler: async (_args, api) =>
+            await api.get("/v1/deals", { returns: page(Deal) }),
+        }),
+        "deals.get": tool({
+          description: "Gets one deal",
+          readOnly: true,
+          reach: "company",
+          answersItem: true,
+          routes: ["GET /v1/deals/{id}"],
+          args: { id: v.string() },
+          returns: Deal,
+          handler: async ({ id }, api) =>
+            await api.get("/v1/deals/{id}", { path: { id }, returns: Deal }),
+        }),
+        "deals.find": tool({
+          description: "Finds a deal by its title",
+          readOnly: true,
+          reach: "company",
+          routes: ["GET /v1/deals/find"],
+          args: {},
+          returns: v.object({ id: v.boolean(), title: v.string() }),
+          handler: async (_args, api) =>
+            await api.get("/v1/deals/find", {
+              returns: v.object({ id: v.boolean(), title: v.string() }),
+            }),
+        }),
+      },
+    });
+    const callDeals = async (name: string, args: Record<string, unknown>) =>
+      await rpc(deals, "tools/call", { name, arguments: args, _meta: {} });
+    const answers = [
+      {
+        items: [
+          { id: 7, title: "a" },
+          { id: 1.5, title: "b" },
+        ],
+        next: null,
+      },
+      { id: 42, title: "c" },
+      { id: true, title: "d" },
+    ];
+    vendorSees(() => Response.json(answers.shift()));
+    const list = await callDeals("deals.list", {});
+    const item = await callDeals("deals.get", { id: "42" });
+    const found = await callDeals("deals.find", {});
+    expect([list._meta, item._meta, found._meta]).toStrictEqual([
+      { [provenanceMetaKey]: ["7", "1.5"] },
+      { [provenanceMetaKey]: ["42"] },
+      { [provenanceMetaKey]: [] },
+    ]);
+  });
+
   it("fails a read that answers an item without naming exactly one", async () => {
     vendorSees(() => Response.json({ text: "no id" }));
     const unnamed = await callNotes("notes.get", { id: "n1" });
@@ -1956,7 +2023,7 @@ describe("a call of a write that takes files", () => {
         stamp,
         confirmed: true,
       },
-      provenance: { [provenanceMetaKey]: ["n1"] },
+      provenance: { [provenanceMetaKey]: [] },
     });
   });
 
@@ -2022,7 +2089,7 @@ describe("a call of a write that reports its change", () => {
     vendorSees(() => Response.json({ id: "n1", text: "new" }));
     const result = await edit("new", 1);
     expect(result._meta).toStrictEqual({
-      [provenanceMetaKey]: ["n1"],
+      [provenanceMetaKey]: [],
       [changeMetaKey]: { before: { text: "old" }, after: { text: "new" } },
     });
   });
@@ -2122,6 +2189,8 @@ describe("what a request sends", () => {
       "x-forwarded-for",
       "x-forwarded-host",
       "x-http-method-override",
+      "x-original-url",
+      "x-rewrite-url",
       "grasp-egress",
       "If-Match",
       "if match",

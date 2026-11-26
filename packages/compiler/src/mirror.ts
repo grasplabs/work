@@ -29,7 +29,11 @@ import type { DeclaredRoute, HttpMethod } from "./tool-names.ts";
 // refused.
 //
 // Every tool is held to the naming rule, and each argument named after a
-// path parameter of its routes to one segment, as the egress sends it. Where the vendor's spec is known
+// path parameter that fills a whole segment of its routes to one segment,
+// exactly as the egress sends one there; a parameter inside literal text
+// (`('{id}')`) is held to the egress's looser rule by `api`, which refuses
+// a value the egress wouldn't send before anything goes out. Where the
+// vendor's spec is known
 // (a generated connector, or one narrowed from it), each tool on one of its
 // routes is held to the spec's operation field by field: an argument or a
 // field the vendor doesn't have is a renamed one.
@@ -97,7 +101,7 @@ const formatOf = (descriptor: ValueDescriptor): string | undefined =>
  * holds: a string held to `segment`, a number, or fixed values that each
  * are one.
  */
-const holdsSegment = (descriptor: ValueDescriptor): boolean => {
+const isOneSegment = (descriptor: ValueDescriptor): boolean => {
   if (descriptor.nullable) {
     return false;
   }
@@ -129,7 +133,7 @@ const pathArgsOf = (
   return [...names]
     .filter((name) => {
       const arg = Object.hasOwn(tool.args, name) ? tool.args[name] : undefined;
-      return arg !== undefined && !holdsSegment(arg);
+      return arg !== undefined && !isOneSegment(arg);
     })
     .map(
       (name) =>

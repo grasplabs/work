@@ -1,3 +1,4 @@
+import type { ConnectionOwner } from "@grasp-os/shared/connect";
 import { sha256Hex, toHex } from "@grasp-os/shared/encoding";
 import { canonicalJson, isRecord } from "@grasp-os/shared/json";
 import type { Json } from "@grasp-os/shared/json";
@@ -130,12 +131,31 @@ const mailSends: ReadonlyMap<
   ])
 );
 
-/** The recipient properties of `action` in any provider that mails by it. */
-const recipientsOf = (action: string): string[] => [
-  ...new Set(
-    [...mailSends.values()].flatMap((tools) => tools.get(action) ?? [])
-  ),
-];
+/**
+ * The call's connection's owner and the recipient properties of `action`
+ * as its own provider declares them, if that provider is a native one
+ * that mails by it; none otherwise. A name no provider mails by is
+ * answered without asking connect whose the connection is.
+ */
+const mailingOf = async (
+  env: Env,
+  connectionId: string,
+  action: string
+): Promise<
+  { owner: ConnectionOwner; recipients: readonly string[] } | undefined
+> => {
+  if (![...mailSends.values()].some((tools) => tools.has(action))) {
+    return undefined;
+  }
+  const [owner] = await connectionOwnersOf(env, [connectionId]);
+  const recipients =
+    owner?.source === "native"
+      ? mailSends.get(owner.provider)?.get(action)
+      : undefined;
+  return owner === undefined || recipients === undefined
+    ? undefined
+    : { owner, recipients };
+};
 
 /** An address, alone. */
 const addressText =
@@ -177,9 +197,7 @@ const addressOf = (text: string) => {
  * the primary address it sends from, which may differ from its sign-in
  * name: M-new-2), the other addresses it receives mail at (its SMTP
  * aliases) and those it may send as (Google's verified send-as
- * addresses), as its provider said when it was connected (GRA-654); none
- * for a call that isn't of a native tool of the connection's provider
- * that mails someone.
+ * addresses), as its provider said when it was connected (GRA-654).
  *
  * Known gap: Microsoft 365 also takes another user's ID or UPN as the
  * mailbox (a shared mailbox named so), and sends from that mailbox's
@@ -188,20 +206,10 @@ const addressOf = (text: string) => {
  * hourly limit only: knowing another mailbox's addresses needs directory
  * access the connector doesn't ask for.
  */
-const sendersOf = async (
-  env: Env,
-  connectionId: string,
-  action: string,
+const sendersOf = (
+  owner: ConnectionOwner,
   mailbox: Json | undefined
-): Promise<string[] | undefined> => {
-  const [owner] = await connectionOwnersOf(env, [connectionId]);
-  if (
-    owner === undefined ||
-    owner.source !== "native" ||
-    mailSends.get(owner.provider)?.has(action) !== true
-  ) {
-    return undefined;
-  }
+): string[] => {
   const senders = [
     typeof mailbox === "string" ? mailbox : null,
     owner.accountName,
@@ -238,11 +246,15 @@ export const stampedMail = async (
   call: StampedCall
 ): Promise<StampedMail> => {
   const { input } = call;
-  const fields = recipientsOf(call.action);
-  if (fields.length === 0 || !isRecord(input)) {
+  if (!isRecord(input)) {
     return { input };
   }
-  const addresses = fields.flatMap((field) =>
+  const mailing = await mailingOf(env, call.connectionId, call.action);
+  if (mailing === undefined) {
+    // Not a native tool that mails someone: it puts no stamp on mail.
+    return { input };
+  }
+  const addresses = mailing.recipients.flatMap((field) =>
     stringsOf(input[field]).flatMap((text) => {
       const address = addressOf(text);
       return address === undefined
@@ -270,16 +282,7 @@ export const stampedMail = async (
       .get();
   let decided = await decidedOf();
   if (decided === undefined) {
-    const senders = await sendersOf(
-      env,
-      call.connectionId,
-      call.action,
-      input.mailbox
-    );
-    if (senders === undefined) {
-      // Not a native tool that mails someone: it puts no stamp on mail.
-      return { input };
-    }
+    const senders = sendersOf(mailing.owner, input.mailbox);
     await db
       .insert(resourceRunMailCalls)
       .values({

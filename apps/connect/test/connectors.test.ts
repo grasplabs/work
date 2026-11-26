@@ -786,7 +786,7 @@ describe("a connector's code", { timeout: 60_000 }, () => {
     expect(api.sent).toHaveLength(1);
   });
 
-  it("can't override the method its action declares", async () => {
+  it("can't override the method or the path its action declares", async () => {
     const connection = await connectionTo("sample");
     await probe(connection, {
       url: `https://${sampleHost}/v1/probe/ok`,
@@ -795,6 +795,8 @@ describe("a connector's code", { timeout: 60_000 }, () => {
         ["x-http-method-override", "DELETE"],
         ["x-http-method", "DELETE"],
         ["x-method-override", "DELETE"],
+        ["x-original-url", "/v1/admin"],
+        ["x-rewrite-url", "/v1/admin"],
         ["te", "trailers"],
       ],
     });
@@ -803,6 +805,8 @@ describe("a connector's code", { timeout: 60_000 }, () => {
       "x-http-method-override",
       "x-http-method",
       "x-method-override",
+      "x-original-url",
+      "x-rewrite-url",
       "te",
     ]) {
       expect(api.sent[0]?.headers).not.toHaveProperty(name);

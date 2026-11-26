@@ -15,7 +15,6 @@ export {
   page,
   sync,
   tool,
-  withNativeSyncs,
 } from "./define.ts";
 export type {
   AccountDeclaration,

@@ -58,7 +58,6 @@ import type {
   SignInInput,
   TenantKind,
 } from "./sign-in.ts";
-import type { Sync } from "./sync.ts";
 import { isDeliveringPath } from "./tool-rules.ts";
 
 // How a connector is written (@grasp-os/sdk/connector): its tools, each one
@@ -104,8 +103,11 @@ export interface ToolCall {
 /**
  * The `attachments` argument of a write that takes files (`takesFiles`),
  * exactly: each file by name, type, size and SHA-256, never its bytes,
- * within the platform's limits (the kit's `attachmentsSchema`, which
- * checks each call's again before its handler runs).
+ * within the platform's per-file limits and file count. Before the
+ * handler runs, the tool checks the bytes it was sent against these
+ * digests and lengths. The names' rules and the total size are the
+ * platform's `attachmentsSchema`, which connect alone checks
+ * (`requireFiles`), before it holds or sends the call.
  */
 export const attachments = v
   .array(
@@ -699,19 +701,24 @@ const provenanceFits = (ids: readonly string[]): boolean =>
   ids.length <= maxProvenanceItems &&
   ids.every((id) => id.length > 0 && id.length <= identifierMaxLength);
 
-/**
- * What an answer says it read: the string `id` of each of its `items`,
- * or else its own `id`, or nothing; only its own `id` for a tool that
- * answers an item.
- */
-const provenanceOf = (answer: JsonObject, item: boolean): string[] => {
-  if (!item && Array.isArray(answer.items)) {
-    return answer.items.flatMap((each: unknown) =>
-      isRecord(each) && typeof each.id === "string" ? [each.id] : []
-    );
+/** A record's `id`, as provenance names it: a string, or a finite number as text. */
+const idOf = (record: unknown): string[] => {
+  const id: unknown = isRecord(record) ? record.id : undefined;
+  if (typeof id === "string") {
+    return [id];
   }
-  return typeof answer.id === "string" ? [answer.id] : [];
+  return typeof id === "number" && Number.isFinite(id) ? [String(id)] : [];
 };
+
+/**
+ * What a read's answer says it read: the `id` of each of its `items` (a
+ * list, as `page` answers one), or else its own `id`, or nothing; only
+ * its own `id` for a tool that answers an item.
+ */
+const provenanceOf = (answer: JsonObject, item: boolean): string[] =>
+  !item && Array.isArray(answer.items)
+    ? answer.items.flatMap(idOf)
+    : idOf(answer);
 
 /**
  * The files a call may use: those of a write that takes files, checked
@@ -769,8 +776,9 @@ const resultOf = (
     checked.issues === undefined && isRecord(checked.value)
       ? checked.value
       : undefined;
+  // A write's answer is what it made or changed, which it didn't read.
   const provenance =
-    answer === undefined ? [] : provenanceOf(answer, answersItem);
+    answer === undefined || !readOnly ? [] : provenanceOf(answer, answersItem);
   const [change, ...more] = changes;
   if (
     answer === undefined ||
@@ -798,6 +806,37 @@ const resultOf = (
 };
 
 /** A declared tool as the runtime's server serves it. */
+/**
+ * A tool's card, as its manifest holds it, if it declares one. Throws for
+ * a field whose arg isn't among its args, or names one twice.
+ */
+const describeOf = (
+  name: string,
+  describe:
+    | { title: string; fields: readonly { label: string; arg: string }[] }
+    | undefined,
+  properties: Readonly<Record<string, unknown>>
+): Pick<ActionManifest, "describe"> => {
+  if (describe === undefined) {
+    return {};
+  }
+  const args = describe.fields.map(({ arg }) => arg);
+  if (
+    !args.every((arg) => Object.hasOwn(properties, arg)) ||
+    new Set(args).size !== args.length
+  ) {
+    throw new Error(
+      `${name}: its card describes only its own input properties, each once`
+    );
+  }
+  return {
+    describe: {
+      title: describe.title,
+      fields: describe.fields.map(({ label, arg }) => ({ label, input: arg })),
+    },
+  };
+};
+
 const toolOf = <
   Args extends ValueShape,
   Returns extends AnySchema,
@@ -848,7 +887,6 @@ const toolOf = <
   const mail = mailOf(name, declaration.mail, properties);
   const takesFiles = declaration.takesFiles === true;
   const answersItem = declaration.answersItem === true;
-  const { describe } = declaration;
   const action: ActionManifest = {
     description: declaration.description,
     routes,
@@ -861,17 +899,7 @@ const toolOf = <
     ...(answersItem ? { answersItem: true as const } : {}),
     ...(takesFiles ? { takesFiles: true as const } : {}),
     ...mail,
-    ...(describe === undefined
-      ? {}
-      : {
-          describe: {
-            title: describe.title,
-            fields: describe.fields.map(({ label, arg }) => ({
-              label,
-              input: arg,
-            })),
-          },
-        }),
+    ...describeOf(name, declaration.describe, properties),
     contract: {
       // A workflow's action names the files by run file ID, which core
       // turns into the digests and bytes the tool itself takes.
@@ -1024,10 +1052,15 @@ export interface DefinedConnector extends Connector {
   readonly declaration: ConnectorDeclaration;
 }
 
-/** A declared connector served with `syncs` (`defineConnector`). */
-const serveDeclared = (
-  declaration: ConnectorDeclaration,
-  nativeSyncs: readonly Sync[]
+/**
+ * A connector: its manifest, and the MCP server connect runs it as. Throws
+ * if a tool breaks the connector contract (a route to a host it doesn't
+ * list, args that aren't strict, a scope its sign-in doesn't ask for), or
+ * an event or a sync reads a route off its hosts, or one whose path
+ * delivers to people.
+ */
+export const defineConnector = (
+  declaration: ConnectorDeclaration
 ): DefinedConnector => {
   const {
     name,
@@ -1086,33 +1119,8 @@ const serveDeclared = (
         hosts,
         credentialHosts,
       },
-      served,
-      nativeSyncs
+      served
     ),
     declaration,
   };
 };
-
-/**
- * A connector: its manifest, and the MCP server connect runs it as. Throws
- * if a tool breaks the connector contract (a route to a host it doesn't
- * list, args that aren't strict, a scope its sign-in doesn't ask for), or
- * an event or a sync reads a route off its hosts, or one whose path
- * delivers to people.
- */
-export const defineConnector = (
-  declaration: ConnectorDeclaration
-): DefinedConnector => serveDeclared(declaration, []);
-
-/**
- * `connector` serving the runtime's own native syncs besides (sync.ts),
- * as connect's Brain sync reads them today. Only the suites' syncs, kept on
- * `defineSync` until Phase 4 of the connector layer rewrites them as
- * declared syncs (GRA-2311), which deletes this: it isn't part of
- * `@grasp-os/sdk/connector`, and only the connector files the import
- * checks list (connect's build.ts, vite.config.ts) may reach it.
- */
-export const withNativeSyncs = (
-  connector: DefinedConnector,
-  syncs: readonly Sync[]
-): DefinedConnector => serveDeclared(connector.declaration, syncs);

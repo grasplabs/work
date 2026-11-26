@@ -137,8 +137,10 @@ const parameter = /\{(?<name>[A-Za-z_]\w*)\}/gu;
  * Headers a request can't add: the credential and the connection, which
  * are the egress's (it strips them, or answers with `grasp-egress`
  * itself); the body's own, which `contentType` and the body set; the
- * hops a proxy records; and method overrides, which some vendors honour
- * on a POST, making it a method the route doesn't declare.
+ * hops a proxy records; method overrides, which some vendors honour on a
+ * POST, making it a method the route doesn't declare; and path rewrites,
+ * which some servers and proxies honour, making it a path the route
+ * doesn't declare.
  */
 const refusedHeaders: ReadonlySet<string> = new Set([
   "authorization",
@@ -155,6 +157,8 @@ const refusedHeaders: ReadonlySet<string> = new Set([
   "x-http-method-override",
   "x-http-method",
   "x-method-override",
+  "x-original-url",
+  "x-rewrite-url",
   egressHeader,
 ]);
 
