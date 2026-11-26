@@ -576,6 +576,7 @@ const signedInAgain = (
   // Read again, for the account it holds now (mcp-connectors.ts).
   toolListReadAt: null,
   toolListFreshUntil: null,
+  toolListTriedAt: null,
   updatedAt: now,
 });
 
@@ -1365,6 +1366,7 @@ const replaceKey = async (
         .set({
           toolListReadAt: null,
           toolListFreshUntil: null,
+          toolListTriedAt: null,
           accountName: account.name,
           accountEmail: account.email?.toLowerCase() ?? null,
           pastVerifiedEmails: pastAddressesAfter(

@@ -161,6 +161,43 @@ describe("a connector's tools", () => {
     }
   });
 
+  it("are read after an answer at once when signed in again, though a read failed moments before", async () => {
+    const { anna, connector, connectionId } = await connected();
+    await listExpires(connectionId);
+    let reads = 0;
+    const failing = (): Response => {
+      reads += 1;
+      linear.next = failing;
+      return new Response(null, { status: 503 });
+    };
+    linear.next = failing;
+    try {
+      await offered(connectionId);
+      await vi.waitFor(() => {
+        expect(reads).toBeGreaterThan(0);
+      }, waitForRead);
+      // Its grant ran out: Anna signs in again.
+      await env.DB.batch([
+        env.DB.prepare(
+          "UPDATE connections SET status = 'needs_reauth' WHERE id = ?"
+        ).bind(connectionId),
+        env.DB.prepare(
+          "DELETE FROM connection_tokens WHERE connection_id = ?"
+        ).bind(connectionId),
+      ]);
+      const again = await connectLinear(connector, anna);
+      const signedIn = reads;
+      await offered(again);
+      await vi.waitFor(() => {
+        expect(reads).toBeGreaterThan(signedIn);
+      }, waitForRead);
+
+      expect(again).toBe(connectionId);
+    } finally {
+      linear.next = undefined;
+    }
+  });
+
   it("are read and kept as it is connected, so they are offered before any call", async () => {
     const connectionId = await connectLinear(await addLinear(), someone());
     const [owner] = await exports.default.connectionOwners([connectionId]);
