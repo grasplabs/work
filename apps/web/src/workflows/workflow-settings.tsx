@@ -18,7 +18,6 @@ import {
   FieldLabel,
   FieldTitle,
 } from "@grasp-os/ui/components/field";
-import { Input } from "@grasp-os/ui/components/input";
 import { TabsLink, TabsNav } from "@grasp-os/ui/components/tabs";
 import { Text } from "@grasp-os/ui/components/text";
 import { font, space } from "@grasp-os/ui/lib/tokens.stylex";
@@ -27,7 +26,6 @@ import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import * as stylex from "@stylexjs/stylex";
 import { Link, useRouter } from "@tanstack/react-router";
-import { useState } from "react";
 import type { ReactNode } from "react";
 
 import { DraftHistory } from "../drafts/draft-history.tsx";
@@ -35,6 +33,7 @@ import { Sharing } from "../drafts/sharing.tsx";
 import { formatList } from "../format.ts";
 import { WithInfo } from "../frame/info-tip.tsx";
 import { NotLoadedState } from "../frame/page-states.tsx";
+import { SavedField } from "../frame/saved-field.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCoreAction } from "../use-core-action.ts";
 import type { Names } from "./activity-words.ts";
@@ -197,55 +196,6 @@ const OwnedBy = ({ owner, names }: { owner: string; names: Names }) => {
 };
 
 /**
- * The title's field, saved as the person leaves it or presses Enter, as
- * the workspace's name is: emptied, it saves none; Escape puts back what
- * was saved; nothing is sent while it is what was saved. The settings'
- * own saved field (settings/saved-field.tsx) does the same on the old
- * kit; once it is on Damsko, this is that field.
- */
-const TitleInput = ({
-  value,
-  readOnly,
-  onSave,
-}: {
-  value: string | null;
-  readOnly: boolean;
-  onSave: (value: string | null) => void;
-}) => {
-  const [draft, setDraft] = useState<string | null>(null);
-  const save = (): void => {
-    if (draft === null) {
-      return;
-    }
-    setDraft(null);
-    const trimmed = draft.trim();
-    const next = trimmed === "" ? null : trimmed;
-    if (next !== value) {
-      onSave(next);
-    }
-  };
-  return (
-    <Input
-      maxLength={workflowTitleMaxLength}
-      onBlur={save}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") {
-          event.currentTarget.blur();
-        }
-        if (event.key === "Escape") {
-          setDraft(null);
-        }
-      }}
-      onValueChange={setDraft}
-      readOnly={readOnly}
-      size="sm"
-      style={styles.control}
-      value={draft ?? value ?? ""}
-    />
-  );
-};
-
-/**
  * The name people see for the workflow, as its builders give it: saved as
  * the field is left, and emptied to show its own name again. Core checks
  * they may, and audits it.
@@ -280,11 +230,13 @@ const TitleRow = ({
         <FieldDescription>{t`What people see instead of ${name}.`}</FieldDescription>
         {failure === undefined ? null : <FieldError>{failure}</FieldError>}
       </FieldContent>
-      <TitleInput
+      <SavedField
+        maxLength={workflowTitleMaxLength}
         onSave={(title) => {
           void save(title);
         }}
         readOnly={busy}
+        style={styles.control}
         value={resource.title}
       />
     </Field>

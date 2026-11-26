@@ -11,6 +11,12 @@ export const rolloutErrorCodes = [
    * Stable, and a channel goes back only to a release it had.
    */
   "promotion_not_allowed",
+  /**
+   * The release can't read the chats the channel's release stores: it's
+   * from before a change in how they're stored, which no client goes back
+   * across.
+   */
+  "channel_behind_chat_storage",
   /** The channel's release changed as it was set: read it again. */
   "channel_changed",
   /** No such client. */

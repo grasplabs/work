@@ -37,6 +37,7 @@ import { notLoadedText } from "../load-from-core.tsx";
 import type { Loaded } from "../load-from-core.tsx";
 import { useCore } from "../use-core.ts";
 import { InFrame } from "./in-frame.ts";
+import { pageRoom } from "./page.styles.ts";
 import { SiteHeader } from "./site-header.tsx";
 import type { Crumb } from "./site-header.tsx";
 
@@ -54,16 +55,6 @@ const styles = stylex.create({
     flexDirection: "column",
     justifyContent: "center",
     flexGrow: 1,
-  },
-  // Not found keeps the page's room in the card, as #2503's shell gives a
-  // page (28px under its bar, 24px at the sides, and at the foot the room
-  // for the chat's dock over it, 96px, its `roomForDock`, as Page's
-  // `pb-chat`), so it stands in the middle of that; a page that failed has
-  // the whole card.
-  room: {
-    paddingBlockStart: space["7"],
-    paddingInline: space["6"],
-    paddingBlockEnd: space["24"],
   },
   // Outside the frame, it fills the window, in its middle.
   alone: {
@@ -198,14 +189,14 @@ const Place = ({
   children,
 }: {
   crumbs: readonly Crumb[];
-  /** Whether it keeps the page's room round it in the card (`styles.room`). */
+  /** Whether it keeps the page's room round it in the card (`pageRoom`), so it stands in the middle of that; a page that failed has the whole card. */
   room?: boolean;
   children: ReactNode;
 }) =>
   use(InFrame) ? (
     <>
       <SiteHeader crumbs={crumbs} />
-      <div {...stylex.props(styles.inFrame, room && styles.room)}>
+      <div {...stylex.props(styles.inFrame, room && pageRoom.room)}>
         {children}
       </div>
     </>

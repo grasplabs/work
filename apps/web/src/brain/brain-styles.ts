@@ -25,7 +25,7 @@ export const brainStyles = stylex.create({
   // The brain, a part or a note, over which a note's dots are carried in.
   // Its words, where a part sets none, and the atlas's dots take the
   // card's own ink, as #2503's App shell gives its card (the shell's
-  // text): the frame here leaves the old kit's foreground on it.
+  // text), where the page's would be the body's.
   page: {
     color: colors.sidebarForeground,
     position: "relative",

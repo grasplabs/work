@@ -27,11 +27,24 @@ import { z } from "zod";
 /** Composio's REST API. */
 export const composioApiBase = "https://backend.composio.dev/api/v3.1";
 
-/** How long one request to Composio may take. */
-const requestTimeoutMs = 10_000;
+/** How long one request to Composio may take, unless it asks for less. */
+export const requestTimeoutMs = 10_000;
 
 /** Largest answer connect reads from Composio's API, in bytes. */
 const maxResponseBytes = 4 * 1024 * 1024;
+
+/** What a {@link ComposioError} knows beyond its message. */
+interface ComposioFailure {
+  /** Composio's HTTP status, when it answered with one. */
+  status?: number;
+  cause?: unknown;
+  /** Composio's name for the error (`error.slug`). */
+  slug?: string;
+  /** Composio's number for the error (`error.code`). */
+  code?: number;
+  /** Composio didn't answer at all. */
+  unanswered?: boolean;
+}
 
 /** Composio didn't answer, or answered something connect can't use. */
 export class ComposioError extends Error {
@@ -44,17 +57,24 @@ export class ComposioError extends Error {
    * what was sent.
    */
   readonly slug: string | undefined;
+  /**
+   * Composio's number for the error, such as 1803, when its answer gave
+   * one (`error.code`): a stable machine code, safe to name for support.
+   */
+  readonly code: number | undefined;
+  /**
+   * Composio didn't answer at all: the request failed on the way, or took
+   * longer than it may. Asking again may get an answer.
+   */
+  readonly unanswered: boolean;
 
-  constructor(
-    message: string,
-    status?: number,
-    cause?: unknown,
-    slug?: string
-  ) {
-    super(message, { cause });
+  constructor(message: string, failure: ComposioFailure = {}) {
+    super(message, { cause: failure.cause });
     this.name = "ComposioError";
-    this.status = status;
-    this.slug = slug;
+    this.status = failure.status;
+    this.slug = failure.slug;
+    this.code = failure.code;
+    this.unanswered = failure.unanswered ?? false;
   }
 }
 
@@ -66,8 +86,9 @@ export const composioKey = (env: Env): string | undefined =>
 
 /**
  * The body's bytes, read up to `maxBytes` as they arrive: one byte more
- * is a {@link ComposioError}, whatever `content-length` said. The body is
- * cancelled once read, or once refused.
+ * is a {@link ComposioError}, whatever `content-length` said, and a body
+ * that breaks off or runs out of time is one that is `unanswered`. The
+ * body is cancelled once read, or once refused.
  */
 export const readCappedBytes = async (
   response: Response,
@@ -78,8 +99,18 @@ export const readCappedBytes = async (
   let bytes = 0;
   try {
     for (;;) {
-      // oxlint-disable-next-line no-await-in-loop -- a stream is read in order
-      const chunk = await reader?.read();
+      let chunk: ReadableStreamReadResult<Uint8Array> | undefined;
+      try {
+        // oxlint-disable-next-line no-await-in-loop -- a stream is read in order
+        chunk = await reader?.read();
+      } catch (error) {
+        // The answer broke off, or ran out of time, on the way: asking
+        // again may get all of it.
+        throw new ComposioError("Composio's answer broke off", {
+          cause: error,
+          unanswered: true,
+        });
+      }
       if (chunk === undefined || chunk.done) {
         break;
       }
@@ -108,27 +139,51 @@ export const readCappedBytes = async (
   return body;
 };
 
-/** Largest error answer connect reads, for its slug alone. */
+/** Largest error answer connect reads, for its slug and code alone. */
 const maxErrorBytes = 64 * 1024;
 
-/** Composio's error answer, of which only the slug is read. */
+/**
+ * Composio's error answer, of which only its machine names are read: the
+ * slug and the number (`code`), never its message.
+ */
 const errorAnswerSchema = z.object({
-  error: z.object({ slug: z.string().regex(/^\w{1,128}$/u) }),
+  error: z.object({
+    slug: z.unknown().optional(),
+    code: z.unknown().optional(),
+  }),
 });
 
 /**
- * The slug of Composio's error answer `response`, if it has one connect
- * can read: anything else, a body that fails or runs over
- * `maxErrorBytes` included, is none. The body is cancelled either way.
+ * A slug of Composio's: a machine name such as
+ * `ConnectedAccount_CredentialValidationRejected`, letters, digits and
+ * underscores starting with a letter, never text.
  */
-const errorSlugOf = async (response: Response): Promise<string | undefined> => {
+const errorSlugSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_]{0,127}$/u);
+
+/** A number of Composio's for an error. */
+const errorCodeSchema = z.number().int().min(0).max(999_999);
+
+/**
+ * The slug and code of Composio's error answer `response`, those it has
+ * that connect can read: anything else, a body that fails or runs over
+ * `maxErrorBytes` included, is neither. The body is cancelled either way.
+ */
+const errorNamesOf = async (
+  response: Response
+): Promise<{ slug?: string; code?: number }> => {
   try {
     const text = new TextDecoder().decode(
       await readCappedBytes(response, maxErrorBytes)
     );
-    return errorAnswerSchema.safeParse(JSON.parse(text)).data?.error.slug;
+    const named = errorAnswerSchema.safeParse(JSON.parse(text)).data?.error;
+    const slug = errorSlugSchema.safeParse(named?.slug);
+    const code = errorCodeSchema.safeParse(named?.code);
+    return {
+      ...(slug.success ? { slug: slug.data } : {}),
+      ...(code.success ? { code: code.data } : {}),
+    };
   } catch {
-    return undefined;
+    return {};
   }
 };
 
@@ -140,6 +195,8 @@ export interface ComposioRequest<Schema extends z.ZodType> {
   body?: object;
   /** What the answer must be. */
   schema: Schema;
+  /** How long it may take, if less than `requestTimeoutMs`. */
+  timeoutMs?: number;
 }
 
 /**
@@ -151,7 +208,13 @@ export interface ComposioRequest<Schema extends z.ZodType> {
  */
 export const composioRequest = async <Schema extends z.ZodType>(
   key: string,
-  { method = "GET", path, body, schema }: ComposioRequest<Schema>
+  {
+    method = "GET",
+    path,
+    body,
+    schema,
+    timeoutMs = requestTimeoutMs,
+  }: ComposioRequest<Schema>
 ): Promise<z.infer<Schema>> => {
   const url = new URL(`${composioApiBase}${path}`);
   const [, area = ""] = path.split(/[/?]/u);
@@ -167,20 +230,21 @@ export const composioRequest = async <Schema extends z.ZodType>(
       body: body === undefined ? undefined : JSON.stringify(body),
       // A redirect could carry the key to another host: never follow.
       redirect: "manual",
-      signal: AbortSignal.timeout(requestTimeoutMs),
+      signal: AbortSignal.timeout(Math.min(timeoutMs, requestTimeoutMs)),
     });
   } catch (error) {
     log.warn("composio.failed", { method, area, ...errorFields(error) });
-    throw new ComposioError("Composio didn't answer", undefined, error);
+    throw new ComposioError("Composio didn't answer", {
+      cause: error,
+      unanswered: true,
+    });
   }
   log.info("composio.request", { method, area, status: response.status });
   if (!response.ok) {
-    throw new ComposioError(
-      `Composio answered ${response.status}`,
-      response.status,
-      undefined,
-      await errorSlugOf(response)
-    );
+    throw new ComposioError(`Composio answered ${response.status}`, {
+      status: response.status,
+      ...(await errorNamesOf(response)),
+    });
   }
   let parsed: unknown;
   try {
@@ -191,7 +255,7 @@ export const composioRequest = async <Schema extends z.ZodType>(
   } catch (error) {
     throw error instanceof ComposioError
       ? error
-      : new ComposioError("Composio's answer isn't JSON", undefined, error);
+      : new ComposioError("Composio's answer isn't JSON", { cause: error });
   }
   const result = schema.safeParse(parsed);
   if (!result.success) {

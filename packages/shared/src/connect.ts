@@ -435,8 +435,87 @@ export const finishConnectionSchema = z.strictObject({
    * issuer it recorded before the code is redeemed.
    */
   iss: z.string().min(1).max(2048).optional(),
+  /**
+   * Composio's `status` on its redirect, `success` or `failed`: a hint
+   * only, never proof the account is connected (connect reads it at
+   * Composio).
+   */
+  status: z.string().min(1).max(64).optional(),
+  /**
+   * The connected account Composio's redirect names
+   * (`connected_account_id`): it must be the one the flow made.
+   */
+  connectedAccountId: identifierSchema.optional(),
 });
 export type FinishConnection = z.input<typeof finishConnectionSchema>;
+
+/**
+ * Why a Composio connection didn't start or finish, for support: one word of a
+ * fixed set, never Composio's text, an ID or anything from the browser.
+ * Connect gives it with the refusal (its `details.reason`) and in the
+ * audit log (`why`); core's callback passes it on as `connectionReason`,
+ * and the Connectors page shows it under the refusal.
+ *
+ * - `redirect_said_failed`: Composio's redirect said `status=failed`.
+ * - `pending`: Composio was still completing the account at the end of
+ *   the wait.
+ * - `status:<word>`: Composio holds the account in that status
+ *   (`other` for one not listed).
+ * - `mismatch:<part>`: the account Composio holds isn't the flow's: its
+ *   ID, toolkit or auth config differs.
+ * - `<step>:<how>`: a request failed. The step is making the auth config
+ *   (`auth_config`), the hosted link (`link`) or, with a key, the
+ *   connected account (`account`), all while starting; or, finishing,
+ *   reading the account (`read`), making its MCP server (`server`) or that
+ *   server's URL (`url`). How is `unanswered` (no answer in time),
+ *   `unreadable` (an answer connect can't read) or `http_<status>`, with
+ *   Composio's number for the error after it when its answer gave one
+ *   (`http_403:1234`): a stable code, never its message.
+ * - `url:<problem>`: the server URL Composio made isn't one connect calls:
+ *   not exactly one (`count`), not Composio's MCP host (`host`), not this
+ *   server's path (`path`), not exactly this account (`account`), or for
+ *   a user (`user`).
+ */
+export const composioReasonSchema = z.union([
+  z.enum([
+    "redirect_said_failed",
+    "pending",
+    "status:FAILED",
+    "status:EXPIRED",
+    "status:INACTIVE",
+    "status:REVOKED",
+    "status:other",
+    "mismatch:id",
+    "mismatch:toolkit",
+    "mismatch:auth_config",
+    "url:count",
+    "url:host",
+    "url:path",
+    "url:account",
+    "url:user",
+  ]),
+  z
+    .string()
+    .regex(
+      /^(?:auth_config|link|account|read|server|url):(?:unanswered|unreadable|http_[1-5]\d\d(?::\d{1,6})?)$/u
+    ),
+]);
+export type ComposioReason = z.infer<typeof composioReasonSchema>;
+
+/**
+ * The release a deployment runs, as core's callback names it beside a
+ * refusal (`connectionRelease`) to the person who started the flow: for
+ * support, to see which code answered. Only a release's own form,
+ * `YY.MM.N` (as CI publishes them, such as `26.11.827`), so a crafted link
+ * can put no words of its own on the page.
+ */
+export const releaseNameSchema = z.string().regex(/^\d{2}\.\d{2}\.\d{1,6}$/u);
+
+/**
+ * The first eight hex digits of connect's version ID, as core's callback
+ * names it beside a Composio refusal (`connectionVersion`).
+ */
+export const connectVersionSchema = z.string().regex(/^[0-9a-f]{8}$/u);
 
 /** Longest API key connect takes. */
 export const apiKeyMaxLength = 4096;
@@ -2804,6 +2883,12 @@ export const connectionErrors = defineErrorFamily({
     "This connection attempt has expired, was already used, or was started by someone else. Start again.",
   "connection.provider_refused":
     "The provider didn't complete the connection. Start again.",
+  "connection.provider_forbidden":
+    "Grasp's connection service isn't allowed to finish this at the provider. Tell Grasp; trying again won't help.",
+  "connection.provider_pending":
+    "The provider was still finishing the connection, so nothing was connected yet. Start again in a minute.",
+  "connection.provider_not_answering":
+    "The provider isn't answering just now, so nothing was connected. Try again in a minute.",
   "connection.wrong_account":
     "That account isn't in your organization. Connect an account of your organization.",
   "connection.refresh_failed":

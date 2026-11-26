@@ -29,7 +29,13 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import type { Dispatch, PointerEvent, ReactNode, SetStateAction } from "react";
+import type {
+  Dispatch,
+  KeyboardEvent,
+  PointerEvent,
+  ReactNode,
+  SetStateAction,
+} from "react";
 import { createPortal } from "react-dom";
 import {
   Area,
@@ -37,6 +43,7 @@ import {
   CartesianGrid,
   ComposedChart,
   Legend,
+  ReferenceLine,
   Tooltip,
   XAxis,
   YAxis,
@@ -56,7 +63,13 @@ import type {
 } from "recharts";
 
 import { useI18n } from "../lib/i18n";
-import { focusRing, focusWithin, visuallyHidden } from "../lib/styles";
+import {
+  focusRing,
+  focusRingInset,
+  focusWithin,
+  tapTargetAfter,
+  visuallyHidden,
+} from "../lib/styles";
 import {
   colors,
   duration,
@@ -163,6 +176,18 @@ interface ChartContextValue {
   setValueFormatter: Dispatch<
     SetStateAction<((value: number) => string) | undefined>
   >;
+  /** Each stacked ChartBar's stack, by its series: a stack's series take the chart tones. */
+  stacks: Readonly<Record<string, string>>;
+  setStacks: Dispatch<SetStateAction<Readonly<Record<string, string>>>>;
+  /** The element Recharts draws in, for what stands over the drawing: the bars to press, the tooltip the keys open. */
+  host: HTMLElement | null;
+  /** The key (rowKeys) of the row whose bar the keyboard is on, when the bars can be pressed: the tooltip shows it. */
+  focused: string | null;
+  setFocused: Dispatch<SetStateAction<string | null>>;
+  /** The pressed row, when the chart says one (`selectedIndex`): the other bars step back. */
+  selectedIndex: number | null | undefined;
+  /** Each reference line's words ("Budget: €4,000"), by the line, said after the summary. */
+  setReferences: Dispatch<SetStateAction<Readonly<Record<string, string>>>>;
 }
 
 const nothing = () => {
@@ -182,6 +207,13 @@ const ChartContext = createContext<ChartContextValue>({
   setVariant: nothing,
   valueFormatter: undefined,
   setValueFormatter: nothing,
+  stacks: {},
+  setStacks: nothing,
+  host: null,
+  focused: null,
+  setFocused: nothing,
+  selectedIndex: undefined,
+  setReferences: nothing,
 });
 
 const useChart = () => use(ChartContext);
@@ -367,6 +399,41 @@ const maskStyles = stylex.create({
   dither: { display: { default: null, [FORCED]: "none" } },
 });
 
+// ---- The chart tones ----------------------------------------------------------------------------
+//
+// The value colour first, then the chart tones, each a step nearer the ground and 3:1 or more
+// against it: a ring's parts and a stack's series take them in the config's order. Five at most,
+// as the brand has five; a sixth would repeat the fifth. Forced colours draw every part in the text
+// colour, told apart by the clear gap between them.
+
+const TONES = [
+  colors.chartPlain,
+  colors.chart2,
+  colors.chart3,
+  colors.chart4,
+  colors.chart5,
+] as const;
+
+const toneOf = (index: number) =>
+  TONES[Math.min(Math.max(0, index), TONES.length - 1)] ?? colors.chart5;
+
+const toneStyles = stylex.create({
+  fill: (colour: string) => ({
+    fill: { default: colour, [FORCED]: "CanvasText" },
+  }),
+  // A key beside a series' name: a small square in its tone.
+  swatch: {
+    flexShrink: 0,
+    width: space[2],
+    height: space[2],
+    borderRadius: radius.xs,
+    cornerShape: radius.shape,
+  },
+  background: (colour: string) => ({
+    backgroundColor: { default: colour, [FORCED]: "CanvasText" },
+  }),
+});
+
 // ---- ChartContainer -----------------------------------------------------------------------------
 
 /** Every prop a ChartContainer takes. */
@@ -393,6 +460,19 @@ export interface ChartContainerProps {
    * @default 240
    */
   height?: number;
+  /**
+   * Makes each point along the bottom a button, the whole height of the drawing: called with its
+   * row and that row's place when it is pressed, by the pointer, or by Enter or Space once Tab and
+   * the arrow keys (Home, End) have reached it. Each is named by its point and its values
+   * ("12 November, Tickets: 34"). Left out, the chart is a picture whose arrow keys move the tooltip.
+   */
+  onRowClick?: (row: Row, index: number) => void;
+  /**
+   * The pressed row's place in `data`, with `onRowClick`: its bar says it is pressed and the other
+   * bars step back. `null` when none is (as is a place outside the rows); left out, the bars are
+   * buttons that hold no state. It is a place: when rows come or go before it, the caller moves it.
+   */
+  selectedIndex?: number | null;
   /** Layout only: its width and where it sits. */
   style?: LayoutStyle;
 }
@@ -431,18 +511,28 @@ const ringed = (svg: SVGSVGElement | null) => {
   svg?.classList.add(...classes);
 };
 
-/** A figure's name and summary, read by a screen reader and never seen. */
+const noLines: Readonly<Record<string, string>> = {};
+
+/** A figure's name and summary, and the lines drawn across it, read by a screen reader and never seen. */
 const Caption = ({
   id,
   label,
   summary,
+  lines = noLines,
 }: {
   id: string;
   label: string;
   summary: string;
+  lines?: Readonly<Record<string, string>>;
 }) => (
   <figcaption {...stylex.props(visuallyHidden)}>
     <span id={id}>{label}</span> <span>{summary}</span>
+    {Object.entries(lines).map(([key, line]) => (
+      <Fragment key={key}>
+        {" "}
+        <span>{line}</span>
+      </Fragment>
+    ))}
   </figcaption>
 );
 
@@ -465,6 +555,233 @@ const writtenValue = (
   return formatter === undefined ? tableNumber.format(value) : formatter(value);
 };
 
+// ---- Bars to press ------------------------------------------------------------------------------
+//
+// With `onRowClick`, each point along the bottom is a button the whole height of the drawing, over
+// the marks and unseen: the pointer presses it where it stands, and the keyboard reaches the row's
+// buttons as one stop, moves between them with the arrow keys, Home and End, and presses with Enter
+// or Space. Each is named by its point and its values, as the live region would say them, and with
+// `selectedIndex` says whether it is pressed. The drawing is not mirrored on a right-to-left page
+// (the points still run left to right), so each arrow goes the way it points. The ring is the
+// system's, just inside the column, as the columns touch; the tooltip shows the column the keys are
+// on. The buttons stand in Recharts' own element, so its pointer still finds the point under them.
+
+const pressStyles = stylex.create({
+  // Left to right on any page, as the drawing is: each button's finger target (tapTargetAfter)
+  // reaches out only where no button stands beside it, the first's to the left, the last's right.
+  layer: {
+    position: "absolute",
+    inset: 0,
+    pointerEvents: "none",
+    direction: "ltr",
+  },
+  bar: {
+    position: "absolute",
+    boxSizing: "border-box",
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    backgroundColor: "transparent",
+    borderRadius: radius.sm,
+    cornerShape: radius.shape,
+    cursor: "pointer",
+    pointerEvents: "auto",
+    WebkitTapHighlightColor: "transparent",
+  },
+  at: (left: number, top: number, width: number, height: number) => ({
+    left,
+    top,
+    width,
+    height,
+  }),
+});
+
+/** Whether the keyboard put focus here, not a press (lib/styles marks a press's focus). */
+const byKeyboard = (element: HTMLElement) =>
+  element.matches(":focus-visible") &&
+  element.dataset.focusPointer === undefined;
+
+/** The row an arrow key, Home or End moves to from `index`, of `count`; null for any other key. */
+const nextRow = (key: string, index: number, count: number) => {
+  if (key === "ArrowRight") {
+    return Math.min(count - 1, index + 1);
+  }
+  if (key === "ArrowLeft") {
+    return Math.max(0, index - 1);
+  }
+  if (key === "Home") {
+    return 0;
+  }
+  return key === "End" ? count - 1 : null;
+};
+
+/** `index` when it is the place of one of `count` rows, else null. */
+const rowAt = (index: number | null, count: number) =>
+  index !== null && Number.isInteger(index) && index >= 0 && index < count
+    ? index
+    : null;
+
+/**
+ * Each row's column across the drawing: its middle, and its edges half-way to its neighbours'.
+ * Bars stand in bands of one width; without bars Recharts sets the points from end to end.
+ */
+const pressColumns = (
+  count: number,
+  plot: { x: number; width: number },
+  banded: boolean
+) => {
+  const middle = (index: number) => {
+    if (banded) {
+      return plot.x + ((index + 0.5) * plot.width) / count;
+    }
+    return count === 1
+      ? plot.x + plot.width / 2
+      : plot.x + (index * plot.width) / (count - 1);
+  };
+  return Array.from({ length: count }, (_, index) => {
+    const left = index === 0 ? plot.x : (middle(index - 1) + middle(index)) / 2;
+    const right =
+      index === count - 1
+        ? plot.x + plot.width
+        : (middle(index) + middle(index + 1)) / 2;
+    return { left, middle: middle(index), width: right - left };
+  });
+};
+
+/** A row as the live region and its button say it: its point, then each series and its value. */
+const pointWords = (
+  words: ReturnType<typeof useI18n>["chart"],
+  label: string,
+  row: Row,
+  config: ChartConfig,
+  valueFormatter: ((value: number) => string) | undefined
+) =>
+  words.pointAt(
+    label,
+    Object.keys(config).map((key) =>
+      words.point(
+        config[key]?.label ?? key,
+        writtenValue(ownValue(row, key), valueFormatter) ?? ""
+      )
+    )
+  );
+
+/** Each point along the bottom as a button over the drawing. */
+const ChartPress = ({
+  onRowClick,
+}: {
+  onRowClick: (row: Row, index: number) => void;
+}) => {
+  const {
+    config,
+    data,
+    xKey,
+    id,
+    host,
+    bars,
+    selectedIndex,
+    focused,
+    setFocused,
+    valueFormatter,
+  } = useChart();
+  const { chart: words } = useI18n();
+  const plot = usePlotArea();
+  // The row the keyboard last stood on, by its key, so it stays the same row as rows come and go:
+  // Tab comes back to it.
+  const [current, setCurrent] = useState<string | null>(null);
+  if (host === null || plot === undefined || data.length === 0) {
+    return null;
+  }
+  const rowIds = rowKeys(data, xKey);
+  const columns = pressColumns(data.length, plot, bars);
+  const last = current === null ? -1 : rowIds.indexOf(current);
+  const stop = last === -1 ? (selectedIndex ?? 0) : last;
+  const move = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    // Escape puts the keyboard's tooltip away, and only that, while it shows; focus stays.
+    if (event.key === "Escape") {
+      if (focused !== null) {
+        event.preventDefault();
+        event.stopPropagation();
+        setFocused(null);
+      }
+      return;
+    }
+    const next = nextRow(event.key, index, data.length);
+    if (next === null) {
+      return;
+    }
+    event.preventDefault();
+    const target = event.currentTarget.parentElement?.children.item(next);
+    if (target instanceof HTMLElement) {
+      target.focus();
+    }
+  };
+  return createPortal(
+    <div
+      role="group"
+      aria-labelledby={`${id}-label`}
+      {...stylex.props(pressStyles.layer)}
+    >
+      {data.map((row, index) => {
+        const key = rowIds[index] ?? String(index);
+        const column = columns[index] ?? { left: 0, middle: 0, width: 0 };
+        return (
+          <button
+            key={key}
+            type="button"
+            tabIndex={index === stop ? 0 : -1}
+            aria-label={pointWords(
+              words,
+              String(ownValue(row, xKey) ?? ""),
+              row,
+              config,
+              valueFormatter
+            )}
+            aria-pressed={
+              selectedIndex === undefined ? undefined : index === selectedIndex
+            }
+            onClick={() => {
+              onRowClick(row, index);
+            }}
+            onKeyDown={(event) => {
+              move(event, index);
+            }}
+            onFocus={(event) => {
+              setCurrent(key);
+              setFocused(byKeyboard(event.currentTarget) ? key : null);
+            }}
+            onBlur={() => {
+              setFocused(null);
+            }}
+            {...stylex.props(
+              pressStyles.bar,
+              focusRingInset,
+              tapTargetAfter,
+              pressStyles.at(column.left, plot.y, column.width, plot.height)
+            )}
+          />
+        );
+      })}
+    </div>,
+    host
+  );
+};
+
+/** `record` with `key` set to `value`, or left out when it is undefined: the same record when nothing changes. */
+const withEntry = <T,>(
+  record: Readonly<Record<string, T>>,
+  key: string,
+  value?: T
+): Readonly<Record<string, T>> => {
+  if (ownValue(record, key) === value) {
+    return record;
+  }
+  const rest = Object.fromEntries(
+    Object.entries(record).filter(([each]) => each !== key)
+  );
+  return value === undefined ? rest : { ...rest, [key]: value };
+};
+
 /** The drawing, its name and summary, a live region for the point the keys are on, and its numbers as a table. */
 export const ChartContainer = ({
   "aria-label": label,
@@ -475,11 +792,26 @@ export const ChartContainer = ({
   config,
   children,
   height = 240,
+  onRowClick,
+  selectedIndex,
   style,
 }: ChartContainerProps) => {
   const id = useChartId();
   const keys = Object.keys(config);
   const [live, setLive] = useState<HTMLElement | null>(null);
+  // The element Recharts draws in: the bars to press and the keyboard's tooltip stand in it.
+  const [host, setHost] = useState<HTMLElement | null>(null);
+  const drawing = (svg: SVGSVGElement | null) => {
+    ringed(svg);
+    setHost(svg?.parentElement ?? null);
+  };
+  // Set by each stacked ChartBar: its stack.
+  const [stacks, setStacks] = useState<Readonly<Record<string, string>>>({});
+  const [focused, setFocused] = useState<string | null>(null);
+  // Set by each ChartReferenceLine: its words, said after the summary.
+  const [references, setReferences] = useState<
+    Readonly<Record<string, string>>
+  >({});
   // How many ChartBars it holds: a chart with bars draws no hover line through them.
   const [barCount, setBarCount] = useState(0);
   // Set by ChartLabels: the room its names need at the right.
@@ -510,6 +842,16 @@ export const ChartContainer = ({
     setVariant,
     valueFormatter,
     setValueFormatter,
+    stacks,
+    setStacks,
+    host,
+    focused: onRowClick === undefined ? null : focused,
+    setFocused,
+    selectedIndex:
+      onRowClick === undefined || selectedIndex === undefined
+        ? undefined
+        : rowAt(selectedIndex, data.length),
+    setReferences,
   };
   return (
     // oxlint-disable-next-line react/jsx-no-constructed-context-values -- compiled
@@ -519,11 +861,18 @@ export const ChartContainer = ({
         data-slot="chart"
         {...stylex.props(containerStyles.figure, style)}
       >
-        <Caption id={`${id}-label`} label={label} summary={summary} />
+        <Caption
+          id={`${id}-label`}
+          label={label}
+          summary={summary}
+          lines={references}
+        />
         <div {...stylex.props(containerStyles.frame(height))}>
           <ComposedChart
-            ref={ringed}
+            ref={drawing}
             data={data}
+            // Bars to press are the keyboard's stops themselves: the drawing is then no stop of its own.
+            accessibilityLayer={onRowClick === undefined}
             responsive
             // Recharts' wrapper takes a class: it fills the frame by plain CSS sizing.
             className={className(containerStyles.fill)}
@@ -537,6 +886,7 @@ export const ChartContainer = ({
             desc={summary}
           >
             <ChartPatterns id={id} />
+            {onRowClick !== undefined && <ChartPress onRowClick={onRowClick} />}
             {children}
           </ComposedChart>
         </div>
@@ -581,17 +931,26 @@ export const ChartContainer = ({
 //
 // One series as bars with round top corners. Plain, a bar is the plain token colour. Dithered, its
 // body is the dither, lit near the top, and a solid cap in the value colour says the number: the
-// fill is decoration.
+// fill is decoration. Stacked (a `stackId` shared with other ChartBars), each series is one part of
+// a bar, in its chart tone by its place in its stack, the first at the foot; a clear gap stands
+// between two parts, and only the stack's top part is rounded. Recharts does the stacking.
 
 /** Every prop a ChartBar takes. */
 export interface ChartBarProps {
   /** The series it draws: its key in each row, named in the chart's config. */
   dataKey: string;
   /**
-   * `none` in the token colour, or a dither: `dither-pixels` chunky, `dither-dots` fine.
+   * `none` in the token colour, or a dither: `dither-pixels` chunky, `dither-dots` fine. A stacked
+   * bar is always plain, in its tone.
    * @default "none"
    */
   pattern?: ChartPattern;
+  /**
+   * Stacks it on the other ChartBars with the same id, one bar a row: each series in a chart tone
+   * of its own, in the config's order (five at most), named by ChartLegend and the tooltip. The
+   * values of a stack are 0 or more.
+   */
+  stackId?: string;
 }
 
 // The bar's corner; the solid cap at a dithered bar's tip and the clear room beside it in dark, an
@@ -600,9 +959,21 @@ const BAR_CORNER = 4;
 const CAP = 2;
 const CAP_GAP = 2;
 
+// The clear gap between two parts of a stacked bar, in CSS pixels.
+const STACK_GAP = 2;
+// How far a mark steps back while another is picked: a bar not pressed, a flow not lit.
+const STEP_BACK = 0.32;
+
 const markStyles = stylex.create({
   plain: { fill: { default: colors.chartPlain, [FORCED]: "CanvasText" } },
   cap: { fill: { default: colors.chart1, [FORCED]: "CanvasText" } },
+  // A bar whose row is not the pressed one, while one is: it steps back, the pressed one stays.
+  bar: {
+    transitionProperty: "opacity",
+    transitionDuration: motionVars.hover,
+    transitionTimingFunction: duration.ease,
+  },
+  rest: { opacity: STEP_BACK },
 });
 
 // A rectangle with its two top corners rounded, from two marks: a rect rounded all round, and a
@@ -716,11 +1087,45 @@ interface BarShapeProps {
   width?: number;
   height?: number;
   index?: number;
+  value?: number | readonly number[];
 }
 
+/** The keys stacked with `stackId`, and the row's sum over them: where the stack's top is. */
+const stackTop = (
+  row: Row | undefined,
+  stacks: Readonly<Record<string, string>>,
+  stackId: string
+) =>
+  Object.keys(stacks)
+    .filter((key) => stacks[key] === stackId)
+    .reduce(
+      (sum, key) =>
+        sum + Math.max(0, row === undefined ? 0 : valueOf(row, key)),
+      0
+    );
+
+/**
+ * A stacked series' place among its stack's series in the config's order, which picks its tone:
+ * the first at the foot takes the value colour, whatever else the chart draws.
+ */
+const toneIndex = (
+  config: ChartConfig,
+  stacks: Readonly<Record<string, string>>,
+  dataKey: string,
+  stackId = ownValue(stacks, dataKey)
+) =>
+  Object.keys(config)
+    .filter((key) => key === dataKey || ownValue(stacks, key) === stackId)
+    .indexOf(dataKey);
+
 /** A series as bars. */
-export const ChartBar = ({ dataKey, pattern = "none" }: ChartBarProps) => {
-  const { config, id, setBarCount } = useChart();
+export const ChartBar = ({
+  dataKey,
+  pattern = "none",
+  stackId,
+}: ChartBarProps) => {
+  const { config, id, data, setBarCount, stacks, setStacks, selectedIndex } =
+    useChart();
   const reduced = useReducedMotion();
   // The chart draws no hover line through bars: count this one in while it is there.
   useEffect(() => {
@@ -729,23 +1134,55 @@ export const ChartBar = ({ dataKey, pattern = "none" }: ChartBarProps) => {
       setBarCount((count) => count - 1);
     };
   }, [setBarCount]);
-  const texture = textureOf(pattern);
+  // The chart knows which stack this series is in, so its tooltip, legend and stack top follow;
+  // before it paints, so the first frame already rounds only the top.
+  useLayoutEffect(() => {
+    setStacks((was) => withEntry(was, dataKey, stackId));
+    return () => {
+      setStacks((was) => withEntry(was, dataKey));
+    };
+  }, [setStacks, dataKey, stackId]);
+  const texture = stackId === undefined ? textureOf(pattern) : null;
+  const tone = toneOf(toneIndex(config, stacks, dataKey, stackId));
   const shape = ({
     x = 0,
     y = 0,
     width = 0,
     height = 0,
     index = 0,
+    value,
   }: BarShapeProps) => {
     if (height <= 0 || width <= 0) {
       return <g />;
+    }
+    const resting =
+      typeof selectedIndex === "number" && index !== selectedIndex;
+    const step = stylex.props(markStyles.bar, resting && markStyles.rest);
+    if (stackId !== undefined) {
+      // Only the stack's top part is rounded; every part under it gives up its top to the gap.
+      const high = typeof value === "number" ? value : (value?.[1] ?? 0);
+      // Its top is the stack's when it reaches the sum of the stack's parts, to a rounding.
+      const sum = stackTop(data[index], stacks, stackId);
+      const top = high >= sum - Math.abs(sum) * 1e-9;
+      const cut = top ? 0 : Math.min(STACK_GAP, height);
+      const part = { x, y: y + cut, width, height: height - cut };
+      return (
+        <g {...step}>
+          {part.height > 0 && top && (
+            <RoundTop {...part} look={toneStyles.fill(tone)} />
+          )}
+          {part.height > 0 && !top && (
+            <rect {...part} {...stylex.props(toneStyles.fill(tone))} />
+          )}
+        </g>
+      );
     }
     const box = { x, y, width, height };
     const outline = (look?: stylex.StyleXStyles) => (
       <RoundTop {...box} look={look} />
     );
     return (
-      <g>
+      <g {...step}>
         {texture === null ? (
           outline(markStyles.plain)
         ) : (
@@ -765,6 +1202,7 @@ export const ChartBar = ({ dataKey, pattern = "none" }: ChartBarProps) => {
     <Bar
       dataKey={dataKey}
       name={config[dataKey]?.label ?? dataKey}
+      stackId={stackId}
       shape={shape}
       isAnimationActive={!reduced}
     />
@@ -1191,15 +1629,36 @@ export interface ChartTooltipProps {
 // The clear room between the tooltip and the crosshair or any hovered mark, in CSS pixels.
 const CLEAR = 16;
 
-type Entry = TooltipContentProps["payload"][number];
+/** One row of the tooltip: a series and its value at the point. */
+interface TooltipRow {
+  key: string;
+  value: unknown;
+}
 
-/** The entries, highest first, for a tooltip that lists several lines by value. */
-const byValue = (payload: readonly Entry[]) =>
-  payload.toSorted(
+/** The rows, highest first, for a tooltip that lists several lines by value. */
+const byValue = (rows: readonly TooltipRow[]) =>
+  rows.toSorted(
     (a, b) =>
       (typeof b.value === "number" ? b.value : 0) -
       (typeof a.value === "number" ? a.value : 0)
   );
+
+/** A value as the tooltip writes it: a number through its formatter, words as they are. */
+const shownValue = (
+  value: unknown,
+  formatter: ((value: number) => string) | undefined
+): string | number | null => {
+  if (typeof value === "number") {
+    return formatter === undefined ? value : formatter(value);
+  }
+  return typeof value === "string" ? value : null;
+};
+
+/** A tooltip or legend entry's series key, as Recharts gives it. */
+const entryKey = (entry: { dataKey?: unknown }) =>
+  typeof entry.dataKey === "string" || typeof entry.dataKey === "number"
+    ? String(entry.dataKey)
+    : "";
 
 const tooltipStyles = stylex.create({
   // The tooltip's panel: the one corner, lifted like every popup, never interactive. Over a chart
@@ -1234,6 +1693,18 @@ const tooltipStyles = stylex.create({
     fontWeight: font.weightNormal,
   },
   value: { fontVariantNumeric: "tabular-nums", fontWeight: font.weightMedium },
+  // The panel for the bar the keys are on, where Recharts would stand its own.
+  keyed: {
+    position: "absolute",
+    zIndex: 1,
+    top: 0,
+    left: 0,
+    pointerEvents: "none",
+  },
+  unplaced: { visibility: "hidden" },
+  placed: (x: number, y: number) => ({
+    transform: `translate(${x}px, ${y}px)`,
+  }),
   cursor: { fill: colors.accent, stroke: "none" },
   cursorLine: {
     stroke: colors.chartGrid,
@@ -1286,32 +1757,49 @@ const Announcer = () => {
   if (live === null || label === undefined || row === undefined) {
     return null;
   }
-  const said = words.pointAt(
-    String(label),
-    Object.keys(config).map((key) =>
-      words.point(
-        config[key]?.label ?? key,
-        writtenValue(ownValue(row, key), valueFormatter) ?? ""
-      )
-    )
+  return createPortal(
+    pointWords(words, String(label), row, config, valueFormatter),
+    live
   );
-  return createPortal(said, live);
 };
 
-// The hovered marks' heights in the drawing: one per series at the active point.
-const useMarks = () => {
-  const { config } = useChart();
-  const y = useYAxisScale();
-  const points = useActiveTooltipDataPoints<Row>();
-  const [row] = points ?? [];
+/**
+ * The marks' heights at a row, in the drawing: one per series, or one per stack at the stack's top,
+ * so the tooltip stands clear of the whole bar.
+ */
+const marksOf = (
+  row: Row | undefined,
+  config: ChartConfig,
+  stacks: Readonly<Record<string, string>>,
+  y: ((value: number) => number | undefined) | undefined
+) => {
   if (y === undefined || row === undefined) {
     return [];
   }
-  return Object.keys(config)
+  const keys = Object.keys(config);
+  const alone = keys
+    .filter((key) => ownValue(stacks, key) === undefined)
     .map((key) => ownValue(row, key))
-    .filter((value) => typeof value === "number")
-    .map((value) => y(value) ?? 0);
+    .filter((value) => typeof value === "number");
+  const tops = [...new Set(Object.values(stacks))].map((stackId) =>
+    stackTop(row, stacks, stackId)
+  );
+  return [...alone, ...tops].map((value) => y(value) ?? 0);
 };
+
+// The hovered marks' heights in the drawing.
+const useMarks = () => {
+  const { config, stacks } = useChart();
+  const y = useYAxisScale();
+  const points = useActiveTooltipDataPoints<Row>();
+  const [row] = points ?? [];
+  return marksOf(row, config, stacks, y);
+};
+
+const keyStyles = stylex.create({
+  // A stacked series' name in the tooltip, after the square of its tone.
+  name: { display: "inline-flex", alignItems: "center", gap: space[2] },
+});
 
 /** The point under the pointer or the keys, in a panel beside it. */
 export const ChartTooltip = ({
@@ -1320,9 +1808,10 @@ export const ChartTooltip = ({
 }: ChartTooltipProps) => {
   // The tooltip writes the values: the chart's table writes them the same way.
   useTellFormatter(valueFormatter);
-  const { config, bars, data } = useChart();
+  const { config, bars, data, xKey, stacks, host, focused } = useChart();
   const reduced = useReducedMotion();
   const plot = usePlotArea();
+  const y = useYAxisScale();
   const marks = useMarks();
   const at = useActiveTooltipCoordinate();
   // The panel's own size, read as it is drawn, so it can stand clear above the marks.
@@ -1335,53 +1824,98 @@ export const ChartTooltip = ({
       setBox({ width: panel.offsetWidth, height: panel.offsetHeight });
     }
   };
-  const top =
-    plot === undefined || box.height === 0
+  // Where the panel stands for marks at `x`: clear above them, else beside the bar over bars.
+  const placeAt = (
+    heights: readonly number[],
+    x: number | undefined,
+    band: number,
+    beside: boolean
+  ) => {
+    const top =
+      plot === undefined || box.height === 0
+        ? undefined
+        : tooltipTop(heights, plot, box.height, CLEAR);
+    // Over bars it stands centred above the bar it explains, or beside it where the bar is too
+    // tall: never on the bar itself.
+    const above =
+      top !== undefined &&
+      heights.length > 0 &&
+      top + box.height <= Math.min(...heights);
+    const across =
+      beside && x !== undefined && plot !== undefined && box.width > 0
+        ? { x: barTooltipLeft(x, band, box.width, plot, CLEAR, above) }
+        : {};
+    return top === undefined
       ? undefined
-      : tooltipTop(marks, plot, box.height, CLEAR);
-  // Over bars it stands centred above the bar it explains, or beside it where the bar is too tall:
-  // never on the bar itself.
-  const above =
-    top !== undefined &&
-    marks.length > 0 &&
-    top + box.height <= Math.min(...marks);
-  const band = plot === undefined ? 0 : plot.width / Math.max(1, data.length);
-  const over =
-    bars && at !== undefined && plot !== undefined && box.width > 0
-      ? { x: barTooltipLeft(at.x, band, box.width, plot, CLEAR, above) }
-      : {};
-  const besideTop = plot === undefined ? top : plot.y;
-  const position =
-    top === undefined
-      ? undefined
-      : { ...over, y: bars && !above ? besideTop : top };
+      : {
+          ...across,
+          y: beside && !above && plot !== undefined ? plot.y : top,
+        };
+  };
+  const position = placeAt(
+    marks,
+    at?.x,
+    plot === undefined ? 0 : plot.width / Math.max(1, data.length),
+    bars
+  );
+  const panel = (label: ReactNode, rows: readonly TooltipRow[]) => (
+    <div ref={measure} {...stylex.props(tooltipStyles.panel)}>
+      <span {...stylex.props(tooltipStyles.title)}>{label}</span>
+      {(sortOrder === "descending" ? byValue(rows) : rows).map((row) => {
+        const value = shownValue(row.value, valueFormatter);
+        const name = config[row.key]?.label ?? row.key;
+        const stacked = ownValue(stacks, row.key) !== undefined;
+        return (
+          <span key={row.key} {...stylex.props(tooltipStyles.row)}>
+            {stacked ? (
+              <span {...stylex.props(keyStyles.name)}>
+                <span
+                  aria-hidden="true"
+                  {...stylex.props(
+                    toneStyles.swatch,
+                    toneStyles.background(
+                      toneOf(toneIndex(config, stacks, row.key))
+                    )
+                  )}
+                />
+                {name}
+              </span>
+            ) : (
+              <span>{name}</span>
+            )}
+            <span {...stylex.props(tooltipStyles.value)}>{value}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
   const content = ({ active, label, payload }: TooltipContentProps) => {
     if (!active || payload.length === 0) {
       return null;
     }
-    return (
-      <div ref={measure} {...stylex.props(tooltipStyles.panel)}>
-        <span {...stylex.props(tooltipStyles.title)}>{label}</span>
-        {(sortOrder === "descending" ? byValue(payload) : payload).map(
-          (entry) => {
-            const key = String(
-              typeof entry.dataKey === "function" ? "" : (entry.dataKey ?? "")
-            );
-            const value =
-              typeof entry.value === "number" && valueFormatter !== undefined
-                ? valueFormatter(entry.value)
-                : entry.value;
-            return (
-              <span key={key} {...stylex.props(tooltipStyles.row)}>
-                <span>{config[key]?.label ?? key}</span>
-                <span {...stylex.props(tooltipStyles.value)}>{value}</span>
-              </span>
-            );
-          }
-        )}
-      </div>
+    return panel(
+      label,
+      payload.map((entry) => ({ key: entryKey(entry), value: entry.value }))
     );
   };
+  // The row the keyboard is on, when the bars can be pressed: Recharts' tooltip follows only its own
+  // keys, so this panel stands where it would, in the same element, and Recharts' waits. A row gone
+  // from the data shows none.
+  const keyed = focused === null ? -1 : rowKeys(data, xKey).indexOf(focused);
+  const row = data[keyed];
+  const column =
+    row === undefined || plot === undefined
+      ? undefined
+      : pressColumns(data.length, plot, bars)[keyed];
+  const place =
+    column === undefined
+      ? undefined
+      : placeAt(
+          marksOf(row, config, stacks, y),
+          column.middle,
+          column.width,
+          true
+        );
   return (
     <>
       <Tooltip
@@ -1390,7 +1924,29 @@ export const ChartTooltip = ({
         isAnimationActive={!reduced}
         offset={CLEAR}
         position={position}
+        active={row === undefined ? undefined : false}
       />
+      {row !== undefined &&
+        host !== null &&
+        createPortal(
+          <div
+            {...stylex.props(
+              tooltipStyles.keyed,
+              place === undefined
+                ? tooltipStyles.unplaced
+                : tooltipStyles.placed(place.x ?? 0, place.y)
+            )}
+          >
+            {panel(
+              String(ownValue(row, xKey) ?? ""),
+              Object.keys(config).map((key) => ({
+                key,
+                value: ownValue(row, key),
+              }))
+            )}
+          </div>,
+          host
+        )}
       <Announcer />
     </>
   );
@@ -1425,25 +1981,44 @@ const legendStyles = stylex.create({
   },
 });
 
-/** Each series' name beside a swatch of how it is drawn, under the chart. */
+/** Each series' name beside a swatch of how it is drawn, under the chart: a stacked series' in its tone. */
 export const ChartLegend = () => {
-  const { config } = useChart();
+  const { config, stacks } = useChart();
+  const keys = Object.keys(config);
   const content = ({ payload }: { payload?: readonly LegendPayload[] }) => (
     <ul {...stylex.props(legendStyles.list)}>
       {(payload ?? []).map((entry) => {
-        const key = String(
-          typeof entry.dataKey === "function" ? "" : (entry.dataKey ?? "")
-        );
+        const key = entryKey(entry);
+        const stacked = ownValue(stacks, key) !== undefined;
         return (
           <li key={key} {...stylex.props(legendStyles.item)}>
-            <span aria-hidden="true" {...stylex.props(legendStyles.swatch)} />
+            <span
+              aria-hidden="true"
+              {...stylex.props(
+                stacked ? toneStyles.swatch : legendStyles.swatch,
+                stacked &&
+                  toneStyles.background(toneOf(toneIndex(config, stacks, key)))
+              )}
+            />
             {config[key]?.label ?? key}
           </li>
         );
       })}
     </ul>
   );
-  return <Legend content={content} />;
+  // A stack's series read in the config's order, the foot's first, as the bars stand; other
+  // series by name, as before.
+  const stacked = Object.keys(stacks).length > 0;
+  return (
+    <Legend
+      content={content}
+      itemSorter={
+        stacked
+          ? (entry: LegendPayload) => keys.indexOf(entryKey(entry))
+          : "value"
+      }
+    />
+  );
 };
 
 // ---- ChartLabels --------------------------------------------------------------------------------
@@ -1628,6 +2203,162 @@ export const ChartLabels = () => {
       ))}
     </g>
   );
+};
+
+// ---- ChartReferenceLine -------------------------------------------------------------------------
+//
+// A line across the drawing at a value up the side (a budget, a limit), or up it at a point along
+// the bottom (a launch): dashed, in ink, on a halo of the card's own ground, so it reads where it
+// crosses a bar in light and dark, with its name at its end. Recharts places it, and widens the axis
+// so the line is always inside the drawing. A screen reader hears its name and value after the
+// chart's summary.
+
+/** Every prop a ChartReferenceLine takes: one of `y` and `x`. */
+export interface ChartReferenceLineProps {
+  /** A value up the side: the line runs across the drawing there (a budget, a limit). */
+  y?: number;
+  /** A point along the bottom, a value of the rows' `xKey`: the line runs up the drawing there (a launch). */
+  x?: string | number;
+  /** Its name, drawn at its end and said with its value ("Budget"). */
+  children?: string;
+}
+
+// The line's dash, its width and its halo's, and the room between the line and its name, in CSS
+// pixels: SVG attributes.
+const REFERENCE_DASH = "6 4";
+const REFERENCE_WIDTH = 1.5;
+const REFERENCE_HALO = 5;
+const REFERENCE_NAME_HALO = 4;
+const REFERENCE_GAP = 4;
+// The room its name takes up and down: one line of the axis's type.
+const REFERENCE_NAME_LINE = 16;
+
+const referenceStyles = stylex.create({
+  halo: {
+    fill: "none",
+    stroke: { default: colors.card, [FORCED]: "Canvas" },
+  },
+  line: {
+    fill: "none",
+    stroke: { default: colors.foreground, [FORCED]: "CanvasText" },
+  },
+  // Its name, on a halo of the ground drawn under the letters, so it reads over a bar.
+  name: {
+    fill: { default: colors.foreground, [FORCED]: "CanvasText" },
+    stroke: { default: colors.card, [FORCED]: "Canvas" },
+    strokeWidth: REFERENCE_NAME_HALO,
+    strokeLinejoin: "round",
+    paintOrder: "stroke",
+    fontFamily: font.sans,
+    fontSize: font.textXs,
+    fontWeight: font.weightMedium,
+    // Its anchor is a side of the drawing on any page; its words still read in their own
+    // direction, set from their first letter.
+    direction: "ltr",
+    unicodeBidi: "plaintext",
+  },
+});
+
+/**
+ * Where a reference line's name stands, by the edge of its words that meets the line's end: across,
+ * its end at the line's end, above the line, or under it where the drawing's top is too near; up,
+ * at the top beside it, after it in the drawing's left half and before it in the right.
+ */
+const referenceNameAt = (
+  line: { x1: number; y1: number; x2: number; y2: number },
+  across: boolean,
+  plot: { x: number; y: number; width: number }
+): {
+  x: number;
+  y: number;
+  anchor: "start" | "end";
+  baseline: "text-after-edge" | "text-before-edge";
+} => {
+  if (across) {
+    const above = line.y1 - REFERENCE_GAP - REFERENCE_NAME_LINE >= plot.y;
+    return {
+      x: line.x2,
+      y: above ? line.y1 - REFERENCE_GAP : line.y1 + REFERENCE_GAP,
+      anchor: "end",
+      baseline: above ? "text-after-edge" : "text-before-edge",
+    };
+  }
+  const after = line.x1 <= plot.x + plot.width / 2;
+  return {
+    x: after ? line.x1 + REFERENCE_GAP : line.x1 - REFERENCE_GAP,
+    y: Math.min(line.y1, line.y2),
+    anchor: after ? "start" : "end",
+    baseline: "text-before-edge",
+  };
+};
+
+interface ReferenceShapeProps {
+  x1?: number;
+  y1?: number;
+  x2?: number;
+  y2?: number;
+}
+
+/** A dashed line across or up the drawing at a value, with its name at its end. */
+export const ChartReferenceLine = ({
+  x,
+  y,
+  children,
+}: ChartReferenceLineProps) => {
+  const { setReferences, valueFormatter } = useChart();
+  const { chart: words } = useI18n();
+  const plot = usePlotArea();
+  const key = useId();
+  const value = y === undefined ? x : writtenValue(y, valueFormatter);
+  const said =
+    children === undefined || value === undefined
+      ? null
+      : words.point(children, String(value));
+  useEffect(() => {
+    setReferences((was) => withEntry(was, key, said ?? undefined));
+    return () => {
+      setReferences((was) => withEntry(was, key));
+    };
+  }, [setReferences, key, said]);
+  const shape = ({ x1 = 0, y1 = 0, x2 = 0, y2 = 0 }: ReferenceShapeProps) => {
+    const at =
+      plot === undefined
+        ? null
+        : referenceNameAt({ x1, y1, x2, y2 }, y !== undefined, plot);
+    return (
+      <g aria-hidden="true" data-slot="chart-reference-line">
+        <line
+          x1={x1}
+          y1={y1}
+          x2={x2}
+          y2={y2}
+          strokeWidth={REFERENCE_HALO}
+          {...stylex.props(referenceStyles.halo)}
+        />
+        <line
+          x1={x1}
+          y1={y1}
+          x2={x2}
+          y2={y2}
+          strokeWidth={REFERENCE_WIDTH}
+          strokeDasharray={REFERENCE_DASH}
+          {...stylex.props(referenceStyles.line)}
+        />
+        {children !== undefined && at !== null && (
+          <text
+            x={at.x}
+            y={at.y}
+            textAnchor={at.anchor}
+            dominantBaseline={at.baseline}
+            {...stylex.props(referenceStyles.name)}
+          >
+            {children}
+          </text>
+        )}
+      </g>
+    );
+  };
+  return <ReferenceLine x={x} y={y} ifOverflow="extendDomain" shape={shape} />;
 };
 
 // ---- The figures of their own -------------------------------------------------------------------
@@ -2086,18 +2817,6 @@ const PIE_CAP = 2;
 // The gap between parts, as an angle on the ring's middle.
 const PIE_GAP_ANGLE = PIE_GAP / (PIE_OUTER - PIE_THICK / 2);
 
-// The tones round the ring: the value colour first, then the chart tones.
-const PIE_TONES = [
-  colors.chartPlain,
-  colors.chart2,
-  colors.chart3,
-  colors.chart4,
-  colors.chart5,
-] as const;
-
-const toneOf = (index: number) =>
-  PIE_TONES[Math.min(index, PIE_TONES.length - 1)] ?? colors.chart5;
-
 const pieStyles = stylex.create({
   // The pie's own width decides how it folds, not the window's.
   room: { containerType: "inline-size", minWidth: 0 },
@@ -2150,9 +2869,6 @@ const pieStyles = stylex.create({
   lift: (x: number, y: number) => ({ transform: `translate(${x}px, ${y}px)` }),
   // The row of the part under the pointer or the keys: its name in ink. Nothing else dims.
   rowActive: { color: colors.foreground },
-  tone: (colour: string) => ({
-    fill: { default: colour, [FORCED]: "CanvasText" },
-  }),
   // A share's empty track: muted, as it is no part.
   track: {
     fill: { default: colors.chartMutedBg, [FORCED]: "GrayText" },
@@ -2181,16 +2897,7 @@ const pieStyles = stylex.create({
     transitionProperty: "opacity",
     transitionDuration: motionVars.hover,
   },
-  swatch: {
-    width: space[2],
-    height: space[2],
-    borderRadius: radius.xs,
-    cornerShape: radius.shape,
-    alignSelf: "center",
-  },
-  swatchTone: (colour: string) => ({
-    backgroundColor: { default: colour, [FORCED]: "CanvasText" },
-  }),
+  swatch: { alignSelf: "center" },
   rowName: { color: colors.bodyForeground, minWidth: 0 },
   rowValue: {
     color: colors.foreground,
@@ -2354,7 +3061,7 @@ const PieDrawing = ({
                 pieStyles.lift(lifted.x, lifted.y)
               )}
             >
-              <path d={d} {...stylex.props(pieStyles.tone(toneOf(index)))} />
+              <path d={d} {...stylex.props(toneStyles.fill(toneOf(index)))} />
               {index === 0 && texture !== null && (
                 <DitherArc
                   chart={chart}
@@ -2401,8 +3108,9 @@ const PieList = ({
       >
         <span
           {...stylex.props(
+            toneStyles.swatch,
             pieStyles.swatch,
-            pieStyles.swatchTone(toneOf(index))
+            toneStyles.background(toneOf(index))
           )}
         />
         <span
@@ -2623,7 +3331,7 @@ const sankeyStyles = stylex.create({
     transitionProperty: "opacity",
     transitionDuration: motionVars.hover,
   },
-  back: { opacity: 0.32 },
+  back: { opacity: STEP_BACK },
   rest: { stopColor: colors.chartRibbon },
   restMuted: { stopColor: colors.chartRibbonMuted },
   lit: { stopColor: colors.chartRibbonLit },

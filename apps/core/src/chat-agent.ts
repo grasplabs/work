@@ -42,16 +42,15 @@ import {
   askQuestions,
   aboutNotes,
   executeCode,
-  instructions,
   filesNoteText,
   makeQuestionsLeft,
+  offersPlans,
   pictureLine,
   draftAgent,
   draftAgentChange,
   proposePlan,
   readApi,
   resultRunId,
-  sectionNames,
   sectionsOf,
   withheldAssistant,
   withheldResult,
@@ -121,6 +120,8 @@ export interface ChatAgent {
    * asked before every model request and every compaction.
    */
   withheld: () => Promise<ReadonlySet<string>>;
+  /** Called as each of the turn's requests starts, before its guard. */
+  asking: () => void;
   /**
    * One of the chat's pictures, for the model to see after its line
    * (`pictureLine`), unless larger than `maxBytes`: only where the turn's
@@ -838,21 +839,12 @@ export const chatAgent = (agent: ChatAgent): Extension => {
   const { apis, scope, runs, assets } = agent;
   const picture =
     agent.picture === undefined ? undefined : shown(agent.picture);
-  const sections = sectionsOf(apis, agent.context);
   // A chat "Make something" started counts its questions before a plan.
   const asksLeft =
     agent.context.make === undefined
       ? chatAskLimits.questions
       : makeQuestionsLeft(agent.history, agent.context.make.kind);
-  // Who builds proposes what to make, in Grasp's own chat, any of theirs.
-  // Never in a turn nobody asked for (a wake-up): a plan waits on the
-  // person's press, as a drafted agent does. Not in a chat started to set
-  // up an agent, which drafts it instead: a plan makes no agent.
-  const plans =
-    agent.context.builds === true &&
-    agent.context.channel === undefined &&
-    scope.unattended !== true &&
-    agent.context.make?.kind !== "agent";
+  const plans = offersPlans(agent.context, scope.unattended === true);
   const tools: ToolRegistration[] = [
     executeCode(agent),
     readApi(apis),
@@ -884,16 +876,13 @@ export const chatAgent = (agent: ChatAgent): Extension => {
   return defineExtension({
     name: chatAgentName(scope.chatId),
     tools: roundTools(tools),
-    sections: [
-      // Not `instructions`, the key of a conversation's own, which pi renders last.
-      section("preamble", () => instructions, { tag: false }),
-      ...sectionNames.map((name) =>
-        section(name, () => sections[name] ?? undefined, { tag: false })
-      ),
-    ],
+    sections: sectionsOf({ apis, context: agent.context, plans }).map(
+      ({ name, text }) => section(name, () => text ?? undefined, { tag: false })
+    ),
     hooks: [
       hook(GenerationTask, {
         beforeRequest: async ({ messages }, api, context) => {
+          agent.asking();
           const sent = await guarded(agent, messages, api, context);
           if (sent.stop !== undefined) {
             try {

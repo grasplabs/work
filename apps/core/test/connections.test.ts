@@ -521,11 +521,11 @@ describe("connecting a Composio toolkit", () => {
   it("goes from the admin's consent through Composio and back, to one shared connection", async () => {
     const admin = await signedInAdmin();
     const { url } = await admin.connections.connectToolkit(request);
-    // Composio sends the browser straight back to the callback it was given.
-    const state = new URL(url).searchParams.get("state") ?? "";
+    // Composio sends the browser straight back to the callback it was
+    // given, with its own query appended.
     const response = await backFromProvider(
       admin.session,
-      { state, status: "success" },
+      Object.fromEntries(new URL(url).searchParams),
       admin.coreEnv
     );
     const listed = await admin.connections.list();
@@ -540,6 +540,107 @@ describe("connecting a Composio toolkit", () => {
       connectedBy: admin.userId,
       tools: ["HUBSPOT_LIST_CONTACTS", "HUBSPOT_CREATE_CONTACT"],
     });
+  });
+
+  it("names why Composio's flow was refused and the release that refused it, for support, and nothing else", async () => {
+    const admin = await signedInAdmin();
+    const { url } = await admin.connections.connectToolkit(request);
+    const response = await backFromProvider(
+      admin.session,
+      { ...Object.fromEntries(new URL(url).searchParams), status: "failed" },
+      {
+        ...admin.coreEnv,
+        PLATFORM_CHANGE: JSON.stringify({
+          by: "rollout",
+          what: "release",
+          release: "26.11.900",
+          at: new Date().toISOString(),
+        }),
+      }
+    );
+    const location = new URL(response.headers.get("location") ?? "");
+    expect({
+      path: location.pathname,
+      query: Object.fromEntries(
+        [...location.searchParams].filter(
+          ([name]) => name !== "connectionVersion"
+        )
+      ),
+    }).toStrictEqual({
+      path: "/connectors",
+      query: {
+        connectionError: "connection.provider_refused",
+        connectionReason: "redirect_said_failed",
+        connectionRelease: "26.11.900",
+      },
+    });
+  });
+
+  it("names nothing for support to someone not signed in, nor for a callback without a state", async () => {
+    const coreEnv = {
+      ...env,
+      PLATFORM_CHANGE: JSON.stringify({
+        by: "rollout",
+        what: "release",
+        release: "26.11.900",
+        at: new Date().toISOString(),
+      }),
+    };
+    const responses = await Promise.all([
+      backFromProvider(undefined, { state: "s".repeat(43) }, coreEnv),
+      backFromProvider(undefined, {}, coreEnv),
+    ]);
+    expect(
+      responses.map((response) => [
+        ...new URL(response.headers.get("location") ?? "").searchParams.keys(),
+      ])
+    ).toStrictEqual([["connectionError"], ["connectionError"]]);
+  });
+
+  it("names the release and why with a start connect refused, for the page to show", async () => {
+    const { session } = await signedInWithRole(idp, "admin");
+    const coreEnv = {
+      ...env,
+      PLATFORM_CHANGE: JSON.stringify({
+        by: "rollout",
+        what: "release",
+        release: "26.11.900",
+        at: new Date().toISOString(),
+      }),
+    };
+    const { core } = await openRpc(session, { coreEnv });
+    const refused = await core
+      .authenticate()
+      .connections.connectToolkit({
+        ...request,
+        toolkit: "acme_erp",
+        tools: ["ACME_ERP_LIST_ORDERS"],
+      })
+      .then(
+        () => {},
+        (error: unknown) => error
+      );
+    expect(refused).toMatchObject({
+      code: "connection.own_auth_required",
+      details: { release: "26.11.900" },
+    });
+  });
+
+  it("leaves out an empty or overlong hint on Composio's redirect, and still connects", async () => {
+    const admin = await signedInAdmin();
+    const { url } = await admin.connections.connectToolkit(request);
+    const response = await backFromProvider(
+      admin.session,
+      {
+        ...Object.fromEntries(new URL(url).searchParams),
+        status: "",
+        connected_account_id: "a".repeat(10_000),
+      },
+      admin.coreEnv
+    );
+    expect(response.headers.get("location")).toMatch(
+      /^[^?]+\?tab=shared&connection=[^&]+$/u
+    );
   });
 
   it("is refused for a toolkit Composio holds no app for, connecting nothing", async () => {
@@ -642,10 +743,10 @@ describe("offering catalog entries", () => {
     const anna = await person();
     // Connected before it is hidden.
     const { url } = await admin.connections.connectToolkit(toolkitRequest);
-    const back = await backFromProvider(admin.session, {
-      state: new URL(url).searchParams.get("state") ?? "",
-      status: "success",
-    });
+    const back = await backFromProvider(
+      admin.session,
+      Object.fromEntries(new URL(url).searchParams)
+    );
     const connectionId =
       new URL(
         back.headers.get("location") ?? "",

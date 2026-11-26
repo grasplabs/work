@@ -119,7 +119,6 @@ export const rpcParamNames: ParamNames = {
     "openGaps": [],
     "read": [],
     "redactGapAnswer": ["gapId"],
-    "saveTeamGroups": ["groups"],
     "thinking": [],
     "tools": [],
     "work": ["id"],

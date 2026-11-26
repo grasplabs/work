@@ -1,5 +1,3 @@
-import { Toaster as KitToaster } from "@grasp-os/app-kit/components/toast";
-import { TooltipProvider as KitTooltipProvider } from "@grasp-os/app-kit/components/tooltip";
 import type { Identity } from "@grasp-os/shared/rpc";
 import {
   SidebarInset,
@@ -190,9 +188,8 @@ const styles = stylex.create({
 /**
  * Says where the page's column stands in the window, on the document, as
  * the sidebar folds, a panel opens beside it and the window resizes: its
- * start, the card's, for the chat gone full screen over it (the kit's
- * DockablePanel reads `--app-shell-main-left`), and its end and foot for
- * the dock, which so stands in the middle of the page and not of its panel.
+ * start, end and foot, for the dock, which so stands in the middle of the
+ * page and not of its panel.
  */
 const usePublishedPage = () => {
   const page = useRef<HTMLDivElement>(null);
@@ -352,56 +349,50 @@ export const AppFrame = ({
   );
   return (
     // Damsko's Toaster (below) is the app's one place for toasts: a page
-    // mounts none of its own and calls Damsko's `toast`. The kit's stays
-    // only for the two files that still call the kit's `toast.add`
-    // (copy.ts, brain/memories-page.tsx), each toast in the one region of
-    // the API it was given to; it goes with the last of them. The kit's
-    // tooltips are for the pages still on the kit.
-    <KitToaster>
-      <KitTooltipProvider>
-        <SidebarProvider storageKey={sidebarKey}>
-          <AppSidebar core={core} identity={identity} />
-          {panels === undefined ? (
-            card
-          ) : (
-            <ChatPanelsBeside
-              card={
-                <>
-                  {/* Damsko's SidebarInset is a card only beside an inset
-                      Sidebar, its sibling; beside the chat it stands in the
-                      panels' group, so it is given that sibling's mark here
-                      (registry gap of 24 Nov 2026: an inset that is a card
-                      wherever it stands). */}
-                  <span
-                    aria-hidden="true"
-                    data-variant="inset"
-                    hidden
-                    {...stylex.props(sidebarMarker)}
-                  />
-                  {card}
-                </>
-              }
-              cover={cover}
-              panels={panels}
-            />
-          )}
-          {dock === undefined ? null : (
-            <div {...stylex.props(styles.dockLayer)}>
-              <div
-                data-slot="app-shell-dock"
-                inert={panels?.covered === true}
-                {...stylex.props(
-                  styles.dock,
-                  panels?.covered === true && styles.covered
-                )}
-              >
-                <div {...stylex.props(styles.docked)}>{dock}</div>
-              </div>
+    // mounts none of its own and calls Damsko's `toast`.
+    <>
+      <SidebarProvider storageKey={sidebarKey}>
+        <AppSidebar core={core} identity={identity} />
+        {panels === undefined ? (
+          card
+        ) : (
+          <ChatPanelsBeside
+            card={
+              <>
+                {/* Damsko's SidebarInset is a card only beside an inset
+                  Sidebar, its sibling; beside the chat it stands in the
+                  panels' group, so it is given that sibling's mark here
+                  (registry gap of 24 Nov 2026: an inset that is a card
+                  wherever it stands). */}
+                <span
+                  aria-hidden="true"
+                  data-variant="inset"
+                  hidden
+                  {...stylex.props(sidebarMarker)}
+                />
+                {card}
+              </>
+            }
+            cover={cover}
+            panels={panels}
+          />
+        )}
+        {dock === undefined ? null : (
+          <div {...stylex.props(styles.dockLayer)}>
+            <div
+              data-slot="app-shell-dock"
+              inert={panels?.covered === true}
+              {...stylex.props(
+                styles.dock,
+                panels?.covered === true && styles.covered
+              )}
+            >
+              <div {...stylex.props(styles.docked)}>{dock}</div>
             </div>
-          )}
-        </SidebarProvider>
-        <Toaster />
-      </KitTooltipProvider>
-    </KitToaster>
+          </div>
+        )}
+      </SidebarProvider>
+      <Toaster />
+    </>
   );
 };

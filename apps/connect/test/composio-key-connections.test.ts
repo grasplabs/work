@@ -8,6 +8,7 @@ import { env, exports } from "cloudflare:workers";
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  asTimePasses,
   call,
   cleanupsLeft,
   composio,
@@ -377,6 +378,96 @@ describe("connecting a Composio toolkit with a key", () => {
     expect(
       recorded.map(({ action, detail }) => [action, detail.reason])
     ).toStrictEqual([["connection.connect", "connection.provider_refused"]]);
+  });
+
+  it("says the provider isn't answering when Composio never reads the new account back, and keeps nothing", async () => {
+    composio.state.failing = "GET /connected_accounts/";
+    const ended = await asTimePasses(
+      async (connect) =>
+        await outcome(connectWithKey(someone("admin"), {}, connect))
+    );
+    composio.state.failing = undefined;
+    const recorded = await events();
+    expect({
+      ended,
+      held: heldAtComposio(),
+      cleanups: await cleanupsLeft(),
+      recorded: recorded.map(({ action, detail }) => [action, detail.reason]),
+    }).toStrictEqual({
+      ended: "connection.provider_not_answering",
+      held: nothingHeld,
+      cleanups: 0,
+      recorded: [["connection.connect", "connection.provider_not_answering"]],
+    });
+  });
+
+  it("says why a key connection was refused: Composio refusing its auth config or account, or an account for a toolkit only Unicode's case rules make the same", async () => {
+    const admin = someone("admin");
+    const ends = [];
+    const failing = [
+      ["POST /auth_configs", 403],
+      ["POST /connected_accounts", 403],
+    ] as const;
+    for (const [prefix, status] of failing) {
+      composio.state.failingFor = { prefix, times: 1, status, code: 1002 };
+      // oxlint-disable-next-line no-await-in-loop -- one connect at a time
+      ends.push(await outcome(connectWithKey(admin)));
+    }
+    // `pipedes\u212A` lowers to `pipedesk` by Unicode's rules alone.
+    composio.state.slugCase = "kelvin";
+    ends.push(await outcome(connectWithKey(admin)));
+    const recorded = await events();
+    expect({
+      ends,
+      why: recorded
+        .filter(({ action }) => action === "connection.connect")
+        .map(({ detail }) => detail.why),
+      held: heldAtComposio(),
+    }).toStrictEqual({
+      ends: [
+        "connection.provider_forbidden",
+        "connection.provider_forbidden",
+        "connection.provider_refused",
+      ],
+      why: [
+        "auth_config:http_403:1002",
+        "account:http_403:1002",
+        "mismatch:toolkit",
+      ],
+      held: nothingHeld,
+    });
+  });
+
+  it("reads Composio's name or number for an error when its answer gives only one", async () => {
+    const admin = someone("admin");
+    // Only the number: the reason still names it.
+    composio.state.failingFor = {
+      prefix: "POST /auth_configs",
+      times: 1,
+      status: 403,
+      code: 1001,
+      slug: null,
+    };
+    const numbered = await outcome(connectWithKey(admin));
+    // Only the name: a key the provider refused is still told apart.
+    composio.state.failingFor = {
+      prefix: "POST /connected_accounts",
+      times: 1,
+      status: 400,
+      code: null,
+      slug: "ConnectedAccount_CredentialValidationRejected",
+    };
+    const named = await outcome(connectWithKey(admin));
+    const recorded = await events();
+    expect({
+      ends: [numbered, named],
+      why: recorded
+        .filter(({ action }) => action === "connection.connect")
+        .map(({ detail }) => detail.why ?? null),
+    }).toStrictEqual({
+      ends: ["connection.provider_forbidden", "connection.key_rejected"],
+      why: ["auth_config:http_403:1001", null],
+    });
   });
 
   it("keeps one shared connection per toolkit: of two connects at once, one is stored and the other leaves nothing at Composio", async () => {

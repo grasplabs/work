@@ -24,7 +24,6 @@
 "use client";
 
 import * as stylex from "@stylexjs/stylex";
-import { createStickToBottom } from "@ui-sdk/core";
 import {
   createContext,
   use,
@@ -37,6 +36,7 @@ import type { ReactNode } from "react";
 
 import { useI18n } from "../lib/i18n";
 import { Icon, TerminalIcon, TrashIcon } from "../lib/icons";
+import { createStickToBottom } from "../lib/stick-to-bottom";
 import { codeStyles, focusRingInset, scrollbarHidden } from "../lib/styles";
 import { colors, font, size, space } from "../lib/tokens.stylex";
 import { announce } from "../lib/utils";

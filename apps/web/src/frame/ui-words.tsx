@@ -156,6 +156,7 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
     },
     codeBlock: {
       collapse: t`Show less`,
+      download: t({ message: "Download", context: "download a file" }),
       expand: t`Show more`,
       moreLines: (count) =>
         plural(count, { one: "# more line", other: "# more lines" }),
@@ -514,17 +515,44 @@ export const UiWords = ({ children }: { children: ReactNode }) => {
       external: t`opens in a new tab`,
     },
     markdown: {
+      // The titles of the five alerts an answer may hold (GitHub's).
+      alerts: {
+        note: t({ message: "Note", context: "an alert in an answer" }),
+        tip: t({ message: "Tip", context: "an alert in an answer" }),
+        important: t({
+          message: "Important",
+          context: "an alert in an answer",
+        }),
+        warning: t({ message: "Warning", context: "an alert in an answer" }),
+        caution: t({ message: "Caution", context: "an alert in an answer" }),
+      },
       // A note used more than once leads back to each use: the second is "1-2".
       back: (number, mark) =>
         mark > 1
           ? t`Back to reference ${number}-${mark}`
           : t`Back to reference ${number}`,
+      copyTable: t`Copy table`,
+      // The formats keep their names in every language.
+      csv: "CSV",
+      diagram: t`Mermaid diagram`,
       done: t({ message: "Done", context: "a task in a list" }),
+      downloadDiagram: t`Download diagram`,
+      downloadTable: t`Download table`,
       footnote: (number) => t`Footnote ${number}`,
+      fullScreen: t`View full screen`,
+      markdown: "Markdown",
+      mermaid: "Mermaid",
+      mmd: "MMD",
+      png: "PNG",
+      resetZoom: t`Reset zoom`,
+      svg: "SVG",
+      zoomIn: t`Zoom in`,
+      zoomOut: t`Zoom out`,
       moreRows: (count) =>
         plural(count, { one: "# more row", other: "# more rows" }),
       notDone: t({ message: "Not done", context: "a task in a list" }),
       table: t({ message: "Table", context: "a table in a text" }),
+      tsv: "TSV",
     },
     menu: {
       // On a menu item, and said, when the work it started failed; not a
