@@ -39,6 +39,7 @@ import {
   briefOf,
   companyOf,
   situationOf,
+  spokenLast,
   TurnFailedError,
   write,
 } from "./interview.ts";
@@ -192,7 +193,7 @@ const partTool = {
   function: {
     name: partFunction,
     description:
-      "Call this when you go to another part of the interview, with that part's name, before your first line of it.",
+      "Call this, silently, when you go to another part of the interview, with that part's name, before your first line of it. Never say the part's name aloud.",
     strict: true,
     parameters: {
       type: "object",
@@ -212,7 +213,8 @@ const instructionsOf = (
   text: string,
   situation: string[],
   before: readonly VoiceLine[],
-  name: string
+  name: string,
+  locale: InterviewLocale
 ): string =>
   [
     text,
@@ -230,6 +232,8 @@ const instructionsOf = (
             )
             .join("\n"),
         ]),
+    "",
+    spokenLast(locale),
   ].join("\n");
 
 // ---- The pass ----------------------------------------------------------
@@ -587,7 +591,8 @@ const open = async (
             company
           ),
           before,
-          context.name
+          context.name,
+          asked.locale
         ),
         stt: {
           model: conversation.listening,
@@ -734,7 +739,8 @@ const answer = async (
           voice.text,
           situationOf(situation, context, company),
           asked.before,
-          context.name
+          context.name,
+          asked.locale
         ),
       } satisfies VoiceAnswered,
       { headers: linkHeaders }

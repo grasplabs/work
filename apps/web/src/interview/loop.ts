@@ -1560,6 +1560,51 @@ let liveCount = 0;
 
 /** How long a sentence of theirs rests over the box once said, in ms. */
 const restMs = 900;
+/**
+ * How fast his words come on the stage while he speaks in a session, in
+ * characters a second: the session tells his text ahead of his voice and
+ * not where his voice is in it, so his words follow the pace of speech.
+ */
+const spokenCharsPerSecond = 15;
+/** When his voice began in the line on the stage; null while he doesn't speak. */
+let liveSpokeAt: number | null = null;
+/** Whether his voice has begun in the line on the stage. */
+let hisVoiced = false;
+/** His line as told before his voice began in it: shown once it does. */
+let hisUnseen: string | null = null;
+let livePacing: number | undefined;
+
+/** His words come on the stage at the pace of his voice, from when it began. */
+const paceHis = (): void => {
+  if (liveSpokeAt === null) {
+    return;
+  }
+  const reached = Math.floor(
+    ((performance.now() - liveSpokeAt) / 1000) * spokenCharsPerSecond
+  );
+  const at = Math.min(reached, state.line.length);
+  if (at !== state.from) {
+    set({ from: at });
+  }
+};
+
+/** His voice began (`true`) or stopped: his words follow it, or all stand. */
+const paceLive = (speaks: boolean): void => {
+  window.clearInterval(livePacing);
+  livePacing = undefined;
+  if (!speaks) {
+    liveSpokeAt = null;
+    return;
+  }
+  // Back to a line he had begun: on from where its words were.
+  liveSpokeAt = performance.now() - (state.from / spokenCharsPerSecond) * 1000;
+  hisVoiced = true;
+  if (hisUnseen !== null) {
+    set({ line: hisUnseen, from: 0 });
+    hisUnseen = null;
+  }
+  livePacing = window.setInterval(paceHis, 60);
+};
 
 /** Where the interview stands, as core is told it with each call of the session. */
 const standingOf = (told: LoopWords) => {
@@ -1776,10 +1821,20 @@ const liveSegment = ({ id, from, text, final }: LiveSegment): void => {
     sayingCount += 1;
     tone = null;
     set({ saying: sayingCount, from: 0 });
+    // A new line: its words follow his voice from where it is now.
+    hisVoiced = liveSpokeAt !== null;
+    if (liveSpokeAt !== null) {
+      liveSpokeAt = performance.now();
+    }
   }
   asked = heardText.endsWith("?");
   hisWords = heardText;
-  set({ line: heardText });
+  if (hisVoiced) {
+    set({ line: heardText });
+  } else {
+    // Told ahead of his voice: it comes on the stage as he starts to say it.
+    hisUnseen = heardText;
+  }
   if (final) {
     hisStretch = null;
     hisWords = "";
@@ -1793,6 +1848,7 @@ const liveSegment = ({ id, from, text, final }: LiveSegment): void => {
 const liveDoing = (doing: LiveDoing): void => {
   if (doing === "speaking") {
     show("speaking");
+    paceLive(true);
     live?.hush(false);
     if (liveOver === null && !micMuted()) {
       // They talk over him: his voice stops here at once, as the room stops him too.
@@ -1802,6 +1858,7 @@ const liveDoing = (doing: LiveDoing): void => {
     }
     return;
   }
+  paceLive(false);
   liveOver?.();
   liveOver = null;
   live?.hush(false);
@@ -1846,6 +1903,7 @@ const leaveLive = async ({ quick = false } = {}): Promise<void> => {
   live = null;
   liveMuting?.();
   liveMuting = null;
+  paceLive(false);
   liveOver?.();
   liveOver = null;
   liveLevel?.();
@@ -1860,6 +1918,8 @@ const leaveLive = async ({ quick = false } = {}): Promise<void> => {
   }
   hisStretch = null;
   hisWords = "";
+  hisVoiced = false;
+  hisUnseen = null;
   liveReadsBack = false;
   if (session === null) {
     return;
