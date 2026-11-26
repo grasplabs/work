@@ -712,6 +712,9 @@ importers:
 
   apps/connect:
     dependencies:
+      '@grasp-os/compiler':
+        specifier: workspace:*
+        version: link:../../packages/compiler
       '@grasp-os/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
@@ -734,9 +737,6 @@ importers:
       '@cloudflare/workers-types':
         specifier: 'catalog:'
         version: 5.20261113.1
-      '@grasp-os/compiler':
-        specifier: workspace:*
-        version: link:../../packages/compiler
       '@grasp-os/connector-google-workspace':
         specifier: workspace:*
         version: link:../../packages/connectors/google-workspace

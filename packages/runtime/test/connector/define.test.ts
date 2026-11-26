@@ -959,7 +959,7 @@ describe("a connector's definition", () => {
     expect(manifest.mcp?.registration).toStrictEqual({ header: "x-api-key" });
     expect(() => tracker("google")).toThrow("by an app's name");
     expect(() => tracker("tracker", "http://mcp.tracker.test/mcp")).toThrow(
-      "Invalid URL"
+      "A server takes https"
     );
     expect(() =>
       tracker("tracker", "https://mcp.tracker.test/mcp?key=1")

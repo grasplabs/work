@@ -1,5 +1,11 @@
-import { mcpServerKey } from "@grasp-os/runtime/connector";
-import type { McpManifest } from "@grasp-os/runtime/connector";
+import {
+  connectorManifestSchema,
+  mcpServerKey,
+} from "@grasp-os/runtime/connector";
+import type {
+  ConnectorManifest,
+  McpManifest,
+} from "@grasp-os/runtime/connector";
 import {
   connectionErrors,
   urlConnectorIdSchema,
@@ -17,6 +23,7 @@ import {
   connectionTools,
   connections,
   connectors,
+  connectorVersions,
   oauthFlows,
   pendingActions,
   tokenRevocations,
@@ -42,7 +49,8 @@ import type { Vault } from "./vault.ts";
 // row: one an admin made from a URL (mcp-connectors.ts `addConnector`),
 // and a built-in of the release whose manifest has `mcp`, whose row is
 // made on its first connection and moved when a release moves its server
-// (`prepareBuiltIn`).
+// (`prepareBuiltIn`). The row is only state: what either connector is
+// comes from its manifest (`manifestOf`).
 
 export type ConnectorRow = typeof connectors.$inferSelect;
 
@@ -75,6 +83,52 @@ export const builtInAt = (url: string): BuiltIn | undefined =>
 /** Whether `id` names a connector: a built-in, or one made from a URL. */
 export const isConnectorId = (id: string): boolean =>
   builtIn(id) !== undefined || urlConnectorIdSchema.safeParse(id).success;
+
+/**
+ * The manifest stored for URL-made connector `id`'s version, if this
+ * release reads it as one that serves an MCP server under that ID.
+ */
+export const storedManifest = (
+  id: string,
+  stored: unknown
+): ConnectorManifest | undefined => {
+  const parsed = connectorManifestSchema.safeParse(stored);
+  return parsed.success &&
+    parsed.data.name === id &&
+    parsed.data.mcp !== undefined
+    ? parsed.data
+    : undefined;
+};
+
+/**
+ * The manifest of the connector `id` names: a built-in's from the
+ * release, a URL-made one's from its version, as connect read it from the
+ * code when it added it. Every path reads a connector through this, so the
+ * two kinds are taken the same way from here on. Only the manifest: a
+ * version's code is run for nothing else until GRA-1378 (db/schema.ts
+ * `connectorVersions`). Undefined for any other ID, and for a URL-made one
+ * whose manifest this release doesn't read. A URL-made one has a version
+ * from the release that added connector versions on, which removed the
+ * ones without (migration 0041), for an admin to add again.
+ */
+export const manifestOf = async (
+  db: D1Database,
+  id: string
+): Promise<ConnectorManifest | undefined> => {
+  if (builtIn(id) !== undefined) {
+    return nativeConnector(id)?.manifest;
+  }
+  if (!urlConnectorIdSchema.safeParse(id).success) {
+    return undefined;
+  }
+  const stored = await drizzle(db)
+    .select({ manifest: connectorVersions.manifest })
+    .from(connectors)
+    .innerJoin(connectorVersions, eq(connectors.version, connectorVersions.id))
+    .where(eq(connectors.id, id))
+    .get();
+  return stored === undefined ? undefined : storedManifest(id, stored.manifest);
+};
 
 /** The connector `id` names, if there is one, as its row holds it. */
 export const connectorRow = async (
@@ -117,6 +171,27 @@ export const stillServes = async (
 ): Promise<boolean> =>
   server === undefined || sameServer(await connectorRow(db, server.id), server);
 
+/**
+ * Whether `row` holds the sign-in of the server `mcp` names: that server,
+ * however its URL is spelled, and a key in the header its manifest names
+ * or a client there, as the manifest says. A row that doesn't is of a
+ * server a release moved its built-in from, until its next connection
+ * moves the row (`prepareBuiltIn`): nothing learned of one server, a
+ * client or a token, is ever used at another.
+ */
+export const servesManifest = (
+  row: ConnectorRow,
+  mcp: McpManifest
+): boolean => {
+  const header =
+    typeof mcp.registration === "object" ? mcp.registration.header : null;
+  return (
+    mcpServerKey(row.url) === mcpServerKey(mcp.url) &&
+    row.auth === (header === null ? "oauth" : "header") &&
+    row.header === header
+  );
+};
+
 /** That the connector's row still holds `server`, as SQL, for a write. */
 export const serverStands = (server: ConnectorServer): SQL =>
   sql`EXISTS (SELECT 1 FROM ${connectors} WHERE ${connectors.id} = ${server.id} AND ${connectors.url} = ${server.url} AND ${connectors.auth} = ${server.auth} AND ${connectors.header} IS ${server.header})`;
@@ -151,6 +226,7 @@ export const signInRow = async (
   const signIn = await discoverSignIn(server);
   const client = await clientFor(signIn, origin, entered);
   return {
+    server: mcpServerKey(server.href),
     resource: signIn.resource,
     auth: "oauth",
     header: null,
@@ -170,9 +246,13 @@ export const signInRow = async (
   } satisfies Partial<typeof connectors.$inferInsert>;
 };
 
-/** A row's sign-in for a key in `header`: none of an OAuth server's. */
-const keyRow = (header: string) =>
+/**
+ * A row's sign-in for a key in `header` at the server at `url`: none of an
+ * OAuth server's.
+ */
+export const keyRow = (url: string, header: string) =>
   ({
+    server: mcpServerKey(url),
     resource: null,
     auth: "header",
     header,
@@ -196,7 +276,8 @@ const builtInCreator = "release";
  * its sign-in is the one of the server its manifest names now: a key's
  * header, or the server's sign-in learned and connect registered there
  * for the deployment at `origin`, as for a server an admin adds. Nothing
- * for any other connector, or one whose row is for that server already.
+ * for any other connector, or one whose row is for that server already,
+ * with a client there or a key as its manifest says.
  *
  * Its connections were made with the sign-in it moves from, so they move
  * with it in one write: each still active must be connected again, and
@@ -207,7 +288,7 @@ const builtInCreator = "release";
  * keeps nothing (oauth.ts `flowStands`).
  *
  * Two first connections at once may each register, but one row is
- * written, or moved from the URL it was made for, and both use it: the
+ * written, or moved from the server it was made for, and both use it: the
  * other's client is never used. Throws `connection.connector_exists` when
  * a connector made from a URL holds the server, and
  * `connection.provider_unavailable` for a sign-in at the server without
@@ -226,19 +307,7 @@ export const prepareBuiltIn = async (
   const { registration } = mcp;
   const header = typeof registration === "object" ? registration.header : null;
   const row = await connectorRow(env.DB, id);
-  if (
-    row !== undefined &&
-    row.url === mcp.url &&
-    row.auth === (header === null ? "oauth" : "header") &&
-    row.header === header
-  ) {
-    // Only its name changed: renamed in place, its sign-in as it is.
-    if (row.name !== title) {
-      await drizzle(env.DB)
-        .update(connectors)
-        .set({ name: title })
-        .where(eq(connectors.id, id));
-    }
+  if (row !== undefined && servesManifest(row, mcp)) {
     return;
   }
   let state: ReturnType<typeof keyRow> | Awaited<ReturnType<typeof signInRow>>;
@@ -254,7 +323,7 @@ export const prepareBuiltIn = async (
       new URL(origin).origin
     );
   } else {
-    state = keyRow(header);
+    state = keyRow(mcp.url, header);
   }
   const db = drizzle(env.DB);
   const prepared = {
@@ -263,14 +332,15 @@ export const prepareBuiltIn = async (
       ? {}
       : { registration: state.registration }),
   };
+  // What a release rolled back to reads of the connector (db/schema.ts).
+  const described = { name: title, url: mcp.url };
   try {
     if (row === undefined) {
       const written = await db
         .insert(connectors)
         .values({
           id,
-          name: title,
-          url: mcp.url,
+          ...described,
           ...state,
           createdBy: builtInCreator,
           createdAt: new Date(),
@@ -321,7 +391,7 @@ export const prepareBuiltIn = async (
         actor: { type: "system" },
         action: "connector.moved",
         target: { type: "connector", id },
-        detail: { connector: id, from: row.url, url: mcp.url },
+        detail: { connector: id, from: mcpServerKey(row.url), url: mcp.url },
       },
       {
         from: connectors,
@@ -362,7 +432,7 @@ export const prepareBuiltIn = async (
           .where(and(active, unmoved)),
         db
           .update(connectors)
-          .set({ name: title, url: mcp.url, ...state })
+          .set({ ...described, ...state })
           .where(asFound),
       ]
     );
@@ -390,6 +460,14 @@ const ownAccount = (owner: string): ProviderAccount => ({
   name: null,
   email: null,
 });
+
+/**
+ * The one address the server `mcp` names is reached at through the
+ * company network (company-network.ts), its URL's origin, when its
+ * manifest says it is inside the company's network; none otherwise.
+ */
+export const networkAddressOf = (mcp: McpManifest): string | undefined =>
+  mcp.network === "company" ? new URL(mcp.url).origin : undefined;
 
 /** Most tools a server may list for connect to read the list at all. */
 export const maxListedTools = 500;
@@ -420,16 +498,21 @@ const keyWorks = async (
   }
 };
 
-/** `row` as a provider connect signs in to. */
+/**
+ * The connector of `row`, whose manifest serves `mcp`, as a provider
+ * connect signs in to. None while the row holds another server's sign-in
+ * (`servesManifest`).
+ */
 const providerOf = async (
   env: Env,
-  row: ConnectorRow
+  row: ConnectorRow,
+  mcp: McpManifest
 ): Promise<ProviderConfig | undefined> => {
-  if (row.auth === "header") {
-    const { header } = row;
-    if (header === null) {
-      return undefined;
-    }
+  if (!servesManifest(row, mcp)) {
+    return undefined;
+  }
+  if (typeof mcp.registration === "object") {
+    const { header } = mcp.registration;
     return {
       kind: "api_key",
       id: row.id,
@@ -437,10 +520,8 @@ const providerOf = async (
       connector: serverOf(row),
       credential: (key) => ({ header, value: key }),
       account: async (key, owner, send) =>
-        (await keyWorks(row.url, header, key, send)) ? ownAccount(owner) : null,
-      ...(row.companyNetwork === true && {
-        companyNetwork: new URL(row.url).origin,
-      }),
+        (await keyWorks(mcp.url, header, key, send)) ? ownAccount(owner) : null,
+      companyNetwork: networkAddressOf(mcp),
     };
   }
   const {
@@ -489,8 +570,8 @@ const providerOf = async (
     scopes: row.scopes?.split(" ") ?? [],
     scopeSeparator: " ",
     // RFC 8707: every token is asked for this server alone.
-    authorizationParams: () => ({ resource: row.resource ?? row.url }),
-    tokenParams: { resource: row.resource ?? row.url },
+    authorizationParams: () => ({ resource: row.resource ?? mcp.url }),
+    tokenParams: { resource: row.resource ?? mcp.url },
     issuer: { id: issuer, inAnswers: row.issParameter === true },
     clientAuthentication,
     client: () => client,
@@ -511,8 +592,14 @@ export const providerConfigFor = async (
   if (known !== undefined) {
     return known;
   }
-  const row = await connectorRow(env.DB, id);
-  return row === undefined ? undefined : await providerOf(env, row);
+  const [row, manifest] = await Promise.all([
+    connectorRow(env.DB, id),
+    manifestOf(env.DB, id),
+  ]);
+  const mcp = manifest?.mcp;
+  return row === undefined || mcp === undefined
+    ? undefined
+    : await providerOf(env, row, mcp);
 };
 
 /**

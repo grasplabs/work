@@ -7,7 +7,6 @@ import {
   connectionErrors,
   firstSentence,
   oauthProviderSchema,
-  urlConnectorIdSchema,
 } from "@grasp-os/shared/connect";
 import type {
   Catalog,
@@ -19,13 +18,19 @@ import type {
 } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
 import { errorFields, log } from "@grasp-os/shared/log";
+import { eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { z } from "zod";
 
 import { nativeConnector } from "./bundled-connectors.ts";
 import { ComposioError, composioKey, composioRequest } from "./composio.ts";
-import { builtIn, builtIns, connectorRow } from "./connector-providers.ts";
-import { connectors } from "./db/schema.ts";
+import {
+  builtIns,
+  manifestOf,
+  networkAddressOf,
+  storedManifest,
+} from "./connector-providers.ts";
+import { connectors, connectorVersions } from "./db/schema.ts";
 import { providers } from "./providers.ts";
 
 // The catalog: what an admin can connect. The native providers come from
@@ -442,54 +447,53 @@ export const lastListedToolkits = async (
  * connection, so none are counted here.
  */
 const connectorEntries = async (env: Env): Promise<CatalogEntry[]> => {
+  // A built-in's row is its state, with no version: listed as the built-in.
   const rows = await drizzle(env.DB)
     .select({
       id: connectors.id,
-      name: connectors.name,
       url: connectors.url,
       auth: connectors.auth,
-      companyNetwork: connectors.companyNetwork,
       authorizationEndpoint: connectors.authorizationEndpoint,
+      manifest: connectorVersions.manifest,
     })
     .from(connectors)
-    .orderBy(connectors.name, connectors.id);
+    .leftJoin(connectorVersions, eq(connectors.version, connectorVersions.id))
+    .orderBy(
+      sql`json_extract(${connectorVersions.manifest}, '$.title')`,
+      connectors.id
+    );
   const rowOf = new Map(rows.map((row) => [row.id, row]));
-  return [
-    ...builtIns().map(({ name, title, mcp }) => {
-      const auth = typeof mcp.registration === "object" ? "header" : "oauth";
-      const row = rowOf.get(name);
-      return {
-        id: name,
-        name: title,
-        url: mcp.url,
-        auth,
-        companyNetwork: false,
-        // Its row's sign-in only while the row is for the server it names:
-        // a release's move learns the new one on its next connection.
-        authorizationEndpoint:
-          row?.url === mcp.url && row.auth === auth
-            ? row.authorizationEndpoint
-            : null,
-      };
-    }),
-    // A built-in's row is its state, listed above as the built-in.
-    ...rows.filter(({ id }) => urlConnectorIdSchema.safeParse(id).success),
-  ].map(({ id, name, url, auth, companyNetwork, authorizationEndpoint }) => {
+  const made = rows.flatMap(({ id, manifest }) => {
+    const stored = manifest === null ? undefined : storedManifest(id, manifest);
+    return stored?.mcp === undefined
+      ? []
+      : [{ name: id, title: stored.title ?? id, mcp: stored.mcp }];
+  });
+  return [...builtIns(), ...made].map(({ name, title, mcp }) => {
+    const network = networkAddressOf(mcp);
+    const auth = typeof mcp.registration === "object" ? "header" : "oauth";
+    const row = rowOf.get(name);
+    // Its row's sign-in only while the row is for the server it names:
+    // a release's move learns the new one on its next connection.
+    const authorizationEndpoint =
+      row?.url === mcp.url && row.auth === auth
+        ? row.authorizationEndpoint
+        : null;
     const signInHost =
       authorizationEndpoint === null
         ? undefined
         : URL.parse(authorizationEndpoint)?.host;
     return {
       source: "connector",
-      id,
-      name,
+      id: name,
+      name: title,
       categories: [],
       toolCount: null,
       logo: null,
       description: null,
       group: catalogGroupOf([]),
       auth: auth === "header" ? "key" : "managed",
-      ...(companyNetwork === true && { companyNetwork: new URL(url).origin }),
+      ...(network !== undefined && { companyNetwork: network }),
       ...(signInHost === undefined ? {} : { signInHost }),
     };
   });
@@ -637,10 +641,7 @@ export const catalogTools = async (
   // A connector's server lists its tools only to a connection
   // (mcp-connectors.ts `currentTools`): its entry has none to show.
   if (source === "connector") {
-    if (
-      builtIn(id) === undefined &&
-      (await connectorRow(env.DB, id)) === undefined
-    ) {
+    if ((await manifestOf(env.DB, id)) === undefined) {
       throw connectErrors.create("connect.catalog_entry_not_found");
     }
     return [];

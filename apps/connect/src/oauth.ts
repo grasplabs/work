@@ -1537,7 +1537,8 @@ export const connectWithKey = async (
   }
   // A built-in that signs in at its server takes no key: nothing is
   // learned or registered for one.
-  if (builtIn(providerId)?.mcp.registration === "dcr") {
+  const registration = builtIn(providerId)?.mcp.registration;
+  if (registration !== undefined && typeof registration !== "object") {
     throw connectionErrors.create("connection.provider_unavailable");
   }
   await prepareBuiltIn(env, providerId);

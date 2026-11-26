@@ -1,14 +1,25 @@
+import { mcpConnectorSource } from "@grasp-os/compiler/connector-source";
+import type { McpConnectorFields } from "@grasp-os/compiler/connector-source";
+import { mcpManifestSchema } from "@grasp-os/runtime/connector";
 import { signCapability } from "@grasp-os/shared/capability";
-import type { ConnectionPerson } from "@grasp-os/shared/connect";
+import { addConnectorSchema, connectionErrors } from "@grasp-os/shared/connect";
+import type {
+  AddBuiltConnector,
+  AddConnector,
+  ConnectionPerson,
+} from "@grasp-os/shared/connect";
 import type { Authority } from "@grasp-os/shared/permissions";
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, vi } from "vite-plus/test";
 import { z } from "zod";
 
+import builtCode from "#test-url-connector";
+
 import { agentFor, clientOrigin, originOf, someone } from "./connect.ts";
 import type { Call } from "./connect.ts";
 import { linearCopyOrigin, linearMcpFake } from "./linear-mcp-fake.ts";
 import type { LinearMcpFake } from "./linear-mcp-fake.ts";
+import { urlConnectorPlaceholders } from "./url-connector-placeholders.ts";
 
 // The internet as the tests of connectors served through an MCP server
 // see it (src/mcp-connectors.ts, threat model on GRA-1375): Linear's MCP
@@ -98,18 +109,87 @@ export const mcpInternet = (): void => {
 
 export const admin = (): ConnectionPerson => someone("admin");
 
+const literal = (value: string): string => JSON.stringify(value);
+
+/**
+ * What core sends connect when `person` asks for the connector `request`
+ * names, with `origin` as the deployment's (core's connections.ts
+ * `addConnector`): its ID, its source generated from the checked fields,
+ * and its code as the compiler builds it, with each field put where the
+ * compiler put its placeholder (global-setup.ts `writeUrlConnector`).
+ * Like core, it refuses fields that aren't a connector's before it
+ * builds; it leaves the role and staff for connect to refuse.
+ */
+export const generatedConnector = (
+  person: ConnectionPerson,
+  request: AddConnector,
+  origin: string = clientOrigin
+): AddBuiltConnector => {
+  const parsed = addConnectorSchema.safeParse(request);
+  if (!parsed.success) {
+    throw connectionErrors.create("connection.invalid");
+  }
+  const { name, url, companyNetwork, auth } = parsed.data;
+  const id = `mcp_${crypto.randomUUID().replaceAll("-", "")}`;
+  let registration: McpConnectorFields["mcp"]["registration"] = "dcr";
+  if (auth.kind === "header") {
+    registration = { header: auth.header };
+  } else if (auth.client !== undefined) {
+    registration = "client";
+  }
+  const mcp = mcpManifestSchema.safeParse({
+    url: new URL(url).href,
+    registration,
+    ...(companyNetwork === true && { network: "company" }),
+  });
+  if (!mcp.success) {
+    throw connectionErrors.create("connection.invalid");
+  }
+  const fields = { name: id, title: name, mcp: mcp.data };
+  const filled: [string, string][] = [
+    [urlConnectorPlaceholders.name, literal(id)],
+    [urlConnectorPlaceholders.title, literal(name)],
+    [urlConnectorPlaceholders.url, literal(mcp.data.url)],
+    [
+      urlConnectorPlaceholders.registration,
+      // The value of `registration` in the code's `mcp` object literal,
+      // so the `network` beside it is written after it there.
+      `${
+        typeof registration === "string"
+          ? literal(registration)
+          : `{header:${literal(registration.header)}}`
+      }${mcp.data.network === "company" ? ',network:"company"' : ""}`,
+    ],
+  ];
+  let code = builtCode;
+  for (const [placeholder, value] of filled) {
+    code = code.replace(literal(placeholder), () => value);
+  }
+  return {
+    person,
+    origin,
+    id,
+    source: mcpConnectorSource(fields),
+    code,
+    compiler: "test",
+    ...(auth.kind === "oauth" && auth.client !== undefined
+      ? { client: auth.client }
+      : {}),
+  };
+};
+
 /** Adds Linear's server as a connector, as `person` would: its ID. */
 export const addLinear = async (
   person: ConnectionPerson = admin(),
   url: string = linear.url
 ): Promise<string> => {
-  const { id } = await exports.default.addConnector({
-    person,
-    name: "Linear",
-    url,
-    origin: clientOrigin,
-    auth: { kind: "oauth" },
-  });
+  const { id } = await exports.default.addConnector(
+    generatedConnector(person, {
+      name: "Linear",
+      url,
+      auth: { kind: "oauth" },
+    })
+  );
   return id;
 };
 

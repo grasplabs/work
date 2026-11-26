@@ -28,12 +28,13 @@ const isolate = {
 
 /**
  * A fresh isolate of connector `code` (one ES module) in `loader`,
- * silenced, reaching the network only through `globalOutbound`.
+ * silenced, reaching the network only through `globalOutbound`, or not
+ * at all with `null`.
  */
 export const loadConnector = (
   loader: WorkerLoader,
   code: string,
-  globalOutbound: Fetcher
+  globalOutbound: Fetcher | null
 ): WorkerStub =>
   quietLoader(loader).load({
     ...isolate,

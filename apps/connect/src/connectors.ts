@@ -1,7 +1,9 @@
+import { manifestMethod } from "@grasp-os/runtime/connector";
 import type { ActionManifest, SyncManifest } from "@grasp-os/runtime/connector";
 import type { CapabilityClaims } from "@grasp-os/shared/capability";
 import { connectErrors } from "@grasp-os/shared/connect";
 import { sha256Hex } from "@grasp-os/shared/encoding";
+import { isRecord } from "@grasp-os/shared/json";
 import { exports } from "cloudflare:workers";
 
 import { nativeConnector } from "./bundled-connectors.ts";
@@ -31,7 +33,7 @@ import { connectorCredentialFor } from "./tokens.ts";
 // loads it silenced (GRA-940).
 
 /** The build a connector's code makes (`nativeRelease`). */
-const releaseOf = async ({
+export const releaseOf = async ({
   manifest,
   code,
 }: NativeConnector): Promise<string> => {
@@ -70,6 +72,37 @@ const nativeResponseBytes = 16 * 1024 * 1024;
 
 /** The URL connect's MCP client posts to; the isolate answers any. */
 const connectorEndpoint = "https://connector.internal/mcp";
+
+/**
+ * The manifest connector `code` makes, as its server answers it in a
+ * fresh isolate that reaches nothing (`manifestMethod`): unchecked, for
+ * its caller to check. Undefined when the code doesn't load or answer.
+ */
+export const manifestIn = async (
+  loader: WorkerLoader,
+  code: string
+): Promise<unknown> => {
+  try {
+    const response = await loadConnector(loader, code, null)
+      .getEntrypoint()
+      .fetch(
+        new Request(connectorEndpoint, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: manifestMethod,
+            params: {},
+          }),
+        })
+      );
+    const body: unknown = await response.json();
+    return isRecord(body) ? body.result : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 /** An action of a native connector, as its manifest declares it. */
 export interface NativeAction {

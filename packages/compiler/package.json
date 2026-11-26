@@ -5,6 +5,9 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "imports": {
+    "#connector-sdk": {
+      "types": "./src/connector-sdk.d.ts"
+    },
     "#kit": {
       "types": "./src/kit-module.d.ts"
     },
@@ -21,6 +24,9 @@
   },
   "exports": {
     ".": "./src/index.ts",
+    "./build-connectors": "./build-connectors.ts",
+    "./connector": "./src/connector.ts",
+    "./connector-source": "./src/connector-source.ts",
     "./inputs": "./src/inputs.ts",
     "./mirror": "./src/mirror.ts",
     "./openapi": "./src/openapi.ts",

@@ -98,6 +98,7 @@ export type {
   ModuleRecord,
 } from "./increments.ts";
 export { pageRefusals } from "./refusals.ts";
+export type { ConnectorBuild } from "./connector.ts";
 export type { SurfaceManifest } from "./route-tree.ts";
 /** Part of every build's cache key: a new compiler or kit builds again. */
 export { version as compilerVersion } from "#version";

@@ -11,10 +11,11 @@ import { addConnector } from "../src/mcp-connectors.ts";
 import { connectWithKey } from "../src/oauth.ts";
 import { companyNetworkKey } from "./company-network-fake.ts";
 import type { CompanyRequest } from "./company-network-fake.ts";
-import { auditEvents, clientOrigin, outcome, someone } from "./connect.ts";
+import { auditEvents, outcome, someone } from "./connect.ts";
 import { egressProps } from "./connectors-harness.ts";
 import { sampleErpHost } from "./fixtures/sample-erp-connector.ts";
 import { fakeInternet, json } from "./internet.ts";
+import { generatedConnector } from "./mcp-connectors-harness.ts";
 import { callTool } from "./tool-calls.ts";
 
 // A shared connection reached through the company network
@@ -405,14 +406,15 @@ describe("a shared connection reached through the company network", () => {
         })
       ),
       server: await outcome(
-        addConnector(hosted, {
-          person,
-          name: "Orders",
-          url: `${address}/mcp`,
-          companyNetwork: true,
-          origin: clientOrigin,
-          auth: { kind: "header", header: "X-Api-Key" },
-        })
+        addConnector(
+          hosted,
+          generatedConnector(person, {
+            name: "Orders",
+            url: `${address}/mcp`,
+            companyNetwork: true,
+            auth: { kind: "header", header: "X-Api-Key" },
+          })
+        )
       ),
       company: await companySent(),
       internet: internet.sent,
@@ -427,20 +429,14 @@ describe("a shared connection reached through the company network", () => {
 });
 
 describe("a connector made from the URL of a server inside the network", () => {
-  const addServer = async (
-    fields: { companyNetwork?: boolean; oauth?: boolean; url?: string } = {}
-  ) =>
-    await exports.default.addConnector({
-      person: admin(),
+  const inside = () =>
+    generatedConnector(admin(), {
       name: "Orders",
-      url: fields.url ?? `${address}/mcp`,
-      ...(fields.companyNetwork === false ? {} : { companyNetwork: true }),
-      origin: clientOrigin,
-      auth:
-        fields.oauth === true
-          ? { kind: "oauth" }
-          : { kind: "header", header: "X-Api-Key" },
+      url: `${address}/mcp`,
+      companyNetwork: true,
+      auth: { kind: "header", header: "X-Api-Key" },
     });
+  const addServer = async () => await exports.default.addConnector(inside());
 
   beforeEach(async () => {
     await env.DB.prepare("DELETE FROM connectors").run();
@@ -501,12 +497,29 @@ describe("a connector made from the URL of a server inside the network", () => {
   });
 
   it("CN-F: takes plain HTTP and an internal address only through the company network, and a key there, never a sign-in read from the internet", async () => {
+    // Its manifest as code could make it, with the source generated for it:
+    // the manifest itself is refused.
+    const asked = inside();
+    const outside = {
+      ...asked,
+      source: asked.source.replace(', network: "company"', ""),
+      code: asked.code.replace(',network:"company"', ""),
+    };
+    const signIn = {
+      ...asked,
+      source: asked.source.replace('{ header: "x-api-key" }', '"dcr"'),
+      code: asked.code.replace('{header:"x-api-key"}', '"dcr"'),
+    };
     expect({
-      publicHttp: await outcome(addServer({ companyNetwork: false })),
-      oauth: await outcome(addServer({ oauth: true })),
+      changed: [outside, signIn].every(
+        ({ source, code }) => source !== asked.source && code !== asked.code
+      ),
+      publicHttp: await outcome(exports.default.addConnector(outside)),
+      oauth: await outcome(exports.default.addConnector(signIn)),
       company: await companySent(),
       internet: internet.sent,
     }).toStrictEqual({
+      changed: true,
       publicHttp: "connection.invalid",
       oauth: "connection.invalid",
       company: [],

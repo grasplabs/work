@@ -17,6 +17,7 @@ import {
   effectKeyMetaKey,
   effectKeyPattern,
   findMetaKey,
+  manifestMethod,
   mcpProtocolVersion,
   notPerformedMetaKey,
   outcomeUnknownMetaKey,
@@ -569,6 +570,9 @@ export const serveConnector = (
           return refusal(id, invalidParams, "No such sync");
         }
         return answer(id, await found.call(params));
+      }
+      case manifestMethod: {
+        return answer(id, manifest);
       }
       case syncPlacesMethod: {
         const found = syncOf(params);

@@ -1,3 +1,10 @@
+import { compilerVersion } from "@grasp-os/compiler";
+import {
+  mcpConnectorEntry,
+  mcpConnectorSource,
+} from "@grasp-os/compiler/connector-source";
+import type { McpConnectorFields } from "@grasp-os/compiler/connector-source";
+import { mcpManifestSchema } from "@grasp-os/runtime/connector";
 import type {
   Agent,
   AgentApp,
@@ -127,6 +134,7 @@ import { inList } from "./db/d1.ts";
 import { errorResponse } from "./errors.ts";
 import { spendMonth } from "./model-spend.ts";
 import { startOAuthConnection } from "./oauth-relay.ts";
+import { platformRunner } from "./platform-sandbox.ts";
 import { CoreRpcTarget } from "./rpc-target.ts";
 import { withPerson } from "./session-check.ts";
 import type { SessionCheck } from "./session-check.ts";
@@ -159,6 +167,12 @@ import {
 // person is, read from their session on each request, and where the
 // deployment is (its origin and its tenant at the provider, both from
 // deployment config, never from a request).
+
+/** What the compiler's `connector` target answers (@grasp-os/compiler). */
+const connectorBuildSchema = z.discriminatedUnion("ok", [
+  z.object({ ok: z.literal(true), code: z.string() }),
+  z.object({ ok: z.literal(false), refusals: z.array(z.string()) }),
+]);
 
 /** What the frontend sends to connect a toolkit, checked as `returnTo` is. */
 const connectToolkitRequestSchema = z.object({
@@ -826,26 +840,81 @@ export class ConnectionsRpc extends CoreRpcTarget implements ConnectionsApi {
   /**
    * Adds a connector by its MCP server's URL, as the signed-in person,
    * with this deployment's origin from its config, where the server's
-   * sign-in returns: connect checks the rest (the role, staff, the URL
-   * and where it leads, the server's sign-in) and audits it (GRA-1375).
+   * sign-in returns. Its source is generated from the checked fields alone
+   * (`mcpConnectorSource`: its ID, made here, the name typed as its title,
+   * the URL, how it gets a client and whether its server sits inside the
+   * company's network) and built with the compiler's
+   * `connector` target, once the person is an admin and not Grasp's
+   * staff; connect checks those again, and audits a refusal, and checks
+   * the rest (that the source is the one generated, the URL and where it
+   * leads, the server's sign-in), keeps it as the connector's version and
+   * audits it (GRA-1375, GRA-2325). The client an admin entered goes
+   * beside it, never in it.
    */
   async addConnector(request: unknown): Promise<{ id: string }> {
     const person = await this.#person();
+    // Refused before anything is generated or built; connect refuses them
+    // again, and audits it.
+    if (person.staff) {
+      throw connectionErrors.create("connection.staff_not_allowed");
+    }
+    if (!isAdmin(person.role)) {
+      throw roleErrors.create("role.forbidden");
+    }
     const config = signInConfig(this.#env);
     if (config === undefined) {
       throw connectionErrors.create("connection.provider_unavailable");
     }
-    // Read here to name what is wrong; connect reads it again.
-    const parsed = addConnectorSchema
-      .omit({ person: true, origin: true })
-      .safeParse(request);
+    const parsed = addConnectorSchema.safeParse(request);
     if (!parsed.success) {
       throw connectionErrors.create("connection.invalid");
     }
+    const { name, url, companyNetwork, auth } = parsed.data;
+    let registration: McpConnectorFields["mcp"]["registration"] = "dcr";
+    if (auth.kind === "header") {
+      registration = { header: auth.header };
+    } else if (auth.client !== undefined) {
+      registration = "client";
+    }
+    // What its manifest will hold, refused here as the manifest refuses it
+    // (plain HTTP only inside the company's network, with a key in a
+    // header there) rather than as a build that failed.
+    const mcp = mcpManifestSchema.safeParse({
+      url: new URL(url).href,
+      registration,
+      ...(companyNetwork === true && { network: "company" }),
+    });
+    if (!mcp.success) {
+      throw connectionErrors.create("connection.invalid");
+    }
+    const id = `mcp_${crypto.randomUUID().replaceAll("-", "")}`;
+    const source = mcpConnectorSource({ name: id, title: name, mcp: mcp.data });
+    const built = connectorBuildSchema.safeParse(
+      await platformRunner(this.#env, `connector:${person.userId}`).run(
+        "package-builder",
+        "connector",
+        [{ [mcpConnectorEntry]: source }, mcpConnectorEntry]
+      )
+    );
+    if (!built.success || !built.data.ok) {
+      log.error("connectors.build_failed", {
+        refusals:
+          built.success && !built.data.ok
+            ? built.data.refusals.join("\n")
+            : undefined,
+      });
+      throw connectionErrors.create("connection.provider_unavailable");
+    }
     return await this.#env.CONNECT.addConnector({
-      ...parsed.data,
       person,
       origin: config.origin,
+      id,
+      source,
+      code: built.data.code,
+      compiler: compilerVersion,
+      ...(auth.kind === "oauth" && auth.client !== undefined
+        ? { client: auth.client }
+        : {}),
     });
   }
 

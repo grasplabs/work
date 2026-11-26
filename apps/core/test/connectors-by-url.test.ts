@@ -1,3 +1,5 @@
+import { compilerVersion } from "@grasp-os/compiler";
+import { mcpConnectorSource } from "@grasp-os/compiler/connector-source";
 import type { ChatMessage } from "@grasp-os/shared/chat";
 import { readRelayRequest } from "@grasp-os/shared/oauth-relay";
 import type { WaitingFeed } from "@grasp-os/shared/waiting";
@@ -71,6 +73,9 @@ const linear = async (): Promise<string> => {
   })();
   return await added;
 };
+
+/** A JSON column's value, or null for none. */
+const parsed = (text = "null"): unknown => JSON.parse(text);
 
 const isFetcher = (value: unknown): value is Fetcher =>
   typeof value === "object" && value !== null && "fetch" in value;
@@ -330,6 +335,86 @@ describe("a connector made from a URL", slow, () => {
     expect(
       listed.find((connection) => connection.id === connectionId)?.status
     ).toBe("active");
+  });
+
+  it("is kept as the platform generated it from its fields, so nothing an admin typed is ever code", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const name = 'Notes" }); globalThis.taken = true; ({ "\u2028</script>';
+    const url =
+      'https://mcp.linear.app/notes"}); globalThis.taken = true; //\\x';
+    const { id } = await admin.api.connections.addConnector({
+      name,
+      url,
+      auth: { kind: "header", header: "X-Api-Key" },
+    });
+    const version = await connectDb()
+      .prepare(
+        "SELECT v.source, v.manifest, v.provenance FROM connectors c JOIN connector_versions v ON v.id = c.version WHERE c.id = ?"
+      )
+      .bind(id)
+      .first<{ source: string; manifest: string; provenance: string }>();
+    const { entries } = await admin.api.connections.catalog();
+    const mcp = {
+      url: new URL(url).href,
+      registration: { header: "x-api-key" },
+    };
+    expect({
+      source: version?.source,
+      manifest: parsed(version?.manifest),
+      provenance: parsed(version?.provenance),
+      listed: entries.find((entry) => entry.id === id)?.name,
+    }).toStrictEqual({
+      source: mcpConnectorSource({ name: id, title: name, mcp }),
+      manifest: {
+        name: id,
+        title: name,
+        provider: id,
+        mcp,
+        scopes: [],
+        hosts: [],
+        actions: {},
+      },
+      provenance: {
+        generatedBy: "platform",
+        from: "url",
+        compiler: compilerVersion,
+      },
+      listed: name,
+    });
+  });
+
+  it("is made for a server inside the company's network only as its manifest takes one: with a key in a header, and plain HTTP nowhere else", async () => {
+    const admin = await signedInApi(idp, "admin");
+    const name = "Orders";
+    const url = "http://10.0.0.8:8080/mcp";
+    const header = { kind: "header", header: "X-Api-Key" } as const;
+    expect({
+      outside: await outcome(
+        admin.api.connections.addConnector({ name, url, auth: header })
+      ),
+      signIn: await outcome(
+        admin.api.connections.addConnector({
+          name,
+          url,
+          companyNetwork: true,
+          auth: { kind: "oauth" },
+        })
+      ),
+      // Made with the network its manifest says, so connect asks for this
+      // deployment's route into it, which it has none of.
+      inside: await outcome(
+        admin.api.connections.addConnector({
+          name,
+          url,
+          companyNetwork: true,
+          auth: header,
+        })
+      ),
+    }).toStrictEqual({
+      outside: "connection.invalid",
+      signIn: "connection.invalid",
+      inside: "connection.company_network_unavailable",
+    });
   });
 
   it("with a key in a header is connected with the key its person typed, which its server must take", async () => {

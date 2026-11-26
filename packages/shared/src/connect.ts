@@ -213,8 +213,10 @@ export type CompanyToolClass = z.infer<typeof companyToolClassSchema>;
 
 /**
  * A connector made from an MCP server's URL (connect's
- * src/mcp-connectors.ts): `mcp_` and 32 random hex digits. Never a name,
- * which takes no underscore.
+ * src/mcp-connectors.ts): `mcp_` and 32 random hex digits, which core
+ * makes as it generates the connector's source, and which that source
+ * names it by. Never a release connector's name, which takes no
+ * underscore.
  */
 export const urlConnectorIdSchema = z.string().regex(/^mcp_[0-9a-f]{32}$/u);
 
@@ -272,13 +274,13 @@ export const connectorKeyHeaderSchema = z
  * a header, which each connection then gives.
  */
 export const addConnectorSchema = z.strictObject({
-  person: connectionPersonSchema,
   name: z.string().trim().min(1).max(80),
   /**
    * The server's own address: nothing but its origin and path, so no
    * query, fragment or credentials, not even empty ones. One that isn't a
    * URL at all is `z.url`'s to refuse. Plain HTTP only for a server
-   * reached through the company network, which connect checks.
+   * reached through the company network, which its connector's manifest
+   * holds it to (`network: "company"`).
    */
   url: z
     .url({ protocol: /^https?$/u })
@@ -297,8 +299,6 @@ export const addConnectorSchema = z.strictObject({
    * key in a header.
    */
   companyNetwork: z.boolean().optional(),
-  /** The deployment's origin, from its config: its sign-in returns there. */
-  origin: z.url(),
   auth: z.discriminatedUnion("kind", [
     z.strictObject({
       kind: z.literal("oauth"),
@@ -359,6 +359,37 @@ export interface ConnectorToolView {
   class: ToolClass | null;
   blocked: boolean;
 }
+
+/** Longest source core generates for a connector made from a URL. */
+const generatedSourceMaxLength = 16 * 1024;
+
+/** Most bytes of a connector's built code, kept whole in one D1 row. */
+const connectorCodeMaxLength = 1024 * 1024;
+
+/**
+ * A connector core generated from what an admin entered (`addConnector`)
+ * and built with the compiler's `connector` target, as connect takes it
+ * to add: its ID, its source, its code, the compiler that built it, and
+ * the client the admin entered, if they did, which is state and never in
+ * the source. Connect reads the rest from the code (GRA-2325).
+ */
+export const addBuiltConnectorSchema = z.strictObject({
+  person: connectionPersonSchema,
+  /** The deployment's origin, from its config: its sign-in returns there. */
+  origin: z.url(),
+  id: urlConnectorIdSchema,
+  source: z.string().min(1).max(generatedSourceMaxLength),
+  code: z.string().min(1).max(connectorCodeMaxLength),
+  /** The compiler's version (`compilerVersion`). */
+  compiler: z.string().min(1).max(64),
+  client: z
+    .strictObject({
+      id: z.string().min(1).max(512),
+      secret: z.string().min(1).max(4096).optional(),
+    })
+    .optional(),
+});
+export type AddBuiltConnector = z.input<typeof addBuiltConnectorSchema>;
 
 /** Starts connecting an account through OAuth. */
 export const startConnectionSchema = z.strictObject({
@@ -865,9 +896,7 @@ export interface ConnectionsApi extends StephenReachApi, AgentsApi {
    * how it signs in and registers there, and it is in the catalog,
    * offered, from then on. Admins only, never Grasp staff; audited.
    */
-  addConnector: (
-    request: Omit<AddConnector, "person" | "origin">
-  ) => Promise<{ id: string }>;
+  addConnector: (request: AddConnector) => Promise<{ id: string }>;
   /**
    * A connector's tools as its server lists them to its connections now,
    * with their classes, and the names an admin blocked

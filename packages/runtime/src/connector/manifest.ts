@@ -6,6 +6,7 @@ import {
   connectorUrlMaxLength,
   oauthProviderSchema,
   toolReachSchema,
+  urlConnectorIdSchema,
 } from "@grasp-os/shared/connect";
 import { attachmentsProperty } from "@grasp-os/shared/connector-attachments";
 import { permissionActionSchema } from "@grasp-os/shared/permissions";
@@ -222,8 +223,16 @@ export type ActionManifest = z.infer<typeof actionManifestSchema>;
 /** Most hosts one connector may reach. */
 const maxHosts = 16;
 
-/** A connector's name: its package's, and its app's slug. */
-export const connectorNameSchema = z.string().regex(/^[a-z][a-z0-9-]{0,62}$/u);
+/**
+ * A connector's name: its package's, and its app's slug; or the ID of
+ * one made from a URL, which the source generated for it names it by
+ * (`urlConnectorIdSchema`). A release's connector never takes that form
+ * (connect's build.ts).
+ */
+export const connectorNameSchema = z.union([
+  z.string().regex(/^[a-z][a-z0-9-]{0,62}$/u),
+  urlConnectorIdSchema,
+]);
 
 /** A sync's name, as core asks for it: `drive`, `gmail`, `calendar`. */
 export const syncNameSchema = z.string().regex(/^[a-z][a-z\d-]{0,63}$/u);
@@ -295,30 +304,46 @@ export type SyncParams = z.infer<typeof syncParamsSchema>;
 
 /**
  * The vendor's own MCP server a connector serves (`defineConnector`'s
- * `mcp`): its URL, https and as the URL parser writes it, with no
- * credentials, query or fragment; and how Grasp gets a client there.
+ * `mcp`): its URL, as the URL parser writes it, with no credentials,
+ * query or fragment; how Grasp gets a client there; and where it sits.
  * `dcr`: the server registers it (RFC 7591, or a client metadata
- * document). `{ header }`: each person's key goes in that header.
+ * document). `client`: an admin enters the client its vendor issued,
+ * kept as the connector's state, never in its source. `{ header }`:
+ * each person's key goes in that header. `network: "company"`: inside
+ * the company's own network, reached through the deployment's company
+ * network at its URL's origin alone, so plain http is taken there, and
+ * only there; its sign-in can't be learned from the internet, so it
+ * takes a key in a header.
  */
-export const mcpManifestSchema = z.strictObject({
-  url: z
-    .url({ protocol: /^https$/u })
-    .max(connectorUrlMaxLength)
-    .refine((url) => {
-      const parsed = new URL(url);
-      return (
-        parsed.href === url &&
-        parsed.username === "" &&
-        parsed.password === "" &&
-        parsed.search === "" &&
-        parsed.hash === ""
-      );
-    }, "Not a server URL: https, as the URL parser writes it, without credentials, query or fragment"),
-  registration: z.union([
-    z.literal("dcr"),
-    z.strictObject({ header: connectorKeyHeaderSchema }),
-  ]),
-});
+export const mcpManifestSchema = z
+  .strictObject({
+    url: z
+      .url({ protocol: /^https?$/u })
+      .max(connectorUrlMaxLength)
+      .refine((url) => {
+        const parsed = new URL(url);
+        return (
+          parsed.href === url &&
+          parsed.username === "" &&
+          parsed.password === "" &&
+          parsed.search === "" &&
+          parsed.hash === ""
+        );
+      }, "Not a server URL: as the URL parser writes it, without credentials, query or fragment"),
+    registration: z.union([
+      z.literal("dcr"),
+      z.literal("client"),
+      z.strictObject({ header: connectorKeyHeaderSchema }),
+    ]),
+    network: z.literal("company").optional(),
+  })
+  .refine(
+    ({ url, registration, network }) =>
+      network === "company"
+        ? typeof registration === "object"
+        : new URL(url).protocol === "https:",
+    'A server takes https, or plain http inside the company\'s network (`network: "company"`), where it takes a key in a header'
+  );
 export type McpManifest = z.output<typeof mcpManifestSchema>;
 export type McpManifestInput = z.input<typeof mcpManifestSchema>;
 
@@ -334,7 +359,7 @@ export const connectorManifestSchema = z
      * Whose token or key a call gets: a connection with this provider's.
      * A suite (`microsoft`, `google`) or an app with its own record.
      */
-    provider: connectorProviderSchema,
+    provider: z.union([connectorProviderSchema, urlConnectorIdSchema]),
     /**
      * An app's provider record: how a person signs in to it (sign-in.ts).
      * Required for an app; a suite's connector may leave it to connect's
@@ -370,16 +395,21 @@ export const connectorManifestSchema = z
   .refine(
     ({ name, title, provider, signIn, mcp }) =>
       mcp === undefined
-        ? signIn !== undefined ||
-          oauthProviderSchema.safeParse(provider).success
+        ? (signIn !== undefined ||
+            oauthProviderSchema.safeParse(provider).success) &&
+          !urlConnectorIdSchema.safeParse(name).success &&
+          !urlConnectorIdSchema.safeParse(provider).success
         : provider === name &&
-          appProviderSchema.safeParse(name).success &&
+          (appProviderSchema.safeParse(name).success ||
+            urlConnectorIdSchema.safeParse(name).success) &&
           signIn === undefined &&
           title !== undefined,
     // An MCP server's sign-in is its own, learned from it: the connection
     // is to the connector, by its name, which is never a suite's or
-    // another reserved provider's.
-    "An app's connector carries its provider record, and one serving an MCP server none, as its own provider by an app's name, with its title"
+    // another reserved provider's. A connector made from a URL is one of
+    // these, by its ID, which no other connector takes as its name or
+    // its provider.
+    "An app's connector carries its provider record, and one serving an MCP server none, as its own provider by an app's name or a URL-made connector's ID, with its title"
   )
   .refine(
     ({ mcp, hosts, scopes, actions, syncs = {} }) =>

@@ -57,7 +57,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
-import type { SQL } from "drizzle-orm";
+import type { Column, SQL, Table } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { recordEvents, recordEventsIf } from "./audit.ts";
@@ -69,6 +69,7 @@ import {
   connections,
   erasedPeople,
   connectors,
+  connectorVersions,
   idempotentCalls,
   pendingActions,
 } from "./db/schema.ts";
@@ -145,6 +146,10 @@ export const callOf = (row: Row): Omit<ConnectCall, "capability"> => {
   });
 };
 
+/** `column` of `table`, named with its table wherever it is read. */
+const of = (table: Table, column: Column): SQL =>
+  sql`${table}.${sql.identifier(column.name)}`;
+
 /** A held action with its connection, as a list reads them together. */
 /** A connection's columns a list shows it by (`ShownConnection`). */
 export const shownConnection = {
@@ -152,10 +157,13 @@ export const shownConnection = {
   accountName: connections.accountName,
   serverKind: connections.serverKind,
   server: connections.server,
-  // A connector's name, for a connection to a connector.
+  // A URL-made connector's title, as its version's manifest says it, for
+  // a connection to it; a built-in's is the release's (`reachedName`).
+  // Every column names its table: `connectors` has a `server` and an `id`
+  // too, which the subquery would otherwise read.
   connectorName: sql<
     string | null
-  >`(select ${connectors.name} from ${connectors} where ${connectors.id} = ${connections.server})`,
+  >`(select json_extract(${of(connectorVersions, connectorVersions.manifest)}, '$.title') from ${connectors} join ${connectorVersions} on ${of(connectorVersions, connectorVersions.id)} = ${of(connectors, connectors.version)} where ${of(connectors, connectors.id)} = ${of(connections, connections.server)})`,
 };
 
 const withConnection = { row: pendingActions, connection: shownConnection };
@@ -325,7 +333,11 @@ export const decidedCallOf = (row: Row): DecidedCall => {
  * connection to a connector, else its provider's (`providerName`).
  */
 export const reachedName = (connection: NonNullable<ShownConnection>): string =>
-  connection.connectorName ?? providerName(connection);
+  (connection.serverKind === "connector"
+    ? nativeConnector(connection.server)?.manifest.title
+    : undefined) ??
+  connection.connectorName ??
+  providerName(connection);
 
 /** The connection's name for people: what it reaches, and its account. */
 export const nameOf = (connection: ShownConnection): string | null => {

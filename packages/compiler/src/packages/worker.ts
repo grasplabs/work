@@ -5,7 +5,9 @@ import type { ChunkRead } from "@grasp-os/shared/chunks";
  * core starts for each build, see `startPackageBuilder`): no bindings, no
  * network, no Node.js compatibility, and a CPU limit. It is handed an
  * approved lock and its tarballs, which core checked against the lock's
- * integrity, and bundles them (build.ts); nothing it is handed ever runs.
+ * integrity, and bundles them (build.ts), or a connector's own files,
+ * which it builds as the `connector` target (../connector.ts); nothing it
+ * is handed ever runs.
  *
  * esbuild is its WebAssembly build, loaded with the isolate as a compiled
  * module (`esbuild.wasm`, from core's static assets): this isolate can't
@@ -18,9 +20,14 @@ import type {
 } from "@grasp-os/shared/packages";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
+import sdkModule from "#connector-sdk";
+
 import { assertNoBindings } from "../authority.ts";
+import { buildConnector } from "../connector.ts";
+import type { ConnectorBuild } from "../connector.ts";
 import { buildLock } from "./build.ts";
 import type { PackageTarget } from "./build.ts";
+import { startedEsbuild } from "./esbuild.ts";
 import esbuildWasm from "./esbuild.wasm";
 
 /** A tarball as the on-prem sandbox host hands it over: its size, not its bytes. */
@@ -44,6 +51,24 @@ export default class PackageBuilder extends WorkerEntrypoint {
   ): Promise<PackageBuildAnswer> {
     assertNoBindings(this.env, this.ctx.props, "The package builder");
     return await buildLock(lock, tarballs, target, esbuildWasm);
+  }
+
+  /**
+   * Builds the connector whose own files are `files`, by path, from its
+   * `entry` (../connector.ts): the compiler's `connector` target.
+   */
+  async connector(
+    files: Record<string, string>,
+    entry: string
+  ): Promise<ConnectorBuild> {
+    assertNoBindings(this.env, this.ctx.props, "The package builder");
+    const read = (path: string): string | undefined =>
+      Object.hasOwn(files, path) ? files[path] : undefined;
+    return await buildConnector(
+      { entry, read },
+      sdkModule,
+      await startedEsbuild(esbuildWasm)
+    );
   }
 
   /**

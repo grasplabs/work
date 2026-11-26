@@ -1,11 +1,14 @@
+import { mcpConnectorSource } from "@grasp-os/compiler/connector-source";
+import type { McpConnectorFields } from "@grasp-os/compiler/connector-source";
 import {
   classByRules,
+  connectorManifestSchema,
   isJsonArray,
   topNames,
 } from "@grasp-os/runtime/connector";
-import type { ToolHints } from "@grasp-os/runtime/connector";
+import type { ConnectorManifest, ToolHints } from "@grasp-os/runtime/connector";
 import {
-  addConnectorSchema,
+  addBuiltConnectorSchema,
   blockConnectorToolSchema,
   connectErrors,
   connectionErrors,
@@ -39,18 +42,24 @@ import type { Connection } from "./connections.ts";
 import {
   builtIn,
   builtInAt,
+  manifestOf,
   connectorRow,
   isDuplicate,
+  keyRow,
   maxListedTools,
+  networkAddressOf,
   sameServer,
+  servesManifest,
   signInRow,
 } from "./connector-providers.ts";
 import type { ConnectorRow } from "./connector-providers.ts";
+import { manifestIn, releaseOf } from "./connectors.ts";
 import {
   connections,
   connectionTools,
   connectorBlockedTools,
   connectors,
+  connectorVersions,
 } from "./db/schema.ts";
 import { ownerErased } from "./erased-people.ts";
 import { isPublicName } from "./mcp-discovery.ts";
@@ -73,11 +82,11 @@ import { vaultFor } from "./vault.ts";
 // release declares its server in its manifest (`defineConnector`'s
 // `mcp`), and connect learns how it signs in and registers there on its
 // first connection (connector-providers.ts `prepareBuiltIn`). Any other
-// is made from its URL (GRA-1375): an admin enters it, and connect checks
-// where it leads, learns how it signs in and registers there
-// (mcp-discovery.ts), and keeps it as the one-line
-// `defineConnector({ name, mcp: { url } })` in `connectors`; moving that
-// onto generated source is GRA-2325's second part. People then connect to
+// is made from its URL (GRA-1375): an admin enters it, core generates the
+// one-line `defineConnector({ name, title, mcp })` and builds it, and
+// connect keeps it as the connector's version (GRA-2325), checks where it
+// leads, learns how it signs in and registers there (mcp-discovery.ts),
+// and keeps that as its state in `connectors`. People then connect to
 // either as to any app (oauth.ts, connector-providers.ts), and connect
 // alone holds their tokens.
 //
@@ -151,30 +160,68 @@ export interface ConnectorTool {
 }
 
 /**
- * Adds a connector by its server's URL, for an admin who isn't staff: the
- * URL checked and its name resolved to public addresses only, its sign-in
- * learned and connect registered there (or the client the admin entered
- * kept, its secret sealed), and the row written with its event. Its ID.
+ * The fields of the connector `manifest` describes when it is exactly a
+ * connector made from a URL with ID `id`: one `defineConnector` of its
+ * name, title and server, with nothing of its own (no tools, hosts, sign-in
+ * or syncs).
+ */
+const generatedFields = (
+  manifest: ConnectorManifest,
+  id: string
+): McpConnectorFields | undefined => {
+  const { name, title, mcp } = manifest;
+  return name === id && title !== undefined && mcp !== undefined
+    ? { name, title, mcp }
+    : undefined;
+};
+
+/**
+ * Adds a connector made from its server's URL, for an admin who isn't
+ * staff: core generated its source from what the admin entered and built
+ * it (core's connections.ts `addConnector`). Connect reads its manifest by
+ * loading its code, and keeps it only as the platform generated it: the
+ * source must be exactly `mcpConnectorSource` of the manifest's own fields,
+ * so no source a person or an agent wrote is kept or run (GRA-2325, until
+ * GRA-1378). Its code is taken as core built it, not built again here:
+ * it is run only to read that manifest, in an isolate that reaches
+ * nothing, and must be built again from its source, or checked against
+ * it, before GRA-1378 runs it for anything else. Then its server is
+ * checked: inside the company's network as its manifest says, through the
+ * company network's route, or else its name resolved to public addresses
+ * only. Then its sign-in learned and connect registered there (or the
+ * client the admin entered kept, its secret sealed), and its version and
+ * row written with its event. Its ID.
  */
 export const addConnector = async (
   env: Env,
   request: unknown
 ): Promise<{ id: string }> => {
-  const { person, name, url, companyNetwork, origin, auth } =
-    connectionErrors.parse("connection.invalid", addConnectorSchema, request);
-  // A URL of its origin and path alone (`addConnectorSchema`), https
-  // but inside the company's network.
-  const server = new URL(url);
-  if (companyNetwork !== true && server.protocol !== "https:") {
+  const { person, origin, id, source, code, compiler, client } =
+    connectionErrors.parse(
+      "connection.invalid",
+      addBuiltConnectorSchema,
+      request
+    );
+  const read = connectorManifestSchema.safeParse(
+    await manifestIn(env.LOADER, code)
+  );
+  const fields = read.success ? generatedFields(read.data, id) : undefined;
+  if (
+    !read.success ||
+    fields === undefined ||
+    source !== mcpConnectorSource(fields) ||
+    (client !== undefined) !== (fields.mcp.registration === "client")
+  ) {
     throw connectionErrors.create("connection.invalid");
   }
-  // A server inside the company's own network is reached through the
-  // company network at its URL's origin alone (company-network.ts).
-  const address =
-    companyNetwork === true ? companyAddressOf(server.origin) : undefined;
+  const { title, mcp } = fields;
+  const server = new URL(mcp.url);
+  const header =
+    typeof mcp.registration === "object" ? mcp.registration.header : null;
+  const address = networkAddressOf(mcp);
   const detail = {
     host: server.host,
-    auth: auth.kind,
+    auth: header === null ? "oauth" : "header",
     ...(address !== undefined && { companyNetwork: address }),
   };
   await refuseStaff(env, person, detail);
@@ -193,10 +240,12 @@ export const addConnector = async (
       connector: served.name,
     });
   }
-  if (companyNetwork === true) {
-    // Its sign-in, discovered and registered at the server, would be read
-    // from the public internet: a key in a header only, for now.
-    if (address === undefined || auth.kind !== "header") {
+  if (address !== undefined) {
+    // An address each event of its connections can name. Its sign-in,
+    // discovered and registered at the server, would be read from the
+    // public internet: its manifest takes a key in a header only there
+    // (`mcpManifestSchema`).
+    if (companyAddressOf(address) === undefined) {
       throw connectionErrors.create("connection.invalid");
     }
     if (companyRoute(env) === undefined) {
@@ -209,40 +258,49 @@ export const addConnector = async (
   if (vault === undefined) {
     throw connectionErrors.create("connection.provider_unavailable");
   }
-  const id = `mcp_${crypto.randomUUID().replaceAll("-", "")}`;
   const now = new Date();
-  const common = { id, name, createdBy: person.userId, createdAt: now };
+  const version = await releaseOf({ manifest: read.data, code });
   const row: typeof connectors.$inferInsert = {
-    ...common,
+    id,
+    // What a release rolled back to reads of the connector (db/schema.ts).
+    name: title,
     url: server.href,
-    ...(auth.kind === "header"
-      ? {
-          auth: "header",
-          header: auth.header,
-          companyNetwork: address !== undefined,
-        }
-      : await signInRow(
-          vault,
-          id,
-          server,
-          new URL(origin).origin,
-          auth.client
-        )),
+    version,
+    ...(header === null
+      ? await signInRow(vault, id, server, new URL(origin).origin, client)
+      : keyRow(server.href, header)),
+    companyNetwork: address !== undefined,
+    createdBy: person.userId,
+    createdAt: now,
   };
   try {
+    const db = drizzle(env.DB);
     await recordEvents(
       env,
       [
         connectionEvent(person, "connector.added", undefined, {
           ...detail,
           connector: id,
-          ...(row.registration === undefined || row.registration === null
-            ? {}
-            : { registration: row.registration }),
+          version,
+          ...(typeof row.registration === "string" && {
+            registration: row.registration,
+          }),
           outcome: "ok",
         }),
       ],
-      [drizzle(env.DB).insert(connectors).values(row)]
+      [
+        db.insert(connectorVersions).values({
+          id: version,
+          connector: id,
+          source,
+          code,
+          manifest: read.data,
+          provenance: { generatedBy: "platform", from: "url", compiler },
+          createdBy: person.userId,
+          createdAt: now,
+        }),
+        db.insert(connectors).values(row),
+      ]
     );
   } catch (error) {
     if (isDuplicate(error)) {
@@ -364,33 +422,45 @@ const serverFor = async (
   allows: (method: string, name: string | null) => boolean,
   admitted?: ConnectorRow
 ) => {
-  const row = await connectorRow(env.DB, connection.server);
+  const [row, manifest] = await Promise.all([
+    connectorRow(env.DB, connection.server),
+    manifestOf(env.DB, connection.server),
+  ]);
+  const mcp = manifest?.mcp;
+  // Its credential is for the server its row holds the sign-in of, and
+  // the one a call's tool was read from: never another a release moved a
+  // built-in to, until its next connection moves the row.
   if (
     row === undefined ||
+    mcp === undefined ||
+    !servesManifest(row, mcp) ||
     (admitted !== undefined && !sameServer(row, admitted))
   ) {
     throw connectErrors.create("connect.server_unavailable");
   }
+  const { url } = mcp;
   const { credential, companyNetwork } = await connectorCredentialFor(
     env,
     connection.id
   );
-  // A release may have moved the connector while its credential was read,
-  // and the credential read since be the new server's: it goes only to
-  // the server the row still names.
+  // Another release may have moved the row while the credential was read,
+  // and the credential read since be for the server it moved to: it goes
+  // only while the row is as it was read.
   const still = await connectorRow(env.DB, connection.server);
-  if (!sameServer(still, row) || still?.companyNetwork !== row.companyNetwork) {
+  if (!sameServer(still, row)) {
     throw connectErrors.create("connect.server_unavailable");
   }
-  // A server inside the network is never sent to over the internet.
-  if (row.companyNetwork === true && companyNetwork === undefined) {
+  // Its credential goes only the way its manifest says the server is
+  // reached: a server inside the network never over the internet, nor
+  // another through the company network.
+  if (companyNetwork !== networkAddressOf(mcp)) {
     throw connectErrors.create("connect.server_unavailable");
   }
   const send = outbound(env, companyNetwork);
-  return modernMcpServer(row.url, async (request) => {
+  return modernMcpServer(url, async (request) => {
     if (
       request.method !== "POST" ||
-      request.url !== row.url ||
+      request.url !== url ||
       !allows(
         request.headers.get("mcp-method") ?? "",
         request.headers.get("mcp-name")

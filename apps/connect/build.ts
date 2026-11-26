@@ -1,7 +1,9 @@
 /**
  * Builds the native connectors into dist/connectors.js, once per release at
  * connect's build time: every package in packages/connectors, each as its
- * manifest and its MCP server bundled into one ES module. Connect imports
+ * manifest and its MCP server built into one ES module by the compiler's
+ * `connector` target, which core builds a connector made from a URL with
+ * too (@grasp-os/compiler/connector). Connect imports
  * the result through `#connectors` and loads a connector's module into an
  * isolate of its own for each call, so adding a connector is adding a
  * package: no Worker, no wrangler.jsonc entry.
@@ -11,11 +13,18 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { connectorBuilder } from "@grasp-os/compiler/build-connectors";
+import { isolateEntry, sdkConnector } from "@grasp-os/compiler/connector";
+import type {
+  ConnectorBuild,
+  ConnectorFiles,
+} from "@grasp-os/compiler/connector";
 import { checkMirror } from "@grasp-os/compiler/mirror";
 import { readSpec } from "@grasp-os/compiler/openapi";
 import type { Spec } from "@grasp-os/compiler/openapi";
@@ -28,6 +37,7 @@ import type {
   ConnectorDeclaration,
   ConnectorManifest,
 } from "@grasp-os/runtime/connector";
+import { urlConnectorIdSchema } from "@grasp-os/shared/connect";
 import { build, defaultClientConditions } from "vite-plus";
 import type { Plugin, Rolldown } from "vite-plus";
 import { z } from "zod";
@@ -153,9 +163,6 @@ const checkMirrorOf = async (
 
 const entryId = "\0connector-entry";
 
-/** What a connector imports, besides its own files. */
-const sdkConnector = "@grasp-os/sdk/connector";
-
 /**
  * The code still written with the old kit, Zod and the runtime, which may
  * import what it does until it moves to `sdkConnector` (GRA-2323,
@@ -193,51 +200,13 @@ const ownFolderOf = (entry: string): string => {
 };
 
 /**
- * Refuses, while bundling, any import a module of the connector's own
- * package makes but of `sdkConnector` and of its own files: the build
- * fails rather than ship a connector that reaches past what it is written
- * with (GRA-1374). Type-only imports never get here: the transform erased
- * them.
- */
-const connectorImports = (folder: string): Plugin => ({
-  name: "connector-imports",
-  // Before Vite's own resolver, which would resolve the import first.
-  enforce: "pre",
-  resolveId: (source, importer) => {
-    if (
-      importer === undefined ||
-      source.startsWith("\0") ||
-      !isWithin(folder, importer) ||
-      importer.split(path.sep).includes("node_modules") ||
-      oldKit.some((each) => isWithin(each, importer))
-    ) {
-      return null;
-    }
-    const ownFile =
-      (source.startsWith("./") || source.startsWith("../")) &&
-      isWithin(folder, path.resolve(path.dirname(importer), source));
-    if (source === sdkConnector || ownFile) {
-      return null;
-    }
-    throw new Error(
-      `${importer} imports "${source}": a connector imports ${sdkConnector} and its own files, nothing else.`
-    );
-  },
-});
-
-/**
- * The isolate's main module: the connector's MCP server as its fetch
- * handler, and nothing else. Its env and context aren't passed on: the
- * connector gets neither.
+ * The isolate's main module for a connector on the old kit: its MCP server
+ * as its fetch handler, and nothing else (as the `connector` target's).
  */
 const entryModule = (entry: string): Plugin => ({
   name: "connector-entry",
   resolveId: (id) => (id === entryId ? id : null),
-  load: (id) =>
-    id === entryId
-      ? `import connector from ${JSON.stringify(entry)};
-export default { fetch: (request) => connector.fetch(request) };`
-      : null,
+  load: (id) => (id === entryId ? isolateEntry(entry) : null),
 });
 
 const chunksOf = (
@@ -255,36 +224,18 @@ const chunksOf = (
  */
 const isolateCondition = "connector-isolate";
 
-/** Part of the path of each of Zod's modules. */
-const zodModule = /[\\/]node_modules[\\/]zod[\\/]/u;
-
 /**
- * Refuses a connector whose isolate would load Zod, unless code written
- * with the old kit brings it (`oldKit`). An isolate evaluates its whole
- * bundle each time it loads, once per call, and Zod with the schemas made
- * with it took most of a call's time: a connector on `sdkConnector`
- * loads only what it uses.
+ * A connector on the old kit (`oldKit`), bundled with what it imports into
+ * one module, until it moves to `sdkConnector` and its `connector` target.
  */
-const checkLoads = (entry: string, modules: readonly string[]): void => {
-  if (
-    modules.some((id) => zodModule.test(id)) &&
-    !modules.some((id) => oldKit.some((each) => isWithin(each, id)))
-  ) {
-    throw new Error(
-      `${entry} would load Zod in its isolate: a module of ${sdkConnector} it imports reaches it`
-    );
-  }
-};
-
-/** The connector at `entry`, bundled with what it imports into one module. */
-const bundle = async (entry: string): Promise<string> => {
+const oldKitBundle = async (entry: string): Promise<string> => {
   const chunks = chunksOf(
     await build({
       configFile: false,
       root,
       logLevel: "warn",
       mode: "production",
-      plugins: [connectorImports(ownFolderOf(entry)), entryModule(entry)],
+      plugins: [entryModule(entry)],
       resolve: { conditions: [...defaultClientConditions, isolateCondition] },
       build: {
         write: false,
@@ -307,8 +258,24 @@ const bundle = async (entry: string): Promise<string> => {
   if (chunk === undefined || chunks.length !== 1) {
     throw new Error(`${entry} didn't bundle into one module`);
   }
-  checkLoads(entry, Object.keys(chunk.modules));
   return chunk.code;
+};
+
+/**
+ * The files of the connector at `entry`, as the `connector` target reads
+ * them: by path within its own folder (`ownFolderOf`), and nothing else.
+ */
+const ownFiles = (entry: string): ConnectorFiles => {
+  const folder = ownFolderOf(entry);
+  return {
+    entry: path.relative(folder, entry).split(path.sep).join("/"),
+    read: (file) => {
+      const at = path.join(folder, ...file.split("/"));
+      return isWithin(folder, at) && existsSync(at) && statSync(at).isFile()
+        ? readFileSync(at, "utf-8")
+        : undefined;
+    },
+  };
 };
 
 /**
@@ -326,6 +293,7 @@ export const buildConnectors = async (
   outFile: string
 ): Promise<void> => {
   const connectors: { manifest: ConnectorManifest; code: string }[] = [];
+  const builder = await connectorBuilder();
   for (const entry of entries) {
     const loaded = moduleSchema.parse(
       // oxlint-disable-next-line no-await-in-loop -- one connector at a time
@@ -333,13 +301,37 @@ export const buildConnectors = async (
     );
     const manifest = connectorManifestSchema.parse(loaded.default.manifest);
     const { declaration } = loaded.default;
+    // A connector made from a URL goes by its ID; one of the release, by a
+    // name of its own, with a client nobody enters for it, and with a
+    // server inside no one company's network.
+    if (
+      urlConnectorIdSchema.safeParse(manifest.name).success ||
+      manifest.mcp?.registration === "client" ||
+      manifest.mcp?.network !== undefined
+    ) {
+      throw new Error(
+        `${entry} is named or signs in as only a connector made from a URL does`
+      );
+    }
+    let code: string;
     if (declaration !== undefined) {
       // One serving its vendor's MCP server has no tools of its own.
       if (declaration.mcp === undefined) {
         // oxlint-disable-next-line no-await-in-loop -- one connector at a time
         await checkMirrorOf(entry, declaration);
       }
-    } else if (!oldKit.some((each) => isWithin(each, entry))) {
+      // oxlint-disable-next-line no-await-in-loop -- one connector at a time
+      const built: ConnectorBuild = await builder(ownFiles(entry));
+      if (!built.ok) {
+        throw new Error(
+          `${entry} doesn't build:\n${built.refusals.join("\n")}`
+        );
+      }
+      ({ code } = built);
+    } else if (oldKit.some((each) => isWithin(each, entry))) {
+      // oxlint-disable-next-line no-await-in-loop -- one connector at a time
+      code = await oldKitBundle(entry);
+    } else {
       throw new Error(
         `${entry} exports no connector made with defineConnector from ${sdkConnector}`
       );
@@ -358,8 +350,7 @@ export const buildConnectors = async (
     ) {
       throw new Error(`Two connectors are for the app ${manifest.provider}`);
     }
-    // oxlint-disable-next-line no-await-in-loop -- one connector at a time
-    connectors.push({ manifest, code: await bundle(entry) });
+    connectors.push({ manifest, code });
   }
   const [shadowing] = shadowingConnectors(
     connectors.map(({ manifest }) => manifest)

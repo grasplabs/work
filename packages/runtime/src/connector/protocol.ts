@@ -202,6 +202,13 @@ export const syncMethod = "grasp-os/sync";
 /** The JSON-RPC method connect asks a sync's places by. */
 export const syncPlacesMethod = "grasp-os/sync-places";
 
+/**
+ * The JSON-RPC method connect asks a connector's server for its manifest
+ * by, unchecked: connect checks it (`connectorManifestSchema`) and decides
+ * by nothing else of what the code says of itself.
+ */
+export const manifestMethod = "grasp-os/manifest";
+
 const decodedSegment = (segment: string): string | undefined => {
   try {
     return decodeURIComponent(segment);
