@@ -137,8 +137,8 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
     <CalmStep
       body={
         kinds === null
-          ? t`Policies, procedures, work instructions. Drafts are fine too. Leave out anything about one person.`
-          : t`${kinds}, and whatever explains how you work. Drafts are fine too. Leave out anything about one person.`
+          ? t`Policies, procedures, work instructions. Anything that explains how you work helps.`
+          : t`${kinds}, and whatever explains how you work.`
       }
       end={
         <Button
@@ -151,7 +151,7 @@ export const DocumentsStep = ({ data, onward }: StepProps) => {
           <Icon icon={ArrowRightIcon} />
         </Button>
       }
-      spoken={t`This is a good moment to give me some context. A process description, an onboarding guide, a price list or even a rough draft helps me understand what you’re dealing with every day. The more I know, the better my questions to your team, and the more useful everything I give back. Just leave out anything about a single person.`}
+      spoken={t`This is a good moment to give me some context. A process description, an onboarding guide or a price list helps me understand what you’re dealing with every day. The more I know, the better my questions to your team, and the more useful everything I give back.`}
       title={t`Do you have anything that explains how you work?`}
     >
       <div {...stylex.props(styles.stack)}>
